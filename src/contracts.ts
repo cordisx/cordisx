@@ -67,6 +67,7 @@ export interface CordisXPluginModule {
 /** Plugin composition delivered from the launcher to the renderer. */
 export interface CordisXBrowserPlugin {
   readonly id: string
-  readonly module: CordisXPluginModule
+  readonly enabled: boolean
+  readonly module?: CordisXPluginModule
   readonly config: unknown
 }

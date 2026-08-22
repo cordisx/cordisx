@@ -37,6 +37,45 @@ Recommended PR boundaries:
 
 Validation: generation race tests, last-good rollback tests, and a real browser HMR test that verifies cleanup and state retention independently.
 
+### Current experimental manager slice
+
+Status: implemented and live-verified as an experimental renderer-local slice
+on 2026-08-23. The remaining Stage 2 items below are not implied complete.
+
+This slice is one `cordisx` implementation PR and does not change the normative
+`cordisx-protocol` contract. Its dependency order is:
+
+1. inject package-version metadata into the renderer composition;
+2. add runtime plugin state and slot-registration attribution/introspection;
+3. add reversible runtime block/restore operations;
+4. mount a host-owned sidebar trigger through the Codex adapter;
+5. render version, extension-point, and searchable plugin-detail views;
+6. verify cleanup and live placement in an isolated Codex renderer.
+
+The PR boundary ends at already-bundled trusted plugins and profile-local
+activation state. Follow-up PRs separately own manifests/dependency graphs,
+launcher-backed persistent configuration and HMR generations, then enforced
+authority and distribution. The manager must not imply those later features
+already exist.
+
+The marketplace-discovery follow-up is implemented on its compatible
+protocol/catalog/site/host branches. It adds validated multi-feed browsing and
+profile-local feed configuration, reuses second-level detail navigation for
+both installed and discovered plugins, keys cross-feed entries by canonical
+`(source, id)`, and remains read-only until authority and distribution
+contracts are implemented.
+
+Scoped validation for this slice includes TypeScript and the complete unit
+suite, DOM integration coverage for trigger placement, tabs, search,
+list-to-detail navigation, block/restore, slot attribution, generation
+disposal, feed validation, ordered-source persistence, failure isolation, and
+cross-feed deduplication. Because the live `app://` renderer rejects direct
+remote fetches, validation also covers the launcher's private, public-HTTPS-only
+feed bridge, non-public-address and redirect rejection, response limits, and an
+opt-in live smoke and screenshot against the current isolated Codex host.
+Installation, signature, capability, and untrusted-code execution tests remain
+out of scope because discovery never executes catalog entries.
+
 ## Stage 3 — authority and distribution
 
 Recommended PR boundaries:

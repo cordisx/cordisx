@@ -6,9 +6,12 @@ import {
   type CordisXSlotOptions,
   type CordisXSlots,
 } from '../contracts.js'
-import { DomSlotRegistry } from './slots.js'
+import { DomSlotRegistry, type SlotRegistrationSnapshot } from './slots.js'
 
 const BASE_STYLE_ID = 'cordisx-base-style'
+
+/** Plugin id inherited by a runtime-created child Context. */
+export const CORDISX_PLUGIN_ID = Symbol('cordisx.pluginId')
 
 function installBaseStyles(document: Document): () => void {
   document.getElementById(BASE_STYLE_ID)?.remove()
@@ -53,9 +56,15 @@ export class CordisXSlotService extends Service implements CordisXSlots {
   /** Register against the caller fiber so plugin unload removes the entry. */
   register(options: CordisXSlotOptions, component: CordisXSlotComponent): ReturnType<CordisXSlots['register']> {
     assertSlotName(options.name)
+    const pluginId = (this.ctx as Context & { [CORDISX_PLUGIN_ID]?: string })[CORDISX_PLUGIN_ID]
     return this.ctx.effect(
-      () => this.registry.register(options, component),
+      () => this.registry.register(options, component, pluginId),
       `slots.register(${JSON.stringify(options.name)}, ${JSON.stringify(options.id)})`,
     )
+  }
+
+  /** Internal manager snapshot of current semantic-slot registrations. */
+  snapshot(): readonly SlotRegistrationSnapshot[] {
+    return this.registry.snapshot()
   }
 }

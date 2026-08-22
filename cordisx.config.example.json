@@ -5,11 +5,12 @@
   },
   "plugins": [
     {
-      "id": "hello-toolbar",
-      "entry": "./plugins/hello-toolbar/index.ts",
+      "id": "slot-showcase",
+      "entry": "./plugins/slot-showcase/index.ts",
       "enabled": true,
       "config": {
-        "label": "CordisX",
+        "accent": "#8b5cf6",
+        "label": "CX Demo",
         "open": true
       }
     }
