@@ -105,4 +105,4 @@ CordisX 当前五个宿主点位都是 root-scoped list slot，因此支持 DSH 
 - 尚未实现：插件市场、签名、权限隔离、进程沙箱、源码 HMR、可视化管理器、Codex 版本适配矩阵。
 - [OpenAI 官方插件 UI 文档](https://developers.openai.com/plugins/build/chatgpt-ui)定义的是 MCP 返回、在宿主 iframe 中运行的会话内 UI 资源；它不是任意替换 Codex shell 的 API。CordisX 走的是本地、非官方的宿主增强路线。
 
-详细设计见 [docs/architecture.md](docs/architecture.md)，开发拆分见 [docs/development-plan.md](docs/development-plan.md)。
+详细设计见 [.agents/docs/architecture.md](.agents/docs/architecture.md)，开发拆分见 [.agents/docs/development-plan.md](.agents/docs/development-plan.md)。
