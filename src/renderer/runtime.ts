@@ -1,6 +1,6 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import type { CordisXBrowserPlugin, CordisXPluginModule } from '../contracts.js'
-import { CordisXService } from './service.js'
+import { CordisXSlotService } from './service.js'
 
 interface CordisXRuntimeHandle {
   readonly pluginIds: readonly string[]
@@ -38,7 +38,7 @@ async function start(plugins: readonly CordisXBrowserPlugin[]): Promise<CordisXR
   const handle: CordisXRuntimeHandle = { pluginIds: plugins.map(plugin => plugin.id), dispose }
 
   try {
-    const service = ctx.plugin(CordisXService)
+    const service = ctx.plugin(CordisXSlotService)
     fibers.push(service)
     await service
     for (const item of plugins) {

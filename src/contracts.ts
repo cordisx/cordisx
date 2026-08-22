@@ -1,12 +1,25 @@
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Disposable, Effect } from '@deepseek-ai/cordis'
+
+/** Host-declared root list slots. Mirrors DSH's SlotMap vocabulary. */
+export interface CordisXSlotMap {
+  'header.actions': { kind: 'list'; scope: 'root' }
+  'composer.before': { kind: 'list'; scope: 'root' }
+  'composer.after': { kind: 'list'; scope: 'root' }
+  'sidebar.footer': { kind: 'list'; scope: 'root' }
+  'shell.overlay': { kind: 'list'; scope: 'root' }
+}
 
 /** Stable UI extension names owned by CordisX rather than individual plugins. */
-export type CordisXSlotName =
-  | 'header.actions'
-  | 'composer.before'
-  | 'composer.after'
-  | 'sidebar.footer'
-  | 'shell.overlay'
+export type CordisXSlotName = keyof CordisXSlotMap
+
+/** Runtime slot list used to reject invalid names from untyped plugins. */
+export const CORDISX_SLOT_NAMES = [
+  'header.actions',
+  'composer.before',
+  'composer.after',
+  'sidebar.footer',
+  'shell.overlay',
+] as const satisfies readonly CordisXSlotName[]
 
 /** DOM surface delivered to one mounted contribution. */
 export interface CordisXMountContext {
@@ -16,24 +29,30 @@ export interface CordisXMountContext {
   readonly slot: CordisXSlotName
 }
 
-/** One reversible UI contribution. IDs are unique within a CordisX generation. */
-export interface CordisXContribution {
+/** DSH-style options for one entry in a CordisX list slot. */
+export interface CordisXSlotOptions {
+  readonly name: CordisXSlotName
   readonly id: string
-  readonly slot: CordisXSlotName
+  readonly order?: number
+  /** Shadowing rank for the same id. The lowest live priority renders. */
   readonly priority?: number
-  mount(context: CordisXMountContext): void | (() => void)
 }
 
-/** Public renderer service exposed to Cordis plugins. */
-export interface CordisXApi {
-  /** Register a contribution for the lifetime of the calling plugin fiber. */
-  contribute(contribution: CordisXContribution): () => void | Promise<void>
+/** DOM mount component used because CordisX cannot join Codex's private React tree. */
+export type CordisXSlotComponent = (context: CordisXMountContext) => void | Disposable<void>
+
+/** DSH-compatible slot service subset exposed to Cordis plugins. */
+export interface CordisXSlots {
+  /** Run an effect while the named host slot declaration exists. */
+  inject(name: CordisXSlotName, setup: () => Effect): Disposable<void | Promise<void>>
+  /** Register a list entry for the lifetime of the calling plugin fiber. */
+  register(options: CordisXSlotOptions, component: CordisXSlotComponent): Disposable<void | Promise<void>>
 }
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    /** CordisX semantic UI extension service. */
-    cordisx: CordisXApi
+    /** DSH-style semantic UI slot service backed by Codex DOM adapters. */
+    slots: CordisXSlots
   }
 }
 

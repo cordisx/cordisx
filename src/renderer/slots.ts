@@ -1,4 +1,4 @@
-import type { CordisXContribution, CordisXSlotName } from '../contracts.js'
+import type { CordisXSlotComponent, CordisXSlotName, CordisXSlotOptions } from '../contracts.js'
 
 export type SlotPlacement = 'append' | 'prepend' | 'before' | 'after'
 
@@ -18,8 +18,9 @@ interface MountedContribution {
 }
 
 interface ContributionRecord {
-  readonly order: number
-  readonly value: CordisXContribution
+  readonly sequence: number
+  readonly options: CordisXSlotOptions
+  readonly component: CordisXSlotComponent
   mounted: MountedContribution | undefined
 }
 
@@ -96,7 +97,7 @@ export class DomSlotRegistry {
   private readonly states = new Map<CordisXSlotName, SlotState>()
   private readonly observer?: MutationObserver
   private scheduled = false
-  private nextOrder = 0
+  private nextSequence = 0
   private disposed = false
 
   constructor(
@@ -111,31 +112,37 @@ export class DomSlotRegistry {
     }
   }
 
-  /** Register a contribution and return its idempotent disposer. */
-  register(contribution: CordisXContribution): () => void {
+  /** Register a DSH-style list entry and return its idempotent disposer. */
+  register(options: CordisXSlotOptions, component: CordisXSlotComponent): () => void {
     if (this.disposed) throw new Error('CordisX slot registry is disposed')
-    if (!/^[a-z0-9][a-z0-9._-]*$/i.test(contribution.id)) {
-      throw new Error(`invalid CordisX contribution id: ${contribution.id}`)
+    if (!/^[a-z0-9][a-z0-9._-]*$/i.test(options.id)) {
+      throw new Error(`invalid CordisX slot entry id: ${options.id}`)
     }
-    if (this.contributions.has(contribution.id)) {
-      throw new Error(`duplicate CordisX contribution id: ${contribution.id}`)
+    const priority = options.priority ?? 0
+    const key = `${options.name}\u0000${options.id}\u0000${priority}`
+    if (this.contributions.has(key)) {
+      throw new Error(
+        `list slot ${JSON.stringify(options.name)} already has an entry with id ${JSON.stringify(options.id)} `
+        + `at priority ${priority} — register at a different priority to shadow it (lowest renders)`,
+      )
     }
-    this.contributions.set(contribution.id, {
-      order: this.nextOrder++,
-      value: contribution,
+    this.contributions.set(key, {
+      sequence: this.nextSequence++,
+      options,
+      component,
       mounted: undefined,
     })
-    this.reconcileSlot(contribution.slot)
+    this.reconcileSlot(options.name)
 
     let active = true
     return () => {
       if (!active) return
       active = false
-      const record = this.contributions.get(contribution.id)
+      const record = this.contributions.get(key)
       if (record === undefined) return
       this.unmount(record)
-      this.contributions.delete(contribution.id)
-      this.reconcileSlot(contribution.slot)
+      this.contributions.delete(key)
+      this.reconcileSlot(options.name)
     }
   }
 
@@ -166,17 +173,34 @@ export class DomSlotRegistry {
   }
 
   private recordsFor(slot: CordisXSlotName): ContributionRecord[] {
-    return [...this.contributions.values()]
-      .filter(record => record.value.slot === slot)
+    const sorted = [...this.contributions.values()]
+      .filter(record => record.options.name === slot)
       .sort((left, right) => {
-        const priority = (left.value.priority ?? 0) - (right.value.priority ?? 0)
-        return priority === 0 ? left.order - right.order : priority
+        const priority = (left.options.priority ?? 0) - (right.options.priority ?? 0)
+        if (priority !== 0) return priority
+        const order = (left.options.order ?? 0) - (right.options.order ?? 0)
+        return order === 0 ? left.sequence - right.sequence : order
+      })
+    const ids = new Set<string>()
+    return sorted
+      .filter((record) => {
+        if (ids.has(record.options.id)) return false
+        ids.add(record.options.id)
+        return true
+      })
+      .sort((left, right) => {
+        const order = (left.options.order ?? 0) - (right.options.order ?? 0)
+        return order === 0 ? left.sequence - right.sequence : order
       })
   }
 
   private reconcileSlot(slot: CordisXSlotName): void {
     if (this.disposed) return
     const records = this.recordsFor(slot)
+    const winners = new Set(records)
+    for (const record of this.contributions.values()) {
+      if (record.options.name === slot && !winners.has(record)) this.unmount(record)
+    }
     const state = this.states.get(slot) ?? { outlet: undefined, target: undefined }
     this.states.set(slot, state)
 
@@ -218,21 +242,21 @@ export class DomSlotRegistry {
 
   private mount(record: ContributionRecord, outlet: HTMLElement): void {
     const container = this.document.createElement('div')
-    container.dataset.cordisxContribution = record.value.id
+    container.dataset.cordisxContribution = record.options.id
     outlet.append(container)
     const abort = new AbortController()
     try {
-      const dispose = record.value.mount({
+      const dispose = record.component({
         container,
         document: this.document,
         signal: abort.signal,
-        slot: record.value.slot,
+        slot: record.options.name,
       })
       record.mounted = { abort, container, ...(dispose === undefined ? {} : { dispose }) }
     } catch (error) {
       container.dataset.cordisxError = 'true'
-      container.textContent = `CordisX plugin ${record.value.id} failed to mount`
-      console.error(`[cordisx] ${record.value.id} failed to mount`, error)
+      container.textContent = `CordisX plugin ${record.options.id} failed to mount`
+      console.error(`[cordisx] ${record.options.id} failed to mount`, error)
       record.mounted = { abort, container }
     }
   }
@@ -245,7 +269,7 @@ export class DomSlotRegistry {
     try {
       mounted.dispose?.()
     } catch (error) {
-      console.error(`[cordisx] ${record.value.id} failed to dispose`, error)
+      console.error(`[cordisx] ${record.options.id} failed to dispose`, error)
     }
     mounted.container.remove()
   }

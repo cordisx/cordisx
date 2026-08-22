@@ -5,7 +5,7 @@ CordisX 是一个实验性的 Codex Desktop 界面插件宿主，兼容独立 `C
 - 参考 CodexPlusPlus，以独立启动器给 Codex Electron 进程开启本机 CDP，并把增强代码注入 renderer；
 - 参考 DeepSeek Harness，在 renderer 内运行 Cordis，让插件的加载、依赖和副作用清理共享同一条生命周期。
 
-首版已经形成最小闭环：配置中的 TypeScript 插件会被打包成一个浏览器 bundle，注入 Codex 页面，并通过 `ctx.cordisx.contribute()` 向具名 UI slot 注册可撤销界面。
+首版已经形成最小闭环：配置中的 TypeScript 插件会被打包成一个浏览器 bundle，注入 Codex 页面，并通过与 DeepSeek Harness 一致的 `ctx.slots.inject()` / `ctx.slots.register()` 向具名 UI slot 注册可撤销界面。
 
 > 这是非官方实验项目。它不会修改 `/Applications/Codex.app` 的文件，但 CDP 注入依赖 Codex 的内部 DOM，Codex 升级后适配器可能需要更新。插件与 Codex renderer 同权限执行，只能安装你信任的插件。
 
@@ -64,27 +64,29 @@ npm run dev -- --executable /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
 
 ## 插件示例
 
-插件是普通 Cordis object plugin。`inject` 声明它依赖 CordisX UI 服务，`contribute()` 自动把注册挂到当前插件 fiber 的生命周期上：
+插件是普通 Cordis object plugin。与 DSH 一样，`inject = ['slots']` 声明 slot service 依赖，`slots.inject()` 等待宿主声明，`slots.register()` 把注册挂到当前插件 fiber 的生命周期上：
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from 'cordisx/contracts'
 
-export const inject = ['cordisx']
+export const inject = ['slots']
 
 export function apply(ctx: Context) {
-  ctx.cordisx.contribute({
+  ctx.slots.inject('header.actions', () => ctx.slots.register({
+    name: 'header.actions',
     id: 'my-header-button',
-    slot: 'header.actions',
-    mount({ container }) {
-      const button = document.createElement('button')
-      button.textContent = 'Hello'
-      container.append(button)
-      return () => button.remove()
-    },
-  })
+    order: 10,
+  }, ({ container, document }) => {
+    const button = document.createElement('button')
+    button.textContent = 'Hello'
+    container.append(button)
+    return () => button.remove()
+  }))
 }
 ```
+
+CordisX 当前五个宿主点位都是 root-scoped list slot，因此支持 DSH list entry 的 `name`、`id`、`order` 和 `priority`；同一 `id` 可以用不同 `priority` 叠放，数值最低的存活项显示，卸载后由下一层接管。第二个参数在 DSH 中是 React component；由于 Codex 的 React 树不属于 CordisX，它在这里是接收 `{ container, document, signal, slot }` 的 DOM mount component。Keyed、chain、children、store、locale 和业务 `inject` face 尚未实现。
 
 当前 slot：
 

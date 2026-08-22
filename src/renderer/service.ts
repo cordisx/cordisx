@@ -1,5 +1,11 @@
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { CordisXApi, CordisXContribution } from '../contracts.js'
+import {
+  CORDISX_SLOT_NAMES,
+  type CordisXSlotComponent,
+  type CordisXSlotName,
+  type CordisXSlotOptions,
+  type CordisXSlots,
+} from '../contracts.js'
 import { DomSlotRegistry } from './slots.js'
 
 const BASE_STYLE_ID = 'cordisx-base-style'
@@ -20,23 +26,36 @@ function installBaseStyles(document: Document): () => void {
   return () => style.remove()
 }
 
-/** Cordis service that owns the renderer adapter and caller-scoped contributions. */
-export class CordisXService extends Service implements CordisXApi {
-  private readonly slots: DomSlotRegistry
+function assertSlotName(name: CordisXSlotName): void {
+  if (!(CORDISX_SLOT_NAMES as readonly string[]).includes(name)) {
+    throw new Error(`slot ${JSON.stringify(name)} is not declared by the CordisX host`)
+  }
+}
+
+/** DSH-style slot service backed by the Codex DOM adapter. */
+export class CordisXSlotService extends Service implements CordisXSlots {
+  private readonly registry: DomSlotRegistry
 
   constructor(ctx: Context) {
-    super(ctx, 'cordisx')
+    super(ctx, 'slots')
     if (typeof document === 'undefined') throw new Error('CordisX requires a browser document')
-    this.slots = new DomSlotRegistry(document)
+    this.registry = new DomSlotRegistry(document)
     ctx.effect(() => installBaseStyles(document), 'cordisx: base styles')
-    ctx.effect(() => () => this.slots.dispose(), 'cordisx: DOM slot registry')
+    ctx.effect(() => () => this.registry.dispose(), 'cordisx: DOM slot registry')
   }
 
-  /** Register against the calling plugin's fiber so unload removes the contribution. */
-  contribute(contribution: CordisXContribution): () => void | Promise<void> {
+  /** Install an effect against the caller fiber while this host declaration exists. */
+  inject(name: CordisXSlotName, setup: Parameters<CordisXSlots['inject']>[1]): ReturnType<CordisXSlots['inject']> {
+    assertSlotName(name)
+    return this.ctx.effect(setup, `slots.inject(${JSON.stringify(name)})`)
+  }
+
+  /** Register against the caller fiber so plugin unload removes the entry. */
+  register(options: CordisXSlotOptions, component: CordisXSlotComponent): ReturnType<CordisXSlots['register']> {
+    assertSlotName(options.name)
     return this.ctx.effect(
-      () => this.slots.register(contribution),
-      `cordisx.contribute(${JSON.stringify(contribution.id)})`,
+      () => this.registry.register(options, component),
+      `slots.register(${JSON.stringify(options.name)}, ${JSON.stringify(options.id)})`,
     )
   }
 }

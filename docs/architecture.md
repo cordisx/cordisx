@@ -34,7 +34,7 @@ launcher -- esbuild browser composition -- plugin modules
 loopback CDP -- addScript/evaluate -- Codex renderer
         |
         v
-Cordis Context -- CordisXService -- semantic slots -- Codex DOM adapter
+Cordis Context -- SlotService -- semantic slots -- Codex DOM adapter
         |                                  |
         +---- plugin fibers/effects -------+
 ```
@@ -51,13 +51,15 @@ Online Chrome DevTools support is opt-in. `--online-devtools` adds `https://chro
 
 ### Renderer plane
 
-The injected bundle creates a new Cordis `Context`, mounts `CordisXService`, then mounts each configured plugin as a child fiber. A second injection first disposes the previous host. Plugin startup is fail-loud; already-started fibers unwind in reverse order if a later plugin fails.
+The injected bundle creates a new Cordis `Context`, mounts `SlotService` at `ctx.slots`, then mounts each configured plugin as a child fiber. A second injection first disposes the previous host. Plugin startup is fail-loud; already-started fibers unwind in reverse order if a later plugin fails.
 
-`CordisXService.contribute()` registers the UI contribution as a Cordis effect owned by the caller's plugin fiber. Unloading a plugin therefore removes its listeners, DOM, timers wrapped by the plugin, and slot registration on the same lifecycle axis.
+The public plugin surface follows DeepSeek Harness: plugins declare `inject = ['slots']`, wait on a host declaration with `ctx.slots.inject(name, setup)`, and contribute with `ctx.slots.register({ name, id, order, priority }, component)`. Both methods install Cordis effects through the service proxy, so the caller's plugin fiber owns the registration. Unloading a plugin therefore removes its listeners, DOM, timers wrapped by the plugin, and slot registration on the same lifecycle axis. There is no parallel `ctx.cordisx.contribute()` facade.
 
 ### Slot plane
 
-Plugins target semantic slot names. The host adapter alone translates a slot name into a current Codex DOM anchor and placement. A `MutationObserver` reconciles outlets after React replaces an anchor. When an outlet moves, the old mount disposer runs before the contribution is mounted under the new anchor.
+Plugins target semantic slot names. The host adapter declares the five root-scoped list slots for the renderer lifetime and alone translates each name into a current Codex DOM anchor and placement. `slots.inject()` therefore activates immediately in version 0.1 while retaining DSH's declaration-dependency syntax. A `MutationObserver` reconciles outlets after React replaces an anchor. When an outlet moves, the old component disposer runs before the contribution is mounted under the new anchor.
+
+CordisX deliberately implements the DSH slot registration subset needed by an external DOM host: `name`, list-entry `id`, `order`, same-cell `priority` shadowing with lowest-live takeover, declaration injection, caller-fiber disposal, and mount remapping. DSH renders React components inside an owned React slot tree; CordisX cannot join Codex's private React tree, so its second `register()` argument is a DOM mount component receiving `{ container, document, signal, slot }`. Keyed, chain, child-declared, store, locale, and injected business-face seats remain deferred until a real CordisX use case requires them.
 
 The first slot contract is deliberately small:
 

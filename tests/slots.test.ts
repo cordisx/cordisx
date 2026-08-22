@@ -26,13 +26,12 @@ describe('DomSlotRegistry', () => {
     let mounts = 0
     let disposals = 0
     const unregister = registry.register({
+      name: 'composer.before',
       id: 'demo',
-      slot: 'composer.before',
-      mount({ container }) {
-        mounts += 1
-        container.textContent = `mount-${mounts}`
-        return () => { disposals += 1 }
-      },
+    }, ({ container }) => {
+      mounts += 1
+      container.textContent = `mount-${mounts}`
+      return () => { disposals += 1 }
     })
 
     expect(document.querySelector('[data-cordisx-contribution="demo"]')?.textContent).toBe('mount-1')
@@ -47,20 +46,54 @@ describe('DomSlotRegistry', () => {
     registry.dispose()
   })
 
-  it('orders contributions by priority and then registration', () => {
+  it('orders list cells by order and then registration, independent of shadow priority', () => {
     const dom = new JSDOM('<body><main></main></body>')
     const document = dom.window.document
     const resolver: SlotResolver = current => ({ anchor: current.querySelector('main')!, placement: 'append' })
     const registry = new DomSlotRegistry(document, allResolvers(resolver))
-    const add = (id: string, priority: number): void => {
-      registry.register({ id, priority, slot: 'composer.before', mount({ container }) { container.textContent = id } })
+    const add = (id: string, priority: number, order = 0): void => {
+      registry.register({ name: 'composer.before', id, priority, order }, ({ container }) => { container.textContent = id })
     }
-    add('later', 10)
-    add('first', -10)
-    add('middle', 0)
+    add('later', 10, 30)
+    add('ordered-second', -10, 20)
+    add('first', 10, 10)
+    add('middle', 0, 20)
     const ids = [...document.querySelectorAll('[data-cordisx-contribution]')]
       .map(element => element.getAttribute('data-cordisx-contribution'))
-    expect(ids).toEqual(['first', 'middle', 'later'])
+    expect(ids).toEqual(['first', 'ordered-second', 'middle', 'later'])
+    registry.dispose()
+  })
+
+  it('shadows the same id by priority and restores the next entry on unload', () => {
+    const dom = new JSDOM('<body><main></main></body>')
+    const document = dom.window.document
+    const resolver: SlotResolver = current => ({ anchor: current.querySelector('main')!, placement: 'append' })
+    const registry = new DomSlotRegistry(document, allResolvers(resolver))
+    let highDisposals = 0
+    let lowDisposals = 0
+    const removeHigh = registry.register({ name: 'composer.before', id: 'same', priority: 10 }, ({ container }) => {
+      container.textContent = 'high'
+      return () => { highDisposals += 1 }
+    })
+    const removeLow = registry.register({ name: 'composer.before', id: 'same', priority: -10 }, ({ container }) => {
+      container.textContent = 'low'
+      return () => { lowDisposals += 1 }
+    })
+
+    expect(document.querySelectorAll('[data-cordisx-contribution="same"]')).toHaveLength(1)
+    expect(document.querySelector('[data-cordisx-contribution="same"]')?.textContent).toBe('low')
+    expect(highDisposals).toBe(1)
+    expect(() => registry.register(
+      { name: 'composer.before', id: 'same', priority: -10 },
+      () => undefined,
+    )).toThrow(/at priority -10/)
+
+    removeLow()
+    expect(lowDisposals).toBe(1)
+    expect(document.querySelector('[data-cordisx-contribution="same"]')?.textContent).toBe('high')
+
+    removeHigh()
+    expect(highDisposals).toBe(2)
     registry.dispose()
   })
 })

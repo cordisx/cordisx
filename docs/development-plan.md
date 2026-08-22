@@ -10,7 +10,7 @@ Status: implemented in this repository.
 - Launch or attach to Codex over loopback CDP.
 - Launch a project-stable second Codex with isolated Chromium/window state, shared Codex configuration, and deterministic process cleanup.
 - Install and remove the renderer bootstrap.
-- Mount and dispose DOM contributions through semantic slots.
+- Mount and dispose DOM contributions through the DSH-style `ctx.slots.inject()` / `ctx.slots.register()` surface.
 - Prove anchor replacement remounts a contribution and runs cleanup.
 
 Validation: TypeScript, configuration tests, DOM lifecycle tests, and dry-run bundle construction.
