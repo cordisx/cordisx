@@ -8,6 +8,7 @@ Status: implemented in this repository.
 
 - Bundle configured TypeScript plugins with one browser Cordis runtime.
 - Launch or attach to Codex over loopback CDP.
+- Launch a project-stable second Codex with isolated Chromium/window state, shared Codex configuration, and deterministic process cleanup.
 - Install and remove the renderer bootstrap.
 - Mount and dispose DOM contributions through semantic slots.
 - Prove anchor replacement remounts a contribution and runs cleanup.

@@ -6,11 +6,12 @@ export const inject = ['cordisx']
 
 interface Config {
   readonly label?: string
+  readonly open?: boolean
 }
 
 /** Example UI plugin: a header action opens a reversible frame-wide inspector. */
 export function apply(ctx: Context, config: Config = {}): void {
-  let open = false
+  let open = config.open ?? false
   let renderPanel = (): void => {}
 
   ctx.cordisx.contribute({
@@ -26,17 +27,17 @@ export function apply(ctx: Context, config: Config = {}): void {
         bottom: '16px',
         width: 'min(360px, calc(100vw - 32px))',
         padding: '16px',
-        border: '1px solid color-mix(in srgb, currentColor 16%, transparent)',
+        border: '1px solid #a78bfa',
         borderRadius: '12px',
-        background: 'var(--token-bg-primary, #202123)',
-        color: 'var(--token-text-primary, #f4f4f5)',
+        background: 'linear-gradient(145deg, #24163d, #17141f)',
+        color: '#f5f3ff',
         boxShadow: '0 18px 60px rgba(0,0,0,.35)',
         font: '13px/1.5 system-ui, sans-serif',
       })
       const title = document.createElement('strong')
-      title.textContent = 'CordisX is running'
+      title.textContent = 'CORDISX · ISOLATED CODEX'
       const description = document.createElement('p')
-      description.textContent = 'This panel is owned by a Cordis plugin fiber. Unloading the plugin removes both the action and this panel.'
+      description.textContent = 'UI plugin injection is active in this project-scoped test window. Your system Codex window is a separate process.'
       description.style.margin = '8px 0 0'
       panel.append(title, description)
       container.append(panel)
@@ -73,6 +74,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         renderPanel()
       }
       button.addEventListener('click', toggle)
+      button.setAttribute('aria-pressed', String(open))
       container.append(button)
       return () => {
         button.removeEventListener('click', toggle)

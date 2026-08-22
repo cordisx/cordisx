@@ -13,7 +13,7 @@ The installed macOS host inspected during the spike is `/Applications/ChatGPT.ap
 
 ## Product boundary
 
-OpenAI's supported plugin UI is an MCP UI resource rendered in an isolated iframe alongside a conversation or in a host-controlled fullscreen presentation. That mechanism is suitable for plugin-owned task UI, but it does not expose arbitrary Codex shell replacement points such as the sidebar, header, or composer.
+OpenAI's [supported plugin UI](https://developers.openai.com/plugins/build/chatgpt-ui) is an MCP UI resource rendered in an isolated iframe alongside a conversation or in a host-controlled fullscreen presentation. That mechanism is suitable for plugin-owned task UI, but it does not expose arbitrary Codex shell replacement points such as the sidebar, header, or composer.
 
 CordisX therefore has two explicit modes of extension:
 
@@ -44,6 +44,10 @@ Cordis Context -- CordisXService -- semantic slots -- Codex DOM adapter
 The Node launcher owns configuration, plugin entry resolution, browser bundling, Codex process startup, CDP target discovery, injection identifiers, and cleanup. The browser bundle contains one Cordis copy and all enabled plugin modules so plugin contexts and services share one runtime identity.
 
 The launcher binds CDP to `127.0.0.1`, records every `Page.addScriptToEvaluateOnNewDocument` identifier, and removes those identifiers on shutdown before asking the live page to dispose CordisX.
+
+For UI development, the default command launches a second, directly tracked native process with a stable project-scoped Chromium `user-data-dir` and an ephemeral loopback CDP port. `HOME` and `CODEX_HOME` stay shared so authentication, conversations, projects, and model configuration remain available; the App main process, app-server stdio channel, renderer processes, UI storage, and window restoration remain separate. Direct spawning is equivalent to macOS `open -n` for instance isolation while retaining the child PID needed for deterministic cleanup. `--system` is the explicit escape hatch to the original profile.
+
+Online Chrome DevTools support is opt-in. `--online-devtools` adds `https://chrome-devtools-frontend.appspot.com` to `--remote-allow-origins`; once connected, that origin has full renderer debugging authority for the isolated instance.
 
 ### Renderer plane
 
@@ -79,7 +83,7 @@ Compatibility is owned by adapter probes rather than a single brittle selector. 
 
 Adapter releases should record the Codex versions they were tested against. Unknown versions may run in best-effort mode, but the launcher and future manager must present that state distinctly from verified compatibility.
 
-The version-0.1 bundle and lifecycle were verified in a simulated renderer DOM. The installed 26.818.41509 host path was verified read-only, but its real DOM anchors were not exercised because that would require restarting the user's active application with CDP enabled.
+The version-0.1 bundle and lifecycle were verified in a simulated renderer DOM. The installed 26.818.41509 host can also be exercised through an isolated second process, so live probes no longer require restarting the user's active application.
 
 ## Decisions deferred
 

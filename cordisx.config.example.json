@@ -9,7 +9,8 @@
       "entry": "./plugins/hello-toolbar/index.ts",
       "enabled": true,
       "config": {
-        "label": "CordisX"
+        "label": "CordisX",
+        "open": true
       }
     }
   ]

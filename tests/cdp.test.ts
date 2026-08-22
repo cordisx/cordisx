@@ -10,6 +10,7 @@ describe('injectableTargets', () => {
     expect(injectableTargets([
       target('settings', 'Settings'),
       target('codex', 'Codex'),
+      target('avatar', 'Codex', 'app://-/index.html?initialRoute=%2Favatar-overlay'),
       target('auth', 'Authentication'),
     ]).map(item => item.id)).toEqual(['codex'])
   })

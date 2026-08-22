@@ -26,6 +26,7 @@ describe('renderer bundle', () => {
 
     expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
     expect(dom.window.document.querySelector('[data-cordisx-contribution="hello-toolbar.action"] button')?.textContent).toBe('CordisX')
+    expect(dom.window.document.querySelector('[data-cordisx-contribution="hello-toolbar.panel"] section')?.hidden).toBe(false)
 
     const runtime = (dom.window as unknown as { __cordisxRuntime?: { dispose(): Promise<void> } }).__cordisxRuntime
     await runtime?.dispose()

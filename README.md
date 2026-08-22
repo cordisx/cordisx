@@ -23,14 +23,33 @@ npm run dev -- --dry-run
 连接 Codex 有两种方式：
 
 ```bash
-# 启动一个带 CDP 的实例；macOS 会自动寻找 Codex.app 或 ChatGPT.app
+# 默认：启动项目级隔离的第二个 Codex；不会占用或重启当前实例
 npm run dev -- --config cordisx.config.json
 
 # 连接已经用 --remote-debugging-port=9229 启动的 Codex
 npm run dev -- --config cordisx.config.json --attach
+
+# 逃生入口：使用系统 Chromium profile（要求普通实例已经退出）
+npm run dev -- --config cordisx.config.json --system
 ```
 
-启动模式下请先退出普通 Codex/ChatGPT 实例，避免应用把第二次启动转交给未开启 CDP 的旧进程。
+默认模式会自动选择空闲 CDP 端口，并为当前项目稳定保存 Chromium profile：
+
+```text
+~/.cordisx/projects/<project-key>/cache/codex-app-profile/
+```
+
+隔离的是 Codex/Electron 进程、Chromium 数据、CDP 端口和窗口恢复状态；当前 `HOME` 与 `CODEX_HOME` 保持共享，因此账号凭证、会话、项目和模型配置仍可使用。新 App 主进程会启动自己的 app-server/stdin 通道，退出 CordisX 时只撤销注入并终止这个被精确跟踪的实例。`--profile-dir <path>` 可覆盖 profile 位置；`--isolated` 作为显式兼容写法仍可使用。
+
+若要在浏览器或 IAB 中使用 Chrome 官方在线 DevTools，可加 `--online-devtools`。它会额外允许 `https://chrome-devtools-frontend.appspot.com` 连接 loopback CDP。这个页面一旦连上就拥有读取和修改测试 Codex renderer 的完整调试权限，只应对隔离实例启用。
+
+实时注入后可运行只读取 CordisX 状态的冒烟探针，并可只截取插件标识区域：
+
+```bash
+npm run smoke -- --port <printed-port> --screenshot artifacts/live-smoke.png
+```
+
+`--system` 模式下请先退出普通 Codex/ChatGPT 实例，避免应用把第二次启动转交给未开启 CDP 的旧进程。
 
 如果自动探测不到 Codex，可显式传可执行文件：
 
@@ -79,9 +98,9 @@ export function apply(ctx: Context) {
 ## 当前边界
 
 - 已实现：配置校验、浏览器打包、Codex 启动/连接、目标页追踪、CDP 注入与撤销、Cordis fiber 生命周期、DOM slot 重挂载、示例插件和单元测试。
-- 已验证：当前项目可生成 283 KB renderer bundle；bundle 在模拟 Codex DOM 中能加载示例插件并完整卸载；本机宿主为 `ChatGPT.app` 26.818.41509，bundle id 仍是 `com.openai.codex`。
-- 未做真人 UI 冒烟：本轮没有退出或重启用户正在使用的 ChatGPT，因此当前 slot 选择器尚未在 26.818.41509 的真实页面中验证。
+- 已验证：项目可以生成 renderer bundle；bundle 在模拟 Codex DOM 中能加载示例插件并完整卸载；本机宿主为 `ChatGPT.app` 26.818.41509，bundle id 仍是 `com.openai.codex`。
+- 已验证：默认启动能让同一应用创建独立 Codex/AppServer 进程、项目级 Chromium profile 和随机 CDP 端口；真实 renderer 已成功加载 CordisX 示例插件。
 - 尚未实现：插件市场、签名、权限隔离、进程沙箱、源码 HMR、可视化管理器、Codex 版本适配矩阵。
-- 官方 Codex 插件 UI 是 MCP 返回的会话内 UI 资源，适合 inline/fullscreen 组件；它不是任意替换 Codex shell 的 API。CordisX 走的是本地、非官方的宿主增强路线。
+- [OpenAI 官方插件 UI 文档](https://developers.openai.com/plugins/build/chatgpt-ui)定义的是 MCP 返回、在宿主 iframe 中运行的会话内 UI 资源；它不是任意替换 Codex shell 的 API。CordisX 走的是本地、非官方的宿主增强路线。
 
 详细设计见 [docs/architecture.md](docs/architecture.md)，开发拆分见 [docs/development-plan.md](docs/development-plan.md)。

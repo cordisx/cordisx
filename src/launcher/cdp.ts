@@ -51,7 +51,8 @@ class CdpSession {
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
       this.socket.send(JSON.stringify({ id, method, params }), (error) => {
-        if (error === undefined) return
+        // ws may pass null on success even though its TypeScript callback uses undefined.
+        if (error == null) return
         this.pending.delete(id)
         reject(error)
       })
@@ -89,6 +90,7 @@ function injectable(target: CdpTarget): boolean {
   return target.type === 'page'
     && typeof target.webSocketDebuggerUrl === 'string'
     && !target.url.startsWith('devtools://')
+    && !target.url.includes('initialRoute=%2Favatar-overlay')
 }
 
 function targetScore(target: CdpTarget): number {
