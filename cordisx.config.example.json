@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "codex": {
+    "debugPort": 9229
+  },
+  "plugins": [
+    {
+      "id": "hello-toolbar",
+      "entry": "./plugins/hello-toolbar/index.ts",
+      "enabled": true,
+      "config": {
+        "label": "CordisX"
+      }
+    }
+  ]
+}
