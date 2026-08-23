@@ -1,13 +1,38 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '../../src/contracts.js'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+  type CordisXMessageSchema,
+  type CordisXPluginManifestV1,
+} from '../../src/contracts.js'
 
 export const name = 'slot-showcase'
-export const inject = ['slots']
+export const inject = ['slots', 'i18n']
+export const manifest = {
+  $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+  schemaVersion: 1,
+  id: 'slot-showcase',
+  name: 'Slot Showcase',
+  capabilities: [
+    {
+      name: 'models.read',
+      required: false,
+      reason: {
+        key: 'permission.models',
+        fallback: 'Show models currently available through the host connection',
+      },
+      scope: {},
+    },
+  ],
+} as const satisfies CordisXPluginManifestV1
 
 interface Config {
   readonly accent?: string
   readonly label?: string
   readonly open?: boolean
+}
+
+interface Messages extends CordisXMessageSchema {
+  'permission.models': undefined
 }
 
 const SLOT_LABELS = [
@@ -20,6 +45,17 @@ const SLOT_LABELS = [
 
 /** Visual demo plugin that exercises every CordisX v0.1 semantic UI slot. */
 export function apply(ctx: Context, config: Config = {}): void {
+  ctx.i18n.define<Messages>({
+    namespace: 'slot-showcase',
+    locale: 'en',
+    default: true,
+    messages: { 'permission.models': 'Show models currently available through the host connection' },
+  })
+  ctx.i18n.define<Messages>({
+    namespace: 'slot-showcase',
+    locale: 'zh-CN',
+    messages: { 'permission.models': '显示当前宿主连接实际可用的模型' },
+  })
   const accent = config.accent ?? '#8b5cf6'
   let open = config.open ?? true
   let renderOverlay = (): void => {}

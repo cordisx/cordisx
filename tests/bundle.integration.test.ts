@@ -82,6 +82,8 @@ describe('renderer bundle', () => {
           localization: { locale: string; direction: string; version: number }
           localeCatalogs: readonly unknown[]
           localizationDiagnostics: readonly unknown[]
+          platform: { mode: string; secondConnectionCreated: boolean; rawBridgeExposed: boolean; diagnostics: readonly { code: string }[] }
+          permissions: readonly { capability: string; policy: string; reasonText: string; required: boolean }[]
         }
         dispose(): Promise<void>
       }
@@ -99,8 +101,20 @@ describe('renderer bundle', () => {
       expect.objectContaining({ pluginId: 'slot-showcase', slot: 'shell.overlay' }),
     ]))
     expect(runtime?.snapshot().localization).toMatchObject({ locale: 'en', direction: 'ltr' })
-    expect(runtime?.snapshot().localeCatalogs).toEqual([])
+    expect(runtime?.snapshot().localeCatalogs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ owner: 'slot-showcase', locale: 'en', active: true }),
+      expect.objectContaining({ owner: 'slot-showcase', locale: 'zh-CN', active: true }),
+    ]))
     expect(runtime?.snapshot().localizationDiagnostics).toEqual([])
+    expect(runtime?.snapshot().platform).toMatchObject({
+      mode: 'unavailable',
+      secondConnectionCreated: false,
+      rawBridgeExposed: false,
+      diagnostics: [expect.objectContaining({ code: 'current-connection-client-unavailable' })],
+    })
+    expect(runtime?.snapshot().permissions).toEqual([
+      expect.objectContaining({ capability: 'models.read', policy: 'ask', required: false }),
+    ])
 
     const managerTrigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')
     expect(managerTrigger?.previousElementSibling?.id).toBe('workspace-switcher')
@@ -139,15 +153,33 @@ describe('renderer bundle', () => {
     expect(back?.getAttribute('aria-label')).toBe('返回')
     expect(back?.classList.contains('cxm-heading-leading')).toBe(true)
     expect(dom.window.getComputedStyle(back as HTMLElement).width).toBe('26px')
-    expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain('插件/slot-showcase')
+    expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain('插件/Slot Showcase')
     expect(dom.window.document.querySelector('.cxm-readme h1')?.textContent).toBe('Slot Showcase')
     expect(managerModal?.textContent).toContain('五扩展点演示插件')
     expect(managerModal?.textContent).not.toContain('插件配置')
-    expect(dom.window.document.querySelectorAll('[data-plugin-detail-tab]')).toHaveLength(4)
+    expect(dom.window.document.querySelectorAll('[data-plugin-detail-tab]')).toHaveLength(5)
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
     expect(managerModal?.textContent).toContain('插件配置')
     expect(managerModal?.textContent).toContain('"accent": "#8b5cf6"')
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="permissions"]')?.click()
+    expect(managerModal?.textContent).toContain('models.read')
+    expect(managerModal?.textContent).toContain('Show models currently available through the host connection')
+    expect(managerModal?.textContent).toContain('current-connection-client-unavailable')
+    expect(managerModal?.textContent).toContain('trusted renderer code 不是安全沙箱')
+    dom.window.document.documentElement.lang = 'zh-CN'
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(managerModal?.textContent).toContain('显示当前宿主连接实际可用的模型')
+    const permissionPolicy = dom.window.document.querySelector<HTMLSelectElement>('[data-permission-capability="models.read"]')
+    if (permissionPolicy !== null) {
+      permissionPolicy.value = 'deny'
+      permissionPolicy.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    }
+    for (let attempt = 0; attempt < 20 && runtime?.snapshot().permissions[0]?.policy !== 'deny'; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(runtime?.snapshot().permissions[0]?.policy).toBe('deny')
+    expect(runtime?.snapshot().plugins[0]?.status).toBe('active')
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.click()
     expect(managerModal?.textContent).toContain('注入服务')
 

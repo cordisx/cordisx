@@ -138,6 +138,22 @@ remain explicitly out of scope.
 
 ## Stage 3 — authority and distribution
 
+### Platform capability v1 slice
+
+Status: architecture approved; implementation follows
+[`platform-capabilities.md`](platform-capabilities.md).
+
+This slice defines the manifest capability vocabulary, Permission Broker,
+adapter-neutral model/task/turn API, manager permission projection, controlled
+read-only projection adapter, and honest unavailable default. It does not
+claim a sandbox or a live Codex request binding. The protocol PR lands first,
+the compatible host PR lands second, and the mono pointers update last.
+
+The future current-connection adapter is separately blocked on a stable
+host-private request-client seat. Direct `electronBridge`, `mcp-request`,
+`connect-app-host`, a second AppServer, or bypass of native scheduling and
+stream coordination are not acceptable substitutes.
+
 Recommended PR boundaries:
 
 1. Define versioned capabilities and host-issued grants.

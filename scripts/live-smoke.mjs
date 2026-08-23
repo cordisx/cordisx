@@ -74,6 +74,14 @@ const evaluated = await send('Runtime.evaluate', {
       version: runtime?.version ?? null,
       pluginIds: runtime?.pluginIds ?? [],
       pluginStates: snapshot?.plugins?.map(plugin => ({ id: plugin.id, status: plugin.status })) ?? [],
+      platform: snapshot?.platform ?? null,
+      permissions: snapshot?.permissions?.map(permission => ({
+        pluginId: permission.identity.id,
+        capability: permission.capability,
+        required: permission.required,
+        policy: permission.policy,
+        reasonText: permission.reasonText,
+      })) ?? [],
       contributions: [...document.querySelectorAll('[data-cordisx-contribution]')].map(element => element.getAttribute('data-cordisx-contribution')),
       managerTrigger: document.querySelector('[data-cordisx-manager-trigger]') !== null,
       marker: panel?.getAttribute('data-cordisx-demo-marker')
@@ -143,7 +151,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   if (!['about', 'slots', 'plugins', 'marketplace', 'settings'].includes(managerTab)) throw new Error(`unknown manager tab: ${managerTab}`)
   const managerPlugin = parsed.values['manager-plugin']
   const managerDetailTab = parsed.values['manager-detail-tab']
-  if (managerDetailTab !== undefined && !['readme', 'config', 'runtime', 'slots'].includes(managerDetailTab)) throw new Error(`unknown manager detail tab: ${managerDetailTab}`)
+  if (managerDetailTab !== undefined && !['readme', 'config', 'permissions', 'runtime', 'slots'].includes(managerDetailTab)) throw new Error(`unknown manager detail tab: ${managerDetailTab}`)
   const managerSettingsTab = parsed.values['manager-settings-tab']
   if (managerSettingsTab !== undefined && !['marketplace', 'runtime', 'launcher'].includes(managerSettingsTab)) throw new Error(`unknown manager settings tab: ${managerSettingsTab}`)
   const evaluatedManager = await send('Runtime.evaluate', {
