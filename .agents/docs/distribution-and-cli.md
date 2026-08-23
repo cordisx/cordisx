@@ -63,6 +63,7 @@ The initial schema is conceptually:
 {
   "version": 1,
   "defaultApp": "codex",
+  "plugins": [],
   "apps": {
     "codex": {
       "defaultProfile": "default",
@@ -80,6 +81,13 @@ The initial schema is conceptually:
   }
 }
 ```
+
+The first generated configuration always uses `plugins: []`. CordisX itself is
+host infrastructure, not a bundled demo plugin, and setup must not silently
+activate `slot-showcase` or any other example. Version 1 may load explicitly
+configured trusted local plugin entries, but package installation, dependency
+resolution, signatures, and marketplace activation remain later authority
+work.
 
 The persisted document is versioned and strictly validated. Writes use a
 same-directory temporary file, fsync where available, atomic rename, and user-
@@ -205,6 +213,22 @@ a result of those usable releases, not a separate empty publication.
    manager distribution reuse the same home config and profiles.
 8. **CordisXMono coordination** — update the exact owning commit only after the
    compatible product and protocol commits are pushed, merged, and verified.
+
+### Functional CLI home-config slice
+
+The home-config PR is limited to the third boundary above. It implements the
+shared command parser, idempotent setup, strict version-1 home configuration,
+atomic and user-only persistence, the adapter registry, named profile
+resolution, and a serializable launch plan. `codex` is the only
+launch-capable adapter in this slice. `claude-code` and every unknown adapter
+fail explicitly without falling back to Codex.
+
+Ordinary launch composes the explicitly configured trusted local plugins from
+the home configuration and defaults to none. Existing repository-local
+composition remains available only through `cordisx dev --config <path>`.
+This PR does not publish to npm, implement `create-cordisx-plugin`, extract a
+public launcher-core package, or ship a native app. Those remain the later PR
+boundaries above.
 
 Platform capabilities, structured UI, and localization work may land before
 the mechanical monorepo move. The move must start from their merged commits so

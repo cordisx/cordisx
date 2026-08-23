@@ -140,6 +140,28 @@ remain explicitly out of scope.
 
 ## Stage 3 — authority and distribution
 
+### Functional CLI home-config slice
+
+Status: implementation follows
+[`distribution-and-cli.md`](distribution-and-cli.md). This is the functional
+CLI boundary between the monorepo foundation and later public release/native
+distribution work.
+
+The slice owns `cordisx setup`, implicit first-run setup, `cordisx config`,
+`cordisx doctor`, host/profile launch parsing, strict and atomic
+`~/.cordisx/config.json` persistence, a host-neutral resolved launch plan, and
+the first Codex adapter projection. A missing named profile is persisted as an
+isolated profile; the default profile is shared; the generated plugin list is
+empty. Other host ids fail explicitly until a launch-capable adapter exists.
+
+Validation covers setup idempotence, invalid/unsupported configuration
+preservation, user-only permissions, option/profile/default precedence,
+shared and isolated data-root projection, unknown adapter diagnostics, host
+argument separation, no-launch doctor/config behavior, package contents, a
+temporary tarball installation, and focused shared/isolated Codex live smoke.
+Publication, the plugin scaffolder, native UI, signing, notarization, updates,
+marketplace activation, and capability isolation remain separate slices.
+
 ### Platform capability v1 slice
 
 Status: architecture approved; implementation follows
