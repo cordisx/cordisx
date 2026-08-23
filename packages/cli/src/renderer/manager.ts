@@ -22,6 +22,7 @@ import {
 import { renderSafeMarkdown } from './markdown.js'
 import type { CommandSnapshot } from './commands.js'
 import { resolveManagerTriggerTarget } from './host-probes.js'
+import { createManagerIcon, type ManagerIconToken } from './icons.js'
 import type { NavigationSnapshot } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
 import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
@@ -78,7 +79,7 @@ export interface ManagerModel {
 type ManagerTab = 'about' | 'slots' | 'plugins' | 'marketplace' | 'settings'
 type PluginDetailTab = 'readme' | 'config' | 'permissions' | 'runtime' | 'slots'
 type SettingsTab = 'marketplace' | 'runtime' | 'launcher'
-type LocalTabIcon = 'document' | 'settings' | 'shield' | 'activity' | 'outlets' | 'marketplace' | 'launcher'
+type LocalTabIcon = 'document' | 'configuration' | 'permissions' | 'runtime' | 'outlets' | 'marketplace' | 'launcher'
 type SecondaryView =
   | { readonly kind: 'plugin'; readonly id: string }
   | { readonly kind: 'marketplace'; readonly identity: string }
@@ -113,49 +114,39 @@ const ABOUT_ACTIONS = [
   },
 ] as const
 
-const LOCAL_TAB_ICON_SVGS: Readonly<Record<LocalTabIcon, string>> = {
-  document: '<path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M9 12h6M9 16h6"/>',
-  settings: '<circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2-.7-.7-1.7.9-1.9-2.1-2.1-1.9.9-1.7-.7-.7-2h-3l-.7 2-1.7.7-1.9-.9-2.1 2.1.9 1.9-.7 1.7-2 .7v3l2 .7.7 1.7-.9 1.9 2.1 2.1 1.9-.9 1.7.7.7 2h3l.7-2 1.7-.7 1.9.9 2.1-2.1-.9-1.9.7-1.7z"/>',
-  shield: '<path d="M12 3.5 19 6v5.2c0 4.4-2.7 7.5-7 9.3-4.3-1.8-7-4.9-7-9.3V6z"/><path d="m9.2 12 1.8 1.8 3.8-4"/>',
-  activity: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/>',
-  outlets: '<rect x="3.5" y="4" width="7" height="7" rx="1.5"/><rect x="13.5" y="13" width="7" height="7" rx="1.5"/><path d="M14 7.5h3a2 2 0 0 1 2 2V11M10 16.5H7a2 2 0 0 1-2-2V13"/>',
-  marketplace: '<path d="M4 9h16l-1.2-4H5.2z"/><path d="M5.5 9v10h13V9M9 19v-5h6v5"/><path d="M4 9c0 1.4 1 2.5 2.3 2.5S8.5 10.4 8.5 9c0 1.4 1.1 2.5 2.4 2.5S13.4 10.4 13.4 9c0 1.4 1.1 2.5 2.4 2.5S18 10.4 18 9"/>',
-  launcher: '<path d="M7 17 17 7M10 7h7v7"/><path d="M17 17v3H4V7h3"/>',
-}
-
 interface CapabilityPresentation {
   readonly name: string
-  readonly icon: string
+  readonly icon: ManagerIconToken
 }
 
 const CAPABILITY_PRESENTATIONS: Readonly<Partial<Record<CordisXPlatformCapability, CapabilityPresentation>>> = {
   'models.read': {
     name: '读取可用模型',
-    icon: '<path d="M5 7.5 12 4l7 3.5-7 3.5z"/><path d="m5 12 7 3.5 7-3.5M5 16.5l7 3.5 7-3.5"/>',
+    icon: 'models-read',
   },
   'tasks.catalog.read': {
     name: '查看任务列表',
-    icon: '<rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/>',
+    icon: 'tasks-catalog-read',
   },
   'tasks.content.read': {
     name: '查看任务内容',
-    icon: '<path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M9 12h6M9 16h4"/>',
+    icon: 'tasks-content-read',
   },
   'tasks.create': {
     name: '创建任务',
-    icon: '<path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M12 11v6M9 14h6"/>',
+    icon: 'tasks-create',
   },
   'tasks.control': {
     name: '管理任务',
-    icon: '<path d="M4 7h10M18 7h2M4 12h2M10 12h10M4 17h7M15 17h5"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="13" cy="17" r="2"/>',
+    icon: 'tasks-control',
   },
   'turns.submit': {
     name: '提交消息',
-    icon: '<path d="m4 12 16-8-5.5 16-3.2-6.8z"/><path d="m11.3 13.2 4.3-4.3"/>',
+    icon: 'turns-submit',
   },
   'turns.control': {
     name: '控制对话轮次',
-    icon: '<circle cx="12" cy="12" r="8.5"/><path d="M9.5 9v6M14.5 9v6"/>',
+    icon: 'turns-control',
   },
 }
 
@@ -194,6 +185,31 @@ const MANAGER_STYLES = `
     width: 18px;
     height: 18px;
     flex: none;
+    pointer-events: none;
+  }
+  .cxm-brand-mark,
+  .cxm-material-icon,
+  .cxm-material-icon svg,
+  .cxm-plugin-icon,
+  .cxm-status-dot,
+  .cxm-dot {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+  .cxm-material-icon {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    line-height: 0;
+    pointer-events: none;
+  }
+  .cxm-material-icon svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    fill: currentColor;
+    pointer-events: none;
   }
   .cxm-brand-mark[data-brand-rendering="direct-dark"] { object-fit: contain; }
   .cxm-brand-mark[data-color-scheme="current-color"] {
@@ -262,7 +278,8 @@ const MANAGER_STYLES = `
   .cxm-nav-button:hover { background: rgba(255, 255, 255, .05); color: #fff; }
   .cxm-nav-button[aria-selected="true"] { background: rgba(199, 204, 212, .14); color: #eef0f3; }
   .cxm-nav-button[data-tab="about"] { margin-top: auto; }
-  .cxm-nav-icon { display: inline-grid; place-items: center; width: 20px; color: #b8bec8; font-size: 15px; }
+  .cxm-nav-icon { width: 20px; height: 20px; color: #b8bec8; }
+  .cxm-nav-icon svg { width: 18px; height: 18px; }
   .cxm-nav-button:focus-visible,
   .cxm-close:focus-visible,
   .cxm-tab:focus-visible,
@@ -281,9 +298,9 @@ const MANAGER_STYLES = `
     padding: 0 22px;
     border-bottom: 1px solid rgba(255, 255, 255, .08);
   }
-  .cxm-heading { display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 9px; min-width: 0; }
+  .cxm-heading { display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: start; column-gap: 9px; min-width: 0; }
   .cxm-heading-row { display: contents; }
-  .cxm-heading h2 { grid-column: 2; min-width: 0; margin: 0; overflow: hidden; color: #fff; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+  .cxm-heading h2 { display: flex; grid-column: 2; align-items: center; min-width: 0; min-height: 26px; margin: 0; overflow: hidden; color: #fff; font-size: 16px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
   .cxm-heading p { grid-column: 1 / -1; margin: 3px 0 0; color: #7f899a; font-size: 11px; }
   .cxm-heading-leading {
     display: grid;
@@ -295,12 +312,16 @@ const MANAGER_STYLES = `
     border: 0;
     background: transparent;
     color: #d8dce3;
+    align-self: start;
   }
+  .cxm-heading-icon svg { width: 18px; height: 18px; transform: translateY(-.5px); }
   .cxm-back {
     padding: 0;
     cursor: pointer;
   }
   .cxm-back { border-radius: 7px; }
+  .cxm-back-icon { width: 18px; height: 18px; }
+  .cxm-back-icon svg { transform: translateY(-.5px); }
   .cxm-back:hover { background: rgba(199, 204, 212, .14); color: #eef0f3; }
   .cxm-back:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
   .cxm-breadcrumb-root { color: #a9b1c0; font-weight: 500; }
@@ -316,8 +337,8 @@ const MANAGER_STYLES = `
     background: rgba(255, 255, 255, .04);
     color: #d8dce5;
     cursor: pointer;
-    font: 18px/1 system-ui, sans-serif;
   }
+  .cxm-close-icon { width: 18px; height: 18px; }
   .cxm-content { min-height: 0; overflow: auto; padding: 20px 22px 24px; }
   .cxm-tabs {
     display: flex;
@@ -338,8 +359,7 @@ const MANAGER_STYLES = `
     font: 11px/1.2 system-ui, sans-serif;
   }
   .cxm-tab-content { display: inline-flex; align-items: center; gap: 6px; }
-  .cxm-tab-icon { display: inline-grid; place-items: center; width: 14px; height: 14px; flex: none; color: currentColor; }
-  .cxm-tab-icon svg { display: block; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+  .cxm-tab-icon { width: 15px; height: 15px; color: currentColor; }
   .cxm-tab:hover { color: #eef0f3; }
   .cxm-tab[aria-selected="true"] { color: #eef0f3; }
   .cxm-tab[aria-selected="true"]::after {
@@ -364,7 +384,7 @@ const MANAGER_STYLES = `
   .cxm-about-action-body { min-width: 0; flex: 1; }
   .cxm-about-action-title { display: block; color: #d8dce3; font-size: 12px; font-weight: 650; }
   .cxm-about-action-copy { display: block; margin-top: 3px; color: #838d9f; font-size: 11px; }
-  .cxm-about-action-arrow { flex: none; color: #747e8e; font-size: 15px; }
+  .cxm-about-action-arrow { width: 16px; height: 16px; color: #747e8e; }
   .cxm-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
   .cxm-card, .cxm-slot-card, .cxm-source-row {
     border: 1px solid rgba(255, 255, 255, .09);
@@ -400,8 +420,8 @@ const MANAGER_STYLES = `
   }
   .cxm-permission-open:hover .cxm-permission-name { color: #fff; }
   .cxm-permission-open:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 4px; border-radius: 5px; }
-  .cxm-capability-icon { display: grid; place-items: center; width: 24px; height: 24px; color: #bfc5ce; }
-  .cxm-capability-icon svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+  .cxm-capability-icon { width: 24px; height: 24px; color: #bfc5ce; }
+  .cxm-capability-icon svg { width: 20px; height: 20px; }
   .cxm-permission-copy { min-width: 0; }
   .cxm-permission-title { display: flex; align-items: center; gap: 7px; }
   .cxm-permission-name { color: #e7e9ee; font-size: 12px; font-weight: 650; }
@@ -448,7 +468,8 @@ const MANAGER_STYLES = `
     color: #c7cdd8;
     font-size: 10px;
   }
-  .cxm-dot { color: #86efac; }
+  .cxm-dot { width: 7px; height: 7px; box-sizing: border-box; border: 1px solid #86efac; border-radius: 50%; }
+  .cxm-dot[data-rendered="true"] { background: #86efac; }
   .cxm-empty { padding: 28px 12px; color: #687284; font-size: 11px; text-align: center; }
   .cxm-toolbar { display: flex; align-items: center; gap: 10px; }
   .cxm-search, .cxm-source-input {
@@ -502,7 +523,7 @@ const MANAGER_STYLES = `
   .cxm-status-dot[data-status="active"], .cxm-status-dot[data-status="loaded"] { background: #4ade80; }
   .cxm-status-dot[data-status="failed"] { background: #fb7185; }
   .cxm-status-dot[data-status="blocked"], .cxm-status-dot[data-status="loading"] { background: #fbbf24; }
-  .cxm-chevron { flex: none; color: #626c7d; font-size: 18px; }
+  .cxm-chevron { width: 18px; height: 18px; color: #626c7d; }
   .cxm-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   .cxm-detail-id { color: #747f91; font: 10px/1.3 ui-monospace, monospace; }
   .cxm-detail-description { max-width: 680px; margin: 14px 0 0; color: #a7afbe; font-size: 12px; }
@@ -519,7 +540,9 @@ const MANAGER_STYLES = `
     cursor: pointer;
     text-decoration: none;
     font: 11px/1.2 system-ui, sans-serif;
+    gap: 6px;
   }
+  .cxm-action-icon { width: 14px; height: 14px; }
   .cxm-action:hover:not(:disabled) { border-color: rgba(199, 204, 212, .5); background: rgba(199, 204, 212, .12); }
   .cxm-action:disabled { cursor: default; opacity: .45; }
   .cxm-action[data-tone="danger"] { color: #fecdd3; }
@@ -573,11 +596,17 @@ function create<K extends keyof HTMLElementTagNameMap>(
   return element
 }
 
+function markDecorative<T extends HTMLElement>(element: T): T {
+  element.setAttribute('aria-hidden', 'true')
+  element.draggable = false
+  return element
+}
+
 function createAdaptiveBrandMark(document: Document): HTMLSpanElement {
   const mark = create(document, 'span', 'cxm-brand-mark')
   mark.dataset.cordisxBrandMark = 'true'
   mark.dataset.colorScheme = 'current-color'
-  mark.setAttribute('aria-hidden', 'true')
+  markDecorative(mark)
   mark.style.setProperty('--cordisx-brand-mask', `url("${CORDISX_MARK_LIGHT_URI}")`)
   return mark
 }
@@ -588,16 +617,7 @@ function createDarkBackgroundBrandMark(document: Document): HTMLImageElement {
   mark.dataset.brandRendering = 'direct-dark'
   mark.src = CORDISX_MARK_DARK_URI
   mark.alt = ''
-  mark.setAttribute('aria-hidden', 'true')
-  mark.draggable = false
-  return mark
-}
-
-function createLocalTabIcon(document: Document, token: LocalTabIcon): HTMLSpanElement {
-  const icon = create(document, 'span', 'cxm-tab-icon')
-  icon.setAttribute('aria-hidden', 'true')
-  icon.innerHTML = `<svg viewBox="0 0 24 24" focusable="false" stroke-linecap="round" stroke-linejoin="round">${LOCAL_TAB_ICON_SVGS[token]}</svg>`
-  return icon
+  return markDecorative(mark)
 }
 
 function capabilityPresentation(capability: CordisXPlatformCapability): CapabilityPresentation {
@@ -612,15 +632,12 @@ function capabilityPresentation(capability: CordisXPlatformCapability): Capabili
         : group === 'turns'
           ? '使用对话能力'
           : '使用宿主能力',
-    icon: '<circle cx="12" cy="12" r="8.5"/><path d="M12 8v4M12 16h.01"/>',
+    icon: 'capability-fallback',
   }
 }
 
 function createCapabilityIcon(document: Document, capability: CordisXPlatformCapability): HTMLSpanElement {
-  const icon = create(document, 'span', 'cxm-capability-icon')
-  icon.setAttribute('aria-hidden', 'true')
-  icon.innerHTML = `<svg viewBox="0 0 24 24" focusable="false" stroke-linecap="round" stroke-linejoin="round">${capabilityPresentation(capability).icon}</svg>`
-  return icon
+  return createManagerIcon(document, capabilityPresentation(capability).icon, 'cxm-capability-icon')
 }
 
 function createPermissionPolicySelect(
@@ -672,7 +689,7 @@ function createLocalTabs(
     button.tabIndex = item.id === active ? 0 : -1
     button.setAttribute(dataAttribute, item.id)
     const visibleContent = create(document, 'span', 'cxm-tab-content')
-    visibleContent.append(createLocalTabIcon(document, item.icon), create(document, 'span', undefined, item.label))
+    visibleContent.append(createManagerIcon(document, item.icon, 'cxm-tab-icon'), create(document, 'span', undefined, item.label))
     button.replaceChildren(visibleContent)
     button.addEventListener('click', () => activate(item.id))
     button.addEventListener('keydown', (event) => {
@@ -726,6 +743,10 @@ function formatConfig(config: unknown): string {
 function initials(name: string): string {
   const value = name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase() ?? '').join('')
   return value || 'CX'
+}
+
+function createPluginIcon(document: Document, name: string): HTMLSpanElement {
+  return markDecorative(create(document, 'span', 'cxm-plugin-icon', initials(name)))
 }
 
 function safeStorage(view: Window | null): MarketplaceStorage | undefined {
@@ -862,12 +883,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const nav = create(document, 'nav', 'cxm-nav')
   nav.setAttribute('role', 'tablist')
   nav.setAttribute('aria-label', 'CordisX 管理器页面')
-  const tabs: readonly { id: ManagerTab; icon: string; label: string; brand?: boolean }[] = [
-    { id: 'plugins', icon: '◫', label: '插件' },
-    { id: 'slots', icon: '⊞', label: '贡献与路由' },
-    { id: 'marketplace', icon: '◇', label: '插件商店' },
-    { id: 'settings', icon: '⚙', label: '配置' },
-    { id: 'about', icon: '', label: '关于 CordisX', brand: true },
+  const tabs: readonly { id: ManagerTab; icon?: ManagerIconToken; label: string; brand?: boolean }[] = [
+    { id: 'plugins', icon: 'plugins', label: '插件' },
+    { id: 'slots', icon: 'contributions', label: '贡献与路由' },
+    { id: 'marketplace', icon: 'marketplace', label: '插件商店' },
+    { id: 'settings', icon: 'settings', label: '配置' },
+    { id: 'about', label: '关于 CordisX', brand: true },
   ]
   let activeTab: ManagerTab = 'plugins'
   const navButtons = new Map<ManagerTab, HTMLButtonElement>()
@@ -878,7 +899,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     button.setAttribute('role', 'tab')
     const icon = tab.brand === true
       ? createDarkBackgroundBrandMark(document)
-      : create(document, 'span', 'cxm-nav-icon', tab.icon)
+      : createManagerIcon(document, tab.icon ?? 'plugins', 'cxm-nav-icon')
     icon.classList.add('cxm-nav-icon')
     icon.setAttribute('aria-hidden', 'true')
     button.append(icon, create(document, 'span', undefined, tab.label))
@@ -890,9 +911,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const main = create(document, 'div', 'cxm-main')
   const header = create(document, 'header', 'cxm-header')
   const heading = create(document, 'div', 'cxm-heading')
-  const close = create(document, 'button', 'cxm-close', '×')
+  const close = create(document, 'button', 'cxm-close')
   close.type = 'button'
   close.setAttribute('aria-label', '关闭 CordisX 管理器')
+  close.append(createManagerIcon(document, 'close', 'cxm-close-icon'))
   header.append(heading, close)
   const content = create(document, 'div', 'cxm-content')
   main.append(header, content)
@@ -920,7 +942,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const setHeading = (
     title: string,
     copy: string,
-    options: { readonly icon?: string; readonly brand?: boolean; readonly root?: string; readonly onBack?: () => void } = {},
+    options: { readonly icon?: ManagerIconToken; readonly brand?: boolean; readonly root?: string; readonly onBack?: () => void } = {},
   ): void => {
     heading.replaceChildren()
     const row = create(document, 'div', 'cxm-heading-row')
@@ -928,13 +950,13 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const back = create(document, 'button', 'cxm-heading-leading cxm-back')
       back.type = 'button'
       back.setAttribute('aria-label', '返回')
-      back.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m15 18-6-6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      back.append(createManagerIcon(document, 'back', 'cxm-back-icon'))
       back.addEventListener('click', options.onBack)
       row.append(back)
     } else {
       const icon = options.brand === true
         ? createDarkBackgroundBrandMark(document)
-        : create(document, 'span', undefined, options.icon ?? '◈')
+        : createManagerIcon(document, options.icon ?? 'plugins')
       icon.classList.add('cxm-heading-leading', 'cxm-heading-icon')
       icon.setAttribute('aria-hidden', 'true')
       row.append(icon)
@@ -980,8 +1002,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         create(document, 'span', 'cxm-about-action-title', action.label),
         create(document, 'span', 'cxm-about-action-copy', action.description),
       )
-      const arrow = create(document, 'span', 'cxm-about-action-arrow', '↗')
-      arrow.setAttribute('aria-hidden', 'true')
+      const arrow = createManagerIcon(document, 'external-link', 'cxm-about-action-arrow')
       link.append(body, arrow)
       item.append(link)
       actions.append(item)
@@ -990,7 +1011,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderSlots = (snapshot: ManagerSnapshot): void => {
-    setHeading('贡献与路由', '按 owning plugin 对账结构化 surfaces、commands、pages、routes 与 host outlets', { icon: '⊞' })
+    setHeading('贡献与路由', '按 owning plugin 对账结构化 surfaces、commands、pages、routes 与 host outlets', { icon: 'contributions' })
     const slots = create(document, 'div', 'cxm-slots')
     for (const slot of CORDISX_SURFACE_NAMES) {
       const registrations = snapshot.registrations.filter(item => item.surface === slot && item.visible)
@@ -1007,11 +1028,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       } else {
         for (const registration of registrations) {
           const row = create(document, 'span', 'cxm-contribution')
-          row.append(
-            create(document, 'span', 'cxm-dot', registration.rendered ? '●' : '○'),
-            create(document, 'strong', undefined, registration.owner),
-            create(document, 'span', undefined, registration.id),
-          )
+          const dot = markDecorative(create(document, 'span', 'cxm-dot'))
+          dot.dataset.rendered = String(registration.rendered)
+          row.append(dot, create(document, 'strong', undefined, registration.owner), create(document, 'span', undefined, registration.id))
           rows.append(row)
         }
       }
@@ -1053,7 +1072,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderPluginList = (snapshot: ManagerSnapshot): void => {
-    setHeading('插件', '搜索当前 bundle 中的插件；选择一项进入二级详情', { icon: '◫' })
+    setHeading('插件', '搜索当前 bundle 中的插件；选择一项进入二级详情', { icon: 'plugins' })
     const toolbar = create(document, 'div', 'cxm-toolbar')
     const search = create(document, 'input', 'cxm-search')
     search.type = 'search'
@@ -1077,15 +1096,16 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const row = create(document, 'button', 'cxm-plugin-row')
       row.type = 'button'
       row.dataset.pluginId = plugin.id
-      row.append(create(document, 'span', 'cxm-plugin-icon', initials(plugin.name)))
+      row.append(createPluginIcon(document, plugin.name))
       const body = create(document, 'span', 'cxm-plugin-body')
       body.append(create(document, 'span', 'cxm-plugin-name', plugin.name))
       const meta = create(document, 'span', 'cxm-plugin-meta')
       const dot = create(document, 'span', 'cxm-status-dot')
+      markDecorative(dot)
       dot.dataset.status = plugin.status
       meta.append(dot, create(document, 'span', undefined, statusLabel(plugin.status)), create(document, 'span', undefined, plugin.id))
       body.append(meta)
-      row.append(body, create(document, 'span', 'cxm-chevron', '›'))
+      row.append(body, createManagerIcon(document, 'view-detail', 'cxm-chevron'))
       row.addEventListener('click', () => {
         secondaryView = { kind: 'plugin', id: plugin.id }
         permissionDetail = undefined
@@ -1209,9 +1229,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
     content.append(createLocalTabs(document, [
       { id: 'readme', label: 'README', icon: 'document' },
-      { id: 'config', label: '配置管理', icon: 'settings' },
-      { id: 'permissions', label: '权限', icon: 'shield' },
-      { id: 'runtime', label: '运行状态', icon: 'activity' },
+      { id: 'config', label: '配置管理', icon: 'configuration' },
+      { id: 'permissions', label: '权限', icon: 'permissions' },
+      { id: 'runtime', label: '运行状态', icon: 'runtime' },
       { id: 'slots', label: '扩展点位', icon: 'outlets' },
     ], pluginDetailTab, 'data-plugin-detail-tab', (tab) => {
       pluginDetailTab = tab as PluginDetailTab
@@ -1263,7 +1283,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         title.append(create(document, 'span', 'cxm-permission-name', presentation.name))
         if (permission.required) title.append(create(document, 'span', 'cxm-required-badge', '必需'))
         copy.append(title, create(document, 'span', 'cxm-permission-reason', permission.reasonText))
-        open.append(createCapabilityIcon(document, permission.capability), copy, create(document, 'span', 'cxm-chevron', '›'))
+        open.append(createCapabilityIcon(document, permission.capability), copy, createManagerIcon(document, 'view-detail', 'cxm-chevron'))
         open.addEventListener('click', () => {
           permissionDetail = { pluginId: plugin.id, capability: permission.capability }
           operationError = undefined
@@ -1416,7 +1436,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderMarketplaceList = (): void => {
     const snapshot = marketplace.snapshot()
-    setHeading('插件商店', '从已配置 JSON feed 浏览插件元数据；当前只读，不提供安装', { icon: '◇' })
+    setHeading('插件商店', '从已配置 JSON feed 浏览插件元数据；当前只读，不提供安装', { icon: 'marketplace' })
     const toolbar = create(document, 'div', 'cxm-toolbar')
     const search = create(document, 'input', 'cxm-search')
     search.type = 'search'
@@ -1440,6 +1460,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     for (const source of snapshot.sourceStates) {
       const chip = create(document, 'span', 'cxm-feed-chip')
       const dot = create(document, 'span', 'cxm-status-dot')
+      markDecorative(dot)
       dot.dataset.status = source.status
       const label = source.status === 'loaded'
         ? `${source.name ?? new URL(source.url).hostname} · ${source.pluginCount ?? 0}`
@@ -1459,7 +1480,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const row = create(document, 'button', 'cxm-plugin-row')
       row.type = 'button'
       row.dataset.marketplacePlugin = plugin.id
-      row.append(create(document, 'span', 'cxm-plugin-icon', initials(plugin.name)))
+      row.append(createPluginIcon(document, plugin.name))
       const body = create(document, 'span', 'cxm-plugin-body')
       body.append(
         create(document, 'span', 'cxm-plugin-name', plugin.name),
@@ -1468,7 +1489,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const meta = create(document, 'span', 'cxm-plugin-meta')
       meta.append(create(document, 'span', undefined, `v${plugin.version}`), create(document, 'span', undefined, plugin.feedName))
       body.append(meta)
-      row.append(body, create(document, 'span', 'cxm-chevron', '›'))
+      row.append(body, createManagerIcon(document, 'view-detail', 'cxm-chevron'))
       row.addEventListener('click', () => {
         secondaryView = { kind: 'marketplace', identity: plugin.identity }
         renderContent()
@@ -1504,7 +1525,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }
     const detailHead = create(document, 'div', 'cxm-detail-head')
     const identity = create(document, 'code', 'cxm-detail-id', `${plugin.source} / ${plugin.id}`)
-    const sourceLink = create(document, 'a', 'cxm-action', '查看源码 ↗')
+    const sourceLink = create(document, 'a', 'cxm-action')
+    sourceLink.append(create(document, 'span', undefined, '查看源码'), createManagerIcon(document, 'external-link', 'cxm-action-icon'))
     sourceLink.href = plugin.homepage ?? plugin.source
     sourceLink.target = '_blank'
     sourceLink.rel = 'noreferrer'
@@ -1587,6 +1609,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       body.append(create(document, 'div', 'cxm-source-url', url))
       const status = create(document, 'div', 'cxm-source-state')
       const dot = create(document, 'span', 'cxm-status-dot')
+      markDecorative(dot)
       dot.dataset.status = state?.status ?? 'loading'
       const stateText = state?.status === 'loaded'
         ? `${state.name ?? '已验证 feed'} · ${state.pluginCount ?? 0} 个插件`
@@ -1652,7 +1675,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const list = create(document, 'div', 'cxm-source-list')
       for (const plugin of blocked) {
         const row = create(document, 'div', 'cxm-source-row')
-        row.append(create(document, 'span', 'cxm-plugin-icon', initials(plugin.name)))
+        row.append(createPluginIcon(document, plugin.name))
         const body = create(document, 'div', 'cxm-source-body')
         body.append(create(document, 'div', 'cxm-source-url', plugin.name), create(document, 'div', 'cxm-source-state', statusLabel(plugin.status)))
         const restore = create(document, 'button', 'cxm-mini-action', '恢复')
@@ -1690,10 +1713,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderSettings = (): void => {
-    setHeading('配置', '管理 CordisX 设置与当前 profile 状态', { icon: '⚙' })
+    setHeading('配置', '管理 CordisX 设置与当前 profile 状态', { icon: 'settings' })
     content.append(createLocalTabs(document, [
       { id: 'marketplace', label: '插件商店', icon: 'marketplace' },
-      { id: 'runtime', label: '运行状态', icon: 'activity' },
+      { id: 'runtime', label: '运行状态', icon: 'runtime' },
       { id: 'launcher', label: '启动器', icon: 'launcher' },
     ], settingsTab, 'data-settings-tab', (tab) => {
       settingsTab = tab as SettingsTab

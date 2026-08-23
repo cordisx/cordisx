@@ -11,9 +11,11 @@ async function manifest(relative: string): Promise<Record<string, unknown>> {
 
 describe('npm workspace boundary', () => {
   it('keeps orchestration private and the existing CLI in its owning workspace', async () => {
-    const [root, cli] = await Promise.all([
+    const [root, cli, managerSource, iconSource] = await Promise.all([
       manifest('package.json'),
       manifest('packages/cli/package.json'),
+      readFile(path.join(repositoryRoot, 'packages/cli/src/renderer/manager.ts'), 'utf8'),
+      readFile(path.join(repositoryRoot, 'packages/cli/src/renderer/icons.ts'), 'utf8'),
     ])
 
     expect(root).toMatchObject({
@@ -26,8 +28,13 @@ describe('npm workspace boundary', () => {
       private: true,
       files: ['dist'],
       bin: { cordisx: './dist/src/cli.js' },
+      dependencies: { '@material-symbols/svg-400': '0.46.0' },
     })
     await expect(access(path.join(repositoryRoot, 'packages/cli/src/cli.ts'))).resolves.toBeUndefined()
     await expect(access(path.join(repositoryRoot, 'examples/plugins/slot-showcase/index.ts'))).resolves.toBeUndefined()
+    expect(iconSource).toContain("from '@material-symbols/svg-400/rounded/extension.svg'")
+    expect(iconSource).toContain("from '@material-symbols/svg-400/rounded/close.svg'")
+    expect(iconSource).not.toContain("from '@material-symbols/svg-400'")
+    expect(managerSource).not.toMatch(/[◫⊞◇⚙◈×›↗●○]/)
   })
 })
