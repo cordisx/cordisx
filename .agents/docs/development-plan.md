@@ -102,20 +102,22 @@ Status: architecture approved; implementation follows
 Dependency and PR order is fixed:
 
 1. land this architecture and validation plan in `cordisx`;
-2. land implementation-independent descriptors, schemas, compatibility rules,
-   and conformance vectors in `cordisx-protocol`;
-3. provide or stack the minimal localization-kernel contract required to
-   resolve `LocalizedText` and notify projection changes;
-4. land the compatible command, structured-surface, route, page, outlet,
-   adapter, manager-diagnostics, and demo implementation in `cordisx`;
-5. complete simulated-DOM tests and an isolated real `app://` renderer smoke;
+2. land `LocalizedText`/`MessageRef` plus the implementation-independent UI
+   descriptors, schemas, compatibility rules, and conformance vectors in
+   `cordisx-protocol`;
+3. land the minimal real `LocalizationKernel` runtime service in `cordisx`;
+4. land command, structured-surface, route, page, and outlet registries against
+   that real kernel service in a stacked `cordisx` runtime PR; focused unit
+   tests may inject a deterministic fake kernel;
+5. land the private adapter, manager diagnostics, demo, simulated DOM coverage,
+   and isolated real `app://` renderer smoke in the next stacked `cordisx` PR;
 6. update exact owning-repository gitlinks in `cordisxmono` only after the
    compatible commits are pushed and verified.
 
-The implementation PR may use internal commits for registries, private adapter
-outlets, manager diagnostics, and the demo, but they remain one compatibility
-unit: no public shell contribution may land without its protocol and no route
-may be exposed without a page and a declared outlet.
+The kernel, registry/runtime, and adapter/demo PRs are explicit stacked review
+boundaries but remain one compatibility unit: no public shell contribution may
+land without its protocol and kernel, and no route may be exposed without a
+page and a declared outlet.
 
 Scoped validation includes schema/conformance checks; registry identity,
 ownership, conflict, order, `when`, disabled, command loading/error, and update
@@ -123,8 +125,8 @@ tests; route matching and parameter checks; internal history/back/close;
 same-context anchor replacement with state retention; different-context abort;
 overlay geometry and portal fallback; native DOM non-replacement and layout
 non-disturbance; message-reference retention, missing-key diagnostics, and
-locale-version reprojection through an injected localization-kernel test
-double; plugin block/restore and generation disposal; plus real sidebar,
+locale-version reprojection through the real kernel integration while focused
+unit tests may inject a fake; plugin block/restore and generation disposal; plus real sidebar,
 session, panel, and native-data-flow probes. Full dictionary registration, ICU
 compilation, language preferences, resource loading, extraction, pseudo-locales,
 capability enforcement,

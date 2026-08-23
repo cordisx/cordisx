@@ -109,7 +109,8 @@ Structured UI cannot freeze already translated strings without blocking the
 i18n workstream. Version 1 therefore models every host-rendered text as a
 `LocalizedText` message reference containing an optional namespace, key,
 serializable params, and optional fallback. The contribution ledger stores the
-reference unchanged.
+reference unchanged. When `namespace` is absent, the registering owner id is
+the default namespace.
 
 The host runtime depends on a minimal injected `LocalizationKernel` contract:
 
@@ -127,10 +128,12 @@ missing-dictionary result. Framework-agnostic page props reserve a typed `t`
 seat and locale namespace; React and other adapters can supply their normal
 reactive binding later.
 
-This slice uses dependency interfaces and deterministic test doubles only. It
-does not implement dictionary registration, ICU compilation, language
-preferences, resource loading, extraction, or pseudo-locales. A reliable i18n
-kernel is a preceding or stacked dependency of the runtime PR.
+The minimal real kernel/runtime service is a preceding stacked `cordisx` PR.
+The structured runtime consumes that service in integration and may inject a
+deterministic fake only in focused unit tests. Dictionary registration APIs
+such as future `ctx.i18n.define/register`, ICU compilation, language
+preferences, resource loading, extraction, and pseudo-locales belong to the
+kernel-owning or later full-i18n workstream, not the structured runtime PR.
 
 ## Future platform compatibility constraints
 
@@ -348,22 +351,23 @@ future controls may be presented as active security.
 The compatibility unit is delivered in this order:
 
 1. this architecture and development plan in `cordisx`;
-2. protocol schemas/specification/conformance in `cordisx-protocol`;
-3. the minimal localization-kernel dependency contract or compatible stacked
-   provider;
-4. compatible runtime registries and TypeScript contracts in `cordisx`;
-5. private adapter outlets and structured host renderers;
-6. manager diagnostics and one real demo plugin;
-7. simulated and isolated real-renderer validation;
-8. exact `cordisxmono` gitlink update.
+2. `LocalizedText`/`MessageRef` and UI schemas/specification/conformance in
+   `cordisx-protocol`;
+3. the minimal real `LocalizationKernel` runtime service in a `cordisx` PR;
+4. compatible command/surface/route/page/outlet registries and TypeScript
+   contracts in a stacked `cordisx` runtime PR;
+5. private adapter outlets, structured host renderers, manager diagnostics,
+   demo, simulated tests, and isolated real-renderer validation in the next
+   stacked `cordisx` PR;
+6. exact `cordisxmono` gitlink update.
 
 Required automated coverage includes:
 
 - schema acceptance/rejection and downgrade behavior;
 - preservation of namespace/key/params in registry snapshots, render-time
   projection, locale-version reprojection without re-registration, missing-key
-  manager diagnostics, typed page-seat shape, and subscription cleanup using an
-  injected localization-kernel test double;
+  manager diagnostics, typed page-seat shape, and subscription cleanup through
+  the real kernel integration; focused unit tests may inject a fake;
 - registry ownership, unique ids, conflicts, deterministic sorting, unknown
   icons/context keys/targets, `when`, disabled state, and update-after-dispose;
 - primary command precedence over route and invalid no-activation entries;
