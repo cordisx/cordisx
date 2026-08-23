@@ -47,6 +47,25 @@ manager-owned content DOM.
 A tab panel is a semantic container, not a visual card. It must not add a
 border, background, or redundant heading merely to make the panel visible.
 
+## Primary navigation, identity, and accent
+
+The primary navigation leads with the product's principal workflow. `插件`
+is the first item, followed by other ordinary manager areas including
+`贡献与路由`, `插件商店`, and `配置`. `关于 CordisX` is the only item anchored
+to the bottom of the navigation; configuration remains in the ordinary main
+group and must not share that bottom placement.
+
+The sidebar identity block contains the `CORDISX` eyebrow, manager title, and
+version without a large logo. The small CordisX mark belongs to the host-side
+manager trigger and remains visible there; duplicating it beside the sidebar
+identity creates an unnecessary competing brand landmark.
+
+Manager-owned interaction accents use a neutral silver-grey palette for
+selected navigation, local tabs, icons, focus rings, hover backgrounds, links,
+and interactive borders. Purple is not a manager accent. Semantic status
+colors remain independent: green for success/active, yellow for warning or
+waiting, and red for failure, denial, or destructive affordances.
+
 ## Flat lists and cards
 
 Ordinary repeated records use a flat list with separators and whitespace. The
@@ -95,6 +114,12 @@ At minimum they prove:
 - configuration and launcher tabs do not repeat their selected tab label; and
 - plugin and marketplace detail bodies do not repeat the breadcrumb record
   name in manager-owned headings.
+- primary navigation begins with `插件`, keeps `配置` in the main group, and
+  anchors `关于 CordisX` at the bottom;
+- the modal sidebar contains no large CordisX mark while the host-side trigger
+  retains its small mark; and
+- manager CSS contains no purple accent tokens while preserving semantic
+  success, warning, and error colors.
 
 Run the repository's complete `check` and `build` gates after DOM changes.
 Then capture a real isolated `app://` renderer screenshot of the affected

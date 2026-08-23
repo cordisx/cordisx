@@ -24,7 +24,6 @@ import type { CommandSnapshot } from './commands.js'
 import { resolveManagerTriggerTarget } from './host-probes.js'
 import type { NavigationSnapshot } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
-import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
 import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 
 export type ManagerPluginStatus = 'active' | 'blocked' | 'permission-blocked' | 'configured-disabled' | 'failed'
@@ -83,7 +82,6 @@ type SecondaryView =
   | { readonly kind: 'marketplace'; readonly identity: string }
 
 const MANAGER_STYLE_ID = 'cordisx-manager-style'
-const CORDISX_MARK_DARK_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkDark)}`
 const CORDISX_MARK_LIGHT_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkLight)}`
 
 const MANAGER_STYLES = `
@@ -107,7 +105,7 @@ const MANAGER_STYLES = `
     opacity: 1;
   }
   [data-cordisx-manager-trigger]:focus-visible {
-    outline: 2px solid #8b5cf6;
+    outline: 2px solid #c7ccd4;
     outline-offset: 1px;
   }
   .cxm-brand-mark {
@@ -116,7 +114,6 @@ const MANAGER_STYLES = `
     height: 18px;
     flex: none;
   }
-  .cxm-brand-mark > img { display: block; width: 100%; height: 100%; object-fit: contain; }
   .cxm-brand-mark[data-color-scheme="current-color"] {
     background: currentColor;
     -webkit-mask-image: var(--cordisx-brand-mask);
@@ -165,13 +162,12 @@ const MANAGER_STYLES = `
     border-right: 1px solid rgba(255, 255, 255, .08);
     background: linear-gradient(180deg, #191c26, #141720);
   }
-  .cxm-brand { display: flex; align-items: center; gap: 10px; padding: 2px 10px 18px; }
-  .cxm-brand > .cxm-brand-mark { width: 34px; height: 34px; }
+  .cxm-brand { padding: 2px 10px 18px; }
   .cxm-brand-copy { min-width: 0; }
-  .cxm-eyebrow { color: #a78bfa; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+  .cxm-eyebrow { color: #c5cad2; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
   .cxm-brand-title { margin-top: 3px; color: #fff; font-size: 16px; font-weight: 700; }
   .cxm-version { margin-top: 4px; color: #8d96a8; font: 11px/1.3 ui-monospace, monospace; }
-  .cxm-nav { display: grid; gap: 4px; }
+  .cxm-nav { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 4px; }
   .cxm-nav-button {
     display: flex;
     align-items: center;
@@ -187,8 +183,18 @@ const MANAGER_STYLES = `
     font: inherit;
   }
   .cxm-nav-button:hover { background: rgba(255, 255, 255, .05); color: #fff; }
-  .cxm-nav-button[aria-selected="true"] { background: rgba(139, 92, 246, .16); color: #ddd6fe; }
-  .cxm-nav-icon { display: inline-grid; place-items: center; width: 20px; color: #a78bfa; font-size: 15px; }
+  .cxm-nav-button[aria-selected="true"] { background: rgba(199, 204, 212, .14); color: #eef0f3; }
+  .cxm-nav-button[data-tab="about"] { margin-top: auto; }
+  .cxm-nav-icon { display: inline-grid; place-items: center; width: 20px; color: #b8bec8; font-size: 15px; }
+  .cxm-nav-button:focus-visible,
+  .cxm-close:focus-visible,
+  .cxm-tab:focus-visible,
+  .cxm-plugin-row:focus-visible,
+  .cxm-action:focus-visible,
+  .cxm-mini-action:focus-visible {
+    outline: 2px solid #c7ccd4;
+    outline-offset: 2px;
+  }
   .cxm-main { display: flex; min-width: 0; flex-direction: column; }
   .cxm-header {
     display: flex;
@@ -209,17 +215,17 @@ const MANAGER_STYLES = `
     height: 26px;
     flex: none;
     box-sizing: border-box;
-    border: 1px solid rgba(167, 139, 250, .28);
+    border: 1px solid rgba(199, 204, 212, .28);
     border-radius: 8px;
-    background: rgba(139, 92, 246, .1);
-    color: #b9a6ff;
+    background: rgba(199, 204, 212, .1);
+    color: #d8dce3;
   }
   .cxm-back {
     padding: 0;
     cursor: pointer;
   }
-  .cxm-back:hover { border-color: rgba(167, 139, 250, .55); background: rgba(139, 92, 246, .18); color: #ddd6fe; }
-  .cxm-back:focus-visible { outline: 2px solid #8b5cf6; outline-offset: 2px; }
+  .cxm-back:hover { border-color: rgba(199, 204, 212, .55); background: rgba(199, 204, 212, .18); color: #eef0f3; }
+  .cxm-back:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
   .cxm-breadcrumb-root { color: #a9b1c0; font-weight: 500; }
   .cxm-breadcrumb-separator { padding: 0 5px; color: #656e7e; }
   .cxm-close {
@@ -254,8 +260,8 @@ const MANAGER_STYLES = `
     cursor: pointer;
     font: 11px/1.2 system-ui, sans-serif;
   }
-  .cxm-tab:hover { color: #ddd6fe; }
-  .cxm-tab[aria-selected="true"] { color: #ddd6fe; }
+  .cxm-tab:hover { color: #eef0f3; }
+  .cxm-tab[aria-selected="true"] { color: #eef0f3; }
   .cxm-tab[aria-selected="true"]::after {
     position: absolute;
     right: 8px;
@@ -263,7 +269,7 @@ const MANAGER_STYLES = `
     left: 8px;
     height: 2px;
     border-radius: 2px 2px 0 0;
-    background: #8b5cf6;
+    background: #c7ccd4;
     content: '';
   }
   .cxm-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -291,9 +297,9 @@ const MANAGER_STYLES = `
   .cxm-notice {
     margin-top: 14px;
     padding: 12px 14px;
-    border: 1px solid rgba(167, 139, 250, .2);
+    border: 1px solid rgba(199, 204, 212, .2);
     border-radius: 11px;
-    background: rgba(139, 92, 246, .07);
+    background: rgba(199, 204, 212, .07);
     color: #b8bfd0;
     font-size: 11px;
   }
@@ -301,7 +307,7 @@ const MANAGER_STYLES = `
   .cxm-slots { display: grid; gap: 10px; }
   .cxm-slot-card { padding: 13px 14px; }
   .cxm-slot-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .cxm-slot-name { color: #ddd6fe; font: 12px/1.3 ui-monospace, monospace; }
+  .cxm-slot-name { color: #d8dce3; font: 12px/1.3 ui-monospace, monospace; }
   .cxm-count { color: #86efac; font-size: 10px; font-weight: 700; }
   .cxm-contributions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
   .cxm-contribution {
@@ -328,7 +334,8 @@ const MANAGER_STYLES = `
     color: #fff;
     font: inherit;
   }
-  .cxm-search:focus, .cxm-source-input:focus { border-color: rgba(167, 139, 250, .65); }
+  .cxm-search:focus, .cxm-source-input:focus { border-color: rgba(199, 204, 212, .65); }
+  .cxm-search:focus-visible, .cxm-source-input:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
   .cxm-result-count { flex: none; color: #737e90; font-size: 10px; }
   .cxm-plugin-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
   .cxm-plugin-row {
@@ -345,17 +352,17 @@ const MANAGER_STYLES = `
     cursor: pointer;
     text-align: left;
   }
-  .cxm-plugin-row:hover { border-color: rgba(167, 139, 250, .3); background: rgba(139, 92, 246, .07); }
+  .cxm-plugin-row:hover { border-color: rgba(199, 204, 212, .3); background: rgba(199, 204, 212, .07); }
   .cxm-plugin-icon {
     display: grid;
     place-items: center;
     width: 36px;
     height: 36px;
     flex: none;
-    border: 1px solid rgba(167, 139, 250, .24);
+    border: 1px solid rgba(199, 204, 212, .24);
     border-radius: 10px;
-    background: rgba(139, 92, 246, .1);
-    color: #c4b5fd;
+    background: rgba(199, 204, 212, .1);
+    color: #d8dce3;
     font-size: 10px;
     font-weight: 800;
   }
@@ -388,7 +395,7 @@ const MANAGER_STYLES = `
     text-decoration: none;
     font: 11px/1.2 system-ui, sans-serif;
   }
-  .cxm-action:hover:not(:disabled) { border-color: rgba(167, 139, 250, .5); background: rgba(139, 92, 246, .12); }
+  .cxm-action:hover:not(:disabled) { border-color: rgba(199, 204, 212, .5); background: rgba(199, 204, 212, .12); }
   .cxm-action:disabled { cursor: default; opacity: .45; }
   .cxm-action[data-tone="danger"] { color: #fecdd3; }
   .cxm-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
@@ -404,9 +411,9 @@ const MANAGER_STYLES = `
   .cxm-readme p { margin: 0 0 12px; }
   .cxm-readme ul { margin: 0 0 14px; padding-left: 21px; }
   .cxm-readme li { margin: 4px 0; }
-  .cxm-readme a { color: #b9a6ff; text-decoration: none; }
+  .cxm-readme a { color: #d8dce3; text-decoration: none; }
   .cxm-readme a:hover { text-decoration: underline; }
-  .cxm-readme code { padding: 1px 4px; border-radius: 4px; background: rgba(255, 255, 255, .065); color: #ddd6fe; font: 10px/1.5 ui-monospace, monospace; }
+  .cxm-readme code { padding: 1px 4px; border-radius: 4px; background: rgba(255, 255, 255, .065); color: #d8dce3; font: 10px/1.5 ui-monospace, monospace; }
   .cxm-readme pre { margin: 12px 0 16px; overflow: auto; padding: 12px 14px; border: 1px solid rgba(255, 255, 255, .08); border-radius: 10px; background: #0d1017; }
   .cxm-readme pre code { padding: 0; background: transparent; color: #c5ccda; white-space: pre; }
   .cxm-error { margin-top: 12px; color: #fda4af; font-size: 11px; }
@@ -415,13 +422,13 @@ const MANAGER_STYLES = `
   .cxm-source-form { display: flex; gap: 8px; margin-top: 16px; }
   .cxm-source-list { display: grid; gap: 8px; margin-top: 14px; }
   .cxm-source-row { display: flex; align-items: center; gap: 10px; padding: 11px; }
-  .cxm-source-index { display: grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: 7px; background: rgba(139, 92, 246, .11); color: #b9a6ff; font-size: 10px; font-weight: 700; }
+  .cxm-source-index { display: grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: 7px; background: rgba(199, 204, 212, .11); color: #d8dce3; font-size: 10px; font-weight: 700; }
   .cxm-source-body { min-width: 0; flex: 1; }
   .cxm-source-url { overflow: hidden; color: #c6ccd8; font: 10px/1.35 ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
   .cxm-source-state { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: #737e90; font-size: 10px; }
   .cxm-source-actions { display: flex; flex: none; gap: 5px; }
   .cxm-mini-action { padding: 5px 7px; border: 1px solid rgba(255, 255, 255, .09); border-radius: 7px; background: transparent; color: #99a2b2; cursor: pointer; font: 10px/1.2 system-ui, sans-serif; }
-  .cxm-mini-action:hover:not(:disabled) { color: #fff; border-color: rgba(167, 139, 250, .4); }
+  .cxm-mini-action:hover:not(:disabled) { color: #fff; border-color: rgba(199, 204, 212, .4); }
   .cxm-mini-action:disabled { cursor: default; opacity: .35; }
   @media (max-width: 760px) {
     .cxm-dialog { grid-template-columns: 165px minmax(0, 1fr); }
@@ -448,18 +455,6 @@ function createAdaptiveBrandMark(document: Document): HTMLSpanElement {
   mark.setAttribute('aria-hidden', 'true')
   mark.style.setProperty('--cordisx-brand-mask', `url("${CORDISX_MARK_LIGHT_URI}")`)
   return mark
-}
-
-function createDarkBrandMark(document: Document): HTMLPictureElement {
-  const picture = create(document, 'picture', 'cxm-brand-mark')
-  picture.dataset.cordisxBrandMark = 'true'
-  picture.setAttribute('aria-hidden', 'true')
-  const fallback = create(document, 'img')
-  fallback.alt = ''
-  picture.dataset.colorScheme = 'dark'
-  fallback.src = CORDISX_MARK_DARK_URI
-  picture.append(fallback)
-  return picture
 }
 
 function createLocalTabs(
@@ -653,21 +648,20 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     create(document, 'div', 'cxm-brand-title', '插件管理器'),
     create(document, 'div', 'cxm-version', `v${model.snapshot().version}`),
   )
-  brand.append(
-    createDarkBrandMark(document),
-    brandCopy,
-  )
+  brand.append(brandCopy)
   sidebar.append(brand)
 
   const nav = create(document, 'nav', 'cxm-nav')
+  nav.setAttribute('role', 'tablist')
+  nav.setAttribute('aria-label', 'CordisX 管理器页面')
   const tabs: readonly { id: ManagerTab; icon: string; label: string }[] = [
-    { id: 'about', icon: '◈', label: '关于 CordisX' },
-    { id: 'slots', icon: '⊞', label: '贡献与路由' },
     { id: 'plugins', icon: '◫', label: '插件' },
+    { id: 'slots', icon: '⊞', label: '贡献与路由' },
     { id: 'marketplace', icon: '◇', label: '插件商店' },
     { id: 'settings', icon: '⚙', label: '配置' },
+    { id: 'about', icon: '◈', label: '关于 CordisX' },
   ]
-  let activeTab: ManagerTab = 'about'
+  let activeTab: ManagerTab = 'plugins'
   const navButtons = new Map<ManagerTab, HTMLButtonElement>()
   for (const tab of tabs) {
     const button = create(document, 'button', 'cxm-nav-button')
