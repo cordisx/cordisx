@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   isPublicMarketplaceAddress,
   normalizeMarketplaceRequestUrl,
-} from '../src/launcher/marketplace.js'
+} from '../packages/cli/src/launcher/marketplace.js'
 
 describe('launcher marketplace network boundary', () => {
   it('accepts public HTTPS feed URLs without credentials or fragments', () => {

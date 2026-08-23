@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/brand/cordisx-mark-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="./assets/brand/cordisx-mark-light.svg">
-    <img alt="CordisX three-ring spherical mark" src="./assets/brand/cordisx-mark-light.svg" width="180">
+    <source media="(prefers-color-scheme: dark)" srcset="./packages/cli/assets/brand/cordisx-mark-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./packages/cli/assets/brand/cordisx-mark-light.svg">
+    <img alt="CordisX three-ring spherical mark" src="./packages/cli/assets/brand/cordisx-mark-light.svg" width="180">
   </picture>
 </p>
 

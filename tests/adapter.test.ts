@@ -1,6 +1,6 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
-import { DomOutletController } from '../src/renderer/adapter.js'
+import { DomOutletController } from '../packages/cli/src/renderer/adapter.js'
 
 async function settle(): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, 0))

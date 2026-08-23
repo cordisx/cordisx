@@ -2,8 +2,8 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
-import { buildRendererBundle } from '../src/launcher/bundle.js'
-import { loadConfig } from '../src/launcher/config.js'
+import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
+import { loadConfig } from '../packages/cli/src/launcher/config.js'
 
 describe('Platform runtime activation', () => {
   it('blocks a required denied capability and mounts fresh after policy recovery', async () => {

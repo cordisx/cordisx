@@ -1,0 +1,44 @@
+{
+  "name": "cordisx",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An experimental Cordis-powered UI plugin host for the Codex desktop app",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "cordisx": "./dist/src/cli.js"
+  },
+  "exports": {
+    "./contracts": {
+      "types": "./dist/src/contracts.d.ts",
+      "default": "./dist/src/contracts.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "check": "npm run typecheck",
+    "dev": "tsx src/cli.ts",
+    "prepack": "npm run build",
+    "smoke": "node scripts/live-smoke.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "esbuild": "^0.25.9",
+    "intl-messageformat": "11.2.14",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.1",
+    "@types/ws": "^8.18.1",
+    "jsdom": "^26.1.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

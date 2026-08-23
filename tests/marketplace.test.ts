@@ -8,7 +8,7 @@ import {
   parseMarketplaceFeed,
   type MarketplaceFetcher,
   type MarketplaceStorage,
-} from '../src/renderer/marketplace.js'
+} from '../packages/cli/src/renderer/marketplace.js'
 
 const PLUGIN_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v1.schema.json'
 const FEED_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json'

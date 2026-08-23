@@ -6,7 +6,7 @@
   "plugins": [
     {
       "id": "slot-showcase",
-      "entry": "./plugins/slot-showcase/index.ts",
+      "entry": "./examples/plugins/slot-showcase/index.ts",
       "enabled": true,
       "config": {}
     }

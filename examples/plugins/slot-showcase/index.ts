@@ -6,8 +6,8 @@ import {
   type CordisXLocalizedText,
   type CordisXMessageParams,
   type CordisXPageMountContext,
-} from '../../src/contracts.js'
-import type {} from '../../src/contracts.js'
+} from '../../../packages/cli/src/contracts.js'
+import type {} from '../../../packages/cli/src/contracts.js'
 
 export const name = 'structured-showcase'
 export const inject = ['i18n', 'commands', 'slots', 'pages', 'routes']

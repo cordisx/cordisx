@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CommandRegistry } from '../src/renderer/commands.js'
+import { CommandRegistry } from '../packages/cli/src/renderer/commands.js'
 
 describe('CommandRegistry', () => {
   it('qualifies ownership, enforces public references, tracks loading, and freezes arguments', async () => {

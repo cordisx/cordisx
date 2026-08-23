@@ -43,10 +43,18 @@ export async function buildRendererBundle(config: CordisXConfig): Promise<string
     Promise.all(config.plugins.map(async plugin => await readPluginReadme(plugin.entry))),
   ])
 
-  const runtimePath = path.resolve(config.rootDir, 'src/renderer/runtime.ts')
-  const projectRuntime = await access(runtimePath).then(() => runtimePath).catch(() => {
-    return new URL('../renderer/runtime.js', import.meta.url).pathname
-  })
+  const runtimeCandidates = [
+    path.resolve(config.rootDir, 'packages/cli/src/renderer/runtime.ts'),
+    path.resolve(config.rootDir, 'src/renderer/runtime.ts'),
+    fileURLToPath(new URL('../renderer/runtime.ts', import.meta.url)),
+    fileURLToPath(new URL('../renderer/runtime.js', import.meta.url)),
+  ]
+  let projectRuntime: string | undefined
+  for (const candidate of runtimeCandidates) {
+    projectRuntime = await access(candidate).then(() => candidate).catch(() => undefined)
+    if (projectRuntime !== undefined) break
+  }
+  if (projectRuntime === undefined) throw new Error('CordisX renderer runtime could not be resolved')
   const imports = [
     `import { installCordisX } from ${JSON.stringify(importSpecifier(config.rootDir, projectRuntime))}`,
     ...enabled.map((plugin, index) => `import * as plugin${index} from ${JSON.stringify(importSpecifier(config.rootDir, plugin.entry))}`),
