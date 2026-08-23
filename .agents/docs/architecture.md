@@ -45,7 +45,14 @@ The Node launcher owns configuration, plugin entry resolution, browser bundling,
 
 The launcher binds CDP to `127.0.0.1`, records every `Page.addScriptToEvaluateOnNewDocument` identifier, and removes those identifiers on shutdown before asking the live page to dispose CordisX.
 
-For UI development, the default command launches a second, directly tracked native process with a stable project-scoped Chromium `user-data-dir` and an ephemeral loopback CDP port. `HOME` and `CODEX_HOME` stay shared so authentication, conversations, projects, and model configuration remain available; the App main process, app-server stdio channel, renderer processes, UI storage, and window restoration remain separate. Direct spawning is equivalent to macOS `open -n` for instance isolation while retaining the child PID needed for deterministic cleanup. `--system` is the explicit escape hatch to the original profile.
+For UI development, the default command launches a second, directly tracked native process with a stable project-scoped Chromium `user-data-dir` and an ephemeral loopback CDP port. `HOME` and `CODEX_HOME` stay shared, so persisted authentication, conversation, project, and model-configuration data may be visible to both processes. That does not share request association, in-flight turns, subscriptions, approvals, current UI context, or live connection state. The App main process, app-server stdio channel, renderer processes, UI storage, and window restoration remain separate and can race as independent clients. Direct spawning is equivalent to macOS `open -n` for instance isolation while retaining the child PID needed for deterministic cleanup. `--system` is the explicit escape hatch to the original profile.
+
+The second process is a UI development host, not a transparent platform bridge.
+CordisX must not start another app-server to impersonate or replace the original
+connection, and must not create a second AppHost that overwrites WebContents
+registration. Reuse of a controlled existing connection remains experimental.
+Until an official bridge or a safely controlled existing-connection adapter
+exists, plugin-visible platform data is limited to read-only renderer snapshots.
 
 Online Chrome DevTools support is opt-in. `--online-devtools` adds `https://chrome-devtools-frontend.appspot.com` to `--remote-allow-origins`; once connected, that origin has full renderer debugging authority for the isolated instance.
 

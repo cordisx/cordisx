@@ -120,8 +120,10 @@ ownership, conflict, order, `when`, disabled, command loading/error, and update
 tests; route matching and parameter checks; internal history/back/close;
 same-context anchor replacement with state retention; different-context abort;
 overlay geometry and portal fallback; native DOM non-replacement and layout
-non-disturbance; plugin block/restore and generation disposal; plus real
-sidebar, session, panel, and native-data-flow probes. Capability enforcement,
+non-disturbance; locale namespace/fallback/change propagation and reactive page
+bindings; read-only platform/environment snapshots; plugin block/restore and
+generation disposal; plus real sidebar, session, panel, locale, and
+native-data-flow probes. Capability enforcement,
 signing, installation, marketplace activation, and untrusted-code isolation
 remain explicitly out of scope.
 
