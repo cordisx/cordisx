@@ -99,10 +99,12 @@ rows into the opened Codex Help or account menu and never adds an independent
 fallback menu trigger. Compact shell actions are icon-only and inherit the
 interaction pattern of adjacent native Codex controls.
 
-Route and page outlets remain independent overlays. `app` and `main` preserve
-the resolved native Electron title-bar safe area, and CordisX interactive
-chrome is explicitly `no-drag`. This keeps native window dragging and ordinary
-page controls from competing for the same macOS hit-test region.
+Route and page outlets remain independent overlays. `app` paints through the
+native title-bar and supplies its own draggable chrome with a macOS
+traffic-light safe inset; `main` preserves the native title-bar vertically.
+Interactive controls are always explicit `no-drag` regions. This keeps native
+window dragging and ordinary page controls from competing for the same hit-test
+region.
 
 The host may improve selectors without requiring plugin changes. Plugins that query Codex DOM directly opt out of that compatibility boundary.
 

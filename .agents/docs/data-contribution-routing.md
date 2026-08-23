@@ -359,14 +359,18 @@ insertion seats defined above.
   portal and tracks the resolved rectangle with `ResizeObserver`, scroll/resize
   signals, and bounded geometry updates.
 
-The Codex adapter preserves the native Electron title-bar safe area for `app`
-and `main` outlets. It derives the inset from the currently resolved native
-application-menu/title-bar rectangle instead of publishing or assuming a
-cross-host constant. The overlay starts below that rectangle, so native window
-dragging remains available. CordisX page chrome and all of its controls are
-explicit `no-drag` regions as defense in depth. `session.content` continues to
-derive its top boundary from the native session-content anchor below the
-session header.
+The `app` outlet paints from the window origin and therefore covers the native
+title-bar background. Its host-owned page chrome becomes the drag region while
+back, close, tabs, and every other interactive descendant remain explicit
+`no-drag` regions. On macOS, the chrome derives a horizontal traffic-light safe
+inset from the resolved native title-bar controls, so page controls never sit
+under the red/yellow/green window buttons.
+
+The `main` outlet instead preserves the native Electron title-bar vertically.
+It derives a top inset from the currently resolved native application-menu
+rectangle rather than publishing or assuming a cross-host constant.
+`session.content` continues to derive its top boundary from the native
+session-content anchor below the session header.
 
 The adapter must not call `replaceWith`, `remove`, `append` on a native child for
 reparenting, set `display:none` on native content, clear native children, or
