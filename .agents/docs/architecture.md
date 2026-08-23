@@ -64,35 +64,26 @@ Online Chrome DevTools support is opt-in. `--online-devtools` adds `https://chro
 
 The injected bundle creates a new Cordis `Context`, mounts `SlotService` at `ctx.slots`, then mounts each configured plugin as a child fiber. A second injection first disposes the previous host. Plugin startup is fail-loud; already-started fibers unwind in reverse order if a later plugin fails.
 
-The public plugin surface follows DeepSeek Harness: plugins declare `inject = ['slots']`, wait on a host declaration with `ctx.slots.inject(name, setup)`, and contribute with `ctx.slots.register({ name, id, order, priority }, component)`. Both methods install Cordis effects through the service proxy, so the caller's plugin fiber owns the registration. Unloading a plugin therefore removes its listeners, DOM, timers wrapped by the plugin, and slot registration on the same lifecycle axis. There is no parallel `ctx.cordisx.contribute()` facade.
+The public plugin surface follows DeepSeek Harness: plugins declare injected
+services and use `ctx.slots.inject/register` for structured shell data. Both
+methods install Cordis effects through the service proxy, so the caller's fiber
+owns every registration and update handle. There is no parallel
+`ctx.cordisx.contribute()` facade.
 
 ### Slot plane
 
-> Migration note: the version-0.1 free-DOM slot implementation below records
-> the current feasibility baseline. The approved next contract is documented in
-> [`data-contribution-routing.md`](data-contribution-routing.md). It replaces
-> direct plugin DOM mounts in all five native-shell slots with structured,
-> host-rendered contributions. Complex plugin DOM is restricted to declared
-> CordisX page outlets. The migration is intentionally one-way during the
-> experimental stage; the same shell semantic is not exposed through both old
-> and new facades.
+The five feasibility-era direct-DOM slots were removed together. Registrations
+now contain only validated actions, navigation items, menu entries, sections,
+rows, and update handles. The host owns DOM, styles, keyboard/a11y behavior,
+loading/error projection, ordering, overflow, and cleanup.
 
-Plugins target semantic slot names. The host adapter declares the five root-scoped list slots for the renderer lifetime and alone translates each name into a current Codex DOM anchor and placement. `slots.inject()` therefore activates immediately in version 0.1 while retaining DSH's declaration-dependency syntax. A `MutationObserver` reconciles outlets after React replaces an anchor. When an outlet moves, the old component disposer runs before the contribution is mounted under the new anchor.
-
-CordisX deliberately implements the DSH slot registration subset needed by an external DOM host: `name`, list-entry `id`, `order`, same-cell `priority` shadowing with lowest-live takeover, declaration injection, caller-fiber disposal, and mount remapping. DSH renders React components inside an owned React slot tree; CordisX cannot join Codex's private React tree, so its second `register()` argument is a DOM mount component receiving `{ container, document, signal, slot }`. Keyed, chain, child-declared, store, locale, and injected business-face seats remain deferred until a real CordisX use case requires them.
-
-The first slot contract is deliberately small:
-
-| Slot | Cardinality | Intended use |
-|---|---:|---|
-| `header.actions` | list | compact global actions |
-| `composer.before` | list | session input helpers before the composer |
-| `composer.after` | list | status or actions after the composer |
-| `sidebar.footer` | list | persistent navigation-adjacent controls |
-| `shell.overlay` | list | dialogs, toasts, inspectors, and floating panels |
-
-These five direct-DOM semantics are experimental and scheduled for removal by
-the structured-contribution slice. They are not a compatibility promise.
+Complex UI registers a page and route, then mounts only inside a declared
+CordisX outlet. `app`, `main`, and `session.content` are initial host adapter
+declarations, not a closed union. React anchor disconnection is only a
+reconciliation signal: the same `contextKey` migrates the same outlet and page
+state, while a changed key aborts/disposes the page. Native React nodes remain
+in place, visible, and subscribed. The complete contract and test matrix live
+in [`data-contribution-routing.md`](data-contribution-routing.md).
 
 The host may improve selectors without requiring plugin changes. Plugins that query Codex DOM directly opt out of that compatibility boundary.
 
@@ -110,8 +101,9 @@ snapshot joins three internal sources:
 - build metadata supplies the CordisX package version;
 - the runtime tracks each bundled plugin module, Cordis fiber, configuration,
   and active or blocked state;
-- the slot registry attributes registrations to the calling plugin fiber and
-  reports their semantic slot, entry id, priority, order, and mounted state.
+- the structured registries attribute commands, surfaces, routes, pages, and
+  outlets to the calling plugin fiber and report validation, context, and mount
+  state.
 
 Blocking a plugin disposes only that plugin's Cordis fiber, which reverses its
 slot registrations and effects. Restoring it creates a fresh fiber from the

@@ -1,7 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
-import type { CordisXLocalizationSeat, CordisXLocalizationSnapshot } from '../src/contracts.js'
+import type { CordisXLocaleCatalog, CordisXLocalizationSeat, CordisXLocalizationSnapshot } from '../src/contracts.js'
 import {
   canonicalLocale,
   CordisXI18nService,
@@ -9,7 +9,7 @@ import {
   LocalizationRegistry,
   type CordisXLocaleSource,
 } from '../src/renderer/i18n.js'
-import { CORDISX_PLUGIN_ID } from '../src/renderer/service.js'
+import { CORDISX_PLUGIN_ID } from '../src/renderer/ownership.js'
 
 class MutableLocaleSource implements CordisXLocaleSource {
   private readonly listeners = new Set<() => void>()
@@ -35,20 +35,48 @@ class MutableLocaleSource implements CordisXLocaleSource {
 }
 
 describe('LocalizationRegistry', () => {
+  it('keeps snapshot identity stable until the projection version changes', () => {
+    const source = new MutableLocaleSource()
+    const registry = new LocalizationRegistry(source)
+    const initial = registry.getSnapshot()
+    expect(registry.getSnapshot()).toBe(initial)
+    expect(Object.isFrozen(initial)).toBe(true)
+
+    const remove = registry.define('demo', {
+      namespace: 'demo',
+      locale: 'en',
+      messages: { label: 'Label' },
+    })
+    const afterDefine = registry.getSnapshot()
+    expect(afterDefine).not.toBe(initial)
+    expect(registry.getSnapshot()).toBe(afterDefine)
+
+    source.set('zh-CN')
+    expect(registry.getSnapshot()).not.toBe(afterDefine)
+    remove()
+    registry.dispose()
+  })
+
   it('uses exact, language, and declared-default locale fallback with ICU params', () => {
+    interface DemoMessages {
+      greeting: { readonly name: string }
+      'default.only': undefined
+    }
     const source = new MutableLocaleSource('zh-CN')
     const registry = new LocalizationRegistry(source)
-    registry.define('demo', {
+    const defaultCatalog: CordisXLocaleCatalog<DemoMessages> = {
       namespace: 'demo',
       locale: 'en',
       default: true,
       messages: { greeting: 'Hello, {name}!', 'default.only': 'Default' },
-    })
-    registry.define('demo', {
+    }
+    const partialCatalog: CordisXLocaleCatalog<DemoMessages> = {
       namespace: 'demo',
       locale: 'zh-CN',
       messages: { greeting: '你好，{name}！' },
-    })
+    }
+    registry.define('demo', defaultCatalog)
+    registry.define('demo', partialCatalog)
 
     expect(registry.resolve('demo', { key: 'greeting', params: { name: 'CordisX' } })).toMatchObject({
       text: '你好，CordisX！',
@@ -126,6 +154,82 @@ describe('LocalizationRegistry', () => {
     registry.dispose()
   })
 
+  it('tracks distinct missing-message projections without notification oscillation', async () => {
+    const registry = new LocalizationRegistry(new MutableLocaleSource())
+    let notifications = 0
+    registry.subscribeDiagnostics(() => { notifications += 1 })
+
+    registry.resolve('demo', { key: 'missing', params: { value: 1 }, fallback: 'First' })
+    registry.resolve('demo', { key: 'missing', params: { value: 2 }, fallback: 'Second' })
+    await Promise.resolve()
+    expect(notifications).toBe(1)
+    expect(registry.diagnostics().map(item => item.text)).toEqual(['First', 'Second'])
+
+    registry.resolve('demo', { key: 'missing', params: { value: 1 }, fallback: 'First' })
+    registry.resolve('demo', { key: 'missing', params: { value: 2 }, fallback: 'Second' })
+    await Promise.resolve()
+    expect(notifications).toBe(1)
+    registry.dispose()
+  })
+
+  it('replaces and clears diagnostics by stable structured projection site', async () => {
+    const registry = new LocalizationRegistry(new MutableLocaleSource())
+    registry.resolve('demo', { key: 'first', fallback: 'First' }, 'surface:demo:label')
+    registry.resolve('demo', { key: 'second', fallback: 'Second' }, 'surface:demo:label')
+    expect(registry.diagnostics()).toEqual([expect.objectContaining({ site: 'surface:demo:label', key: 'second' })])
+    registry.clearDiagnosticSite('demo', 'surface:demo:label')
+    await Promise.resolve()
+    expect(registry.diagnostics()).toEqual([])
+    registry.dispose()
+  })
+
+  it('turns unsafe untyped params into deterministic diagnostics instead of throwing', () => {
+    const registry = new LocalizationRegistry(new MutableLocaleSource())
+    for (const params of [null, { value: 1n }, { value: Number.POSITIVE_INFINITY }]) {
+      expect(() => registry.resolve('demo', { key: 'unsafe', params } as never)).not.toThrow()
+      expect(registry.resolve('demo', { key: 'unsafe', params } as never)).toMatchObject({
+        text: '[[demo:unsafe]]',
+        diagnostic: 'invalid-message',
+      })
+    }
+    expect(registry.diagnostics()).toHaveLength(1)
+    registry.dispose()
+  })
+
+  it('treats ICU-like tags as plain host-rendered text', () => {
+    const registry = new LocalizationRegistry(new MutableLocaleSource())
+    registry.define('demo', {
+      namespace: 'demo',
+      locale: 'en',
+      messages: { label: 'Use <code>{name}</code>' },
+    })
+    expect(registry.resolve('demo', { key: 'label', params: { name: 'CordisX' } }).text).toBe('Use <code>CordisX</code>')
+    registry.dispose()
+  })
+
+  it('isolates throwing subscribers and preserves dictionary ownership', () => {
+    const source = new MutableLocaleSource()
+    const registry = new LocalizationRegistry(source)
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let healthyRuns = 0
+    registry.subscribe(() => { throw new Error('projection failed') })
+    registry.subscribe(() => { healthyRuns += 1 })
+
+    const remove = registry.define('demo', {
+      namespace: 'demo',
+      locale: 'en',
+      messages: { label: 'Label' },
+    })
+    expect(healthyRuns).toBe(1)
+    expect(registry.resolve('demo', { key: 'label' }).text).toBe('Label')
+    expect(error).toHaveBeenCalledTimes(1)
+
+    remove()
+    expect(registry.catalogs()).toEqual([])
+    registry.dispose()
+    error.mockRestore()
+  })
+
   it('requires canonical locale serialization and owned namespaces', () => {
     expect(canonicalLocale('EN-us')).toBe('en-US')
     const registry = new LocalizationRegistry(new MutableLocaleSource())
@@ -138,8 +242,9 @@ describe('LocalizationRegistry', () => {
       namespace: 'other:foreign',
       locale: 'en',
       messages: { label: 'Label' },
-    })).toThrow(/foreign locale namespace/)
+    })).toThrow(/invalid locale namespace/)
     registry.dispose()
+    expect(() => registry.resolve('demo', { key: 'late' })).toThrow(/disposed/)
   })
 })
 
@@ -147,6 +252,9 @@ describe('DocumentLocaleAdapter', () => {
   it('observes upstream html lang and dir without writing either attribute', async () => {
     const dom = new JSDOM('<html lang="en" dir="ltr"><body></body></html>')
     const adapter = new DocumentLocaleAdapter(dom.window.document)
+    const initial = adapter.getSnapshot()
+    expect(adapter.getSnapshot()).toBe(initial)
+    expect(Object.isFrozen(initial)).toBe(true)
     let changes = 0
     adapter.subscribe(() => { changes += 1 })
 
@@ -155,6 +263,7 @@ describe('DocumentLocaleAdapter', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(adapter.getSnapshot()).toEqual({ locale: 'zh-CN', direction: 'rtl', version: 1 })
+    expect(adapter.getSnapshot()).not.toBe(initial)
     expect(dom.window.document.documentElement.lang).toBe('zh-cn')
     expect(dom.window.document.documentElement.dir).toBe('rtl')
     expect(changes).toBe(1)
@@ -177,6 +286,7 @@ describe('CordisXI18nService', () => {
     let seat: CordisXLocalizationSeat<DemoMessages> | undefined
     let effectRuns = 0
     let effectCleanups = 0
+    let attributeTarget: HTMLElement | undefined
 
     try {
       await serviceFiber
@@ -197,10 +307,13 @@ describe('CordisXI18nService', () => {
           })
           pluginCtx.i18n.inject<DemoMessages>('demo', (injected) => {
             seat = injected
+            attributeTarget = dom.window.document.getElementById('text')!
+            attributeTarget.setAttribute('title', 'Native title')
             injected.bindText(
-              dom.window.document.getElementById('text')!,
+              attributeTarget,
               injected.message('greeting', { name: 'CordisX' }),
             )
+            injected.bindAttribute(attributeTarget, 'title', injected.message('status'))
             injected.effect(() => {
               effectRuns += 1
               return () => { effectCleanups += 1 }
@@ -213,6 +326,7 @@ describe('CordisXI18nService', () => {
 
       expect(seat?.t('status')).toBe('Ready')
       expect(dom.window.document.getElementById('text')?.textContent).toBe('Hello, CordisX!')
+      expect(attributeTarget?.getAttribute('title')).toBe('Ready')
       expect(effectRuns).toBe(1)
 
       dom.window.document.documentElement.lang = 'zh-CN'
@@ -220,11 +334,14 @@ describe('CordisXI18nService', () => {
       await new Promise(resolve => setTimeout(resolve, 0))
       expect(seat?.getSnapshot()).toMatchObject({ locale: 'zh-CN', direction: 'rtl' })
       expect(dom.window.document.getElementById('text')?.textContent).toBe('你好，CordisX！')
+      expect(attributeTarget?.getAttribute('title')).toBe('就绪')
       expect(effectRuns).toBe(2)
       expect(effectCleanups).toBe(1)
 
       await plugin.dispose()
       expect(effectCleanups).toBe(2)
+      expect(attributeTarget?.textContent).toBe('')
+      expect(attributeTarget?.getAttribute('title')).toBe('Native title')
       expect((ctx.i18n as CordisXI18nService).catalogs()).toEqual([])
     } finally {
       await serviceFiber.dispose()

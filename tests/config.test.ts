@@ -30,4 +30,26 @@ describe('loadConfig', () => {
     }))
     await expect(loadConfig(configPath)).rejects.toThrow('duplicate plugin id: demo')
   })
+
+  it('uses the same lowercase 96-character owner contract as renderer registries', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-config-'))
+    const configPath = path.join(directory, 'cordisx.config.json')
+    await writeFile(configPath, JSON.stringify({
+      version: 1,
+      plugins: [{ id: 'Demo', entry: './demo.ts' }],
+    }))
+    await expect(loadConfig(configPath)).rejects.toThrow('invalid plugin id: Demo')
+
+    await writeFile(configPath, JSON.stringify({
+      version: 1,
+      plugins: [{ id: `a${'b'.repeat(96)}`, entry: './demo.ts' }],
+    }))
+    await expect(loadConfig(configPath)).rejects.toThrow(/invalid plugin id/)
+
+    await writeFile(configPath, JSON.stringify({
+      version: 1,
+      plugins: [{ id: 'host', entry: './demo.ts' }],
+    }))
+    await expect(loadConfig(configPath)).rejects.toThrow('reserved plugin id: host')
+  })
 })

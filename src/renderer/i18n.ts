@@ -9,16 +9,17 @@ import type {
   CordisXLocalizationSeat,
   CordisXLocalizationSnapshot,
   CordisXMessageParams,
-  CordisXMessageSchema,
+  CordisXMessageDefinition,
 } from '../contracts.js'
-import { CORDISX_PLUGIN_ID } from './service.js'
-
-const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,95}$/
+import { ownerFromContext } from './ownership.js'
+import { LOCAL_ID_PATTERN, REFERENCE_PATTERN } from './validation.js'
 
 export interface CordisXLocaleSource {
   getSnapshot(): CordisXLocalizationSnapshot
   subscribe(listener: () => void): () => void
 }
+
+export type LocalizationEffectOwner = (setup: () => Disposable<void>) => Disposable<void>
 
 interface CatalogRecord {
   readonly sequence: number
@@ -39,7 +40,7 @@ export interface LocaleCatalogSnapshot {
 }
 
 function assertId(value: string, label: string): void {
-  if (!ID_PATTERN.test(value)) throw new Error(`invalid ${label}: ${value}`)
+  if (!LOCAL_ID_PATTERN.test(value)) throw new Error(`invalid ${label}: ${value}`)
 }
 
 export function canonicalLocale(value: string): string {
@@ -65,10 +66,12 @@ export class DocumentLocaleAdapter implements CordisXLocaleSource {
   private locale: string
   private direction: 'ltr' | 'rtl' | 'auto'
   private version = 0
+  private snapshot: CordisXLocalizationSnapshot
 
   constructor(private readonly document: Document) {
     this.locale = this.readLocale()
     this.direction = normalizedDirection(document.documentElement.dir)
+    this.snapshot = Object.freeze({ locale: this.locale, direction: this.direction, version: this.version })
     const Observer = document.defaultView?.MutationObserver
     if (Observer !== undefined) {
       this.observer = new Observer(() => this.refresh())
@@ -80,7 +83,7 @@ export class DocumentLocaleAdapter implements CordisXLocaleSource {
   }
 
   getSnapshot(): CordisXLocalizationSnapshot {
-    return { locale: this.locale, direction: this.direction, version: this.version }
+    return this.snapshot
   }
 
   subscribe(listener: () => void): () => void {
@@ -110,7 +113,18 @@ export class DocumentLocaleAdapter implements CordisXLocaleSource {
     this.locale = locale
     this.direction = direction
     this.version += 1
-    for (const listener of this.listeners) listener()
+    this.snapshot = Object.freeze({ locale, direction, version: this.version })
+    this.notify(this.listeners)
+  }
+
+  private notify(listeners: ReadonlySet<() => void>): void {
+    for (const listener of [...listeners]) {
+      try {
+        listener()
+      } catch (error) {
+        console.error('CordisX locale subscriber failed', error)
+      }
+    }
   }
 }
 
@@ -118,29 +132,89 @@ function messageFallback(namespace: string, message: CordisXLocalizedText): stri
   return message.fallback ?? `[[${namespace}:${message.key}]]`
 }
 
-function validParams(params: CordisXMessageParams | undefined): boolean {
-  if (params === undefined) return true
-  return Object.values(params).every(value => value === null || ['string', 'number', 'boolean'].includes(typeof value))
+interface NormalizedMessage {
+  readonly valid: boolean
+  readonly message: CordisXLocalizedText
+}
+
+function normalizeMessage(value: unknown): NormalizedMessage {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return { valid: false, message: { key: 'invalid' } }
+  }
+  const raw = value as Record<string, unknown>
+  let valid = Object.keys(raw).every(key => ['namespace', 'key', 'params', 'fallback'].includes(key))
+  const key = typeof raw.key === 'string' && LOCAL_ID_PATTERN.test(raw.key) ? raw.key : 'invalid'
+  if (key !== raw.key) valid = false
+  const namespace = typeof raw.namespace === 'string' && REFERENCE_PATTERN.test(raw.namespace)
+    ? raw.namespace
+    : undefined
+  if (raw.namespace !== undefined && namespace === undefined) valid = false
+  const fallback = typeof raw.fallback === 'string' && raw.fallback.length > 0 && raw.fallback.length <= 4000
+    ? raw.fallback
+    : undefined
+  if (raw.fallback !== undefined && fallback === undefined) valid = false
+
+  let params: Record<string, string | number | boolean | null> | undefined
+  if (raw.params !== undefined) {
+    const prototype = raw.params === null || typeof raw.params !== 'object' ? undefined : Object.getPrototypeOf(raw.params)
+    const constructor = prototype === null || prototype === undefined || !Object.prototype.hasOwnProperty.call(prototype, 'constructor')
+      ? undefined
+      : (prototype as { constructor?: unknown }).constructor
+    if (raw.params === null || typeof raw.params !== 'object' || Array.isArray(raw.params)
+      || Object.prototype.toString.call(raw.params) !== '[object Object]'
+      || (constructor !== undefined && (typeof constructor !== 'function' || constructor.name !== 'Object'))) {
+      valid = false
+    } else {
+      const entries = Object.entries(raw.params as Record<string, unknown>)
+      if (entries.length > 32) valid = false
+      params = {}
+      for (const [name, item] of entries.sort(([left], [right]) => left.localeCompare(right))) {
+        if (!/^[a-z][a-zA-Z0-9]*$/.test(name)
+          || (item !== null && !['string', 'number', 'boolean'].includes(typeof item))
+          || (typeof item === 'number' && !Number.isFinite(item))) {
+          valid = false
+          continue
+        }
+        params[name] = item as string | number | boolean | null
+      }
+    }
+  }
+  return {
+    valid,
+    message: Object.freeze({
+      ...(namespace === undefined ? {} : { namespace }),
+      key,
+      ...(params === undefined ? {} : { params: Object.freeze(params) }),
+      ...(fallback === undefined ? {} : { fallback }),
+    }),
+  }
+}
+
+function diagnosticIdentity(owner: string, namespace: string, message: CordisXLocalizedText): string {
+  return `message:${JSON.stringify([owner, namespace, message.key, message.params ?? {}, message.fallback ?? ''])}`
 }
 
 /** Framework-independent dictionary registry and projection kernel. */
 export class LocalizationRegistry {
   private readonly records = new Map<string, Map<string, CatalogRecord[]>>()
   private readonly listeners = new Set<() => void>()
+  private readonly diagnosticListeners = new Set<() => void>()
   private readonly diagnosticRecords = new Map<string, CordisXLocalizationDiagnostic>()
   private readonly disposeSource: () => void
   private version = 0
   private nextSequence = 0
   private disposed = false
   private diagnosticScheduled = false
+  private snapshot: CordisXLocalizationSnapshot
 
   constructor(private readonly source: CordisXLocaleSource) {
+    const initial = source.getSnapshot()
+    this.snapshot = Object.freeze({ locale: initial.locale, direction: initial.direction, version: this.version })
     this.disposeSource = source.subscribe(() => this.changed())
   }
 
   getSnapshot(): CordisXLocalizationSnapshot {
-    const source = this.source.getSnapshot()
-    return { locale: source.locale, direction: source.direction, version: this.version }
+    return this.snapshot
   }
 
   subscribe(listener: () => void): () => void {
@@ -149,15 +223,17 @@ export class LocalizationRegistry {
     return () => this.listeners.delete(listener)
   }
 
+  subscribeDiagnostics(listener: () => void): () => void {
+    if (this.disposed) throw new Error('CordisX localization registry is disposed')
+    this.diagnosticListeners.add(listener)
+    return () => this.diagnosticListeners.delete(listener)
+  }
+
   define(owner: string, catalog: CordisXLocaleCatalog): () => void {
     if (this.disposed) throw new Error('CordisX localization registry is disposed')
     assertId(owner, 'localization owner')
+    assertId(catalog.namespace, 'locale namespace')
     const namespace = qualifyNamespace(owner, catalog.namespace)
-    const localNamespace = namespace.includes(':') ? namespace.split(':').at(-1) ?? '' : namespace
-    assertId(localNamespace, 'locale namespace')
-    if (namespace.includes(':') && !namespace.startsWith(`${owner}:`)) {
-      throw new Error(`plugin ${owner} cannot define foreign locale namespace ${namespace}`)
-    }
     const locale = canonicalLocale(catalog.locale)
     if (locale !== catalog.locale) throw new Error(`locale must use canonical serialization: ${locale}`)
     const defaults = this.records.get(namespace)
@@ -175,7 +251,7 @@ export class LocalizationRegistry {
       assertId(key, 'locale message key')
       if (typeof value !== 'string') throw new Error(`locale message ${key} must be a string`)
       try {
-        messages.set(key, new IntlMessageFormat(value, locale))
+        messages.set(key, new IntlMessageFormat(value, locale, undefined, { ignoreTag: true }))
       } catch {
         throw new Error(`locale message ${namespace}:${key} is not valid ICU MessageFormat`)
       }
@@ -213,14 +289,19 @@ export class LocalizationRegistry {
     return this.records.has(qualifyNamespace(owner, namespace))
   }
 
-  resolve(owner: string, message: CordisXLocalizedText): CordisXLocalizedProjection {
-    const namespace = message.namespace === undefined ? owner : qualifyNamespace(owner, message.namespace)
-    const diagnosticKey = `${owner}\u0000${namespace}\u0000${message.key}`
-    if (!ID_PATTERN.test(message.key) || !validParams(message.params)) {
-      return this.recordDiagnostic(diagnosticKey, owner, message, {
-        text: messageFallback(namespace, message),
+  resolve(owner: string, message: CordisXLocalizedText, diagnosticSite?: string): CordisXLocalizedProjection {
+    if (this.disposed) throw new Error('CordisX localization registry is disposed')
+    const normalized = normalizeMessage(message)
+    const safeMessage = normalized.message
+    const namespace = safeMessage.namespace === undefined ? owner : qualifyNamespace(owner, safeMessage.namespace)
+    const diagnosticKey = diagnosticSite === undefined
+      ? diagnosticIdentity(owner, namespace, safeMessage)
+      : `site:${JSON.stringify([owner, diagnosticSite])}`
+    if (!normalized.valid) {
+      return this.recordDiagnostic(diagnosticKey, owner, safeMessage, diagnosticSite, {
+        text: messageFallback(namespace, safeMessage),
         namespace,
-        key: message.key,
+        key: safeMessage.key,
         diagnostic: 'invalid-message',
         detail: 'message key or params are invalid',
       })
@@ -228,10 +309,10 @@ export class LocalizationRegistry {
 
     const localeMap = this.records.get(namespace)
     if (localeMap === undefined) {
-      return this.recordDiagnostic(diagnosticKey, owner, message, {
-        text: messageFallback(namespace, message),
+      return this.recordDiagnostic(diagnosticKey, owner, safeMessage, diagnosticSite, {
+        text: messageFallback(namespace, safeMessage),
         namespace,
-        key: message.key,
+        key: safeMessage.key,
         diagnostic: 'missing-namespace',
         detail: `locale namespace ${namespace} is not registered`,
       })
@@ -246,7 +327,7 @@ export class LocalizationRegistry {
     let formatter: IntlMessageFormat | undefined
     for (const locale of candidates) {
       const candidate = localeMap.get(locale)?.at(-1)
-      const candidateFormatter = candidate?.messages.get(message.key)
+      const candidateFormatter = candidate?.messages.get(safeMessage.key)
       if (candidate !== undefined && candidateFormatter !== undefined) {
         record = candidate
         formatter = candidateFormatter
@@ -254,27 +335,27 @@ export class LocalizationRegistry {
       }
     }
     if (record === undefined || formatter === undefined) {
-      return this.recordDiagnostic(diagnosticKey, owner, message, {
-        text: messageFallback(namespace, message),
+      return this.recordDiagnostic(diagnosticKey, owner, safeMessage, diagnosticSite, {
+        text: messageFallback(namespace, safeMessage),
         namespace,
-        key: message.key,
+        key: safeMessage.key,
         diagnostic: 'missing-key',
-        detail: `message ${namespace}:${message.key} is not available for ${current}`,
+        detail: `message ${namespace}:${safeMessage.key} is not available for ${current}`,
       })
     }
 
     try {
-      const text = String(formatter.format(message.params ?? {}))
+      const text = String(formatter.format(safeMessage.params ?? {}))
       if (this.diagnosticRecords.delete(diagnosticKey)) this.scheduleDiagnosticNotification()
-      return { text, namespace, key: message.key, locale: record.locale }
+      return { text, namespace, key: safeMessage.key, locale: record.locale }
     } catch {
-      return this.recordDiagnostic(diagnosticKey, owner, message, {
-        text: messageFallback(namespace, message),
+      return this.recordDiagnostic(diagnosticKey, owner, safeMessage, diagnosticSite, {
+        text: messageFallback(namespace, safeMessage),
         namespace,
-        key: message.key,
+        key: safeMessage.key,
         locale: record.locale,
         diagnostic: 'missing-params',
-        detail: `message ${namespace}:${message.key} is missing required params`,
+        detail: `message ${namespace}:${safeMessage.key} is missing required params`,
       })
     }
   }
@@ -284,6 +365,8 @@ export class LocalizationRegistry {
       return left.owner.localeCompare(right.owner)
         || left.namespace.localeCompare(right.namespace)
         || left.key.localeCompare(right.key)
+        || JSON.stringify(left.message.params ?? {}).localeCompare(JSON.stringify(right.message.params ?? {}))
+        || (left.message.fallback ?? '').localeCompare(right.message.fallback ?? '')
     })
   }
 
@@ -314,17 +397,23 @@ export class LocalizationRegistry {
     this.records.clear()
     this.diagnosticRecords.clear()
     this.listeners.clear()
+    this.diagnosticListeners.clear()
   }
 
   private recordDiagnostic(
     id: string,
     owner: string,
     message: CordisXLocalizedText,
+    site: string | undefined,
     projection: CordisXLocalizedProjection,
   ): CordisXLocalizedProjection {
-    const next = { owner, message, ...projection }
+    const next = { owner, message, ...(site === undefined ? {} : { site }), ...projection }
     const previous = this.diagnosticRecords.get(id)
     this.diagnosticRecords.set(id, next)
+    if (site === undefined && this.diagnosticRecords.size > 512) {
+      const oldest = [...this.diagnosticRecords.keys()].find(key => key.startsWith('message:'))
+      if (oldest !== undefined && oldest !== id) this.diagnosticRecords.delete(oldest)
+    }
     if (JSON.stringify(previous) !== JSON.stringify(next)) this.scheduleDiagnosticNotification()
     return projection
   }
@@ -335,20 +424,33 @@ export class LocalizationRegistry {
     queueMicrotask(() => {
       this.diagnosticScheduled = false
       if (this.disposed) return
-      for (const listener of this.listeners) listener()
+      this.notify(this.diagnosticListeners, 'diagnostic')
     })
+  }
+
+  clearDiagnosticSite(owner: string, site: string): void {
+    if (this.diagnosticRecords.delete(`site:${JSON.stringify([owner, site])}`)) this.scheduleDiagnosticNotification()
   }
 
   private changed(): void {
     if (this.disposed) return
     this.version += 1
+    const source = this.source.getSnapshot()
+    this.snapshot = Object.freeze({ locale: source.locale, direction: source.direction, version: this.version })
     this.diagnosticRecords.clear()
-    for (const listener of this.listeners) listener()
+    this.notify(this.listeners, 'projection')
+    this.notify(this.diagnosticListeners, 'diagnostic')
   }
-}
 
-function pluginOwner(ctx: Context): string {
-  return (ctx as Context & { [CORDISX_PLUGIN_ID]?: string })[CORDISX_PLUGIN_ID] ?? 'host'
+  private notify(listeners: ReadonlySet<() => void>, kind: string): void {
+    for (const listener of [...listeners]) {
+      try {
+        listener()
+      } catch (error) {
+        console.error(`CordisX localization ${kind} subscriber failed`, error)
+      }
+    }
+  }
 }
 
 /** Fiber-aware Cordis service over LocalizationRegistry. */
@@ -367,18 +469,18 @@ export class CordisXI18nService extends Service implements CordisXI18n {
     }, 'cordisx: localization registry')
   }
 
-  define<Messages extends CordisXMessageSchema>(
+  define<Messages extends CordisXMessageDefinition<Messages>>(
     catalog: CordisXLocaleCatalog<Messages>,
   ): ReturnType<CordisXI18n['define']> {
-    const owner = pluginOwner(this.ctx)
+    const owner = ownerFromContext(this.ctx)
     return this.ctx.effect(() => this.registry.define(owner, catalog), `i18n.define(${JSON.stringify(catalog.namespace)}, ${JSON.stringify(catalog.locale)})`)
   }
 
-  inject<Messages extends CordisXMessageSchema>(
+  inject<Messages extends CordisXMessageDefinition<Messages>>(
     namespace: string,
     setup: (seat: CordisXLocalizationSeat<Messages>) => Effect,
   ): ReturnType<CordisXI18n['inject']> {
-    const owner = pluginOwner(this.ctx)
+    const owner = ownerFromContext(this.ctx)
     if (!this.registry.hasNamespace(owner, namespace)) {
       throw new Error(`locale namespace ${qualifyNamespace(owner, namespace)} is not declared`)
     }
@@ -386,17 +488,21 @@ export class CordisXI18nService extends Service implements CordisXI18n {
     return this.ctx.effect(() => setup(seat), `i18n.inject(${JSON.stringify(namespace)})`)
   }
 
-  seat<Messages extends CordisXMessageSchema>(namespace?: string): CordisXLocalizationSeat<Messages> {
-    const owner = pluginOwner(this.ctx)
+  seat<Messages extends CordisXMessageDefinition<Messages>>(namespace?: string): CordisXLocalizationSeat<Messages> {
+    const owner = ownerFromContext(this.ctx)
     return this.createSeat<Messages>(owner, namespace ?? owner)
   }
 
   resolve(message: CordisXLocalizedText): CordisXLocalizedProjection {
-    return this.registry.resolve(pluginOwner(this.ctx), message)
+    return this.registry.resolve(ownerFromContext(this.ctx), message)
   }
 
-  resolveFor(owner: string, message: CordisXLocalizedText): CordisXLocalizedProjection {
-    return this.registry.resolve(owner, message)
+  resolveFor(owner: string, message: CordisXLocalizedText, diagnosticSite?: string): CordisXLocalizedProjection {
+    return this.registry.resolve(owner, message, diagnosticSite)
+  }
+
+  clearDiagnosticSite(owner: string, site: string): void {
+    this.registry.clearDiagnosticSite(owner, site)
   }
 
   getSnapshot(): CordisXLocalizationSnapshot {
@@ -412,22 +518,43 @@ export class CordisXI18nService extends Service implements CordisXI18n {
   }
 
   subscribeInternal(listener: () => void): () => void {
-    return this.registry.subscribe(listener)
+    let scheduled = false
+    let active = true
+    const coalesced = (): void => {
+      if (scheduled || !active) return
+      scheduled = true
+      queueMicrotask(() => {
+        scheduled = false
+        if (active) listener()
+      })
+    }
+    const unsubscribeProjection = this.registry.subscribe(coalesced)
+    const unsubscribeDiagnostics = this.registry.subscribeDiagnostics(coalesced)
+    return () => {
+      active = false
+      unsubscribeProjection()
+      unsubscribeDiagnostics()
+    }
   }
 
-  seatFor<Messages extends CordisXMessageSchema>(owner: string, namespace?: string): CordisXLocalizationSeat<Messages> {
-    return this.createSeat(owner, namespace ?? owner)
+  seatFor<Messages extends CordisXMessageDefinition<Messages>>(
+    owner: string,
+    namespace: string | undefined,
+    own: LocalizationEffectOwner,
+  ): CordisXLocalizationSeat<Messages> {
+    return this.createSeat(owner, namespace ?? owner, own)
   }
 
-  private createSeat<Messages extends CordisXMessageSchema>(
+  private createSeat<Messages extends CordisXMessageDefinition<Messages>>(
     owner: string,
     namespace: string,
+    effectOwner?: LocalizationEffectOwner,
   ): CordisXLocalizationSeat<Messages> {
     const qualified = qualifyNamespace(owner, namespace)
     const messageNamespace = qualified === owner ? undefined : qualified
-    const own = (setup: () => Disposable<void>): Disposable<void> => {
+    const own = effectOwner ?? ((setup: () => Disposable<void>): Disposable<void> => {
       return this.ctx.effect(setup, `i18n seat ${qualified}`) as Disposable<void>
-    }
+    })
     const messageFor = <Key extends Extract<keyof Messages, string>>(
       key: Key,
       ...args: Messages[Key] extends CordisXMessageParams ? [params: Messages[Key]] : [params?: undefined]
@@ -466,12 +593,18 @@ export class CordisXI18nService extends Service implements CordisXI18n {
         }
       }),
       bindText: (node, message) => seat.effect(() => {
+        const previous = node.textContent
         node.textContent = this.registry.resolve(owner, message).text
-        return () => {}
+        return () => { node.textContent = previous }
       }),
       bindAttribute: (element, name, message) => seat.effect(() => {
+        const present = element.hasAttribute(name)
+        const previous = element.getAttribute(name)
         element.setAttribute(name, this.registry.resolve(owner, message).text)
-        return () => {}
+        return () => {
+          if (present) element.setAttribute(name, previous ?? '')
+          else element.removeAttribute(name)
+        }
       }),
     }
     return seat

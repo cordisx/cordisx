@@ -1,0 +1,178 @@
+import { Context, Service } from '@deepseek-ai/cordis'
+import type {
+  CordisXCommandHandler,
+  CordisXCommandMetadata,
+  CordisXCommandReference,
+  CordisXCommands,
+} from '../contracts.js'
+import { ownerFromContext, qualifyOwnedId } from './ownership.js'
+import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
+import { ICON_TOKEN_PATTERN, assertLocalId, assertLocalizedText, assertReference, immutableSnapshot } from './validation.js'
+
+interface CommandRecord {
+  readonly owner: string
+  readonly qualifiedId: string
+  readonly metadata: CordisXCommandMetadata
+  readonly handler: CordisXCommandHandler
+  readonly running: Map<string, AbortController>
+  lastError?: string
+}
+
+export interface CommandSnapshot {
+  readonly owner: string
+  readonly id: string
+  readonly qualifiedId: string
+  readonly metadata: CordisXCommandMetadata
+  readonly running: number
+  readonly lastError?: string
+}
+
+export class CommandRegistry {
+  private readonly records = new Map<string, CommandRecord>()
+  private readonly listeners = new Set<() => void>()
+  private disposed = false
+
+  register(owner: string, metadata: CordisXCommandMetadata, handler: CordisXCommandHandler): () => void {
+    if (this.disposed) throw new Error('CordisX command registry is disposed')
+    assertLocalId(owner, 'command owner')
+    assertLocalId(metadata.id, 'command id')
+    const unknown = Object.keys(metadata).find(key => !['id', 'title', 'category', 'icon', 'public'].includes(key))
+    if (unknown !== undefined) throw new Error(`command metadata has unknown field ${unknown}`)
+    assertLocalizedText(metadata.title, 'command title')
+    if (metadata.category !== undefined) assertLocalizedText(metadata.category, 'command category')
+    if (metadata.icon !== undefined && (!ICON_TOKEN_PATTERN.test(metadata.icon)
+      || !(CORDISX_HOST_ICON_TOKENS as readonly string[]).includes(metadata.icon))) {
+      throw new Error(`command ${metadata.id} uses unknown host icon token ${metadata.icon}`)
+    }
+    if (metadata.public !== undefined && typeof metadata.public !== 'boolean') throw new Error('command public must be a boolean')
+    if (typeof handler !== 'function') throw new Error(`command ${metadata.id} requires a handler`)
+    const qualifiedId = qualifyOwnedId(owner, metadata.id)
+    if (this.records.has(qualifiedId)) throw new Error(`command ${qualifiedId} is already registered`)
+    const record: CommandRecord = {
+      owner,
+      qualifiedId,
+      metadata: immutableSnapshot(metadata),
+      handler,
+      running: new Map(),
+    }
+    this.records.set(qualifiedId, record)
+    this.notify()
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      for (const controller of record.running.values()) controller.abort()
+      record.running.clear()
+      this.records.delete(qualifiedId)
+      this.notify()
+    }
+  }
+
+  async execute(
+    requestingOwner: string,
+    reference: CordisXCommandReference,
+    invocationKey = 'default',
+  ): Promise<unknown> {
+    if (this.disposed) throw new Error('CordisX command registry is disposed')
+    assertReference(reference.id, 'command reference')
+    const unknown = Object.keys(reference).find(key => !['id', 'arguments'].includes(key))
+    if (unknown !== undefined) throw new Error(`command reference has unknown field ${unknown}`)
+    const qualifiedId = qualifyOwnedId(requestingOwner, reference.id)
+    const record = this.records.get(qualifiedId)
+    if (record === undefined) throw new Error(`command ${qualifiedId} is not registered`)
+    if (record.owner !== requestingOwner && record.metadata.public !== true) {
+      throw new Error(`command ${qualifiedId} is private to plugin ${record.owner}`)
+    }
+    const executionId = `${qualifiedId}\u0000${invocationKey}`
+    if (record.running.has(executionId)) throw new Error(`command ${qualifiedId} is already running for ${invocationKey}`)
+    const abort = new AbortController()
+    record.running.set(executionId, abort)
+    delete record.lastError
+    this.notify()
+    try {
+      return await record.handler({
+        owner: record.owner,
+        id: qualifiedId,
+        arguments: reference.arguments === undefined ? undefined : immutableSnapshot(reference.arguments),
+        signal: abort.signal,
+        invocationKey,
+      })
+    } catch (error) {
+      if (!abort.signal.aborted) record.lastError = error instanceof Error ? error.message : String(error)
+      throw error
+    } finally {
+      record.running.delete(executionId)
+      this.notify()
+    }
+  }
+
+  has(requestingOwner: string, reference: CordisXCommandReference): boolean {
+    const qualifiedId = qualifyOwnedId(requestingOwner, reference.id)
+    const record = this.records.get(qualifiedId)
+    return record !== undefined && (record.owner === requestingOwner || record.metadata.public === true)
+  }
+
+  snapshot(): readonly CommandSnapshot[] {
+    return [...this.records.values()]
+      .map(record => ({
+        owner: record.owner,
+        id: record.metadata.id,
+        qualifiedId: record.qualifiedId,
+        metadata: record.metadata,
+        running: record.running.size,
+        ...(record.lastError === undefined ? {} : { lastError: record.lastError }),
+      }))
+      .sort((left, right) => left.qualifiedId.localeCompare(right.qualifiedId))
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    for (const record of this.records.values()) {
+      for (const controller of record.running.values()) controller.abort()
+    }
+    this.records.clear()
+    this.listeners.clear()
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener()
+  }
+}
+
+export class CordisXCommandService extends Service implements CordisXCommands {
+  constructor(ctx: Context, private readonly registry: CommandRegistry = new CommandRegistry()) {
+    super(ctx, 'commands')
+    ctx.effect(() => () => registry.dispose(), 'cordisx: command registry')
+  }
+
+  register(metadata: CordisXCommandMetadata, handler: CordisXCommandHandler): ReturnType<CordisXCommands['register']> {
+    const owner = ownerFromContext(this.ctx)
+    return this.ctx.effect(() => this.registry.register(owner, metadata, handler), `commands.register(${JSON.stringify(metadata.id)})`)
+  }
+
+  execute(reference: CordisXCommandReference, invocationKey?: string): Promise<unknown> {
+    return this.registry.execute(ownerFromContext(this.ctx), reference, invocationKey)
+  }
+
+  executeFor(owner: string, reference: CordisXCommandReference, invocationKey?: string): Promise<unknown> {
+    return this.registry.execute(owner, reference, invocationKey)
+  }
+
+  hasFor(owner: string, reference: CordisXCommandReference): boolean {
+    return this.registry.has(owner, reference)
+  }
+
+  snapshot(): readonly CommandSnapshot[] {
+    return this.registry.snapshot()
+  }
+
+  subscribeInternal(listener: () => void): () => void {
+    return this.registry.subscribe(listener)
+  }
+}

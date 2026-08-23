@@ -1,23 +1,20 @@
 # Slot Showcase
 
-这是 CordisX 的五扩展点演示插件。它使用与 DSH 一致的 `slots` 服务，展示一个插件如何随 Cordis fiber 一起挂载、卸载和恢复。
+这是 CordisX 的结构化 UI 端到端演示插件。它通过 `ctx.commands`、`ctx.routes`、`ctx.pages` 与 DSH 风格的 `ctx.slots.register` 提交数据；shell DOM、交互、排序、无障碍与清理由宿主统一负责。
 
 ## 展示内容
 
-- `header.actions`：顶部的 CX Demo 开关
-- `composer.before`：输入框前的 Prompt Lens
-- `composer.after`：输入框后的运行状态
-- `sidebar.footer`：侧栏底部的扩展点计数
-- `shell.overlay`：可开关的页面级浮层
+- 侧栏底部控件前、后及菜单项
+- 主导航行及不会冒泡到主行为的独立快捷操作
+- workspace toolbar 语义锚点前、后及菜单项
+- 环境信息 panel header action、section、section action、row 与 trailing action
+- `app`、`main`、`session.content` 三类 page outlet
+- 英文/简体中文词典、动态消息参数与 locale 重新投影
 
 ## 配置示例
 
 ```json
-{
-  "accent": "#8b5cf6",
-  "label": "CX Demo",
-  "open": true
-}
+{ "sessionId": "当前原生会话 ID（可选）" }
 ```
 
-屏蔽插件会销毁当前 Cordis fiber 并撤销以上贡献；恢复插件会从同一个可信本地 bundle 创建新的 fiber。
+屏蔽插件会销毁当前 Cordis fiber、撤销贡献并 Abort/dispose 活跃页面；恢复插件会从同一个可信本地 bundle 创建新的 generation。页面 mount 属于 trusted-local 受控 DOM，不是权限沙箱。

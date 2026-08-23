@@ -5,8 +5,37 @@ import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../src/launcher/bundle.js'
 import { loadConfig } from '../src/launcher/config.js'
 
+interface RuntimeSnapshot {
+  plugins: readonly { id: string; source: string; status: string; readme?: string }[]
+  registrations: readonly { owner: string; surface: string; valid: boolean; rendered: boolean; item: unknown }[]
+  commands: readonly { owner: string; qualifiedId: string }[]
+  navigation: {
+    routes: readonly { owner: string; qualifiedId: string; valid: boolean }[]
+    pages: readonly { owner: string; qualifiedId: string }[]
+    outlets: readonly { id: string; contextKey?: string; activeRoute?: string; mounted: boolean }[]
+  }
+  localization: { locale: string; direction: string; version: number }
+  localeCatalogs: readonly { owner: string; locale: string }[]
+  localizationDiagnostics: readonly unknown[]
+  platform: { mode: string; secondConnectionCreated: boolean; rawBridgeExposed: boolean; diagnostics: readonly { code: string }[] }
+  permissions: readonly { capability: string; policy: string; reasonText: string; required: boolean }[]
+}
+
+interface RuntimeHandle {
+  readonly version: string
+  snapshot(): RuntimeSnapshot
+  setPluginBlocked(id: string, blocked: boolean): Promise<void>
+  execute(owner: string, reference: { id: string }): Promise<unknown>
+  navigate(owner: string, reference: { id: string; params?: Record<string, string> }): Promise<void>
+  dispose(): Promise<void>
+}
+
+async function settle(): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, 0))
+}
+
 describe('renderer bundle', () => {
-  it('boots a Cordis plugin and removes its UI on runtime disposal', async () => {
+  it('boots the structured demo, routes all outlets, reprojects locale, and disposes one generation', async () => {
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const baseConfig = await loadConfig(path.join(projectRoot, 'cordisx.config.example.json'))
     const config = {
@@ -17,114 +46,120 @@ describe('renderer bundle', () => {
       ],
     }
     const bundle = await buildRendererBundle(config)
+    const sessionId = '01a02d54-8adf-7043-944c-0bc9bb41bfd9'
     const dom = new JSDOM(`
-      <html><head></head><body>
+      <html lang="en" dir="ltr"><head></head><body>
         <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
-        <header class="app-header-tint"><div class="ms-auto flex items-center"></div></header>
-        <aside></aside>
-        <main><form><textarea></textarea></form></main>
+        <header data-app-shell-application-menu-bar style="position:relative"></header>
+        <aside><div data-app-action-sidebar-scroll style="position:relative">
+          <div data-app-action-sidebar-project-list-id="project-one">
+            <button data-app-action-sidebar-thread-selected="true" data-app-action-sidebar-thread-host-id="local" data-app-action-sidebar-thread-id="local:${sessionId}"></button>
+          </div>
+        </div></aside>
+        <main data-app-shell-main-content-layout="thread-edge-scroll" style="position:relative">
+          <section data-codex-thread-reference-drop-target style="position:relative">
+            <div id="native-conversation" data-thread-find-target="conversation" data-response-annotation-conversation="${sessionId}">native data</div>
+            <div data-above-composer-conversation-id="${sessionId}"></div>
+            <div data-codex-thread-reference-drop-target></div>
+          </section>
+        </main>
+        <aside data-pip-home-surface="thread-summary-panel" style="position:relative"></aside>
       </body></html>
-    `, { runScripts: 'dangerously', url: 'https://codex.local/' })
-    Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', {
-      value: () => ({ length: 1 }),
-    })
+    `, { runScripts: 'dangerously', url: 'https://codex.local/native' })
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
     Object.defineProperty(dom.window, 'fetch', {
-      value: async () => ({
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({
-          $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json',
-          schemaVersion: 1,
-          name: 'CordisX Community Marketplace',
-          homepage: 'https://cordisx.github.io/marketplace/',
-          plugins: [{
-            $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v1.schema.json',
-            schemaVersion: 1,
-            id: 'slot-showcase',
-            name: 'Slot Showcase',
-            description: 'Demonstrates all five CordisX semantic UI extension points.',
-            version: '0.1.0',
-            source: 'https://github.com/cordisx/cordisx',
-            homepage: 'https://github.com/cordisx/cordisx',
-            license: 'UNLICENSED',
-            compatibility: { cordisx: '^0.1.0' },
-            authors: [{ name: 'CordisX', url: 'https://github.com/cordisx' }],
-            keywords: ['demo', 'slots'],
-          }],
-        }),
-      }),
+      value: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json',
+        schemaVersion: 1,
+        name: 'CordisX Community Marketplace',
+        homepage: 'https://cordisx.github.io/marketplace/',
+        plugins: [],
+      }) }),
     })
-
+    const native = dom.window.document.getElementById('native-conversation')!
+    const nativeParent = native.parentElement
     dom.window.eval(bundle)
-    for (let attempt = 0; attempt < 20 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
+    for (let attempt = 0; attempt < 30 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
-
+    const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
     expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
-    const toggle = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-contribution="slot-showcase.header-action"] button')
-    const overlay = dom.window.document.querySelector<HTMLElement>('[data-cordisx-contribution="slot-showcase.overlay"] section')
-    expect(toggle?.querySelector('span:last-child')?.textContent).toBe('CX Demo')
-    expect(dom.window.document.querySelector('[data-cordisx-contribution="slot-showcase.composer-before"]')?.textContent).toContain('Prompt Lens')
-    expect(dom.window.document.querySelector('[data-cordisx-contribution="slot-showcase.composer-after"]')?.textContent).toContain('demo active')
-    expect(dom.window.document.querySelector('[data-cordisx-contribution="slot-showcase.sidebar-footer"]')?.textContent).toContain('5 slots online')
-    expect(overlay?.hidden).toBe(false)
-    toggle?.click()
-    expect(overlay?.hidden).toBe(true)
-    toggle?.click()
-    expect(overlay?.hidden).toBe(false)
-
-    const runtime = (dom.window as unknown as {
-      __cordisxRuntime?: {
-        readonly version: string
-        snapshot(): {
-          plugins: readonly { id: string; status: string; readme?: string }[]
-          registrations: readonly { pluginId: string; slot: string; active: boolean }[]
-          localization: { locale: string; direction: string; version: number }
-          localeCatalogs: readonly unknown[]
-          localizationDiagnostics: readonly unknown[]
-          platform: { mode: string; secondConnectionCreated: boolean; rawBridgeExposed: boolean; diagnostics: readonly { code: string }[] }
-          permissions: readonly { capability: string; policy: string; reasonText: string; required: boolean }[]
-        }
-        dispose(): Promise<void>
-      }
-    }).__cordisxRuntime
     expect(runtime?.version).toBe('0.1.0')
-    expect(runtime?.snapshot().plugins).toEqual([
+    const snapshot = runtime!.snapshot()
+    expect(snapshot.plugins).toEqual([
       expect.objectContaining({ id: 'slot-showcase', status: 'active', readme: expect.stringContaining('# Slot Showcase') }),
       expect.objectContaining({ id: 'configured-off', status: 'configured-disabled' }),
     ])
-    expect(runtime?.snapshot().registrations.filter(item => item.active)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ pluginId: 'slot-showcase', slot: 'header.actions' }),
-      expect.objectContaining({ pluginId: 'slot-showcase', slot: 'composer.before' }),
-      expect.objectContaining({ pluginId: 'slot-showcase', slot: 'composer.after' }),
-      expect.objectContaining({ pluginId: 'slot-showcase', slot: 'sidebar.footer' }),
-      expect.objectContaining({ pluginId: 'slot-showcase', slot: 'shell.overlay' }),
+    expect(snapshot.registrations).toHaveLength(12)
+    expect(new Set(snapshot.registrations.map(item => item.surface))).toEqual(new Set([
+      'sidebar.footer.before-control', 'sidebar.footer.after-control', 'sidebar.footer.menu', 'sidebar.navigation.items',
+      'workspace.toolbar.items', 'environment.panel.header-actions', 'environment.panel.sections',
+      'environment.section.actions', 'environment.section.rows', 'environment.row.trailing-actions',
     ]))
-    expect(runtime?.snapshot().localization).toMatchObject({ locale: 'en', direction: 'ltr' })
-    expect(runtime?.snapshot().localeCatalogs).toEqual(expect.arrayContaining([
-      expect.objectContaining({ owner: 'slot-showcase', locale: 'en', active: true }),
-      expect.objectContaining({ owner: 'slot-showcase', locale: 'zh-CN', active: true }),
-    ]))
-    expect(runtime?.snapshot().localizationDiagnostics).toEqual([])
-    expect(runtime?.snapshot().platform).toMatchObject({
+    expect(snapshot.registrations.every(item => item.valid && item.rendered)).toBe(true)
+    expect(snapshot.commands).toHaveLength(5)
+    expect(snapshot.navigation.routes).toHaveLength(3)
+    expect(snapshot.navigation.routes.every(item => item.valid)).toBe(true)
+    expect(snapshot.navigation.pages).toHaveLength(3)
+    expect(snapshot.navigation.outlets).toHaveLength(3)
+    expect(snapshot.localeCatalogs).toHaveLength(2)
+    expect(snapshot.localizationDiagnostics).toEqual([])
+    expect(dom.window.document.querySelectorAll('[data-cordisx-surface-host]')).toHaveLength(3)
+
+    const trailing = dom.window.document.querySelector<HTMLButtonElement>('.cordisx-nav-actions button')!
+    trailing.click()
+    await settle()
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')?.activeRoute).toBeUndefined()
+    dom.window.document.querySelector<HTMLElement>('.cordisx-nav-row')!.click()
+    await settle()
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({ activeRoute: 'slot-showcase:main.analytics', mounted: true })
+    expect(dom.window.document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')).not.toBeNull()
+
+    await runtime!.navigate('slot-showcase', { id: 'app.overview' })
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ activeRoute: 'slot-showcase:app.overview', mounted: true })
+    await runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId } })
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({ activeRoute: 'slot-showcase:session.analytics', mounted: true, contextKey: `session:${sessionId}` })
+    await expect(runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId: 'stale' } })).rejects.toThrow(/does not match native session/)
+    expect(dom.window.location.href).toBe('https://codex.local/native')
+
+    dom.window.document.documentElement.lang = 'zh-CN'
+    await settle()
+    await settle()
+    expect(runtime!.snapshot().localization.locale).toBe('zh-CN')
+    expect(dom.window.document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')?.textContent).toContain('主区域 outlet')
+
+    expect(native.parentElement).toBe(nativeParent)
+    expect(native.textContent).toBe('native data')
+    expect(dom.window.getComputedStyle(native).display).not.toBe('none')
+    native.textContent = 'native data updated'
+    expect(native.textContent).toBe('native data updated')
+
+    await runtime!.setPluginBlocked('slot-showcase', true)
+    const blockedSnapshot = runtime!.snapshot()
+    expect(blockedSnapshot.plugins[0]?.status).toBe('blocked')
+    expect(blockedSnapshot.commands).toEqual([])
+    expect(blockedSnapshot.navigation.routes).toEqual([])
+    expect(blockedSnapshot.navigation.pages).toEqual([])
+    expect(blockedSnapshot.registrations.every(item => !item.rendered)).toBe(true)
+    expect(dom.window.document.querySelector('[data-cordisx-page]')).toBeNull()
+
+    await runtime!.setPluginBlocked('slot-showcase', false)
+    await settle()
+    const restoredSnapshot = runtime!.snapshot()
+    expect(restoredSnapshot.plugins[0]?.status).toBe('active')
+    expect(restoredSnapshot.commands.length).toBe(5)
+    expect(restoredSnapshot.registrations.filter(item => item.rendered).length).toBe(12)
+    expect(restoredSnapshot.platform).toMatchObject({
       mode: 'unavailable',
       secondConnectionCreated: false,
       rawBridgeExposed: false,
       diagnostics: [expect.objectContaining({ code: 'current-connection-client-unavailable' })],
     })
-    expect(runtime?.snapshot().permissions).toEqual([
+    expect(restoredSnapshot.permissions).toEqual([
       expect.objectContaining({ capability: 'models.read', policy: 'ask', required: false }),
     ])
 
     const managerTrigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')
-    expect(managerTrigger?.previousElementSibling?.id).toBe('workspace-switcher')
-    const replacementSwitcher = dom.window.document.createElement('button')
-    replacementSwitcher.id = 'workspace-switcher-replaced'
-    replacementSwitcher.setAttribute('aria-haspopup', 'menu')
-    replacementSwitcher.textContent = 'Codex'
-    dom.window.document.getElementById('workspace-switcher')?.replaceWith(replacementSwitcher)
-    await new Promise(resolve => setTimeout(resolve, 0))
-    expect(managerTrigger?.previousElementSibling?.id).toBe('workspace-switcher-replaced')
     managerTrigger?.click()
     const managerModal = dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')
     expect(managerModal?.hidden).toBe(false)
@@ -135,12 +170,12 @@ describe('renderer bundle', () => {
     expect(managerModal?.textContent).toContain('宿主语言')
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="slots"]')?.click()
     expect(dom.window.document.querySelector('.cxm-heading-icon')?.textContent).toBe('⊞')
-    expect(managerModal?.textContent).toContain('header.actions')
+    expect(managerModal?.textContent).toContain('sidebar.footer.before-control')
     expect(managerModal?.textContent).toContain('slot-showcase')
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')?.click()
     const search = dom.window.document.querySelector<HTMLInputElement>('.cxm-search')
     if (search !== null) {
-      search.value = 'composer.before'
+      search.value = 'workspace.toolbar.items'
       search.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     }
     expect(managerModal?.textContent).toContain('slot-showcase')
@@ -155,16 +190,16 @@ describe('renderer bundle', () => {
     expect(dom.window.getComputedStyle(back as HTMLElement).width).toBe('26px')
     expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain('插件/Slot Showcase')
     expect(dom.window.document.querySelector('.cxm-readme h1')?.textContent).toBe('Slot Showcase')
-    expect(managerModal?.textContent).toContain('五扩展点演示插件')
+    expect(managerModal?.textContent).toContain('结构化 UI 端到端演示插件')
     expect(managerModal?.textContent).not.toContain('插件配置')
     expect(dom.window.document.querySelectorAll('[data-plugin-detail-tab]')).toHaveLength(5)
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
     expect(managerModal?.textContent).toContain('插件配置')
-    expect(managerModal?.textContent).toContain('"accent": "#8b5cf6"')
+    expect(managerModal?.textContent).toContain('{}')
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="permissions"]')?.click()
     expect(managerModal?.textContent).toContain('models.read')
-    expect(managerModal?.textContent).toContain('Show models currently available through the host connection')
+    expect(managerModal?.textContent).toContain('显示当前宿主连接实际可用的模型')
     expect(managerModal?.textContent).toContain('current-connection-client-unavailable')
     expect(managerModal?.textContent).toContain('trusted renderer code 不是安全沙箱')
     dom.window.document.documentElement.lang = 'zh-CN'
@@ -189,21 +224,22 @@ describe('renderer bundle', () => {
     }
     expect(runtime?.snapshot().plugins[0]?.status).toBe('blocked')
     expect(JSON.parse(dom.window.localStorage.getItem('cordisx.manager.blockedPlugins.v1') ?? '[]')).toContain('slot-showcase')
-    expect(dom.window.document.querySelector('[data-cordisx-contribution]')).toBeNull()
+    expect(runtime!.snapshot().commands).toEqual([])
+    expect(dom.window.document.querySelector('.cordisx-nav-row')).toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-plugin-runtime-action')?.click()
     for (let attempt = 0; attempt < 20 && runtime?.snapshot().plugins[0]?.status !== 'active'; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     expect(runtime?.snapshot().plugins[0]?.status).toBe('active')
     expect(JSON.parse(dom.window.localStorage.getItem('cordisx.manager.blockedPlugins.v1') ?? '[]')).toEqual([])
-    expect(dom.window.document.querySelector('[data-cordisx-contribution="slot-showcase.header-action"]')).not.toBeNull()
+    expect(dom.window.document.querySelector('.cordisx-nav-row')).not.toBeNull()
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="slots"]')?.click()
-    expect(managerModal?.textContent).toContain('slot-showcase.header-action')
-    expect(managerModal?.textContent).toContain('已挂载')
+    expect(managerModal?.textContent).toContain('workspace.toolbar.items')
+    expect(managerModal?.textContent).toContain('已渲染')
 
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
-    expect(dom.window.document.querySelector<HTMLInputElement>('.cxm-search')?.value).toBe('composer.before')
+    expect(dom.window.document.querySelector<HTMLInputElement>('.cxm-search')?.value).toBe('workspace.toolbar.items')
     expect(managerModal?.textContent).not.toContain('插件配置')
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="marketplace"]')?.click()
@@ -212,13 +248,8 @@ describe('renderer bundle', () => {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     expect(managerModal?.textContent).toContain('CordisX Community Marketplace')
-    expect(managerModal?.textContent).toContain('Slot Showcase')
+    expect(managerModal?.textContent).toContain('没有可展示的匹配插件')
     expect(managerModal?.textContent).not.toContain('查看源码')
-    dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-plugin="slot-showcase"]')?.click()
-    expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain('插件商店/Slot Showcase')
-    expect(managerModal?.textContent).toContain('查看源码')
-    expect(managerModal?.textContent).toContain('不会下载、执行、安装或激活')
-    dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="settings"]')?.click()
     expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain('配置')
@@ -235,9 +266,11 @@ describe('renderer bundle', () => {
     expect(managerModal?.textContent).toContain('启动器配置')
 
     await runtime?.dispose()
-    expect(dom.window.document.querySelector('[data-cordisx-contribution]')).toBeNull()
+    expect(dom.window.document.documentElement.dataset.cordisxReady).toBeUndefined()
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host]')).toBeNull()
+    expect(dom.window.document.querySelector('[data-cordisx-page-outlet]')).toBeNull()
     expect(dom.window.document.querySelector('[data-cordisx-manager-trigger]')).toBeNull()
-    expect(dom.window.document.querySelector('[data-cordisx-manager-modal]')).toBeNull()
+    expect(native.parentElement).toBe(nativeParent)
     dom.window.close()
   })
 })

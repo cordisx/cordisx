@@ -8,11 +8,7 @@
       "id": "slot-showcase",
       "entry": "./plugins/slot-showcase/index.ts",
       "enabled": true,
-      "config": {
-        "accent": "#8b5cf6",
-        "label": "CX Demo",
-        "open": true
-      }
+      "config": {}
     }
   ]
 }
