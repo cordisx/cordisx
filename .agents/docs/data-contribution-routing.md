@@ -366,11 +366,15 @@ insertion seats defined above.
 
 - `app` appends one fixed CordisX host layer under `body` and covers the
   renderer application rectangle.
-- `main` and `session.content` prefer a stable, already-positioned native host
-  region and append exactly one CordisX absolute/inset overlay.
-- If no reliable positioned anchor exists, the adapter appends a fixed body
-  portal and tracks the resolved rectangle with `ResizeObserver`, scroll/resize
-  signals, and bounded geometry updates.
+- `session.content` prefers a stable, already-positioned native host region and
+  appends exactly one CordisX absolute/inset overlay.
+- `main` uses a fixed body portal projected from the complete native main-region
+  rectangle. Keeping it outside the native main stacking context is required:
+  otherwise the native title toolbar can paint above CordisX even when both
+  rectangles begin at `y=0`.
+- A body portal tracks the resolved rectangle with `ResizeObserver`,
+  scroll/resize signals, and bounded geometry updates. This includes sidebar
+  collapse/expand and user-driven sidebar-width changes.
 
 The `app` outlet paints from the window origin and therefore covers the native
 title-bar background. Its host-owned page chrome becomes the drag region while
