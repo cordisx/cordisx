@@ -22,7 +22,7 @@ function appendInline(document: Document, parent: HTMLElement, source: string): 
         anchor.textContent = parts[1] ?? ''
         anchor.href = parts[2] ?? '#'
         anchor.target = '_blank'
-        anchor.rel = 'noreferrer'
+        anchor.rel = 'noopener noreferrer'
         parent.append(anchor)
       }
     }

@@ -113,12 +113,14 @@ than package removal: module top-level code is already in the trusted bundle,
 and the manager does not edit `cordisx.config.json`, install packages, enforce
 permissions, or create a security boundary.
 
-The initial manager has three navigation views:
+The manager has six primary navigation views:
 
-1. CordisX runtime and version information;
-2. semantic extension points with their currently active plugin contributions;
-3. searchable plugin inventory, runtime blocking/restoration, and details
-   derived from module/configuration data available today.
+1. searchable installed-plugin inventory and local runtime controls;
+2. semantic extension points with attributed plugin use and enforced policy;
+3. routes/pages as a separate associated-resource inventory;
+4. marketplace discovery from validated feeds;
+5. profile and launcher configuration; and
+6. product identity, version, and verified external support links on About.
 
 Manager-owned content follows one semantic context at a time: a title,
 breadcrumb, or selected tab is not restated by body headings or redundant
@@ -141,8 +143,10 @@ Installed plugin detail is local tab navigation inside that second-level page,
 not another semantic extension point. Its default `README` tab renders the
 plugin's adjacent `README.md`; `配置管理` shows the configuration available to
 the current bundle; `运行状态` owns activation state, injected services,
-failures, and block/restore actions; and `扩展点位` lists attributed slot
-registrations and mount state. The launcher reads the adjacent README while
+failures and block/restore actions; `扩展点位` lists only attributed surface or
+outlet use; and `路由` separately owns routes, pages, and their outlet
+associations. Runtime status does not repeat route/page inventory. The launcher
+reads the adjacent README while
 composing the browser bundle so the renderer does not gain filesystem access.
 The manager renders a deliberately limited Markdown subset by creating DOM
 nodes and text nodes only: raw HTML is never interpreted, and remote media or
@@ -150,7 +154,8 @@ script execution is not supported. A missing README produces an explicit empty
 state rather than synthesized package documentation.
 
 Marketplace discovery adds two manager views without adding execution
-authority: a searchable catalog assembled from validated feeds, and a general
+authority: a searchable catalog assembled from validated feeds with a
+two-tab `概览` / `作者与来源` detail, and a general
 CordisX settings view whose first editable section owns the ordered list of
 marketplace JSON URLs and profile-local block state. The settings page is also
 local tab navigation: `插件商店` owns feed URLs, `运行状态` explains the
@@ -159,8 +164,16 @@ profile-local activation state, and `启动器` exposes the current read-only
 file-managed until generation-aware configuration writes exist. Feed aggregation keys
 plugins by canonical `(source, id)` identity; the first configured feed wins a
 duplicate. Source settings and blocked plugin ids are separate profile-local
-state. Catalog entries can link to their public source but cannot install or
-activate code in this stage.
+state. Catalog entries can link to authors, their public source, optional
+homepage, manifest/icon, and feed provenance, but cannot install or activate
+code in this stage. External navigation first hides the manager modal and then
+uses the browser's uncancelled `_blank` navigation with `noopener noreferrer`.
+
+The primary manager navigation keeps `插件`, `扩展点`, `路由`, `插件商店`, and
+`配置` as separate top-level contexts, with About anchored last. Searchable
+browse pages omit aggregate result and usage counts. The content viewport is
+the single vertical scroll owner and restores query/scroll state after a
+detail back action.
 
 Codex's `app://` renderer rejects direct arbitrary network reads, including the
 official raw GitHub feed. The launcher therefore owns a narrow, private CDP

@@ -3,9 +3,8 @@
 Status: approved CordisX product and architecture contract. The structured
 surface/outlet registries, localized host catalog, identity-bound point-policy
 broker, surface command-origin checks, and outlet navigation/mount enforcement
-are implemented in the runtime slice. The searchable manager catalog and point
-detail experience remain a following delivery and must not be presented as
-implemented yet.
+are implemented in the runtime slice. This manager delivery adds the searchable
+catalog and point-detail experience described below.
 
 Normative, plugin-visible schemas belong in `cordisx-protocol`. This document
 owns the CordisX host model, manager projection, enforcement boundary, and
@@ -92,8 +91,7 @@ contains, in order:
 2. localized title and one concise localized description;
 3. the stable id as secondary technical text;
 4. a localized `Surface` or `Outlet` kind label; and
-5. the number of distinct plugins currently using the point, with unavailable
-   or diagnostic state only when it changes the row's meaning.
+5. unavailable or diagnostic state only when it changes the row's meaning.
 
 Selecting a row opens that point's second-level page. Point policy is not
 edited inline in the catalog, because an isolated selector without plugin
@@ -105,12 +103,11 @@ search keywords, and attributed plugin display names, ids, and canonical
 sources. It does not search arbitrary page or README content. Locale changes
 recompute the searchable localized fields without losing the query.
 
-The result summary reports both dimensions, for example `13 points · 6 in
-use`; after filtering it reports `4 of 13 points · 3 in use`. `In use` counts
-distinct points with at least one active attributed surface contribution or an
-active route/page association. It does not sum contribution badges. A point
-with only invalid, denied, blocked, or pending use remains inspectable but does
-not increment the active-use count.
+Search does not display a result summary, catalog total, in-use count, or row
+usage count. The runtime may retain usage cardinality for diagnostics and
+compatibility, but the browse UI presents identity, description, kind, and
+state instead of aggregate telemetry. A point with only invalid, denied,
+blocked, or pending use remains inspectable.
 
 There are two distinct empty states:
 
@@ -121,7 +118,7 @@ There are two distinct empty states:
 
 ### Scroll ownership
 
-The modal shell, sidebar, page header, and search/result summary remain stable.
+The modal shell, sidebar, page header, and search field remain stable.
 The manager content viewport below the header owns vertical scrolling for the
 entire catalog and for every point detail page. The list must not grow the
 modal beyond the viewport or depend on document/body scrolling. Rows do not
@@ -138,7 +135,8 @@ back control and names the selected localized point. Its local tabs are:
 
 `Usage` is the default tab. It groups records by canonical plugin identity and
 shows the plugin mark, display name, source, id, active/blocked state, effective
-point policy, and only the resources attributable to this point:
+point policy, and only the resources attributable to this point. It does not
+display an aggregate plugin or contribution count:
 
 - for a surface, contribution ids, commands reached from those contributions,
   visibility, target, and render state; and
@@ -203,7 +201,7 @@ Policy changes reconcile the affected records immediately:
   contracts permit it.
 
 Registry snapshots retain denied records and their reason for manager
-inspection. They are excluded from active-use counts. Owner disposal,
+inspection. Owner disposal,
 generation replacement, and context changes continue to apply independently.
 
 Point policy, whole-plugin blocking, and Platform capability policy are
@@ -258,8 +256,8 @@ policy.
 | Layer | Required evidence |
 | --- | --- |
 | Protocol | Schema acceptance/rejection for both kinds; all descriptor text retained as message references; unique ids; host icons; tuple identity; `inherit`/`allow`/`deny`; origin and outlet enforcement vectors; compatible default allow. |
-| Runtime | Exactly thirteen built-in descriptors; locale and dictionary reprojection; adapter augmentation and invalid declaration diagnostics; distinct-plugin use counts; source identity non-spoofing; surface render plus command-origin denial; outlet navigation plus active-page disposal; plugin block, capability policy, context, and generation orthogonality. |
-| Manager | Search every declared field; result counts and both empty states; one content scroll owner; list/detail/back scroll restoration; localized names and descriptions; `Usage`/`Point information`/`Diagnostics` tabs; policy controls keyed by source/plugin/point; keyboard, focus, tab, list, and accessible-name semantics. |
+| Runtime | Exactly thirteen built-in descriptors; locale and dictionary reprojection; adapter augmentation and invalid declaration diagnostics; retained usage attribution; source identity non-spoofing; surface render plus command-origin denial; outlet navigation plus active-page disposal; plugin block, capability policy, context, and generation orthogonality. |
+| Manager | Search every declared field without aggregate/result counts; both empty states; one content scroll owner; list/detail/back query and scroll restoration; localized names and descriptions; `Usage`/`Point information`/`Diagnostics` tabs; policy controls keyed by source/plugin/point; keyboard, focus, tab, list, and accessible-name semantics. |
 | Live renderer | Scroll to the final point; filter by localized title, stable id, and plugin; open each point kind; change allow/deny and observe surface disappearance/restore plus outlet close/reopen rejection; keep native React nodes visible, connected, and updating; capture screenshots and a machine-readable report. |
 | Mono | Exact pushed protocol and runtime/manager revisions, clean registered submodules, public modules initialized, private roadmap still `update = none`, and no unrelated pointer changes. |
 

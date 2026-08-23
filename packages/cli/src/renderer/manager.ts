@@ -1,5 +1,4 @@
 import {
-  CORDISX_SURFACE_NAMES,
   type CordisXCapabilityScope,
   type CordisXLocalizationDiagnostic,
   type CordisXLocalizationSnapshot,
@@ -25,7 +24,7 @@ import { resolveManagerTriggerTarget } from './host-probes.js'
 import { createManagerIcon, type ManagerIconToken } from './icons.js'
 import type { NavigationSnapshot } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
-import type { ExtensionPointRuntimeSnapshot } from './extension-points.js'
+import type { ExtensionPointRuntimeSnapshot, ExtensionPointSnapshot } from './extension-points.js'
 import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
 import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 
@@ -80,13 +79,17 @@ export interface ManagerModel {
   subscribe(listener: () => void): () => void
 }
 
-type ManagerTab = 'about' | 'slots' | 'plugins' | 'marketplace' | 'settings'
-type PluginDetailTab = 'readme' | 'config' | 'permissions' | 'runtime' | 'slots'
+type ManagerTab = 'about' | 'extension-points' | 'routes' | 'plugins' | 'marketplace' | 'settings'
+type PluginDetailTab = 'readme' | 'config' | 'permissions' | 'runtime' | 'extension-points' | 'routes'
 type SettingsTab = 'marketplace' | 'runtime' | 'launcher'
-type LocalTabIcon = 'document' | 'configuration' | 'permissions' | 'runtime' | 'outlets' | 'marketplace' | 'launcher'
+type ExtensionPointDetailTab = 'usage' | 'information' | 'diagnostics'
+type MarketplaceDetailTab = 'overview' | 'authors-source'
+type LocalTabIcon = ManagerIconToken
 type SecondaryView =
   | { readonly kind: 'plugin'; readonly id: string }
   | { readonly kind: 'marketplace'; readonly identity: string }
+  | { readonly kind: 'extension-point'; readonly id: string }
+  | { readonly kind: 'route'; readonly qualifiedId: string }
 type PermissionDetailView = {
   readonly pluginId: string
   readonly capability: CordisXPlatformCapability
@@ -240,16 +243,16 @@ const MANAGER_STYLES = `
     place-items: center;
     width: 100%;
     height: 100%;
-    padding: 28px;
+    padding: 20px;
     box-sizing: border-box;
     background: rgba(5, 7, 12, .66);
     backdrop-filter: blur(8px);
   }
   .cxm-dialog {
     display: grid;
-    grid-template-columns: 210px minmax(0, 1fr);
-    width: min(980px, calc(100vw - 56px));
-    height: min(680px, calc(100vh - 56px));
+    grid-template-columns: 248px minmax(0, 1fr);
+    width: min(1440px, calc(100vw - 40px));
+    height: min(960px, calc(100vh - 40px));
     overflow: hidden;
     border: 1px solid rgba(255, 255, 255, .12);
     border-radius: 18px;
@@ -293,12 +296,13 @@ const MANAGER_STYLES = `
     outline: 2px solid #c7ccd4;
     outline-offset: 2px;
   }
-  .cxm-main { display: flex; min-width: 0; flex-direction: column; }
+  .cxm-main { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
   .cxm-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     min-height: 72px;
+    flex: 0 0 auto;
     padding: 0 22px;
     border-bottom: 1px solid rgba(255, 255, 255, .08);
   }
@@ -343,12 +347,20 @@ const MANAGER_STYLES = `
     cursor: pointer;
   }
   .cxm-close-icon { width: 18px; height: 18px; }
-  .cxm-content { min-height: 0; overflow: auto; padding: 20px 22px 24px; }
+  .cxm-content {
+    min-height: 0;
+    flex: 1 1 0%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 20px 22px 24px;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
   .cxm-tabs {
     display: flex;
     gap: 4px;
     margin: -5px 0 16px;
-    padding: 0 2px;
+    padding: 0;
     overflow-x: auto;
     border-bottom: 1px solid rgba(255, 255, 255, .08);
   }
@@ -362,8 +374,10 @@ const MANAGER_STYLES = `
     cursor: pointer;
     font: 11px/1.2 system-ui, sans-serif;
   }
-  .cxm-tab-content { display: inline-flex; align-items: center; gap: 6px; }
-  .cxm-tab-icon { width: 15px; height: 15px; color: currentColor; }
+  .cxm-tab:first-child { padding-left: 0; }
+  .cxm-tab-content { display: inline-grid; grid-template-columns: 26px max-content; align-items: center; gap: 9px; }
+  .cxm-tab-icon { width: 26px; height: 26px; color: currentColor; }
+  .cxm-tab-icon svg { width: 18px; height: 18px; transform: translateY(-.5px); }
   .cxm-tab:hover { color: #eef0f3; }
   .cxm-tab[aria-selected="true"] { color: #eef0f3; }
   .cxm-tab[aria-selected="true"]::after {
@@ -376,7 +390,9 @@ const MANAGER_STYLES = `
     background: #c7ccd4;
     content: '';
   }
+  .cxm-tab:first-child[aria-selected="true"]::after { left: 0; }
   .cxm-about-identity { display: flex; align-items: center; gap: 18px; padding: 4px 2px 22px; }
+  .cxm-about-identity-copy { min-width: 0; white-space: nowrap; }
   .cxm-about-mark.cxm-brand-mark { width: 54px; height: 54px; }
   .cxm-about-name { color: #f5f6f8; font-size: 22px; font-weight: 720; letter-spacing: -.02em; }
   .cxm-about-version { margin-top: 3px; color: #8d96a8; font: 11px/1.4 ui-monospace, monospace; }
@@ -460,7 +476,6 @@ const MANAGER_STYLES = `
   .cxm-slot-card { padding: 13px 14px; }
   .cxm-slot-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .cxm-slot-name { color: #d8dce3; font: 12px/1.3 ui-monospace, monospace; }
-  .cxm-count { color: #86efac; font-size: 10px; font-weight: 700; }
   .cxm-contributions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
   .cxm-contribution {
     display: inline-flex;
@@ -489,7 +504,6 @@ const MANAGER_STYLES = `
   }
   .cxm-search:focus, .cxm-source-input:focus { border-color: rgba(199, 204, 212, .65); }
   .cxm-search:focus-visible, .cxm-source-input:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
-  .cxm-result-count { flex: none; color: #737e90; font-size: 10px; }
   .cxm-plugin-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
   .cxm-plugin-row {
     display: flex;
@@ -569,22 +583,61 @@ const MANAGER_STYLES = `
   .cxm-readme pre { margin: 12px 0 16px; overflow: auto; padding: 12px 14px; border: 1px solid rgba(255, 255, 255, .08); border-radius: 10px; background: #0d1017; }
   .cxm-readme pre code { padding: 0; background: transparent; color: #c5ccda; white-space: pre; }
   .cxm-error { margin-top: 12px; color: #fda4af; font-size: 11px; }
-  .cxm-feed-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-  .cxm-feed-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; background: rgba(255, 255, 255, .04); color: #8c96a8; font-size: 10px; }
+  .cxm-catalog-list { margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, .08); border-bottom: 1px solid rgba(255, 255, 255, .08); }
+  .cxm-catalog-row {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) max-content 18px;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 15px 2px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  .cxm-catalog-row + .cxm-catalog-row { border-top: 1px solid rgba(255, 255, 255, .08); }
+  .cxm-catalog-item + .cxm-catalog-item { border-top: 1px solid rgba(255, 255, 255, .08); }
+  .cxm-catalog-row:hover .cxm-catalog-title { color: #fff; }
+  .cxm-catalog-row:focus-visible { outline: 2px solid #c7ccd4; outline-offset: -2px; border-radius: 7px; }
+  .cxm-catalog-icon { width: 32px; height: 32px; color: #bfc5ce; }
+  .cxm-catalog-icon svg { width: 21px; height: 21px; }
+  .cxm-catalog-copy { min-width: 0; }
+  .cxm-catalog-title { color: #e7e9ee; font-size: 12px; font-weight: 650; }
+  .cxm-catalog-description { display: block; margin-top: 3px; color: #858fa1; font-size: 11px; }
+  .cxm-catalog-id { display: block; margin-top: 4px; color: #697386; font: 10px/1.35 ui-monospace, monospace; }
+  .cxm-kind-badge { padding: 3px 7px; border-radius: 6px; background: rgba(199, 204, 212, .09); color: #aeb6c5; font-size: 9px; }
+  .cxm-usage-list { border-top: 1px solid rgba(255, 255, 255, .08); border-bottom: 1px solid rgba(255, 255, 255, .08); }
+  .cxm-usage-item { padding: 15px 2px; }
+  .cxm-usage-item + .cxm-usage-item { border-top: 1px solid rgba(255, 255, 255, .08); }
+  .cxm-usage-header { display: grid; grid-template-columns: 36px minmax(0, 1fr) minmax(150px, 190px); align-items: center; gap: 12px; }
+  .cxm-usage-resources { display: grid; gap: 6px; margin: 10px 0 0 48px; }
+  .cxm-resource-row { color: #8f98a9; font: 10px/1.45 ui-monospace, monospace; overflow-wrap: anywhere; }
+  .cxm-link-list { border-top: 1px solid rgba(255, 255, 255, .08); border-bottom: 1px solid rgba(255, 255, 255, .08); }
+  .cxm-link-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 2px; }
+  .cxm-link-row + .cxm-link-row { border-top: 1px solid rgba(255, 255, 255, .08); }
+  .cxm-link-row-copy { min-width: 0; }
+  .cxm-link-row-title { color: #d8dce3; font-size: 11px; font-weight: 650; }
+  .cxm-link-row-value { display: block; margin-top: 3px; overflow-wrap: anywhere; color: #778295; font: 10px/1.4 ui-monospace, monospace; }
   .cxm-source-form { display: flex; gap: 8px; margin-top: 16px; }
   .cxm-source-list { display: grid; gap: 8px; margin-top: 14px; }
   .cxm-source-row { display: flex; align-items: center; gap: 10px; padding: 11px; }
   .cxm-source-index { display: grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: 7px; background: rgba(199, 204, 212, .11); color: #d8dce3; font-size: 10px; font-weight: 700; }
   .cxm-source-body { min-width: 0; flex: 1; }
-  .cxm-source-url { overflow: hidden; color: #c6ccd8; font: 10px/1.35 ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+  .cxm-source-url { display: block; overflow: hidden; color: #c6ccd8; font: 10px/1.35 ui-monospace, monospace; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+  a.cxm-source-url:hover { color: #fff; text-decoration: underline; }
   .cxm-source-state { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: #737e90; font-size: 10px; }
   .cxm-source-actions { display: flex; flex: none; gap: 5px; }
   .cxm-mini-action { padding: 5px 7px; border: 1px solid rgba(255, 255, 255, .09); border-radius: 7px; background: transparent; color: #99a2b2; cursor: pointer; font: 10px/1.2 system-ui, sans-serif; }
   .cxm-mini-action:hover:not(:disabled) { color: #fff; border-color: rgba(199, 204, 212, .4); }
   .cxm-mini-action:disabled { cursor: default; opacity: .35; }
   @media (max-width: 760px) {
-    .cxm-dialog { grid-template-columns: 165px minmax(0, 1fr); }
+    .cxm-backdrop { padding: 10px; }
+    .cxm-dialog { grid-template-columns: 168px minmax(0, 1fr); width: calc(100vw - 20px); height: calc(100vh - 20px); }
     .cxm-card-grid, .cxm-detail-grid, .cxm-plugin-list { grid-template-columns: 1fr; }
+    .cxm-usage-header { grid-template-columns: 36px minmax(0, 1fr); }
+    .cxm-usage-header .cxm-source-input { grid-column: 2; }
   }
 `
 
@@ -889,7 +942,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   nav.setAttribute('aria-label', 'CordisX 管理器页面')
   const tabs: readonly { id: ManagerTab; icon?: ManagerIconToken; label: string; brand?: boolean }[] = [
     { id: 'plugins', icon: 'plugins', label: '插件' },
-    { id: 'slots', icon: 'contributions', label: '贡献与路由' },
+    { id: 'extension-points', icon: 'contributions', label: '扩展点' },
+    { id: 'routes', icon: 'routes', label: '路由' },
     { id: 'marketplace', icon: 'marketplace', label: '插件商店' },
     { id: 'settings', icon: 'settings', label: '配置' },
     { id: 'about', label: '关于 CordisX', brand: true },
@@ -934,14 +988,40 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   )
   let pluginQuery = ''
   let marketplaceQuery = ''
+  let extensionPointQuery = ''
+  let routeQuery = ''
   let secondaryView: SecondaryView | undefined
   let permissionDetail: PermissionDetailView | undefined
   let pluginDetailTab: PluginDetailTab = 'readme'
+  let extensionPointDetailTab: ExtensionPointDetailTab = 'usage'
+  let marketplaceDetailTab: MarketplaceDetailTab = 'overview'
   let settingsTab: SettingsTab = 'marketplace'
+  const listScrollPositions = new Map<ManagerTab, number>()
   let busyPluginId: string | undefined
   let operationError: string | undefined
   let sourceOperationError: string | undefined
   let sourcesBusy = false
+
+  const hideForExternalNavigation = (): void => {
+    modal.hidden = true
+    trigger.setAttribute('aria-expanded', 'false')
+  }
+
+  const configureExternalLink = <T extends HTMLAnchorElement>(link: T, href: string): T => {
+    link.href = href
+    link.target = '_blank'
+    link.rel = 'noopener noreferrer'
+    link.addEventListener('click', hideForExternalNavigation)
+    return link
+  }
+
+  const rememberListScroll = (): void => {
+    listScrollPositions.set(activeTab, content.scrollTop)
+  }
+
+  const restoreListScroll = (): void => {
+    content.scrollTop = listScrollPositions.get(activeTab) ?? 0
+  }
 
   const setHeading = (
     title: string,
@@ -984,7 +1064,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const identity = create(document, 'div', 'cxm-about-identity')
     const mark = createDarkBackgroundBrandMark(document)
     mark.classList.add('cxm-about-mark')
-    const identityCopy = create(document, 'div')
+    const identityCopy = create(document, 'div', 'cxm-about-identity-copy')
     identityCopy.append(
       create(document, 'div', 'cxm-about-name', 'CordisX'),
       create(document, 'div', 'cxm-about-version', `v${snapshot.version}`),
@@ -998,9 +1078,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const item = create(document, 'div', 'cxm-about-action-item')
       item.setAttribute('role', 'listitem')
       const link = create(document, 'a', 'cxm-about-action')
-      link.href = action.href
-      link.target = '_blank'
-      link.rel = 'noopener noreferrer'
+      configureExternalLink(link, action.href)
       const body = create(document, 'span', 'cxm-about-action-body')
       body.append(
         create(document, 'span', 'cxm-about-action-title', action.label),
@@ -1014,65 +1092,283 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     content.append(identity, actions)
   }
 
-  const renderSlots = (snapshot: ManagerSnapshot): void => {
-    setHeading('贡献与路由', '按 owning plugin 对账结构化 surfaces、commands、pages、routes 与 host outlets', { icon: 'contributions' })
-    const slots = create(document, 'div', 'cxm-slots')
-    for (const slot of CORDISX_SURFACE_NAMES) {
-      const registrations = snapshot.registrations.filter(item => item.surface === slot && item.visible)
-      const card = create(document, 'section', 'cxm-slot-card')
-      const head = create(document, 'div', 'cxm-slot-head')
-      head.append(
-        create(document, 'code', 'cxm-slot-name', slot),
-        create(document, 'span', 'cxm-count', `${registrations.length} 个活跃贡献`),
+  const extensionPointIcon = (point: ExtensionPointSnapshot): ManagerIconToken => (
+    point.kind === 'outlet' ? 'outlets' : point.icon === 'host:info' ? 'point-info' : 'contributions'
+  )
+
+  const renderExtensionPointList = (snapshot: ManagerSnapshot): void => {
+    setHeading('扩展点', '浏览宿主声明的界面点位，并管理每个插件对点位的使用权限', { icon: 'contributions' })
+    const search = create(document, 'input', 'cxm-search')
+    search.type = 'search'
+    search.placeholder = '搜索名称、介绍、点位 id 或插件…'
+    search.value = extensionPointQuery
+    search.setAttribute('aria-label', '搜索 CordisX 扩展点')
+    content.append(search)
+
+    const points = snapshot.extensionPoints?.points ?? []
+    const normalized = extensionPointQuery.trim().toLowerCase()
+    const filtered = points.filter(point => [
+      point.titleProjection.text,
+      point.descriptionProjection.text,
+      point.id,
+      point.kind,
+      ...point.plugins.flatMap(plugin => [plugin.name, plugin.identity.id, plugin.identity.source]),
+      ...point.plugins.flatMap(plugin => plugin.registrations.map(item => item.id)),
+      ...point.plugins.flatMap(plugin => plugin.routes.map(item => item.qualifiedId)),
+    ].join('\n').toLowerCase().includes(normalized))
+    const list = create(document, 'div', 'cxm-catalog-list')
+    list.setAttribute('role', 'list')
+    list.setAttribute('aria-label', '扩展点列表')
+    if (points.length === 0) list.append(create(document, 'div', 'cxm-empty', '当前宿主没有声明扩展点；请查看运行诊断。'))
+    else if (filtered.length === 0) list.append(create(document, 'div', 'cxm-empty', '没有匹配的扩展点'))
+    for (const point of filtered) {
+      const listItem = create(document, 'div', 'cxm-catalog-item')
+      listItem.setAttribute('role', 'listitem')
+      const row = create(document, 'button', 'cxm-catalog-row')
+      row.type = 'button'
+      row.dataset.extensionPointId = point.id
+      const copy = create(document, 'span', 'cxm-catalog-copy')
+      copy.append(
+        create(document, 'span', 'cxm-catalog-title', point.titleProjection.text),
+        create(document, 'span', 'cxm-catalog-description', point.descriptionProjection.text),
+        create(document, 'code', 'cxm-catalog-id', point.id),
       )
-      card.append(head)
-      const rows = create(document, 'div', 'cxm-contributions')
-      if (registrations.length === 0) {
-        rows.append(create(document, 'span', 'cxm-empty', '当前没有插件贡献'))
-      } else {
-        for (const registration of registrations) {
-          const row = create(document, 'span', 'cxm-contribution')
-          const dot = markDecorative(create(document, 'span', 'cxm-dot'))
-          dot.dataset.rendered = String(registration.rendered)
-          row.append(dot, create(document, 'strong', undefined, registration.owner), create(document, 'span', undefined, registration.id))
-          rows.append(row)
+      row.append(
+        createManagerIcon(document, extensionPointIcon(point), 'cxm-catalog-icon'),
+        copy,
+        create(document, 'span', 'cxm-kind-badge', point.kind === 'surface' ? '界面点位' : '页面出口'),
+        createManagerIcon(document, 'view-detail', 'cxm-chevron'),
+      )
+      row.addEventListener('click', () => {
+        rememberListScroll()
+        secondaryView = { kind: 'extension-point', id: point.id }
+        extensionPointDetailTab = 'usage'
+        operationError = undefined
+        renderContent()
+      })
+      listItem.append(row)
+      list.append(listItem)
+    }
+    content.append(list)
+    search.addEventListener('input', () => {
+      extensionPointQuery = search.value
+      renderContent()
+      const next = content.querySelector<HTMLInputElement>('.cxm-search')
+      next?.focus()
+      next?.setSelectionRange(extensionPointQuery.length, extensionPointQuery.length)
+    })
+  }
+
+  const renderExtensionPointDetail = (snapshot: ManagerSnapshot, id: string): void => {
+    const point = snapshot.extensionPoints?.points.find(item => item.id === id)
+    setHeading(point?.titleProjection.text ?? id, point?.descriptionProjection.text ?? '扩展点已不在当前宿主目录中', {
+      root: '扩展点',
+      onBack: () => {
+        secondaryView = undefined
+        renderContent()
+        restoreListScroll()
+      },
+    })
+    if (point === undefined) {
+      content.append(create(document, 'div', 'cxm-empty', '该扩展点已不在当前宿主目录中'))
+      return
+    }
+    content.append(createLocalTabs(document, [
+      { id: 'usage', label: '使用情况', icon: 'plugins' },
+      { id: 'information', label: '点位信息', icon: 'point-info' },
+      { id: 'diagnostics', label: '诊断', icon: 'diagnostics' },
+    ], extensionPointDetailTab, 'data-extension-point-detail-tab', (tab) => {
+      extensionPointDetailTab = tab as ExtensionPointDetailTab
+      renderContent()
+    }))
+
+    if (extensionPointDetailTab === 'usage') {
+      const panel = createTabPanel(document, '使用情况')
+      if (point.plugins.length === 0) panel.append(create(document, 'div', 'cxm-empty', '当前没有插件使用这个扩展点'))
+      const list = create(document, 'div', 'cxm-usage-list')
+      list.setAttribute('role', 'list')
+      for (const usage of point.plugins) {
+        const item = create(document, 'div', 'cxm-usage-item')
+        item.setAttribute('role', 'listitem')
+        const headerRow = create(document, 'div', 'cxm-usage-header')
+        const pluginCopy = create(document, 'div', 'cxm-plugin-body')
+        pluginCopy.append(
+          create(document, 'div', 'cxm-plugin-name', usage.name),
+          create(document, 'div', 'cxm-plugin-meta', `${usage.identity.id} · ${usage.status}`),
+          create(document, 'div', 'cxm-detail-id', usage.identity.source),
+        )
+        const policy = create(document, 'select', 'cxm-source-input')
+        policy.setAttribute('aria-label', `${usage.name}使用${point.titleProjection.text}的策略`)
+        for (const value of ['inherit', 'allow', 'deny'] as const) {
+          const option = document.createElement('option')
+          option.value = value
+          option.textContent = value === 'inherit' ? '跟随宿主默认' : value === 'allow' ? '允许' : '拒绝'
+          option.selected = usage.policy === value
+          policy.append(option)
         }
+        policy.disabled = model.setExtensionPointPolicy === undefined
+        policy.addEventListener('change', async () => {
+          policy.disabled = true
+          operationError = undefined
+          try {
+            await model.setExtensionPointPolicy?.(usage.identity.source, usage.identity.id, point.id, policy.value as 'inherit' | 'allow' | 'deny')
+          } catch (error) {
+            operationError = error instanceof Error ? error.message : String(error)
+          } finally {
+            renderContent()
+          }
+        })
+        headerRow.append(createPluginIcon(document, usage.name), pluginCopy, policy)
+        item.append(headerRow)
+        const resources = create(document, 'div', 'cxm-usage-resources')
+        if (point.kind === 'surface') {
+          for (const registration of usage.registrations) {
+            const state = !registration.valid ? '无效' : !registration.authorized ? '已拒绝' : registration.rendered ? '已渲染' : registration.pending ? '等待宿主锚点' : '已登记'
+            resources.append(create(document, 'div', 'cxm-resource-row', `${registration.id} · ${state}`))
+          }
+        } else {
+          for (const route of usage.routes) {
+            const pageId = `${route.owner}:${route.definition.page}`
+            resources.append(create(document, 'div', 'cxm-resource-row', `${route.qualifiedId} → ${pageId} · ${route.authorized ? '已授权' : '已拒绝'}`))
+          }
+        }
+        item.append(resources)
+        list.append(item)
       }
-      card.append(rows)
-      slots.append(card)
+      if (point.plugins.length > 0) panel.append(list)
+      if (operationError !== undefined) panel.append(create(document, 'div', 'cxm-error', operationError))
+      content.append(panel)
+      return
     }
-    content.append(slots)
-    content.append(createSectionTitle(document, 'Commands'))
-    if (snapshot.commands.length === 0) content.append(create(document, 'div', 'cxm-empty', '当前没有 command 注册'))
-    for (const command of snapshot.commands) {
-      content.append(create(
-        document,
-        'div',
-        command.lastError === undefined ? 'cxm-notice' : 'cxm-error',
-        `${command.qualifiedId} · running ${command.running}${command.lastError === undefined ? '' : ` · ${command.lastError}`}`,
-      ))
+
+    if (extensionPointDetailTab === 'information') {
+      const panel = createTabPanel(document, '点位信息')
+      const fields = create(document, 'div', 'cxm-detail-grid')
+      const outlet = point.kind === 'outlet' ? snapshot.navigation.outlets.find(item => item.id === point.id) : undefined
+      const rows: readonly (readonly [string, string])[] = [
+        ['稳定标识', point.id],
+        ['类型', point.kind === 'surface' ? '结构化界面点位' : '覆盖页面出口'],
+        ['宿主图标', point.icon],
+        ['可用状态', point.available ? '当前可用' : '当前不可用'],
+        ...(outlet === undefined ? [] : [
+          ['覆盖方式', outlet.placement],
+          ['上下文', outlet.contextKey ?? '等待宿主上下文'],
+        ] as const),
+      ]
+      for (const [label, value] of rows) {
+        const field = create(document, 'div', 'cxm-field')
+        field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
+        fields.append(field)
+      }
+      panel.append(fields)
+      content.append(panel)
+      return
     }
-    content.append(createSectionTitle(document, 'Routes / Pages'))
-    for (const route of snapshot.navigation.routes) {
-      content.append(create(
-        document,
-        'div',
-        route.valid ? 'cxm-notice' : 'cxm-error',
-        `${route.qualifiedId} · ${route.definition.path} → ${route.definition.outlet}/${route.definition.page}${route.error === undefined ? '' : ` · ${route.error}`}`,
-      ))
+
+    const panel = createTabPanel(document, '诊断')
+    const diagnostics = [
+      ...(point.availabilityError === undefined ? [] : [point.availabilityError]),
+      ...(snapshot.extensionPoints?.descriptorDiagnostics.filter(item => item.pointId === point.id).map(item => `${item.code} · ${item.message}`) ?? []),
+      ...(snapshot.extensionPoints?.policyDiagnostics.filter(item => item.identity.pointId === point.id).map(item => `${item.code} · ${item.message}`) ?? []),
+      ...(snapshot.extensionPoints?.accessDiagnostics.filter(item => item.request.identity.pointId === point.id).map(item => `${item.request.operation} · ${item.authorized ? '允许' : '拒绝'}${item.reason === undefined ? '' : ` · ${item.reason}`}`) ?? []),
+    ]
+    if (diagnostics.length === 0) panel.append(create(document, 'div', 'cxm-empty', '当前没有与这个扩展点相关的诊断'))
+    for (const diagnostic of diagnostics) panel.append(create(document, 'div', 'cxm-error', diagnostic))
+    content.append(panel)
+  }
+
+  const renderRouteList = (snapshot: ManagerSnapshot): void => {
+    setHeading('路由', '查看插件页面如何匹配路径并覆盖到宿主 outlet', { icon: 'routes' })
+    const search = create(document, 'input', 'cxm-search')
+    search.type = 'search'
+    search.placeholder = '搜索路由、路径、页面、outlet 或插件…'
+    search.value = routeQuery
+    search.setAttribute('aria-label', '搜索 CordisX 路由')
+    content.append(search)
+    const normalized = routeQuery.trim().toLowerCase()
+    const filtered = snapshot.navigation.routes.filter(route => [
+      route.qualifiedId,
+      route.owner,
+      route.definition.path,
+      route.definition.outlet,
+      route.definition.page,
+      route.error ?? '',
+    ].join('\n').toLowerCase().includes(normalized))
+    const list = create(document, 'div', 'cxm-catalog-list')
+    list.setAttribute('role', 'list')
+    list.setAttribute('aria-label', '路由列表')
+    if (filtered.length === 0) list.append(create(document, 'div', 'cxm-empty', '没有匹配的路由'))
+    for (const route of filtered) {
+      const listItem = create(document, 'div', 'cxm-catalog-item')
+      listItem.setAttribute('role', 'listitem')
+      const row = create(document, 'button', 'cxm-catalog-row')
+      row.type = 'button'
+      row.dataset.routeId = route.qualifiedId
+      const copy = create(document, 'span', 'cxm-catalog-copy')
+      copy.append(
+        create(document, 'span', 'cxm-catalog-title', route.qualifiedId),
+        create(document, 'span', 'cxm-catalog-description', `${route.definition.path} → ${route.definition.outlet}`),
+        create(document, 'code', 'cxm-catalog-id', `${route.owner}:${route.definition.page}`),
+      )
+      row.append(
+        createManagerIcon(document, 'routes', 'cxm-catalog-icon'),
+        copy,
+        create(document, 'span', 'cxm-kind-badge', route.valid && route.authorized ? '可用' : '受限'),
+        createManagerIcon(document, 'view-detail', 'cxm-chevron'),
+      )
+      row.addEventListener('click', () => {
+        rememberListScroll()
+        secondaryView = { kind: 'route', qualifiedId: route.qualifiedId }
+        renderContent()
+      })
+      listItem.append(row)
+      list.append(listItem)
     }
-    for (const page of snapshot.navigation.pages) {
-      content.append(create(document, 'div', 'cxm-notice', `${page.qualifiedId} · page mount registered`))
+    content.append(list)
+    search.addEventListener('input', () => {
+      routeQuery = search.value
+      renderContent()
+      const next = content.querySelector<HTMLInputElement>('.cxm-search')
+      next?.focus()
+      next?.setSelectionRange(routeQuery.length, routeQuery.length)
+    })
+  }
+
+  const renderRouteDetail = (snapshot: ManagerSnapshot, qualifiedId: string): void => {
+    const route = snapshot.navigation.routes.find(item => item.qualifiedId === qualifiedId)
+    setHeading(route?.qualifiedId ?? qualifiedId, '插件页面路由与宿主出口关联', {
+      root: '路由',
+      onBack: () => {
+        secondaryView = undefined
+        renderContent()
+        restoreListScroll()
+      },
+    })
+    if (route === undefined) {
+      content.append(create(document, 'div', 'cxm-empty', '该路由已不在当前 bundle 中'))
+      return
     }
-    content.append(createSectionTitle(document, 'Host Outlets'))
-    for (const outlet of snapshot.navigation.outlets) {
-      content.append(create(
-        document,
-        'div',
-        outlet.error === undefined ? 'cxm-notice' : 'cxm-error',
-        `${outlet.id} · ${outlet.placement} · contextKey ${outlet.contextKey ?? '<pending>'} · ${outlet.mounted ? `mounted ${outlet.activeRoute ?? ''}` : 'native content visible'}${outlet.error === undefined ? '' : ` · ${outlet.error}`}`,
-      ))
+    const pageId = `${route.owner}:${route.definition.page}`
+    const page = snapshot.navigation.pages.find(item => item.qualifiedId === pageId)
+    const outlet = snapshot.navigation.outlets.find(item => item.id === route.definition.outlet)
+    const fields = create(document, 'div', 'cxm-detail-grid')
+    for (const [label, value] of [
+      ['路径', route.definition.path],
+      ['宿主出口', route.definition.outlet],
+      ['页面', pageId],
+      ['拥有插件', route.owner],
+      ['路由状态', !route.valid ? '无效' : route.authorized ? '已授权' : '已拒绝'],
+      ['页面注册', page === undefined ? '缺失' : '已注册'],
+      ['出口状态', outlet === undefined ? '未声明' : outlet.available ? '可用' : '不可用'],
+      ['覆盖状态', outlet?.mounted && outlet.activeRoute === route.qualifiedId ? '当前已打开' : '未打开'],
+    ]) {
+      const field = create(document, 'div', 'cxm-field')
+      field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
+      fields.append(field)
     }
+    content.append(fields)
+    if (route.error !== undefined) content.append(create(document, 'div', 'cxm-error', route.error))
+    if (outlet?.error !== undefined) content.append(create(document, 'div', 'cxm-error', outlet.error))
   }
 
   const renderPluginList = (snapshot: ManagerSnapshot): void => {
@@ -1091,7 +1387,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         .join('\n').toLowerCase()
       return haystack.includes(normalized)
     })
-    toolbar.append(search, create(document, 'span', 'cxm-result-count', `${filtered.length} / ${snapshot.plugins.length}`))
+    toolbar.append(search)
     content.append(toolbar)
 
     const list = create(document, 'div', 'cxm-plugin-list')
@@ -1111,6 +1407,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       body.append(meta)
       row.append(body, createManagerIcon(document, 'view-detail', 'cxm-chevron'))
       row.addEventListener('click', () => {
+        rememberListScroll()
         secondaryView = { kind: 'plugin', id: plugin.id }
         permissionDetail = undefined
         pluginDetailTab = 'readme'
@@ -1224,6 +1521,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       onBack: () => {
         secondaryView = undefined
         renderContent()
+        restoreListScroll()
       },
     })
     if (plugin === undefined) {
@@ -1236,7 +1534,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       { id: 'config', label: '配置管理', icon: 'configuration' },
       { id: 'permissions', label: '权限', icon: 'permissions' },
       { id: 'runtime', label: '运行状态', icon: 'runtime' },
-      { id: 'slots', label: '扩展点位', icon: 'outlets' },
+      { id: 'extension-points', label: '扩展点位', icon: 'outlets' },
+      { id: 'routes', label: '路由', icon: 'routes' },
     ], pluginDetailTab, 'data-plugin-detail-tab', (tab) => {
       pluginDetailTab = tab as PluginDetailTab
       renderContent()
@@ -1354,7 +1653,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         ['注入服务', plugin.inject.join(', ') || '无'],
         ['活跃贡献', String(pluginRegistrations.filter(item => item.visible && item.valid).length)],
         ['Commands', String(pluginCommands.length)],
-        ['Routes / Pages', `${pluginRoutes.length} / ${pluginPages.length}`],
         ['元数据', '模块 manifest + launcher 绑定身份'],
       ]) {
         const field = create(document, 'div', 'cxm-field')
@@ -1389,12 +1687,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         ))
       }
       panel.append(createSectionTitle(document, '结构化运行时'))
-      if (pluginCommands.length === 0 && pluginRoutes.length === 0 && pluginPages.length === 0) {
-        panel.append(create(document, 'div', 'cxm-empty', '当前插件没有 command、route 或 page 注册'))
+      if (pluginCommands.length === 0) {
+        panel.append(create(document, 'div', 'cxm-empty', '当前插件没有 command 注册'))
       }
       for (const command of pluginCommands) panel.append(create(document, 'div', 'cxm-notice', `${command.qualifiedId} · running ${command.running}`))
-      for (const route of pluginRoutes) panel.append(create(document, 'div', route.valid ? 'cxm-notice' : 'cxm-error', `${route.qualifiedId} · ${route.definition.path}${route.error === undefined ? '' : ` · ${route.error}`}`))
-      for (const page of pluginPages) panel.append(create(document, 'div', 'cxm-notice', `${page.qualifiedId} · controlled mount`))
       const adapter = snapshot.platform
       const diagnostics = create(document, 'details', 'cxm-diagnostics')
       diagnostics.dataset.runtimeDiagnostics = 'platform'
@@ -1416,25 +1712,78 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return
     }
 
-    const panel = createTabPanel(document, '扩展点位')
-    const slots = create(document, 'div', 'cxm-slots')
-    if (pluginRegistrations.length === 0) slots.append(create(document, 'div', 'cxm-empty', '当前没有可归属到该插件的扩展点注册'))
-    for (const registration of pluginRegistrations) {
-      const card = create(document, 'section', 'cxm-slot-card')
-      const head = create(document, 'div', 'cxm-slot-head')
-      const registrationState = !registration.valid ? '无效' : !registration.visible ? '条件未满足' : registration.rendered ? '已渲染' : registration.pending ? '等待目标' : '已登记'
-      head.append(create(document, 'code', 'cxm-slot-name', registration.surface), create(document, 'span', 'cxm-count', registrationState))
-      const rows = create(document, 'div', 'cxm-contributions')
-      rows.append(
-        create(document, 'span', 'cxm-contribution', registration.id),
-        create(document, 'span', 'cxm-contribution', `order ${registration.order}`),
-        create(document, 'span', 'cxm-contribution', `group ${registration.group}`),
-        ...(registration.error === undefined ? [] : [create(document, 'span', 'cxm-contribution', registration.error)]),
-      )
-      card.append(head, rows)
-      slots.append(card)
+    if (pluginDetailTab === 'extension-points') {
+      const panel = createTabPanel(document, '扩展点位')
+      const points = (snapshot.extensionPoints?.points ?? []).filter(point => point.plugins.some(usage => (
+        usage.identity.source === plugin.source && usage.identity.id === plugin.id
+      )))
+      if (points.length === 0) panel.append(create(document, 'div', 'cxm-empty', '当前插件没有使用任何扩展点'))
+      const list = create(document, 'div', 'cxm-catalog-list')
+      list.setAttribute('role', 'list')
+      for (const point of points) {
+        const usage = point.plugins.find(item => item.identity.source === plugin.source && item.identity.id === plugin.id)
+        const item = create(document, 'div', 'cxm-catalog-row')
+        item.setAttribute('role', 'listitem')
+        const copy = create(document, 'span', 'cxm-catalog-copy')
+        copy.append(
+          create(document, 'span', 'cxm-catalog-title', point.titleProjection.text),
+          create(document, 'span', 'cxm-catalog-description', point.descriptionProjection.text),
+          create(document, 'code', 'cxm-catalog-id', point.id),
+        )
+        const state = usage?.authorized === false ? '已拒绝' : usage?.active === true ? '使用中' : '已登记'
+        item.append(
+          createManagerIcon(document, extensionPointIcon(point), 'cxm-catalog-icon'),
+          copy,
+          create(document, 'span', 'cxm-kind-badge', state),
+          create(document, 'span'),
+        )
+        if (point.kind === 'surface' && usage !== undefined && usage.registrations.length > 0) {
+          const resources = create(document, 'div', 'cxm-usage-resources')
+          resources.style.gridColumn = '2 / -1'
+          for (const registration of usage.registrations) {
+            resources.append(create(document, 'div', 'cxm-resource-row', registration.id))
+          }
+          item.append(resources)
+        }
+        list.append(item)
+      }
+      if (points.length > 0) panel.append(list)
+      content.append(panel)
+      return
     }
-    panel.append(slots)
+
+    const panel = createTabPanel(document, '路由')
+    if (pluginRoutes.length === 0 && pluginPages.length === 0) {
+      panel.append(create(document, 'div', 'cxm-empty', '当前插件没有注册路由或页面'))
+    }
+    const routeList = create(document, 'div', 'cxm-catalog-list')
+    routeList.setAttribute('role', 'list')
+    for (const route of pluginRoutes) {
+      const row = create(document, 'div', 'cxm-catalog-row')
+      row.setAttribute('role', 'listitem')
+      const copy = create(document, 'span', 'cxm-catalog-copy')
+      copy.append(
+        create(document, 'span', 'cxm-catalog-title', route.qualifiedId),
+        create(document, 'span', 'cxm-catalog-description', `${route.definition.path} → ${route.definition.outlet}`),
+        create(document, 'code', 'cxm-catalog-id', `${route.owner}:${route.definition.page}`),
+      )
+      row.append(
+        createManagerIcon(document, 'routes', 'cxm-catalog-icon'),
+        copy,
+        create(document, 'span', 'cxm-kind-badge', route.valid && route.authorized ? '可用' : '受限'),
+        create(document, 'span'),
+      )
+      routeList.append(row)
+    }
+    for (const page of pluginPages) {
+      const row = create(document, 'div', 'cxm-catalog-row')
+      row.setAttribute('role', 'listitem')
+      const copy = create(document, 'span', 'cxm-catalog-copy')
+      copy.append(create(document, 'span', 'cxm-catalog-title', page.qualifiedId), create(document, 'span', 'cxm-catalog-description', '受控页面 mount'))
+      row.append(createManagerIcon(document, 'document', 'cxm-catalog-icon'), copy, create(document, 'span', 'cxm-kind-badge', '页面'), create(document, 'span'))
+      routeList.append(row)
+    }
+    if (pluginRoutes.length > 0 || pluginPages.length > 0) panel.append(routeList)
     content.append(panel)
   }
 
@@ -1457,24 +1806,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       ...plugin.keywords,
       ...plugin.authors.map(author => author.name),
     ].join('\n').toLowerCase().includes(normalized))
-    toolbar.append(search, create(document, 'span', 'cxm-result-count', `${filtered.length} / ${snapshot.plugins.length}`))
+    toolbar.append(search)
     content.append(toolbar)
-
-    const feedSummary = create(document, 'div', 'cxm-feed-summary')
-    for (const source of snapshot.sourceStates) {
-      const chip = create(document, 'span', 'cxm-feed-chip')
-      const dot = create(document, 'span', 'cxm-status-dot')
-      markDecorative(dot)
-      dot.dataset.status = source.status
-      const label = source.status === 'loaded'
-        ? `${source.name ?? new URL(source.url).hostname} · ${source.pluginCount ?? 0}`
-        : source.status === 'loading' ? `${new URL(source.url).hostname} · 加载中` : `${new URL(source.url).hostname} · 失败`
-      chip.title = source.error ?? source.url
-      chip.append(dot, create(document, 'span', undefined, label))
-      feedSummary.append(chip)
-    }
-    if (snapshot.duplicates.length > 0) feedSummary.append(create(document, 'span', 'cxm-feed-chip', `${snapshot.duplicates.length} 个重复项已忽略`))
-    content.append(feedSummary)
 
     const list = create(document, 'div', 'cxm-plugin-list')
     if (!snapshot.loading && filtered.length === 0) {
@@ -1495,7 +1828,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       body.append(meta)
       row.append(body, createManagerIcon(document, 'view-detail', 'cxm-chevron'))
       row.addEventListener('click', () => {
+        rememberListScroll()
         secondaryView = { kind: 'marketplace', identity: plugin.identity }
+        marketplaceDetailTab = 'overview'
         renderContent()
       })
       list.append(row)
@@ -1521,43 +1856,76 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       onBack: () => {
         secondaryView = undefined
         renderContent()
+        restoreListScroll()
       },
     })
     if (plugin === undefined) {
       content.append(create(document, 'div', 'cxm-empty', '该插件已不在当前聚合结果中'))
       return
     }
-    const detailHead = create(document, 'div', 'cxm-detail-head')
-    const identity = create(document, 'code', 'cxm-detail-id', `${plugin.source} / ${plugin.id}`)
-    const sourceLink = create(document, 'a', 'cxm-action')
-    sourceLink.append(create(document, 'span', undefined, '查看源码'), createManagerIcon(document, 'external-link', 'cxm-action-icon'))
-    sourceLink.href = plugin.homepage ?? plugin.source
-    sourceLink.target = '_blank'
-    sourceLink.rel = 'noreferrer'
-    detailHead.append(identity, sourceLink)
-    content.append(detailHead, create(document, 'p', 'cxm-detail-description', plugin.description))
+    content.append(createLocalTabs(document, [
+      { id: 'overview', label: '概览', icon: 'overview' },
+      { id: 'authors-source', label: '作者与来源', icon: 'authors-source' },
+    ], marketplaceDetailTab, 'data-marketplace-detail-tab', (tab) => {
+      marketplaceDetailTab = tab as MarketplaceDetailTab
+      renderContent()
+    }))
 
-    const fields = create(document, 'div', 'cxm-detail-grid')
-    for (const [label, value] of [
-      ['版本', `v${plugin.version}`],
-      ['CordisX 兼容范围', plugin.compatibility.cordisx],
-      ['作者', plugin.authors.map(author => author.name).join(', ')],
-      ['许可证', plugin.license],
-      ['插件来源', plugin.source],
-      ['商店来源', `${plugin.feedName}\n${plugin.feedUrl}`],
-    ]) {
-      const field = create(document, 'div', 'cxm-field')
-      field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
-      fields.append(field)
+    if (marketplaceDetailTab === 'overview') {
+      const panel = createTabPanel(document, '概览')
+      panel.append(create(document, 'p', 'cxm-detail-description', plugin.description))
+      const fields = create(document, 'div', 'cxm-detail-grid')
+      for (const [label, value] of [
+        ['版本', `v${plugin.version}`],
+        ['CordisX 兼容范围', plugin.compatibility.cordisx],
+        ['许可证', plugin.license],
+        ['插件标识', plugin.id],
+      ]) {
+        const field = create(document, 'div', 'cxm-field')
+        field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
+        fields.append(field)
+      }
+      panel.append(fields)
+      if (plugin.keywords.length > 0) {
+        panel.append(createSectionTitle(document, '关键词'))
+        panel.append(create(document, 'p', 'cxm-copy', plugin.keywords.join(' · ')))
+      }
+      content.append(panel)
+      return
     }
-    content.append(fields)
-    if (plugin.keywords.length > 0) {
-      content.append(createSectionTitle(document, '关键词'))
-      content.append(create(document, 'p', 'cxm-copy', plugin.keywords.join(' · ')))
+
+    const panel = createTabPanel(document, '作者与来源')
+    const links = create(document, 'div', 'cxm-link-list')
+    links.setAttribute('role', 'list')
+    const appendLink = (label: string, value: string, href: string): void => {
+      const row = create(document, 'div', 'cxm-link-row')
+      row.setAttribute('role', 'listitem')
+      const copy = create(document, 'div', 'cxm-link-row-copy')
+      copy.append(create(document, 'div', 'cxm-link-row-title', label), create(document, 'code', 'cxm-link-row-value', value))
+      const link = configureExternalLink(create(document, 'a', 'cxm-action'), href)
+      link.append(create(document, 'span', undefined, '打开'), createManagerIcon(document, 'external-link', 'cxm-action-icon'))
+      row.append(copy, link)
+      links.append(row)
     }
-    const boundary = create(document, 'div', 'cxm-notice', '当前阶段只提供发现与源码跳转，不会下载、执行、安装或激活这个插件。')
+    for (const author of plugin.authors) {
+      if (author.url === undefined) {
+        const row = create(document, 'div', 'cxm-link-row')
+        row.setAttribute('role', 'listitem')
+        row.append(create(document, 'div', 'cxm-link-row-title', `作者 · ${author.name}`))
+        links.append(row)
+      } else appendLink(`作者 · ${author.name}`, author.url, author.url)
+    }
+    appendLink('插件源码', plugin.source, plugin.source)
+    if (plugin.homepage !== undefined) appendLink('插件主页', plugin.homepage, plugin.homepage)
+    if (plugin.manifest !== undefined) appendLink('插件 Manifest', plugin.manifest, plugin.manifest)
+    if (plugin.icon !== undefined) appendLink('插件图标', plugin.icon, plugin.icon)
+    appendLink(`商店来源 · ${plugin.feedName}`, plugin.feedUrl, plugin.feedUrl)
+    appendLink('商店主页', plugin.feedHomepage, plugin.feedHomepage)
+    panel.append(links)
+    const boundary = create(document, 'div', 'cxm-notice', '商店元数据与外部链接不代表代码审计、签名验证、安全批准或可安装性；当前不会下载、执行、安装或激活这个插件。')
     boundary.dataset.tone = 'warning'
-    content.append(boundary)
+    panel.append(boundary)
+    content.append(panel)
   }
 
   const commitSources = async (sources: readonly string[]): Promise<void> => {
@@ -1610,13 +1978,13 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const row = create(document, 'div', 'cxm-source-row')
       row.append(create(document, 'span', 'cxm-source-index', String(index + 1)))
       const body = create(document, 'div', 'cxm-source-body')
-      body.append(create(document, 'div', 'cxm-source-url', url))
+      body.append(configureExternalLink(create(document, 'a', 'cxm-source-url', url), url))
       const status = create(document, 'div', 'cxm-source-state')
       const dot = create(document, 'span', 'cxm-status-dot')
       markDecorative(dot)
       dot.dataset.status = state?.status ?? 'loading'
       const stateText = state?.status === 'loaded'
-        ? `${state.name ?? '已验证 feed'} · ${state.pluginCount ?? 0} 个插件`
+        ? `${state.name ?? '已验证 feed'} · 已加载`
         : state?.status === 'failed' ? `加载失败 · ${state.error ?? '未知错误'}` : '加载中…'
       status.append(dot, create(document, 'span', undefined, stateText))
       body.append(status)
@@ -1747,8 +2115,17 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       renderMarketplaceDetail(secondaryView.identity)
       return
     }
+    if (secondaryView?.kind === 'extension-point' && activeTab === 'extension-points') {
+      renderExtensionPointDetail(snapshot, secondaryView.id)
+      return
+    }
+    if (secondaryView?.kind === 'route' && activeTab === 'routes') {
+      renderRouteDetail(snapshot, secondaryView.qualifiedId)
+      return
+    }
     if (activeTab === 'about') renderAbout(snapshot)
-    if (activeTab === 'slots') renderSlots(snapshot)
+    if (activeTab === 'extension-points') renderExtensionPointList(snapshot)
+    if (activeTab === 'routes') renderRouteList(snapshot)
     if (activeTab === 'plugins') renderPluginList(snapshot)
     if (activeTab === 'marketplace') renderMarketplaceList()
     if (activeTab === 'settings') renderSettings()
@@ -1770,6 +2147,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
   trigger.addEventListener('click', open)
   close.addEventListener('click', dismiss)
+  content.addEventListener('click', (event) => {
+    const target = event.target instanceof document.defaultView!.Element ? event.target : undefined
+    if (target?.closest('a[href]') !== null && target !== undefined) hideForExternalNavigation()
+  })
   backdrop.addEventListener('click', (event) => {
     if (event.target === backdrop) dismiss()
   })

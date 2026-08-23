@@ -59,6 +59,13 @@ whether by pointer, Enter, or navigation key, focus is restored to the
 replacement active tab rather than falling back to the document body. Icons
 and focus restoration must not cause tab geometry to jump between panels.
 
+All local tablists share one leading inset. The left edge of the first tab's
+icon aligns exactly with the page-header leading seat, including installed
+plugin detail, marketplace detail, settings, extension-point detail, and any
+future tabbed page. Tab icons and header icons use the same zero-line-height
+grid and optical vertical adjustment; fixing one page with a local padding
+override is forbidden.
+
 ## Page headers
 
 Every primary page reserves the same fixed-width leading seat immediately to
@@ -124,10 +131,12 @@ identical geometry without making the title jump between navigation levels.
 ## Primary navigation, identity, and accent
 
 The primary navigation leads with the product's principal workflow. `插件`
-is the first item, followed by other ordinary manager areas including
-`贡献与路由`, `插件商店`, and `配置`. `关于 CordisX` is the only item anchored
-to the bottom of the navigation; configuration remains in the ordinary main
-group and must not share that bottom placement.
+is the first item, followed by separate `扩展点`, `路由`, `插件商店`, and
+`配置` areas. Their stable ids are `plugins`, `extension-points`, `routes`,
+`marketplace`, and `settings`; the old `slots` / `贡献与路由` page is retired.
+`关于 CordisX` (`about`) is the only item anchored to the bottom of the
+navigation. Extension points mean host-declared surfaces and outlets. Routes
+and pages are associated resources and therefore have their own primary page.
 
 The sidebar begins directly with primary navigation. It does not contain a
 separate `CORDISX` eyebrow, manager title, version, or logo block. Product
@@ -149,11 +158,51 @@ official dark-background SVG directly. They retain its continuous per-segment
 grey depth shading and never flatten it into a monochrome mask, recolor it with
 `currentColor`, redraw its paths, or add a frame or background.
 
-The About body is a concise product hub, not a runtime dashboard. After its
-identity row it exposes flat, actionable links such as issue feedback,
-contribution, and documentation. It does not repeat manager diagnostics,
-plugin counts, routes, outlets, locale metrics, trust notices, or blocking
-semantics that belong to their owning pages.
+The About body is a concise product hub, not a runtime dashboard. Its identity
+is one horizontal row: the official mark occupies the left seat while the
+`CordisX` name and dynamic runtime version form a non-wrapping copy column on
+the right. After that row it exposes flat, actionable links such as issue
+feedback, contribution, and documentation. It does not repeat manager
+diagnostics, plugin counts, routes, outlets, locale metrics, trust notices, or
+blocking semantics that belong to their owning pages.
+
+Every manager-owned external link uses ordinary browser navigation with
+`target="_blank"` and `rel="noopener noreferrer"`. Its click handler only
+synchronously hides the manager modal and sets the host trigger's
+`aria-expanded` to `false`; it does not cancel the default event, stop
+propagation, call `window.open`, or restore focus to the obscured trigger. This
+rule covers About links, marketplace author/source/homepage/manifest/icon
+links, feed provenance, and future external destinations.
+
+## Search and browsing lists
+
+Search is a direct filter, not a dashboard. Plugin, extension-point, route,
+and marketplace browse pages do not display result totals, ratios, aggregate
+usage counts, feed summary chips, duplicate counts, or per-row usage counts.
+Source health in configuration keeps only the source name and loading/loaded/
+failed state; it does not expose a feed plugin count. Stable status, version,
+source name, and diagnostics remain where they describe the current record.
+
+Search query and scroll position are page state. Opening a second-level record
+and returning restores both. The manager content viewport is the single
+vertical scroll owner; page headers, primary navigation, and local tab rows do
+not create competing vertical scroll containers.
+
+## Installed and marketplace plugin details
+
+Installed-plugin details use local tabs in this order: `README`, `配置管理`,
+`权限`, `运行状态`, `扩展点位`, and `路由`. `扩展点位` includes only the
+surface/outlet descriptors used by the plugin and their attributed
+contributions. `路由` owns routes, pages, and outlet associations. The runtime
+tab does not repeat route or page inventory.
+
+Marketplace detail reuses the same local-tab component, breadcrumb/back seat,
+roving tabindex, focus restoration, and panel semantics. Version 1 exposes
+only two honest facets: `概览` for description, version, compatibility,
+license, and keywords; and `作者与来源` for authors, source, optional homepage,
+manifest/icon links, feed provenance, and the trust boundary. The catalog does
+not synthesize README, permission, extension-point, route, runtime, install,
+or activation tabs when the feed schema does not provide those capabilities.
 
 Manager-owned interaction accents use a neutral silver-grey palette for
 selected navigation, local tabs, icons, focus rings, hover backgrounds, links,
@@ -233,6 +282,17 @@ At minimum they prove:
 - configuration and launcher tabs do not repeat their selected tab label; and
 - plugin and marketplace detail bodies do not repeat the breadcrumb record
   name in manager-owned headings.
+- primary navigation exposes separate `扩展点` and `路由` pages; installed
+  plugin detail exposes separate `扩展点位` and `路由` tabs, while runtime does
+  not repeat route/page inventory;
+- plugin, marketplace, extension-point, and route browse pages contain no
+  aggregate count or result-summary UI, and marketplace source health contains
+  no plugin count;
+- marketplace detail has exactly `概览` and `作者与来源` tabs and does not
+  present unsupported install/runtime/permission/README facets;
+- every manager-owned external link preserves uncancelled default navigation,
+  carries safe target/rel attributes, and synchronously hides the modal without
+  forcing focus back to the manager trigger;
 - primary navigation begins with `插件`, keeps `配置` in the main group, and
   anchors `关于 CordisX` at the bottom;
 - the modal sidebar begins with navigation and contains no identity block;
@@ -245,7 +305,8 @@ At minimum they prove:
   metric grid and generic boundary copy are absent;
 - every local tab has one decorative semantic icon and an unchanged accessible
   label, with no icon frame; roving tabindex, wrapped arrow navigation,
-  Home/End, and focus restoration survive manager re-rendering;
+  Home/End, and focus restoration survive manager re-rendering; the first icon
+  in every tablist shares the header leading seat's exact horizontal origin;
 - non-brand icons resolve to the documented per-icon Material Symbols imports,
   contain no Unicode placeholder glyphs, remain hidden from accessibility APIs,
   and cannot be selected, dragged, focused, or intercept pointer activation;
@@ -254,6 +315,9 @@ At minimum they prove:
   with that seat, and retain visible back button hover/focus feedback; and
 - manager CSS contains no purple accent tokens while preserving semantic
   success, warning, and error colors.
+- the desktop modal reaches `min(1440px, calc(100vw - 40px))` by
+  `min(960px, calc(100vh - 40px))`, retains a 248-pixel sidebar, and remains
+  bounded and usable on smaller viewports.
 
 Run the repository's complete `check` and `build` gates after DOM changes.
 Then capture a real isolated `app://` renderer screenshot of the affected
