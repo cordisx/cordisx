@@ -151,7 +151,7 @@ async function start(
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`
   const agentRuntime = new CordisXHostAgentRuntime({ adapter, broker, generation })
   const extensionPointDescriptors = new ExtensionPointDescriptorRegistry()
-  const extensionPointBroker = new ExtensionPointPolicyBroker(extensionPointDescriptors, new BrowserExtensionPointPolicyStore())
+  const extensionPointBroker = new ExtensionPointPolicyBroker(extensionPointDescriptors, new BrowserExtensionPointPolicyStore(), generation)
   const controllers: PluginController[] = plugins.map(createController)
   for (const controller of controllers) {
     controller.unregisterPermissions = broker.register(controller.identity, controller.manifest)
@@ -292,6 +292,7 @@ async function start(
         registrations: [...liveRegistrations, ...inactiveRegistrations],
         commands: commandService?.snapshot() ?? [],
         navigation,
+        surfaceAvailability: slotService?.registry.availabilitySnapshot() ?? [],
       }),
     }
   }
@@ -519,7 +520,10 @@ async function start(
       routeService.subscribeInternal(notify),
       slotService.subscribeInternal(notify),
     )
-    adapterHandle = installCodexAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors)
+    adapterHandle = installCodexAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, {
+      generation,
+      adapterVersion: metadata.version,
+    })
     for (const controller of controllers) {
       if (controller.status !== 'active') continue
       await mountPlugin(controller)

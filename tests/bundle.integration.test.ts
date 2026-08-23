@@ -12,7 +12,7 @@ interface RuntimeSnapshot {
   navigation: {
     routes: readonly { owner: string; qualifiedId: string; valid: boolean; authorized: boolean }[]
     pages: readonly { owner: string; qualifiedId: string }[]
-    outlets: readonly { id: string; contextKey?: string; activeRoute?: string; mounted: boolean; presentation: 'inactive' | 'presented' | 'suspended'; suspendedBy?: string }[]
+    outlets: readonly { id: string; available: boolean; error?: string; contextKey?: string; activeRoute?: string; mounted: boolean; presentation: 'inactive' | 'presented' | 'suspended'; suspendedBy?: string }[]
   }
   localization: { locale: string; direction: string; version: number }
   localeCatalogs: readonly { owner: string; locale: string }[]
@@ -29,7 +29,7 @@ interface RuntimeSnapshot {
     }[]
     policies: readonly { identity: { source: string; pluginId: string; pointId: string }; policy: string }[]
     descriptorDiagnostics: readonly unknown[]
-    accessDiagnostics: readonly { request: { operation: string; identity: { source: string; pluginId: string; pointId: string } }; authorized: boolean }[]
+    accessDiagnostics: readonly { request: { generation: string; operation: string; identity: { source: string; pluginId: string; pointId: string } }; authorized: boolean }[]
   }
 }
 
@@ -325,6 +325,7 @@ describe('renderer bundle', () => {
     await settle()
     expect(runtime!.snapshot().extensionPoints.accessDiagnostics.at(-1)).toMatchObject({
       request: {
+        generation: expect.not.stringMatching(/^generation-legacy$/),
         operation: 'outlet.page.command.invoke',
         routeId: 'slot-showcase:app.overview',
         pageId: 'slot-showcase:app.overview',
@@ -332,6 +333,24 @@ describe('renderer bundle', () => {
         commandId: 'slot-showcase:refresh',
       },
       authorized: true,
+    })
+    const ambiguousSessionSeat = dom.window.document.createElement('section')
+    ambiguousSessionSeat.dataset.pipAnchorHost = 'codex-main-thread'
+    ambiguousSessionSeat.dataset.appActionTimelineScroll = ''
+    ambiguousSessionSeat.innerHTML = `<div data-response-annotation-conversation="${sessionId}"></div><div data-above-composer-conversation-id="${sessionId}"></div>`
+    dom.window.document.querySelector('[data-app-shell-main-content-layout]')?.append(ambiguousSessionSeat)
+    await settle()
+    await settle()
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({
+      available: false,
+      error: 'semantic anchor is unavailable',
+    })
+    ambiguousSessionSeat.remove()
+    await settle()
+    await settle()
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({
+      available: true,
+      contextKey: `session:${sessionId}`,
     })
     await runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId } })
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({ activeRoute: 'slot-showcase:session.analytics', mounted: true, contextKey: `session:${sessionId}`, presentation: 'presented' })

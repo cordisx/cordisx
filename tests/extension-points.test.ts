@@ -27,6 +27,27 @@ describe('extension point runtime contract', () => {
     expect(registry.descriptors()).toHaveLength(33)
     expect(registry.descriptors().filter(item => item.kind === 'surface')).toHaveLength(28)
     expect(registry.descriptors().filter(item => item.kind === 'outlet')).toHaveLength(5)
+    expect(registry.descriptors()
+      .filter(item => item.stability === 'stable' && item.availability === 'available')
+      .map(item => item.id)
+      .sort()).toEqual([
+      'app',
+      'composer.toolbar.items',
+      'environment.panel.header-actions',
+      'environment.panel.sections',
+      'environment.row.trailing-actions',
+      'environment.section.actions',
+      'environment.section.rows',
+      'main',
+      'session.content',
+      'session.header.actions',
+      'sidebar.account.menu',
+      'sidebar.footer.after-control',
+      'sidebar.footer.before-control',
+      'sidebar.footer.menu',
+      'sidebar.navigation.items',
+      'workspace.toolbar.items',
+    ])
     expect(registry.descriptor('session.content')).toMatchObject({
       kind: 'outlet',
       title: { namespace: 'cordisx.manager.extension-points', key: 'outlet.session.content.title', fallback: 'Session content page' },
