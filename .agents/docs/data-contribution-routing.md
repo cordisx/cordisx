@@ -43,9 +43,8 @@ parallel `ctx.cordisx.contribute()` facade:
 - `ctx.pages.register()` registers a controlled page mount callback for a page
   id.
 
-Page mount props reserve `localeNamespace` and a framework-injected typed `t`
-seat. The runtime consumes a localization-kernel dependency; it does not define
-a partial dictionary product in this slice.
+Page mount props receive `localeNamespace`, a framework-injected typed `t` seat,
+and reactive locale bindings from the i18n v1 kernel.
 
 The runtime returns fiber-owned, idempotent handles. Structured contributions
 whose values change at runtime receive an `update(snapshot)` handle. Updates
@@ -84,8 +83,8 @@ render or navigate.
   navigation handles;
 - TypeScript `CommandMap`, `SurfaceMap`, and extensible `OutletMap` module
   augmentation;
-- the localization-kernel dependency interface and page-prop type seats, not a
-  dictionary/ICU implementation;
+- the i18n v1 kernel, fiber-owned dictionary registration, ICU projection,
+  typed translator seats, and page-prop reactive bindings;
 - the update-handle implementation and manager snapshot types.
 
 The `cordisx` private adapter/runtime owns all Codex-specific behavior:
@@ -103,7 +102,7 @@ The `cordisx` private adapter/runtime owns all Codex-specific behavior:
 Protocol schemas never contain a Codex selector, DOM class, React concept, or
 renderer-version assumption.
 
-## Localization kernel dependency
+## Localization kernel v1
 
 Structured UI cannot freeze already translated strings without blocking the
 i18n workstream. Version 1 therefore models every host-rendered text as a
@@ -112,7 +111,7 @@ serializable params, and optional fallback. The contribution ledger stores the
 reference unchanged. When `namespace` is absent, the registering owner id is
 the default namespace.
 
-The host runtime depends on a minimal injected `LocalizationKernel` contract:
+The host runtime integrates a `LocalizationKernel` contract:
 
 - `getSnapshot()` returns at least the current locale and a monotonically
   changing projection version;
@@ -128,12 +127,16 @@ missing-dictionary result. Framework-agnostic page props reserve a typed `t`
 seat and locale namespace; React and other adapters can supply their normal
 reactive binding later.
 
-The minimal real kernel/runtime service is a preceding stacked `cordisx` PR.
-The structured runtime consumes that service in integration and may inject a
-deterministic fake only in focused unit tests. Dictionary registration APIs
-such as future `ctx.i18n.define/register`, ICU compilation, language
-preferences, resource loading, extraction, and pseudo-locales belong to the
-kernel-owning or later full-i18n workstream, not the structured runtime PR.
+The i18n v1 kernel/runtime service is a preceding stacked `cordisx` PR. It owns
+the read-only `html[lang]/dir` adapter, canonical locale handling,
+fiber-owned namespace-by-locale dictionary registration, ICU MessageFormat
+compilation, exact/language/default fallback, typed `t` seats, reactive
+`getSnapshot/subscribe/effect/bind` APIs, replacement/unload, and deterministic
+missing namespace/key/params diagnostics. The structured runtime consumes that
+real service and may inject a deterministic fake only in focused unit tests.
+
+CordisX language preferences, remote dictionaries, extraction tooling,
+pseudo-locales, and marketplace translation remain later i18n workstreams.
 
 ## Future platform compatibility constraints
 
@@ -353,7 +356,8 @@ The compatibility unit is delivered in this order:
 1. this architecture and development plan in `cordisx`;
 2. `LocalizedText`/`MessageRef` and UI schemas/specification/conformance in
    `cordisx-protocol`;
-3. the minimal real `LocalizationKernel` runtime service in a `cordisx` PR;
+3. the usable i18n v1 kernel, adapter, dictionary registry, typed seats, and
+   reactive bindings in a `cordisx` PR;
 4. compatible command/surface/route/page/outlet registries and TypeScript
    contracts in a stacked `cordisx` runtime PR;
 5. private adapter outlets, structured host renderers, manager diagnostics,
@@ -366,8 +370,10 @@ Required automated coverage includes:
 - schema acceptance/rejection and downgrade behavior;
 - preservation of namespace/key/params in registry snapshots, render-time
   projection, locale-version reprojection without re-registration, missing-key
-  manager diagnostics, typed page-seat shape, and subscription cleanup through
-  the real kernel integration; focused unit tests may inject a fake;
+  and params diagnostics, canonical exact/language/default fallback,
+  dictionary replacement/unload, typed page-seat shape, and subscription and
+  generation cleanup through the real kernel integration; focused unit tests
+  may inject a fake;
 - registry ownership, unique ids, conflicts, deterministic sorting, unknown
   icons/context keys/targets, `when`, disabled state, and update-after-dispose;
 - primary command precedence over route and invalid no-activation entries;
@@ -402,5 +408,6 @@ schema validation, host-rendered shell DOM, and private adapters reduce
 accidental coupling but do not isolate a malicious plugin. Capability grants,
 signatures, package installation/update, marketplace activation, atomic
 generation publication, rollback, isolated realms, and MCP UI transport remain
-planned work. Full i18n kernel/product behavior and every platform/app-server
-bridge also remain outside this slice.
+planned work. CordisX language preferences, remote dictionaries, extraction,
+pseudo-locales, marketplace translation, and every platform/app-server bridge
+also remain outside this slice.

@@ -1,4 +1,9 @@
-import { CORDISX_SLOT_NAMES } from '../contracts.js'
+import {
+  CORDISX_SLOT_NAMES,
+  type CordisXLocalizationDiagnostic,
+  type CordisXLocalizationSnapshot,
+} from '../contracts.js'
+import type { LocaleCatalogSnapshot } from './i18n.js'
 import {
   BrowserMarketplaceModel,
   OFFICIAL_MARKETPLACE_SOURCE,
@@ -27,6 +32,9 @@ export interface ManagerSnapshot {
   readonly version: string
   readonly plugins: readonly ManagerPluginSnapshot[]
   readonly registrations: readonly SlotRegistrationSnapshot[]
+  readonly localization: CordisXLocalizationSnapshot
+  readonly localeCatalogs: readonly LocaleCatalogSnapshot[]
+  readonly localizationDiagnostics: readonly CordisXLocalizationDiagnostic[]
 }
 
 export interface ManagerModel {
@@ -641,6 +649,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       ['CordisX 版本', `v${snapshot.version}`],
       ['运行插件', `${active} / ${snapshot.plugins.length}`],
       ['语义扩展点', String(CORDISX_SLOT_NAMES.length)],
+      ['宿主语言', `${snapshot.localization.locale} / ${snapshot.localization.direction}`],
+      ['词典', String(snapshot.localeCatalogs.filter(item => item.active).length)],
+      ['i18n 诊断', String(snapshot.localizationDiagnostics.length)],
     ]) {
       const card = create(document, 'div', 'cxm-card')
       card.append(create(document, 'div', 'cxm-card-label', label), create(document, 'div', 'cxm-card-value', value))
@@ -828,6 +839,29 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       detail.append(fields)
       if (plugin.error !== undefined) detail.append(create(document, 'div', 'cxm-error', plugin.error))
       if (operationError !== undefined) detail.append(create(document, 'div', 'cxm-error', operationError))
+      const localeCatalogs = snapshot.localeCatalogs.filter(item => item.owner === plugin.id)
+      const localeDiagnostics = snapshot.localizationDiagnostics.filter(item => item.owner === plugin.id)
+      detail.append(create(document, 'div', 'cxm-section-title', '本地化'))
+      if (localeCatalogs.length === 0) {
+        detail.append(create(document, 'div', 'cxm-empty', '当前插件没有活跃 locale dictionary'))
+      } else {
+        for (const catalog of localeCatalogs) {
+          detail.append(create(
+            document,
+            'div',
+            'cxm-notice',
+            `${catalog.namespace} · ${catalog.locale} · ${catalog.messageCount} keys · ${catalog.active ? 'active' : 'shadowed'}`,
+          ))
+        }
+      }
+      for (const diagnostic of localeDiagnostics) {
+        detail.append(create(
+          document,
+          'div',
+          'cxm-error',
+          `${diagnostic.diagnostic ?? 'unknown'} · ${diagnostic.namespace}:${diagnostic.key} · ${diagnostic.text}`,
+        ))
+      }
       content.append(detail)
       return
     }
