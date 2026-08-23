@@ -32,10 +32,12 @@ describe('CordisX brand assets', () => {
     expect(new Set([...dark.matchAll(/stroke="(#[0-9a-f]{6})"/gi)].map(match => match[1])).size).toBeGreaterThan(10)
   })
 
-  it('uses the same theme-aware assets in the repository README', async () => {
-    const readme = await read('README.md')
-    expect(readme).toContain('<source media="(prefers-color-scheme: dark)" srcset="./packages/cli/assets/brand/cordisx-mark-dark.svg">')
-    expect(readme).toContain('<source media="(prefers-color-scheme: light)" srcset="./packages/cli/assets/brand/cordisx-mark-light.svg">')
-    expect(readme).toContain('<img alt="CordisX three-ring spherical mark" src="./packages/cli/assets/brand/cordisx-mark-light.svg" width="180">')
+  it('uses the same theme-aware assets in both repository READMEs', async () => {
+    for (const path of ['README.md', 'README.zh-CN.md']) {
+      const readme = await read(path)
+      expect(readme).toContain('<source media="(prefers-color-scheme: dark)" srcset="./packages/cli/assets/brand/cordisx-mark-dark.svg">')
+      expect(readme).toContain('<source media="(prefers-color-scheme: light)" srcset="./packages/cli/assets/brand/cordisx-mark-light.svg">')
+      expect(readme).toContain('<img alt="CordisX three-ring spherical mark" src="./packages/cli/assets/brand/cordisx-mark-light.svg" width="180">')
+    }
   })
 })
