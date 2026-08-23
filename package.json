@@ -27,6 +27,7 @@
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.1",
     "esbuild": "^0.25.9",
+    "intl-messageformat": "11.2.14",
     "ws": "^8.18.3"
   },
   "devDependencies": {

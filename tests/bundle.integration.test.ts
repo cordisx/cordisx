@@ -79,6 +79,9 @@ describe('renderer bundle', () => {
         snapshot(): {
           plugins: readonly { id: string; status: string; readme?: string }[]
           registrations: readonly { pluginId: string; slot: string; active: boolean }[]
+          localization: { locale: string; direction: string; version: number }
+          localeCatalogs: readonly unknown[]
+          localizationDiagnostics: readonly unknown[]
         }
         dispose(): Promise<void>
       }
@@ -95,6 +98,9 @@ describe('renderer bundle', () => {
       expect.objectContaining({ pluginId: 'slot-showcase', slot: 'sidebar.footer' }),
       expect.objectContaining({ pluginId: 'slot-showcase', slot: 'shell.overlay' }),
     ]))
+    expect(runtime?.snapshot().localization).toMatchObject({ locale: 'en', direction: 'ltr' })
+    expect(runtime?.snapshot().localeCatalogs).toEqual([])
+    expect(runtime?.snapshot().localizationDiagnostics).toEqual([])
 
     const managerTrigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')
     expect(managerTrigger?.previousElementSibling?.id).toBe('workspace-switcher')
@@ -112,6 +118,7 @@ describe('renderer bundle', () => {
     expect(primaryLeading?.classList.contains('cxm-heading-icon')).toBe(true)
     expect(dom.window.getComputedStyle(primaryLeading as HTMLElement).width).toBe('26px')
     expect(primaryLeading?.textContent).toBe('◈')
+    expect(managerModal?.textContent).toContain('宿主语言')
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="slots"]')?.click()
     expect(dom.window.document.querySelector('.cxm-heading-icon')?.textContent).toBe('⊞')
     expect(managerModal?.textContent).toContain('header.actions')

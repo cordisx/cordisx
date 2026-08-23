@@ -7,6 +7,7 @@ import {
   type ManagerPluginStatus,
   type ManagerSnapshot,
 } from './manager.js'
+import { CordisXI18nService } from './i18n.js'
 import { CORDISX_PLUGIN_ID, CordisXSlotService } from './service.js'
 import type { SlotRegistrationSnapshot } from './slots.js'
 
@@ -93,8 +94,11 @@ async function start(
   const listeners = new Set<() => void>()
   const knownRegistrations = new Map<string, readonly SlotRegistrationSnapshot[]>()
   let slotService: CordisXSlotService | undefined
-  let serviceFiber: Fiber | undefined
+  let i18nService: CordisXI18nService | undefined
+  let i18nFiber: Fiber | undefined
+  let slotFiber: Fiber | undefined
   let disposeManager: (() => void) | undefined
+  let disposeI18nSubscription: (() => void) | undefined
   let operation = Promise.resolve()
   let disposed = false
 
@@ -145,6 +149,9 @@ async function start(
         ...(controller.error === undefined ? {} : { error: controller.error }),
       })),
       registrations: [...liveRegistrations, ...inactiveRegistrations],
+      localization: i18nService?.getSnapshot() ?? { locale: 'en', direction: 'ltr', version: 0 },
+      localeCatalogs: i18nService?.catalogs() ?? [],
+      localizationDiagnostics: i18nService?.diagnostics() ?? [],
     }
   }
 
@@ -196,13 +203,17 @@ async function start(
     disposed = true
     disposeManager?.()
     disposeManager = undefined
+    disposeI18nSubscription?.()
+    disposeI18nSubscription = undefined
     await operation
     for (const controller of [...controllers].reverse()) {
       await controller.fiber?.dispose()
       delete controller.fiber
     }
-    await serviceFiber?.dispose()
-    serviceFiber = undefined
+    await slotFiber?.dispose()
+    slotFiber = undefined
+    await i18nFiber?.dispose()
+    i18nFiber = undefined
     listeners.clear()
     if (globalThis.__cordisxRuntime === handle) globalThis.__cordisxRuntime = undefined
     document.documentElement.removeAttribute('data-cordisx-ready')
@@ -218,8 +229,12 @@ async function start(
   }
 
   try {
-    serviceFiber = ctx.plugin(CordisXSlotService)
-    await serviceFiber
+    i18nFiber = ctx.plugin(CordisXI18nService)
+    await i18nFiber
+    i18nService = ctx.i18n as CordisXI18nService
+    disposeI18nSubscription = i18nService.subscribeInternal(notify)
+    slotFiber = ctx.plugin(CordisXSlotService)
+    await slotFiber
     slotService = ctx.slots as CordisXSlotService
     for (const controller of controllers) {
       if (controller.status !== 'active') continue

@@ -105,7 +105,9 @@ Dependency and PR order is fixed:
 2. land `LocalizedText`/`MessageRef` plus the implementation-independent UI
    descriptors, schemas, compatibility rules, and conformance vectors in
    `cordisx-protocol`;
-3. land the minimal real `LocalizationKernel` runtime service in `cordisx`;
+3. land the usable i18n v1 `LocalizationKernel`, read-only document locale
+   adapter, fiber-owned dictionaries, typed translator seats, and reactive page
+   bindings in `cordisx`;
 4. land command, structured-surface, route, page, and outlet registries against
    that real kernel service in a stacked `cordisx` runtime PR; focused unit
    tests may inject a deterministic fake kernel;
@@ -124,12 +126,13 @@ ownership, conflict, order, `when`, disabled, command loading/error, and update
 tests; route matching and parameter checks; internal history/back/close;
 same-context anchor replacement with state retention; different-context abort;
 overlay geometry and portal fallback; native DOM non-replacement and layout
-non-disturbance; message-reference retention, missing-key diagnostics, and
-locale-version reprojection through the real kernel integration while focused
-unit tests may inject a fake; plugin block/restore and generation disposal; plus real sidebar,
-session, panel, and native-data-flow probes. Full dictionary registration, ICU
-compilation, language preferences, resource loading, extraction, pseudo-locales,
-capability enforcement,
+non-disturbance; canonical locale resolution, exact/language/default fallback,
+fiber-owned dictionary replacement/unload, ICU parameters, missing-key/params
+diagnostics, typed seats and page bindings, and locale-version reprojection
+through the real kernel integration while focused unit tests may inject a fake;
+plugin block/restore and generation disposal; plus real sidebar, session,
+panel, locale, and native-data-flow probes. CordisX language-preference UI,
+remote dictionaries, extraction tooling, pseudo-locales, capability enforcement,
 signing, installation, marketplace activation, and untrusted-code isolation
 remain explicitly out of scope.
 
