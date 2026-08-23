@@ -398,6 +398,52 @@ interface NativeSurfaceSeat {
   readonly className: string
 }
 
+interface NativeActionSeat extends NativeSurfaceSeat {
+  readonly template: HTMLButtonElement
+}
+
+function resolveSessionHeaderSeat(document: Document, sessionId: string | undefined): NativeActionSeat | undefined {
+  if (sessionId === undefined) return undefined
+  const surface = uniqueVisible(document, '[data-testid="app-shell-header-context-menu-surface"]')
+  if (surface === undefined) return undefined
+  const template = nativeButtons(surface).at(-1)
+  if (template === undefined) return undefined
+  const anchor = nativeControlInsertionAnchor(document, template)
+  const parent = anchor.parentElement
+  if (parent === null || !surface.contains(parent)) return undefined
+  return {
+    key: 'session.header.actions',
+    parent,
+    before: anchor,
+    className: 'cordisx-session-header-actions',
+    template,
+  }
+}
+
+function resolveComposerSubmitSeat(document: Document, sessionId: string | undefined): NativeActionSeat | undefined {
+  if (sessionId === undefined) return undefined
+  const roots = [...document.querySelectorAll<HTMLElement>('[data-codex-composer-root][data-composer-placement]')]
+    .filter(visible)
+    .filter(root => [...root.querySelectorAll('[data-above-composer-conversation-id]')]
+      .some(marker => marker.getAttribute('data-above-composer-conversation-id') === sessionId))
+  if (roots.length !== 1) return undefined
+  const footers = [...roots[0]!.querySelectorAll<HTMLElement>('[data-composer-footer-responsive]')].filter(visible)
+  if (footers.length !== 1) return undefined
+  const footer = footers[0]!
+  const template = nativeButtons(footer).at(-1)
+  if (template === undefined) return undefined
+  const anchor = nativeControlInsertionAnchor(document, template)
+  const parent = anchor.parentElement
+  if (parent === null || !footer.contains(parent)) return undefined
+  return {
+    key: 'composer.submit.before',
+    parent,
+    before: anchor,
+    className: 'cordisx-composer-submit-before',
+    template,
+  }
+}
+
 class StructuredSurfaceRenderer {
   private readonly roots = new Map<string, HTMLElement>()
   private readonly sites = new Set<string>()
@@ -469,7 +515,6 @@ class StructuredSurfaceRenderer {
   }
 
   private render(rebuild: boolean): void {
-    const snapshots = this.slots.snapshot()
     const nextSites = new Set<string>()
     if (!rebuild) for (const site of this.sites) nextSites.add(site)
     const usedRoots = new Set<string>()
@@ -484,6 +529,8 @@ class StructuredSurfaceRenderer {
     const toolbarControl = toolbar === undefined ? undefined : resolveToolbarControl(toolbar)
     const toolbarMenuControl = toolbar === undefined ? undefined : resolveToolbarMenuControl(toolbar)
     const sessionId = currentSessionId(this.document)
+    const sessionHeaderSeat = resolveSessionHeaderSeat(this.document, sessionId)
+    const composerSubmitSeat = resolveComposerSubmitSeat(this.document, sessionId)
     const contextValues = {
       'sidebar.visible': sidebarNavigation !== undefined || sidebarFooterControl !== undefined,
       'toolbar.visible': toolbarControl !== undefined,
@@ -493,6 +540,29 @@ class StructuredSurfaceRenderer {
     this.slots.contexts.replace(contextValues)
     this.routes.contexts.replace(contextValues)
     this.slots.registry.setToolbarAnchors(toolbarControl === undefined ? [] : ['workspace.primary'])
+    this.slots.registry.setSurfaceAnchors('composer.toolbar.items', composerSubmitSeat === undefined ? [] : [{ id: 'submit', placements: ['before'] }])
+    this.slots.registry.setAvailability([
+      { surface: 'sidebar.navigation.items', state: sidebarNavigation === undefined ? 'pending' : 'available', ...(sidebarNavigation === undefined ? { code: 'anchor-unresolved', detail: 'unique visible sidebar navigation seat is unavailable' } : {}) },
+      { surface: 'sidebar.footer.before-control', state: sidebarFooterControl === undefined ? 'pending' : 'available', ...(sidebarFooterControl === undefined ? { code: 'anchor-unresolved', detail: 'unique visible sidebar footer control is unavailable' } : {}) },
+      { surface: 'sidebar.footer.after-control', state: sidebarFooterControl === undefined ? 'pending' : 'available', ...(sidebarFooterControl === undefined ? { code: 'anchor-unresolved', detail: 'unique visible sidebar footer control is unavailable' } : {}) },
+      { surface: 'sidebar.footer.menu', state: sidebarFooterControl === undefined ? 'pending' : 'available', ...(sidebarFooterControl === undefined ? { code: 'anchor-unresolved', detail: 'native sidebar footer menu control is unavailable' } : {}) },
+      { surface: 'sidebar.account.menu', state: accountControl === undefined ? 'pending' : 'available', ...(accountControl === undefined ? { code: 'anchor-unresolved', detail: 'native account menu control is unavailable' } : {}) },
+      { surface: 'workspace.toolbar.items', state: toolbarControl === undefined ? 'pending' : 'available', ...(toolbarControl === undefined ? { code: 'anchor-unresolved', detail: 'unique visible workspace toolbar control is unavailable' } : {}) },
+      { surface: 'session.header.actions', state: sessionHeaderSeat === undefined ? 'pending' : 'available', ...(sessionHeaderSeat === undefined ? { code: 'anchor-unresolved', detail: 'unique visible active-session header action seat is unavailable' } : {}) },
+      {
+        surface: 'composer.toolbar.items', state: composerSubmitSeat === undefined ? 'pending' : 'available',
+        ...(composerSubmitSeat === undefined ? { code: 'anchor-unresolved', detail: 'unique visible active-session composer submit seat is unavailable' } : {}),
+        anchors: [
+          { id: 'submit', placements: ['before'], state: composerSubmitSeat === undefined ? 'pending' : 'available', ...(composerSubmitSeat === undefined ? { code: 'anchor-unresolved', detail: 'terminal native composer control is unavailable' } : {}) },
+          { id: 'leading', placements: ['before', 'after'], state: 'pending', code: 'release-unverified', detail: 'composer leading anchor is not release-verified' },
+          { id: 'model', placements: ['before', 'after', 'menu'], state: 'pending', code: 'release-unverified', detail: 'composer model anchor is not release-verified' },
+        ],
+      },
+      ...(['environment.panel.header-actions', 'environment.panel.sections', 'environment.section.actions', 'environment.section.rows', 'environment.row.trailing-actions'] as const)
+        .map(surface => ({ surface, state: environment === undefined ? 'pending' as const : 'available' as const, ...(environment === undefined ? { code: 'anchor-unresolved', detail: 'visible environment panel is unavailable' } : {}) })),
+    ])
+
+    const snapshots = this.slots.snapshot()
 
     const active = snapshots.filter(item => item.visible && item.authorized && item.valid && !item.pending)
     if (sidebarNavigation !== undefined) {
@@ -560,6 +630,24 @@ class StructuredSurfaceRenderer {
       }
     }
     this.reconcileToolbarSlot(toolbarControl, usedRoots)
+    if (sessionHeaderSeat !== undefined) {
+      availableSurfaces.add('session.header.actions')
+      const items = active.filter(item => item.surface === 'session.header.actions')
+      if (items.length > 0) {
+        const root = this.placeRoot(sessionHeaderSeat, usedRoots)
+        if (rebuild || root.childElementCount === 0) this.renderActions(root, items, nextSites, 'header', sessionHeaderSeat.template, 'toolbar')
+      }
+    }
+    if (composerSubmitSeat !== undefined) {
+      availableSurfaces.add('composer.toolbar.items')
+      const items = active.filter(item => item.surface === 'composer.toolbar.items'
+        && (item.item as { anchor: string; placement: string }).anchor === 'submit'
+        && (item.item as { anchor: string; placement: string }).placement === 'before')
+      if (items.length > 0) {
+        const root = this.placeRoot(composerSubmitSeat, usedRoots)
+        if (rebuild || root.childElementCount === 0) this.renderActions(root, items, nextSites, 'submit.before', composerSubmitSeat.template, 'shortcut')
+      }
+    }
     if (environment !== undefined) {
       for (const surface of [
         'environment.panel.header-actions', 'environment.panel.sections', 'environment.section.actions',
@@ -669,7 +757,8 @@ class StructuredSurfaceRenderer {
     button.setAttribute('aria-label', action.ariaLabel === undefined
       ? label
       : this.text(snapshot, action.ariaLabel, `${path}.ariaLabel`, nextSites))
-    const command = this.commands.snapshot().find(item => item.qualifiedId === (action.command.id.includes(':') ? action.command.id : `${snapshot.owner}:${action.command.id}`))
+    const commandId = action.command?.id
+    const command = commandId === undefined ? undefined : this.commands.snapshot().find(item => item.qualifiedId === (commandId.includes(':') ? commandId : `${snapshot.owner}:${commandId}`))
     const actionState = action as CordisXStructuredAction & { when?: Parameters<typeof evaluateWhen>[0]; disabled?: { value: boolean; reason?: CordisXLocalizedText } }
     button.hidden = !evaluateWhen(actionState.when, this.slots.contexts.getSnapshot())
     button.disabled = snapshot.disabled || actionState.disabled?.value === true || (command?.running ?? 0) > 0
@@ -678,10 +767,15 @@ class StructuredSurfaceRenderer {
     button.addEventListener('click', (event) => {
       event.stopPropagation()
       afterActivate?.()
-      void this.commands.executeFor(snapshot.owner, action.command, `${snapshot.surface}:${snapshot.qualifiedId}:${path}`, {
-        pointId: snapshot.surface,
-        contributionId: snapshot.qualifiedId,
-      }).catch(error => {
+      const operation = action.command !== undefined
+        ? this.commands.executeFor(snapshot.owner, action.command, `${snapshot.surface}:${snapshot.qualifiedId}:${path}`, {
+            pointId: snapshot.surface,
+            contributionId: snapshot.qualifiedId,
+          })
+        : action.route !== undefined
+          ? this.routes.navigateFor(snapshot.owner, action.route)
+          : Promise.reject(new Error('surface action has no activation'))
+      void operation.catch(error => {
         button.dataset.error = error instanceof Error ? error.message : String(error)
         this.schedule(true)
       })
@@ -732,9 +826,16 @@ class StructuredSurfaceRenderer {
     root.append(navigation)
   }
 
-  private renderActions(root: HTMLElement, snapshots: readonly SurfaceContributionSnapshot[], sites: Set<string>, path: string, template: HTMLButtonElement): void {
+  private renderActions(
+    root: HTMLElement,
+    snapshots: readonly SurfaceContributionSnapshot[],
+    sites: Set<string>,
+    path: string,
+    template: HTMLButtonElement,
+    preferredPattern?: 'toolbar' | 'footer' | 'shortcut',
+  ): void {
     root.replaceChildren()
-    const pattern = template.closest('header[data-app-shell-application-menu-bar]') === null ? 'footer' : 'toolbar'
+    const pattern = preferredPattern ?? (template.closest('header[data-app-shell-application-menu-bar]') === null ? 'footer' : 'toolbar')
     for (const snapshot of snapshots) root.append(this.button(snapshot, snapshot.item as CordisXStructuredAction, path, sites, pattern, template))
   }
 
@@ -787,10 +888,15 @@ class StructuredSurfaceRenderer {
       item.addEventListener('pointermove', () => item.focus())
       const activate = (): void => {
         control.click()
-        void this.commands.executeFor(snapshot.owner, action.command, `${snapshot.surface}:${snapshot.qualifiedId}:menu`, {
-          pointId: snapshot.surface,
-          contributionId: snapshot.qualifiedId,
-        }).catch(error => { item.dataset.error = error instanceof Error ? error.message : String(error); this.schedule(true) })
+        const operation = action.command !== undefined
+          ? this.commands.executeFor(snapshot.owner, action.command, `${snapshot.surface}:${snapshot.qualifiedId}:menu`, {
+              pointId: snapshot.surface,
+              contributionId: snapshot.qualifiedId,
+            })
+          : action.route !== undefined
+            ? this.routes.navigateFor(snapshot.owner, action.route)
+            : Promise.reject(new Error('surface menu item has no activation'))
+        void operation.catch(error => { item.dataset.error = error instanceof Error ? error.message : String(error); this.schedule(true) })
       }
       item.addEventListener('click', event => { event.stopPropagation(); activate() })
       item.addEventListener('keydown', event => {
@@ -860,6 +966,7 @@ function installStyles(document: Document): () => void {
     .cordisx-sidebar-navigation { display: block; width: 100%; min-width: 0; }
     .cordisx-sidebar-footer-before, .cordisx-sidebar-footer-after { display: flex; flex: 0 0 auto; height: 32px; align-items: center; gap: 4px; min-width: 0; }
     .cordisx-toolbar-before, .cordisx-toolbar-after { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: 4px; min-width: 0; }
+    .cordisx-session-header-actions, .cordisx-composer-submit-before { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: 4px; min-width: 0; }
     .cordisx-environment { display: block; width: 100%; min-width: 0; padding: 6px; }
     .cordisx-navigation, .cordisx-env-section { display: grid; gap: 1px; }
     .cordisx-nav-row { display: grid; grid-template-columns: minmax(0,1fr) max-content; align-items: center; height: var(--height-token-row,30px); padding: 0 8px; border-radius: var(--radius-lg,10px); -webkit-app-region: no-drag; }

@@ -1,5 +1,6 @@
 import { Context, Service, type Effect } from '@deepseek-ai/cordis'
 import {
+  CORDISX_IMPLEMENTED_SURFACE_NAMES,
   CORDISX_SURFACE_NAMES,
   type CordisXCommandReference,
   type CordisXContributionHandle,
@@ -15,6 +16,8 @@ import {
   type CordisXStructuredAction,
   type CordisXSurfaceMap,
   type CordisXSurfaceName,
+  type CordisXTabItem,
+  type CordisXPresenterItem,
   type CordisXToolbarItem,
   type CordisXWhen,
 } from '../contracts.js'
@@ -79,6 +82,24 @@ export interface SurfaceContributionSnapshot {
   readonly pending: boolean
   readonly rendered: boolean
   readonly error?: string
+  readonly availabilityCode?: string
+  readonly availabilityDetail?: string
+}
+
+export interface SurfaceAnchorAvailability {
+  readonly id: string
+  readonly placements: readonly ('before' | 'after' | 'menu')[]
+  readonly state: 'available' | 'pending' | 'unavailable'
+  readonly code?: string
+  readonly detail?: string
+}
+
+export interface SurfaceAvailabilitySnapshot {
+  readonly surface: string
+  readonly state: 'available' | 'pending' | 'unavailable'
+  readonly code?: string
+  readonly detail?: string
+  readonly anchors?: readonly SurfaceAnchorAvailability[]
 }
 
 export interface SurfaceResolvers {
@@ -103,11 +124,19 @@ function assertCommand(reference: CordisXCommandReference, label: string): void 
   assertKeys(reference, ['id', 'arguments'], `${label} command`)
 }
 
+function assertRoute(reference: { readonly id: string; readonly params?: Readonly<Record<string, unknown>> }, label: string): void {
+  if (reference === null || typeof reference !== 'object') throw new Error(`${label} requires a route reference`)
+  assertReference(reference.id, `${label} route id`)
+  assertKeys(reference, ['id', 'params'], `${label} route`)
+}
+
 function assertAction(action: CordisXStructuredAction, label: string): void {
   assertLocalizedText(action.label, `${label} label`)
   if (action.ariaLabel !== undefined) assertLocalizedText(action.ariaLabel, `${label} ariaLabel`)
   assertIcon(action.icon, label)
-  assertCommand(action.command, label)
+  if (action.command === undefined && action.route === undefined) throw new Error(`${label} requires a command or route reference`)
+  if (action.command !== undefined) assertCommand(action.command, label)
+  if (action.route !== undefined) assertRoute(action.route, label)
 }
 
 function assertDisabled(disabled: CordisXDisabledState | undefined): void {
@@ -126,8 +155,17 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
     || surface === 'sidebar.footer.after-control'
     || surface === 'sidebar.footer.menu'
     || surface === 'sidebar.account.menu'
-    || surface === 'environment.panel.header-actions') {
-    assertKeys(snapshot, ['label', 'ariaLabel', 'icon', 'command'], surface)
+    || surface === 'environment.panel.header-actions'
+    || surface === 'sidebar.workspace.menu'
+    || surface === 'sidebar.session.actions'
+    || surface === 'sidebar.session.menu'
+    || surface === 'session.header.actions'
+    || surface === 'session.message.actions'
+    || surface === 'session.tool.actions'
+    || surface === 'composer.command-menu.items'
+    || surface === 'panel.right.header-actions'
+    || surface === 'panel.bottom.header-actions') {
+    assertKeys(snapshot, ['label', 'ariaLabel', 'icon', 'command', 'route'], surface)
     assertAction(snapshot as CordisXStructuredAction, surface)
   } else if (surface === 'sidebar.navigation.items') {
     const navigation = snapshot as CordisXNavigationItem
@@ -150,12 +188,41 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
       assertWhenExpression(action.when)
       assertDisabled(action.disabled)
     }
-  } else if (surface === 'workspace.toolbar.items') {
+  } else if (surface === 'workspace.toolbar.items' || surface === 'composer.toolbar.items') {
     const toolbar = snapshot as CordisXToolbarItem
-    assertKeys(snapshot, ['label', 'ariaLabel', 'icon', 'command', 'anchor', 'placement'], 'toolbar item')
+    assertKeys(snapshot, ['label', 'ariaLabel', 'icon', 'command', 'route', 'anchor', 'placement'], 'toolbar item')
     assertAction(toolbar, 'toolbar item')
-    assertLocalId(toolbar.anchor, 'toolbar anchor')
+    if (surface === 'composer.toolbar.items') {
+      if (!['leading', 'model', 'submit'].includes(toolbar.anchor)) throw new Error('composer toolbar anchor is invalid')
+    } else assertLocalId(toolbar.anchor, 'toolbar anchor')
     if (!['before', 'after', 'menu'].includes(toolbar.placement)) throw new Error('toolbar placement is invalid')
+  } else if (surface === 'session.tabs' || surface === 'panel.right.tabs' || surface === 'panel.bottom.tabs') {
+    const tab = snapshot as CordisXTabItem
+    assertKeys(snapshot, ['id', 'title', 'icon', 'route', 'badge', 'order', 'when'], 'tab item')
+    assertLocalId(tab.id, 'tab id')
+    assertLocalizedText(tab.title, 'tab title')
+    assertIcon(tab.icon, 'tab item')
+    assertRoute(tab.route, 'tab item')
+    if (tab.badge !== undefined && typeof tab.badge === 'object') assertLocalizedText(tab.badge, 'tab badge')
+    if (tab.order !== undefined && (!Number.isInteger(tab.order) || tab.order < -100000 || tab.order > 100000)) throw new Error('tab order is invalid')
+    assertWhenExpression(tab.when)
+  } else if (surface === 'session.banner.items'
+    || surface === 'session.turn.footer'
+    || surface === 'composer.dock.above'
+    || surface === 'composer.dock.below') {
+    const presenter = snapshot as CordisXPresenterItem
+    assertKeys(snapshot, ['kind', 'text', 'detail', 'icon', 'tone', 'command', 'route', 'progress'], 'presenter item')
+    if (!['banner', 'status', 'chip', 'progress'].includes(presenter.kind)) throw new Error('presenter kind is invalid')
+    assertLocalizedText(presenter.text, 'presenter text')
+    if (presenter.detail !== undefined) assertLocalizedText(presenter.detail, 'presenter detail')
+    assertIcon(presenter.icon, 'presenter item')
+    if (presenter.tone !== undefined && !['neutral', 'info', 'success', 'warning', 'error'].includes(presenter.tone)) throw new Error('presenter tone is invalid')
+    if (presenter.command !== undefined) assertCommand(presenter.command, 'presenter item')
+    if (presenter.route !== undefined) assertRoute(presenter.route, 'presenter item')
+    if (presenter.kind === 'progress') {
+      if (presenter.progress === undefined || !Number.isFinite(presenter.progress.current) || !Number.isFinite(presenter.progress.total)
+        || presenter.progress.current < 0 || presenter.progress.total <= 0) throw new Error('progress presenter requires finite current/total values')
+    } else if (presenter.progress !== undefined) throw new Error('progress values require a progress presenter')
   } else if (surface === 'environment.panel.sections') {
     const section = snapshot as CordisXEnvironmentSection
     assertKeys(snapshot, ['sectionId', 'title', 'description', 'icon'], 'environment section')
@@ -189,8 +256,9 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
 export class SurfaceRegistry {
   private readonly records = new Map<string, SurfaceRecord>()
   private readonly listeners = new Set<() => void>()
-  private readonly declared = new Set<string>(CORDISX_SURFACE_NAMES)
-  private readonly toolbarAnchors = new Set<string>()
+  private readonly declared = new Set<string>(CORDISX_IMPLEMENTED_SURFACE_NAMES)
+  private readonly surfaceAnchors = new Map<string, Map<string, ReadonlySet<string>>>()
+  private readonly availability = new Map<string, SurfaceAvailabilitySnapshot>()
   private nextSequence = 0
   private disposed = false
   private resolvers: SurfaceResolvers = { command: () => false, route: () => false }
@@ -223,11 +291,30 @@ export class SurfaceRegistry {
   }
 
   setToolbarAnchors(anchors: readonly string[]): void {
-    const next = new Set(anchors)
-    if (next.size === this.toolbarAnchors.size && [...next].every(anchor => this.toolbarAnchors.has(anchor))) return
-    this.toolbarAnchors.clear()
-    for (const anchor of next) this.toolbarAnchors.add(anchor)
+    this.setSurfaceAnchors('workspace.toolbar.items', anchors.map(id => ({ id, placements: ['before', 'after', 'menu'] as const })))
+  }
+
+  setSurfaceAnchors(surface: string, anchors: readonly { id: string; placements: readonly ('before' | 'after' | 'menu')[] }[]): void {
+    const next = new Map(anchors.map(anchor => [anchor.id, new Set(anchor.placements) as ReadonlySet<string>]))
+    const previous = this.surfaceAnchors.get(surface)
+    if (previous?.size === next.size && [...next].every(([id, placements]) => {
+      const existing = previous.get(id)
+      return existing?.size === placements.size && [...placements].every(placement => existing.has(placement))
+    })) return
+    this.surfaceAnchors.set(surface, next)
     this.notify()
+  }
+
+  setAvailability(items: readonly SurfaceAvailabilitySnapshot[]): void {
+    const next = new Map(items.map(item => [item.surface, immutableSnapshot(item)]))
+    if (JSON.stringify([...this.availability]) === JSON.stringify([...next])) return
+    this.availability.clear()
+    for (const [surface, item] of next) this.availability.set(surface, item)
+    this.notify()
+  }
+
+  availabilitySnapshot(): readonly SurfaceAvailabilitySnapshot[] {
+    return [...this.availability.values()].sort((left, right) => left.surface < right.surface ? -1 : left.surface > right.surface ? 1 : 0)
   }
 
   isDeclared(name: string): boolean {
@@ -341,9 +428,9 @@ export class SurfaceRegistry {
             ? undefined
             : whenContextKeys(actionWithUnknownWhen.when).find(key => !knownKeys.has(key))
           if (error === undefined && unknownActionKey !== undefined) error = `when context key ${unknownActionKey} is not declared by the host`
-          if (record.options.name === 'workspace.toolbar.items') {
-            const anchor = (item as unknown as CordisXToolbarItem).anchor
-            if (!this.toolbarAnchors.has(anchor)) pending = true
+          if (record.options.name === 'workspace.toolbar.items' || record.options.name === 'composer.toolbar.items') {
+            const anchored = item as unknown as CordisXToolbarItem
+            if (!this.surfaceAnchors.get(record.options.name)?.get(anchored.anchor)?.has(anchored.placement)) pending = true
           }
           if (record.options.name === 'environment.section.actions' || record.options.name === 'environment.section.rows') {
             const target = qualifyOwnedId(record.owner, String(item.sectionId))
@@ -354,6 +441,8 @@ export class SurfaceRegistry {
             if (!rows.has(target)) pending = true
           }
         }
+        const availability = this.availability.get(record.options.name)
+        if (availability !== undefined && availability.state !== 'available') pending = true
         return {
           owner: record.owner,
           id: record.options.id,
@@ -372,6 +461,8 @@ export class SurfaceRegistry {
           pending,
           rendered: record.rendered,
           ...(error === undefined ? {} : { error }),
+          ...(availability?.code === undefined ? {} : { availabilityCode: availability.code }),
+          ...(availability?.detail === undefined ? {} : { availabilityDetail: availability.detail }),
         }
       })
   }
@@ -387,7 +478,8 @@ export class SurfaceRegistry {
     this.records.clear()
     this.listeners.clear()
     this.declared.clear()
-    this.toolbarAnchors.clear()
+    this.surfaceAnchors.clear()
+    this.availability.clear()
   }
 
   private notify(): void {

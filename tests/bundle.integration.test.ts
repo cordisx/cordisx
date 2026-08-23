@@ -78,9 +78,19 @@ describe('renderer bundle', () => {
           </div>
         </div><div id="native-footer-controls" style="display:flex"><button id="native-account" aria-label="Open profile menu" aria-haspopup="menu" aria-expanded="false">Profile</button><button id="native-help" class="codex-footer-button" aria-label="Help" aria-haspopup="menu" aria-expanded="false">Help</button></div></aside>
         <main data-app-shell-main-content-layout="thread-edge-scroll" style="position:relative">
+          <header data-testid="app-shell-header-context-menu-surface" style="display:flex">
+            <div id="native-session-title">Current session</div>
+            <div id="native-session-actions" style="display:flex"><button id="native-session-menu" class="codex-toolbar-button">Session menu</button></div>
+          </header>
           <section data-codex-thread-reference-drop-target style="position:relative">
             <div id="native-conversation" data-thread-find-target="conversation" data-response-annotation-conversation="${sessionId}">native data</div>
-            <div data-above-composer-conversation-id="${sessionId}"></div>
+            <div data-codex-composer-root data-composer-placement="thread">
+              <div data-above-composer-conversation-id="${sessionId}"></div>
+              <div data-composer-footer-responsive style="display:flex">
+                <button id="native-composer-leading">Attach</button>
+                <div id="native-composer-actions" style="display:flex"><button id="native-submit" class="codex-composer-button">Send</button></div>
+              </div>
+            </div>
             <div data-codex-thread-reference-drop-target></div>
           </section>
         </main>
@@ -133,10 +143,10 @@ describe('renderer bundle', () => {
       expect.objectContaining({ id: 'slot-showcase', status: 'active', readme: expect.stringContaining('# Slot Showcase') }),
       expect.objectContaining({ id: 'configured-off', status: 'configured-disabled' }),
     ])
-    expect(snapshot.registrations).toHaveLength(13)
+    expect(snapshot.registrations).toHaveLength(15)
     expect(new Set(snapshot.registrations.map(item => item.surface))).toEqual(new Set([
       'sidebar.footer.before-control', 'sidebar.footer.after-control', 'sidebar.footer.menu', 'sidebar.account.menu', 'sidebar.navigation.items',
-      'workspace.toolbar.items', 'environment.panel.header-actions', 'environment.panel.sections',
+      'workspace.toolbar.items', 'session.header.actions', 'composer.toolbar.items', 'environment.panel.header-actions', 'environment.panel.sections',
       'environment.section.actions', 'environment.section.rows', 'environment.row.trailing-actions',
     ]))
     expect(snapshot.registrations.every(item => item.valid && item.rendered)).toBe(true)
@@ -145,8 +155,8 @@ describe('renderer bundle', () => {
     expect(snapshot.navigation.routes.every(item => item.valid)).toBe(true)
     expect(snapshot.navigation.pages).toHaveLength(3)
     expect(snapshot.navigation.outlets).toHaveLength(3)
-    expect(snapshot.extensionPoints.points).toHaveLength(14)
-    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(11)
+    expect(snapshot.extensionPoints.points).toHaveLength(16)
+    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(13)
     expect(snapshot.extensionPoints.points.filter(item => item.kind === 'outlet')).toHaveLength(3)
     expect(snapshot.extensionPoints.descriptorDiagnostics).toEqual([])
     expect(snapshot.localeCatalogs).toHaveLength(4)
@@ -158,7 +168,7 @@ describe('renderer bundle', () => {
     const surfaceHosts = [...dom.window.document.querySelectorAll<HTMLElement>('[data-cordisx-surface-host]')]
     expect(new Set(surfaceHosts.map(host => host.dataset.cordisxSurfaceHost))).toEqual(new Set([
       'sidebar.navigation', 'sidebar.footer.before', 'sidebar.footer.after',
-      'toolbar.before', 'toolbar.after', 'environment',
+      'toolbar.before', 'toolbar.after', 'session.header.actions', 'composer.submit.before', 'environment',
     ]))
     expect(surfaceHosts.every(host => host.parentElement !== dom.window.document.body)).toBe(true)
     expect(dom.window.document.querySelector('.cordisx-structured')).toBeNull()
@@ -168,6 +178,12 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="toolbar.before"]')?.nextElementSibling?.id).toBe('native-toolbar-tooltip-trigger')
     expect(dom.window.document.getElementById('native-toolbar-tooltip-trigger')?.nextElementSibling?.getAttribute('data-cordisx-surface-host')).toBe('toolbar.after')
     expect(dom.window.document.getElementById('native-toolbar-tooltip-trigger')?.querySelector('[data-cordisx-surface-host]')).toBeNull()
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"]')?.nextElementSibling?.id).toBe('native-session-menu')
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"]')?.parentElement?.id).toBe('native-session-actions')
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="composer.submit.before"]')?.nextElementSibling?.id).toBe('native-submit')
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="composer.submit.before"]')?.parentElement?.id).toBe('native-composer-actions')
+    expect(dom.window.document.getElementById('native-session-menu')?.parentElement?.id).toBe('native-session-actions')
+    expect(dom.window.document.getElementById('native-submit')?.parentElement?.id).toBe('native-composer-actions')
     expect(surfaceHosts.every(host => host.dataset.cordisxNoDrag === 'true')).toBe(true)
     expect([...dom.window.document.querySelectorAll<HTMLElement>('.cordisx-action')]
       .every(button => button.dataset.cordisxNoDrag === 'true')).toBe(true)
@@ -180,6 +196,25 @@ describe('renderer bundle', () => {
     expect(toolbarAction.getAttribute('aria-label')).toBe('Open main page')
     expect(toolbarAction.dataset.cordisxTooltip).toBe('Open main page')
     expect(toolbarAction.querySelector('[data-host-icon="host:open"] svg')).not.toBeNull()
+    const sessionHeaderAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="session.header.actions"] button')!
+    expect(sessionHeaderAction.className).toContain('codex-toolbar-button')
+    expect(sessionHeaderAction.getAttribute('aria-label')).toBe('Open main page')
+    expect(sessionHeaderAction.dataset.cordisxTooltip).toBe('Open main page')
+    const composerAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="composer.submit.before"] button')!
+    expect(composerAction.className).toContain('codex-composer-button')
+    expect(composerAction.getAttribute('aria-label')).toBe('Refresh snapshot')
+    expect(composerAction.dataset.cordisxTooltip).toBe('Refresh snapshot')
+    const composerSeat = composerAction.closest<HTMLElement>('[data-cordisx-surface-host="composer.submit.before"]')!
+    const replacementSubmit = dom.window.document.createElement('button')
+    replacementSubmit.id = 'native-stop'
+    replacementSubmit.className = 'codex-composer-button'
+    replacementSubmit.textContent = 'Stop'
+    dom.window.document.getElementById('native-submit')?.replaceWith(replacementSubmit)
+    await settle()
+    await settle()
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="composer.submit.before"]')).toBe(composerSeat)
+    expect(composerSeat.nextElementSibling?.id).toBe('native-stop')
+    expect(replacementSubmit.parentElement?.id).toBe('native-composer-actions')
     const sameToolbarAction = toolbarAction
     const nativeTooltip = dom.window.document.createElement('div')
     nativeTooltip.setAttribute('role', 'tooltip')
@@ -339,7 +374,7 @@ describe('renderer bundle', () => {
     const restoredSnapshot = runtime!.snapshot()
     expect(restoredSnapshot.plugins[0]?.status).toBe('active')
     expect(restoredSnapshot.commands.length).toBe(5)
-    expect(restoredSnapshot.registrations.filter(item => item.rendered).length).toBe(13)
+    expect(restoredSnapshot.registrations.filter(item => item.rendered).length).toBe(15)
     expect(restoredSnapshot.platform).toMatchObject({
       mode: 'unavailable',
       secondConnectionCreated: false,
