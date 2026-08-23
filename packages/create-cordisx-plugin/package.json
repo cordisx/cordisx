@@ -1,0 +1,28 @@
+{
+  "name": "create-cordisx-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Create a minimal CordisX plugin project",
+  "type": "module",
+  "files": [
+    "dist",
+    "template"
+  ],
+  "bin": {
+    "create-cordisx-plugin": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "npm run typecheck",
+    "check:package": "node scripts/check-package-contents.mjs",
+    "prepack": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.1",
+    "typescript": "^5.9.2"
+  }
+}
