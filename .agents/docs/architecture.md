@@ -108,6 +108,14 @@ does not fall back to a fixed covering card. Mutation repair may reinsert a
 detached seat after React replaces its parent, but plugins never receive that
 DOM.
 
+The host-neutral surface/outlet vocabulary, current Codex adapter availability,
+DeepSeek Harness intent mapping, explicit replacement refusals, contextual
+identity boundary, PR order, and validation matrix are maintained in
+[`ui-extension-catalog-codex-adapter.md`](ui-extension-catalog-codex-adapter.md).
+The catalog distinguishes implemented, experimental, and reserved points;
+protocol reservation is never evidence that the current Codex adapter can
+project a point.
+
 Native menu contributions use the same boundary: CordisX inserts host-rendered
 rows into the opened Codex Help or account menu and never adds an independent
 fallback menu trigger. Compact shell actions are icon-only and inherit the
