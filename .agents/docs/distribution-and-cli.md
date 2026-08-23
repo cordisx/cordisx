@@ -138,9 +138,13 @@ examples/
 tests/
 ```
 
-The first migration may keep runtime and Codex-adapter source inside
+The first migration keeps runtime and Codex-adapter source inside
 `packages/cli` while package boundaries are extracted in later reviewable PRs.
-It must not invent empty public packages to reserve names.
+The already published `cordisx@0.0.0` and
+`create-cordisx-plugin@0.0.0` packages are an explicit, one-time name-
+reservation exception requested by the project owner. They must remain clearly
+labelled non-functional reservations until replaced by the functional releases
+defined below; no additional empty public packages may be invented.
 
 Repository ownership does not change:
 
@@ -157,10 +161,11 @@ SDK/protocol surfaces and never imports monorepo-private paths.
 
 ## Package and release contract
 
-A name is considered owned only after a functional package is published and
+A registry name may be reserved by the explicit `0.0.0` exception above, but it
+is considered product-ready only after a functional package is published and
 the registry reports the intended maintainers. A local `name` field or registry
-404 is not ownership. Placeholder packages, misleading packages, and unusable
-tarballs are forbidden.
+404 is not evidence of either state. Misleading placeholders and unusable
+release tarballs remain forbidden.
 
 Every public package requires:
 

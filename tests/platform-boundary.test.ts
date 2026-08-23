@@ -7,8 +7,8 @@ describe('Platform current-connection boundary', () => {
   it('contains no private Desktop transport or second-server implementation', async () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const sources = await Promise.all([
-      readFile(path.join(root, 'src/platform-contracts.ts'), 'utf8'),
-      readFile(path.join(root, 'src/renderer/platform.ts'), 'utf8'),
+      readFile(path.join(root, 'packages/cli/src/platform-contracts.ts'), 'utf8'),
+      readFile(path.join(root, 'packages/cli/src/renderer/platform.ts'), 'utf8'),
     ])
     const implementation = sources.join('\n')
     for (const forbidden of [

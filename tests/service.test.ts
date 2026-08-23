@@ -1,7 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
-import { CORDISX_PLUGIN_ID } from '../src/renderer/ownership.js'
-import { CordisXSlotService } from '../src/renderer/surfaces.js'
+import { CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
+import { CordisXSlotService } from '../packages/cli/src/renderer/surfaces.js'
 
 describe('CordisXSlotService', () => {
   it('owns a structured snapshot handle on the calling plugin fiber', async () => {

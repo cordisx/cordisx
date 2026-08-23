@@ -9,7 +9,7 @@ import {
   findFreeLoopbackPort,
   prepareIsolatedCodexProfile,
   projectProfileKey,
-} from '../src/launcher/process.js'
+} from '../packages/cli/src/launcher/process.js'
 
 describe('isolated Codex process support', () => {
   it('creates a stable project profile without inventing an isolated HOME', async () => {

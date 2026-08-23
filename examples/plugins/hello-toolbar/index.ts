@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '../../src/contracts.js'
+import type {} from '../../../packages/cli/src/contracts.js'
 
 export const name = 'hello-toolbar'
 export const inject = ['i18n', 'commands', 'slots']

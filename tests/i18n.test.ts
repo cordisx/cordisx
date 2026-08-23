@@ -1,15 +1,15 @@
 import { Context } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
-import type { CordisXLocaleCatalog, CordisXLocalizationSeat, CordisXLocalizationSnapshot } from '../src/contracts.js'
+import type { CordisXLocaleCatalog, CordisXLocalizationSeat, CordisXLocalizationSnapshot } from '../packages/cli/src/contracts.js'
 import {
   canonicalLocale,
   CordisXI18nService,
   DocumentLocaleAdapter,
   LocalizationRegistry,
   type CordisXLocaleSource,
-} from '../src/renderer/i18n.js'
-import { CORDISX_PLUGIN_ID } from '../src/renderer/ownership.js'
+} from '../packages/cli/src/renderer/i18n.js'
+import { CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
 
 class MutableLocaleSource implements CordisXLocaleSource {
   private readonly listeners = new Set<() => void>()

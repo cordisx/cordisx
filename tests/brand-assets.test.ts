@@ -12,8 +12,8 @@ async function read(relative: string): Promise<string> {
 describe('CordisX brand assets', () => {
   it('publishes transparent light and dark SVGs with the same spherical geometry', async () => {
     const [light, dark] = await Promise.all([
-      read('assets/brand/cordisx-mark-light.svg'),
-      read('assets/brand/cordisx-mark-dark.svg'),
+      read('packages/cli/assets/brand/cordisx-mark-light.svg'),
+      read('packages/cli/assets/brand/cordisx-mark-dark.svg'),
     ])
 
     for (const source of [light, dark]) {
@@ -30,8 +30,8 @@ describe('CordisX brand assets', () => {
 
   it('uses the same theme-aware assets in the repository README', async () => {
     const readme = await read('README.md')
-    expect(readme).toContain('<source media="(prefers-color-scheme: dark)" srcset="./assets/brand/cordisx-mark-dark.svg">')
-    expect(readme).toContain('<source media="(prefers-color-scheme: light)" srcset="./assets/brand/cordisx-mark-light.svg">')
-    expect(readme).toContain('<img alt="CordisX three-ring spherical mark" src="./assets/brand/cordisx-mark-light.svg" width="180">')
+    expect(readme).toContain('<source media="(prefers-color-scheme: dark)" srcset="./packages/cli/assets/brand/cordisx-mark-dark.svg">')
+    expect(readme).toContain('<source media="(prefers-color-scheme: light)" srcset="./packages/cli/assets/brand/cordisx-mark-light.svg">')
+    expect(readme).toContain('<img alt="CordisX three-ring spherical mark" src="./packages/cli/assets/brand/cordisx-mark-light.svg" width="180">')
   })
 })

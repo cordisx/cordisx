@@ -4,7 +4,7 @@ import {
   installCordisXManager,
   type ManagerModel,
   type ManagerSnapshot,
-} from '../src/renderer/manager.js'
+} from '../packages/cli/src/renderer/manager.js'
 
 function snapshot(): ManagerSnapshot {
   const identity = { source: 'file:///plugins/demo/index.ts', id: 'demo' }

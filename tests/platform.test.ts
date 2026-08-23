@@ -8,7 +8,7 @@ import {
   type CordisXPluginIdentity,
   type CordisXPluginManifestV1,
   type CordisXTaskSummary,
-} from '../src/contracts.js'
+} from '../packages/cli/src/contracts.js'
 import {
   CordisXPlatformService,
   MemoryPermissionPolicyStore,
@@ -18,8 +18,8 @@ import {
   normalizePluginManifest,
   type CordisXPlatformAdapter,
   type PermissionPrompt,
-} from '../src/renderer/platform.js'
-import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from '../src/renderer/service.js'
+} from '../packages/cli/src/renderer/platform.js'
+import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from '../packages/cli/src/renderer/service.js'
 
 const identity: CordisXPluginIdentity = { source: 'file:///plugins/demo.ts', id: 'demo' }
 const models: readonly CordisXModelDescriptor[] = [

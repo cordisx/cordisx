@@ -1,17 +1,17 @@
 import type { Disposable } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
-import type { CordisXLocalizationSeat } from '../src/contracts.js'
-import type { CordisXI18nService, LocalizationEffectOwner } from '../src/renderer/i18n.js'
+import type { CordisXLocalizationSeat } from '../packages/cli/src/contracts.js'
+import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
 import {
   NavigationRegistry,
   OutletRegistry,
   PageRegistry,
   type OutletController,
   type OutletHostSnapshot,
-} from '../src/renderer/navigation.js'
+} from '../packages/cli/src/renderer/navigation.js'
 
-declare module '../src/contracts.js' {
+declare module '../packages/cli/src/contracts.js' {
   interface CordisXOutletMap {
     'panel.right': { readonly scope: 'panel' }
   }

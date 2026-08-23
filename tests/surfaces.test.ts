@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { SurfaceRegistry } from '../src/renderer/surfaces.js'
-import { HostContextStore } from '../src/renderer/validation.js'
+import { SurfaceRegistry } from '../packages/cli/src/renderer/surfaces.js'
+import { HostContextStore } from '../packages/cli/src/renderer/validation.js'
 
 describe('SurfaceRegistry', () => {
   it('retains immutable data, sorts deterministically, and replaces snapshots through an owned handle', () => {

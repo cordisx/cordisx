@@ -2,7 +2,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { loadConfig } from '../src/launcher/config.js'
+import { loadConfig } from '../packages/cli/src/launcher/config.js'
 
 describe('loadConfig', () => {
   it('resolves plugin entries relative to the config', async () => {

@@ -1,6 +1,6 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
-import { renderSafeMarkdown } from '../src/renderer/markdown.js'
+import { renderSafeMarkdown } from '../packages/cli/src/renderer/markdown.js'
 
 describe('safe manager Markdown renderer', () => {
   it('renders README structure without interpreting raw HTML', () => {
