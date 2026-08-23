@@ -186,6 +186,11 @@ loading or error DOM.
 
 ## Initial structured surfaces
 
+Surfaces are extension points; their commands are associated executable
+resources rather than additional points. The localized host descriptors,
+manager catalog, per-plugin point policy, and enforcement plan are specified in
+[`extension-point-management.md`](extension-point-management.md).
+
 The initial surface registry includes at least:
 
 | Surface | Structured contribution |
@@ -252,6 +257,11 @@ schema-validated. The initial built-ins are:
 - `main`: the region to the right of the sidebar;
 - `session.content`: the current task body below its native title/header and
   excluding side and bottom panels.
+
+Outlets are extension points. Routes and pages remain associated resources and
+must not be counted as separate points in the manager. Point identity,
+localized descriptors, usage details, and policy enforcement are specified in
+[`extension-point-management.md`](extension-point-management.md).
 
 Future host/adapter packages may add `panel.right`, `panel.bottom`, `sidebar`,
 or other outlet ids without changing a closed union in core.
@@ -332,6 +342,13 @@ generation replacement, or renderer shutdown aborts all active pages and
 commands regardless of context.
 
 ## Manager diagnostics
+
+The extension-point primary list and its second-level `Usage`, `Point
+information`, and `Diagnostics` tabs follow
+[`extension-point-management.md`](extension-point-management.md). In
+particular, user-facing point identity comes from localized host descriptors;
+stable English ids remain searchable secondary data rather than the only
+visible name.
 
 The manager joins immutable registry snapshots and groups them by owning
 plugin. It reports:
