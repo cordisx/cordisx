@@ -238,10 +238,13 @@ test evidence, not shipped fixtures containing host-private fields.
    `2ec9ca`. The delivery-control protocol merged at `08dcdc1`; it adds the
    version-2 event/snapshot schemas and conformance vectors and changes neither
    Platform scope nor UI catalog.
-2. Provider-aware Platform foundation `cordisx#41` is the required host parent
-   at `1f2c10df7909c0d4fe0d99189cffbd28f9c33207`. It owns composite Platform
-   identity, `scope.sessions`, requested-scope audit, and the generation-fenced
-   provider registry seam. Agent `sessionIds` neither replace nor map them.
+2. Provider-aware Platform foundation `cordisx#41` landed at `1f2c10d` and
+   Provider Fleet `cordisx#44` landed at
+   `d74c48524b73f47b3cf56de795ca66ed92bbab30`, the current host parent. They
+   own composite Platform identity, `scope.sessions`, requested-scope audit,
+   provider routing, and the generation-fenced provider registry/binding seam.
+   Agent `sessionIds` neither replace nor map those identities, and this slice
+   adds no Platform-to-Agent session bridge.
 3. This host PR owns contracts, ledger, broker integration, facade, private
    adapter, fixtures, and tests. It adds no Timeline or demo plugin.
 4. The host PR must pass protocol conformance, typecheck/build/tests, release
