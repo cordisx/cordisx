@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { npmPackItem } from '../../../scripts/npm-pack-report.mjs'
 
 const repositoryRoot = fileURLToPath(new URL('../../..', import.meta.url))
 const output = execFileSync(
@@ -8,7 +9,7 @@ const output = execFileSync(
   { cwd: repositoryRoot, encoding: 'utf8' },
 )
 const report = JSON.parse(output)
-const files = report[0]?.files?.map(file => file.path)
+const files = npmPackItem(report, 'create-cordisx-plugin').files?.map(file => file.path)
 if (!Array.isArray(files)) throw new Error('npm pack did not report package contents')
 
 const allowedRoots = ['CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md', 'LICENSE', 'README.md', 'package.json']

@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { npmPackItem } from './npm-pack-report.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -100,7 +101,7 @@ async function pack(pkg, destination) {
     '--pack-destination',
     destination,
   ])
-  const item = report[0]
+  const item = npmPackItem(report, pkg.name)
   if (item?.version !== version || typeof item?.integrity !== 'string') {
     throw new Error(`${pkg.name} local pack report is incomplete`)
   }

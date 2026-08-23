@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { npmPackItem } from './npm-pack-report.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -23,14 +24,14 @@ async function run(file, args, options = {}) {
   }
 }
 
-function parsePackReport(stdout) {
+function parsePackReport(stdout, packageName) {
   let report
   try {
     report = JSON.parse(stdout)
   } catch (error) {
     throw new Error(`npm pack did not return JSON:\n${stdout}`, { cause: error })
   }
-  const filename = report[0]?.filename
+  const filename = npmPackItem(report, packageName).filename
   if (typeof filename !== 'string' || filename.length === 0) {
     throw new Error('npm pack did not report a tarball filename')
   }
@@ -45,7 +46,7 @@ async function packWorkspace(workspace, packDirectory) {
     packDirectory,
     '--json',
   ], { cwd: repositoryRoot, env: process.env })
-  return path.join(packDirectory, parsePackReport(packed.stdout))
+  return path.join(packDirectory, parsePackReport(packed.stdout, workspace))
 }
 
 async function expectMissing(target, label) {
