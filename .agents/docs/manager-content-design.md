@@ -97,6 +97,14 @@ the single About identity row. These marks are rendered directly without a
 decorative container. Other primary pages use their own host-owned semantic
 icons, while secondary pages use the back control.
 
+Brand rendering preserves the official asset rather than approximating it.
+The host-side manager trigger alone may use the light-background SVG as an
+adaptive `currentColor` mask because it lives in an unknown host theme. The
+manager dialog has a fixed dark background, so all three About marks use the
+official dark-background SVG directly. They retain its continuous per-segment
+grey depth shading and never flatten it into a monochrome mask, recolor it with
+`currentColor`, redraw its paths, or add a frame or background.
+
 The About body is a concise product hub, not a runtime dashboard. After its
 identity row it exposes flat, actionable links such as issue feedback,
 contribution, and documentation. It does not repeat manager diagnostics,
@@ -185,7 +193,9 @@ At minimum they prove:
   anchors `关于 CordisX` at the bottom;
 - the modal sidebar begins with navigation and contains no identity block;
   About alone uses the CordisX mark in its navigation item, header seat, and
-  identity row, while the host-side trigger retains its small mark;
+  identity row; those three marks directly render the official dark-background
+  asset with its multi-grey depth shading, while the host-side trigger remains
+  the only adaptive `currentColor` mask;
 - the About identity uses the runtime version, its action links have verified
   public destinations and safe external-link attributes, and the old runtime
   metric grid and generic boundary copy are absent;
