@@ -73,7 +73,20 @@ describe('renderer bundle', () => {
         schemaVersion: 1,
         name: 'CordisX Community Marketplace',
         homepage: 'https://cordisx.github.io/marketplace/',
-        plugins: [],
+        plugins: [{
+          $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v1.schema.json',
+          schemaVersion: 1,
+          id: 'slot-showcase',
+          name: 'Slot Showcase Catalog',
+          description: 'Marketplace hierarchy fixture',
+          version: '0.1.0',
+          source: 'https://github.com/cordisx/slot-showcase',
+          homepage: 'https://github.com/cordisx/slot-showcase',
+          license: 'MIT',
+          compatibility: { cordisx: '^0.1.0' },
+          authors: [{ name: 'CordisX' }],
+          keywords: ['structured-ui', 'demo'],
+        }],
       }) }),
     })
     const native = dom.window.document.getElementById('native-conversation')!
@@ -163,15 +176,19 @@ describe('renderer bundle', () => {
     managerTrigger?.click()
     const managerModal = dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')
     expect(managerModal?.hidden).toBe(false)
+    const managerHeadings = (): string[] => [...dom.window.document.querySelectorAll<HTMLElement>('.cxm-heading h2, .cxm-section-title')]
+      .map(element => element.textContent?.trim() ?? '')
     const primaryLeading = dom.window.document.querySelector<HTMLElement>('.cxm-heading-leading')
     expect(primaryLeading?.classList.contains('cxm-heading-icon')).toBe(true)
     expect(dom.window.getComputedStyle(primaryLeading as HTMLElement).width).toBe('26px')
     expect(primaryLeading?.textContent).toBe('◈')
     expect(managerModal?.textContent).toContain('宿主语言')
+    expect(managerHeadings()).toEqual(['关于 CordisX', '运行边界'])
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="slots"]')?.click()
     expect(dom.window.document.querySelector('.cxm-heading-icon')?.textContent).toBe('⊞')
     expect(managerModal?.textContent).toContain('sidebar.footer.before-control')
     expect(managerModal?.textContent).toContain('slot-showcase')
+    expect(managerHeadings()).toEqual(['贡献与路由', 'Commands', 'Routes / Pages', 'Host Outlets'])
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')?.click()
     const search = dom.window.document.querySelector<HTMLInputElement>('.cxm-search')
     if (search !== null) {
@@ -181,6 +198,7 @@ describe('renderer bundle', () => {
     expect(managerModal?.textContent).toContain('slot-showcase')
     expect(managerModal?.textContent).not.toContain('插件配置')
     expect(dom.window.document.querySelector('.cxm-heading-icon')?.textContent).toBe('◫')
+    expect(managerHeadings()).toEqual(['插件'])
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="slot-showcase"]')?.click()
     const back = dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')
@@ -195,13 +213,27 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelectorAll('[data-plugin-detail-tab]')).toHaveLength(5)
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
-    expect(managerModal?.textContent).toContain('插件配置')
+    expect(managerModal?.textContent).not.toContain('插件配置')
     expect(managerModal?.textContent).toContain('{}')
+    expect(managerHeadings()).toEqual(['插件/Slot Showcase'])
+    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="配置管理"]')).not.toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="permissions"]')?.click()
+    const permissionsPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="权限"]')
+    expect(dom.window.document.querySelector('[data-plugin-detail-tab="permissions"]')?.getAttribute('aria-selected')).toBe('true')
+    expect(managerHeadings()).toEqual(['插件/Slot Showcase', '能力声明', '宿主连接'])
+    expect(managerHeadings()).not.toContain('Platform 权限')
+    expect(permissionsPanel?.textContent).not.toContain('Platform 权限')
+    expect(permissionsPanel?.querySelector('.cxm-detail')).toBeNull()
+    expect(permissionsPanel?.querySelector('.cxm-slot-card')).toBeNull()
+    expect(permissionsPanel?.querySelector('[role="list"][data-manager-group="capability-declarations"]')).not.toBeNull()
+    expect(permissionsPanel?.querySelector('[role="listitem"][data-permission-item="models.read"]')?.getAttribute('aria-label')).toBe('Capability models.read')
     expect(managerModal?.textContent).toContain('models.read')
     expect(managerModal?.textContent).toContain('显示当前宿主连接实际可用的模型')
     expect(managerModal?.textContent).toContain('current-connection-client-unavailable')
     expect(managerModal?.textContent).toContain('trusted renderer code 不是安全沙箱')
+    expect(permissionsPanel?.textContent?.match(/二次连接/g)).toHaveLength(1)
+    expect(permissionsPanel?.textContent?.match(/原始 bridge 暴露/g)).toHaveLength(1)
+    expect(permissionsPanel?.textContent?.match(/不是安全沙箱/g)).toHaveLength(1)
     dom.window.document.documentElement.lang = 'zh-CN'
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(managerModal?.textContent).toContain('显示当前宿主连接实际可用的模型')
@@ -217,6 +249,9 @@ describe('renderer bundle', () => {
     expect(runtime?.snapshot().plugins[0]?.status).toBe('active')
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.click()
     expect(managerModal?.textContent).toContain('注入服务')
+    expect(managerHeadings()).toEqual(['插件/Slot Showcase', '本地化', '结构化运行时'])
+    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="运行状态"] .cxm-detail-id')?.textContent).toBe('slot-showcase')
+    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="运行状态"]')?.textContent?.match(/Slot Showcase/g) ?? []).toHaveLength(0)
 
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-plugin-runtime-action')?.click()
     for (let attempt = 0; attempt < 20 && runtime?.snapshot().plugins[0]?.status !== 'blocked'; attempt += 1) {
@@ -237,10 +272,26 @@ describe('renderer bundle', () => {
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="slots"]')?.click()
     expect(managerModal?.textContent).toContain('workspace.toolbar.items')
     expect(managerModal?.textContent).toContain('已渲染')
+    expect(managerHeadings()).toEqual(['插件/Slot Showcase'])
 
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
-    expect(dom.window.document.querySelector<HTMLInputElement>('.cxm-search')?.value).toBe('workspace.toolbar.items')
+    const restoredSearch = dom.window.document.querySelector<HTMLInputElement>('.cxm-search')
+    expect(restoredSearch?.value).toBe('workspace.toolbar.items')
     expect(managerModal?.textContent).not.toContain('插件配置')
+
+    if (restoredSearch !== null) {
+      restoredSearch.value = ''
+      restoredSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    }
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="configured-off"]')?.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="permissions"]')?.click()
+    const emptyPermissionsPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="权限"]')
+    expect(emptyPermissionsPanel?.textContent).toContain('该插件没有声明 capability；宿主连接状态仍在下方显示。')
+    expect(emptyPermissionsPanel?.textContent).toContain('当前连接：')
+    expect(emptyPermissionsPanel?.querySelector('[role="list"]')).toBeNull()
+    expect(emptyPermissionsPanel?.querySelector('section section')).toBeNull()
+    expect(managerHeadings().slice(-2)).toEqual(['能力声明', '宿主连接'])
+    dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="marketplace"]')?.click()
     expect(dom.window.document.querySelector('.cxm-heading-icon')?.textContent).toBe('◇')
@@ -248,22 +299,36 @@ describe('renderer bundle', () => {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     expect(managerModal?.textContent).toContain('CordisX Community Marketplace')
-    expect(managerModal?.textContent).toContain('没有可展示的匹配插件')
+    expect(managerModal?.textContent).toContain('Slot Showcase Catalog')
     expect(managerModal?.textContent).not.toContain('查看源码')
+    expect(managerHeadings()).toEqual(['插件商店'])
+    dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-plugin="slot-showcase"]')?.click()
+    expect(managerHeadings()).toEqual(['插件商店/Slot Showcase Catalog', '关键词'])
+    expect(managerModal?.textContent?.match(/Slot Showcase Catalog/g)).toHaveLength(1)
+    expect(managerModal?.textContent).toContain('Marketplace hierarchy fixture')
+    expect(managerModal?.textContent).toContain('查看源码')
+    expect(managerModal?.querySelector('.cxm-detail')).toBeNull()
+    dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="settings"]')?.click()
     expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain('配置')
     expect(dom.window.document.querySelector('.cxm-heading-icon')?.textContent).toBe('⚙')
     expect(dom.window.document.querySelectorAll('[data-settings-tab]')).toHaveLength(3)
-    expect(managerModal?.textContent).toContain('插件商店来源')
+    expect(managerModal?.textContent).not.toContain('插件商店来源')
     expect(managerModal?.textContent).toContain('https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json')
     expect(managerModal?.textContent).toContain('CordisX Community Marketplace')
     expect(managerModal?.textContent).not.toContain('启动器配置')
+    expect(managerHeadings()).toEqual(['配置'])
+    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="插件商店"]')).not.toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="runtime"]')?.click()
-    expect(managerModal?.textContent).toContain('插件运行状态')
+    expect(managerModal?.textContent).not.toContain('插件运行状态')
     expect(managerModal?.textContent).toContain('当前隔离 Chromium profile')
+    expect(managerHeadings()).toEqual(['配置'])
+    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="运行状态"]')).not.toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="launcher"]')?.click()
-    expect(managerModal?.textContent).toContain('启动器配置')
+    expect(managerModal?.textContent).not.toContain('启动器配置')
+    expect(managerHeadings()).toEqual(['配置'])
+    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="启动器"]')).not.toBeNull()
 
     await runtime?.dispose()
     expect(dom.window.document.documentElement.dataset.cordisxReady).toBeUndefined()

@@ -120,6 +120,12 @@ The initial manager has three navigation views:
 3. searchable plugin inventory, runtime blocking/restoration, and details
    derived from module/configuration data available today.
 
+Manager-owned content follows one semantic context at a time: a title,
+breadcrumb, or selected tab is not restated by body headings or redundant
+cards. The reusable hierarchy, flat-list/card, exceptional-state,
+accessibility, and visual-regression rules are normative in
+[`manager-content-design.md`](manager-content-design.md).
+
 Plugin inventory is a list page rather than a permanent list/detail split.
 Selecting a plugin opens a second-level detail page inside the manager; its
 header provides an icon-only back action and the breadcrumb `插件 / <name>`.

@@ -5,6 +5,9 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `getting-started.md` records local development, launcher, smoke-test, and
   example-plugin instructions that should not live in the product README.
 - `architecture.md` defines the current runtime, lifecycle, slot, and security boundaries.
+- `manager-content-design.md` is the reusable design guideline for manager
+  hierarchy, title de-duplication, tabs, flat lists, cards, states, and
+  accessibility/screenshot regression evidence.
 - `data-contribution-routing.md` defines the approved structured shell-contribution and
   page/outlet architecture that replaces direct plugin DOM rendering in native shell areas.
 - `distribution-and-cli.md` defines the product monorepo, home configuration,
