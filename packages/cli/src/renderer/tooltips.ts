@@ -7,13 +7,21 @@ const NATIVE_TOOLTIP_CLASS = [
 ].join(' ')
 
 let tooltipSequence = 0
+const DISMISS_EVENT = 'cordisx:host-tooltips-dismiss'
+
+export function dismissHostTooltips(document: Document): void {
+  const EventClass = document.defaultView?.Event
+  if (EventClass !== undefined) document.dispatchEvent(new EventClass(DISMISS_EVENT))
+}
 
 export class HostTooltipController {
   private activeTarget: HTMLElement | undefined
   private activeTooltip: HTMLElement | undefined
   private timer: ReturnType<typeof setTimeout> | undefined
 
-  constructor(private readonly document: Document) {}
+  constructor(private readonly document: Document) {
+    document.addEventListener(DISMISS_EVENT, this.dismiss)
+  }
 
   attach(
     target: HTMLElement,
@@ -59,8 +67,11 @@ export class HostTooltipController {
   }
 
   dispose(): void {
+    this.document.removeEventListener(DISMISS_EVENT, this.dismiss)
     this.hide()
   }
+
+  private readonly dismiss = (): void => this.hide()
 
   private show(
     target: HTMLElement,

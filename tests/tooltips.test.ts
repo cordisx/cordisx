@@ -1,6 +1,6 @@
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { HostTooltipController } from '../packages/cli/src/renderer/tooltips.js'
+import { dismissHostTooltips, HostTooltipController } from '../packages/cli/src/renderer/tooltips.js'
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
   return {
@@ -41,7 +41,7 @@ describe('HostTooltipController', () => {
     expect(tooltip.style.top).toBe('40px')
     expect(action.getAttribute('aria-describedby')).toBe(tooltip.id)
 
-    action.dispatchEvent(new dom.window.Event('pointerleave'))
+    dismissHostTooltips(dom.window.document)
     expect(dom.window.document.querySelector('[role="tooltip"]')).toBeNull()
     controller.dispose()
     dom.window.close()

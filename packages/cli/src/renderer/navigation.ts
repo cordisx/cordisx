@@ -18,7 +18,7 @@ import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { createHostSurfaceIcon } from './icons.js'
 import { ownerFromContext, qualifyOwnedId } from './ownership.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
-import { HostTooltipController } from './tooltips.js'
+import { dismissHostTooltips, HostTooltipController } from './tooltips.js'
 import {
   ICON_TOKEN_PATTERN,
   HostContextStore,
@@ -48,6 +48,7 @@ export interface OutletDescriptor {
   readonly scope: string
   readonly preferredPlacement: OutletPlacement
   readonly contextPolicy: OutletContextPolicy
+  readonly presentationGroup?: string
 }
 
 export interface OutletHostSnapshot {
@@ -76,6 +77,8 @@ interface OutletRecord {
 
 export interface OutletSnapshot extends OutletDescriptor, OutletHostSnapshot {
   readonly mounted: boolean
+  readonly presentation: 'inactive' | 'presented' | 'suspended'
+  readonly suspendedBy?: string
   readonly activeRoute?: string
   readonly error?: string
 }
@@ -87,13 +90,14 @@ export class OutletRegistry {
 
   declare(descriptor: OutletDescriptor, controller: OutletController, validatePath: (path: string) => boolean): () => void {
     if (this.disposed) throw new Error('CordisX outlet registry is disposed')
-    assertKeys(descriptor, ['schemaVersion', 'id', 'authority', 'scope', 'preferredPlacement', 'contextPolicy'], 'outlet descriptor')
+    assertKeys(descriptor, ['schemaVersion', 'id', 'authority', 'scope', 'preferredPlacement', 'contextPolicy', 'presentationGroup'], 'outlet descriptor')
     if (descriptor.schemaVersion !== 1) throw new Error(`unsupported outlet schema version: ${descriptor.schemaVersion}`)
     assertReference(descriptor.id, 'outlet id')
     if (descriptor.authority !== 'host-adapter') throw new Error('outlet authority must be host-adapter')
     assertLocalId(descriptor.scope, 'outlet scope')
     if (!['fixed', 'absolute', 'portal'].includes(descriptor.preferredPlacement)) throw new Error('invalid outlet placement')
     if (!['generation', 'semantic'].includes(descriptor.contextPolicy)) throw new Error('invalid outlet context policy')
+    if (descriptor.presentationGroup !== undefined) assertLocalId(descriptor.presentationGroup, 'outlet presentation group')
     if (typeof validatePath !== 'function') throw new Error('outlet requires a host path validator')
     if (this.records.has(descriptor.id)) throw new Error(`outlet ${descriptor.id} is already declared`)
     const frozen = immutableSnapshot(descriptor)
@@ -313,6 +317,8 @@ interface OutletNavigationState {
   mount?: MountedPage
   contextKey?: string
   error?: string
+  presentation?: 'presented' | 'suspended'
+  suspendedBy?: string
 }
 
 export interface RouteSnapshot {
@@ -380,6 +386,7 @@ export class NavigationRegistry {
   private readonly records = new Map<string, RouteRecord>()
   private readonly states = new Map<string, OutletNavigationState>()
   private readonly listeners = new Set<() => void>()
+  private presentationOrder: string[] = []
   private readonly unsubscribePages: () => void
   private readonly unsubscribeOutlets: () => void
   private operation = Promise.resolve()
@@ -457,6 +464,7 @@ export class NavigationRegistry {
       await this.unmount(state)
       state.stack.pop()
       await this.mountCurrent(name, state)
+      await this.reconcilePresentation()
       this.notify()
     })
   }
@@ -506,6 +514,8 @@ export class NavigationRegistry {
         ...descriptor,
         ...host,
         mounted: state?.mount !== undefined,
+        presentation: state?.mount === undefined ? 'inactive' : state.presentation ?? 'presented',
+        ...(state?.suspendedBy === undefined ? {} : { suspendedBy: state.suspendedBy }),
         ...(state?.stack.at(-1) === undefined ? {} : { activeRoute: state.stack.at(-1)!.record.qualifiedId }),
         ...(state?.error === undefined ? {} : { error: state.error }),
       }
@@ -531,6 +541,7 @@ export class NavigationRegistry {
     for (const [name] of this.states) await this.closeNow(name)
     this.records.clear()
     this.states.clear()
+    this.presentationOrder = []
     this.listeners.clear()
   }
 
@@ -596,6 +607,9 @@ export class NavigationRegistry {
     await this.unmount(state)
     state.stack.push({ record, params, path })
     await this.mountCurrent(record.definition.outlet, state)
+    this.presentationOrder = this.presentationOrder.filter(name => name !== record.definition.outlet)
+    this.presentationOrder.push(record.definition.outlet)
+    await this.reconcilePresentation()
     this.notify()
   }
 
@@ -838,13 +852,17 @@ export class NavigationRegistry {
       await this.unmount(state)
       state.stack = []
       delete state.contextKey
+      delete state.presentation
+      delete state.suspendedBy
     }
+    this.presentationOrder = this.presentationOrder.filter(candidate => candidate !== name)
     await this.outlets.get(name)?.controller.hide()
+    await this.reconcilePresentation()
   }
 
   private currentOutletFor(owner: string): CordisXOutletName | undefined {
-    const entry = [...this.states.entries()].find(([, state]) => state.stack.at(-1)?.record.owner === owner)
-    return entry?.[0] as CordisXOutletName | undefined
+    return [...this.presentationOrder].reverse()
+      .find(name => this.states.get(name)?.stack.at(-1)?.record.owner === owner) as CordisXOutletName | undefined
   }
 
   private async reconcileDependencies(): Promise<void> {
@@ -877,7 +895,48 @@ export class NavigationRegistry {
         host.container.append(state.mount.content)
       }
     }
+    await this.reconcilePresentation()
     this.notify()
+  }
+
+  private async reconcilePresentation(): Promise<void> {
+    const active = new Set([...this.states.entries()]
+      .filter(([, state]) => state.mount !== undefined && state.stack.length > 0)
+      .map(([name]) => name))
+    this.presentationOrder = this.presentationOrder.filter(name => active.has(name))
+    for (const name of active) if (!this.presentationOrder.includes(name)) this.presentationOrder.push(name)
+    const winners = new Map<string, string>()
+    for (const name of this.presentationOrder) {
+      const descriptor = this.outlets.get(name)?.descriptor
+      if (descriptor === undefined || !active.has(name)) continue
+      winners.set(descriptor.presentationGroup ?? descriptor.id, name)
+    }
+    for (const [name, state] of this.states) {
+      if (!active.has(name) || state.mount === undefined) continue
+      const outlet = this.outlets.get(name)
+      if (outlet === undefined) continue
+      const group = outlet.descriptor.presentationGroup ?? outlet.descriptor.id
+      const winner = winners.get(group)
+      if (winner === undefined || winner === name) {
+        await outlet.controller.show()
+        state.presentation = 'presented'
+        delete state.suspendedBy
+        state.mount.content.inert = false
+        state.mount.content.removeAttribute('aria-hidden')
+        state.mount.content.dataset.cordisxPresentation = 'presented'
+        continue
+      }
+      dismissHostTooltips(state.mount.content.ownerDocument)
+      const focused = state.mount.content.ownerDocument.activeElement
+      if (focused instanceof state.mount.content.ownerDocument.defaultView!.HTMLElement
+        && state.mount.content.contains(focused)) focused.blur()
+      state.mount.content.inert = true
+      state.mount.content.setAttribute('aria-hidden', 'true')
+      state.mount.content.dataset.cordisxPresentation = 'suspended'
+      state.presentation = 'suspended'
+      state.suspendedBy = winner
+      await outlet.controller.hide()
+    }
   }
 
   private notify(): void {

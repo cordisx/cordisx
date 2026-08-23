@@ -59,6 +59,11 @@ function titlebarTrafficLightInset(document: Document): number {
   return Math.max(12, Math.ceil((candidates[0]?.left ?? titlebarRect.left + 88) - titlebarRect.left))
 }
 
+function pageChromeSafeLeft(document: Document, anchor: HTMLElement): number {
+  const anchorLeft = Math.max(0, anchor.getBoundingClientRect().left)
+  return Math.max(0, titlebarTrafficLightInset(document) - anchorLeft)
+}
+
 function selectedSessionId(document: Document): string | undefined {
   const selected = uniqueVisible(document, '[data-app-action-sidebar-thread-selected="true"]')
   const host = selected?.getAttribute('data-app-action-sidebar-thread-host-id')
@@ -701,6 +706,13 @@ class StructuredSurfaceRenderer {
       const description = item.description === undefined ? undefined : this.text(snapshot, item.description, 'description', sites)
       if (description !== undefined) primary.dataset.cordisxTooltip = description
       primary.append(copy)
+      if (item.route !== undefined) {
+        const routeId = item.route.id.includes(':') ? item.route.id : `${snapshot.owner}:${item.route.id}`
+        const outlet = this.routes.snapshot().outlets.find(candidate => candidate.activeRoute === routeId)
+        const presentation = outlet?.presentation ?? 'inactive'
+        row.dataset.cordisxRouteState = presentation
+        if (presentation === 'presented') primary.setAttribute('aria-current', 'page')
+      }
       const activate = (): void => {
         const operation = item.command !== undefined
           ? this.commands.executeFor(snapshot.owner, item.command, `nav:${snapshot.qualifiedId}`, {
@@ -852,6 +864,7 @@ function installStyles(document: Document): () => void {
     .cordisx-navigation, .cordisx-env-section { display: grid; gap: 1px; }
     .cordisx-nav-row { display: grid; grid-template-columns: minmax(0,1fr) max-content; align-items: center; height: var(--height-token-row,30px); padding: 0 8px; border-radius: var(--radius-lg,10px); -webkit-app-region: no-drag; }
     .cordisx-nav-row:hover { background: var(--color-background-primary-ghost-hover,rgba(255,255,255,.078)); }
+    .cordisx-nav-row[data-cordisx-route-state="presented"] { background: var(--color-background-primary-ghost-hover,rgba(255,255,255,.078)); }
     .cordisx-nav-primary { display: grid; grid-template-columns: 16px minmax(0,1fr); align-items: center; gap: 8px; height: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: 445 13px/18px system-ui,sans-serif; text-align: left; cursor: default; }
     .cordisx-nav-primary:focus-visible { outline: 2px solid var(--color-ring,rgba(131,195,255,.76)); outline-offset: -2px; border-radius: var(--radius-lg,10px); }
     .cordisx-nav-copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -895,7 +908,7 @@ export function installCodexAdapter(
   let lastProjectKey: string | undefined
   const app = new DomOutletController(document, 'app', 'fixed', () => {
     if (document.body === null) return undefined
-    return { anchor: document.body, contextKey: 'renderer', pageChromeSafeLeft: titlebarTrafficLightInset(document) }
+    return { anchor: document.body, contextKey: 'renderer', pageChromeSafeLeft: pageChromeSafeLeft(document, document.body) }
   })
   const main = new DomOutletController(document, 'main', 'portal', () => {
     const anchor = uniqueVisible(document, '[data-app-shell-main-content-layout="thread-edge-scroll"]')
@@ -904,7 +917,11 @@ export function installCodexAdapter(
     const selected = uniqueVisible(document, '[data-app-action-sidebar-thread-selected="true"]')
     const project = selected?.closest('[data-app-action-sidebar-project-list-id]')?.getAttribute('data-app-action-sidebar-project-list-id')
     if (project !== null && project !== undefined) lastProjectKey = project
-    return { anchor, contextKey: `main:${lastProjectKey ?? 'default'}` }
+    return {
+      anchor,
+      contextKey: `main:${lastProjectKey ?? 'default'}`,
+      pageChromeSafeLeft: pageChromeSafeLeft(document, anchor),
+    }
   })
   const session = new DomOutletController(document, 'session.content', 'absolute', () => {
     const sessionId = currentSessionId(document)
@@ -914,13 +931,13 @@ export function installCodexAdapter(
   })
   const undeclare = [
     routes.outlets.declare({
-      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
+      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation', presentationGroup: 'primary',
     }, app, path => path !== '/main' && !path.startsWith('/main/') && path !== '/sessions' && !path.startsWith('/sessions/')),
     routes.outlets.declare({
-      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'portal', contextPolicy: 'semantic',
+      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'portal', contextPolicy: 'semantic', presentationGroup: 'primary',
     }, main, path => path.startsWith('/main/') && path.length > '/main/'.length),
     routes.outlets.declare({
-      schemaVersion: 1, id: 'session.content', authority: 'host-adapter', scope: 'session', preferredPlacement: 'absolute', contextPolicy: 'semantic',
+      schemaVersion: 1, id: 'session.content', authority: 'host-adapter', scope: 'session', preferredPlacement: 'absolute', contextPolicy: 'semantic', presentationGroup: 'primary',
     }, session, path => path.startsWith('/sessions/:sessionId/') && path.length > '/sessions/:sessionId/'.length),
   ]
   const removeStyles = installStyles(document)

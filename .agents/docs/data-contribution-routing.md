@@ -345,6 +345,24 @@ returns within that CordisX stack, and close clears the current CordisX page to
 reveal the untouched native content. These operations do not call
 `history.pushState`, change the browser URL, or invoke Codex routing APIs.
 
+Host outlet declarations also assign a presentation group. Outlets in the same
+group occupy intersecting product regions and are coordinated by one runtime
+presentation stack. Their route stacks may remain active at the same time, but
+only the most recently presented outlet is visible and interactive. Older
+members become `suspended`: their mounted page, framework root, and local state
+remain connected, while the host layer is hidden, inert, and removed from the
+accessibility tree. Closing the presented member restores the previous member
+without remounting it. Outlets in different presentation groups may be visible
+at the same time.
+
+The built-in `app`, `main`, and `session.content` outlets share the primary
+presentation group because their rectangles overlap. Runtime and manager
+snapshots distinguish `inactive`, `presented`, and `suspended`, including which
+outlet currently suspends another. Shell navigation selection follows
+`presented`, not merely an active route. Suspending a page also dismisses its
+host tooltip, menu, and focus state. This is presentation coordination only: it
+does not replace native DOM, discard plugin state, or redirect Codex data flow.
+
 Host page chrome owns title, icon, close/back controls, breadcrumb rendering,
 declared tabs, and declared header actions. This rule is identical for `app`,
 `main`, and every future outlet: covering a native header does not give the
@@ -400,10 +418,14 @@ back, close, tabs, and every other interactive descendant remain explicit
 inset from the resolved native title-bar controls, so page controls never sit
 under the red/yellow/green window buttons.
 
-The `main` outlet covers the complete region to the right of the sidebar from
-`y=0`; the sidebar keeps the macOS traffic lights, while the main page chrome
-provides the draggable region on the right. `session.content` alone derives its
-top boundary from the native session-content anchor below the session header.
+The `main` outlet covers the complete native main-region rectangle from `y=0`.
+With the sidebar expanded, the sidebar keeps the macOS traffic lights and the
+main page chrome supplies the draggable region on the right. When the sidebar
+collapses and the main rectangle reaches into the traffic-light zone, the same
+host-derived safe inset is applied relative to the main rectangle's current
+left edge. Collapse, expansion, and drag-resize must update that inset together
+with portal geometry. `session.content` alone derives its top boundary from the
+native session-content anchor below the session header.
 
 The adapter must not call `replaceWith`, `remove`, `append` on a native child for
 reparenting, set `display:none` on native content, clear native children, or
