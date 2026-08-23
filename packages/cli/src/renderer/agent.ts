@@ -150,21 +150,7 @@ export class CordisXHostAgentRuntime {
       data: { stage: 'requested', target, wakeup, message },
     })
     const operation = this.deliver(identity, sessionId, message, target, wakeup, requested.eventId)
-      .catch(error => {
-        if (this.disposed) return
-        this.ledger.commit({
-          sessionId,
-          messageId: message.id,
-          type: 'message.delivery',
-          provenance: 'cordisx',
-          source: this.runtimeSource('agent-runtime'),
-          ...this.causal(this.latestEventId(sessionId)),
-          data: {
-            stage: 'failed', target, wakeup,
-            diagnostic: { code: 'adapter-failure', message: error instanceof Error ? error.message : String(error), retryable: false },
-          },
-        })
-      })
+      .catch(error => console.error('CordisX Agent delivery ledger failed', error))
       .finally(() => this.operations.delete(operation))
     this.operations.add(operation)
   }
@@ -183,14 +169,32 @@ export class CordisXHostAgentRuntime {
     this.assertLive()
     let messages = clone(input.messages)
     for (const record of [...this.preSteps].sort((left, right) => left.order - right.order)) {
-      const decision = await record.handler(freeze({ ...input, messages }))
+      let decision
+      try {
+        decision = await record.handler(freeze({ ...input, messages }))
+      } catch (error) {
+        const diagnostic = { code: 'adapter-failure' as const, message: `agent/pre-step handler failed: ${error instanceof Error ? error.message : String(error)}` }
+        this.preStepDiagnostic(input, record.source, diagnostic.code, diagnostic.message)
+        return { status: 'failed', messages, error: diagnostic }
+      }
+      if (decision === null || typeof decision !== 'object' || !['continue', 'append', 'reject', 'transform'].includes(decision.kind)) {
+        const error = { code: 'invalid-request' as const, message: 'agent/pre-step handler returned an invalid decision' }
+        this.preStepDiagnostic(input, record.source, error.code, error.message)
+        return { status: 'failed', messages, error }
+      }
       if (decision.kind === 'continue') continue
       const capability = decision.kind === 'append' ? 'agent.messages.append'
         : decision.kind === 'reject' ? 'agent.steps.reject'
           : 'agent.messages.transform'
       const grant = await this.broker.authorize(record.identity, capability, { agentSessionId: input.sessionId })
-      if (!grant.ok) return { status: 'failed', messages, error: grant.error }
-      if (decision.kind === 'reject') return { status: 'rejected', messages, reason: decision.reason, source: record.source }
+      if (!grant.ok) {
+        this.preStepDiagnostic(input, record.source, grant.error.code, grant.error.message)
+        return { status: 'failed', messages, error: grant.error }
+      }
+      if (decision.kind === 'reject') {
+        this.preStepDiagnostic(input, record.source, 'pre-step-rejected', decision.reason)
+        return { status: 'rejected', messages, reason: decision.reason, source: record.source }
+      }
       if (decision.kind === 'append') {
         messages = freeze([...messages, ...decision.messages.map(item => this.message(record.source, item))])
         continue
@@ -221,10 +225,31 @@ export class CordisXHostAgentRuntime {
       active: false,
       disposed: false,
     }
+    if ([...this.prompts].some(item => item.kind === kind
+      && item.identity.source === identity.source
+      && item.identity.id === identity.id
+      && item.contribution.sessionId === contribution.sessionId
+      && item.contribution.id === contribution.id)) {
+      throw new Error(`Duplicate systemPrompt.${kind} contribution ${contribution.id}`)
+    }
     this.prompts.add(record)
     const capability = kind === 'section' ? 'agent.prompt.section' : 'agent.prompt.context'
     const operation = this.broker.authorize(identity, capability, { agentSessionId: contribution.sessionId })
-      .then(grant => { if (grant.ok && !record.disposed && !this.disposed) record.active = true })
+      .then(grant => {
+        if (grant.ok && !record.disposed && !this.disposed) {
+          record.active = true
+          return
+        }
+        if (!grant.ok && !record.disposed && !this.disposed) {
+          this.ledger.commit({
+            sessionId: contribution.sessionId,
+            type: 'diagnostic',
+            provenance: 'cordisx',
+            source: this.runtimeSource('permission-broker'),
+            data: { code: grant.error.code, message: grant.error.message },
+          })
+        }
+      })
       .finally(() => this.operations.delete(operation))
     this.operations.add(operation)
     return () => {
@@ -291,7 +316,27 @@ export class CordisXHostAgentRuntime {
       causalParentId: permission.eventId,
       data: { stage: 'queued', target, wakeup },
     })
-    const outcome = await this.adapter.deliver({ sessionId, target, wakeup, message })
+    let outcome: CordisXAgentDeliveryOutcome
+    try {
+      outcome = await this.adapter.deliver({ sessionId, target, wakeup, message })
+    } catch {
+      this.terminal(sessionId, message.id, target, wakeup, 'failed', queued.eventId, {
+        code: 'adapter-failure', message: 'Agent adapter delivery failed', retryable: true,
+      })
+      return
+    }
+    if (outcome.projected && !outcome.claimed) {
+      this.terminal(sessionId, message.id, target, wakeup, 'failed', queued.eventId, {
+        code: 'adapter-failure', message: 'Agent adapter projected an unclaimed message', retryable: false,
+      })
+      return
+    }
+    if (outcome.terminal === 'forwarded' && (!outcome.claimed || !outcome.projected)) {
+      this.terminal(sessionId, message.id, target, wakeup, 'failed', queued.eventId, {
+        code: 'adapter-failure', message: 'Agent adapter reported forwarded before claim and projection', retryable: false,
+      })
+      return
+    }
     let causalParentId = queued.eventId
     if (outcome.claimed) {
       causalParentId = this.ledger.commit({
@@ -375,6 +420,19 @@ export class CordisXHostAgentRuntime {
 
   private latestEventId(sessionId: string): string | undefined {
     return this.ledger.latestEventId(sessionId)
+  }
+
+  private preStepDiagnostic(input: CordisXPreStepInput, source: CordisXAgentPluginSource, code: string, message: string): void {
+    this.ledger.commit({
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      stepId: input.stepId,
+      type: 'diagnostic',
+      provenance: 'cordisx',
+      source,
+      ...this.causal(this.latestEventId(input.sessionId)),
+      data: { code, message },
+    })
   }
 
   private causal(eventId: string | undefined): { readonly causalParentId: string } | Record<never, never> {

@@ -86,6 +86,16 @@ describe('Agent event ledger', () => {
       sessionId: 'session-1', turnId: 'turn-1', itemId: 'item-1', type: 'content.chunk', provenance: 'observed', source,
       data: { channel: 'assistant', index: 1, ref: 'blob-1' },
     })).toThrowError(expect.objectContaining({ code: 'gap' }))
+
+    const atomic = new CordisXAgentEventLedger()
+    expect(() => atomic.commitBatch([
+      { ...session(), sessionId: 'session-atomic' },
+      {
+        sessionId: 'session-atomic', turnId: 'turn-1', itemId: 'item-1', type: 'content.chunk', provenance: 'observed', source,
+        data: { channel: 'assistant', index: 2, delta: 'gap' },
+      },
+    ])).toThrowError(expect.objectContaining({ code: 'gap' }))
+    expect(atomic.query({ sessionId: 'session-atomic' }).events).toEqual([])
   })
 
   it('clears subscriptions and rejects access after generation disposal', () => {
@@ -130,6 +140,18 @@ describe('Agent event ledger', () => {
     await Promise.resolve()
     ledger.commit({ sessionId: 'session-1', type: 'diagnostic', provenance: 'inferred', source, data: { code: 'new', message: 'new' } })
     expect(listener).toHaveBeenCalledWith({ sessionId: 'session-1', fromSeq: 1, toSeq: 1 })
+    const broad = vi.fn()
+    ctx.agentEvents.subscribe({}, broad)
+    await Promise.resolve()
+    ledger.commit({ sessionId: 'session-1', type: 'diagnostic', provenance: 'inferred', source, data: { code: 'scoped', message: 'scoped' } })
+    expect(broad).not.toHaveBeenCalled()
+    expect(broker.snapshots()[0]).toMatchObject({ denialCount: 2 })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    ledger.subscribe({}, () => { throw new Error('subscriber failure') })
+    expect(() => ledger.commit({ sessionId: 'session-1', type: 'diagnostic', provenance: 'inferred', source, data: { code: 'safe', message: 'safe' } })).not.toThrow()
+    expect(consoleError).toHaveBeenCalledWith('CordisX Agent event subscriber failed', expect.any(Error))
+    consoleError.mockRestore()
+    expect(ledger.latestEventId('session-1')).toBe('cxevt:session-1:3')
     expect(ctx.agentEvents.status()).toMatchObject({ secondConnectionCreated: false, rawBridgeExposed: false })
     expect(Object.keys(ctx.agentEvents)).not.toEqual(expect.arrayContaining(['ledger', 'broker', 'adapter']))
     dispose()

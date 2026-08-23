@@ -197,4 +197,31 @@ describe('Agent runtime', () => {
     await agentFiber.dispose()
     await runtime.dispose()
   })
+
+  it('contains pre-step handler failures and invalid adapter forwarding claims', async () => {
+    const invalidAdapter: CordisXAgentAdapter = {
+      agentStatus: () => ({
+        hostId: 'fixture', hostName: 'Fixture', mode: 'read-write', adapterId: 'fixture', adapterVersion: '1',
+        experimental: [], diagnostics: [], secondConnectionCreated: false, rawBridgeExposed: false,
+      }),
+      deliver: vi.fn(async () => ({ terminal: 'forwarded', claimed: false, projected: false })),
+    }
+    const { runtime } = allowedRuntime(invalidAdapter)
+    runtime.registerPreStep(identity, () => { throw new Error('plugin failure') })
+    const preStep = await runtime.runPreStep({
+      sessionId: 'session-1', turnId: 'turn-1', stepId: 'step-1', messages: [observed('user-1', 'first')],
+    })
+    expect(preStep).toMatchObject({ status: 'failed', error: { code: 'adapter-failure', message: expect.stringContaining('plugin failure') } })
+    expect(runtime.ledger.query({ sessionId: 'session-1' }).events.at(-1)).toMatchObject({
+      type: 'diagnostic', provenance: 'cordisx', source: { kind: 'plugin', id: identity.id },
+    })
+    runtime.send(identity, 'session-1', 'invalid adapter', 'next-step', false)
+    await runtime.settled()
+    const delivery = runtime.ledger.query({ sessionId: 'session-1' }).events.filter(event => event.type === 'message.delivery')
+    expect((delivery.at(-1)?.data as { stage: string; diagnostic: { code: string } })).toMatchObject({
+      stage: 'failed', diagnostic: { code: 'adapter-failure' },
+    })
+    expect(delivery.some(event => (event.data as { stage: string }).stage === 'forwarded')).toBe(false)
+    await runtime.dispose()
+  })
 })

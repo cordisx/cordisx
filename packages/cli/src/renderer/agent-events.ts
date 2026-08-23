@@ -84,7 +84,9 @@ export class CordisXAgentEventLedger {
       }
     } catch (error) {
       for (const event of [...committed].reverse()) {
-        this.sessions.get(event.sessionId)?.pop()
+        const session = this.sessions.get(event.sessionId)
+        session?.pop()
+        if (session?.length === 0) this.sessions.delete(event.sessionId)
         this.eventIds.delete(event.eventId)
       }
       this.chunkIndices.clear()
@@ -133,6 +135,10 @@ export class CordisXAgentEventLedger {
 
   subscribe(filter: CordisXAgentEventSubscription, listener: (range: CordisXAgentEventRange) => void): Disposable<void> {
     this.assertLive()
+    if (filter.sessionId !== undefined && !validId(filter.sessionId)) throw new AgentEventLedgerError('invalid', 'subscription sessionId is invalid')
+    if (filter.afterSeq !== undefined && (!Number.isInteger(filter.afterSeq) || filter.afterSeq < -1)) {
+      throw new AgentEventLedgerError('invalid', 'subscription afterSeq must be an integer at least -1')
+    }
     const subscription = { filter: clone(filter), listener }
     this.subscriptions.add(subscription)
     return () => { this.subscriptions.delete(subscription) }
@@ -186,10 +192,14 @@ export class CordisXAgentEventLedger {
     for (const subscription of this.subscriptions) {
       if (subscription.filter.sessionId !== undefined && subscription.filter.sessionId !== range.sessionId) continue
       if (range.toSeq <= (subscription.filter.afterSeq ?? -1)) continue
-      subscription.listener(clone({
-        ...range,
-        fromSeq: Math.max(range.fromSeq, (subscription.filter.afterSeq ?? -1) + 1),
-      }))
+      try {
+        subscription.listener(clone({
+          ...range,
+          fromSeq: Math.max(range.fromSeq, (subscription.filter.afterSeq ?? -1) + 1),
+        }))
+      } catch (error) {
+        console.error('CordisX Agent event subscriber failed', error)
+      }
     }
   }
 
@@ -276,9 +286,10 @@ export class CordisXAgentEventService extends Service implements CordisXAgentEve
     let active = true
     if (caller !== undefined && (input.sessionId === undefined || validId(input.sessionId))) {
       void serviceOptions(this).broker.authorize(caller, 'agent.events.read', {
-        ...(input.sessionId === undefined ? {} : { agentSessionId: input.sessionId }),
+        ...(input.sessionId === undefined ? { allAgentSessions: true as const } : { agentSessionId: input.sessionId }),
       }).then(grant => {
-        if (active && grant.ok) dispose = serviceOptions(this).ledger.subscribe(input, listener)
+        if (!active || !grant.ok) return
+        dispose = serviceOptions(this).ledger.subscribe(input, listener)
       })
     }
     return () => {

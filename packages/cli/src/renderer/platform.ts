@@ -268,6 +268,7 @@ export interface RequestedScope {
   readonly session?: CordisXPlatformSessionRef
   readonly adapterGeneration?: string
   readonly agentSessionId?: string
+  readonly allAgentSessions?: true
 }
 
 export interface PermissionPromptRequest {
@@ -349,6 +350,7 @@ function scopeAllows(scope: CordisXCapabilityScope, requested: RequestedScope): 
   })) return false
   if (requested.cwd !== undefined && scope.cwdRoots !== undefined && !scope.cwdRoots.some(root => pathInside(requested.cwd as string, root))) return false
   if (requested.agentSessionId !== undefined && scope.sessionIds !== undefined && !scope.sessionIds.includes(requested.agentSessionId)) return false
+  if (requested.allAgentSessions === true && scope.sessionIds !== undefined) return false
   return true
 }
 
@@ -361,6 +363,7 @@ function requestedSnapshot(requested: RequestedScope): RequestedScope {
     ...(requested.session === undefined ? {} : { session: Object.freeze({ ...requested.session }) }),
     ...(requested.adapterGeneration === undefined ? {} : { adapterGeneration: requested.adapterGeneration }),
     ...(requested.agentSessionId === undefined ? {} : { agentSessionId: requested.agentSessionId }),
+    ...(requested.allAgentSessions === true ? { allAgentSessions: true as const } : {}),
   })
 }
 
