@@ -9,6 +9,7 @@ import {
 } from '../packages/cli/src/renderer/extension-points.js'
 import {
   CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1,
+  CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
   type CordisXExtensionPointPolicyRecordV1,
@@ -100,7 +101,7 @@ describe('extension point runtime contract', () => {
   it('projects live surface and anchor availability instead of hardcoding surfaces available', () => {
     const descriptors = new ExtensionPointDescriptorRegistry()
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
-    const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
+    const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore(), 'generation-test')
     const i18n = {
       resolveFor: (_owner: string, message: { key: string; fallback?: string }) => ({
         text: message.fallback ?? message.key,
@@ -185,23 +186,34 @@ describe('extension point runtime contract', () => {
   it('emits exact host-generated surface and outlet access origins', () => {
     const descriptors = new ExtensionPointDescriptorRegistry()
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
-    const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
+    const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore(), 'generation-test')
     const identity = { source: 'https://plugins.example/demo', id: 'demo' }
     broker.register(identity)
     broker.setPolicy(identity, 'sidebar.navigation.items', 'deny')
 
     expect(broker.authorizeSurfaceCommand('demo', 'sidebar.navigation.items', 'demo:navigation', 'demo:open')).toMatchObject({ authorized: false })
+    expect(broker.authorizeSurfaceRoute('demo', 'session.header.actions', 'demo:trace', 'demo:trace.route')).toMatchObject({ authorized: true })
     expect(broker.authorizeOutletRoute('demo', 'app', 'demo:route', 'demo:page')).toMatchObject({ authorized: true })
     expect(broker.authorizeOutletPage('demo', 'app', 'demo:route', 'demo:page')).toMatchObject({ authorized: true })
     expect(broker.accessDiagnostics().map(item => item.request)).toEqual([
       expect.objectContaining({
+        $schema: CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2,
+        schemaVersion: 2,
+        generation: 'generation-test',
         operation: 'surface.command.invoke',
         identity: { source: identity.source, pluginId: identity.id, pointId: 'sidebar.navigation.items' },
         contributionId: 'demo:navigation', commandId: 'demo:open',
       }),
+      expect.objectContaining({ operation: 'surface.route.navigate', contributionId: 'demo:trace', routeId: 'demo:trace.route' }),
       expect.objectContaining({ operation: 'outlet.route.navigate', routeId: 'demo:route', pageId: 'demo:page' }),
       expect.objectContaining({ operation: 'outlet.page.mount', routeId: 'demo:route', pageId: 'demo:page' }),
     ])
+    broker.setSurfaceAvailability([{
+      surface: 'session.header.actions', state: 'pending', code: 'anchor-unresolved', detail: 'No unique seat.',
+    }])
+    expect(broker.authorizeSurfaceRoute('demo', 'session.header.actions', 'demo:trace', 'demo:trace.route')).toMatchObject({
+      authorized: false, reason: 'extension point session.header.actions is pending',
+    })
     broker.dispose()
     descriptors.dispose()
   })

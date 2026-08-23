@@ -452,6 +452,20 @@ export class NavigationRegistry {
     return this.enqueue(() => this.navigateNow(requestingOwner, reference))
   }
 
+  navigateFromSurface(
+    requestingOwner: string,
+    reference: CordisXRouteReference,
+    pointId: string,
+    contributionId: string,
+  ): Promise<void> {
+    const routeId = qualifyOwnedId(requestingOwner, reference.id)
+    const decision = this.access?.authorizeSurfaceRoute(requestingOwner, pointId, contributionId, routeId)
+    if (decision !== undefined && !decision.authorized) {
+      return Promise.reject(new Error(decision.reason ?? `extension point ${pointId} is denied for plugin ${requestingOwner}`))
+    }
+    return this.navigate(requestingOwner, reference)
+  }
+
   back(requestingOwner: string, outlet?: CordisXOutletName): Promise<void> {
     return this.enqueue(async () => {
       const name = outlet ?? this.currentOutletFor(requestingOwner)
@@ -1014,6 +1028,15 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
 
   navigateFor(owner: string, reference: CordisXRouteReference): Promise<void> {
     return this.registry.navigate(owner, reference)
+  }
+
+  navigateFromSurface(
+    owner: string,
+    reference: CordisXRouteReference,
+    pointId: string,
+    contributionId: string,
+  ): Promise<void> {
+    return this.registry.navigateFromSurface(owner, reference, pointId, contributionId)
   }
 
   snapshot(): NavigationSnapshot {

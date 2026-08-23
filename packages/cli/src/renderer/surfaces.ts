@@ -273,6 +273,7 @@ export class SurfaceRegistry {
 
   setAccessResolver(access: ExtensionPointAccessResolver): void {
     this.access = access
+    access.setSurfaceAvailability(this.availabilitySnapshot())
     this.notify()
   }
 
@@ -310,6 +311,7 @@ export class SurfaceRegistry {
     if (JSON.stringify([...this.availability]) === JSON.stringify([...next])) return
     this.availability.clear()
     for (const [surface, item] of next) this.availability.set(surface, item)
+    this.access?.setSurfaceAvailability(this.availabilitySnapshot())
     this.notify()
   }
 
