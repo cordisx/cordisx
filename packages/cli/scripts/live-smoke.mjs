@@ -8,6 +8,7 @@ const parsed = parseArgs({
   options: {
     port: { type: 'string' },
     screenshot: { type: 'string' },
+    'app-screenshot': { type: 'string' },
     'manager-screenshot': { type: 'string' },
     'manager-tab': { type: 'string' },
     'manager-plugin': { type: 'string' },
@@ -23,6 +24,7 @@ const parsed = parseArgs({
     'fetch-url': { type: 'string' },
     report: { type: 'string' },
     'select-thread': { type: 'string' },
+    'plugin-owner': { type: 'string' },
     'open-route': { type: 'string' },
     'session-id': { type: 'string' },
     exercise: { type: 'boolean', default: false },
@@ -31,7 +33,7 @@ const parsed = parseArgs({
 })
 const port = Number(parsed.values.port)
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--screenshot <png>] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-settings-tab <tab> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-click-external] [--trigger-screenshot <png>]')
+  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--screenshot <png>] [--app-screenshot <png>] [--plugin-owner <id> --open-route <id>] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-settings-tab <tab> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-click-external] [--trigger-screenshot <png>]')
 }
 
 const response = await fetch(`http://127.0.0.1:${port}/json/list`)
@@ -135,7 +137,8 @@ if (parsed.values['open-route'] !== undefined) {
       await new Promise(resolve => setTimeout(resolve, 80))
       const route = ${JSON.stringify(parsed.values['open-route'])}
       const sessionId = ${JSON.stringify(parsed.values['session-id'])}
-      await globalThis.__cordisxRuntime?.navigate?.('slot-showcase', {
+      const owner = ${JSON.stringify(parsed.values['plugin-owner'] ?? 'slot-showcase')}
+      await globalThis.__cordisxRuntime?.navigate?.(owner, {
         id: route,
         ...(sessionId === undefined ? {} : { params: { sessionId } }),
       })
@@ -147,6 +150,7 @@ if (parsed.values['open-route'] !== undefined) {
       const anchor = outlet?.parentElement
       const anchorRect = anchor?.getBoundingClientRect()
       return {
+        owner,
         route,
         page: page?.getAttribute('data-cordisx-page') ?? null,
         pageRect: pageRect === undefined ? null : { x: pageRect.x, y: pageRect.y, width: pageRect.width, height: pageRect.height },
@@ -569,6 +573,19 @@ if (parsed.values.screenshot !== undefined) {
     return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
   })()`)
   await capture(markerRect, parsed.values.screenshot, 'CordisX marker')
+}
+
+if (parsed.values['app-screenshot'] !== undefined) {
+  const captured = await send('Page.captureScreenshot', {
+    format: 'png',
+    fromSurface: true,
+    captureBeyondViewport: false,
+  })
+  if (typeof captured.data !== 'string') throw new Error('CDP app screenshot returned no image')
+  const screenshotPath = path.resolve(parsed.values['app-screenshot'])
+  await mkdir(path.dirname(screenshotPath), { recursive: true })
+  await writeFile(screenshotPath, Buffer.from(captured.data, 'base64'))
+  console.log(`app-screenshot=${screenshotPath}`)
 }
 
 if (parsed.values['manager-screenshot'] !== undefined) {

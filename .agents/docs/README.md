@@ -23,6 +23,9 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `multi-provider-sessions.md` defines provider-aware model/session identity,
   Provider Fleet routing, the launcher-private connection plane, CLIProxyAPI
   integration, PR order, and validation scope.
+- `agent-trace-showcase.md` defines the independent development-only Agent
+  Trace Showcase plugin, its stacked core-contract dependency, session Timeline
+  product boundary, fixture seam, lifecycle, and validation matrix.
 - `development-plan.md` records staged implementation and validation boundaries.
 
 Normative plugin contracts belong in `cordisx/cordisx-protocol`; private or provisional planning belongs in `cordisx/roadmap`.
