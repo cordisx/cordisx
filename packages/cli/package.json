@@ -1,14 +1,18 @@
 {
   "name": "cordisx",
-  "version": "0.1.0",
-  "private": true,
-  "description": "An experimental Cordis-powered UI plugin host for the Codex desktop app",
+  "version": "0.1.0-beta.0",
+  "description": "An experimental Cordis-powered UI plugin host for Codex Desktop",
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md",
+    "THIRD_PARTY_NOTICES.md",
+    "third_party"
   ],
   "bin": {
-    "cordisx": "./dist/src/cli.js"
+    "cordisx": "dist/src/cli.js"
   },
   "exports": {
     "./contracts": {
@@ -27,6 +31,26 @@
   },
   "engines": {
     "node": ">=22.19"
+  },
+  "license": "AGPL-3.0-or-later",
+  "homepage": "https://cordisx.github.io/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cordisx/cordisx.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/cordisx/cordisx/issues"
+  },
+  "keywords": [
+    "codex",
+    "cordis",
+    "plugins"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "beta",
+    "provenance": true
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.1",

@@ -127,7 +127,7 @@ describe('renderer bundle', () => {
     }
     const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
     expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
-    expect(runtime?.version).toBe('0.1.0')
+    expect(runtime?.version).toBe('0.1.0-beta.0')
     const snapshot = runtime!.snapshot()
     expect(snapshot.plugins).toEqual([
       expect.objectContaining({ id: 'slot-showcase', status: 'active', readme: expect.stringContaining('# Slot Showcase') }),
@@ -488,7 +488,7 @@ describe('renderer bundle', () => {
     expect(directSvg).toContain('CordisX mark for dark backgrounds')
     expect(new Set([...directSvg.matchAll(/stroke="(#[0-9a-f]{6})"/gi)].map(match => match[1])).size).toBeGreaterThan(10)
     expect(dom.window.document.querySelector('.cxm-about-name')?.textContent).toBe('CordisX')
-    expect(dom.window.document.querySelector('.cxm-about-version')?.textContent).toBe('v0.1.0')
+    expect(dom.window.document.querySelector('.cxm-about-version')?.textContent).toBe('v0.1.0-beta.0')
     expect(dom.window.document.querySelector('.cxm-about-identity [data-cordisx-brand-mark]')).not.toBeNull()
     expect([...dom.window.document.querySelector('.cxm-about-identity')?.children ?? []].map(item => item.className)).toEqual([
       'cxm-brand-mark cxm-about-mark', 'cxm-about-identity-copy',

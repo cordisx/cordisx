@@ -26,17 +26,23 @@ describe('npm workspace boundary', () => {
     })
     expect(cli).toMatchObject({
       name: 'cordisx',
-      private: true,
-      files: ['dist'],
-      bin: { cordisx: './dist/src/cli.js' },
+      version: '0.1.0-beta.0',
+      license: 'AGPL-3.0-or-later',
+      files: ['dist', 'README.md', 'LICENSE', 'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md', 'THIRD_PARTY_NOTICES.md', 'third_party'],
+      bin: { cordisx: 'dist/src/cli.js' },
+      publishConfig: { access: 'public', tag: 'beta', provenance: true },
       dependencies: { '@material-symbols/svg-400': '0.46.0' },
     })
+    expect(cli.private).toBeUndefined()
     expect(creator).toMatchObject({
       name: 'create-cordisx-plugin',
-      private: true,
-      files: ['dist', 'template'],
-      bin: { 'create-cordisx-plugin': './dist/cli.js' },
+      version: '0.1.0-beta.0',
+      license: 'AGPL-3.0-or-later',
+      files: ['dist', 'template', 'README.md', 'LICENSE', 'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'],
+      bin: { 'create-cordisx-plugin': 'dist/cli.js' },
+      publishConfig: { access: 'public', tag: 'beta', provenance: true },
     })
+    expect(creator.private).toBeUndefined()
     await expect(access(path.join(repositoryRoot, 'packages/cli/src/cli.ts'))).resolves.toBeUndefined()
     await expect(access(path.join(repositoryRoot, 'examples/plugins/slot-showcase/index.ts'))).resolves.toBeUndefined()
     expect(iconSource).toContain("from '@material-symbols/svg-400/rounded/extension.svg'")

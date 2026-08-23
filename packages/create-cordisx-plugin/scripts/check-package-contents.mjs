@@ -11,7 +11,7 @@ const report = JSON.parse(output)
 const files = report[0]?.files?.map(file => file.path)
 if (!Array.isArray(files)) throw new Error('npm pack did not report package contents')
 
-const allowedRoots = ['README.md', 'package.json']
+const allowedRoots = ['CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md', 'LICENSE', 'README.md', 'package.json']
 const leaked = files.filter(file => (
   !allowedRoots.includes(file) && !file.startsWith('dist/') && !file.startsWith('template/')
 ))
@@ -20,6 +20,8 @@ if (leaked.length > 0) {
 }
 
 for (const required of [
+  'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md',
+  'LICENSE',
   'README.md',
   'dist/cli.js',
   'template/README.md',

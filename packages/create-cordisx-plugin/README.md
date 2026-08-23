@@ -3,12 +3,23 @@
 Create a minimal trusted-local CordisX plugin project.
 
 ```bash
-npm create cordisx-plugin my-plugin
+npm create cordisx-plugin@beta my-plugin
 # or
-npx create-cordisx-plugin my-plugin
+npx create-cordisx-plugin@beta my-plugin
 ```
+
+The `@beta` qualifier is required while npm `latest` remains the non-functional
+`0.0.0` package-name reservation.
 
 The generated project includes a version-1 manifest exported from its entry,
 structured UI contribution, TypeScript build, manifest test, and
 `cordisx dev --dry-run` script. It does not install to a marketplace, sign the
 plugin, provide a permission sandbox, or promise hot reload.
+
+The `create-cordisx-plugin` tool itself is licensed under
+`AGPL-3.0-or-later`. Files under its marked `template` directory and projects
+generated from them receive the included CordisX Independent Plugin Exception.
+An independent plugin using only public, versioned CordisX plugin interfaces
+may be commercial, sold, distributed through a marketplace, and licensed under
+terms chosen by its author. The custom Exception is not a standard SPDX
+exception and should receive legal review before stable.
