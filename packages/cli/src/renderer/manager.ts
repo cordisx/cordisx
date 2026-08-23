@@ -24,6 +24,7 @@ import type { CommandSnapshot } from './commands.js'
 import { resolveManagerTriggerTarget } from './host-probes.js'
 import type { NavigationSnapshot } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
+import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
 import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 
 export type ManagerPluginStatus = 'active' | 'blocked' | 'permission-blocked' | 'configured-disabled' | 'failed'
@@ -87,6 +88,7 @@ type PermissionDetailView = {
 }
 
 const MANAGER_STYLE_ID = 'cordisx-manager-style'
+const CORDISX_MARK_DARK_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkDark)}`
 const CORDISX_MARK_LIGHT_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkLight)}`
 const ABOUT_ACTIONS = [
   {
@@ -188,11 +190,12 @@ const MANAGER_STYLES = `
     outline-offset: 1px;
   }
   .cxm-brand-mark {
-    display: inline-flex;
+    display: block;
     width: 18px;
     height: 18px;
     flex: none;
   }
+  .cxm-brand-mark[data-brand-rendering="direct-dark"] { object-fit: contain; }
   .cxm-brand-mark[data-color-scheme="current-color"] {
     background: currentColor;
     -webkit-mask-image: var(--cordisx-brand-mask);
@@ -350,7 +353,7 @@ const MANAGER_STYLES = `
     content: '';
   }
   .cxm-about-identity { display: flex; align-items: center; gap: 18px; padding: 4px 2px 22px; }
-  .cxm-about-mark.cxm-brand-mark { width: 54px; height: 54px; color: #eef0f3; }
+  .cxm-about-mark.cxm-brand-mark { width: 54px; height: 54px; }
   .cxm-about-name { color: #f5f6f8; font-size: 22px; font-weight: 720; letter-spacing: -.02em; }
   .cxm-about-version { margin-top: 3px; color: #8d96a8; font: 11px/1.4 ui-monospace, monospace; }
   .cxm-about-actions { border-top: 1px solid rgba(255, 255, 255, .08); border-bottom: 1px solid rgba(255, 255, 255, .08); }
@@ -576,6 +579,17 @@ function createAdaptiveBrandMark(document: Document): HTMLSpanElement {
   mark.dataset.colorScheme = 'current-color'
   mark.setAttribute('aria-hidden', 'true')
   mark.style.setProperty('--cordisx-brand-mask', `url("${CORDISX_MARK_LIGHT_URI}")`)
+  return mark
+}
+
+function createDarkBackgroundBrandMark(document: Document): HTMLImageElement {
+  const mark = create(document, 'img', 'cxm-brand-mark')
+  mark.dataset.cordisxBrandMark = 'true'
+  mark.dataset.brandRendering = 'direct-dark'
+  mark.src = CORDISX_MARK_DARK_URI
+  mark.alt = ''
+  mark.setAttribute('aria-hidden', 'true')
+  mark.draggable = false
   return mark
 }
 
@@ -863,7 +877,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     button.dataset.tab = tab.id
     button.setAttribute('role', 'tab')
     const icon = tab.brand === true
-      ? createAdaptiveBrandMark(document)
+      ? createDarkBackgroundBrandMark(document)
       : create(document, 'span', 'cxm-nav-icon', tab.icon)
     icon.classList.add('cxm-nav-icon')
     icon.setAttribute('aria-hidden', 'true')
@@ -919,7 +933,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       row.append(back)
     } else {
       const icon = options.brand === true
-        ? createAdaptiveBrandMark(document)
+        ? createDarkBackgroundBrandMark(document)
         : create(document, 'span', undefined, options.icon ?? '◈')
       icon.classList.add('cxm-heading-leading', 'cxm-heading-icon')
       icon.setAttribute('aria-hidden', 'true')
@@ -942,7 +956,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const renderAbout = (snapshot: ManagerSnapshot): void => {
     setHeading('关于 CordisX', '项目、社区与支持入口', { brand: true })
     const identity = create(document, 'div', 'cxm-about-identity')
-    const mark = createAdaptiveBrandMark(document)
+    const mark = createDarkBackgroundBrandMark(document)
     mark.classList.add('cxm-about-mark')
     const identityCopy = create(document, 'div')
     identityCopy.append(

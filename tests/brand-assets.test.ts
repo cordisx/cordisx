@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -26,6 +27,9 @@ describe('CordisX brand assets', () => {
     expect(light).toContain('stroke="#030303"')
     expect(dark).toContain('for dark backgrounds')
     expect(dark).toContain('stroke="#fcfcfc"')
+    expect(createHash('sha256').update(light).digest('hex')).toBe('bd5afe024112063e487b2ee3c40d92c3f1236ab7dc957623e444fb0635836865')
+    expect(createHash('sha256').update(dark).digest('hex')).toBe('cbf804af4f89ef57d5e74e097c2eff7cef4c746ec5858ba295f570e14226b544')
+    expect(new Set([...dark.matchAll(/stroke="(#[0-9a-f]{6})"/gi)].map(match => match[1])).size).toBeGreaterThan(10)
   })
 
   it('uses the same theme-aware assets in the repository README', async () => {
