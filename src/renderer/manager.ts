@@ -165,7 +165,6 @@ const MANAGER_STYLES = `
   .cxm-nav-button:hover { background: rgba(255, 255, 255, .05); color: #fff; }
   .cxm-nav-button[aria-selected="true"] { background: rgba(139, 92, 246, .16); color: #ddd6fe; }
   .cxm-nav-icon { display: inline-grid; place-items: center; width: 20px; color: #a78bfa; font-size: 15px; }
-  .cxm-sidebar-note { margin-top: auto; padding: 10px; color: #70798b; font-size: 10px; }
   .cxm-main { display: flex; min-width: 0; flex-direction: column; }
   .cxm-header {
     display: flex;
@@ -244,7 +243,7 @@ const MANAGER_STYLES = `
     content: '';
   }
   .cxm-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-  .cxm-card, .cxm-detail, .cxm-slot-card, .cxm-source-row {
+  .cxm-card, .cxm-slot-card, .cxm-source-row {
     border: 1px solid rgba(255, 255, 255, .09);
     border-radius: 12px;
     background: rgba(255, 255, 255, .035);
@@ -253,6 +252,17 @@ const MANAGER_STYLES = `
   .cxm-card-label { color: #7f899a; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
   .cxm-card-value { margin-top: 6px; color: #fff; font-size: 20px; font-weight: 700; }
   .cxm-section-title { margin: 22px 0 8px; color: #f2f4f8; font-size: 13px; font-weight: 700; }
+  .cxm-tab-panel { min-width: 0; }
+  .cxm-tab-panel > .cxm-section-title:first-child { margin-top: 0; }
+  .cxm-flat-list {
+    margin-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, .08);
+    border-bottom: 1px solid rgba(255, 255, 255, .08);
+  }
+  .cxm-flat-item { padding: 14px 2px; }
+  .cxm-flat-item + .cxm-flat-item { border-top: 1px solid rgba(255, 255, 255, .08); }
+  .cxm-flat-item > .cxm-copy, .cxm-flat-item > .cxm-permission-policy { margin-top: 10px; }
+  .cxm-runtime-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .cxm-copy { margin: 0; color: #98a1b2; font-size: 12px; }
   .cxm-notice {
     margin-top: 14px;
@@ -334,13 +344,11 @@ const MANAGER_STYLES = `
   .cxm-status-dot[data-status="failed"] { background: #fb7185; }
   .cxm-status-dot[data-status="blocked"], .cxm-status-dot[data-status="loading"] { background: #fbbf24; }
   .cxm-chevron { flex: none; color: #626c7d; font-size: 18px; }
-  .cxm-detail { min-width: 0; padding: 18px; }
   .cxm-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   .cxm-permission-policy { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 12px; }
   .cxm-permission-policy .cxm-field-label { white-space: nowrap; }
   .cxm-permission-policy .cxm-source-input { width: 100%; min-width: 0; }
-  .cxm-detail h3 { margin: 0; color: #fff; font-size: 17px; }
-  .cxm-detail-id { margin-top: 3px; color: #747f91; font: 10px/1.3 ui-monospace, monospace; }
+  .cxm-detail-id { color: #747f91; font: 10px/1.3 ui-monospace, monospace; }
   .cxm-detail-description { max-width: 680px; margin: 14px 0 0; color: #a7afbe; font-size: 12px; }
   .cxm-action {
     display: inline-flex;
@@ -428,6 +436,17 @@ function createLocalTabs(
     tabs.append(button)
   }
   return tabs
+}
+
+function createTabPanel(document: Document, label: string): HTMLDivElement {
+  const panel = create(document, 'div', 'cxm-tab-panel')
+  panel.setAttribute('role', 'tabpanel')
+  panel.setAttribute('aria-label', label)
+  return panel
+}
+
+function createSectionTitle(document: Document, text: string): HTMLHeadingElement {
+  return create(document, 'h3', 'cxm-section-title', text)
 }
 
 function statusLabel(status: ManagerPluginStatus): string {
@@ -611,7 +630,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     navButtons.set(tab.id, button)
     nav.append(button)
   }
-  sidebar.append(nav, create(document, 'div', 'cxm-sidebar-note', 'Trusted local code · 当前不是安全沙箱'))
+  sidebar.append(nav)
 
   const main = create(document, 'div', 'cxm-main')
   const header = create(document, 'header', 'cxm-header')
@@ -695,7 +714,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       grid.append(card)
     }
     content.append(grid)
-    content.append(create(document, 'div', 'cxm-section-title', '运行边界'))
+    content.append(createSectionTitle(document, '运行边界'))
     content.append(create(document, 'p', 'cxm-copy', '插件作为可信本地代码运行在 Codex renderer 中；Cordis fiber 提供生命周期与可逆卸载，但不提供进程隔离或权限沙箱。'))
     content.append(create(document, 'div', 'cxm-notice', '管理器里的“屏蔽”会卸载插件 fiber，并保存在当前 Chromium profile。它不会删除包、修改配置文件或阻止已打包模块的顶层代码。'))
   }
@@ -730,7 +749,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       slots.append(card)
     }
     content.append(slots)
-    content.append(create(document, 'div', 'cxm-section-title', 'Commands'))
+    content.append(createSectionTitle(document, 'Commands'))
     if (snapshot.commands.length === 0) content.append(create(document, 'div', 'cxm-empty', '当前没有 command 注册'))
     for (const command of snapshot.commands) {
       content.append(create(
@@ -740,7 +759,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         `${command.qualifiedId} · running ${command.running}${command.lastError === undefined ? '' : ` · ${command.lastError}`}`,
       ))
     }
-    content.append(create(document, 'div', 'cxm-section-title', 'Routes / Pages'))
+    content.append(createSectionTitle(document, 'Routes / Pages'))
     for (const route of snapshot.navigation.routes) {
       content.append(create(
         document,
@@ -752,7 +771,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     for (const page of snapshot.navigation.pages) {
       content.append(create(document, 'div', 'cxm-notice', `${page.qualifiedId} · page mount registered`))
     }
-    content.append(create(document, 'div', 'cxm-section-title', 'Host Outlets'))
+    content.append(createSectionTitle(document, 'Host Outlets'))
     for (const outlet of snapshot.navigation.outlets) {
       content.append(create(
         document,
@@ -826,9 +845,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       },
     })
     if (plugin === undefined) {
-      const detail = create(document, 'section', 'cxm-detail')
-      detail.append(create(document, 'div', 'cxm-empty', '插件已不在当前 bundle 中'))
-      content.append(detail)
+      content.append(create(document, 'div', 'cxm-empty', '插件已不在当前 bundle 中'))
       return
     }
 
@@ -844,34 +861,41 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }))
 
     if (pluginDetailTab === 'readme') {
+      const panel = createTabPanel(document, 'README')
       if (plugin.readme?.trim() === '') {
-        content.append(create(document, 'div', 'cxm-empty', '该插件没有随当前 bundle 提供 README.md'))
+        panel.append(create(document, 'div', 'cxm-empty', '该插件没有随当前 bundle 提供 README.md'))
       } else if (plugin.readme === undefined) {
-        content.append(create(document, 'div', 'cxm-empty', '该插件没有随当前 bundle 提供 README.md'))
+        panel.append(create(document, 'div', 'cxm-empty', '该插件没有随当前 bundle 提供 README.md'))
       } else {
-        content.append(renderSafeMarkdown(document, plugin.readme))
+        panel.append(renderSafeMarkdown(document, plugin.readme))
       }
+      content.append(panel)
       return
     }
 
     if (pluginDetailTab === 'config') {
-      const detail = create(document, 'section', 'cxm-detail')
-      detail.append(create(document, 'h3', undefined, '插件配置'))
-      detail.append(create(document, 'pre', 'cxm-code', formatConfig(plugin.config)))
-      detail.append(create(document, 'div', 'cxm-notice', '当前配置来自本次 launcher composition，只读展示；可跨 generation 安全写入前不会在 renderer 内直接修改配置文件。'))
-      content.append(detail)
+      const panel = createTabPanel(document, '配置管理')
+      panel.append(create(document, 'pre', 'cxm-code', formatConfig(plugin.config)))
+      panel.append(create(document, 'div', 'cxm-notice', '当前配置来自本次 launcher composition，只读展示；可跨 generation 安全写入前不会在 renderer 内直接修改配置文件。'))
+      content.append(panel)
       return
     }
 
     if (pluginDetailTab === 'permissions') {
-      const detail = create(document, 'section', 'cxm-detail')
-      detail.append(create(document, 'h3', undefined, 'Platform 权限'))
+      const panel = createTabPanel(document, '权限')
       const permissions = snapshot.permissions.filter(item => item.identity.source === plugin.source && item.identity.id === plugin.id)
+      panel.append(createSectionTitle(document, '能力声明'))
       if (permissions.length === 0) {
-        detail.append(create(document, 'div', 'cxm-empty', '该插件没有声明 Platform capability'))
+        panel.append(create(document, 'div', 'cxm-empty', '该插件没有声明 capability；宿主连接状态仍在下方显示。'))
       }
+      const permissionList = create(document, 'div', 'cxm-flat-list')
+      permissionList.setAttribute('role', 'list')
+      permissionList.dataset.managerGroup = 'capability-declarations'
       for (const permission of permissions) {
-        const card = create(document, 'section', 'cxm-slot-card')
+        const item = create(document, 'div', 'cxm-flat-item')
+        item.setAttribute('role', 'listitem')
+        item.setAttribute('aria-label', `Capability ${permission.capability}`)
+        item.dataset.permissionItem = permission.capability
         const head = create(document, 'div', 'cxm-slot-head')
         head.append(
           create(document, 'code', 'cxm-slot-name', permission.capability),
@@ -908,21 +932,25 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           'cxm-copy',
           `最近使用：${permission.lastUsedAt ?? '无'} · 最近拒绝：${permission.lastDeniedAt ?? '无'} · 拒绝次数：${permission.denialCount}`,
         )
-        card.append(head, reason, scope, policyRow, recent)
-        if (permission.blockedReason !== undefined) card.append(create(document, 'div', 'cxm-error', permission.blockedReason))
-        detail.append(card)
+        item.append(head, reason, scope, policyRow, recent)
+        if (permission.blockedReason !== undefined) item.append(create(document, 'div', 'cxm-error', permission.blockedReason))
+        permissionList.append(item)
       }
-      if (operationError !== undefined) detail.append(create(document, 'div', 'cxm-error', operationError))
+      if (permissions.length > 0) panel.append(permissionList)
+      if (operationError !== undefined) panel.append(create(document, 'div', 'cxm-error', operationError))
       const adapter = snapshot.platform
-      detail.append(create(
+      panel.append(createSectionTitle(document, '宿主连接'))
+      panel.append(create(
         document,
         'div',
-        'cxm-notice',
+        'cxm-copy',
         `当前连接：${adapter.hostName} · ${adapter.mode} · 二次连接 ${adapter.secondConnectionCreated ? '是' : '否'} · 原始 bridge 暴露 ${adapter.rawBridgeExposed ? '是' : '否'}`,
       ))
-      for (const diagnostic of adapter.diagnostics) detail.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
-      detail.append(create(document, 'div', 'cxm-notice', '这些策略只约束通过 CordisX Platform API 的调用；当前 trusted renderer code 不是安全沙箱。'))
-      content.append(detail)
+      for (const diagnostic of adapter.diagnostics) panel.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
+      const securityBoundary = create(document, 'div', 'cxm-notice', '权限策略只约束通过 CordisX Platform API 的调用；当前 trusted renderer code 不是安全沙箱。')
+      securityBoundary.dataset.tone = 'warning'
+      panel.append(securityBoundary)
+      content.append(panel)
       return
     }
 
@@ -931,10 +959,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const pluginRoutes = snapshot.navigation.routes.filter(item => item.owner === plugin.id)
     const pluginPages = snapshot.navigation.pages.filter(item => item.owner === plugin.id)
     if (pluginDetailTab === 'runtime') {
-      const detail = create(document, 'section', 'cxm-detail')
-      const detailHead = create(document, 'div', 'cxm-detail-head')
-      const identity = create(document, 'div')
-      identity.append(create(document, 'h3', undefined, plugin.name), create(document, 'div', 'cxm-detail-id', plugin.id))
+      const panel = createTabPanel(document, '运行状态')
+      const runtimeToolbar = create(document, 'div', 'cxm-runtime-toolbar')
+      const identity = create(document, 'code', 'cxm-detail-id', plugin.id)
       const action = create(document, 'button', 'cxm-action cxm-plugin-runtime-action')
       action.type = 'button'
       const blocked = plugin.status === 'blocked' || plugin.status === 'failed'
@@ -960,8 +987,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           renderContent()
         }
       })
-      detailHead.append(identity, action)
-      detail.append(detailHead)
+      runtimeToolbar.append(identity, action)
+      panel.append(runtimeToolbar)
       const fields = create(document, 'div', 'cxm-detail-grid')
       for (const [label, value] of [
         ['状态', statusLabel(plugin.status)],
@@ -976,18 +1003,18 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
         fields.append(field)
       }
-      detail.append(fields)
-      if (plugin.error !== undefined) detail.append(create(document, 'div', 'cxm-error', plugin.error))
-      if (plugin.blockedReason !== undefined) detail.append(create(document, 'div', 'cxm-error', plugin.blockedReason))
-      if (operationError !== undefined) detail.append(create(document, 'div', 'cxm-error', operationError))
+      panel.append(fields)
+      if (plugin.error !== undefined) panel.append(create(document, 'div', 'cxm-error', plugin.error))
+      if (plugin.blockedReason !== undefined) panel.append(create(document, 'div', 'cxm-error', plugin.blockedReason))
+      if (operationError !== undefined) panel.append(create(document, 'div', 'cxm-error', operationError))
       const localeCatalogs = snapshot.localeCatalogs.filter(item => item.owner === plugin.id)
       const localeDiagnostics = snapshot.localizationDiagnostics.filter(item => item.owner === plugin.id)
-      detail.append(create(document, 'div', 'cxm-section-title', '本地化'))
+      panel.append(createSectionTitle(document, '本地化'))
       if (localeCatalogs.length === 0) {
-        detail.append(create(document, 'div', 'cxm-empty', '当前插件没有活跃 locale dictionary'))
+        panel.append(create(document, 'div', 'cxm-empty', '当前插件没有活跃 locale dictionary'))
       } else {
         for (const catalog of localeCatalogs) {
-          detail.append(create(
+          panel.append(create(
             document,
             'div',
             'cxm-notice',
@@ -996,21 +1023,25 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         }
       }
       for (const diagnostic of localeDiagnostics) {
-        detail.append(create(
+        panel.append(create(
           document,
           'div',
           'cxm-error',
           `${diagnostic.diagnostic ?? 'unknown'} · ${diagnostic.namespace}:${diagnostic.key} · ${diagnostic.text}`,
         ))
       }
-      detail.append(create(document, 'div', 'cxm-section-title', '结构化运行时'))
-      for (const command of pluginCommands) detail.append(create(document, 'div', 'cxm-notice', `${command.qualifiedId} · running ${command.running}`))
-      for (const route of pluginRoutes) detail.append(create(document, 'div', route.valid ? 'cxm-notice' : 'cxm-error', `${route.qualifiedId} · ${route.definition.path}${route.error === undefined ? '' : ` · ${route.error}`}`))
-      for (const page of pluginPages) detail.append(create(document, 'div', 'cxm-notice', `${page.qualifiedId} · controlled mount`))
-      content.append(detail)
+      panel.append(createSectionTitle(document, '结构化运行时'))
+      if (pluginCommands.length === 0 && pluginRoutes.length === 0 && pluginPages.length === 0) {
+        panel.append(create(document, 'div', 'cxm-empty', '当前插件没有 command、route 或 page 注册'))
+      }
+      for (const command of pluginCommands) panel.append(create(document, 'div', 'cxm-notice', `${command.qualifiedId} · running ${command.running}`))
+      for (const route of pluginRoutes) panel.append(create(document, 'div', route.valid ? 'cxm-notice' : 'cxm-error', `${route.qualifiedId} · ${route.definition.path}${route.error === undefined ? '' : ` · ${route.error}`}`))
+      for (const page of pluginPages) panel.append(create(document, 'div', 'cxm-notice', `${page.qualifiedId} · controlled mount`))
+      content.append(panel)
       return
     }
 
+    const panel = createTabPanel(document, '扩展点位')
     const slots = create(document, 'div', 'cxm-slots')
     if (pluginRegistrations.length === 0) slots.append(create(document, 'div', 'cxm-empty', '当前没有可归属到该插件的扩展点注册'))
     for (const registration of pluginRegistrations) {
@@ -1028,7 +1059,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       card.append(head, rows)
       slots.append(card)
     }
-    content.append(slots)
+    panel.append(slots)
+    content.append(panel)
   }
 
   const renderMarketplaceList = (): void => {
@@ -1115,21 +1147,18 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         renderContent()
       },
     })
-    const detail = create(document, 'section', 'cxm-detail')
     if (plugin === undefined) {
-      detail.append(create(document, 'div', 'cxm-empty', '该插件已不在当前聚合结果中'))
-      content.append(detail)
+      content.append(create(document, 'div', 'cxm-empty', '该插件已不在当前聚合结果中'))
       return
     }
     const detailHead = create(document, 'div', 'cxm-detail-head')
-    const identity = create(document, 'div')
-    identity.append(create(document, 'h3', undefined, plugin.name), create(document, 'div', 'cxm-detail-id', `${plugin.source} / ${plugin.id}`))
+    const identity = create(document, 'code', 'cxm-detail-id', `${plugin.source} / ${plugin.id}`)
     const sourceLink = create(document, 'a', 'cxm-action', '查看源码 ↗')
     sourceLink.href = plugin.homepage ?? plugin.source
     sourceLink.target = '_blank'
     sourceLink.rel = 'noreferrer'
     detailHead.append(identity, sourceLink)
-    detail.append(detailHead, create(document, 'p', 'cxm-detail-description', plugin.description))
+    content.append(detailHead, create(document, 'p', 'cxm-detail-description', plugin.description))
 
     const fields = create(document, 'div', 'cxm-detail-grid')
     for (const [label, value] of [
@@ -1144,15 +1173,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
       fields.append(field)
     }
-    detail.append(fields)
+    content.append(fields)
     if (plugin.keywords.length > 0) {
-      detail.append(create(document, 'div', 'cxm-section-title', '关键词'))
-      detail.append(create(document, 'p', 'cxm-copy', plugin.keywords.join(' · ')))
+      content.append(createSectionTitle(document, '关键词'))
+      content.append(create(document, 'p', 'cxm-copy', plugin.keywords.join(' · ')))
     }
     const boundary = create(document, 'div', 'cxm-notice', '当前阶段只提供发现与源码跳转，不会下载、执行、安装或激活这个插件。')
     boundary.dataset.tone = 'warning'
-    detail.append(boundary)
-    content.append(detail)
+    content.append(boundary)
   }
 
   const commitSources = async (sources: readonly string[]): Promise<void> => {
@@ -1171,8 +1199,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderMarketplaceSettings = (): void => {
     const snapshot = marketplace.snapshot()
-    content.append(create(document, 'div', 'cxm-section-title', '插件商店来源'))
-    content.append(create(document, 'p', 'cxm-copy', '按优先级保存多个 marketplace JSON 地址。feed 地址只记录目录来源；插件唯一性由 canonical source 与小写 id 共同决定。'))
+    const panel = createTabPanel(document, '插件商店')
+    panel.append(create(document, 'p', 'cxm-copy', '按优先级保存多个 marketplace JSON 地址。feed 地址只记录目录来源；插件唯一性由 canonical source 与小写 id 共同决定。'))
 
     const form = create(document, 'form', 'cxm-source-form')
     const input = create(document, 'input', 'cxm-source-input')
@@ -1195,8 +1223,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         renderContent()
       }
     })
-    content.append(form)
-    if (sourceOperationError !== undefined) content.append(create(document, 'div', 'cxm-error', sourceOperationError))
+    panel.append(form)
+    if (sourceOperationError !== undefined) panel.append(create(document, 'div', 'cxm-error', sourceOperationError))
 
     const sourceList = create(document, 'div', 'cxm-source-list')
     if (snapshot.sources.length === 0) sourceList.append(create(document, 'div', 'cxm-empty', '没有已配置商店；插件商店页会保持为空'))
@@ -1246,7 +1274,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       row.append(actions)
       sourceList.append(row)
     })
-    content.append(sourceList)
+    panel.append(sourceList)
 
     const footerActions = create(document, 'div', 'cxm-toolbar')
     footerActions.style.marginTop = '14px'
@@ -1259,15 +1287,16 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     reload.disabled = snapshot.loading || sourcesBusy
     reload.addEventListener('click', () => void marketplace.reload())
     footerActions.append(reset, reload)
-    content.append(footerActions)
+    panel.append(footerActions)
+    content.append(panel)
   }
 
   const renderRuntimeSettings = (): void => {
-    content.append(create(document, 'div', 'cxm-section-title', '插件运行状态'))
+    const panel = createTabPanel(document, '运行状态')
     const runtime = model.snapshot()
     const blocked = runtime.plugins.filter(plugin => plugin.status === 'blocked' || plugin.status === 'failed')
     if (blocked.length === 0) {
-      content.append(create(document, 'p', 'cxm-copy', '当前没有被 profile 本地状态屏蔽的插件。单个插件可在插件详情页屏蔽或恢复。'))
+      panel.append(create(document, 'p', 'cxm-copy', '当前没有被 profile 本地状态屏蔽的插件。单个插件可在插件详情页屏蔽或恢复。'))
     } else {
       const list = create(document, 'div', 'cxm-source-list')
       for (const plugin of blocked) {
@@ -1293,18 +1322,20 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         row.append(body, restore)
         list.append(row)
       }
-      content.append(list)
+      panel.append(list)
     }
     const boundary = create(document, 'div', 'cxm-notice', '屏蔽状态保存在当前隔离 Chromium profile，只控制已打包插件的 Cordis fiber；它不是卸载、权限隔离或 package 禁用。')
     boundary.dataset.tone = 'warning'
-    content.append(boundary)
+    panel.append(boundary)
+    content.append(panel)
   }
 
   const renderLauncherSettings = (): void => {
-    content.append(create(document, 'div', 'cxm-section-title', '启动器配置'))
+    const panel = createTabPanel(document, '启动器')
     const launcherNotice = create(document, 'div', 'cxm-notice', '`cordisx.config.json` 仍负责 Codex 可执行文件、插件 composition 和插件配置。修改这些字段需要重新打包并启动新 generation，当前页面只读展示这条边界。')
     launcherNotice.dataset.tone = 'warning'
-    content.append(launcherNotice)
+    panel.append(launcherNotice)
+    content.append(panel)
   }
 
   const renderSettings = (): void => {
