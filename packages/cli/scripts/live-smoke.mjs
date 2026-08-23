@@ -25,13 +25,21 @@ const parsed = parseArgs({
     'select-thread': { type: 'string' },
     'open-route': { type: 'string' },
     'session-id': { type: 'string' },
+    'adapter-commit': { type: 'string' },
+    'protocol-commit': { type: 'string' },
+    'host-version': { type: 'string' },
+    'host-build': { type: 'string' },
     exercise: { type: 'boolean', default: false },
     generation: { type: 'boolean', default: false },
+    'ui-catalog': { type: 'boolean', default: false },
   },
 })
 const port = Number(parsed.values.port)
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
   throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--screenshot <png>] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-settings-tab <tab> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-click-external] [--trigger-screenshot <png>]')
+}
+if (parsed.values['ui-catalog'] && parsed.values.report === undefined) {
+  throw new Error('--ui-catalog requires --report so screenshots and machine-readable assertions share one artifact directory')
 }
 
 const response = await fetch(`http://127.0.0.1:${port}/json/list`)
@@ -206,6 +214,60 @@ const evaluated = await send('Runtime.evaluate', {
         threadRows: document.querySelectorAll('[data-app-action-sidebar-thread-id]').length,
         rightPanels: document.querySelectorAll('[data-pip-home-surface="thread-summary-panel"]').length,
         bottomPanels: document.querySelectorAll('[data-panel-location="bottom"], [data-bottom-panel]').length,
+        responseMarkers: [...document.querySelectorAll('[data-response-annotation-conversation]')].map(element => ({
+          sessionId: element.getAttribute('data-response-annotation-conversation'),
+          visible: element.getClientRects().length > 0,
+          ancestors: [...function * () { for (let current = element.parentElement, depth = 0; current !== null && depth < 20; current = current.parentElement, depth += 1) yield current }()]
+            .map(current => ({ tag: current.tagName.toLowerCase(), data: Object.fromEntries([...current.attributes].filter(attribute => attribute.name.startsWith('data-')).map(attribute => [attribute.name, attribute.value])) })),
+        })),
+        composerMarkers: [...document.querySelectorAll('[data-above-composer-conversation-id]')].map(element => ({
+          sessionId: element.getAttribute('data-above-composer-conversation-id'),
+          visible: element.getClientRects().length > 0,
+          ancestors: [...function * () { for (let current = element.parentElement, depth = 0; current !== null && depth < 20; current = current.parentElement, depth += 1) yield current }()]
+            .map(current => ({ tag: current.tagName.toLowerCase(), data: Object.fromEntries([...current.attributes].filter(attribute => attribute.name.startsWith('data-')).map(attribute => [attribute.name, attribute.value])) })),
+        })),
+        sessionAnchorProbe: (() => {
+          const selectedRaw = document.querySelector('[data-app-action-sidebar-thread-selected="true"]')?.getAttribute('data-app-action-sidebar-thread-id')
+          const sessionId = selectedRaw?.startsWith('local:') ? selectedRaw.slice('local:'.length) : null
+          const rect = (element) => {
+            const value = element.getBoundingClientRect()
+            return { x: value.x, y: value.y, width: value.width, height: value.height }
+          }
+          const data = (element) => Object.fromEntries([...element.attributes]
+            .filter(attribute => attribute.name.startsWith('data-') && !attribute.name.startsWith('data-cordisx-'))
+            .map(attribute => [attribute.name, attribute.value]))
+          const response = sessionId === null ? [] : [...document.querySelectorAll('[data-response-annotation-conversation]')]
+            .filter(element => element.getAttribute('data-response-annotation-conversation') === sessionId)
+          const composer = sessionId === null ? [] : [...document.querySelectorAll('[data-above-composer-conversation-id]')]
+            .filter(element => element.getAttribute('data-above-composer-conversation-id') === sessionId)
+          const semantic = [...document.querySelectorAll('[data-pip-anchor-host="codex-main-thread"][data-app-action-timeline-scroll]')]
+            .map((element, index) => {
+              const responseMatches = sessionId === null ? 0 : [...element.querySelectorAll('[data-response-annotation-conversation]')]
+                .filter(marker => marker.getAttribute('data-response-annotation-conversation') === sessionId).length
+              const composerMatches = sessionId === null ? 0 : [...element.querySelectorAll('[data-above-composer-conversation-id]')]
+                .filter(marker => marker.getAttribute('data-above-composer-conversation-id') === sessionId).length
+              const value = element.getBoundingClientRect()
+              return {
+                index, data: data(element), rect: rect(element), visible: element.getClientRects().length > 0 && value.width > 0 && value.height > 0,
+                responseMatches, composerMatches, joined: responseMatches === 1 && composerMatches === 1,
+              }
+            })
+          let commonAncestor = null
+          if (response.length === 1 && composer.length === 1) {
+            const composerAncestors = new Set(function * () { for (let current = composer[0]; current !== null; current = current.parentElement) yield current }())
+            const candidate = [...function * () { for (let current = response[0]; current !== null; current = current.parentElement) yield current }()]
+              .find(element => composerAncestors.has(element))
+            if (candidate !== undefined) commonAncestor = {
+              tag: candidate.tagName.toLowerCase(), data: data(candidate), rect: rect(candidate),
+              semantic: candidate.matches('[data-pip-anchor-host="codex-main-thread"][data-app-action-timeline-scroll]'),
+            }
+          }
+          return {
+            selectedRaw: selectedRaw ?? null, sessionId, responseMatches: response.length, composerMatches: composer.length,
+            legacyCandidates: document.querySelectorAll('[data-codex-thread-reference-drop-target]').length,
+            semanticCandidates: semantic, commonAncestor,
+          }
+        })(),
         sessionCandidates: [...document.querySelectorAll('[data-codex-thread-reference-drop-target]')].map((element, index) => {
           const rect = element.getBoundingClientRect()
           return {
@@ -243,12 +305,6 @@ const evaluated = await send('Runtime.evaluate', {
 const report = evaluated.result?.value
 if (report === undefined) throw new Error('CDP evaluation returned no report')
 console.log(JSON.stringify(report, null, 2))
-if (parsed.values.report !== undefined) {
-  const reportPath = path.resolve(parsed.values.report)
-  await mkdir(path.dirname(reportPath), { recursive: true })
-  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
-  console.log(`report=${reportPath}`)
-}
 
 async function evaluateByValue(expression, awaitPromise = false) {
   const value = await send('Runtime.evaluate', { expression, awaitPromise, returnByValue: true })
@@ -258,13 +314,13 @@ async function evaluateByValue(expression, awaitPromise = false) {
 
 let exerciseReport
 if (parsed.values.exercise) {
-  await evaluateByValue(`(async () => {
+  await evaluateByValue(`(() => {
     document.querySelector('.cxm-close')?.click()
     for (const page of document.querySelectorAll('[data-cordisx-page]')) {
       page.querySelector('button[aria-label="Close"]')?.click()
     }
-    await new Promise(resolve => setTimeout(resolve, 100))
-  })()`, true)
+  })()`)
+  await new Promise(resolve => setTimeout(resolve, 100))
   const separatorBefore = await evaluateByValue(`(() => {
     const separator = [...document.querySelectorAll('[role="separator"]')]
       .filter(element => element.getClientRects().length > 0 && element.getAttribute('aria-orientation') === 'vertical')
@@ -321,10 +377,18 @@ if (parsed.values.exercise) {
     const selectedRaw = document.querySelector('[data-app-action-sidebar-thread-selected="true"]')?.getAttribute('data-app-action-sidebar-thread-id')
     const sessionId = selectedRaw?.startsWith('local:') ? selectedRaw.slice('local:'.length) : undefined
     if (sessionId === undefined) throw new Error('exercise requires a selected local native session')
-    const nativeRootFor = id => [...document.querySelectorAll('[data-codex-thread-reference-drop-target]')]
-      .filter(visible)
-      .find(element => [...element.querySelectorAll('[data-response-annotation-conversation]')]
-        .some(child => child.getAttribute('data-response-annotation-conversation') === id))
+    const nativeRootFor = id => {
+      const candidates = [...document.querySelectorAll([
+        '[data-codex-thread-reference-drop-target]',
+        '[data-pip-anchor-host="codex-main-thread"][data-app-action-timeline-scroll]',
+      ].join(','))]
+        .filter(visible)
+        .filter(element => [...element.querySelectorAll('[data-response-annotation-conversation]')]
+          .some(child => child.getAttribute('data-response-annotation-conversation') === id)
+          && [...element.querySelectorAll('[data-above-composer-conversation-id]')]
+            .some(child => child.getAttribute('data-above-composer-conversation-id') === id))
+      return candidates.length === 1 ? candidates[0] : undefined
+    }
     const nativeRoot = nativeRootFor(sessionId)
     if (nativeRoot === undefined) throw new Error('native session content root not found')
     const nativeParent = nativeRoot.parentElement
@@ -379,7 +443,6 @@ if (parsed.values.exercise) {
       }
     }
 
-    await runtime.navigate('slot-showcase', { id: 'main.analytics' })
     await runtime.navigate('slot-showcase', { id: 'main.analytics' })
     await wait(120)
     const mainPage = document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')
@@ -457,7 +520,11 @@ if (parsed.values.exercise) {
       commands: runtime.snapshot().commands.length,
       registrationsRendered: runtime.snapshot().registrations.filter(item => item.rendered).length,
     }
-    await runtime.navigate('slot-showcase', { id: 'main.analytics' })
+    let finalNavigate = 'started'
+    void runtime.navigate('slot-showcase', { id: 'main.analytics' }).then(
+      () => { finalNavigate = 'settled' },
+      error => { finalNavigate = 'rejected:' + String(error) },
+    )
     await wait(180)
     observer.disconnect()
     return {
@@ -479,41 +546,13 @@ if (parsed.values.exercise) {
       nativeMutationCount,
       blocked,
       restored,
+      finalNavigate,
       browserHistoryUnchanged: location.href === 'app://-/index.html',
       finalOutlet: runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'main'),
     }
   })()`, true)
   exerciseReport.drag = drag
   console.log(`exercise=${JSON.stringify(exerciseReport, null, 2)}`)
-  if (parsed.values.report !== undefined) {
-    const reportPath = path.resolve(parsed.values.report)
-    await writeFile(reportPath, `${JSON.stringify({ baseline: report, exercise: exerciseReport }, null, 2)}\n`)
-  }
-}
-
-if (parsed.values.generation) {
-  const beforeDispose = await evaluateByValue(`(() => ({
-    ready: document.documentElement.dataset.cordisxReady === 'true',
-    surfaces: document.querySelectorAll('[data-cordisx-surface-host]').length,
-    outlets: document.querySelectorAll('[data-cordisx-page-outlet]').length,
-    trigger: document.querySelector('[data-cordisx-manager-trigger]') !== null,
-  }))()`)
-  const afterDispose = await evaluateByValue(`(async () => {
-    await globalThis.__cordisxRuntime?.dispose?.()
-    return {
-      ready: document.documentElement.dataset.cordisxReady === 'true',
-      surfaces: document.querySelectorAll('[data-cordisx-surface-host]').length,
-      outlets: document.querySelectorAll('[data-cordisx-page-outlet]').length,
-      pages: document.querySelectorAll('[data-cordisx-page]').length,
-      trigger: document.querySelector('[data-cordisx-manager-trigger]') !== null,
-    }
-  })()`, true)
-  const generationReport = { beforeDispose, afterDispose }
-  console.log(`generation=${JSON.stringify(generationReport, null, 2)}`)
-  if (parsed.values.report !== undefined) {
-    const reportPath = path.resolve(parsed.values.report)
-    await writeFile(reportPath, `${JSON.stringify({ baseline: report, generation: generationReport }, null, 2)}\n`)
-  }
 }
 
 if (parsed.values['fetch-url'] !== undefined) {
@@ -544,22 +583,255 @@ if (parsed.values['fetch-url'] !== undefined) {
 async function capture(rect, outputPath, label) {
   if (rect === null || rect.width <= 0 || rect.height <= 0) throw new Error(`${label} is not visible`)
   const padding = 12
+  const clip = {
+    x: Math.max(0, rect.x - padding),
+    y: Math.max(0, rect.y - padding),
+    width: rect.width + padding * 2,
+    height: rect.height + padding * 2,
+    scale: 1,
+  }
   const captured = await send('Page.captureScreenshot', {
     format: 'png',
     fromSurface: true,
-    clip: {
-      x: Math.max(0, rect.x - padding),
-      y: Math.max(0, rect.y - padding),
-      width: rect.width + padding * 2,
-      height: rect.height + padding * 2,
-      scale: 1,
-    },
+    clip,
   })
   if (typeof captured.data !== 'string') throw new Error('CDP screenshot returned no image')
   const screenshotPath = path.resolve(outputPath)
   await mkdir(path.dirname(screenshotPath), { recursive: true })
   await writeFile(screenshotPath, Buffer.from(captured.data, 'base64'))
   console.log(`screenshot=${screenshotPath}`)
+  return { path: screenshotPath, clip }
+}
+
+let uiCatalogReport
+if (parsed.values['ui-catalog']) {
+  uiCatalogReport = await evaluateByValue(`(async () => {
+    const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+    const waitFor = async (predicate, label) => {
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        if (predicate()) return true
+        await wait(50)
+      }
+      return false
+    }
+    const runtime = globalThis.__cordisxRuntime
+    if (runtime === undefined) return { result: 'fail', error: 'CordisX runtime is unavailable', assertions: [] }
+    document.querySelector('.cxm-close')?.click()
+    for (const page of document.querySelectorAll('[data-cordisx-page]')) page.querySelector('button[aria-label="Close"]')?.click()
+    await wait(120)
+    const rect = element => {
+      const value = element?.getBoundingClientRect()
+      return value === undefined ? null : { x: value.x, y: value.y, width: value.width, height: value.height, right: value.right, bottom: value.bottom }
+    }
+    const visible = element => {
+      if (!(element instanceof HTMLElement) || element.getClientRects().length === 0) return false
+      const value = element.getBoundingClientRect()
+      const style = getComputedStyle(element)
+      return value.width > 0 && value.height > 0 && value.right > 0 && value.bottom > 0
+        && value.left < innerWidth && value.top < innerHeight && style.display !== 'none' && style.visibility !== 'hidden'
+    }
+    const selectorFor = key => '[data-cordisx-surface-host="' + key + '"]'
+    const pointConfig = [{
+      id: 'session.header.actions', key: 'session.header.actions', contributionId: 'slot-showcase:trace',
+    }, {
+      id: 'composer.toolbar.items', key: 'composer.submit.before', contributionId: 'slot-showcase:submit-before',
+    }]
+    const rootFor = config => document.querySelector(selectorFor(config.key))
+    await waitFor(() => pointConfig.every(config => visible(rootFor(config))), 'initial extension seats')
+    const nativeFor = root => {
+      const anchor = root?.nextSibling
+      if (!(anchor instanceof HTMLElement)) return { anchor: null, control: null }
+      return { anchor, control: anchor.matches('button') ? anchor : anchor.querySelector('button') }
+    }
+    const initial = new Map(pointConfig.map(config => {
+      const root = rootFor(config)
+      const native = nativeFor(root)
+      return [config.id, { root, nativeAnchor: native.anchor, nativeControl: native.control, nativeParent: native.anchor?.parentElement ?? null }]
+    }))
+    const mutation = { cordisxChildChanges: 0, unexpectedChildChanges: 0, nativeAttributeChanges: 0 }
+    const observer = new MutationObserver(records => {
+      for (const record of records) {
+        if (record.type === 'attributes') mutation.nativeAttributeChanges += 1
+        else {
+          const changed = [...record.addedNodes, ...record.removedNodes]
+          if (changed.every(node => node instanceof HTMLElement && node.matches('[data-cordisx-surface-host]'))) mutation.cordisxChildChanges += 1
+          else mutation.unexpectedChildChanges += 1
+        }
+      }
+    })
+    for (const value of initial.values()) {
+      if (value.nativeParent !== null) observer.observe(value.nativeParent, { childList: true })
+      if (value.nativeControl !== null) observer.observe(value.nativeControl, { attributes: true, attributeFilter: ['style', 'hidden', 'aria-hidden'] })
+    }
+    const plugin = runtime.snapshot().plugins.find(item => item.id === 'slot-showcase')
+    const policyTransitions = []
+    if (plugin !== undefined && typeof runtime.setExtensionPointPolicy === 'function') {
+      for (const config of pointConfig) {
+        const before = initial.get(config.id)
+        const original = runtime.snapshot().extensionPoints.policies.find(item => item.identity.source === plugin.source
+          && item.identity.pluginId === 'slot-showcase' && item.identity.pointId === config.id)?.policy ?? 'inherit'
+        try {
+          await runtime.setExtensionPointPolicy(plugin.source, 'slot-showcase', config.id, 'deny')
+          const hidden = await waitFor(() => rootFor(config) === null
+            && runtime.snapshot().registrations.find(item => item.owner === 'slot-showcase' && item.surface === config.id)?.authorized === false, config.id + ' deny')
+          const nativeWhileDenied = before?.nativeControl?.isConnected === true
+            && before.nativeAnchor?.parentElement === before.nativeParent && visible(before.nativeControl)
+          await runtime.setExtensionPointPolicy(plugin.source, 'slot-showcase', config.id, 'allow')
+          const restored = await waitFor(() => visible(rootFor(config)), config.id + ' allow')
+          const after = rootFor(config)
+          policyTransitions.push({ id: config.id, original, hidden, restored, sameSeat: after === before?.root,
+            nativeWhileDenied, sameNative: nativeFor(after).control === before?.nativeControl,
+            sameNativeParent: before?.nativeAnchor?.parentElement === before?.nativeParent })
+        } finally {
+          await runtime.setExtensionPointPolicy(plugin.source, 'slot-showcase', config.id, original)
+          if (original !== 'deny') await waitFor(() => visible(rootFor(config)), config.id + ' policy restore')
+        }
+      }
+    }
+    let pluginBlock = null
+    if (typeof runtime.setPluginBlocked === 'function') {
+      await runtime.setPluginBlocked('slot-showcase', true)
+      const blocked = await waitFor(() => pointConfig.every(config => rootFor(config) === null)
+        && runtime.snapshot().plugins.find(item => item.id === 'slot-showcase')?.status === 'blocked', 'plugin block')
+      const nativeWhileBlocked = pointConfig.every(config => {
+        const before = initial.get(config.id)
+        return before?.nativeControl?.isConnected === true && before.nativeAnchor?.parentElement === before.nativeParent
+          && visible(before.nativeControl)
+      })
+      await runtime.setPluginBlocked('slot-showcase', false)
+      const restored = await waitFor(() => pointConfig.every(config => visible(rootFor(config)))
+        && runtime.snapshot().plugins.find(item => item.id === 'slot-showcase')?.status === 'active', 'plugin restore')
+      const sameNative = pointConfig.every(config => nativeFor(rootFor(config)).control === initial.get(config.id)?.nativeControl)
+      pluginBlock = { blocked, nativeWhileBlocked, restored, sameNative }
+    }
+    observer.disconnect()
+    const snapshot = runtime.snapshot()
+    const points = pointConfig.map(config => {
+      const root = rootFor(config)
+      const native = nativeFor(root)
+      const rootRect = rect(root)
+      const nativeRect = rect(native.control)
+      const parentRect = rect(root?.parentElement)
+      const style = root === null ? null : getComputedStyle(root)
+      const action = root?.querySelector('button') ?? null
+      const actionStyle = action === null ? null : getComputedStyle(action)
+      const point = snapshot.extensionPoints.points.find(item => item.id === config.id)
+      const registration = snapshot.registrations.find(item => item.owner === 'slot-showcase' && item.surface === config.id)
+      const insideViewport = rootRect !== null && rootRect.x >= 0 && rootRect.y >= 0 && rootRect.right <= innerWidth && rootRect.bottom <= innerHeight
+      const nonOverlapping = rootRect !== null && nativeRect !== null && rootRect.right <= nativeRect.x + 0.5
+      return {
+        id: config.id, key: config.key, contributionId: config.contributionId,
+        availability: point === undefined ? null : { stability: point.stability, availability: point.availability, available: point.available,
+          code: point.availabilityCode ?? null, detail: point.availabilityDetail ?? null, anchors: point.anchors ?? [] },
+        registration: registration === undefined ? null : { valid: registration.valid, authorized: registration.authorized,
+          visible: registration.visible, rendered: registration.rendered, pending: registration.pending, error: registration.error ?? null },
+        candidateCount: document.querySelectorAll(selectorFor(config.key)).length,
+        relationship: { sameParent: root?.parentElement === native.anchor?.parentElement, beforeNative: root?.nextSibling === native.anchor,
+          nativeConnected: native.control?.isConnected ?? false, nativeParentConnected: native.anchor?.parentElement?.isConnected ?? false },
+        geometry: { root: rootRect, native: nativeRect, parent: parentRect, nonOverlapping },
+        computed: { display: style?.display ?? null, position: style?.position ?? null, transform: style?.transform ?? null,
+          appRegion: style?.getPropertyValue('-webkit-app-region') ?? null, actionAppRegion: actionStyle?.getPropertyValue('-webkit-app-region') ?? null },
+        a11y: { actionLabel: action?.getAttribute('aria-label') ?? null, tooltipText: action?.dataset.cordisxTooltip ?? null,
+          noDragData: root?.dataset.cordisxNoDrag ?? null },
+        viewport: { width: innerWidth, height: innerHeight, inside: insideViewport },
+        captureRect: rootRect === null || nativeRect === null ? null : {
+          x: Math.min(rootRect.x, nativeRect.x), y: Math.min(rootRect.y, nativeRect.y),
+          width: Math.max(rootRect.right, nativeRect.right) - Math.min(rootRect.x, nativeRect.x),
+          height: Math.max(rootRect.bottom, nativeRect.bottom) - Math.min(rootRect.y, nativeRect.y),
+        },
+      }
+    })
+    const assertions = []
+    const assert = (id, pass, actual, expected) => assertions.push({ id, pass: Boolean(pass), actual, expected })
+    for (const point of points) {
+      assert(point.id + '.unique-seat', point.candidateCount === 1, point.candidateCount, 1)
+      assert(point.id + '.rendered', point.registration?.rendered === true, point.registration, 'rendered=true')
+      assert(point.id + '.sibling-before-native', point.relationship.sameParent && point.relationship.beforeNative, point.relationship, 'same parent and immediate preceding sibling')
+      assert(point.id + '.normal-flow', point.computed.position === 'static' && point.computed.transform === 'none', point.computed, 'position=static, transform=none')
+      assert(point.id + '.native-continuity', point.relationship.nativeConnected && point.relationship.nativeParentConnected, point.relationship, 'native node and parent connected')
+      assert(point.id + '.non-overlap', point.geometry.nonOverlapping, point.geometry, 'CordisX root ends before native control')
+      assert(point.id + '.no-drag', point.a11y.noDragData === 'true' && point.computed.appRegion === 'no-drag'
+        && point.computed.actionAppRegion === 'no-drag', { a11y: point.a11y, computed: point.computed }, 'root/action no-drag')
+      assert(point.id + '.viewport', point.viewport.inside, point.viewport, 'inside viewport')
+    }
+    for (const transition of policyTransitions) {
+      assert(transition.id + '.policy-hide-restore', transition.hidden && transition.restored && transition.nativeWhileDenied
+        && transition.sameNative && transition.sameNativeParent, transition, 'hide/restore without changing native control')
+    }
+    assert('native.no-unexpected-child-mutations', mutation.unexpectedChildChanges === 0, mutation, 'only CordisX seat child changes')
+    assert('native.no-attribute-mutations', mutation.nativeAttributeChanges === 0, mutation, 'no native style/hidden/aria-hidden mutations')
+    assert('plugin.block-restore', pluginBlock?.blocked === true && pluginBlock.nativeWhileBlocked === true
+      && pluginBlock.restored === true && pluginBlock.sameNative === true, pluginBlock, 'plugin block/restore without changing native controls')
+    const titlebar = [...document.querySelectorAll('header[data-app-shell-application-menu-bar]')].find(visible)
+    const titlebarRect = rect(titlebar)
+    const safeLeft = titlebarRect === null ? null : Math.max(12, Math.ceil(Math.min(...[...titlebar.querySelectorAll('button')]
+      .filter(visible).map(button => button.getBoundingClientRect().x).filter(x => x >= titlebarRect.x + 64 && x < titlebarRect.x + 180), titlebarRect.x + 88) - titlebarRect.x))
+    const sessionPoint = points.find(point => point.id === 'session.header.actions')
+    assert('session.header.actions.safe-inset', safeLeft !== null && sessionPoint?.geometry.root?.x >= safeLeft,
+      { safeLeft, rootX: sessionPoint?.geometry.root?.x ?? null }, 'root starts after titlebar safe inset')
+    return { result: assertions.every(item => item.pass) ? 'pass' : 'fail', sessionId: snapshot.extensionPoints === undefined ? null
+      : document.querySelector('[data-app-action-sidebar-thread-selected="true"]')?.getAttribute('data-app-action-sidebar-thread-id')?.replace(/^local:/, '') ?? null,
+      points, policyTransitions, pluginBlock, nativeMutation: mutation, safeInsets: { titlebar: titlebarRect, safeLeft }, assertions }
+  })()`, true)
+
+  const reportPath = path.resolve(parsed.values.report)
+  const extension = path.extname(reportPath)
+  const stem = path.basename(reportPath, extension)
+  const artifact = suffix => path.join(path.dirname(reportPath), `${stem}.${suffix}.png`)
+  const screenshots = {}
+  for (const [id, suffix] of [['session.header.actions', 'session-header-actions'], ['composer.toolbar.items', 'composer-submit-before']]) {
+    const point = uiCatalogReport.points?.find(item => item.id === id)
+    if (point?.captureRect !== null && point?.captureRect !== undefined) screenshots[id] = await capture(point.captureRect, artifact(suffix), id)
+  }
+  const tooltipEvidence = async (id, key, suffix) => {
+    const trigger = await evaluateByValue(`(() => {
+      const button = document.querySelector('[data-cordisx-surface-host=${JSON.stringify(key)}] button')
+      const rect = button?.getBoundingClientRect()
+      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    })()`)
+    if (trigger === null) return { pass: false, error: 'trigger unavailable' }
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: trigger.x + trigger.width / 2, y: trigger.y + trigger.height / 2, pointerType: 'mouse' })
+    const activation = await evaluateByValue(`(() => {
+      const button = document.querySelector('[data-cordisx-surface-host=${JSON.stringify(key)}] button')
+      if (!(button instanceof HTMLElement)) return { focused: false, pointerDispatched: false }
+      button.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, pointerType: 'mouse' }))
+      button.focus()
+      return { focused: document.activeElement === button, pointerDispatched: true }
+    })()`)
+    await new Promise(resolve => setTimeout(resolve, 2_400))
+    const evidence = await evaluateByValue(`(() => {
+      const button = document.querySelector('[data-cordisx-surface-host=${JSON.stringify(key)}] button')
+      const tooltip = document.querySelector('.cordisx-host-tooltip')
+      if (button === null || tooltip === null) return { pass: false, error: 'tooltip unavailable' }
+      const trigger = button.getBoundingClientRect()
+      const tip = tooltip.getBoundingClientRect()
+      const rect = { x: Math.min(trigger.x, tip.x), y: Math.min(trigger.y, tip.y),
+        width: Math.max(trigger.right, tip.right) - Math.min(trigger.x, tip.x),
+        height: Math.max(trigger.bottom, tip.bottom) - Math.min(trigger.y, tip.y) }
+      const role = tooltip.getAttribute('role') ?? tooltip.role ?? null
+      return { pass: role === 'tooltip' && button.getAttribute('aria-describedby') === tooltip.id && tip.x >= 0 && tip.y >= 0
+        && tip.right <= innerWidth && tip.bottom <= innerHeight, text: tooltip.textContent, side: tooltip.dataset.side,
+        role, describedBy: button.getAttribute('aria-describedby'), tooltipId: tooltip.id, rect }
+    })()`)
+    evidence.activation = activation
+    if (evidence.rect !== undefined) evidence.screenshot = await capture(evidence.rect, artifact(suffix), `${id} tooltip`)
+    await evaluateByValue(`document.querySelector('[data-cordisx-surface-host=${JSON.stringify(key)}] button')?.blur()`)
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 100, pointerType: 'mouse' })
+    await new Promise(resolve => setTimeout(resolve, 80))
+    evidence.dismissed = await evaluateByValue(`document.querySelector('.cordisx-host-tooltip') === null`)
+    evidence.pass &&= evidence.dismissed
+    return evidence
+  }
+  const tooltips = {
+    'session.header.actions': await tooltipEvidence('session.header.actions', 'session.header.actions', 'session-header-actions-tooltip'),
+    'composer.toolbar.items': await tooltipEvidence('composer.toolbar.items', 'composer.submit.before', 'composer-submit-before-tooltip'),
+  }
+  for (const [id, evidence] of Object.entries(tooltips)) {
+    uiCatalogReport.assertions.push({ id: `${id}.tooltip`, pass: evidence.pass, actual: evidence, expected: 'described, in viewport, dismissed' })
+  }
+  uiCatalogReport = { ...uiCatalogReport, screenshots, tooltips,
+    result: uiCatalogReport.assertions.every(item => item.pass) ? 'pass' : 'fail' }
+  console.log(`ui-catalog=${JSON.stringify(uiCatalogReport, null, 2)}`)
 }
 
 if (parsed.values.screenshot !== undefined) {
@@ -674,4 +946,62 @@ if (colorScheme !== undefined) {
   })
 }
 
+let generationReport
+if (parsed.values.generation) {
+  const beforeDispose = await evaluateByValue(`(() => ({
+    ready: document.documentElement.dataset.cordisxReady === 'true',
+    runtimePresent: globalThis.__cordisxRuntime !== undefined,
+    surfaces: document.querySelectorAll('[data-cordisx-surface-host]').length,
+    outlets: document.querySelectorAll('[data-cordisx-page-outlet]').length,
+    pages: document.querySelectorAll('[data-cordisx-page]').length,
+    tooltips: document.querySelectorAll('.cordisx-host-tooltip').length,
+    styles: document.querySelectorAll('#cordisx-structured-styles, #cordisx-manager-style').length,
+    trigger: document.querySelector('[data-cordisx-manager-trigger]') !== null,
+  }))()`)
+  const afterDispose = await evaluateByValue(`(async () => {
+    await globalThis.__cordisxRuntime?.dispose?.()
+    return {
+      ready: document.documentElement.dataset.cordisxReady === 'true',
+      runtimePresent: globalThis.__cordisxRuntime !== undefined,
+      surfaces: document.querySelectorAll('[data-cordisx-surface-host]').length,
+      outlets: document.querySelectorAll('[data-cordisx-page-outlet]').length,
+      pages: document.querySelectorAll('[data-cordisx-page]').length,
+      tooltips: document.querySelectorAll('.cordisx-host-tooltip').length,
+      styles: document.querySelectorAll('#cordisx-structured-styles, #cordisx-manager-style').length,
+      trigger: document.querySelector('[data-cordisx-manager-trigger]') !== null,
+    }
+  })()`, true)
+  generationReport = { beforeDispose, afterDispose,
+    cleaned: afterDispose.ready === false && afterDispose.runtimePresent === false && afterDispose.surfaces === 0
+      && afterDispose.outlets === 0 && afterDispose.pages === 0 && afterDispose.tooltips === 0
+      && afterDispose.styles === 0 && afterDispose.trigger === false }
+  console.log(`generation=${JSON.stringify(generationReport, null, 2)}`)
+}
+
+if (parsed.values.report !== undefined) {
+  const reportPath = path.resolve(parsed.values.report)
+  const aggregate = {
+    run: {
+      rendererUrl: report.url,
+      runtimeVersion: report.version,
+      adapterCommit: parsed.values['adapter-commit'] ?? null,
+      protocolCommit: parsed.values['protocol-commit'] ?? null,
+      hostVersion: parsed.values['host-version'] ?? null,
+      hostBuild: parsed.values['host-build'] ?? null,
+      isolatedRenderer: true,
+    },
+    baseline: report,
+    ...(exerciseReport === undefined ? {} : { exercise: exerciseReport }),
+    ...(uiCatalogReport === undefined ? {} : { uiCatalog: uiCatalogReport }),
+    ...(generationReport === undefined ? {} : { generation: generationReport }),
+  }
+  await mkdir(path.dirname(reportPath), { recursive: true })
+  await writeFile(reportPath, `${JSON.stringify(aggregate, null, 2)}\n`)
+  console.log(`report=${reportPath}`)
+}
+
 socket.close()
+
+if (uiCatalogReport?.result === 'fail') {
+  throw new Error('UI catalog smoke assertions failed; inspect the aggregated report')
+}

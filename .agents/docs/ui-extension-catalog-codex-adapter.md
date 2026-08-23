@@ -39,6 +39,16 @@ Availability is adapter- and host-version-specific. A registered contribution
 to an unavailable or ambiguous point is retained for diagnostics and is never
 visually simulated.
 
+The verified Codex/ChatGPT host `26.818.41509` (build `6962`) no longer emits
+the earlier thread-reference marker for an active local session. The
+`session.content` resolver therefore accepts either that exact legacy seat or
+the exact current main-thread timeline seat, but only when one visible
+candidate contains both the response annotation and composer identity for the
+same selected local session. It does not fall back to the application body,
+the generic main layout, localized labels, or geometry-only matching. A zero
+or ambiguous result remains unavailable with the existing semantic-anchor
+diagnostic.
+
 ## Payload families
 
 The catalog uses a small set of shapes instead of one API per visual style:
