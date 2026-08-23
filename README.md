@@ -18,7 +18,7 @@
 
 <h1 align="center">CordisX</h1>
 
-<p align="center"><strong>Let plugins meet users where AI work already happens.</strong></p>
+<p align="center"><strong>Extend everything extensible with Cordis.</strong></p>
 
 <p align="center">
   <a href="https://cordisx.github.io/"><strong>Explore CordisX</strong></a>
