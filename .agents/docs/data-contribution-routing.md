@@ -338,12 +338,25 @@ returns within that CordisX stack, and close clears the current CordisX page to
 reveal the untouched native content. These operations do not call
 `history.pushState`, change the browser URL, or invoke Codex routing APIs.
 
-Host page chrome owns title, close/back controls, breadcrumb rendering, and
-declared tabs where possible. The page mount receives the body container. A
+Host page chrome owns title, icon, close/back controls, breadcrumb rendering,
+declared tabs, and declared header actions. This rule is identical for `app`,
+`main`, and every future outlet: covering a native header does not give the
+plugin a header DOM seat. Page metadata is a closed, schema-validated data
+record. A header action may name only a local id, localized label and accessible
+name, a host icon token, a command reference, and optional host-evaluated
+visibility/disabled state. Arbitrary `Node`, component, render callback, raw
+HTML, `children`, or header mount container values are rejected.
+
+The host renders those values through one chrome component and owns layout,
+macOS safe insets, drag/no-drag regions, native button interaction, i18n,
+keyboard/a11y behavior, command dispatch, and current outlet-policy checks.
+The page mount receives only the scrollable body container after that chrome;
+it cannot replace or append to the host header through the page API. A
 framework-agnostic mount may use DOM or attach its own framework root inside
-that container. This trusted-local mount is controlled lifecycle composition,
-not a permission sandbox; an isolated realm or MCP UI bridge remains a later
-migration path.
+the body container. This trusted-local mount is controlled lifecycle
+composition, not a permission sandbox: trusted renderer code can still query
+the document on its own, while an isolated realm or MCP UI bridge remains a
+later migration path.
 
 ## Overlay insertion and native-DOM safety
 

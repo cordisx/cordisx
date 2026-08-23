@@ -106,6 +106,14 @@ sidebar from `y=0` and supplies draggable chrome there. Interactive controls
 are always explicit `no-drag` regions. This keeps native window dragging and
 ordinary page controls from competing for the same hit-test region.
 
+Both chrome variants are the same host-owned structured projection. Plugins
+declare only validated title/icon/breadcrumb/tab/action data, and header
+actions reference commands that the host dispatches after checking the active
+outlet policy. Plugins receive a body mount container, never a header seat,
+node, component, or render callback. Covering the native header therefore
+changes geometry only; it does not transfer shell rendering authority to the
+plugin.
+
 The host may improve selectors without requiring plugin changes. Plugins that query Codex DOM directly opt out of that compatibility boundary.
 
 ### Built-in manager plane
