@@ -58,6 +58,14 @@ The version-1 Platform capability architecture and its honest unavailable
 default are specified in [`platform-capabilities.md`](platform-capabilities.md).
 It introduces no second app-server and exposes no raw Desktop bridge.
 
+Separately managed provider connections are specified in
+[`multi-provider-sessions.md`](multi-provider-sessions.md). They run below a
+launcher-owned Provider Fleet with provider-specific persistence and structured
+session identity. They never claim to be the Desktop current connection. This
+separation preserves the one-current-connection rule while allowing an
+explicitly independent provider plugin to own its own Codex app-server and
+conversation store.
+
 Online Chrome DevTools support is opt-in. `--online-devtools` adds `https://chrome-devtools-frontend.appspot.com` to `--remote-allow-origins`; once connected, that origin has full renderer debugging authority for the isolated instance.
 
 ### Renderer plane
@@ -228,6 +236,12 @@ The Platform slice adds versioned capability declarations, an identity-bound
 Permission Broker, and manager permission projections. These controls govern
 cooperative `ctx.platform` calls only; package installation, signatures,
 untrusted execution isolation, and marketplace activation remain later stages.
+
+The multi-provider Platform slice routes every model and session operation by
+structured provider-aware identity. Its launcher-private RPC exposes normalized
+operations only; credentials, child processes, app-server messages, and raw
+transport stay outside the renderer. An external provider becoming available
+does not change the honest status of the native current-connection adapter.
 
 ## Trust and security
 
