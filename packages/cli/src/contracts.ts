@@ -173,10 +173,19 @@ export interface CordisXOutletPageAccessV1 extends CordisXExtensionPointAccessBa
   readonly pageId: string
 }
 
+export interface CordisXOutletPageCommandAccessV1 extends CordisXExtensionPointAccessBase {
+  readonly operation: 'outlet.page.command.invoke'
+  readonly routeId: string
+  readonly pageId: string
+  readonly actionId: string
+  readonly commandId: string
+}
+
 export type CordisXExtensionPointAccessV1 =
   | CordisXSurfaceCommandAccessV1
   | CordisXOutletRouteAccessV1
   | CordisXOutletPageAccessV1
+  | CordisXOutletPageCommandAccessV1
 
 export type CordisXWhen =
   | { readonly key: string; readonly exists: boolean }
@@ -346,12 +355,20 @@ export interface CordisXPageTab {
   readonly icon?: CordisXIconToken
 }
 
+/** Host-rendered page-chrome action. Plugins provide data and a command reference only. */
+export interface CordisXPageHeaderAction extends CordisXStructuredAction {
+  readonly id: string
+  readonly when?: CordisXWhen
+  readonly disabled?: CordisXDisabledState
+}
+
 export interface CordisXPageMetadata {
   readonly id: string
   readonly title: CordisXLocalizedText
   readonly icon?: CordisXIconToken
   readonly breadcrumbs?: readonly CordisXLocalizedText[]
   readonly tabs?: readonly CordisXPageTab[]
+  readonly headerActions?: readonly CordisXPageHeaderAction[]
   readonly localeNamespace?: string
 }
 

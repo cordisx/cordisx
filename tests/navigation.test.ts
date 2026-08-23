@@ -2,6 +2,7 @@ import type { Disposable } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import type { CordisXLocalizationSeat } from '../packages/cli/src/contracts.js'
+import { CommandRegistry } from '../packages/cli/src/renderer/commands.js'
 import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
 import {
   NavigationRegistry,
@@ -170,6 +171,117 @@ describe('NavigationRegistry', () => {
     pages.dispose()
     outlets.dispose()
     dom.window.close()
+  })
+
+  it('renders app and main page headers from closed data and rechecks outlet policy before header commands', async () => {
+    const dom = new JSDOM(`
+      <body>
+        <header data-app-shell-application-menu-bar><button class="native-icon-button" type="button">native</button></header>
+        <main id="app"></main>
+      </body>
+    `)
+    const pages = new PageRegistry()
+    const outlets = new OutletRegistry()
+    const descriptors = new ExtensionPointDescriptorRegistry()
+    descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
+    const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
+    const identity = { source: 'https://plugins.example/demo', id: 'demo' }
+    broker.register(identity)
+    const commandRegistry = new CommandRegistry(broker)
+    const commands = {
+      hasFor: (owner: string, reference: { id: string }) => commandRegistry.has(owner, reference),
+      executeFor: (owner: string, reference: { id: string }, invocationKey?: string) => commandRegistry.execute(owner, reference, invocationKey),
+      subscribeInternal: (listener: () => void) => commandRegistry.subscribe(listener),
+    }
+    const controller = new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer')
+    outlets.declare({
+      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
+    }, controller, path => !path.startsWith('/main/') && !path.startsWith('/sessions/'))
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), undefined, broker, commands)
+    let executions = 0
+    commandRegistry.register('demo', { id: 'refresh', title: { key: 'refresh', fallback: 'Refresh' } }, () => { executions += 1 })
+    let bodyContainer: HTMLElement | undefined
+    pages.register('demo', {
+      id: 'overview',
+      title: { key: 'title', fallback: 'Overview' },
+      icon: 'host:layers',
+      breadcrumbs: [{ key: 'crumb', fallback: 'Demo' }],
+      tabs: [{ id: 'details', label: { key: 'details', fallback: 'Details' }, icon: 'host:info' }],
+      headerActions: [{
+        id: 'refresh',
+        label: { key: 'refresh', fallback: 'Refresh' },
+        icon: 'host:refresh',
+        command: { id: 'refresh' },
+      }],
+    }, ({ container }) => { bodyContainer = container })
+    navigation.register('demo', { id: 'overview', path: '/overview', outlet: 'app', page: 'overview' })
+
+    await navigation.navigate('demo', { id: 'overview' })
+    const chrome = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-chrome]')!
+    const title = chrome.querySelector<HTMLElement>('[data-cordisx-page-title]')!
+    const action = chrome.querySelector<HTMLButtonElement>('[data-cordisx-page-header-action="refresh"]')!
+    expect(title.querySelector('[data-host-icon="host:layers"]')).not.toBeNull()
+    expect(title.textContent).toBe('Overview')
+    expect(action.classList.contains('native-icon-button')).toBe(true)
+    expect(action.textContent).toBe('')
+    expect(action.getAttribute('aria-label')).toBe('Refresh')
+    expect(action.dataset.cordisxNoDrag).toBe('true')
+    expect(action.querySelector('[data-host-icon="host:refresh"]')).not.toBeNull()
+    expect(dom.window.document.querySelector('[role="tab"] [data-host-icon="host:info"]')).not.toBeNull()
+    expect(bodyContainer?.dataset.cordisxPageBody).toBe('true')
+    expect(bodyContainer?.closest('header')).toBeNull()
+
+    action.click()
+    await settle()
+    expect(executions).toBe(1)
+    expect(broker.accessDiagnostics().at(-1)).toMatchObject({
+      request: {
+        operation: 'outlet.page.command.invoke',
+        routeId: 'demo:overview',
+        pageId: 'demo:overview',
+        actionId: 'refresh',
+        commandId: 'demo:refresh',
+      },
+      authorized: true,
+    })
+
+    broker.setPolicy(identity, 'app', 'deny')
+    action.click()
+    await settle()
+    expect(executions).toBe(1)
+    expect(broker.accessDiagnostics().at(-1)).toMatchObject({
+      request: { operation: 'outlet.page.command.invoke', actionId: 'refresh' },
+      authorized: false,
+    })
+
+    await navigation.dispose()
+    commandRegistry.dispose()
+    pages.dispose()
+    outlets.dispose()
+    broker.dispose()
+    descriptors.dispose()
+    dom.window.close()
+  })
+
+  it('rejects arbitrary page-header render fields instead of exposing a DOM seat', () => {
+    const pages = new PageRegistry()
+    expect(() => pages.register('demo', {
+      id: 'unsafe',
+      title: { key: 'unsafe' },
+      headerMount: () => undefined,
+    } as never, () => undefined)).toThrow(/unknown field headerMount/)
+    expect(() => pages.register('demo', {
+      id: 'unsafe-action',
+      title: { key: 'unsafe-action' },
+      headerActions: [{
+        id: 'unsafe',
+        label: { key: 'unsafe' },
+        icon: 'host:info',
+        command: { id: 'unsafe' },
+        children: [],
+      }],
+    } as never, () => undefined)).toThrow(/unknown field children/)
+    pages.dispose()
   })
 
   it('diagnoses missing dependencies and makes both path conflicts unavailable', () => {

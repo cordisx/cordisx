@@ -257,6 +257,7 @@ export interface ExtensionPointAccessResolver {
   authorizeSurfaceCommand(owner: string, pointId: string, contributionId: string, commandId: string): ExtensionPointAccessDecision
   authorizeOutletRoute(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision
   authorizeOutletPage(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision
+  authorizeOutletPageCommand(owner: string, pointId: string, routeId: string, pageId: string, actionId: string, commandId: string): ExtensionPointAccessDecision
 }
 
 export interface ExtensionPointAccessDiagnostic {
@@ -276,6 +277,7 @@ type ExtensionPointAccessFields =
   | { readonly operation: 'surface.command.invoke'; readonly contributionId: string; readonly commandId: string }
   | { readonly operation: 'outlet.route.navigate'; readonly routeId: string; readonly pageId: string }
   | { readonly operation: 'outlet.page.mount'; readonly routeId: string; readonly pageId: string }
+  | { readonly operation: 'outlet.page.command.invoke'; readonly routeId: string; readonly pageId: string; readonly actionId: string; readonly commandId: string }
 
 export interface ExtensionPointPluginUsageSnapshot {
   readonly identity: CordisXPluginIdentity
@@ -499,6 +501,20 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
   authorizeOutletPage(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision {
     const decision = this.decision(owner, pointId, 'outlet')
     return this.recordAccess(decision, { operation: 'outlet.page.mount', routeId, pageId })
+  }
+
+  authorizeOutletPageCommand(
+    owner: string,
+    pointId: string,
+    routeId: string,
+    pageId: string,
+    actionId: string,
+    commandId: string,
+  ): ExtensionPointAccessDecision {
+    const decision = this.decision(owner, pointId, 'outlet')
+    return this.recordAccess(decision, {
+      operation: 'outlet.page.command.invoke', routeId, pageId, actionId, commandId,
+    })
   }
 
   policiesSnapshot(): readonly CordisXExtensionPointPolicyRecordV1[] {

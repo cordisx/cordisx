@@ -234,6 +234,12 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')).not.toBeNull()
     expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.top).toBe('0px')
     expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="slot-showcase:main.analytics"]')?.dataset.cordisxNoDrag).toBe('true')
+    const mainChrome = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="slot-showcase:main.analytics"] [data-cordisx-page-chrome]')!
+    expect(mainChrome.querySelector('[data-cordisx-page-title] [data-host-icon="host:analytics"]')).not.toBeNull()
+    const mainHeaderAction = mainChrome.querySelector<HTMLButtonElement>('[data-cordisx-page-header-action="refresh"]')!
+    expect(mainHeaderAction.textContent).toBe('')
+    expect(mainHeaderAction.getAttribute('aria-label')).toBe('Refresh snapshot')
+    expect(mainHeaderAction.querySelector('[data-host-icon="host:refresh"]')).not.toBeNull()
     expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-cordisx-page-chrome] button')]
       .every(button => button.dataset.cordisxNoDrag === 'true')).toBe(true)
 
@@ -245,6 +251,22 @@ describe('renderer bundle', () => {
     const appChrome = appOutlet.querySelector<HTMLElement>('[data-cordisx-page-chrome]')!
     expect(appChrome.dataset.cordisxDrag).toBe('true')
     expect(appChrome.style.paddingLeft).toContain('--cordisx-page-chrome-safe-left')
+    expect(appChrome.querySelector('[data-cordisx-page-title] [data-host-icon="host:layers"]')).not.toBeNull()
+    expect(appChrome.querySelectorAll('[data-cordisx-page-header-action="refresh"]')).toHaveLength(1)
+    expect(appOutlet.querySelectorAll('[role="tab"] [data-host-icon]')).toHaveLength(2)
+    expect(appOutlet.querySelector('[data-cordisx-page-body]')?.closest('header')).toBeNull()
+    appChrome.querySelector<HTMLButtonElement>('[data-cordisx-page-header-action="refresh"]')!.click()
+    await settle()
+    expect(runtime!.snapshot().extensionPoints.accessDiagnostics.at(-1)).toMatchObject({
+      request: {
+        operation: 'outlet.page.command.invoke',
+        routeId: 'slot-showcase:app.overview',
+        pageId: 'slot-showcase:app.overview',
+        actionId: 'refresh',
+        commandId: 'slot-showcase:refresh',
+      },
+      authorized: true,
+    })
     await runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId } })
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({ activeRoute: 'slot-showcase:session.analytics', mounted: true, contextKey: `session:${sessionId}` })
     await expect(runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId: 'stale' } })).rejects.toThrow(/does not match native session/)

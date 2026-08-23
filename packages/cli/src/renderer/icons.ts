@@ -98,6 +98,15 @@ const MANAGER_ICON_SOURCES: Readonly<Record<ManagerIconToken, string>> = {
   'authors-source': person,
 }
 
+function svgMarkup(source: string): string {
+  if (!source.startsWith('data:image/svg+xml,')) return source
+  try {
+    return decodeURIComponent(source.slice('data:image/svg+xml,'.length))
+  } catch {
+    return source
+  }
+}
+
 /** Create one decorative, host-owned icon from a compile-time bundled Material symbol. */
 export function createManagerIcon(
   document: Document,
@@ -109,7 +118,7 @@ export function createManagerIcon(
   icon.dataset.materialIcon = token
   icon.setAttribute('aria-hidden', 'true')
   icon.draggable = false
-  icon.innerHTML = MANAGER_ICON_SOURCES[token]
+  icon.innerHTML = svgMarkup(MANAGER_ICON_SOURCES[token])
   const svg = icon.querySelector('svg')
   svg?.setAttribute('aria-hidden', 'true')
   svg?.setAttribute('focusable', 'false')
@@ -142,7 +151,7 @@ export function createHostSurfaceIcon(document: Document, token: string | undefi
   icon.dataset.hostIcon = token ?? 'host:more'
   icon.setAttribute('aria-hidden', 'true')
   icon.draggable = false
-  icon.innerHTML = HOST_SURFACE_ICON_SOURCES[token ?? 'host:more'] ?? moreHoriz
+  icon.innerHTML = svgMarkup(HOST_SURFACE_ICON_SOURCES[token ?? 'host:more'] ?? moreHoriz)
   const svg = icon.querySelector('svg')
   svg?.setAttribute('aria-hidden', 'true')
   svg?.setAttribute('focusable', 'false')
