@@ -13,6 +13,9 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `extension-point-management.md` defines surfaces and outlets as the two
   extension-point families, their localized host catalog, manager search and
   detail experience, point-policy enforcement, and delivery/validation order.
+- `ui-extension-catalog-codex-adapter.md` defines the complete host-neutral UI
+  catalog, Codex adapter availability, structured payload families, DeepSeek
+  Harness mapping/refusals, contextual identity boundary, and validation matrix.
 - `distribution-and-cli.md` defines the product monorepo, home configuration,
   app/profile command model, package ownership, and release gates.
 - `platform-capabilities.md` defines the Platform service, permission broker,
