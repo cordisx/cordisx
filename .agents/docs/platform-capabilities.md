@@ -77,6 +77,13 @@ The installed-plugin detail page adds a `权限` tab. Its model retains:
 - requested scope and current `ask`/`deny`/`allow` policy;
 - last allowed use, last denial, denial count, and blocked reason.
 
+The permission tab follows the shared hierarchy and de-duplication rules in
+[`manager-content-design.md`](manager-content-design.md). Platform adds only
+these projection-specific placement requirements: policy appears beside its
+selector; denial detail appears beside the affected declaration; adapter
+diagnostics appear beside adapter status; and the trusted-renderer warning
+appears once at the permission/security boundary.
+
 Policy changes reconcile the plugin fiber: changing a required capability to
 `deny` disposes it; moving every denied required declaration to `ask` or
 `allow` permits a fresh mount. Locale changes reproject permission reasons
@@ -146,8 +153,9 @@ Automated coverage must include provider/model validation; allow/ask/deny;
 required/optional activation; scope denial; identity non-spoofing; declaration
 upgrade reset; two-phase create success and retained-task partial failure;
 read-only projection and write refusal; unavailable diagnostics; manager data
-and locale reprojection; generation cleanup; and absence of a raw bridge or
-second app-server in the Platform surface.
+and locale reprojection; conformance with the shared manager content hierarchy
+plus the Platform-specific fact placement above; generation cleanup; and
+absence of a raw bridge or second app-server in the Platform surface.
 
 Repository validation is `npm run check`, `npm audit --audit-level=high`, and
 `git diff --check` in each owning repository. Live validation builds and
