@@ -15,10 +15,10 @@ describe('injectableTargets', () => {
     ]).map(item => item.id)).toEqual(['codex'])
   })
 
-  it('uses one page as a compatibility fallback when branding is absent', () => {
+  it('fails closed when branding is absent instead of injecting an unrelated page', () => {
     expect(injectableTargets([
       target('first', 'Desktop'),
       target('second', 'Settings'),
-    ])).toHaveLength(1)
+    ])).toEqual([])
   })
 })

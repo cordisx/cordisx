@@ -1,4 +1,5 @@
-import { access, mkdir } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { access, mkdir, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -11,33 +12,51 @@ export interface IsolatedCodexProfile {
 
 export const ONLINE_DEVTOOLS_ORIGIN = 'https://chrome-devtools-frontend.appspot.com'
 
-async function firstExisting(paths: readonly string[]): Promise<string | undefined> {
+async function executableFile(candidate: string): Promise<string> {
+  const metadata = await stat(candidate)
+  if (!metadata.isFile()) throw new Error(`host executable is not a regular file: ${candidate}`)
+  await access(candidate, process.platform === 'win32' ? constants.F_OK : constants.X_OK)
+  return candidate
+}
+
+async function firstExecutable(paths: readonly string[]): Promise<string | undefined> {
   for (const candidate of paths) {
-    if (await access(candidate).then(() => true).catch(() => false)) return candidate
+    if (await executableFile(candidate).then(() => true).catch(() => false)) return candidate
   }
+}
+
+/** Return trusted platform candidates without deriving paths from the cwd. */
+export function codexExecutableCandidates(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  homedir = os.homedir(),
+): readonly string[] {
+  if (platform === 'darwin') {
+    return [
+      '/Applications/Codex.app/Contents/MacOS/Codex',
+      path.join(homedir, 'Applications/Codex.app/Contents/MacOS/Codex'),
+      '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT',
+      path.join(homedir, 'Applications/ChatGPT.app/Contents/MacOS/ChatGPT'),
+    ]
+  }
+  if (platform === 'win32') {
+    const localAppData = env.LOCALAPPDATA?.trim()
+    if (localAppData === undefined || localAppData === '' || !path.win32.isAbsolute(localAppData)) return []
+    return [
+      path.win32.join(localAppData, 'Programs', 'Codex', 'Codex.exe'),
+      path.win32.join(localAppData, 'Programs', 'ChatGPT', 'ChatGPT.exe'),
+    ]
+  }
+  return []
 }
 
 /** Resolve the native Codex executable without reading or changing its profile. */
 export async function resolveCodexExecutable(explicit?: string): Promise<string> {
   if (explicit !== undefined) {
     const resolved = path.resolve(explicit)
-    await access(resolved)
-    return resolved
+    return await executableFile(resolved)
   }
-  const candidates = process.platform === 'darwin'
-    ? [
-        '/Applications/Codex.app/Contents/MacOS/Codex',
-        path.join(os.homedir(), 'Applications/Codex.app/Contents/MacOS/Codex'),
-        '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT',
-        path.join(os.homedir(), 'Applications/ChatGPT.app/Contents/MacOS/ChatGPT'),
-      ]
-    : process.platform === 'win32'
-      ? [
-          path.join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Codex', 'Codex.exe'),
-          path.join(process.env.LOCALAPPDATA ?? '', 'Programs', 'ChatGPT', 'ChatGPT.exe'),
-        ]
-      : []
-  const found = await firstExisting(candidates)
+  const found = await firstExecutable(codexExecutableCandidates())
   if (found === undefined) throw new Error('Codex/ChatGPT executable not found; pass --executable <path> or use --attach')
   return found
 }
@@ -59,6 +78,20 @@ export async function findFreeLoopbackPort(): Promise<number> {
     server.close(error => error === undefined ? resolve() : reject(error))
   })
   return address.port
+}
+
+/** Fail before launch when an explicit loopback port is already owned. */
+export async function assertLoopbackPortAvailable(port: number): Promise<void> {
+  const server = createServer()
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(port, '127.0.0.1', () => resolve())
+  }).catch((error) => {
+    throw new Error(`loopback CDP port is unavailable: ${port}`, { cause: error })
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.close(error => error === undefined ? resolve() : reject(error))
+  })
 }
 
 /** Derive a readable collision-resistant key for one project checkout. */
@@ -117,10 +150,11 @@ export function launchCodex(
   extraArgs: readonly string[],
   profile?: IsolatedCodexProfile,
   allowOnlineDevTools = false,
+  environment?: Readonly<Record<string, string>>,
 ): ChildProcess {
   return spawn(executable, codexLaunchArgs(debugPort, extraArgs, profile, allowOnlineDevTools), {
     stdio: profile === undefined ? 'inherit' : 'ignore',
-    env: process.env,
+    env: environment === undefined ? process.env : { ...process.env, ...environment },
   })
 }
 
@@ -143,11 +177,14 @@ async function waitForExit(child: ChildProcess, milliseconds: number): Promise<b
   })
 }
 
-/** Stop only the exact isolated process returned by launchCodex. */
+/** Stop only the exact process returned by launchCodex. */
 export async function terminateIsolatedCodex(child: ChildProcess): Promise<void> {
+  if (child.pid === undefined) return
   if (exited(child)) return
   child.kill('SIGTERM')
   if (await waitForExit(child, 5_000)) return
   child.kill('SIGKILL')
-  await waitForExit(child, 2_000)
+  if (!await waitForExit(child, 2_000)) {
+    throw new Error(`failed to stop launched host process${child.pid === undefined ? '' : ` ${child.pid}`}`)
+  }
 }

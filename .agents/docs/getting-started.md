@@ -10,49 +10,68 @@ Use Node.js 22.19 or newer.
 
 ```bash
 npm install
-cp cordisx.config.example.json cordisx.config.json
 npm run check
-npm run dev -- --dry-run
+npm run dev -- setup
+npm run dev -- codex --dry-run
 ```
+
+The first `setup` or ordinary launch creates `${CORDISX_HOME ||
+~/.cordisx}/config.json` with `codex/default/shared` and no plugins. Ordinary
+launch never reads a project-local `cordisx.config.json`.
 
 ## Launch modes
 
-The default command starts a separately tracked Codex instance with a
-project-scoped Chromium profile and an automatically selected loopback CDP
-port:
+The default command starts a separately tracked Codex instance with an
+independent Chromium profile and an automatically selected loopback CDP port:
 
 ```bash
-npm run dev -- --config cordisx.config.json
+npm run dev
+npm run dev -- codex
+npm run dev -- codex work
+npm run dev -- codex work --data isolated
 ```
 
-The profile is stored under:
+The named profile is persisted in the home configuration. `default` initially
+shares the host's `HOME` and `CODEX_HOME`; an unknown explicit profile such as
+`work` is created as isolated and reused on later launches. Its host and
+Chromium roots are stored under:
 
 ```text
-~/.cordisx/projects/<project-key>/cache/codex-app-profile/
+~/.cordisx/apps/codex/profiles/<profile>/
 ```
 
 Other supported modes are:
 
 ```bash
 # Attach to a host that was already started with --remote-debugging-port=9229.
-npm run dev -- --config cordisx.config.json --attach
+npm run dev -- codex --attach
 
 # Use the system Chromium profile. Exit the ordinary instance first.
-npm run dev -- --config cordisx.config.json --system
+npm run dev -- codex --system
 
 # Override the application executable when automatic discovery is insufficient.
-npm run dev -- --executable /Applications/Codex.app/Contents/MacOS/Codex
-npm run dev -- --executable /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
+npm run dev -- codex --executable /Applications/Codex.app/Contents/MacOS/Codex
+npm run dev -- codex --executable /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
 ```
 
-`--profile-dir <path>` overrides the project profile path. `--isolated` remains
-an explicit compatibility spelling for the default isolated mode.
+`--profile-dir <path>` overrides the selected Chromium profile path. The old
+`--isolated` flag remains accepted only by `cordisx dev`; ordinary launch uses
+the unambiguous `--data isolated` profile contract.
 
-The isolated instance has separate Codex/Electron processes, Chromium data,
-CDP port, UI storage, window restoration, and AppServer stdio lifecycle. It
-shares `HOME` and `CODEX_HOME`, so the account, conversations, projects, and
-model configuration remain available. Shutdown removes the tracked injection
-and stops only the process started by this launcher.
+Every normal launch has separate Codex/Electron processes, Chromium data, CDP
+port, UI storage, window restoration, and AppServer stdio lifecycle. A
+`shared` profile also shares `HOME` and `CODEX_HOME`, so the account,
+conversations, projects, and model configuration remain available. An
+`isolated` profile instead projects private `HOME` and `CODEX_HOME` roots.
+Shutdown removes the tracked injection and stops only the process started by
+this launcher.
+
+Project-local composition is an explicit developer mode only:
+
+```bash
+npm run dev -- dev --config cordisx.config.json
+npm run dev -- dev ./plugins/example.ts --dry-run
+```
 
 `--online-devtools` additionally permits the official Chrome DevTools frontend
 to connect to the loopback endpoint. That frontend receives full debugging

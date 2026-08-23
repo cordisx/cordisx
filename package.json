@@ -6,7 +6,8 @@
   ],
   "scripts": {
     "build": "npm run build --workspace=cordisx",
-    "check": "npm run typecheck && npm run build && npm test && npm run check:package",
+    "check": "npm run typecheck && npm run build && npm test && npm run check:package && npm run check:installed",
+    "check:installed": "node packages/cli/scripts/check-installed-package.mjs",
     "check:package": "node packages/cli/scripts/check-package-contents.mjs",
     "dev": "tsx packages/cli/src/cli.ts",
     "smoke": "node packages/cli/scripts/live-smoke.mjs",
