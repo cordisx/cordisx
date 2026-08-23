@@ -517,18 +517,42 @@ function createLocalTabs(
 ): HTMLElement {
   const tabs = create(document, 'div', 'cxm-tabs')
   tabs.setAttribute('role', 'tablist')
-  for (const item of items) {
+  tabs.setAttribute('aria-orientation', 'horizontal')
+  const activate = (id: string): void => {
+    onSelect(id)
+    const replacement = [...document.querySelectorAll<HTMLButtonElement>(`[${dataAttribute}]`)]
+      .find(candidate => candidate.getAttribute(dataAttribute) === id)
+    replacement?.focus()
+  }
+  items.forEach((item, index) => {
     const button = create(document, 'button', 'cxm-tab', item.label)
     button.type = 'button'
     button.setAttribute('role', 'tab')
     button.setAttribute('aria-selected', String(item.id === active))
+    button.tabIndex = item.id === active ? 0 : -1
     button.setAttribute(dataAttribute, item.id)
     const visibleContent = create(document, 'span', 'cxm-tab-content')
     visibleContent.append(createLocalTabIcon(document, item.icon), create(document, 'span', undefined, item.label))
     button.replaceChildren(visibleContent)
-    button.addEventListener('click', () => onSelect(item.id))
+    button.addEventListener('click', () => activate(item.id))
+    button.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        activate(item.id)
+        return
+      }
+      let nextIndex: number | undefined
+      if (event.key === 'ArrowRight') nextIndex = (index + 1) % items.length
+      if (event.key === 'ArrowLeft') nextIndex = (index - 1 + items.length) % items.length
+      if (event.key === 'Home') nextIndex = 0
+      if (event.key === 'End') nextIndex = items.length - 1
+      if (nextIndex === undefined) return
+      event.preventDefault()
+      const next = items[nextIndex]
+      if (next !== undefined) activate(next.id)
+    })
     tabs.append(button)
-  }
+  })
   return tabs
 }
 
@@ -815,7 +839,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         create(document, 'span', 'cxm-about-action-title', action.label),
         create(document, 'span', 'cxm-about-action-copy', action.description),
       )
-      link.append(body, create(document, 'span', 'cxm-about-action-arrow', '↗'))
+      const arrow = create(document, 'span', 'cxm-about-action-arrow', '↗')
+      arrow.setAttribute('aria-hidden', 'true')
+      link.append(body, arrow)
       item.append(link)
       actions.append(item)
     }

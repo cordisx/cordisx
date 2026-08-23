@@ -50,9 +50,14 @@ border, background, or redundant heading merely to make the panel visible.
 Local tabs pair every label with a host-owned semantic icon. The icon is part
 of the structured tab descriptor, is hidden from accessibility APIs, and is
 rendered directly without its own border, background, chip, or card. The label
-remains the accessible tab name, the active underline remains the only
-persistent selection accent, and adding icons must not change keyboard order
-or cause tab geometry to jump between panels.
+remains the accessible tab name and the active underline remains the only
+persistent selection accent. Local tablists use the horizontal ARIA tabs
+keyboard pattern: only the active tab has `tabindex="0"`; inactive tabs use
+`tabindex="-1"`; Left/Right wrap and activate the adjacent tab; Home/End
+activate the first/last tab. After an activation re-renders manager-owned DOM,
+whether by pointer, Enter, or navigation key, focus is restored to the
+replacement active tab rather than falling back to the document body. Icons
+and focus restoration must not cause tab geometry to jump between panels.
 
 ## Page headers
 
@@ -161,7 +166,8 @@ At minimum they prove:
   public destinations and safe external-link attributes, and the old runtime
   metric grid and generic boundary copy are absent;
 - every local tab has one decorative semantic icon and an unchanged accessible
-  label, with no icon frame or keyboard-order change;
+  label, with no icon frame; roving tabindex, wrapped arrow navigation,
+  Home/End, and focus restoration survive manager re-rendering;
 - primary and breadcrumb headers keep a fixed 26-pixel frameless leading seat,
   align the second-row description with that seat, and retain visible back
   button hover/focus feedback; and
