@@ -6,23 +6,27 @@ import {
   type CordisXCapabilityScope,
   type CordisXLocalizedText,
   type CordisXModelDescriptor,
+  type CordisXModelPage,
   type CordisXModelsListInput,
   type CordisXPermissionPolicy,
   type CordisXPlatform,
   type CordisXPlatformAdapterStatus,
   type CordisXPlatformCapability,
   type CordisXPlatformDiagnostic,
+  type CordisXPlatformModelRef,
+  type CordisXPlatformSessionRef,
   type CordisXPlatformResult,
   type CordisXPluginIdentity,
   type CordisXPluginManifestV1,
   type CordisXTaskControlInput,
   type CordisXTaskControlOutcome,
   type CordisXTaskCreateInput,
-  type CordisXTaskCreateOutcome,
-  type CordisXTaskProjection,
   type CordisXTaskReadInput,
   type CordisXTasksListInput,
-  type CordisXTaskSummary,
+  type CordisXSessionCreateOutcome,
+  type CordisXSessionPage,
+  type CordisXSessionProjection,
+  type CordisXSessionSummary,
   type CordisXTurnControlInput,
   type CordisXTurnControlOutcome,
   type CordisXTurnStart,
@@ -67,18 +71,46 @@ function stringList(
   return Object.freeze(normalized)
 }
 
+function sessionList(value: unknown, label: string): readonly CordisXPlatformSessionRef[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length === 0 || value.length > 100) {
+    throw new Error(`${label} must be a non-empty session reference array`)
+  }
+  const seen = new Set<string>()
+  const sessions = value.map((item, index): CordisXPlatformSessionRef => {
+    const ref = object(item, `${label}[${index}]`)
+    const unknown = Object.keys(ref).find(key => !['providerId', 'remoteSessionId'].includes(key))
+    if (unknown !== undefined) throw new Error(`${label}[${index}] contains unknown field ${unknown}`)
+    if (typeof ref.providerId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(ref.providerId)) {
+      throw new Error(`${label}[${index}].providerId is invalid`)
+    }
+    if (typeof ref.remoteSessionId !== 'string' || ref.remoteSessionId.trim() === '' || ref.remoteSessionId.length > 512) {
+      throw new Error(`${label}[${index}].remoteSessionId is invalid`)
+    }
+    const normalized = Object.freeze({ providerId: ref.providerId, remoteSessionId: ref.remoteSessionId })
+    const key = JSON.stringify([normalized.providerId, normalized.remoteSessionId])
+    if (seen.has(key)) throw new Error(`${label} must not contain duplicate session references`)
+    seen.add(key)
+    return normalized
+  })
+  return Object.freeze(sessions.sort((left, right) => {
+    return JSON.stringify([left.providerId, left.remoteSessionId])
+      .localeCompare(JSON.stringify([right.providerId, right.remoteSessionId]))
+  }))
+}
+
 function normalizedScope(value: unknown, label: string): CordisXCapabilityScope {
   const scope = object(value, label)
-  const unknown = Object.keys(scope).filter(key => !['providers', 'cwdRoots', 'taskIds'].includes(key))
+  const unknown = Object.keys(scope).filter(key => !['providers', 'cwdRoots', 'sessions'].includes(key))
   if (unknown.length > 0) throw new Error(`${label} contains unknown field ${unknown[0]}`)
   const providers = stringList(scope.providers, `${label}.providers`, 32, item => /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(item))
   const cwdRoots = stringList(scope.cwdRoots, `${label}.cwdRoots`, 32, item => item.length <= 4096)
-  const taskIds = stringList(scope.taskIds, `${label}.taskIds`, 100, item => item.length <= 256)
+  const sessions = sessionList(scope.sessions, `${label}.sessions`)
   if (cwdRoots?.some(root => !absolutePath(root)) === true) throw new Error(`${label}.cwdRoots must contain absolute paths`)
   return Object.freeze({
     ...(providers === undefined ? {} : { providers }),
     ...(cwdRoots === undefined ? {} : { cwdRoots }),
-    ...(taskIds === undefined ? {} : { taskIds }),
+    ...(sessions === undefined ? {} : { sessions }),
   })
 }
 
@@ -226,10 +258,13 @@ export class BrowserPermissionPolicyStore implements PermissionPolicyStore {
   }
 }
 
-interface RequestedScope {
+export interface RequestedScope {
   readonly providerId?: string
+  readonly providerIds?: readonly string[]
   readonly cwd?: string
-  readonly taskId?: string
+  readonly model?: CordisXPlatformModelRef
+  readonly session?: CordisXPlatformSessionRef
+  readonly adapterGeneration?: string
 }
 
 export interface PermissionPromptRequest {
@@ -254,6 +289,7 @@ export class BrowserPermissionPrompt implements PermissionPrompt {
 interface AuditRecord {
   lastUsedAt?: string
   lastDeniedAt?: string
+  lastRequested?: RequestedScope
   denialCount: number
 }
 
@@ -265,6 +301,7 @@ export interface PlatformPermissionSnapshot {
   readonly scope: CordisXCapabilityScope
   readonly fingerprint: string
   readonly policy: CordisXPermissionPolicy
+  readonly lastRequested?: RequestedScope
   readonly lastUsedAt?: string
   readonly lastDeniedAt?: string
   readonly denialCount: number
@@ -302,9 +339,24 @@ function pathInside(value: string, root: string): boolean {
 
 function scopeAllows(scope: CordisXCapabilityScope, requested: RequestedScope): boolean {
   if (requested.providerId !== undefined && scope.providers !== undefined && !scope.providers.includes(requested.providerId)) return false
-  if (requested.taskId !== undefined && scope.taskIds !== undefined && !scope.taskIds.includes(requested.taskId)) return false
+  if (requested.providerIds !== undefined && scope.providers !== undefined && requested.providerIds.some(id => !scope.providers?.includes(id))) return false
+  if (requested.model !== undefined && scope.providers !== undefined && !scope.providers.includes(requested.model.providerId)) return false
+  if (requested.session !== undefined && scope.sessions !== undefined && !scope.sessions.some(ref => {
+    return ref.providerId === requested.session?.providerId && ref.remoteSessionId === requested.session.remoteSessionId
+  })) return false
   if (requested.cwd !== undefined && scope.cwdRoots !== undefined && !scope.cwdRoots.some(root => pathInside(requested.cwd as string, root))) return false
   return true
+}
+
+function requestedSnapshot(requested: RequestedScope): RequestedScope {
+  return Object.freeze({
+    ...(requested.providerId === undefined ? {} : { providerId: requested.providerId }),
+    ...(requested.providerIds === undefined ? {} : { providerIds: Object.freeze([...requested.providerIds]) }),
+    ...(requested.cwd === undefined ? {} : { cwd: requested.cwd }),
+    ...(requested.model === undefined ? {} : { model: Object.freeze({ ...requested.model }) }),
+    ...(requested.session === undefined ? {} : { session: Object.freeze({ ...requested.session }) }),
+    ...(requested.adapterGeneration === undefined ? {} : { adapterGeneration: requested.adapterGeneration }),
+  })
 }
 
 function isoNow(now: () => Date): string {
@@ -366,16 +418,16 @@ export class PermissionBroker {
     const identityKey = platformIdentityKey(identity)
     const declaration = this.registrations.get(identityKey)?.declarations.get(capability)
     if (declaration === undefined) {
-      this.denied(identityKey, capability)
+      this.denied(identityKey, capability, requested)
       return failure('permission-undeclared', `Plugin ${identity.id} does not declare ${capability}`)
     }
     if (!scopeAllows(declaration.scope, requested)) {
-      this.denied(identityKey, capability)
+      this.denied(identityKey, capability, requested)
       return failure('permission-scope-denied', `Requested parameters are outside the declared ${capability} scope`)
     }
     const policy = this.policy(identity, capability)
     if (policy === 'deny') {
-      this.denied(identityKey, capability)
+      this.denied(identityKey, capability, requested)
       return failure('permission-denied', `${capability} is denied for plugin ${identity.id}`)
     }
     if (policy === 'ask') {
@@ -386,13 +438,14 @@ export class PermissionBroker {
         decision = 'deny'
       }
       if (decision === 'deny') {
-        this.denied(identityKey, capability)
+        this.denied(identityKey, capability, requested)
         return failure('permission-denied', `${capability} was denied for this call`)
       }
     }
     const auditKey = this.auditKey(identityKey, capability)
     const audit = this.audit.get(auditKey) ?? { denialCount: 0 }
     audit.lastUsedAt = isoNow(this.now)
+    audit.lastRequested = requestedSnapshot(requested)
     this.audit.set(auditKey, audit)
     this.changed()
     return { ok: true, value: { declaration } }
@@ -406,8 +459,8 @@ export class PermissionBroker {
       .map(item => item.name)
   }
 
-  recordScopeDenial(identity: CordisXPluginIdentity, capability: CordisXPlatformCapability): void {
-    this.denied(platformIdentityKey(identity), capability)
+  recordScopeDenial(identity: CordisXPluginIdentity, capability: CordisXPlatformCapability, requested: RequestedScope): void {
+    this.denied(platformIdentityKey(identity), capability, requested)
   }
 
   snapshots(): readonly PlatformPermissionSnapshot[] {
@@ -423,6 +476,7 @@ export class PermissionBroker {
         scope: declaration.scope,
         fingerprint: declarationFingerprint(declaration),
         policy,
+        ...(audit.lastRequested === undefined ? {} : { lastRequested: audit.lastRequested }),
         ...(audit.lastUsedAt === undefined ? {} : { lastUsedAt: audit.lastUsedAt }),
         ...(audit.lastDeniedAt === undefined ? {} : { lastDeniedAt: audit.lastDeniedAt }),
         denialCount: audit.denialCount,
@@ -442,10 +496,11 @@ export class PermissionBroker {
     this.listeners.clear()
   }
 
-  private denied(identityKey: string, capability: CordisXPlatformCapability): void {
+  private denied(identityKey: string, capability: CordisXPlatformCapability, requested: RequestedScope): void {
     const key = this.auditKey(identityKey, capability)
     const audit = this.audit.get(key) ?? { denialCount: 0 }
     audit.lastDeniedAt = isoNow(this.now)
+    audit.lastRequested = requestedSnapshot(requested)
     audit.denialCount += 1
     this.audit.set(key, audit)
     this.changed()
@@ -470,10 +525,10 @@ export class PermissionBroker {
 
 export interface CordisXPlatformAdapter {
   status(): CordisXPlatformAdapterStatus
-  listModels(input: CordisXModelsListInput): Promise<CordisXPlatformResult<readonly CordisXModelDescriptor[]>>
-  listTasks(input: CordisXTasksListInput): Promise<CordisXPlatformResult<readonly CordisXTaskSummary[]>>
-  readTask(input: CordisXTaskReadInput): Promise<CordisXPlatformResult<CordisXTaskProjection>>
-  createTask(input: Omit<CordisXTaskCreateInput, 'initialMessage'>): Promise<CordisXPlatformResult<CordisXTaskSummary>>
+  listModels(input: CordisXModelsListInput): Promise<CordisXPlatformResult<CordisXModelPage>>
+  listTasks(input: CordisXTasksListInput): Promise<CordisXPlatformResult<CordisXSessionPage>>
+  readTask(input: CordisXTaskReadInput): Promise<CordisXPlatformResult<CordisXSessionProjection>>
+  createTask(input: Omit<CordisXTaskCreateInput, 'initialMessage'>): Promise<CordisXPlatformResult<CordisXSessionSummary>>
   controlTask(input: CordisXTaskControlInput): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>>
   submitTurn(input: CordisXTurnSubmitInput): Promise<CordisXPlatformResult<CordisXTurnStart>>
   controlTurn(input: CordisXTurnControlInput): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>>
@@ -509,9 +564,10 @@ export class UnavailablePlatformAdapter implements CordisXPlatformAdapter {
 export interface CordisXPlatformProjection {
   readonly hostId: string
   readonly hostName: string
+  readonly snapshotId?: string
   readonly models?: readonly CordisXModelDescriptor[]
-  readonly tasks?: readonly CordisXTaskSummary[]
-  readonly taskContents?: readonly CordisXTaskProjection[]
+  readonly sessions?: readonly CordisXSessionSummary[]
+  readonly sessionContents?: readonly CordisXSessionProjection[]
 }
 
 export interface CordisXPlatformProjectionSource {
@@ -525,8 +581,8 @@ export class ProjectionPlatformAdapter implements CordisXPlatformAdapter {
     const snapshot = this.source.getSnapshot()
     const supported: CordisXPlatformCapability[] = []
     if (snapshot.models !== undefined) supported.push('models.read')
-    if (snapshot.tasks !== undefined) supported.push('tasks.catalog.read')
-    if (snapshot.taskContents !== undefined) supported.push('tasks.content.read')
+    if (snapshot.sessions !== undefined) supported.push('tasks.catalog.read')
+    if (snapshot.sessionContents !== undefined) supported.push('tasks.content.read')
     return {
       hostId: snapshot.hostId,
       hostName: snapshot.hostName,
@@ -538,26 +594,60 @@ export class ProjectionPlatformAdapter implements CordisXPlatformAdapter {
     }
   }
 
-  async listModels(input: CordisXModelsListInput): Promise<CordisXPlatformResult<readonly CordisXModelDescriptor[]>> {
+  async listModels(input: CordisXModelsListInput): Promise<CordisXPlatformResult<CordisXModelPage>> {
     const models = this.source.getSnapshot().models
     if (models === undefined) return failure('adapter-unavailable', 'The current model projection is unavailable')
-    return { ok: true, value: copy(models.filter(item => input.providerId === undefined || item.providerId === input.providerId)) }
+    const providerIds = input.providerIds ?? []
+    return {
+      ok: true,
+      value: {
+        contract: 'cordisx.platform-model-page/v1',
+        schemaVersion: 1,
+        providerIds: copy(providerIds),
+        models: copy(models.filter(item => providerIds.length === 0 || providerIds.includes(item.ref.providerId))),
+      },
+    }
   }
 
-  async listTasks(input: CordisXTasksListInput): Promise<CordisXPlatformResult<readonly CordisXTaskSummary[]>> {
-    const tasks = this.source.getSnapshot().tasks
-    if (tasks === undefined) return failure('adapter-unavailable', 'The complete task catalog projection is unavailable')
-    return { ok: true, value: copy(tasks.filter(item => {
-      return (input.providerId === undefined || item.providerId === input.providerId)
+  async listTasks(input: CordisXTasksListInput): Promise<CordisXPlatformResult<CordisXSessionPage>> {
+    const snapshot = this.source.getSnapshot()
+    const sessions = snapshot.sessions
+    if (sessions === undefined) return failure('adapter-unavailable', 'The complete session catalog projection is unavailable')
+    if (input.cursor !== undefined) return failure('invalid-request', 'The projection adapter does not support continuation cursors')
+    const providerIds = input.providerIds ?? []
+    const limit = input.limit ?? 100
+    const filtered = sessions.filter(item => {
+      return (providerIds.length === 0 || providerIds.includes(item.ref.providerId))
         && (input.cwd === undefined || normalizedPath(item.cwd) === normalizedPath(input.cwd))
-    })) }
+        && (input.searchTerm === undefined || `${item.title ?? ''}\n${item.cwd}`.toLocaleLowerCase().includes(input.searchTerm.toLocaleLowerCase()))
+    }).slice(0, limit)
+    return {
+      ok: true,
+      value: {
+        contract: 'cordisx.platform-session-page/v1',
+        schemaVersion: 1,
+        query: {
+          ...(input.providerIds === undefined ? {} : { providerIds: copy(input.providerIds) }),
+          ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+          ...(input.searchTerm === undefined ? {} : { searchTerm: input.searchTerm }),
+          ...(input.limit === undefined ? {} : { limit: input.limit }),
+        },
+        snapshotId: snapshot.snapshotId ?? `projection:${snapshot.hostId}`,
+        sessions: copy(filtered),
+      },
+    }
   }
 
-  async readTask(input: CordisXTaskReadInput): Promise<CordisXPlatformResult<CordisXTaskProjection>> {
-    const contents = this.source.getSnapshot().taskContents
-    if (contents === undefined) return failure('adapter-unavailable', 'The complete task content projection is unavailable')
-    const task = contents.find(item => item.id === input.taskId)
-    return task === undefined ? failure('task-not-found', `Task ${input.taskId} was not found`) : { ok: true, value: copy(task) }
+  async readTask(input: CordisXTaskReadInput): Promise<CordisXPlatformResult<CordisXSessionProjection>> {
+    const contents = this.source.getSnapshot().sessionContents
+    if (contents === undefined) return failure('adapter-unavailable', 'The complete session content projection is unavailable')
+    const session = contents.find(item => {
+      return item.ref.providerId === input.session.providerId
+        && item.ref.remoteSessionId === input.session.remoteSessionId
+    })
+    return session === undefined
+      ? failure('task-not-found', `Session ${input.session.remoteSessionId} was not found for provider ${input.session.providerId}`)
+      : { ok: true, value: copy(session) }
   }
 
   async createTask(): Promise<CordisXPlatformResult<never>> { return failure('adapter-read-only', 'The current Platform adapter is read-only') }
@@ -598,6 +688,33 @@ function pluginIdentity(ctx: Context): CordisXPluginIdentity | undefined {
 
 function validText(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== ''
+}
+
+function validProviderIds(value: unknown): value is readonly string[] {
+  return Array.isArray(value)
+    && value.length <= 32
+    && value.every(validText)
+    && new Set(value).size === value.length
+}
+
+function validModelRef(value: unknown): value is CordisXPlatformModelRef {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const ref = value as Partial<CordisXPlatformModelRef>
+  return Object.keys(value).every(key => key === 'providerId' || key === 'modelId')
+    && validText(ref.providerId)
+    && validText(ref.modelId)
+}
+
+function validSessionRef(value: unknown): value is CordisXPlatformSessionRef {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const ref = value as Partial<CordisXPlatformSessionRef>
+  return Object.keys(value).every(key => key === 'providerId' || key === 'remoteSessionId')
+    && validText(ref.providerId)
+    && validText(ref.remoteSessionId)
+}
+
+function sameSession(left: CordisXPlatformSessionRef, right: CordisXPlatformSessionRef): boolean {
+  return left.providerId === right.providerId && left.remoteSessionId === right.remoteSessionId
 }
 
 function absolutePath(value: string): boolean {
@@ -652,89 +769,110 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     }
   }
 
-  private async ensureTaskScope(
+  private async ensureSessionScope(
     grant: AuthorizationGrant,
-    taskId: string,
+    session: CordisXPlatformSessionRef,
   ): Promise<CordisXPlatformResult<true>> {
     const scope = grant.declaration.scope
-    if (scope.providers === undefined && scope.cwdRoots === undefined) return { ok: true, value: true }
-    const task = await this.guarded(async () => await optionsFor(this).adapter.readTask({ taskId }))
-    if (!task.ok) return task
-    if (scopeAllows(scope, { taskId, providerId: task.value.providerId, cwd: task.value.cwd })) return { ok: true, value: true }
+    if (scope.cwdRoots === undefined) return { ok: true, value: true }
+    const projection = await this.guarded(async () => await optionsFor(this).adapter.readTask({ session }))
+    if (!projection.ok) return projection
+    const requested = { session, providerId: session.providerId, cwd: projection.value.cwd }
+    if (scopeAllows(scope, requested)) return { ok: true, value: true }
     const identity = pluginIdentity(this.ctx)
-    if (identity !== undefined) optionsFor(this).broker.recordScopeDenial(identity, grant.declaration.name)
-    return failure('permission-scope-denied', `Task ${taskId} is outside the declared ${grant.declaration.name} scope`)
+    if (identity !== undefined) optionsFor(this).broker.recordScopeDenial(identity, grant.declaration.name, requested)
+    return failure('permission-scope-denied', `Session ${session.remoteSessionId} is outside the declared ${grant.declaration.name} scope`)
   }
 
-  private async listModels(input: CordisXModelsListInput): Promise<CordisXPlatformResult<readonly CordisXModelDescriptor[]>> {
-    if (input.providerId !== undefined && !validText(input.providerId)) return failure('invalid-request', 'providerId must be a non-empty string')
+  private async listModels(input: CordisXModelsListInput): Promise<CordisXPlatformResult<CordisXModelPage>> {
+    if (input.providerIds !== undefined && !validProviderIds(input.providerIds)) return failure('invalid-request', 'providerIds must be a unique string array')
     const grant = await this.authorize('models.read', {
-      ...(input.providerId === undefined ? {} : { providerId: input.providerId }),
+      ...(input.providerIds === undefined ? {} : { providerIds: input.providerIds }),
     })
     if (!grant.ok) return grant
     const result = await this.guarded(async () => await optionsFor(this).adapter.listModels(input))
     if (!result.ok) return result
-    return { ok: true, value: result.value.filter(item => scopeAllows(grant.value.declaration.scope, { providerId: item.providerId })) }
+    return {
+      ok: true,
+      value: {
+        ...result.value,
+        models: result.value.models.filter(item => scopeAllows(grant.value.declaration.scope, { model: item.ref })),
+      },
+    }
   }
 
-  private async listTasks(input: CordisXTasksListInput): Promise<CordisXPlatformResult<readonly CordisXTaskSummary[]>> {
-    if (input.providerId !== undefined && !validText(input.providerId)) return failure('invalid-request', 'providerId must be a non-empty string')
+  private async listTasks(input: CordisXTasksListInput): Promise<CordisXPlatformResult<CordisXSessionPage>> {
+    if (input.providerIds !== undefined && !validProviderIds(input.providerIds)) return failure('invalid-request', 'providerIds must be a unique string array')
     if (input.cwd !== undefined && (!validText(input.cwd) || !absolutePath(input.cwd))) return failure('invalid-request', 'cwd must be an absolute path')
+    if (input.searchTerm !== undefined && !validText(input.searchTerm)) return failure('invalid-request', 'searchTerm must be a non-empty string')
+    if (input.cursor !== undefined && !validText(input.cursor)) return failure('invalid-request', 'cursor must be a non-empty string')
+    if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 500)) {
+      return failure('invalid-request', 'limit must be an integer between 1 and 500')
+    }
     const grant = await this.authorize('tasks.catalog.read', {
-      ...(input.providerId === undefined ? {} : { providerId: input.providerId }),
+      ...(input.providerIds === undefined ? {} : { providerIds: input.providerIds }),
       ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     })
     if (!grant.ok) return grant
     const result = await this.guarded(async () => await optionsFor(this).adapter.listTasks(input))
     if (!result.ok) return result
-    return { ok: true, value: result.value.filter(item => scopeAllows(grant.value.declaration.scope, {
-      providerId: item.providerId,
-      cwd: item.cwd,
-      taskId: item.id,
-    })) }
+    return {
+      ok: true,
+      value: {
+        ...result.value,
+        sessions: result.value.sessions.filter(item => scopeAllows(grant.value.declaration.scope, {
+          providerId: item.ref.providerId,
+          cwd: item.cwd,
+          session: item.ref,
+        })),
+      },
+    }
   }
 
-  private async readTask(input: CordisXTaskReadInput): Promise<CordisXPlatformResult<CordisXTaskProjection>> {
-    if (!validText(input.taskId)) return failure('invalid-request', 'taskId must be a non-empty string')
-    const grant = await this.authorize('tasks.content.read', { taskId: input.taskId })
+  private async readTask(input: CordisXTaskReadInput): Promise<CordisXPlatformResult<CordisXSessionProjection>> {
+    if (!validSessionRef(input.session)) return failure('invalid-request', 'session must be a complete Platform session reference')
+    const requested = { providerId: input.session.providerId, session: input.session }
+    const grant = await this.authorize('tasks.content.read', requested)
     if (!grant.ok) return grant
     const result = await this.guarded(async () => await optionsFor(this).adapter.readTask(input))
     if (!result.ok) return result
-    return scopeAllows(grant.value.declaration.scope, { providerId: result.value.providerId, cwd: result.value.cwd, taskId: result.value.id })
-      ? result
-      : failure('permission-scope-denied', 'Task content is outside the declared scope')
+    if (!sameSession(result.value.ref, input.session) || result.value.model.providerId !== input.session.providerId) return safeAdapterFailure()
+    if (scopeAllows(grant.value.declaration.scope, { ...requested, cwd: result.value.cwd })) return result
+    const identity = pluginIdentity(this.ctx)
+    if (identity !== undefined) optionsFor(this).broker.recordScopeDenial(identity, grant.value.declaration.name, { ...requested, cwd: result.value.cwd })
+    return failure('permission-scope-denied', 'Session content is outside the declared scope')
   }
 
-  private async createTask(input: CordisXTaskCreateInput): Promise<CordisXPlatformResult<CordisXTaskCreateOutcome>> {
-    if (!validText(input.providerId) || !validText(input.modelId)) return failure('invalid-request', 'providerId and modelId must be non-empty strings')
+  private async createTask(input: CordisXTaskCreateInput): Promise<CordisXPlatformResult<CordisXSessionCreateOutcome>> {
+    if (!validModelRef(input.model)) return failure('invalid-request', 'model must be a complete Platform model reference')
     if (!validText(input.cwd) || !absolutePath(input.cwd)) return failure('invalid-request', 'cwd must be an absolute path')
     if (input.initialMessage !== undefined && !validText(input.initialMessage)) return failure('invalid-request', 'initialMessage must be a non-empty string')
-    const grant = await this.authorize('tasks.create', { providerId: input.providerId, cwd: input.cwd })
+    const grant = await this.authorize('tasks.create', { providerId: input.model.providerId, model: input.model, cwd: input.cwd })
     if (!grant.ok) return grant
-    const models = await this.guarded(async () => await optionsFor(this).adapter.listModels({}))
+    const models = await this.guarded(async () => await optionsFor(this).adapter.listModels({ providerIds: [input.model.providerId] }))
     if (!models.ok) return models
-    const providerModels = models.value.filter(model => model.providerId === input.providerId)
-    if (providerModels.length === 0) return failure('invalid-provider', `Provider ${input.providerId} is not currently available`)
-    if (!providerModels.some(model => model.id === input.modelId)) {
-      return failure('invalid-model', `Model ${input.modelId} is not currently available from provider ${input.providerId}`)
+    const providerModels = models.value.models.filter(model => model.ref.providerId === input.model.providerId)
+    if (providerModels.length === 0) return failure('invalid-provider', `Provider ${input.model.providerId} is not currently available`)
+    if (!providerModels.some(model => model.ref.modelId === input.model.modelId)) {
+      return failure('invalid-model', `Model ${input.model.modelId} is not currently available from provider ${input.model.providerId}`)
     }
     const created = await this.guarded(async () => await optionsFor(this).adapter.createTask({
-      providerId: input.providerId,
-      modelId: input.modelId,
+      model: input.model,
       cwd: input.cwd,
     }))
     if (!created.ok) return created
-    if (input.initialMessage === undefined) return { ok: true, value: { status: 'created', task: created.value } }
-    const turn = await this.guarded(async () => await optionsFor(this).adapter.submitTurn({ taskId: created.value.id, message: input.initialMessage as string }))
-    if (turn.ok) return { ok: true, value: { status: 'created', task: created.value, initialTurn: turn.value } }
+    if (created.value.ref.providerId !== input.model.providerId || created.value.model.providerId !== input.model.providerId) return safeAdapterFailure()
+    if (input.initialMessage === undefined) return { ok: true, value: { status: 'created', session: created.value } }
+    const turn = await this.guarded(async () => await optionsFor(this).adapter.submitTurn({ session: created.value.ref, message: input.initialMessage as string }))
+    if (turn.ok) return { ok: true, value: { status: 'created', session: created.value, initialTurn: turn.value } }
     return {
       ok: true,
       value: {
         status: 'created-initial-turn-failed',
-        task: created.value,
+        session: created.value,
         error: {
           code: 'initial-turn-failed',
-          message: `Task ${created.value.id} was created, but its initial turn did not start: ${turn.error.message}`,
+          message: `Session ${created.value.ref.remoteSessionId} was created, but its initial turn did not start: ${turn.error.message}`,
           ...(turn.error.retryable === undefined ? {} : { retryable: turn.error.retryable }),
         },
       },
@@ -742,31 +880,31 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
   }
 
   private async controlTask(input: CordisXTaskControlInput): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>> {
-    if (!validText(input.taskId) || !['continue', 'fork', 'archive', 'restore', 'delete'].includes(input.action)) {
+    if (!validSessionRef(input.session) || !['continue', 'fork', 'archive', 'restore', 'delete'].includes(input.action)) {
       return failure('invalid-request', 'task control input is invalid')
     }
-    const grant = await this.authorize('tasks.control', { taskId: input.taskId })
+    const grant = await this.authorize('tasks.control', { providerId: input.session.providerId, session: input.session })
     if (!grant.ok) return grant
-    const scope = await this.ensureTaskScope(grant.value, input.taskId)
+    const scope = await this.ensureSessionScope(grant.value, input.session)
     if (!scope.ok) return scope
     return await this.guarded(async () => await optionsFor(this).adapter.controlTask(input))
   }
 
   private async submitTurn(input: CordisXTurnSubmitInput): Promise<CordisXPlatformResult<CordisXTurnStart>> {
-    if (!validText(input.taskId) || !validText(input.message)) return failure('invalid-request', 'taskId and message must be non-empty strings')
-    const grant = await this.authorize('turns.submit', { taskId: input.taskId })
+    if (!validSessionRef(input.session) || !validText(input.message)) return failure('invalid-request', 'session and message must be valid')
+    const grant = await this.authorize('turns.submit', { providerId: input.session.providerId, session: input.session })
     if (!grant.ok) return grant
-    const scope = await this.ensureTaskScope(grant.value, input.taskId)
+    const scope = await this.ensureSessionScope(grant.value, input.session)
     if (!scope.ok) return scope
     return await this.guarded(async () => await optionsFor(this).adapter.submitTurn(input))
   }
 
   private async controlTurn(input: CordisXTurnControlInput): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>> {
-    if (!validText(input.taskId) || !['steer', 'interrupt'].includes(input.action)) return failure('invalid-request', 'turn control input is invalid')
+    if (!validSessionRef(input.session) || !['steer', 'interrupt'].includes(input.action)) return failure('invalid-request', 'turn control input is invalid')
     if (input.action === 'steer' && !validText(input.message)) return failure('invalid-request', 'steer message must be a non-empty string')
-    const grant = await this.authorize('turns.control', { taskId: input.taskId })
+    const grant = await this.authorize('turns.control', { providerId: input.session.providerId, session: input.session })
     if (!grant.ok) return grant
-    const scope = await this.ensureTaskScope(grant.value, input.taskId)
+    const scope = await this.ensureSessionScope(grant.value, input.session)
     if (!scope.ok) return scope
     return await this.guarded(async () => await optionsFor(this).adapter.controlTurn(input))
   }

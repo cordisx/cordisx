@@ -7,7 +7,7 @@ import {
   type CordisXPlatformResult,
   type CordisXPluginIdentity,
   type CordisXPluginManifestV1,
-  type CordisXTaskSummary,
+  type CordisXSessionSummary,
 } from '../packages/cli/src/contracts.js'
 import {
   CordisXPlatformService,
@@ -23,14 +23,21 @@ import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from '../packages/cli/src/re
 
 const identity: CordisXPluginIdentity = { source: 'file:///plugins/demo.ts', id: 'demo' }
 const models: readonly CordisXModelDescriptor[] = [
-  { hostId: 'desktop', providerId: 'codex', id: 'gpt-5.6', label: 'GPT-5.6', isDefault: true },
-  { hostId: 'desktop', providerId: 'zcode', id: 'z-1', label: 'Z-1' },
+  {
+    contract: 'cordisx.platform-model/v1', schemaVersion: 1,
+    hostId: 'desktop', ref: { providerId: 'codex', modelId: 'gpt-5.6' }, label: 'GPT-5.6', isDefault: true,
+  },
+  {
+    contract: 'cordisx.platform-model/v1', schemaVersion: 1,
+    hostId: 'desktop', ref: { providerId: 'zcode', modelId: 'z-1' }, label: 'Z-1',
+  },
 ]
-const task: CordisXTaskSummary = {
-  id: 'task-1',
+const session: CordisXSessionSummary = {
+  contract: 'cordisx.platform-session/v1',
+  schemaVersion: 1,
+  ref: { providerId: 'codex', remoteSessionId: 'task-1' },
   hostId: 'desktop',
-  providerId: 'codex',
-  modelId: 'gpt-5.6',
+  model: { providerId: 'codex', modelId: 'gpt-5.6' },
   cwd: '/workspace/project',
   state: 'active',
 }
@@ -79,15 +86,32 @@ function fakeAdapter(overrides: Partial<CordisXPlatformAdapter> = {}): CordisXPl
       secondConnectionCreated: false as const,
       rawBridgeExposed: false as const,
     }),
-    listModels: vi.fn(async () => ({ ok: true as const, value: models })),
-    listTasks: vi.fn(async () => ({ ok: true as const, value: [task] })),
-    readTask: vi.fn(async () => ({ ok: true as const, value: { ...task, turns: [] } })),
-    createTask: vi.fn(async () => ({ ok: true as const, value: task })),
+    listModels: vi.fn(async input => ({
+      ok: true as const,
+      value: {
+        contract: 'cordisx.platform-model-page/v1' as const,
+        schemaVersion: 1 as const,
+        providerIds: input.providerIds ?? [],
+        models,
+      },
+    })),
+    listTasks: vi.fn(async input => ({
+      ok: true as const,
+      value: {
+        contract: 'cordisx.platform-session-page/v1' as const,
+        schemaVersion: 1 as const,
+        query: input,
+        snapshotId: 'snapshot-1',
+        sessions: [session],
+      },
+    })),
+    readTask: vi.fn(async () => ({ ok: true as const, value: { ...session, turns: [] } })),
+    createTask: vi.fn(async () => ({ ok: true as const, value: session })),
     controlTask: vi.fn(async input => input.action === 'delete'
-      ? { ok: true as const, value: { action: 'delete' as const, taskId: input.taskId, deleted: true as const } }
-      : { ok: true as const, value: { action: input.action, task } }),
-    submitTurn: vi.fn(async () => ({ ok: true as const, value: { taskId: task.id, turnId: 'turn-1' } })),
-    controlTurn: vi.fn(async input => ({ ok: true as const, value: { action: input.action, taskId: input.taskId } })),
+      ? { ok: true as const, value: { action: 'delete' as const, session: input.session, deleted: true as const } }
+      : { ok: true as const, value: { action: input.action, session } }),
+    submitTurn: vi.fn(async input => ({ ok: true as const, value: { session: input.session, turnId: 'turn-1' } })),
+    controlTurn: vi.fn(async input => ({ ok: true as const, value: { action: input.action, session: input.session } })),
   }
   return Object.assign(base, overrides) as unknown as ReturnType<typeof fakeAdapter>
 }
@@ -115,28 +139,34 @@ describe('Platform capability runtime', () => {
     broker.setPolicy(identity, 'tasks.create', 'allow')
     const { fiber, ctx } = await platformContext(adapter, broker)
     try {
-      await expect(ctx.platform.tasks.create({ providerId: 'missing', modelId: 'x', cwd: '/workspace' }))
+      await expect(ctx.platform.tasks.create({ model: { providerId: 'missing', modelId: 'x' }, cwd: '/workspace' }))
         .resolves.toMatchObject({ ok: false, error: { code: 'invalid-provider' } })
-      await expect(ctx.platform.tasks.create({ providerId: 'codex', modelId: 'missing', cwd: '/workspace' }))
+      await expect(ctx.platform.tasks.create({ model: { providerId: 'codex', modelId: 'missing' }, cwd: '/workspace' }))
         .resolves.toMatchObject({ ok: false, error: { code: 'invalid-model' } })
       await expect(ctx.platform.tasks.create({
-        providerId: 'codex',
-        modelId: 'gpt-5.6',
+        model: { providerId: 'codex', modelId: 'gpt-5.6' },
         cwd: '/workspace',
         initialMessage: 'Start here',
       })).resolves.toMatchObject({
         ok: true,
-        value: { status: 'created', task: { id: 'task-1' }, initialTurn: { turnId: 'turn-1' } },
+        value: {
+          status: 'created',
+          session: { ref: { providerId: 'codex', remoteSessionId: 'task-1' } },
+          initialTurn: { turnId: 'turn-1' },
+        },
       })
       expect(adapter.createTask).toHaveBeenCalledTimes(1)
-      expect(adapter.submitTurn).toHaveBeenCalledWith({ taskId: 'task-1', message: 'Start here' })
+      expect(adapter.submitTurn).toHaveBeenCalledWith({
+        session: { providerId: 'codex', remoteSessionId: 'task-1' },
+        message: 'Start here',
+      })
     } finally {
       await fiber.dispose()
       broker.dispose()
     }
   })
 
-  it('retains the created task when the initial turn fails and never performs cleanup control', async () => {
+  it('retains the created session when the initial turn fails and never performs cleanup control', async () => {
     const adapter = fakeAdapter({ submitTurn: vi.fn(async () => resultError('adapter-failure')) })
     const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), prompt())
     broker.register(identity, manifest(identity.id, [declaration('tasks.create')]))
@@ -144,8 +174,7 @@ describe('Platform capability runtime', () => {
     const { fiber, ctx } = await platformContext(adapter, broker)
     try {
       const result = await ctx.platform.tasks.create({
-        providerId: 'codex',
-        modelId: 'gpt-5.6',
+        model: { providerId: 'codex', modelId: 'gpt-5.6' },
         cwd: '/workspace',
         initialMessage: 'Start here',
       })
@@ -153,7 +182,7 @@ describe('Platform capability runtime', () => {
         ok: true,
         value: {
           status: 'created-initial-turn-failed',
-          task: { id: 'task-1' },
+          session: { ref: { providerId: 'codex', remoteSessionId: 'task-1' } },
           error: { code: 'initial-turn-failed', retryable: true },
         },
       })
@@ -170,17 +199,19 @@ describe('Platform capability runtime', () => {
     const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), ask, () => new Date('2026-08-23T08:00:00.000Z'))
     broker.register(identity, manifest(identity.id, [
       declaration('models.read', { required: true, scope: { providers: ['codex'] } }),
-      declaration('turns.submit', { scope: { taskIds: ['task-1'], cwdRoots: ['/other'] } }),
+      declaration('turns.submit', {
+        scope: { sessions: [{ providerId: 'codex', remoteSessionId: 'task-1' }], cwdRoots: ['/other'] },
+      }),
     ]))
     const { fiber, ctx } = await platformContext(adapter, broker)
     try {
-      await expect(ctx.platform.models.list({ providerId: 'codex' }))
+      await expect(ctx.platform.models.list({ providerIds: ['codex'] }))
         .resolves.toMatchObject({ ok: false, error: { code: 'permission-denied' } })
       expect(ask.request).toHaveBeenCalledTimes(1)
 
       broker.setPolicy(identity, 'models.read', 'allow')
-      await expect(ctx.platform.models.list({ providerId: 'codex' }))
-        .resolves.toMatchObject({ ok: true, value: [{ providerId: 'codex' }] })
+      await expect(ctx.platform.models.list({ providerIds: ['codex'] }))
+        .resolves.toMatchObject({ ok: true, value: { models: [{ ref: { providerId: 'codex' } }] } })
 
       broker.setPolicy(identity, 'models.read', 'deny')
       expect(broker.requiredDenied(identity)).toEqual(['models.read'])
@@ -189,12 +220,23 @@ describe('Platform capability runtime', () => {
       expect(broker.requiredDenied(identity)).toEqual([])
 
       broker.setPolicy(identity, 'turns.submit', 'allow')
-      await expect(ctx.platform.turns.submit({ taskId: 'task-2', message: 'outside scope' }))
+      await expect(ctx.platform.turns.submit({
+        session: { providerId: 'codex', remoteSessionId: 'task-2' }, message: 'outside scope',
+      }))
         .resolves.toMatchObject({ ok: false, error: { code: 'permission-scope-denied' } })
-      await expect(ctx.platform.turns.submit({ taskId: 'task-1', message: 'outside cwd scope' }))
+      await expect(ctx.platform.turns.submit({
+        session: { providerId: 'zcode', remoteSessionId: 'task-1' }, message: 'same local id, other provider',
+      }))
+        .resolves.toMatchObject({ ok: false, error: { code: 'permission-scope-denied' } })
+      await expect(ctx.platform.turns.submit({
+        session: { providerId: 'codex', remoteSessionId: 'task-1' }, message: 'outside cwd scope',
+      }))
         .resolves.toMatchObject({ ok: false, error: { code: 'permission-scope-denied' } })
       expect(adapter.submitTurn).not.toHaveBeenCalled()
-      expect(broker.snapshots().find(item => item.capability === 'turns.submit')).toMatchObject({ denialCount: 2 })
+      expect(broker.snapshots().find(item => item.capability === 'turns.submit')).toMatchObject({
+        denialCount: 3,
+        lastRequested: { session: { providerId: 'codex', remoteSessionId: 'task-1' } },
+      })
     } finally {
       await fiber.dispose()
       broker.dispose()
@@ -205,13 +247,20 @@ describe('Platform capability runtime', () => {
     const other: CordisXPluginIdentity = { source: 'file:///plugins/other.ts', id: 'other' }
     const adapter = fakeAdapter()
     const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), prompt())
-    broker.register(identity, manifest(identity.id, [declaration('turns.submit', { scope: { taskIds: ['task-1'] } })]))
-    broker.register(other, manifest(other.id, [declaration('turns.submit', { scope: { taskIds: ['other-task'] } })]))
+    broker.register(identity, manifest(identity.id, [declaration('turns.submit', {
+      scope: { sessions: [{ providerId: 'codex', remoteSessionId: 'task-1' }] },
+    })]))
+    broker.register(other, manifest(other.id, [declaration('turns.submit', {
+      scope: { sessions: [{ providerId: 'codex', remoteSessionId: 'other-task' }] },
+    })]))
     broker.setPolicy(identity, 'turns.submit', 'allow')
     broker.setPolicy(other, 'turns.submit', 'deny')
     const { fiber, ctx } = await platformContext(adapter, broker, identity)
     try {
-      const spoofed = { taskId: 'task-1', message: 'hello', pluginId: 'other', source: other.source }
+      const spoofed = {
+        session: { providerId: 'codex', remoteSessionId: 'task-1' },
+        message: 'hello', pluginId: 'other', source: other.source,
+      }
       await expect(ctx.platform.turns.submit(spoofed)).resolves.toMatchObject({ ok: true })
       expect(adapter.submitTurn).toHaveBeenCalledWith(spoofed)
       expect((ctx.platform as unknown as { options?: unknown }).options).toBeUndefined()
@@ -237,12 +286,41 @@ describe('Platform capability runtime', () => {
     const adapter = fakeAdapter()
     const { fiber, ctx } = await platformContext(adapter, broker)
     try {
-      await expect(ctx.platform.models.list({ providerId: 'zcode' })).resolves.toMatchObject({ ok: true })
+      await expect(ctx.platform.models.list({ providerIds: ['zcode'] })).resolves.toMatchObject({ ok: true })
       expect(ask.request).toHaveBeenCalledTimes(1)
     } finally {
       await fiber.dispose()
       broker.dispose()
     }
+  })
+
+  it('normalizes composite session scope and fails closed on naked, malformed, duplicate, or unknown scope', () => {
+    const reason = { key: 'permission.turn-submit', fallback: 'Submit turns' }
+    const scoped = (scope: unknown) => normalizePluginManifest({
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+      schemaVersion: 1,
+      id: identity.id,
+      capabilities: [{ name: 'turns.submit', required: false, reason, scope }],
+    }, identity.id)
+
+    expect(() => scoped({ taskIds: ['thread-1'] })).toThrow('unknown field taskIds')
+    expect(() => scoped({ sessions: ['thread-1'] })).toThrow('must be an object')
+    expect(() => scoped({ sessions: [{ remoteSessionId: 'thread-1' }] })).toThrow('providerId is invalid')
+    expect(() => scoped({ sessions: [{ providerId: 'main', remoteSessionId: 'thread-1', raw: true }] }))
+      .toThrow('unknown field raw')
+    expect(() => scoped({ sessions: [
+      { providerId: 'main', remoteSessionId: 'thread-1' },
+      { providerId: 'main', remoteSessionId: 'thread-1' },
+    ] })).toThrow('duplicate session references')
+
+    const normalized = scoped({ sessions: [
+      { providerId: 'zcode', remoteSessionId: 'thread-1' },
+      { providerId: 'codex', remoteSessionId: 'thread-1' },
+    ] })
+    expect(normalized.capabilities[0]?.scope.sessions).toEqual([
+      { providerId: 'codex', remoteSessionId: 'thread-1' },
+      { providerId: 'zcode', remoteSessionId: 'thread-1' },
+    ])
   })
 
   it('offers authoritative read-only projections while refusing writes', async () => {
@@ -251,8 +329,8 @@ describe('Platform capability runtime', () => {
         hostId: 'host',
         hostName: 'Projection Host',
         models,
-        tasks: [task],
-        taskContents: [{ ...task, turns: [] }],
+        sessions: [session],
+        sessionContents: [{ ...session, turns: [] }],
       }),
     })
     expect(projection.status()).toMatchObject({
@@ -261,9 +339,12 @@ describe('Platform capability runtime', () => {
       secondConnectionCreated: false,
       rawBridgeExposed: false,
     })
-    await expect(projection.listModels({ providerId: 'codex' })).resolves.toMatchObject({ ok: true, value: [{ id: 'gpt-5.6' }] })
-    await expect(projection.readTask({ taskId: 'task-1' })).resolves.toMatchObject({ ok: true, value: { turns: [] } })
-    await expect(projection.createTask({ providerId: 'codex', modelId: 'gpt-5.6', cwd: '/workspace' }))
+    await expect(projection.listModels({ providerIds: ['codex'] })).resolves.toMatchObject({
+      ok: true, value: { models: [{ ref: { modelId: 'gpt-5.6' } }] },
+    })
+    await expect(projection.readTask({ session: { providerId: 'codex', remoteSessionId: 'task-1' } }))
+      .resolves.toMatchObject({ ok: true, value: { turns: [] } })
+    await expect(projection.createTask({ model: { providerId: 'codex', modelId: 'gpt-5.6' }, cwd: '/workspace' }))
       .resolves.toMatchObject({ ok: false, error: { code: 'adapter-read-only' } })
   })
 
