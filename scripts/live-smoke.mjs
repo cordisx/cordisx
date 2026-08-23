@@ -14,6 +14,7 @@ const parsed = parseArgs({
     'manager-detail-tab': { type: 'string' },
     'manager-settings-tab': { type: 'string' },
     'trigger-screenshot': { type: 'string' },
+    'color-scheme': { type: 'string' },
     'fetch-url': { type: 'string' },
     report: { type: 'string' },
     'select-thread': { type: 'string' },
@@ -25,7 +26,7 @@ const parsed = parseArgs({
 })
 const port = Number(parsed.values.port)
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-  throw new Error('Usage: npm run smoke -- --port <port> [--screenshot <png>] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-settings-tab <tab>] [--trigger-screenshot <png>]')
+  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--screenshot <png>] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-settings-tab <tab>] [--trigger-screenshot <png>]')
 }
 
 const response = await fetch(`http://127.0.0.1:${port}/json/list`)
@@ -66,6 +67,38 @@ function send(method, params = {}) {
 
 await send('Runtime.enable')
 await send('Page.enable')
+const colorScheme = parsed.values['color-scheme']
+if (colorScheme !== undefined) {
+  if (!['light', 'dark'].includes(colorScheme)) throw new Error(`unknown color scheme: ${colorScheme}`)
+  await send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-color-scheme', value: colorScheme }],
+  })
+  await send('Runtime.evaluate', {
+    expression: `(() => {
+      globalThis.__cordisxRestoreSmokeTheme?.()
+      const trigger = document.querySelector('[data-cordisx-manager-trigger]')
+      const switcher = trigger?.previousElementSibling
+      const host = trigger?.parentElement
+      if (!(trigger instanceof HTMLElement) || !(switcher instanceof HTMLElement) || !(host instanceof HTMLElement)) return false
+      const records = [host, switcher, trigger].map(element => ({ element, style: element.getAttribute('style') }))
+      globalThis.__cordisxRestoreSmokeTheme = () => {
+        for (const record of records) {
+          if (record.style === null) record.element.removeAttribute('style')
+          else record.element.setAttribute('style', record.style)
+        }
+        delete globalThis.__cordisxRestoreSmokeTheme
+      }
+      const dark = ${JSON.stringify(colorScheme)} === 'dark'
+      host.style.setProperty('background-color', dark ? '#1a1c1f' : '#ffffff', 'important')
+      host.style.setProperty('color', dark ? '#f7f8f8' : '#1a1c1f', 'important')
+      switcher.style.setProperty('color', 'inherit', 'important')
+      trigger.style.setProperty('color', 'inherit', 'important')
+      return true
+    })()`,
+    returnByValue: true,
+  })
+  await new Promise(resolve => setTimeout(resolve, 80))
+}
 if (parsed.values['select-thread'] !== undefined) {
   const selected = await send('Runtime.evaluate', {
     expression: `(async () => {
@@ -584,6 +617,12 @@ if (parsed.values['trigger-screenshot'] !== undefined) {
     returnByValue: true,
   })
   await capture(evaluatedTrigger.result?.value ?? null, parsed.values['trigger-screenshot'], 'CordisX manager trigger')
+}
+
+if (colorScheme !== undefined) {
+  await send('Runtime.evaluate', {
+    expression: 'globalThis.__cordisxRestoreSmokeTheme?.()',
+  })
 }
 
 socket.close()
