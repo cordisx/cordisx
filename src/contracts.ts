@@ -70,4 +70,6 @@ export interface CordisXBrowserPlugin {
   readonly enabled: boolean
   readonly module?: CordisXPluginModule
   readonly config: unknown
+  /** Adjacent README.md captured by the launcher for this browser generation. */
+  readonly readme?: string
 }

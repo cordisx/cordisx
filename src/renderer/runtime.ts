@@ -140,6 +140,7 @@ async function start(
         name: controller.item.module?.name ?? controller.item.id,
         inject: pluginInject(controller.item.module),
         config: controller.item.config,
+        ...(controller.item.readme === undefined ? {} : { readme: controller.item.readme }),
         status: controller.status,
         ...(controller.error === undefined ? {} : { error: controller.error }),
       })),

@@ -65,6 +65,20 @@ both installed and discovered plugins, keys cross-feed entries by canonical
 `(source, id)`, and remains read-only until authority and distribution
 contracts are implemented.
 
+The manager navigation contract for this slice is:
+
+1. reserve one fixed-size leading control in every page header, using a page
+   icon at the primary level and an icon-only accessible back action at deeper
+   levels so title geometry stays stable;
+2. make installed-plugin detail a tabbed second-level page whose default tab
+   safely renders the adjacent bundled `README.md`, followed by configuration,
+   runtime-state, and attributed-extension-point tabs;
+3. make general CordisX configuration a primary tabbed page split into
+   marketplace sources, runtime/profile state, and the launcher-owned
+   read-only configuration boundary;
+4. keep these tabs as private manager navigation rather than public slot or
+   protocol contracts.
+
 Scoped validation for this slice includes TypeScript and the complete unit
 suite, DOM integration coverage for trigger placement, tabs, search,
 list-to-detail navigation, block/restore, slot attribution, generation
@@ -73,6 +87,10 @@ cross-feed deduplication. Because the live `app://` renderer rejects direct
 remote fetches, validation also covers the launcher's private, public-HTTPS-only
 feed bridge, non-public-address and redirect rejection, response limits, and an
 opt-in live smoke and screenshot against the current isolated Codex host.
+Manager navigation validation additionally checks identical primary/back
+leading-control geometry, accessible icon-only back navigation, README
+rendering without HTML interpretation, plugin-detail tab state, and the three
+configuration tabs.
 Installation, signature, capability, and untrusted-code execution tests remain
 out of scope because discovery never executes catalog entries.
 

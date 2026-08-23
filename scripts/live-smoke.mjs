@@ -11,13 +11,15 @@ const parsed = parseArgs({
     'manager-screenshot': { type: 'string' },
     'manager-tab': { type: 'string' },
     'manager-plugin': { type: 'string' },
+    'manager-detail-tab': { type: 'string' },
+    'manager-settings-tab': { type: 'string' },
     'trigger-screenshot': { type: 'string' },
     'fetch-url': { type: 'string' },
   },
 })
 const port = Number(parsed.values.port)
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-  throw new Error('Usage: npm run smoke -- --port <port> [--screenshot <png>] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id>] [--trigger-screenshot <png>]')
+  throw new Error('Usage: npm run smoke -- --port <port> [--screenshot <png>] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-settings-tab <tab>] [--trigger-screenshot <png>]')
 }
 
 const response = await fetch(`http://127.0.0.1:${port}/json/list`)
@@ -140,6 +142,10 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   const managerTab = parsed.values['manager-tab'] ?? 'plugins'
   if (!['about', 'slots', 'plugins', 'marketplace', 'settings'].includes(managerTab)) throw new Error(`unknown manager tab: ${managerTab}`)
   const managerPlugin = parsed.values['manager-plugin']
+  const managerDetailTab = parsed.values['manager-detail-tab']
+  if (managerDetailTab !== undefined && !['readme', 'config', 'runtime', 'slots'].includes(managerDetailTab)) throw new Error(`unknown manager detail tab: ${managerDetailTab}`)
+  const managerSettingsTab = parsed.values['manager-settings-tab']
+  if (managerSettingsTab !== undefined && !['marketplace', 'runtime', 'launcher'].includes(managerSettingsTab)) throw new Error(`unknown manager settings tab: ${managerSettingsTab}`)
   const evaluatedManager = await send('Runtime.evaluate', {
     expression: `(() => {
       const trigger = document.querySelector('[data-cordisx-manager-trigger]')
@@ -151,6 +157,10 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           .find(element => element.getAttribute('data-plugin-id') === pluginId || element.getAttribute('data-marketplace-plugin') === pluginId)
         row?.click()
       }
+      const detailTab = ${JSON.stringify(managerDetailTab)}
+      if (detailTab !== undefined) document.querySelector('[data-plugin-detail-tab="' + detailTab + '"]')?.click()
+      const settingsTab = ${JSON.stringify(managerSettingsTab)}
+      if (settingsTab !== undefined) document.querySelector('[data-settings-tab="' + settingsTab + '"]')?.click()
       const dialog = document.querySelector('[data-cordisx-manager-modal] [role="dialog"]')
       const rect = dialog?.getBoundingClientRect()
       return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }

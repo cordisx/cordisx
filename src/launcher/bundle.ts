@@ -25,11 +25,23 @@ async function readCordisXVersion(): Promise<string> {
   }
 }
 
+async function readPluginReadme(entry: string): Promise<string | undefined> {
+  try {
+    await access(entry)
+    return await readFile(path.join(path.dirname(entry), 'README.md'), 'utf8')
+  } catch {
+    return undefined
+  }
+}
+
 /** Bundle the renderer host and every enabled plugin into one Cordis generation. */
 export async function buildRendererBundle(config: CordisXConfig): Promise<string> {
   const enabled = config.plugins.filter(plugin => plugin.enabled)
   for (const plugin of enabled) await access(plugin.entry)
-  const version = await readCordisXVersion()
+  const [version, readmes] = await Promise.all([
+    readCordisXVersion(),
+    Promise.all(config.plugins.map(async plugin => await readPluginReadme(plugin.entry))),
+  ])
 
   const runtimePath = path.resolve(config.rootDir, 'src/renderer/runtime.ts')
   const projectRuntime = await access(runtimePath).then(() => runtimePath).catch(() => {
@@ -40,10 +52,12 @@ export async function buildRendererBundle(config: CordisXConfig): Promise<string
     ...enabled.map((plugin, index) => `import * as plugin${index} from ${JSON.stringify(importSpecifier(config.rootDir, plugin.entry))}`),
   ]
   const enabledIndexes = new Map(enabled.map((plugin, index) => [plugin.id, index]))
-  const composition = `[${config.plugins.map((plugin) => {
+  const composition = `[${config.plugins.map((plugin, pluginIndex) => {
     const index = enabledIndexes.get(plugin.id)
     const moduleField = index === undefined ? '' : `, module: plugin${index}`
-    return `{ id: ${JSON.stringify(plugin.id)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}${moduleField} }`
+    const readme = readmes[pluginIndex]
+    const readmeField = readme === undefined ? '' : `, readme: ${JSON.stringify(readme)}`
+    return `{ id: ${JSON.stringify(plugin.id)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}${readmeField}${moduleField} }`
   }).join(',')}]`
   const metadata = `{ version: ${JSON.stringify(version)} }`
   const source = `${imports.join('\n')}\nvoid installCordisX(${composition}, ${metadata}).catch(error => console.error('[cordisx] boot failed', error))\n`

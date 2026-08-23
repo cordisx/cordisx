@@ -107,17 +107,35 @@ The initial manager has three navigation views:
 
 Plugin inventory is a list page rather than a permanent list/detail split.
 Selecting a plugin opens a second-level detail page inside the manager; its
-header provides an explicit back action and the breadcrumb `插件 / <name>`.
-Returning preserves the list search query. The same list-to-detail navigation
-pattern is used by marketplace discovery so dense details do not crowd catalog
-results.
+header provides an icon-only back action and the breadcrumb `插件 / <name>`.
+Every manager header reserves one fixed-size leading slot: a primary page puts
+its page glyph in that slot, while a second- or third-level page replaces the
+glyph with the back action. Both controls share the same geometry, so changing
+levels never moves the title horizontally. The back action has an accessible
+name without visible text. Returning preserves the list search query. The same
+list-to-detail navigation pattern is used by marketplace discovery so dense
+details do not crowd catalog results.
+
+Installed plugin detail is local tab navigation inside that second-level page,
+not another semantic extension point. Its default `README` tab renders the
+plugin's adjacent `README.md`; `配置管理` shows the configuration available to
+the current bundle; `运行状态` owns activation state, injected services,
+failures, and block/restore actions; and `扩展点位` lists attributed slot
+registrations and mount state. The launcher reads the adjacent README while
+composing the browser bundle so the renderer does not gain filesystem access.
+The manager renders a deliberately limited Markdown subset by creating DOM
+nodes and text nodes only: raw HTML is never interpreted, and remote media or
+script execution is not supported. A missing README produces an explicit empty
+state rather than synthesized package documentation.
 
 Marketplace discovery adds two manager views without adding execution
 authority: a searchable catalog assembled from validated feeds, and a general
 CordisX settings view whose first editable section owns the ordered list of
-marketplace JSON URLs and profile-local block state. Launcher-owned composition
-fields remain visibly file-managed until generation-aware configuration writes
-exist. Feed aggregation keys
+marketplace JSON URLs and profile-local block state. The settings page is also
+local tab navigation: `插件商店` owns feed URLs, `运行状态` explains the
+profile-local activation state, and `启动器` exposes the current read-only
+`cordisx.config.json` boundary. Launcher-owned composition fields remain visibly
+file-managed until generation-aware configuration writes exist. Feed aggregation keys
 plugins by canonical `(source, id)` identity; the first configured feed wins a
 duplicate. Source settings and blocked plugin ids are separate profile-local
 state. Catalog entries can link to their public source but cannot install or

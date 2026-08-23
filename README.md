@@ -65,9 +65,11 @@ npm run dev -- --executable /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
 
 ## 内建管理器
 
-CordisX 会在侧栏 `Codex` 工作区下拉按钮右侧挂载一个管理入口。弹窗左侧包含“关于 CordisX”“扩展点”“插件”“插件商店”和“配置”五个视图。已安装插件页只展示可搜索列表；点击插件进入带“返回”和 `插件 / <name>` 面包屑的二级详情页，返回时保留搜索。插件商店复用同样的列表到详情导航。
+CordisX 会在侧栏 `Codex` 工作区下拉按钮右侧挂载一个管理入口。弹窗左侧包含“关于 CordisX”“扩展点”“插件”“插件商店”和“配置”五个视图。每个一级页标题都有固定尺寸的页面图标；进入二级页时，同一位置替换成只有图标的返回按钮，因此标题不会随页面切换横向跳动。已安装插件页只展示可搜索列表；点击插件进入 `插件 / <name>` 二级详情页，返回时保留搜索。插件商店复用同样的列表到详情导航。
 
-“配置”是通用 CordisX 设置入口；首版管理 profile 本地的商店来源顺序和插件屏蔽状态，并明确展示仍由 `cordisx.config.json` 托管的启动器边界。商店来源支持多个 HTTPS JSON feed；目录聚合以 canonical `source` 与小写 `id` 的 tuple 作为插件唯一性，相同插件出现在多个 feed 时靠前来源获胜。这个阶段只校验和展示元数据、链接到公开源码，不下载、安装、更新或执行商店插件。
+已安装插件详情默认安全渲染插件入口同目录的 `README.md`，并提供“配置管理”“运行状态”“扩展点位”tabs。README 由 launcher 在 bundle composition 时读取，renderer 只接收文本元数据；渲染器不解释原始 HTML，也不加载 README 里的远程媒体。“配置”是通用 CordisX 配置入口，按“插件商店”“运行状态”“启动器”拆分 tabs。
+
+配置页首版管理 profile 本地的商店来源顺序和插件屏蔽状态，并明确展示仍由 `cordisx.config.json` 托管的启动器边界。商店来源支持多个 HTTPS JSON feed；目录聚合以 canonical `source` 与小写 `id` 的 tuple 作为插件唯一性，相同插件出现在多个 feed 时靠前来源获胜。这个阶段只校验和展示元数据、链接到公开源码，不下载、安装、更新或执行商店插件。
 
 屏蔽会销毁对应插件的 Cordis fiber，并把 blocked id 保存在当前 Chromium profile；恢复会从已打包模块创建新 fiber。配置文件中原本禁用的插件不会进入 bundle，因此管理器只能显示它，不能在 renderer 内启用。当前操作不是卸载，不会修改 `cordisx.config.json`，也不能阻止可信 bundle 中的模块顶层代码执行。
 

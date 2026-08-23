@@ -8,6 +8,7 @@ import {
   type MarketplaceModel,
   type MarketplaceStorage,
 } from './marketplace.js'
+import { renderSafeMarkdown } from './markdown.js'
 import { resolveManagerTriggerTarget, type SlotRegistrationSnapshot } from './slots.js'
 
 export type ManagerPluginStatus = 'active' | 'blocked' | 'configured-disabled' | 'failed'
@@ -17,6 +18,7 @@ export interface ManagerPluginSnapshot {
   readonly name: string
   readonly inject: readonly string[]
   readonly config: unknown
+  readonly readme?: string
   readonly status: ManagerPluginStatus
   readonly error?: string
 }
@@ -34,6 +36,8 @@ export interface ManagerModel {
 }
 
 type ManagerTab = 'about' | 'slots' | 'plugins' | 'marketplace' | 'settings'
+type PluginDetailTab = 'readme' | 'config' | 'runtime' | 'slots'
+type SettingsTab = 'marketplace' | 'runtime' | 'launcher'
 type SecondaryView =
   | { readonly kind: 'plugin'; readonly id: string }
   | { readonly kind: 'marketplace'; readonly identity: string }
@@ -136,28 +140,25 @@ const MANAGER_STYLES = `
   .cxm-heading { min-width: 0; }
   .cxm-heading-row { display: flex; align-items: center; gap: 9px; min-width: 0; }
   .cxm-heading h2 { min-width: 0; margin: 0; overflow: hidden; color: #fff; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
-  .cxm-heading p { margin: 3px 0 0; color: #7f899a; font-size: 11px; }
-  .cxm-heading-icon {
+  .cxm-heading p { margin: 3px 0 0 35px; color: #7f899a; font-size: 11px; }
+  .cxm-heading-leading {
     display: grid;
     place-items: center;
     width: 26px;
     height: 26px;
     flex: none;
+    box-sizing: border-box;
     border: 1px solid rgba(167, 139, 250, .28);
     border-radius: 8px;
     background: rgba(139, 92, 246, .1);
     color: #b9a6ff;
   }
   .cxm-back {
-    flex: none;
     padding: 0;
-    border: 0;
-    background: transparent;
-    color: #aaa2c8;
     cursor: pointer;
-    font: 11px/1.4 system-ui, sans-serif;
   }
-  .cxm-back:hover { color: #ddd6fe; }
+  .cxm-back:hover { border-color: rgba(167, 139, 250, .55); background: rgba(139, 92, 246, .18); color: #ddd6fe; }
+  .cxm-back:focus-visible { outline: 2px solid #8b5cf6; outline-offset: 2px; }
   .cxm-breadcrumb-root { color: #a9b1c0; font-weight: 500; }
   .cxm-breadcrumb-separator { padding: 0 5px; color: #656e7e; }
   .cxm-close {
@@ -174,6 +175,36 @@ const MANAGER_STYLES = `
     font: 18px/1 system-ui, sans-serif;
   }
   .cxm-content { min-height: 0; overflow: auto; padding: 20px 22px 24px; }
+  .cxm-tabs {
+    display: flex;
+    gap: 4px;
+    margin: -5px 0 16px;
+    padding: 0 2px;
+    overflow-x: auto;
+    border-bottom: 1px solid rgba(255, 255, 255, .08);
+  }
+  .cxm-tab {
+    position: relative;
+    flex: none;
+    padding: 9px 11px 10px;
+    border: 0;
+    background: transparent;
+    color: #858fa1;
+    cursor: pointer;
+    font: 11px/1.2 system-ui, sans-serif;
+  }
+  .cxm-tab:hover { color: #ddd6fe; }
+  .cxm-tab[aria-selected="true"] { color: #ddd6fe; }
+  .cxm-tab[aria-selected="true"]::after {
+    position: absolute;
+    right: 8px;
+    bottom: -1px;
+    left: 8px;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: #8b5cf6;
+    content: '';
+  }
   .cxm-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
   .cxm-card, .cxm-detail, .cxm-slot-card, .cxm-source-row {
     border: 1px solid rgba(255, 255, 255, .09);
@@ -292,6 +323,19 @@ const MANAGER_STYLES = `
   .cxm-field-label { color: #737e90; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
   .cxm-field-value { margin-top: 5px; overflow-wrap: anywhere; color: #cdd2dc; font-size: 11px; }
   .cxm-code { max-height: 140px; margin: 6px 0 0; overflow: auto; color: #bac2d2; font: 10px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
+  .cxm-readme { max-width: 760px; color: #b8c0cf; font-size: 12px; line-height: 1.65; }
+  .cxm-readme h1, .cxm-readme h2, .cxm-readme h3, .cxm-readme h4 { color: #f5f6f8; line-height: 1.3; }
+  .cxm-readme h1 { margin: 2px 0 14px; font-size: 22px; }
+  .cxm-readme h2 { margin: 24px 0 10px; font-size: 16px; }
+  .cxm-readme h3, .cxm-readme h4 { margin: 18px 0 8px; font-size: 13px; }
+  .cxm-readme p { margin: 0 0 12px; }
+  .cxm-readme ul { margin: 0 0 14px; padding-left: 21px; }
+  .cxm-readme li { margin: 4px 0; }
+  .cxm-readme a { color: #b9a6ff; text-decoration: none; }
+  .cxm-readme a:hover { text-decoration: underline; }
+  .cxm-readme code { padding: 1px 4px; border-radius: 4px; background: rgba(255, 255, 255, .065); color: #ddd6fe; font: 10px/1.5 ui-monospace, monospace; }
+  .cxm-readme pre { margin: 12px 0 16px; overflow: auto; padding: 12px 14px; border: 1px solid rgba(255, 255, 255, .08); border-radius: 10px; background: #0d1017; }
+  .cxm-readme pre code { padding: 0; background: transparent; color: #c5ccda; white-space: pre; }
   .cxm-error { margin-top: 12px; color: #fda4af; font-size: 11px; }
   .cxm-feed-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .cxm-feed-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; background: rgba(255, 255, 255, .04); color: #8c96a8; font-size: 10px; }
@@ -322,6 +366,27 @@ function create<K extends keyof HTMLElementTagNameMap>(
   if (className !== undefined) element.className = className
   if (text !== undefined) element.textContent = text
   return element
+}
+
+function createLocalTabs(
+  document: Document,
+  items: readonly { readonly id: string; readonly label: string }[],
+  active: string,
+  dataAttribute: string,
+  onSelect: (id: string) => void,
+): HTMLElement {
+  const tabs = create(document, 'div', 'cxm-tabs')
+  tabs.setAttribute('role', 'tablist')
+  for (const item of items) {
+    const button = create(document, 'button', 'cxm-tab', item.label)
+    button.type = 'button'
+    button.setAttribute('role', 'tab')
+    button.setAttribute('aria-selected', String(item.id === active))
+    button.setAttribute(dataAttribute, item.id)
+    button.addEventListener('click', () => onSelect(item.id))
+    tabs.append(button)
+  }
+  return tabs
 }
 
 function statusLabel(status: ManagerPluginStatus): string {
@@ -528,6 +593,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let pluginQuery = ''
   let marketplaceQuery = ''
   let secondaryView: SecondaryView | undefined
+  let pluginDetailTab: PluginDetailTab = 'readme'
+  let settingsTab: SettingsTab = 'marketplace'
   let busyPluginId: string | undefined
   let operationError: string | undefined
   let sourceOperationError: string | undefined
@@ -541,13 +608,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     heading.replaceChildren()
     const row = create(document, 'div', 'cxm-heading-row')
     if (options.onBack !== undefined) {
-      const back = create(document, 'button', 'cxm-back', '← 返回')
+      const back = create(document, 'button', 'cxm-heading-leading cxm-back')
       back.type = 'button'
+      back.setAttribute('aria-label', '返回')
+      back.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m15 18-6-6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
       back.addEventListener('click', options.onBack)
       row.append(back)
-    }
-    if (options.icon !== undefined) {
-      const icon = create(document, 'span', 'cxm-heading-icon', options.icon)
+    } else {
+      const icon = create(document, 'span', 'cxm-heading-leading cxm-heading-icon', options.icon ?? '◈')
       icon.setAttribute('aria-hidden', 'true')
       row.append(icon)
     }
@@ -566,7 +634,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderAbout = (snapshot: ManagerSnapshot): void => {
-    setHeading('关于 CordisX', '当前 renderer 中的宿主与运行状态')
+    setHeading('关于 CordisX', '当前 renderer 中的宿主与运行状态', { icon: '◈' })
     const active = snapshot.plugins.filter(plugin => plugin.status === 'active').length
     const grid = create(document, 'div', 'cxm-card-grid')
     for (const [label, value] of [
@@ -585,7 +653,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderSlots = (snapshot: ManagerSnapshot): void => {
-    setHeading('扩展点', '按语义 slot 查看当前活跃插件贡献')
+    setHeading('扩展点', '按语义 slot 查看当前活跃插件贡献', { icon: '⊞' })
     const slots = create(document, 'div', 'cxm-slots')
     for (const slot of CORDISX_SLOT_NAMES) {
       const registrations = snapshot.registrations.filter(item => item.slot === slot && item.active)
@@ -652,6 +720,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       row.append(body, create(document, 'span', 'cxm-chevron', '›'))
       row.addEventListener('click', () => {
         secondaryView = { kind: 'plugin', id: plugin.id }
+        pluginDetailTab = 'readme'
+        operationError = undefined
         renderContent()
       })
       list.append(row)
@@ -676,60 +746,109 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         renderContent()
       },
     })
-    const detail = create(document, 'section', 'cxm-detail')
     if (plugin === undefined) {
+      const detail = create(document, 'section', 'cxm-detail')
       detail.append(create(document, 'div', 'cxm-empty', '插件已不在当前 bundle 中'))
       content.append(detail)
       return
     }
 
-    const detailHead = create(document, 'div', 'cxm-detail-head')
-    const identity = create(document, 'div')
-    identity.append(create(document, 'h3', undefined, plugin.name), create(document, 'div', 'cxm-detail-id', plugin.id))
-    const action = create(document, 'button', 'cxm-action')
-    action.type = 'button'
-    const blocked = plugin.status === 'blocked' || plugin.status === 'failed'
-    action.textContent = busyPluginId === plugin.id
-      ? '处理中…'
-      : plugin.status === 'configured-disabled'
-        ? '配置中已禁用'
-        : blocked ? '恢复插件' : '屏蔽插件'
-    action.disabled = busyPluginId !== undefined || plugin.status === 'configured-disabled'
-    if (!blocked) action.dataset.tone = 'danger'
-    action.addEventListener('click', async () => {
-      busyPluginId = plugin.id
-      operationError = undefined
+    content.append(createLocalTabs(document, [
+      { id: 'readme', label: 'README' },
+      { id: 'config', label: '配置管理' },
+      { id: 'runtime', label: '运行状态' },
+      { id: 'slots', label: '扩展点位' },
+    ], pluginDetailTab, 'data-plugin-detail-tab', (tab) => {
+      pluginDetailTab = tab as PluginDetailTab
       renderContent()
-      try {
-        await model.setPluginBlocked(plugin.id, !blocked)
-      } catch (error) {
-        operationError = error instanceof Error ? error.message : String(error)
-      } finally {
-        busyPluginId = undefined
-        renderContent()
-      }
-    })
-    detailHead.append(identity, action)
-    detail.append(detailHead)
+    }))
 
-    const pluginRegistrations = snapshot.registrations.filter(item => item.pluginId === plugin.id && item.active)
-    const fields = create(document, 'div', 'cxm-detail-grid')
-    for (const [label, value] of [
-      ['状态', statusLabel(plugin.status)],
-      ['注入服务', plugin.inject.join(', ') || '无'],
-      ['活跃贡献', pluginRegistrations.map(item => item.slot).join(', ') || '无'],
-      ['元数据', '当前来自模块导出；manifest 尚未实现'],
-    ]) {
-      const field = create(document, 'div', 'cxm-field')
-      field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
-      fields.append(field)
+    if (pluginDetailTab === 'readme') {
+      if (plugin.readme?.trim() === '') {
+        content.append(create(document, 'div', 'cxm-empty', '该插件没有随当前 bundle 提供 README.md'))
+      } else if (plugin.readme === undefined) {
+        content.append(create(document, 'div', 'cxm-empty', '该插件没有随当前 bundle 提供 README.md'))
+      } else {
+        content.append(renderSafeMarkdown(document, plugin.readme))
+      }
+      return
     }
-    detail.append(fields)
-    detail.append(create(document, 'div', 'cxm-section-title', '插件配置'))
-    detail.append(create(document, 'pre', 'cxm-code', formatConfig(plugin.config)))
-    if (plugin.error !== undefined) detail.append(create(document, 'div', 'cxm-error', plugin.error))
-    if (operationError !== undefined) detail.append(create(document, 'div', 'cxm-error', operationError))
-    content.append(detail)
+
+    if (pluginDetailTab === 'config') {
+      const detail = create(document, 'section', 'cxm-detail')
+      detail.append(create(document, 'h3', undefined, '插件配置'))
+      detail.append(create(document, 'pre', 'cxm-code', formatConfig(plugin.config)))
+      detail.append(create(document, 'div', 'cxm-notice', '当前配置来自本次 launcher composition，只读展示；可跨 generation 安全写入前不会在 renderer 内直接修改配置文件。'))
+      content.append(detail)
+      return
+    }
+
+    const pluginRegistrations = snapshot.registrations.filter(item => item.pluginId === plugin.id)
+    if (pluginDetailTab === 'runtime') {
+      const detail = create(document, 'section', 'cxm-detail')
+      const detailHead = create(document, 'div', 'cxm-detail-head')
+      const identity = create(document, 'div')
+      identity.append(create(document, 'h3', undefined, plugin.name), create(document, 'div', 'cxm-detail-id', plugin.id))
+      const action = create(document, 'button', 'cxm-action cxm-plugin-runtime-action')
+      action.type = 'button'
+      const blocked = plugin.status === 'blocked' || plugin.status === 'failed'
+      action.textContent = busyPluginId === plugin.id
+        ? '处理中…'
+        : plugin.status === 'configured-disabled'
+          ? '配置中已禁用'
+          : blocked ? '恢复插件' : '屏蔽插件'
+      action.disabled = busyPluginId !== undefined || plugin.status === 'configured-disabled'
+      if (!blocked) action.dataset.tone = 'danger'
+      action.addEventListener('click', async () => {
+        busyPluginId = plugin.id
+        operationError = undefined
+        renderContent()
+        try {
+          await model.setPluginBlocked(plugin.id, !blocked)
+        } catch (error) {
+          operationError = error instanceof Error ? error.message : String(error)
+        } finally {
+          busyPluginId = undefined
+          renderContent()
+        }
+      })
+      detailHead.append(identity, action)
+      detail.append(detailHead)
+      const fields = create(document, 'div', 'cxm-detail-grid')
+      for (const [label, value] of [
+        ['状态', statusLabel(plugin.status)],
+        ['注入服务', plugin.inject.join(', ') || '无'],
+        ['活跃贡献', String(pluginRegistrations.filter(item => item.active).length)],
+        ['元数据', '当前来自模块导出；manifest 尚未实现'],
+      ]) {
+        const field = create(document, 'div', 'cxm-field')
+        field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
+        fields.append(field)
+      }
+      detail.append(fields)
+      if (plugin.error !== undefined) detail.append(create(document, 'div', 'cxm-error', plugin.error))
+      if (operationError !== undefined) detail.append(create(document, 'div', 'cxm-error', operationError))
+      content.append(detail)
+      return
+    }
+
+    const slots = create(document, 'div', 'cxm-slots')
+    if (pluginRegistrations.length === 0) slots.append(create(document, 'div', 'cxm-empty', '当前没有可归属到该插件的扩展点注册'))
+    for (const registration of pluginRegistrations) {
+      const card = create(document, 'section', 'cxm-slot-card')
+      const head = create(document, 'div', 'cxm-slot-head')
+      const registrationState = !registration.active ? '未激活' : registration.mounted ? '已挂载' : '等待宿主锚点'
+      head.append(create(document, 'code', 'cxm-slot-name', registration.slot), create(document, 'span', 'cxm-count', registrationState))
+      const rows = create(document, 'div', 'cxm-contributions')
+      rows.append(
+        create(document, 'span', 'cxm-contribution', registration.id),
+        create(document, 'span', 'cxm-contribution', `order ${registration.order}`),
+        create(document, 'span', 'cxm-contribution', `priority ${registration.priority}`),
+      )
+      card.append(head, rows)
+      slots.append(card)
+    }
+    content.append(slots)
   }
 
   const renderMarketplaceList = (): void => {
@@ -870,9 +989,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }
   }
 
-  const renderSettings = (): void => {
+  const renderMarketplaceSettings = (): void => {
     const snapshot = marketplace.snapshot()
-    setHeading('配置', '管理 CordisX profile 本地设置；启动器配置保持文件托管')
     content.append(create(document, 'div', 'cxm-section-title', '插件商店来源'))
     content.append(create(document, 'p', 'cxm-copy', '按优先级保存多个 marketplace JSON 地址。feed 地址只记录目录来源；插件唯一性由 canonical source 与小写 id 共同决定。'))
 
@@ -962,7 +1080,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     reload.addEventListener('click', () => void marketplace.reload())
     footerActions.append(reset, reload)
     content.append(footerActions)
+  }
 
+  const renderRuntimeSettings = (): void => {
     content.append(create(document, 'div', 'cxm-section-title', '插件运行状态'))
     const runtime = model.snapshot()
     const blocked = runtime.plugins.filter(plugin => plugin.status === 'blocked' || plugin.status === 'failed')
@@ -995,11 +1115,31 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       }
       content.append(list)
     }
+    const boundary = create(document, 'div', 'cxm-notice', '屏蔽状态保存在当前隔离 Chromium profile，只控制已打包插件的 Cordis fiber；它不是卸载、权限隔离或 package 禁用。')
+    boundary.dataset.tone = 'warning'
+    content.append(boundary)
+  }
 
+  const renderLauncherSettings = (): void => {
     content.append(create(document, 'div', 'cxm-section-title', '启动器配置'))
     const launcherNotice = create(document, 'div', 'cxm-notice', '`cordisx.config.json` 仍负责 Codex 可执行文件、插件 composition 和插件配置。修改这些字段需要重新打包并启动新 generation，当前页面只读展示这条边界。')
     launcherNotice.dataset.tone = 'warning'
     content.append(launcherNotice)
+  }
+
+  const renderSettings = (): void => {
+    setHeading('配置', '管理 CordisX 设置与当前 profile 状态', { icon: '⚙' })
+    content.append(createLocalTabs(document, [
+      { id: 'marketplace', label: '插件商店' },
+      { id: 'runtime', label: '运行状态' },
+      { id: 'launcher', label: '启动器' },
+    ], settingsTab, 'data-settings-tab', (tab) => {
+      settingsTab = tab as SettingsTab
+      renderContent()
+    }))
+    if (settingsTab === 'marketplace') renderMarketplaceSettings()
+    if (settingsTab === 'runtime') renderRuntimeSettings()
+    if (settingsTab === 'launcher') renderLauncherSettings()
   }
 
   function renderContent(): void {
