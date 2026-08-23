@@ -1,12 +1,15 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import type {
   CordisXBrowserPlugin,
+  CordisXCommandReference,
   CordisXPermissionPolicy,
   CordisXPlatformCapability,
   CordisXPluginIdentity,
   CordisXPluginManifestV1,
   CordisXPluginModule,
+  CordisXRouteReference,
 } from '../contracts.js'
+import { installCodexAdapter, type CodexAdapterHandle } from './adapter.js'
 import {
   installCordisXManager,
   type ManagerModel,
@@ -14,7 +17,9 @@ import {
   type ManagerPluginStatus,
   type ManagerSnapshot,
 } from './manager.js'
+import { CordisXCommandService } from './commands.js'
 import { CordisXI18nService } from './i18n.js'
+import { CordisXPageService, CordisXRouteService } from './navigation.js'
 import {
   BrowserPermissionPolicyStore,
   BrowserPermissionPrompt,
@@ -25,7 +30,7 @@ import {
   type PlatformPermissionSnapshot,
 } from './platform.js'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE, CordisXSlotService } from './service.js'
-import type { SlotRegistrationSnapshot } from './slots.js'
+import type { SurfaceContributionSnapshot } from './surfaces.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 
@@ -47,6 +52,8 @@ interface PluginController {
 interface CordisXRuntimeHandle extends ManagerModel {
   readonly version: string
   readonly pluginIds: readonly string[]
+  execute(owner: string, reference: CordisXCommandReference, invocationKey?: string): Promise<unknown>
+  navigate(owner: string, reference: CordisXRouteReference): Promise<void>
   dispose(): Promise<void>
 }
 
@@ -138,15 +145,23 @@ async function start(
     }
   }
   const listeners = new Set<() => void>()
-  const knownRegistrations = new Map<string, readonly SlotRegistrationSnapshot[]>()
+  const knownRegistrations = new Map<string, readonly SurfaceContributionSnapshot[]>()
   let slotService: CordisXSlotService | undefined
+  let commandService: CordisXCommandService | undefined
+  let pageService: CordisXPageService | undefined
+  let routeService: CordisXRouteService | undefined
   let i18nService: CordisXI18nService | undefined
   let i18nFiber: Fiber | undefined
   let platformFiber: Fiber | undefined
+  let commandFiber: Fiber | undefined
+  let pageFiber: Fiber | undefined
+  let routeFiber: Fiber | undefined
   let slotFiber: Fiber | undefined
   let disposeManager: (() => void) | undefined
+  let adapterHandle: CodexAdapterHandle | undefined
   let disposeI18nSubscription: (() => void) | undefined
   let disposePermissionSubscription: (() => void) | undefined
+  const registrySubscriptions: (() => void)[] = []
   let operation = Promise.resolve()
   let disposed = false
 
@@ -155,7 +170,7 @@ async function start(
   }
 
   const rememberRegistrations = (pluginId: string): void => {
-    const registrations = slotService?.snapshot().filter(item => item.pluginId === pluginId) ?? []
+    const registrations = slotService?.snapshot().filter(item => item.owner === pluginId) ?? []
     if (registrations.length > 0) knownRegistrations.set(pluginId, registrations)
   }
 
@@ -191,10 +206,15 @@ async function start(
 
   const snapshot = (): ManagerSnapshot => {
     const liveRegistrations = slotService?.snapshot() ?? []
-    const livePluginIds = new Set(liveRegistrations.map(item => item.pluginId))
+    const livePluginIds = new Set(liveRegistrations.map(item => item.owner))
     const inactiveRegistrations = [...knownRegistrations]
       .filter(([pluginId]) => !livePluginIds.has(pluginId))
-      .flatMap(([, registrations]) => registrations.map(item => ({ ...item, active: false, mounted: false })))
+      .flatMap(([, registrations]) => registrations.map(item => ({
+        ...item,
+        visible: false,
+        rendered: false,
+        error: item.error ?? 'owning plugin is inactive',
+      })))
     return {
       version: metadata.version,
       plugins: controllers.map((controller): ManagerPluginSnapshot => ({
@@ -209,6 +229,8 @@ async function start(
         ...(controller.blockedReason === undefined ? {} : { blockedReason: controller.blockedReason }),
       })),
       registrations: [...liveRegistrations, ...inactiveRegistrations],
+      commands: commandService?.snapshot() ?? [],
+      navigation: routeService?.snapshot() ?? { routes: [], pages: pageService?.snapshot() ?? [], outlets: [] },
       localization: i18nService?.getSnapshot() ?? { locale: 'en', direction: 'ltr', version: 0 },
       localeCatalogs: i18nService?.catalogs() ?? [],
       localizationDiagnostics: i18nService?.diagnostics() ?? [],
@@ -218,7 +240,11 @@ async function start(
         capability: permission.capability,
         required: permission.required,
         reason: permission.reason,
-        reasonText: i18nService?.resolveFor(permission.identity.id, permission.reason).text
+        reasonText: i18nService?.resolveFor(
+          permission.identity.id,
+          permission.reason,
+          `permission:${permission.identity.source}:${permission.identity.id}:${permission.capability}`,
+        ).text
           ?? permission.reason.fallback
           ?? `[[${permission.identity.id}:${permission.reason.key}]]`,
         scope: permission.scope,
@@ -245,6 +271,7 @@ async function start(
         writeBlockedPlugins(blockedPlugins)
         rememberRegistrations(id)
         await controller.fiber?.dispose()
+        await routeService?.settled()
         delete controller.fiber
         controller.status = 'blocked'
         delete controller.error
@@ -290,6 +317,7 @@ async function start(
       if (denied.length > 0) {
         rememberRegistrations(id)
         await controller.fiber?.dispose()
+        await routeService?.settled()
         delete controller.fiber
         controller.status = 'permission-blocked'
         controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
@@ -326,13 +354,22 @@ async function start(
     disposeI18nSubscription = undefined
     disposePermissionSubscription?.()
     disposePermissionSubscription = undefined
+    for (const unsubscribe of registrySubscriptions.splice(0)) unsubscribe()
     await operation
     for (const controller of [...controllers].reverse()) {
       await controller.fiber?.dispose()
       delete controller.fiber
     }
+    adapterHandle?.dispose()
+    adapterHandle = undefined
     await slotFiber?.dispose()
     slotFiber = undefined
+    await routeFiber?.dispose()
+    routeFiber = undefined
+    await pageFiber?.dispose()
+    pageFiber = undefined
+    await commandFiber?.dispose()
+    commandFiber = undefined
     await platformFiber?.dispose()
     platformFiber = undefined
     await i18nFiber?.dispose()
@@ -347,6 +384,14 @@ async function start(
   const handle: CordisXRuntimeHandle = {
     version: metadata.version,
     pluginIds: plugins.map(plugin => plugin.id),
+    execute: (owner, reference, invocationKey) => {
+      if (commandService === undefined) return Promise.reject(new Error('CordisX commands are not ready'))
+      return commandService.executeFor(owner, reference, invocationKey)
+    },
+    navigate: (owner, reference) => {
+      if (routeService === undefined) return Promise.reject(new Error('CordisX routes are not ready'))
+      return routeService.navigateFor(owner, reference)
+    },
     snapshot,
     setPluginBlocked,
     setPermissionPolicy,
@@ -362,9 +407,29 @@ async function start(
     disposePermissionSubscription = broker.subscribe(notify)
     platformFiber = ctx.plugin(CordisXPlatformService, { adapter, broker })
     await platformFiber
+    commandFiber = ctx.plugin(CordisXCommandService)
+    await commandFiber
+    commandService = ctx.commands as CordisXCommandService
+    pageFiber = ctx.plugin(CordisXPageService)
+    await pageFiber
+    pageService = ctx.pages as CordisXPageService
+    routeFiber = ctx.plugin(CordisXRouteService)
+    await routeFiber
+    routeService = ctx.routes as CordisXRouteService
     slotFiber = ctx.plugin(CordisXSlotService)
     await slotFiber
     slotService = ctx.slots as CordisXSlotService
+    slotService.setResolvers({
+      command: (owner, reference) => commandService?.hasFor(owner, reference) ?? false,
+      route: (owner, id) => routeService?.hasFor(owner, id) ?? false,
+    })
+    registrySubscriptions.push(
+      commandService.subscribeInternal(notify),
+      pageService.registry.subscribe(notify),
+      routeService.subscribeInternal(notify),
+      slotService.subscribeInternal(notify),
+    )
+    adapterHandle = installCodexAdapter(document, slotService, commandService, routeService, i18nService)
     for (const controller of controllers) {
       if (controller.status !== 'active') continue
       await mountPlugin(controller)

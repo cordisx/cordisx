@@ -1,5 +1,5 @@
 import {
-  CORDISX_SLOT_NAMES,
+  CORDISX_SURFACE_NAMES,
   type CordisXCapabilityScope,
   type CordisXLocalizationDiagnostic,
   type CordisXLocalizationSnapshot,
@@ -20,7 +20,10 @@ import {
   type MarketplaceStorage,
 } from './marketplace.js'
 import { renderSafeMarkdown } from './markdown.js'
-import { resolveManagerTriggerTarget, type SlotRegistrationSnapshot } from './slots.js'
+import type { CommandSnapshot } from './commands.js'
+import { resolveManagerTriggerTarget } from './host-probes.js'
+import type { NavigationSnapshot } from './navigation.js'
+import type { SurfaceContributionSnapshot } from './surfaces.js'
 
 export type ManagerPluginStatus = 'active' | 'blocked' | 'permission-blocked' | 'configured-disabled' | 'failed'
 
@@ -53,7 +56,9 @@ export interface ManagerPermissionSnapshot {
 export interface ManagerSnapshot {
   readonly version: string
   readonly plugins: readonly ManagerPluginSnapshot[]
-  readonly registrations: readonly SlotRegistrationSnapshot[]
+  readonly registrations: readonly SurfaceContributionSnapshot[]
+  readonly commands: readonly CommandSnapshot[]
+  readonly navigation: NavigationSnapshot
   readonly localization: CordisXLocalizationSnapshot
   readonly localeCatalogs: readonly LocaleCatalogSnapshot[]
   readonly localizationDiagnostics: readonly CordisXLocalizationDiagnostic[]
@@ -588,7 +593,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const nav = create(document, 'nav', 'cxm-nav')
   const tabs: readonly { id: ManagerTab; icon: string; label: string }[] = [
     { id: 'about', icon: '◈', label: '关于 CordisX' },
-    { id: 'slots', icon: '⊞', label: '扩展点' },
+    { id: 'slots', icon: '⊞', label: '贡献与路由' },
     { id: 'plugins', icon: '◫', label: '插件' },
     { id: 'marketplace', icon: '◇', label: '插件商店' },
     { id: 'settings', icon: '⚙', label: '配置' },
@@ -677,7 +682,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     for (const [label, value] of [
       ['CordisX 版本', `v${snapshot.version}`],
       ['运行插件', `${active} / ${snapshot.plugins.length}`],
-      ['语义扩展点', String(CORDISX_SLOT_NAMES.length)],
+      ['结构化 surfaces', String(CORDISX_SURFACE_NAMES.length)],
+      ['Commands', String(snapshot.commands.length)],
+      ['Routes / Pages', `${snapshot.navigation.routes.length} / ${snapshot.navigation.pages.length}`],
+      ['Outlets', `${snapshot.navigation.outlets.filter(item => item.available).length} / ${snapshot.navigation.outlets.length}`],
       ['宿主语言', `${snapshot.localization.locale} / ${snapshot.localization.direction}`],
       ['词典', String(snapshot.localeCatalogs.filter(item => item.active).length)],
       ['i18n 诊断', String(snapshot.localizationDiagnostics.length)],
@@ -693,10 +701,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderSlots = (snapshot: ManagerSnapshot): void => {
-    setHeading('扩展点', '按语义 slot 查看当前活跃插件贡献', { icon: '⊞' })
+    setHeading('贡献与路由', '按 owning plugin 对账结构化 surfaces、commands、pages、routes 与 host outlets', { icon: '⊞' })
     const slots = create(document, 'div', 'cxm-slots')
-    for (const slot of CORDISX_SLOT_NAMES) {
-      const registrations = snapshot.registrations.filter(item => item.slot === slot && item.active)
+    for (const slot of CORDISX_SURFACE_NAMES) {
+      const registrations = snapshot.registrations.filter(item => item.surface === slot && item.visible)
       const card = create(document, 'section', 'cxm-slot-card')
       const head = create(document, 'div', 'cxm-slot-head')
       head.append(
@@ -711,8 +719,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         for (const registration of registrations) {
           const row = create(document, 'span', 'cxm-contribution')
           row.append(
-            create(document, 'span', 'cxm-dot', registration.mounted ? '●' : '○'),
-            create(document, 'strong', undefined, registration.pluginId),
+            create(document, 'span', 'cxm-dot', registration.rendered ? '●' : '○'),
+            create(document, 'strong', undefined, registration.owner),
             create(document, 'span', undefined, registration.id),
           )
           rows.append(row)
@@ -722,6 +730,37 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       slots.append(card)
     }
     content.append(slots)
+    content.append(create(document, 'div', 'cxm-section-title', 'Commands'))
+    if (snapshot.commands.length === 0) content.append(create(document, 'div', 'cxm-empty', '当前没有 command 注册'))
+    for (const command of snapshot.commands) {
+      content.append(create(
+        document,
+        'div',
+        command.lastError === undefined ? 'cxm-notice' : 'cxm-error',
+        `${command.qualifiedId} · running ${command.running}${command.lastError === undefined ? '' : ` · ${command.lastError}`}`,
+      ))
+    }
+    content.append(create(document, 'div', 'cxm-section-title', 'Routes / Pages'))
+    for (const route of snapshot.navigation.routes) {
+      content.append(create(
+        document,
+        'div',
+        route.valid ? 'cxm-notice' : 'cxm-error',
+        `${route.qualifiedId} · ${route.definition.path} → ${route.definition.outlet}/${route.definition.page}${route.error === undefined ? '' : ` · ${route.error}`}`,
+      ))
+    }
+    for (const page of snapshot.navigation.pages) {
+      content.append(create(document, 'div', 'cxm-notice', `${page.qualifiedId} · page mount registered`))
+    }
+    content.append(create(document, 'div', 'cxm-section-title', 'Host Outlets'))
+    for (const outlet of snapshot.navigation.outlets) {
+      content.append(create(
+        document,
+        'div',
+        outlet.error === undefined ? 'cxm-notice' : 'cxm-error',
+        `${outlet.id} · ${outlet.placement} · contextKey ${outlet.contextKey ?? '<pending>'} · ${outlet.mounted ? `mounted ${outlet.activeRoute ?? ''}` : 'native content visible'}${outlet.error === undefined ? '' : ` · ${outlet.error}`}`,
+      ))
+    }
   }
 
   const renderPluginList = (snapshot: ManagerSnapshot): void => {
@@ -735,8 +774,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
     const normalized = pluginQuery.trim().toLowerCase()
     const filtered = snapshot.plugins.filter((plugin) => {
-      const registrations = snapshot.registrations.filter(item => item.pluginId === plugin.id)
-      const haystack = [plugin.id, plugin.name, ...plugin.inject, ...registrations.flatMap(item => [item.slot, item.id])]
+      const registrations = snapshot.registrations.filter(item => item.owner === plugin.id)
+      const haystack = [plugin.id, plugin.name, ...plugin.inject, ...registrations.flatMap(item => [item.surface, item.id])]
         .join('\n').toLowerCase()
       return haystack.includes(normalized)
     })
@@ -887,7 +926,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return
     }
 
-    const pluginRegistrations = snapshot.registrations.filter(item => item.pluginId === plugin.id)
+    const pluginRegistrations = snapshot.registrations.filter(item => item.owner === plugin.id)
+    const pluginCommands = snapshot.commands.filter(item => item.owner === plugin.id)
+    const pluginRoutes = snapshot.navigation.routes.filter(item => item.owner === plugin.id)
+    const pluginPages = snapshot.navigation.pages.filter(item => item.owner === plugin.id)
     if (pluginDetailTab === 'runtime') {
       const detail = create(document, 'section', 'cxm-detail')
       const detailHead = create(document, 'div', 'cxm-detail-head')
@@ -925,7 +967,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         ['状态', statusLabel(plugin.status)],
         ['来源', plugin.source],
         ['注入服务', plugin.inject.join(', ') || '无'],
-        ['活跃贡献', String(pluginRegistrations.filter(item => item.active).length)],
+        ['活跃贡献', String(pluginRegistrations.filter(item => item.visible && item.valid).length)],
+        ['Commands', String(pluginCommands.length)],
+        ['Routes / Pages', `${pluginRoutes.length} / ${pluginPages.length}`],
         ['元数据', '模块 manifest + launcher 绑定身份'],
       ]) {
         const field = create(document, 'div', 'cxm-field')
@@ -959,6 +1003,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           `${diagnostic.diagnostic ?? 'unknown'} · ${diagnostic.namespace}:${diagnostic.key} · ${diagnostic.text}`,
         ))
       }
+      detail.append(create(document, 'div', 'cxm-section-title', '结构化运行时'))
+      for (const command of pluginCommands) detail.append(create(document, 'div', 'cxm-notice', `${command.qualifiedId} · running ${command.running}`))
+      for (const route of pluginRoutes) detail.append(create(document, 'div', route.valid ? 'cxm-notice' : 'cxm-error', `${route.qualifiedId} · ${route.definition.path}${route.error === undefined ? '' : ` · ${route.error}`}`))
+      for (const page of pluginPages) detail.append(create(document, 'div', 'cxm-notice', `${page.qualifiedId} · controlled mount`))
       content.append(detail)
       return
     }
@@ -968,13 +1016,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     for (const registration of pluginRegistrations) {
       const card = create(document, 'section', 'cxm-slot-card')
       const head = create(document, 'div', 'cxm-slot-head')
-      const registrationState = !registration.active ? '未激活' : registration.mounted ? '已挂载' : '等待宿主锚点'
-      head.append(create(document, 'code', 'cxm-slot-name', registration.slot), create(document, 'span', 'cxm-count', registrationState))
+      const registrationState = !registration.valid ? '无效' : !registration.visible ? '条件未满足' : registration.rendered ? '已渲染' : registration.pending ? '等待目标' : '已登记'
+      head.append(create(document, 'code', 'cxm-slot-name', registration.surface), create(document, 'span', 'cxm-count', registrationState))
       const rows = create(document, 'div', 'cxm-contributions')
       rows.append(
         create(document, 'span', 'cxm-contribution', registration.id),
         create(document, 'span', 'cxm-contribution', `order ${registration.order}`),
-        create(document, 'span', 'cxm-contribution', `priority ${registration.priority}`),
+        create(document, 'span', 'cxm-contribution', `group ${registration.group}`),
+        ...(registration.error === undefined ? [] : [create(document, 'span', 'cxm-contribution', registration.error)]),
       )
       card.append(head, rows)
       slots.append(card)

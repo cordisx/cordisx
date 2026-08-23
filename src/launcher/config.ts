@@ -50,6 +50,7 @@ export async function loadConfig(configPath: string): Promise<CordisXConfig> {
     const plugin = object(value, `config.plugins[${index}]`)
     const id = nonEmptyString(plugin.id, `config.plugins[${index}].id`)
     if (!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(id)) throw new Error(`invalid plugin id: ${id}`)
+    if (id === 'host' || id.startsWith('cordisx.')) throw new Error(`reserved plugin id: ${id}`)
     if (seen.has(id)) throw new Error(`duplicate plugin id: ${id}`)
     seen.add(id)
     const entry = nonEmptyString(plugin.entry, `config.plugins[${index}].entry`)

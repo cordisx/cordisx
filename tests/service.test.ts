@@ -1,50 +1,37 @@
 import { Context } from '@deepseek-ai/cordis'
-import { JSDOM } from 'jsdom'
-import { describe, expect, it, vi } from 'vitest'
-import { CordisXSlotService } from '../src/renderer/service.js'
+import { describe, expect, it } from 'vitest'
+import { CORDISX_PLUGIN_ID } from '../src/renderer/ownership.js'
+import { CordisXSlotService } from '../src/renderer/surfaces.js'
 
 describe('CordisXSlotService', () => {
-  it('owns a DSH-style slot registration on the calling plugin fiber', async () => {
-    const dom = new JSDOM(`
-      <html><head></head><body>
-        <header class="app-header-tint"><div class="ms-auto flex items-center"></div></header>
-      </body></html>
-    `)
-    Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', {
-      value: () => ({ length: 1 }),
-    })
-    vi.stubGlobal('document', dom.window.document)
-
+  it('owns a structured snapshot handle on the calling plugin fiber', async () => {
     const ctx = new Context()
-    const service = ctx.plugin(CordisXSlotService)
-    let disposals = 0
+    const serviceFiber = ctx.plugin(CordisXSlotService)
+    await serviceFiber
+    const service = ctx.slots as CordisXSlotService
+    service.setResolvers({ command: () => true, route: () => true })
+    const pluginContext = ctx.extend({ [CORDISX_PLUGIN_ID]: 'demo' })
+    const plugin = pluginContext.plugin({
+      inject: ['slots'],
+      apply(pluginCtx: Context) {
+        pluginCtx.slots.inject('sidebar.footer.before-control', () => pluginCtx.slots.register({
+          name: 'sidebar.footer.before-control', id: 'owned',
+        }, { label: { key: 'owned' }, command: { id: 'open' } }))
+      },
+    })
+    await plugin
+    expect(service.snapshot()).toEqual([expect.objectContaining({ owner: 'demo', id: 'owned', valid: true })])
 
-    try {
-      await service
-      const plugin = ctx.plugin({
-        inject: ['slots'],
-        apply(pluginCtx: Context) {
-          pluginCtx.slots.inject('header.actions', () => pluginCtx.slots.register({
-            name: 'header.actions',
-            id: 'fiber-owned',
-          }, ({ container }) => {
-            container.textContent = 'mounted'
-            return () => { disposals += 1 }
-          }))
-        },
-      })
+    await plugin.dispose()
+    expect(service.snapshot()).toEqual([])
+    await serviceFiber.dispose()
+  })
 
-      await plugin
-      expect(dom.window.document.querySelector('[data-cordisx-contribution="fiber-owned"]')?.textContent).toBe('mounted')
-
-      await plugin.dispose()
-      expect(dom.window.document.querySelector('[data-cordisx-contribution="fiber-owned"]')).toBeNull()
-      expect(disposals).toBe(1)
-      expect(dom.window.document.getElementById('cordisx-base-style')).not.toBeNull()
-    } finally {
-      await service.dispose()
-      vi.unstubAllGlobals()
-      dom.window.close()
-    }
+  it('rejects every retired free-DOM slot name', async () => {
+    const ctx = new Context()
+    const serviceFiber = ctx.plugin(CordisXSlotService)
+    await serviceFiber
+    expect(() => (ctx.slots.inject as (name: string, setup: () => void) => unknown)('shell.overlay', () => {})).toThrow(/direct-DOM slots were removed/)
+    await serviceFiber.dispose()
   })
 })
