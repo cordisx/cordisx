@@ -142,10 +142,9 @@ remain explicitly out of scope.
 
 ### Functional CLI home-config slice
 
-Status: implementation follows
-[`distribution-and-cli.md`](distribution-and-cli.md). This is the functional
-CLI boundary between the monorepo foundation and later public release/native
-distribution work.
+Status: implemented and verified in the functional CLI slice described by
+[`distribution-and-cli.md`](distribution-and-cli.md). Public npm release and
+native distribution remain later boundaries.
 
 The slice owns `cordisx setup`, implicit first-run setup, `cordisx config`,
 `cordisx doctor`, host/profile launch parsing, strict and atomic

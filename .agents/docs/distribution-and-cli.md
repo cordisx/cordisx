@@ -91,19 +91,23 @@ work.
 
 The persisted document is versioned and strictly validated. Writes use a
 same-directory temporary file, fsync where available, atomic rename, and user-
-only permissions. A migration preserves unknown future fields only when their
-owning schema allows them; a failed migration leaves the last readable file in
-place and reports a recovery path.
+only permissions. Setup may tighten the canonical existing `~/.cordisx`
+directory left by an older CordisX launcher; an explicit `CORDISX_HOME` with
+broad permissions fails closed instead of being modified. A migration
+preserves unknown future fields only when their owning schema allows them; a
+failed migration leaves the last readable file in place and reports a recovery
+path.
 
 `cordisx setup` and implicit first launch call the same idempotent
 `ensureHomeConfig()` operation:
 
 1. return the validated configuration when it already exists;
 2. migrate an older supported version atomically;
-3. in an interactive terminal, offer detected launch-capable apps and choose a
-   default app/profile;
-4. in a non-interactive environment, use deterministic defaults or fail with
-   the exact missing choice rather than waiting for input;
+3. use deterministic `codex/default/shared` defaults in version 1 without
+   waiting for interactive input; a later setup UI may offer other installed
+   launch-capable adapters without changing this file contract;
+4. fail with the exact missing adapter or choice rather than falling back to a
+   different host;
 5. create the parent directory and initial configuration without overwriting an
    unrelated or invalid file.
 
@@ -128,6 +132,9 @@ unavailable until that adapter can enforce it completely.
 
 CordisX never modifies an installed host application. Shared data does not mean
 shared renderer processes, debugging endpoints, UI storage, or window state.
+Isolation is a filesystem/profile contract, not a security identity boundary:
+platform keychains, device identity, and other operating-system services may
+still be shared unless a future adapter can project them explicitly.
 
 ## Product monorepo
 
@@ -216,7 +223,8 @@ a result of those usable releases, not a separate empty publication.
 
 ### Functional CLI home-config slice
 
-The home-config PR is limited to the third boundary above. It implements the
+Status: implemented and verified. The home-config PR is limited to the third
+boundary above. It implements the
 shared command parser, idempotent setup, strict version-1 home configuration,
 atomic and user-only persistence, the adapter registry, named profile
 resolution, and a serializable launch plan. `codex` is the only

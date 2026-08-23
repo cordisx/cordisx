@@ -4,6 +4,7 @@ import { fetchMarketplaceFeed } from './marketplace.js'
 const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
 const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
 const MAX_MARKETPLACE_REQUESTS = 4
+const CDP_REQUEST_TIMEOUT_MS = 5_000
 
 export interface CdpTarget {
   readonly id: string
@@ -60,11 +61,25 @@ class CdpSession {
   send(method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const id = this.nextId++
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error(`CDP request timed out: ${method}`))
+      }, CDP_REQUEST_TIMEOUT_MS)
+      this.pending.set(id, {
+        resolve: value => {
+          clearTimeout(timer)
+          resolve(value)
+        },
+        reject: error => {
+          clearTimeout(timer)
+          reject(error)
+        },
+      })
       this.socket.send(JSON.stringify({ id, method, params }), (error) => {
         // ws may pass null on success even though its TypeScript callback uses undefined.
         if (error == null) return
         this.pending.delete(id)
+        clearTimeout(timer)
         reject(error)
       })
     })
@@ -119,11 +134,10 @@ function targetScore(target: CdpTarget): number {
   return label.includes('codex') ? 10 : label.includes('chatgpt') ? 5 : 0
 }
 
-/** Select renderer pages, preferring targets visibly associated with Codex. */
+/** Select only renderer pages visibly associated with Codex/ChatGPT. */
 export function injectableTargets(targets: readonly CdpTarget[]): CdpTarget[] {
   const pages = targets.filter(injectable).sort((left, right) => targetScore(right) - targetScore(left))
-  const matched = pages.filter(target => targetScore(target) > 0)
-  return matched.length > 0 ? matched : pages.slice(0, 1)
+  return pages.filter(target => targetScore(target) > 0)
 }
 
 interface InstalledScript {
@@ -220,12 +234,14 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.marketplaceController.abort()
   installed.removeBindingListener()
   try {
-    await installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }).catch(() => undefined)
-    await installed.session.send('Runtime.evaluate', {
-      expression: 'void globalThis.__cordisxRuntime?.dispose?.()',
-      allowUnsafeEvalBlockedByCSP: true,
-    }).catch(() => undefined)
-    await installed.session.send('Runtime.removeBinding', { name: MARKETPLACE_BINDING }).catch(() => undefined)
+    await Promise.allSettled([
+      installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }),
+      installed.session.send('Runtime.evaluate', {
+        expression: 'void globalThis.__cordisxRuntime?.dispose?.()',
+        allowUnsafeEvalBlockedByCSP: true,
+      }),
+      installed.session.send('Runtime.removeBinding', { name: MARKETPLACE_BINDING }),
+    ])
   } finally {
     installed.session.close()
   }
