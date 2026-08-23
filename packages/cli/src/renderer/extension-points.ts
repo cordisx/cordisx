@@ -1,25 +1,33 @@
 import type {
   CordisXEffectivePointPolicy,
-  CordisXExtensionPointAccessV1,
+  CordisXExtensionPointAccessV2,
   CordisXExtensionPointIdentity,
   CordisXExtensionPointKind,
+  CordisXExtensionPointAvailability,
   CordisXExtensionPointPolicyRecordV1,
+  CordisXExtensionPointPayloadFamily,
+  CordisXExtensionPointStability,
   CordisXHostExtensionPointCatalogV1,
+  CordisXHostExtensionPointCatalogV2,
+  CordisXHostExtensionPointAnchorDescriptorV2,
   CordisXHostExtensionPointDescriptor,
+  CordisXHostExtensionPointDescriptorV2,
   CordisXLocaleCatalog,
+  CordisXLocalizedText,
   CordisXLocalizedProjection,
   CordisXPointPolicy,
   CordisXPluginIdentity,
 } from '../contracts.js'
 import {
-  CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V1,
+  CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2,
   CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
 } from '../contracts.js'
 import type { CordisXI18nService } from './i18n.js'
 import type { CommandSnapshot } from './commands.js'
 import type { NavigationSnapshot, RouteSnapshot } from './navigation.js'
-import type { SurfaceContributionSnapshot } from './surfaces.js'
+import type { SurfaceAvailabilitySnapshot, SurfaceContributionSnapshot } from './surfaces.js'
 import { qualifyOwnedId } from './ownership.js'
 import { ICON_TOKEN_PATTERN, assertLocalId, assertLocalizedText, immutableSnapshot } from './validation.js'
 
@@ -32,13 +40,19 @@ export interface ExtensionPointDescriptorDiagnostic {
   readonly pointId?: string
 }
 
-export interface HostExtensionPointProjection extends CordisXHostExtensionPointDescriptor {
+export interface HostExtensionPointAnchorProjection extends CordisXHostExtensionPointAnchorDescriptorV2 {
+  readonly diagnosticProjection?: CordisXLocalizedProjection
+}
+
+export interface HostExtensionPointProjection extends CordisXHostExtensionPointDescriptorV2 {
   readonly titleProjection: CordisXLocalizedProjection
   readonly descriptionProjection: CordisXLocalizedProjection
+  readonly diagnosticProjection?: CordisXLocalizedProjection
+  readonly anchors?: readonly HostExtensionPointAnchorProjection[]
 }
 
 interface DescriptorRegistration {
-  readonly descriptors: readonly CordisXHostExtensionPointDescriptor[]
+  readonly descriptors: readonly CordisXHostExtensionPointDescriptorV2[]
   readonly diagnostics: readonly ExtensionPointDescriptorDiagnostic[]
 }
 
@@ -47,10 +61,40 @@ function exactKeys(value: object, allowed: readonly string[], label: string): vo
   if (unknown !== undefined) throw new Error(`${label} has unknown field ${unknown}`)
 }
 
-function normalizeDescriptor(value: unknown): CordisXHostExtensionPointDescriptor {
+const PAYLOAD_FAMILIES = new Set<CordisXExtensionPointPayloadFamily>([
+  'action', 'menu-item', 'contextual-action', 'tab', 'presenter', 'navigation-item',
+  'environment-section', 'environment-row', 'outlet',
+])
+const STABILITIES = new Set<CordisXExtensionPointStability>(['stable', 'experimental', 'reserved'])
+const AVAILABILITIES = new Set<CordisXExtensionPointAvailability>(['available', 'pending', 'unavailable'])
+
+function normalizeAnchor(value: unknown, pointId: string): CordisXHostExtensionPointAnchorDescriptorV2 {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`extension point ${pointId} anchor must be an object`)
+  exactKeys(value, ['id', 'placements', 'availability', 'diagnostic'], `extension point ${pointId} anchor`)
+  const anchor = value as Partial<CordisXHostExtensionPointAnchorDescriptorV2>
+  if (typeof anchor.id !== 'string') throw new Error(`extension point ${pointId} anchor id is required`)
+  assertLocalId(anchor.id, `extension point ${pointId} anchor id`)
+  if (!Array.isArray(anchor.placements) || anchor.placements.length === 0 || anchor.placements.length > 3
+    || anchor.placements.some(item => !['before', 'after', 'menu'].includes(item))
+    || new Set(anchor.placements).size !== anchor.placements.length) {
+    throw new Error(`extension point ${pointId} anchor ${anchor.id} placements are invalid`)
+  }
+  if (!AVAILABILITIES.has(anchor.availability as CordisXExtensionPointAvailability)) {
+    throw new Error(`extension point ${pointId} anchor ${anchor.id} availability is invalid`)
+  }
+  if (anchor.diagnostic !== undefined) assertLocalizedText(anchor.diagnostic, `extension point ${pointId} anchor ${anchor.id} diagnostic`)
+  if (anchor.availability !== 'available' && anchor.diagnostic === undefined) {
+    throw new Error(`extension point ${pointId} anchor ${anchor.id} requires a diagnostic`)
+  }
+  return immutableSnapshot(anchor as CordisXHostExtensionPointAnchorDescriptorV2)
+}
+
+function normalizeDescriptor(value: unknown, schemaVersion: 1 | 2): CordisXHostExtensionPointDescriptorV2 {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('descriptor must be an object')
-  exactKeys(value, ['id', 'kind', 'title', 'description', 'icon'], 'descriptor')
-  const descriptor = value as Partial<CordisXHostExtensionPointDescriptor>
+  exactKeys(value, schemaVersion === 1
+    ? ['id', 'kind', 'title', 'description', 'icon']
+    : ['id', 'kind', 'title', 'description', 'icon', 'payloadFamily', 'stability', 'availability', 'diagnostic', 'anchors'], 'descriptor')
+  const descriptor = value as Partial<CordisXHostExtensionPointDescriptorV2>
   if (typeof descriptor.id !== 'string') throw new Error('descriptor id is required')
   assertLocalId(descriptor.id, 'extension point id')
   if (descriptor.kind !== 'surface' && descriptor.kind !== 'outlet') throw new Error(`extension point ${descriptor.id} kind is invalid`)
@@ -65,7 +109,30 @@ function normalizeDescriptor(value: unknown): CordisXHostExtensionPointDescripto
   if (typeof descriptor.icon !== 'string' || !ICON_TOKEN_PATTERN.test(descriptor.icon) || !descriptor.icon.startsWith('host:')) {
     throw new Error(`extension point ${descriptor.id} requires a host icon token`)
   }
-  return immutableSnapshot(descriptor as CordisXHostExtensionPointDescriptor)
+  if (schemaVersion === 1) return immutableSnapshot({
+    ...(descriptor as CordisXHostExtensionPointDescriptor),
+    payloadFamily: descriptor.kind === 'outlet' ? 'outlet' : 'action',
+    stability: 'stable',
+    availability: 'available',
+  })
+  if (!PAYLOAD_FAMILIES.has(descriptor.payloadFamily as CordisXExtensionPointPayloadFamily)) {
+    throw new Error(`extension point ${descriptor.id} payload family is invalid`)
+  }
+  if ((descriptor.kind === 'outlet') !== (descriptor.payloadFamily === 'outlet')) {
+    throw new Error(`extension point ${descriptor.id} payload family does not match its kind`)
+  }
+  if (!STABILITIES.has(descriptor.stability as CordisXExtensionPointStability)) throw new Error(`extension point ${descriptor.id} stability is invalid`)
+  if (!AVAILABILITIES.has(descriptor.availability as CordisXExtensionPointAvailability)) throw new Error(`extension point ${descriptor.id} availability is invalid`)
+  if (descriptor.diagnostic !== undefined) assertLocalizedText(descriptor.diagnostic, `extension point ${descriptor.id} diagnostic`)
+  if (descriptor.availability !== 'available' && descriptor.diagnostic === undefined) throw new Error(`extension point ${descriptor.id} requires a diagnostic`)
+  if (descriptor.stability === 'reserved' && descriptor.availability !== 'unavailable') throw new Error(`reserved extension point ${descriptor.id} must be unavailable`)
+  if (descriptor.anchors !== undefined && (!Array.isArray(descriptor.anchors) || descriptor.anchors.length > 32)) {
+    throw new Error(`extension point ${descriptor.id} anchors must be an array of at most 32 items`)
+  }
+  const pointId = descriptor.id
+  const anchors = descriptor.anchors?.map(anchor => normalizeAnchor(anchor, pointId))
+  if (anchors !== undefined && new Set(anchors.map(anchor => anchor.id)).size !== anchors.length) throw new Error(`extension point ${descriptor.id} has duplicate anchors`)
+  return immutableSnapshot({ ...descriptor, ...(anchors === undefined ? {} : { anchors }) } as CordisXHostExtensionPointDescriptorV2)
 }
 
 /** Runtime ledger for host/adapter-owned descriptors. Invalid declarations remain diagnostic-only. */
@@ -75,22 +142,27 @@ export class ExtensionPointDescriptorRegistry {
   private disposed = false
   private projectionI18n: CordisXI18nService | undefined
 
-  registerCatalog(value: CordisXHostExtensionPointCatalogV1 | unknown): () => void {
+  registerCatalog(value: CordisXHostExtensionPointCatalogV1 | CordisXHostExtensionPointCatalogV2 | unknown): () => void {
     if (this.disposed) throw new Error('CordisX extension point descriptor registry is disposed')
-    const descriptors: CordisXHostExtensionPointDescriptor[] = []
+    const descriptors: CordisXHostExtensionPointDescriptorV2[] = []
     const diagnostics: ExtensionPointDescriptorDiagnostic[] = []
     try {
       if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('catalog must be an object')
       exactKeys(value, ['$schema', 'schemaVersion', 'points'], 'extension point catalog')
-      const catalog = value as Partial<CordisXHostExtensionPointCatalogV1>
-      if (catalog.$schema !== CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1 || catalog.schemaVersion !== 1) {
+      const catalog = value as Partial<CordisXHostExtensionPointCatalogV1 | CordisXHostExtensionPointCatalogV2>
+      const schemaVersion = catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1 && catalog.schemaVersion === 1
+        ? 1
+        : catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2 && catalog.schemaVersion === 2
+          ? 2
+          : undefined
+      if (schemaVersion === undefined) {
         throw new Error('extension point catalog schema/version is unsupported')
       }
       if (!Array.isArray(catalog.points) || catalog.points.length > 256) throw new Error('extension point catalog points must be an array of at most 256 items')
       const liveIds = new Set(this.descriptors().map(item => item.id))
       for (const candidate of catalog.points) {
         try {
-          const descriptor = normalizeDescriptor(candidate)
+          const descriptor = normalizeDescriptor(candidate, schemaVersion)
           if (liveIds.has(descriptor.id) || descriptors.some(item => item.id === descriptor.id)) {
             diagnostics.push({ code: 'duplicate-point-id', pointId: descriptor.id, message: `duplicate extension point id across families: ${descriptor.id}` })
             continue
@@ -120,6 +192,10 @@ export class ExtensionPointDescriptorRegistry {
       for (const descriptor of registration.descriptors) {
         this.projectionI18n?.clearDiagnosticSite('host', `extension-point:${descriptor.id}:title`)
         this.projectionI18n?.clearDiagnosticSite('host', `extension-point:${descriptor.id}:description`)
+        this.projectionI18n?.clearDiagnosticSite('host', `extension-point:${descriptor.id}:diagnostic`)
+        for (const anchor of descriptor.anchors ?? []) {
+          this.projectionI18n?.clearDiagnosticSite('host', `extension-point:${descriptor.id}:anchor:${anchor.id}:diagnostic`)
+        }
       }
       const index = this.registrations.indexOf(registration)
       if (index >= 0) this.registrations.splice(index, 1)
@@ -127,11 +203,11 @@ export class ExtensionPointDescriptorRegistry {
     }
   }
 
-  descriptors(): readonly CordisXHostExtensionPointDescriptor[] {
+  descriptors(): readonly CordisXHostExtensionPointDescriptorV2[] {
     return this.registrations.flatMap(item => item.descriptors).sort((left, right) => left.id.localeCompare(right.id))
   }
 
-  descriptor(id: string): CordisXHostExtensionPointDescriptor | undefined {
+  descriptor(id: string): CordisXHostExtensionPointDescriptorV2 | undefined {
     return this.descriptors().find(item => item.id === id)
   }
 
@@ -141,11 +217,23 @@ export class ExtensionPointDescriptorRegistry {
 
   project(i18n: CordisXI18nService): readonly HostExtensionPointProjection[] {
     this.projectionI18n = i18n
-    return this.descriptors().map(descriptor => ({
-      ...descriptor,
-      titleProjection: i18n.resolveFor('host', descriptor.title, `extension-point:${descriptor.id}:title`),
-      descriptionProjection: i18n.resolveFor('host', descriptor.description, `extension-point:${descriptor.id}:description`),
-    }))
+    return this.descriptors().map(descriptor => {
+      const projectedAnchors = descriptor.anchors?.map(anchor => ({
+        ...anchor,
+        ...(anchor.diagnostic === undefined ? {} : {
+          diagnosticProjection: i18n.resolveFor('host', anchor.diagnostic, `extension-point:${descriptor.id}:anchor:${anchor.id}:diagnostic`),
+        }),
+      }))
+      return {
+        ...descriptor,
+        titleProjection: i18n.resolveFor('host', descriptor.title, `extension-point:${descriptor.id}:title`),
+        descriptionProjection: i18n.resolveFor('host', descriptor.description, `extension-point:${descriptor.id}:description`),
+        ...(descriptor.diagnostic === undefined ? {} : {
+          diagnosticProjection: i18n.resolveFor('host', descriptor.diagnostic, `extension-point:${descriptor.id}:diagnostic`),
+        }),
+        ...(projectedAnchors === undefined ? {} : { anchors: projectedAnchors }),
+      }
+    })
   }
 
   subscribe(listener: () => void): () => void {
@@ -159,6 +247,10 @@ export class ExtensionPointDescriptorRegistry {
     for (const descriptor of this.descriptors()) {
       this.projectionI18n?.clearDiagnosticSite('host', `extension-point:${descriptor.id}:title`)
       this.projectionI18n?.clearDiagnosticSite('host', `extension-point:${descriptor.id}:description`)
+      this.projectionI18n?.clearDiagnosticSite('host', `extension-point:${descriptor.id}:diagnostic`)
+      for (const anchor of descriptor.anchors ?? []) {
+        this.projectionI18n?.clearDiagnosticSite('host', `extension-point:${descriptor.id}:anchor:${anchor.id}:diagnostic`)
+      }
     }
     this.projectionI18n = undefined
     this.registrations.length = 0
@@ -254,14 +346,16 @@ export interface ExtensionPointAccessDecision {
 
 export interface ExtensionPointAccessResolver {
   decision(owner: string, pointId: string, expectedKind: CordisXExtensionPointKind): ExtensionPointAccessDecision
+  setSurfaceAvailability(items: readonly SurfaceAvailabilitySnapshot[]): void
   authorizeSurfaceCommand(owner: string, pointId: string, contributionId: string, commandId: string): ExtensionPointAccessDecision
+  authorizeSurfaceRoute(owner: string, pointId: string, contributionId: string, routeId: string): ExtensionPointAccessDecision
   authorizeOutletRoute(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision
   authorizeOutletPage(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision
   authorizeOutletPageCommand(owner: string, pointId: string, routeId: string, pageId: string, actionId: string, commandId: string): ExtensionPointAccessDecision
 }
 
 export interface ExtensionPointAccessDiagnostic {
-  readonly request: CordisXExtensionPointAccessV1
+  readonly request: CordisXExtensionPointAccessV2
   readonly authorized: boolean
   readonly effectivePolicy: CordisXEffectivePointPolicy
   readonly reason?: string
@@ -275,6 +369,7 @@ export interface ExtensionPointPolicyDiagnostic {
 
 type ExtensionPointAccessFields =
   | { readonly operation: 'surface.command.invoke'; readonly contributionId: string; readonly commandId: string }
+  | { readonly operation: 'surface.route.navigate'; readonly contributionId: string; readonly routeId: string }
   | { readonly operation: 'outlet.route.navigate'; readonly routeId: string; readonly pageId: string }
   | { readonly operation: 'outlet.page.mount'; readonly routeId: string; readonly pageId: string }
   | { readonly operation: 'outlet.page.command.invoke'; readonly routeId: string; readonly pageId: string; readonly actionId: string; readonly commandId: string }
@@ -294,11 +389,20 @@ export interface ExtensionPointPluginUsageSnapshot {
 }
 
 export interface ExtensionPointSnapshot extends HostExtensionPointProjection {
+  readonly anchors?: readonly ExtensionPointAnchorSnapshot[]
   readonly available: boolean
+  readonly availabilityCode?: string
+  readonly availabilityDetail?: string
+  /** @deprecated Use availabilityDetail. */
   readonly availabilityError?: string
   readonly usingPluginCount: number
   readonly activePluginCount: number
   readonly plugins: readonly ExtensionPointPluginUsageSnapshot[]
+}
+
+export interface ExtensionPointAnchorSnapshot extends HostExtensionPointAnchorProjection {
+  readonly availabilityCode?: string
+  readonly availabilityDetail?: string
 }
 
 export interface ExtensionPointRuntimeSnapshot {
@@ -337,12 +441,41 @@ export function buildExtensionPointRuntimeSnapshot(input: {
   readonly registrations: readonly SurfaceContributionSnapshot[]
   readonly commands: readonly CommandSnapshot[]
   readonly navigation: NavigationSnapshot
+  readonly surfaceAvailability?: readonly SurfaceAvailabilitySnapshot[]
 }): ExtensionPointRuntimeSnapshot {
   const projections = input.descriptors.project(input.i18n)
   const points = projections.map((descriptor): ExtensionPointSnapshot => {
     const outlet = descriptor.kind === 'outlet'
       ? input.navigation.outlets.find(item => item.id === descriptor.id)
       : undefined
+    const liveSurface = descriptor.kind === 'surface'
+      ? input.surfaceAvailability?.find(item => item.surface === descriptor.id)
+      : undefined
+    const availability: CordisXExtensionPointAvailability = descriptor.stability === 'reserved'
+      ? 'unavailable'
+      : descriptor.kind === 'surface'
+        ? liveSurface?.state ?? descriptor.availability
+        : outlet?.available === true
+          ? 'available'
+          : descriptor.availability === 'available'
+            ? 'unavailable'
+            : descriptor.availability
+    const availabilityCode = descriptor.kind === 'surface'
+      ? liveSurface?.code
+      : outlet?.available === true || descriptor.stability === 'reserved' ? undefined : 'outlet-unavailable'
+    const availabilityDetail = descriptor.kind === 'surface'
+      ? liveSurface?.detail ?? (availability === 'available' ? undefined : descriptor.diagnosticProjection?.text)
+      : outlet?.error ?? (availability === 'available' ? undefined : descriptor.diagnosticProjection?.text)
+    const anchors = descriptor.anchors?.map((anchor): ExtensionPointAnchorSnapshot => {
+      const liveAnchor = liveSurface?.anchors?.find(item => item.id === anchor.id)
+      const anchorDetail = liveAnchor?.detail ?? anchor.diagnosticProjection?.text
+      return {
+        ...anchor,
+        availability: liveAnchor?.state ?? anchor.availability,
+        ...(liveAnchor?.code === undefined ? {} : { availabilityCode: liveAnchor.code }),
+        ...(anchorDetail === undefined ? {} : { availabilityDetail: anchorDetail }),
+      }
+    })
     const pluginUsages = input.plugins.flatMap((plugin): ExtensionPointPluginUsageSnapshot[] => {
       const registrations = descriptor.kind === 'surface'
         ? input.registrations.filter(item => item.owner === plugin.id && item.surface === descriptor.id)
@@ -374,8 +507,11 @@ export function buildExtensionPointRuntimeSnapshot(input: {
     }).sort((left, right) => left.name.localeCompare(right.name) || left.identity.source.localeCompare(right.identity.source) || left.identity.id.localeCompare(right.identity.id))
     return {
       ...descriptor,
-      available: descriptor.kind === 'surface' ? true : outlet?.available === true,
-      ...(outlet?.error === undefined ? {} : { availabilityError: outlet.error }),
+      availability,
+      ...(anchors === undefined ? {} : { anchors }),
+      available: availability === 'available',
+      ...(availabilityCode === undefined ? {} : { availabilityCode }),
+      ...(availabilityDetail === undefined ? {} : { availabilityDetail, availabilityError: availabilityDetail }),
       usingPluginCount: pluginUsages.length,
       activePluginCount: pluginUsages.filter(item => item.active).length,
       plugins: pluginUsages,
@@ -399,10 +535,12 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
   private readonly duplicatePolicyIdentities = new Map<string, CordisXExtensionPointIdentity>()
   private readonly accesses: ExtensionPointAccessDiagnostic[] = []
   private readonly listeners = new Set<() => void>()
+  private readonly surfaceAvailability = new Map<string, SurfaceAvailabilitySnapshot>()
 
   constructor(
     private readonly descriptors: ExtensionPointDescriptorRegistry,
     private readonly store: ExtensionPointPolicyStore,
+    private readonly generation = 'generation-legacy',
   ) {
     for (const record of store.read()) {
       if (!validStoredPolicy(record)) continue
@@ -441,6 +579,14 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
     return this.policies.get(key)?.policy ?? 'inherit'
   }
 
+  setSurfaceAvailability(items: readonly SurfaceAvailabilitySnapshot[]): void {
+    const next = new Map(items.map(item => [item.surface, immutableSnapshot(item)]))
+    if (JSON.stringify([...this.surfaceAvailability]) === JSON.stringify([...next])) return
+    this.surfaceAvailability.clear()
+    for (const [pointId, item] of next) this.surfaceAvailability.set(pointId, item)
+    this.changed()
+  }
+
   setPolicy(identity: CordisXPluginIdentity, pointId: string, policy: CordisXPointPolicy): void {
     const bound = this.identities.get(identity.id)
     if (bound === undefined || bound.source !== identity.source) throw new Error(`plugin ${identity.id} is not bound to source ${identity.source}`)
@@ -474,6 +620,16 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
       authorized: false,
       reason: `extension point ${pointId} is ${descriptor.kind}, expected ${expectedKind}`,
     }
+    const availability = expectedKind === 'surface'
+      ? this.surfaceAvailability.get(pointId)?.state ?? descriptor.availability
+      : descriptor.availability
+    if (availability !== 'available') return {
+      identity,
+      policy: this.pointPolicy(identity),
+      effectivePolicy: 'deny',
+      authorized: false,
+      reason: `extension point ${pointId} is ${availability}`,
+    }
     if (this.duplicatePolicyKeys.has(extensionPointIdentityKey(identity))) return {
       identity,
       policy: 'inherit',
@@ -491,6 +647,11 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
     return this.recordAccess(decision, {
       operation: 'surface.command.invoke', contributionId, commandId,
     })
+  }
+
+  authorizeSurfaceRoute(owner: string, pointId: string, contributionId: string, routeId: string): ExtensionPointAccessDecision {
+    const decision = this.decision(owner, pointId, 'surface')
+    return this.recordAccess(decision, { operation: 'surface.route.navigate', contributionId, routeId })
   }
 
   authorizeOutletRoute(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision {
@@ -552,6 +713,7 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
     this.duplicatePolicyKeys.clear()
     this.duplicatePolicyIdentities.clear()
     this.accesses.length = 0
+    this.surfaceAvailability.clear()
     this.listeners.clear()
   }
 
@@ -561,11 +723,12 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
   ): ExtensionPointAccessDecision {
     if (decision.identity === undefined) return decision
     const request = Object.freeze({
-      $schema: CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V1,
-      schemaVersion: 1,
+      $schema: CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2,
+      schemaVersion: 2,
+      generation: this.generation,
       identity: decision.identity,
       ...operation,
-    }) as CordisXExtensionPointAccessV1
+    }) as CordisXExtensionPointAccessV2
     this.accesses.push(Object.freeze({
       request,
       authorized: decision.authorized,
@@ -586,43 +749,91 @@ function descriptor(
   fallbackTitle: string,
   fallbackDescription: string,
   icon: `host:${string}`,
-): CordisXHostExtensionPointDescriptor {
+  payloadFamily: CordisXExtensionPointPayloadFamily,
+  stability: CordisXExtensionPointStability,
+  availability: CordisXExtensionPointAvailability,
+  options: Readonly<{
+    diagnostic?: CordisXLocalizedText
+    anchors?: readonly CordisXHostExtensionPointAnchorDescriptorV2[]
+  }> = {},
+): CordisXHostExtensionPointDescriptorV2 {
   return Object.freeze({
     id,
     kind,
     title: Object.freeze({ namespace: DESCRIPTOR_NAMESPACE, key: `${key}.title`, fallback: fallbackTitle }),
     description: Object.freeze({ namespace: DESCRIPTOR_NAMESPACE, key: `${key}.description`, fallback: fallbackDescription }),
     icon,
+    payloadFamily,
+    stability,
+    availability,
+    ...options,
   })
 }
 
+function diagnostic(key: string, fallback: string): CordisXLocalizedText {
+  return Object.freeze({ namespace: DESCRIPTOR_NAMESPACE, key: `diagnostic.${key}`, fallback })
+}
+
+const RESERVED = Object.freeze({ diagnostic: diagnostic('reserved', 'Reserved by the protocol; this host does not expose a safe seat.') })
+const PENDING_ANCHOR = Object.freeze({ diagnostic: diagnostic('anchor', 'The native host seat is not currently resolved.') })
+
 export const CORDISX_BUILTIN_EXTENSION_POINT_CATALOG = Object.freeze({
-  $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1,
-  schemaVersion: 1,
+  $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
+  schemaVersion: 2,
   points: Object.freeze([
-    descriptor('sidebar.footer.before-control', 'surface', 'sidebar.footer.before-control', 'Sidebar footer before control', 'Adds a compact action before the designated sidebar footer control.', 'host:open'),
-    descriptor('sidebar.footer.after-control', 'surface', 'sidebar.footer.after-control', 'Sidebar footer after control', 'Adds a compact action after the designated sidebar footer control.', 'host:open'),
-    descriptor('sidebar.footer.menu', 'surface', 'sidebar.footer.menu', 'Sidebar footer menu', 'Adds a host-rendered command to the designated footer control menu.', 'host:more'),
-    descriptor('sidebar.account.menu', 'surface', 'sidebar.account.menu', 'Sidebar account menu', 'Adds a host-rendered command to the native account/profile menu.', 'host:more'),
-    descriptor('sidebar.navigation.items', 'surface', 'sidebar.navigation.items', 'Sidebar navigation', 'Adds a navigation row with a primary action and optional independent shortcuts.', 'host:layers'),
-    descriptor('workspace.toolbar.items', 'surface', 'workspace.toolbar.items', 'Workspace toolbar', 'Adds an action before, after, or inside the menu of a semantic workspace toolbar anchor.', 'host:more'),
-    descriptor('environment.panel.header-actions', 'surface', 'environment.panel.header-actions', 'Environment panel header', 'Adds a command action to the environment panel header.', 'host:settings'),
-    descriptor('environment.panel.sections', 'surface', 'environment.panel.sections', 'Environment panel sections', 'Adds a host-rendered section to the environment panel.', 'host:layers'),
-    descriptor('environment.section.actions', 'surface', 'environment.section.actions', 'Environment section actions', 'Adds a command action to a declared environment section.', 'host:settings'),
-    descriptor('environment.section.rows', 'surface', 'environment.section.rows', 'Environment section rows', 'Adds a structured label, value, description, and status row to a declared section.', 'host:info'),
-    descriptor('environment.row.trailing-actions', 'surface', 'environment.row.trailing-actions', 'Environment row actions', 'Adds an independent command action to the end of a declared environment row.', 'host:more'),
-    descriptor('app', 'outlet', 'outlet.app', 'Application page', 'Opens a CordisX page over the renderer application region without replacing native content.', 'host:open'),
-    descriptor('main', 'outlet', 'outlet.main', 'Main workspace page', 'Opens a CordisX page over the region to the right of the sidebar and follows the current main context.', 'host:layers'),
-    descriptor('session.content', 'outlet', 'outlet.session.content', 'Session content page', 'Opens a CordisX page below the active session header while preserving side and bottom panels.', 'host:history'),
+    descriptor('sidebar.footer.before-control', 'surface', 'sidebar.footer.before-control', 'Sidebar footer before control', 'Adds a compact action before the designated sidebar footer control.', 'host:open', 'action', 'stable', 'available'),
+    descriptor('sidebar.footer.after-control', 'surface', 'sidebar.footer.after-control', 'Sidebar footer after control', 'Adds a compact action after the designated sidebar footer control.', 'host:open', 'action', 'stable', 'available'),
+    descriptor('sidebar.footer.menu', 'surface', 'sidebar.footer.menu', 'Sidebar footer menu', 'Adds a host-rendered command to the designated footer control menu.', 'host:more', 'menu-item', 'stable', 'available'),
+    descriptor('sidebar.account.menu', 'surface', 'sidebar.account.menu', 'Sidebar account menu', 'Adds a host-rendered command to the native account/profile menu.', 'host:more', 'menu-item', 'stable', 'available'),
+    descriptor('sidebar.navigation.items', 'surface', 'sidebar.navigation.items', 'Sidebar navigation', 'Adds a navigation row with a primary action and optional independent shortcuts.', 'host:layers', 'navigation-item', 'stable', 'available'),
+    descriptor('sidebar.workspace.menu', 'surface', 'sidebar.workspace.menu', 'Workspace menu', 'Adds host-rendered items to the native workspace menu when its seat is resolved.', 'host:more', 'menu-item', 'experimental', 'pending', PENDING_ANCHOR),
+    descriptor('sidebar.session.actions', 'surface', 'sidebar.session.actions', 'Session row actions', 'Adds contextual actions to an identified native session row.', 'host:more', 'contextual-action', 'reserved', 'unavailable', RESERVED),
+    descriptor('sidebar.session.menu', 'surface', 'sidebar.session.menu', 'Session row menu', 'Adds contextual items to an identified native session menu.', 'host:more', 'contextual-action', 'reserved', 'unavailable', RESERVED),
+    descriptor('workspace.toolbar.items', 'surface', 'workspace.toolbar.items', 'Workspace toolbar', 'Adds an action before, after, or inside the menu of a semantic workspace toolbar anchor.', 'host:more', 'action', 'stable', 'available', {
+      anchors: Object.freeze([{ id: 'workspace.primary', placements: Object.freeze(['before', 'after', 'menu'] as const), availability: 'available' }]),
+    }),
+    descriptor('session.header.actions', 'surface', 'session.header.actions', 'Session header actions', 'Adds host-rendered action and utility groups to the active native session header.', 'host:more', 'contextual-action', 'stable', 'available'),
+    descriptor('session.tabs', 'surface', 'session.tabs', 'Session tabs', 'Adds controlled view entries navigated and rendered by the host.', 'host:layers', 'tab', 'reserved', 'unavailable', RESERVED),
+    descriptor('session.banner.items', 'surface', 'session.banner.items', 'Session banners', 'Adds limited structured banners to the active session.', 'host:info', 'presenter', 'reserved', 'unavailable', RESERVED),
+    descriptor('session.message.actions', 'surface', 'session.message.actions', 'Message actions', 'Adds contextual actions to a canonically identified message.', 'host:more', 'contextual-action', 'reserved', 'unavailable', { diagnostic: diagnostic('message-identity', 'Canonical message identity is unavailable.') }),
+    descriptor('session.turn.footer', 'surface', 'session.turn.footer', 'Turn footer', 'Adds a structured presenter after a canonically identified turn.', 'host:info', 'presenter', 'reserved', 'unavailable', RESERVED),
+    descriptor('session.tool.actions', 'surface', 'session.tool.actions', 'Tool actions', 'Adds contextual actions to a canonically identified tool item.', 'host:more', 'contextual-action', 'reserved', 'unavailable', { diagnostic: diagnostic('tool-identity', 'Canonical tool identity is unavailable.') }),
+    descriptor('composer.toolbar.items', 'surface', 'composer.toolbar.items', 'Composer toolbar', 'Adds a host-rendered action at a verified semantic composer anchor.', 'host:more', 'contextual-action', 'stable', 'available', {
+      anchors: Object.freeze([
+        { id: 'submit', placements: Object.freeze(['before'] as const), availability: 'available' },
+        { id: 'leading', placements: Object.freeze(['before', 'after'] as const), availability: 'pending', diagnostic: diagnostic('anchor-unverified', 'This anchor is not release-verified.') },
+        { id: 'model', placements: Object.freeze(['before', 'after', 'menu'] as const), availability: 'pending', diagnostic: diagnostic('anchor-unverified', 'This anchor is not release-verified.') },
+      ]),
+    }),
+    descriptor('composer.command-menu.items', 'surface', 'composer.command-menu.items', 'Composer command menu', 'Adds host-rendered items to the existing native composer command menu.', 'host:more', 'contextual-action', 'experimental', 'pending', PENDING_ANCHOR),
+    descriptor('composer.dock.above', 'surface', 'composer.dock.above', 'Composer dock above', 'Adds a limited structured presenter above the composer.', 'host:info', 'presenter', 'experimental', 'pending', PENDING_ANCHOR),
+    descriptor('composer.dock.below', 'surface', 'composer.dock.below', 'Composer dock below', 'Adds a limited structured presenter below the composer.', 'host:info', 'presenter', 'experimental', 'pending', PENDING_ANCHOR),
+    descriptor('panel.right.header-actions', 'surface', 'panel.right.header-actions', 'Right panel actions', 'Adds contextual actions to a verified visible right panel header.', 'host:more', 'contextual-action', 'experimental', 'pending', PENDING_ANCHOR),
+    descriptor('panel.right.tabs', 'surface', 'panel.right.tabs', 'Right panel tabs', 'Adds host-controlled tabs to the right panel.', 'host:layers', 'tab', 'reserved', 'unavailable', RESERVED),
+    descriptor('panel.bottom.header-actions', 'surface', 'panel.bottom.header-actions', 'Bottom panel actions', 'Adds contextual actions to a verified visible bottom panel header.', 'host:more', 'contextual-action', 'experimental', 'pending', PENDING_ANCHOR),
+    descriptor('panel.bottom.tabs', 'surface', 'panel.bottom.tabs', 'Bottom panel tabs', 'Adds host-controlled tabs to the bottom panel.', 'host:layers', 'tab', 'reserved', 'unavailable', RESERVED),
+    descriptor('environment.panel.header-actions', 'surface', 'environment.panel.header-actions', 'Environment panel header', 'Adds a command action to the environment panel header.', 'host:settings', 'action', 'stable', 'available'),
+    descriptor('environment.panel.sections', 'surface', 'environment.panel.sections', 'Environment panel sections', 'Adds a host-rendered section to the environment panel.', 'host:layers', 'environment-section', 'stable', 'available'),
+    descriptor('environment.section.actions', 'surface', 'environment.section.actions', 'Environment section actions', 'Adds a command action to a declared environment section.', 'host:settings', 'action', 'stable', 'available'),
+    descriptor('environment.section.rows', 'surface', 'environment.section.rows', 'Environment section rows', 'Adds a structured label, value, description, and status row to a declared section.', 'host:info', 'environment-row', 'stable', 'available'),
+    descriptor('environment.row.trailing-actions', 'surface', 'environment.row.trailing-actions', 'Environment row actions', 'Adds an independent command action to the end of a declared environment row.', 'host:more', 'action', 'stable', 'available'),
+    descriptor('app', 'outlet', 'outlet.app', 'Application page', 'Opens a CordisX page over the renderer application region without replacing native content.', 'host:open', 'outlet', 'stable', 'available'),
+    descriptor('main', 'outlet', 'outlet.main', 'Main workspace page', 'Opens a CordisX page over the region to the right of the sidebar and follows the current main context.', 'host:layers', 'outlet', 'stable', 'available'),
+    descriptor('session.content', 'outlet', 'outlet.session.content', 'Session content page', 'Opens a CordisX page below the active session header while preserving side and bottom panels.', 'host:history', 'outlet', 'stable', 'available'),
+    descriptor('panel.right.content', 'outlet', 'outlet.panel.right.content', 'Right panel content', 'Hosts controlled trusted-local page content in the right panel.', 'host:layers', 'outlet', 'reserved', 'unavailable', RESERVED),
+    descriptor('panel.bottom.content', 'outlet', 'outlet.panel.bottom.content', 'Bottom panel content', 'Hosts controlled trusted-local page content in the bottom panel.', 'host:layers', 'outlet', 'reserved', 'unavailable', RESERVED),
   ]),
-}) satisfies CordisXHostExtensionPointCatalogV1
+}) satisfies CordisXHostExtensionPointCatalogV2
 
 const EN_MESSAGES = Object.fromEntries(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG.points.flatMap(point => [
   [point.title.key, point.title.fallback!],
   [point.description.key, point.description.fallback!],
+  ...(point.diagnostic === undefined ? [] : [[point.diagnostic.key, point.diagnostic.fallback!]]),
+  ...(point.anchors ?? []).flatMap(anchor => anchor.diagnostic === undefined ? [] : [[anchor.diagnostic.key, anchor.diagnostic.fallback!]]),
 ]))
 
 const ZH_MESSAGES: Readonly<Record<string, string>> = {
+  ...EN_MESSAGES,
   'sidebar.footer.before-control.title': '侧边栏底部前置操作',
   'sidebar.footer.before-control.description': '在侧边栏底部指定控件左侧添加紧凑操作。',
   'sidebar.footer.after-control.title': '侧边栏底部后置操作',
@@ -635,6 +846,10 @@ const ZH_MESSAGES: Readonly<Record<string, string>> = {
   'sidebar.navigation.items.description': '添加带主操作和独立快捷操作的导航条目。',
   'workspace.toolbar.items.title': '工作区工具栏',
   'workspace.toolbar.items.description': '在语义工具栏锚点前后或菜单中添加操作。',
+  'session.header.actions.title': '会话标题操作',
+  'session.header.actions.description': '向当前原生会话标题添加由宿主渲染的操作和工具分组。',
+  'composer.toolbar.items.title': '输入区工具栏',
+  'composer.toolbar.items.description': '在已验证的语义输入区锚点添加由宿主渲染的操作。',
   'environment.panel.header-actions.title': '环境面板标题操作',
   'environment.panel.header-actions.description': '向环境面板标题区添加命令操作。',
   'environment.panel.sections.title': '环境面板分区',
@@ -651,6 +866,11 @@ const ZH_MESSAGES: Readonly<Record<string, string>> = {
   'outlet.main.description': '在侧边栏右侧区域覆盖 CordisX 页面，并跟随当前主上下文。',
   'outlet.session.content.title': '会话内容页面',
   'outlet.session.content.description': '在当前会话标题下方覆盖 CordisX 页面，同时保留侧边和底部面板。',
+  'diagnostic.anchor': '当前未定位到原生宿主点位。',
+  'diagnostic.anchor-unverified': '该锚点尚未通过发布验证。',
+  'diagnostic.message-identity': '当前无法取得规范消息标识。',
+  'diagnostic.reserved': '协议已保留该点位；当前宿主未开放安全位置。',
+  'diagnostic.tool-identity': '当前无法取得规范工具标识。',
 }
 
 export const CORDISX_EXTENSION_POINT_LOCALE_CATALOGS: readonly CordisXLocaleCatalog[] = Object.freeze([

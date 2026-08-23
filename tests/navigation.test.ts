@@ -398,11 +398,21 @@ describe('NavigationRegistry', () => {
 
     await navigation.navigate('demo', { id: 'route' })
     expect(navigation.snapshot().outlets[0]).toMatchObject({ mounted: true, activeRoute: 'demo:route' })
+    await navigation.navigateFromSurface('demo', { id: 'route' }, 'sidebar.navigation.items', 'demo:navigation')
+    expect(broker.accessDiagnostics().at(-3)).toMatchObject({
+      request: { operation: 'surface.route.navigate', contributionId: 'demo:navigation', routeId: 'demo:route' },
+      authorized: true,
+    })
+    broker.setPolicy(identity, 'sidebar.navigation.items', 'deny')
+    await expect(navigation.navigateFromSurface('demo', { id: 'route' }, 'sidebar.navigation.items', 'demo:navigation')).rejects.toThrow(/denied/)
+    broker.setPolicy(identity, 'sidebar.navigation.items', 'inherit')
+    const disposedBeforeOutletDeny = disposed
+    const hidesBeforeOutletDeny = controller.hides
     broker.setPolicy(identity, 'app', 'deny')
     await navigation.invalidatePointPolicies()
     expect(aborted).toBe(true)
-    expect(disposed).toBe(1)
-    expect(controller.hides).toBe(1)
+    expect(disposed).toBe(disposedBeforeOutletDeny + 1)
+    expect(controller.hides).toBe(hidesBeforeOutletDeny + 1)
     expect(navigation.snapshot().routes[0]).toMatchObject({ valid: true, authorized: false, pointPolicy: 'deny' })
     expect(broker.accessDiagnostics()).toEqual(expect.arrayContaining([
       expect.objectContaining({ request: expect.objectContaining({ operation: 'outlet.page.mount' }), authorized: false }),

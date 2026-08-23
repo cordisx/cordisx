@@ -254,6 +254,11 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.slots.register({ name: 'workspace.toolbar.items', id: 'menu', order: 30 }, {
     anchor: 'workspace.primary', placement: 'menu', ...action(message('action.settings'), 'settings', 'host:settings'),
   })
+  ctx.slots.register({ name: 'session.header.actions', id: 'trace', group: 'action', order: 10 },
+    action(message('action.open-main'), 'open-main', 'host:open'))
+  ctx.slots.register({ name: 'composer.toolbar.items', id: 'submit-before', group: 'action', order: 10 }, {
+    anchor: 'submit', placement: 'before', ...action(message('action.refresh'), 'refresh', 'host:refresh'),
+  })
   ctx.slots.register({ name: 'environment.panel.header-actions', id: 'refresh', order: 10 }, action(message('action.refresh'), 'refresh', 'host:refresh'))
   ctx.slots.register({ name: 'environment.panel.sections', id: 'runtime', order: 10 }, {
     sectionId: 'runtime', title: message('environment.section'), description: message('environment.description'), icon: 'host:info',

@@ -112,14 +112,32 @@ export type CordisXIconToken = `${string}:${string}`
 
 export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v1.schema.json' as const
+export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v2.schema.json' as const
 export const CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-policy.v1.schema.json' as const
 export const CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-access.v1.schema.json' as const
+export const CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-access.v2.schema.json' as const
+export const CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/surface-invocation-context.v1.schema.json' as const
 
 export type CordisXExtensionPointKind = 'surface' | 'outlet'
 export type CordisXPointPolicy = 'inherit' | 'allow' | 'deny'
 export type CordisXEffectivePointPolicy = 'allow' | 'deny'
+export type CordisXExtensionPointPayloadFamily =
+  | 'action'
+  | 'menu-item'
+  | 'contextual-action'
+  | 'tab'
+  | 'presenter'
+  | 'navigation-item'
+  | 'environment-section'
+  | 'environment-row'
+  | 'outlet'
+export type CordisXExtensionPointStability = 'stable' | 'experimental' | 'reserved'
+export type CordisXExtensionPointAvailability = 'available' | 'pending' | 'unavailable'
 
 /** Protocol-v1 host-owned identity for one structured surface or controlled outlet. */
 export interface CordisXHostExtensionPointDescriptor {
@@ -134,6 +152,28 @@ export interface CordisXHostExtensionPointCatalogV1 {
   readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1
   readonly schemaVersion: 1
   readonly points: readonly CordisXHostExtensionPointDescriptor[]
+}
+
+export interface CordisXHostExtensionPointAnchorDescriptorV2 {
+  readonly id: string
+  readonly placements: readonly ('before' | 'after' | 'menu')[]
+  readonly availability: CordisXExtensionPointAvailability
+  readonly diagnostic?: CordisXLocalizedText
+}
+
+/** Protocol-v2 descriptor. Stability is a product promise; availability is a live host fact. */
+export interface CordisXHostExtensionPointDescriptorV2 extends CordisXHostExtensionPointDescriptor {
+  readonly payloadFamily: CordisXExtensionPointPayloadFamily
+  readonly stability: CordisXExtensionPointStability
+  readonly availability: CordisXExtensionPointAvailability
+  readonly diagnostic?: CordisXLocalizedText
+  readonly anchors?: readonly CordisXHostExtensionPointAnchorDescriptorV2[]
+}
+
+export interface CordisXHostExtensionPointCatalogV2 {
+  readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2
+  readonly schemaVersion: 2
+  readonly points: readonly CordisXHostExtensionPointDescriptorV2[]
 }
 
 /** Launcher-bound canonical tuple; plugins never provide or override source. */
@@ -188,6 +228,52 @@ export type CordisXExtensionPointAccessV1 =
   | CordisXOutletPageAccessV1
   | CordisXOutletPageCommandAccessV1
 
+interface CordisXExtensionPointAccessBaseV2 {
+  readonly $schema: typeof CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2
+  readonly schemaVersion: 2
+  readonly generation: string
+  readonly identity: CordisXExtensionPointIdentity
+}
+
+export interface CordisXSurfaceCommandAccessV2 extends CordisXExtensionPointAccessBaseV2 {
+  readonly operation: 'surface.command.invoke'
+  readonly contributionId: string
+  readonly commandId: string
+}
+
+export interface CordisXSurfaceRouteAccessV2 extends CordisXExtensionPointAccessBaseV2 {
+  readonly operation: 'surface.route.navigate'
+  readonly contributionId: string
+  readonly routeId: string
+}
+
+export interface CordisXOutletRouteAccessV2 extends CordisXExtensionPointAccessBaseV2 {
+  readonly operation: 'outlet.route.navigate'
+  readonly routeId: string
+  readonly pageId: string
+}
+
+export interface CordisXOutletPageAccessV2 extends CordisXExtensionPointAccessBaseV2 {
+  readonly operation: 'outlet.page.mount'
+  readonly routeId: string
+  readonly pageId: string
+}
+
+export interface CordisXOutletPageCommandAccessV2 extends CordisXExtensionPointAccessBaseV2 {
+  readonly operation: 'outlet.page.command.invoke'
+  readonly routeId: string
+  readonly pageId: string
+  readonly actionId: string
+  readonly commandId: string
+}
+
+export type CordisXExtensionPointAccessV2 =
+  | CordisXSurfaceCommandAccessV2
+  | CordisXSurfaceRouteAccessV2
+  | CordisXOutletRouteAccessV2
+  | CordisXOutletPageAccessV2
+  | CordisXOutletPageCommandAccessV2
+
 export type CordisXWhen =
   | { readonly key: string; readonly exists: boolean }
   | { readonly key: string; readonly equals: CordisXJsonScalar }
@@ -215,11 +301,13 @@ export interface CordisXStructuredAction {
   readonly label: CordisXLocalizedText
   readonly ariaLabel?: CordisXLocalizedText
   readonly icon?: CordisXIconToken
-  readonly command: CordisXCommandReference
+  readonly command?: CordisXCommandReference
+  readonly route?: CordisXRouteReference
 }
 
 export interface CordisXNavigationAction extends CordisXStructuredAction {
   readonly id: string
+  readonly command: CordisXCommandReference
   readonly when?: CordisXWhen
   readonly disabled?: CordisXDisabledState
 }
@@ -238,6 +326,27 @@ export interface CordisXToolbarItem extends CordisXStructuredAction {
   readonly placement: 'before' | 'after' | 'menu'
 }
 
+export interface CordisXTabItem {
+  readonly id: string
+  readonly title: CordisXLocalizedText
+  readonly icon?: CordisXIconToken
+  readonly route: CordisXRouteReference
+  readonly badge?: CordisXLocalizedText | string | number
+  readonly order?: number
+  readonly when?: CordisXWhen
+}
+
+export interface CordisXPresenterItem {
+  readonly kind: 'banner' | 'status' | 'chip' | 'progress'
+  readonly text: CordisXLocalizedText
+  readonly detail?: CordisXLocalizedText
+  readonly icon?: CordisXIconToken
+  readonly tone?: 'neutral' | 'info' | 'success' | 'warning' | 'error'
+  readonly command?: CordisXCommandReference
+  readonly route?: CordisXRouteReference
+  readonly progress?: Readonly<{ current: number; total: number }>
+}
+
 export interface CordisXEnvironmentSection {
   readonly sectionId: string
   readonly title: CordisXLocalizedText
@@ -247,6 +356,7 @@ export interface CordisXEnvironmentSection {
 
 export interface CordisXEnvironmentSectionAction extends CordisXStructuredAction {
   readonly sectionId: string
+  readonly command: CordisXCommandReference
 }
 
 export interface CordisXEnvironmentRow {
@@ -260,6 +370,7 @@ export interface CordisXEnvironmentRow {
 
 export interface CordisXEnvironmentRowAction extends CordisXStructuredAction {
   readonly rowId: string
+  readonly command: CordisXCommandReference
 }
 
 /** Extensible structured-surface vocabulary. Plugins may augment this map. */
@@ -269,7 +380,24 @@ export interface CordisXSurfaceMap {
   'sidebar.footer.menu': CordisXStructuredAction
   'sidebar.account.menu': CordisXStructuredAction
   'sidebar.navigation.items': CordisXNavigationItem
+  'sidebar.workspace.menu': CordisXStructuredAction
+  'sidebar.session.actions': CordisXStructuredAction
+  'sidebar.session.menu': CordisXStructuredAction
   'workspace.toolbar.items': CordisXToolbarItem
+  'session.header.actions': CordisXStructuredAction
+  'session.tabs': CordisXTabItem
+  'session.banner.items': CordisXPresenterItem
+  'session.message.actions': CordisXStructuredAction
+  'session.turn.footer': CordisXPresenterItem
+  'session.tool.actions': CordisXStructuredAction
+  'composer.toolbar.items': CordisXToolbarItem
+  'composer.command-menu.items': CordisXStructuredAction
+  'composer.dock.above': CordisXPresenterItem
+  'composer.dock.below': CordisXPresenterItem
+  'panel.right.header-actions': CordisXStructuredAction
+  'panel.right.tabs': CordisXTabItem
+  'panel.bottom.header-actions': CordisXStructuredAction
+  'panel.bottom.tabs': CordisXTabItem
   'environment.panel.header-actions': CordisXStructuredAction
   'environment.panel.sections': CordisXEnvironmentSection
   'environment.section.actions': CordisXEnvironmentSectionAction
@@ -285,7 +413,40 @@ export const CORDISX_SURFACE_NAMES = [
   'sidebar.footer.menu',
   'sidebar.account.menu',
   'sidebar.navigation.items',
+  'sidebar.workspace.menu',
+  'sidebar.session.actions',
+  'sidebar.session.menu',
   'workspace.toolbar.items',
+  'session.header.actions',
+  'session.tabs',
+  'session.banner.items',
+  'session.message.actions',
+  'session.turn.footer',
+  'session.tool.actions',
+  'composer.toolbar.items',
+  'composer.command-menu.items',
+  'composer.dock.above',
+  'composer.dock.below',
+  'panel.right.header-actions',
+  'panel.right.tabs',
+  'panel.bottom.header-actions',
+  'panel.bottom.tabs',
+  'environment.panel.header-actions',
+  'environment.panel.sections',
+  'environment.section.actions',
+  'environment.section.rows',
+  'environment.row.trailing-actions',
+] as const satisfies readonly CordisXSurfaceName[]
+
+export const CORDISX_IMPLEMENTED_SURFACE_NAMES = [
+  'sidebar.footer.before-control',
+  'sidebar.footer.after-control',
+  'sidebar.footer.menu',
+  'sidebar.account.menu',
+  'sidebar.navigation.items',
+  'workspace.toolbar.items',
+  'session.header.actions',
+  'composer.toolbar.items',
   'environment.panel.header-actions',
   'environment.panel.sections',
   'environment.section.actions',
@@ -332,6 +493,34 @@ export interface CordisXCommandContext {
   readonly arguments: CordisXJsonValue | undefined
   readonly signal: AbortSignal
   readonly invocationKey: string
+  readonly hostContext?: CordisXSurfaceInvocationContextV1
+}
+
+export interface CordisXSurfaceInvocationContextV1 {
+  readonly $schema: typeof CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1
+  readonly schemaVersion: 1
+  readonly generation: string
+  readonly contextRef: string
+  readonly pointId: string
+  readonly contributionId: string
+  readonly commandId: string
+  readonly provenance: 'observed' | 'cordisx' | 'inferred'
+  readonly source:
+    | Readonly<{ kind: 'adapter'; adapterId: string; adapterVersion: string; hostId: string }>
+    | Readonly<{ kind: 'cordisx'; component: string; generation: string }>
+  readonly identity: Readonly<{
+    workspaceRef?: string
+    agent?: Readonly<{
+      sessionKey: string
+      turnId?: string
+      stepId?: string
+      itemId?: string
+      messageId?: string
+      toolCallId?: string
+    }>
+    platformSession?: Readonly<{ providerId: string; remoteSessionId: string }>
+    contextId?: string
+  }>
 }
 
 export type CordisXCommandHandler = (context: CordisXCommandContext) => unknown | Promise<unknown>
@@ -359,6 +548,7 @@ export interface CordisXPageTab {
 /** Host-rendered page-chrome action. Plugins provide data and a command reference only. */
 export interface CordisXPageHeaderAction extends CordisXStructuredAction {
   readonly id: string
+  readonly command: CordisXCommandReference
   readonly when?: CordisXWhen
   readonly disabled?: CordisXDisabledState
 }

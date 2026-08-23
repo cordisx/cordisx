@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SurfaceRegistry } from '../packages/cli/src/renderer/surfaces.js'
+import { partitionDirectActions } from '../packages/cli/src/renderer/adapter.js'
 import { HostContextStore } from '../packages/cli/src/renderer/validation.js'
 import {
   CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
@@ -9,6 +10,11 @@ import {
 } from '../packages/cli/src/renderer/extension-points.js'
 
 describe('SurfaceRegistry', () => {
+  it('partitions deterministic registry order into host-owned direct and overflow actions', () => {
+    const partition = partitionDirectActions(['action-1', 'action-2', 'utility-1', 'utility-2'], 3)
+    expect(partition).toEqual({ direct: ['action-1', 'action-2', 'utility-1'], overflow: ['utility-2'] })
+    expect(Object.isFrozen(partition)).toBe(true)
+  })
   it('retains immutable data, sorts deterministically, and replaces snapshots through an owned handle', () => {
     const contexts = new HostContextStore()
     contexts.replace({ enabled: true })
