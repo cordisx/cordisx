@@ -85,6 +85,35 @@ state, while a changed key aborts/disposes the page. Native React nodes remain
 in place, visible, and subscribed. The complete contract and test matrix live
 in [`data-contribution-routing.md`](data-contribution-routing.md).
 
+Structured shell surfaces are not page overlays. The private Codex adapter
+projects them through minimal host-owned insertion seats in the resolved native
+layout. Buttons sit before or after their semantic control, navigation rows
+join the native list, and environment rows and sections join the native panel.
+If a precise seat is unavailable the contribution remains pending; the adapter
+does not fall back to a fixed covering card. Mutation repair may reinsert a
+detached seat after React replaces its parent, but plugins never receive that
+DOM.
+
+Native menu contributions use the same boundary: CordisX inserts host-rendered
+rows into the opened Codex Help or account menu and never adds an independent
+fallback menu trigger. Compact shell actions are icon-only and inherit the
+interaction pattern of adjacent native Codex controls.
+
+Route and page outlets remain independent overlays. `app` paints through the
+native title-bar and supplies its own draggable chrome with a macOS
+traffic-light safe inset; `main` paints the entire region to the right of the
+sidebar from `y=0` and supplies draggable chrome there. Interactive controls
+are always explicit `no-drag` regions. This keeps native window dragging and
+ordinary page controls from competing for the same hit-test region.
+
+Both chrome variants are the same host-owned structured projection. Plugins
+declare only validated title/icon/breadcrumb/tab/action data, and header
+actions reference commands that the host dispatches after checking the active
+outlet policy. Plugins receive a body mount container, never a header seat,
+node, component, or render callback. Covering the native header therefore
+changes geometry only; it does not transfer shell rendering authority to the
+plugin.
+
 The host may improve selectors without requiring plugin changes. Plugins that query Codex DOM directly opt out of that compatibility boundary.
 
 ### Built-in manager plane

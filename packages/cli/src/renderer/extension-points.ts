@@ -257,6 +257,7 @@ export interface ExtensionPointAccessResolver {
   authorizeSurfaceCommand(owner: string, pointId: string, contributionId: string, commandId: string): ExtensionPointAccessDecision
   authorizeOutletRoute(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision
   authorizeOutletPage(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision
+  authorizeOutletPageCommand(owner: string, pointId: string, routeId: string, pageId: string, actionId: string, commandId: string): ExtensionPointAccessDecision
 }
 
 export interface ExtensionPointAccessDiagnostic {
@@ -276,6 +277,7 @@ type ExtensionPointAccessFields =
   | { readonly operation: 'surface.command.invoke'; readonly contributionId: string; readonly commandId: string }
   | { readonly operation: 'outlet.route.navigate'; readonly routeId: string; readonly pageId: string }
   | { readonly operation: 'outlet.page.mount'; readonly routeId: string; readonly pageId: string }
+  | { readonly operation: 'outlet.page.command.invoke'; readonly routeId: string; readonly pageId: string; readonly actionId: string; readonly commandId: string }
 
 export interface ExtensionPointPluginUsageSnapshot {
   readonly identity: CordisXPluginIdentity
@@ -501,6 +503,20 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
     return this.recordAccess(decision, { operation: 'outlet.page.mount', routeId, pageId })
   }
 
+  authorizeOutletPageCommand(
+    owner: string,
+    pointId: string,
+    routeId: string,
+    pageId: string,
+    actionId: string,
+    commandId: string,
+  ): ExtensionPointAccessDecision {
+    const decision = this.decision(owner, pointId, 'outlet')
+    return this.recordAccess(decision, {
+      operation: 'outlet.page.command.invoke', routeId, pageId, actionId, commandId,
+    })
+  }
+
   policiesSnapshot(): readonly CordisXExtensionPointPolicyRecordV1[] {
     return [...this.policies.values()]
       .filter(record => this.descriptors.descriptor(record.identity.pointId) !== undefined)
@@ -587,6 +603,7 @@ export const CORDISX_BUILTIN_EXTENSION_POINT_CATALOG = Object.freeze({
     descriptor('sidebar.footer.before-control', 'surface', 'sidebar.footer.before-control', 'Sidebar footer before control', 'Adds a compact action before the designated sidebar footer control.', 'host:open'),
     descriptor('sidebar.footer.after-control', 'surface', 'sidebar.footer.after-control', 'Sidebar footer after control', 'Adds a compact action after the designated sidebar footer control.', 'host:open'),
     descriptor('sidebar.footer.menu', 'surface', 'sidebar.footer.menu', 'Sidebar footer menu', 'Adds a host-rendered command to the designated footer control menu.', 'host:more'),
+    descriptor('sidebar.account.menu', 'surface', 'sidebar.account.menu', 'Sidebar account menu', 'Adds a host-rendered command to the native account/profile menu.', 'host:more'),
     descriptor('sidebar.navigation.items', 'surface', 'sidebar.navigation.items', 'Sidebar navigation', 'Adds a navigation row with a primary action and optional independent shortcuts.', 'host:layers'),
     descriptor('workspace.toolbar.items', 'surface', 'workspace.toolbar.items', 'Workspace toolbar', 'Adds an action before, after, or inside the menu of a semantic workspace toolbar anchor.', 'host:more'),
     descriptor('environment.panel.header-actions', 'surface', 'environment.panel.header-actions', 'Environment panel header', 'Adds a command action to the environment panel header.', 'host:settings'),
@@ -612,6 +629,8 @@ const ZH_MESSAGES: Readonly<Record<string, string>> = {
   'sidebar.footer.after-control.description': '在侧边栏底部指定控件右侧添加紧凑操作。',
   'sidebar.footer.menu.title': '侧边栏底部菜单',
   'sidebar.footer.menu.description': '向侧边栏底部指定控件的菜单添加宿主渲染命令。',
+  'sidebar.account.menu.title': '侧边栏账户菜单',
+  'sidebar.account.menu.description': '向原生账户或个人资料菜单添加宿主渲染命令。',
   'sidebar.navigation.items.title': '侧边栏导航',
   'sidebar.navigation.items.description': '添加带主操作和独立快捷操作的导航条目。',
   'workspace.toolbar.items.title': '工作区工具栏',

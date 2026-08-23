@@ -165,9 +165,15 @@ export function apply(ctx: Context, config: Config = {}): void {
     title: message('page.app.title'),
     icon: 'host:layers',
     localeNamespace: 'showcase',
+    headerActions: [{
+      id: 'refresh',
+      label: message('action.refresh'),
+      icon: 'host:refresh',
+      command: { id: 'refresh' },
+    }],
     tabs: [
-      { id: 'overview', label: message('page.tab.overview') },
-      { id: 'details', label: message('page.tab.details') },
+      { id: 'overview', label: message('page.tab.overview'), icon: 'host:layers' },
+      { id: 'details', label: message('page.tab.details'), icon: 'host:info' },
     ],
   }, context => mountCard(context, message('page.app.body')))
   ctx.pages.register<Messages>({
@@ -175,6 +181,12 @@ export function apply(ctx: Context, config: Config = {}): void {
     title: message('page.main.title'),
     icon: 'host:analytics',
     localeNamespace: 'showcase',
+    headerActions: [{
+      id: 'refresh',
+      label: message('action.refresh'),
+      icon: 'host:refresh',
+      command: { id: 'refresh' },
+    }],
   }, context => mountCard(context, message('page.main.body')))
   ctx.pages.register<Messages>({
     id: 'session.analytics',
@@ -218,6 +230,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.slots.register({ name: 'sidebar.footer.before-control', id: 'open-app', order: 10 }, action(message('action.open-app'), 'open-app', 'host:open'))
   ctx.slots.register({ name: 'sidebar.footer.after-control', id: 'settings', order: 20 }, action(message('action.settings'), 'settings', 'host:settings'))
   ctx.slots.register({ name: 'sidebar.footer.menu', id: 'refresh', order: 10 }, action(message('action.refresh'), 'refresh', 'host:refresh'))
+  ctx.slots.register({ name: 'sidebar.account.menu', id: 'settings', order: 10 }, action(message('action.settings'), 'settings', 'host:settings'))
   ctx.slots.register({ name: 'sidebar.navigation.items', id: 'main-page', order: 10 }, {
     label: message('navigation.title'),
     description: message('navigation.description'),

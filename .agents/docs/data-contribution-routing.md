@@ -92,8 +92,9 @@ The `cordisx` private adapter/runtime owns all Codex-specific behavior:
 - DOM probes, semantic anchors, native-session matching, and `contextKey`;
 - outlet declaration and runtime schema validation;
 - host icon-token implementation and structured DOM renderers;
-- absolute overlay insertion, body portal fallback, `ResizeObserver`, geometry,
-  z-index, mutation signals, and anchor repair;
+- native-layout insertion seats for structured surfaces, plus route/page
+  absolute overlays, body portal fallback, `ResizeObserver`, geometry, z-index,
+  mutation signals, and anchor repair;
 - command loading/error UI, overflow/menu mechanics, focus, keyboard, and
   accessibility behavior;
 - projection of retained message references through the injected localization
@@ -198,6 +199,7 @@ The initial surface registry includes at least:
 | `sidebar.footer.before-control` | compact action before the designated native control |
 | `sidebar.footer.after-control` | compact action after the designated native control |
 | `sidebar.footer.menu` | command menu item in the designated control menu |
+| `sidebar.account.menu` | command menu item in the native account/profile menu |
 | `sidebar.navigation.items` | main navigation row with primary activation and independent trailing actions |
 | `workspace.toolbar.items` | action before, after, or in the menu of a declared semantic toolbar anchor |
 | `environment.panel.header-actions` | panel-header command action |
@@ -213,6 +215,52 @@ gives every action an independent accessible label and command state.
 Toolbar contributions name a semantic host anchor plus `before`, `after`, or
 `menu`; plugins cannot submit selectors. An unavailable anchor keeps the entry
 pending and diagnosed.
+
+### Native surface insertion seats
+
+Structured shell surfaces and route/page outlets deliberately use different
+projection mechanisms:
+
+- a **surface** is rendered into an adapter-owned insertion seat that
+  participates in the native layout beside or inside the resolved semantic
+  control; and
+- an **outlet** remains a CordisX-owned overlay over a declared content region.
+
+A surface seat may be an externally inserted DOM island, but it is not a visual
+overlay. The Codex adapter inserts the smallest host-owned container at the
+resolved native sibling/child position, lets normal flex/grid layout size it,
+and removes or reattaches that container with the renderer generation. React
+may detach an external island when it replaces or clears the native parent, so
+the mutation observer repairs the same seat after re-resolving the semantic
+anchor. Plugins never receive the parent, anchor, seat, or selector.
+
+Interactive surface projection must satisfy all of these rules:
+
+- no fixed-position fallback, broad covering card, or geometry clone is
+  allowed for a shell button, navigation row, menu trigger, section, or row;
+- if the adapter cannot resolve one unique insertion position, the affected
+  contribution stays pending and native content remains untouched;
+- the seat has no product-visible border, background, shadow, or width beyond
+  its rendered content unless the native layout contract explicitly allocates
+  a full row or section;
+- every title-bar surface seat and interactive descendant is an Electron
+  `no-drag` region, while noninteractive native title-bar space remains
+  draggable;
+- menu contributions mount inside the corresponding native menu after its
+  native trigger opens; they never create a CordisX-owned fallback trigger or
+  a parallel `CX` menu;
+- toolbar and sidebar-footer actions are icon-only controls. Their localized
+  label remains available through the accessible name and native tooltip, and
+  their size, hover, focus, disabled, and pressed behavior follow the adjacent
+  native control pattern; and
+- insertion, reattachment, and disposal must preserve the identity, parent,
+  visibility, event flow, and data updates of every native React node.
+
+The first Codex adapter projects sidebar navigation into the native navigation
+list, sidebar footer actions around the designated footer control, workspace
+toolbar actions around the declared toolbar anchor, and environment
+sections/actions/rows into the native environment panel layout. These probes
+are private adapter details and may vary by verified Codex version.
 
 Environment sections and rows use snapshot/update handles for dynamic values.
 Rows contain text, host-token status, and command references only. Section and
@@ -290,16 +338,31 @@ returns within that CordisX stack, and close clears the current CordisX page to
 reveal the untouched native content. These operations do not call
 `history.pushState`, change the browser URL, or invoke Codex routing APIs.
 
-Host page chrome owns title, close/back controls, breadcrumb rendering, and
-declared tabs where possible. The page mount receives the body container. A
+Host page chrome owns title, icon, close/back controls, breadcrumb rendering,
+declared tabs, and declared header actions. This rule is identical for `app`,
+`main`, and every future outlet: covering a native header does not give the
+plugin a header DOM seat. Page metadata is a closed, schema-validated data
+record. A header action may name only a local id, localized label and accessible
+name, a host icon token, a command reference, and optional host-evaluated
+visibility/disabled state. Arbitrary `Node`, component, render callback, raw
+HTML, `children`, or header mount container values are rejected.
+
+The host renders those values through one chrome component and owns layout,
+macOS safe insets, drag/no-drag regions, native button interaction, i18n,
+keyboard/a11y behavior, command dispatch, and current outlet-policy checks.
+The page mount receives only the scrollable body container after that chrome;
+it cannot replace or append to the host header through the page API. A
 framework-agnostic mount may use DOM or attach its own framework root inside
-that container. This trusted-local mount is controlled lifecycle composition,
-not a permission sandbox; an isolated realm or MCP UI bridge remains a later
-migration path.
+the body container. This trusted-local mount is controlled lifecycle
+composition, not a permission sandbox: trusted renderer code can still query
+the document on its own, while an isolated realm or MCP UI bridge remains a
+later migration path.
 
 ## Overlay insertion and native-DOM safety
 
-Routes are insertion overlays over native content, never replacements.
+Routes are insertion overlays over native content, never replacements. This
+section applies to outlets only; structured shell surfaces use the native
+insertion seats defined above.
 
 - `app` appends one fixed CordisX host layer under `body` and covers the
   renderer application rectangle.
@@ -308,6 +371,18 @@ Routes are insertion overlays over native content, never replacements.
 - If no reliable positioned anchor exists, the adapter appends a fixed body
   portal and tracks the resolved rectangle with `ResizeObserver`, scroll/resize
   signals, and bounded geometry updates.
+
+The `app` outlet paints from the window origin and therefore covers the native
+title-bar background. Its host-owned page chrome becomes the drag region while
+back, close, tabs, and every other interactive descendant remain explicit
+`no-drag` regions. On macOS, the chrome derives a horizontal traffic-light safe
+inset from the resolved native title-bar controls, so page controls never sit
+under the red/yellow/green window buttons.
+
+The `main` outlet covers the complete region to the right of the sidebar from
+`y=0`; the sidebar keeps the macOS traffic lights, while the main page chrome
+provides the draggable region on the right. `session.content` alone derives its
+top boundary from the native session-content anchor below the session header.
 
 The adapter must not call `replaceWith`, `remove`, `append` on a native child for
 reparenting, set `display:none` on native content, clear native children, or

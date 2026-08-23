@@ -13,11 +13,11 @@ import {
 } from '../packages/cli/src/contracts.js'
 
 describe('extension point runtime contract', () => {
-  it('declares exactly thirteen retained host descriptors and diagnoses cross-family duplicates', () => {
+  it('declares exactly fourteen retained host descriptors and diagnoses cross-family duplicates', () => {
     const registry = new ExtensionPointDescriptorRegistry()
     const remove = registry.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
-    expect(registry.descriptors()).toHaveLength(13)
-    expect(registry.descriptors().filter(item => item.kind === 'surface')).toHaveLength(10)
+    expect(registry.descriptors()).toHaveLength(14)
+    expect(registry.descriptors().filter(item => item.kind === 'surface')).toHaveLength(11)
     expect(registry.descriptors().filter(item => item.kind === 'outlet')).toHaveLength(3)
     expect(registry.descriptor('session.content')).toMatchObject({
       kind: 'outlet',

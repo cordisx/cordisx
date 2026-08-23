@@ -3,6 +3,7 @@ import type {
   CordisXJsonScalar,
   CordisXMessageDefinition,
   CordisXOutletName,
+  CordisXPageHeaderAction,
   CordisXPageMetadata,
   CordisXPageMount,
   CordisXPageMountContext,
@@ -11,8 +12,10 @@ import type {
   CordisXRouteReference,
   CordisXRoutes,
 } from '../contracts.js'
+import type { CordisXCommandService } from './commands.js'
 import { CordisXI18nService, type LocalizationEffectOwner } from './i18n.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
+import { createHostSurfaceIcon } from './icons.js'
 import { ownerFromContext, qualifyOwnedId } from './ownership.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
 import {
@@ -161,6 +164,47 @@ function assertHostIcon(icon: string | undefined, label: string): void {
   }
 }
 
+function assertPageHeaderAction(action: CordisXPageHeaderAction, label: string): void {
+  assertKeys(action, ['id', 'label', 'ariaLabel', 'icon', 'command', 'when', 'disabled'], label)
+  assertLocalId(action.id, `${label} id`)
+  assertLocalizedText(action.label, `${label} label`)
+  if (action.ariaLabel !== undefined) assertLocalizedText(action.ariaLabel, `${label} ariaLabel`)
+  assertHostIcon(action.icon, label)
+  if (action.command === null || typeof action.command !== 'object') throw new Error(`${label} requires a command reference`)
+  assertKeys(action.command, ['id', 'arguments'], `${label} command`)
+  assertReference(action.command.id, `${label} command id`)
+  assertWhenExpression(action.when)
+  if (action.disabled !== undefined) {
+    assertKeys(action.disabled, ['value', 'reason'], `${label} disabled state`)
+    if (typeof action.disabled.value !== 'boolean') throw new Error(`${label} disabled.value must be a boolean`)
+    if (action.disabled.reason !== undefined) assertLocalizedText(action.disabled.reason, `${label} disabled reason`)
+  }
+}
+
+function pageChromeButton(document: Document, ariaLabel: string, icon: string): HTMLButtonElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.setAttribute('aria-label', ariaLabel)
+  button.dataset.cordisxNoDrag = 'true'
+  button.style.setProperty('-webkit-app-region', 'no-drag')
+  const Button = document.defaultView?.HTMLButtonElement
+  const template = [...document.querySelectorAll('header[data-app-shell-application-menu-bar] button')]
+    .find((candidate): candidate is HTMLButtonElement => Button !== undefined
+      && candidate instanceof Button
+      && candidate.closest('[data-cordisx-page-outlet]') === null)
+  if (template !== undefined) {
+    button.className = template.className
+  } else {
+    Object.assign(button.style, {
+      width: '30px', height: '30px', border: '1px solid transparent', borderRadius: '8px',
+      background: 'transparent', color: 'inherit', cursor: 'pointer', padding: '5px',
+    })
+  }
+  button.classList.add('cordisx-page-chrome-action')
+  button.append(createHostSurfaceIcon(document, icon))
+  return button
+}
+
 export class PageRegistry {
   private readonly records = new Map<string, PageRecord>()
   private readonly listeners = new Set<() => void>()
@@ -173,7 +217,7 @@ export class PageRegistry {
   ): () => void {
     if (this.disposed) throw new Error('CordisX page registry is disposed')
     assertLocalId(owner, 'page owner')
-    assertKeys(metadata, ['id', 'title', 'icon', 'breadcrumbs', 'tabs', 'localeNamespace'], 'page metadata')
+    assertKeys(metadata, ['id', 'title', 'icon', 'breadcrumbs', 'tabs', 'headerActions', 'localeNamespace'], 'page metadata')
     assertLocalId(metadata.id, 'page id')
     assertLocalizedText(metadata.title, 'page title')
     assertHostIcon(metadata.icon, 'page')
@@ -187,6 +231,12 @@ export class PageRegistry {
       tabIds.add(tab.id)
       assertLocalizedText(tab.label, 'page tab label')
       assertHostIcon(tab.icon, 'page tab')
+    }
+    const actionIds = new Set<string>()
+    for (const action of metadata.headerActions ?? []) {
+      assertPageHeaderAction(action, 'page header action')
+      if (actionIds.has(action.id)) throw new Error(`page ${metadata.id} has duplicate header action ${action.id}`)
+      actionIds.add(action.id)
     }
     if (typeof mount !== 'function') throw new Error(`page ${metadata.id} requires a mount callback`)
     const qualifiedId = qualifyOwnedId(owner, metadata.id)
@@ -340,6 +390,7 @@ export class NavigationRegistry {
     private readonly i18n: CordisXI18nService,
     readonly contexts: HostContextStore = new HostContextStore(),
     private access?: ExtensionPointAccessResolver,
+    private readonly commands?: Pick<CordisXCommandService, 'hasFor' | 'executeFor' | 'subscribeInternal'>,
   ) {
     this.unsubscribePages = pages.subscribe(() => { void this.enqueue(() => this.reconcileDependencies()) })
     this.unsubscribeOutlets = outlets.subscribe(() => { void this.enqueue(() => this.reconcileDependencies()) })
@@ -573,6 +624,8 @@ export class NavigationRegistry {
       position: 'absolute', inset: '0', display: 'flex', flexDirection: 'column', overflow: 'hidden',
       background: '#10131a', color: '#eef0f5', font: '13px/1.45 ui-sans-serif, system-ui, sans-serif',
     })
+    content.dataset.cordisxNoDrag = 'true'
+    content.style.setProperty('-webkit-app-region', 'no-drag')
     host.container.append(content)
     const abort = new AbortController()
     const effects: Disposable<void>[] = []
@@ -597,34 +650,84 @@ export class NavigationRegistry {
     try {
       const chrome = content.ownerDocument.createElement('header')
       chrome.dataset.cordisxPageChrome = 'true'
+      chrome.dataset.cordisxDrag = 'true'
       Object.assign(chrome.style, {
         display: 'flex', alignItems: 'center', gap: '8px', minHeight: '46px', padding: '0 12px',
         borderBottom: '1px solid rgba(255,255,255,.1)', background: '#161a23', flex: '0 0 auto',
       })
-      const back = content.ownerDocument.createElement('button')
-      back.type = 'button'
-      back.textContent = '←'
-      back.setAttribute('aria-label', 'Back')
+      chrome.style.paddingLeft = 'max(12px, var(--cordisx-page-chrome-safe-left, 0px))'
+      chrome.style.setProperty('-webkit-app-region', 'drag')
+      const back = pageChromeButton(content.ownerDocument, 'Back', 'host:back')
       back.disabled = state.stack.length < 2
       back.addEventListener('click', () => { void this.back(page.owner, name as CordisXOutletName) })
+      const titleGroup = content.ownerDocument.createElement('div')
+      titleGroup.dataset.cordisxPageTitle = 'true'
+      titleGroup.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;flex:1'
+      if (page.metadata.icon !== undefined) titleGroup.append(createHostSurfaceIcon(content.ownerDocument, page.metadata.icon))
       const title = content.ownerDocument.createElement('strong')
-      title.style.flex = '1'
+      title.style.cssText = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
       const titleMessage = entry.record.definition.title ?? page.metadata.title
       const titleSite = `page:${page.qualifiedId}:chrome.title`
       localization.effect(() => {
         title.textContent = this.i18n.resolveFor(page.owner, titleMessage, titleSite).text
         return () => this.i18n.clearDiagnosticSite(page.owner, titleSite)
       })
-      const close = content.ownerDocument.createElement('button')
-      close.type = 'button'
-      close.textContent = '×'
-      close.setAttribute('aria-label', 'Close')
+      titleGroup.append(title)
+      const close = pageChromeButton(content.ownerDocument, 'Close', 'host:close')
       close.addEventListener('click', () => { void this.close(page.owner, name as CordisXOutletName) })
-      for (const button of [back, close]) Object.assign(button.style, {
-        width: '30px', height: '30px', border: '1px solid rgba(255,255,255,.14)', borderRadius: '8px',
-        background: 'rgba(255,255,255,.06)', color: 'inherit', cursor: 'pointer',
-      })
-      chrome.append(back, title, close)
+      chrome.append(back, titleGroup)
+      for (const action of page.metadata.headerActions ?? []) {
+        const button = pageChromeButton(content.ownerDocument, action.id, action.icon ?? 'host:more')
+        button.dataset.cordisxPageHeaderAction = action.id
+        const labelSite = `page:${page.qualifiedId}:chrome.actions.${action.id}.label`
+        const disabledSite = `page:${page.qualifiedId}:chrome.actions.${action.id}.disabled`
+        localization.effect(() => {
+          const accessible = this.i18n.resolveFor(page.owner, action.ariaLabel ?? action.label, labelSite).text
+          button.setAttribute('aria-label', accessible)
+          const disabledReason = action.disabled?.reason === undefined
+            ? undefined
+            : this.i18n.resolveFor(page.owner, action.disabled.reason, disabledSite).text
+          button.title = action.disabled?.value === true && disabledReason !== undefined ? disabledReason : accessible
+          return () => {
+            this.i18n.clearDiagnosticSite(page.owner, labelSite)
+            this.i18n.clearDiagnosticSite(page.owner, disabledSite)
+          }
+        })
+        const refresh = (): void => {
+          button.hidden = !evaluateWhen(action.when, this.contexts.getSnapshot())
+          button.disabled = action.disabled?.value === true || !(this.commands?.hasFor(page.owner, action.command) ?? false)
+        }
+        refresh()
+        effects.push(this.contexts.subscribe(refresh))
+        if (this.commands !== undefined) effects.push(this.commands.subscribeInternal(refresh))
+        button.addEventListener('click', () => {
+          if (button.disabled || button.hidden || this.commands === undefined) return
+          const commandId = qualifyOwnedId(page.owner, action.command.id)
+          const decision = this.access?.authorizeOutletPageCommand(
+            page.owner,
+            name,
+            entry.record.qualifiedId,
+            page.qualifiedId,
+            action.id,
+            commandId,
+          )
+          if (decision !== undefined && !decision.authorized) {
+            state.error = decision.reason ?? `extension point ${name} is denied for plugin ${page.owner}`
+            this.notify()
+            return
+          }
+          void this.commands.executeFor(
+            page.owner,
+            action.command,
+            `page:${page.qualifiedId}:header:${action.id}`,
+          ).catch((error: unknown) => {
+            state.error = error instanceof Error ? error.message : String(error)
+            this.notify()
+          })
+        })
+        chrome.append(button)
+      }
+      chrome.append(close)
       content.append(chrome)
       if ((page.metadata.breadcrumbs?.length ?? 0) > 0) {
         const breadcrumbs = content.ownerDocument.createElement('nav')
@@ -644,16 +747,23 @@ export class NavigationRegistry {
       if ((page.metadata.tabs?.length ?? 0) > 0) {
         const tabs = content.ownerDocument.createElement('div')
         tabs.setAttribute('role', 'tablist')
+        tabs.dataset.cordisxNoDrag = 'true'
         tabs.style.cssText = 'display:flex;gap:4px;padding:7px 12px;border-bottom:1px solid rgba(255,255,255,.08);flex:0 0 auto'
+        tabs.style.setProperty('-webkit-app-region', 'no-drag')
         for (const [index, tab] of page.metadata.tabs!.entries()) {
           const button = content.ownerDocument.createElement('button')
           button.type = 'button'
           button.setAttribute('role', 'tab')
           button.setAttribute('aria-selected', String(index === 0))
           button.dataset.tabId = tab.id
+          button.dataset.cordisxNoDrag = 'true'
+          button.style.setProperty('-webkit-app-region', 'no-drag')
+          if (tab.icon !== undefined) button.append(createHostSurfaceIcon(content.ownerDocument, tab.icon))
+          const label = content.ownerDocument.createElement('span')
+          button.append(label)
           const site = `page:${page.qualifiedId}:chrome.tabs.${tab.id}`
           localization.effect(() => {
-            button.textContent = this.i18n.resolveFor(page.owner, tab.label, site).text
+            label.textContent = this.i18n.resolveFor(page.owner, tab.label, site).text
             return () => this.i18n.clearDiagnosticSite(page.owner, site)
           })
           tabs.append(button)
@@ -787,7 +897,7 @@ export class CordisXPageService extends Service implements CordisXPages {
 }
 
 export class CordisXRouteService extends Service implements CordisXRoutes {
-  static readonly inject = ['pages', 'i18n']
+  static readonly inject = ['pages', 'i18n', 'commands']
   readonly outlets = new OutletRegistry()
   readonly registry: NavigationRegistry
   readonly contexts = new HostContextStore()
@@ -796,8 +906,11 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
     super(ctx, 'routes')
     const pages = ctx.pages as CordisXPageService
     const i18n = ctx.i18n as CordisXI18nService
-    if (pages?.registry === undefined || i18n === undefined) throw new Error('CordisX routes require pages and i18n services')
-    this.registry = new NavigationRegistry(pages.registry, this.outlets, i18n, this.contexts)
+    const commands = ctx.commands as CordisXCommandService
+    if (pages?.registry === undefined || i18n === undefined || commands === undefined) {
+      throw new Error('CordisX routes require pages, i18n, and commands services')
+    }
+    this.registry = new NavigationRegistry(pages.registry, this.outlets, i18n, this.contexts, undefined, commands)
     ctx.effect(() => async () => {
       await this.registry.dispose()
       this.outlets.dispose()

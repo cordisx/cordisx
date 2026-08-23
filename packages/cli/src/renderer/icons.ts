@@ -1,14 +1,23 @@
 import accountTree from '@material-symbols/svg-400/rounded/account_tree.svg'
+import analytics from '@material-symbols/svg-400/rounded/analytics.svg'
+import arrowBack from '@material-symbols/svg-400/rounded/arrow_back.svg'
+import check from '@material-symbols/svg-400/rounded/check.svg'
+import checkCircle from '@material-symbols/svg-400/rounded/check_circle.svg'
 import chevronLeft from '@material-symbols/svg-400/rounded/chevron_left.svg'
 import chevronRight from '@material-symbols/svg-400/rounded/chevron_right.svg'
 import close from '@material-symbols/svg-400/rounded/close.svg'
 import description from '@material-symbols/svg-400/rounded/description.svg'
 import diagnosis from '@material-symbols/svg-400/rounded/diagnosis.svg'
+import error from '@material-symbols/svg-400/rounded/error.svg'
 import extension from '@material-symbols/svg-400/rounded/extension.svg'
+import folder from '@material-symbols/svg-400/rounded/folder.svg'
 import help from '@material-symbols/svg-400/rounded/help.svg'
+import history from '@material-symbols/svg-400/rounded/history.svg'
 import hub from '@material-symbols/svg-400/rounded/hub.svg'
 import info from '@material-symbols/svg-400/rounded/info.svg'
+import layers from '@material-symbols/svg-400/rounded/layers.svg'
 import modelTraining from '@material-symbols/svg-400/rounded/model_training.svg'
+import moreHoriz from '@material-symbols/svg-400/rounded/more_horiz.svg'
 import monitorHeart from '@material-symbols/svg-400/rounded/monitor_heart.svg'
 import noteAdd from '@material-symbols/svg-400/rounded/note_add.svg'
 import openInNew from '@material-symbols/svg-400/rounded/open_in_new.svg'
@@ -17,6 +26,7 @@ import pauseCircle from '@material-symbols/svg-400/rounded/pause_circle.svg'
 import person from '@material-symbols/svg-400/rounded/person.svg'
 import rocketLaunch from '@material-symbols/svg-400/rounded/rocket_launch.svg'
 import route from '@material-symbols/svg-400/rounded/route.svg'
+import refresh from '@material-symbols/svg-400/rounded/refresh.svg'
 import send from '@material-symbols/svg-400/rounded/send.svg'
 import settings from '@material-symbols/svg-400/rounded/settings.svg'
 import shield from '@material-symbols/svg-400/rounded/shield.svg'
@@ -24,6 +34,7 @@ import storefront from '@material-symbols/svg-400/rounded/storefront.svg'
 import summarize from '@material-symbols/svg-400/rounded/summarize.svg'
 import tune from '@material-symbols/svg-400/rounded/tune.svg'
 import viewList from '@material-symbols/svg-400/rounded/view_list.svg'
+import warning from '@material-symbols/svg-400/rounded/warning.svg'
 
 export const MANAGER_ICON_TOKENS = [
   'back',
@@ -87,6 +98,15 @@ const MANAGER_ICON_SOURCES: Readonly<Record<ManagerIconToken, string>> = {
   'authors-source': person,
 }
 
+function svgMarkup(source: string): string {
+  if (!source.startsWith('data:image/svg+xml,')) return source
+  try {
+    return decodeURIComponent(source.slice('data:image/svg+xml,'.length))
+  } catch {
+    return source
+  }
+}
+
 /** Create one decorative, host-owned icon from a compile-time bundled Material symbol. */
 export function createManagerIcon(
   document: Document,
@@ -98,10 +118,44 @@ export function createManagerIcon(
   icon.dataset.materialIcon = token
   icon.setAttribute('aria-hidden', 'true')
   icon.draggable = false
-  icon.innerHTML = MANAGER_ICON_SOURCES[token]
+  icon.innerHTML = svgMarkup(MANAGER_ICON_SOURCES[token])
   const svg = icon.querySelector('svg')
   svg?.setAttribute('aria-hidden', 'true')
   svg?.setAttribute('focusable', 'false')
   svg?.setAttribute('draggable', 'false')
+  return icon
+}
+
+const HOST_SURFACE_ICON_SOURCES: Readonly<Record<string, string>> = {
+  'host:analytics': analytics,
+  'host:back': arrowBack,
+  'host:close': close,
+  'host:error': error,
+  'host:files': folder,
+  'host:history': history,
+  'host:info': info,
+  'host:layers': layers,
+  'host:more': moreHoriz,
+  'host:open': openInNew,
+  'host:refresh': refresh,
+  'host:review': check,
+  'host:settings': settings,
+  'host:success': checkCircle,
+  'host:warning': warning,
+}
+
+/** Render a protocol host icon with the same bundled Material geometry as manager chrome. */
+export function createHostSurfaceIcon(document: Document, token: string | undefined): HTMLSpanElement {
+  const icon = document.createElement('span')
+  icon.className = 'cordisx-host-icon'
+  icon.dataset.hostIcon = token ?? 'host:more'
+  icon.setAttribute('aria-hidden', 'true')
+  icon.draggable = false
+  icon.innerHTML = svgMarkup(HOST_SURFACE_ICON_SOURCES[token ?? 'host:more'] ?? moreHoriz)
+  const svg = icon.querySelector('svg')
+  svg?.setAttribute('aria-hidden', 'true')
+  svg?.setAttribute('focusable', 'false')
+  svg?.setAttribute('draggable', 'false')
+  svg?.classList.add('icon-xs')
   return icon
 }
