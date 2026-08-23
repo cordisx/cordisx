@@ -2,7 +2,7 @@
 
 ## Goal
 
-CordisX lets trusted local plugins add or replace pieces of the Codex Desktop interface without modifying the installed Codex application. It is a UI-host project, not an alternative agent loop and not an authentication or API relay.
+CordisX lets trusted local plugins augment the Codex Desktop interface without modifying the installed application or replacing native React content. It is a UI-host project, not an alternative agent loop and not an authentication or API relay.
 
 The initial design is based on two source snapshots inspected on 2026-08-22:
 
@@ -57,6 +57,15 @@ The public plugin surface follows DeepSeek Harness: plugins declare `inject = ['
 
 ### Slot plane
 
+> Migration note: the version-0.1 free-DOM slot implementation below records
+> the current feasibility baseline. The approved next contract is documented in
+> [`data-contribution-routing.md`](data-contribution-routing.md). It replaces
+> direct plugin DOM mounts in all five native-shell slots with structured,
+> host-rendered contributions. Complex plugin DOM is restricted to declared
+> CordisX page outlets. The migration is intentionally one-way during the
+> experimental stage; the same shell semantic is not exposed through both old
+> and new facades.
+
 Plugins target semantic slot names. The host adapter declares the five root-scoped list slots for the renderer lifetime and alone translates each name into a current Codex DOM anchor and placement. `slots.inject()` therefore activates immediately in version 0.1 while retaining DSH's declaration-dependency syntax. A `MutationObserver` reconciles outlets after React replaces an anchor. When an outlet moves, the old component disposer runs before the contribution is mounted under the new anchor.
 
 CordisX deliberately implements the DSH slot registration subset needed by an external DOM host: `name`, list-entry `id`, `order`, same-cell `priority` shadowing with lowest-live takeover, declaration injection, caller-fiber disposal, and mount remapping. DSH renders React components inside an owned React slot tree; CordisX cannot join Codex's private React tree, so its second `register()` argument is a DOM mount component receiving `{ container, document, signal, slot }`. Keyed, chain, child-declared, store, locale, and injected business-face seats remain deferred until a real CordisX use case requires them.
@@ -70,6 +79,9 @@ The first slot contract is deliberately small:
 | `composer.after` | list | status or actions after the composer |
 | `sidebar.footer` | list | persistent navigation-adjacent controls |
 | `shell.overlay` | list | dialogs, toasts, inspectors, and floating panels |
+
+These five direct-DOM semantics are experimental and scheduled for removal by
+the structured-contribution slice. They are not a compatibility promise.
 
 The host may improve selectors without requiring plugin changes. Plugins that query Codex DOM directly opt out of that compatibility boundary.
 
@@ -180,5 +192,5 @@ The version-0.1 bundle and lifecycle were verified in a simulated renderer DOM. 
 
 - Whether the long-term distribution unit is an npm package, a signed archive, or a Codex universal plugin plus a CordisX-specific UI entry.
 - Whether isolated UI should use an iframe, a dedicated Electron utility process, or both.
-- Whether host replacement slots should allow one winner by priority or require an explicit user choice.
+- Whether a future explicitly declared host-replacement protocol should allow one winner or require an explicit user choice; the structured-contribution slice does not expose replacement slots.
 - How a plugin persists state across bundle rebuilds without receiving direct Codex storage access.

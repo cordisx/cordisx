@@ -94,6 +94,37 @@ configuration tabs.
 Installation, signature, capability, and untrusted-code execution tests remain
 out of scope because discovery never executes catalog entries.
 
+## Stage 2.5 — structured shell contributions and page outlets
+
+Status: architecture approved; implementation follows
+[`data-contribution-routing.md`](data-contribution-routing.md).
+
+Dependency and PR order is fixed:
+
+1. land this architecture and validation plan in `cordisx`;
+2. land implementation-independent descriptors, schemas, compatibility rules,
+   and conformance vectors in `cordisx-protocol`;
+3. land the compatible command, structured-surface, route, page, outlet,
+   adapter, manager-diagnostics, and demo implementation in `cordisx`;
+4. complete simulated-DOM tests and an isolated real `app://` renderer smoke;
+5. update exact owning-repository gitlinks in `cordisxmono` only after the
+   compatible commits are pushed and verified.
+
+The implementation PR may use internal commits for registries, private adapter
+outlets, manager diagnostics, and the demo, but they remain one compatibility
+unit: no public shell contribution may land without its protocol and no route
+may be exposed without a page and a declared outlet.
+
+Scoped validation includes schema/conformance checks; registry identity,
+ownership, conflict, order, `when`, disabled, command loading/error, and update
+tests; route matching and parameter checks; internal history/back/close;
+same-context anchor replacement with state retention; different-context abort;
+overlay geometry and portal fallback; native DOM non-replacement and layout
+non-disturbance; plugin block/restore and generation disposal; plus real
+sidebar, session, panel, and native-data-flow probes. Capability enforcement,
+signing, installation, marketplace activation, and untrusted-code isolation
+remain explicitly out of scope.
+
 ## Stage 3 — authority and distribution
 
 Recommended PR boundaries:
