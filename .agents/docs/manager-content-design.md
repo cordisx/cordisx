@@ -143,8 +143,9 @@ separate `CORDISX` eyebrow, manager title, version, or logo block. Product
 identity and runtime version belong to the About page, where the first content
 row presents one direct CordisX mark beside `CordisX` and the current version.
 
-The small CordisX mark remains on the host-side manager trigger. Inside the
-manager, the same mark is allowed only where it identifies the About area: the
+The CordisX mark on the host-side manager trigger uses a 20-pixel visual size
+inside its unchanged button target. Inside the manager, the same mark is
+allowed only where it identifies the About area: the
 bottom-anchored About navigation item, the About page header leading seat, and
 the single About identity row. These marks are rendered directly without a
 decorative container. Other primary pages use their own host-owned semantic
