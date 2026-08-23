@@ -3,6 +3,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { npmViewItem } from './npm-pack-report.mjs'
 
 const execute = promisify(execFile)
 
@@ -36,6 +37,10 @@ async function run(file, args, options = {}) {
 async function npmJson(args, cwd) {
   const result = await run('npm', [...args, '--json', `--registry=${registry}`], { cwd })
   return JSON.parse(result.stdout)
+}
+
+async function npmViewJson(args, cwd) {
+  return npmViewItem(await npmJson(['view', ...args], cwd), args[0])
 }
 
 async function verifyInstalledPackage(runner, packageName) {
@@ -110,7 +115,7 @@ try {
   await verifyGeneratedProject(npxTarget)
 
   for (const packageName of ['cordisx', 'create-cordisx-plugin']) {
-    const tags = await npmJson(['view', packageName, 'dist-tags'], runner)
+    const tags = await npmViewJson([packageName, 'dist-tags'], runner)
     if (tags.beta !== version) throw new Error(`${packageName} beta dist-tag mismatch`)
     if (tags.latest !== '0.0.0') throw new Error(`${packageName} latest must remain 0.0.0`)
   }

@@ -5,3 +5,11 @@ export function npmPackItem(report, packageName) {
   }
   return item
 }
+
+export function npmViewItem(report, subject) {
+  if (!Array.isArray(report)) return report
+  if (report.length !== 1) {
+    throw new Error(`npm view returned ${report.length} results for ${subject}`)
+  }
+  return report[0]
+}

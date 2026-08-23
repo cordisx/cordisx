@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { npmPackItem } from '../scripts/npm-pack-report.mjs'
+import { npmPackItem, npmViewItem } from '../scripts/npm-pack-report.mjs'
 
 const packed = {
   name: 'cordisx',
@@ -20,5 +20,22 @@ describe('npm pack report compatibility', () => {
 
   it('fails closed when the requested package is absent', () => {
     expect(() => npmPackItem({}, 'cordisx')).toThrow('npm pack did not report cordisx')
+  })
+})
+
+describe('npm view report compatibility', () => {
+  it('reads the npm 10 direct result', () => {
+    expect(npmViewItem(packed, 'cordisx')).toBe(packed)
+  })
+
+  it('reads the npm 12 single-result array', () => {
+    expect(npmViewItem([packed], 'cordisx')).toBe(packed)
+  })
+
+  it('fails closed for ambiguous npm view output', () => {
+    expect(() => npmViewItem([], 'cordisx')).toThrow('npm view returned 0 results for cordisx')
+    expect(() => npmViewItem([packed, packed], 'cordisx')).toThrow(
+      'npm view returned 2 results for cordisx',
+    )
   })
 })

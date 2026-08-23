@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { npmPackItem } from './npm-pack-report.mjs'
+import { npmPackItem, npmViewItem } from './npm-pack-report.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -65,13 +65,17 @@ async function npmJson(args, options) {
   }
 }
 
+async function npmViewJson(args, options) {
+  return npmViewItem(await npmJson(['view', ...args], options), args[0])
+}
+
 async function readManifest(pkg) {
   return JSON.parse(await readFile(path.join(repositoryRoot, pkg.directory, 'package.json'), 'utf8'))
 }
 
 async function viewVersion(name, requestedVersion) {
   try {
-    return await npmJson(['view', `${name}@${requestedVersion}`])
+    return await npmViewJson([`${name}@${requestedVersion}`])
   } catch (error) {
     if (typeof error.npmOutput === 'string' && /E404|404 Not Found/.test(error.npmOutput)) return undefined
     throw error
@@ -84,7 +88,7 @@ function maintainerNames(value) {
 }
 
 async function assertRegistryPackage(pkg) {
-  const metadata = await npmJson(['view', pkg.name])
+  const metadata = await npmViewJson([pkg.name])
   if (!maintainerNames(metadata.maintainers).includes('yijie4188')) {
     throw new Error(`${pkg.name} registry owner yijie4188 is missing`)
   }
@@ -159,7 +163,7 @@ try {
     const existing = await viewVersion(pkg.name, version)
     if (existing !== undefined) {
       assertPublishedMetadata(pkg, manifest, packed, existing)
-      const tags = await npmJson(['view', pkg.name, 'dist-tags'])
+      const tags = await npmViewJson([pkg.name, 'dist-tags'])
       if (tags.beta !== version) {
         throw new Error(`${pkg.name}@${version} already exists but beta does not point to it`)
       }
