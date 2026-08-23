@@ -10,6 +10,9 @@ This directory is the public, aggregatable source for CordisX product and archit
   accessibility/screenshot regression evidence.
 - `data-contribution-routing.md` defines the approved structured shell-contribution and
   page/outlet architecture that replaces direct plugin DOM rendering in native shell areas.
+- `extension-point-management.md` defines surfaces and outlets as the two
+  extension-point families, their localized host catalog, manager search and
+  detail experience, point-policy enforcement, and delivery/validation order.
 - `distribution-and-cli.md` defines the product monorepo, home configuration,
   app/profile command model, package ownership, and release gates.
 - `platform-capabilities.md` defines the Platform service, permission broker,
