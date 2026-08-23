@@ -81,6 +81,10 @@ type LocalTabIcon = 'document' | 'settings' | 'shield' | 'activity' | 'outlets' 
 type SecondaryView =
   | { readonly kind: 'plugin'; readonly id: string }
   | { readonly kind: 'marketplace'; readonly identity: string }
+type PermissionDetailView = {
+  readonly pluginId: string
+  readonly capability: CordisXPlatformCapability
+}
 
 const MANAGER_STYLE_ID = 'cordisx-manager-style'
 const CORDISX_MARK_LIGHT_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkLight)}`
@@ -115,6 +119,48 @@ const LOCAL_TAB_ICON_SVGS: Readonly<Record<LocalTabIcon, string>> = {
   outlets: '<rect x="3.5" y="4" width="7" height="7" rx="1.5"/><rect x="13.5" y="13" width="7" height="7" rx="1.5"/><path d="M14 7.5h3a2 2 0 0 1 2 2V11M10 16.5H7a2 2 0 0 1-2-2V13"/>',
   marketplace: '<path d="M4 9h16l-1.2-4H5.2z"/><path d="M5.5 9v10h13V9M9 19v-5h6v5"/><path d="M4 9c0 1.4 1 2.5 2.3 2.5S8.5 10.4 8.5 9c0 1.4 1.1 2.5 2.4 2.5S13.4 10.4 13.4 9c0 1.4 1.1 2.5 2.4 2.5S18 10.4 18 9"/>',
   launcher: '<path d="M7 17 17 7M10 7h7v7"/><path d="M17 17v3H4V7h3"/>',
+}
+
+interface CapabilityPresentation {
+  readonly name: string
+  readonly icon: string
+}
+
+const CAPABILITY_PRESENTATIONS: Readonly<Partial<Record<CordisXPlatformCapability, CapabilityPresentation>>> = {
+  'models.read': {
+    name: '读取可用模型',
+    icon: '<path d="M5 7.5 12 4l7 3.5-7 3.5z"/><path d="m5 12 7 3.5 7-3.5M5 16.5l7 3.5 7-3.5"/>',
+  },
+  'tasks.catalog.read': {
+    name: '查看任务列表',
+    icon: '<rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/>',
+  },
+  'tasks.content.read': {
+    name: '查看任务内容',
+    icon: '<path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M9 12h6M9 16h4"/>',
+  },
+  'tasks.create': {
+    name: '创建任务',
+    icon: '<path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M12 11v6M9 14h6"/>',
+  },
+  'tasks.control': {
+    name: '管理任务',
+    icon: '<path d="M4 7h10M18 7h2M4 12h2M10 12h10M4 17h7M15 17h5"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="13" cy="17" r="2"/>',
+  },
+  'turns.submit': {
+    name: '提交消息',
+    icon: '<path d="m4 12 16-8-5.5 16-3.2-6.8z"/><path d="m11.3 13.2 4.3-4.3"/>',
+  },
+  'turns.control': {
+    name: '控制对话轮次',
+    icon: '<circle cx="12" cy="12" r="8.5"/><path d="M9.5 9v6M14.5 9v6"/>',
+  },
+}
+
+const POLICY_LABELS: Readonly<Record<CordisXPermissionPolicy, string>> = {
+  ask: '每次询问',
+  allow: '始终允许',
+  deny: '始终拒绝',
 }
 
 const MANAGER_STYLES = `
@@ -335,7 +381,42 @@ const MANAGER_STYLES = `
   }
   .cxm-flat-item { padding: 14px 2px; }
   .cxm-flat-item + .cxm-flat-item { border-top: 1px solid rgba(255, 255, 255, .08); }
-  .cxm-flat-item > .cxm-copy, .cxm-flat-item > .cxm-permission-policy { margin-top: 10px; }
+  .cxm-permission-item { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; gap: 18px; }
+  .cxm-permission-open {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) 14px;
+    align-items: center;
+    gap: 11px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  .cxm-permission-open:hover .cxm-permission-name { color: #fff; }
+  .cxm-permission-open:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 4px; border-radius: 5px; }
+  .cxm-capability-icon { display: grid; place-items: center; width: 24px; height: 24px; color: #bfc5ce; }
+  .cxm-capability-icon svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+  .cxm-permission-copy { min-width: 0; }
+  .cxm-permission-title { display: flex; align-items: center; gap: 7px; }
+  .cxm-permission-name { color: #e7e9ee; font-size: 12px; font-weight: 650; }
+  .cxm-required-badge { padding: 2px 5px; border-radius: 5px; background: rgba(251, 191, 36, .1); color: #d6c37e; font-size: 9px; font-weight: 700; }
+  .cxm-permission-reason { display: block; margin-top: 3px; overflow: hidden; color: #858fa1; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .cxm-permission-control { display: flex; align-items: center; justify-content: flex-end; min-width: 118px; }
+  .cxm-permission-control .cxm-source-input { width: 118px; padding-block: 7px; }
+  .cxm-permission-unavailable { color: #8d96a8; font-size: 11px; }
+  .cxm-permission-detail-intro { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 12px; }
+  .cxm-permission-detail-intro .cxm-capability-icon { width: 34px; height: 34px; }
+  .cxm-permission-detail-intro .cxm-capability-icon svg { width: 26px; height: 26px; }
+  .cxm-permission-detail-policy { display: grid; grid-template-columns: max-content minmax(160px, 260px); align-items: center; gap: 12px; margin-top: 18px; }
+  .cxm-permission-detail-policy .cxm-field-label { white-space: nowrap; }
+  .cxm-permission-audit { margin-top: 16px; }
+  .cxm-diagnostics { margin-top: 22px; border-top: 1px solid rgba(255, 255, 255, .08); }
+  .cxm-diagnostics summary { padding: 14px 2px; color: #98a1b2; cursor: pointer; font-size: 11px; }
+  .cxm-diagnostics[open] summary { color: #d8dce3; }
+  .cxm-diagnostics-body { padding: 0 2px 4px; }
   .cxm-runtime-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .cxm-copy { margin: 0; color: #98a1b2; font-size: 12px; }
   .cxm-notice {
@@ -420,9 +501,6 @@ const MANAGER_STYLES = `
   .cxm-status-dot[data-status="blocked"], .cxm-status-dot[data-status="loading"] { background: #fbbf24; }
   .cxm-chevron { flex: none; color: #626c7d; font-size: 18px; }
   .cxm-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-  .cxm-permission-policy { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 12px; }
-  .cxm-permission-policy .cxm-field-label { white-space: nowrap; }
-  .cxm-permission-policy .cxm-source-input { width: 100%; min-width: 0; }
   .cxm-detail-id { color: #747f91; font: 10px/1.3 ui-monospace, monospace; }
   .cxm-detail-description { max-width: 680px; margin: 14px 0 0; color: #a7afbe; font-size: 12px; }
   .cxm-action {
@@ -506,6 +584,54 @@ function createLocalTabIcon(document: Document, token: LocalTabIcon): HTMLSpanEl
   icon.setAttribute('aria-hidden', 'true')
   icon.innerHTML = `<svg viewBox="0 0 24 24" focusable="false" stroke-linecap="round" stroke-linejoin="round">${LOCAL_TAB_ICON_SVGS[token]}</svg>`
   return icon
+}
+
+function capabilityPresentation(capability: CordisXPlatformCapability): CapabilityPresentation {
+  const known = CAPABILITY_PRESENTATIONS[capability]
+  if (known !== undefined) return known
+  const group = String(capability).split('.')[0]
+  return {
+    name: group === 'models'
+      ? '使用模型能力'
+      : group === 'tasks'
+        ? '使用任务能力'
+        : group === 'turns'
+          ? '使用对话能力'
+          : '使用宿主能力',
+    icon: '<circle cx="12" cy="12" r="8.5"/><path d="M12 8v4M12 16h.01"/>',
+  }
+}
+
+function createCapabilityIcon(document: Document, capability: CordisXPlatformCapability): HTMLSpanElement {
+  const icon = create(document, 'span', 'cxm-capability-icon')
+  icon.setAttribute('aria-hidden', 'true')
+  icon.innerHTML = `<svg viewBox="0 0 24 24" focusable="false" stroke-linecap="round" stroke-linejoin="round">${capabilityPresentation(capability).icon}</svg>`
+  return icon
+}
+
+function createPermissionPolicySelect(
+  document: Document,
+  permission: ManagerPermissionSnapshot,
+  onChange: (policy: CordisXPermissionPolicy, control: HTMLSelectElement) => Promise<void>,
+): HTMLSelectElement {
+  const policy = create(document, 'select', 'cxm-source-input')
+  policy.dataset.permissionCapability = permission.capability
+  policy.setAttribute('aria-label', `${capabilityPresentation(permission.capability).name}的权限策略`)
+  for (const value of ['ask', 'allow', 'deny'] as const) {
+    const option = document.createElement('option')
+    option.value = value
+    option.textContent = POLICY_LABELS[value]
+    option.selected = permission.policy === value
+    policy.append(option)
+  }
+  policy.addEventListener('change', () => {
+    void onChange(policy.value as CordisXPermissionPolicy, policy)
+  })
+  return policy
+}
+
+function hasCapabilityScope(scope: CordisXCapabilityScope): boolean {
+  return Object.values(scope).some(value => Array.isArray(value) && value.length > 0)
 }
 
 function createLocalTabs(
@@ -769,6 +895,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let pluginQuery = ''
   let marketplaceQuery = ''
   let secondaryView: SecondaryView | undefined
+  let permissionDetail: PermissionDetailView | undefined
   let pluginDetailTab: PluginDetailTab = 'readme'
   let settingsTab: SettingsTab = 'marketplace'
   let busyPluginId: string | undefined
@@ -947,6 +1074,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       row.append(body, create(document, 'span', 'cxm-chevron', '›'))
       row.addEventListener('click', () => {
         secondaryView = { kind: 'plugin', id: plugin.id }
+        permissionDetail = undefined
         pluginDetailTab = 'readme'
         operationError = undefined
         renderContent()
@@ -962,6 +1090,93 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       next?.focus()
       next?.setSelectionRange(pluginQuery.length, pluginQuery.length)
     })
+  }
+
+  const commitPermissionPolicy = async (
+    pluginId: string,
+    permission: ManagerPermissionSnapshot,
+    policy: CordisXPermissionPolicy,
+    control: HTMLSelectElement,
+  ): Promise<void> => {
+    operationError = undefined
+    control.disabled = true
+    try {
+      await model.setPermissionPolicy(pluginId, permission.capability, policy)
+    } catch (error) {
+      operationError = error instanceof Error ? error.message : String(error)
+    } finally {
+      renderContent()
+    }
+  }
+
+  const renderPermissionDetail = (snapshot: ManagerSnapshot, view: PermissionDetailView): void => {
+    const plugin = snapshot.plugins.find(item => item.id === view.pluginId)
+    const permission = snapshot.permissions.find(item => (
+      item.identity.id === view.pluginId
+      && item.identity.source === plugin?.source
+      && item.capability === view.capability
+    ))
+    const presentation = capabilityPresentation(view.capability)
+    setHeading(presentation.name, plugin === undefined ? '插件权限详情' : `${plugin.name} 申请的权限`, {
+      root: '权限',
+      onBack: () => {
+        permissionDetail = undefined
+        pluginDetailTab = 'permissions'
+        renderContent()
+      },
+    })
+    if (plugin === undefined || permission === undefined) {
+      content.append(create(document, 'div', 'cxm-empty', '该权限声明已不在当前 bundle 中'))
+      return
+    }
+
+    const supported = snapshot.platform.supportedCapabilities.includes(permission.capability)
+    const detail = create(document, 'div', 'cxm-permission-detail')
+    detail.dataset.permissionDetail = permission.capability
+    const intro = create(document, 'div', 'cxm-permission-detail-intro')
+    const introCopy = create(document, 'div')
+    introCopy.append(create(document, 'p', 'cxm-copy', permission.reasonText))
+    intro.append(createCapabilityIcon(document, permission.capability), introCopy)
+    detail.append(intro)
+
+    const fields = create(document, 'div', 'cxm-detail-grid')
+    for (const [label, value] of [
+      ['申请类型', permission.required ? '必需权限' : '可选权限'],
+      ['宿主支持', supported ? '当前宿主支持' : '当前宿主暂不支持'],
+      ['能力标识', permission.capability],
+    ]) {
+      const field = create(document, 'div', 'cxm-field')
+      field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
+      fields.append(field)
+    }
+    detail.append(fields)
+
+    const policyRow = create(document, 'div', 'cxm-permission-detail-policy')
+    policyRow.append(
+      create(document, 'label', 'cxm-field-label', '权限策略'),
+      createPermissionPolicySelect(document, permission, async (policy, control) => {
+        await commitPermissionPolicy(plugin.id, permission, policy, control)
+      }),
+    )
+    detail.append(policyRow)
+    if (permission.required && permission.policy === 'deny') {
+      const blocked = create(document, 'div', 'cxm-notice', '这是一项必需权限。保持“始终拒绝”时，插件将停止运行。')
+      blocked.dataset.tone = 'warning'
+      detail.append(blocked)
+    }
+
+    if (hasCapabilityScope(permission.scope)) {
+      detail.append(createSectionTitle(document, '使用范围'))
+      detail.append(create(document, 'pre', 'cxm-code', formatConfig(permission.scope)))
+    }
+
+    detail.append(createSectionTitle(document, '本次运行审计'))
+    const audit = permission.lastUsedAt === undefined && permission.lastDeniedAt === undefined && permission.denialCount === 0
+      ? '本次运行尚无调用记录'
+      : `最近允许：${permission.lastUsedAt ?? '无'} · 最近拒绝：${permission.lastDeniedAt ?? '无'} · 拒绝次数：${permission.denialCount}`
+    detail.append(create(document, 'p', 'cxm-copy cxm-permission-audit', audit))
+    if (operationError !== undefined) detail.append(create(document, 'div', 'cxm-error', operationError))
+    content.append(detail)
   }
 
   const renderPluginDetail = (snapshot: ManagerSnapshot, id: string): void => {
@@ -1013,72 +1228,48 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (pluginDetailTab === 'permissions') {
       const panel = createTabPanel(document, '权限')
       const permissions = snapshot.permissions.filter(item => item.identity.source === plugin.source && item.identity.id === plugin.id)
-      panel.append(createSectionTitle(document, '能力声明'))
       if (permissions.length === 0) {
-        panel.append(create(document, 'div', 'cxm-empty', '该插件没有声明 capability；宿主连接状态仍在下方显示。'))
+        panel.append(create(document, 'div', 'cxm-empty', '该插件没有申请任何权限。'))
       }
       const permissionList = create(document, 'div', 'cxm-flat-list')
       permissionList.setAttribute('role', 'list')
       permissionList.dataset.managerGroup = 'capability-declarations'
       for (const permission of permissions) {
-        const item = create(document, 'div', 'cxm-flat-item')
+        const presentation = capabilityPresentation(permission.capability)
+        const supported = snapshot.platform.supportedCapabilities.includes(permission.capability)
+        const item = create(document, 'div', 'cxm-flat-item cxm-permission-item')
         item.setAttribute('role', 'listitem')
-        item.setAttribute('aria-label', `Capability ${permission.capability}`)
+        item.setAttribute('aria-label', presentation.name)
         item.dataset.permissionItem = permission.capability
-        const head = create(document, 'div', 'cxm-slot-head')
-        head.append(
-          create(document, 'code', 'cxm-slot-name', permission.capability),
-          create(document, 'span', 'cxm-count', permission.required ? '必需' : '可选'),
-        )
-        const reason = create(document, 'div', 'cxm-copy', permission.reasonText)
-        const scope = create(document, 'pre', 'cxm-code', formatConfig(permission.scope))
-        const policyRow = create(document, 'div', 'cxm-permission-policy')
-        const policyLabel = create(document, 'label', 'cxm-field-label', '用户策略')
-        const policy = create(document, 'select', 'cxm-source-input')
-        policy.dataset.permissionCapability = permission.capability
-        for (const value of ['ask', 'deny', 'allow'] as const) {
-          const option = document.createElement('option')
-          option.value = value
-          option.textContent = value
-          option.selected = permission.policy === value
-          policy.append(option)
-        }
-        policy.addEventListener('change', async () => {
+        const open = create(document, 'button', 'cxm-permission-open')
+        open.type = 'button'
+        open.dataset.permissionOpen = permission.capability
+        const copy = create(document, 'span', 'cxm-permission-copy')
+        const title = create(document, 'span', 'cxm-permission-title')
+        title.append(create(document, 'span', 'cxm-permission-name', presentation.name))
+        if (permission.required) title.append(create(document, 'span', 'cxm-required-badge', '必需'))
+        copy.append(title, create(document, 'span', 'cxm-permission-reason', permission.reasonText))
+        open.append(createCapabilityIcon(document, permission.capability), copy, create(document, 'span', 'cxm-chevron', '›'))
+        open.addEventListener('click', () => {
+          permissionDetail = { pluginId: plugin.id, capability: permission.capability }
           operationError = undefined
-          policy.disabled = true
-          try {
-            await model.setPermissionPolicy(plugin.id, permission.capability, policy.value as CordisXPermissionPolicy)
-          } catch (error) {
-            operationError = error instanceof Error ? error.message : String(error)
-          } finally {
-            renderContent()
-          }
+          renderContent()
         })
-        policyRow.append(policyLabel, policy)
-        const recent = create(
-          document,
-          'div',
-          'cxm-copy',
-          `最近使用：${permission.lastUsedAt ?? '无'} · 最近拒绝：${permission.lastDeniedAt ?? '无'} · 拒绝次数：${permission.denialCount}`,
-        )
-        item.append(head, reason, scope, policyRow, recent)
-        if (permission.blockedReason !== undefined) item.append(create(document, 'div', 'cxm-error', permission.blockedReason))
+        const control = create(document, 'div', 'cxm-permission-control')
+        if (supported) {
+          control.append(createPermissionPolicySelect(document, permission, async (policy, select) => {
+            await commitPermissionPolicy(plugin.id, permission, policy, select)
+          }))
+        } else {
+          const unavailable = create(document, 'span', 'cxm-permission-unavailable', '暂不可用')
+          unavailable.dataset.permissionUnavailable = permission.capability
+          control.append(unavailable)
+        }
+        item.append(open, control)
         permissionList.append(item)
       }
       if (permissions.length > 0) panel.append(permissionList)
       if (operationError !== undefined) panel.append(create(document, 'div', 'cxm-error', operationError))
-      const adapter = snapshot.platform
-      panel.append(createSectionTitle(document, '宿主连接'))
-      panel.append(create(
-        document,
-        'div',
-        'cxm-copy',
-        `当前连接：${adapter.hostName} · ${adapter.mode} · 二次连接 ${adapter.secondConnectionCreated ? '是' : '否'} · 原始 bridge 暴露 ${adapter.rawBridgeExposed ? '是' : '否'}`,
-      ))
-      for (const diagnostic of adapter.diagnostics) panel.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
-      const securityBoundary = create(document, 'div', 'cxm-notice', '权限策略只约束通过 CordisX Platform API 的调用；当前 trusted renderer code 不是安全沙箱。')
-      securityBoundary.dataset.tone = 'warning'
-      panel.append(securityBoundary)
       content.append(panel)
       return
     }
@@ -1166,6 +1357,23 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       for (const command of pluginCommands) panel.append(create(document, 'div', 'cxm-notice', `${command.qualifiedId} · running ${command.running}`))
       for (const route of pluginRoutes) panel.append(create(document, 'div', route.valid ? 'cxm-notice' : 'cxm-error', `${route.qualifiedId} · ${route.definition.path}${route.error === undefined ? '' : ` · ${route.error}`}`))
       for (const page of pluginPages) panel.append(create(document, 'div', 'cxm-notice', `${page.qualifiedId} · controlled mount`))
+      const adapter = snapshot.platform
+      const diagnostics = create(document, 'details', 'cxm-diagnostics')
+      diagnostics.dataset.runtimeDiagnostics = 'platform'
+      diagnostics.append(create(document, 'summary', undefined, '诊断'))
+      const diagnosticsBody = create(document, 'div', 'cxm-diagnostics-body')
+      diagnosticsBody.append(create(
+        document,
+        'div',
+        'cxm-copy',
+        `宿主：${adapter.hostName} · adapter ${adapter.mode} · 二次连接 ${adapter.secondConnectionCreated ? '是' : '否'} · 原始 bridge 暴露 ${adapter.rawBridgeExposed ? '是' : '否'}`,
+      ))
+      for (const diagnostic of adapter.diagnostics) diagnosticsBody.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
+      const securityBoundary = create(document, 'div', 'cxm-notice', '权限策略只约束通过 CordisX Platform API 的调用；当前 trusted renderer code 不是安全沙箱。')
+      securityBoundary.dataset.tone = 'warning'
+      diagnosticsBody.append(securityBoundary)
+      diagnostics.append(diagnosticsBody)
+      panel.append(diagnostics)
       content.append(panel)
       return
     }
@@ -1486,6 +1694,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const snapshot = model.snapshot()
     content.replaceChildren()
     for (const [id, button] of navButtons) button.setAttribute('aria-selected', String(id === activeTab))
+    if (permissionDetail !== undefined && secondaryView?.kind === 'plugin' && activeTab === 'plugins') {
+      renderPermissionDetail(snapshot, permissionDetail)
+      return
+    }
     if (secondaryView?.kind === 'plugin' && activeTab === 'plugins') {
       renderPluginDetail(snapshot, secondaryView.id)
       return
@@ -1525,6 +1737,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     button.addEventListener('click', () => {
       activeTab = id
       secondaryView = undefined
+      permissionDetail = undefined
       renderContent()
     })
   }
