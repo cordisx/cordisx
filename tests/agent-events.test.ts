@@ -16,6 +16,14 @@ const source: CordisXAgentAdapterSource = {
   kind: 'adapter', adapterId: 'fixture', adapterVersion: '1', hostId: 'host-1',
 }
 
+const pluginSource = {
+  kind: 'plugin' as const,
+  source: 'file:///plugins/audit.ts',
+  id: 'audit',
+  version: null,
+  generation: 'generation-1',
+}
+
 function session(phase: 'opened' | 'resumed' = 'opened'): CordisXAgentEventDraft<'session.lifecycle'> {
   return { sessionId: 'session-1', type: 'session.lifecycle', provenance: 'observed', source, data: { phase, history: 'unknown' } }
 }
@@ -105,6 +113,52 @@ describe('Agent event ledger', () => {
     ledger.dispose()
     expect(() => ledger.commit(session())).toThrowError(expect.objectContaining({ code: 'disposed' }))
     expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('enforces owner-stable delivery terminals and prompt contribution ordering', () => {
+    const cancelAfterClaim = new CordisXAgentEventLedger()
+    const delivery = (stage: string, owner = pluginSource): CordisXAgentEventDraft<'message.delivery'> => ({
+      sessionId: 'session-1', messageId: 'message-1', deliveryId: 'delivery-1',
+      type: 'message.delivery', provenance: 'cordisx', source: pluginSource,
+      data: {
+        stage: stage as CordisXAgentEvent<'message.delivery'>['data']['stage'],
+        target: 'next-step', wakeup: false, owner,
+        ...(stage === 'requested' ? { message: { id: 'message-1', role: 'user', content: [{ type: 'text', text: 'hello' }], source: pluginSource } } : {}),
+        ...(stage === 'cancelled' ? { cancelReason: 'requested' as const, diagnostic: { code: 'interrupted', message: 'cancelled' } } : {}),
+      },
+    })
+    for (const stage of ['requested', 'permission', 'queued', 'claimed']) cancelAfterClaim.commit(delivery(stage))
+    expect(() => cancelAfterClaim.commit(delivery('cancelled'))).toThrowError(expect.objectContaining({ code: 'invalid' }))
+
+    const ownerChange = new CordisXAgentEventLedger()
+    ownerChange.commit(delivery('requested'))
+    expect(() => ownerChange.commit(delivery('failed', { ...pluginSource, id: 'other' }))).toThrowError(expect.objectContaining({ code: 'invalid' }))
+
+    const terminal = new CordisXAgentEventLedger()
+    for (const stage of ['requested', 'permission', 'queued', 'claimed', 'projected', 'forwarded']) terminal.commit(delivery(stage))
+    expect(() => terminal.commit(delivery('failed'))).toThrowError(expect.objectContaining({ code: 'invalid' }))
+
+    const prompt = new CordisXAgentEventLedger()
+    expect(() => prompt.commit({
+      sessionId: 'session-1', turnId: 'turn-1', stepId: 'step-1', contributionId: 'contribution-1',
+      type: 'input.contribution', provenance: 'cordisx', source: pluginSource,
+      data: { kind: 'system-prompt.section', stage: 'evaluated', evaluationId: 'evaluation-1' },
+    })).toThrowError(expect.objectContaining({ code: 'invalid' }))
+    prompt.commit({
+      sessionId: 'session-1', contributionId: 'contribution-1',
+      type: 'input.contribution', provenance: 'cordisx', source: pluginSource,
+      data: { kind: 'system-prompt.section', stage: 'registered', capability: 'agent.prompt.section' },
+    })
+    prompt.commit({
+      sessionId: 'session-1', contributionId: 'contribution-1',
+      type: 'input.contribution', provenance: 'cordisx', source: pluginSource,
+      data: { kind: 'system-prompt.section', stage: 'released', releaseReason: 'explicit' },
+    })
+    expect(() => prompt.commit({
+      sessionId: 'session-1', contributionId: 'contribution-1',
+      type: 'input.contribution', provenance: 'cordisx', source: pluginSource,
+      data: { kind: 'system-prompt.section', stage: 'released', releaseReason: 'explicit' },
+    })).toThrowError(expect.objectContaining({ code: 'duplicate' }))
   })
 
   it('brokers read/query and subscription by plugin identity and session scope', async () => {

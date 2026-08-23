@@ -1,8 +1,10 @@
 import type { Context, Disposable } from '@deepseek-ai/cordis'
 import type { CordisXPlatformResult } from './platform-contracts.js'
 
-export const CORDISX_AGENT_EVENT_CONTRACT = 'cordisx.agent-events/v1' as const
-export const CORDISX_AGENT_EVENT_SCHEMA_VERSION = 1 as const
+export const CORDISX_AGENT_EVENT_CONTRACT = 'cordisx.agent-events/v2' as const
+export const CORDISX_AGENT_EVENT_SCHEMA_VERSION = 2 as const
+export const CORDISX_AGENT_DELIVERY_CONTRACT = 'cordisx.agent-delivery/v1' as const
+export const CORDISX_AGENT_DELIVERY_SCHEMA_VERSION = 1 as const
 
 export type CordisXAgentEventType =
   | 'session.lifecycle'
@@ -11,6 +13,7 @@ export type CordisXAgentEventType =
   | 'item.lifecycle'
   | 'message.observed'
   | 'message.delivery'
+  | 'input.contribution'
   | 'content.chunk'
   | 'diagnostic'
 
@@ -64,6 +67,34 @@ export type CordisXMessageDeliveryStage =
   | 'expired'
   | 'cancelled'
 
+export type CordisXMessageDeliveryCancelReason =
+  | 'requested'
+  | 'clear-pending'
+  | 'owner-disposed'
+  | 'plugin-blocked'
+  | 'permission-blocked'
+  | 'generation-replaced'
+
+export type CordisXInputContributionKind =
+  | 'pre-step.append'
+  | 'system-prompt.section'
+  | 'system-prompt.context'
+
+export type CordisXInputContributionStage =
+  | 'registered'
+  | 'evaluated'
+  | 'projected'
+  | 'forwarded'
+  | 'released'
+  | 'failed'
+
+export type CordisXInputContributionReleaseReason =
+  | 'explicit'
+  | 'owner-disposed'
+  | 'plugin-blocked'
+  | 'permission-blocked'
+  | 'generation-replaced'
+
 export type CordisXAgentTarget = 'next-turn' | 'next-step'
 
 export interface CordisXAgentDiagnosticData {
@@ -98,11 +129,22 @@ export interface CordisXAgentEventDataMap {
     readonly stage: CordisXMessageDeliveryStage
     readonly target: CordisXAgentTarget
     readonly wakeup: boolean
+    readonly owner: CordisXAgentPluginSource
     readonly message?: CordisXUserMessage
     readonly capability?: string
     readonly policy?: 'ask' | 'deny' | 'allow'
     readonly decision?: 'allow' | 'deny' | 'timeout'
     readonly declarationFingerprint?: string
+    readonly cancelReason?: CordisXMessageDeliveryCancelReason
+    readonly diagnostic?: CordisXAgentDiagnosticData
+  }
+  readonly 'input.contribution': {
+    readonly kind: CordisXInputContributionKind
+    readonly stage: CordisXInputContributionStage
+    readonly evaluationId?: string
+    readonly messageIds?: readonly string[]
+    readonly capability?: string
+    readonly releaseReason?: CordisXInputContributionReleaseReason
     readonly diagnostic?: CordisXAgentDiagnosticData
   }
   readonly 'content.chunk': {
@@ -124,6 +166,8 @@ export type CordisXAgentEvent<Type extends CordisXAgentEventType = CordisXAgentE
   readonly stepId?: string
   readonly itemId?: string
   readonly messageId?: string
+  readonly deliveryId?: string
+  readonly contributionId?: string
   readonly toolCallId?: string
   readonly contextId?: string
   readonly seq: number
@@ -191,11 +235,51 @@ export interface CordisXAgentEvents {
 
 export type CordisXAgentMessageInput = string | readonly CordisXAgentContentBlock[]
 
+export interface CordisXAgentDeliverySnapshot {
+  readonly contract: typeof CORDISX_AGENT_DELIVERY_CONTRACT
+  readonly schemaVersion: typeof CORDISX_AGENT_DELIVERY_SCHEMA_VERSION
+  readonly deliveryId: string
+  readonly messageId: string
+  readonly sessionId: string
+  readonly target: CordisXAgentTarget
+  readonly wakeup: boolean
+  readonly owner: CordisXAgentPluginSource
+  readonly stage: CordisXMessageDeliveryStage
+  readonly terminal: boolean
+  readonly cancellable: boolean
+  readonly valid: boolean
+  readonly stageEventId: string
+  readonly turnId?: string
+  readonly stepId?: string
+  readonly contextId?: string
+  readonly diagnostic?: CordisXAgentDiagnosticData
+}
+
+export type CordisXAgentDeliveryCancelResult =
+  | { readonly ok: true; readonly snapshot: CordisXAgentDeliverySnapshot }
+  | {
+      readonly ok: false
+      readonly reason: 'irreversible' | 'terminal' | 'stale-generation' | 'owner-mismatch'
+      readonly snapshot: CordisXAgentDeliverySnapshot
+    }
+
+export interface CordisXAgentDeliveryHandle {
+  readonly deliveryId: string
+  snapshot(): CordisXAgentDeliverySnapshot
+  cancel(): CordisXAgentDeliveryCancelResult
+}
+
+export interface CordisXAgentDeliveryClearResult {
+  readonly cancelled: readonly CordisXAgentDeliverySnapshot[]
+  readonly retained: readonly CordisXAgentDeliverySnapshot[]
+}
+
 export interface CordisXAgent {
-  send(message: CordisXAgentMessageInput, target: CordisXAgentTarget, wakeup: boolean): void
-  followup(message: CordisXAgentMessageInput): void
-  steer(message: CordisXAgentMessageInput): void
-  inject(message: CordisXAgentMessageInput): void
+  send(message: CordisXAgentMessageInput, target: CordisXAgentTarget, wakeup: boolean): CordisXAgentDeliveryHandle
+  followup(message: CordisXAgentMessageInput): CordisXAgentDeliveryHandle
+  steer(message: CordisXAgentMessageInput): CordisXAgentDeliveryHandle
+  inject(message: CordisXAgentMessageInput): CordisXAgentDeliveryHandle
+  clearPending(): CordisXAgentDeliveryClearResult
 }
 
 export type CordisXPreStepOperation =

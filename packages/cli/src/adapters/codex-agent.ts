@@ -7,6 +7,7 @@ import type {
 import type { CordisXPlatformDiagnostic } from '../platform-contracts.js'
 import {
   type CordisXAgentAdapter,
+  type CordisXAgentDeliveryControl,
   type CordisXAgentDeliveryInput,
   type CordisXAgentDeliveryOutcome,
 } from '../renderer/agent.js'
@@ -89,7 +90,7 @@ export class UnavailableCodexHostAdapter extends UnavailablePlatformAdapter impl
   }
 
   async deliver(): Promise<CordisXAgentDeliveryOutcome> {
-    return { terminal: 'failed', claimed: false, projected: false, diagnostic: CURRENT_CONNECTION_UNAVAILABLE }
+    return { terminal: 'failed', diagnostic: CURRENT_CONNECTION_UNAVAILABLE }
   }
 }
 
@@ -121,12 +122,16 @@ export class CodexCurrentConnectionAgentAdapter implements CordisXAgentAdapter {
     this.nativeContext.set(sessionId, Object.freeze({ ...context }))
   }
 
-  async deliver(input: CordisXAgentDeliveryInput): Promise<CordisXAgentDeliveryOutcome> {
+  async deliver(input: CordisXAgentDeliveryInput, control: CordisXAgentDeliveryControl): Promise<CordisXAgentDeliveryOutcome> {
     const additionalContext = projectCodexAdditionalContext(
       this.nativeContext.get(input.sessionId) ?? {},
       input.message,
       this.generation,
     )
+    if (!control.claim()) {
+      return { terminal: 'failed', diagnostic: { code: 'interrupted', message: 'Agent delivery was cancelled before Codex claim' } }
+    }
+    control.projected()
     try {
       const result = await this.client.forward({
         threadId: input.sessionId,
@@ -136,7 +141,7 @@ export class CodexCurrentConnectionAgentAdapter implements CordisXAgentAdapter {
       })
       if (!result.accepted) {
         return {
-          terminal: 'failed', claimed: true, projected: true,
+          terminal: 'failed',
           ...(result.turnId === undefined ? {} : { turnId: result.turnId }),
           ...(result.stepId === undefined ? {} : { stepId: result.stepId }),
           ...(result.contextId === undefined ? {} : { contextId: result.contextId }),
@@ -144,14 +149,14 @@ export class CodexCurrentConnectionAgentAdapter implements CordisXAgentAdapter {
         }
       }
       return {
-        terminal: 'forwarded', claimed: true, projected: true,
+        terminal: 'forwarded',
         ...(result.turnId === undefined ? {} : { turnId: result.turnId }),
         ...(result.stepId === undefined ? {} : { stepId: result.stepId }),
         ...(result.contextId === undefined ? {} : { contextId: result.contextId }),
       }
     } catch {
       return {
-        terminal: 'failed', claimed: true, projected: true,
+        terminal: 'failed',
         diagnostic: { code: 'adapter-failure', message: 'Codex current-connection Agent delivery failed', retryable: true },
       }
     }

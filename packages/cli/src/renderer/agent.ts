@@ -1,13 +1,23 @@
 import { Context, Service, type Disposable } from '@deepseek-ai/cordis'
 import {
+  CORDISX_AGENT_DELIVERY_CONTRACT,
+  CORDISX_AGENT_DELIVERY_SCHEMA_VERSION,
   type CordisXAgent,
   type CordisXAgentContentBlock,
+  type CordisXAgentDeliveryCancelResult,
+  type CordisXAgentDeliveryClearResult,
+  type CordisXAgentDeliveryHandle,
+  type CordisXAgentDeliverySnapshot,
   type CordisXAgentEventSource,
   type CordisXAgentEventStatus,
   type CordisXAgentMessageInput,
   type CordisXAgentPluginSource,
   type CordisXAgentTarget,
   type CordisXAgents,
+  type CordisXInputContributionKind,
+  type CordisXInputContributionReleaseReason,
+  type CordisXMessageDeliveryCancelReason,
+  type CordisXMessageDeliveryStage,
   type CordisXPreStepHandler,
   type CordisXPreStepInput,
   type CordisXPreStepOperation,
@@ -56,23 +66,33 @@ export interface CordisXAgentDeliveryInput {
 }
 
 export interface CordisXAgentDeliveryOutcome {
-  readonly terminal: 'forwarded' | 'failed' | 'expired' | 'cancelled'
-  readonly claimed: boolean
-  readonly projected: boolean
+  readonly terminal: 'forwarded' | 'failed' | 'expired'
   readonly turnId?: string
   readonly stepId?: string
   readonly contextId?: string
   readonly diagnostic?: CordisXPlatformDiagnostic
 }
 
+export interface CordisXAgentDeliveryIdentity {
+  readonly turnId?: string
+  readonly stepId?: string
+  readonly contextId?: string
+}
+
+export interface CordisXAgentDeliveryControl {
+  claim(identity?: CordisXAgentDeliveryIdentity): boolean
+  projected(identity?: CordisXAgentDeliveryIdentity): void
+}
+
 /** Private host boundary. Implementations never cross the public services. */
 export interface CordisXAgentAdapter {
   agentStatus(): CordisXAgentEventStatus
-  deliver(input: CordisXAgentDeliveryInput): Promise<CordisXAgentDeliveryOutcome>
+  deliver(input: CordisXAgentDeliveryInput, control: CordisXAgentDeliveryControl): Promise<CordisXAgentDeliveryOutcome>
 }
 
 interface PreStepRecord {
   readonly order: number
+  readonly contributionId: string
   readonly identity: CordisXPluginIdentity
   readonly source: CordisXAgentPluginSource
   readonly handler: CordisXPreStepHandler
@@ -83,12 +103,45 @@ interface PromptRecord {
   readonly identity: CordisXPluginIdentity
   readonly source: CordisXAgentPluginSource
   readonly contribution: CordisXPromptContribution
+  readonly contributionId: string
   active: boolean
   disposed: boolean
+  registrationEventId?: string
+}
+
+interface DeliveryRecord {
+  readonly identity: CordisXPluginIdentity
+  readonly owner: CordisXAgentPluginSource
+  readonly deliveryId: string
+  readonly sessionId: string
+  readonly message: CordisXUserMessage
+  readonly target: CordisXAgentTarget
+  readonly wakeup: boolean
+  stage: CordisXMessageDeliveryStage
+  stageEventId: string
+  valid: boolean
+  turnId?: string
+  stepId?: string
+  contextId?: string
+  diagnostic?: CordisXPlatformDiagnostic
+}
+
+interface ContributionEvaluation {
+  readonly contributionId: string
+  readonly evaluationId: string
+  readonly kind: CordisXInputContributionKind
+  readonly source: CordisXAgentPluginSource
+  readonly messageIds?: readonly string[]
+  eventId: string
+}
+
+export interface CordisXPromptProjection {
+  readonly sections: readonly (CordisXPromptContribution & { readonly source: CordisXAgentPluginSource })[]
+  readonly contexts: readonly (CordisXPromptContribution & { readonly source: CordisXAgentPluginSource })[]
 }
 
 export type CordisXPreStepOutcome =
-  | { readonly status: 'continued'; readonly messages: readonly CordisXUserMessage[] }
+  | { readonly status: 'continued'; readonly messages: readonly CordisXUserMessage[]; readonly prompt: CordisXPromptProjection }
   | { readonly status: 'rejected'; readonly messages: readonly CordisXUserMessage[]; readonly reason: string; readonly source: CordisXAgentPluginSource }
   | { readonly status: 'failed'; readonly messages: readonly CordisXUserMessage[]; readonly error: CordisXPlatformDiagnostic }
 
@@ -109,9 +162,13 @@ export class CordisXHostAgentRuntime {
   private readonly now: () => number
   private readonly preSteps: PreStepRecord[] = []
   private readonly prompts = new Set<PromptRecord>()
+  private readonly deliveries = new Map<string, DeliveryRecord>()
   private readonly operations = new Set<Promise<void>>()
+  private nextDelivery = 0
   private nextMessage = 0
   private nextRegistration = 0
+  private nextContribution = 0
+  private nextEvaluation = 0
   private disposed = false
 
   constructor(options: CordisXHostAgentRuntimeOptions) {
@@ -130,34 +187,78 @@ export class CordisXHostAgentRuntime {
     return freeze({ kind: 'plugin', source: identity.source, id: identity.id, version: null, generation: this.generation })
   }
 
-  send(identity: CordisXPluginIdentity, sessionId: string, input: CordisXAgentMessageInput, target: CordisXAgentTarget, wakeup: boolean): void {
+  send(
+    identity: CordisXPluginIdentity,
+    sessionId: string,
+    input: CordisXAgentMessageInput,
+    target: CordisXAgentTarget,
+    wakeup: boolean,
+  ): CordisXAgentDeliveryHandle {
     this.assertLive()
     if (!validId(sessionId)) throw new Error('sessionId must be a non-empty opaque id')
     if (!['next-turn', 'next-step'].includes(target) || typeof wakeup !== 'boolean') throw new Error('Agent delivery target is invalid')
-    const source = this.pluginSource(identity)
+    const owner = this.pluginSource(identity)
+    const deliveryId = `cxdelivery:${encodeURIComponent(this.generation)}:${this.nextDelivery++}`
     const message: CordisXUserMessage = freeze({
       id: `cxmsg:${encodeURIComponent(this.generation)}:${this.nextMessage++}`,
       role: 'user',
       content: content(input),
-      source,
+      source: owner,
     })
     const requested = this.ledger.commit({
       sessionId,
       messageId: message.id,
+      deliveryId,
       type: 'message.delivery',
       provenance: 'cordisx',
-      source,
-      data: { stage: 'requested', target, wakeup, message },
+      source: owner,
+      data: { stage: 'requested', target, wakeup, owner, message },
     })
-    const operation = this.deliver(identity, sessionId, message, target, wakeup, requested.eventId)
+    const record: DeliveryRecord = {
+      identity: clone(identity), owner, deliveryId, sessionId, message, target, wakeup,
+      stage: 'requested', stageEventId: requested.eventId, valid: true,
+    }
+    this.deliveries.set(deliveryId, record)
+    const operation = this.deliver(record)
       .catch(error => console.error('CordisX Agent delivery ledger failed', error))
       .finally(() => this.operations.delete(operation))
     this.operations.add(operation)
+    return this.deliveryHandle(identity, record)
+  }
+
+  clearPending(identity: CordisXPluginIdentity, sessionId: string): CordisXAgentDeliveryClearResult {
+    this.assertLive()
+    const cancelled: CordisXAgentDeliverySnapshot[] = []
+    const retained: CordisXAgentDeliverySnapshot[] = []
+    for (const record of this.deliveries.values()) {
+      if (record.sessionId !== sessionId || !this.sameOwner(record.identity, identity) || record.owner.generation !== this.generation) continue
+      if (this.terminalStage(record.stage)) continue
+      const result = this.cancelDelivery(identity, record.deliveryId, 'clear-pending')
+      if (result.ok) cancelled.push(result.snapshot)
+      else retained.push(result.snapshot)
+    }
+    return clone({ cancelled, retained })
+  }
+
+  releaseOwner(identity: CordisXPluginIdentity, reason: Exclude<CordisXMessageDeliveryCancelReason, 'requested' | 'clear-pending'>): void {
+    for (const record of this.deliveries.values()) {
+      if (!this.sameOwner(record.identity, identity)) continue
+      this.invalidateDelivery(record, reason)
+    }
+    for (const prompt of [...this.prompts]) {
+      if (this.sameOwner(prompt.identity, identity)) this.releasePrompt(prompt, reason)
+    }
   }
 
   registerPreStep(identity: CordisXPluginIdentity, handler: CordisXPreStepHandler): Disposable<void> {
     this.assertLive()
-    const record = { order: this.nextRegistration++, identity, source: this.pluginSource(identity), handler }
+    const record = {
+      order: this.nextRegistration++,
+      contributionId: `cxcontribution:${encodeURIComponent(this.generation)}:${this.nextContribution++}`,
+      identity,
+      source: this.pluginSource(identity),
+      handler,
+    }
     this.preSteps.push(record)
     return () => {
       const index = this.preSteps.indexOf(record)
@@ -167,7 +268,12 @@ export class CordisXHostAgentRuntime {
 
   async runPreStep(input: CordisXPreStepInput): Promise<CordisXPreStepOutcome> {
     this.assertLive()
+    if (!validId(input.sessionId) || !validId(input.turnId) || !validId(input.stepId)) {
+      throw new Error('pre-step session, turn, and step ids must be non-empty opaque ids')
+    }
     let messages = clone(input.messages)
+    const evaluations: ContributionEvaluation[] = []
+    const prompt = this.beginPromptProjection(input, evaluations)
     for (const record of [...this.preSteps].sort((left, right) => left.order - right.order)) {
       let decision
       try {
@@ -175,11 +281,13 @@ export class CordisXHostAgentRuntime {
       } catch (error) {
         const diagnostic = { code: 'adapter-failure' as const, message: `agent/pre-step handler failed: ${error instanceof Error ? error.message : String(error)}` }
         this.preStepDiagnostic(input, record.source, diagnostic.code, diagnostic.message)
+        this.failContributions(input, evaluations, diagnostic)
         return { status: 'failed', messages, error: diagnostic }
       }
       if (decision === null || typeof decision !== 'object' || !['continue', 'append', 'reject', 'transform'].includes(decision.kind)) {
         const error = { code: 'invalid-request' as const, message: 'agent/pre-step handler returned an invalid decision' }
         this.preStepDiagnostic(input, record.source, error.code, error.message)
+        this.failContributions(input, evaluations, error)
         return { status: 'failed', messages, error }
       }
       if (decision.kind === 'continue') continue
@@ -189,27 +297,52 @@ export class CordisXHostAgentRuntime {
       const grant = await this.broker.authorize(record.identity, capability, { agentSessionId: input.sessionId })
       if (!grant.ok) {
         this.preStepDiagnostic(input, record.source, grant.error.code, grant.error.message)
+        if (decision.kind === 'append') this.contributionFailure(input, record, 'pre-step.append', grant.error, capability)
+        this.failContributions(input, evaluations, grant.error)
         return { status: 'failed', messages, error: grant.error }
       }
       if (decision.kind === 'reject') {
-        this.preStepDiagnostic(input, record.source, 'pre-step-rejected', decision.reason)
+        this.preStepDiagnostic(input, record.source, 'invalid-request', decision.reason)
+        this.failContributions(input, evaluations, { code: 'invalid-request', message: decision.reason })
         return { status: 'rejected', messages, reason: decision.reason, source: record.source }
       }
       if (decision.kind === 'append') {
-        messages = freeze([...messages, ...decision.messages.map(item => this.message(record.source, item))])
+        let appended: readonly CordisXUserMessage[]
+        try {
+          if (decision.messages.length === 0) throw new Error('pre-step append requires at least one message')
+          appended = freeze(decision.messages.map(item => this.message(record.source, item)))
+        } catch (error) {
+          const diagnostic = { code: 'invalid-request' as const, message: error instanceof Error ? error.message : String(error) }
+          this.contributionFailure(input, record, 'pre-step.append', diagnostic, capability)
+          this.failContributions(input, evaluations, diagnostic)
+          return { status: 'failed', messages, error: diagnostic }
+        }
+        const evaluation = this.beginContributionEvaluation(
+          input,
+          record.contributionId,
+          'pre-step.append',
+          record.source,
+          appended.map(message => message.id),
+        )
+        messages = freeze([...messages, ...appended])
+        evaluation.eventId = this.contributionStage(input, evaluation, 'projected')
+        evaluations.push(evaluation)
         continue
       }
       try {
         messages = this.transform(messages, decision.operations, decision.append ?? [], record.source)
       } catch (error) {
+        const diagnostic = { code: 'invalid-request' as const, message: error instanceof Error ? error.message : String(error) }
+        this.failContributions(input, evaluations, diagnostic)
         return {
           status: 'failed',
           messages,
-          error: { code: 'invalid-request', message: error instanceof Error ? error.message : String(error) },
+          error: diagnostic,
         }
       }
     }
-    return { status: 'continued', messages }
+    for (const evaluation of evaluations) evaluation.eventId = this.contributionStage(input, evaluation, 'forwarded')
+    return { status: 'continued', messages, prompt }
   }
 
   registerPrompt(identity: CordisXPluginIdentity, kind: 'section' | 'context', contribution: CordisXPromptContribution): Disposable<void> {
@@ -222,6 +355,7 @@ export class CordisXHostAgentRuntime {
       identity,
       source: this.pluginSource(identity),
       contribution: clone(contribution),
+      contributionId: `cxcontribution:${encodeURIComponent(this.generation)}:${this.nextContribution++}`,
       active: false,
       disposed: false,
     }
@@ -238,25 +372,41 @@ export class CordisXHostAgentRuntime {
       .then(grant => {
         if (grant.ok && !record.disposed && !this.disposed) {
           record.active = true
+          record.registrationEventId = this.ledger.commit({
+            sessionId: contribution.sessionId,
+            contributionId: record.contributionId,
+            type: 'input.contribution',
+            provenance: 'cordisx',
+            source: record.source,
+            ...this.causal(this.latestEventId(contribution.sessionId)),
+            data: {
+              kind: kind === 'section' ? 'system-prompt.section' : 'system-prompt.context',
+              stage: 'registered',
+              capability,
+            },
+          }).eventId
           return
         }
         if (!grant.ok && !record.disposed && !this.disposed) {
           this.ledger.commit({
             sessionId: contribution.sessionId,
-            type: 'diagnostic',
+            contributionId: record.contributionId,
+            type: 'input.contribution',
             provenance: 'cordisx',
-            source: this.runtimeSource('permission-broker'),
-            data: { code: grant.error.code, message: grant.error.message },
+            source: record.source,
+            ...this.causal(this.latestEventId(contribution.sessionId)),
+            data: {
+              kind: kind === 'section' ? 'system-prompt.section' : 'system-prompt.context',
+              stage: 'failed',
+              capability,
+              diagnostic: grant.error,
+            },
           })
         }
       })
       .finally(() => this.operations.delete(operation))
     this.operations.add(operation)
-    return () => {
-      record.disposed = true
-      record.active = false
-      this.prompts.delete(record)
-    }
+    return () => this.releasePrompt(record, 'explicit')
   }
 
   promptSnapshot(sessionId: string): readonly Readonly<PromptRecord>[] {
@@ -271,6 +421,10 @@ export class CordisXHostAgentRuntime {
 
   async dispose(): Promise<void> {
     if (this.disposed) return
+    for (const record of this.deliveries.values()) {
+      this.invalidateDelivery(record, 'generation-replaced')
+    }
+    for (const prompt of [...this.prompts]) this.releasePrompt(prompt, 'generation-replaced')
     this.disposed = true
     await this.settled()
     this.preSteps.length = 0
@@ -278,112 +432,363 @@ export class CordisXHostAgentRuntime {
     this.ledger.dispose()
   }
 
-  private async deliver(
-    identity: CordisXPluginIdentity,
-    sessionId: string,
-    message: CordisXUserMessage,
-    target: CordisXAgentTarget,
-    wakeup: boolean,
-    parentId: string,
-  ): Promise<void> {
-    const policy = this.broker.policy(identity, 'agent.messages.append')
-    const grant = await this.broker.authorize(identity, 'agent.messages.append', { agentSessionId: sessionId })
-    const permission = this.ledger.commit({
-      sessionId,
-      messageId: message.id,
-      type: 'message.delivery',
-      provenance: 'cordisx',
-      source: this.runtimeSource('permission-broker'),
-      causalParentId: parentId,
-      data: {
-        stage: 'permission', target, wakeup,
-        capability: 'agent.messages.append',
-        policy,
-        decision: grant.ok ? 'allow' : grant.error.code === 'timeout' ? 'timeout' : 'deny',
-        ...(!grant.ok ? { diagnostic: grant.error } : {}),
-      },
+  private async deliver(record: DeliveryRecord): Promise<void> {
+    const policy = this.broker.policy(record.identity, 'agent.messages.append')
+    const grant = await this.broker.authorize(record.identity, 'agent.messages.append', { agentSessionId: record.sessionId })
+    if (this.terminalStage(record.stage)) return
+    this.deliveryStage(record, 'permission', this.runtimeSource('permission-broker'), {
+      capability: 'agent.messages.append',
+      policy,
+      decision: grant.ok ? 'allow' : grant.error.code === 'timeout' ? 'timeout' : 'deny',
+      ...(!grant.ok ? { diagnostic: grant.error } : {}),
     })
     if (!grant.ok) {
-      this.terminal(sessionId, message.id, target, wakeup, 'failed', permission.eventId, grant.error)
+      this.deliveryTerminal(record, 'failed', grant.error)
       return
     }
-    const queued = this.ledger.commit({
-      sessionId,
-      messageId: message.id,
-      type: 'message.delivery',
-      provenance: 'cordisx',
-      source: this.runtimeSource('agent-runtime'),
-      causalParentId: permission.eventId,
-      data: { stage: 'queued', target, wakeup },
-    })
+    if (this.terminalStage(record.stage)) return
+    this.deliveryStage(record, 'queued', this.runtimeSource('agent-runtime'))
+    if (this.terminalStage(record.stage)) return
+
+    const control: CordisXAgentDeliveryControl = {
+      claim: identity => {
+        if (!record.valid || this.terminalStage(record.stage) || record.stage !== 'queued') return false
+        this.assignDeliveryIdentity(record, identity)
+        this.deliveryStage(record, 'claimed', this.runtimeSource('agent-runtime'))
+        return true
+      },
+      projected: identity => {
+        if (!record.valid || record.stage !== 'claimed') throw new Error('Agent delivery must be claimed before projection')
+        this.assignDeliveryIdentity(record, identity)
+        this.deliveryStage(record, 'projected', this.runtimeSource('adapter-boundary'))
+      },
+    }
+
     let outcome: CordisXAgentDeliveryOutcome
     try {
-      outcome = await this.adapter.deliver({ sessionId, target, wakeup, message })
+      outcome = await this.adapter.deliver({
+        sessionId: record.sessionId,
+        target: record.target,
+        wakeup: record.wakeup,
+        message: record.message,
+      }, control)
     } catch {
-      this.terminal(sessionId, message.id, target, wakeup, 'failed', queued.eventId, {
-        code: 'adapter-failure', message: 'Agent adapter delivery failed', retryable: true,
-      })
+      if (!this.terminalStage(record.stage)) {
+        this.deliveryTerminal(record, 'failed', {
+          code: 'adapter-failure', message: 'Agent adapter delivery failed', retryable: true,
+        })
+      }
       return
     }
-    if (outcome.projected && !outcome.claimed) {
-      this.terminal(sessionId, message.id, target, wakeup, 'failed', queued.eventId, {
-        code: 'adapter-failure', message: 'Agent adapter projected an unclaimed message', retryable: false,
-      })
-      return
-    }
-    if (outcome.terminal === 'forwarded' && (!outcome.claimed || !outcome.projected)) {
-      this.terminal(sessionId, message.id, target, wakeup, 'failed', queued.eventId, {
+    if (this.terminalStage(record.stage)) return
+    this.assignDeliveryIdentity(record, outcome)
+    if (outcome.terminal === 'forwarded' && record.stage !== 'projected') {
+      this.deliveryTerminal(record, 'failed', {
         code: 'adapter-failure', message: 'Agent adapter reported forwarded before claim and projection', retryable: false,
       })
       return
     }
-    let causalParentId = queued.eventId
-    if (outcome.claimed) {
-      causalParentId = this.ledger.commit({
-        sessionId,
-        ...(outcome.turnId === undefined ? {} : { turnId: outcome.turnId }),
-        ...(outcome.stepId === undefined ? {} : { stepId: outcome.stepId }),
-        ...(outcome.contextId === undefined ? {} : { contextId: outcome.contextId }),
-        messageId: message.id,
-        type: 'message.delivery', provenance: 'cordisx', source: this.runtimeSource('agent-runtime'), causalParentId,
-        data: { stage: 'claimed', target, wakeup },
-      }).eventId
-    }
-    if (outcome.projected) {
-      causalParentId = this.ledger.commit({
-        sessionId,
-        ...(outcome.turnId === undefined ? {} : { turnId: outcome.turnId }),
-        ...(outcome.stepId === undefined ? {} : { stepId: outcome.stepId }),
-        ...(outcome.contextId === undefined ? {} : { contextId: outcome.contextId }),
-        messageId: message.id,
-        type: 'message.delivery', provenance: 'cordisx', source: this.runtimeSource('adapter-boundary'), causalParentId,
-        data: { stage: 'projected', target, wakeup },
-      }).eventId
-    }
-    this.terminal(sessionId, message.id, target, wakeup, outcome.terminal, causalParentId, outcome.diagnostic, outcome)
+    this.deliveryTerminal(record, outcome.terminal, outcome.diagnostic)
   }
 
-  private terminal(
-    sessionId: string,
-    messageId: string,
-    target: CordisXAgentTarget,
-    wakeup: boolean,
-    terminal: CordisXAgentDeliveryOutcome['terminal'],
-    causalParentId: string,
-    diagnostic?: CordisXPlatformDiagnostic,
-    identities: Pick<CordisXAgentDeliveryOutcome, 'turnId' | 'stepId' | 'contextId'> = {},
+  private deliveryStage(
+    record: DeliveryRecord,
+    stage: Exclude<CordisXMessageDeliveryStage, 'requested' | 'forwarded' | 'failed' | 'expired' | 'cancelled'>,
+    source: CordisXAgentEventSource,
+    details: Partial<{
+      capability: string
+      policy: 'ask' | 'deny' | 'allow'
+      decision: 'allow' | 'deny' | 'timeout'
+      diagnostic: CordisXPlatformDiagnostic
+    }> = {},
   ): void {
-    this.ledger.commit({
-      sessionId,
-      ...(identities.turnId === undefined ? {} : { turnId: identities.turnId }),
-      ...(identities.stepId === undefined ? {} : { stepId: identities.stepId }),
-      ...(identities.contextId === undefined ? {} : { contextId: identities.contextId }),
-      messageId,
+    const event = this.ledger.commit({
+      sessionId: record.sessionId,
+      ...this.deliveryIdentity(record),
+      messageId: record.message.id,
+      deliveryId: record.deliveryId,
+      type: 'message.delivery',
+      provenance: 'cordisx',
+      source,
+      causalParentId: record.stageEventId,
+      data: { stage, target: record.target, wakeup: record.wakeup, owner: record.owner, ...details },
+    })
+    record.stage = stage
+    record.stageEventId = event.eventId
+    if (details.diagnostic !== undefined) record.diagnostic = details.diagnostic
+  }
+
+  private deliveryTerminal(
+    record: DeliveryRecord,
+    terminal: 'forwarded' | 'failed' | 'expired',
+    diagnostic?: CordisXPlatformDiagnostic,
+  ): void {
+    if (this.terminalStage(record.stage)) return
+    const resolvedDiagnostic = terminal === 'forwarded'
+      ? diagnostic
+      : diagnostic ?? { code: terminal === 'expired' ? 'timeout' : 'adapter-failure', message: `Agent delivery ${terminal}` }
+    const event = this.ledger.commit({
+      sessionId: record.sessionId,
+      ...this.deliveryIdentity(record),
+      messageId: record.message.id,
+      deliveryId: record.deliveryId,
       type: 'message.delivery',
       provenance: 'cordisx',
       source: this.runtimeSource('adapter-boundary'),
-      causalParentId,
-      data: { stage: terminal, target, wakeup, ...(diagnostic === undefined ? {} : { diagnostic }) },
+      causalParentId: record.stageEventId,
+      data: {
+        stage: terminal,
+        target: record.target,
+        wakeup: record.wakeup,
+        owner: record.owner,
+        ...(resolvedDiagnostic === undefined ? {} : { diagnostic: resolvedDiagnostic }),
+      },
+    })
+    record.stage = terminal
+    record.stageEventId = event.eventId
+    if (resolvedDiagnostic === undefined) delete record.diagnostic
+    else record.diagnostic = resolvedDiagnostic
+  }
+
+  private deliveryHandle(identity: CordisXPluginIdentity, record: DeliveryRecord): CordisXAgentDeliveryHandle {
+    const owner = clone(identity)
+    return Object.freeze({
+      deliveryId: record.deliveryId,
+      snapshot: () => this.deliverySnapshot(record),
+      cancel: () => this.cancelDelivery(owner, record.deliveryId, 'requested'),
+    })
+  }
+
+  private invalidateDelivery(
+    record: DeliveryRecord,
+    reason: Exclude<CordisXMessageDeliveryCancelReason, 'requested' | 'clear-pending'>,
+  ): void {
+    if (!this.terminalStage(record.stage) && this.cancellableStage(record.stage)) {
+      this.cancelDelivery(record.identity, record.deliveryId, reason)
+    }
+    record.valid = false
+  }
+
+  private cancelDelivery(
+    identity: CordisXPluginIdentity,
+    deliveryId: string,
+    reason: CordisXMessageDeliveryCancelReason,
+  ): CordisXAgentDeliveryCancelResult {
+    const record = this.deliveries.get(deliveryId)
+    if (record === undefined) throw new Error(`Unknown Agent delivery ${deliveryId}`)
+    if (!this.sameOwner(record.identity, identity)) {
+      return clone({ ok: false, reason: 'owner-mismatch', snapshot: this.deliverySnapshot(record) })
+    }
+    if (!record.valid) return clone({ ok: false, reason: 'stale-generation', snapshot: this.deliverySnapshot(record) })
+    if (this.terminalStage(record.stage)) return clone({ ok: false, reason: 'terminal', snapshot: this.deliverySnapshot(record) })
+    if (!this.cancellableStage(record.stage)) return clone({ ok: false, reason: 'irreversible', snapshot: this.deliverySnapshot(record) })
+    const diagnostic: CordisXPlatformDiagnostic = { code: 'interrupted', message: `Agent delivery cancelled: ${reason}`, retryable: false }
+    const event = this.ledger.commit({
+      sessionId: record.sessionId,
+      ...this.deliveryIdentity(record),
+      messageId: record.message.id,
+      deliveryId: record.deliveryId,
+      type: 'message.delivery',
+      provenance: 'cordisx',
+      source: this.runtimeSource('agent-runtime'),
+      causalParentId: record.stageEventId,
+      data: {
+        stage: 'cancelled',
+        target: record.target,
+        wakeup: record.wakeup,
+        owner: record.owner,
+        cancelReason: reason,
+        diagnostic,
+      },
+    })
+    record.stage = 'cancelled'
+    record.stageEventId = event.eventId
+    record.diagnostic = diagnostic
+    return clone({ ok: true, snapshot: this.deliverySnapshot(record) })
+  }
+
+  private deliverySnapshot(record: DeliveryRecord): CordisXAgentDeliverySnapshot {
+    return clone({
+      contract: CORDISX_AGENT_DELIVERY_CONTRACT,
+      schemaVersion: CORDISX_AGENT_DELIVERY_SCHEMA_VERSION,
+      deliveryId: record.deliveryId,
+      messageId: record.message.id,
+      sessionId: record.sessionId,
+      target: record.target,
+      wakeup: record.wakeup,
+      owner: record.owner,
+      stage: record.stage,
+      terminal: this.terminalStage(record.stage),
+      cancellable: record.valid && this.cancellableStage(record.stage),
+      valid: record.valid,
+      stageEventId: record.stageEventId,
+      ...this.deliveryIdentity(record),
+      ...(record.diagnostic === undefined ? {} : { diagnostic: record.diagnostic }),
+    })
+  }
+
+  private assignDeliveryIdentity(record: DeliveryRecord, identity: CordisXAgentDeliveryIdentity | undefined): void {
+    if (identity === undefined) return
+    for (const key of ['turnId', 'stepId', 'contextId'] as const) {
+      const value = identity[key]
+      if (value === undefined) continue
+      if (!validId(value)) throw new Error(`Agent delivery ${key} is invalid`)
+      if (record[key] !== undefined && record[key] !== value) throw new Error(`Agent delivery changed ${key}`)
+      record[key] = value
+    }
+  }
+
+  private deliveryIdentity(record: DeliveryRecord): CordisXAgentDeliveryIdentity {
+    return {
+      ...(record.turnId === undefined ? {} : { turnId: record.turnId }),
+      ...(record.stepId === undefined ? {} : { stepId: record.stepId }),
+      ...(record.contextId === undefined ? {} : { contextId: record.contextId }),
+    }
+  }
+
+  private terminalStage(stage: CordisXMessageDeliveryStage): boolean {
+    return ['forwarded', 'failed', 'expired', 'cancelled'].includes(stage)
+  }
+
+  private cancellableStage(stage: CordisXMessageDeliveryStage): boolean {
+    return ['requested', 'permission', 'queued'].includes(stage)
+  }
+
+  private sameOwner(left: CordisXPluginIdentity, right: CordisXPluginIdentity): boolean {
+    return left.source === right.source && left.id === right.id
+  }
+
+  private beginPromptProjection(input: CordisXPreStepInput, evaluations: ContributionEvaluation[]): CordisXPromptProjection {
+    const sections: (CordisXPromptContribution & { readonly source: CordisXAgentPluginSource })[] = []
+    const contexts: (CordisXPromptContribution & { readonly source: CordisXAgentPluginSource })[] = []
+    for (const prompt of [...this.prompts]
+      .filter(item => item.active && item.contribution.sessionId === input.sessionId)
+      .sort((left, right) => (left.contribution.order ?? 0) - (right.contribution.order ?? 0))) {
+      const kind = prompt.kind === 'section' ? 'system-prompt.section' : 'system-prompt.context'
+      const evaluation = this.beginContributionEvaluation(input, prompt.contributionId, kind, prompt.source)
+      evaluation.eventId = this.contributionStage(input, evaluation, 'projected')
+      evaluations.push(evaluation)
+      const projected = freeze({ ...prompt.contribution, source: prompt.source })
+      if (prompt.kind === 'section') sections.push(projected)
+      else contexts.push(projected)
+    }
+    return freeze({ sections, contexts })
+  }
+
+  private beginContributionEvaluation(
+    input: CordisXPreStepInput,
+    contributionId: string,
+    kind: CordisXInputContributionKind,
+    source: CordisXAgentPluginSource,
+    messageIds?: readonly string[],
+  ): ContributionEvaluation {
+    const evaluationId = `cxevaluation:${encodeURIComponent(this.generation)}:${this.nextEvaluation++}`
+    const event = this.ledger.commit({
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      stepId: input.stepId,
+      contributionId,
+      type: 'input.contribution',
+      provenance: 'cordisx',
+      source,
+      ...this.causal(this.latestEventId(input.sessionId)),
+      data: {
+        kind,
+        stage: 'evaluated',
+        evaluationId,
+        ...(messageIds === undefined ? {} : { messageIds }),
+      },
+    })
+    return { contributionId, evaluationId, kind, source, ...(messageIds === undefined ? {} : { messageIds }), eventId: event.eventId }
+  }
+
+  private contributionStage(
+    input: CordisXPreStepInput,
+    evaluation: ContributionEvaluation,
+    stage: 'projected' | 'forwarded',
+  ): string {
+    return this.ledger.commit({
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      stepId: input.stepId,
+      contributionId: evaluation.contributionId,
+      type: 'input.contribution',
+      provenance: 'cordisx',
+      source: evaluation.source,
+      causalParentId: evaluation.eventId,
+      data: {
+        kind: evaluation.kind,
+        stage,
+        evaluationId: evaluation.evaluationId,
+        ...(evaluation.messageIds === undefined ? {} : { messageIds: evaluation.messageIds }),
+      },
+    }).eventId
+  }
+
+  private failContributions(
+    input: CordisXPreStepInput,
+    evaluations: readonly ContributionEvaluation[],
+    diagnostic: CordisXPlatformDiagnostic,
+  ): void {
+    for (const evaluation of evaluations) {
+      evaluation.eventId = this.ledger.commit({
+        sessionId: input.sessionId,
+        turnId: input.turnId,
+        stepId: input.stepId,
+        contributionId: evaluation.contributionId,
+        type: 'input.contribution',
+        provenance: 'cordisx',
+        source: evaluation.source,
+        causalParentId: evaluation.eventId,
+        data: {
+          kind: evaluation.kind,
+          stage: 'failed',
+          evaluationId: evaluation.evaluationId,
+          ...(evaluation.messageIds === undefined ? {} : { messageIds: evaluation.messageIds }),
+          diagnostic,
+        },
+      }).eventId
+    }
+  }
+
+  private contributionFailure(
+    input: CordisXPreStepInput,
+    record: PreStepRecord,
+    kind: CordisXInputContributionKind,
+    diagnostic: CordisXPlatformDiagnostic,
+    capability: string,
+  ): void {
+    this.ledger.commit({
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      stepId: input.stepId,
+      contributionId: record.contributionId,
+      type: 'input.contribution',
+      provenance: 'cordisx',
+      source: record.source,
+      ...this.causal(this.latestEventId(input.sessionId)),
+      data: { kind, stage: 'failed', capability, diagnostic },
+    })
+  }
+
+  private releasePrompt(record: PromptRecord, reason: CordisXInputContributionReleaseReason): void {
+    if (record.disposed) return
+    record.disposed = true
+    record.active = false
+    this.prompts.delete(record)
+    if (record.registrationEventId === undefined) return
+    this.ledger.commit({
+      sessionId: record.contribution.sessionId,
+      contributionId: record.contributionId,
+      type: 'input.contribution',
+      provenance: 'cordisx',
+      source: record.source,
+      causalParentId: record.registrationEventId,
+      data: {
+        kind: record.kind === 'section' ? 'system-prompt.section' : 'system-prompt.context',
+        stage: 'released',
+        releaseReason: reason,
+      },
     })
   }
 
@@ -476,11 +881,24 @@ export class CordisXAgentService extends Service implements CordisXAgents {
     if (!validId(sessionId)) throw new Error('sessionId must be a non-empty opaque id')
     const identity = caller(this.ctx)
     const runtime = runtimeFor(this)
+    const send = (
+      message: CordisXAgentMessageInput,
+      target: CordisXAgentTarget,
+      wakeup: boolean,
+    ): CordisXAgentDeliveryHandle => {
+      const handle = runtime.send(identity, sessionId, message, target, wakeup)
+      this.ctx.effect(
+        () => () => runtime.releaseOwner(identity, 'owner-disposed'),
+        `agents.delivery(${JSON.stringify(handle.deliveryId)})`,
+      )
+      return handle
+    }
     return Object.freeze({
-      send: (message: CordisXAgentMessageInput, target: CordisXAgentTarget, wakeup: boolean) => runtime.send(identity, sessionId, message, target, wakeup),
-      followup: (message: CordisXAgentMessageInput) => runtime.send(identity, sessionId, message, 'next-turn', true),
-      steer: (message: CordisXAgentMessageInput) => runtime.send(identity, sessionId, message, 'next-step', true),
-      inject: (message: CordisXAgentMessageInput) => runtime.send(identity, sessionId, message, 'next-step', false),
+      send,
+      followup: (message: CordisXAgentMessageInput) => send(message, 'next-turn', true),
+      steer: (message: CordisXAgentMessageInput) => send(message, 'next-step', true),
+      inject: (message: CordisXAgentMessageInput) => send(message, 'next-step', false),
+      clearPending: () => runtime.clearPending(identity, sessionId),
     })
   }
 

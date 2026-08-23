@@ -4,10 +4,10 @@ Status: approved implementation architecture for the version-2 Agent event
 and delivery-control slice. Normative plugin-visible behavior lives in
 `cordisx-protocol` at `cordisx.agent-events/v2` (schema version 2), with
 delivery snapshots at `cordisx.agent-delivery/v1`. Version 1 landed at
-`e6155723528a888d1b949a9c56483340874cff27`; the version-2 protocol PR must
-descend from the current merged baseline
-`2ec9ca15234e778853104d1667c7d1c4bffff1d9` so provider-aware Platform scopes
-and the independent UI catalog remain intact.
+`e6155723528a888d1b949a9c56483340874cff27`; version 2 merged at
+`08dcdc11aae38ea9c0e91e4ad17cf31b8c756747`, descending from UI-catalog
+baseline `2ec9ca15234e778853104d1667c7d1c4bffff1d9` so provider-aware Platform
+scopes and the independent UI catalog remain intact.
 
 ## Boundary and ownership
 
@@ -235,9 +235,9 @@ test evidence, not shipped fixtures containing host-private fields.
 1. `cordisx-protocol#10` owns Agent event version 1 at `e615572`. Protocol
    `#11` added structured Platform session identity at `00113dc`, which remains
    independent of Agent `sessionId`; protocol `#12` added the UI catalog at
-   `2ec9ca`. The delivery-control protocol PR descends from `2ec9ca`, adds the
-   version-2 event/snapshot schemas and conformance vectors, and changes
-   neither Platform scope nor UI catalog.
+   `2ec9ca`. The delivery-control protocol merged at `08dcdc1`; it adds the
+   version-2 event/snapshot schemas and conformance vectors and changes neither
+   Platform scope nor UI catalog.
 2. Provider-aware Platform foundation `cordisx#41` is the required host parent
    at `1f2c10df7909c0d4fe0d99189cffbd28f9c33207`. It owns composite Platform
    identity, `scope.sessions`, requested-scope audit, and the generation-fenced

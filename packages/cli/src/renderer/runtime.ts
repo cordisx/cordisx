@@ -319,6 +319,7 @@ async function start(
         blockedPlugins.add(id)
         writeBlockedPlugins(blockedPlugins)
         rememberRegistrations(id)
+        agentRuntime.releaseOwner(controller.identity, 'plugin-blocked')
         await controller.fiber?.dispose()
         await routeService?.settled()
         delete controller.fiber
@@ -365,6 +366,7 @@ async function start(
       const denied = broker.requiredDenied(controller.identity)
       if (denied.length > 0) {
         rememberRegistrations(id)
+        agentRuntime.releaseOwner(controller.identity, 'permission-blocked')
         await controller.fiber?.dispose()
         await routeService?.settled()
         delete controller.fiber
@@ -427,6 +429,7 @@ async function start(
     for (const unsubscribe of registrySubscriptions.splice(0)) unsubscribe()
     await operation
     for (const controller of [...controllers].reverse()) {
+      agentRuntime.releaseOwner(controller.identity, 'generation-replaced')
       await controller.fiber?.dispose()
       delete controller.fiber
     }
