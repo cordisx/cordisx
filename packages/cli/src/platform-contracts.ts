@@ -27,7 +27,7 @@ export interface CordisXPluginIdentity {
 export interface CordisXCapabilityScope {
   readonly providers?: readonly string[]
   readonly cwdRoots?: readonly string[]
-  readonly taskIds?: readonly string[]
+  readonly sessions?: readonly CordisXPlatformSessionRef[]
 }
 
 export interface CordisXCapabilityDeclaration {
@@ -82,27 +82,46 @@ export interface CordisXPlatformAdapterStatus {
   readonly rawBridgeExposed: false
 }
 
+export interface CordisXPlatformModelRef {
+  readonly providerId: string
+  readonly modelId: string
+}
+
+export interface CordisXPlatformSessionRef {
+  readonly providerId: string
+  readonly remoteSessionId: string
+}
+
 export interface CordisXModelDescriptor {
+  readonly contract: 'cordisx.platform-model/v1'
+  readonly schemaVersion: 1
+  readonly ref: CordisXPlatformModelRef
   readonly hostId: string
   readonly accountId?: string
-  readonly providerId: string
-  readonly id: string
   readonly label: string
   readonly isDefault?: boolean
   readonly features?: readonly string[]
 }
 
-export type CordisXTaskState = 'active' | 'archived' | 'deleted' | 'unknown'
+export interface CordisXModelPage {
+  readonly contract: 'cordisx.platform-model-page/v1'
+  readonly schemaVersion: 1
+  readonly providerIds: readonly string[]
+  readonly models: readonly CordisXModelDescriptor[]
+}
 
-export interface CordisXTaskSummary {
-  readonly id: string
+export type CordisXSessionState = 'active' | 'archived' | 'deleted' | 'unknown'
+
+export interface CordisXSessionSummary {
+  readonly contract: 'cordisx.platform-session/v1'
+  readonly schemaVersion: 1
+  readonly ref: CordisXPlatformSessionRef
   readonly hostId: string
   readonly accountId?: string
-  readonly providerId: string
-  readonly modelId: string
+  readonly model: CordisXPlatformModelRef
   readonly cwd: string
   readonly title?: string
-  readonly state: CordisXTaskState
+  readonly state: CordisXSessionState
   readonly createdAt?: string
   readonly updatedAt?: string
 }
@@ -119,82 +138,93 @@ export interface CordisXTurnProjection {
   readonly items: readonly CordisXTaskContentItem[]
 }
 
-export interface CordisXTaskProjection extends CordisXTaskSummary {
+export interface CordisXSessionProjection extends CordisXSessionSummary {
   readonly turns: readonly CordisXTurnProjection[]
 }
 
 export interface CordisXTurnStart {
-  readonly taskId: string
+  readonly session: CordisXPlatformSessionRef
   readonly turnId: string
 }
 
-export type CordisXTaskCreateOutcome =
+export type CordisXSessionCreateOutcome =
   | {
     readonly status: 'created'
-    readonly task: CordisXTaskSummary
+    readonly session: CordisXSessionSummary
     readonly initialTurn?: CordisXTurnStart
   }
   | {
     readonly status: 'created-initial-turn-failed'
-    readonly task: CordisXTaskSummary
+    readonly session: CordisXSessionSummary
     readonly error: CordisXPlatformDiagnostic
   }
 
 export interface CordisXModelsListInput {
-  readonly providerId?: string
+  readonly providerIds?: readonly string[]
 }
 
 export interface CordisXTasksListInput {
-  readonly providerId?: string
+  readonly providerIds?: readonly string[]
   readonly cwd?: string
+  readonly searchTerm?: string
+  readonly cursor?: string
+  readonly limit?: number
+}
+
+export interface CordisXSessionPage {
+  readonly contract: 'cordisx.platform-session-page/v1'
+  readonly schemaVersion: 1
+  readonly query: Omit<CordisXTasksListInput, 'cursor'>
+  readonly snapshotId: string
+  readonly nextCursor?: string
+  readonly sessions: readonly CordisXSessionSummary[]
 }
 
 export interface CordisXTaskReadInput {
-  readonly taskId: string
+  readonly session: CordisXPlatformSessionRef
 }
 
 export interface CordisXTaskCreateInput {
-  readonly providerId: string
-  readonly modelId: string
+  readonly model: CordisXPlatformModelRef
   readonly cwd: string
   readonly initialMessage?: string
 }
 
 export type CordisXTaskControlInput =
-  | { readonly action: 'continue'; readonly taskId: string }
-  | { readonly action: 'fork'; readonly taskId: string }
-  | { readonly action: 'archive'; readonly taskId: string }
-  | { readonly action: 'restore'; readonly taskId: string }
-  | { readonly action: 'delete'; readonly taskId: string }
+  | { readonly action: 'continue'; readonly session: CordisXPlatformSessionRef }
+  | { readonly action: 'fork'; readonly session: CordisXPlatformSessionRef }
+  | { readonly action: 'archive'; readonly session: CordisXPlatformSessionRef }
+  | { readonly action: 'restore'; readonly session: CordisXPlatformSessionRef }
+  | { readonly action: 'delete'; readonly session: CordisXPlatformSessionRef }
 
 export type CordisXTaskControlOutcome =
-  | { readonly action: 'continue' | 'fork' | 'archive' | 'restore'; readonly task: CordisXTaskSummary }
-  | { readonly action: 'delete'; readonly taskId: string; readonly deleted: true }
+  | { readonly action: 'continue' | 'fork' | 'archive' | 'restore'; readonly session: CordisXSessionSummary }
+  | { readonly action: 'delete'; readonly session: CordisXPlatformSessionRef; readonly deleted: true }
 
 export interface CordisXTurnSubmitInput {
-  readonly taskId: string
+  readonly session: CordisXPlatformSessionRef
   readonly message: string
 }
 
 export type CordisXTurnControlInput =
-  | { readonly action: 'steer'; readonly taskId: string; readonly turnId?: string; readonly message: string }
-  | { readonly action: 'interrupt'; readonly taskId: string; readonly turnId?: string }
+  | { readonly action: 'steer'; readonly session: CordisXPlatformSessionRef; readonly turnId?: string; readonly message: string }
+  | { readonly action: 'interrupt'; readonly session: CordisXPlatformSessionRef; readonly turnId?: string }
 
 export interface CordisXTurnControlOutcome {
   readonly action: 'steer' | 'interrupt'
-  readonly taskId: string
+  readonly session: CordisXPlatformSessionRef
   readonly turnId?: string
 }
 
 export interface CordisXPlatform {
   status(): CordisXPlatformAdapterStatus
   readonly models: {
-    list(input?: CordisXModelsListInput): Promise<CordisXPlatformResult<readonly CordisXModelDescriptor[]>>
+    list(input?: CordisXModelsListInput): Promise<CordisXPlatformResult<CordisXModelPage>>
   }
   readonly tasks: {
-    list(input?: CordisXTasksListInput): Promise<CordisXPlatformResult<readonly CordisXTaskSummary[]>>
-    read(input: CordisXTaskReadInput): Promise<CordisXPlatformResult<CordisXTaskProjection>>
-    create(input: CordisXTaskCreateInput): Promise<CordisXPlatformResult<CordisXTaskCreateOutcome>>
+    list(input?: CordisXTasksListInput): Promise<CordisXPlatformResult<CordisXSessionPage>>
+    read(input: CordisXTaskReadInput): Promise<CordisXPlatformResult<CordisXSessionProjection>>
+    create(input: CordisXTaskCreateInput): Promise<CordisXPlatformResult<CordisXSessionCreateOutcome>>
     control(input: CordisXTaskControlInput): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>>
   }
   readonly turns: {
