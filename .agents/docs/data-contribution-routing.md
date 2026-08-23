@@ -92,8 +92,9 @@ The `cordisx` private adapter/runtime owns all Codex-specific behavior:
 - DOM probes, semantic anchors, native-session matching, and `contextKey`;
 - outlet declaration and runtime schema validation;
 - host icon-token implementation and structured DOM renderers;
-- absolute overlay insertion, body portal fallback, `ResizeObserver`, geometry,
-  z-index, mutation signals, and anchor repair;
+- native-layout insertion seats for structured surfaces, plus route/page
+  absolute overlays, body portal fallback, `ResizeObserver`, geometry, z-index,
+  mutation signals, and anchor repair;
 - command loading/error UI, overflow/menu mechanics, focus, keyboard, and
   accessibility behavior;
 - projection of retained message references through the injected localization
@@ -214,6 +215,48 @@ Toolbar contributions name a semantic host anchor plus `before`, `after`, or
 `menu`; plugins cannot submit selectors. An unavailable anchor keeps the entry
 pending and diagnosed.
 
+### Native surface insertion seats
+
+Structured shell surfaces and route/page outlets deliberately use different
+projection mechanisms:
+
+- a **surface** is rendered into an adapter-owned insertion seat that
+  participates in the native layout beside or inside the resolved semantic
+  control; and
+- an **outlet** remains a CordisX-owned overlay over a declared content region.
+
+A surface seat may be an externally inserted DOM island, but it is not a visual
+overlay. The Codex adapter inserts the smallest host-owned container at the
+resolved native sibling/child position, lets normal flex/grid layout size it,
+and removes or reattaches that container with the renderer generation. React
+may detach an external island when it replaces or clears the native parent, so
+the mutation observer repairs the same seat after re-resolving the semantic
+anchor. Plugins never receive the parent, anchor, seat, or selector.
+
+Interactive surface projection must satisfy all of these rules:
+
+- no fixed-position fallback, broad covering card, or geometry clone is
+  allowed for a shell button, navigation row, menu trigger, section, or row;
+- if the adapter cannot resolve one unique insertion position, the affected
+  contribution stays pending and native content remains untouched;
+- the seat has no product-visible border, background, shadow, or width beyond
+  its rendered content unless the native layout contract explicitly allocates
+  a full row or section;
+- every title-bar surface seat and interactive descendant is an Electron
+  `no-drag` region, while noninteractive native title-bar space remains
+  draggable;
+- a menu popup may use normal floating overlay mechanics, but its trigger and
+  menu ownership remain host-controlled and its shell position comes from an
+  inserted seat; and
+- insertion, reattachment, and disposal must preserve the identity, parent,
+  visibility, event flow, and data updates of every native React node.
+
+The first Codex adapter projects sidebar navigation into the native navigation
+list, sidebar footer actions around the designated footer control, workspace
+toolbar actions around the declared toolbar anchor, and environment
+sections/actions/rows into the native environment panel layout. These probes
+are private adapter details and may vary by verified Codex version.
+
 Environment sections and rows use snapshot/update handles for dynamic values.
 Rows contain text, host-token status, and command references only. Section and
 row targeting is validated, so an orphan action or row is diagnosed rather
@@ -299,7 +342,9 @@ migration path.
 
 ## Overlay insertion and native-DOM safety
 
-Routes are insertion overlays over native content, never replacements.
+Routes are insertion overlays over native content, never replacements. This
+section applies to outlets only; structured shell surfaces use the native
+insertion seats defined above.
 
 - `app` appends one fixed CordisX host layer under `body` and covers the
   renderer application rectangle.
@@ -308,6 +353,15 @@ Routes are insertion overlays over native content, never replacements.
 - If no reliable positioned anchor exists, the adapter appends a fixed body
   portal and tracks the resolved rectangle with `ResizeObserver`, scroll/resize
   signals, and bounded geometry updates.
+
+The Codex adapter preserves the native Electron title-bar safe area for `app`
+and `main` outlets. It derives the inset from the currently resolved native
+application-menu/title-bar rectangle instead of publishing or assuming a
+cross-host constant. The overlay starts below that rectangle, so native window
+dragging remains available. CordisX page chrome and all of its controls are
+explicit `no-drag` regions as defense in depth. `session.content` continues to
+derive its top boundary from the native session-content anchor below the
+session header.
 
 The adapter must not call `replaceWith`, `remove`, `append` on a native child for
 reparenting, set `display:none` on native content, clear native children, or

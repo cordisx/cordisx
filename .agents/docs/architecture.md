@@ -85,6 +85,20 @@ state, while a changed key aborts/disposes the page. Native React nodes remain
 in place, visible, and subscribed. The complete contract and test matrix live
 in [`data-contribution-routing.md`](data-contribution-routing.md).
 
+Structured shell surfaces are not page overlays. The private Codex adapter
+projects them through minimal host-owned insertion seats in the resolved native
+layout. Buttons sit before or after their semantic control, navigation rows
+join the native list, and environment rows and sections join the native panel.
+If a precise seat is unavailable the contribution remains pending; the adapter
+does not fall back to a fixed covering card. Mutation repair may reinsert a
+detached seat after React replaces its parent, but plugins never receive that
+DOM.
+
+Route and page outlets remain independent overlays. `app` and `main` preserve
+the resolved native Electron title-bar safe area, and CordisX interactive
+chrome is explicitly `no-drag`. This keeps native window dragging and ordinary
+page controls from competing for the same macOS hit-test region.
+
 The host may improve selectors without requiring plugin changes. Plugins that query Codex DOM directly opt out of that compatibility boundary.
 
 ### Built-in manager plane

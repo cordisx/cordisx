@@ -16,7 +16,7 @@ An extension point is a host-declared place where plugin-owned behavior can be
 projected. CordisX has exactly two extension-point families:
 
 - a **surface** accepts structured contribution data and lets the host render
-  native-shell controls; and
+  native-shell controls in an adapter-resolved insertion seat; and
 - an **outlet** accepts a compatible route and mounts its page inside a
   CordisX-owned overlay.
 
@@ -80,6 +80,12 @@ keys and English fallbacks. Host dictionaries provide localized projections.
 The catalog owns point identity only. Plugin-provided contribution labels,
 command titles, route titles, and page content keep their own owner-qualified
 message references.
+
+Surface placement is a host-adapter contract, not plugin metadata. A surface
+must resolve to a real native layout seat and must not degrade to a broad fixed
+overlay. Failure to resolve a unique seat leaves attributed uses pending and
+diagnosable. Outlet placement remains overlay-based and follows the safe-area,
+geometry, and context rules in `data-contribution-routing.md`.
 
 ## Primary catalog page
 
