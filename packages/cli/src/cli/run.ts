@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { randomBytes } from 'node:crypto'
 import type { ChildProcess } from 'node:child_process'
 import { resolveHostAdapter } from '../adapters/registry.js'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
@@ -18,6 +19,7 @@ import {
 } from '../launcher/process.js'
 import { parseCordisXCli, type CordisXDevInvocation, type CordisXLauncherOptions } from './parse.js'
 import { resolveProfileSelection } from './profiles.js'
+import { ProviderFleet } from '../providers/fleet.js'
 
 const HELP = `Usage:
   cordisx [app] [profile] [--data shared|isolated] [options] [-- host-arguments...]
@@ -80,15 +82,22 @@ function developmentPluginConfig(pluginPath: string, cwd: string): CordisXConfig
     version: 1,
     rootDir: cwd,
     codex: { debugPort: 9229 },
+    providers: [],
     plugins: [{ id: pluginId(entry), entry, enabled: true, config: {} }],
   }
 }
 
-async function bundle(config: CordisXConfig, stdout: (line: string) => void): Promise<string> {
-  const source = await buildRendererBundle(config)
+interface RendererComposition {
+  readonly source: string
+  readonly providerBridgeToken?: string
+}
+
+async function bundle(config: CordisXConfig, stdout: (line: string) => void): Promise<RendererComposition> {
+  const providerBridgeToken = config.providers.some(provider => provider.enabled) ? randomBytes(32).toString('hex') : undefined
+  const source = await buildRendererBundle(config, providerBridgeToken === undefined ? {} : { providerBridgeToken })
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
   stdout(`[cordisx] bundle ready: ${source.length} bytes, plugins: ${enabled.join(', ') || '(none)'}`)
-  return source
+  return { source, ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }) }
 }
 
 function printPlan(plan: ResolvedLaunchPlan, stdout: (line: string) => void): void {
@@ -97,6 +106,8 @@ function printPlan(plan: ResolvedLaunchPlan, stdout: (line: string) => void): vo
 
 async function runInjectedHost(input: {
   readonly source: string
+  readonly providerFleet?: ProviderFleet
+  readonly providerBridgeToken?: string
   readonly executable?: string
   readonly debugPort: number
   readonly hostArgs: readonly string[]
@@ -113,6 +124,10 @@ async function runInjectedHost(input: {
     port: input.debugPort,
     source: input.source,
     signal: controller.signal,
+    ...(input.providerFleet === undefined || input.providerBridgeToken === undefined ? {} : {
+      providerFleet: input.providerFleet,
+      providerBridgeToken: input.providerBridgeToken,
+    }),
     onStatus: message => input.stdout(`[cordisx] ${message}`),
   })
   let launched: ChildProcess | undefined
@@ -140,6 +155,7 @@ async function runInjectedHost(input: {
     controller.abort()
     const cleanup = await Promise.allSettled([
       watcher,
+      ...(input.providerFleet === undefined ? [] : [input.providerFleet.close()]),
       ...(launched === undefined ? [] : [terminateIsolatedCodex(launched)]),
     ])
     process.removeListener('SIGINT', stop)
@@ -155,11 +171,12 @@ async function runDevelopment(
   invocation: CordisXDevInvocation,
   cwd: string,
   stdout: (line: string) => void,
+  environment: NodeJS.ProcessEnv,
 ): Promise<void> {
   const config = invocation.pluginPath === undefined
     ? await loadConfig(path.resolve(cwd, invocation.configPath ?? 'cordisx.config.json'))
     : developmentPluginConfig(invocation.pluginPath, cwd)
-  const source = await bundle(config, stdout)
+  const composition = await bundle(config, stdout)
   if (invocation.options.dryRun) {
     stdout(JSON.stringify({
       status: 'ready',
@@ -187,7 +204,11 @@ async function runDevelopment(
     ? undefined
     : await prepareIsolatedCodexProfile(config.rootDir, invocation.options.profileDir)
   await runInjectedHost({
-    source,
+    source: composition.source,
+    ...(composition.providerBridgeToken === undefined ? {} : {
+      providerFleet: await ProviderFleet.create(config.providers, { appServer: { environment } }),
+      providerBridgeToken: composition.providerBridgeToken,
+    }),
     ...(executable === undefined ? {} : { executable }),
     debugPort,
     hostArgs: invocation.hostArgs,
@@ -221,7 +242,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     return
   }
   if (invocation.action === 'dev') {
-    await runDevelopment(invocation, cwd, stdout)
+    await runDevelopment(invocation, cwd, stdout, runtime.env ?? process.env)
     return
   }
 
@@ -273,7 +294,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   }
 
   const composition = await loadConfig(configPath)
-  const source = await bundle(composition, stdout)
+  const rendererComposition = await bundle(composition, stdout)
   if (invocation.options.attach) {
     const debugPort = invocation.options.debugPort ?? composition.codex.debugPort
     if (invocation.options.dryRun) {
@@ -281,7 +302,11 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       return
     }
     await runInjectedHost({
-      source,
+      source: rendererComposition.source,
+      ...(rendererComposition.providerBridgeToken === undefined ? {} : {
+        providerFleet: await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } }),
+        providerBridgeToken: rendererComposition.providerBridgeToken,
+      }),
       debugPort,
       hostArgs: invocation.hostArgs,
       launcher: invocation.options,
@@ -319,7 +344,11 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     ? { userDataDir: plan.chromiumProfile.path }
     : undefined
   await runInjectedHost({
-    source,
+    source: rendererComposition.source,
+    ...(rendererComposition.providerBridgeToken === undefined ? {} : {
+      providerFleet: await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } }),
+      providerBridgeToken: rendererComposition.providerBridgeToken,
+    }),
     executable: plan.executable,
     debugPort,
     hostArgs: invocation.hostArgs,

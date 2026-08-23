@@ -25,6 +25,7 @@ import { createManagerIcon, type ManagerIconToken } from './icons.js'
 import type { NavigationSnapshot } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
 import type { ExtensionPointRuntimeSnapshot, ExtensionPointSnapshot } from './extension-points.js'
+import type { RequestedScope } from './platform.js'
 import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
 import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 
@@ -50,6 +51,7 @@ export interface ManagerPermissionSnapshot {
   readonly reasonText: string
   readonly scope: CordisXCapabilityScope
   readonly policy: CordisXPermissionPolicy
+  readonly lastRequested?: RequestedScope
   readonly lastUsedAt?: string
   readonly lastDeniedAt?: string
   readonly denialCount: number
@@ -1522,9 +1524,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }
 
     detail.append(createSectionTitle(document, '本次运行审计'))
+    const target = permission.lastRequested === undefined ? '无' : JSON.stringify(permission.lastRequested)
     const audit = permission.lastUsedAt === undefined && permission.lastDeniedAt === undefined && permission.denialCount === 0
       ? '本次运行尚无调用记录'
-      : `最近允许：${permission.lastUsedAt ?? '无'} · 最近拒绝：${permission.lastDeniedAt ?? '无'} · 拒绝次数：${permission.denialCount}`
+      : `最近目标：${target} · 最近允许：${permission.lastUsedAt ?? '无'} · 最近拒绝：${permission.lastDeniedAt ?? '无'} · 拒绝次数：${permission.denialCount}`
     detail.append(create(document, 'p', 'cxm-copy cxm-permission-audit', audit))
     if (operationError !== undefined) detail.append(create(document, 'div', 'cxm-error', operationError))
     content.append(detail)

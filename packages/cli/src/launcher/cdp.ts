@@ -1,5 +1,14 @@
 import WebSocket from 'ws'
 import { fetchMarketplaceFeed } from './marketplace.js'
+import type { ProviderFleet } from '../providers/fleet.js'
+import {
+  handleProviderBindingRequest,
+  MAX_PROVIDER_REQUEST_BYTES,
+  MAX_PROVIDER_REQUESTS,
+  parseProviderBindingRequest,
+  PROVIDER_BINDING,
+  PROVIDER_RECEIVER,
+} from './provider-rpc.js'
 
 const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
 const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
@@ -146,6 +155,9 @@ interface InstalledScript {
   readonly session: CdpSession
   readonly marketplaceController: AbortController
   readonly removeBindingListener: () => void
+  readonly providerController?: AbortController
+  readonly removeProviderBindingListener?: () => void
+  readonly providerBindingInstalled: boolean
 }
 
 interface MarketplaceBindingRequest {
@@ -172,16 +184,30 @@ async function sendMarketplaceBindingResponse(
   })
 }
 
-async function install(target: CdpTarget, source: string): Promise<InstalledScript> {
+async function sendProviderBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
+  await session.send('Runtime.evaluate', {
+    expression: `void globalThis.${PROVIDER_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    allowUnsafeEvalBlockedByCSP: true,
+  })
+}
+
+async function install(
+  target: CdpTarget,
+  source: string,
+  provider?: { readonly fleet: ProviderFleet; readonly token: string },
+): Promise<InstalledScript> {
   const url = target.webSocketDebuggerUrl
   if (url === undefined) throw new Error(`target ${target.id} has no websocket URL`)
   const session = await CdpSession.connect(url)
   const marketplaceController = new AbortController()
+  const providerController = provider === undefined ? undefined : new AbortController()
   let removeBindingListener = (): void => {}
+  let removeProviderBindingListener = (): void => {}
   try {
     await session.send('Runtime.enable')
     await session.send('Page.enable')
     await session.send('Runtime.addBinding', { name: MARKETPLACE_BINDING })
+    if (provider !== undefined) await session.send('Runtime.addBinding', { name: PROVIDER_BINDING })
     let activeMarketplaceRequests = 0
     removeBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
       if (params.name !== MARKETPLACE_BINDING || typeof params.payload !== 'string') return
@@ -214,6 +240,36 @@ async function install(target: CdpTarget, source: string): Promise<InstalledScri
         }
       })()
     })
+    let activeProviderRequests = 0
+    if (provider !== undefined) {
+      removeProviderBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
+        if (params.name !== PROVIDER_BINDING || typeof params.payload !== 'string') return
+        const payload = params.payload
+        void (async () => {
+          let requestId = 'invalid'
+          try {
+            if (Buffer.byteLength(payload) > MAX_PROVIDER_REQUEST_BYTES) throw new Error('provider request exceeds maximum size')
+            const request = parseProviderBindingRequest(JSON.parse(payload) as unknown, provider.token)
+            requestId = request.requestId
+            if (providerController?.signal.aborted === true) throw new Error('provider request bridge is closed')
+            if (activeProviderRequests >= MAX_PROVIDER_REQUESTS) throw new Error('too many concurrent provider requests')
+            activeProviderRequests += 1
+            try {
+              const value = await handleProviderBindingRequest(provider.fleet, request)
+              await sendProviderBindingResponse(session, { requestId, ok: true, value })
+            } finally {
+              activeProviderRequests -= 1
+            }
+          } catch {
+            await sendProviderBindingResponse(session, {
+              requestId,
+              ok: false,
+              error: 'Provider request was rejected',
+            }).catch(() => undefined)
+          }
+        })()
+      })
+    }
     const added = await session.send('Page.addScriptToEvaluateOnNewDocument', { source })
     const identifier = added.identifier
     if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
@@ -221,10 +277,20 @@ async function install(target: CdpTarget, source: string): Promise<InstalledScri
       expression: source,
       allowUnsafeEvalBlockedByCSP: true,
     })
-    return { target, identifier, session, marketplaceController, removeBindingListener }
+    return {
+      target,
+      identifier,
+      session,
+      marketplaceController,
+      removeBindingListener,
+      ...(providerController === undefined ? {} : { providerController, removeProviderBindingListener }),
+      providerBindingInstalled: provider !== undefined,
+    }
   } catch (error) {
     marketplaceController.abort()
+    providerController?.abort()
     removeBindingListener()
+    removeProviderBindingListener()
     session.close()
     throw error
   }
@@ -232,7 +298,9 @@ async function install(target: CdpTarget, source: string): Promise<InstalledScri
 
 async function uninstall(installed: InstalledScript): Promise<void> {
   installed.marketplaceController.abort()
+  installed.providerController?.abort()
   installed.removeBindingListener()
+  installed.removeProviderBindingListener?.()
   try {
     await Promise.allSettled([
       installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }),
@@ -241,6 +309,9 @@ async function uninstall(installed: InstalledScript): Promise<void> {
         allowUnsafeEvalBlockedByCSP: true,
       }),
       installed.session.send('Runtime.removeBinding', { name: MARKETPLACE_BINDING }),
+      ...(installed.providerBindingInstalled
+        ? [installed.session.send('Runtime.removeBinding', { name: PROVIDER_BINDING })]
+        : []),
     ])
   } finally {
     installed.session.close()
@@ -252,6 +323,8 @@ export interface WatchInjectionOptions {
   readonly source: string
   readonly signal: AbortSignal
   readonly onStatus?: (message: string) => void
+  readonly providerFleet?: ProviderFleet
+  readonly providerBridgeToken?: string
 }
 
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
@@ -274,7 +347,10 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             await uninstall(current).catch(() => undefined)
             installed.delete(target.id)
           }
-          const record = await install(target, options.source)
+          const provider = options.providerFleet === undefined || options.providerBridgeToken === undefined
+            ? undefined
+            : { fleet: options.providerFleet, token: options.providerBridgeToken }
+          const record = await install(target, options.source, provider)
           installed.set(target.id, record)
           options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)
         }

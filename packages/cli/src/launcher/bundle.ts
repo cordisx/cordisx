@@ -4,6 +4,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import type { CordisXConfig } from './config.js'
 
+export interface BuildRendererBundleOptions {
+  readonly providerBridgeToken?: string
+}
+
 function importSpecifier(fromDirectory: string, absolutePath: string): string {
   const relative = path.relative(fromDirectory, absolutePath).replaceAll(path.sep, '/')
   return relative.startsWith('.') ? relative : `./${relative}`
@@ -35,7 +39,7 @@ async function readPluginReadme(entry: string): Promise<string | undefined> {
 }
 
 /** Bundle the renderer host and every enabled plugin into one Cordis generation. */
-export async function buildRendererBundle(config: CordisXConfig): Promise<string> {
+export async function buildRendererBundle(config: CordisXConfig, options: BuildRendererBundleOptions = {}): Promise<string> {
   const enabled = config.plugins.filter(plugin => plugin.enabled)
   for (const plugin of enabled) await access(plugin.entry)
   const [version, readmes] = await Promise.all([
@@ -67,7 +71,8 @@ export async function buildRendererBundle(config: CordisXConfig): Promise<string
     const readmeField = readme === undefined ? '' : `, readme: ${JSON.stringify(readme)}`
     return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}${readmeField}${moduleField} }`
   }).join(',')}]`
-  const metadata = `{ version: ${JSON.stringify(version)} }`
+  const providers = config.providers.filter(provider => provider.enabled).map(provider => ({ id: provider.id, displayName: provider.displayName }))
+  const metadata = `{ version: ${JSON.stringify(version)}, providers: ${JSON.stringify(providers)}${options.providerBridgeToken === undefined ? '' : `, providerBridgeToken: ${JSON.stringify(options.providerBridgeToken)}`} }`
   const source = `${imports.join('\n')}\nvoid installCordisX(${composition}, ${metadata}).catch(error => console.error('[cordisx] boot failed', error))\n`
 
   const result = await build({
