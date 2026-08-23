@@ -47,6 +47,36 @@ manager-owned content DOM.
 A tab panel is a semantic container, not a visual card. It must not add a
 border, background, or redundant heading merely to make the panel visible.
 
+Local tabs pair every label with a host-owned semantic icon. The icon is part
+of the structured tab descriptor, is hidden from accessibility APIs, and is
+rendered directly without its own border, background, chip, or card. The label
+remains the accessible tab name and the active underline remains the only
+persistent selection accent. Local tablists use the horizontal ARIA tabs
+keyboard pattern: only the active tab has `tabindex="0"`; inactive tabs use
+`tabindex="-1"`; Left/Right wrap and activate the adjacent tab; Home/End
+activate the first/last tab. After an activation re-renders manager-owned DOM,
+whether by pointer, Enter, or navigation key, focus is restored to the
+replacement active tab rather than falling back to the document body. Icons
+and focus restoration must not cause tab geometry to jump between panels.
+
+## Page headers
+
+Every primary page reserves the same fixed-width leading seat immediately to
+the left of its title. Secondary and deeper pages replace the icon in that
+seat with an icon-only back button. The title never moves when navigation
+depth changes.
+
+The title occupies the first row. The description occupies its own second row
+and spans the complete header grid, so its left edge aligns with the leading
+icon or back control rather than with the title text. This applies equally to
+plain titles and breadcrumb titles.
+
+Leading icons are rendered directly in a transparent 26-pixel seat. They do
+not use a persistent border, background, chip, or rounded frame. The back
+control follows the same frameless resting appearance while retaining a real
+button target, an accessible `返回` label, and silver-grey hover and
+`focus-visible` feedback that does not change its dimensions.
+
 ## Primary navigation, identity, and accent
 
 The primary navigation leads with the product's principal workflow. `插件`
@@ -55,10 +85,23 @@ is the first item, followed by other ordinary manager areas including
 to the bottom of the navigation; configuration remains in the ordinary main
 group and must not share that bottom placement.
 
-The sidebar identity block contains the `CORDISX` eyebrow, manager title, and
-version without a large logo. The small CordisX mark belongs to the host-side
-manager trigger and remains visible there; duplicating it beside the sidebar
-identity creates an unnecessary competing brand landmark.
+The sidebar begins directly with primary navigation. It does not contain a
+separate `CORDISX` eyebrow, manager title, version, or logo block. Product
+identity and runtime version belong to the About page, where the first content
+row presents one direct CordisX mark beside `CordisX` and the current version.
+
+The small CordisX mark remains on the host-side manager trigger. Inside the
+manager, the same mark is allowed only where it identifies the About area: the
+bottom-anchored About navigation item, the About page header leading seat, and
+the single About identity row. These marks are rendered directly without a
+decorative container. Other primary pages use their own host-owned semantic
+icons, while secondary pages use the back control.
+
+The About body is a concise product hub, not a runtime dashboard. After its
+identity row it exposes flat, actionable links such as issue feedback,
+contribution, and documentation. It does not repeat manager diagnostics,
+plugin counts, routes, outlets, locale metrics, trust notices, or blocking
+semantics that belong to their owning pages.
 
 Manager-owned interaction accents use a neutral silver-grey palette for
 selected navigation, local tabs, icons, focus rings, hover backgrounds, links,
@@ -116,8 +159,18 @@ At minimum they prove:
   name in manager-owned headings.
 - primary navigation begins with `插件`, keeps `配置` in the main group, and
   anchors `关于 CordisX` at the bottom;
-- the modal sidebar contains no large CordisX mark while the host-side trigger
-  retains its small mark; and
+- the modal sidebar begins with navigation and contains no identity block;
+  About alone uses the CordisX mark in its navigation item, header seat, and
+  identity row, while the host-side trigger retains its small mark;
+- the About identity uses the runtime version, its action links have verified
+  public destinations and safe external-link attributes, and the old runtime
+  metric grid and generic boundary copy are absent;
+- every local tab has one decorative semantic icon and an unchanged accessible
+  label, with no icon frame; roving tabindex, wrapped arrow navigation,
+  Home/End, and focus restoration survive manager re-rendering;
+- primary and breadcrumb headers keep a fixed 26-pixel frameless leading seat,
+  align the second-row description with that seat, and retain visible back
+  button hover/focus feedback; and
 - manager CSS contains no purple accent tokens while preserving semantic
   success, warning, and error colors.
 
