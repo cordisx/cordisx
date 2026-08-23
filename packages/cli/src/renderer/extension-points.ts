@@ -1,6 +1,6 @@
 import type {
   CordisXEffectivePointPolicy,
-  CordisXExtensionPointAccessV1,
+  CordisXExtensionPointAccessV2,
   CordisXExtensionPointIdentity,
   CordisXExtensionPointKind,
   CordisXExtensionPointAvailability,
@@ -19,7 +19,7 @@ import type {
   CordisXPluginIdentity,
 } from '../contracts.js'
 import {
-  CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V1,
+  CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2,
   CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
@@ -346,14 +346,16 @@ export interface ExtensionPointAccessDecision {
 
 export interface ExtensionPointAccessResolver {
   decision(owner: string, pointId: string, expectedKind: CordisXExtensionPointKind): ExtensionPointAccessDecision
+  setSurfaceAvailability(items: readonly SurfaceAvailabilitySnapshot[]): void
   authorizeSurfaceCommand(owner: string, pointId: string, contributionId: string, commandId: string): ExtensionPointAccessDecision
+  authorizeSurfaceRoute(owner: string, pointId: string, contributionId: string, routeId: string): ExtensionPointAccessDecision
   authorizeOutletRoute(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision
   authorizeOutletPage(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision
   authorizeOutletPageCommand(owner: string, pointId: string, routeId: string, pageId: string, actionId: string, commandId: string): ExtensionPointAccessDecision
 }
 
 export interface ExtensionPointAccessDiagnostic {
-  readonly request: CordisXExtensionPointAccessV1
+  readonly request: CordisXExtensionPointAccessV2
   readonly authorized: boolean
   readonly effectivePolicy: CordisXEffectivePointPolicy
   readonly reason?: string
@@ -367,6 +369,7 @@ export interface ExtensionPointPolicyDiagnostic {
 
 type ExtensionPointAccessFields =
   | { readonly operation: 'surface.command.invoke'; readonly contributionId: string; readonly commandId: string }
+  | { readonly operation: 'surface.route.navigate'; readonly contributionId: string; readonly routeId: string }
   | { readonly operation: 'outlet.route.navigate'; readonly routeId: string; readonly pageId: string }
   | { readonly operation: 'outlet.page.mount'; readonly routeId: string; readonly pageId: string }
   | { readonly operation: 'outlet.page.command.invoke'; readonly routeId: string; readonly pageId: string; readonly actionId: string; readonly commandId: string }
@@ -532,10 +535,12 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
   private readonly duplicatePolicyIdentities = new Map<string, CordisXExtensionPointIdentity>()
   private readonly accesses: ExtensionPointAccessDiagnostic[] = []
   private readonly listeners = new Set<() => void>()
+  private readonly surfaceAvailability = new Map<string, SurfaceAvailabilitySnapshot>()
 
   constructor(
     private readonly descriptors: ExtensionPointDescriptorRegistry,
     private readonly store: ExtensionPointPolicyStore,
+    private readonly generation = 'generation-legacy',
   ) {
     for (const record of store.read()) {
       if (!validStoredPolicy(record)) continue
@@ -574,6 +579,14 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
     return this.policies.get(key)?.policy ?? 'inherit'
   }
 
+  setSurfaceAvailability(items: readonly SurfaceAvailabilitySnapshot[]): void {
+    const next = new Map(items.map(item => [item.surface, immutableSnapshot(item)]))
+    if (JSON.stringify([...this.surfaceAvailability]) === JSON.stringify([...next])) return
+    this.surfaceAvailability.clear()
+    for (const [pointId, item] of next) this.surfaceAvailability.set(pointId, item)
+    this.changed()
+  }
+
   setPolicy(identity: CordisXPluginIdentity, pointId: string, policy: CordisXPointPolicy): void {
     const bound = this.identities.get(identity.id)
     if (bound === undefined || bound.source !== identity.source) throw new Error(`plugin ${identity.id} is not bound to source ${identity.source}`)
@@ -607,6 +620,16 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
       authorized: false,
       reason: `extension point ${pointId} is ${descriptor.kind}, expected ${expectedKind}`,
     }
+    const availability = expectedKind === 'surface'
+      ? this.surfaceAvailability.get(pointId)?.state ?? descriptor.availability
+      : descriptor.availability
+    if (availability !== 'available') return {
+      identity,
+      policy: this.pointPolicy(identity),
+      effectivePolicy: 'deny',
+      authorized: false,
+      reason: `extension point ${pointId} is ${availability}`,
+    }
     if (this.duplicatePolicyKeys.has(extensionPointIdentityKey(identity))) return {
       identity,
       policy: 'inherit',
@@ -624,6 +647,11 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
     return this.recordAccess(decision, {
       operation: 'surface.command.invoke', contributionId, commandId,
     })
+  }
+
+  authorizeSurfaceRoute(owner: string, pointId: string, contributionId: string, routeId: string): ExtensionPointAccessDecision {
+    const decision = this.decision(owner, pointId, 'surface')
+    return this.recordAccess(decision, { operation: 'surface.route.navigate', contributionId, routeId })
   }
 
   authorizeOutletRoute(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision {
@@ -685,6 +713,7 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
     this.duplicatePolicyKeys.clear()
     this.duplicatePolicyIdentities.clear()
     this.accesses.length = 0
+    this.surfaceAvailability.clear()
     this.listeners.clear()
   }
 
@@ -694,11 +723,12 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
   ): ExtensionPointAccessDecision {
     if (decision.identity === undefined) return decision
     const request = Object.freeze({
-      $schema: CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V1,
-      schemaVersion: 1,
+      $schema: CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2,
+      schemaVersion: 2,
+      generation: this.generation,
       identity: decision.identity,
       ...operation,
-    }) as CordisXExtensionPointAccessV1
+    }) as CordisXExtensionPointAccessV2
     this.accesses.push(Object.freeze({
       request,
       authorized: decision.authorized,

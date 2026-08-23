@@ -839,7 +839,7 @@ class StructuredSurfaceRenderer {
             ...(context === undefined ? {} : { context }),
           })
         : action.route !== undefined
-          ? this.routes.navigateFor(snapshot.owner, action.route)
+          ? this.routes.navigateFromSurface(snapshot.owner, action.route, snapshot.surface, snapshot.qualifiedId)
           : Promise.reject(new Error('surface action has no activation'))
       void operation.catch(error => {
         button.dataset.error = error instanceof Error ? error.message : String(error)
@@ -879,7 +879,7 @@ class StructuredSurfaceRenderer {
               pointId: snapshot.surface,
               contributionId: snapshot.qualifiedId,
             })
-          : item.route === undefined ? Promise.reject(new Error('navigation item has no activation')) : this.routes.navigateFor(snapshot.owner, item.route)
+          : item.route === undefined ? Promise.reject(new Error('navigation item has no activation')) : this.routes.navigateFromSurface(snapshot.owner, item.route, snapshot.surface, snapshot.qualifiedId)
         void operation.catch(error => { row.dataset.error = error instanceof Error ? error.message : String(error); this.schedule(true) })
       }
       primary.addEventListener('click', activate)
@@ -970,7 +970,7 @@ class StructuredSurfaceRenderer {
               ...(context === undefined ? {} : { context }),
             })
           : action.route !== undefined
-            ? this.routes.navigateFor(snapshot.owner, action.route)
+            ? this.routes.navigateFromSurface(snapshot.owner, action.route, snapshot.surface, snapshot.qualifiedId)
             : Promise.reject(new Error('surface menu item has no activation'))
         void operation.catch(error => { item.dataset.error = error instanceof Error ? error.message : String(error); this.schedule(true) })
       }
