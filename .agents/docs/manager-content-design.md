@@ -113,9 +113,27 @@ waiting, and red for failure, denial, or destructive affordances.
 
 Ordinary repeated records use a flat list with separators and whitespace. The
 container exposes list semantics and each item has a stable visible label plus
-list-item semantics. A capability declaration is a flat item whose capability
-id is the local label; its policy control, reason, scope, usage, blocked reason,
-and errors remain inside that one item.
+list-item semantics. A capability declaration is a flat item whose host-owned,
+localized product name is the visible label. Its primary row contains only a
+frameless semantic icon, name, one-sentence reason, a `必需` badge when
+applicable, and either a localized policy selector or `暂不可用` when the
+current host does not support that capability. Optional declarations do not
+need an `可选` badge.
+
+The primary permission list never exposes capability ids, scope objects,
+audit counters, blocked reasons, adapter diagnostics, transport facts, raw
+bridge facts, or the trusted-renderer security boundary. Selecting the item
+opens a third-level permission detail (`插件` list, plugin detail, permission
+detail). That page owns the capability id, non-empty requested scope, current
+run audit, required/optional status, host support state, and policy control.
+Policy remains editable there when the host currently reports the capability
+as unsupported, so a denied required declaration can be recovered without a
+host-adapter state change.
+
+Host connection, adapter, bridge, and trusted-renderer engineering facts live
+in the plugin `运行状态` tab under one collapsed `诊断` disclosure. The summary
+is concise; raw diagnostic codes and security-boundary detail are visible only
+after the user expands it.
 
 Cards are reserved for a genuine independent boundary: a separately
 actionable source, an independently mounted outlet or contribution, an
@@ -147,13 +165,19 @@ local tabs rather than checking only a screenshot. DOM regression tests assert
 the visible manager-owned heading sequence and stable panel/list structure.
 At minimum they prove:
 
-- the `权限` tab contains no `Platform 权限` heading;
-- capability selectors are inside flat list items, not `.cxm-slot-card` or
-  nested `section section` structures;
-- adapter diagnostics, blocked reasons, and security notices appear once at
-  their owning level;
-- a plugin with no declarations retains an explicit permission empty state and
-  a separately understandable host-connection group;
+- the `权限` tab contains no `Platform 权限` or `能力声明` heading;
+- supported capability selectors are inside flat list items, not
+  `.cxm-slot-card` or nested `section section` structures, while unsupported
+  declarations show only `暂不可用` in the list control seat;
+- permission items use host-owned names and semantic icons, expose only a
+  `必需` badge, and hide ids, scope, audit, blocked reasons, adapter facts, and
+  security notices until their owning deeper or diagnostic view;
+- permission detail is a third-level page whose back control restores the
+  plugin's selected `权限` tab, and it retains an editable policy even when the
+  capability is unsupported;
+- adapter diagnostics and security notices appear once inside the collapsed
+  `运行状态` diagnostic disclosure;
+- a plugin with no declarations retains an explicit permission empty state;
 - configuration and launcher tabs do not repeat their selected tab label; and
 - plugin and marketplace detail bodies do not repeat the breadcrumb record
   name in manager-owned headings.

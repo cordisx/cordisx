@@ -78,16 +78,27 @@ The installed-plugin detail page adds a `权限` tab. Its model retains:
 - last allowed use, last denial, denial count, and blocked reason.
 
 The permission tab follows the shared hierarchy and de-duplication rules in
-[`manager-content-design.md`](manager-content-design.md). Platform adds only
-these projection-specific placement requirements: policy appears beside its
-selector; denial detail appears beside the affected declaration; adapter
-diagnostics appear beside adapter status; and the trusted-renderer warning
-appears once at the permission/security boundary.
+[`manager-content-design.md`](manager-content-design.md). Its first projection
+is deliberately smaller than the retained model: a flat row shows a host-owned
+localized capability name and icon, resolved reason, required badge, and a
+localized policy selector only when `adapter.status().supportedCapabilities`
+contains the declaration. An unsupported declaration shows `暂不可用`; support
+and policy remain orthogonal.
+
+Selecting a row opens a third-level permission detail. That page owns the raw
+capability id, non-empty scope, required/optional state, host support state,
+policy selector, and current-run audit. The selector remains available there
+for an unsupported declaration so changing `required + deny` to `ask` or
+`allow` can reconcile and remount the plugin. The list does not expose raw
+scope, usage, blocked reason, adapter diagnostics, connection/bridge facts, or
+the security statement. Those engineering facts appear once under the plugin
+`运行状态` tab's collapsed `诊断` disclosure.
 
 Policy changes reconcile the plugin fiber: changing a required capability to
 `deny` disposes it; moving every denied required declaration to `ask` or
-`allow` permits a fresh mount. Locale changes reproject permission reasons
-through the existing LocalizationKernel subscription.
+`allow` permits a fresh mount. Denying an optional declaration never stops the
+plugin. Locale changes reproject permission reasons through the existing
+LocalizationKernel subscription.
 
 ## Platform service and adapter boundary
 
@@ -153,13 +164,16 @@ Automated coverage must include provider/model validation; allow/ask/deny;
 required/optional activation; scope denial; identity non-spoofing; declaration
 upgrade reset; two-phase create success and retained-task partial failure;
 read-only projection and write refusal; unavailable diagnostics; manager data
-and locale reprojection; conformance with the shared manager content hierarchy
-plus the Platform-specific fact placement above; generation cleanup; and
+and locale reprojection; supported/unsupported list controls, localized policy
+labels, third-level permission navigation and recovery, collapsed runtime
+diagnostics, conformance with the shared manager content hierarchy plus the
+Platform-specific fact placement above; generation cleanup; and
 absence of a raw bridge or second app-server in the Platform surface.
 
 Repository validation is `npm run check`, `npm audit --audit-level=high`, and
 `git diff --check` in each owning repository. Live validation builds and
-injects the real renderer bundle, opens the manager permission tab, records
-the adapter unavailable diagnostic, and confirms the existing UI still
+injects the real renderer bundle, opens the manager permission list and its
+third-level detail, then confirms the adapter-unavailable facts are confined
+to the collapsed runtime diagnostic disclosure while the existing UI still
 mounts/disposes. It cannot claim real model/task writes until the private
 current-connection adapter exists.
