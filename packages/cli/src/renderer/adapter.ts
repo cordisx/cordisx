@@ -8,6 +8,7 @@ import {
   type ExtensionPointDescriptorRegistry,
 } from './extension-points.js'
 import { createHostSurfaceIcon } from './icons.js'
+import { HostTooltipController, type HostTooltipPlacement } from './tooltips.js'
 import { evaluateWhen } from './validation.js'
 
 interface ResolvedOutletAnchor {
@@ -287,6 +288,16 @@ function nextNativeSibling(node: ChildNode): ChildNode | null {
   return sibling
 }
 
+function nativeControlInsertionAnchor(document: Document, control: HTMLElement): HTMLElement {
+  let anchor = control
+  for (let parent = anchor.parentElement; parent !== null; parent = anchor.parentElement) {
+    if (parent.closest(CORDISX_SURFACE_HOST_SELECTOR) !== null) break
+    if (document.defaultView?.getComputedStyle(parent).display !== 'contents') break
+    anchor = parent
+  }
+  return anchor
+}
+
 function resolveSidebarNavigationParent(document: Document, sidebar: HTMLElement): HTMLElement | undefined {
   const candidates = nativeButtons(sidebar).filter(button => (
     button.closest('[data-app-action-sidebar-section]') === null
@@ -386,6 +397,7 @@ class StructuredSurfaceRenderer {
   private readonly roots = new Map<string, HTMLElement>()
   private readonly sites = new Set<string>()
   private readonly observer?: MutationObserver
+  private readonly tooltips: HostTooltipController
   private readonly unsubscribers: (() => void)[]
   private toolbarSlot: { element: HTMLElement; width: string; minWidth: string } | undefined
   private scheduled = false
@@ -399,6 +411,7 @@ class StructuredSurfaceRenderer {
     private readonly routes: CordisXRouteService,
     private readonly i18n: CordisXI18nService,
   ) {
+    this.tooltips = new HostTooltipController(document)
     this.unsubscribers = [
       slots.subscribeInternal(() => this.schedule(true)),
       commands.subscribeInternal(() => this.schedule(true)),
@@ -426,6 +439,7 @@ class StructuredSurfaceRenderer {
     this.disposed = true
     this.observer?.disconnect()
     this.restoreToolbarSlot()
+    this.tooltips.dispose()
     for (const unsubscribe of this.unsubscribers) unsubscribe()
     for (const root of this.roots.values()) root.remove()
     this.roots.clear()
@@ -516,19 +530,21 @@ class StructuredSurfaceRenderer {
       if (menuItems.length > 0 && menu !== undefined) this.projectNativeMenu('sidebar.account.menu', menu, accountControl, menuItems, nextSites, usedRoots, rebuild)
     }
     if (toolbarControl?.parentElement !== null && toolbarControl?.parentElement !== undefined) {
-      const parent = toolbarControl.parentElement
+      const toolbarAnchor = nativeControlInsertionAnchor(this.document, toolbarControl)
+      const parent = toolbarAnchor.parentElement
+      if (parent === null) return
       availableSurfaces.add('workspace.toolbar.items')
       const beforeItems = active.filter(item => item.surface === 'workspace.toolbar.items' && (item.item as { placement: string }).placement === 'before')
       if (beforeItems.length > 0) {
         const root = this.placeRoot({
-          key: 'toolbar.before', parent, before: toolbarControl, className: 'cordisx-toolbar-before',
+          key: 'toolbar.before', parent, before: toolbarAnchor, className: 'cordisx-toolbar-before',
         }, usedRoots)
         if (rebuild || root.childElementCount === 0) this.renderActions(root, beforeItems, nextSites, 'before', toolbarControl)
       }
       const afterItems = active.filter(item => item.surface === 'workspace.toolbar.items' && (item.item as { placement: string }).placement === 'after')
       if (afterItems.length > 0) {
         const root = this.placeRoot({
-          key: 'toolbar.after', parent, before: nextNativeSibling(toolbarControl), className: 'cordisx-toolbar-after',
+          key: 'toolbar.after', parent, before: nextNativeSibling(toolbarAnchor), className: 'cordisx-toolbar-after',
         }, usedRoots)
         if (rebuild || root.childElementCount === 0) this.renderActions(root, afterItems, nextSites, 'after', toolbarControl)
       }
@@ -642,6 +658,8 @@ class StructuredSurfaceRenderer {
     } else {
       button.append(createHostSurfaceIcon(this.document, action.icon))
       button.dataset.cordisxTooltip = label
+      const placement: HostTooltipPlacement = nativePattern === 'toolbar' ? 'bottom' : 'top'
+      this.tooltips.attach(button, () => button.dataset.cordisxTooltip, placement)
     }
     button.setAttribute('aria-label', action.ariaLabel === undefined
       ? label
@@ -841,16 +859,12 @@ function installStyles(document: Document): () => void {
     .cordisx-env-row, .cordisx-env-header { display: flex; align-items: center; gap: 5px; }
     .cordisx-env-header { justify-content: flex-end; }
     .cordisx-action:not(.cordisx-native-icon-action) { display: inline-flex; align-items: center; gap: 6px; min-height: 27px; border: 1px solid transparent; border-radius: var(--radius-lg,10px); background: transparent; color: inherit; cursor: default; padding: 4px 7px; font: inherit; white-space: nowrap; user-select: none; -webkit-user-select: none; -webkit-app-region: no-drag; }
-    .cordisx-native-icon-action { position: relative; flex: 0 0 auto; -webkit-app-region: no-drag; }
+    .cordisx-native-icon-action { flex: 0 0 auto; -webkit-app-region: no-drag; }
     .cordisx-shortcut-action:not([class*="size-"]):not([class*="h-"]) { display: inline-flex; width: 24px; min-width: 24px; height: 24px; min-height: 24px; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: var(--radius-lg,8px); background: transparent; color: var(--color-text-tertiary,rgba(255,255,255,.5)); }
     .cordisx-host-icon { display: inline-flex; flex: 0 0 auto; width: 20px; height: 20px; align-items: center; justify-content: center; line-height: 0; pointer-events: none; user-select: none; -webkit-user-select: none; }
     .cordisx-host-icon svg { display: block; width: 20px; height: 20px; fill: currentColor; pointer-events: none; }
     .cordisx-nav-primary > .cordisx-host-icon { width: 16px; height: 16px; }
     .cordisx-nav-primary > .cordisx-host-icon svg, .cordisx-shortcut-action .cordisx-host-icon, .cordisx-shortcut-action .cordisx-host-icon svg { width: 16px; height: 16px; }
-    .cordisx-native-icon-action::after { content: attr(data-cordisx-tooltip); position: absolute; z-index: 2147483100; width: max-content; max-width: 240px; padding: 5px 8px; border: 1px solid var(--color-border,rgba(255,255,255,.14)); border-radius: 8px; background: var(--color-background-surface-elevated-secondary,#25272d); color: var(--color-text-default,#fff); box-shadow: 0 8px 22px rgba(0,0,0,.32); font: 12px/16px system-ui,sans-serif; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity .12s ease .65s,visibility 0s linear .77s; }
-    .cordisx-toolbar-before .cordisx-native-icon-action::after, .cordisx-toolbar-after .cordisx-native-icon-action::after { top: calc(100% + 7px); right: 0; }
-    .cordisx-sidebar-footer-before .cordisx-native-icon-action::after, .cordisx-sidebar-footer-after .cordisx-native-icon-action::after { bottom: calc(100% + 7px); left: 50%; transform: translateX(-50%); }
-    .cordisx-native-icon-action:hover::after, .cordisx-native-icon-action:focus-visible::after { opacity: 1; visibility: visible; transition-delay: .65s,0s; }
     .cordisx-native-menu-root { display: contents; }
     .cordisx-native-menu-item { -webkit-app-region: no-drag; }
     .cordisx-native-menu-row { display: flex; width: 100%; align-items: center; gap: 6px; }

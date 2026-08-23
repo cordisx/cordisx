@@ -80,22 +80,21 @@ function mountCard(context: CordisXPageMountContext, body: CordisXLocalizedText)
     gap: '14px',
     margin: '24px',
     padding: '24px',
-    border: '1px solid color-mix(in srgb, #8b5cf6 55%, transparent)',
-    borderRadius: '18px',
-    background: 'linear-gradient(145deg, rgba(35, 27, 57, .98), rgba(15, 19, 31, .98))',
-    color: '#f8fafc',
-    boxShadow: '0 24px 80px rgba(0, 0, 0, .35)',
+    border: '1px solid var(--color-border, rgba(255, 255, 255, .084))',
+    borderRadius: '14px',
+    background: 'var(--color-background-elevated-secondary, rgba(255, 255, 255, .032))',
+    color: 'var(--color-text, #dfdfdf)',
     font: '14px/1.55 ui-sans-serif, system-ui, sans-serif',
   })
   const eyebrow = context.document.createElement('strong')
   eyebrow.textContent = `CORDISX · ${context.outlet.toUpperCase()}`
-  eyebrow.style.color = '#c4b5fd'
+  eyebrow.style.color = 'var(--color-text-secondary, rgba(255, 255, 255, .71))'
   const copy = context.document.createElement('p')
   copy.style.margin = '0'
   context.localization.bindText(copy, body)
   const route = context.document.createElement('code')
   route.textContent = `${context.routeId} · ${JSON.stringify(context.params)}`
-  route.style.opacity = '.66'
+  route.style.color = 'var(--color-text-tertiary, rgba(255, 255, 255, .498))'
   card.append(eyebrow, copy, route)
   context.container.append(card)
   return () => card.remove()

@@ -150,17 +150,23 @@ describe('NavigationRegistry', () => {
       schemaVersion: 1, id: 'session.content', authority: 'host-adapter', scope: 'session', preferredPlacement: 'absolute', contextPolicy: 'semantic',
     }, session, path => path.startsWith('/sessions/:sessionId/'))
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
-    pages.register('demo', { id: 'first', title: { key: 'first' } }, () => undefined)
-    pages.register('demo', { id: 'second', title: { key: 'second' } }, () => undefined)
+    pages.register('demo', { id: 'first', title: { key: 'first' }, icon: 'host:info' }, () => undefined)
+    pages.register('demo', { id: 'second', title: { key: 'second' }, icon: 'host:analytics' }, () => undefined)
     pages.register('demo', { id: 'session', title: { key: 'session' } }, () => undefined)
     navigation.register('demo', { id: 'first', path: '/first', outlet: 'app', page: 'first' })
     navigation.register('demo', { id: 'second', path: '/second', outlet: 'app', page: 'second' })
     navigation.register('demo', { id: 'session', path: '/sessions/:sessionId/files', outlet: 'session.content', page: 'session' })
 
     await navigation.navigate('demo', { id: 'first' })
+    expect(dom.window.document.querySelector('[data-cordisx-page-leading] [data-host-icon="host:info"]')).not.toBeNull()
+    expect(dom.window.document.querySelector('[data-cordisx-page-chrome] button[aria-label="Back"]')).toBeNull()
     await navigation.navigate('demo', { id: 'second' })
+    const back = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-page-leading] button[aria-label="Back"]')!
+    expect(back).not.toBeNull()
+    expect(dom.window.document.querySelector('[data-cordisx-page-leading] [data-host-icon="host:analytics"]')).toBeNull()
     expect(dom.window.location.href).toBe('https://example.test/native')
-    await navigation.back('demo', 'app')
+    back.click()
+    await settle()
     expect(navigation.snapshot().outlets.find(item => item.id === 'app')?.activeRoute).toBe('demo:first')
     await navigation.close('demo', 'app')
     expect(app.hides).toBe(1)
@@ -220,7 +226,8 @@ describe('NavigationRegistry', () => {
     const chrome = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-chrome]')!
     const title = chrome.querySelector<HTMLElement>('[data-cordisx-page-title]')!
     const action = chrome.querySelector<HTMLButtonElement>('[data-cordisx-page-header-action="refresh"]')!
-    expect(title.querySelector('[data-host-icon="host:layers"]')).not.toBeNull()
+    expect(chrome.querySelector('[data-cordisx-page-leading] [data-host-icon="host:layers"]')).not.toBeNull()
+    expect(chrome.querySelector('button[aria-label="Back"]')).toBeNull()
     expect(title.textContent).toBe('Overview')
     expect(action.classList.contains('native-icon-button')).toBe(true)
     expect(action.textContent).toBe('')

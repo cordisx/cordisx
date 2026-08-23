@@ -18,6 +18,7 @@ import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { createHostSurfaceIcon } from './icons.js'
 import { ownerFromContext, qualifyOwnedId } from './ownership.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
+import { HostTooltipController } from './tooltips.js'
 import {
   ICON_TOKEN_PATTERN,
   HostContextStore,
@@ -622,7 +623,8 @@ export class NavigationRegistry {
     content.dataset.cordisxRoute = entry.record.qualifiedId
     Object.assign(content.style, {
       position: 'absolute', inset: '0', display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      background: '#10131a', color: '#eef0f5', font: '13px/1.45 ui-sans-serif, system-ui, sans-serif',
+      background: 'var(--color-background-surface-under, #141414)',
+      color: 'var(--color-text, #dfdfdf)', font: '13px/1.45 ui-sans-serif, system-ui, sans-serif',
     })
     content.dataset.cordisxNoDrag = 'true'
     content.style.setProperty('-webkit-app-region', 'no-drag')
@@ -644,6 +646,8 @@ export class NavigationRegistry {
     }
     const namespace = page.metadata.localeNamespace ?? page.owner
     const localization = this.i18n.seatFor(page.owner, namespace, own)
+    const tooltips = new HostTooltipController(content.ownerDocument)
+    effects.push(() => tooltips.dispose())
     const mount: MountedPage = { entry, contextKey: host.contextKey, content, abort, effects }
     state.mount = mount
     delete state.error
@@ -653,17 +657,24 @@ export class NavigationRegistry {
       chrome.dataset.cordisxDrag = 'true'
       Object.assign(chrome.style, {
         display: 'flex', alignItems: 'center', gap: '8px', minHeight: '46px', padding: '0 12px',
-        borderBottom: '1px solid rgba(255,255,255,.1)', background: '#161a23', flex: '0 0 auto',
+        borderBottom: '1px solid var(--color-border, rgba(255,255,255,.084))',
+        background: 'var(--color-background-surface, #181818)', flex: '0 0 auto',
       })
       chrome.style.paddingLeft = 'max(12px, var(--cordisx-page-chrome-safe-left, 0px))'
       chrome.style.setProperty('-webkit-app-region', 'drag')
-      const back = pageChromeButton(content.ownerDocument, 'Back', 'host:back')
-      back.disabled = state.stack.length < 2
-      back.addEventListener('click', () => { void this.back(page.owner, name as CordisXOutletName) })
+      const leading = content.ownerDocument.createElement('div')
+      leading.dataset.cordisxPageLeading = 'true'
+      leading.style.cssText = 'display:flex;width:28px;height:28px;flex:0 0 28px;align-items:center;justify-content:center'
+      if (state.stack.length >= 2) {
+        const back = pageChromeButton(content.ownerDocument, 'Back', 'host:back')
+        back.addEventListener('click', () => { void this.back(page.owner, name as CordisXOutletName) })
+        leading.append(back)
+      } else if (page.metadata.icon !== undefined) {
+        leading.append(createHostSurfaceIcon(content.ownerDocument, page.metadata.icon))
+      }
       const titleGroup = content.ownerDocument.createElement('div')
       titleGroup.dataset.cordisxPageTitle = 'true'
       titleGroup.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;flex:1'
-      if (page.metadata.icon !== undefined) titleGroup.append(createHostSurfaceIcon(content.ownerDocument, page.metadata.icon))
       const title = content.ownerDocument.createElement('strong')
       title.style.cssText = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
       const titleMessage = entry.record.definition.title ?? page.metadata.title
@@ -675,7 +686,7 @@ export class NavigationRegistry {
       titleGroup.append(title)
       const close = pageChromeButton(content.ownerDocument, 'Close', 'host:close')
       close.addEventListener('click', () => { void this.close(page.owner, name as CordisXOutletName) })
-      chrome.append(back, titleGroup)
+      chrome.append(leading, titleGroup)
       for (const action of page.metadata.headerActions ?? []) {
         const button = pageChromeButton(content.ownerDocument, action.id, action.icon ?? 'host:more')
         button.dataset.cordisxPageHeaderAction = action.id
@@ -687,7 +698,7 @@ export class NavigationRegistry {
           const disabledReason = action.disabled?.reason === undefined
             ? undefined
             : this.i18n.resolveFor(page.owner, action.disabled.reason, disabledSite).text
-          button.title = action.disabled?.value === true && disabledReason !== undefined ? disabledReason : accessible
+          button.dataset.cordisxTooltip = action.disabled?.value === true && disabledReason !== undefined ? disabledReason : accessible
           return () => {
             this.i18n.clearDiagnosticSite(page.owner, labelSite)
             this.i18n.clearDiagnosticSite(page.owner, disabledSite)
@@ -698,6 +709,7 @@ export class NavigationRegistry {
           button.disabled = action.disabled?.value === true || !(this.commands?.hasFor(page.owner, action.command) ?? false)
         }
         refresh()
+        effects.push(tooltips.attach(button, () => button.dataset.cordisxTooltip, 'bottom'))
         effects.push(this.contexts.subscribe(refresh))
         if (this.commands !== undefined) effects.push(this.commands.subscribeInternal(refresh))
         button.addEventListener('click', () => {
