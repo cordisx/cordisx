@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/brand/cordisx-mark-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./assets/brand/cordisx-mark-light.svg">
+    <img alt="CordisX three-ring spherical mark" src="./assets/brand/cordisx-mark-light.svg" width="180">
+  </picture>
+</p>
+
 # CordisX
 
 让每一个 AI 编程客户端，都成为你的工作台。

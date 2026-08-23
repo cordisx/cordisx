@@ -24,6 +24,8 @@ import type { CommandSnapshot } from './commands.js'
 import { resolveManagerTriggerTarget } from './host-probes.js'
 import type { NavigationSnapshot } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
+import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
+import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 
 export type ManagerPluginStatus = 'active' | 'blocked' | 'permission-blocked' | 'configured-disabled' | 'failed'
 
@@ -81,6 +83,8 @@ type SecondaryView =
   | { readonly kind: 'marketplace'; readonly identity: string }
 
 const MANAGER_STYLE_ID = 'cordisx-manager-style'
+const CORDISX_MARK_DARK_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkDark)}`
+const CORDISX_MARK_LIGHT_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkLight)}`
 
 const MANAGER_STYLES = `
   [data-cordisx-manager-trigger] {
@@ -105,6 +109,24 @@ const MANAGER_STYLES = `
   [data-cordisx-manager-trigger]:focus-visible {
     outline: 2px solid #8b5cf6;
     outline-offset: 1px;
+  }
+  .cxm-brand-mark {
+    display: inline-flex;
+    width: 18px;
+    height: 18px;
+    flex: none;
+  }
+  .cxm-brand-mark > img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .cxm-brand-mark[data-color-scheme="current-color"] {
+    background: currentColor;
+    -webkit-mask-image: var(--cordisx-brand-mask);
+    mask-image: var(--cordisx-brand-mask);
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-size: contain;
+    mask-size: contain;
   }
   [data-cordisx-manager-modal] {
     position: fixed;
@@ -143,7 +165,9 @@ const MANAGER_STYLES = `
     border-right: 1px solid rgba(255, 255, 255, .08);
     background: linear-gradient(180deg, #191c26, #141720);
   }
-  .cxm-brand { padding: 2px 10px 18px; }
+  .cxm-brand { display: flex; align-items: center; gap: 10px; padding: 2px 10px 18px; }
+  .cxm-brand > .cxm-brand-mark { width: 34px; height: 34px; }
+  .cxm-brand-copy { min-width: 0; }
   .cxm-eyebrow { color: #a78bfa; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
   .cxm-brand-title { margin-top: 3px; color: #fff; font-size: 16px; font-weight: 700; }
   .cxm-version { margin-top: 4px; color: #8d96a8; font: 11px/1.3 ui-monospace, monospace; }
@@ -417,6 +441,27 @@ function create<K extends keyof HTMLElementTagNameMap>(
   return element
 }
 
+function createAdaptiveBrandMark(document: Document): HTMLSpanElement {
+  const mark = create(document, 'span', 'cxm-brand-mark')
+  mark.dataset.cordisxBrandMark = 'true'
+  mark.dataset.colorScheme = 'current-color'
+  mark.setAttribute('aria-hidden', 'true')
+  mark.style.setProperty('--cordisx-brand-mask', `url("${CORDISX_MARK_LIGHT_URI}")`)
+  return mark
+}
+
+function createDarkBrandMark(document: Document): HTMLPictureElement {
+  const picture = create(document, 'picture', 'cxm-brand-mark')
+  picture.dataset.cordisxBrandMark = 'true'
+  picture.setAttribute('aria-hidden', 'true')
+  const fallback = create(document, 'img')
+  fallback.alt = ''
+  picture.dataset.colorScheme = 'dark'
+  fallback.src = CORDISX_MARK_DARK_URI
+  picture.append(fallback)
+  return picture
+}
+
 function createLocalTabs(
   document: Document,
   items: readonly { readonly id: string; readonly label: string }[],
@@ -589,7 +634,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   trigger.setAttribute('aria-haspopup', 'dialog')
   trigger.setAttribute('aria-expanded', 'false')
   trigger.title = 'CordisX 插件与扩展点'
-  trigger.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 13.5v7m-3.5-3.5h7" stroke-linecap="round"/></svg>'
+  trigger.append(createAdaptiveBrandMark(document))
 
   const modal = create(document, 'div')
   modal.dataset.cordisxManagerModal = 'true'
@@ -602,10 +647,15 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const sidebar = create(document, 'aside', 'cxm-sidebar')
   const brand = create(document, 'div', 'cxm-brand')
-  brand.append(
+  const brandCopy = create(document, 'div', 'cxm-brand-copy')
+  brandCopy.append(
     create(document, 'div', 'cxm-eyebrow', 'CORDISX'),
     create(document, 'div', 'cxm-brand-title', '插件管理器'),
     create(document, 'div', 'cxm-version', `v${model.snapshot().version}`),
+  )
+  brand.append(
+    createDarkBrandMark(document),
+    brandCopy,
   )
   sidebar.append(brand)
 

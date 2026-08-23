@@ -69,6 +69,7 @@ export async function buildRendererBundle(config: CordisXConfig): Promise<string
     platform: 'browser',
     target: ['chrome120'],
     sourcemap: 'inline',
+    loader: { '.svg': 'text' },
     write: false,
     logLevel: 'silent',
   })

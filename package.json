@@ -14,7 +14,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "check": "npm run typecheck && npm test",
     "dev": "tsx src/cli.ts",
     "smoke": "node scripts/live-smoke.mjs",

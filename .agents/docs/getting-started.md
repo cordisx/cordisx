@@ -66,6 +66,8 @@ After live injection, run the read-only probe against the printed port:
 ```bash
 npm run smoke -- --port <printed-port> --screenshot artifacts/live-smoke.png
 npm run smoke -- --port <printed-port> --manager-screenshot artifacts/manager.png
+npm run smoke -- --port <printed-port> --color-scheme dark \
+  --trigger-screenshot artifacts/brand-trigger-dark.png
 npm run smoke -- --port <printed-port> \
   --select-thread local:<session-id> --exercise \
   --report artifacts/live-smoke/structured-exercise.json \
@@ -73,6 +75,12 @@ npm run smoke -- --port <printed-port> \
 npm run smoke -- --port <printed-port> --generation \
   --report artifacts/live-smoke/generation.json
 ```
+
+`--color-scheme light|dark` emulates the media preference and applies a
+temporary matching color context only to the native row containing the Codex
+mode switcher and CordisX trigger. The smoke script restores the row styles
+after capture; this verifies the trigger's `currentColor` contrast strategy
+without claiming that the complete Codex application theme was changed.
 
 `--exercise` uses real CDP input for sidebar drag and exercises collapse,
 bottom/right panels, page history/close, locale reprojection, native session
