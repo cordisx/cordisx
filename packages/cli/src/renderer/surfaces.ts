@@ -19,6 +19,7 @@ import {
   type CordisXWhen,
 } from '../contracts.js'
 import { ownerFromContext, qualifyOwnedId } from './ownership.js'
+import type { ExtensionPointAccessResolver } from './extension-points.js'
 import {
   HostContextStore,
   ICON_TOKEN_PATTERN,
@@ -69,6 +70,10 @@ export interface SurfaceContributionSnapshot {
   readonly order: number
   readonly item: unknown
   readonly visible: boolean
+  readonly authorized: boolean
+  readonly pointPolicy: 'inherit' | 'allow' | 'deny'
+  readonly effectivePointPolicy: 'allow' | 'deny'
+  readonly pointPolicyReason?: string
   readonly disabled: boolean
   readonly valid: boolean
   readonly pending: boolean
@@ -188,11 +193,21 @@ export class SurfaceRegistry {
   private nextSequence = 0
   private disposed = false
   private resolvers: SurfaceResolvers = { command: () => false, route: () => false }
+  private access: ExtensionPointAccessResolver | undefined
 
   constructor(private readonly contexts: HostContextStore) {}
 
   setResolvers(resolvers: SurfaceResolvers): void {
     this.resolvers = resolvers
+    this.notify()
+  }
+
+  setAccessResolver(access: ExtensionPointAccessResolver): void {
+    this.access = access
+    this.notify()
+  }
+
+  invalidatePointPolicies(): void {
     this.notify()
   }
 
@@ -306,6 +321,8 @@ export class SurfaceRegistry {
         let error = record.validationError
         let pending = false
         const item = record.item as Record<string, unknown> | undefined
+        const pointAccess = this.access?.decision(record.owner, record.options.name, 'surface')
+          ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }
         if (error === undefined && !this.declared.has(record.options.name)) error = `surface ${record.options.name} is not declared by the host`
         const unknownWhen = whenContextKeys(record.options.when).find(key => !knownKeys.has(key))
         if (error === undefined && unknownWhen !== undefined) error = `when context key ${unknownWhen} is not declared by the host`
@@ -345,6 +362,10 @@ export class SurfaceRegistry {
           order: record.options.order ?? 0,
           item: record.item,
           visible: error === undefined && evaluateWhen(record.options.when, contexts),
+          authorized: pointAccess.authorized,
+          pointPolicy: pointAccess.policy,
+          effectivePointPolicy: pointAccess.effectivePolicy,
+          ...(pointAccess.reason === undefined ? {} : { pointPolicyReason: pointAccess.reason }),
           disabled: record.options.disabled?.value ?? false,
           valid: error === undefined,
           pending,
@@ -413,5 +434,13 @@ export class CordisXSlotService extends Service implements CordisXSlots {
 
   setResolvers(resolvers: SurfaceResolvers): void {
     this.registry.setResolvers(resolvers)
+  }
+
+  setAccessResolver(access: ExtensionPointAccessResolver): void {
+    this.registry.setAccessResolver(access)
+  }
+
+  invalidatePointPolicies(): void {
+    this.registry.invalidatePointPolicies()
   }
 }

@@ -10,6 +10,12 @@ import {
   type OutletController,
   type OutletHostSnapshot,
 } from '../packages/cli/src/renderer/navigation.js'
+import {
+  CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
+  ExtensionPointDescriptorRegistry,
+  ExtensionPointPolicyBroker,
+  MemoryExtensionPointPolicyStore,
+} from '../packages/cli/src/renderer/extension-points.js'
 
 declare module '../packages/cli/src/contracts.js' {
   interface CordisXOutletMap {
@@ -197,6 +203,65 @@ describe('NavigationRegistry', () => {
     void navigation.dispose()
     pages.dispose()
     outlets.dispose()
+    dom.window.close()
+  })
+
+  it('denies outlet navigation and aborts an active page without touching native content', async () => {
+    const dom = new JSDOM('<body><main id="app"><div id="native">native</div></main></body>')
+    const container = dom.window.document.getElementById('app')!
+    const native = dom.window.document.getElementById('native')!
+    const nativeParent = native.parentElement
+    const pages = new PageRegistry()
+    const outlets = new OutletRegistry()
+    const controller = new FakeOutlet(container, 'renderer')
+    outlets.declare({
+      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
+    }, controller, path => !path.startsWith('/main/') && !path.startsWith('/sessions/'))
+    const descriptors = new ExtensionPointDescriptorRegistry()
+    descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
+    const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
+    const identity = { source: 'https://plugins.example/demo', id: 'demo' }
+    broker.register(identity)
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), undefined, broker)
+    let aborted = false
+    let disposed = 0
+    pages.register('demo', { id: 'page', title: { key: 'page' } }, ({ signal }) => {
+      signal.addEventListener('abort', () => { aborted = true })
+      return () => { disposed += 1 }
+    })
+    navigation.register('demo', { id: 'route', path: '/demo', outlet: 'app', page: 'page' })
+
+    await navigation.navigate('demo', { id: 'route' })
+    expect(navigation.snapshot().outlets[0]).toMatchObject({ mounted: true, activeRoute: 'demo:route' })
+    broker.setPolicy(identity, 'app', 'deny')
+    await navigation.invalidatePointPolicies()
+    expect(aborted).toBe(true)
+    expect(disposed).toBe(1)
+    expect(controller.hides).toBe(1)
+    expect(navigation.snapshot().routes[0]).toMatchObject({ valid: true, authorized: false, pointPolicy: 'deny' })
+    expect(broker.accessDiagnostics()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ request: expect.objectContaining({ operation: 'outlet.page.mount' }), authorized: false }),
+    ]))
+    expect(navigation.match('app', '/demo')).toBeUndefined()
+    const shows = controller.shows
+    await expect(navigation.navigate('demo', { id: 'route' })).rejects.toThrow(/denied/)
+    expect(controller.shows).toBe(shows)
+    expect(broker.accessDiagnostics().at(-1)).toMatchObject({
+      request: { operation: 'outlet.route.navigate' }, authorized: false,
+    })
+    expect(native.parentElement).toBe(nativeParent)
+    expect(native.isConnected).toBe(true)
+    expect(native.textContent).toBe('native')
+
+    broker.setPolicy(identity, 'app', 'allow')
+    await navigation.invalidatePointPolicies()
+    await navigation.navigate('demo', { id: 'route' })
+    expect(navigation.snapshot().outlets[0]).toMatchObject({ mounted: true, activeRoute: 'demo:route' })
+    await navigation.dispose()
+    pages.dispose()
+    outlets.dispose()
+    broker.dispose()
+    descriptors.dispose()
     dom.window.close()
   })
 })

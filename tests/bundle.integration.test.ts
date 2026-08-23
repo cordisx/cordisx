@@ -7,10 +7,10 @@ import { loadConfig } from '../packages/cli/src/launcher/config.js'
 
 interface RuntimeSnapshot {
   plugins: readonly { id: string; source: string; status: string; readme?: string }[]
-  registrations: readonly { owner: string; surface: string; valid: boolean; rendered: boolean; item: unknown }[]
+  registrations: readonly { owner: string; surface: string; valid: boolean; authorized: boolean; rendered: boolean; item: unknown }[]
   commands: readonly { owner: string; qualifiedId: string }[]
   navigation: {
-    routes: readonly { owner: string; qualifiedId: string; valid: boolean }[]
+    routes: readonly { owner: string; qualifiedId: string; valid: boolean; authorized: boolean }[]
     pages: readonly { owner: string; qualifiedId: string }[]
     outlets: readonly { id: string; contextKey?: string; activeRoute?: string; mounted: boolean }[]
   }
@@ -19,6 +19,18 @@ interface RuntimeSnapshot {
   localizationDiagnostics: readonly unknown[]
   platform: { mode: string; secondConnectionCreated: boolean; rawBridgeExposed: boolean; diagnostics: readonly { code: string }[] }
   permissions: readonly { capability: string; policy: string; reasonText: string; required: boolean }[]
+  extensionPoints: {
+    points: readonly {
+      id: string
+      kind: string
+      titleProjection: { text: string }
+      usingPluginCount: number
+      activePluginCount: number
+    }[]
+    policies: readonly { identity: { source: string; pluginId: string; pointId: string }; policy: string }[]
+    descriptorDiagnostics: readonly unknown[]
+    accessDiagnostics: readonly { request: { operation: string; identity: { source: string; pluginId: string; pointId: string } }; authorized: boolean }[]
+  }
 }
 
 interface RuntimeHandle {
@@ -27,6 +39,7 @@ interface RuntimeHandle {
   setPluginBlocked(id: string, blocked: boolean): Promise<void>
   execute(owner: string, reference: { id: string }): Promise<unknown>
   navigate(owner: string, reference: { id: string; params?: Record<string, string> }): Promise<void>
+  setExtensionPointPolicy(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
   dispose(): Promise<void>
 }
 
@@ -115,7 +128,15 @@ describe('renderer bundle', () => {
     expect(snapshot.navigation.routes.every(item => item.valid)).toBe(true)
     expect(snapshot.navigation.pages).toHaveLength(3)
     expect(snapshot.navigation.outlets).toHaveLength(3)
-    expect(snapshot.localeCatalogs).toHaveLength(2)
+    expect(snapshot.extensionPoints.points).toHaveLength(13)
+    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(10)
+    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'outlet')).toHaveLength(3)
+    expect(snapshot.extensionPoints.descriptorDiagnostics).toEqual([])
+    expect(snapshot.localeCatalogs).toHaveLength(4)
+    expect(snapshot.localeCatalogs.filter(item => item.owner === 'host')).toEqual([
+      expect.objectContaining({ locale: 'en' }),
+      expect.objectContaining({ locale: 'zh-CN' }),
+    ])
     expect(snapshot.localizationDiagnostics).toEqual([])
     expect(dom.window.document.querySelectorAll('[data-cordisx-surface-host]')).toHaveLength(3)
 
@@ -139,6 +160,7 @@ describe('renderer bundle', () => {
     await settle()
     await settle()
     expect(runtime!.snapshot().localization.locale).toBe('zh-CN')
+    expect(runtime!.snapshot().extensionPoints.points.find(item => item.id === 'sidebar.navigation.items')?.titleProjection.text).toBe('侧边栏导航')
     expect(dom.window.document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')?.textContent).toContain('主区域 outlet')
 
     expect(native.parentElement).toBe(nativeParent)
@@ -171,6 +193,27 @@ describe('renderer bundle', () => {
     expect(restoredSnapshot.permissions).toEqual([
       expect.objectContaining({ capability: 'models.read', policy: 'ask', required: false }),
     ])
+
+    const pluginSource = restoredSnapshot.plugins[0]!.source
+    await runtime!.setExtensionPointPolicy(pluginSource, 'slot-showcase', 'sidebar.navigation.items', 'deny')
+    await settle()
+    const deniedSurface = runtime!.snapshot()
+    expect(deniedSurface.commands).toHaveLength(5)
+    expect(deniedSurface.registrations.find(item => item.surface === 'sidebar.navigation.items')).toMatchObject({ authorized: false, rendered: false })
+    expect(dom.window.document.querySelector('.cordisx-nav-row')).toBeNull()
+    await runtime!.setExtensionPointPolicy(pluginSource, 'slot-showcase', 'sidebar.navigation.items', 'allow')
+    await settle()
+    expect(dom.window.document.querySelector('.cordisx-nav-row')).not.toBeNull()
+
+    await runtime!.navigate('slot-showcase', { id: 'main.analytics' })
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({ mounted: true })
+    await runtime!.setExtensionPointPolicy(pluginSource, 'slot-showcase', 'main', 'deny')
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({ mounted: false })
+    expect(runtime!.snapshot().navigation.routes.find(item => item.qualifiedId === 'slot-showcase:main.analytics')).toMatchObject({ valid: true, authorized: false })
+    expect(native.parentElement).toBe(nativeParent)
+    expect(native.isConnected).toBe(true)
+    await expect(runtime!.navigate('slot-showcase', { id: 'main.analytics' })).rejects.toThrow(/denied/)
+    await runtime!.setExtensionPointPolicy(pluginSource, 'slot-showcase', 'main', 'allow')
 
     const managerTrigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')
     expect(managerTrigger?.getAttribute('aria-label')).toBe('管理 CordisX 插件')

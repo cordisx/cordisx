@@ -109,6 +109,75 @@ export type CordisXJsonValue = CordisXJsonScalar | readonly CordisXJsonValue[] |
 
 export type CordisXIconToken = `${string}:${string}`
 
+export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v1.schema.json' as const
+export const CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-policy.v1.schema.json' as const
+export const CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-access.v1.schema.json' as const
+
+export type CordisXExtensionPointKind = 'surface' | 'outlet'
+export type CordisXPointPolicy = 'inherit' | 'allow' | 'deny'
+export type CordisXEffectivePointPolicy = 'allow' | 'deny'
+
+/** Protocol-v1 host-owned identity for one structured surface or controlled outlet. */
+export interface CordisXHostExtensionPointDescriptor {
+  readonly id: string
+  readonly kind: CordisXExtensionPointKind
+  readonly title: CordisXLocalizedText
+  readonly description: CordisXLocalizedText
+  readonly icon: CordisXIconToken
+}
+
+export interface CordisXHostExtensionPointCatalogV1 {
+  readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1
+  readonly schemaVersion: 1
+  readonly points: readonly CordisXHostExtensionPointDescriptor[]
+}
+
+/** Launcher-bound canonical tuple; plugins never provide or override source. */
+export interface CordisXExtensionPointIdentity {
+  readonly source: string
+  readonly pluginId: string
+  readonly pointId: string
+}
+
+export interface CordisXExtensionPointPolicyRecordV1 {
+  readonly $schema: typeof CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1
+  readonly schemaVersion: 1
+  readonly identity: CordisXExtensionPointIdentity
+  readonly policy: CordisXPointPolicy
+}
+
+interface CordisXExtensionPointAccessBase {
+  readonly $schema: typeof CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V1
+  readonly schemaVersion: 1
+  readonly identity: CordisXExtensionPointIdentity
+}
+
+export interface CordisXSurfaceCommandAccessV1 extends CordisXExtensionPointAccessBase {
+  readonly operation: 'surface.command.invoke'
+  readonly contributionId: string
+  readonly commandId: string
+}
+
+export interface CordisXOutletRouteAccessV1 extends CordisXExtensionPointAccessBase {
+  readonly operation: 'outlet.route.navigate'
+  readonly routeId: string
+  readonly pageId: string
+}
+
+export interface CordisXOutletPageAccessV1 extends CordisXExtensionPointAccessBase {
+  readonly operation: 'outlet.page.mount'
+  readonly routeId: string
+  readonly pageId: string
+}
+
+export type CordisXExtensionPointAccessV1 =
+  | CordisXSurfaceCommandAccessV1
+  | CordisXOutletRouteAccessV1
+  | CordisXOutletPageAccessV1
+
 export type CordisXWhen =
   | { readonly key: string; readonly exists: boolean }
   | { readonly key: string; readonly equals: CordisXJsonScalar }

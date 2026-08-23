@@ -25,6 +25,7 @@ import { resolveManagerTriggerTarget } from './host-probes.js'
 import { createManagerIcon, type ManagerIconToken } from './icons.js'
 import type { NavigationSnapshot } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
+import type { ExtensionPointRuntimeSnapshot } from './extension-points.js'
 import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
 import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 
@@ -67,12 +68,15 @@ export interface ManagerSnapshot {
   readonly localizationDiagnostics: readonly CordisXLocalizationDiagnostic[]
   readonly platform: CordisXPlatformAdapterStatus
   readonly permissions: readonly ManagerPermissionSnapshot[]
+  /** Runtime-owned point catalog/policy projection; manager UX consumes it in the following slice. */
+  readonly extensionPoints?: ExtensionPointRuntimeSnapshot
 }
 
 export interface ManagerModel {
   snapshot(): ManagerSnapshot
   setPluginBlocked(id: string, blocked: boolean): Promise<void>
   setPermissionPolicy(id: string, capability: CordisXPlatformCapability, policy: CordisXPermissionPolicy): Promise<void>
+  setExtensionPointPolicy?(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
   subscribe(listener: () => void): () => void
 }
 

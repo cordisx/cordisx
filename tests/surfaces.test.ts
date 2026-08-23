@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { SurfaceRegistry } from '../packages/cli/src/renderer/surfaces.js'
 import { HostContextStore } from '../packages/cli/src/renderer/validation.js'
+import {
+  CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
+  ExtensionPointDescriptorRegistry,
+  ExtensionPointPolicyBroker,
+  MemoryExtensionPointPolicyStore,
+} from '../packages/cli/src/renderer/extension-points.js'
 
 describe('SurfaceRegistry', () => {
   it('retains immutable data, sorts deterministically, and replaces snapshots through an owned handle', () => {
@@ -69,6 +75,36 @@ describe('SurfaceRegistry', () => {
     })
     expect(registry.snapshot()[0]).toMatchObject({ valid: true, visible: true })
     registry.dispose()
+    contexts.dispose()
+  })
+
+  it('retains denied contributions while removing them from authorized projection', () => {
+    const contexts = new HostContextStore()
+    const descriptors = new ExtensionPointDescriptorRegistry()
+    descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
+    const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
+    const identity = { source: 'https://plugins.example/demo', id: 'demo' }
+    broker.register(identity)
+    const registry = new SurfaceRegistry(contexts)
+    registry.setResolvers({ command: () => true, route: () => true })
+    registry.setAccessResolver(broker)
+    registry.register('demo', { name: 'sidebar.footer.before-control', id: 'open' }, {
+      label: { key: 'open' }, command: { id: 'open' },
+    })
+    registry.markRendered('sidebar.footer.before-control', 'demo:open', true)
+    expect(registry.snapshot()[0]).toMatchObject({ authorized: true, pointPolicy: 'inherit', rendered: true })
+
+    broker.setPolicy(identity, 'sidebar.footer.before-control', 'deny')
+    registry.invalidatePointPolicies()
+    expect(registry.snapshot()[0]).toMatchObject({
+      valid: true, visible: true, authorized: false, pointPolicy: 'deny', effectivePointPolicy: 'deny', rendered: true,
+    })
+    registry.markRendered('sidebar.footer.before-control', 'demo:open', false)
+    expect(registry.snapshot()[0]).toMatchObject({ authorized: false, rendered: false })
+    expect(registry.snapshot()).toHaveLength(1)
+    registry.dispose()
+    broker.dispose()
+    descriptors.dispose()
     contexts.dispose()
   })
 })

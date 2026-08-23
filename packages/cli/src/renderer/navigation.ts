@@ -12,6 +12,7 @@ import type {
   CordisXRoutes,
 } from '../contracts.js'
 import { CordisXI18nService, type LocalizationEffectOwner } from './i18n.js'
+import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { ownerFromContext, qualifyOwnedId } from './ownership.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
 import {
@@ -269,6 +270,10 @@ export interface RouteSnapshot {
   readonly qualifiedId: string
   readonly definition: CordisXRouteDefinition
   readonly valid: boolean
+  readonly authorized: boolean
+  readonly pointPolicy: 'inherit' | 'allow' | 'deny'
+  readonly effectivePointPolicy: 'allow' | 'deny'
+  readonly pointPolicyReason?: string
   readonly error?: string
 }
 
@@ -334,9 +339,19 @@ export class NavigationRegistry {
     private readonly outlets: OutletRegistry,
     private readonly i18n: CordisXI18nService,
     readonly contexts: HostContextStore = new HostContextStore(),
+    private access?: ExtensionPointAccessResolver,
   ) {
     this.unsubscribePages = pages.subscribe(() => { void this.enqueue(() => this.reconcileDependencies()) })
     this.unsubscribeOutlets = outlets.subscribe(() => { void this.enqueue(() => this.reconcileDependencies()) })
+  }
+
+  setAccessResolver(access: ExtensionPointAccessResolver): void {
+    this.access = access
+    void this.invalidatePointPolicies()
+  }
+
+  invalidatePointPolicies(): Promise<void> {
+    return this.enqueue(() => this.reconcileDependencies())
   }
 
   register(owner: string, definition: CordisXRouteDefinition): () => void {
@@ -405,7 +420,9 @@ export class NavigationRegistry {
 
   match(outlet: string, path: string): { readonly routeId: string; readonly params: Readonly<Record<string, string>> } | undefined {
     const matches = [...this.records.values()]
-      .filter(record => record.definition.outlet === outlet && this.routeError(record) === undefined)
+      .filter(record => record.definition.outlet === outlet
+        && this.routeError(record) === undefined
+        && (this.access?.decision(record.owner, outlet, 'outlet').authorized ?? true))
       .map(record => ({ record, params: matchPath(record, path) }))
       .filter((item): item is { record: RouteRecord; params: Readonly<Record<string, string>> } => item.params !== undefined)
     if (matches.length !== 1) return undefined
@@ -415,12 +432,18 @@ export class NavigationRegistry {
   snapshot(): NavigationSnapshot {
     const routes = [...this.records.values()].map((record): RouteSnapshot => {
       const error = this.routeError(record)
+      const pointAccess = this.access?.decision(record.owner, record.definition.outlet, 'outlet')
+        ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }
       return {
         owner: record.owner,
         id: record.definition.id,
         qualifiedId: record.qualifiedId,
         definition: record.definition,
         valid: error === undefined,
+        authorized: pointAccess.authorized,
+        pointPolicy: pointAccess.policy,
+        effectivePointPolicy: pointAccess.effectivePolicy,
+        ...(pointAccess.reason === undefined ? {} : { pointPolicyReason: pointAccess.reason }),
         ...(error === undefined ? {} : { error }),
       }
     }).sort((left, right) => left.qualifiedId.localeCompare(right.qualifiedId))
@@ -491,6 +514,15 @@ export class NavigationRegistry {
     if (record === undefined || record.owner !== requestingOwner) throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
     const error = this.routeError(record)
     if (error !== undefined) throw new Error(`route ${record.qualifiedId} is invalid: ${error}`)
+    const routeAccess = this.access?.authorizeOutletRoute(
+      requestingOwner,
+      record.definition.outlet,
+      record.qualifiedId,
+      qualifyOwnedId(record.owner, record.definition.page),
+    )
+    if (routeAccess !== undefined && !routeAccess.authorized) {
+      throw new Error(routeAccess.reason ?? `extension point ${record.definition.outlet} is denied for plugin ${requestingOwner}`)
+    }
     const params = immutableSnapshot(reference.params ?? {})
     const path = buildPath(record, params)
     const outletRecord = this.outlets.get(record.definition.outlet)!
@@ -523,6 +555,17 @@ export class NavigationRegistry {
     if (outlet === undefined || page === undefined) return
     const host = outlet.controller.getSnapshot()
     if (!host.available || host.container === undefined || host.contextKey === undefined) return
+    const pageAccess = this.access?.authorizeOutletPage(
+      entry.record.owner,
+      entry.record.definition.outlet,
+      entry.record.qualifiedId,
+      page.qualifiedId,
+    )
+    if (pageAccess !== undefined && !pageAccess.authorized) {
+      state.error = pageAccess.reason ?? `extension point ${entry.record.definition.outlet} is denied for plugin ${entry.record.owner}`
+      await this.closeNow(name)
+      return
+    }
     const content = host.container.ownerDocument.createElement('section')
     content.dataset.cordisxPage = page.qualifiedId
     content.dataset.cordisxRoute = entry.record.qualifiedId
@@ -691,6 +734,16 @@ export class NavigationRegistry {
         await this.closeNow(name)
         continue
       }
+      const retentionAccess = this.access?.authorizeOutletPage(
+        current.record.owner,
+        name,
+        current.record.qualifiedId,
+        qualifyOwnedId(current.record.owner, current.record.definition.page),
+      )
+      if (retentionAccess !== undefined && !retentionAccess.authorized) {
+        await this.closeNow(name)
+        continue
+      }
       const host = outlet.controller.getSnapshot()
       if (!host.available || host.container === undefined || host.contextKey === undefined
         || (state.contextKey !== undefined && state.contextKey !== host.contextKey)
@@ -785,6 +838,14 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
 
   subscribeInternal(listener: () => void): () => void {
     return this.registry.subscribe(listener)
+  }
+
+  setAccessResolver(access: ExtensionPointAccessResolver): void {
+    this.registry.setAccessResolver(access)
+  }
+
+  invalidatePointPolicies(): Promise<void> {
+    return this.registry.invalidatePointPolicies()
   }
 
   settled(): Promise<void> {
