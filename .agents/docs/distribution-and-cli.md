@@ -170,9 +170,10 @@ Repository ownership does not change:
   scaffolder, and release automation.
 
 The canonical unscoped `cordisx` package owns the friendly CLI. There is no
-duplicate `@cordisx/cli` package. `create-cordisx-plugin` owns
-`npm create cordisx-plugin@latest`; its generated project depends only on public
-SDK/protocol surfaces and never imports monorepo-private paths.
+duplicate `@cordisx/cli` package. `create-cordisx-plugin` owns the
+`create-cordisx-plugin` bin used by both `npm create cordisx-plugin` and
+`npx create-cordisx-plugin`; its generated project depends only on public
+CordisX/Cordis surfaces and never imports monorepo-private paths.
 
 ## Package and release contract
 
@@ -199,6 +200,76 @@ and a no-launch doctor/config probe work. The first
 `create-cordisx-plugin` release must generate a package that installs,
 typechecks, tests, and exposes a valid CordisX plugin entry. Name reservation is
 a result of those usable releases, not a separate empty publication.
+
+## First npm beta delivery
+
+The first installable release train is `0.1.0-beta.0` for both `cordisx` and
+`create-cordisx-plugin`. The two packages advance together while the generated
+template directly depends on the CordisX CLI/contracts package. Every retry or
+follow-up release uses a new immutable prerelease version; a published version
+is never overwritten or reused.
+
+Both packages publish with the explicit `beta` dist-tag. The existing
+name-reservation packages remain `latest: 0.0.0` until a separate stable-
+promotion decision. Publishing without `--tag beta`, moving `latest`, or
+promoting a beta as an incidental recovery action is forbidden. Because npm
+resolves unqualified commands through `latest`, beta users must include the
+channel explicitly:
+
+```bash
+npm install --global cordisx@beta
+npx cordisx@beta --help
+npm create cordisx-plugin@beta my-plugin
+npx create-cordisx-plugin@beta my-plugin
+```
+
+The generated bin and project remain compatible with the unqualified
+`npm create cordisx-plugin <directory>` and
+`npx create-cordisx-plugin <directory>` forms once the functional package is
+locally selected or deliberately promoted to `latest`; the beta documentation
+must not imply that the placeholder `latest` package is functional.
+
+The beta package boundaries are:
+
+| Package | Owns | Must not imply |
+| --- | --- | --- |
+| `cordisx` | Launcher CLI, home configuration, trusted-local plugin bundling, public contracts, and developer dry-run | Marketplace installation, signing, an execution sandbox, enforced capability isolation, or HMR |
+| `create-cordisx-plugin` | Directory creation, the versioned minimal template, manifest-bearing entry, project scripts, README, and generated-project verification | Registry/catalog submission, signing, permission grants, marketplace activation, or a watch/reload service |
+
+The scaffolder package exclusively owns
+`packages/create-cordisx-plugin/template`. It is copied from the published
+tarball rather than downloaded from a branch or from `roadmap`. The template
+exports its version-1 manifest from the runtime entry, requests no platform
+capabilities by default, uses structured host-owned surfaces, and is testable
+with `cordisx dev <entry> --dry-run`. Template changes and their generated-
+project tests land in the same PR; no second copy is maintained in CordisXMono
+or the docs repository.
+
+Publishing is allowed only from merged `main` through
+`.github/workflows/release-beta.yml`, on a GitHub-hosted runner with OIDC and the
+`npm-beta` GitHub environment. Each npm package configures that exact repository,
+workflow filename, environment, and the `npm publish` action as its trusted
+publisher. The workflow carries no npm token. It validates the requested
+version against both package manifests, the clean pack allowlists, install
+smokes, repository metadata, registry owner, version absence, and both
+`latest` values before the first publish.
+
+The registry cannot atomically publish two packages. The workflow therefore
+publishes and reads back `cordisx` first, then publishes and reads back the
+scaffolder that depends on it. A retry may skip an already published first
+package only after its registry tarball integrity and metadata match the local
+merged commit exactly. Any mismatched existing version, owner, tag, integrity,
+or repository metadata stops the workflow; recovery advances to a new
+prerelease unless the already published artifact is proven identical.
+
+Completion requires remote readback, not only `npm pack`: both `beta` tags must
+resolve to the requested versions, both `latest` tags must still resolve to
+`0.0.0`, and a clean temporary directory must install/run `cordisx@beta`, invoke
+both scaffolder command forms, install each generated project, run its
+check/build/test scripts, and bundle its entry with the published
+`cordisx dev --dry-run`. Package tests also assert that the tarball includes its
+README, license, bin, built output, and complete template while excluding repo-
+private docs, tests, source-only bins, tokens, and developer configuration.
 
 ## Delivery order and PR boundaries
 
