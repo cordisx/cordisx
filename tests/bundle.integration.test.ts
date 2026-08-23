@@ -82,7 +82,7 @@ describe('renderer bundle', () => {
             <div id="native-session-title">Current session</div>
             <div id="native-session-actions" style="display:flex"><button id="native-session-menu" class="codex-toolbar-button">Session menu</button></div>
           </header>
-          <section data-codex-thread-reference-drop-target style="position:relative">
+          <section id="native-session-content" data-pip-anchor-host="codex-main-thread" data-app-action-timeline-scroll style="position:relative">
             <div id="native-conversation" data-thread-find-target="conversation" data-response-annotation-conversation="${sessionId}">native data</div>
             <div data-codex-composer-root data-composer-placement="thread">
               <div data-above-composer-conversation-id="${sessionId}"></div>
@@ -91,7 +91,7 @@ describe('renderer bundle', () => {
                 <div id="native-composer-actions" style="display:flex"><button id="native-submit" class="codex-composer-button">Send</button></div>
               </div>
             </div>
-            <div data-codex-thread-reference-drop-target></div>
+            <div id="unmatched-session-content" data-pip-anchor-host="codex-main-thread" data-app-action-timeline-scroll></div>
           </section>
         </main>
         <aside data-pip-home-surface="thread-summary-panel" style="position:relative"></aside>
@@ -336,6 +336,8 @@ describe('renderer bundle', () => {
     await runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId } })
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({ activeRoute: 'slot-showcase:session.analytics', mounted: true, contextKey: `session:${sessionId}`, presentation: 'presented' })
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ presentation: 'suspended', suspendedBy: 'session.content' })
+    expect(dom.window.document.querySelector('[data-codex-thread-reference-drop-target]')).toBeNull()
+    expect(dom.window.document.querySelector('[data-cordisx-page-outlet="session.content"]')?.parentElement?.id).toBe('native-session-content')
     await expect(runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId: 'stale' } })).rejects.toThrow(/does not match native session/)
     expect(dom.window.location.href).toBe('https://codex.local/native')
 
