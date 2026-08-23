@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { CommandRegistry } from '../packages/cli/src/renderer/commands.js'
 import {
+  CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1,
+  type CordisXCommandContext,
+} from '../packages/cli/src/contracts.js'
+import {
   CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
@@ -69,6 +73,44 @@ describe('CommandRegistry', () => {
       pointId: 'sidebar.footer.before-control', contributionId: 'demo:footer',
     })).resolves.toBeUndefined()
     expect(executions).toBe(2)
+    registry.dispose()
+    broker.dispose()
+    descriptors.dispose()
+  })
+
+  it('injects only matching immutable host context and never promotes plugin arguments', async () => {
+    const descriptors = new ExtensionPointDescriptorRegistry()
+    descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
+    const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
+    broker.register({ source: 'https://plugins.example/demo', id: 'demo' })
+    const registry = new CommandRegistry(broker)
+    let received: CordisXCommandContext | undefined
+    registry.register('demo', { id: 'trace', title: { key: 'trace' } }, context => { received = context })
+    const hostContext = {
+      $schema: CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1,
+      schemaVersion: 1 as const,
+      generation: 'generation-test',
+      contextRef: 'context-1',
+      pointId: 'session.header.actions',
+      contributionId: 'demo:trace',
+      commandId: 'demo:trace',
+      provenance: 'observed' as const,
+      source: { kind: 'adapter' as const, adapterId: 'codex', adapterVersion: 'fixture', hostId: 'com.openai.codex' },
+      identity: { agent: { sessionKey: 'session-opaque' } },
+    }
+
+    await registry.execute('demo', { id: 'trace', arguments: { sessionId: 'spoofed' } }, 'surface', {
+      pointId: 'session.header.actions', contributionId: 'demo:trace', context: hostContext,
+    })
+    expect(received?.hostContext).toEqual(hostContext)
+    expect(Object.isFrozen(received?.hostContext)).toBe(true)
+    expect(Object.isFrozen(received?.hostContext?.identity.agent)).toBe(true)
+    expect(received?.arguments).toEqual({ sessionId: 'spoofed' })
+    await registry.execute('demo', { id: 'trace', arguments: { hostContext } as never }, 'direct')
+    expect(received?.hostContext).toBeUndefined()
+    await expect(registry.execute('demo', { id: 'trace' }, 'mismatch', {
+      pointId: 'composer.toolbar.items', contributionId: 'demo:trace', context: hostContext,
+    })).rejects.toThrow(/does not match/)
     registry.dispose()
     broker.dispose()
     descriptors.dispose()

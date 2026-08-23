@@ -122,23 +122,46 @@ dispatch:
 
 ```ts
 interface HostInvocationContext {
+  readonly generation: string
+  readonly contextRef: string
+  readonly pointId: string
+  readonly contributionId: string
+  readonly commandId: string
   readonly provenance: 'observed' | 'cordisx' | 'inferred'
-  readonly workspaceId?: string
-  readonly sessionId?: string
-  readonly turnId?: string
-  readonly stepId?: string
-  readonly itemId?: string
-  readonly messageId?: string
-  readonly toolCallId?: string
-  readonly contextId?: string
+  readonly source: Readonly<{
+    kind: 'adapter' | 'cordisx'
+    adapterId?: string
+    adapterVersion?: string
+    hostId?: string
+    component?: string
+  }>
+  readonly identity: Readonly<{
+    workspaceRef?: string
+    agent?: Readonly<{
+      sessionKey: string
+      turnId?: string
+      stepId?: string
+      itemId?: string
+      messageId?: string
+      toolCallId?: string
+    }>
+    platformSession?: Readonly<{
+      providerId: string
+      remoteSessionId: string
+    }>
+    contextId?: string
+  }>
 }
 ```
 
-These opaque identities align with `cordisx.agent-events/v1`; they do not add a
-Timeline or infer missing hierarchy. The command dispatcher accepts context
-only from its private host-origin channel. Plugin command arguments remain
-ordinary immutable JSON and a key that resembles an identity never becomes
-host context.
+The provider-neutral Agent `sessionKey` is distinct from a Platform session's
+`(providerId, remoteSessionId)` composite identity. A naked session id is never
+interpreted as globally unique across providers. These opaque identities align
+with `cordisx.agent-events/v1`; they do not add a Timeline or infer missing
+hierarchy. Codex `additionalContext` and private adapter fields are excluded.
+The command dispatcher accepts context only from its private host-origin
+channel. Plugin command arguments remain ordinary immutable JSON and a key that
+resembles an identity never becomes host context.
 
 ## DeepSeek Harness intent mapping and refusal
 

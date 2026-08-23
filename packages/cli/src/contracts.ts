@@ -126,6 +126,18 @@ export const CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1 =
 export type CordisXExtensionPointKind = 'surface' | 'outlet'
 export type CordisXPointPolicy = 'inherit' | 'allow' | 'deny'
 export type CordisXEffectivePointPolicy = 'allow' | 'deny'
+export type CordisXExtensionPointPayloadFamily =
+  | 'action'
+  | 'menu-item'
+  | 'contextual-action'
+  | 'tab'
+  | 'presenter'
+  | 'navigation-item'
+  | 'environment-section'
+  | 'environment-row'
+  | 'outlet'
+export type CordisXExtensionPointStability = 'stable' | 'experimental' | 'reserved'
+export type CordisXExtensionPointAvailability = 'available' | 'pending' | 'unavailable'
 
 /** Protocol-v1 host-owned identity for one structured surface or controlled outlet. */
 export interface CordisXHostExtensionPointDescriptor {
@@ -140,6 +152,28 @@ export interface CordisXHostExtensionPointCatalogV1 {
   readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1
   readonly schemaVersion: 1
   readonly points: readonly CordisXHostExtensionPointDescriptor[]
+}
+
+export interface CordisXHostExtensionPointAnchorDescriptorV2 {
+  readonly id: string
+  readonly placements: readonly ('before' | 'after' | 'menu')[]
+  readonly availability: CordisXExtensionPointAvailability
+  readonly diagnostic?: CordisXLocalizedText
+}
+
+/** Protocol-v2 descriptor. Stability is a product promise; availability is a live host fact. */
+export interface CordisXHostExtensionPointDescriptorV2 extends CordisXHostExtensionPointDescriptor {
+  readonly payloadFamily: CordisXExtensionPointPayloadFamily
+  readonly stability: CordisXExtensionPointStability
+  readonly availability: CordisXExtensionPointAvailability
+  readonly diagnostic?: CordisXLocalizedText
+  readonly anchors?: readonly CordisXHostExtensionPointAnchorDescriptorV2[]
+}
+
+export interface CordisXHostExtensionPointCatalogV2 {
+  readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2
+  readonly schemaVersion: 2
+  readonly points: readonly CordisXHostExtensionPointDescriptorV2[]
 }
 
 /** Launcher-bound canonical tuple; plugins never provide or override source. */
@@ -193,6 +227,52 @@ export type CordisXExtensionPointAccessV1 =
   | CordisXOutletRouteAccessV1
   | CordisXOutletPageAccessV1
   | CordisXOutletPageCommandAccessV1
+
+interface CordisXExtensionPointAccessBaseV2 {
+  readonly $schema: typeof CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2
+  readonly schemaVersion: 2
+  readonly generation: string
+  readonly identity: CordisXExtensionPointIdentity
+}
+
+export interface CordisXSurfaceCommandAccessV2 extends CordisXExtensionPointAccessBaseV2 {
+  readonly operation: 'surface.command.invoke'
+  readonly contributionId: string
+  readonly commandId: string
+}
+
+export interface CordisXSurfaceRouteAccessV2 extends CordisXExtensionPointAccessBaseV2 {
+  readonly operation: 'surface.route.navigate'
+  readonly contributionId: string
+  readonly routeId: string
+}
+
+export interface CordisXOutletRouteAccessV2 extends CordisXExtensionPointAccessBaseV2 {
+  readonly operation: 'outlet.route.navigate'
+  readonly routeId: string
+  readonly pageId: string
+}
+
+export interface CordisXOutletPageAccessV2 extends CordisXExtensionPointAccessBaseV2 {
+  readonly operation: 'outlet.page.mount'
+  readonly routeId: string
+  readonly pageId: string
+}
+
+export interface CordisXOutletPageCommandAccessV2 extends CordisXExtensionPointAccessBaseV2 {
+  readonly operation: 'outlet.page.command.invoke'
+  readonly routeId: string
+  readonly pageId: string
+  readonly actionId: string
+  readonly commandId: string
+}
+
+export type CordisXExtensionPointAccessV2 =
+  | CordisXSurfaceCommandAccessV2
+  | CordisXSurfaceRouteAccessV2
+  | CordisXOutletRouteAccessV2
+  | CordisXOutletPageAccessV2
+  | CordisXOutletPageCommandAccessV2
 
 export type CordisXWhen =
   | { readonly key: string; readonly exists: boolean }

@@ -128,6 +128,10 @@ describe('renderer bundle', () => {
       toJSON: () => ({}),
     }) as DOMRect
     Object.defineProperty(dom.window.document.querySelector('[data-app-shell-application-menu-bar]'), 'getBoundingClientRect', { value: () => rect(0, 0, 1200, 46) })
+    Object.defineProperty(dom.window.document.querySelector('[data-testid="app-shell-header-context-menu-surface"]'), 'getBoundingClientRect', { value: () => rect(240, 0, 960, 46) })
+    Object.defineProperty(dom.window.document.querySelector('[data-codex-composer-root]'), 'getBoundingClientRect', { value: () => rect(420, 700, 600, 120) })
+    Object.defineProperty(dom.window.document.querySelector('[data-composer-footer-responsive]'), 'getBoundingClientRect', { value: () => rect(440, 760, 560, 40) })
+    Object.defineProperty(dom.window.document.querySelector('[data-pip-home-surface="thread-summary-panel"]'), 'getBoundingClientRect', { value: () => rect(960, 46, 240, 654) })
     Object.defineProperty(dom.window.document.body, 'getBoundingClientRect', { value: () => rect(0, 0, 1200, 900) })
     let mainRect = rect(240, 0, 960, 900)
     Object.defineProperty(dom.window.document.querySelector('[data-app-shell-main-content-layout]'), 'getBoundingClientRect', { value: () => mainRect })
@@ -155,9 +159,9 @@ describe('renderer bundle', () => {
     expect(snapshot.navigation.routes.every(item => item.valid)).toBe(true)
     expect(snapshot.navigation.pages).toHaveLength(3)
     expect(snapshot.navigation.outlets).toHaveLength(3)
-    expect(snapshot.extensionPoints.points).toHaveLength(16)
-    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(13)
-    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'outlet')).toHaveLength(3)
+    expect(snapshot.extensionPoints.points).toHaveLength(33)
+    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(28)
+    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'outlet')).toHaveLength(5)
     expect(snapshot.extensionPoints.descriptorDiagnostics).toEqual([])
     expect(snapshot.localeCatalogs).toHaveLength(4)
     expect(snapshot.localeCatalogs.filter(item => item.owner === 'host')).toEqual([
