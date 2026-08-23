@@ -66,7 +66,7 @@ describe('renderer bundle', () => {
         <header data-app-shell-application-menu-bar style="position:relative">
           <div data-test-id="header-shell-slot"><div><div><button>left native</button></div></div></div>
           <div data-test-id="header-shell-slot" style="width:0px;min-width:70px"><div><div id="native-toolbar-controls" style="display:flex">
-            <button id="native-toolbar-primary" class="codex-toolbar-button">native primary</button><button class="codex-toolbar-button">native secondary</button>
+            <span id="native-toolbar-tooltip-trigger" style="display:contents"><button id="native-toolbar-primary" class="codex-toolbar-button">native primary</button></span><button class="codex-toolbar-button">native secondary</button>
           </div></div></div>
         </header>
         <aside><div data-app-action-sidebar-scroll style="position:relative">
@@ -164,8 +164,9 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="sidebar.navigation"]')?.parentElement?.id).toBe('native-navigation')
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="sidebar.footer.before"]')?.nextElementSibling?.id).toBe('native-help')
     expect(dom.window.document.getElementById('native-help')?.nextElementSibling?.getAttribute('data-cordisx-surface-host')).toBe('sidebar.footer.after')
-    expect(dom.window.document.querySelector('[data-cordisx-surface-host="toolbar.before"]')?.nextElementSibling?.id).toBe('native-toolbar-primary')
-    expect(dom.window.document.getElementById('native-toolbar-primary')?.nextElementSibling?.getAttribute('data-cordisx-surface-host')).toBe('toolbar.after')
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="toolbar.before"]')?.nextElementSibling?.id).toBe('native-toolbar-tooltip-trigger')
+    expect(dom.window.document.getElementById('native-toolbar-tooltip-trigger')?.nextElementSibling?.getAttribute('data-cordisx-surface-host')).toBe('toolbar.after')
+    expect(dom.window.document.getElementById('native-toolbar-tooltip-trigger')?.querySelector('[data-cordisx-surface-host]')).toBeNull()
     expect(surfaceHosts.every(host => host.dataset.cordisxNoDrag === 'true')).toBe(true)
     expect([...dom.window.document.querySelectorAll<HTMLElement>('.cordisx-action')]
       .every(button => button.dataset.cordisxNoDrag === 'true')).toBe(true)
@@ -176,6 +177,7 @@ describe('renderer bundle', () => {
     expect(toolbarAction.className).toContain('codex-toolbar-button')
     expect(toolbarAction.textContent).toBe('')
     expect(toolbarAction.getAttribute('aria-label')).toBe('Open main page')
+    expect(toolbarAction.dataset.cordisxTooltip).toBe('Open main page')
     expect(toolbarAction.querySelector('[data-host-icon="host:open"] svg')).not.toBeNull()
     const sameToolbarAction = toolbarAction
     const nativeTooltip = dom.window.document.createElement('div')
@@ -236,8 +238,12 @@ describe('renderer bundle', () => {
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')?.placement).toBe('portal')
     expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.top).toBe('0px')
     expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="slot-showcase:main.analytics"]')?.dataset.cordisxNoDrag).toBe('true')
+    const mainDemo = dom.window.document.querySelector<HTMLElement>('[data-cordisx-demo-marker="main"]')!
+    expect(mainDemo.style.background).toContain('--color-background-elevated-secondary')
+    expect(mainDemo.getAttribute('style')).not.toMatch(/#8b5cf6|#c4b5fd|linear-gradient/)
     const mainChrome = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="slot-showcase:main.analytics"] [data-cordisx-page-chrome]')!
-    expect(mainChrome.querySelector('[data-cordisx-page-title] [data-host-icon="host:analytics"]')).not.toBeNull()
+    expect(mainChrome.querySelector('[data-cordisx-page-leading] [data-host-icon="host:analytics"]')).not.toBeNull()
+    expect(mainChrome.querySelector('button[aria-label="Back"]')).toBeNull()
     const mainHeaderAction = mainChrome.querySelector<HTMLButtonElement>('[data-cordisx-page-header-action="refresh"]')!
     expect(mainHeaderAction.textContent).toBe('')
     expect(mainHeaderAction.getAttribute('aria-label')).toBe('Refresh snapshot')
@@ -253,7 +259,8 @@ describe('renderer bundle', () => {
     const appChrome = appOutlet.querySelector<HTMLElement>('[data-cordisx-page-chrome]')!
     expect(appChrome.dataset.cordisxDrag).toBe('true')
     expect(appChrome.style.paddingLeft).toContain('--cordisx-page-chrome-safe-left')
-    expect(appChrome.querySelector('[data-cordisx-page-title] [data-host-icon="host:layers"]')).not.toBeNull()
+    expect(appChrome.querySelector('[data-cordisx-page-leading] [data-host-icon="host:layers"]')).not.toBeNull()
+    expect(appChrome.querySelector('button[aria-label="Back"]')).toBeNull()
     expect(appChrome.querySelectorAll('[data-cordisx-page-header-action="refresh"]')).toHaveLength(1)
     expect(appOutlet.querySelectorAll('[role="tab"] [data-host-icon]')).toHaveLength(2)
     expect(appOutlet.querySelector('[data-cordisx-page-body]')?.closest('header')).toBeNull()
