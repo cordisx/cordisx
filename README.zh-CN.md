@@ -18,7 +18,7 @@
 
 <h1 align="center">CordisX</h1>
 
-<p align="center"><strong>让插件在 AI 工作真正发生的地方，与用户相遇。</strong></p>
+<p align="center"><strong>用 Cordis 扩展可扩展的一切。</strong></p>
 
 <p align="center">
   <a href="https://cordisx.github.io/"><strong>探索 CordisX</strong></a>
