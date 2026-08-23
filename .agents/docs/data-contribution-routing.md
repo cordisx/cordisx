@@ -366,11 +366,10 @@ back, close, tabs, and every other interactive descendant remain explicit
 inset from the resolved native title-bar controls, so page controls never sit
 under the red/yellow/green window buttons.
 
-The `main` outlet instead preserves the native Electron title-bar vertically.
-It derives a top inset from the currently resolved native application-menu
-rectangle rather than publishing or assuming a cross-host constant.
-`session.content` continues to derive its top boundary from the native
-session-content anchor below the session header.
+The `main` outlet covers the complete region to the right of the sidebar from
+`y=0`; the sidebar keeps the macOS traffic lights, while the main page chrome
+provides the draggable region on the right. `session.content` alone derives its
+top boundary from the native session-content anchor below the session header.
 
 The adapter must not call `replaceWith`, `remove`, `append` on a native child for
 reparenting, set `display:none` on native content, clear native children, or
