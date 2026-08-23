@@ -77,7 +77,7 @@ npx cordisx@beta codex --dry-run
 npx cordisx@beta codex
 ```
 
-`setup` 会创建 `~/.cordisx/config.json`，默认内容包含 `plugins: []`。默认
+`setup` 会创建 `~/.cordisx/config.json`，默认内容包含 `providers: []` 和 `plugins: []`。默认
 profile 共享已有 Codex 账号、会话、项目和模型；如果宿主数据也需要隔离，请
 使用一个具名隔离 profile：
 
@@ -90,6 +90,8 @@ npx cordisx@beta codex work --data isolated
 `npm install --global cordisx@beta`。完整说明见
 [公测上手指南](./.agents/docs/getting-started.md#npm-beta-installation)和
 [CLI 与分发文档](./.agents/docs/distribution-and-cli.md)。
+多外部模型与会话 Provider 的配置方式见
+[CLIProxyAPI Provider 配置](./.agents/docs/getting-started.md#configure-cliproxyapi-providers)。
 
 ## 开发插件
 

@@ -85,7 +85,7 @@ npx cordisx@beta codex --dry-run
 npx cordisx@beta codex
 ```
 
-`setup` creates `~/.cordisx/config.json` with `plugins: []`. The default profile
+`setup` creates `~/.cordisx/config.json` with `providers: []` and `plugins: []`. The default profile
 shares the existing Codex account, conversations, projects, and models; use an
 isolated named profile when its host data should also be separate:
 
@@ -98,6 +98,8 @@ For a global command, install the same explicit channel with
 `npm install --global cordisx@beta`. See the
 [complete beta guide](./.agents/docs/getting-started.md#npm-beta-installation)
 and [CLI and distribution details](./.agents/docs/distribution-and-cli.md).
+For multiple external model/session providers, see
+[CLIProxyAPI provider configuration](./.agents/docs/getting-started.md#configure-cliproxyapi-providers).
 
 ## Build a plugin
 

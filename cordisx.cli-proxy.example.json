@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "defaultApp": "codex",
+  "apps": {
+    "codex": {
+      "defaultProfile": "default",
+      "profiles": {
+        "default": {
+          "displayName": "Default",
+          "dataMode": "shared"
+        }
+      }
+    }
+  },
+  "providers": [
+    {
+      "id": "gateway-a",
+      "kind": "cli-proxy-api",
+      "displayName": "CLIProxy Gateway A",
+      "baseUrl": "http://127.0.0.1:8317/v1",
+      "apiKeyEnv": "CLIPROXY_A_API_KEY"
+    },
+    {
+      "id": "gateway-b",
+      "kind": "cli-proxy-api",
+      "displayName": "CLIProxy Gateway B",
+      "baseUrl": "https://proxy.example.com/v1",
+      "apiKeyEnv": "CLIPROXY_B_API_KEY"
+    }
+  ],
+  "plugins": [
+    {
+      "id": "cli-proxy-api",
+      "entry": "cordisx:cli-proxy-api",
+      "enabled": true,
+      "config": {}
+    }
+  ]
+}
