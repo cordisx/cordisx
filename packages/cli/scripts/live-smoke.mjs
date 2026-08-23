@@ -13,6 +13,11 @@ const parsed = parseArgs({
     'manager-plugin': { type: 'string' },
     'manager-detail-tab': { type: 'string' },
     'manager-settings-tab': { type: 'string' },
+    'manager-extension-point': { type: 'string' },
+    'manager-extension-point-tab': { type: 'string' },
+    'manager-route': { type: 'string' },
+    'manager-marketplace-tab': { type: 'string' },
+    'manager-click-external': { type: 'boolean', default: false },
     'trigger-screenshot': { type: 'string' },
     'color-scheme': { type: 'string' },
     'fetch-url': { type: 'string' },
@@ -26,7 +31,7 @@ const parsed = parseArgs({
 })
 const port = Number(parsed.values.port)
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--screenshot <png>] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-settings-tab <tab>] [--trigger-screenshot <png>]')
+  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--screenshot <png>] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-settings-tab <tab> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-click-external] [--trigger-screenshot <png>]')
 }
 
 const response = await fetch(`http://127.0.0.1:${port}/json/list`)
@@ -568,12 +573,18 @@ if (parsed.values.screenshot !== undefined) {
 
 if (parsed.values['manager-screenshot'] !== undefined) {
   const managerTab = parsed.values['manager-tab'] ?? 'plugins'
-  if (!['about', 'slots', 'plugins', 'marketplace', 'settings'].includes(managerTab)) throw new Error(`unknown manager tab: ${managerTab}`)
+  if (!['about', 'extension-points', 'routes', 'plugins', 'marketplace', 'settings'].includes(managerTab)) throw new Error(`unknown manager tab: ${managerTab}`)
   const managerPlugin = parsed.values['manager-plugin']
   const managerDetailTab = parsed.values['manager-detail-tab']
-  if (managerDetailTab !== undefined && !['readme', 'config', 'permissions', 'runtime', 'slots'].includes(managerDetailTab)) throw new Error(`unknown manager detail tab: ${managerDetailTab}`)
+  if (managerDetailTab !== undefined && !['readme', 'config', 'permissions', 'runtime', 'extension-points', 'routes'].includes(managerDetailTab)) throw new Error(`unknown manager detail tab: ${managerDetailTab}`)
   const managerSettingsTab = parsed.values['manager-settings-tab']
   if (managerSettingsTab !== undefined && !['marketplace', 'runtime', 'launcher'].includes(managerSettingsTab)) throw new Error(`unknown manager settings tab: ${managerSettingsTab}`)
+  const managerExtensionPoint = parsed.values['manager-extension-point']
+  const managerExtensionPointTab = parsed.values['manager-extension-point-tab']
+  if (managerExtensionPointTab !== undefined && !['usage', 'information', 'diagnostics'].includes(managerExtensionPointTab)) throw new Error(`unknown manager extension point tab: ${managerExtensionPointTab}`)
+  const managerRoute = parsed.values['manager-route']
+  const managerMarketplaceTab = parsed.values['manager-marketplace-tab']
+  if (managerMarketplaceTab !== undefined && !['overview', 'authors-source'].includes(managerMarketplaceTab)) throw new Error(`unknown manager marketplace tab: ${managerMarketplaceTab}`)
   const evaluatedManager = await send('Runtime.evaluate', {
     expression: `(() => {
       const trigger = document.querySelector('[data-cordisx-manager-trigger]')
@@ -589,13 +600,51 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       if (detailTab !== undefined) document.querySelector('[data-plugin-detail-tab="' + detailTab + '"]')?.click()
       const settingsTab = ${JSON.stringify(managerSettingsTab)}
       if (settingsTab !== undefined) document.querySelector('[data-settings-tab="' + settingsTab + '"]')?.click()
+      const extensionPointId = ${JSON.stringify(managerExtensionPoint)}
+      if (extensionPointId !== undefined) document.querySelector('[data-extension-point-id="' + CSS.escape(extensionPointId) + '"]')?.click()
+      const extensionPointTab = ${JSON.stringify(managerExtensionPointTab)}
+      if (extensionPointTab !== undefined) document.querySelector('[data-extension-point-detail-tab="' + extensionPointTab + '"]')?.click()
+      const routeId = ${JSON.stringify(managerRoute)}
+      if (routeId !== undefined) document.querySelector('[data-route-id="' + CSS.escape(routeId) + '"]')?.click()
+      const marketplaceTab = ${JSON.stringify(managerMarketplaceTab)}
+      if (marketplaceTab !== undefined) document.querySelector('[data-marketplace-detail-tab="' + marketplaceTab + '"]')?.click()
       const dialog = document.querySelector('[data-cordisx-manager-modal] [role="dialog"]')
       const rect = dialog?.getBoundingClientRect()
-      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+      const leadingRect = document.querySelector('.cxm-heading-leading')?.getBoundingClientRect()
+      const firstTab = document.querySelector('.cxm-tabs .cxm-tab:first-child')
+      const tabIconRect = firstTab?.querySelector('.cxm-tab-icon')?.getBoundingClientRect()
+      const tabLabelRect = firstTab?.querySelector('.cxm-tab-content > span:last-child')?.getBoundingClientRect()
+      const titleRect = document.querySelector('.cxm-heading h2')?.getBoundingClientRect()
+      let externalDefaultPrevented
+      if (${JSON.stringify(parsed.values['manager-click-external'])}) {
+        const link = document.querySelector('.cxm-content a[href]')
+        if (link !== null) {
+          const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+          link.dispatchEvent(event)
+          externalDefaultPrevented = event.defaultPrevented
+        }
+      }
+      const modal = document.querySelector('[data-cordisx-manager-modal]')
+      return rect === undefined ? null : {
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        state: {
+          modalHidden: modal?.hidden,
+          triggerExpanded: trigger?.getAttribute('aria-expanded'),
+          externalDefaultPrevented,
+          tabGeometry: leadingRect === undefined || tabIconRect === undefined || tabLabelRect === undefined || titleRect === undefined ? null : {
+            headingLeadingCenterX: leadingRect.x + leadingRect.width / 2,
+            firstTabIconCenterX: tabIconRect.x + tabIconRect.width / 2,
+            headingTitleX: titleRect.x,
+            firstTabLabelX: tabLabelRect.x,
+          },
+        },
+      }
     })()`,
     returnByValue: true,
   })
-  await capture(evaluatedManager.result?.value ?? null, parsed.values['manager-screenshot'], 'CordisX manager')
+  const managerResult = evaluatedManager.result?.value ?? null
+  console.log(`manager-state=${JSON.stringify(managerResult?.state ?? null)}`)
+  await capture(managerResult?.rect ?? null, parsed.values['manager-screenshot'], 'CordisX manager')
 }
 
 if (parsed.values['trigger-screenshot'] !== undefined) {
