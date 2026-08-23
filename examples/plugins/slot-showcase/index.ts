@@ -218,6 +218,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.slots.register({ name: 'sidebar.footer.before-control', id: 'open-app', order: 10 }, action(message('action.open-app'), 'open-app', 'host:open'))
   ctx.slots.register({ name: 'sidebar.footer.after-control', id: 'settings', order: 20 }, action(message('action.settings'), 'settings', 'host:settings'))
   ctx.slots.register({ name: 'sidebar.footer.menu', id: 'refresh', order: 10 }, action(message('action.refresh'), 'refresh', 'host:refresh'))
+  ctx.slots.register({ name: 'sidebar.account.menu', id: 'settings', order: 10 }, action(message('action.settings'), 'settings', 'host:settings'))
   ctx.slots.register({ name: 'sidebar.navigation.items', id: 'main-page', order: 10 }, {
     label: message('navigation.title'),
     description: message('navigation.description'),

@@ -125,6 +125,7 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
   if (surface === 'sidebar.footer.before-control'
     || surface === 'sidebar.footer.after-control'
     || surface === 'sidebar.footer.menu'
+    || surface === 'sidebar.account.menu'
     || surface === 'environment.panel.header-actions') {
     assertKeys(snapshot, ['label', 'ariaLabel', 'icon', 'command'], surface)
     assertAction(snapshot as CordisXStructuredAction, surface)

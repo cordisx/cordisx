@@ -63,12 +63,20 @@ describe('renderer bundle', () => {
     const dom = new JSDOM(`
       <html lang="en" dir="ltr"><head></head><body>
         <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
-        <header data-app-shell-application-menu-bar style="position:relative"></header>
+        <header data-app-shell-application-menu-bar style="position:relative">
+          <div data-test-id="header-shell-slot"><div><div><button>left native</button></div></div></div>
+          <div data-test-id="header-shell-slot" style="width:0px;min-width:70px"><div><div id="native-toolbar-controls" style="display:flex">
+            <button id="native-toolbar-primary" class="codex-toolbar-button">native primary</button><button class="codex-toolbar-button">native secondary</button>
+          </div></div></div>
+        </header>
         <aside><div data-app-action-sidebar-scroll style="position:relative">
+          <div id="native-navigation" style="display:flex;flex-direction:column">
+            <button>New conversation</button><button>Pull requests</button>
+          </div>
           <div data-app-action-sidebar-project-list-id="project-one">
             <button data-app-action-sidebar-thread-selected="true" data-app-action-sidebar-thread-host-id="local" data-app-action-sidebar-thread-id="local:${sessionId}"></button>
           </div>
-        </div></aside>
+        </div><div id="native-footer-controls" style="display:flex"><button id="native-account" aria-label="Open profile menu" aria-haspopup="menu" aria-expanded="false">Profile</button><button id="native-help" class="codex-footer-button" aria-label="Help" aria-haspopup="menu" aria-expanded="false">Help</button></div></aside>
         <main data-app-shell-main-content-layout="thread-edge-scroll" style="position:relative">
           <section data-codex-thread-reference-drop-target style="position:relative">
             <div id="native-conversation" data-thread-find-target="conversation" data-response-annotation-conversation="${sessionId}">native data</div>
@@ -80,6 +88,7 @@ describe('renderer bundle', () => {
       </body></html>
     `, { runScripts: 'dangerously', url: 'https://codex.local/native' })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+    Object.defineProperty(dom.window.navigator, 'platform', { value: 'MacIntel', configurable: true })
     Object.defineProperty(dom.window, 'fetch', {
       value: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({
         $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json',
@@ -104,6 +113,13 @@ describe('renderer bundle', () => {
     })
     const native = dom.window.document.getElementById('native-conversation')!
     const nativeParent = native.parentElement
+    const rect = (left: number, top: number, width: number, height: number): DOMRect => ({
+      x: left, y: top, left, top, right: left + width, bottom: top + height, width, height,
+      toJSON: () => ({}),
+    }) as DOMRect
+    Object.defineProperty(dom.window.document.querySelector('[data-app-shell-application-menu-bar]'), 'getBoundingClientRect', { value: () => rect(0, 0, 1200, 46) })
+    Object.defineProperty(dom.window.document.body, 'getBoundingClientRect', { value: () => rect(0, 0, 1200, 900) })
+    Object.defineProperty(dom.window.document.querySelector('[data-app-shell-main-content-layout]'), 'getBoundingClientRect', { value: () => rect(240, 0, 960, 900) })
     dom.window.eval(bundle)
     for (let attempt = 0; attempt < 30 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
@@ -116,9 +132,9 @@ describe('renderer bundle', () => {
       expect.objectContaining({ id: 'slot-showcase', status: 'active', readme: expect.stringContaining('# Slot Showcase') }),
       expect.objectContaining({ id: 'configured-off', status: 'configured-disabled' }),
     ])
-    expect(snapshot.registrations).toHaveLength(12)
+    expect(snapshot.registrations).toHaveLength(13)
     expect(new Set(snapshot.registrations.map(item => item.surface))).toEqual(new Set([
-      'sidebar.footer.before-control', 'sidebar.footer.after-control', 'sidebar.footer.menu', 'sidebar.navigation.items',
+      'sidebar.footer.before-control', 'sidebar.footer.after-control', 'sidebar.footer.menu', 'sidebar.account.menu', 'sidebar.navigation.items',
       'workspace.toolbar.items', 'environment.panel.header-actions', 'environment.panel.sections',
       'environment.section.actions', 'environment.section.rows', 'environment.row.trailing-actions',
     ]))
@@ -128,8 +144,8 @@ describe('renderer bundle', () => {
     expect(snapshot.navigation.routes.every(item => item.valid)).toBe(true)
     expect(snapshot.navigation.pages).toHaveLength(3)
     expect(snapshot.navigation.outlets).toHaveLength(3)
-    expect(snapshot.extensionPoints.points).toHaveLength(13)
-    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(10)
+    expect(snapshot.extensionPoints.points).toHaveLength(14)
+    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(11)
     expect(snapshot.extensionPoints.points.filter(item => item.kind === 'outlet')).toHaveLength(3)
     expect(snapshot.extensionPoints.descriptorDiagnostics).toEqual([])
     expect(snapshot.localeCatalogs).toHaveLength(4)
@@ -138,19 +154,97 @@ describe('renderer bundle', () => {
       expect.objectContaining({ locale: 'zh-CN' }),
     ])
     expect(snapshot.localizationDiagnostics).toEqual([])
-    expect(dom.window.document.querySelectorAll('[data-cordisx-surface-host]')).toHaveLength(3)
+    const surfaceHosts = [...dom.window.document.querySelectorAll<HTMLElement>('[data-cordisx-surface-host]')]
+    expect(new Set(surfaceHosts.map(host => host.dataset.cordisxSurfaceHost))).toEqual(new Set([
+      'sidebar.navigation', 'sidebar.footer.before', 'sidebar.footer.after',
+      'toolbar.before', 'toolbar.after', 'environment',
+    ]))
+    expect(surfaceHosts.every(host => host.parentElement !== dom.window.document.body)).toBe(true)
+    expect(dom.window.document.querySelector('.cordisx-structured')).toBeNull()
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="sidebar.navigation"]')?.parentElement?.id).toBe('native-navigation')
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="sidebar.footer.before"]')?.nextElementSibling?.id).toBe('native-help')
+    expect(dom.window.document.getElementById('native-help')?.nextElementSibling?.getAttribute('data-cordisx-surface-host')).toBe('sidebar.footer.after')
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="toolbar.before"]')?.nextElementSibling?.id).toBe('native-toolbar-primary')
+    expect(dom.window.document.getElementById('native-toolbar-primary')?.nextElementSibling?.getAttribute('data-cordisx-surface-host')).toBe('toolbar.after')
+    expect(surfaceHosts.every(host => host.dataset.cordisxNoDrag === 'true')).toBe(true)
+    expect([...dom.window.document.querySelectorAll<HTMLElement>('.cordisx-action')]
+      .every(button => button.dataset.cordisxNoDrag === 'true')).toBe(true)
+    expect(dom.window.document.getElementById('cordisx-structured-styles')?.textContent).toContain('[data-cordisx-no-drag="true"]')
+    expect(dom.window.document.querySelector('details[data-cordisx-no-drag]')).toBeNull()
+    expect(dom.window.document.body.textContent).not.toContain('CX')
+    const toolbarAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="toolbar.before"] button')!
+    expect(toolbarAction.className).toContain('codex-toolbar-button')
+    expect(toolbarAction.textContent).toBe('')
+    expect(toolbarAction.getAttribute('aria-label')).toBe('Open main page')
+    expect(toolbarAction.querySelector('[data-host-icon="host:open"] svg')).not.toBeNull()
+    const sameToolbarAction = toolbarAction
+    const nativeTooltip = dom.window.document.createElement('div')
+    nativeTooltip.setAttribute('role', 'tooltip')
+    dom.window.document.body.append(nativeTooltip)
+    await settle()
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="toolbar.before"] button')).toBe(sameToolbarAction)
+    nativeTooltip.remove()
+
+    const help = dom.window.document.getElementById('native-help')!
+    help.setAttribute('aria-expanded', 'true')
+    const helpMenu = dom.window.document.createElement('div')
+    helpMenu.setAttribute('role', 'menu')
+    helpMenu.setAttribute('aria-labelledby', 'native-help')
+    helpMenu.innerHTML = '<div role="menuitem" class="codex-menu-item">Native feature</div><div role="separator"></div><div role="menuitem" class="codex-menu-item">Native help</div>'
+    dom.window.document.body.append(helpMenu)
+    await settle()
+    await settle()
+    const helpInsertion = helpMenu.querySelector<HTMLElement>('[data-cordisx-surface-host="sidebar.footer.menu"]')!
+    expect(helpInsertion).not.toBeNull()
+    expect(helpInsertion.previousElementSibling?.getAttribute('role')).toBe('separator')
+    expect(helpInsertion.querySelector('[role="menuitem"]')?.className).toContain('codex-menu-item')
+    expect(helpInsertion.textContent).toBe('Refresh snapshot')
+
+    help.setAttribute('aria-expanded', 'false')
+    helpMenu.remove()
+    const account = dom.window.document.getElementById('native-account')!
+    account.setAttribute('aria-expanded', 'true')
+    const accountMenu = dom.window.document.createElement('div')
+    accountMenu.setAttribute('role', 'menu')
+    accountMenu.setAttribute('aria-labelledby', 'native-account')
+    accountMenu.innerHTML = '<div>Account header</div><div role="separator"></div><div role="menuitem" class="codex-menu-item">Native settings</div>'
+    dom.window.document.body.append(accountMenu)
+    await settle()
+    await settle()
+    expect(accountMenu.querySelector('[data-cordisx-surface-host="sidebar.account.menu"]')?.textContent).toBe('Showcase settings')
+
+    const navigationSeat = dom.window.document.querySelector<HTMLElement>('[data-cordisx-surface-host="sidebar.navigation"]')!
+    const replacementNavigation = dom.window.document.createElement('div')
+    replacementNavigation.id = 'native-navigation'
+    replacementNavigation.style.cssText = 'display:flex;flex-direction:column'
+    replacementNavigation.innerHTML = '<button>New conversation</button><button>Pull requests</button>'
+    dom.window.document.getElementById('native-navigation')?.replaceWith(replacementNavigation)
+    await settle()
+    await settle()
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="sidebar.navigation"]')).toBe(navigationSeat)
+    expect(navigationSeat.parentElement).toBe(replacementNavigation)
 
     const trailing = dom.window.document.querySelector<HTMLButtonElement>('.cordisx-nav-actions button')!
     trailing.click()
     await settle()
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')?.activeRoute).toBeUndefined()
-    dom.window.document.querySelector<HTMLElement>('.cordisx-nav-row')!.click()
+    dom.window.document.querySelector<HTMLButtonElement>('.cordisx-nav-primary')!.click()
     await settle()
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({ activeRoute: 'slot-showcase:main.analytics', mounted: true })
     expect(dom.window.document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')).not.toBeNull()
+    expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.top).toBe('0px')
+    expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="slot-showcase:main.analytics"]')?.dataset.cordisxNoDrag).toBe('true')
+    expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-cordisx-page-chrome] button')]
+      .every(button => button.dataset.cordisxNoDrag === 'true')).toBe(true)
 
     await runtime!.navigate('slot-showcase', { id: 'app.overview' })
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ activeRoute: 'slot-showcase:app.overview', mounted: true })
+    const appOutlet = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="app"]')!
+    expect(appOutlet.style.top).toBe('0px')
+    expect(appOutlet.style.getPropertyValue('--cordisx-page-chrome-safe-left')).toBe('88px')
+    const appChrome = appOutlet.querySelector<HTMLElement>('[data-cordisx-page-chrome]')!
+    expect(appChrome.dataset.cordisxDrag).toBe('true')
+    expect(appChrome.style.paddingLeft).toContain('--cordisx-page-chrome-safe-left')
     await runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId } })
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({ activeRoute: 'slot-showcase:session.analytics', mounted: true, contextKey: `session:${sessionId}` })
     await expect(runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId: 'stale' } })).rejects.toThrow(/does not match native session/)
@@ -183,7 +277,7 @@ describe('renderer bundle', () => {
     const restoredSnapshot = runtime!.snapshot()
     expect(restoredSnapshot.plugins[0]?.status).toBe('active')
     expect(restoredSnapshot.commands.length).toBe(5)
-    expect(restoredSnapshot.registrations.filter(item => item.rendered).length).toBe(12)
+    expect(restoredSnapshot.registrations.filter(item => item.rendered).length).toBe(13)
     expect(restoredSnapshot.platform).toMatchObject({
       mode: 'unavailable',
       secondConnectionCreated: false,
@@ -625,6 +719,7 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('[data-cordisx-page-outlet]')).toBeNull()
     expect(dom.window.document.querySelector('[data-cordisx-manager-trigger]')).toBeNull()
     expect(dom.window.document.querySelector('[data-cordisx-brand-mark]')).toBeNull()
+    expect(dom.window.document.querySelectorAll<HTMLElement>('[data-test-id="header-shell-slot"]')[1]?.style.width).toBe('0px')
     expect(dom.window.document.getElementById('cordisx-manager-style')).toBeNull()
     expect(native.parentElement).toBe(nativeParent)
     dom.window.close()

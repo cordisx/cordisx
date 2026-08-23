@@ -21,7 +21,11 @@ describe('DomOutletController', () => {
     const nativeParent = native.parentElement
     expect(layer.parentElement?.id).toBe('anchor')
     expect(first).toMatchObject({ available: true, contextKey: 'main:project', placement: 'absolute' })
-    expect(layer.style.inset).toBe('0')
+    expect(layer.style.inset).toBe('auto')
+    expect(layer.style.left).toBe('0px')
+    expect(layer.style.top).toBe('0px')
+    expect(layer.style.right).toBe('0px')
+    expect(layer.style.bottom).toBe('0px')
     expect(native.parentElement).toBe(nativeParent)
     expect(dom.window.getComputedStyle(native).display).not.toBe('none')
 
@@ -56,6 +60,24 @@ describe('DomOutletController', () => {
     expect(snapshot.container?.style.cssText).toContain('left: 10px')
     expect(anchor.style.position).toBe('')
     expect(anchor.contains(dom.window.document.getElementById('native'))).toBe(true)
+    controller.dispose()
+    dom.window.close()
+  })
+
+  it('applies safe insets without changing the native anchor geometry', () => {
+    const dom = new JSDOM('<body><main id="anchor" style="position:relative"><div id="native">native</div></main></body>')
+    const anchor = dom.window.document.getElementById('anchor')!
+    const controller = new DomOutletController(dom.window.document, 'main', 'absolute', () => ({
+      anchor,
+      contextKey: 'main:safe',
+      insets: { top: 46, right: 3, bottom: 2, left: 1 },
+    }))
+    controller.show()
+    const layer = controller.getSnapshot().container!
+    expect(layer.style).toMatchObject({ top: '46px', right: '3px', bottom: '2px', left: '1px' })
+    expect(anchor.style.position).toBe('relative')
+    expect(anchor.firstElementChild?.id).toBe('native')
+    expect(dom.window.getComputedStyle(anchor.firstElementChild!).display).not.toBe('none')
     controller.dispose()
     dom.window.close()
   })

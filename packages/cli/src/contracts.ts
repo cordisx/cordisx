@@ -257,6 +257,7 @@ export interface CordisXSurfaceMap {
   'sidebar.footer.before-control': CordisXStructuredAction
   'sidebar.footer.after-control': CordisXStructuredAction
   'sidebar.footer.menu': CordisXStructuredAction
+  'sidebar.account.menu': CordisXStructuredAction
   'sidebar.navigation.items': CordisXNavigationItem
   'workspace.toolbar.items': CordisXToolbarItem
   'environment.panel.header-actions': CordisXStructuredAction
@@ -272,6 +273,7 @@ export const CORDISX_SURFACE_NAMES = [
   'sidebar.footer.before-control',
   'sidebar.footer.after-control',
   'sidebar.footer.menu',
+  'sidebar.account.menu',
   'sidebar.navigation.items',
   'workspace.toolbar.items',
   'environment.panel.header-actions',

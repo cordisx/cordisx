@@ -573,6 +573,8 @@ export class NavigationRegistry {
       position: 'absolute', inset: '0', display: 'flex', flexDirection: 'column', overflow: 'hidden',
       background: '#10131a', color: '#eef0f5', font: '13px/1.45 ui-sans-serif, system-ui, sans-serif',
     })
+    content.dataset.cordisxNoDrag = 'true'
+    content.style.setProperty('-webkit-app-region', 'no-drag')
     host.container.append(content)
     const abort = new AbortController()
     const effects: Disposable<void>[] = []
@@ -597,14 +599,18 @@ export class NavigationRegistry {
     try {
       const chrome = content.ownerDocument.createElement('header')
       chrome.dataset.cordisxPageChrome = 'true'
+      chrome.dataset.cordisxDrag = 'true'
       Object.assign(chrome.style, {
         display: 'flex', alignItems: 'center', gap: '8px', minHeight: '46px', padding: '0 12px',
         borderBottom: '1px solid rgba(255,255,255,.1)', background: '#161a23', flex: '0 0 auto',
       })
+      chrome.style.paddingLeft = 'max(12px, var(--cordisx-page-chrome-safe-left, 0px))'
+      chrome.style.setProperty('-webkit-app-region', 'drag')
       const back = content.ownerDocument.createElement('button')
       back.type = 'button'
       back.textContent = '←'
       back.setAttribute('aria-label', 'Back')
+      back.dataset.cordisxNoDrag = 'true'
       back.disabled = state.stack.length < 2
       back.addEventListener('click', () => { void this.back(page.owner, name as CordisXOutletName) })
       const title = content.ownerDocument.createElement('strong')
@@ -619,11 +625,13 @@ export class NavigationRegistry {
       close.type = 'button'
       close.textContent = '×'
       close.setAttribute('aria-label', 'Close')
+      close.dataset.cordisxNoDrag = 'true'
       close.addEventListener('click', () => { void this.close(page.owner, name as CordisXOutletName) })
       for (const button of [back, close]) Object.assign(button.style, {
         width: '30px', height: '30px', border: '1px solid rgba(255,255,255,.14)', borderRadius: '8px',
         background: 'rgba(255,255,255,.06)', color: 'inherit', cursor: 'pointer',
       })
+      for (const button of [back, close]) button.style.setProperty('-webkit-app-region', 'no-drag')
       chrome.append(back, title, close)
       content.append(chrome)
       if ((page.metadata.breadcrumbs?.length ?? 0) > 0) {
@@ -644,13 +652,17 @@ export class NavigationRegistry {
       if ((page.metadata.tabs?.length ?? 0) > 0) {
         const tabs = content.ownerDocument.createElement('div')
         tabs.setAttribute('role', 'tablist')
+        tabs.dataset.cordisxNoDrag = 'true'
         tabs.style.cssText = 'display:flex;gap:4px;padding:7px 12px;border-bottom:1px solid rgba(255,255,255,.08);flex:0 0 auto'
+        tabs.style.setProperty('-webkit-app-region', 'no-drag')
         for (const [index, tab] of page.metadata.tabs!.entries()) {
           const button = content.ownerDocument.createElement('button')
           button.type = 'button'
           button.setAttribute('role', 'tab')
           button.setAttribute('aria-selected', String(index === 0))
           button.dataset.tabId = tab.id
+          button.dataset.cordisxNoDrag = 'true'
+          button.style.setProperty('-webkit-app-region', 'no-drag')
           const site = `page:${page.qualifiedId}:chrome.tabs.${tab.id}`
           localization.effect(() => {
             button.textContent = this.i18n.resolveFor(page.owner, tab.label, site).text
