@@ -21,3 +21,8 @@ export function npmMaintainerNames(value) {
     return typeof entry?.name === 'string' ? entry.name : undefined
   }).filter(Boolean)
 }
+
+export function isNpmRegistryPropagationError(error) {
+  return typeof error?.commandOutput === 'string'
+    && /\b(?:ETARGET|E404)\b|No matching version found|notarget/i.test(error.commandOutput)
+}
