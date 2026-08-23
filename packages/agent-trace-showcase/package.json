@@ -1,0 +1,27 @@
+{
+  "name": "@cordisx/agent-trace-showcase",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Development-only CordisX Agent trace and injection showcase",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "npm --prefix ../.. run build --workspace=cordisx && tsc -p tsconfig.json",
+    "check": "npm run typecheck",
+    "typecheck": "npm --prefix ../.. run build --workspace=cordisx && tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "cordisx": "0.1.0-beta.0"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "license": "AGPL-3.0-or-later"
+}

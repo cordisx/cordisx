@@ -26,6 +26,9 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `agent-events.md` defines the UI-neutral Session/Agent event ledger,
   DSH-aligned messaging facade, permission chain, private adapter boundary,
   honest degradation, and validation matrix.
+- `agent-trace-showcase.md` defines the independent development-only Agent
+  Trace Showcase plugin, its stacked core-contract dependency, session Timeline
+  product boundary, fixture seam, lifecycle, and validation matrix.
 - `development-plan.md` records staged implementation and validation boundaries.
 
 Normative plugin contracts belong in `cordisx/cordisx-protocol`; private or provisional planning belongs in `cordisx/roadmap`.
