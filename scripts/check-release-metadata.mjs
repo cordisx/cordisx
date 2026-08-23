@@ -35,12 +35,13 @@ function validatePackage(manifest, input) {
   assert(manifest.publishConfig?.provenance === true, `${input.name} provenance must be enabled`)
 }
 
-const [cli, creator, rootReadme, cliReadme, creatorReadme, workflow] = await Promise.all([
+const [cli, creator, rootReadme, cliReadme, creatorReadme, gettingStarted, workflow] = await Promise.all([
   json('packages/cli/package.json'),
   json('packages/create-cordisx-plugin/package.json'),
   readFile(path.join(repositoryRoot, 'README.md'), 'utf8'),
   readFile(path.join(repositoryRoot, 'packages/cli/README.md'), 'utf8'),
   readFile(path.join(repositoryRoot, 'packages/create-cordisx-plugin/README.md'), 'utf8'),
+  readFile(path.join(repositoryRoot, '.agents/docs/getting-started.md'), 'utf8'),
   readFile(path.join(repositoryRoot, '.github/workflows/release-beta.yml'), 'utf8'),
 ])
 
@@ -61,17 +62,22 @@ validatePackage(creator, {
 assert(JSON.stringify(creator.exports) === '{}', 'creator must not expose its executable as an import API')
 
 for (const [label, readme] of [
-  ['root README', rootReadme],
   ['cordisx README', cliReadme],
   ['creator README', creatorReadme],
 ]) {
   assert(readme.includes('@beta'), `${label} must use the beta channel`)
 }
-assert(rootReadme.includes('plugins: []'), 'root README must document the empty plugin default')
-assert(rootReadme.includes('--data shared'), 'root README must document shared profiles')
-assert(rootReadme.includes('--data isolated'), 'root README must document isolated profiles')
-assert(rootReadme.includes('npm create cordisx-plugin@beta'), 'root README must document plugin creation')
-assert(rootReadme.includes('npm run dev:dry-run'), 'root README must document plugin dry-run')
+// Keep the product entry in its pre-publication state until registry readback
+// succeeds. Flip these assertions together with the post-publication README.
+assert(!rootReadme.includes('npx cordisx@beta'), 'root README must not present the unpublished beta as runnable')
+assert(!rootReadme.includes('npm create cordisx-plugin@beta'), 'root README must not present the unpublished creator beta as runnable')
+assert(rootReadme.includes('Registry readback'), 'root README must explain the pre-publication registry boundary')
+assert(rootReadme.includes('getting-started.md#local-setup'), 'root README must link to the source-development path')
+assert(gettingStarted.includes('plugins: []'), 'getting started must document the empty plugin default')
+assert(gettingStarted.includes('--data shared'), 'getting started must document shared profiles')
+assert(gettingStarted.includes('--data isolated'), 'getting started must document isolated profiles')
+assert(gettingStarted.includes('npm create cordisx-plugin@beta'), 'getting started must document plugin creation')
+assert(gettingStarted.includes('npm run dev:dry-run'), 'getting started must document plugin dry-run')
 assert(rootReadme.includes('AGPL-3.0-or-later'), 'root README must explain the core license')
 assert(rootReadme.includes('Independent Plugin Exception'), 'root README must explain the plugin exception')
 assert(cliReadme.includes('AGPL-3.0-or-later'), 'cordisx package README must explain the core license')
