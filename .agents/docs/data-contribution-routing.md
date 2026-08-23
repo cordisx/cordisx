@@ -26,11 +26,8 @@ The invariants are:
    a Codex React node. CordisX never calls the Codex router or browser history.
 8. Every registration, observer, page mount, and command execution is fenced by
    the owning plugin fiber and renderer generation.
-9. Host-rendered text stores locale namespace/message key/params and resolves
-   at render time; a plugin does not freeze the current translated string into
-   a contribution.
-10. Platform integration is adapter-neutral and read-only in this slice. It is
-   not a second app-server or a replacement live connection.
+9. Host-rendered text is retained as `LocalizedText`/message references in the
+   ledger and resolved only during host projection.
 
 ## Public runtime shape
 
@@ -45,12 +42,10 @@ parallel `ctx.cordisx.contribute()` facade:
   id-based navigation, back, and close operations;
 - `ctx.pages.register()` registers a controlled page mount callback for a page
   id.
-- `ctx.i18n.define()` registers namespace-by-locale dictionaries and
-  `ctx.i18n.inject()` supplies a typed translator seat;
-- `ctx.environment` exposes reactive locale, direction, theme, and viewport
-  snapshots;
-- `ctx.platform` exposes the current adapter id, read-only capability snapshot,
-  typed read-only invocation, and events. There is no `ctx.codex` service.
+
+Page mount props reserve `localeNamespace` and a framework-injected typed `t`
+seat. The runtime consumes a localization-kernel dependency; it does not define
+a partial dictionary product in this slice.
 
 The runtime returns fiber-owned, idempotent handles. Structured contributions
 whose values change at runtime receive an `update(snapshot)` handle. Updates
@@ -75,9 +70,8 @@ render or navigate.
   ids;
 - outlet declaration metadata and the rule that only a host/adapter may declare
   a DOM-touching outlet;
-- locale catalogs, message references, fallback, and change semantics;
-- adapter-neutral platform/environment snapshot shapes and namespaced vendor
-  capability identifiers;
+- extensible `LocalizedText`/message references for every host-rendered title,
+  label, description, tab, menu, and configuration string;
 - identifier, uniqueness, sorting, conflict, `when`, disabled, downgrade, and
   invalid-contribution behavior;
 - route/path/outlet compatibility rules and deterministic conformance vectors;
@@ -90,8 +84,8 @@ render or navigate.
   navigation handles;
 - TypeScript `CommandMap`, `SurfaceMap`, and extensible `OutletMap` module
   augmentation;
-- typed locale namespace/key/params maps, translator seats, environment
-  snapshots, and platform capability/invoke/event maps;
+- the localization-kernel dependency interface and page-prop type seats, not a
+  dictionary/ICU implementation;
 - the update-handle implementation and manager snapshot types.
 
 The `cordisx` private adapter/runtime owns all Codex-specific behavior:
@@ -102,63 +96,54 @@ The `cordisx` private adapter/runtime owns all Codex-specific behavior:
 - absolute overlay insertion, body portal fallback, `ResizeObserver`, geometry,
   z-index, mutation signals, and anchor repair;
 - command loading/error UI, overflow/menu mechanics, focus, keyboard, and
-  accessibility behavior.
-- a read-only locale adapter whose authority is `html[lang]` and `html[dir]`,
-  and a read-only platform adapter snapshot such as
-  `openai.codex.desktop`.
+  accessibility behavior;
+- projection of retained message references through the injected localization
+  kernel and rerendering when its snapshot version changes.
 
 Protocol schemas never contain a Codex selector, DOM class, React concept, or
 renderer-version assumption.
 
-## Locale and reactive environment
+## Localization kernel dependency
 
-Locale is a first-class service, not merely an environment string. A plugin
-registers dictionaries by namespace and BCP-47 locale. Every host-rendered
-label, menu item, tab, setting, title, breadcrumb, disabled reason, and error
-message retains a structured `{ namespace?, key, params? }` reference. The
-owner namespace is the default; raw pretranslated shell strings are invalid.
+Structured UI cannot freeze already translated strings without blocking the
+i18n workstream. Version 1 therefore models every host-rendered text as a
+`LocalizedText` message reference containing an optional namespace, key,
+serializable params, and optional fallback. The contribution ledger stores the
+reference unchanged.
 
-After declaring a locale namespace, the framework injects a typed `t` seat so
-key and parameter types can be augmented by plugins. Namespace lookup uses the
-current locale, language fallback, then the declared default locale. Missing
-keys render a deterministic diagnostic token and are visible in the manager.
+The host runtime depends on a minimal injected `LocalizationKernel` contract:
 
-The current Codex locale adapter treats `document.documentElement.lang` and
-`dir` as authoritative read-only state. A focused `MutationObserver` reports a
-locale change but never writes either attribute or changes Codex preferences.
-One `locale/change` invalidation causes every host-rendered contribution and
-host-owned page chrome to translate again without plugin-authored listeners.
+- `getSnapshot()` returns at least the current locale and a monotonically
+  changing projection version;
+- `resolve(owner, message)` returns rendered text plus missing-dictionary/key
+  diagnostics;
+- `subscribe(listener)` invalidates host projections when locale or dictionary
+  state changes.
 
-Framework-agnostic page mounts receive a fiber-owned reactive API: immutable
-`getSnapshot()`, `subscribe(listener)`, an `effect` helper that cleans up with
-the page/fiber, and DOM binding helpers for translated text/attributes. React
-and similar frameworks may adapt the same `getSnapshot/subscribe` pair to
-their external-store mechanism. Page content therefore follows locale,
-direction, theme, and viewport changes without re-mounting the page.
+Host shell renderers resolve at render time and reproject every mounted label,
+tab, menu, setting, and page-chrome field when the kernel version changes.
+Manager diagnostics show the original namespace/key and any unresolved or
+missing-dictionary result. Framework-agnostic page props reserve a typed `t`
+seat and locale namespace; React and other adapters can supply their normal
+reactive binding later.
 
-`ctx.environment` contains only reactive locale, direction, theme, and viewport
-snapshots. Translation dictionaries and `t` live in `ctx.i18n`; platform
-capabilities live in `ctx.platform`.
+This slice uses dependency interfaces and deterministic test doubles only. It
+does not implement dictionary registration, ICU compilation, language
+preferences, resource loading, extraction, or pseudo-locales. A reliable i18n
+kernel is a preceding or stacked dependency of the runtime PR.
 
-## Platform boundary
+## Future platform compatibility constraints
 
-The platform service is vendor-neutral. Its snapshot names an adapter such as
-`openai.codex.desktop`; future adapters may name Claude Code, Zcode, or another
-host without changing the service name. Capability queries, invocations, and
-events use augmentable typed maps. Vendor-only ids must be namespaced, for
-example `openai.codex.desktop:session.read`.
+A future platform abstraction must use an adapter-neutral service such as
+`ctx.platform`, not lock the public API to `ctx.codex`. Locale/theme/viewport
+snapshots belong to an environment service, while translation dictionaries and
+typed translation seats belong to a separate i18n service.
 
-This slice exposes read-only snapshot capabilities only. It does not launch a
-second app-server to proxy platform operations, replace the original
-connection, or create a second AppHost over the renderer WebContents. Sharing
-`HOME` or `CODEX_HOME` means persisted accounts, conversations, projects, and
-configuration may be visible; it does not share request correlation, in-flight
-turns, subscriptions, approvals, active UI context, or live connection state.
-Those are independent clients and may race.
-
-Write capabilities remain unavailable until a controlled adapter can use the
-existing connection safely or an official bridge exists. Existing-connection
-reuse is explicitly experimental and must not be presented as implemented.
+No future platform adapter may treat a newly started app-server as the original
+live connection or create a second AppHost that overwrites WebContents
+registration. Shared persisted data does not imply shared requests, in-flight
+turns, subscriptions, approvals, or current UI context. Controlled reuse of an
+existing connection or an official bridge remains experimental future work.
 
 ## Registries and conflict rules
 
@@ -364,20 +349,21 @@ The compatibility unit is delivered in this order:
 
 1. this architecture and development plan in `cordisx`;
 2. protocol schemas/specification/conformance in `cordisx-protocol`;
-3. compatible runtime registries and TypeScript contracts in `cordisx`;
-4. private adapter outlets and structured host renderers;
-5. manager diagnostics and one real demo plugin;
-6. simulated and isolated real-renderer validation;
-7. exact `cordisxmono` gitlink update.
+3. the minimal localization-kernel dependency contract or compatible stacked
+   provider;
+4. compatible runtime registries and TypeScript contracts in `cordisx`;
+5. private adapter outlets and structured host renderers;
+6. manager diagnostics and one real demo plugin;
+7. simulated and isolated real-renderer validation;
+8. exact `cordisxmono` gitlink update.
 
 Required automated coverage includes:
 
 - schema acceptance/rejection and downgrade behavior;
-- locale catalog ownership, namespace/key/params validation, language/default
-  fallback, missing keys, `html[lang]/dir` change propagation, host chrome
-  rerendering, page reactive bindings, and cleanup;
-- adapter-neutral read-only platform snapshots, namespaced capabilities,
-  environment separation, and rejection of write/unknown invokes;
+- preservation of namespace/key/params in registry snapshots, render-time
+  projection, locale-version reprojection without re-registration, missing-key
+  manager diagnostics, typed page-seat shape, and subscription cleanup using an
+  injected localization-kernel test double;
 - registry ownership, unique ids, conflicts, deterministic sorting, unknown
   icons/context keys/targets, `when`, disabled state, and update-after-dispose;
 - primary command precedence over route and invalid no-activation entries;
@@ -399,9 +385,9 @@ with live snapshot updates, and arbitrary pages in `app`, `main`, and
 
 The isolated `app://` renderer smoke must exercise sidebar collapse/expand and
 drag resize, native session switching, side and bottom panels, simulated React
-anchor replacement, page open/back/close, a read-only `html[lang]/dir` change
-with automatic shell/page translation, native data updates during overlay,
-plugin block/restore, and renderer-generation disposal. Screenshots and the
+anchor replacement, page open/back/close, localization projection invalidation,
+native data updates during overlay, plugin block/restore, and
+renderer-generation disposal. Screenshots and the
 machine-readable smoke report are delivery artifacts, not substitutes for
 automated lifecycle tests.
 
@@ -412,4 +398,5 @@ schema validation, host-rendered shell DOM, and private adapters reduce
 accidental coupling but do not isolate a malicious plugin. Capability grants,
 signatures, package installation/update, marketplace activation, atomic
 generation publication, rollback, isolated realms, and MCP UI transport remain
-planned work.
+planned work. Full i18n kernel/product behavior and every platform/app-server
+bridge also remain outside this slice.
