@@ -376,6 +376,8 @@ describe('renderer bundle', () => {
     expect(managerTrigger?.querySelector('svg')).toBeNull()
     const triggerMark = managerTrigger?.querySelector<HTMLImageElement>('[data-brand-rendering="direct-host"]')
     expect(triggerMark?.dataset.hostBackground).toBe('dark')
+    expect(dom.window.getComputedStyle(triggerMark!).width).toBe('20px')
+    expect(dom.window.getComputedStyle(triggerMark!).height).toBe('20px')
     expect(decodeURIComponent(triggerMark?.src ?? '')).toContain('for dark backgrounds')
     expect(decodeURIComponent(triggerMark?.src ?? '')).toContain('stroke="#fcfcfc"')
     expect(dom.window.document.getElementById('cordisx-manager-style')?.textContent).not.toContain('mask-image')

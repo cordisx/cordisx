@@ -194,6 +194,10 @@ const MANAGER_STYLES = `
     flex: none;
     pointer-events: none;
   }
+  [data-cordisx-manager-trigger] .cxm-brand-mark {
+    width: 20px;
+    height: 20px;
+  }
   .cxm-brand-mark,
   .cxm-material-icon,
   .cxm-material-icon svg,
