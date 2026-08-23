@@ -29,9 +29,33 @@ cordisx codex
 ```
 
 `setup` creates `~/.cordisx/config.json`. Its version-1 defaults select
-`codex/default/shared` and contain `plugins: []`; CordisX never activates a demo
+`codex/default/shared` and contain `providers: []` and `plugins: []`; CordisX never activates a demo
 plugin implicitly. `setup` is idempotent and refuses an unrelated or invalid
 existing file rather than overwriting it.
+
+## Configure CLIProxyAPI providers
+
+Copy [`cordisx.cli-proxy.example.json`](../../cordisx.cli-proxy.example.json) to
+the active CordisX configuration and replace its endpoint and environment
+variable names. Each entry is an independent provider connection:
+
+```json
+{
+  "id": "gateway-a",
+  "kind": "cli-proxy-api",
+  "displayName": "CLIProxy Gateway A",
+  "baseUrl": "http://127.0.0.1:8317/v1",
+  "apiKeyEnv": "CLIPROXY_A_API_KEY"
+}
+```
+
+Set the named environment variable before launching CordisX. Credential values
+do not belong in the JSON file. Remote endpoints require HTTPS; cleartext HTTP
+is accepted only for loopback development. Each provider gets a private
+`providers/<providerId>/codex-home` session store, and the normal
+`cli-proxy-api` plugin contributes the existing sidebar navigation and `main`
+page. The native Codex Desktop current connection remains a separate, honestly
+reported connection plane.
 
 The default profile shares the existing host account, conversations, projects,
 models, and host configuration while keeping the CordisX process, Chromium
@@ -89,7 +113,8 @@ npm run dev -- codex --dry-run
 ```
 
 The first `setup` or ordinary launch creates `${CORDISX_HOME ||
-~/.cordisx}/config.json` with `codex/default/shared` and no plugins. Ordinary
+~/.cordisx}/config.json` with `codex/default/shared`, no external providers,
+and no plugins. Ordinary
 launch never reads a project-local `cordisx.config.json`.
 
 ## Launch modes

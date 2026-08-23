@@ -1,5 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { resolveProviderConfigs } from '../providers/config.js'
+import type { CliProxyProviderConfig } from '../providers/contracts.js'
 
 export interface CordisXConfigPlugin {
   readonly id: string
@@ -15,6 +18,7 @@ export interface CordisXConfig {
     readonly debugPort: number
     readonly executable?: string
   }
+  readonly providers: readonly CliProxyProviderConfig[]
   readonly plugins: readonly CordisXConfigPlugin[]
 }
 
@@ -28,6 +32,16 @@ function object(value: unknown, label: string): Record<string, unknown> {
 function nonEmptyString(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.trim() === '') throw new Error(`${label} must be a non-empty string`)
   return value.trim()
+}
+
+function pluginEntry(value: unknown, label: string, rootDir: string): string {
+  const entry = nonEmptyString(value, label)
+  if (entry === 'cordisx:cli-proxy-api') {
+    const extension = import.meta.url.endsWith('.ts') ? 'ts' : 'js'
+    return fileURLToPath(new URL(`../plugins/cli-proxy-api.${extension}`, import.meta.url))
+  }
+  if (entry.startsWith('cordisx:')) throw new Error(`${label} uses an unknown built-in plugin`)
+  return path.resolve(rootDir, entry)
 }
 
 /** Read and validate the version-1 local composition file. */
@@ -53,13 +67,13 @@ export async function loadConfig(configPath: string): Promise<CordisXConfig> {
     if (id === 'host' || id.startsWith('cordisx.')) throw new Error(`reserved plugin id: ${id}`)
     if (seen.has(id)) throw new Error(`duplicate plugin id: ${id}`)
     seen.add(id)
-    const entry = nonEmptyString(plugin.entry, `config.plugins[${index}].entry`)
+    const entry = pluginEntry(plugin.entry, `config.plugins[${index}].entry`, path.dirname(absolutePath))
     if (plugin.enabled !== undefined && typeof plugin.enabled !== 'boolean') {
       throw new Error(`config.plugins[${index}].enabled must be a boolean`)
     }
     return {
       id,
-      entry: path.resolve(path.dirname(absolutePath), entry),
+      entry,
       enabled: plugin.enabled !== false,
       config: plugin.config ?? {},
     }
@@ -72,6 +86,7 @@ export async function loadConfig(configPath: string): Promise<CordisXConfig> {
       debugPort: debugPort as number,
       ...(executable === undefined ? {} : { executable: path.resolve(path.dirname(absolutePath), executable) }),
     },
+    providers: resolveProviderConfigs(raw.providers, { rootDir: path.dirname(absolutePath) }),
     plugins,
   }
 }

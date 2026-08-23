@@ -256,6 +256,12 @@ structured provider-aware identity. Its launcher-private RPC exposes normalized
 operations only; credentials, child processes, app-server messages, and raw
 transport stay outside the renderer. An external provider becoming available
 does not change the honest status of the native current-connection adapter.
+The renderer adapter authenticates the narrow CDP binding with a per-launch
+closure-bound token before any Platform operation is dispatched. Plugins use
+only `ctx.platform`, so the Permission Broker retains canonical source identity,
+composite requested session/model targets, policy outcome, and user-visible
+audit state. This reduces accidental binding bypass inside the current trusted
+renderer model; it is not a substitute for a future isolated plugin realm.
 
 ## Trust and security
 

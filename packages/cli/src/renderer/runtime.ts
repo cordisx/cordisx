@@ -41,11 +41,14 @@ import {
   ExtensionPointPolicyBroker,
   buildExtensionPointRuntimeSnapshot,
 } from './extension-points.js'
+import { BindingPlatformAdapter } from './provider-binding.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 
 interface CordisXRuntimeMetadata {
   readonly version: string
+  readonly providers: readonly { readonly id: string; readonly displayName: string }[]
+  readonly providerBridgeToken?: string
 }
 
 interface PluginController {
@@ -144,12 +147,17 @@ async function start(
 
   const ctx = new Context()
   const blockedPlugins = readBlockedPlugins()
-  const adapter = new UnavailableCodexHostAdapter()
+  const agentAdapter = new UnavailableCodexHostAdapter()
+  let bindingPlatformAdapter: BindingPlatformAdapter | undefined
+  if (metadata.providers.length > 0 && metadata.providerBridgeToken !== undefined) {
+    bindingPlatformAdapter = await BindingPlatformAdapter.connect(metadata.providerBridgeToken).catch(() => undefined)
+  }
+  const platformAdapter = bindingPlatformAdapter ?? agentAdapter
   const broker = new PermissionBroker(new BrowserPermissionPolicyStore(), new BrowserPermissionPrompt())
   const generation = typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  const agentRuntime = new CordisXHostAgentRuntime({ adapter, broker, generation })
+  const agentRuntime = new CordisXHostAgentRuntime({ adapter: agentAdapter, broker, generation })
   const extensionPointDescriptors = new ExtensionPointDescriptorRegistry()
   const extensionPointBroker = new ExtensionPointPolicyBroker(extensionPointDescriptors, new BrowserExtensionPointPolicyStore(), generation)
   const controllers: PluginController[] = plugins.map(createController)
@@ -259,7 +267,7 @@ async function start(
       localization: i18nService?.getSnapshot() ?? { locale: 'en', direction: 'ltr', version: 0 },
       localeCatalogs: i18nService?.catalogs() ?? [],
       localizationDiagnostics: i18nService?.diagnostics() ?? [],
-      platform: adapter.status(),
+      platform: platformAdapter.status(),
       permissions: broker.snapshots().map((permission: PlatformPermissionSnapshot) => ({
         identity: permission.identity,
         capability: permission.capability,
@@ -274,6 +282,7 @@ async function start(
           ?? `[[${permission.identity.id}:${permission.reason.key}]]`,
         scope: permission.scope,
         policy: permission.policy,
+        ...(permission.lastRequested === undefined ? {} : { lastRequested: permission.lastRequested }),
         ...(permission.lastUsedAt === undefined ? {} : { lastUsedAt: permission.lastUsedAt }),
         ...(permission.lastDeniedAt === undefined ? {} : { lastDeniedAt: permission.lastDeniedAt }),
         denialCount: permission.denialCount,
@@ -440,6 +449,8 @@ async function start(
     await agentEventFiber?.dispose()
     agentEventFiber = undefined
     await agentRuntime.dispose()
+    bindingPlatformAdapter?.dispose()
+    bindingPlatformAdapter = undefined
     for (const remove of disposeExtensionPointCatalogs.splice(0).reverse()) await remove()
     await i18nFiber?.dispose()
     i18nFiber = undefined
@@ -482,7 +493,7 @@ async function start(
     disposeI18nSubscription = i18nService.subscribeInternal(notify)
     disposePermissionSubscription = broker.subscribe(notify)
     disposeExtensionPointSubscription = extensionPointBroker.subscribe(notify)
-    platformFiber = ctx.plugin(CordisXPlatformService, { adapter, broker })
+    platformFiber = ctx.plugin(CordisXPlatformService, { adapter: platformAdapter, broker })
     await platformFiber
     agentEventFiber = ctx.plugin(CordisXAgentEventService, {
       ledger: agentRuntime.ledger,

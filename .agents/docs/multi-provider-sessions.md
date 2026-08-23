@@ -1,8 +1,8 @@
 # Multi-provider Platform sessions
 
-Status: approved delivery architecture for provider-aware Platform routing and
-the first CLIProxyAPI connection plugin. Normative plugin-visible changes land
-in `cordisx-protocol` before the compatible host implementation.
+Status: implemented delivery architecture for provider-aware Platform routing
+and the first CLIProxyAPI connection plugin. Normative plugin-visible changes
+are owned by `cordisx-protocol`; implementation remains in this repository.
 
 ## Outcome and non-goals
 
@@ -123,7 +123,7 @@ not process isolation.
 
 The launcher owns provider processes, environment-variable credential lookup,
 timeouts, retry/cancellation, generation drain, and deterministic cleanup. A
-narrow CDP `Runtime.addBinding` request/response channel carries only validated
+token-bound, narrow CDP `Runtime.addBinding` request/response channel carries only validated
 Platform operations and sanitized results. It follows the existing marketplace
 binding pattern but has separate names, payload limits, request limits, and
 abort ownership.

@@ -21,6 +21,18 @@ export interface HomeConfigPlugin {
   readonly config?: JsonValue
 }
 
+export interface HomeConfigProvider {
+  readonly id: string
+  readonly kind: 'cli-proxy-api'
+  readonly displayName: string
+  readonly baseUrl: string
+  readonly apiKeyEnv: string
+  readonly codexExecutable?: string
+  readonly dataDir?: string
+  readonly enabled?: boolean
+  readonly timeoutMs?: number
+}
+
 export interface HomeConfigProfile {
   readonly displayName: string
   readonly dataMode: HomeDataMode
@@ -34,6 +46,7 @@ export interface HomeConfigApp {
 export interface HomeConfig {
   readonly version: 1
   readonly defaultApp: string
+  readonly providers: readonly HomeConfigProvider[]
   readonly plugins: readonly HomeConfigPlugin[]
   readonly apps: Readonly<Record<string, HomeConfigApp>>
 }
@@ -134,6 +147,33 @@ function parsePlugin(value: unknown, index: number): HomeConfigPlugin {
   }
 }
 
+function parseProvider(value: unknown, index: number): HomeConfigProvider {
+  const label = `config.providers[${index}]`
+  const provider = record(value, label)
+  rejectUnknownKeys(provider, [
+    'id', 'kind', 'displayName', 'baseUrl', 'apiKeyEnv', 'codexExecutable', 'dataDir', 'enabled', 'timeoutMs',
+  ], label)
+  const id = nonEmptyString(provider.id, `${label}.id`)
+  if (!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(id)) throw new Error(`${label}.id is invalid: ${id}`)
+  if (provider.kind !== 'cli-proxy-api') throw new Error(`${label}.kind must be cli-proxy-api`)
+  const displayName = nonEmptyString(provider.displayName, `${label}.displayName`)
+  const baseUrl = nonEmptyString(provider.baseUrl, `${label}.baseUrl`)
+  const apiKeyEnv = nonEmptyString(provider.apiKeyEnv, `${label}.apiKeyEnv`)
+  if (provider.enabled !== undefined && typeof provider.enabled !== 'boolean') throw new Error(`${label}.enabled must be a boolean`)
+  if (provider.timeoutMs !== undefined && !Number.isInteger(provider.timeoutMs)) throw new Error(`${label}.timeoutMs must be an integer`)
+  return {
+    id,
+    kind: 'cli-proxy-api',
+    displayName,
+    baseUrl,
+    apiKeyEnv,
+    ...(provider.codexExecutable === undefined ? {} : { codexExecutable: nonEmptyString(provider.codexExecutable, `${label}.codexExecutable`) }),
+    ...(provider.dataDir === undefined ? {} : { dataDir: nonEmptyString(provider.dataDir, `${label}.dataDir`) }),
+    ...(provider.enabled === undefined ? {} : { enabled: provider.enabled }),
+    ...(provider.timeoutMs === undefined ? {} : { timeoutMs: provider.timeoutMs as number }),
+  }
+}
+
 function parseProfile(value: unknown, label: string): HomeConfigProfile {
   const profile = record(value, label)
   rejectUnknownKeys(profile, ['displayName', 'dataMode'], label)
@@ -163,9 +203,17 @@ function parseApp(value: unknown, label: string): HomeConfigApp {
 /** Strictly validate and normalize a version-1 CordisX home configuration. */
 export function parseHomeConfig(value: unknown): HomeConfig {
   const config = record(value, 'config')
-  rejectUnknownKeys(config, ['version', 'defaultApp', 'plugins', 'apps'], 'config')
+  rejectUnknownKeys(config, ['version', 'defaultApp', 'providers', 'plugins', 'apps'], 'config')
   if (config.version !== 1) throw new Error('config.version must be 1')
   const defaultApp = portableId(config.defaultApp, 'config.defaultApp')
+  if (config.providers !== undefined && !Array.isArray(config.providers)) throw new Error('config.providers must be an array')
+  const seenProviders = new Set<string>()
+  const providers = (config.providers ?? []).map((value, index) => {
+    const provider = parseProvider(value, index)
+    if (seenProviders.has(provider.id)) throw new Error(`duplicate provider id: ${provider.id}`)
+    seenProviders.add(provider.id)
+    return provider
+  })
   if (!Array.isArray(config.plugins)) throw new Error('config.plugins must be an array')
   const seenPlugins = new Set<string>()
   const plugins = config.plugins.map((value, index) => {
@@ -181,7 +229,7 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     apps[appId] = parseApp(rawApp, `config.apps.${appId}`)
   }
   if (!Object.hasOwn(apps, defaultApp)) throw new Error(`config.defaultApp references missing app: ${defaultApp}`)
-  return { version: 1, defaultApp, plugins, apps }
+  return { version: 1, defaultApp, providers, plugins, apps }
 }
 
 /** Return a new deterministic configuration for first launch or non-interactive setup. */
@@ -189,6 +237,7 @@ export function createDefaultHomeConfig(): HomeConfig {
   return {
     version: 1,
     defaultApp: 'codex',
+    providers: [],
     plugins: [],
     apps: {
       codex: {
