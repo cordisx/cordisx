@@ -1,15 +1,18 @@
 {
   "name": "create-cordisx-plugin",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.1.0-beta.0",
   "description": "Create a minimal CordisX plugin project",
   "type": "module",
   "files": [
     "dist",
-    "template"
+    "template",
+    "README.md",
+    "LICENSE",
+    "CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md"
   ],
+  "exports": {},
   "bin": {
-    "create-cordisx-plugin": "./dist/cli.js"
+    "create-cordisx-plugin": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -20,6 +23,27 @@
   },
   "engines": {
     "node": ">=22.19"
+  },
+  "license": "AGPL-3.0-or-later",
+  "homepage": "https://cordisx.github.io/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cordisx/cordisx.git",
+    "directory": "packages/create-cordisx-plugin"
+  },
+  "bugs": {
+    "url": "https://github.com/cordisx/cordisx/issues"
+  },
+  "keywords": [
+    "cordisx",
+    "create",
+    "plugin",
+    "scaffolding"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "beta",
+    "provenance": true
   },
   "devDependencies": {
     "@types/node": "^22.18.1",

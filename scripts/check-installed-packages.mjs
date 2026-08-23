@@ -61,6 +61,9 @@ async function expectMissing(target, label) {
 async function verifyGeneratedProject(project, cordisxTarball, expectedVersion) {
   const packagePath = path.join(project, 'package.json')
   const manifest = JSON.parse(await readFile(packagePath, 'utf8'))
+  if (manifest.license !== 'UNLICENSED') {
+    throw new Error('generated plugin must leave its author an explicit license choice')
+  }
   if (manifest.devDependencies?.cordisx !== expectedVersion) {
     throw new Error(`generated CordisX dependency must be ${expectedVersion}`)
   }
@@ -103,6 +106,16 @@ try {
     cordisxTarball,
     creatorTarball,
   ], { cwd: runnerDirectory, env: process.env })
+
+  for (const packageName of ['cordisx', 'create-cordisx-plugin']) {
+    const packageRoot = path.join(runnerDirectory, 'node_modules', packageName)
+    const installedManifest = JSON.parse(await readFile(path.join(packageRoot, 'package.json'), 'utf8'))
+    if (installedManifest.license !== 'AGPL-3.0-or-later') {
+      throw new Error(`${packageName} installed license metadata is invalid`)
+    }
+    await access(path.join(packageRoot, 'LICENSE'))
+    await access(path.join(packageRoot, 'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'))
+  }
 
   const binDirectory = path.join(runnerDirectory, 'node_modules', '.bin')
   const executable = name => path.join(
@@ -167,7 +180,7 @@ try {
   await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
   await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
 
-  console.log('[cordisx] installed tarballs verified: CLI, both creator forms, generated checks, dev dry-run')
+  console.log('[cordisx] installed tarballs verified: licenses, CLI, both creator forms, generated checks, dev dry-run')
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }

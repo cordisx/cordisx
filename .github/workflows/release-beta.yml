@@ -1,0 +1,37 @@
+name: Release npm beta
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact coordinated beta version (for example 0.1.0-beta.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-beta-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: npm-beta
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm install --global npm@12.0.2 --registry=https://registry.npmjs.org
+      - run: npm ci --ignore-scripts --registry=https://registry.npmjs.org
+      - run: npm run check
+      - name: Publish and verify coordinated beta
+        run: node scripts/release-beta.mjs --version "${{ inputs.version }}" --registry https://registry.npmjs.org
+      - name: Verify clean registry installation
+        run: node scripts/check-registry-beta.mjs --version "${{ inputs.version }}" --registry https://registry.npmjs.org

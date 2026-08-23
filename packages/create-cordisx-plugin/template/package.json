@@ -2,6 +2,7 @@
   "name": "{{packageName}}",
   "version": "0.1.0",
   "private": true,
+  "license": "UNLICENSED",
   "description": "A CordisX plugin",
   "type": "module",
   "main": "./dist/{{pluginId}}.js",

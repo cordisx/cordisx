@@ -1,8 +1,81 @@
-# CordisX development entrypoint
+# CordisX getting started
 
-This document owns local setup, launcher operation, live smoke testing, and the
-minimal plugin example. The repository README intentionally stays focused on
-the product rather than these implementation details.
+This document owns the npm beta user path, repository-local development,
+launcher operation, live smoke testing, and the minimal plugin example.
+
+## npm beta installation
+
+Use Node.js 22.19 or newer and install Codex Desktop before starting CordisX.
+The functional prerelease is published only through the `beta` dist-tag;
+unqualified npm commands still resolve the non-functional `0.0.0` name
+reservation on `latest`.
+
+The zero-install path is:
+
+```bash
+npx cordisx@beta --help
+npx cordisx@beta setup
+npx cordisx@beta codex --dry-run
+npx cordisx@beta codex
+```
+
+For repeated use, install the same channel globally:
+
+```bash
+npm install --global cordisx@beta
+cordisx setup
+cordisx codex --dry-run
+cordisx codex
+```
+
+`setup` creates `~/.cordisx/config.json`. Its version-1 defaults select
+`codex/default/shared` and contain `plugins: []`; CordisX never activates a demo
+plugin implicitly. `setup` is idempotent and refuses an unrelated or invalid
+existing file rather than overwriting it.
+
+The default profile shares the existing host account, conversations, projects,
+models, and host configuration while keeping the CordisX process, Chromium
+profile, CDP endpoint, UI storage, and lifecycle separate. An explicit named
+isolated profile gets its own host data roots and is reused on later launches:
+
+```bash
+npx cordisx@beta codex default --data shared
+npx cordisx@beta codex work --data isolated
+```
+
+## Create a plugin
+
+Both creator command forms resolve the beta package when the channel is
+specified:
+
+```bash
+npm create cordisx-plugin@beta my-plugin
+npx create-cordisx-plugin@beta another-plugin
+```
+
+The generated project owns a version-1 manifest-bearing TypeScript entry, a
+structured toolbar contribution, a README, and check/build/test scripts:
+
+```bash
+cd my-plugin
+npm install
+npm run check
+npm run dev:dry-run
+npm run dev
+```
+
+`dev:dry-run` executes `cordisx dev <entry> --dry-run` and bundles the complete
+plugin without launching Codex Desktop. `dev` starts the separate development
+host. The initial template has no marketplace submission, package signing,
+permission grants, execution sandbox, or HMR dependency; plugins remain trusted
+local renderer code.
+
+Generated projects start with `license: UNLICENSED` so the plugin author makes
+the licensing choice explicitly. Under the CordisX Independent Plugin
+Exception, an independent plugin that uses only documented, versioned public
+plugin interfaces may be commercial, sold, marketplace-distributed, and
+licensed under author-chosen terms. Copying or modifying CordisX host code or
+using private interfaces remains under the host's AGPL terms.
 
 ## Local setup
 

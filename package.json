@@ -6,9 +6,10 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "check": "npm run typecheck && npm run build && npm test && npm run check:package && npm run check:installed",
+    "check": "npm run typecheck && npm run build && npm test && npm run check:release && npm run check:package && npm run check:installed",
     "check:installed": "node scripts/check-installed-packages.mjs",
     "check:package": "npm run check:package --workspaces --if-present",
+    "check:release": "node scripts/check-release-metadata.mjs",
     "dev": "tsx packages/cli/src/cli.ts",
     "smoke": "node packages/cli/scripts/live-smoke.mjs",
     "test": "vitest run",

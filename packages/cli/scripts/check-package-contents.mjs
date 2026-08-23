@@ -11,10 +11,24 @@ const report = JSON.parse(output)
 const files = report[0]?.files?.map(file => file.path)
 if (!Array.isArray(files)) throw new Error('npm pack did not report package contents')
 
-const leaked = files.filter(file => file !== 'package.json' && !file.startsWith('dist/'))
+const allowedRoots = [
+  'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md',
+  'LICENSE',
+  'README.md',
+  'THIRD_PARTY_NOTICES.md',
+  'package.json',
+]
+const leaked = files.filter(file => (
+  !allowedRoots.includes(file) && !file.startsWith('dist/') && !file.startsWith('third_party/')
+))
 if (leaked.length > 0) throw new Error(`cordisx package leaked non-allowlisted files: ${leaked.join(', ')}`)
 
 for (const required of [
+  'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md',
+  'LICENSE',
+  'README.md',
+  'THIRD_PARTY_NOTICES.md',
+  'third_party/material-symbols-APACHE-2.0.txt',
   'dist/src/cli.js',
   'dist/src/contracts.js',
   'dist/src/contracts.d.ts',

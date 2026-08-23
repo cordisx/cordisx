@@ -271,6 +271,27 @@ check/build/test scripts, and bundle its entry with the published
 README, license, bin, built output, and complete template while excluding repo-
 private docs, tests, source-only bins, tokens, and developer configuration.
 
+### Beta licensing boundary
+
+The repository and both public beta packages use the valid SPDX identifier
+`AGPL-3.0-or-later` and include the verbatim GNU AGPLv3 text. Package metadata
+does not invent a `WITH CordisX` expression. Each tarball also includes the
+separate CordisX Independent Plugin Exception as an AGPLv3 section 7 additional
+permission.
+
+The exception covers independent plugins that use only expressly documented,
+versioned public plugin interfaces, the interface declarations/types/schemas
+reasonably necessary to implement such plugins, and the scaffolder's marked
+template and generated result. Those plugins may be commercial and use author-
+chosen licenses. It does not cover copying, embedding, modifying, repackaging,
+or replacing the host/runtime/CLI/manager/launcher/adapter/scaffolder
+implementation, a substitute host based on CordisX code, or private interfaces.
+
+The public protocol schemas are licensed compatibly in `cordisx-protocol` and
+expressly identified as interface material. The CordisX-specific exception is
+not a standard SPDX exception and is not represented as OSI- or FSF-reviewed;
+legal review is recommended before stable.
+
 ## Delivery order and PR boundaries
 
 1. **Architecture PR** — this document only; no package or CLI behavior.
