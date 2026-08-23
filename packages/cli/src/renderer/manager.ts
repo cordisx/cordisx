@@ -1351,6 +1351,13 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const pageId = `${route.owner}:${route.definition.page}`
     const page = snapshot.navigation.pages.find(item => item.qualifiedId === pageId)
     const outlet = snapshot.navigation.outlets.find(item => item.id === route.definition.outlet)
+    const presentation = outlet?.activeRoute !== route.qualifiedId
+      ? '未打开'
+      : outlet.presentation === 'presented'
+        ? '展示中'
+        : outlet.presentation === 'suspended'
+          ? `已暂停${outlet.suspendedBy === undefined ? '' : ` · 由 ${outlet.suspendedBy} 覆盖`}`
+          : '未打开'
     const fields = create(document, 'div', 'cxm-detail-grid')
     for (const [label, value] of [
       ['路径', route.definition.path],
@@ -1360,7 +1367,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       ['路由状态', !route.valid ? '无效' : route.authorized ? '已授权' : '已拒绝'],
       ['页面注册', page === undefined ? '缺失' : '已注册'],
       ['出口状态', outlet === undefined ? '未声明' : outlet.available ? '可用' : '不可用'],
-      ['覆盖状态', outlet?.mounted && outlet.activeRoute === route.qualifiedId ? '当前已打开' : '未打开'],
+      ['展示状态', presentation],
     ]) {
       const field = create(document, 'div', 'cxm-field')
       field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))

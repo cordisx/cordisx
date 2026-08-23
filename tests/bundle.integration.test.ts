@@ -12,7 +12,7 @@ interface RuntimeSnapshot {
   navigation: {
     routes: readonly { owner: string; qualifiedId: string; valid: boolean; authorized: boolean }[]
     pages: readonly { owner: string; qualifiedId: string }[]
-    outlets: readonly { id: string; contextKey?: string; activeRoute?: string; mounted: boolean }[]
+    outlets: readonly { id: string; contextKey?: string; activeRoute?: string; mounted: boolean; presentation: 'inactive' | 'presented' | 'suspended'; suspendedBy?: string }[]
   }
   localization: { locale: string; direction: string; version: number }
   localeCatalogs: readonly { owner: string; locale: string }[]
@@ -232,8 +232,10 @@ describe('renderer bundle', () => {
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')?.activeRoute).toBeUndefined()
     dom.window.document.querySelector<HTMLButtonElement>('.cordisx-nav-primary')!.click()
     await settle()
-    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({ activeRoute: 'slot-showcase:main.analytics', mounted: true })
-    expect(dom.window.document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')).not.toBeNull()
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({ activeRoute: 'slot-showcase:main.analytics', mounted: true, presentation: 'presented' })
+    const mainPage = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="slot-showcase:main.analytics"]')!
+    expect(mainPage).not.toBeNull()
+    expect(dom.window.document.querySelector('.cordisx-nav-primary')?.getAttribute('aria-current')).toBe('page')
     expect(dom.window.document.querySelector('[data-cordisx-page-outlet="main"]')?.parentElement).toBe(dom.window.document.body)
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')?.placement).toBe('portal')
     expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.top).toBe('0px')
@@ -252,7 +254,13 @@ describe('renderer bundle', () => {
       .every(button => button.dataset.cordisxNoDrag === 'true')).toBe(true)
 
     await runtime!.navigate('slot-showcase', { id: 'app.overview' })
-    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ activeRoute: 'slot-showcase:app.overview', mounted: true })
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ activeRoute: 'slot-showcase:app.overview', mounted: true, presentation: 'presented' })
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({ activeRoute: 'slot-showcase:main.analytics', mounted: true, presentation: 'suspended', suspendedBy: 'app' })
+    expect(mainPage.isConnected).toBe(true)
+    expect(mainPage.inert).toBe(true)
+    expect(mainPage.getAttribute('aria-hidden')).toBe('true')
+    expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.hidden).toBe(true)
+    expect(dom.window.document.querySelector('.cordisx-nav-primary')?.hasAttribute('aria-current')).toBe(false)
     const appOutlet = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="app"]')!
     expect(appOutlet.style.top).toBe('0px')
     expect(appOutlet.style.getPropertyValue('--cordisx-page-chrome-safe-left')).toBe('88px')
@@ -277,9 +285,22 @@ describe('renderer bundle', () => {
       authorized: true,
     })
     await runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId } })
-    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({ activeRoute: 'slot-showcase:session.analytics', mounted: true, contextKey: `session:${sessionId}` })
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({ activeRoute: 'slot-showcase:session.analytics', mounted: true, contextKey: `session:${sessionId}`, presentation: 'presented' })
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ presentation: 'suspended', suspendedBy: 'session.content' })
     await expect(runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId: 'stale' } })).rejects.toThrow(/does not match native session/)
     expect(dom.window.location.href).toBe('https://codex.local/native')
+
+    dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-page="slot-showcase:session.analytics"] button[aria-label="Close"]')!.click()
+    await settle()
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ presentation: 'presented' })
+    expect(appOutlet.hidden).toBe(false)
+    appChrome.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click()
+    await settle()
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({ presentation: 'presented' })
+    expect(dom.window.document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')).toBe(mainPage)
+    expect(mainPage.inert).toBe(false)
+    expect(mainPage.hasAttribute('aria-hidden')).toBe(false)
+    expect(dom.window.document.querySelector('.cordisx-nav-primary')?.getAttribute('aria-current')).toBe('page')
 
     dom.window.document.documentElement.lang = 'zh-CN'
     await settle()

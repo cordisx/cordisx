@@ -179,6 +179,52 @@ describe('NavigationRegistry', () => {
     dom.window.close()
   })
 
+  it('suspends an overlapping outlet without remounting and restores it after close', async () => {
+    const dom = new JSDOM('<body><main id="main"></main><main id="app"></main></body>')
+    const pages = new PageRegistry()
+    const outlets = new OutletRegistry()
+    const main = new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one')
+    const app = new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer')
+    outlets.declare({
+      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'portal', contextPolicy: 'semantic', presentationGroup: 'primary',
+    }, main, path => path.startsWith('/main/'))
+    outlets.declare({
+      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation', presentationGroup: 'primary',
+    }, app, path => !path.startsWith('/main/'))
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    pages.register('demo', { id: 'main', title: { key: 'main' } }, ({ container }) => {
+      const input = container.ownerDocument.createElement('input')
+      input.value = 'preserved'
+      container.append(input)
+    })
+    pages.register('demo', { id: 'app', title: { key: 'app' } }, () => undefined)
+    navigation.register('demo', { id: 'main', path: '/main/demo', outlet: 'main', page: 'main' })
+    navigation.register('demo', { id: 'app', path: '/app', outlet: 'app', page: 'app' })
+
+    await navigation.navigate('demo', { id: 'main' })
+    const mainPage = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="demo:main"]')!
+    await navigation.navigate('demo', { id: 'app' })
+    expect(navigation.snapshot().outlets.find(item => item.id === 'main')).toMatchObject({
+      mounted: true, presentation: 'suspended', suspendedBy: 'app',
+    })
+    expect(navigation.snapshot().outlets.find(item => item.id === 'app')).toMatchObject({ presentation: 'presented' })
+    expect(mainPage.isConnected).toBe(true)
+    expect(mainPage.inert).toBe(true)
+    expect(mainPage.getAttribute('aria-hidden')).toBe('true')
+
+    await navigation.close('demo', 'app')
+    expect(navigation.snapshot().outlets.find(item => item.id === 'main')).toMatchObject({ presentation: 'presented' })
+    expect(dom.window.document.querySelector('[data-cordisx-page="demo:main"]')).toBe(mainPage)
+    expect(mainPage.querySelector('input')?.value).toBe('preserved')
+    expect(mainPage.inert).toBe(false)
+    expect(mainPage.hasAttribute('aria-hidden')).toBe(false)
+
+    await navigation.dispose()
+    pages.dispose()
+    outlets.dispose()
+    dom.window.close()
+  })
+
   it('renders app and main page headers from closed data and rechecks outlet policy before header commands', async () => {
     const dom = new JSDOM(`
       <body>
