@@ -1,0 +1,18 @@
+{
+  "protocolVersion": "codex-cli 0.145.0 experimental",
+  "nativeAdditionalContext": {
+    "native.application": { "value": "native application context", "kind": "application" },
+    "native.untrusted": { "value": "native untrusted context", "kind": "untrusted" }
+  },
+  "notifications": [
+    { "method": "thread/started", "params": { "thread": { "id": "session-fixture" } } },
+    { "method": "turn/started", "params": { "threadId": "session-fixture", "turn": { "id": "turn-fixture", "status": "inProgress" } } },
+    { "method": "item/started", "params": { "threadId": "session-fixture", "turnId": "turn-fixture", "item": { "id": "user-fixture", "type": "userMessage", "content": [{ "type": "text", "text": "Fixture input" }] } } },
+    { "method": "item/completed", "params": { "threadId": "session-fixture", "turnId": "turn-fixture", "item": { "id": "user-fixture", "type": "userMessage" } } },
+    { "method": "item/started", "params": { "threadId": "session-fixture", "turnId": "turn-fixture", "item": { "id": "assistant-fixture", "type": "agentMessage" } } },
+    { "method": "item/agentMessage/delta", "params": { "threadId": "session-fixture", "turnId": "turn-fixture", "itemId": "assistant-fixture", "delta": "Fixture" } },
+    { "method": "item/agentMessage/delta", "params": { "threadId": "session-fixture", "turnId": "turn-fixture", "itemId": "assistant-fixture", "delta": " response", "final": true } },
+    { "method": "item/completed", "params": { "threadId": "session-fixture", "turnId": "turn-fixture", "item": { "id": "assistant-fixture", "type": "agentMessage" } } },
+    { "method": "turn/completed", "params": { "threadId": "session-fixture", "turn": { "id": "turn-fixture", "status": "completed" } } }
+  ]
+}

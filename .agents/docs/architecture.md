@@ -66,6 +66,12 @@ separation preserves the one-current-connection rule while allowing an
 explicitly independent provider plugin to own its own Codex app-server and
 conversation store.
 
+The UI-neutral Agent event ledger, DSH-aligned messaging facade, permission
+chain, and private Codex event adapter are specified in
+[`agent-events.md`](agent-events.md). They share the Platform broker and host
+adapter generation, retain only stable projection identities, and define no
+Timeline, session header, DOM surface, or outlet.
+
 Online Chrome DevTools support is opt-in. `--online-devtools` adds `https://chrome-devtools-frontend.appspot.com` to `--remote-allow-origins`; once connected, that origin has full renderer debugging authority for the isolated instance.
 
 ### Renderer plane

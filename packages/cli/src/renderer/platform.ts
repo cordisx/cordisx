@@ -101,16 +101,18 @@ function sessionList(value: unknown, label: string): readonly CordisXPlatformSes
 
 function normalizedScope(value: unknown, label: string): CordisXCapabilityScope {
   const scope = object(value, label)
-  const unknown = Object.keys(scope).filter(key => !['providers', 'cwdRoots', 'sessions'].includes(key))
+  const unknown = Object.keys(scope).filter(key => !['providers', 'cwdRoots', 'sessions', 'sessionIds'].includes(key))
   if (unknown.length > 0) throw new Error(`${label} contains unknown field ${unknown[0]}`)
   const providers = stringList(scope.providers, `${label}.providers`, 32, item => /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(item))
   const cwdRoots = stringList(scope.cwdRoots, `${label}.cwdRoots`, 32, item => item.length <= 4096)
   const sessions = sessionList(scope.sessions, `${label}.sessions`)
+  const sessionIds = stringList(scope.sessionIds, `${label}.sessionIds`, 100, item => item.length <= 512)
   if (cwdRoots?.some(root => !absolutePath(root)) === true) throw new Error(`${label}.cwdRoots must contain absolute paths`)
   return Object.freeze({
     ...(providers === undefined ? {} : { providers }),
     ...(cwdRoots === undefined ? {} : { cwdRoots }),
     ...(sessions === undefined ? {} : { sessions }),
+    ...(sessionIds === undefined ? {} : { sessionIds }),
   })
 }
 
@@ -171,11 +173,19 @@ export function normalizePluginManifest(value: unknown, expectedId: string): Cor
     if (seen.has(declaration.name)) throw new Error(`plugin ${expectedId} declares ${declaration.name} more than once`)
     seen.add(declaration.name)
     if (typeof declaration.required !== 'boolean') throw new Error(`plugin ${expectedId} capability[${index}].required must be boolean`)
+    const name = declaration.name as CordisXPlatformCapability
+    const scope = normalizedScope(declaration.scope, `plugin ${expectedId} capability[${index}].scope`)
+    if (name.startsWith('agent.') && scope.sessions !== undefined) {
+      throw new Error(`plugin ${expectedId} capability[${index}] cannot use Platform sessions scope for ${name}`)
+    }
+    if (!name.startsWith('agent.') && scope.sessionIds !== undefined) {
+      throw new Error(`plugin ${expectedId} capability[${index}] cannot use Agent sessionIds scope for ${name}`)
+    }
     return Object.freeze({
-      name: declaration.name as CordisXPlatformCapability,
+      name,
       required: declaration.required,
       reason: normalizedReason(declaration.reason, `plugin ${expectedId} capability[${index}].reason`),
-      scope: normalizedScope(declaration.scope, `plugin ${expectedId} capability[${index}].scope`),
+      scope,
     })
   })
   return Object.freeze({
@@ -265,6 +275,8 @@ export interface RequestedScope {
   readonly model?: CordisXPlatformModelRef
   readonly session?: CordisXPlatformSessionRef
   readonly adapterGeneration?: string
+  readonly agentSessionId?: string
+  readonly allAgentSessions?: true
 }
 
 export interface PermissionPromptRequest {
@@ -345,6 +357,8 @@ function scopeAllows(scope: CordisXCapabilityScope, requested: RequestedScope): 
     return ref.providerId === requested.session?.providerId && ref.remoteSessionId === requested.session.remoteSessionId
   })) return false
   if (requested.cwd !== undefined && scope.cwdRoots !== undefined && !scope.cwdRoots.some(root => pathInside(requested.cwd as string, root))) return false
+  if (requested.agentSessionId !== undefined && scope.sessionIds !== undefined && !scope.sessionIds.includes(requested.agentSessionId)) return false
+  if (requested.allAgentSessions === true && scope.sessionIds !== undefined) return false
   return true
 }
 
@@ -356,6 +370,8 @@ function requestedSnapshot(requested: RequestedScope): RequestedScope {
     ...(requested.model === undefined ? {} : { model: Object.freeze({ ...requested.model }) }),
     ...(requested.session === undefined ? {} : { session: Object.freeze({ ...requested.session }) }),
     ...(requested.adapterGeneration === undefined ? {} : { adapterGeneration: requested.adapterGeneration }),
+    ...(requested.agentSessionId === undefined ? {} : { agentSessionId: requested.agentSessionId }),
+    ...(requested.allAgentSessions === true ? { allAgentSessions: true as const } : {}),
   })
 }
 
@@ -373,6 +389,7 @@ export class PermissionBroker {
     private readonly store: PermissionPolicyStore,
     private readonly prompt: PermissionPrompt,
     private readonly now: () => Date = () => new Date(),
+    private readonly promptTimeoutMs = 30_000,
   ) {
     for (const record of store.read()) this.policies.set(this.policyKey(record.identityKey, record.capability, record.fingerprint), record)
   }
@@ -431,11 +448,21 @@ export class PermissionBroker {
       return failure('permission-denied', `${capability} is denied for plugin ${identity.id}`)
     }
     if (policy === 'ask') {
-      let decision: 'allow' | 'deny'
+      let decision: 'allow' | 'deny' | 'timeout'
+      let timer: ReturnType<typeof setTimeout> | undefined
       try {
-        decision = await this.prompt.request({ identity, declaration, requested })
+        decision = await Promise.race([
+          this.prompt.request({ identity, declaration, requested }),
+          new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), this.promptTimeoutMs) }),
+        ])
       } catch {
         decision = 'deny'
+      } finally {
+        if (timer !== undefined) clearTimeout(timer)
+      }
+      if (decision === 'timeout') {
+        this.denied(identityKey, capability, requested)
+        return failure('timeout', `${capability} permission request timed out`)
       }
       if (decision === 'deny') {
         this.denied(identityKey, capability, requested)

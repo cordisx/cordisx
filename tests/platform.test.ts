@@ -304,6 +304,7 @@ describe('Platform capability runtime', () => {
     }, identity.id)
 
     expect(() => scoped({ taskIds: ['thread-1'] })).toThrow('unknown field taskIds')
+    expect(() => scoped({ sessionIds: ['agent-session-1'] })).toThrow('cannot use Agent sessionIds scope')
     expect(() => scoped({ sessions: ['thread-1'] })).toThrow('must be an object')
     expect(() => scoped({ sessions: [{ remoteSessionId: 'thread-1' }] })).toThrow('providerId is invalid')
     expect(() => scoped({ sessions: [{ providerId: 'main', remoteSessionId: 'thread-1', raw: true }] }))
@@ -321,6 +322,28 @@ describe('Platform capability runtime', () => {
       { providerId: 'codex', remoteSessionId: 'thread-1' },
       { providerId: 'zcode', remoteSessionId: 'thread-1' },
     ])
+
+    expect(() => normalizePluginManifest({
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+      schemaVersion: 1,
+      id: identity.id,
+      capabilities: [{
+        name: 'agent.events.read', required: false,
+        reason: { key: 'permission.agent-events', fallback: 'Read Agent events' },
+        scope: { sessions: [{ providerId: 'main', remoteSessionId: 'thread-1' }] },
+      }],
+    }, identity.id)).toThrow('cannot use Platform sessions scope')
+
+    expect(normalizePluginManifest({
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+      schemaVersion: 1,
+      id: identity.id,
+      capabilities: [{
+        name: 'agent.events.read', required: false,
+        reason: { key: 'permission.agent-events', fallback: 'Read Agent events' },
+        scope: { sessionIds: ['agent-session-1'] },
+      }],
+    }, identity.id).capabilities[0]?.scope).toEqual({ sessionIds: ['agent-session-1'] })
   })
 
   it('offers authoritative read-only projections while refusing writes', async () => {

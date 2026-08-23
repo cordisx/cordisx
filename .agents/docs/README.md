@@ -20,6 +20,9 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `multi-provider-sessions.md` defines provider-aware model/session identity,
   Provider Fleet routing, the launcher-private connection plane, CLIProxyAPI
   integration, PR order, and validation scope.
+- `agent-events.md` defines the UI-neutral Session/Agent event ledger,
+  DSH-aligned messaging facade, permission chain, private adapter boundary,
+  honest degradation, and validation matrix.
 - `development-plan.md` records staged implementation and validation boundaries.
 
 Normative plugin contracts belong in `cordisx/cordisx-protocol`; private or provisional planning belongs in `cordisx/roadmap`.

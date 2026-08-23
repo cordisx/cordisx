@@ -12,6 +12,12 @@ export const CORDISX_PLATFORM_CAPABILITIES = [
   'tasks.control',
   'turns.submit',
   'turns.control',
+  'agent.events.read',
+  'agent.messages.append',
+  'agent.steps.reject',
+  'agent.messages.transform',
+  'agent.prompt.section',
+  'agent.prompt.context',
 ] as const
 
 export type CordisXPlatformCapability = typeof CORDISX_PLATFORM_CAPABILITIES[number]
@@ -28,6 +34,7 @@ export interface CordisXCapabilityScope {
   readonly providers?: readonly string[]
   readonly cwdRoots?: readonly string[]
   readonly sessions?: readonly CordisXPlatformSessionRef[]
+  readonly sessionIds?: readonly string[]
 }
 
 export interface CordisXCapabilityDeclaration {
