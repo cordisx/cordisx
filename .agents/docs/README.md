@@ -17,6 +17,9 @@ This directory is the public, aggregatable source for CordisX product and archit
   app/profile command model, package ownership, and release gates.
 - `platform-capabilities.md` defines the Platform service, permission broker,
   current-connection adapter boundary, manager projection, PR order, and validation scope.
+- `multi-provider-sessions.md` defines provider-aware model/session identity,
+  Provider Fleet routing, the launcher-private connection plane, CLIProxyAPI
+  integration, PR order, and validation scope.
 - `development-plan.md` records staged implementation and validation boundaries.
 
 Normative plugin contracts belong in `cordisx/cordisx-protocol`; private or provisional planning belongs in `cordisx/roadmap`.

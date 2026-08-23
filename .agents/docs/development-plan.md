@@ -186,6 +186,23 @@ Recommended PR boundaries:
 
 Validation: deny-by-default capability tests, origin and signature tests, compromised-plugin scenarios, atomic publication tests, and rollback after failed activation.
 
+### Multi-provider Platform and CLIProxyAPI slice
+
+Status: approved architecture; implementation follows
+[`multi-provider-sessions.md`](multi-provider-sessions.md).
+
+This slice makes provider identity part of model selection, session creation,
+list/search/read, persistence, resume/control, and audit. It adds a
+launcher-owned Provider Fleet and a CLIProxyAPI connection backed by an
+isolated Codex app-server. The renderer plugin uses only the public Platform
+and existing page/outlet APIs. It neither modifies the native Codex session
+list nor claims its independent provider sessions are native.
+
+Delivery order is architecture checkpoint, protocol, host core, plugin UI,
+then current-main mono pins. The protocol baseline is Agent event v1 at
+`e615572`; provider sessions do not add experimental Agent adapter fields or
+change provider-neutral ledger identity.
+
 ## Stage 4 — upstream-compatible bridge
 
 Package portable task UI as standard MCP UI resources. A CordisX package may carry both:
