@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { npmMaintainerNames, npmPackItem, npmViewItem } from '../scripts/npm-pack-report.mjs'
+import {
+  isNpmRegistryPropagationError,
+  npmMaintainerNames,
+  npmPackItem,
+  npmViewItem,
+} from '../scripts/npm-pack-report.mjs'
 
 const packed = {
   name: 'cordisx',
@@ -50,5 +55,14 @@ describe('npm maintainer compatibility', () => {
 
   it('ignores incomplete entries', () => {
     expect(npmMaintainerNames([null, {}, 42])).toEqual([])
+  })
+})
+
+describe('npm registry propagation errors', () => {
+  it('retries only missing-version and missing-package responses', () => {
+    expect(isNpmRegistryPropagationError({ commandOutput: 'npm error code ETARGET' })).toBe(true)
+    expect(isNpmRegistryPropagationError({ commandOutput: 'npm error code E404' })).toBe(true)
+    expect(isNpmRegistryPropagationError({ commandOutput: 'npm error code E401' })).toBe(false)
+    expect(isNpmRegistryPropagationError(new Error('ETARGET'))).toBe(false)
   })
 })

@@ -3,9 +3,10 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { npmViewItem } from './npm-pack-report.mjs'
+import { isNpmRegistryPropagationError, npmViewItem } from './npm-pack-report.mjs'
 
 const execute = promisify(execFile)
+let npmCache
 
 function argument(name) {
   const index = process.argv.indexOf(name)
@@ -23,14 +24,34 @@ async function run(file, args, options = {}) {
   try {
     return await execute(file, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env, npm_config_registry: registry },
+      env: {
+        ...process.env,
+        ...options.env,
+        npm_config_cache: npmCache,
+        npm_config_prefer_online: 'true',
+        npm_config_registry: registry,
+      },
       encoding: 'utf8',
       maxBuffer: 20 * 1024 * 1024,
     })
   } catch (error) {
     const stdout = typeof error.stdout === 'string' ? error.stdout : ''
     const stderr = typeof error.stderr === 'string' ? error.stderr : ''
-    throw new Error(`${file} ${args.join(' ')} failed\n${stdout}${stderr}`, { cause: error })
+    const wrapped = new Error(`${file} ${args.join(' ')} failed\n${stdout}${stderr}`, { cause: error })
+    wrapped.commandOutput = `${stdout}${stderr}`
+    throw wrapped
+  }
+}
+
+async function retryRegistryPropagation(label, operation) {
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      if (!isNpmRegistryPropagationError(error) || attempt === 12) throw error
+      console.log(`[registry] ${label} is still propagating (attempt ${attempt}/12)`)
+      await new Promise(resolve => setTimeout(resolve, 5000))
+    }
   }
 }
 
@@ -69,20 +90,36 @@ async function verifyGeneratedProject(project) {
 
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-registry-beta-'))
 try {
+  npmCache = path.join(temporaryRoot, 'npm-cache')
   const runner = path.join(temporaryRoot, 'runner')
   const cordisxHome = path.join(temporaryRoot, 'cordisx-home')
   await mkdir(runner, { recursive: true })
   await writeFile(path.join(runner, 'package.json'), `${JSON.stringify({ private: true }, null, 2)}\n`, 'utf8')
-  await run('npm', [
-    'install',
-    '--ignore-scripts',
-    '--no-audit',
-    '--no-fund',
-    '--loglevel=error',
-    'cordisx@beta',
-    'create-cordisx-plugin@beta',
-    `--registry=${registry}`,
-  ], { cwd: runner })
+  await retryRegistryPropagation('beta package metadata', async () => {
+    for (const packageName of ['cordisx', 'create-cordisx-plugin']) {
+      const tags = await npmViewJson([packageName, 'dist-tags'], runner)
+      if (tags.latest !== '0.0.0') throw new Error(`${packageName} latest must remain 0.0.0`)
+      if (tags.beta !== version) {
+        const error = new Error(`${packageName} beta dist-tag is still propagating`)
+        error.commandOutput = 'ETARGET'
+        throw error
+      }
+    }
+  })
+  await retryRegistryPropagation('beta package installation', async () => {
+    await rm(path.join(runner, 'node_modules'), { recursive: true, force: true })
+    await rm(path.join(runner, 'package-lock.json'), { force: true })
+    await run('npm', [
+      'install',
+      '--ignore-scripts',
+      '--no-audit',
+      '--no-fund',
+      '--loglevel=error',
+      'cordisx@beta',
+      'create-cordisx-plugin@beta',
+      `--registry=${registry}`,
+    ], { cwd: runner })
+  })
   await verifyInstalledPackage(runner, 'cordisx')
   await verifyInstalledPackage(runner, 'create-cordisx-plugin')
 
