@@ -12,6 +12,8 @@ const BASE_STYLE_ID = 'cordisx-base-style'
 
 /** Plugin id inherited by a runtime-created child Context. */
 export const CORDISX_PLUGIN_ID = Symbol('cordisx.pluginId')
+/** Launcher-owned source inherited by the same runtime-created child Context. */
+export const CORDISX_PLUGIN_SOURCE = Symbol('cordisx.pluginSource')
 
 function installBaseStyles(document: Document): () => void {
   document.getElementById(BASE_STYLE_ID)?.remove()

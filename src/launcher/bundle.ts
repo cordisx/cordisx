@@ -1,6 +1,6 @@
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import type { CordisXConfig } from './config.js'
 
@@ -57,7 +57,7 @@ export async function buildRendererBundle(config: CordisXConfig): Promise<string
     const moduleField = index === undefined ? '' : `, module: plugin${index}`
     const readme = readmes[pluginIndex]
     const readmeField = readme === undefined ? '' : `, readme: ${JSON.stringify(readme)}`
-    return `{ id: ${JSON.stringify(plugin.id)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}${readmeField}${moduleField} }`
+    return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}${readmeField}${moduleField} }`
   }).join(',')}]`
   const metadata = `{ version: ${JSON.stringify(version)} }`
   const source = `${imports.join('\n')}\nvoid installCordisX(${composition}, ${metadata}).catch(error => console.error('[cordisx] boot failed', error))\n`

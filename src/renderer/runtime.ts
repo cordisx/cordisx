@@ -1,5 +1,12 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
-import type { CordisXBrowserPlugin, CordisXPluginModule } from '../contracts.js'
+import type {
+  CordisXBrowserPlugin,
+  CordisXPermissionPolicy,
+  CordisXPlatformCapability,
+  CordisXPluginIdentity,
+  CordisXPluginManifestV1,
+  CordisXPluginModule,
+} from '../contracts.js'
 import {
   installCordisXManager,
   type ManagerModel,
@@ -8,7 +15,16 @@ import {
   type ManagerSnapshot,
 } from './manager.js'
 import { CordisXI18nService } from './i18n.js'
-import { CORDISX_PLUGIN_ID, CordisXSlotService } from './service.js'
+import {
+  BrowserPermissionPolicyStore,
+  BrowserPermissionPrompt,
+  CordisXPlatformService,
+  PermissionBroker,
+  UnavailablePlatformAdapter,
+  normalizePluginManifest,
+  type PlatformPermissionSnapshot,
+} from './platform.js'
+import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE, CordisXSlotService } from './service.js'
 import type { SlotRegistrationSnapshot } from './slots.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
@@ -19,9 +35,13 @@ interface CordisXRuntimeMetadata {
 
 interface PluginController {
   readonly item: CordisXBrowserPlugin
+  readonly identity: CordisXPluginIdentity
+  readonly manifest: CordisXPluginManifestV1
+  unregisterPermissions?: () => void
   fiber?: Fiber
   status: ManagerPluginStatus
   error?: string
+  blockedReason?: string
 }
 
 interface CordisXRuntimeHandle extends ManagerModel {
@@ -57,6 +77,26 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function createController(item: CordisXBrowserPlugin): PluginController {
+  const identity = Object.freeze({ source: item.source, id: item.id })
+  try {
+    return {
+      item,
+      identity,
+      manifest: normalizePluginManifest(item.module?.manifest, item.id),
+      status: !item.enabled || item.module === undefined ? 'configured-disabled' : 'active',
+    }
+  } catch (error) {
+    return {
+      item,
+      identity,
+      manifest: normalizePluginManifest(undefined, item.id),
+      status: 'failed',
+      error: errorMessage(error),
+    }
+  }
+}
+
 function readBlockedPlugins(): Set<string> {
   try {
     const value = localStorage.getItem(BLOCKED_PLUGINS_KEY)
@@ -85,20 +125,28 @@ async function start(
 
   const ctx = new Context()
   const blockedPlugins = readBlockedPlugins()
-  const controllers: PluginController[] = plugins.map(item => ({
-    item,
-    status: !item.enabled || item.module === undefined
-      ? 'configured-disabled'
-      : blockedPlugins.has(item.id) ? 'blocked' : 'active',
-  }))
+  const adapter = new UnavailablePlatformAdapter()
+  const broker = new PermissionBroker(new BrowserPermissionPolicyStore(), new BrowserPermissionPrompt())
+  const controllers: PluginController[] = plugins.map(createController)
+  for (const controller of controllers) {
+    controller.unregisterPermissions = broker.register(controller.identity, controller.manifest)
+    if (controller.status === 'active' && blockedPlugins.has(controller.item.id)) controller.status = 'blocked'
+    const denied = broker.requiredDenied(controller.identity)
+    if (controller.status === 'active' && denied.length > 0) {
+      controller.status = 'permission-blocked'
+      controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+    }
+  }
   const listeners = new Set<() => void>()
   const knownRegistrations = new Map<string, readonly SlotRegistrationSnapshot[]>()
   let slotService: CordisXSlotService | undefined
   let i18nService: CordisXI18nService | undefined
   let i18nFiber: Fiber | undefined
+  let platformFiber: Fiber | undefined
   let slotFiber: Fiber | undefined
   let disposeManager: (() => void) | undefined
   let disposeI18nSubscription: (() => void) | undefined
+  let disposePermissionSubscription: (() => void) | undefined
   let operation = Promise.resolve()
   let disposed = false
 
@@ -114,13 +162,23 @@ async function start(
   const mountPlugin = async (controller: PluginController): Promise<void> => {
     const module = controller.item.module
     if (module === undefined) throw new Error(`plugin ${controller.item.id} is not bundled because it is disabled in configuration`)
-    const pluginContext = ctx.extend({ [CORDISX_PLUGIN_ID]: controller.item.id })
+    const denied = broker.requiredDenied(controller.identity)
+    if (denied.length > 0) {
+      controller.status = 'permission-blocked'
+      controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+      return
+    }
+    const pluginContext = ctx.extend({
+      [CORDISX_PLUGIN_ID]: controller.item.id,
+      [CORDISX_PLUGIN_SOURCE]: controller.item.source,
+    })
     const fiber = pluginContext.plugin(pluginFromModule(module), controller.item.config)
     controller.fiber = fiber
     try {
       await fiber
       controller.status = 'active'
       delete controller.error
+      delete controller.blockedReason
       rememberRegistrations(controller.item.id)
     } catch (error) {
       controller.status = 'failed'
@@ -141,17 +199,35 @@ async function start(
       version: metadata.version,
       plugins: controllers.map((controller): ManagerPluginSnapshot => ({
         id: controller.item.id,
-        name: controller.item.module?.name ?? controller.item.id,
+        source: controller.item.source,
+        name: controller.manifest.name ?? controller.item.module?.name ?? controller.item.id,
         inject: pluginInject(controller.item.module),
         config: controller.item.config,
         ...(controller.item.readme === undefined ? {} : { readme: controller.item.readme }),
         status: controller.status,
         ...(controller.error === undefined ? {} : { error: controller.error }),
+        ...(controller.blockedReason === undefined ? {} : { blockedReason: controller.blockedReason }),
       })),
       registrations: [...liveRegistrations, ...inactiveRegistrations],
       localization: i18nService?.getSnapshot() ?? { locale: 'en', direction: 'ltr', version: 0 },
       localeCatalogs: i18nService?.catalogs() ?? [],
       localizationDiagnostics: i18nService?.diagnostics() ?? [],
+      platform: adapter.status(),
+      permissions: broker.snapshots().map((permission: PlatformPermissionSnapshot) => ({
+        identity: permission.identity,
+        capability: permission.capability,
+        required: permission.required,
+        reason: permission.reason,
+        reasonText: i18nService?.resolveFor(permission.identity.id, permission.reason).text
+          ?? permission.reason.fallback
+          ?? `[[${permission.identity.id}:${permission.reason.key}]]`,
+        scope: permission.scope,
+        policy: permission.policy,
+        ...(permission.lastUsedAt === undefined ? {} : { lastUsedAt: permission.lastUsedAt }),
+        ...(permission.lastDeniedAt === undefined ? {} : { lastDeniedAt: permission.lastDeniedAt }),
+        denialCount: permission.denialCount,
+        ...(permission.blockedReason === undefined ? {} : { blockedReason: permission.blockedReason }),
+      })),
     }
   }
 
@@ -179,6 +255,13 @@ async function start(
       if (controller.status === 'active') return
       blockedPlugins.delete(id)
       writeBlockedPlugins(blockedPlugins)
+      const denied = broker.requiredDenied(controller.identity)
+      if (denied.length > 0) {
+        controller.status = 'permission-blocked'
+        controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+        notify()
+        return
+      }
       try {
         await mountPlugin(controller)
       } catch (error) {
@@ -186,6 +269,42 @@ async function start(
         writeBlockedPlugins(blockedPlugins)
         notify()
         throw error
+      }
+      notify()
+    })
+    operation = task.catch(() => {})
+    return task
+  }
+
+  const setPermissionPolicy = (
+    id: string,
+    capability: CordisXPlatformCapability,
+    policy: CordisXPermissionPolicy,
+  ): Promise<void> => {
+    const task = operation.then(async () => {
+      if (disposed) throw new Error('CordisX runtime is disposed')
+      const controller = controllers.find(item => item.item.id === id)
+      if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+      broker.setPolicy(controller.identity, capability, policy)
+      const denied = broker.requiredDenied(controller.identity)
+      if (denied.length > 0) {
+        rememberRegistrations(id)
+        await controller.fiber?.dispose()
+        delete controller.fiber
+        controller.status = 'permission-blocked'
+        controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+        notify()
+        return
+      }
+      if (controller.status === 'permission-blocked') {
+        delete controller.blockedReason
+        if (blockedPlugins.has(id)) {
+          controller.status = 'blocked'
+        } else if (controller.item.enabled && controller.item.module !== undefined) {
+          await mountPlugin(controller)
+        } else {
+          controller.status = 'configured-disabled'
+        }
       }
       notify()
     })
@@ -205,6 +324,8 @@ async function start(
     disposeManager = undefined
     disposeI18nSubscription?.()
     disposeI18nSubscription = undefined
+    disposePermissionSubscription?.()
+    disposePermissionSubscription = undefined
     await operation
     for (const controller of [...controllers].reverse()) {
       await controller.fiber?.dispose()
@@ -212,9 +333,13 @@ async function start(
     }
     await slotFiber?.dispose()
     slotFiber = undefined
+    await platformFiber?.dispose()
+    platformFiber = undefined
     await i18nFiber?.dispose()
     i18nFiber = undefined
     listeners.clear()
+    for (const controller of controllers) controller.unregisterPermissions?.()
+    broker.dispose()
     if (globalThis.__cordisxRuntime === handle) globalThis.__cordisxRuntime = undefined
     document.documentElement.removeAttribute('data-cordisx-ready')
   }
@@ -224,6 +349,7 @@ async function start(
     pluginIds: plugins.map(plugin => plugin.id),
     snapshot,
     setPluginBlocked,
+    setPermissionPolicy,
     subscribe,
     dispose,
   }
@@ -233,6 +359,9 @@ async function start(
     await i18nFiber
     i18nService = ctx.i18n as CordisXI18nService
     disposeI18nSubscription = i18nService.subscribeInternal(notify)
+    disposePermissionSubscription = broker.subscribe(notify)
+    platformFiber = ctx.plugin(CordisXPlatformService, { adapter, broker })
+    await platformFiber
     slotFiber = ctx.plugin(CordisXSlotService)
     await slotFiber
     slotService = ctx.slots as CordisXSlotService

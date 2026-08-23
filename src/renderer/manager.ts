@@ -1,7 +1,13 @@
 import {
   CORDISX_SLOT_NAMES,
+  type CordisXCapabilityScope,
   type CordisXLocalizationDiagnostic,
   type CordisXLocalizationSnapshot,
+  type CordisXPermissionPolicy,
+  type CordisXPlatformAdapterStatus,
+  type CordisXPlatformCapability,
+  type CordisXPluginIdentity,
+  type CordisXLocalizedText,
 } from '../contracts.js'
 import type { LocaleCatalogSnapshot } from './i18n.js'
 import {
@@ -16,16 +22,32 @@ import {
 import { renderSafeMarkdown } from './markdown.js'
 import { resolveManagerTriggerTarget, type SlotRegistrationSnapshot } from './slots.js'
 
-export type ManagerPluginStatus = 'active' | 'blocked' | 'configured-disabled' | 'failed'
+export type ManagerPluginStatus = 'active' | 'blocked' | 'permission-blocked' | 'configured-disabled' | 'failed'
 
 export interface ManagerPluginSnapshot {
   readonly id: string
+  readonly source: string
   readonly name: string
   readonly inject: readonly string[]
   readonly config: unknown
   readonly readme?: string
   readonly status: ManagerPluginStatus
   readonly error?: string
+  readonly blockedReason?: string
+}
+
+export interface ManagerPermissionSnapshot {
+  readonly identity: CordisXPluginIdentity
+  readonly capability: CordisXPlatformCapability
+  readonly required: boolean
+  readonly reason: CordisXLocalizedText
+  readonly reasonText: string
+  readonly scope: CordisXCapabilityScope
+  readonly policy: CordisXPermissionPolicy
+  readonly lastUsedAt?: string
+  readonly lastDeniedAt?: string
+  readonly denialCount: number
+  readonly blockedReason?: string
 }
 
 export interface ManagerSnapshot {
@@ -35,16 +57,19 @@ export interface ManagerSnapshot {
   readonly localization: CordisXLocalizationSnapshot
   readonly localeCatalogs: readonly LocaleCatalogSnapshot[]
   readonly localizationDiagnostics: readonly CordisXLocalizationDiagnostic[]
+  readonly platform: CordisXPlatformAdapterStatus
+  readonly permissions: readonly ManagerPermissionSnapshot[]
 }
 
 export interface ManagerModel {
   snapshot(): ManagerSnapshot
   setPluginBlocked(id: string, blocked: boolean): Promise<void>
+  setPermissionPolicy(id: string, capability: CordisXPlatformCapability, policy: CordisXPermissionPolicy): Promise<void>
   subscribe(listener: () => void): () => void
 }
 
 type ManagerTab = 'about' | 'slots' | 'plugins' | 'marketplace' | 'settings'
-type PluginDetailTab = 'readme' | 'config' | 'runtime' | 'slots'
+type PluginDetailTab = 'readme' | 'config' | 'permissions' | 'runtime' | 'slots'
 type SettingsTab = 'marketplace' | 'runtime' | 'launcher'
 type SecondaryView =
   | { readonly kind: 'plugin'; readonly id: string }
@@ -306,6 +331,9 @@ const MANAGER_STYLES = `
   .cxm-chevron { flex: none; color: #626c7d; font-size: 18px; }
   .cxm-detail { min-width: 0; padding: 18px; }
   .cxm-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .cxm-permission-policy { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 12px; }
+  .cxm-permission-policy .cxm-field-label { white-space: nowrap; }
+  .cxm-permission-policy .cxm-source-input { width: 100%; min-width: 0; }
   .cxm-detail h3 { margin: 0; color: #fff; font-size: 17px; }
   .cxm-detail-id { margin-top: 3px; color: #747f91; font: 10px/1.3 ui-monospace, monospace; }
   .cxm-detail-description { max-width: 680px; margin: 14px 0 0; color: #a7afbe; font-size: 12px; }
@@ -400,6 +428,7 @@ function createLocalTabs(
 function statusLabel(status: ManagerPluginStatus): string {
   if (status === 'active') return '运行中'
   if (status === 'blocked') return '已屏蔽'
+  if (status === 'permission-blocked') return '权限阻止'
   if (status === 'failed') return '启动失败'
   return '配置禁用'
 }
@@ -767,6 +796,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     content.append(createLocalTabs(document, [
       { id: 'readme', label: 'README' },
       { id: 'config', label: '配置管理' },
+      { id: 'permissions', label: '权限' },
       { id: 'runtime', label: '运行状态' },
       { id: 'slots', label: '扩展点位' },
     ], pluginDetailTab, 'data-plugin-detail-tab', (tab) => {
@@ -794,6 +824,69 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return
     }
 
+    if (pluginDetailTab === 'permissions') {
+      const detail = create(document, 'section', 'cxm-detail')
+      detail.append(create(document, 'h3', undefined, 'Platform 权限'))
+      const permissions = snapshot.permissions.filter(item => item.identity.source === plugin.source && item.identity.id === plugin.id)
+      if (permissions.length === 0) {
+        detail.append(create(document, 'div', 'cxm-empty', '该插件没有声明 Platform capability'))
+      }
+      for (const permission of permissions) {
+        const card = create(document, 'section', 'cxm-slot-card')
+        const head = create(document, 'div', 'cxm-slot-head')
+        head.append(
+          create(document, 'code', 'cxm-slot-name', permission.capability),
+          create(document, 'span', 'cxm-count', permission.required ? '必需' : '可选'),
+        )
+        const reason = create(document, 'div', 'cxm-copy', permission.reasonText)
+        const scope = create(document, 'pre', 'cxm-code', formatConfig(permission.scope))
+        const policyRow = create(document, 'div', 'cxm-permission-policy')
+        const policyLabel = create(document, 'label', 'cxm-field-label', '用户策略')
+        const policy = create(document, 'select', 'cxm-source-input')
+        policy.dataset.permissionCapability = permission.capability
+        for (const value of ['ask', 'deny', 'allow'] as const) {
+          const option = document.createElement('option')
+          option.value = value
+          option.textContent = value
+          option.selected = permission.policy === value
+          policy.append(option)
+        }
+        policy.addEventListener('change', async () => {
+          operationError = undefined
+          policy.disabled = true
+          try {
+            await model.setPermissionPolicy(plugin.id, permission.capability, policy.value as CordisXPermissionPolicy)
+          } catch (error) {
+            operationError = error instanceof Error ? error.message : String(error)
+          } finally {
+            renderContent()
+          }
+        })
+        policyRow.append(policyLabel, policy)
+        const recent = create(
+          document,
+          'div',
+          'cxm-copy',
+          `最近使用：${permission.lastUsedAt ?? '无'} · 最近拒绝：${permission.lastDeniedAt ?? '无'} · 拒绝次数：${permission.denialCount}`,
+        )
+        card.append(head, reason, scope, policyRow, recent)
+        if (permission.blockedReason !== undefined) card.append(create(document, 'div', 'cxm-error', permission.blockedReason))
+        detail.append(card)
+      }
+      if (operationError !== undefined) detail.append(create(document, 'div', 'cxm-error', operationError))
+      const adapter = snapshot.platform
+      detail.append(create(
+        document,
+        'div',
+        'cxm-notice',
+        `当前连接：${adapter.hostName} · ${adapter.mode} · 二次连接 ${adapter.secondConnectionCreated ? '是' : '否'} · 原始 bridge 暴露 ${adapter.rawBridgeExposed ? '是' : '否'}`,
+      ))
+      for (const diagnostic of adapter.diagnostics) detail.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
+      detail.append(create(document, 'div', 'cxm-notice', '这些策略只约束通过 CordisX Platform API 的调用；当前 trusted renderer code 不是安全沙箱。'))
+      content.append(detail)
+      return
+    }
+
     const pluginRegistrations = snapshot.registrations.filter(item => item.pluginId === plugin.id)
     if (pluginDetailTab === 'runtime') {
       const detail = create(document, 'section', 'cxm-detail')
@@ -807,8 +900,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         ? '处理中…'
         : plugin.status === 'configured-disabled'
           ? '配置中已禁用'
+          : plugin.status === 'permission-blocked'
+            ? '由必需权限阻止'
           : blocked ? '恢复插件' : '屏蔽插件'
-      action.disabled = busyPluginId !== undefined || plugin.status === 'configured-disabled'
+      action.disabled = busyPluginId !== undefined || plugin.status === 'configured-disabled' || plugin.status === 'permission-blocked'
       if (!blocked) action.dataset.tone = 'danger'
       action.addEventListener('click', async () => {
         busyPluginId = plugin.id
@@ -828,9 +923,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const fields = create(document, 'div', 'cxm-detail-grid')
       for (const [label, value] of [
         ['状态', statusLabel(plugin.status)],
+        ['来源', plugin.source],
         ['注入服务', plugin.inject.join(', ') || '无'],
         ['活跃贡献', String(pluginRegistrations.filter(item => item.active).length)],
-        ['元数据', '当前来自模块导出；manifest 尚未实现'],
+        ['元数据', '模块 manifest + launcher 绑定身份'],
       ]) {
         const field = create(document, 'div', 'cxm-field')
         field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
@@ -838,6 +934,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       }
       detail.append(fields)
       if (plugin.error !== undefined) detail.append(create(document, 'div', 'cxm-error', plugin.error))
+      if (plugin.blockedReason !== undefined) detail.append(create(document, 'div', 'cxm-error', plugin.blockedReason))
       if (operationError !== undefined) detail.append(create(document, 'div', 'cxm-error', operationError))
       const localeCatalogs = snapshot.localeCatalogs.filter(item => item.owner === plugin.id)
       const localeDiagnostics = snapshot.localizationDiagnostics.filter(item => item.owner === plugin.id)

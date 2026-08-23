@@ -1,4 +1,7 @@
 import type { Context, Disposable, Effect } from '@deepseek-ai/cordis'
+import type { CordisXPluginManifestV1 } from './platform-contracts.js'
+
+export * from './platform-contracts.js'
 
 /** Scalar parameter values accepted by LocalizedText and the protocol. */
 export type CordisXMessageParam = string | number | boolean | null
@@ -152,6 +155,7 @@ declare module '@deepseek-ai/cordis' {
 /** Cordis plugin module after browser bundling. */
 export interface CordisXPluginModule {
   readonly name?: string
+  readonly manifest?: CordisXPluginManifestV1
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly apply?: (ctx: Context, config: unknown) => unknown
   readonly default?: unknown
@@ -160,6 +164,8 @@ export interface CordisXPluginModule {
 /** Plugin composition delivered from the launcher to the renderer. */
 export interface CordisXBrowserPlugin {
   readonly id: string
+  /** Launcher-owned canonical source; module code cannot replace it. */
+  readonly source: string
   readonly enabled: boolean
   readonly module?: CordisXPluginModule
   readonly config: unknown
