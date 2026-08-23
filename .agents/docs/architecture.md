@@ -73,6 +73,91 @@ The first slot contract is deliberately small:
 
 The host may improve selectors without requiring plugin changes. Plugins that query Codex DOM directly opt out of that compatibility boundary.
 
+### Built-in manager plane
+
+The local plugin manager is host chrome, not a plugin contribution and not a
+new public slot. Its trigger is mounted beside Codex's workspace switcher by a
+private adapter probe, and a mutation observer remounts it when the host React
+tree replaces that row. The manager and every listener, observer, and DOM node
+it creates are disposed with the CordisX renderer generation.
+
+The manager reads a runtime-owned snapshot rather than scraping plugin UI. The
+snapshot joins three internal sources:
+
+- build metadata supplies the CordisX package version;
+- the runtime tracks each bundled plugin module, Cordis fiber, configuration,
+  and active or blocked state;
+- the slot registry attributes registrations to the calling plugin fiber and
+  reports their semantic slot, entry id, priority, order, and mounted state.
+
+Blocking a plugin disposes only that plugin's Cordis fiber, which reverses its
+slot registrations and effects. Restoring it creates a fresh fiber from the
+already bundled trusted module. The blocked-id set may be retained in renderer
+storage for the current Chromium profile, but this is activation state rather
+than package removal: module top-level code is already in the trusted bundle,
+and the manager does not edit `cordisx.config.json`, install packages, enforce
+permissions, or create a security boundary.
+
+The initial manager has three navigation views:
+
+1. CordisX runtime and version information;
+2. semantic extension points with their currently active plugin contributions;
+3. searchable plugin inventory, runtime blocking/restoration, and details
+   derived from module/configuration data available today.
+
+Plugin inventory is a list page rather than a permanent list/detail split.
+Selecting a plugin opens a second-level detail page inside the manager; its
+header provides an icon-only back action and the breadcrumb `插件 / <name>`.
+Every manager header reserves one fixed-size leading slot: a primary page puts
+its page glyph in that slot, while a second- or third-level page replaces the
+glyph with the back action. Both controls share the same geometry, so changing
+levels never moves the title horizontally. The back action has an accessible
+name without visible text. Returning preserves the list search query. The same
+list-to-detail navigation pattern is used by marketplace discovery so dense
+details do not crowd catalog results.
+
+Installed plugin detail is local tab navigation inside that second-level page,
+not another semantic extension point. Its default `README` tab renders the
+plugin's adjacent `README.md`; `配置管理` shows the configuration available to
+the current bundle; `运行状态` owns activation state, injected services,
+failures, and block/restore actions; and `扩展点位` lists attributed slot
+registrations and mount state. The launcher reads the adjacent README while
+composing the browser bundle so the renderer does not gain filesystem access.
+The manager renders a deliberately limited Markdown subset by creating DOM
+nodes and text nodes only: raw HTML is never interpreted, and remote media or
+script execution is not supported. A missing README produces an explicit empty
+state rather than synthesized package documentation.
+
+Marketplace discovery adds two manager views without adding execution
+authority: a searchable catalog assembled from validated feeds, and a general
+CordisX settings view whose first editable section owns the ordered list of
+marketplace JSON URLs and profile-local block state. The settings page is also
+local tab navigation: `插件商店` owns feed URLs, `运行状态` explains the
+profile-local activation state, and `启动器` exposes the current read-only
+`cordisx.config.json` boundary. Launcher-owned composition fields remain visibly
+file-managed until generation-aware configuration writes exist. Feed aggregation keys
+plugins by canonical `(source, id)` identity; the first configured feed wins a
+duplicate. Source settings and blocked plugin ids are separate profile-local
+state. Catalog entries can link to their public source but cannot install or
+activate code in this stage.
+
+Codex's `app://` renderer rejects direct arbitrary network reads, including the
+official raw GitHub feed. The launcher therefore owns a narrow, private CDP
+binding for marketplace JSON retrieval. It accepts only configured public
+HTTPS URLs, resolves and rejects non-public network addresses, follows a small
+number of individually revalidated HTTPS redirects, applies timeout/response
+size/concurrency limits, and returns text to the manager for protocol
+validation. The binding is reserved host infrastructure rather than a plugin
+API and catalog code is never evaluated. This reserved name is not capability
+enforcement: plugins are still trusted renderer code and can inspect globals,
+so the public-HTTPS, address, redirect, concurrency, timeout, and size limits
+are damage-reduction boundaries rather than isolation from a malicious bundled
+plugin.
+
+Manifest metadata, dependency graphs, compatibility declarations, persisted
+launcher configuration, package installation/update/removal, capabilities,
+signatures, and marketplace operations remain later delivery stages.
+
 ## Trust and security
 
 Version 0.1 uses a trusted-code model. A plugin is bundled into the renderer and can read or modify anything the renderer can access. Cordis provides lifecycle and dependency composition; it is not a security sandbox.
@@ -84,6 +169,10 @@ Before any public marketplace, CordisX needs a separate plugin execution realm, 
 Compatibility is owned by adapter probes rather than a single brittle selector. A resolver tries narrow stable attributes first, then structural fallbacks. If no candidate is found, the slot remains pending and does not modify the page. Plugin mount failures are contained to that contribution and shown in its outlet while other plugins continue.
 
 Adapter releases should record the Codex versions they were tested against. Unknown versions may run in best-effort mode, but the launcher and future manager must present that state distinctly from verified compatibility.
+
+The built-in manager trigger follows the same rule: its workspace-switcher
+probe stays in the host adapter, remains pending when no unique visible target
+exists, and must not make plugins depend on Codex-owned class names.
 
 The version-0.1 bundle and lifecycle were verified in a simulated renderer DOM. The installed 26.818.41509 host can also be exercised through an isolated second process, so live probes no longer require restarting the user's active application.
 

@@ -1,4 +1,9 @@
 import WebSocket from 'ws'
+import { fetchMarketplaceFeed } from './marketplace.js'
+
+const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
+const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
+const MAX_MARKETPLACE_REQUESTS = 4
 
 export interface CdpTarget {
   readonly id: string
@@ -12,6 +17,8 @@ interface CdpResponse {
   readonly id?: number
   readonly result?: Record<string, unknown>
   readonly error?: { readonly code: number; readonly message: string }
+  readonly method?: string
+  readonly params?: Record<string, unknown>
 }
 
 class CdpSession {
@@ -20,10 +27,14 @@ class CdpSession {
     readonly resolve: (value: Record<string, unknown>) => void
     readonly reject: (error: Error) => void
   }>()
+  private readonly eventListeners = new Map<string, Set<(params: Record<string, unknown>) => void>>()
 
   private constructor(private readonly socket: WebSocket) {
     socket.on('message', (data) => {
       const message = JSON.parse(data.toString()) as CdpResponse
+      if (message.method !== undefined) {
+        for (const listener of this.eventListeners.get(message.method) ?? []) listener(message.params ?? {})
+      }
       if (message.id === undefined) return
       const callback = this.pending.get(message.id)
       if (callback === undefined) return
@@ -57,6 +68,16 @@ class CdpSession {
         reject(error)
       })
     })
+  }
+
+  onEvent(method: string, listener: (params: Record<string, unknown>) => void): () => void {
+    const listeners = this.eventListeners.get(method) ?? new Set()
+    listeners.add(listener)
+    this.eventListeners.set(method, listeners)
+    return () => {
+      listeners.delete(listener)
+      if (listeners.size === 0) this.eventListeners.delete(method)
+    }
   }
 
   close(): void {
@@ -108,15 +129,77 @@ export function injectableTargets(targets: readonly CdpTarget[]): CdpTarget[] {
 interface InstalledScript {
   readonly target: CdpTarget
   readonly identifier: string
+  readonly session: CdpSession
+  readonly marketplaceController: AbortController
+  readonly removeBindingListener: () => void
+}
+
+interface MarketplaceBindingRequest {
+  readonly requestId: string
+  readonly url: string
+}
+
+function parseMarketplaceBindingRequest(value: unknown): MarketplaceBindingRequest {
+  if (value === null || typeof value !== 'object') throw new Error('invalid marketplace bridge request')
+  const requestId = (value as { requestId?: unknown }).requestId
+  const url = (value as { url?: unknown }).url
+  if (typeof requestId !== 'string' || !/^[a-z0-9-]{1,96}$/i.test(requestId)) throw new Error('invalid marketplace bridge request id')
+  if (typeof url !== 'string' || url.length === 0 || url.length > 2048) throw new Error('invalid marketplace bridge URL')
+  return { requestId, url }
+}
+
+async function sendMarketplaceBindingResponse(
+  session: CdpSession,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await session.send('Runtime.evaluate', {
+    expression: `void globalThis.${MARKETPLACE_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    allowUnsafeEvalBlockedByCSP: true,
+  })
 }
 
 async function install(target: CdpTarget, source: string): Promise<InstalledScript> {
   const url = target.webSocketDebuggerUrl
   if (url === undefined) throw new Error(`target ${target.id} has no websocket URL`)
   const session = await CdpSession.connect(url)
+  const marketplaceController = new AbortController()
+  let removeBindingListener = (): void => {}
   try {
     await session.send('Runtime.enable')
     await session.send('Page.enable')
+    await session.send('Runtime.addBinding', { name: MARKETPLACE_BINDING })
+    let activeMarketplaceRequests = 0
+    removeBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
+      if (params.name !== MARKETPLACE_BINDING || typeof params.payload !== 'string') return
+      const payload = params.payload
+      void (async () => {
+        let requestId = 'invalid'
+        try {
+          const requestValue = parseMarketplaceBindingRequest(JSON.parse(payload) as unknown)
+          requestId = requestValue.requestId
+          if (activeMarketplaceRequests >= MAX_MARKETPLACE_REQUESTS) throw new Error('too many concurrent marketplace feed requests')
+          activeMarketplaceRequests += 1
+          try {
+            const response = await fetchMarketplaceFeed(requestValue.url, marketplaceController.signal)
+            await sendMarketplaceBindingResponse(session, {
+              requestId,
+              ok: response.status >= 200 && response.status < 300,
+              status: response.status,
+              url: response.url,
+              text: response.text,
+            })
+          } finally {
+            activeMarketplaceRequests -= 1
+          }
+        } catch (error) {
+          await sendMarketplaceBindingResponse(session, {
+            requestId,
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          }).catch(() => undefined)
+        }
+      })()
+    })
     const added = await session.send('Page.addScriptToEvaluateOnNewDocument', { source })
     const identifier = added.identifier
     if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
@@ -124,24 +207,27 @@ async function install(target: CdpTarget, source: string): Promise<InstalledScri
       expression: source,
       allowUnsafeEvalBlockedByCSP: true,
     })
-    return { target, identifier }
-  } finally {
+    return { target, identifier, session, marketplaceController, removeBindingListener }
+  } catch (error) {
+    marketplaceController.abort()
+    removeBindingListener()
     session.close()
+    throw error
   }
 }
 
 async function uninstall(installed: InstalledScript): Promise<void> {
-  const url = installed.target.webSocketDebuggerUrl
-  if (url === undefined) return
-  const session = await CdpSession.connect(url)
+  installed.marketplaceController.abort()
+  installed.removeBindingListener()
   try {
-    await session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier })
-    await session.send('Runtime.evaluate', {
+    await installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }).catch(() => undefined)
+    await installed.session.send('Runtime.evaluate', {
       expression: 'void globalThis.__cordisxRuntime?.dispose?.()',
       allowUnsafeEvalBlockedByCSP: true,
-    })
+    }).catch(() => undefined)
+    await installed.session.send('Runtime.removeBinding', { name: MARKETPLACE_BINDING }).catch(() => undefined)
   } finally {
-    session.close()
+    installed.session.close()
   }
 }
 
@@ -160,7 +246,11 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
       try {
         const targets = injectableTargets(await listTargets(options.port))
         const live = new Set(targets.map(target => target.id))
-        for (const id of installed.keys()) if (!live.has(id)) installed.delete(id)
+        for (const [id, record] of installed) {
+          if (live.has(id)) continue
+          await uninstall(record).catch(() => undefined)
+          installed.delete(id)
+        }
         for (const target of targets) {
           const current = installed.get(target.id)
           if (current?.target.webSocketDebuggerUrl === target.webSocketDebuggerUrl) continue

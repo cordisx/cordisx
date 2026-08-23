@@ -19,9 +19,21 @@ interface MountedContribution {
 
 interface ContributionRecord {
   readonly sequence: number
+  readonly pluginId: string
   readonly options: CordisXSlotOptions
   readonly component: CordisXSlotComponent
   mounted: MountedContribution | undefined
+}
+
+/** Read-only manager view of one registered semantic-slot contribution. */
+export interface SlotRegistrationSnapshot {
+  readonly pluginId: string
+  readonly slot: CordisXSlotName
+  readonly id: string
+  readonly order: number
+  readonly priority: number
+  readonly active: boolean
+  readonly mounted: boolean
 }
 
 interface SlotState {
@@ -80,6 +92,16 @@ export function createDefaultSlotResolvers(): Record<CordisXSlotName, SlotResolv
   }
 }
 
+/** Private host-adapter probe for the built-in manager trigger. */
+export function resolveManagerTriggerTarget(document: Document): HTMLElement | undefined {
+  const candidates = document.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]')
+  for (const candidate of candidates) {
+    if (!visible(candidate)) continue
+    if (candidate.textContent?.trim() !== 'Codex') continue
+    return candidate
+  }
+}
+
 function sameTarget(left: ResolvedSlotTarget | undefined, right: ResolvedSlotTarget): boolean {
   return left?.anchor === right.anchor && left.placement === right.placement
 }
@@ -113,7 +135,7 @@ export class DomSlotRegistry {
   }
 
   /** Register a DSH-style list entry and return its idempotent disposer. */
-  register(options: CordisXSlotOptions, component: CordisXSlotComponent): () => void {
+  register(options: CordisXSlotOptions, component: CordisXSlotComponent, pluginId = 'unknown'): () => void {
     if (this.disposed) throw new Error('CordisX slot registry is disposed')
     if (!/^[a-z0-9][a-z0-9._-]*$/i.test(options.id)) {
       throw new Error(`invalid CordisX slot entry id: ${options.id}`)
@@ -128,6 +150,7 @@ export class DomSlotRegistry {
     }
     this.contributions.set(key, {
       sequence: this.nextSequence++,
+      pluginId,
       options,
       component,
       mounted: undefined,
@@ -144,6 +167,25 @@ export class DomSlotRegistry {
       this.contributions.delete(key)
       this.reconcileSlot(options.name)
     }
+  }
+
+  /** Snapshot registration ownership without exposing mutable registry state. */
+  snapshot(): readonly SlotRegistrationSnapshot[] {
+    const active = new Set<ContributionRecord>()
+    for (const slot of Object.keys(this.resolvers) as CordisXSlotName[]) {
+      for (const record of this.recordsFor(slot)) active.add(record)
+    }
+    return [...this.contributions.values()]
+      .sort((left, right) => left.sequence - right.sequence)
+      .map(record => ({
+        pluginId: record.pluginId,
+        slot: record.options.name,
+        id: record.options.id,
+        order: record.options.order ?? 0,
+        priority: record.options.priority ?? 0,
+        active: active.has(record),
+        mounted: record.mounted !== undefined,
+      }))
   }
 
   /** Re-probe every semantic anchor. Useful for diagnostics and tests. */

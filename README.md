@@ -47,6 +47,7 @@ npm run dev -- --config cordisx.config.json --system
 
 ```bash
 npm run smoke -- --port <printed-port> --screenshot artifacts/live-smoke.png
+npm run smoke -- --port <printed-port> --manager-screenshot artifacts/manager.png
 ```
 
 `--system` 模式下请先退出普通 Codex/ChatGPT 实例，避免应用把第二次启动转交给未开启 CDP 的旧进程。
@@ -62,7 +63,19 @@ npm run dev -- --executable /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
 
 退出 CordisX 启动器时，它会尝试移除新页面注入脚本，并卸载当前页面中的 Cordis 插件。它不会修改 Codex 的登录信息、配置文件或应用包。
 
+## 内建管理器
+
+CordisX 会在侧栏 `Codex` 工作区下拉按钮右侧挂载一个管理入口。弹窗左侧包含“关于 CordisX”“扩展点”“插件”“插件商店”和“配置”五个视图。每个一级页标题都有固定尺寸的页面图标；进入二级页时，同一位置替换成只有图标的返回按钮，因此标题不会随页面切换横向跳动。已安装插件页只展示可搜索列表；点击插件进入 `插件 / <name>` 二级详情页，返回时保留搜索。插件商店复用同样的列表到详情导航。
+
+已安装插件详情默认安全渲染插件入口同目录的 `README.md`，并提供“配置管理”“运行状态”“扩展点位”tabs。README 由 launcher 在 bundle composition 时读取，renderer 只接收文本元数据；渲染器不解释原始 HTML，也不加载 README 里的远程媒体。“配置”是通用 CordisX 配置入口，按“插件商店”“运行状态”“启动器”拆分 tabs。
+
+配置页首版管理 profile 本地的商店来源顺序和插件屏蔽状态，并明确展示仍由 `cordisx.config.json` 托管的启动器边界。商店来源支持多个 HTTPS JSON feed；目录聚合以 canonical `source` 与小写 `id` 的 tuple 作为插件唯一性，相同插件出现在多个 feed 时靠前来源获胜。这个阶段只校验和展示元数据、链接到公开源码，不下载、安装、更新或执行商店插件。
+
+屏蔽会销毁对应插件的 Cordis fiber，并把 blocked id 保存在当前 Chromium profile；恢复会从已打包模块创建新 fiber。配置文件中原本禁用的插件不会进入 bundle，因此管理器只能显示它，不能在 renderer 内启用。当前操作不是卸载，不会修改 `cordisx.config.json`，也不能阻止可信 bundle 中的模块顶层代码执行。
+
 ## 插件示例
+
+默认配置加载 `plugins/slot-showcase`，会同时展示五个语义 slot；顶部的 `CX Demo` 按钮可开关页面级状态面板。`plugins/hello-toolbar` 保留为只包含一个按钮和浮层的最小示例。
 
 插件是普通 Cordis object plugin。与 DSH 一样，`inject = ['slots']` 声明 slot service 依赖，`slots.inject()` 等待宿主声明，`slots.register()` 把注册挂到当前插件 fiber 的生命周期上：
 
@@ -99,10 +112,10 @@ CordisX 当前五个宿主点位都是 root-scoped list slot，因此支持 DSH 
 
 ## 当前边界
 
-- 已实现：配置校验、浏览器打包、Codex 启动/连接、目标页追踪、CDP 注入与撤销、Cordis fiber 生命周期、DOM slot 重挂载、示例插件和单元测试。
+- 已实现：配置校验、浏览器打包、Codex 启动/连接、目标页追踪、CDP 注入与撤销、Cordis fiber 生命周期、DOM slot 重挂载、五 slot 示例插件、内建管理器、运行期插件屏蔽/恢复、只读多源 marketplace discovery 和单元测试。
 - 已验证：项目可以生成 renderer bundle；bundle 在模拟 Codex DOM 中能加载示例插件并完整卸载；本机宿主为 `ChatGPT.app` 26.818.41509，bundle id 仍是 `com.openai.codex`。
-- 已验证：默认启动能让同一应用创建独立 Codex/AppServer 进程、项目级 Chromium profile 和随机 CDP 端口；真实 renderer 已成功加载 CordisX 示例插件。
-- 尚未实现：插件市场、签名、权限隔离、进程沙箱、源码 HMR、可视化管理器、Codex 版本适配矩阵。
+- 已验证：默认启动能让同一应用创建独立 Codex/AppServer 进程、项目级 Chromium profile 和随机 CDP 端口；真实 renderer 已成功加载 CordisX 示例插件及管理器，并完成插件屏蔽后零 contribution、恢复后五 contribution 的生命周期冒烟验证。
+- 尚未实现：插件 manifest/依赖图、launcher 配置写回、源码 HMR、商店插件安装/更新、签名、权限隔离、进程沙箱和 Codex 版本适配矩阵。
 - [OpenAI 官方插件 UI 文档](https://developers.openai.com/plugins/build/chatgpt-ui)定义的是 MCP 返回、在宿主 iframe 中运行的会话内 UI 资源；它不是任意替换 Codex shell 的 API。CordisX 走的是本地、非官方的宿主增强路线。
 
 详细设计见 [.agents/docs/architecture.md](.agents/docs/architecture.md)，开发拆分见 [.agents/docs/development-plan.md](.agents/docs/development-plan.md)。
