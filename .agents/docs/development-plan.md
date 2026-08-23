@@ -199,9 +199,10 @@ and existing page/outlet APIs. It neither modifies the native Codex session
 list nor claims its independent provider sessions are native.
 
 Delivery order is architecture checkpoint, protocol, host core, plugin UI,
-then current-main mono pins. The protocol baseline is Agent event v1 at
-`e615572`; provider sessions do not add experimental Agent adapter fields or
-change provider-neutral ledger identity.
+then current-main mono pins. Agent event v1 landed at `e615572`; the current
+merged protocol baseline is `2ec9ca`, which retains provider sessions from
+`00113dc` and adds the UI extension catalog without experimental Agent adapter
+fields or changes to provider-neutral ledger identity.
 
 ## Stage 4 — upstream-compatible bridge
 

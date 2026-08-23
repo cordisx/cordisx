@@ -3,9 +3,10 @@
 Status: approved implementation architecture for the version-1 Agent event
 and messaging slice. Normative plugin-visible behavior lives in
 `cordisx-protocol` at `cordisx.agent-events/v1` (schema version 1). The Agent
-contract landed at `e6155723528a888d1b949a9c56483340874cff27`; the current
-minimum protocol baseline is the provider-aware descendant
-`00113dc7d10eb75f900b997783449679502d1990`.
+contract landed at `e6155723528a888d1b949a9c56483340874cff27`. The current
+merged protocol baseline is the UI-catalog descendant
+`2ec9ca15234e778853104d1667c7d1c4bffff1d9`; it retains the provider-aware
+Platform contract from `00113dc7d10eb75f900b997783449679502d1990`.
 
 ## Boundary and ownership
 
@@ -181,8 +182,10 @@ test evidence, not shipped fixtures containing host-private fields.
 
 1. `cordisx-protocol#10` owns the versioned Agent contract, capabilities,
    conformance runner, and valid/invalid vectors. It merged at `e615572`.
-   Protocol `#11` is the required descendant at `00113dc`; its structured
-   Platform session identity remains independent of Agent `sessionId`.
+   Protocol `#11` added structured Platform session identity at `00113dc`,
+   which remains independent of Agent `sessionId`. The current required
+   descendant is protocol `#12` at `2ec9ca`; its UI extension catalog adds no
+   Agent identity or Codex adapter fields.
 2. Provider-aware Platform foundation `cordisx#41` is the required host parent
    at `1f2c10df7909c0d4fe0d99189cffbd28f9c33207`. It owns composite Platform
    identity, `scope.sessions`, requested-scope audit, and the generation-fenced
