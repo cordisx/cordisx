@@ -1,0 +1,25 @@
+{
+  "name": "{{packageName}}",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A CordisX plugin",
+  "type": "module",
+  "main": "./dist/{{pluginId}}.js",
+  "types": "./dist/{{pluginId}}.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "npm run typecheck && npm run build && npm test",
+    "dev": "cordisx dev ./src/{{pluginId}}.ts",
+    "dev:dry-run": "cordisx dev ./src/{{pluginId}}.ts --dry-run",
+    "test": "node --test test/manifest.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "cordisx": "{{cordisxVersion}}",
+    "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=22.19"
+  }
+}

@@ -5,14 +5,14 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=cordisx",
+    "build": "npm run build --workspaces --if-present",
     "check": "npm run typecheck && npm run build && npm test && npm run check:package && npm run check:installed",
-    "check:installed": "node packages/cli/scripts/check-installed-package.mjs",
-    "check:package": "node packages/cli/scripts/check-package-contents.mjs",
+    "check:installed": "node scripts/check-installed-packages.mjs",
+    "check:package": "npm run check:package --workspaces --if-present",
     "dev": "tsx packages/cli/src/cli.ts",
     "smoke": "node packages/cli/scripts/live-smoke.mjs",
     "test": "vitest run",
-    "typecheck": "npm run typecheck --workspace=cordisx"
+    "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "engines": {
     "node": ">=22.19"
