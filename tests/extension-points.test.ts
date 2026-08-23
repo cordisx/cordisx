@@ -4,25 +4,47 @@ import {
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
   MemoryExtensionPointPolicyStore,
+  buildExtensionPointRuntimeSnapshot,
   canonicalExtensionPointSource,
 } from '../packages/cli/src/renderer/extension-points.js'
 import {
   CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
   type CordisXExtensionPointPolicyRecordV1,
 } from '../packages/cli/src/contracts.js'
+import type { CordisXI18nService } from '../packages/cli/src/renderer/i18n.js'
 
 describe('extension point runtime contract', () => {
-  it('declares exactly fourteen retained host descriptors and diagnoses cross-family duplicates', () => {
+  it('declares the complete v2 catalog and diagnoses cross-family duplicates', () => {
     const registry = new ExtensionPointDescriptorRegistry()
     const remove = registry.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
-    expect(registry.descriptors()).toHaveLength(14)
-    expect(registry.descriptors().filter(item => item.kind === 'surface')).toHaveLength(11)
-    expect(registry.descriptors().filter(item => item.kind === 'outlet')).toHaveLength(3)
+    expect(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG).toMatchObject({
+      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
+      schemaVersion: 2,
+    })
+    expect(registry.descriptors()).toHaveLength(33)
+    expect(registry.descriptors().filter(item => item.kind === 'surface')).toHaveLength(28)
+    expect(registry.descriptors().filter(item => item.kind === 'outlet')).toHaveLength(5)
     expect(registry.descriptor('session.content')).toMatchObject({
       kind: 'outlet',
       title: { namespace: 'cordisx.manager.extension-points', key: 'outlet.session.content.title', fallback: 'Session content page' },
       icon: 'host:history',
+    })
+    expect(registry.descriptor('session.header.actions')).toMatchObject({
+      kind: 'surface', payloadFamily: 'contextual-action', stability: 'stable', availability: 'available',
+    })
+    expect(registry.descriptor('composer.toolbar.items')).toMatchObject({
+      kind: 'surface', stability: 'stable', availability: 'available',
+      anchors: [
+        { id: 'submit', placements: ['before'], availability: 'available' },
+        { id: 'leading', availability: 'pending' },
+        { id: 'model', availability: 'pending' },
+      ],
+    })
+    expect(registry.descriptor('panel.right.content')).toMatchObject({
+      kind: 'outlet', stability: 'reserved', availability: 'unavailable',
+      diagnostic: { fallback: expect.stringContaining('Reserved') },
     })
     expect(Object.isFrozen(registry.descriptor('session.content')?.title)).toBe(true)
 
@@ -55,6 +77,78 @@ describe('extension point runtime contract', () => {
     remove()
     expect(registry.descriptors()).toEqual([])
     registry.dispose()
+  })
+
+  it('normalizes a v1 catalog into stable available descriptors without weakening v2 validation', () => {
+    const registry = new ExtensionPointDescriptorRegistry()
+    const remove = registry.registerCatalog({
+      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1,
+      schemaVersion: 1,
+      points: [{
+        id: 'legacy.surface', kind: 'surface', title: { key: 'legacy.title', fallback: 'Legacy' },
+        description: { key: 'legacy.description', fallback: 'Legacy v1 surface' }, icon: 'host:info',
+      }],
+    })
+    expect(registry.descriptor('legacy.surface')).toMatchObject({
+      payloadFamily: 'action', stability: 'stable', availability: 'available',
+    })
+    expect(registry.diagnostics()).toEqual([])
+    remove()
+    registry.dispose()
+  })
+
+  it('projects live surface and anchor availability instead of hardcoding surfaces available', () => {
+    const descriptors = new ExtensionPointDescriptorRegistry()
+    descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
+    const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
+    const i18n = {
+      resolveFor: (_owner: string, message: { key: string; fallback?: string }) => ({
+        text: message.fallback ?? message.key,
+        namespace: 'cordisx.manager.extension-points',
+        key: message.key,
+      }),
+      clearDiagnosticSite: () => {},
+    } as unknown as CordisXI18nService
+    const snapshot = buildExtensionPointRuntimeSnapshot({
+      descriptors,
+      broker,
+      i18n,
+      plugins: [],
+      registrations: [],
+      commands: [],
+      navigation: {
+        routes: [], pages: [],
+        outlets: [
+          { id: 'app', placement: 'application', available: true, mounted: false, presentation: 'inactive' },
+          { id: 'main', placement: 'main', available: true, mounted: false, presentation: 'inactive' },
+          { id: 'session.content', placement: 'session', available: true, mounted: false, presentation: 'inactive' },
+        ],
+      },
+      surfaceAvailability: [{
+        surface: 'session.header.actions', state: 'pending', code: 'session-header-seat-missing', detail: 'No unique native header seat.',
+      }, {
+        surface: 'composer.toolbar.items', state: 'available', anchors: [
+          { id: 'submit', placements: ['before'], state: 'available' },
+          { id: 'leading', placements: ['before', 'after'], state: 'pending', code: 'anchor-unverified', detail: 'Leading is not verified.' },
+          { id: 'model', placements: ['before', 'after', 'menu'], state: 'pending', code: 'anchor-unverified', detail: 'Model is not verified.' },
+        ],
+      }],
+    })
+    expect(snapshot.points.find(item => item.id === 'session.header.actions')).toMatchObject({
+      stability: 'stable', availability: 'pending', available: false,
+      availabilityCode: 'session-header-seat-missing', availabilityDetail: 'No unique native header seat.',
+    })
+    expect(snapshot.points.find(item => item.id === 'composer.toolbar.items')?.anchors).toEqual([
+      expect.objectContaining({ id: 'submit', availability: 'available', placements: ['before'] }),
+      expect.objectContaining({ id: 'leading', availability: 'pending', availabilityCode: 'anchor-unverified' }),
+      expect.objectContaining({ id: 'model', availability: 'pending', availabilityCode: 'anchor-unverified' }),
+    ])
+    expect(snapshot.points.find(item => item.id === 'panel.right.content')).toMatchObject({
+      stability: 'reserved', availability: 'unavailable', available: false,
+      availabilityDetail: expect.stringContaining('Reserved'),
+    })
+    broker.dispose()
+    descriptors.dispose()
   })
 
   it('keys inherit/allow/deny by canonical source, plugin id, and point id', () => {

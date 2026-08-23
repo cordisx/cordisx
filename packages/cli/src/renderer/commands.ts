@@ -4,6 +4,7 @@ import type {
   CordisXCommandMetadata,
   CordisXCommandReference,
   CordisXCommands,
+  CordisXSurfaceInvocationContextV1,
 } from '../contracts.js'
 import { ownerFromContext, qualifyOwnedId } from './ownership.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
@@ -32,6 +33,7 @@ export interface CommandSnapshot {
 export interface SurfaceCommandOrigin {
   readonly pointId: string
   readonly contributionId: string
+  readonly context?: CordisXSurfaceInvocationContextV1
 }
 
 export class CommandRegistry {
@@ -102,6 +104,11 @@ export class CommandRegistry {
       if (decision !== undefined && !decision.authorized) {
         throw new Error(decision.reason ?? `extension point ${origin.pointId} is denied for plugin ${requestingOwner}`)
       }
+      if (origin.context !== undefined && (
+        origin.context.pointId !== origin.pointId
+        || origin.context.contributionId !== origin.contributionId
+        || origin.context.commandId !== qualifiedId
+      )) throw new Error('host invocation context does not match its surface origin')
     }
     const executionId = `${qualifiedId}\u0000${invocationKey}`
     if (record.running.has(executionId)) throw new Error(`command ${qualifiedId} is already running for ${invocationKey}`)
@@ -116,6 +123,7 @@ export class CommandRegistry {
         arguments: reference.arguments === undefined ? undefined : immutableSnapshot(reference.arguments),
         signal: abort.signal,
         invocationKey,
+        ...(origin?.context === undefined ? {} : { hostContext: immutableSnapshot(origin.context) }),
       })
     } catch (error) {
       if (!abort.signal.aborted) record.lastError = error instanceof Error ? error.message : String(error)

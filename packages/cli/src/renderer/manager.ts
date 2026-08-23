@@ -1121,6 +1121,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       point.descriptionProjection.text,
       point.id,
       point.kind,
+      point.payloadFamily,
+      point.stability,
+      point.availability,
+      point.availabilityCode ?? '',
+      point.availabilityDetail ?? '',
+      ...(point.anchors ?? []).flatMap(anchor => [anchor.id, anchor.availability, anchor.availabilityCode ?? '', anchor.availabilityDetail ?? '']),
       ...point.plugins.flatMap(plugin => [plugin.name, plugin.identity.id, plugin.identity.source]),
       ...point.plugins.flatMap(plugin => plugin.registrations.map(item => item.id)),
       ...point.plugins.flatMap(plugin => plugin.routes.map(item => item.qualifiedId)),
@@ -1146,6 +1152,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         createManagerIcon(document, extensionPointIcon(point), 'cxm-catalog-icon'),
         copy,
         create(document, 'span', 'cxm-kind-badge', point.kind === 'surface' ? '界面点位' : '页面出口'),
+        create(document, 'span', 'cxm-kind-badge', point.availability === 'available' ? '可用' : point.availability === 'pending' ? '待定位' : '不可用'),
         createManagerIcon(document, 'view-detail', 'cxm-chevron'),
       )
       row.addEventListener('click', () => {
@@ -1254,11 +1261,21 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const panel = createTabPanel(document, '点位信息')
       const fields = create(document, 'div', 'cxm-detail-grid')
       const outlet = point.kind === 'outlet' ? snapshot.navigation.outlets.find(item => item.id === point.id) : undefined
+      const stabilityLabel = point.stability === 'stable' ? '稳定' : point.stability === 'experimental' ? '实验性' : '协议保留'
+      const availabilityLabel = point.availability === 'available' ? '当前可用' : point.availability === 'pending' ? '等待宿主定位' : '当前不可用'
       const rows: readonly (readonly [string, string])[] = [
         ['稳定标识', point.id],
         ['类型', point.kind === 'surface' ? '结构化界面点位' : '覆盖页面出口'],
+        ['载荷族', point.payloadFamily],
         ['宿主图标', point.icon],
-        ['可用状态', point.available ? '当前可用' : '当前不可用'],
+        ['稳定性', stabilityLabel],
+        ['可用状态', availabilityLabel],
+        ...(point.availabilityCode === undefined ? [] : [['诊断代码', point.availabilityCode]] as const),
+        ...(point.availabilityDetail === undefined ? [] : [['诊断详情', point.availabilityDetail]] as const),
+        ...(point.anchors ?? []).map(anchor => [
+          `语义锚点 ${anchor.id}`,
+          `${anchor.placements.join('/')} · ${anchor.availability}${anchor.availabilityCode === undefined ? '' : ` · ${anchor.availabilityCode}`}${anchor.availabilityDetail === undefined ? '' : ` · ${anchor.availabilityDetail}`}`,
+        ] as const),
         ...(outlet === undefined ? [] : [
           ['覆盖方式', outlet.placement],
           ['上下文', outlet.contextKey ?? '等待宿主上下文'],
@@ -1276,7 +1293,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
     const panel = createTabPanel(document, '诊断')
     const diagnostics = [
-      ...(point.availabilityError === undefined ? [] : [point.availabilityError]),
+      ...(point.availabilityCode === undefined ? [] : [point.availabilityCode]),
+      ...(point.availabilityDetail === undefined ? [] : [point.availabilityDetail]),
+      ...(point.anchors ?? []).flatMap(anchor => [
+        ...(anchor.availabilityCode === undefined ? [] : [`${anchor.id} · ${anchor.availabilityCode}`]),
+        ...(anchor.availabilityDetail === undefined ? [] : [`${anchor.id} · ${anchor.availabilityDetail}`]),
+      ]),
       ...(snapshot.extensionPoints?.descriptorDiagnostics.filter(item => item.pointId === point.id).map(item => `${item.code} · ${item.message}`) ?? []),
       ...(snapshot.extensionPoints?.policyDiagnostics.filter(item => item.identity.pointId === point.id).map(item => `${item.code} · ${item.message}`) ?? []),
       ...(snapshot.extensionPoints?.accessDiagnostics.filter(item => item.request.identity.pointId === point.id).map(item => `${item.request.operation} · ${item.authorized ? '允许' : '拒绝'}${item.reason === undefined ? '' : ` · ${item.reason}`}`) ?? []),
