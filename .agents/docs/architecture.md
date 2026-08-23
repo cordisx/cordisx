@@ -102,9 +102,12 @@ interaction pattern of adjacent native Codex controls.
 Route and page outlets remain independent overlays. `app` paints through the
 native title-bar and supplies its own draggable chrome with a macOS
 traffic-light safe inset; `main` paints the entire region to the right of the
-sidebar from `y=0` and supplies draggable chrome there. Interactive controls
-are always explicit `no-drag` regions. This keeps native window dragging and
-ordinary page controls from competing for the same hit-test region.
+sidebar from `y=0` through a body-level portal and supplies draggable chrome
+there. The portal avoids being trapped below the native main-toolbar stacking
+context while its geometry still follows sidebar collapse and width changes.
+Interactive controls are always explicit `no-drag` regions. This keeps native
+window dragging and ordinary page controls from competing for the same
+hit-test region.
 
 Both chrome variants are the same host-owned structured projection. Plugins
 declare only validated title/icon/breadcrumb/tab/action data, and header
