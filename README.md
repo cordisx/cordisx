@@ -75,15 +75,29 @@ endorsed by OpenAI or DeepSeek.
 
 ## Quick start
 
-The beta package metadata and release automation are prepared, but the
-functional public beta has not yet been published to npm. Registry readback
-currently shows only the non-functional `0.0.0` name reservations, so this
-README intentionally does not show an npm install or `npx` launch command yet.
+Use Node.js 22.19 or newer and install Codex Desktop first. The functional
+prerelease is on the `beta` channel; unqualified npm commands still resolve the
+non-functional `0.0.0` name reservation on `latest`.
 
-To evaluate the current implementation from source, follow the
-[local setup guide](./.agents/docs/getting-started.md#local-setup). Copy-and-paste
-registry commands will appear here only after the beta packages are published
-and verified from the registry.
+```bash
+npx cordisx@beta setup
+npx cordisx@beta codex --dry-run
+npx cordisx@beta codex
+```
+
+`setup` creates `~/.cordisx/config.json` with `plugins: []`. The default profile
+shares the existing Codex account, conversations, projects, and models; use an
+isolated named profile when its host data should also be separate:
+
+```bash
+npx cordisx@beta codex default --data shared
+npx cordisx@beta codex work --data isolated
+```
+
+For a global command, install the same explicit channel with
+`npm install --global cordisx@beta`. See the
+[complete beta guide](./.agents/docs/getting-started.md#npm-beta-installation)
+and [CLI and distribution details](./.agents/docs/distribution-and-cli.md).
 
 ## Build a plugin
 
@@ -92,10 +106,21 @@ mount a page in a CordisX-owned outlet. The host keeps control of rendering,
 interaction, localization, and cleanup, so plugins stay focused on their own
 workflow.
 
-Start with the [minimal plugin guide](./.agents/docs/getting-started.md#minimal-plugin)
-and the [slot showcase](./examples/plugins/slot-showcase/README.md). The
-in-repository scaffolder is implemented and release-ready, but its functional
-npm beta has not been published yet.
+Create and verify a minimal plugin directly from the beta registry package:
+
+```bash
+npm create cordisx-plugin@beta my-plugin
+cd my-plugin
+npm install
+npm run check
+npm run dev:dry-run
+npm run dev
+```
+
+`dev:dry-run` checks the build without launching Codex; `dev` starts the
+separate development host. Continue with the
+[minimal plugin guide](./.agents/docs/getting-started.md#create-a-plugin) and the
+[slot showcase](./examples/plugins/slot-showcase/README.md).
 
 ## Ecosystem and community
 
@@ -130,12 +155,13 @@ Available in the current source tree:
   localization;
 - a built-in manager for plugins, extension points, routes, discovery, and
   local configuration;
+- registry-verified `beta` packages for the CLI and plugin scaffolder;
 - a plugin project scaffolder with generated-project validation; and
 - coordinated beta packaging, licensing, and release automation.
 
 Not shipped as public product capabilities yet:
 
-- a functional npm beta or signed native distribution;
+- a stable npm channel or signed native distribution;
 - marketplace install, update, signing, activation, and rollback;
 - an untrusted-plugin sandbox—current plugins are trusted local renderer code,
   and cooperative permission policies are not process isolation; and

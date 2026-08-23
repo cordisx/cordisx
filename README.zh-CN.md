@@ -67,14 +67,29 @@ CordisX 是独立的非官方项目，与 OpenAI 或 DeepSeek 不存在隶属或
 
 ## 快速开始
 
-公测包的 metadata 与发布自动化已经准备完成，但可用的 npm 公测版本尚未
-发布。Registry 当前仍只回读到不可运行的 `0.0.0` 包名占位，因此本文暂不
-展示 npm 安装或 `npx` 启动命令。
+请先安装 Node.js 22.19 或更高版本与 Codex Desktop。可用的预发布版本位于
+`beta` 通道；不带通道的 npm 命令仍会解析到 `latest` 上不可运行的 `0.0.0`
+包名占位版本。
 
-如需从源码评估当前实现，请参阅
-[本地开发入口](./.agents/docs/getting-started.md#local-setup)。
-只有在公测包完成发布并通过 registry 回读验证后，这里才会加入可直接复制的
-安装与启动命令。
+```bash
+npx cordisx@beta setup
+npx cordisx@beta codex --dry-run
+npx cordisx@beta codex
+```
+
+`setup` 会创建 `~/.cordisx/config.json`，默认内容包含 `plugins: []`。默认
+profile 共享已有 Codex 账号、会话、项目和模型；如果宿主数据也需要隔离，请
+使用一个具名隔离 profile：
+
+```bash
+npx cordisx@beta codex default --data shared
+npx cordisx@beta codex work --data isolated
+```
+
+如需全局命令，请安装同一个明确通道：
+`npm install --global cordisx@beta`。完整说明见
+[公测上手指南](./.agents/docs/getting-started.md#npm-beta-installation)和
+[CLI 与分发文档](./.agents/docs/distribution-and-cli.md)。
 
 ## 开发插件
 
@@ -82,9 +97,20 @@ CordisX 插件使用 Cordis 生命周期，通过结构化数据向宿主贡献�
 CordisX 管理的页面容器中挂载复杂内容。渲染、交互、本地化和清理由宿主统一
 负责，插件只需要专注自己的工作流。
 
-可以从[最小插件指南](./.agents/docs/getting-started.md#minimal-plugin)和
-[扩展点示例](./examples/plugins/slot-showcase/README.md)开始。仓库内的插件脚手架
-已经实现并具备发布条件，但它的可用 npm 公测版本还没有发布。
+直接使用 registry 上的公测脚手架创建并验证一个最小插件：
+
+```bash
+npm create cordisx-plugin@beta my-plugin
+cd my-plugin
+npm install
+npm run check
+npm run dev:dry-run
+npm run dev
+```
+
+`dev:dry-run` 只检查构建，不启动 Codex；`dev` 会启动独立开发宿主。更多说明见
+[最小插件指南](./.agents/docs/getting-started.md#create-a-plugin)和
+[扩展点示例](./examples/plugins/slot-showcase/README.md)。
 
 ## 生态、文档与社区
 
@@ -112,12 +138,13 @@ OSI 或 FSF 审核；建议在 stable 发布前完成法律审阅。
 - 可用于本地评估的功能性 CordisX CLI 与 Codex 宿主适配器；
 - 可逆的 Cordis 生命周期、结构化界面贡献、页面与本地化；
 - 管理插件、扩展点、路由、发现和本地配置的内置管理器；
+- 已通过 registry 安装验证的 CLI 与插件脚手架 `beta` 包；
 - 带有生成项目验证的插件脚手架；以及
 - 协同版本的公测打包、许可和发布自动化。
 
 尚未作为公开产品能力交付：
 
-- 可用的 npm 公测版本或已签名的原生发行版；
+- npm stable 通道或已签名的原生发行版；
 - 从插件商店安装、更新、签名、激活与回滚；
 - 不受信任插件的安全沙箱——当前插件仍是受信任的本地 renderer 代码，协作式
   权限策略不等于进程隔离；以及

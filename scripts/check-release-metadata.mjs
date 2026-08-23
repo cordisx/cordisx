@@ -35,10 +35,20 @@ function validatePackage(manifest, input) {
   assert(manifest.publishConfig?.provenance === true, `${input.name} provenance must be enabled`)
 }
 
-const [cli, creator, rootReadme, cliReadme, creatorReadme, gettingStarted, workflow] = await Promise.all([
+const [
+  cli,
+  creator,
+  rootReadme,
+  rootReadmeZh,
+  cliReadme,
+  creatorReadme,
+  gettingStarted,
+  workflow,
+] = await Promise.all([
   json('packages/cli/package.json'),
   json('packages/create-cordisx-plugin/package.json'),
   readFile(path.join(repositoryRoot, 'README.md'), 'utf8'),
+  readFile(path.join(repositoryRoot, 'README.zh-CN.md'), 'utf8'),
   readFile(path.join(repositoryRoot, 'packages/cli/README.md'), 'utf8'),
   readFile(path.join(repositoryRoot, 'packages/create-cordisx-plugin/README.md'), 'utf8'),
   readFile(path.join(repositoryRoot, '.agents/docs/getting-started.md'), 'utf8'),
@@ -67,12 +77,18 @@ for (const [label, readme] of [
 ]) {
   assert(readme.includes('@beta'), `${label} must use the beta channel`)
 }
-// Keep the product entry in its pre-publication state until registry readback
-// succeeds. Flip these assertions together with the post-publication README.
-assert(!rootReadme.includes('npx cordisx@beta'), 'root README must not present the unpublished beta as runnable')
-assert(!rootReadme.includes('npm create cordisx-plugin@beta'), 'root README must not present the unpublished creator beta as runnable')
-assert(rootReadme.includes('Registry readback'), 'root README must explain the pre-publication registry boundary')
-assert(rootReadme.includes('getting-started.md#local-setup'), 'root README must link to the source-development path')
+for (const [label, readme] of [
+  ['root README', rootReadme],
+  ['Chinese root README', rootReadmeZh],
+]) {
+  assert(readme.includes('npx cordisx@beta setup'), `${label} must document beta setup`)
+  assert(readme.includes('npm create cordisx-plugin@beta'), `${label} must document beta plugin creation`)
+  assert(readme.includes('plugins: []'), `${label} must document the empty plugin default`)
+  assert(readme.includes('--data shared'), `${label} must document shared profiles`)
+  assert(readme.includes('--data isolated'), `${label} must document isolated profiles`)
+  assert(readme.includes('getting-started.md#npm-beta-installation'), `${label} must link the beta guide`)
+  assert(readme.includes('distribution-and-cli.md'), `${label} must link the CLI and distribution guide`)
+}
 assert(gettingStarted.includes('plugins: []'), 'getting started must document the empty plugin default')
 assert(gettingStarted.includes('--data shared'), 'getting started must document shared profiles')
 assert(gettingStarted.includes('--data isolated'), 'getting started must document isolated profiles')
