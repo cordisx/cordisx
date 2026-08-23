@@ -173,11 +173,19 @@ export function normalizePluginManifest(value: unknown, expectedId: string): Cor
     if (seen.has(declaration.name)) throw new Error(`plugin ${expectedId} declares ${declaration.name} more than once`)
     seen.add(declaration.name)
     if (typeof declaration.required !== 'boolean') throw new Error(`plugin ${expectedId} capability[${index}].required must be boolean`)
+    const name = declaration.name as CordisXPlatformCapability
+    const scope = normalizedScope(declaration.scope, `plugin ${expectedId} capability[${index}].scope`)
+    if (name.startsWith('agent.') && scope.sessions !== undefined) {
+      throw new Error(`plugin ${expectedId} capability[${index}] cannot use Platform sessions scope for ${name}`)
+    }
+    if (!name.startsWith('agent.') && scope.sessionIds !== undefined) {
+      throw new Error(`plugin ${expectedId} capability[${index}] cannot use Agent sessionIds scope for ${name}`)
+    }
     return Object.freeze({
-      name: declaration.name as CordisXPlatformCapability,
+      name,
       required: declaration.required,
       reason: normalizedReason(declaration.reason, `plugin ${expectedId} capability[${index}].reason`),
-      scope: normalizedScope(declaration.scope, `plugin ${expectedId} capability[${index}].scope`),
+      scope,
     })
   })
   return Object.freeze({

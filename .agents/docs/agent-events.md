@@ -183,12 +183,16 @@ test evidence, not shipped fixtures containing host-private fields.
    conformance runner, and valid/invalid vectors. It merged at `e615572`.
    Protocol `#11` is the required descendant at `00113dc`; its structured
    Platform session identity remains independent of Agent `sessionId`.
-2. This host PR owns contracts, ledger, broker integration, facade, private
+2. Provider-aware Platform foundation `cordisx#41` is the required host parent
+   at `1f2c10df7909c0d4fe0d99189cffbd28f9c33207`. It owns composite Platform
+   identity, `scope.sessions`, requested-scope audit, and the generation-fenced
+   provider registry seam. Agent `sessionIds` neither replace nor map them.
+3. This host PR owns contracts, ledger, broker integration, facade, private
    adapter, fixtures, and tests. It adds no Timeline or demo plugin.
-3. The host PR must pass protocol conformance, typecheck/build/tests, release
+4. The host PR must pass protocol conformance, typecheck/build/tests, release
    and package checks, installed-package checks, high-severity audit,
    `git diff --check`, and a controlled renderer/app-server smoke where safe.
-4. Only merged compatible owner commits are pinned by a separate CordisXMono
+5. Only merged compatible owner commits are pinned by a separate CordisXMono
    PR. Product code is never committed to the mono repository.
 
 Automated coverage includes gap/duplicate/out-of-order rejection, immutable
