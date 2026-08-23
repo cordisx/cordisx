@@ -359,11 +359,10 @@ The compatibility unit is delivered in this order:
 3. the usable i18n v1 kernel, adapter, dictionary registry, typed seats, and
    reactive bindings in a `cordisx` PR;
 4. compatible command/surface/route/page/outlet registries and TypeScript
-   contracts in a stacked `cordisx` runtime PR;
-5. private adapter outlets, structured host renderers, manager diagnostics,
-   demo, simulated tests, and isolated real-renderer validation in the next
-   stacked `cordisx` PR;
-6. exact `cordisxmono` gitlink update.
+   contracts together with private adapter outlets, structured host renderers,
+   manager diagnostics, demo, simulated tests, and isolated real-renderer
+   validation in one `cordisx` runtime/adapter delivery PR;
+5. exact `cordisxmono` gitlink update.
 
 Required automated coverage includes:
 

@@ -21,6 +21,7 @@ describe('DomOutletController', () => {
     const nativeParent = native.parentElement
     expect(layer.parentElement?.id).toBe('anchor')
     expect(first).toMatchObject({ available: true, contextKey: 'main:project', placement: 'absolute' })
+    expect(layer.style.inset).toBe('0')
     expect(native.parentElement).toBe(nativeParent)
     expect(dom.window.getComputedStyle(native).display).not.toBe('none')
 

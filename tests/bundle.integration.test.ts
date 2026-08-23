@@ -60,6 +60,7 @@ describe('renderer bundle', () => {
           <section data-codex-thread-reference-drop-target style="position:relative">
             <div id="native-conversation" data-thread-find-target="conversation" data-response-annotation-conversation="${sessionId}">native data</div>
             <div data-above-composer-conversation-id="${sessionId}"></div>
+            <div data-codex-thread-reference-drop-target></div>
           </section>
         </main>
         <aside data-pip-home-surface="thread-summary-panel" style="position:relative"></aside>

@@ -96,7 +96,9 @@ out of scope because discovery never executes catalog entries.
 
 ## Stage 2.5 — structured shell contributions and page outlets
 
-Status: architecture approved; implementation follows
+Status: protocol and i18n kernel are landed; the structured runtime, private
+adapter, manager diagnostics, demo, and live-smoke expansion are implemented in
+the current delivery slice following
 [`data-contribution-routing.md`](data-contribution-routing.md).
 
 Dependency and PR order is fixed:
@@ -109,17 +111,17 @@ Dependency and PR order is fixed:
    adapter, fiber-owned dictionaries, typed translator seats, and reactive page
    bindings in `cordisx`;
 4. land command, structured-surface, route, page, and outlet registries against
-   that real kernel service in a stacked `cordisx` runtime PR; focused unit
-   tests may inject a deterministic fake kernel;
-5. land the private adapter, manager diagnostics, demo, simulated DOM coverage,
-   and isolated real `app://` renderer smoke in the next stacked `cordisx` PR;
-6. update exact owning-repository gitlinks in `cordisxmono` only after the
+   that real kernel together with the private adapter, manager diagnostics,
+   demo, simulated DOM coverage, and isolated real `app://` smoke as one
+   reviewable runtime/adapter delivery PR; focused unit tests may inject a
+   deterministic fake kernel;
+5. update exact owning-repository gitlinks in `cordisxmono` only after the
    compatible commits are pushed and verified.
 
-The kernel, registry/runtime, and adapter/demo PRs are explicit stacked review
-boundaries but remain one compatibility unit: no public shell contribution may
-land without its protocol and kernel, and no route may be exposed without a
-page and a declared outlet.
+The architecture, protocol, kernel, and runtime/adapter PRs are explicit stacked
+review boundaries but remain one compatibility unit: no public shell
+contribution may land without its protocol and kernel, and no route may be
+exposed without a page and a declared outlet.
 
 Scoped validation includes schema/conformance checks; registry identity,
 ownership, conflict, order, `when`, disabled, command loading/error, and update

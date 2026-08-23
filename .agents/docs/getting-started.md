@@ -66,7 +66,19 @@ After live injection, run the read-only probe against the printed port:
 ```bash
 npm run smoke -- --port <printed-port> --screenshot artifacts/live-smoke.png
 npm run smoke -- --port <printed-port> --manager-screenshot artifacts/manager.png
+npm run smoke -- --port <printed-port> \
+  --select-thread local:<session-id> --exercise \
+  --report artifacts/live-smoke/structured-exercise.json \
+  --screenshot artifacts/live-smoke/main-page.png
+npm run smoke -- --port <printed-port> --generation \
+  --report artifacts/live-smoke/generation.json
 ```
+
+`--exercise` uses real CDP input for sidebar drag and exercises collapse,
+bottom/right panels, page history/close, locale reprojection, native session
+switching, plugin block/restore, and native-DOM continuity. `--generation`
+disposes the current injected generation and records deterministic cleanup; run
+it last because a fresh launcher generation is required afterwards.
 
 ## Minimal plugin
 
@@ -77,25 +89,31 @@ The plugin surface follows the Cordis service and fiber lifecycle:
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from 'cordisx/contracts'
 
-export const inject = ['slots']
+export const inject = ['i18n', 'commands', 'slots']
 
 export function apply(ctx: Context) {
-  ctx.slots.inject('header.actions', () => ctx.slots.register({
-    name: 'header.actions',
-    id: 'my-header-button',
-    order: 10,
-  }, ({ container, document }) => {
-    const button = document.createElement('button')
-    button.textContent = 'Hello'
-    container.append(button)
-    return () => button.remove()
-  }))
+  ctx.i18n.define({
+    namespace: 'example', locale: 'en', default: true,
+    messages: { 'hello.title': 'Say hello' },
+  })
+  ctx.commands.register({
+    id: 'hello', title: { namespace: 'example', key: 'hello.title' },
+  }, () => console.info('hello'))
+  ctx.slots.register({
+    name: 'workspace.toolbar.items', id: 'hello', order: 10,
+  }, {
+    anchor: 'workspace.primary', placement: 'after',
+    label: { namespace: 'example', key: 'hello.title' },
+    icon: 'host:open', command: { id: 'hello' },
+  })
 }
 ```
 
-The current semantic slots are `header.actions`, `composer.before`,
-`composer.after`, `sidebar.footer`, and `shell.overlay`. Plugins target these
-names; version-sensitive host DOM probes stay in the adapter.
+Shell slots accept structured contribution data only. The initial surfaces
+cover sidebar footer controls/menu, sidebar navigation, workspace toolbar, and
+the environment information panel. Complex DOM belongs only in a registered
+CordisX page mounted inside a host-declared outlet; version-sensitive Codex DOM
+probes stay in the private adapter.
 
 For runtime, manager, marketplace-discovery, trust, and compatibility details,
 continue with [architecture.md](architecture.md). For implemented and planned

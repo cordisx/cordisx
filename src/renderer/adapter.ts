@@ -50,6 +50,19 @@ function currentSessionId(document: Document): string | undefined {
   return candidates[0]
 }
 
+function sessionContentAnchor(document: Document, sessionId: string): HTMLElement | undefined {
+  const candidates = [...document.querySelectorAll('[data-codex-thread-reference-drop-target]')]
+    .filter(visible)
+    .filter((candidate) => {
+      const response = [...candidate.querySelectorAll('[data-response-annotation-conversation]')]
+        .some(element => element.getAttribute('data-response-annotation-conversation') === sessionId)
+      const composer = [...candidate.querySelectorAll('[data-above-composer-conversation-id]')]
+        .some(element => element.getAttribute('data-above-composer-conversation-id') === sessionId)
+      return response && composer
+    })
+  return candidates.length === 1 ? candidates[0] : undefined
+}
+
 /** One host-owned overlay layer. Native anchors are observed and never mutated except by appending this layer. */
 export class DomOutletController implements OutletController {
   private readonly listeners = new Set<() => void>()
@@ -156,9 +169,13 @@ export class DomOutletController implements OutletController {
       this.resizeObserver?.disconnect()
       this.resizeObserver = undefined
       if (this.layer.parentElement !== resolved.anchor) resolved.anchor.append(this.layer)
-      Object.assign(this.layer.style, isApp
-        ? { position: 'fixed', inset: '0', left: '', top: '', width: '', height: '' }
-        : { position: 'absolute', inset: '0', left: '', top: '', width: '', height: '' })
+      Object.assign(this.layer.style, {
+        position: isApp ? 'fixed' : 'absolute',
+        left: '', top: '', right: '', bottom: '', width: '', height: '',
+      })
+      // Apply the shorthand last: clearing left/top after `inset` would leave
+      // only right/bottom and collapse an auto-sized absolute layer to 0×0.
+      this.layer.style.inset = '0'
     }
     if (this.layer.hidden === this.shown) this.layer.hidden = !this.shown
     this.updateSnapshot(Object.freeze({
@@ -532,8 +549,8 @@ export function installCodexAdapter(
     return { anchor, contextKey: `main:${lastProjectKey ?? 'default'}` }
   })
   const session = new DomOutletController(document, 'session.content', 'absolute', () => {
-    const anchor = uniqueVisible(document, '[data-codex-thread-reference-drop-target]')
     const sessionId = currentSessionId(document)
+    const anchor = sessionId === undefined ? undefined : sessionContentAnchor(document, sessionId)
     if (anchor === undefined || sessionId === undefined) return undefined
     return { anchor, contextKey: `session:${sessionId}`, nativeSessionId: sessionId }
   })
