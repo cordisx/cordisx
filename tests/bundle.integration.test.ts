@@ -119,7 +119,8 @@ describe('renderer bundle', () => {
     }) as DOMRect
     Object.defineProperty(dom.window.document.querySelector('[data-app-shell-application-menu-bar]'), 'getBoundingClientRect', { value: () => rect(0, 0, 1200, 46) })
     Object.defineProperty(dom.window.document.body, 'getBoundingClientRect', { value: () => rect(0, 0, 1200, 900) })
-    Object.defineProperty(dom.window.document.querySelector('[data-app-shell-main-content-layout]'), 'getBoundingClientRect', { value: () => rect(240, 0, 960, 900) })
+    let mainRect = rect(240, 0, 960, 900)
+    Object.defineProperty(dom.window.document.querySelector('[data-app-shell-main-content-layout]'), 'getBoundingClientRect', { value: () => mainRect })
     dom.window.eval(bundle)
     for (let attempt = 0; attempt < 30 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
@@ -239,6 +240,7 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('[data-cordisx-page-outlet="main"]')?.parentElement).toBe(dom.window.document.body)
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')?.placement).toBe('portal')
     expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.top).toBe('0px')
+    expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.getPropertyValue('--cordisx-page-chrome-safe-left')).toBe('0px')
     expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="slot-showcase:main.analytics"]')?.dataset.cordisxNoDrag).toBe('true')
     const mainDemo = dom.window.document.querySelector<HTMLElement>('[data-cordisx-demo-marker="main"]')!
     expect(mainDemo.style.background).toContain('--color-background-elevated-secondary')
@@ -252,6 +254,14 @@ describe('renderer bundle', () => {
     expect(mainHeaderAction.querySelector('[data-host-icon="host:refresh"]')).not.toBeNull()
     expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-cordisx-page-chrome] button')]
       .every(button => button.dataset.cordisxNoDrag === 'true')).toBe(true)
+
+    mainRect = rect(0, 0, 1200, 900)
+    dom.window.document.querySelector('[data-app-shell-main-content-layout]')?.setAttribute('data-sidebar-collapsed', 'true')
+    await settle()
+    await settle()
+    expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.left).toBe('0px')
+    expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.getPropertyValue('--cordisx-page-chrome-safe-left')).toBe('88px')
+    expect(mainChrome.style.paddingLeft).toContain('--cordisx-page-chrome-safe-left')
 
     await runtime!.navigate('slot-showcase', { id: 'app.overview' })
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ activeRoute: 'slot-showcase:app.overview', mounted: true, presentation: 'presented' })

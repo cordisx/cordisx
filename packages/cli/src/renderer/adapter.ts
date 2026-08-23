@@ -59,6 +59,11 @@ function titlebarTrafficLightInset(document: Document): number {
   return Math.max(12, Math.ceil((candidates[0]?.left ?? titlebarRect.left + 88) - titlebarRect.left))
 }
 
+function pageChromeSafeLeft(document: Document, anchor: HTMLElement): number {
+  const anchorLeft = Math.max(0, anchor.getBoundingClientRect().left)
+  return Math.max(0, titlebarTrafficLightInset(document) - anchorLeft)
+}
+
 function selectedSessionId(document: Document): string | undefined {
   const selected = uniqueVisible(document, '[data-app-action-sidebar-thread-selected="true"]')
   const host = selected?.getAttribute('data-app-action-sidebar-thread-host-id')
@@ -903,7 +908,7 @@ export function installCodexAdapter(
   let lastProjectKey: string | undefined
   const app = new DomOutletController(document, 'app', 'fixed', () => {
     if (document.body === null) return undefined
-    return { anchor: document.body, contextKey: 'renderer', pageChromeSafeLeft: titlebarTrafficLightInset(document) }
+    return { anchor: document.body, contextKey: 'renderer', pageChromeSafeLeft: pageChromeSafeLeft(document, document.body) }
   })
   const main = new DomOutletController(document, 'main', 'portal', () => {
     const anchor = uniqueVisible(document, '[data-app-shell-main-content-layout="thread-edge-scroll"]')
@@ -912,7 +917,11 @@ export function installCodexAdapter(
     const selected = uniqueVisible(document, '[data-app-action-sidebar-thread-selected="true"]')
     const project = selected?.closest('[data-app-action-sidebar-project-list-id]')?.getAttribute('data-app-action-sidebar-project-list-id')
     if (project !== null && project !== undefined) lastProjectKey = project
-    return { anchor, contextKey: `main:${lastProjectKey ?? 'default'}` }
+    return {
+      anchor,
+      contextKey: `main:${lastProjectKey ?? 'default'}`,
+      pageChromeSafeLeft: pageChromeSafeLeft(document, anchor),
+    }
   })
   const session = new DomOutletController(document, 'session.content', 'absolute', () => {
     const sessionId = currentSessionId(document)
