@@ -112,7 +112,10 @@ function currentSessionId(document: Document): string | undefined {
 }
 
 function sessionContentAnchor(document: Document, sessionId: string): HTMLElement | undefined {
-  const candidates = [...document.querySelectorAll('[data-codex-thread-reference-drop-target]')]
+  const candidates = [...document.querySelectorAll([
+    '[data-codex-thread-reference-drop-target]',
+    '[data-pip-anchor-host="codex-main-thread"][data-app-action-timeline-scroll]',
+  ].join(','))]
     .filter(visible)
     .filter((candidate) => {
       const response = [...candidate.querySelectorAll('[data-response-annotation-conversation]')]
