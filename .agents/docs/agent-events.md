@@ -2,8 +2,10 @@
 
 Status: approved implementation architecture for the version-1 Agent event
 and messaging slice. Normative plugin-visible behavior lives in
-`cordisx-protocol` at `cordisx.agent-events/v1` (schema version 1), merged as
-`cordisx-protocol@e6155723528a888d1b949a9c56483340874cff27`.
+`cordisx-protocol` at `cordisx.agent-events/v1` (schema version 1). The Agent
+contract landed at `e6155723528a888d1b949a9c56483340874cff27`; the current
+minimum protocol baseline is the provider-aware descendant
+`00113dc7d10eb75f900b997783449679502d1990`.
 
 ## Boundary and ownership
 
@@ -177,8 +179,10 @@ test evidence, not shipped fixtures containing host-private fields.
 
 ## Delivery and validation order
 
-1. `cordisx-protocol#10` owns the versioned contract, capabilities,
+1. `cordisx-protocol#10` owns the versioned Agent contract, capabilities,
    conformance runner, and valid/invalid vectors. It merged at `e615572`.
+   Protocol `#11` is the required descendant at `00113dc`; its structured
+   Platform session identity remains independent of Agent `sessionId`.
 2. This host PR owns contracts, ledger, broker integration, facade, private
    adapter, fixtures, and tests. It adds no Timeline or demo plugin.
 3. The host PR must pass protocol conformance, typecheck/build/tests, release
@@ -194,4 +198,3 @@ session scope, required denial, append-only batch protection, separately
 authorized reject/transform, all delivery terminal paths, native context
 preservation and collision avoidance, unavailable current-connection
 degradation, and absence of raw bridge/second-connection surfaces.
-

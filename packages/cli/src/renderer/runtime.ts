@@ -11,6 +11,9 @@ import type {
   CordisXRouteReference,
 } from '../contracts.js'
 import { installCodexAdapter, type CodexAdapterHandle } from './adapter.js'
+import { UnavailableCodexHostAdapter } from '../adapters/codex-agent.js'
+import { CordisXAgentService, CordisXHostAgentRuntime, CordisXSystemPromptService } from './agent.js'
+import { CordisXAgentEventService } from './agent-events.js'
 import {
   installCordisXManager,
   type ManagerModel,
@@ -26,7 +29,6 @@ import {
   BrowserPermissionPrompt,
   CordisXPlatformService,
   PermissionBroker,
-  UnavailablePlatformAdapter,
   normalizePluginManifest,
   type PlatformPermissionSnapshot,
 } from './platform.js'
@@ -142,8 +144,12 @@ async function start(
 
   const ctx = new Context()
   const blockedPlugins = readBlockedPlugins()
-  const adapter = new UnavailablePlatformAdapter()
+  const adapter = new UnavailableCodexHostAdapter()
   const broker = new PermissionBroker(new BrowserPermissionPolicyStore(), new BrowserPermissionPrompt())
+  const generation = typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const agentRuntime = new CordisXHostAgentRuntime({ adapter, broker, generation })
   const extensionPointDescriptors = new ExtensionPointDescriptorRegistry()
   const extensionPointBroker = new ExtensionPointPolicyBroker(extensionPointDescriptors, new BrowserExtensionPointPolicyStore())
   const controllers: PluginController[] = plugins.map(createController)
@@ -166,6 +172,9 @@ async function start(
   let i18nService: CordisXI18nService | undefined
   let i18nFiber: Fiber | undefined
   let platformFiber: Fiber | undefined
+  let agentEventFiber: Fiber | undefined
+  let agentFiber: Fiber | undefined
+  let systemPromptFiber: Fiber | undefined
   let commandFiber: Fiber | undefined
   let pageFiber: Fiber | undefined
   let routeFiber: Fiber | undefined
@@ -423,6 +432,13 @@ async function start(
     commandFiber = undefined
     await platformFiber?.dispose()
     platformFiber = undefined
+    await systemPromptFiber?.dispose()
+    systemPromptFiber = undefined
+    await agentFiber?.dispose()
+    agentFiber = undefined
+    await agentEventFiber?.dispose()
+    agentEventFiber = undefined
+    await agentRuntime.dispose()
     for (const remove of disposeExtensionPointCatalogs.splice(0).reverse()) await remove()
     await i18nFiber?.dispose()
     i18nFiber = undefined
@@ -467,6 +483,16 @@ async function start(
     disposeExtensionPointSubscription = extensionPointBroker.subscribe(notify)
     platformFiber = ctx.plugin(CordisXPlatformService, { adapter, broker })
     await platformFiber
+    agentEventFiber = ctx.plugin(CordisXAgentEventService, {
+      ledger: agentRuntime.ledger,
+      broker,
+      status: () => agentRuntime.status(),
+    })
+    await agentEventFiber
+    agentFiber = ctx.plugin(CordisXAgentService, agentRuntime)
+    await agentFiber
+    systemPromptFiber = ctx.plugin(CordisXSystemPromptService, agentRuntime)
+    await systemPromptFiber
     commandFiber = ctx.plugin(CordisXCommandService)
     await commandFiber
     commandService = ctx.commands as CordisXCommandService

@@ -2,6 +2,7 @@ import type { Context, Disposable, Effect } from '@deepseek-ai/cordis'
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
 
 export * from './platform-contracts.js'
+export * from './agent-contracts.js'
 
 /** Scalar parameter values accepted by LocalizedText and the protocol. */
 export type CordisXMessageParam = string | number | boolean | null
