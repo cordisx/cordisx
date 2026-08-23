@@ -199,8 +199,17 @@ describe('renderer bundle', () => {
     expect(primaryNavigation.map(item => item.dataset.tab)).toEqual(['plugins', 'slots', 'marketplace', 'settings', 'about'])
     expect(primaryNavigation.map(item => item.tabIndex)).toEqual([0, 0, 0, 0, 0])
     expect(primaryNavigation.map(item => item.getAttribute('aria-selected'))).toEqual(['true', 'false', 'false', 'false', 'false'])
+    expect(primaryNavigation.slice(0, 4).map(item => item.querySelector('[data-material-icon]')?.getAttribute('data-material-icon'))).toEqual([
+      'plugins', 'contributions', 'marketplace', 'settings',
+    ])
     expect(primaryNavigation.at(0)?.textContent).toContain('插件')
     expect(primaryNavigation.at(-1)?.textContent).toContain('关于 CordisX')
+    expect(managerModal?.querySelector('.cxm-close [data-material-icon="close"]')).not.toBeNull()
+    const initialMaterialIcons = [...(managerModal?.querySelectorAll<HTMLElement>('[data-material-icon]') ?? [])]
+    expect(initialMaterialIcons.length).toBeGreaterThan(6)
+    expect(initialMaterialIcons.every(icon => icon.getAttribute('aria-hidden') === 'true' && icon.draggable === false)).toBe(true)
+    expect(initialMaterialIcons.every(icon => icon.querySelector('svg path') !== null)).toBe(true)
+    expect(initialMaterialIcons.every(icon => icon.querySelector('svg')?.getAttribute('focusable') === 'false')).toBe(true)
     const aboutNavigationMark = primaryNavigation.at(-1)?.querySelector<HTMLImageElement>('img[data-cordisx-brand-mark][data-brand-rendering="direct-dark"]')
     expect(aboutNavigationMark?.getAttribute('aria-hidden')).toBe('true')
     expect(aboutNavigationMark?.alt).toBe('')
@@ -211,6 +220,11 @@ describe('renderer bundle', () => {
     expect(managerStyles).toContain('grid-template-columns: 26px minmax(0, 1fr)')
     expect(managerStyles).toContain('.cxm-heading p { grid-column: 1 / -1; margin: 3px 0 0;')
     expect(managerStyles).toContain('.cxm-heading-leading {')
+    expect(managerStyles).toContain('min-height: 26px')
+    expect(managerStyles).toContain('transform: translateY(-.5px)')
+    expect(managerStyles).toContain('-webkit-user-select: none')
+    expect(managerStyles).toContain('user-select: none')
+    expect(managerStyles).toContain('-webkit-user-drag: none')
     expect(managerStyles).toContain('border: 0;\n    background: transparent;')
     expect(managerStyles).toContain('.cxm-back:hover { background: rgba(199, 204, 212, .14);')
     expect(managerStyles).toContain('.cxm-back:focus-visible { outline: 2px solid #c7ccd4;')
@@ -226,7 +240,10 @@ describe('renderer bundle', () => {
     expect(dom.window.getComputedStyle(primaryLeading as HTMLElement).width).toBe('26px')
     expect(dom.window.getComputedStyle(primaryLeading as HTMLElement).borderTopWidth).toBe('0px')
     expect(dom.window.getComputedStyle(primaryLeading as HTMLElement).backgroundColor).toBe('rgba(0, 0, 0, 0)')
-    expect(primaryLeading?.textContent).toBe('◫')
+    expect(primaryLeading?.dataset.materialIcon).toBe('plugins')
+    expect(primaryLeading?.textContent).toBe('')
+    expect(primaryLeading?.querySelector('svg')?.getAttribute('focusable')).toBe('false')
+    expect(primaryLeading?.draggable).toBe(false)
     expect(managerHeadings()).toEqual(['插件'])
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="about"]')?.click()
     expect(dom.window.document.querySelector('.cxm-heading-icon')?.textContent).toBe('')
@@ -259,6 +276,7 @@ describe('renderer bundle', () => {
     expect(aboutActions.every(link => link.target === '_blank' && link.rel === 'noopener noreferrer')).toBe(true)
     expect(aboutActions.every(link => link.getAttribute('role') === null)).toBe(true)
     expect(aboutActions.every(link => link.querySelector('.cxm-about-action-arrow')?.getAttribute('aria-hidden') === 'true')).toBe(true)
+    expect(aboutActions.every(link => link.querySelector('.cxm-about-action-arrow')?.getAttribute('data-material-icon') === 'external-link')).toBe(true)
     expect(managerModal?.textContent).not.toContain('CordisX 版本')
     expect(managerModal?.textContent).not.toContain('运行插件')
     expect(managerModal?.textContent).not.toContain('结构化 surfaces')
@@ -268,7 +286,7 @@ describe('renderer bundle', () => {
     expect(managerModal?.querySelector('.cxm-card-grid')).toBeNull()
     expect(managerHeadings()).toEqual(['关于 CordisX'])
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="slots"]')?.click()
-    expect(dom.window.document.querySelector('.cxm-heading-icon')?.textContent).toBe('⊞')
+    expect(dom.window.document.querySelector<HTMLElement>('.cxm-heading-icon')?.dataset.materialIcon).toBe('contributions')
     expect(managerModal?.textContent).toContain('sidebar.footer.before-control')
     expect(managerModal?.textContent).toContain('slot-showcase')
     expect(managerHeadings()).toEqual(['贡献与路由', 'Commands', 'Routes / Pages', 'Host Outlets'])
@@ -280,7 +298,7 @@ describe('renderer bundle', () => {
     }
     expect(managerModal?.textContent).toContain('slot-showcase')
     expect(managerModal?.textContent).not.toContain('插件配置')
-    expect(dom.window.document.querySelector('.cxm-heading-icon')?.textContent).toBe('◫')
+    expect(dom.window.document.querySelector<HTMLElement>('.cxm-heading-icon')?.dataset.materialIcon).toBe('plugins')
     expect(managerHeadings()).toEqual(['插件'])
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="slot-showcase"]')?.click()
@@ -288,6 +306,7 @@ describe('renderer bundle', () => {
     expect(back?.textContent).toBe('')
     expect(back?.getAttribute('aria-label')).toBe('返回')
     expect(back?.classList.contains('cxm-heading-leading')).toBe(true)
+    expect(back?.querySelector('[data-material-icon="back"]')).not.toBeNull()
     expect(dom.window.getComputedStyle(back as HTMLElement).width).toBe('26px')
     expect(dom.window.getComputedStyle(back as HTMLElement).borderTopWidth).toBe('0px')
     expect(dom.window.getComputedStyle(back as HTMLElement).backgroundColor).toBe('rgba(0, 0, 0, 0)')
@@ -299,6 +318,9 @@ describe('renderer bundle', () => {
     const pluginDetailTabs = [...dom.window.document.querySelectorAll<HTMLElement>('[data-plugin-detail-tab]')]
     expect(pluginDetailTabs.every(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('aria-hidden') === 'true')).toBe(true)
     expect(pluginDetailTabs.every(tab => tab.querySelector('.cxm-tab-icon svg') !== null)).toBe(true)
+    expect(pluginDetailTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-material-icon'))).toEqual([
+      'document', 'configuration', 'permissions', 'runtime', 'outlets',
+    ])
     expect(pluginDetailTabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1, -1, -1])
     expect(pluginDetailTabs.map(tab => tab.textContent)).toEqual(['README', '配置管理', '权限', '运行状态', '扩展点位'])
 
@@ -406,7 +428,7 @@ describe('renderer bundle', () => {
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="marketplace"]')?.click()
-    expect(dom.window.document.querySelector('.cxm-heading-icon')?.textContent).toBe('◇')
+    expect(dom.window.document.querySelector<HTMLElement>('.cxm-heading-icon')?.dataset.materialIcon).toBe('marketplace')
     for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-marketplace-plugin="slot-showcase"]') === null; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
@@ -424,11 +446,14 @@ describe('renderer bundle', () => {
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="settings"]')?.click()
     expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain('配置')
-    expect(dom.window.document.querySelector('.cxm-heading-icon')?.textContent).toBe('⚙')
+    expect(dom.window.document.querySelector<HTMLElement>('.cxm-heading-icon')?.dataset.materialIcon).toBe('settings')
     expect(dom.window.document.querySelectorAll('[data-settings-tab]')).toHaveLength(3)
     const settingsTabs = [...dom.window.document.querySelectorAll<HTMLElement>('[data-settings-tab]')]
     expect(settingsTabs.every(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('aria-hidden') === 'true')).toBe(true)
     expect(settingsTabs.every(tab => tab.querySelector('.cxm-tab-icon svg') !== null)).toBe(true)
+    expect(settingsTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-material-icon'))).toEqual([
+      'marketplace', 'runtime', 'launcher',
+    ])
     expect(settingsTabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1])
     expect(settingsTabs.map(tab => tab.textContent)).toEqual(['插件商店', '运行状态', '启动器'])
     expect(managerModal?.textContent).not.toContain('插件商店来源')

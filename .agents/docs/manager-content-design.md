@@ -77,6 +77,50 @@ control follows the same frameless resting appearance while retaining a real
 button target, an accessible `返回` label, and silver-grey hover and
 `focus-visible` feedback that does not change its dimensions.
 
+## Icon system
+
+Manager-owned non-brand icons come from the rounded, weight-400 Material
+Symbols SVG set in `@material-symbols/svg-400`. Every symbol is imported by its
+individual SVG path and inlined into the renderer bundle at build time. The
+manager does not load an icon font, request a network asset at runtime, or
+bundle the complete icon catalog. CordisX brand marks are explicitly outside
+this mapping and continue to use the official assets described below.
+
+The semantic mapping is stable and host-owned:
+
+| Manager meaning | Material symbol |
+| --- | --- |
+| plugins | `extension` |
+| contributions and routes | `hub` |
+| marketplace | `storefront` |
+| settings page | `settings` |
+| plugin configuration | `tune` |
+| document / README | `description` |
+| permissions | `shield` |
+| runtime status | `monitor_heart` |
+| outlets | `account_tree` |
+| launcher | `rocket_launch` |
+| read models | `model_training` |
+| list, read, create, and control tasks | `view_list`, `summarize`, `note_add`, `tune` |
+| submit and control turns | `send`, `pause_circle` |
+| back, detail, close, and external link | `chevron_left`, `chevron_right`, `close`, `open_in_new` |
+| unknown capability fallback | `help` |
+
+All of these symbols are decorative beside a visible label or an
+accessible-name-bearing control. Their wrappers and SVGs use
+`aria-hidden="true"`, `focusable="false"`, `pointer-events: none`,
+`user-select: none`, `-webkit-user-select: none`, and
+`-webkit-user-drag: none`. Image-backed brand marks additionally set
+`draggable=false`. Interaction, keyboard focus, tooltip semantics, and ARIA
+names remain on the owning button, link, tab, or list item; an icon never
+becomes a second hit target.
+
+Material SVGs use `currentColor` and a zero-line-height grid wrapper, not the
+text baseline. Header titles vertically center within the same 26-pixel row as
+the leading seat, and the 18-pixel leading SVG receives one shared half-pixel
+upward optical adjustment. Primary icons and back controls therefore occupy
+identical geometry without making the title jump between navigation levels.
+
 ## Primary navigation, identity, and accent
 
 The primary navigation leads with the product's principal workflow. `插件`
@@ -202,9 +246,12 @@ At minimum they prove:
 - every local tab has one decorative semantic icon and an unchanged accessible
   label, with no icon frame; roving tabindex, wrapped arrow navigation,
   Home/End, and focus restoration survive manager re-rendering;
+- non-brand icons resolve to the documented per-icon Material Symbols imports,
+  contain no Unicode placeholder glyphs, remain hidden from accessibility APIs,
+  and cannot be selected, dragged, focused, or intercept pointer activation;
 - primary and breadcrumb headers keep a fixed 26-pixel frameless leading seat,
-  align the second-row description with that seat, and retain visible back
-  button hover/focus feedback; and
+  optically center its SVG with the title row, align the second-row description
+  with that seat, and retain visible back button hover/focus feedback; and
 - manager CSS contains no purple accent tokens while preserving semantic
   success, warning, and error colors.
 
