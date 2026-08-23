@@ -218,18 +218,7 @@ const MANAGER_STYLES = `
     fill: currentColor;
     pointer-events: none;
   }
-  .cxm-brand-mark[data-brand-rendering="direct-dark"] { object-fit: contain; }
-  .cxm-brand-mark[data-color-scheme="current-color"] {
-    background: currentColor;
-    -webkit-mask-image: var(--cordisx-brand-mask);
-    mask-image: var(--cordisx-brand-mask);
-    -webkit-mask-position: center;
-    mask-position: center;
-    -webkit-mask-repeat: no-repeat;
-    mask-repeat: no-repeat;
-    -webkit-mask-size: contain;
-    mask-size: contain;
-  }
+  .cxm-brand-mark[data-brand-rendering^="direct-"] { object-fit: contain; }
   [data-cordisx-manager-modal] {
     position: fixed;
     inset: 0;
@@ -659,12 +648,27 @@ function markDecorative<T extends HTMLElement>(element: T): T {
   return element
 }
 
-function createAdaptiveBrandMark(document: Document): HTMLSpanElement {
-  const mark = create(document, 'span', 'cxm-brand-mark')
+function hostBrandBackground(document: Document): 'dark' | 'light' {
+  const root = document.documentElement
+  if (root.classList.contains('electron-light')) return 'light'
+  if (root.classList.contains('electron-dark')) return 'dark'
+  return document.defaultView?.getComputedStyle(root).colorScheme.includes('light') === true ? 'light' : 'dark'
+}
+
+function syncAdaptiveBrandMark(document: Document, mark: HTMLImageElement): void {
+  const background = hostBrandBackground(document)
+  const source = background === 'dark' ? CORDISX_MARK_DARK_URI : CORDISX_MARK_LIGHT_URI
+  if (mark.src !== source) mark.src = source
+  mark.dataset.hostBackground = background
+}
+
+function createAdaptiveBrandMark(document: Document): HTMLImageElement {
+  const mark = create(document, 'img', 'cxm-brand-mark')
   mark.dataset.cordisxBrandMark = 'true'
-  mark.dataset.colorScheme = 'current-color'
+  mark.dataset.brandRendering = 'direct-host'
+  mark.alt = ''
   markDecorative(mark)
-  mark.style.setProperty('--cordisx-brand-mask', `url("${CORDISX_MARK_LIGHT_URI}")`)
+  syncAdaptiveBrandMark(document, mark)
   return mark
 }
 
@@ -925,7 +929,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   trigger.setAttribute('aria-haspopup', 'dialog')
   trigger.setAttribute('aria-expanded', 'false')
   trigger.title = 'CordisX 插件与扩展点'
-  trigger.append(createAdaptiveBrandMark(document))
+  const triggerMark = createAdaptiveBrandMark(document)
+  trigger.append(triggerMark)
 
   const modal = create(document, 'div')
   modal.dataset.cordisxManagerModal = 'true'
@@ -2175,6 +2180,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let scheduled = false
   const reconcile = (): void => {
     scheduled = false
+    syncAdaptiveBrandMark(document, triggerMark)
     const target = resolveManagerTriggerTarget(document)
     if (target === undefined) {
       trigger.remove()
@@ -2192,7 +2198,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
   const Observer = document.defaultView?.MutationObserver
   const observer = Observer === undefined ? undefined : new Observer(schedule)
+  const themeObserver = Observer === undefined ? undefined : new Observer(() => syncAdaptiveBrandMark(document, triggerMark))
   if (document.documentElement !== null) observer?.observe(document.documentElement, { childList: true, subtree: true })
+  if (document.documentElement !== null) themeObserver?.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
   reconcile()
   renderContent()
   const unsubscribeRuntime = model.subscribe(renderContent)
@@ -2201,6 +2209,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   return () => {
     observer?.disconnect()
+    themeObserver?.disconnect()
     unsubscribeRuntime()
     unsubscribeMarketplace()
     marketplace.dispose()

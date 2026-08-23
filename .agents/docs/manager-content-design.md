@@ -151,12 +151,13 @@ decorative container. Other primary pages use their own host-owned semantic
 icons, while secondary pages use the back control.
 
 Brand rendering preserves the official asset rather than approximating it.
-The host-side manager trigger alone may use the light-background SVG as an
-adaptive `currentColor` mask because it lives in an unknown host theme. The
-manager dialog has a fixed dark background, so all three About marks use the
-official dark-background SVG directly. They retain its continuous per-segment
-grey depth shading and never flatten it into a monochrome mask, recolor it with
-`currentColor`, redraw its paths, or add a frame or background.
+The host-side manager trigger observes the host root's `electron-dark` /
+`electron-light` theme projection and selects the matching official direct SVG.
+The manager dialog has a fixed dark background, so all three About marks use
+the official dark-background SVG directly. Every placement therefore retains
+the same continuous per-segment grey depth shading and never flattens it into a
+monochrome mask, recolors it with `currentColor`, redraws its paths, or adds a
+frame or background.
 
 The About body is a concise product hub, not a runtime dashboard. Its identity
 is one horizontal row: the official mark occupies the left seat while the

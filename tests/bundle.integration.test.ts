@@ -61,7 +61,7 @@ describe('renderer bundle', () => {
     const bundle = await buildRendererBundle(config)
     const sessionId = '01a02d54-8adf-7043-944c-0bc9bb41bfd9'
     const dom = new JSDOM(`
-      <html lang="en" dir="ltr"><head></head><body>
+      <html lang="en" dir="ltr" class="electron-dark"><head></head><body>
         <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
         <header data-app-shell-application-menu-bar style="position:relative">
           <div data-test-id="header-shell-slot"><div><div><button>left native</button></div></div></div>
@@ -374,12 +374,19 @@ describe('renderer bundle', () => {
     const managerTrigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')
     expect(managerTrigger?.getAttribute('aria-label')).toBe('管理 CordisX 插件')
     expect(managerTrigger?.querySelector('svg')).toBeNull()
-    const triggerMark = managerTrigger?.querySelector<HTMLElement>('[data-color-scheme="current-color"]')
-    const mask = triggerMark?.style.getPropertyValue('--cordisx-brand-mask') ?? ''
-    expect(mask).toMatch(/^url\("data:image\/svg\+xml;charset=utf-8,/)
-    expect(decodeURIComponent(mask.slice(mask.indexOf(',') + 1, -2))).toContain('stroke="#030303"')
-    expect(dom.window.document.getElementById('cordisx-manager-style')?.textContent).toContain('background: currentColor')
-    expect(dom.window.document.querySelectorAll('[data-color-scheme="current-color"]')).toHaveLength(1)
+    const triggerMark = managerTrigger?.querySelector<HTMLImageElement>('[data-brand-rendering="direct-host"]')
+    expect(triggerMark?.dataset.hostBackground).toBe('dark')
+    expect(decodeURIComponent(triggerMark?.src ?? '')).toContain('for dark backgrounds')
+    expect(decodeURIComponent(triggerMark?.src ?? '')).toContain('stroke="#fcfcfc"')
+    expect(dom.window.document.getElementById('cordisx-manager-style')?.textContent).not.toContain('mask-image')
+    expect(dom.window.document.querySelectorAll('[data-brand-rendering="direct-host"]')).toHaveLength(1)
+    dom.window.document.documentElement.className = 'electron-light'
+    await settle()
+    expect(triggerMark?.dataset.hostBackground).toBe('light')
+    expect(decodeURIComponent(triggerMark?.src ?? '')).toContain('for light backgrounds')
+    expect(decodeURIComponent(triggerMark?.src ?? '')).toContain('stroke="#030303"')
+    dom.window.document.documentElement.className = 'electron-dark'
+    await settle()
     managerTrigger?.click()
     const managerModal = dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')
     expect(managerModal?.hidden).toBe(false)
@@ -471,8 +478,8 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('.cxm-heading-icon')?.matches('[data-cordisx-brand-mark]')).toBe(true)
     const aboutDirectMarks = [...(managerModal?.querySelectorAll<HTMLImageElement>('img[data-cordisx-brand-mark][data-brand-rendering="direct-dark"]') ?? [])]
     expect(aboutDirectMarks).toHaveLength(3)
-    expect(managerModal?.querySelector('[data-color-scheme="current-color"]')).toBeNull()
-    expect(dom.window.document.querySelectorAll('[data-color-scheme="current-color"]')).toHaveLength(1)
+    expect(managerModal?.querySelector('[data-brand-rendering="direct-host"]')).toBeNull()
+    expect(dom.window.document.querySelectorAll('[data-brand-rendering="direct-host"]')).toHaveLength(1)
     expect(aboutDirectMarks.every(mark => mark.getAttribute('aria-hidden') === 'true' && mark.alt === '')).toBe(true)
     expect(aboutDirectMarks.every(mark => mark.style.getPropertyValue('--cordisx-brand-mask') === '')).toBe(true)
     const directSvg = decodeURIComponent(aboutDirectMarks[0]?.src.slice(aboutDirectMarks[0].src.indexOf(',') + 1) ?? '')
