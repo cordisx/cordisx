@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { npmPackItem, npmViewItem } from './npm-pack-report.mjs'
+import { npmMaintainerNames, npmPackItem, npmViewItem } from './npm-pack-report.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -82,14 +82,9 @@ async function viewVersion(name, requestedVersion) {
   }
 }
 
-function maintainerNames(value) {
-  const entries = Array.isArray(value) ? value : value === undefined ? [] : [value]
-  return entries.map(entry => typeof entry === 'string' ? entry : entry?.name).filter(Boolean)
-}
-
 async function assertRegistryPackage(pkg) {
   const metadata = await npmViewJson([pkg.name])
-  if (!maintainerNames(metadata.maintainers).includes('yijie4188')) {
+  if (!npmMaintainerNames(metadata.maintainers).includes('yijie4188')) {
     throw new Error(`${pkg.name} registry owner yijie4188 is missing`)
   }
   if (metadata['dist-tags']?.latest !== '0.0.0') {

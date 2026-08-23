@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { npmPackItem, npmViewItem } from '../scripts/npm-pack-report.mjs'
+import { npmMaintainerNames, npmPackItem, npmViewItem } from '../scripts/npm-pack-report.mjs'
 
 const packed = {
   name: 'cordisx',
@@ -37,5 +37,18 @@ describe('npm view report compatibility', () => {
     expect(() => npmViewItem([packed, packed], 'cordisx')).toThrow(
       'npm view returned 2 results for cordisx',
     )
+  })
+})
+
+describe('npm maintainer compatibility', () => {
+  it('extracts names from npm string and object forms', () => {
+    expect(npmMaintainerNames([
+      'yijie4188 <yijie4188@example.com>',
+      { name: 'release-bot', email: 'release-bot@example.com' },
+    ])).toEqual(['yijie4188', 'release-bot'])
+  })
+
+  it('ignores incomplete entries', () => {
+    expect(npmMaintainerNames([null, {}, 42])).toEqual([])
   })
 })
