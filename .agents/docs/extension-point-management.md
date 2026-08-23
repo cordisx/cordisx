@@ -57,7 +57,7 @@ all five validated fields is invalid. Descriptor ids are unique across both
 families. A changed kind for an existing id is an incompatible protocol
 change.
 
-The initial catalog contains ten surfaces and three outlets. The message
+The initial catalog contains eleven surfaces and three outlets. The message
 namespace is `cordisx.manager.extension-points`; the table freezes the message
 keys and English fallbacks. Host dictionaries provide localized projections.
 
@@ -66,6 +66,7 @@ keys and English fallbacks. Host dictionaries provide localized projections.
 | surface | `sidebar.footer.before-control` | `sidebar.footer.before-control.title`; Sidebar footer before control | `sidebar.footer.before-control.description`; Adds a compact action before the designated sidebar footer control. | `host:open` |
 | surface | `sidebar.footer.after-control` | `sidebar.footer.after-control.title`; Sidebar footer after control | `sidebar.footer.after-control.description`; Adds a compact action after the designated sidebar footer control. | `host:open` |
 | surface | `sidebar.footer.menu` | `sidebar.footer.menu.title`; Sidebar footer menu | `sidebar.footer.menu.description`; Adds a host-rendered command to the designated footer control menu. | `host:more` |
+| surface | `sidebar.account.menu` | `sidebar.account.menu.title`; Sidebar account menu | `sidebar.account.menu.description`; Adds a host-rendered command to the native account/profile menu. | `host:more` |
 | surface | `sidebar.navigation.items` | `sidebar.navigation.items.title`; Sidebar navigation | `sidebar.navigation.items.description`; Adds a navigation row with a primary action and optional independent shortcuts. | `host:layers` |
 | surface | `workspace.toolbar.items` | `workspace.toolbar.items.title`; Workspace toolbar | `workspace.toolbar.items.description`; Adds an action before, after, or inside the menu of a semantic workspace toolbar anchor. | `host:more` |
 | surface | `environment.panel.header-actions` | `environment.panel.header-actions.title`; Environment panel header | `environment.panel.header-actions.description`; Adds a command action to the environment panel header. | `host:settings` |
@@ -86,6 +87,14 @@ must resolve to a real native layout seat and must not degrade to a broad fixed
 overlay. Failure to resolve a unique seat leaves attributed uses pending and
 diagnosable. Outlet placement remains overlay-based and follows the safe-area,
 geometry, and context rules in `data-contribution-routing.md`.
+
+Menu descriptors do not authorize a plugin-owned trigger. The adapter projects
+their actions into the matching native menu only while that menu exists. In the
+Codex adapter, `sidebar.footer.menu` targets the Help menu and
+`sidebar.account.menu` targets the account/profile menu. Neither point may
+create a standalone `CX` button or fallback popup. Compact toolbar and footer
+actions are icon-only and inherit the adjacent native control interaction
+pattern; localized labels remain accessible names and tooltip text.
 
 ## Primary catalog page
 
@@ -262,7 +271,7 @@ policy.
 | Layer | Required evidence |
 | --- | --- |
 | Protocol | Schema acceptance/rejection for both kinds; all descriptor text retained as message references; unique ids; host icons; tuple identity; `inherit`/`allow`/`deny`; origin and outlet enforcement vectors; compatible default allow. |
-| Runtime | Exactly thirteen built-in descriptors; locale and dictionary reprojection; adapter augmentation and invalid declaration diagnostics; retained usage attribution; source identity non-spoofing; surface render plus command-origin denial; outlet navigation plus active-page disposal; plugin block, capability policy, context, and generation orthogonality. |
+| Runtime | Exactly fourteen built-in descriptors; locale and dictionary reprojection; adapter augmentation and invalid declaration diagnostics; retained usage attribution; source identity non-spoofing; surface render plus command-origin denial; outlet navigation plus active-page disposal; plugin block, capability policy, context, and generation orthogonality. |
 | Manager | Search every declared field without aggregate/result counts; both empty states; one content scroll owner; list/detail/back query and scroll restoration; localized names and descriptions; `Usage`/`Point information`/`Diagnostics` tabs; policy controls keyed by source/plugin/point; keyboard, focus, tab, list, and accessible-name semantics. |
 | Live renderer | Scroll to the final point; filter by localized title, stable id, and plugin; open each point kind; change allow/deny and observe surface disappearance/restore plus outlet close/reopen rejection; keep native React nodes visible, connected, and updating; capture screenshots and a machine-readable report. |
 | Mono | Exact pushed protocol and runtime/manager revisions, clean registered submodules, public modules initialized, private roadmap still `update = none`, and no unrelated pointer changes. |

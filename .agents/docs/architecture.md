@@ -94,6 +94,11 @@ does not fall back to a fixed covering card. Mutation repair may reinsert a
 detached seat after React replaces its parent, but plugins never receive that
 DOM.
 
+Native menu contributions use the same boundary: CordisX inserts host-rendered
+rows into the opened Codex Help or account menu and never adds an independent
+fallback menu trigger. Compact shell actions are icon-only and inherit the
+interaction pattern of adjacent native Codex controls.
+
 Route and page outlets remain independent overlays. `app` and `main` preserve
 the resolved native Electron title-bar safe area, and CordisX interactive
 chrome is explicitly `no-drag`. This keeps native window dragging and ordinary

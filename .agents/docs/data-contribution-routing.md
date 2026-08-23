@@ -199,6 +199,7 @@ The initial surface registry includes at least:
 | `sidebar.footer.before-control` | compact action before the designated native control |
 | `sidebar.footer.after-control` | compact action after the designated native control |
 | `sidebar.footer.menu` | command menu item in the designated control menu |
+| `sidebar.account.menu` | command menu item in the native account/profile menu |
 | `sidebar.navigation.items` | main navigation row with primary activation and independent trailing actions |
 | `workspace.toolbar.items` | action before, after, or in the menu of a declared semantic toolbar anchor |
 | `environment.panel.header-actions` | panel-header command action |
@@ -245,9 +246,13 @@ Interactive surface projection must satisfy all of these rules:
 - every title-bar surface seat and interactive descendant is an Electron
   `no-drag` region, while noninteractive native title-bar space remains
   draggable;
-- a menu popup may use normal floating overlay mechanics, but its trigger and
-  menu ownership remain host-controlled and its shell position comes from an
-  inserted seat; and
+- menu contributions mount inside the corresponding native menu after its
+  native trigger opens; they never create a CordisX-owned fallback trigger or
+  a parallel `CX` menu;
+- toolbar and sidebar-footer actions are icon-only controls. Their localized
+  label remains available through the accessible name and native tooltip, and
+  their size, hover, focus, disabled, and pressed behavior follow the adjacent
+  native control pattern; and
 - insertion, reattachment, and disposal must preserve the identity, parent,
   visibility, event flow, and data updates of every native React node.
 
