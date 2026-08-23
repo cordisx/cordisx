@@ -345,6 +345,24 @@ returns within that CordisX stack, and close clears the current CordisX page to
 reveal the untouched native content. These operations do not call
 `history.pushState`, change the browser URL, or invoke Codex routing APIs.
 
+Host outlet declarations also assign a presentation group. Outlets in the same
+group occupy intersecting product regions and are coordinated by one runtime
+presentation stack. Their route stacks may remain active at the same time, but
+only the most recently presented outlet is visible and interactive. Older
+members become `suspended`: their mounted page, framework root, and local state
+remain connected, while the host layer is hidden, inert, and removed from the
+accessibility tree. Closing the presented member restores the previous member
+without remounting it. Outlets in different presentation groups may be visible
+at the same time.
+
+The built-in `app`, `main`, and `session.content` outlets share the primary
+presentation group because their rectangles overlap. Runtime and manager
+snapshots distinguish `inactive`, `presented`, and `suspended`, including which
+outlet currently suspends another. Shell navigation selection follows
+`presented`, not merely an active route. Suspending a page also dismisses its
+host tooltip, menu, and focus state. This is presentation coordination only: it
+does not replace native DOM, discard plugin state, or redirect Codex data flow.
+
 Host page chrome owns title, icon, close/back controls, breadcrumb rendering,
 declared tabs, and declared header actions. This rule is identical for `app`,
 `main`, and every future outlet: covering a native header does not give the
