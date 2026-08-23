@@ -2,7 +2,7 @@
 
 ## Goal
 
-CordisX lets trusted local plugins add or replace pieces of the Codex Desktop interface without modifying the installed Codex application. It is a UI-host project, not an alternative agent loop and not an authentication or API relay.
+CordisX lets trusted local plugins augment the Codex Desktop interface without modifying the installed application or replacing native React content. It is a UI-host project, not an alternative agent loop and not an authentication or API relay.
 
 The initial design is based on two source snapshots inspected on 2026-08-22:
 
@@ -45,7 +45,14 @@ The Node launcher owns configuration, plugin entry resolution, browser bundling,
 
 The launcher binds CDP to `127.0.0.1`, records every `Page.addScriptToEvaluateOnNewDocument` identifier, and removes those identifiers on shutdown before asking the live page to dispose CordisX.
 
-For UI development, the default command launches a second, directly tracked native process with a stable project-scoped Chromium `user-data-dir` and an ephemeral loopback CDP port. `HOME` and `CODEX_HOME` stay shared so authentication, conversations, projects, and model configuration remain available; the App main process, app-server stdio channel, renderer processes, UI storage, and window restoration remain separate. Direct spawning is equivalent to macOS `open -n` for instance isolation while retaining the child PID needed for deterministic cleanup. `--system` is the explicit escape hatch to the original profile.
+For UI development, the default command launches a second, directly tracked native process with a stable project-scoped Chromium `user-data-dir` and an ephemeral loopback CDP port. `HOME` and `CODEX_HOME` stay shared, so persisted authentication, conversation, project, and model-configuration data may be visible to both processes. That does not share request association, in-flight turns, subscriptions, approvals, current UI context, or live connection state. The App main process, app-server stdio channel, renderer processes, UI storage, and window restoration remain separate and can race as independent clients. Direct spawning is equivalent to macOS `open -n` for instance isolation while retaining the child PID needed for deterministic cleanup. `--system` is the explicit escape hatch to the original profile.
+
+The second process is a UI development host, not a transparent platform bridge.
+CordisX must not start another app-server to impersonate or replace the original
+connection, and must not create a second AppHost that overwrites WebContents
+registration. Reuse of a controlled existing connection remains experimental.
+Until an official bridge or a safely controlled existing-connection adapter
+exists, plugin-visible platform data is limited to read-only renderer snapshots.
 
 Online Chrome DevTools support is opt-in. `--online-devtools` adds `https://chrome-devtools-frontend.appspot.com` to `--remote-allow-origins`; once connected, that origin has full renderer debugging authority for the isolated instance.
 
@@ -56,6 +63,15 @@ The injected bundle creates a new Cordis `Context`, mounts `SlotService` at `ctx
 The public plugin surface follows DeepSeek Harness: plugins declare `inject = ['slots']`, wait on a host declaration with `ctx.slots.inject(name, setup)`, and contribute with `ctx.slots.register({ name, id, order, priority }, component)`. Both methods install Cordis effects through the service proxy, so the caller's plugin fiber owns the registration. Unloading a plugin therefore removes its listeners, DOM, timers wrapped by the plugin, and slot registration on the same lifecycle axis. There is no parallel `ctx.cordisx.contribute()` facade.
 
 ### Slot plane
+
+> Migration note: the version-0.1 free-DOM slot implementation below records
+> the current feasibility baseline. The approved next contract is documented in
+> [`data-contribution-routing.md`](data-contribution-routing.md). It replaces
+> direct plugin DOM mounts in all five native-shell slots with structured,
+> host-rendered contributions. Complex plugin DOM is restricted to declared
+> CordisX page outlets. The migration is intentionally one-way during the
+> experimental stage; the same shell semantic is not exposed through both old
+> and new facades.
 
 Plugins target semantic slot names. The host adapter declares the five root-scoped list slots for the renderer lifetime and alone translates each name into a current Codex DOM anchor and placement. `slots.inject()` therefore activates immediately in version 0.1 while retaining DSH's declaration-dependency syntax. A `MutationObserver` reconciles outlets after React replaces an anchor. When an outlet moves, the old component disposer runs before the contribution is mounted under the new anchor.
 
@@ -70,6 +86,9 @@ The first slot contract is deliberately small:
 | `composer.after` | list | status or actions after the composer |
 | `sidebar.footer` | list | persistent navigation-adjacent controls |
 | `shell.overlay` | list | dialogs, toasts, inspectors, and floating panels |
+
+These five direct-DOM semantics are experimental and scheduled for removal by
+the structured-contribution slice. They are not a compatibility promise.
 
 The host may improve selectors without requiring plugin changes. Plugins that query Codex DOM directly opt out of that compatibility boundary.
 
@@ -180,5 +199,5 @@ The version-0.1 bundle and lifecycle were verified in a simulated renderer DOM. 
 
 - Whether the long-term distribution unit is an npm package, a signed archive, or a Codex universal plugin plus a CordisX-specific UI entry.
 - Whether isolated UI should use an iframe, a dedicated Electron utility process, or both.
-- Whether host replacement slots should allow one winner by priority or require an explicit user choice.
+- Whether a future explicitly declared host-replacement protocol should allow one winner or require an explicit user choice; the structured-contribution slice does not expose replacement slots.
 - How a plugin persists state across bundle rebuilds without receiving direct Codex storage access.
