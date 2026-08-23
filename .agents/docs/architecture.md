@@ -54,6 +54,10 @@ registration. Reuse of a controlled existing connection remains experimental.
 Until an official bridge or a safely controlled existing-connection adapter
 exists, plugin-visible platform data is limited to read-only renderer snapshots.
 
+The version-1 Platform capability architecture and its honest unavailable
+default are specified in [`platform-capabilities.md`](platform-capabilities.md).
+It introduces no second app-server and exposes no raw Desktop bridge.
+
 Online Chrome DevTools support is opt-in. `--online-devtools` adds `https://chrome-devtools-frontend.appspot.com` to `--remote-allow-origins`; once connected, that origin has full renderer debugging authority for the isolated instance.
 
 ### Renderer plane
@@ -176,6 +180,11 @@ plugin.
 Manifest metadata, dependency graphs, compatibility declarations, persisted
 launcher configuration, package installation/update/removal, capabilities,
 signatures, and marketplace operations remain later delivery stages.
+
+The Platform slice adds versioned capability declarations, an identity-bound
+Permission Broker, and manager permission projections. These controls govern
+cooperative `ctx.platform` calls only; package installation, signatures,
+untrusted execution isolation, and marketplace activation remain later stages.
 
 ## Trust and security
 
