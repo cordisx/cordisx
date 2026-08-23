@@ -253,6 +253,13 @@ Interactive surface projection must satisfy all of these rules:
   label remains available through the accessible name and native tooltip, and
   their size, hover, focus, disabled, and pressed behavior follow the adjacent
   native control pattern; and
+- an inserted action is a sibling of the complete native control/tooltip
+  trigger, never a child of that trigger. Its hit box, accessible name, and
+  tooltip belong only to the CordisX contribution; hovering it must not open a
+  neighboring native control's tooltip. Host tooltips render through a
+  body-level portal with the native Codex tooltip tokens and viewport-edge
+  collision handling, never through a seat-local pseudo-element that can be
+  clipped by sidebar or toolbar overflow; and
 - insertion, reattachment, and disposal must preserve the identity, parent,
   visibility, event flow, and data updates of every native React node.
 
@@ -350,6 +357,16 @@ HTML, `children`, or header mount container values are rejected.
 The host renders those values through one chrome component and owns layout,
 macOS safe insets, drag/no-drag regions, native button interaction, i18n,
 keyboard/a11y behavior, command dispatch, and current outlet-policy checks.
+The chrome reserves one fixed-width leading position before the title. At the
+outlet root it renders the declared host icon token; when the outlet stack has
+a previous entry, the same position changes to the host-rendered back button.
+Plugins never render or resize that position, so title and breadcrumb text do
+not jump horizontally across navigation. A root page has no redundant back
+button when the close action already reveals native content.
+
+Page chrome, page surfaces, and bundled examples use the current host semantic
+background, border, and text tokens. They must not introduce an independent
+purple/accent palette merely to identify CordisX content.
 The page mount receives only the scrollable body container after that chrome;
 it cannot replace or append to the host header through the page API. A
 framework-agnostic mount may use DOM or attach its own framework root inside
