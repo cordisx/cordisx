@@ -46,19 +46,19 @@ describe('DomOutletController', () => {
     dom.window.close()
   })
 
-  it('falls back to a body portal and tracks geometry without changing native layout styles', () => {
-    const dom = new JSDOM('<body><main id="anchor"><div id="native">native</div></main></body>')
+  it('honors an explicit body portal and tracks geometry without changing positioned native layout styles', () => {
+    const dom = new JSDOM('<body><main id="anchor" style="position:relative"><div id="native">native</div></main></body>')
     const anchor = dom.window.document.getElementById('anchor')!
     vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue({
       x: 10, y: 20, left: 10, top: 20, right: 310, bottom: 220, width: 300, height: 200, toJSON: () => ({}),
     })
-    const controller = new DomOutletController(dom.window.document, 'custom.panel', 'absolute', () => ({ anchor, contextKey: 'panel:one' }))
+    const controller = new DomOutletController(dom.window.document, 'custom.panel', 'portal', () => ({ anchor, contextKey: 'panel:one' }))
     controller.show()
     const snapshot = controller.getSnapshot()
     expect(snapshot).toMatchObject({ placement: 'portal', contextKey: 'panel:one' })
     expect(snapshot.container?.parentElement).toBe(dom.window.document.body)
     expect(snapshot.container?.style.cssText).toContain('left: 10px')
-    expect(anchor.style.position).toBe('')
+    expect(anchor.style.position).toBe('relative')
     expect(anchor.contains(dom.window.document.getElementById('native'))).toBe(true)
     controller.dispose()
     dom.window.close()

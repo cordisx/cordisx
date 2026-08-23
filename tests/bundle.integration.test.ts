@@ -232,6 +232,8 @@ describe('renderer bundle', () => {
     await settle()
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({ activeRoute: 'slot-showcase:main.analytics', mounted: true })
     expect(dom.window.document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')).not.toBeNull()
+    expect(dom.window.document.querySelector('[data-cordisx-page-outlet="main"]')?.parentElement).toBe(dom.window.document.body)
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')?.placement).toBe('portal')
     expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.top).toBe('0px')
     expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="slot-showcase:main.analytics"]')?.dataset.cordisxNoDrag).toBe('true')
     const mainChrome = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="slot-showcase:main.analytics"] [data-cordisx-page-chrome]')!

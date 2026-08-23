@@ -195,7 +195,13 @@ export class DomOutletController implements OutletController {
     const isApp = this.outletId === 'app'
     const hostPosition = this.document.defaultView?.getComputedStyle(resolved.anchor).position
     const positioned = isApp || (hostPosition !== undefined && hostPosition !== '' && hostPosition !== 'static')
-    const placement: OutletPlacement = isApp ? 'fixed' : positioned ? 'absolute' : 'portal'
+    const placement: OutletPlacement = isApp
+      ? 'fixed'
+      : this.preferredPlacement === 'portal'
+        ? 'portal'
+        : positioned
+          ? 'absolute'
+          : 'portal'
     if (placement === 'portal') {
       if (this.layer.parentElement !== this.document.body) this.document.body.append(this.layer)
       this.installGeometryObserver(resolved.anchor)
@@ -877,7 +883,7 @@ export function installCodexAdapter(
     if (document.body === null) return undefined
     return { anchor: document.body, contextKey: 'renderer', pageChromeSafeLeft: titlebarTrafficLightInset(document) }
   })
-  const main = new DomOutletController(document, 'main', 'absolute', () => {
+  const main = new DomOutletController(document, 'main', 'portal', () => {
     const anchor = uniqueVisible(document, '[data-app-shell-main-content-layout="thread-edge-scroll"]')
       ?? uniqueVisible(document, '[data-app-shell-main-content-layout]')
     if (anchor === undefined) return undefined
@@ -897,7 +903,7 @@ export function installCodexAdapter(
       schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
     }, app, path => path !== '/main' && !path.startsWith('/main/') && path !== '/sessions' && !path.startsWith('/sessions/')),
     routes.outlets.declare({
-      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'absolute', contextPolicy: 'semantic',
+      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'portal', contextPolicy: 'semantic',
     }, main, path => path.startsWith('/main/') && path.length > '/main/'.length),
     routes.outlets.declare({
       schemaVersion: 1, id: 'session.content', authority: 'host-adapter', scope: 'session', preferredPlacement: 'absolute', contextPolicy: 'semantic',
