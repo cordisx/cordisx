@@ -6,6 +6,7 @@ import type {
   CordisXCommands,
 } from '../contracts.js'
 import { ownerFromContext, qualifyOwnedId } from './ownership.js'
+import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
 import { ICON_TOKEN_PATTERN, assertLocalId, assertLocalizedText, assertReference, immutableSnapshot } from './validation.js'
 
@@ -27,10 +28,22 @@ export interface CommandSnapshot {
   readonly lastError?: string
 }
 
+/** Host-generated origin. This is intentionally absent from the public CordisXCommands API. */
+export interface SurfaceCommandOrigin {
+  readonly pointId: string
+  readonly contributionId: string
+}
+
 export class CommandRegistry {
   private readonly records = new Map<string, CommandRecord>()
   private readonly listeners = new Set<() => void>()
   private disposed = false
+
+  constructor(private access?: ExtensionPointAccessResolver) {}
+
+  setAccessResolver(access: ExtensionPointAccessResolver): void {
+    this.access = access
+  }
 
   register(owner: string, metadata: CordisXCommandMetadata, handler: CordisXCommandHandler): () => void {
     if (this.disposed) throw new Error('CordisX command registry is disposed')
@@ -72,6 +85,7 @@ export class CommandRegistry {
     requestingOwner: string,
     reference: CordisXCommandReference,
     invocationKey = 'default',
+    origin?: SurfaceCommandOrigin,
   ): Promise<unknown> {
     if (this.disposed) throw new Error('CordisX command registry is disposed')
     assertReference(reference.id, 'command reference')
@@ -82,6 +96,12 @@ export class CommandRegistry {
     if (record === undefined) throw new Error(`command ${qualifiedId} is not registered`)
     if (record.owner !== requestingOwner && record.metadata.public !== true) {
       throw new Error(`command ${qualifiedId} is private to plugin ${record.owner}`)
+    }
+    if (origin !== undefined) {
+      const decision = this.access?.authorizeSurfaceCommand(requestingOwner, origin.pointId, origin.contributionId, qualifiedId)
+      if (decision !== undefined && !decision.authorized) {
+        throw new Error(decision.reason ?? `extension point ${origin.pointId} is denied for plugin ${requestingOwner}`)
+      }
     }
     const executionId = `${qualifiedId}\u0000${invocationKey}`
     if (record.running.has(executionId)) throw new Error(`command ${qualifiedId} is already running for ${invocationKey}`)
@@ -160,8 +180,8 @@ export class CordisXCommandService extends Service implements CordisXCommands {
     return this.registry.execute(ownerFromContext(this.ctx), reference, invocationKey)
   }
 
-  executeFor(owner: string, reference: CordisXCommandReference, invocationKey?: string): Promise<unknown> {
-    return this.registry.execute(owner, reference, invocationKey)
+  executeFor(owner: string, reference: CordisXCommandReference, invocationKey?: string, origin?: SurfaceCommandOrigin): Promise<unknown> {
+    return this.registry.execute(owner, reference, invocationKey, origin)
   }
 
   hasFor(owner: string, reference: CordisXCommandReference): boolean {
@@ -174,5 +194,9 @@ export class CordisXCommandService extends Service implements CordisXCommands {
 
   subscribeInternal(listener: () => void): () => void {
     return this.registry.subscribe(listener)
+  }
+
+  setAccessResolver(access: ExtensionPointAccessResolver): void {
+    this.registry.setAccessResolver(access)
   }
 }

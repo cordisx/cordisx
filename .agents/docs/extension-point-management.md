@@ -1,10 +1,11 @@
 # Extension-point catalog and policy
 
 Status: approved CordisX product and architecture contract. The structured
-surface and outlet registries already exist. The localized host catalog,
-manager search/detail experience, and point-policy enforcement described here
-must land through the dependency sequence below before they are presented as
-implemented.
+surface/outlet registries, localized host catalog, identity-bound point-policy
+broker, surface command-origin checks, and outlet navigation/mount enforcement
+are implemented in the runtime slice. The searchable manager catalog and point
+detail experience remain a following delivery and must not be presented as
+implemented yet.
 
 Normative, plugin-visible schemas belong in `cordisx-protocol`. This document
 owns the CordisX host model, manager projection, enforcement boundary, and

@@ -3,6 +3,10 @@ import type { CordisXCommandService } from './commands.js'
 import type { CordisXI18nService } from './i18n.js'
 import type { CordisXRouteService, OutletController, OutletHostSnapshot, OutletPlacement } from './navigation.js'
 import type { CordisXSlotService, SurfaceContributionSnapshot } from './surfaces.js'
+import {
+  CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
+  type ExtensionPointDescriptorRegistry,
+} from './extension-points.js'
 import { evaluateWhen } from './validation.js'
 
 interface ResolvedOutletAnchor {
@@ -314,7 +318,7 @@ class StructuredSurfaceRenderer {
     this.renderGroup('toolbar', toolbar, snapshots.filter(item => item.surface.startsWith('workspace.')), nextSites)
     this.renderGroup('environment', environment, snapshots.filter(item => item.surface.startsWith('environment.')), nextSites)
     for (const snapshot of snapshots) {
-      const rendered = snapshot.visible && snapshot.valid && !snapshot.pending
+      const rendered = snapshot.visible && snapshot.authorized && snapshot.valid && !snapshot.pending
         && ((snapshot.surface.startsWith('sidebar.') && sidebar !== undefined)
           || (snapshot.surface.startsWith('workspace.') && toolbar !== undefined)
           || (snapshot.surface.startsWith('environment.') && environment !== undefined))
@@ -346,7 +350,7 @@ class StructuredSurfaceRenderer {
     if (root.parentElement !== this.document.body) this.document.body.append(root)
     this.positionRoot(group, root, anchor)
     root.replaceChildren()
-    const active = snapshots.filter(item => item.visible && item.valid && !item.pending)
+    const active = snapshots.filter(item => item.visible && item.authorized && item.valid && !item.pending)
     if (active.length === 0) {
       root.hidden = true
       return
@@ -387,7 +391,10 @@ class StructuredSurfaceRenderer {
     if (button.disabled && reason !== undefined) button.title = this.text(snapshot, reason, `${path}.disabled`, nextSites)
     button.addEventListener('click', (event) => {
       event.stopPropagation()
-      void this.commands.executeFor(snapshot.owner, action.command, `${snapshot.surface}:${snapshot.qualifiedId}:${path}`).catch(error => {
+      void this.commands.executeFor(snapshot.owner, action.command, `${snapshot.surface}:${snapshot.qualifiedId}:${path}`, {
+        pointId: snapshot.surface,
+        contributionId: snapshot.qualifiedId,
+      }).catch(error => {
         button.dataset.error = error instanceof Error ? error.message : String(error)
         this.schedule()
       })
@@ -407,7 +414,10 @@ class StructuredSurfaceRenderer {
       if (item.description !== undefined) copy.title = this.text(snapshot, item.description, 'description', sites)
       const activate = (): void => {
         const operation = item.command !== undefined
-          ? this.commands.executeFor(snapshot.owner, item.command, `nav:${snapshot.qualifiedId}`)
+          ? this.commands.executeFor(snapshot.owner, item.command, `nav:${snapshot.qualifiedId}`, {
+              pointId: snapshot.surface,
+              contributionId: snapshot.qualifiedId,
+            })
           : item.route === undefined ? Promise.reject(new Error('navigation item has no activation')) : this.routes.navigateFor(snapshot.owner, item.route)
         void operation.catch(error => { row.dataset.error = error instanceof Error ? error.message : String(error); this.schedule() })
       }
@@ -534,7 +544,9 @@ export function installCodexAdapter(
   commands: CordisXCommandService,
   routes: CordisXRouteService,
   i18n: CordisXI18nService,
+  extensionPoints: ExtensionPointDescriptorRegistry,
 ): CodexAdapterHandle {
+  const unregisterExtensionPoints = extensionPoints.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
   let lastProjectKey: string | undefined
   const app = new DomOutletController(document, 'app', 'fixed', () => {
     return document.body === null ? undefined : { anchor: document.body, contextKey: 'renderer' }
@@ -575,6 +587,7 @@ export function installCodexAdapter(
       session.dispose()
       main.dispose()
       app.dispose()
+      unregisterExtensionPoints()
     },
   }
 }

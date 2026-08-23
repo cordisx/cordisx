@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { CommandRegistry } from '../packages/cli/src/renderer/commands.js'
+import {
+  CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
+  ExtensionPointDescriptorRegistry,
+  ExtensionPointPolicyBroker,
+  MemoryExtensionPointPolicyStore,
+} from '../packages/cli/src/renderer/extension-points.js'
 
 describe('CommandRegistry', () => {
   it('qualifies ownership, enforces public references, tracks loading, and freezes arguments', async () => {
@@ -41,5 +47,30 @@ describe('CommandRegistry', () => {
     await expect(registry.execute('demo', { id: 'fail' })).rejects.toThrow('boom')
     expect(registry.snapshot()[0]?.lastError).toBe('boom')
     registry.dispose()
+  })
+
+  it('rechecks host-generated surface origin without disabling the command elsewhere', async () => {
+    const descriptors = new ExtensionPointDescriptorRegistry()
+    descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
+    const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
+    const identity = { source: 'https://plugins.example/demo', id: 'demo' }
+    broker.register(identity)
+    const registry = new CommandRegistry(broker)
+    let executions = 0
+    registry.register('demo', { id: 'open', title: { key: 'open' } }, () => { executions += 1 })
+    broker.setPolicy(identity, 'sidebar.navigation.items', 'deny')
+
+    await expect(registry.execute('demo', { id: 'open' }, 'stale', {
+      pointId: 'sidebar.navigation.items', contributionId: 'demo:navigation',
+    })).rejects.toThrow(/denied/)
+    expect(executions).toBe(0)
+    await expect(registry.execute('demo', { id: 'open' }, 'direct')).resolves.toBeUndefined()
+    await expect(registry.execute('demo', { id: 'open' }, 'allowed', {
+      pointId: 'sidebar.footer.before-control', contributionId: 'demo:footer',
+    })).resolves.toBeUndefined()
+    expect(executions).toBe(2)
+    registry.dispose()
+    broker.dispose()
+    descriptors.dispose()
   })
 })

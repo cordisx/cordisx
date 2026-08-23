@@ -3,6 +3,7 @@ import type {
   CordisXBrowserPlugin,
   CordisXCommandReference,
   CordisXPermissionPolicy,
+  CordisXPointPolicy,
   CordisXPlatformCapability,
   CordisXPluginIdentity,
   CordisXPluginManifestV1,
@@ -31,6 +32,13 @@ import {
 } from './platform.js'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE, CordisXSlotService } from './service.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
+import {
+  BrowserExtensionPointPolicyStore,
+  CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
+  ExtensionPointDescriptorRegistry,
+  ExtensionPointPolicyBroker,
+  buildExtensionPointRuntimeSnapshot,
+} from './extension-points.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 
@@ -43,6 +51,7 @@ interface PluginController {
   readonly identity: CordisXPluginIdentity
   readonly manifest: CordisXPluginManifestV1
   unregisterPermissions?: () => void
+  unregisterExtensionPoints?: () => void
   fiber?: Fiber
   status: ManagerPluginStatus
   error?: string
@@ -54,6 +63,7 @@ interface CordisXRuntimeHandle extends ManagerModel {
   readonly pluginIds: readonly string[]
   execute(owner: string, reference: CordisXCommandReference, invocationKey?: string): Promise<unknown>
   navigate(owner: string, reference: CordisXRouteReference): Promise<void>
+  setExtensionPointPolicy(source: string, pluginId: string, pointId: string, policy: CordisXPointPolicy): Promise<void>
   dispose(): Promise<void>
 }
 
@@ -134,9 +144,12 @@ async function start(
   const blockedPlugins = readBlockedPlugins()
   const adapter = new UnavailablePlatformAdapter()
   const broker = new PermissionBroker(new BrowserPermissionPolicyStore(), new BrowserPermissionPrompt())
+  const extensionPointDescriptors = new ExtensionPointDescriptorRegistry()
+  const extensionPointBroker = new ExtensionPointPolicyBroker(extensionPointDescriptors, new BrowserExtensionPointPolicyStore())
   const controllers: PluginController[] = plugins.map(createController)
   for (const controller of controllers) {
     controller.unregisterPermissions = broker.register(controller.identity, controller.manifest)
+    controller.unregisterExtensionPoints = extensionPointBroker.register(controller.identity)
     if (controller.status === 'active' && blockedPlugins.has(controller.item.id)) controller.status = 'blocked'
     const denied = broker.requiredDenied(controller.identity)
     if (controller.status === 'active' && denied.length > 0) {
@@ -161,6 +174,8 @@ async function start(
   let adapterHandle: CodexAdapterHandle | undefined
   let disposeI18nSubscription: (() => void) | undefined
   let disposePermissionSubscription: (() => void) | undefined
+  let disposeExtensionPointSubscription: (() => void) | undefined
+  const disposeExtensionPointCatalogs: (() => void | Promise<void>)[] = []
   const registrySubscriptions: (() => void)[] = []
   let operation = Promise.resolve()
   let disposed = false
@@ -215,6 +230,7 @@ async function start(
         rendered: false,
         error: item.error ?? 'owning plugin is inactive',
       })))
+    const navigation = routeService?.snapshot() ?? { routes: [], pages: pageService?.snapshot() ?? [], outlets: [] }
     return {
       version: metadata.version,
       plugins: controllers.map((controller): ManagerPluginSnapshot => ({
@@ -230,7 +246,7 @@ async function start(
       })),
       registrations: [...liveRegistrations, ...inactiveRegistrations],
       commands: commandService?.snapshot() ?? [],
-      navigation: routeService?.snapshot() ?? { routes: [], pages: pageService?.snapshot() ?? [], outlets: [] },
+      navigation,
       localization: i18nService?.getSnapshot() ?? { locale: 'en', direction: 'ltr', version: 0 },
       localeCatalogs: i18nService?.catalogs() ?? [],
       localizationDiagnostics: i18nService?.diagnostics() ?? [],
@@ -254,6 +270,20 @@ async function start(
         denialCount: permission.denialCount,
         ...(permission.blockedReason === undefined ? {} : { blockedReason: permission.blockedReason }),
       })),
+      extensionPoints: buildExtensionPointRuntimeSnapshot({
+        descriptors: extensionPointDescriptors,
+        broker: extensionPointBroker,
+        i18n: i18nService!,
+        plugins: controllers.map(controller => ({
+          id: controller.item.id,
+          source: controller.item.source,
+          name: controller.manifest.name ?? controller.item.module?.name ?? controller.item.id,
+          status: controller.status,
+        })),
+        registrations: [...liveRegistrations, ...inactiveRegistrations],
+        commands: commandService?.snapshot() ?? [],
+        navigation,
+      }),
     }
   }
 
@@ -345,6 +375,25 @@ async function start(
     return () => listeners.delete(listener)
   }
 
+  const setExtensionPointPolicy = (
+    source: string,
+    pluginId: string,
+    pointId: string,
+    policy: CordisXPointPolicy,
+  ): Promise<void> => {
+    const task = operation.then(async () => {
+      if (disposed) throw new Error('CordisX runtime is disposed')
+      const controller = controllers.find(item => item.item.id === pluginId && item.item.source === source)
+      if (controller === undefined) throw new Error(`unknown CordisX plugin identity: ${source} / ${pluginId}`)
+      extensionPointBroker.setPolicy(controller.identity, pointId, policy)
+      slotService?.invalidatePointPolicies()
+      await routeService?.invalidatePointPolicies()
+      notify()
+    })
+    operation = task.catch(() => {})
+    return task
+  }
+
   const dispose = async (): Promise<void> => {
     if (disposed) return
     disposed = true
@@ -354,6 +403,8 @@ async function start(
     disposeI18nSubscription = undefined
     disposePermissionSubscription?.()
     disposePermissionSubscription = undefined
+    disposeExtensionPointSubscription?.()
+    disposeExtensionPointSubscription = undefined
     for (const unsubscribe of registrySubscriptions.splice(0)) unsubscribe()
     await operation
     for (const controller of [...controllers].reverse()) {
@@ -372,11 +423,15 @@ async function start(
     commandFiber = undefined
     await platformFiber?.dispose()
     platformFiber = undefined
+    for (const remove of disposeExtensionPointCatalogs.splice(0).reverse()) await remove()
     await i18nFiber?.dispose()
     i18nFiber = undefined
     listeners.clear()
     for (const controller of controllers) controller.unregisterPermissions?.()
+    for (const controller of controllers) controller.unregisterExtensionPoints?.()
     broker.dispose()
+    extensionPointBroker.dispose()
+    extensionPointDescriptors.dispose()
     if (globalThis.__cordisxRuntime === handle) globalThis.__cordisxRuntime = undefined
     document.documentElement.removeAttribute('data-cordisx-ready')
   }
@@ -392,6 +447,7 @@ async function start(
       if (routeService === undefined) return Promise.reject(new Error('CordisX routes are not ready'))
       return routeService.navigateFor(owner, reference)
     },
+    setExtensionPointPolicy,
     snapshot,
     setPluginBlocked,
     setPermissionPolicy,
@@ -403,8 +459,12 @@ async function start(
     i18nFiber = ctx.plugin(CordisXI18nService)
     await i18nFiber
     i18nService = ctx.i18n as CordisXI18nService
+    for (const catalog of CORDISX_EXTENSION_POINT_LOCALE_CATALOGS) {
+      disposeExtensionPointCatalogs.push(i18nService.define(catalog))
+    }
     disposeI18nSubscription = i18nService.subscribeInternal(notify)
     disposePermissionSubscription = broker.subscribe(notify)
+    disposeExtensionPointSubscription = extensionPointBroker.subscribe(notify)
     platformFiber = ctx.plugin(CordisXPlatformService, { adapter, broker })
     await platformFiber
     commandFiber = ctx.plugin(CordisXCommandService)
@@ -423,13 +483,17 @@ async function start(
       command: (owner, reference) => commandService?.hasFor(owner, reference) ?? false,
       route: (owner, id) => routeService?.hasFor(owner, id) ?? false,
     })
+    commandService.setAccessResolver(extensionPointBroker)
+    routeService.setAccessResolver(extensionPointBroker)
+    slotService.setAccessResolver(extensionPointBroker)
     registrySubscriptions.push(
+      extensionPointDescriptors.subscribe(notify),
       commandService.subscribeInternal(notify),
       pageService.registry.subscribe(notify),
       routeService.subscribeInternal(notify),
       slotService.subscribeInternal(notify),
     )
-    adapterHandle = installCodexAdapter(document, slotService, commandService, routeService, i18nService)
+    adapterHandle = installCodexAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors)
     for (const controller of controllers) {
       if (controller.status !== 'active') continue
       await mountPlugin(controller)
