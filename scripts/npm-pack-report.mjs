@@ -13,3 +13,11 @@ export function npmViewItem(report, subject) {
   }
   return report[0]
 }
+
+export function npmMaintainerNames(value) {
+  const entries = Array.isArray(value) ? value : value === undefined ? [] : [value]
+  return entries.map((entry) => {
+    if (typeof entry === 'string') return /^\s*([^\s<]+)/.exec(entry)?.[1]
+    return typeof entry?.name === 'string' ? entry.name : undefined
+  }).filter(Boolean)
+}
