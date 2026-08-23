@@ -48,6 +48,10 @@ export class CordisXAgentEventLedger {
   private readonly sessions = new Map<string, CordisXAgentEvent[]>()
   private readonly eventIds = new Set<string>()
   private readonly chunkIndices = new Map<string, number>()
+  private readonly deliveryStates = new Map<string, { stage: string; owner: string; messageId: string }>()
+  private readonly contributionRegistrations = new Map<string, string>()
+  private readonly contributionReleases = new Set<string>()
+  private readonly contributionEvaluations = new Map<string, { stage: string; contributionId: string; source: string; messageIds: string }>()
   private readonly subscriptions = new Set<LedgerSubscription>()
   private disposed = false
 
@@ -63,6 +67,10 @@ export class CordisXAgentEventLedger {
     const committed: CordisXAgentEvent[] = []
     const ranges = new Map<string, { fromSeq: number; toSeq: number }>()
     const chunkSnapshot = new Map(this.chunkIndices)
+    const deliverySnapshot = new Map(this.deliveryStates)
+    const registrationSnapshot = new Map(this.contributionRegistrations)
+    const releaseSnapshot = new Set(this.contributionReleases)
+    const evaluationSnapshot = new Map(this.contributionEvaluations)
     try {
       for (const draft of drafts) {
         if (!validId(draft.sessionId)) throw new AgentEventLedgerError('invalid', 'sessionId must be a non-empty opaque id')
@@ -91,6 +99,14 @@ export class CordisXAgentEventLedger {
       }
       this.chunkIndices.clear()
       for (const [key, index] of chunkSnapshot) this.chunkIndices.set(key, index)
+      this.deliveryStates.clear()
+      for (const [key, state] of deliverySnapshot) this.deliveryStates.set(key, state)
+      this.contributionRegistrations.clear()
+      for (const [key, source] of registrationSnapshot) this.contributionRegistrations.set(key, source)
+      this.contributionReleases.clear()
+      for (const key of releaseSnapshot) this.contributionReleases.add(key)
+      this.contributionEvaluations.clear()
+      for (const [key, state] of evaluationSnapshot) this.contributionEvaluations.set(key, state)
       throw error
     }
     for (const [sessionId, range] of ranges) this.publish({ sessionId, ...range })
@@ -154,6 +170,10 @@ export class CordisXAgentEventLedger {
     this.sessions.clear()
     this.eventIds.clear()
     this.chunkIndices.clear()
+    this.deliveryStates.clear()
+    this.contributionRegistrations.clear()
+    this.contributionReleases.clear()
+    this.contributionEvaluations.clear()
     this.subscriptions.clear()
   }
 
@@ -175,6 +195,14 @@ export class CordisXAgentEventLedger {
     if (event.causalParentId !== undefined && !session.some(item => item.eventId === event.causalParentId)) {
       throw new AgentEventLedgerError('invalid', 'causalParentId must name an earlier event in the same session')
     }
+    if ((event.provenance === 'observed' || event.provenance === 'inferred') && event.source.kind !== 'adapter') {
+      throw new AgentEventLedgerError('invalid', `${event.provenance} provenance requires an adapter source`)
+    }
+    if (event.provenance === 'cordisx' && event.source.kind === 'adapter') {
+      throw new AgentEventLedgerError('invalid', 'CordisX provenance cannot claim an adapter source')
+    }
+    if (event.type === 'message.delivery') this.validateDelivery(event as CordisXAgentEvent<'message.delivery'>)
+    if (event.type === 'input.contribution') this.validateContribution(event as CordisXAgentEvent<'input.contribution'>)
     if (event.type === 'content.chunk') {
       const data = event.data as { channel: string; index: number; delta?: string; ref?: string }
       if ((data.delta === undefined) === (data.ref === undefined)) throw new AgentEventLedgerError('invalid', 'content chunk requires exactly one of delta or ref')
@@ -186,6 +214,79 @@ export class CordisXAgentEventLedger {
     session.push(event)
     this.sessions.set(event.sessionId, session)
     this.eventIds.add(event.eventId)
+  }
+
+  private validateDelivery(event: CordisXAgentEvent<'message.delivery'>): void {
+    if (!validId(event.deliveryId) || !validId(event.messageId) || event.data.owner.kind !== 'plugin') {
+      throw new AgentEventLedgerError('invalid', 'message delivery requires stable delivery, message, and owner identity')
+    }
+    const owner = JSON.stringify(event.data.owner)
+    const current = this.deliveryStates.get(event.deliveryId)
+    const terminal = ['forwarded', 'failed', 'expired', 'cancelled']
+    const cancellable = ['requested', 'permission', 'queued']
+    const next = new Map([
+      ['requested', 'permission'], ['permission', 'queued'], ['queued', 'claimed'],
+      ['claimed', 'projected'], ['projected', 'forwarded'],
+    ])
+    if (current === undefined) {
+      if (event.data.stage !== 'requested') throw new AgentEventLedgerError('invalid', 'message delivery must begin at requested')
+    } else {
+      if (current.owner !== owner || current.messageId !== event.messageId) {
+        throw new AgentEventLedgerError('invalid', 'message delivery owner or message identity changed')
+      }
+      if (terminal.includes(current.stage)) throw new AgentEventLedgerError('invalid', `message delivery has a stage after terminal ${current.stage}`)
+      if (event.data.stage === 'cancelled' && !cancellable.includes(current.stage)) {
+        throw new AgentEventLedgerError('invalid', `message delivery cancelled after irreversible stage ${current.stage}`)
+      }
+      if (!terminal.includes(event.data.stage) && next.get(current.stage) !== event.data.stage) {
+        throw new AgentEventLedgerError('invalid', `invalid message delivery transition ${current.stage} -> ${event.data.stage}`)
+      }
+    }
+    this.deliveryStates.set(event.deliveryId, { stage: event.data.stage, owner, messageId: event.messageId })
+  }
+
+  private validateContribution(event: CordisXAgentEvent<'input.contribution'>): void {
+    if (!validId(event.contributionId) || event.provenance !== 'cordisx' || event.source.kind !== 'plugin') {
+      throw new AgentEventLedgerError('invalid', 'input contribution requires stable identity and a host-stamped plugin source')
+    }
+    const source = JSON.stringify(event.source)
+    if (event.data.stage === 'registered') {
+      if (this.contributionRegistrations.has(event.contributionId)) throw new AgentEventLedgerError('duplicate', 'input contribution registered twice')
+      this.contributionRegistrations.set(event.contributionId, source)
+    }
+    if (event.data.stage === 'released') {
+      if (this.contributionRegistrations.get(event.contributionId) !== source) {
+        throw new AgentEventLedgerError('invalid', 'input contribution released before matching registration')
+      }
+      if (this.contributionReleases.has(event.contributionId)) throw new AgentEventLedgerError('duplicate', 'input contribution released twice')
+      this.contributionReleases.add(event.contributionId)
+    }
+    if (event.data.kind !== 'pre-step.append'
+      && ['evaluated', 'projected', 'forwarded'].includes(event.data.stage)
+      && this.contributionRegistrations.get(event.contributionId) !== source) {
+      throw new AgentEventLedgerError('invalid', 'prompt contribution evaluated before matching registration')
+    }
+    if (event.data.evaluationId === undefined) return
+    const messageIds = JSON.stringify(event.data.messageIds)
+    const current = this.contributionEvaluations.get(event.data.evaluationId)
+    const next = new Map([['evaluated', 'projected'], ['projected', 'forwarded']])
+    if (current === undefined) {
+      if (event.data.stage !== 'evaluated') throw new AgentEventLedgerError('invalid', 'input evaluation must begin at evaluated')
+    } else {
+      if (current.contributionId !== event.contributionId || current.source !== source || current.messageIds !== messageIds) {
+        throw new AgentEventLedgerError('invalid', 'input evaluation identity changed')
+      }
+      if (['forwarded', 'failed'].includes(current.stage)) throw new AgentEventLedgerError('invalid', 'input evaluation has a stage after terminal')
+      if (event.data.stage !== 'failed' && next.get(current.stage) !== event.data.stage) {
+        throw new AgentEventLedgerError('invalid', `invalid input contribution transition ${current.stage} -> ${event.data.stage}`)
+      }
+    }
+    this.contributionEvaluations.set(event.data.evaluationId, {
+      stage: event.data.stage,
+      contributionId: event.contributionId,
+      source,
+      messageIds,
+    })
   }
 
   private publish(range: CordisXAgentEventRange): void {

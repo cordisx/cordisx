@@ -1,12 +1,13 @@
 # Agent event and messaging architecture
 
-Status: approved implementation architecture for the version-1 Agent event
-and messaging slice. Normative plugin-visible behavior lives in
-`cordisx-protocol` at `cordisx.agent-events/v1` (schema version 1). The Agent
-contract landed at `e6155723528a888d1b949a9c56483340874cff27`. The current
-merged protocol baseline is the UI-catalog descendant
-`2ec9ca15234e778853104d1667c7d1c4bffff1d9`; it retains the provider-aware
-Platform contract from `00113dc7d10eb75f900b997783449679502d1990`.
+Status: approved implementation architecture for the version-2 Agent event
+and delivery-control slice. Normative plugin-visible behavior lives in
+`cordisx-protocol` at `cordisx.agent-events/v2` (schema version 2), with
+delivery snapshots at `cordisx.agent-delivery/v1`. Version 1 landed at
+`e6155723528a888d1b949a9c56483340874cff27`; version 2 merged at
+`08dcdc11aae38ea9c0e91e4ad17cf31b8c756747`, descending from UI-catalog
+baseline `2ec9ca15234e778853104d1667c7d1c4bffff1d9` so provider-aware Platform
+scopes and the independent UI catalog remain intact.
 
 ## Boundary and ownership
 
@@ -76,9 +77,9 @@ The public envelope records:
 - adapter-neutral source and causal parent;
 - session plus optional turn, step, item, message, tool-call, and context ids;
 - plugin source/id/version/generation for plugin-originated actions; and
-- one of the eight protocol event types: `session.lifecycle`,
+- one of the nine protocol event types: `session.lifecycle`,
   `turn.lifecycle`, `step.lifecycle`, `item.lifecycle`, `message.observed`,
-  `message.delivery`, `content.chunk`, or `diagnostic`.
+  `message.delivery`, `input.contribution`, `content.chunk`, or `diagnostic`.
 
 ## Agent facade and delivery state
 
@@ -92,13 +93,35 @@ methods are aligned with DeepSeek Harness `dsh-v0.1.1-rc.2` at
 | `steer(message)` | `next-step` | `true` | waking next step |
 | `inject(message)` | `next-step` | `false` | non-waking next-step queue |
 
-`send` is intentionally fire-and-record like DSH. The ledger is the
-authoritative completion surface. Every accepted request records
+Every send method returns an immutable public delivery handle bound to the
+calling plugin owner and current generation. The handle exposes its stable
+`deliveryId`, a current typed snapshot, and `cancel()`. The Agent handle also
+exposes `clearPending()`, which may cancel only that owner's still-cancellable
+deliveries in the selected Agent session and generation. There is no API that
+accepts another owner or generation.
+
+The ledger remains the authoritative completion surface. Every accepted request records
 `requested -> permission -> queued -> claimed -> projected -> forwarded`; a
 request may instead terminate as `failed`, `expired`, or `cancelled`. A
 permission denial records `permission` followed by `failed` without calling
 the adapter. Missing current-connection support fails honestly rather than
 leaving a request indefinitely queued.
+
+Cancellation is an atomic race against adapter claim. `requested`,
+`permission`, and `queued` are cancellable. The adapter must claim through a
+host-owned control before any irreversible projection or native forward. Once
+`claimed` wins, `cancel()` returns a typed `irreversible` result and does not
+write a false `cancelled` event. `projected`, `forwarded`, and every terminal
+stage are likewise non-cancellable. Repeated cancellation is idempotent and
+does not append duplicate terminal events.
+
+Plugin block, owning-fiber disposal, permission blocking, and generation
+replacement invalidate that owner's handles. Pending cancellable deliveries
+first receive one auditable `cancelled` terminal with the actual release
+reason. An already claimed delivery retains its real eventual terminal; it is
+never rewritten as cancelled merely because its owner disappeared. A stale
+handle can still return its frozen last snapshot but mutation returns
+`stale-generation` or `terminal`.
 
 The `agent/pre-step` waterfall receives the complete immutable sourced
 `UserMessage[]`. Handlers run in stable registration order. Ordinary
@@ -115,6 +138,35 @@ identity and broker. They require `agent.prompt.section` and
 `agent.prompt.context`, respectively. There is no `ctx.modelInput`. Prompt
 contributions are claimed by the same pre-step execution and disposed with
 their owning fiber/generation.
+
+## Successful input lifecycle
+
+The host writes successful pre-step append and prompt composition facts into
+the same Agent ledger. Consumers must project these events and must not invent
+parallel Trace events. `input.contribution` identifies one of
+`pre-step.append`, `system-prompt.section`, or `system-prompt.context` and uses
+only stages the HostRuntime actually completed:
+
+| Stage | Meaning |
+| --- | --- |
+| `registered` | a prompt contribution passed permission and entered the generation registry |
+| `evaluated` | a handler or prompt contribution successfully produced step input |
+| `projected` | the HostRuntime incorporated that output into the immutable step projection |
+| `forwarded` | the completed projection left the HostRuntime for the next host boundary |
+| `released` | the owning registration was removed explicitly, blocked, disposed, or replaced |
+| `failed` | permission, evaluation, validation, or projection failed |
+
+`forwarded` means only that CordisX returned the projection to its host caller;
+it never means model-consumed. An adapter may record model consumption only
+from a distinct host observation, and the current unavailable Codex connection
+produces no such fact.
+
+Each lifecycle event is host-committed with `provenance: cordisx` and the
+host-stamped plugin source `(source, id, version, generation)`. Session is
+always present. Turn and step are attached to evaluation/projection/forwarding
+when known. Pre-step append events name the generated message ids. Prompt
+events name a stable contribution id and kind; prompt content is returned only
+through the private host composition path, not copied into audit data.
 
 ## Permission, timeout, and diagnostics
 
@@ -180,16 +232,19 @@ test evidence, not shipped fixtures containing host-private fields.
 
 ## Delivery and validation order
 
-1. `cordisx-protocol#10` owns the versioned Agent contract, capabilities,
-   conformance runner, and valid/invalid vectors. It merged at `e615572`.
-   Protocol `#11` added structured Platform session identity at `00113dc`,
-   which remains independent of Agent `sessionId`. The current required
-   descendant is protocol `#12` at `2ec9ca`; its UI extension catalog adds no
-   Agent identity or Codex adapter fields.
-2. Provider-aware Platform foundation `cordisx#41` is the required host parent
-   at `1f2c10df7909c0d4fe0d99189cffbd28f9c33207`. It owns composite Platform
-   identity, `scope.sessions`, requested-scope audit, and the generation-fenced
-   provider registry seam. Agent `sessionIds` neither replace nor map them.
+1. `cordisx-protocol#10` owns Agent event version 1 at `e615572`. Protocol
+   `#11` added structured Platform session identity at `00113dc`, which remains
+   independent of Agent `sessionId`; protocol `#12` added the UI catalog at
+   `2ec9ca`. The delivery-control protocol merged at `08dcdc1`; it adds the
+   version-2 event/snapshot schemas and conformance vectors and changes neither
+   Platform scope nor UI catalog.
+2. Provider-aware Platform foundation `cordisx#41` landed at `1f2c10d` and
+   Provider Fleet `cordisx#44` landed at
+   `d74c48524b73f47b3cf56de795ca66ed92bbab30`, the current host parent. They
+   own composite Platform identity, `scope.sessions`, requested-scope audit,
+   provider routing, and the generation-fenced provider registry/binding seam.
+   Agent `sessionIds` neither replace nor map those identities, and this slice
+   adds no Platform-to-Agent session bridge.
 3. This host PR owns contracts, ledger, broker integration, facade, private
    adapter, fixtures, and tests. It adds no Timeline or demo plugin.
 4. The host PR must pass protocol conformance, typecheck/build/tests, release
@@ -200,8 +255,10 @@ test evidence, not shipped fixtures containing host-private fields.
 
 Automated coverage includes gap/duplicate/out-of-order rejection, immutable
 pagination and committed subscription ranges, content chunk coalescing,
-generation disposal, plugin identity stamping, allow/ask/deny and timeout,
-session scope, required denial, append-only batch protection, separately
-authorized reject/transform, all delivery terminal paths, native context
-preservation and collision avoidance, unavailable current-connection
+generation and owner fencing, plugin identity stamping, allow/ask/deny and
+timeout, session scope, required denial, cancel-versus-claim races, owner-only
+clear, terminal idempotence, block/fiber-dispose/generation replacement,
+append-only batch protection, separately authorized reject/transform,
+successful pre-step and prompt lifecycle, all delivery terminal paths, native
+context preservation and collision avoidance, unavailable current-connection
 degradation, and absence of raw bridge/second-connection surfaces.
