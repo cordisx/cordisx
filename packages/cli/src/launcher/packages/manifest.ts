@@ -195,6 +195,10 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     if (runtimeManifest.$schema !== runtimeSchema || runtimeManifest.id !== pluginId) {
       throw new PackageLifecycleError('package-identity-mismatch', 'runtime manifest schema/id differs from its package reference')
     }
+    for (const [index, service] of (runtimeManifest.services ?? []).entries()) {
+      const serviceEntry = safePath(service.entry, ENTRY, `runtime manifest services[${index}].entry`)
+      await containedFile(snapshotRoot, serviceEntry, `runtime manifest services[${index}].entry`)
+    }
 
     const publicSource = manifest.canonicalSource
     if (publicSource !== undefined && (typeof publicSource !== 'string' || !PUBLIC_HTTPS.test(publicSource))) {

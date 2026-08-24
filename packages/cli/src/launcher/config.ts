@@ -67,6 +67,10 @@ function pluginEntry(value: unknown, label: string, rootDir: string): string {
     const extension = import.meta.url.endsWith('.ts') ? 'ts' : 'js'
     return fileURLToPath(new URL(`../plugins/cli-proxy-api/index.${extension}`, import.meta.url))
   }
+  if (entry === 'cordisx:channel') {
+    const extension = import.meta.url.endsWith('.ts') ? 'ts' : 'js'
+    return fileURLToPath(new URL(`../plugins/channel/index.${extension}`, import.meta.url))
+  }
   if (entry.startsWith('cordisx:')) throw new Error(`${label} uses an unknown built-in plugin`)
   return path.resolve(rootDir, entry)
 }

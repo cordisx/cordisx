@@ -52,4 +52,16 @@ describe('loadConfig', () => {
     }))
     await expect(loadConfig(configPath)).rejects.toThrow('reserved plugin id: host')
   })
+
+  it('resolves the built-in Channel renderer bundle without treating service config as renderer config', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-channel-config-'))
+    const configPath = path.join(directory, 'cordisx.config.json')
+    await writeFile(configPath, JSON.stringify({
+      version: 1,
+      plugins: [{ id: 'channel', entry: 'cordisx:channel', enabled: true }],
+    }))
+    const config = await loadConfig(configPath)
+    expect(config.plugins[0]).toMatchObject({ id: 'channel', enabled: true, config: {} })
+    expect(config.plugins[0]?.entry).toMatch(/plugins\/channel\/index\.(?:ts|js)$/)
+  })
 })

@@ -32,6 +32,7 @@ const parsed = parseArgs({
     'manager-viewport-width': { type: 'string' },
     'manager-breadcrumb-width': { type: 'string' },
     'manager-theme-cycle': { type: 'boolean', default: false },
+    'channel-data-plane': { type: 'boolean', default: false },
     'manager-light-screenshot': { type: 'string' },
     'manager-dark-screenshot': { type: 'string' },
     'trigger-screenshot': { type: 'string' },
@@ -71,6 +72,9 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535) {
 }
 if (parsed.values['ui-catalog'] && parsed.values.report === undefined) {
   throw new Error('--ui-catalog requires --report so screenshots and machine-readable assertions share one artifact directory')
+}
+if (parsed.values['channel-data-plane'] && parsed.values.report === undefined) {
+  throw new Error('--channel-data-plane requires --report')
 }
 if (parsed.values['plugin-console-exercise'] && parsed.values.report === undefined) {
   throw new Error('--plugin-console-exercise requires --report')
@@ -3327,6 +3331,51 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           },
           nativeRoute: { url: location.href, historyLength: history.length },
           breadcrumbConstraintWidth: breadcrumbWidth ?? null,
+          channelDataPlane: (() => {
+            const runtime = globalThis.__cordisxRuntime
+            const snapshot = runtime?.snapshot?.()
+            if (snapshot === undefined) return null
+            const plugin = snapshot.plugins.find(item => item.id === 'channel')
+            const registration = snapshot.registrations.find(item => (
+              item.surface === 'manager.settings.navigation-items'
+              && item.qualifiedId === 'channel:channels'
+            ))
+            const route = snapshot.navigation.routes.find(item => item.qualifiedId === 'channel:settings')
+            const page = snapshot.navigation.pages.find(item => item.qualifiedId === 'channel:settings')
+            const outlet = snapshot.navigation.outlets.find(item => item.id === 'manager.content')
+            return {
+              plugin: plugin === undefined ? null : {
+                status: plugin.status,
+                schemaKind: plugin.configuration.schemaKind,
+                configFields: plugin.configuration.fields.length,
+              },
+              registration: registration === undefined ? null : {
+                valid: registration.valid,
+                pending: registration.pending,
+                visible: registration.visible,
+                authorized: registration.authorized,
+                group: registration.group,
+                routeId: registration.item?.route?.id ?? null,
+              },
+              route: route === undefined ? null : {
+                valid: route.valid,
+                outlet: route.definition.outlet,
+                path: route.definition.path,
+                page: route.definition.page,
+                diagnostics: route.productMetadata.diagnostics.length,
+              },
+              page: page === undefined ? null : {
+                chrome: page.metadata.chrome,
+                icon: page.metadata.icon,
+                diagnostics: page.productMetadata.diagnostics.length,
+              },
+              outlet: outlet === undefined ? null : {
+                available: outlet.available,
+                mounted: outlet.mounted,
+              },
+              mounted: document.querySelector('[data-channel-manager]') !== null,
+            }
+          })(),
           tabGeometry: leadingRect === undefined || tabIconRect === undefined || tabLabelRect === undefined || titleRect === undefined ? null : {
             headingLeadingCenterX: leadingRect.x + leadingRect.width / 2,
             firstTabIconCenterX: tabIconRect.x + tabIconRect.width / 2,
@@ -3471,6 +3520,31 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   }
   const managerResult = evaluatedManager.result?.value ?? null
   managerReport = managerResult?.state ?? null
+  if (parsed.values['channel-data-plane']) {
+    const channel = managerReport?.channelDataPlane
+    if (channel?.plugin?.status !== 'active'
+      || channel.plugin.schemaKind !== 'none'
+      || channel.plugin.configFields !== 0
+      || channel.registration?.valid !== true
+      || channel.registration.pending !== false
+      || channel.registration.visible !== true
+      || channel.registration.authorized !== true
+      || channel.registration.group !== 'after-settings'
+      || channel.registration.routeId !== 'settings'
+      || channel.route?.valid !== true
+      || channel.route.outlet !== 'manager.content'
+      || channel.route.path !== '/manager/extensions/channels'
+      || channel.route.page !== 'settings'
+      || channel.route.diagnostics !== 0
+      || channel.page?.chrome !== 'standard'
+      || channel.page.icon !== 'host:layers'
+      || channel.page.diagnostics !== 0
+      || channel.outlet?.available !== false
+      || channel.outlet.mounted !== false
+      || channel.mounted !== false) {
+      throw new Error(`Channel data-plane smoke assertions failed: ${JSON.stringify(channel)}`)
+    }
+  }
   if (managerTab === 'about') {
     const aboutState = async () => await evaluateByValue(`(() => {
       const action = document.querySelector('.cxm-about-action')

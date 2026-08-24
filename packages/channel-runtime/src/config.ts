@@ -4,6 +4,9 @@ export const CHANNEL_SERVICE_CONFIG_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
 export const CHANNEL_SERVICE_CONFIG_DESCRIPTOR_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config-descriptor.v1.schema.json'
+export const CHANNEL_PLUGIN_MANIFEST_SCHEMA_V4 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v4.schema.json'
+/** Legacy schema reference retained for persisted descriptor compatibility. */
 export const CHANNEL_PLUGIN_MANIFEST_SCHEMA_V3 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v3.schema.json'
 
@@ -134,6 +137,25 @@ export interface ChannelServiceConfigProjectionInput {
     secretRef: string | undefined,
     connection: ChannelTenantRef,
   ) => ChannelSecretState
+}
+
+export interface ChannelHostServiceConfigContract {
+  readonly identity: { readonly source: string; readonly pluginId: string; readonly serviceId: string }
+  readonly schema: {
+    readonly id: typeof CHANNEL_SERVICE_CONFIG_SCHEMA_V1
+    readonly projection: { readonly kind: 'standard'; readonly renderable: false }
+  }
+  readonly configApplies: 'service-restart'
+  readonly initialConfiguration: unknown
+  parseStored(value: unknown): unknown
+  normalizeMutation(value: unknown, current: unknown): unknown
+  project(
+    value: unknown,
+    secretState: (secretRef: string | undefined) => ChannelSecretState,
+  ): {
+    readonly configuration: unknown
+    readonly secrets: readonly { readonly path: readonly string[]; readonly set: boolean }[]
+  }
 }
 
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
@@ -552,6 +574,100 @@ export function projectChannelServiceConfig(
       connections,
       routes: configuration.routes,
       reliability: configuration.reliability,
+    },
+  })
+}
+
+/** Safe disabled default for the generic Host service-configuration store. */
+export const CHANNEL_SERVICE_CONFIG_INITIAL: ChannelServiceConfigV1 = parseChannelServiceConfig({
+  contract: 'cordisx.channel-service-config/v1',
+  schemaVersion: 1,
+  connections: [{
+    ref: { adapterId: 'simulator', accountId: 'local', tenantId: 'default' },
+    adapterKind: 'simulator',
+    enabled: false,
+    transport: { mode: 'simulator' },
+  }],
+  routes: [],
+  reliability: {
+    leaseMs: 30_000,
+    retry: {
+      maxAttempts: 5,
+      baseDelayMs: 1_000,
+      maxDelayMs: 60_000,
+      maxAgeMs: 86_400_000,
+      jitterRatio: 0.2,
+    },
+    rateLimit: {
+      perAccountPerMinute: 120,
+      perUserPerMinute: 20,
+      perConversationPerMinute: 60,
+      maxConcurrent: 8,
+      maxBacklog: 1_000,
+    },
+    attachments: {
+      maxFiles: 4,
+      maxBytesPerFile: 10_485_760,
+      allowedMediaTypes: ['image/png', 'text/plain'],
+    },
+  },
+})
+
+function mergeCurrentSecretRefs(value: unknown, current: unknown): ChannelServiceConfigV1 {
+  const candidate = record(structuredClone(value), 'Channel service configuration mutation')
+  const stored = parseChannelServiceConfig(current)
+  const storedByTenant = new Map(stored.connections.map(connection => [tenantKey(connection.ref), connection]))
+  const candidateConnections = array(
+    candidate.connections,
+    'Channel service configuration mutation.connections',
+    1,
+    64,
+  ).map((value, index) => {
+    const connection = record(value, `Channel service configuration mutation.connections[${index}]`)
+    if (connection.secretRef !== undefined) return connection
+    const connectionRef = tenantRef(connection.ref, `Channel service configuration mutation.connections[${index}].ref`)
+    const secretRef = storedByTenant.get(tenantKey(connectionRef))?.secretRef
+    return secretRef === undefined ? connection : { ...connection, secretRef }
+  })
+  return parseChannelServiceConfig({ ...candidate, connections: candidateConnections })
+}
+
+/**
+ * Adapter for the generic launcher HostServiceConfigNarrowApi. The closed
+ * manifest-v4 `restart` declaration maps to the Host's precise
+ * `service-restart` application plane; no renderer Config document is created.
+ */
+export function createChannelHostServiceConfigContract(
+  identity: ChannelHostServiceConfigContract['identity'],
+  initialConfiguration: unknown = CHANNEL_SERVICE_CONFIG_INITIAL,
+): ChannelHostServiceConfigContract {
+  const initial = parseChannelServiceConfig(initialConfiguration)
+  return Object.freeze({
+    identity: Object.freeze({ ...identity }),
+    schema: Object.freeze({
+      id: CHANNEL_SERVICE_CONFIG_SCHEMA_V1,
+      projection: Object.freeze({ kind: 'standard', renderable: false }),
+    }),
+    configApplies: 'service-restart',
+    initialConfiguration: initial,
+    parseStored: (value: unknown) => parseChannelServiceConfig(value),
+    normalizeMutation: (value: unknown, current: unknown) => mergeCurrentSecretRefs(value, current),
+    project: (value: unknown, secretState: (secretRef: string | undefined) => ChannelSecretState) => {
+      const configuration = parseChannelServiceConfig(value)
+      return immutable({
+        configuration: {
+          ...configuration,
+          connections: configuration.connections.map(({ secretRef: _secretRef, ...connection }) => connection),
+        },
+        secrets: configuration.connections.flatMap((connection, index) => (
+          connection.adapterKind === 'simulator'
+            ? []
+            : [{
+                path: ['connections', String(index), 'secretRef'],
+                set: secretState(connection.secretRef) === 'ready',
+              }]
+        )),
+      })
     },
   })
 }

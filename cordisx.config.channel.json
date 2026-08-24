@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "codex": {
+    "debugPort": 9229
+  },
+  "providers": [],
+  "plugins": [
+    {
+      "id": "channel",
+      "entry": "cordisx:channel",
+      "enabled": true
+    }
+  ]
+}
