@@ -250,13 +250,15 @@ describe('extension point runtime contract', () => {
       presentationGroup: 'manager', pageChrome: ['standard'],
       maturity: 'stable', adapterSupport: 'supported',
     })
-    expect(registry.descriptor('manager.settings.tabs')?.description.fallback).toContain('plugin settings')
-    expect(registry.descriptor('manager.settings.content')?.description.fallback).toContain('trusted-local page body')
-    expect(registry.descriptor('manager.settings.navigation-items')?.description.fallback).toContain('before or after Settings')
+    expect(registry.descriptor('manager.settings.tabs')?.description.fallback).toContain('not mounted')
+    expect(registry.descriptor('manager.settings.content')?.description.fallback).toContain('not mounted')
+    expect(registry.descriptor('manager.settings.navigation-items')?.description.fallback).toContain('settings extension seam')
     expect(registry.descriptor('manager.content')?.description.fallback).toContain('standard Host-owned Manager page header')
     const zh = CORDISX_EXTENSION_POINT_LOCALE_CATALOGS.find(item => item.locale === 'zh-CN')!
     expect(zh.messages['manager.settings.tabs.title']).toBe('管理器配置内容标签页')
+    expect(zh.messages['manager.settings.tabs.description']).toContain('当前管理器布局未挂载')
     expect(zh.messages['manager.settings.navigation-items.title']).toBe('管理器配置导航条目')
+    expect(zh.messages['manager.settings.navigation-items.description']).toContain('配置扩展缝隙')
     expect(zh.messages['manager.content.description']).toContain('标准管理器页面标题')
     expect(registry.diagnostics()).toEqual([])
     remove()
