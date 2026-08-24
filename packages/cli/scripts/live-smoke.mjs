@@ -17,6 +17,7 @@ const parsed = parseArgs({
     'manager-settings-tab': { type: 'string' },
     'manager-settings-exercise': { type: 'boolean', default: false },
     'config-exercise': { type: 'boolean', default: false },
+    'manager-lifecycle-source': { type: 'string' },
     'manager-extension-point': { type: 'string' },
     'manager-extension-point-tab': { type: 'string' },
     'manager-route': { type: 'string' },
@@ -54,7 +55,7 @@ const parsed = parseArgs({
 })
 const port = Number(parsed.values.port)
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--screenshot <png>] [--app-screenshot <png>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-permission-capability <name> --manager-settings-tab <tab> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-click-external --manager-viewport-width <pixels> --manager-breadcrumb-width <pixels>] [--trigger-screenshot <png>]')
+  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--screenshot <png>] [--app-screenshot <png>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-permission-capability <name> --manager-settings-tab <tab> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-click-external --manager-viewport-width <pixels> --manager-breadcrumb-width <pixels>] [--manager-lifecycle-source <absolute-directory> --report <json>] [--trigger-screenshot <png>]')
 }
 if (parsed.values['ui-catalog'] && parsed.values.report === undefined) {
   throw new Error('--ui-catalog requires --report so screenshots and machine-readable assertions share one artifact directory')
@@ -70,6 +71,12 @@ if (parsed.values['authorization-plugin'] === undefined && (
   || parsed.values['authorization-decline-optional']
   || parsed.values['authorization-screenshot'] !== undefined
 )) throw new Error('authorization smoke options require --authorization-plugin')
+if (parsed.values['manager-lifecycle-source'] !== undefined) {
+  if (parsed.values.report === undefined) throw new Error('--manager-lifecycle-source requires --report')
+  if (!path.isAbsolute(parsed.values['manager-lifecycle-source'])) {
+    throw new Error('--manager-lifecycle-source must be an absolute local package directory')
+  }
+}
 
 const response = await fetch(`http://127.0.0.1:${port}/json/list`)
 if (!response.ok) throw new Error(`CDP target list returned HTTP ${response.status}`)
@@ -113,6 +120,11 @@ async function pointerClick(rect) {
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, pointerType: 'mouse' })
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1, pointerType: 'mouse' })
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1, pointerType: 'mouse' })
+}
+
+async function pressKey(key, code, keyCode) {
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode })
 }
 
 await send('Runtime.enable')
@@ -1189,6 +1201,257 @@ async function capture(rect, outputPath, label) {
   return { path: screenshotPath, clip }
 }
 
+let managerLifecycleReport
+if (parsed.values['manager-lifecycle-source'] !== undefined) {
+  const sourceDirectory = parsed.values['manager-lifecycle-source']
+  const reportPath = path.resolve(parsed.values.report)
+  const extension = path.extname(reportPath)
+  const stem = path.basename(reportPath, extension)
+  const artifact = suffix => path.join(path.dirname(reportPath), `${stem}.${suffix}.png`)
+  const installed = await evaluateByValue(`(async () => {
+    const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+    const waitFor = async (predicate, label) => {
+      for (let attempt = 0; attempt < 160; attempt += 1) {
+        const value = predicate()
+        if (value) return value
+        await wait(50)
+      }
+      throw new Error('timed out waiting for ' + label)
+    }
+    const rect = element => {
+      const value = element?.getBoundingClientRect()
+      return value === undefined ? null : { x: value.x, y: value.y, width: value.width, height: value.height,
+        right: value.right, bottom: value.bottom }
+    }
+    const runtime = globalThis.__cordisxRuntime
+    if (runtime === undefined) throw new Error('CordisX runtime is unavailable')
+    document.querySelector('[data-permission-authorization] [data-authorization-decision="cancel"]')?.click()
+    document.querySelector('.cxm-lifecycle-overlay .cxm-lifecycle-actions button')?.click()
+    const modal = document.querySelector('[data-cordisx-manager-modal]')
+    const trigger = document.querySelector('[data-cordisx-manager-trigger]')
+    if (modal?.hidden !== false) {
+      if (trigger !== null) trigger.click()
+      else if (modal instanceof HTMLElement) modal.hidden = false
+    }
+    document.querySelector('[data-tab="plugins"]')?.click()
+    const install = await waitFor(() => document.querySelector('[data-install-local-plugin]:not(:disabled)'), 'local install action')
+    install.click()
+    const input = await waitFor(() => document.querySelector('.cxm-lifecycle-dialog input[aria-label="本地插件包绝对路径"]'), 'local package input')
+    input.value = ${JSON.stringify(sourceDirectory)}
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    document.querySelector('.cxm-lifecycle-dialog .cxm-lifecycle-actions button:last-child')?.click()
+    const authorization = await waitFor(() => document.querySelector('[data-permission-authorization="lifecycle-smoke"]'), 'install authorization')
+    const authorizationState = {
+      title: authorization.querySelector('h2')?.textContent ?? null,
+      optional: authorization.querySelector('[data-authorization-choice="models.read"]')?.disabled === false,
+      primaryFocused: document.activeElement === authorization.querySelector('[data-authorization-decision="allow"]'),
+    }
+    authorization.querySelector('[data-authorization-decision="allow"]')?.click()
+    await waitFor(() => document.querySelector('[data-plugin-card="lifecycle-smoke"]'), 'installed plugin row')
+    const plugin = await waitFor(() => runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke' && item.status === 'active'), 'active installed plugin')
+    await wait(150)
+    const currentRow = await waitFor(() => document.querySelector('[data-plugin-card="lifecycle-smoke"]'), 'current installed plugin row')
+    return {
+      appRenderer: location.href === 'app://-/index.html',
+      authorization: authorizationState,
+      revision: runtime.snapshot().pluginLifecycle?.revision ?? null,
+      plugin: { id: plugin.id, status: plugin.status, source: plugin.source, package: plugin.package },
+      localSourceProjected: JSON.stringify(runtime.snapshot()).includes(${JSON.stringify(sourceDirectory)}),
+      primaryRect: rect(currentRow.querySelector('[data-plugin-primary="lifecycle-smoke"]')),
+      managerRect: rect(document.querySelector('[data-cordisx-manager-modal] [role="dialog"]')),
+    }
+  })()`, true)
+  if (installed.primaryRect === null || installed.primaryRect.width <= 0 || installed.primaryRect.height <= 0
+    || installed.managerRect === null) throw new Error('installed lifecycle fixture is not visible')
+  const screenshots = {
+    installed: await capture(installed.managerRect, artifact('lifecycle-installed'), 'installed lifecycle plugin'),
+  }
+
+  await pointerClick(installed.primaryRect)
+  await new Promise(resolve => setTimeout(resolve, 180))
+  const pointerNavigation = await evaluateByValue(`(async () => {
+    const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+    const detail = document.querySelector('[data-manager-page-route^="plugin:lifecycle-smoke:"]') !== null
+    document.querySelector('.cxm-back')?.click()
+    for (let attempt = 0; attempt < 80 && document.querySelector('[data-plugin-primary="lifecycle-smoke"]') === null; attempt += 1) await wait(25)
+    return { detail, restored: document.querySelector('[data-plugin-primary="lifecycle-smoke"]') !== null }
+  })()`, true)
+
+  const focusPrimary = async () => await evaluateByValue(`(() => {
+    const primary = document.querySelector('[data-plugin-primary="lifecycle-smoke"]')
+    primary?.focus()
+    return document.activeElement === primary
+  })()`)
+  const keyboardNavigation = {}
+  keyboardNavigation.enterFocused = await focusPrimary()
+  await pressKey('Enter', 'Enter', 13)
+  await new Promise(resolve => setTimeout(resolve, 120))
+  keyboardNavigation.enterDetail = await evaluateByValue(`document.querySelector('[data-manager-page-route^="plugin:lifecycle-smoke:"]') !== null`)
+  await evaluateByValue(`document.querySelector('.cxm-back')?.click()`)
+  await new Promise(resolve => setTimeout(resolve, 120))
+  keyboardNavigation.spaceFocused = await focusPrimary()
+  await pressKey(' ', 'Space', 32)
+  await new Promise(resolve => setTimeout(resolve, 120))
+  keyboardNavigation.spaceDetail = await evaluateByValue(`document.querySelector('[data-manager-page-route^="plugin:lifecycle-smoke:"]') !== null`)
+  await evaluateByValue(`document.querySelector('.cxm-back')?.click()`)
+  await new Promise(resolve => setTimeout(resolve, 120))
+
+  const exercised = await evaluateByValue(`(async () => {
+    const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+    const waitFor = async (predicate, label) => {
+      for (let attempt = 0; attempt < 160; attempt += 1) {
+        const value = predicate()
+        if (value) return value
+        await wait(50)
+      }
+      throw new Error('timed out waiting for ' + label)
+    }
+    const rect = element => {
+      const value = element?.getBoundingClientRect()
+      return value === undefined ? null : { x: value.x, y: value.y, width: value.width, height: value.height,
+        right: value.right, bottom: value.bottom }
+    }
+    const runtime = globalThis.__cordisxRuntime
+    const counters = globalThis.__cordisxLifecycleSmoke
+    if (runtime === undefined || counters === undefined) throw new Error('lifecycle fixture runtime state is unavailable')
+    const initial = { ...counters, revision: runtime.snapshot().pluginLifecycle?.revision ?? null }
+    document.querySelector('[data-plugin-card="lifecycle-smoke"] [data-plugin-action="reload"]')?.click()
+    await waitFor(() => counters.apply === initial.apply + 1 && counters.dispose === initial.dispose + 1, 'owning plugin reload')
+    const afterReload = { ...counters, revision: runtime.snapshot().pluginLifecycle?.revision ?? null }
+
+    document.querySelector('[data-plugin-card="lifecycle-smoke"] [data-plugin-action="disable"]')?.click()
+    const disableDialog = await waitFor(() => document.querySelector('.cxm-lifecycle-overlay'), 'disable impact confirmation')
+    const disableImpact = disableDialog.querySelector('.cxm-lifecycle-impact')?.textContent ?? ''
+    disableDialog.querySelector('.cxm-lifecycle-actions button:last-child')?.click()
+    await waitFor(() => runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke')?.status === 'configured-disabled', 'disabled plugin')
+    const afterDisable = { ...counters, revision: runtime.snapshot().pluginLifecycle?.revision ?? null }
+
+    document.querySelector('[data-plugin-card="lifecycle-smoke"] [data-plugin-action="enable"]')?.click()
+    let enableAuthorization
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      enableAuthorization = document.querySelector('[data-permission-authorization="lifecycle-smoke"]') ?? undefined
+      if (enableAuthorization !== undefined
+        || runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke')?.status === 'active') break
+      await wait(50)
+    }
+    enableAuthorization?.querySelector('[data-authorization-decision="allow-once"]')?.click()
+    await waitFor(() => runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke')?.status === 'active', 'enabled plugin')
+    await waitFor(() => document.querySelector('[data-plugin-card="lifecycle-smoke"] [data-plugin-action="reload"]:not(:disabled)'), 'enabled plugin actions')
+    const afterEnable = { ...counters, revision: runtime.snapshot().pluginLifecycle?.revision ?? null }
+
+    const menuTrigger = document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger')
+    menuTrigger?.click()
+    let popup = await waitFor(() => document.querySelector('body > .cxm-plugin-menu-popup'), 'plugin action menu')
+    popup.querySelector('[data-plugin-menu-action="favorite"]')?.click()
+    await waitFor(() => document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger'), 'favorite rerender')
+    const routeAfterFavorite = document.querySelector('[data-manager-page-route="primary:plugins"]') !== null
+    const replacementTrigger = document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger')
+    const favoriteFocusRestored = document.activeElement === replacementTrigger
+    replacementTrigger?.click()
+    popup = await waitFor(() => document.querySelector('body > .cxm-plugin-menu-popup'), 'reopened plugin action menu')
+    const modal = document.querySelector('[data-cordisx-manager-modal]')
+    const modalWasHidden = modal?.hidden === true
+    if (modal instanceof HTMLElement) modal.hidden = false
+    const managerRect = rect(modal?.querySelector('[role="dialog"]'))
+    const popupRect = rect(popup)
+    const menu = {
+      portaled: popup.parentElement === document.body,
+      actions: [...popup.querySelectorAll('[role="menuitem"]')].map(item => ({
+        action: item.getAttribute('data-plugin-menu-action'), disabled: item.disabled,
+      })),
+      bounded: popupRect !== null && popupRect.x >= 0 && popupRect.y >= 0
+        && popupRect.right <= innerWidth && popupRect.bottom <= innerHeight,
+      firstItemFocused: popup.contains(document.activeElement),
+      shareText: popup.querySelector('[data-plugin-menu-action="share"]')?.textContent?.trim() ?? null,
+    }
+    return {
+      initial, afterReload, disableImpact, afterDisable, afterEnable,
+      enableAuthorization: enableAuthorization === undefined ? 'persisted-policy' : 'allow-once',
+      routeAfterFavorite, favoriteFocusRestored, favoriteStored: localStorage.getItem('cordisx.manager.favoritePlugins.v1:smoke'),
+      menu, menuRect: managerRect, modalWasHidden,
+    }
+  })()`, true)
+  if (exercised.menuRect === null) throw new Error('lifecycle action menu is not visible')
+  screenshots.menu = await capture(exercised.menuRect, artifact('lifecycle-menu'), 'lifecycle action menu')
+
+  const uninstallPlan = await evaluateByValue(`(async () => {
+    const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+    let popup = document.querySelector('body > .cxm-plugin-menu-popup')
+    if (popup === null) {
+      document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger')?.click()
+      for (let attempt = 0; attempt < 80 && popup === null; attempt += 1) {
+        popup = document.querySelector('body > .cxm-plugin-menu-popup')
+        if (popup === null) await wait(25)
+      }
+    }
+    const uninstall = popup?.querySelector('[data-plugin-menu-action="uninstall"]')
+    if (!(uninstall instanceof HTMLButtonElement) || uninstall.disabled) throw new Error('uninstall menu action is unavailable')
+    uninstall.click()
+    let dialog
+    for (let attempt = 0; attempt < 120 && dialog === undefined; attempt += 1) {
+      dialog = document.querySelector('.cxm-lifecycle-overlay') ?? undefined
+      if (dialog === undefined) await wait(50)
+    }
+    const value = dialog?.getBoundingClientRect()
+    return value === undefined ? null : {
+      text: dialog.textContent?.trim() ?? '',
+      rect: { x: value.x, y: value.y, width: value.width, height: value.height },
+    }
+  })()`, true)
+  if (uninstallPlan?.rect === undefined) throw new Error('uninstall confirmation did not open')
+  screenshots.uninstall = await capture(uninstallPlan.rect, artifact('lifecycle-uninstall'), 'lifecycle uninstall confirmation')
+
+  const removed = await evaluateByValue(`(async () => {
+    const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+    const runtime = globalThis.__cordisxRuntime
+    const counters = globalThis.__cordisxLifecycleSmoke
+    const beforeRevision = runtime.snapshot().pluginLifecycle?.revision ?? null
+    document.querySelector('.cxm-lifecycle-overlay .cxm-lifecycle-actions button:last-child')?.click()
+    for (let attempt = 0; attempt < 160 && runtime.snapshot().plugins.some(item => item.id === 'lifecycle-smoke'); attempt += 1) await wait(50)
+    const snapshot = runtime.snapshot()
+    return {
+      beforeRevision,
+      afterRevision: snapshot.pluginLifecycle?.revision ?? null,
+      removed: !snapshot.plugins.some(item => item.id === 'lifecycle-smoke'),
+      registrationsRemoved: !snapshot.registrations.some(item => item.owner === 'lifecycle-smoke'),
+      routesRemoved: !snapshot.navigation.routes.some(item => item.owner === 'lifecycle-smoke'),
+      pagesRemoved: !snapshot.navigation.pages.some(item => item.owner === 'lifecycle-smoke'),
+      counters: { ...counters },
+      appRenderer: location.href === 'app://-/index.html',
+    }
+  })()`, true)
+
+  const assertions = {
+    appRenderer: installed.appRenderer && removed.appRenderer,
+    authorization: installed.authorization.title === '安装授权' && installed.authorization.optional
+      && installed.authorization.primaryFocused,
+    installedWithoutLocalPath: installed.plugin.status === 'active' && installed.localSourceProjected === false
+      && installed.plugin.package?.canonicalSource === 'https://github.com/cordisx/cordisx/tree/main/examples/plugins/lifecycle-smoke',
+    pointerNavigation: pointerNavigation.detail && pointerNavigation.restored,
+    keyboardNavigation: Object.values(keyboardNavigation).every(Boolean),
+    owningReloadOnly: exercised.afterReload.apply === exercised.initial.apply + 1
+      && exercised.afterReload.dispose === exercised.initial.dispose + 1
+      && exercised.afterReload.revision === exercised.initial.revision,
+    disableEnable: exercised.disableImpact.includes('lifecycle-smoke')
+      && exercised.afterDisable.dispose === exercised.afterReload.dispose + 1
+      && exercised.afterEnable.apply === exercised.afterReload.apply + 1,
+    profileFavorite: exercised.routeAfterFavorite && exercised.favoriteFocusRestored
+      && JSON.parse(exercised.favoriteStored ?? '[]').includes('lifecycle-smoke'),
+    menu: exercised.menu.portaled && exercised.menu.bounded && exercised.menu.firstItemFocused
+      && exercised.menu.actions.some(item => item.action === 'share' && item.disabled === false)
+      && exercised.menu.actions.some(item => item.action === 'uninstall' && item.disabled === false),
+    uninstallImpact: uninstallPlan.text.includes('lifecycle-smoke') && uninstallPlan.text.includes('确认卸载'),
+    uninstallCleanup: removed.removed && removed.registrationsRemoved && removed.routesRemoved && removed.pagesRemoved
+      && removed.counters.dispose === exercised.afterEnable.dispose + 1,
+  }
+  managerLifecycleReport = {
+    result: Object.values(assertions).every(Boolean) ? 'pass' : 'fail',
+    installed, pointerNavigation, keyboardNavigation, exercised, uninstallPlan: { text: uninstallPlan.text }, removed,
+    screenshots, assertions,
+  }
+  console.log(`manager-lifecycle=${JSON.stringify(managerLifecycleReport, null, 2)}`)
+}
+
 let uiCatalogReport
 if (parsed.values['ui-catalog']) {
   uiCatalogReport = await evaluateByValue(`(async () => {
@@ -2180,6 +2443,7 @@ if (parsed.values.report !== undefined) {
     ...(demoReport === undefined ? {} : { agentTraceDemo: demoReport }),
     ...(pluginLifecycleReport === undefined ? {} : { pluginLifecycle: pluginLifecycleReport }),
     ...(authorizationReport === undefined ? {} : { authorization: authorizationReport }),
+    ...(managerLifecycleReport === undefined ? {} : { managerLifecycle: managerLifecycleReport }),
     ...(uiCatalogReport === undefined ? {} : { uiCatalog: uiCatalogReport }),
     ...(generationReport === undefined ? {} : { generation: generationReport }),
   }
@@ -2198,4 +2462,7 @@ if (settingsTabsReport?.passed === false) {
 }
 if (configExerciseReport?.result === 'fail') {
   throw new Error('plugin configuration smoke assertions failed; inspect the aggregated report')
+}
+if (managerLifecycleReport?.result === 'fail') {
+  throw new Error('manager lifecycle smoke assertions failed; inspect the aggregated report')
 }
