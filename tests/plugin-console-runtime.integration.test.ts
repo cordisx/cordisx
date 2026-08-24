@@ -154,6 +154,9 @@ describe('plugin DevTools Console runtime', () => {
     const inspector = dom.window.document.querySelector('[data-console-detail]')
     expect(inspector?.textContent).toContain('host-mediated')
     expect(inspector?.textContent).not.toContain('arg[')
+    const closeInspector = inspector?.querySelector<HTMLButtonElement>('[aria-label="关闭日志详情"]')
+    expect(closeInspector?.textContent).toBe('')
+    expect(closeInspector?.classList.contains('cxm-manager-icon-action')).toBe(true)
     expect(dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="copy"]')?.disabled).toBe(false)
     const search = dom.window.document.querySelector<HTMLInputElement>('[data-console-search="console-showcase"]')
     search!.value = 'inspectable error'
@@ -189,6 +192,9 @@ describe('plugin DevTools Console runtime', () => {
     scopedFrame!.dispatchEvent(new dom.window.Event('scroll'))
     const latest = scopedFrame!.parentElement?.querySelector<HTMLButtonElement>('.cxm-console-latest')
     expect(latest?.hidden).toBe(false)
+    expect(latest?.textContent).toBe('')
+    expect(latest?.getAttribute('aria-label')).toBe('回到最新')
+    expect(latest?.querySelector('[data-material-icon="console-follow"]')).not.toBeNull()
     latest?.click()
     expect(scopedFrame!.scrollTop).toBe(800)
 
