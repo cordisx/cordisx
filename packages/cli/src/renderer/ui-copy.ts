@@ -72,6 +72,61 @@ type CopyKey =
   | 'marketplace.reload'
   | 'marketplace.invalid-url'
   | 'marketplace.duplicate-source'
+  | 'marketplace.source-menu-label'
+  | 'marketplace.source-menu-description'
+  | 'marketplace.source-menu.create'
+  | 'marketplace.source-menu.clipboard'
+  | 'marketplace.source-menu.manage'
+  | 'marketplace.source.clipboard-prompt'
+  | 'marketplace.source.clipboard-unavailable'
+  | 'marketplace.source.imported'
+  | 'marketplace.source.index-heading'
+  | 'marketplace.source.add'
+  | 'marketplace.source.disabled'
+  | 'marketplace.source.failed'
+  | 'marketplace.source.updating'
+  | 'marketplace.source.cached'
+  | 'marketplace.source.no-description'
+  | 'marketplace.source.open'
+  | 'marketplace.source.enable'
+  | 'marketplace.source.disable'
+  | 'marketplace.source.edit'
+  | 'marketplace.source.move-up'
+  | 'marketplace.source.move-down'
+  | 'marketplace.source.remove'
+  | 'marketplace.source.official-remove-unavailable'
+  | 'marketplace.source.disabled-notice'
+  | 'marketplace.source.enabled-notice'
+  | 'marketplace.source.moved-notice'
+  | 'marketplace.source.removed-notice'
+  | 'marketplace.source.collection-label'
+  | 'marketplace.source.search-label'
+  | 'marketplace.source.search-placeholder'
+  | 'marketplace.source.empty'
+  | 'marketplace.source.no-matches'
+  | 'marketplace.source.more-actions'
+  | 'marketplace.source.create-heading'
+  | 'marketplace.source.edit-heading'
+  | 'marketplace.source.url-section'
+  | 'marketplace.source.url-help'
+  | 'marketplace.source.readonly-url-help'
+  | 'marketplace.source.url-label'
+  | 'marketplace.source.local-section'
+  | 'marketplace.source.local-help'
+  | 'marketplace.source.name-label'
+  | 'marketplace.source.name-help'
+  | 'marketplace.source.description-label'
+  | 'marketplace.source.description-help'
+  | 'marketplace.source.note-label'
+  | 'marketplace.source.note-help'
+  | 'marketplace.source.create'
+  | 'marketplace.source.save'
+  | 'marketplace.source.url-required'
+  | 'marketplace.source.url-invalid'
+  | 'marketplace.source.duplicate'
+  | 'marketplace.source.added'
+  | 'marketplace.source.saved'
+  | 'marketplace.source.operation-failed'
   | 'runtime.empty'
   | 'runtime.restore'
   | 'launcher.description'
@@ -180,6 +235,61 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'marketplace.reload': { en: 'Reload', 'zh-CN': '重新加载' },
   'marketplace.invalid-url': { en: 'Enter an HTTPS URL', 'zh-CN': '请输入 HTTPS 地址' },
   'marketplace.duplicate-source': { en: 'This marketplace is already configured', 'zh-CN': '这个商店地址已经配置' },
+  'marketplace.source-menu-label': { en: 'Manage marketplace sources', 'zh-CN': '管理商店来源' },
+  'marketplace.source-menu-description': { en: 'Add, import, or manage sources', 'zh-CN': '添加、导入或管理来源' },
+  'marketplace.source-menu.create': { en: 'Add source', 'zh-CN': '新增来源' },
+  'marketplace.source-menu.clipboard': { en: 'Import from clipboard', 'zh-CN': '从剪贴板导入' },
+  'marketplace.source-menu.manage': { en: 'Manage sources', 'zh-CN': '管理来源' },
+  'marketplace.source.clipboard-prompt': { en: 'Paste an HTTPS URL or source file', 'zh-CN': '粘贴 HTTPS 地址或来源文件' },
+  'marketplace.source.clipboard-unavailable': { en: 'Clipboard unavailable', 'zh-CN': '剪贴板不可用' },
+  'marketplace.source.imported': { en: 'Source imported', 'zh-CN': '已导入来源' },
+  'marketplace.source.index-heading': { en: 'Marketplace sources', 'zh-CN': '商店来源' },
+  'marketplace.source.add': { en: 'Add source', 'zh-CN': '新增来源' },
+  'marketplace.source.disabled': { en: 'Disabled', 'zh-CN': '已停用' },
+  'marketplace.source.failed': { en: 'Failed to update', 'zh-CN': '更新失败' },
+  'marketplace.source.updating': { en: 'Updating', 'zh-CN': '正在更新' },
+  'marketplace.source.cached': { en: 'Using cached data', 'zh-CN': '使用缓存' },
+  'marketplace.source.no-description': { en: 'No description', 'zh-CN': '暂无说明' },
+  'marketplace.source.open': { en: 'Open source details', 'zh-CN': '打开来源详情' },
+  'marketplace.source.enable': { en: 'Enable source', 'zh-CN': '启用来源' },
+  'marketplace.source.disable': { en: 'Disable source', 'zh-CN': '停用来源' },
+  'marketplace.source.edit': { en: 'Edit display details', 'zh-CN': '编辑显示信息' },
+  'marketplace.source.move-up': { en: 'Move up', 'zh-CN': '上移' },
+  'marketplace.source.move-down': { en: 'Move down', 'zh-CN': '下移' },
+  'marketplace.source.remove': { en: 'Remove source', 'zh-CN': '移除来源' },
+  'marketplace.source.official-remove-unavailable': { en: 'The official source cannot be removed', 'zh-CN': '官方来源不能删除' },
+  'marketplace.source.disabled-notice': { en: 'Source disabled', 'zh-CN': '已停用来源' },
+  'marketplace.source.enabled-notice': { en: 'Source enabled', 'zh-CN': '已启用来源' },
+  'marketplace.source.moved-notice': { en: 'Source order updated', 'zh-CN': '已调整来源顺序' },
+  'marketplace.source.removed-notice': { en: 'Source removed', 'zh-CN': '已移除来源' },
+  'marketplace.source.collection-label': { en: 'Marketplace sources', 'zh-CN': '插件商店来源' },
+  'marketplace.source.search-label': { en: 'Search sources', 'zh-CN': '搜索商店来源' },
+  'marketplace.source.search-placeholder': { en: 'Search sources', 'zh-CN': '搜索来源' },
+  'marketplace.source.empty': { en: 'No sources yet', 'zh-CN': '暂无商店来源' },
+  'marketplace.source.no-matches': { en: 'No matching sources', 'zh-CN': '没有匹配的来源' },
+  'marketplace.source.more-actions': { en: 'More source actions', 'zh-CN': '更多来源操作' },
+  'marketplace.source.create-heading': { en: 'Add source', 'zh-CN': '添加来源' },
+  'marketplace.source.edit-heading': { en: 'Source details', 'zh-CN': '来源详情' },
+  'marketplace.source.url-section': { en: 'Source URL', 'zh-CN': '来源地址' },
+  'marketplace.source.url-help': { en: 'Enter an HTTPS URL', 'zh-CN': '请输入 HTTPS 地址' },
+  'marketplace.source.readonly-url-help': { en: 'This URL cannot be changed', 'zh-CN': '此地址不可修改' },
+  'marketplace.source.url-label': { en: 'Marketplace URL', 'zh-CN': '商店地址' },
+  'marketplace.source.local-section': { en: 'Display details', 'zh-CN': '显示信息' },
+  'marketplace.source.local-help': { en: 'Shown only in this Manager', 'zh-CN': '仅在此管理器中显示' },
+  'marketplace.source.name-label': { en: 'Name', 'zh-CN': '名称' },
+  'marketplace.source.name-help': { en: 'Leave blank to use the source name', 'zh-CN': '留空时使用来源名称' },
+  'marketplace.source.description-label': { en: 'Description', 'zh-CN': '说明' },
+  'marketplace.source.description-help': { en: 'Describe this source', 'zh-CN': '说明此来源的内容' },
+  'marketplace.source.note-label': { en: 'Note', 'zh-CN': '备注' },
+  'marketplace.source.note-help': { en: 'For your reference', 'zh-CN': '仅供参考' },
+  'marketplace.source.create': { en: 'Add source', 'zh-CN': '添加来源' },
+  'marketplace.source.save': { en: 'Save details', 'zh-CN': '保存信息' },
+  'marketplace.source.url-required': { en: 'Enter a marketplace URL', 'zh-CN': '请输入商店地址' },
+  'marketplace.source.url-invalid': { en: 'Enter an HTTPS URL', 'zh-CN': '请输入有效的 HTTPS 地址' },
+  'marketplace.source.duplicate': { en: 'This source is already configured', 'zh-CN': '这个来源已经配置' },
+  'marketplace.source.added': { en: 'Source added', 'zh-CN': '已添加来源' },
+  'marketplace.source.saved': { en: 'Details saved', 'zh-CN': '已保存信息' },
+  'marketplace.source.operation-failed': { en: 'Could not update source', 'zh-CN': '无法更新来源' },
   'runtime.empty': { en: 'No blocked plugins.', 'zh-CN': '暂无被屏蔽的插件。' },
   'runtime.restore': { en: 'Restore', 'zh-CN': '恢复' },
   'launcher.description': { en: 'Manage launcher settings in cordisx.config.json.', 'zh-CN': '启动器配置由 cordisx.config.json 管理。' },

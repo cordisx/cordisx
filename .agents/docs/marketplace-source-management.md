@@ -77,12 +77,11 @@ detail route. Documentation and source administration are not primary calls to
 action on this page.
 
 An icon action beside search opens one Host-owned, themed menu with three
-structured tasks: add a source, import `marketplace-source.v1` from the
-clipboard, or manage existing sources. Source creation is a third-level
-Manager route (`Marketplace / Sources / Add source`). Existing source cards
-open a corresponding detail route where profile-local name, description, and
-note overrides can be edited. The canonical URL is displayed as read-only
-machine identity.
+structured tasks: add a source, import a source file from the clipboard, or
+manage existing sources. Source creation is a third-level Manager route.
+Existing source cards open a corresponding detail route where the display
+name, description, and note can be edited. The URL remains a read-only,
+secondary machine field.
 
 Sources use the shared compact collection renderer. Enable/disable is the
 direct action; ordering and removal are overflow actions. Removal is disabled

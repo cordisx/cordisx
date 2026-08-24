@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
+import { managerCopy } from '../packages/cli/src/renderer/ui-copy.js'
 
 type TestTDesignSelect = HTMLElement & {
   options: readonly { readonly value: string; readonly label: string }[]
@@ -1170,7 +1171,7 @@ describe('renderer bundle', () => {
 
     const sourceMenu = dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-source-menu]')!
     sourceMenu.click()
-    expect(dom.window.document.querySelector('[data-manager-action-menu="商店来源操作"]')?.parentElement).toBe(dom.window.document.body)
+    expect(dom.window.document.querySelector(`[data-manager-action-menu="${managerCopy('zh-CN', 'marketplace.source-menu-label')}"]`)?.parentElement).toBe(dom.window.document.body)
     dom.window.document.querySelector<HTMLButtonElement>('[data-manager-menu-action="manage"]')!.click()
     expect(dom.window.document.querySelector('[data-marketplace-source-page="index"]')).not.toBeNull()
     expect(dom.window.document.querySelector('[data-host-collection="marketplace-sources"]')).not.toBeNull()
