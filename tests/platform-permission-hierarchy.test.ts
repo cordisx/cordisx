@@ -6,6 +6,7 @@ import {
 } from '../packages/cli/src/contracts.js'
 import {
   installCordisXManager,
+  projectManagerBreadcrumbs,
   requestPluginAuthorization,
   type ManagerModel,
   type ManagerPermissionSnapshot,
@@ -99,6 +100,17 @@ function openPluginTab(document: Document, pluginId: string, tab: 'permissions' 
 }
 
 describe('Platform permission presentation hierarchy', () => {
+  it('keeps root/current visible and moves only middle ancestors into overflow', () => {
+    expect(projectManagerBreadcrumbs([62, 94, 72, 88], 205, 42)).toEqual({
+      visible: [0, 3],
+      overflow: [1, 2],
+    })
+    expect(projectManagerBreadcrumbs([62, 94, 72, 88], 400, 42)).toEqual({
+      visible: [0, 1, 2, 3],
+      overflow: [],
+    })
+  })
+
   it('reviews required and optional declarations once with persistent allow as the primary action', async () => {
     const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
     const permissions = [
@@ -244,7 +256,10 @@ describe('Platform permission presentation hierarchy', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-permission-open="tasks.create"]')?.click()
       const detail = dom.window.document.querySelector<HTMLElement>('[data-permission-detail="tasks.create"]')
       expect(detail).not.toBeNull()
-      expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain('权限/创建任务')
+      const breadcrumb = [...dom.window.document.querySelectorAll<HTMLElement>('.cxm-breadcrumb-action, .cxm-breadcrumb-current')]
+      expect(breadcrumb.map(item => item.textContent)).toEqual(['插件', 'Demo', '权限', '创建任务'])
+      expect(breadcrumb.slice(0, -1).every(item => item.matches('button[data-breadcrumb-target]'))).toBe(true)
+      expect(breadcrumb.at(-1)?.matches('span[aria-current="page"]')).toBe(true)
       expect(detail?.textContent).toContain('申请使用对应的宿主功能')
       expect(detail?.textContent).toContain('必需权限')
       expect(detail?.textContent).toContain('当前宿主暂不支持')
@@ -264,6 +279,49 @@ describe('Platform permission presentation hierarchy', () => {
       expect(dom.window.document.querySelector('[data-permission-detail]')).toBeNull()
       expect(dom.window.document.querySelector('[data-plugin-detail-tab="permissions"]')?.getAttribute('aria-selected')).toBe('true')
       expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="权限"]')).not.toBeNull()
+    } finally {
+      dispose()
+      dom.window.close()
+    }
+  })
+
+  it('projects constrained middle ancestors into an ordered, navigable ellipsis menu', async () => {
+    const state = snapshot()
+    const { dom, dispose } = install(state)
+    try {
+      Object.defineProperty(dom.window.HTMLElement.prototype, 'clientWidth', {
+        configurable: true,
+        get(this: HTMLElement) {
+          return this.classList.contains('cxm-breadcrumbs') ? 190 : 0
+        },
+      })
+      const rect = dom.window.HTMLElement.prototype.getBoundingClientRect
+      Object.defineProperty(dom.window.HTMLElement.prototype, 'getBoundingClientRect', {
+        configurable: true,
+        value(this: HTMLElement) {
+          if (this.classList.contains('cxm-breadcrumb-item')) {
+            const width = Math.max(54, (this.textContent?.length ?? 0) * 15 + 18)
+            return { x: 0, y: 0, top: 0, right: width, bottom: 24, left: 0, width, height: 24, toJSON: () => ({}) }
+          }
+          return rect.call(this)
+        },
+      })
+      openPluginTab(dom.window.document, 'demo', 'permissions')
+      dom.window.document.querySelector<HTMLButtonElement>('[data-permission-open="tasks.create"]')?.click()
+      await Promise.resolve()
+
+      const breadcrumbs = dom.window.document.querySelector<HTMLElement>('.cxm-breadcrumbs')
+      expect(breadcrumbs?.dataset.breadcrumbOverflowCount).toBe('2')
+      expect([...dom.window.document.querySelectorAll<HTMLElement>('.cxm-breadcrumb-list > .cxm-breadcrumb-item > .cxm-breadcrumb-action, .cxm-breadcrumb-list > .cxm-breadcrumb-item > .cxm-breadcrumb-current')]
+        .map(item => item.textContent)).toEqual(['插件', '创建任务'])
+      const overflow = dom.window.document.querySelector<HTMLDetailsElement>('.cxm-breadcrumb-overflow')
+      expect(overflow?.querySelector('summary')?.getAttribute('aria-label')).toBe('显示省略的上级页面')
+      const menuItems = [...(overflow?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])]
+      expect(menuItems.map(item => item.textContent)).toEqual(['Demo', '权限'])
+      menuItems.at(-1)?.click()
+      expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="权限"]')).not.toBeNull()
+      expect(dom.window.history.length).toBe(1)
+      expect(dom.window.location.href).toBe('https://codex.local/')
     } finally {
       dispose()
       dom.window.close()

@@ -13,6 +13,7 @@ const parsed = parseArgs({
     'manager-tab': { type: 'string' },
     'manager-plugin': { type: 'string' },
     'manager-detail-tab': { type: 'string' },
+    'manager-permission-capability': { type: 'string' },
     'manager-settings-tab': { type: 'string' },
     'manager-settings-exercise': { type: 'boolean', default: false },
     'config-exercise': { type: 'boolean', default: false },
@@ -21,6 +22,8 @@ const parsed = parseArgs({
     'manager-route': { type: 'string' },
     'manager-marketplace-tab': { type: 'string' },
     'manager-click-external': { type: 'boolean', default: false },
+    'manager-viewport-width': { type: 'string' },
+    'manager-breadcrumb-width': { type: 'string' },
     'trigger-screenshot': { type: 'string' },
     'color-scheme': { type: 'string' },
     'fetch-url': { type: 'string' },
@@ -51,7 +54,7 @@ const parsed = parseArgs({
 })
 const port = Number(parsed.values.port)
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--screenshot <png>] [--app-screenshot <png>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-settings-tab <tab> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-click-external] [--trigger-screenshot <png>]')
+  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--screenshot <png>] [--app-screenshot <png>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-permission-capability <name> --manager-settings-tab <tab> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-click-external --manager-viewport-width <pixels> --manager-breadcrumb-width <pixels>] [--trigger-screenshot <png>]')
 }
 if (parsed.values['ui-catalog'] && parsed.values.report === undefined) {
   throw new Error('--ui-catalog requires --report so screenshots and machine-readable assertions share one artifact directory')
@@ -1915,12 +1918,15 @@ if (parsed.values['authorization-plugin'] !== undefined) {
   console.log(`authorization=${JSON.stringify(authorizationReport, null, 2)}`)
 }
 
+let managerReport
 if (parsed.values['manager-screenshot'] !== undefined) {
   const managerTab = parsed.values['manager-tab'] ?? 'plugins'
   if (!['about', 'extension-points', 'routes', 'plugins', 'marketplace', 'settings'].includes(managerTab)) throw new Error(`unknown manager tab: ${managerTab}`)
   const managerPlugin = parsed.values['manager-plugin']
   const managerDetailTab = parsed.values['manager-detail-tab']
   if (managerDetailTab !== undefined && !['readme', 'config', 'permissions', 'runtime', 'extension-points', 'routes'].includes(managerDetailTab)) throw new Error(`unknown manager detail tab: ${managerDetailTab}`)
+  const managerPermissionCapability = parsed.values['manager-permission-capability']
+  if (managerPermissionCapability !== undefined && managerDetailTab !== 'permissions') throw new Error('--manager-permission-capability requires --manager-detail-tab permissions')
   const managerSettingsTab = parsed.values['manager-settings-tab']
   if (managerSettingsTab !== undefined && !/^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)?$/.test(managerSettingsTab)) {
     throw new Error(`invalid manager settings tab id: ${managerSettingsTab}`)
@@ -1931,6 +1937,26 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   const managerRoute = parsed.values['manager-route']
   const managerMarketplaceTab = parsed.values['manager-marketplace-tab']
   if (managerMarketplaceTab !== undefined && !['overview', 'authors-source'].includes(managerMarketplaceTab)) throw new Error(`unknown manager marketplace tab: ${managerMarketplaceTab}`)
+  const managerViewportWidth = parsed.values['manager-viewport-width'] === undefined
+    ? undefined
+    : Number(parsed.values['manager-viewport-width'])
+  if (managerViewportWidth !== undefined && (!Number.isInteger(managerViewportWidth) || managerViewportWidth < 400 || managerViewportWidth > 3840)) {
+    throw new Error('--manager-viewport-width must be an integer between 400 and 3840')
+  }
+  const managerBreadcrumbWidth = parsed.values['manager-breadcrumb-width'] === undefined
+    ? undefined
+    : Number(parsed.values['manager-breadcrumb-width'])
+  if (managerBreadcrumbWidth !== undefined && (!Number.isInteger(managerBreadcrumbWidth) || managerBreadcrumbWidth < 120 || managerBreadcrumbWidth > 800)) {
+    throw new Error('--manager-breadcrumb-width must be an integer between 120 and 800')
+  }
+  if (managerViewportWidth !== undefined) {
+    await send('Emulation.setDeviceMetricsOverride', {
+      width: managerViewportWidth,
+      height: 900,
+      deviceScaleFactor: 1,
+      mobile: false,
+    })
+  }
   const evaluatedManager = await send('Runtime.evaluate', {
     expression: `(async () => {
       const trigger = document.querySelector('[data-cordisx-manager-trigger]')
@@ -1947,6 +1973,8 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       }
       const detailTab = ${JSON.stringify(managerDetailTab)}
       if (detailTab !== undefined) document.querySelector('[data-plugin-detail-tab="' + detailTab + '"]')?.click()
+      const permissionCapability = ${JSON.stringify(managerPermissionCapability)}
+      if (permissionCapability !== undefined) document.querySelector('[data-permission-open="' + CSS.escape(permissionCapability) + '"]')?.click()
       const settingsTab = ${JSON.stringify(managerSettingsTab)}
       if (settingsTab !== undefined) document.querySelector('[data-settings-tab="' + settingsTab + '"]')?.click()
       if (settingsTab !== undefined) await new Promise(resolve => setTimeout(resolve, 250))
@@ -1958,13 +1986,34 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       if (routeId !== undefined) document.querySelector('[data-route-id="' + CSS.escape(routeId) + '"]')?.click()
       const marketplaceTab = ${JSON.stringify(managerMarketplaceTab)}
       if (marketplaceTab !== undefined) document.querySelector('[data-marketplace-detail-tab="' + marketplaceTab + '"]')?.click()
+      const breadcrumbWidth = ${JSON.stringify(managerBreadcrumbWidth)}
+      const heading = document.querySelector('.cxm-heading')
+      if (breadcrumbWidth !== undefined && heading instanceof HTMLElement) {
+        heading.style.flex = '0 1 ' + breadcrumbWidth + 'px'
+        heading.style.width = breadcrumbWidth + 'px'
+        window.dispatchEvent(new Event('resize'))
+      }
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      if (breadcrumbWidth !== undefined) {
+        const overflow = document.querySelector('.cxm-breadcrumb-overflow')
+        if (overflow instanceof HTMLDetailsElement) overflow.open = true
+      }
       const dialog = document.querySelector('[data-cordisx-manager-modal] [role="dialog"]')
       const rect = dialog?.getBoundingClientRect()
       const leadingRect = document.querySelector('.cxm-heading-leading')?.getBoundingClientRect()
       const firstTab = document.querySelector('.cxm-tabs .cxm-tab:first-child')
       const tabIconRect = firstTab?.querySelector('.cxm-tab-icon')?.getBoundingClientRect()
       const tabLabelRect = firstTab?.querySelector('.cxm-tab-content > span:last-child')?.getBoundingClientRect()
-      const titleRect = document.querySelector('.cxm-heading h2')?.getBoundingClientRect()
+      const titleRect = document.querySelector('.cxm-heading-title')?.getBoundingClientRect()
+      const breadcrumb = document.querySelector('.cxm-breadcrumbs')
+      const breadcrumbItems = [...(breadcrumb?.querySelectorAll(':scope > .cxm-breadcrumb-list > .cxm-breadcrumb-item') ?? [])]
+      const breadcrumbOrdered = breadcrumbItems.flatMap(item => {
+        const menu = item.querySelector('.cxm-breadcrumb-menu')
+        if (menu !== null) return [...menu.querySelectorAll('.cxm-breadcrumb-action')].map(action => action.textContent?.trim() ?? '')
+        const label = item.querySelector(':scope > .cxm-breadcrumb-action, :scope > .cxm-breadcrumb-current')
+        return label === null ? [] : [label.textContent?.trim() ?? '']
+      })
+      const breadcrumbCurrent = breadcrumb?.querySelector('.cxm-breadcrumb-current')
       let externalDefaultPrevented
       if (${JSON.stringify(parsed.values['manager-click-external'])}) {
         const link = document.querySelector('.cxm-content a[href]')
@@ -1981,6 +2030,23 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           openedBy,
           triggerExpanded: trigger?.getAttribute('aria-expanded'),
           externalDefaultPrevented,
+          breadcrumb: {
+            route: breadcrumb?.getAttribute('data-manager-page-route') ?? null,
+            ordered: breadcrumbOrdered,
+            inline: breadcrumbItems.flatMap(item => [...item.querySelectorAll(':scope > .cxm-breadcrumb-action, :scope > .cxm-breadcrumb-current')].map(label => label.textContent?.trim() ?? '')),
+            overflow: [...(breadcrumb?.querySelectorAll('.cxm-breadcrumb-menu .cxm-breadcrumb-action') ?? [])].map(item => item.textContent?.trim() ?? ''),
+            overflowCount: Number(breadcrumb?.getAttribute('data-breadcrumb-overflow-count') ?? 0),
+            overflowMenuOpen: breadcrumb?.querySelector('.cxm-breadcrumb-overflow')?.open ?? false,
+            clientWidth: breadcrumb?.clientWidth ?? null,
+            scrollWidth: breadcrumb?.scrollWidth ?? null,
+            itemWidths: breadcrumbItems.map(item => item.getBoundingClientRect().width),
+            current: breadcrumbCurrent?.textContent?.trim() ?? null,
+            currentInteractive: breadcrumbCurrent?.matches('a,button') ?? null,
+            ancestorTargets: [...(breadcrumb?.querySelectorAll('[data-breadcrumb-target]') ?? [])].map(item => item.getAttribute('data-breadcrumb-target')),
+            backPresent: document.querySelector('.cxm-heading-leading.cxm-back') !== null,
+          },
+          nativeRoute: { url: location.href, historyLength: history.length },
+          breadcrumbConstraintWidth: breadcrumbWidth ?? null,
           tabGeometry: leadingRect === undefined || tabIconRect === undefined || tabLabelRect === undefined || titleRect === undefined ? null : {
             headingLeadingCenterX: leadingRect.x + leadingRect.width / 2,
             firstTabIconCenterX: tabIconRect.x + tabIconRect.width / 2,
@@ -1994,8 +2060,25 @@ if (parsed.values['manager-screenshot'] !== undefined) {
     returnByValue: true,
   })
   const managerResult = evaluatedManager.result?.value ?? null
-  console.log(`manager-state=${JSON.stringify(managerResult?.state ?? null)}`)
-  await capture(managerResult?.rect ?? null, parsed.values['manager-screenshot'], 'CordisX manager')
+  managerReport = managerResult?.state ?? null
+  console.log(`manager-state=${JSON.stringify(managerReport)}`)
+  try {
+    await capture(managerResult?.rect ?? null, parsed.values['manager-screenshot'], 'CordisX manager')
+  } finally {
+    if (managerBreadcrumbWidth !== undefined) {
+      await send('Runtime.evaluate', {
+        expression: `(() => {
+          const heading = document.querySelector('.cxm-heading')
+          if (!(heading instanceof HTMLElement)) return false
+          heading.style.removeProperty('flex')
+          heading.style.removeProperty('width')
+          return true
+        })()`,
+        returnByValue: true,
+      })
+    }
+    if (managerViewportWidth !== undefined) await send('Emulation.clearDeviceMetricsOverride')
+  }
 }
 
 if (parsed.values['trigger-screenshot'] !== undefined) {
@@ -2073,6 +2156,7 @@ if (parsed.values.report !== undefined) {
       isolatedRenderer: true,
     },
     baseline: report,
+    ...(managerReport === undefined ? {} : { manager: managerReport }),
     ...(exerciseReport === undefined ? {} : { exercise: exerciseReport }),
     ...(settingsTabsReport === undefined ? {} : { managerSettings: settingsTabsReport }),
     ...(configExerciseReport === undefined ? {} : { pluginConfiguration: configExerciseReport }),
