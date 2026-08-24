@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CordisXPluginConsoleEntryV1 } from '../packages/cli/src/contracts.js'
-import { projectPluginConsoleForLuna } from '../packages/cli/src/renderer/manager.js'
+import { projectPluginConsoleEntryForLuna } from '../packages/cli/src/renderer/manager.js'
 import { snapshotConsoleValue } from '../packages/cli/src/renderer/plugin-console.js'
 
 function entry(overrides: Partial<CordisXPluginConsoleEntryV1> = {}): CordisXPluginConsoleEntryV1 {
@@ -17,25 +17,31 @@ function entry(overrides: Partial<CordisXPluginConsoleEntryV1> = {}): CordisXPlu
   }
 }
 
-describe('Luna Log projection', () => {
-  it('keeps the native formatted message and expands safe object/array snapshots in the same text stream', () => {
-    const projection = projectPluginConsoleForLuna([{ entry: entry(), count: 1 }])
-    expect(projection.text).toContain('console.log  x=4 payload Array(2)')
-    expect(projection.text).toContain('arg[2]: [object Object] {')
-    expect(projection.text).toContain('nested: [object Object] {')
-    expect(projection.text).toContain('arg[3]: Array(2) [')
-    expect(projection.blocks).toMatchObject([{ startLine: 0 }])
-    expect(projection.blocks[0]!.endLine).toBe(projection.text.split('\n').length)
+describe('Luna Console entry projection', () => {
+  it('keeps one native argument array with safe expandable objects and arrays', () => {
+    const projection = projectPluginConsoleEntryForLuna(entry())
+    expect(projection.type).toBe('log')
+    expect(projection.header.from).toBe('console.log')
+    expect(projection.header.time).toMatch(/^\d{2}:\d{2}:\d{2}\.\d{3}$/u)
+    expect(projection.args).toHaveLength(4)
+    expect(projection.args[0]).toBe('x=%d')
+    expect(projection.args[1]).toBe(4)
+    expect(projection.args[2]).toEqual({ nested: { ok: true } })
+    expect(projection.args[3]).toEqual([1, 2])
+    expect(projection).not.toHaveProperty('text')
   })
 
-  it('prints Error stacks in Luna and groups one correlated Host boundary chain', () => {
+  it('keeps every Host boundary event independent and restores Error stacks', () => {
     const failure = new Error('boom')
     failure.stack = 'Error: boom\n    at plugin.ts:1:1'
     const requested = entry({ entryId: 'request', coverage: 'host-mediated', kind: 'invocation', source: 'tools.call', message: 'Call requested', correlationId: 'call-1', phase: 'requested', args: [] })
     const terminal = entry({ entryId: 'failure', coverage: 'host-mediated', kind: 'invocation', method: 'error', source: 'tools.call', message: 'Call failed', correlationId: 'call-1', phase: 'failure', args: [snapshotConsoleValue(failure)], stack: failure.stack })
-    const projection = projectPluginConsoleForLuna([{ entry: requested, count: 1 }, { entry: terminal, count: 1 }])
-    expect(projection.text).toContain('├─ tools.call')
-    expect(projection.text).toContain('Error: boom')
-    expect(projection.text).toContain('at plugin.ts:1:1')
+    const projectedRequest = projectPluginConsoleEntryForLuna(requested)
+    const projectedTerminal = projectPluginConsoleEntryForLuna(terminal)
+    expect(projectedRequest.args).toEqual(['Call requested'])
+    expect(projectedTerminal.args[0]).toBe('Call failed')
+    expect(projectedTerminal.args[1]).toBeInstanceOf(Error)
+    expect((projectedTerminal.args[1] as Error).stack).toContain('at plugin.ts:1:1')
+    expect(projectedRequest.entry.correlationId).toBe(projectedTerminal.entry.correlationId)
   })
 })

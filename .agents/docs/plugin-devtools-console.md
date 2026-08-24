@@ -40,6 +40,11 @@ is not assumed and Node `AsyncLocalStorage` is not available in the renderer.
 
 ## Coverage truth
 
+These boundaries are architecture documentation, not persistent product copy.
+The normal Console page does not display a generic capture-coverage notice.
+Only a concrete attribution conflict or renderer failure may produce a
+dismissible, actionable status tied to the observed problem.
+
 - `host-mediated`: strong attribution from an issued capability token.
 - `scoped-console`: strong attribution while plugin module code or a wrapped
   Host callback uses its lexical Console facade.
@@ -57,23 +62,31 @@ network/tool proxies.
 
 ## Rendering, privacy and lifetime
 
-Luna Log `0.1.0` and Luna Text Viewer `0.2.1` are pinned, locally bundled
-MIT-licensed renderers. Luna Log's published API accepts a string log and
-`append(string)`; it does not expose an object-tree or entry-row API. For that
-reason the Log component is the only Console body DOM: CordisX projects safe
-`args[]` snapshots, format substitution, object/array trees and Error stacks
-into one escaped multiline Luna stream instead of layering custom rows over it.
-The optional Inspector contains Host ownership/correlation/call metadata only
-and never repeats arguments or lets a plugin provide renderer nodes.
+The original `luna-log@0.1.0` integration was rejected because that terminal
+viewer accepts only `log: string` / `append(string)` and reduced the entire
+Console to one text blob. The production body now uses Luna Console `1.3.6`
+with its pinned Luna Object Viewer `0.3.2`, Data Grid `1.6.5`, and DOM Viewer
+`1.8.4` peers. Each Host record is inserted as one Luna log with its own method,
+argument array, timestamp and source header. Luna owns level presentation,
+repeat folding, selection, virtual viewport, format substitution and expandable
+safe objects. CordisX does not create ASCII trees, giant text streams, `<pre>`
+fallbacks or parallel record rows. The optional Inspector contains only Host
+ownership/correlation/call metadata and never repeats arguments or lets a
+plugin provide renderer nodes.
 
-The Log scroll element has intrinsic content height and a bounded maximum
-viewport. Only the empty state receives a minimum height. Follow-latest is
-preserved across live rerenders only while the viewer is already at the bottom;
-scrolling upward exposes an explicit return-to-latest action. Luna instances
-and resize observers are destroyed on rerender, route change and Manager
-dispose. Light/dark selection comes only from the shared `HostThemeProjection`
-and its `data-cordisx-app-theme` / `--cx-*` tokens; the Console has no private
-system-theme detector. There is no CDN dependency.
+The Luna Console scroll element has intrinsic content height and a bounded
+maximum viewport. Only the empty state receives a minimum height. Follow-latest
+is preserved across live rerenders only while the viewer is already at the
+bottom; scrolling upward exposes an explicit return-to-latest action. Luna
+instances and resize observers are destroyed on rerender, route change and
+Manager dispose. Light/dark selection comes only from the shared
+`HostThemeProjection` and its `data-cordisx-app-theme` / `--cx-*` tokens; the
+Console has no private system-theme detector. There is no CDN dependency.
+
+Pause/resume, follow-latest, clear and copy are Host-owned 30-pixel Material
+icon controls using the common Manager icon-button state and tooltip system.
+Pause and follow are independent toggles, copy is disabled without a selected
+Luna entry, and clear is explicitly exposed as irreversible.
 
 Automatic Host summaries omit prompt/message/content, credentials, secrets,
 tokens, URL/path/CWD values and raw response bodies. Snapshotting does not

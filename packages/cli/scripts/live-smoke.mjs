@@ -667,7 +667,7 @@ if (parsed.values['manager-settings-exercise']) {
     const trigger = document.querySelector('[data-cordisx-manager-trigger]')
     trigger?.click()
     document.querySelector('[data-tab="settings"]')?.click()
-    await wait(120)
+    await wait(700)
     const main = document.querySelector('[data-app-shell-main-content-layout]')
     const selected = document.querySelector('[data-app-action-sidebar-thread-selected="true"]')
     globalThis.__cordisxSettingsSmokeNative = { main, selected }
@@ -2827,6 +2827,71 @@ let managerReport
 let pluginConsoleReport
 if (parsed.values['plugin-console-exercise']) {
   const owner = parsed.values['plugin-owner'] ?? 'console-showcase'
+  const toolbarTarget = await evaluateByValue(`(async () => {
+    const owner = ${JSON.stringify(owner)}
+    const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+    document.querySelector('[data-permission-prompt] [data-permission-decision="deny"]')?.click()
+    await wait(120)
+    const modal = document.querySelector('[data-cordisx-manager-modal]')
+    const trigger = document.querySelector('[data-cordisx-manager-trigger]')
+    if (modal?.hidden === true && trigger !== null) trigger.click()
+    else if (modal instanceof HTMLElement && modal.hidden) modal.hidden = false
+    if (document.querySelector('[role="tabpanel"][aria-label="运行状态"]') === null) {
+      document.querySelector('[data-tab="plugins"]')?.click()
+      document.querySelector('[data-plugin-id="' + CSS.escape(owner) + '"]')?.click()
+      document.querySelector('[data-plugin-detail-tab="runtime"]')?.click()
+    }
+    let button
+    let rect
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      button = document.querySelector('[data-console-action="pause"]')
+      button?.scrollIntoView({ block: 'center', inline: 'center' })
+      rect = button?.getBoundingClientRect()
+      if (rect !== undefined && rect.width > 0 && rect.height > 0) break
+      await wait(25)
+    }
+    return rect === undefined || rect.width === 0 || rect.height === 0
+      ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+  })()`, true)
+  if (toolbarTarget === null) throw new Error('Plugin Console icon toolbar is unavailable')
+  await pointerClick(toolbarTarget)
+  await new Promise(resolve => setTimeout(resolve, 300))
+  const pointerPaused = await evaluateByValue(`(() => {
+    const button = document.querySelector('[data-console-action="pause"]')
+    const rect = button?.getBoundingClientRect()
+    return {
+      pressed: button?.getAttribute('aria-pressed') === 'true',
+      label: button?.getAttribute('aria-label') ?? null,
+      activeAction: document.activeElement?.getAttribute('data-console-action') ?? null,
+      rect: rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+    }
+  })()`)
+  if (pointerPaused.rect !== null) {
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1, pointerType: 'mouse' })
+    await send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: pointerPaused.rect.x + pointerPaused.rect.width / 2,
+      y: pointerPaused.rect.y + pointerPaused.rect.height / 2,
+      pointerType: 'mouse',
+    })
+  }
+  await new Promise(resolve => setTimeout(resolve, 120))
+  const toolbarTooltip = await evaluateByValue(`(() => {
+    const button = document.querySelector('[data-console-action="pause"]')
+    const tooltip = document.querySelector('[role="tooltip"]')
+    return { text: tooltip?.textContent ?? null, describedBy: button?.getAttribute('aria-describedby') ?? null }
+  })()`)
+  const keyboardFocused = await evaluateByValue(`(() => {
+    const button = document.querySelector('[data-console-action="pause"]')
+    button?.focus()
+    return document.activeElement === button
+  })()`)
+  await pressKey(' ', 'Space', 32)
+  await new Promise(resolve => setTimeout(resolve, 80))
+  const keyboardResumed = await evaluateByValue(`(() => {
+    const button = document.querySelector('[data-console-action="pause"]')
+    return { pressed: button?.getAttribute('aria-pressed') === 'false', label: button?.getAttribute('aria-label') ?? null }
+  })()`)
   pluginConsoleReport = await evaluateByValue(`(async () => {
     const owner = ${JSON.stringify(owner)}
     const runtime = globalThis.__cordisxRuntime
@@ -2835,15 +2900,24 @@ if (parsed.values['plugin-console-exercise']) {
     await new Promise(resolve => setTimeout(resolve, 120))
     const before = runtime.pluginConsole(owner)
     const silent = runtime.pluginConsole('silent-api')
-    document.querySelector('[data-cordisx-manager-trigger]')?.click()
-    document.querySelector('[data-tab="plugins"]')?.click()
-    document.querySelector('[data-plugin-id="' + CSS.escape(owner) + '"]')?.click()
-    document.querySelector('[data-plugin-detail-tab="runtime"]')?.click()
+    const modal = document.querySelector('[data-cordisx-manager-modal]')
+    const trigger = document.querySelector('[data-cordisx-manager-trigger]')
+    if (modal?.hidden === true && trigger !== null) trigger.click()
+    else if (modal instanceof HTMLElement && modal.hidden) modal.hidden = false
+    if (document.querySelector('[role="tabpanel"][aria-label="运行状态"]') === null) {
+      document.querySelector('[data-tab="plugins"]')?.click()
+      document.querySelector('[data-plugin-id="' + CSS.escape(owner) + '"]')?.click()
+      document.querySelector('[data-plugin-detail-tab="runtime"]')?.click()
+    }
     const runtimePanel = document.querySelector('[role="tabpanel"][aria-label="运行状态"]')
-    const pause = [...(runtimePanel?.querySelectorAll('.cxm-console-controls button') ?? [])].find(item => item.textContent === '暂停')
+    let pause = runtimePanel?.querySelector('[data-console-action="pause"]')
+    if (pause?.getAttribute('aria-pressed') === 'true') {
+      pause.click()
+      pause = document.querySelector('[role="tabpanel"][aria-label="运行状态"] [data-console-action="pause"]')
+    }
     pause?.click()
     const pausedPanel = document.querySelector('[role="tabpanel"][aria-label="运行状态"]')
-    const paused = pause !== undefined && [...(pausedPanel?.querySelectorAll('.cxm-console-controls button') ?? [])].some(item => item.textContent === '继续')
+    const paused = pause !== null && pausedPanel?.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed') === 'true'
     const initialFrame = pausedPanel?.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
     await new Promise(resolve => setTimeout(resolve, 80))
     initialFrame?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientY: initialFrame.getBoundingClientRect().top + 7 }))
@@ -2854,19 +2928,37 @@ if (parsed.values['plugin-console-exercise']) {
       kind.value = 'console'
       kind.dispatchEvent(new Event('change', { bubbles: true }))
     }
-    await new Promise(resolve => setTimeout(resolve, 80))
-    const lunaFrame = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
-    const lunaText = lunaFrame?.querySelector('.luna-text-viewer-text')
-    const scopedFiltered = lunaText?.textContent?.includes('console.log') === true && lunaText?.textContent?.includes('settings.get') !== true
-    const firstLineAtTop = lunaFrame !== null && lunaText !== null
-      && lunaText.getBoundingClientRect().top - lunaFrame.getBoundingClientRect().top < 16
-    const contentDrivenHeight = lunaFrame !== null && lunaText !== null
-      && lunaFrame.getBoundingClientRect().height <= Math.min(522, lunaText.getBoundingClientRect().height + 14)
-    const lunaOnly = lunaFrame?.classList.contains('luna-log') === true
-      && lunaFrame.querySelector('[data-console-entry], .cxm-console-hit-layer') === null
-    const nativePayloads = lunaText?.textContent?.includes('arg[1]') === true
-      && lunaText?.textContent?.includes('Error: inspectable error') === true
-      && lunaText?.textContent?.includes('Array(3)') === true
+    let lunaFrame
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      lunaFrame = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
+      if (lunaFrame?.querySelector('[data-console-entry]') != null) break
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    const lunaEntries = [...(lunaFrame?.querySelectorAll('[data-console-entry]') ?? [])]
+    const scopedFiltered = lunaEntries.some(item => item.dataset.consoleSource === 'console.log')
+      && !lunaEntries.some(item => item.dataset.consoleSource === 'settings.get')
+    const firstEntry = lunaEntries[0]
+    const firstLineAtTop = lunaFrame !== null && firstEntry !== undefined
+      && firstEntry.getBoundingClientRect().top - lunaFrame.getBoundingClientRect().top < 16
+    const contentDrivenHeight = lunaFrame !== null && lunaFrame.getBoundingClientRect().height <= 522
+    const lunaOnly = lunaFrame?.classList.contains('luna-console') === true
+      && lunaFrame.querySelector('.luna-text-viewer-text, pre, .cxm-console-hit-layer') === null
+    const objectEntry = lunaEntries.find(item => item.dataset.consoleSource === 'console.log')
+    objectEntry?.querySelector('.luna-console-preview')?.click()
+    const errorEntry = lunaEntries.find(item => item.dataset.consoleSource === 'console.info')
+    errorEntry?.querySelector('.luna-console-preview')?.click()
+    const objectExpanded = objectEntry?.querySelector('.luna-object-viewer') != null
+    const nativePayloads = objectEntry?.querySelectorAll('.luna-console-preview').length === 2
+      && errorEntry?.querySelector('.luna-object-viewer')?.textContent?.includes('inspectable error') === true
+    const independentEntryCount = before.entries.filter(entry => entry.kind === 'console').length
+    const independentEntries = lunaEntries.length === independentEntryCount
+    const levelVisuals = lunaEntries.some(item => item.querySelector('.luna-console-debug') !== null)
+      && lunaEntries.some(item => item.querySelector('.luna-console-warn') !== null)
+      && lunaEntries.some(item => item.querySelector('.luna-console-error') !== null)
+    const coverageRemoved = !document.querySelector('[role="tabpanel"][aria-label="运行状态"]')?.textContent?.includes('采集范围')
+      && !document.querySelector('[role="tabpanel"][aria-label="运行状态"]')?.textContent?.includes('Host API 自动切面')
+    const toolbarButtons = [...(document.querySelectorAll('.cxm-console-action-toolbar [data-console-action]') ?? [])]
+    const iconToolbar = toolbarButtons.length === 4 && toolbarButtons.every(item => item.textContent === '' && item.querySelector('[data-material-icon]') !== null)
     if (lunaFrame instanceof HTMLElement) {
       lunaFrame.style.maxHeight = '120px'
       lunaFrame.scrollTop = 0
@@ -2882,13 +2974,13 @@ if (parsed.values['plugin-console-exercise']) {
     document.documentElement.classList.add('electron-light')
     await new Promise(resolve => setTimeout(resolve, 20))
     const lightTheme = managerModal?.getAttribute('data-cordisx-app-theme') === 'light'
-      && lunaFrame?.classList.contains('luna-text-viewer-theme-light') === true
+      && lunaFrame?.classList.contains('luna-console-theme-light') === true
     document.documentElement.className = originalThemeClass
     await new Promise(resolve => setTimeout(resolve, 20))
     const darkTheme = managerModal?.getAttribute('data-cordisx-app-theme') === 'dark'
-    const resumed = [...document.querySelectorAll('.cxm-console-controls button')].find(item => item.textContent === '继续')
-    resumed?.click()
-    const clear = [...document.querySelectorAll('.cxm-console-controls button')].find(item => item.textContent === '清空')
+    const resumed = document.querySelector('[data-console-action="pause"]')
+    if (resumed?.getAttribute('aria-pressed') === 'true') resumed.click()
+    const clear = document.querySelector('[data-console-action="clear"]')
     clear?.click()
     const cleared = runtime.pluginConsole(owner).entries.length === 0
     await runtime.setPluginBlocked(owner, true)
@@ -2903,6 +2995,7 @@ if (parsed.values['plugin-console-exercise']) {
     if (screenshotFrame instanceof HTMLElement) {
       screenshotFrame.scrollTop = 0
       screenshotFrame.dispatchEvent(new Event('scroll'))
+      screenshotFrame.querySelector('[data-console-source="console.log"] .luna-console-preview')?.click()
     }
     const screenshotPreparedAtTop = screenshotFrame instanceof HTMLElement && screenshotFrame.scrollTop === 0
     return {
@@ -2923,6 +3016,12 @@ if (parsed.values['plugin-console-exercise']) {
       ui: {
         paused, detailOpened, inspectorMetadataOnly: !inspectorText.includes('arg['), scopedFiltered, cleared,
         lunaOnly, nativePayloads, firstLineAtTop, contentDrivenHeight,
+        independentEntries, independentEntryCount, mountedEntryCount: lunaEntries.length,
+        levelVisuals, objectExpanded, coverageRemoved, iconToolbar,
+        pointerPaused: ${JSON.stringify(pointerPaused.pressed)}, pointerPauseDetail: ${JSON.stringify(pointerPaused)},
+        keyboardFocused: ${JSON.stringify(keyboardFocused)}, keyboardResumed: ${JSON.stringify(keyboardResumed.pressed)},
+        keyboardResumeDetail: ${JSON.stringify(keyboardResumed)},
+        toolbarTooltip: ${JSON.stringify(toolbarTooltip)},
         returnLatestVisible, returnedToLatest, lightTheme, darkTheme, screenshotPreparedAtTop,
       },
       reload: {
@@ -3099,6 +3198,13 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         window.dispatchEvent(new Event('resize'))
       }
       await nextPaint()
+      if (${JSON.stringify(parsed.values['plugin-console-exercise'])} && detailTab === 'runtime') {
+        const consoleFrame = document.querySelector('[data-plugin-console="' + CSS.escape(pluginId) + '"]')
+        const objectEntry = consoleFrame?.querySelector('[data-console-source="console.log"]')
+        const expandable = objectEntry?.querySelector('.luna-console-preview')
+        if (expandable != null) expandable.click()
+        await nextPaint()
+      }
       if (breadcrumbWidth !== undefined) {
         const overflow = document.querySelector('.cxm-breadcrumb-overflow')
         if (overflow instanceof HTMLDetailsElement) overflow.open = true

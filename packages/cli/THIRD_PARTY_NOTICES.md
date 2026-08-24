@@ -10,8 +10,10 @@ licenses remain with their respective copyright holders:
 | `@material-symbols/svg-400` | `0.46.0` | Apache-2.0 |
 | `esbuild` | `^0.25.9` | MIT |
 | `intl-messageformat` | `11.2.14` | BSD-3-Clause |
-| `luna-log` | `0.1.0` | MIT |
-| `luna-text-viewer` | `0.2.1` | MIT |
+| `luna-console` | `1.3.6` | MIT |
+| `luna-data-grid` | `1.6.5` | MIT |
+| `luna-dom-viewer` | `1.8.4` | MIT |
+| `luna-object-viewer` | `0.3.2` | MIT |
 | `tar` | `7.5.22` | BlueOak-1.0.0 |
 | `ws` | `^8.18.3` | MIT |
 
@@ -24,12 +26,12 @@ BSD-3-Clause, BlueOak-1.0.0, and ISC license identifiers for production
 dependencies in this beta. This inventory is evidence for release review, not
 legal advice.
 
-The plugin DevTools Console pins and bundles Luna Log and Luna Text Viewer
-locally as its only log-body renderer. Their upstream project is liriliri/luna;
-both packages are MIT licensed (copyright liriliri contributors). CordisX
-retains the structured `method + args[]` capture model and projects safe
-multiline text into Luna's published `log` / `append(string)` API. The separate
-Host Inspector contains metadata only. There is no runtime CDN dependency.
+The plugin DevTools Console pins and locally bundles Luna Console with its
+official Luna Object Viewer, Data Grid, and DOM Viewer peers. Their upstream
+project is liriliri/luna; all four packages are MIT licensed (copyright
+liriliri contributors). CordisX inserts each safe structured `method + args[]`
+record independently into Luna Console. The separate Host Inspector contains
+metadata only. There is no runtime CDN dependency.
 
 ## Evaluated but not distributed
 
