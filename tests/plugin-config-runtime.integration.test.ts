@@ -219,7 +219,8 @@ describe('plugin config runtime', () => {
       .find(element => element.dataset.pluginId === 'live-config')
     row?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
-    for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('input[type="range"]') === null; attempt += 1) {
+    for (let attempt = 0; attempt < 20
+      && dom.window.document.querySelector('input[type="range"][data-host-form-primitive="custom"]') === null; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 0))
     }
     const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="配置管理"]')
@@ -230,10 +231,10 @@ describe('plugin config runtime', () => {
     expect(configPanel?.textContent).not.toContain('Revision')
     expect(configPanel?.querySelector('.cxm-detail-grid')).toBeNull()
     expect(configPanel?.querySelector('.cxm-config-path')).toBeNull()
-    expect(timeoutField?.querySelector('.cxm-config-label')?.textContent).toBe('Request timeout')
-    expect(timeoutField?.querySelector('.cxm-config-help')?.textContent).toBe('Live timeout')
-    expect(secretField?.querySelector('.cxm-config-label')?.textContent).toBe('Api Key')
-    expect(secretField?.querySelectorAll('.cxm-notice')).toHaveLength(1)
+    expect(timeoutField?.querySelector('.cxf-label')?.textContent).toBe('Request timeout')
+    expect(timeoutField?.querySelector('.cxf-help')?.textContent).toBe('Live timeout')
+    expect(secretField?.querySelector('.cxf-label')?.textContent).toBe('Api Key')
+    expect(secretField?.querySelectorAll('.cxf-alert')).toHaveLength(1)
     expect(configPanel?.textContent).not.toContain('Host 保留了')
     const state = (dom.window as unknown as {
       __cordisxConfigFixture: { rendererMount: number; rendererDispose: number; rendererAbort: number }
@@ -255,6 +256,37 @@ describe('plugin config runtime', () => {
     expect(state.rendererAbort).toBe(1)
     expect(state.rendererDispose).toBe(1)
     expect(dom.window.document.querySelector('input[type="range"]')).toBeNull()
+    await runtime.dispose()
+  })
+
+  it('keeps a custom-renderer draft and exposes a bounded form error after a CAS conflict', async () => {
+    const { dom, runtime, bridge } = await boot()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
+    ;[...dom.window.document.querySelectorAll<HTMLButtonElement>('[data-plugin-id]')]
+      .find(element => element.dataset.pluginId === 'live-config')?.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
+    for (let attempt = 0; attempt < 20
+      && dom.window.document.querySelector('input[type="range"][data-host-form-primitive="custom"]') === null; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0))
+    }
+    const range = dom.window.document.querySelector<HTMLInputElement>('input[type="range"]')!
+    expect(dom.window.document.querySelectorAll('#cxm-config-live-config-0')).toHaveLength(1)
+    expect(range.dataset.hostFormPrimitive).toBe('custom')
+    expect(range.getAttribute('aria-describedby')).toContain('cxm-config-live-config-0-error')
+    range.value = '45'
+    range.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    expect(dom.window.document.querySelector('[data-plugin-config-form="live-config"]')?.getAttribute('data-state')).toBe('dirty')
+
+    bridge.get('live-config')!.revision = 1
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-config-form="live-config"] button[type="submit"]')!.click()
+    for (let attempt = 0; attempt < 30 && dom.window.document.querySelector('[data-plugin-config-form="live-config"][data-state="conflict"]') === null; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0))
+    }
+    const conflicted = dom.window.document.querySelector<HTMLElement>('[data-plugin-config-form="live-config"]')!
+    expect(conflicted.dataset.state).toBe('conflict')
+    expect(dom.window.document.querySelector<HTMLInputElement>('input[type="range"]')?.value).toBe('45')
+    expect(dom.window.document.querySelector('.cxf-alert[data-tone="error"]')?.textContent).toContain('草稿仍保留')
+    expect(conflicted.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(false)
     await runtime.dispose()
   })
 })

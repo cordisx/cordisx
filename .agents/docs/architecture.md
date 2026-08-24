@@ -257,6 +257,20 @@ plugin.
 
 The host may improve selectors without requiring plugin changes. Plugins that query Codex DOM directly opt out of that compatibility boundary.
 
+### Host-owned form plane
+
+Host-owned configuration, import, Marketplace, permission, Provider, and
+Channel forms share the scoped primitive, theme, validation, and state model in
+[`host-form-system.md`](host-form-system.md). Plugins still provide structured
+schema data and bounded custom field content only; they never receive a UI
+library instance, form root, selector, CSS, or portal authority.
+
+The official TDesign Web Components package is not bundled because its current
+package and global-style boundary cannot satisfy the Host installation and
+Codex DOM isolation gates. The adapter retains TDesign desktop form semantics
+without a second framework runtime or a second schema registry. This is an
+implementation boundary, not a new plugin contract.
+
 ### Built-in manager plane
 
 The local plugin manager is host chrome, not a plugin contribution and not a

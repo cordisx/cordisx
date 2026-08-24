@@ -8,10 +8,18 @@ function value(name) {
   return process.argv[index + 1]
 }
 
+function optionalValue(name) {
+  const index = process.argv.indexOf(name)
+  if (index < 0) return undefined
+  if (index + 1 >= process.argv.length) throw new Error(`${name} requires a value`)
+  return process.argv[index + 1]
+}
+
 const separator = process.argv.indexOf('--')
 if (separator < 0) throw new Error('separate live-smoke arguments with --')
 const port = Number(value('--port'))
 const profileDir = value('--profile-dir')
+const devConfig = optionalValue('--dev-config')
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('--port must be an unprivileged TCP port')
 const smokeArgs = process.argv.slice(separator + 1)
 
@@ -110,8 +118,11 @@ async function waitForRenderer() {
 }
 
 const crashpadBefore = await crashpadCount()
+const invocation = devConfig === undefined
+  ? ['codex', 'smoke', '--data', 'isolated']
+  : ['dev', '--config', devConfig]
 const launcher = spawn(process.execPath, [
-  '--import', 'tsx', 'packages/cli/src/cli.ts', 'codex', 'smoke', '--data', 'isolated',
+  '--import', 'tsx', 'packages/cli/src/cli.ts', ...invocation,
   '--debug-port', String(port), '--profile-dir', profileDir, '--', '--start-minimized',
 ], {
   stdio: ['ignore', 'pipe', 'pipe'],

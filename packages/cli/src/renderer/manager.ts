@@ -57,6 +57,7 @@ import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
 import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 import { HostTooltipController } from './tooltips.js'
 import { HostThemeProjection, resolveHostTheme } from './host-theme.js'
+import { HOST_FORM_STYLES, HostFormAdapter, selectHostFormPrimitive, validateHostFormValue } from './host-form.js'
 import lunaTextViewerCss from 'luna-text-viewer/luna-text-viewer.css'
 
 export type ManagerPluginStatus =
@@ -326,6 +327,7 @@ const POLICY_LABELS: Readonly<Record<CordisXPermissionPolicy, string>> = {
 }
 
 const MANAGER_STYLES = `
+  ${HOST_FORM_STYLES}
   [data-cordisx-manager-trigger] {
     display: inline-flex;
     align-items: center;
@@ -865,16 +867,7 @@ const MANAGER_STYLES = `
   .cxm-field-label { color: #737e90; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
   .cxm-field-value { margin-top: 5px; overflow-wrap: anywhere; color: #cdd2dc; font-size: 11px; }
   .cxm-code { max-height: 140px; margin: 6px 0 0; overflow: auto; color: #bac2d2; font: 10px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
-  .cxm-config-form { display: grid; gap: 12px; margin-top: 10px; }
-  .cxm-config-field { display: grid; gap: 6px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.07); }
-  .cxm-config-label { color: #eef0f4; font-weight: 600; }
-  .cxm-config-help { margin: 0; color: #aab0bc; font-size: 11px; }
-  .cxm-config-control { box-sizing: border-box; width: 100%; min-height: 34px; border: 1px solid rgba(255,255,255,.13); border-radius: 8px; padding: 7px 9px; background: rgba(8,10,14,.52); color: inherit; font: inherit; }
-  textarea.cxm-config-control { min-height: 92px; resize: vertical; font-family: ui-monospace, monospace; font-size: 11px; }
-  .cxm-config-checkbox { width: 18px; height: 18px; accent-color: #aeb7c7; }
-  .cxm-config-renderer { min-height: 34px; }
-  .cxm-config-field-actions, .cxm-config-actions { display: flex; justify-content: flex-end; }
-  .cxm-config-error { color: #ffaaa4; font-size: 11px; }
+  .cxm-config-renderer { min-height: 2rem; }
   .cxm-readme { max-width: 760px; color: #b8c0cf; font-size: 12px; line-height: 1.65; }
   .cxm-readme h1, .cxm-readme h2, .cxm-readme h3, .cxm-readme h4 { color: #f5f6f8; line-height: 1.3; }
   .cxm-readme h1 { margin: 2px 0 14px; font-size: 22px; }
@@ -1141,7 +1134,8 @@ function createPermissionPolicySelect(
   permission: ManagerPermissionSnapshot,
   onChange: (policy: CordisXPermissionPolicy, control: HTMLSelectElement) => Promise<void>,
 ): HTMLSelectElement {
-  const policy = create(document, 'select', 'cxm-source-input')
+  const policy = create(document, 'select', 'cxm-source-input cxf-control')
+  policy.dataset.hostFormPrimitive = 'select'
   policy.dataset.permissionCapability = permission.capability
   policy.setAttribute('aria-label', `${capabilityPresentation(permission.capability).name}的权限策略`)
   for (const value of ['ask', 'allow', 'deny'] as const) {
@@ -1181,7 +1175,8 @@ export async function requestPluginAuthorization(
   })
   if (plan.declarations.length === 0) return decisionEnvelope('allow', () => true)
   return await new Promise((resolve) => {
-    const overlay = create(document, 'div', 'cxm-authorization-overlay')
+    const forms = new HostFormAdapter(document)
+    const overlay = create(document, 'div', 'cxm-authorization-overlay cxf-scope')
     const theme = new HostThemeProjection(document)
     const detachTheme = theme.attach(overlay)
     overlay.dataset.permissionAuthorization = plugin.id
@@ -1190,7 +1185,7 @@ export async function requestPluginAuthorization(
     const titleId = `cxm-authorization-${plugin.id}`
     overlay.setAttribute('aria-labelledby', titleId)
     const style = document.createElement('style')
-    style.textContent = `
+    style.textContent = `${HOST_FORM_STYLES}
       .cxm-authorization-overlay { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 24px; background: var(--cx-backdrop); }
       .cxm-authorization-dialog { width: min(600px, 100%); max-height: min(720px, calc(100vh - 48px)); overflow: auto; border: 1px solid var(--cx-border); border-radius: 14px; padding: 20px; background: var(--cx-surface); color: var(--cx-text); box-shadow: 0 24px 80px var(--cx-shadow); }
       .cxm-authorization-dialog h2 { margin: 0; font-size: 18px; }
@@ -1225,12 +1220,13 @@ export async function requestPluginAuthorization(
       item.dataset.authorizationCapability = declaration.capability
       const choice = document.createElement('input')
       choice.type = 'checkbox'
+      choice.className = 'cxf-checkbox'
       choice.checked = true
       choice.disabled = declaration.required
       choice.dataset.authorizationChoice = declaration.capability
       choice.setAttribute('aria-label', `${presentation.name}（${declaration.required ? '必需' : '可选'}）`)
       choices.set(declaration.capability, choice)
-      const choiceLabel = create(document, 'label', 'cxm-authorization-choice')
+      const choiceLabel = create(document, 'label', 'cxm-authorization-choice cxf-choice')
       choiceLabel.append(choice, create(document, 'span', undefined, `当前：${POLICY_LABELS[declaration.policy]}`))
       item.append(
         create(document, 'div', 'cxm-authorization-name', `${presentation.name} · ${declaration.required ? '必需' : '可选'}`),
@@ -1249,21 +1245,17 @@ export async function requestPluginAuthorization(
         capability => choices.get(capability)?.checked === true,
       ))
     }
-    const cancel = create(document, 'button', undefined, '取消')
-    cancel.type = 'button'
+    const cancel = forms.button('取消')
     cancel.dataset.authorizationDecision = 'cancel'
     cancel.addEventListener('click', () => finish(undefined), { once: true })
-    const deny = create(document, 'button', undefined, `拒绝并保持${operationLabel === '安装' ? '未安装' : '停用'}`)
-    deny.type = 'button'
+    const deny = forms.button(`拒绝并保持${operationLabel === '安装' ? '未安装' : '停用'}`, { tone: 'danger' })
     deny.dataset.authorizationDecision = 'deny'
     deny.dataset.tone = 'danger'
     deny.addEventListener('click', () => finish('deny'), { once: true })
-    const once = create(document, 'button', undefined, `仅此次允许并${operationLabel}`)
-    once.type = 'button'
+    const once = forms.button(`仅此次允许并${operationLabel}`)
     once.dataset.authorizationDecision = 'allow-once'
     once.addEventListener('click', () => finish('allow-once'), { once: true })
-    const allow = create(document, 'button', undefined, `始终允许并${operationLabel}`)
-    allow.type = 'button'
+    const allow = forms.button(`始终允许并${operationLabel}`, { variant: 'primary' })
     allow.dataset.authorizationDecision = 'allow'
     allow.dataset.primary = 'true'
     allow.addEventListener('click', () => finish('allow'), { once: true })
@@ -1562,7 +1554,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const triggerMark = createAdaptiveBrandMark(document)
   trigger.append(triggerMark)
 
-  const modal = create(document, 'div')
+  const modal = create(document, 'div', 'cxf-scope')
   const detachModalTheme = theme.attach(modal)
   modal.dataset.cordisxManagerModal = 'true'
   modal.hidden = true
@@ -1624,6 +1616,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     marketplaceFetcher.fetcher,
   )
   const tooltips = new HostTooltipController(document)
+  const forms = new HostFormAdapter(document)
   let pluginQuery = ''
   let marketplaceQuery = ''
   let extensionPointQuery = ''
@@ -1654,6 +1647,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const listScrollPositions = new Map<ManagerTab, number>()
   let busyPluginId: string | undefined
   let operationError: string | undefined
+  const configDrafts = new Map<string, {
+    baseRevision: number
+    readonly values: Map<string, unknown>
+    readonly operations: Map<string, ConfigMutationOperation>
+    readonly issues: Map<string, string>
+    state: 'pristine' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error'
+    message?: string
+  }>()
   let sourceOperationError: string | undefined
   let sourcesBusy = false
   const lifecycleBusy = new Map<string, ManagerPluginStatus>()
@@ -1761,12 +1762,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       unmountOverlay()
       resolve(confirmed)
     }
-    const cancel = create(document, 'button', 'cxm-action', '取消')
-    cancel.type = 'button'
+    panel.classList.add('cxf-scope')
+    const cancel = forms.button('取消')
     cancel.addEventListener('click', () => finish(false), { once: true })
-    const confirm = create(document, 'button', 'cxm-action', confirmLabel)
-    confirm.type = 'button'
-    if (danger) confirm.dataset.tone = 'danger'
+    const confirm = forms.button(confirmLabel, { variant: danger ? 'default' : 'primary', tone: danger ? 'danger' : 'default' })
     confirm.addEventListener('click', () => finish(true), { once: true })
     overlay.addEventListener('keydown', event => {
       if (event.key !== 'Escape') return
@@ -1791,33 +1790,42 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       create(document, 'h2', undefined, '安装本地插件'),
       create(document, 'p', undefined, '选择显式本地包目录。当前版本不下载远程包，也不宣称签名验证或安全沙箱。'),
     )
-    const input = create(document, 'input', 'cxm-source-input')
-    input.type = 'text'
-    input.placeholder = '/absolute/path/to/plugin'
-    input.setAttribute('aria-label', '本地插件包绝对路径')
-    panel.append(input)
-    const actions = create(document, 'div', 'cxm-lifecycle-actions')
+    const form = forms.form('local-package-directory')
+    const item = forms.item({
+      id: 'cxm-local-package-directory', label: '本地插件包绝对路径',
+      help: '仅接受明确的本地绝对目录；Host 将先检查包内容，再进入授权和激活事务。', fullWidth: true, required: true,
+    })
+    let pathValue = ''
+    const pathField: CordisXConfigFieldSnapshot = {
+      namespace: 'cordisx.host', path: ['localPackageDirectory'], type: 'string', role: 'directory', value: '', disabled: false, required: true,
+    }
+    const control = forms.control(pathField, 'cxm-local-package-directory', value => {
+      pathValue = typeof value === 'string' ? value.trim() : ''
+      const absolute = pathValue.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(pathValue)
+      item.setError(pathValue === '' ? '请输入本地包绝对路径' : absolute ? undefined : '请输入绝对路径')
+    })
+    forms.connect(item, control)
+    item.control.append(control.root)
+    form.append(item.root)
+    const actions = create(document, 'div', 'cxf-actions')
     const finish = (value?: string): void => {
       unmountOverlay()
       resolve(value)
     }
-    const cancel = create(document, 'button', 'cxm-action', '取消')
-    cancel.type = 'button'
+    const cancel = forms.button('取消')
     cancel.addEventListener('click', () => finish(), { once: true })
-    const inspect = create(document, 'button', 'cxm-action', '检查并继续')
-    inspect.type = 'button'
-    inspect.addEventListener('click', () => {
-      const value = input.value.trim()
-      if (value === '') {
-        input.setCustomValidity('请输入本地包绝对路径')
-        input.reportValidity()
+    const inspect = forms.button('检查并继续', { type: 'submit', variant: 'primary' })
+    form.addEventListener('submit', event => {
+      event.preventDefault()
+      const absolute = pathValue.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(pathValue)
+      if (pathValue === '' || !absolute) {
+        item.setError(pathValue === '' ? '请输入本地包绝对路径' : '请输入绝对路径')
+        control.focusTarget?.focus()
         return
       }
-      finish(value)
+      finish(pathValue)
     })
-    input.addEventListener('input', () => input.setCustomValidity(''))
-    input.addEventListener('keydown', event => {
-      if (event.key === 'Enter') inspect.click()
+    form.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         event.preventDefault()
         event.stopPropagation()
@@ -1825,10 +1833,11 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       }
     })
     actions.append(cancel, inspect)
-    panel.append(actions)
+    form.append(actions)
+    panel.append(form)
     overlay.append(panel)
     unmountOverlay = mountPortal(overlay)
-    input.focus()
+    control.focusTarget?.focus()
   })
 
   const lifecycleFailure = (result: CordisXPluginLifecycleResultV1): Error | undefined => {
@@ -3114,178 +3123,172 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       .replace(/^./, character => character.toUpperCase())
   }
 
-  const renderDefaultConfigControl = (
-    field: CordisXConfigFieldSnapshot,
-    id: string,
-    onDraft: (value: unknown) => void,
-  ): HTMLElement => {
-    if (field.choices !== undefined) {
-      const select = create(document, 'select', 'cxm-config-control')
-      select.id = id
-      select.disabled = field.disabled
-      for (const choice of field.choices) {
-        const option = create(document, 'option', undefined, choice.label)
-        option.value = JSON.stringify(choice.value)
-        option.selected = Object.is(choice.value, field.value)
-        select.append(option)
-      }
-      select.addEventListener('change', () => onDraft(JSON.parse(select.value) as unknown))
-      return select
-    }
-    if (field.type === 'boolean') {
-      const input = create(document, 'input', 'cxm-config-checkbox')
-      input.id = id
-      input.type = 'checkbox'
-      input.checked = field.value === true
-      input.disabled = field.disabled
-      input.addEventListener('change', () => onDraft(input.checked))
-      return input
-    }
-    if (field.type === 'number' || field.type === 'natural') {
-      const input = create(document, 'input', 'cxm-config-control')
-      input.id = id
-      input.type = 'number'
-      input.value = typeof field.value === 'number' ? String(field.value) : ''
-      input.disabled = field.disabled
-      input.required = field.required
-      if (field.min !== undefined) input.min = String(field.min)
-      if (field.max !== undefined) input.max = String(field.max)
-      if (field.step !== undefined) input.step = String(field.step)
-      input.addEventListener('input', () => onDraft(input.value === '' ? undefined : Number(input.value)))
-      return input
-    }
-    if (field.type === 'string') {
-      const input = create(document, 'input', 'cxm-config-control')
-      input.id = id
-      input.type = field.role === 'color' ? 'color' : 'text'
-      input.value = typeof field.value === 'string' ? field.value : ''
-      input.disabled = field.disabled
-      input.required = field.required
-      input.addEventListener('input', () => onDraft(input.value))
-      return input
-    }
-    const textarea = create(document, 'textarea', 'cxm-config-control')
-    textarea.id = id
-    textarea.disabled = field.disabled
-    textarea.value = formatConfig(field.value)
-    textarea.addEventListener('input', () => {
-      try {
-        onDraft(JSON.parse(textarea.value) as unknown)
-        textarea.removeAttribute('aria-invalid')
-      } catch {
-        textarea.setAttribute('aria-invalid', 'true')
-      }
-    })
-    return textarea
-  }
-
   const renderPluginConfiguration = (plugin: ManagerPluginSnapshot, panel: HTMLElement): void => {
     const descriptor = plugin.configuration
-    if (descriptor === undefined) {
-      panel.append(create(document, 'div', 'cxm-empty', '此插件未提供可编辑设置。'))
-      return
-    }
-    if (descriptor.schemaKind !== 'schemastery') {
-      panel.append(create(document, 'div', 'cxm-empty', '此插件未提供可编辑设置。'))
+    if (descriptor === undefined || descriptor.schemaKind !== 'schemastery') {
+      panel.append(forms.empty('此插件未提供可编辑设置。'))
       return
     }
     const sensitiveRoles = ['secret', 'credential', 'credential-ref', 'permission', 'capability']
     const visibleFields = descriptor.fields.filter(field => !field.disabled || sensitiveRoles.includes(field.role ?? ''))
-    const editableFields = visibleFields.filter(field => !field.disabled && !sensitiveRoles.includes(field.role ?? ''))
+    const editableFields = visibleFields.filter(field => !field.disabled
+      && !sensitiveRoles.includes(field.role ?? '') && selectHostFormPrimitive(field) !== 'unsupported')
     if (visibleFields.length === 0) {
-      panel.append(create(document, 'div', 'cxm-empty', '此插件没有可编辑设置。'))
+      panel.append(forms.empty('此插件没有可编辑设置。'))
       return
     }
 
-    const form = create(document, 'form', 'cxm-config-form')
+    let draft = configDrafts.get(plugin.id)
+    if (draft === undefined) {
+      draft = { baseRevision: descriptor.revision, values: new Map(), operations: new Map(), issues: new Map(), state: 'pristine' }
+      configDrafts.set(plugin.id, draft)
+    } else if (draft.baseRevision !== descriptor.revision && draft.operations.size === 0) {
+      draft.baseRevision = descriptor.revision
+      if (draft.state !== 'saved') draft.state = 'pristine'
+      delete draft.message
+    }
+
+    const form = forms.form(plugin.id)
     form.dataset.pluginConfigForm = plugin.id
-    const dirty = new Map<string, ConfigMutationOperation>()
+    form.dataset.state = draft.state
+    const grid = forms.grid()
+    form.append(grid)
     let submit: HTMLButtonElement | undefined
     for (const [index, field] of visibleFields.entries()) {
       const pathKey = JSON.stringify(field.path)
-      const wrapper = create(document, 'div', 'cxm-config-field')
-      wrapper.dataset.configPath = field.path.join('.')
       const controlId = `cxm-config-${plugin.id}-${index}`
-      const label = create(document, 'label', 'cxm-config-label', fieldLabel(field))
       const sensitive = field.role !== undefined && sensitiveRoles.includes(field.role)
-      if (!sensitive) label.htmlFor = controlId
-      wrapper.append(label)
-      if (field.description !== undefined) wrapper.append(create(document, 'p', 'cxm-config-help', field.description))
+      const primitive = selectHostFormPrimitive(field)
+      const item = forms.item({
+        id: controlId,
+        label: fieldLabel(field),
+        ...(field.description === undefined ? {} : { help: field.description }),
+        required: field.required,
+        fullWidth: sensitive || ['textarea', 'json-textarea', 'path-input', 'unsupported'].includes(primitive),
+      })
+      item.root.dataset.configPath = field.path.join('.')
+      item.root.dataset.hostFormPrimitive = primitive
 
       if (sensitive) {
-        const boundary = create(document, 'div', 'cxm-notice', '敏感字段由 Host credential 边界保留；当前版本尚未提供 credential broker，因此不会显示、写入或交给自定义 renderer。')
-        boundary.dataset.tone = 'warning'
-        wrapper.append(boundary)
-        form.append(wrapper)
+        const control = forms.control(field, controlId, () => undefined)
+        forms.connect(item, control)
+        item.control.append(control.root)
+        grid.append(item.root)
         continue
       }
 
-      const setDraft = (value: unknown): void => {
-        dirty.set(pathKey, value === undefined
+      const setDraft = (value: unknown, issue?: string): void => {
+        draft!.values.set(pathKey, value)
+        draft!.operations.set(pathKey, value === undefined
           ? { op: 'unset', path: field.path }
           : { op: 'set', path: field.path, value: value as CordisXJsonValue })
-        if (submit !== undefined) submit.disabled = !descriptor.writable || busyPluginId !== undefined || dirty.size === 0
+        const validationIssue = issue ?? validateHostFormValue(field, value)
+        if (validationIssue === undefined) draft!.issues.delete(pathKey)
+        else draft!.issues.set(pathKey, validationIssue)
+        item.setError(validationIssue)
+        draft!.state = 'dirty'
+        delete draft!.message
+        form.dataset.state = 'dirty'
+        const status = form.querySelector<HTMLElement>('.cxf-status')
+        if (status !== null) {
+          status.dataset.state = 'dirty'
+          status.textContent = '有未保存更改'
+        }
+        if (submit !== undefined) submit.disabled = !descriptor.writable || busyPluginId !== undefined
+          || draft!.operations.size === 0 || draft!.issues.size > 0
       }
+      const renderedField = draft.values.has(pathKey) ? { ...field, value: draft.values.get(pathKey) } : field
       const defaultHolder = create(document, 'div')
-      defaultHolder.append(renderDefaultConfigControl(field, controlId, setDraft))
-      wrapper.append(defaultHolder)
+      const control = forms.control(renderedField, controlId, setDraft)
+      forms.connect(item, control)
+      defaultHolder.append(control.root)
+      item.control.append(defaultHolder)
+      item.setError(draft.issues.get(pathKey))
       if (model.mountConfigRenderer !== undefined && !field.disabled) {
-        const custom = create(document, 'div', 'cxm-config-renderer')
+        const custom = create(document, 'div', 'cxm-config-renderer cxf-custom-seat')
         custom.hidden = true
-        wrapper.append(custom)
-        void model.mountConfigRenderer(plugin.id, field, custom, setDraft).then(mount => {
-          if (!wrapper.isConnected) {
+        item.control.append(custom)
+        void model.mountConfigRenderer(plugin.id, renderedField, custom, setDraft).then(mount => {
+          if (!item.root.isConnected) {
             void mount.dispose()
             return
           }
           configRendererMounts.add(mount)
           if (mount.mounted) {
             custom.hidden = false
-            defaultHolder.hidden = true
             const focusable = custom.querySelector<HTMLElement>('input,select,textarea,button,[tabindex]')
-            if (focusable !== null && focusable.id === '') focusable.id = controlId
+            if (focusable !== null) {
+              if (focusable.id === '') focusable.id = controlId
+              focusable.dataset.hostFormPrimitive = 'custom'
+              focusable.setAttribute('aria-describedby', [item.help?.id, item.error.id].filter(Boolean).join(' '))
+              if (field.required) focusable.setAttribute('aria-required', 'true')
+            }
+            defaultHolder.remove()
           }
         }).catch(() => undefined)
       }
-      const reset = create(document, 'button', 'cxm-mini-action', '恢复默认值')
-      reset.type = 'button'
+      const reset = forms.button('恢复默认值')
       reset.disabled = !descriptor.writable || busyPluginId !== undefined
-      reset.addEventListener('click', async () => {
-        if (model.updatePluginConfig === undefined) return
-        busyPluginId = plugin.id
-        operationError = undefined
+      reset.setAttribute('aria-label', `恢复${fieldLabel(field)}默认值`)
+      reset.addEventListener('click', () => {
+        draft!.values.delete(pathKey)
+        draft!.issues.delete(pathKey)
+        draft!.operations.set(pathKey, { op: 'unset', path: field.path })
+        draft!.state = 'dirty'
+        delete draft!.message
         renderContent()
-        try {
-          await model.updatePluginConfig(plugin.id, descriptor.revision, [{ op: 'unset', path: field.path }])
-        } catch (error) {
-          operationError = error instanceof Error ? error.message : String(error)
-        } finally {
-          busyPluginId = undefined
-          renderContent()
-        }
       })
-      const fieldActions = create(document, 'div', 'cxm-config-field-actions')
+      const fieldActions = create(document, 'div', 'cxf-actions')
       fieldActions.append(reset)
-      wrapper.append(fieldActions)
-      form.append(wrapper)
+      item.control.append(fieldActions)
+      grid.append(item.root)
     }
     if (editableFields.length > 0) {
-      submit = create(document, 'button', 'cxm-action', busyPluginId === plugin.id ? '保存中…' : '保存配置')
-      submit.type = 'submit'
-      submit.disabled = true
-      const actions = create(document, 'div', 'cxm-config-actions')
-      actions.append(submit)
+      const actions = create(document, 'div', 'cxf-actions')
+      const status = create(document, 'span', 'cxf-status')
+      status.dataset.state = draft.state
+      status.setAttribute('role', 'status')
+      status.textContent = draft.state === 'saving' ? '正在保存…'
+        : draft.state === 'saved' ? '已保存'
+          : draft.operations.size > 0 ? '有未保存更改' : '没有未保存更改'
+      const resetDraft = forms.button('撤销更改')
+      resetDraft.disabled = draft.operations.size === 0 || busyPluginId !== undefined
+      resetDraft.addEventListener('click', () => {
+        draft!.values.clear()
+        draft!.operations.clear()
+        draft!.issues.clear()
+        draft!.state = 'pristine'
+        delete draft!.message
+        renderContent()
+      })
+      submit = forms.button(busyPluginId === plugin.id ? '保存中…' : '保存配置', { type: 'submit', variant: 'primary' })
+      submit.disabled = !descriptor.writable || busyPluginId !== undefined || draft.operations.size === 0 || draft.issues.size > 0
+      actions.append(status, resetDraft, submit)
       form.append(actions)
       form.addEventListener('submit', async (event) => {
         event.preventDefault()
-        if (model.updatePluginConfig === undefined || dirty.size === 0) return
+        if (model.updatePluginConfig === undefined || draft!.operations.size === 0 || draft!.issues.size > 0) return
         busyPluginId = plugin.id
-        operationError = undefined
+        draft!.state = 'saving'
+        delete draft!.message
         submit!.disabled = true
+        submit!.textContent = '保存中…'
+        status.dataset.state = 'saving'
+        status.textContent = '正在保存…'
+        form.setAttribute('aria-busy', 'true')
         try {
-          await model.updatePluginConfig(plugin.id, descriptor.revision, [...dirty.values()])
+          await model.updatePluginConfig(plugin.id, draft!.baseRevision, [...draft!.operations.values()])
+          draft!.values.clear()
+          draft!.operations.clear()
+          draft!.issues.clear()
+          draft!.state = 'saved'
+          draft!.message = '配置已保存'
         } catch (error) {
-          operationError = error instanceof Error ? error.message : String(error)
+          const message = error instanceof Error ? error.message : String(error)
+          draft!.state = /conflict|revision/iu.test(message) ? 'conflict' : 'error'
+          draft!.message = draft!.state === 'conflict'
+            ? '配置已在其他窗口或进程中更新。你的草稿仍保留；刷新后请重新核对再保存。'
+            : message
         } finally {
           busyPluginId = undefined
           renderContent()
@@ -3293,12 +3296,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       })
     }
     panel.append(form)
-    if (!descriptor.writable) panel.append(create(document, 'div', 'cxm-notice', '当前 launcher 模式没有 profile/generation 绑定的配置 writer；renderer 不会直接写配置文件。'))
-    if (operationError !== undefined) {
-      const error = create(document, 'div', 'cxm-config-error', operationError)
-      error.setAttribute('role', 'alert')
-      panel.append(error)
-    }
+    if (!descriptor.writable) panel.append(forms.alert('当前 launcher 模式没有可用的配置写入服务；设置保持只读。', 'warning'))
+    if (draft.message !== undefined) panel.append(forms.alert(draft.message, draft.state === 'saved' ? 'info' : 'error'))
   }
 
   const escapeConsoleText = (value: string): string => value
@@ -3946,35 +3945,46 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderMarketplaceSettings = (target: HTMLElement): void => {
     const snapshot = marketplace.snapshot()
-    const panel = create(document, 'div', 'cxm-settings-builtin')
+    const panel = create(document, 'div', 'cxm-settings-builtin cxf-scope')
     panel.append(create(document, 'p', 'cxm-copy', '按优先级保存多个 marketplace JSON 地址。feed 地址只记录目录来源；插件唯一性由 canonical source 与小写 id 共同决定。'))
 
-    const form = create(document, 'form', 'cxm-source-form')
-    const input = create(document, 'input', 'cxm-source-input')
-    input.type = 'url'
-    input.required = true
-    input.placeholder = 'https://example.com/cordisx-marketplace.json'
-    input.setAttribute('aria-label', '新的插件商店 JSON 地址')
-    const add = create(document, 'button', 'cxm-action', '添加商店')
-    add.type = 'submit'
+    const form = forms.form('marketplace-source')
+    const item = forms.item({ id: 'cxm-marketplace-source', label: '插件商店 JSON 地址', required: true, fullWidth: true })
+    let sourceValue = ''
+    const sourceField: CordisXConfigFieldSnapshot = {
+      namespace: 'cordisx.host', path: ['marketplaceSource'], type: 'string', role: 'url', value: '', disabled: sourcesBusy, required: true,
+    }
+    const sourceControl = forms.control(sourceField, 'cxm-marketplace-source', value => {
+      sourceValue = typeof value === 'string' ? value.trim() : ''
+      item.setError(sourceValue === '' ? undefined : /^https:\/\//iu.test(sourceValue) ? undefined : '请输入 HTTPS 地址')
+    })
+    if (sourceControl.focusTarget instanceof document.defaultView!.HTMLInputElement) {
+      sourceControl.focusTarget.placeholder = 'https://example.com/cordisx-marketplace.json'
+    }
+    forms.connect(item, sourceControl)
+    item.control.append(sourceControl.root)
+    form.append(item.root)
+    const add = forms.button('添加商店', { type: 'submit', variant: 'primary' })
     add.disabled = sourcesBusy
-    form.append(input, add)
+    const sourceActions = create(document, 'div', 'cxf-actions')
+    sourceActions.append(add)
+    form.append(sourceActions)
     form.addEventListener('submit', (event) => {
       event.preventDefault()
       try {
-        const normalized = normalizeMarketplaceSource(input.value.trim())
+        const normalized = normalizeMarketplaceSource(sourceValue)
         if (snapshot.sources.includes(normalized)) throw new Error('这个商店地址已经配置')
         void commitSources([...snapshot.sources, normalized])
       } catch (error) {
         sourceOperationError = error instanceof Error ? error.message : String(error)
-        renderContent()
+        item.setError(sourceOperationError)
       }
     })
     panel.append(form)
-    if (sourceOperationError !== undefined) panel.append(create(document, 'div', 'cxm-error', sourceOperationError))
+    if (sourceOperationError !== undefined) panel.append(forms.alert(sourceOperationError, 'error'))
 
     const sourceList = create(document, 'div', 'cxm-source-list')
-    if (snapshot.sources.length === 0) sourceList.append(create(document, 'div', 'cxm-empty', '没有已配置商店；插件商店页会保持为空'))
+    if (snapshot.sources.length === 0) sourceList.append(forms.empty('没有已配置商店；插件商店页会保持为空'))
     snapshot.sources.forEach((url, index) => {
       const state = snapshot.sourceStates[index]
       const row = create(document, 'div', 'cxm-source-row')
@@ -3992,8 +4002,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       body.append(status)
       row.append(body)
       const actions = create(document, 'div', 'cxm-source-actions')
-      const up = create(document, 'button', 'cxm-mini-action', '上移')
-      up.type = 'button'
+      const up = forms.button('上移')
       up.disabled = index === 0 || sourcesBusy
       up.addEventListener('click', () => {
         const next = [...snapshot.sources]
@@ -4003,8 +4012,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         next[index] = previous
         void commitSources(next)
       })
-      const down = create(document, 'button', 'cxm-mini-action', '下移')
-      down.type = 'button'
+      const down = forms.button('下移')
       down.disabled = index === snapshot.sources.length - 1 || sourcesBusy
       down.addEventListener('click', () => {
         const next = [...snapshot.sources]
@@ -4014,8 +4022,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         next[index] = following
         void commitSources(next)
       })
-      const remove = create(document, 'button', 'cxm-mini-action', '移除')
-      remove.type = 'button'
+      const remove = forms.button('移除', { tone: 'danger' })
       remove.disabled = sourcesBusy
       remove.addEventListener('click', () => void commitSources(snapshot.sources.filter(item => item !== url)))
       actions.append(up, down, remove)
@@ -4026,12 +4033,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
     const footerActions = create(document, 'div', 'cxm-toolbar')
     footerActions.style.marginTop = '14px'
-    const reset = create(document, 'button', 'cxm-action', '恢复官方商店')
-    reset.type = 'button'
+    const reset = forms.button('恢复官方商店')
     reset.disabled = sourcesBusy || (snapshot.sources.length === 1 && snapshot.sources[0] === OFFICIAL_MARKETPLACE_SOURCE)
     reset.addEventListener('click', () => void commitSources([OFFICIAL_MARKETPLACE_SOURCE]))
-    const reload = create(document, 'button', 'cxm-action', snapshot.loading ? '加载中…' : '重新加载')
-    reload.type = 'button'
+    const reload = forms.button(snapshot.loading ? '加载中…' : '重新加载')
     reload.disabled = snapshot.loading || sourcesBusy
     reload.addEventListener('click', () => void marketplace.reload())
     footerActions.append(reset, reload)

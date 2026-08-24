@@ -104,8 +104,8 @@ describe('settings tab demo bundle', () => {
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')!.click()
     const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="配置管理"]')!
     const demoField = configPanel.querySelector<HTMLElement>('[data-config-path="demoValue"]')!
-    expect(demoField.querySelector('.cxm-config-label')?.textContent).toBe('Demo value')
-    expect(demoField.querySelector('.cxm-config-help')?.textContent).toBe('Initial value shown inside the controlled settings page.')
+    expect(demoField.querySelector('.cxf-label')?.textContent).toBe('Demo value')
+    expect(demoField.querySelector('.cxf-help')?.textContent).toBe('Initial value shown inside the controlled settings page.')
     expect(demoField.querySelector<HTMLInputElement>('input')?.value).toBe('CordisX')
     expect(configPanel.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true)
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="settings"]')!.click()

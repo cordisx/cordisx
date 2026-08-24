@@ -114,6 +114,11 @@ describe('CordisX manager settings tabs', () => {
       const panel = dom.window.document.querySelector<HTMLElement>('[data-settings-root] [role="tabpanel"]')!
       expect(panel.getAttribute('aria-labelledby')).toBe(tabs()[0]!.id)
       expect(panel.parentElement?.querySelectorAll('[role="tabpanel"]')).toHaveLength(1)
+      const marketplaceForm = panel.querySelector<HTMLFormElement>('[data-host-form="marketplace-source"]')!
+      expect(marketplaceForm.classList.contains('cxf-scope')).toBe(true)
+      expect(marketplaceForm.querySelector('.cxf-label')?.textContent).toBe('插件商店 JSON 地址')
+      expect(marketplaceForm.querySelector<HTMLInputElement>('[data-host-form-primitive="input"]')?.type).toBe('url')
+      expect(marketplaceForm.querySelector<HTMLButtonElement>('button[type="submit"]')?.textContent).toBe('添加商店')
 
       tabs().find(tab => tab.dataset.settingsTab === 'settings-demo:settings')!.click()
       await settle()
