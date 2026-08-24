@@ -602,6 +602,19 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     for (const owner of this.owners.values()) this.notify(owner.identity.id)
   }
 
+  /** Project an error boundary only after the Host has one unique bundle/source owner match. */
+  recordBestEffortError(token: PluginPrincipalToken, source: string, error: unknown): void {
+    if (this.disposed) return
+    let record: PluginPrincipalRecord
+    try { record = this.principal(token) } catch { return }
+    const snapshot = snapshotConsoleValue(error)
+    this.append(record, {
+      coverage: 'best-effort', kind: 'diagnostic', method: 'error', source,
+      message: errorText(error), args: [snapshot], trigger: { kind: 'error-boundary' },
+      ...(snapshot.stack === undefined ? {} : { stack: snapshot.stack }),
+    })
+  }
+
   dispose(): void {
     if (this.disposed) return
     this.disposed = true

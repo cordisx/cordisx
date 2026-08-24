@@ -149,4 +149,15 @@ describe('plugin DevTools Console aspect', () => {
     aspect.recordUnattributedError('unhandledrejection')
     expect(aspect.query(alpha)).toMatchObject({ unattributedEntries: 2, entries: [] })
   })
+
+  it('projects a uniquely matched error boundary as best-effort without changing strong attribution', () => {
+    const aspect = new PluginConsoleAspect('runtime-1')
+    const token = aspect.issue(alpha, 'runtime-1:alpha:1')
+    aspect.issue(beta, 'runtime-1:beta:1')
+    aspect.recordBestEffortError(token, 'window.error', new Error('alpha boundary'))
+    expect(aspect.query(alpha).entries).toEqual([
+      expect.objectContaining({ coverage: 'best-effort', kind: 'diagnostic', source: 'window.error' }),
+    ])
+    expect(aspect.query(beta).entries).toEqual([])
+  })
 })
