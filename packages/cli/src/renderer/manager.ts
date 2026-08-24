@@ -635,6 +635,14 @@ const MANAGER_STYLES = `
   .cxm-dot[data-rendered="true"] { background: #86efac; }
   .cxm-empty { padding: 28px 12px; color: #687284; font-size: 11px; text-align: center; }
   .cxm-toolbar { display: flex; align-items: center; gap: 10px; }
+  .cxm-list-search { display: flex; align-items: center; gap: 7px; width: 100%; box-sizing: border-box; border: 1px solid rgba(255, 255, 255, .1); border-radius: 9px; background: rgba(255, 255, 255, .045); }
+  .cxm-list-search-icon { width: 18px; height: 18px; margin-left: 10px; color: #8e98a9; }
+  .cxm-list-search .cxm-search { min-width: 0; padding-left: 0; border-width: 0; background: transparent; }
+  .cxm-list-search:focus-within { border-color: rgba(199, 204, 212, .65); outline: 2px solid #c7ccd4; outline-offset: 2px; }
+  .cxm-list-search .cxm-search:focus-visible { outline: 0; }
+  .cxm-list-search-clear { width: 28px; height: 28px; margin-right: 3px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #9fa8b8; cursor: pointer; }
+  .cxm-list-search-clear[hidden] { display: none; }
+  .cxm-search-match { padding: 0; border-radius: 2px; background: rgba(251, 191, 36, .25); color: inherit; }
   .cxm-search, .cxm-source-input {
     width: 100%;
     box-sizing: border-box;
@@ -652,16 +660,13 @@ const MANAGER_STYLES = `
   .cxm-plugin-row {
     display: flex;
     align-items: center;
-    gap: 11px;
+    gap: 4px;
     width: 100%;
     min-width: 0;
-    padding: 12px;
+    padding: 4px;
     border: 1px solid rgba(255, 255, 255, .075);
     border-radius: 11px;
     background: rgba(255, 255, 255, .025);
-    color: inherit;
-    cursor: pointer;
-    text-align: left;
   }
   .cxm-plugin-row:hover { border-color: rgba(199, 204, 212, .3); background: rgba(199, 204, 212, .07); }
   .cxm-plugin-icon {
@@ -685,7 +690,14 @@ const MANAGER_STYLES = `
   .cxm-status-dot[data-status="active"], .cxm-status-dot[data-status="loaded"] { background: #4ade80; }
   .cxm-status-dot[data-status="failed"] { background: #fb7185; }
   .cxm-status-dot[data-status="blocked"], .cxm-status-dot[data-status="loading"] { background: #fbbf24; }
-  .cxm-chevron { width: 18px; height: 18px; color: #626c7d; }
+  .cxm-plugin-open { display: flex; align-items: center; gap: 11px; min-width: 0; flex: 1; padding: 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+  .cxm-plugin-actions { display: flex; align-items: center; flex: none; gap: 2px; padding-right: 2px; }
+  .cxm-plugin-action { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #9fa8b8; cursor: pointer; }
+  .cxm-plugin-action:hover:not(:disabled), .cxm-plugin-action[aria-expanded="true"] { background: rgba(199, 204, 212, .14); color: #eef0f3; }
+  .cxm-plugin-action:disabled { cursor: not-allowed; opacity: .4; }
+  .cxm-plugin-action-icon { width: 16px; height: 16px; }
+  .cxm-plugin-overflow-menu { position: fixed; z-index: 2147483646; display: grid; min-width: 176px; padding: 4px; border: 1px solid rgba(255,255,255,.16); border-radius: 9px; background: #20242d; box-shadow: 0 14px 40px rgba(0,0,0,.42); }
+  .cxm-plugin-menu-item { min-height: 30px; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: #7d8798; text-align: left; font: 11px/1.3 system-ui,sans-serif; }
   .cxm-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   .cxm-detail-id { color: #747f91; font: 10px/1.3 ui-monospace, monospace; }
   .cxm-detail-description { max-width: 680px; margin: 14px 0 0; color: #a7afbe; font-size: 12px; }
@@ -740,7 +752,7 @@ const MANAGER_STYLES = `
   .cxm-catalog-list { margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, .08); border-bottom: 1px solid rgba(255, 255, 255, .08); }
   .cxm-catalog-row {
     display: grid;
-    grid-template-columns: 32px minmax(0, 1fr) max-content 18px;
+    grid-template-columns: 32px minmax(0, 1fr) max-content;
     align-items: center;
     gap: 12px;
     width: 100%;
@@ -1103,6 +1115,25 @@ function safeStorage(view: Window | null): MarketplaceStorage | undefined {
   }
 }
 
+function normalizeManagerSearchText(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function matchesManagerSearch(query: string, fields: readonly string[]): boolean {
+  const terms = normalizeManagerSearchText(query).split(' ').filter(Boolean)
+  const haystack = normalizeManagerSearchText(fields.join('\n'))
+  return terms.every(term => haystack.includes(term))
+}
+
+function activateManagerListRow(row: HTMLButtonElement, action: () => void): void {
+  row.addEventListener('click', action)
+  row.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    action()
+  })
+}
+
 /** Keep breadcrumb identity explicit when constrained instead of clipping ancestors. */
 export function projectManagerBreadcrumbs(
   itemWidths: readonly number[],
@@ -1308,6 +1339,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let marketplaceQuery = ''
   let extensionPointQuery = ''
   let routeQuery = ''
+  const favoritePluginIds = (() => {
+    try {
+      const stored = JSON.parse(safeStorage(document.defaultView)?.getItem('cordisx.manager.favoritePlugins.v1') ?? '[]')
+      return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : [])
+    } catch { return new Set<string>() }
+  })()
   let settingsRoot: HTMLDivElement | undefined
   let settingsPanel: HTMLDivElement | undefined
   let settingsPanelBody: HTMLDivElement | undefined
@@ -1608,6 +1645,48 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     content.scrollTop = listScrollPositions.get(activePrimary()) ?? 0
   }
 
+  const createListSearch = (id: string, label: string, placeholder: string, value: string, onChange: (value: string) => void): HTMLDivElement => {
+    const root = create(document, 'div', 'cxm-list-search')
+    root.dataset.listSearch = id
+    root.setAttribute('role', 'search')
+    root.append(createManagerIcon(document, 'search', 'cxm-list-search-icon'))
+    const input = create(document, 'input', 'cxm-search')
+    input.type = 'search'
+    input.placeholder = placeholder
+    input.value = value
+    input.setAttribute('aria-label', label)
+    const clear = create(document, 'button', 'cxm-list-search-clear')
+    clear.type = 'button'
+    clear.setAttribute('aria-label', `清除${label}`)
+    clear.append(createManagerIcon(document, 'close'))
+    clear.hidden = value.length === 0
+    const update = (next: string): void => {
+      onChange(next)
+      renderContent()
+      const replacement = content.querySelector<HTMLInputElement>(`[data-list-search="${id}"] .cxm-search`)
+      replacement?.focus()
+      replacement?.setSelectionRange(next.length, next.length)
+    }
+    input.addEventListener('input', () => update(input.value))
+    input.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      if (input.value.length > 0) update('')
+      else input.blur()
+    })
+    clear.addEventListener('click', () => update(''))
+    root.append(input, clear)
+    return root
+  }
+
+  const toggleFavoritePlugin = (id: string): void => {
+    if (favoritePluginIds.has(id)) favoritePluginIds.delete(id)
+    else favoritePluginIds.add(id)
+    try { safeStorage(document.defaultView)?.setItem('cordisx.manager.favoritePlugins.v1', JSON.stringify([...favoritePluginIds].sort())) } catch {}
+    renderContent()
+  }
+
   const setHeading = (
     copy: string,
     snapshot: ManagerSnapshot,
@@ -1677,16 +1756,11 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderExtensionPointList = (snapshot: ManagerSnapshot): void => {
     setHeading('浏览宿主声明的界面点位，并管理每个插件对点位的使用权限', snapshot, { icon: 'contributions' })
-    const search = create(document, 'input', 'cxm-search')
-    search.type = 'search'
-    search.placeholder = '搜索名称、介绍、点位 id 或插件…'
-    search.value = extensionPointQuery
-    search.setAttribute('aria-label', '搜索 CordisX 扩展点')
+    const search = createListSearch('extension-points', '搜索 CordisX 扩展点', '搜索名称、介绍、点位 id 或插件…', extensionPointQuery, value => { extensionPointQuery = value })
     content.append(search)
 
     const points = snapshot.extensionPoints?.points ?? []
-    const normalized = extensionPointQuery.trim().toLowerCase()
-    const filtered = points.filter(point => [
+    const filtered = points.filter(point => matchesManagerSearch(extensionPointQuery, [
       point.titleProjection.text,
       point.descriptionProjection.text,
       point.id,
@@ -1700,7 +1774,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       ...point.plugins.flatMap(plugin => [plugin.name, plugin.identity.id, plugin.identity.source]),
       ...point.plugins.flatMap(plugin => plugin.registrations.map(item => item.id)),
       ...point.plugins.flatMap(plugin => plugin.routes.map(item => item.qualifiedId)),
-    ].join('\n').toLowerCase().includes(normalized))
+    ]))
     const list = create(document, 'div', 'cxm-catalog-list')
     list.setAttribute('role', 'list')
     list.setAttribute('aria-label', '扩展点列表')
@@ -1723,9 +1797,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         copy,
         create(document, 'span', 'cxm-kind-badge', point.kind === 'surface' ? '界面点位' : '页面出口'),
         create(document, 'span', 'cxm-kind-badge', point.availability === 'available' ? '可用' : point.availability === 'pending' ? '待定位' : '不可用'),
-        createManagerIcon(document, 'view-detail', 'cxm-chevron'),
       )
-      row.addEventListener('click', () => {
+      activateManagerListRow(row, () => {
         rememberListScroll()
         operationError = undefined
         void navigateRoute({ kind: 'extension-point', pointId: point.id, facet: 'usage' })
@@ -1734,13 +1807,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       list.append(listItem)
     }
     content.append(list)
-    search.addEventListener('input', () => {
-      extensionPointQuery = search.value
-      renderContent()
-      const next = content.querySelector<HTMLInputElement>('.cxm-search')
-      next?.focus()
-      next?.setSelectionRange(extensionPointQuery.length, extensionPointQuery.length)
-    })
   }
 
   const renderExtensionPointDetail = (snapshot: ManagerSnapshot, id: string): void => {
@@ -1867,21 +1933,16 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderRouteList = (snapshot: ManagerSnapshot): void => {
     setHeading('查看插件页面如何匹配路径并覆盖到宿主 outlet', snapshot, { icon: 'routes' })
-    const search = create(document, 'input', 'cxm-search')
-    search.type = 'search'
-    search.placeholder = '搜索路由、路径、页面、outlet 或插件…'
-    search.value = routeQuery
-    search.setAttribute('aria-label', '搜索 CordisX 路由')
+    const search = createListSearch('routes', '搜索 CordisX 路由', '搜索路由、路径、页面、outlet 或插件…', routeQuery, value => { routeQuery = value })
     content.append(search)
-    const normalized = routeQuery.trim().toLowerCase()
-    const filtered = snapshot.navigation.routes.filter(route => [
+    const filtered = snapshot.navigation.routes.filter(route => matchesManagerSearch(routeQuery, [
       route.qualifiedId,
       route.owner,
       route.definition.path,
       route.definition.outlet,
       route.definition.page,
       route.error ?? '',
-    ].join('\n').toLowerCase().includes(normalized))
+    ]))
     const list = create(document, 'div', 'cxm-catalog-list')
     list.setAttribute('role', 'list')
     list.setAttribute('aria-label', '路由列表')
@@ -1902,9 +1963,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         createManagerIcon(document, 'routes', 'cxm-catalog-icon'),
         copy,
         create(document, 'span', 'cxm-kind-badge', route.valid && route.authorized ? '可用' : '受限'),
-        createManagerIcon(document, 'view-detail', 'cxm-chevron'),
       )
-      row.addEventListener('click', () => {
+      activateManagerListRow(row, () => {
         rememberListScroll()
         void navigateRoute({ kind: 'route', qualifiedId: route.qualifiedId })
       })
@@ -1912,13 +1972,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       list.append(listItem)
     }
     content.append(list)
-    search.addEventListener('input', () => {
-      routeQuery = search.value
-      renderContent()
-      const next = content.querySelector<HTMLInputElement>('.cxm-search')
-      next?.focus()
-      next?.setSelectionRange(routeQuery.length, routeQuery.length)
-    })
   }
 
   const renderRouteDetail = (snapshot: ManagerSnapshot, qualifiedId: string): void => {
@@ -1961,29 +2014,26 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const renderPluginList = (snapshot: ManagerSnapshot): void => {
     setHeading('搜索当前 bundle 中的插件；选择一项进入二级详情', snapshot, { icon: 'plugins' })
     const toolbar = create(document, 'div', 'cxm-toolbar')
-    const search = create(document, 'input', 'cxm-search')
-    search.type = 'search'
-    search.placeholder = '搜索插件、扩展点或 contribution id…'
-    search.value = pluginQuery
-    search.setAttribute('aria-label', '搜索 CordisX 插件')
-
-    const normalized = pluginQuery.trim().toLowerCase()
+    const search = createListSearch('plugins', '搜索 CordisX 插件', '搜索插件、扩展点或 contribution id…', pluginQuery, value => { pluginQuery = value })
     const filtered = snapshot.plugins.filter((plugin) => {
       const registrations = snapshot.registrations.filter(item => item.owner === plugin.id)
-      const haystack = [plugin.id, plugin.name, ...plugin.inject, ...registrations.flatMap(item => [item.surface, item.id])]
-        .join('\n').toLowerCase()
-      return haystack.includes(normalized)
-    })
+      return matchesManagerSearch(pluginQuery, [plugin.id, plugin.name, plugin.source, ...plugin.inject, ...registrations.flatMap(item => [item.surface, item.id])])
+    }).sort((left, right) => Number(favoritePluginIds.has(right.id)) - Number(favoritePluginIds.has(left.id)))
     toolbar.append(search)
     content.append(toolbar)
 
     const list = create(document, 'div', 'cxm-plugin-list')
+    list.setAttribute('role', 'list')
+    list.setAttribute('aria-label', '当前 bundle 插件')
     if (filtered.length === 0) list.append(create(document, 'div', 'cxm-empty', '没有匹配的插件'))
     for (const plugin of filtered) {
-      const row = create(document, 'button', 'cxm-plugin-row')
-      row.type = 'button'
-      row.dataset.pluginId = plugin.id
-      row.append(createPluginIcon(document, plugin.name))
+      const row = create(document, 'div', 'cxm-plugin-row')
+      row.setAttribute('role', 'listitem')
+      const open = create(document, 'button', 'cxm-plugin-open')
+      open.type = 'button'
+      open.dataset.pluginId = plugin.id
+      open.setAttribute('aria-label', `查看${plugin.name}详情`)
+      open.append(createPluginIcon(document, plugin.name))
       const body = create(document, 'span', 'cxm-plugin-body')
       body.append(create(document, 'span', 'cxm-plugin-name', plugin.name))
       const meta = create(document, 'span', 'cxm-plugin-meta')
@@ -1992,23 +2042,53 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       dot.dataset.status = plugin.status
       meta.append(dot, create(document, 'span', undefined, statusLabel(plugin.status)), create(document, 'span', undefined, plugin.id))
       body.append(meta)
-      row.append(body, createManagerIcon(document, 'view-detail', 'cxm-chevron'))
-      row.addEventListener('click', () => {
+      open.append(body)
+      activateManagerListRow(open, () => {
         rememberListScroll()
         operationError = undefined
         void navigateRoute({ kind: 'plugin', pluginId: plugin.id, facet: 'readme' })
       })
+      const actions = create(document, 'div', 'cxm-plugin-actions')
+      actions.setAttribute('role', 'group')
+      actions.setAttribute('aria-label', `${plugin.name}的快速操作`)
+      const action = (id: string, label: string, icon: ManagerIconToken, disabled: boolean, handler?: () => void): HTMLButtonElement => {
+        const button = create(document, 'button', 'cxm-plugin-action')
+        button.type = 'button'; button.dataset.pluginAction = id; button.dataset.pluginActionPlugin = plugin.id
+        button.setAttribute('aria-label', label); button.disabled = disabled; button.title = label
+        button.append(createManagerIcon(document, icon, 'cxm-plugin-action-icon'))
+        button.addEventListener('click', event => { event.stopPropagation(); handler?.() })
+        return button
+      }
+      const profile = action('enable-disable', plugin.status === 'active' ? '停用此 profile 中的插件' : '启用此 profile 中的插件', plugin.status === 'active' ? 'close' : 'plugins', plugin.status === 'configured-disabled', () => {
+        if (plugin.status === 'active') void model.setPluginBlocked(plugin.id, true).finally(renderContent)
+        else void authorizeAndRestore(plugin).finally(renderContent)
+      })
+      const reload = action('reload', '按插件重载需要 generation lifecycle API；当前不可用。', 'runtime', true)
+      const favorite = action('favorite', favoritePluginIds.has(plugin.id) ? '取消收藏插件' : '收藏插件', 'favorite', false, () => toggleFavoritePlugin(plugin.id))
+      favorite.setAttribute('aria-pressed', String(favoritePluginIds.has(plugin.id)))
+      const more = action('more', '更多插件操作', 'more', false, () => {
+        const prior = document.querySelector('[data-plugin-overflow-menu]')
+        prior?.remove()
+        const menu = create(document, 'div', 'cxm-plugin-overflow-menu')
+        menu.dataset.pluginOverflowMenu = plugin.id; menu.setAttribute('role', 'menu'); menu.tabIndex = -1
+        for (const [id, label] of [['share', '分享公开来源'], ['uninstall', '卸载'], ['diagnostics-source', '诊断与来源']] as const) {
+          const item = create(document, 'button', 'cxm-plugin-menu-item', label)
+          item.type = 'button'; item.disabled = true; item.dataset.pluginMenuAction = id; item.setAttribute('role', 'menuitem')
+          menu.append(item)
+        }
+        menu.append(create(document, 'span', 'cxm-plugin-menu-item', 'Package Store / generation lifecycle API 当前不可用。'))
+        const bounds = more.getBoundingClientRect()
+        menu.style.left = `${Math.max(8, bounds.right - 176)}px`; menu.style.top = `${Math.max(8, bounds.bottom + 6)}px`
+        menu.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); menu.remove(); more.setAttribute('aria-expanded', 'false'); more.focus() } })
+        more.setAttribute('aria-haspopup', 'menu'); more.setAttribute('aria-expanded', 'true')
+        ;(document.body ?? document.documentElement).append(menu); menu.focus()
+      })
+      actions.append(profile, reload, favorite, more)
+      row.append(open, actions)
       list.append(row)
     }
     content.append(list)
 
-    search.addEventListener('input', () => {
-      pluginQuery = search.value
-      renderContent()
-      const next = content.querySelector<HTMLInputElement>('.cxm-search')
-      next?.focus()
-      next?.setSelectionRange(pluginQuery.length, pluginQuery.length)
-    })
   }
 
   const commitPermissionPolicy = async (
@@ -2350,8 +2430,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         title.append(create(document, 'span', 'cxm-permission-name', presentation.name))
         if (permission.required) title.append(create(document, 'span', 'cxm-required-badge', '必需'))
         copy.append(title, create(document, 'span', 'cxm-permission-reason', permission.reasonText))
-        open.append(createCapabilityIcon(document, permission.capability), copy, createManagerIcon(document, 'view-detail', 'cxm-chevron'))
-        open.addEventListener('click', () => {
+        open.append(createCapabilityIcon(document, permission.capability), copy)
+        activateManagerListRow(open, () => {
           operationError = undefined
           void navigateRoute({ kind: 'permission', pluginId: plugin.id, capability: permission.capability })
         })
@@ -2571,13 +2651,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const snapshot = marketplace.snapshot()
     setHeading('从已配置 JSON feed 浏览插件元数据；当前只读，不提供安装', managerSnapshot, { icon: 'marketplace' })
     const toolbar = create(document, 'div', 'cxm-toolbar')
-    const search = create(document, 'input', 'cxm-search')
-    search.type = 'search'
-    search.placeholder = '搜索商店插件、作者、关键词或来源…'
-    search.value = marketplaceQuery
-    search.setAttribute('aria-label', '搜索 CordisX 插件商店')
-    const normalized = marketplaceQuery.trim().toLowerCase()
-    const filtered = snapshot.plugins.filter(plugin => [
+    const search = createListSearch('marketplace', '搜索 CordisX 插件商店', '搜索商店插件、作者、关键词或来源…', marketplaceQuery, value => { marketplaceQuery = value })
+    const filtered = snapshot.plugins.filter(plugin => matchesManagerSearch(marketplaceQuery, [
       plugin.id,
       plugin.name,
       plugin.description,
@@ -2585,11 +2660,13 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       plugin.feedName,
       ...plugin.keywords,
       ...plugin.authors.map(author => author.name),
-    ].join('\n').toLowerCase().includes(normalized))
+    ]))
     toolbar.append(search)
     content.append(toolbar)
 
     const list = create(document, 'div', 'cxm-plugin-list')
+    list.setAttribute('role', 'list')
+    list.setAttribute('aria-label', '插件商店列表')
     if (!snapshot.loading && filtered.length === 0) {
       list.append(create(document, 'div', 'cxm-empty', snapshot.sources.length === 0 ? '尚未配置插件商店地址' : '没有可展示的匹配插件'))
     }
@@ -2606,8 +2683,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const meta = create(document, 'span', 'cxm-plugin-meta')
       meta.append(create(document, 'span', undefined, `v${plugin.version}`), create(document, 'span', undefined, plugin.feedName))
       body.append(meta)
-      row.append(body, createManagerIcon(document, 'view-detail', 'cxm-chevron'))
-      row.addEventListener('click', () => {
+      row.append(body)
+      activateManagerListRow(row, () => {
         rememberListScroll()
         void navigateRoute({ kind: 'marketplace', identity: plugin.identity, facet: 'overview' })
       })
@@ -2618,13 +2695,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     boundary.dataset.tone = 'warning'
     content.append(boundary)
 
-    search.addEventListener('input', () => {
-      marketplaceQuery = search.value
-      renderContent()
-      const next = content.querySelector<HTMLInputElement>('.cxm-search')
-      next?.focus()
-      next?.setSelectionRange(marketplaceQuery.length, marketplaceQuery.length)
-    })
   }
 
   const renderMarketplaceDetail = (managerSnapshot: ManagerSnapshot, identityValue: string): void => {

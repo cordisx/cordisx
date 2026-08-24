@@ -218,7 +218,8 @@ The semantic mapping is stable and host-owned:
 | read models | `model_training` |
 | list, read, create, and control tasks | `view_list`, `summarize`, `note_add`, `tune` |
 | submit and control turns | `send`, `pause_circle` |
-| back, detail, close, and external link | `chevron_left`, `chevron_right`, `close`, `open_in_new` |
+| back, disclosure, search, close, and external link | `chevron_left`, `chevron_right`, `search`, `close`, `open_in_new` |
+| plugin favorite and overflow | `star`, `more_horiz` |
 | unknown capability fallback | `help` |
 
 All of these symbols are decorative beside a visible label or an
@@ -322,12 +323,29 @@ waiting, and red for failure, denial, or destructive affordances.
 
 ## Flat lists and cards
 
-An installed-plugin row has mutually exclusive navigation and action regions.
-The complete row body is a button-like detail target activated by pointer,
-Enter, or Space; it has no trailing chevron. Its right edge is a Host-rendered
-icon-only action region. Action pointer and keyboard events stop row
-navigation, use native tooltip and focus treatment, remain `no-drag`, and never
-accept plugin-owned DOM.
+Every Manager list follows one Host-owned list pattern. A normal navigation
+item has exactly one primary whole-row detail target, activated by pointer,
+Enter, or Space. It never carries a trailing chevron, arrow button, or any
+other second navigation affordance: navigation is already expressed by the
+row's accessible name and focus/hover treatment. This applies equally to
+plugins, extension points, routes, Marketplace records, capability
+declarations, configuration sources, dependency records, and future call-log
+or diagnostics records.
+
+A chevron is reserved solely for an in-place disclosure. Its owning control
+must expose `aria-expanded`, reference or contain real independently visible
+expanded content, and have behavior distinct from route/detail navigation.
+It must never be a decorative route cue. Remove unused chevron DOM, handlers,
+and test assumptions instead of hiding the icon in CSS.
+
+The right edge of a navigation row contains only real state and Host-owned
+shortcut controls. Each shortcut stops propagation for pointer and keyboard
+activation, has an accessible name, no-drag/decorative icon treatment, and
+visible hover/focus/disabled feedback. Menus restore focus to their trigger on
+close and both menus and tooltips stay within the viewport. The installed
+plugin row is the canonical example: it has mutually exclusive navigation and
+action regions, with its complete body as the detail target and an icon-only
+action region at the right.
 
 Wide rows show enable/disable, reload, and favorite in that deterministic
 priority. When width is insufficient, lower-priority controls move into one
@@ -336,11 +354,51 @@ uninstall always live in that menu. Closing the menu restores focus to its
 trigger, and both menu and tooltips are constrained to the manager viewport.
 Unavailable lifecycle operations are absent or explicitly unavailable; a
 button must never restart the launcher while claiming to reload one plugin.
+Before the C/D Package Store and generation lifecycle runtime merges, the only
+related live action is a profile-local block/restore of an already bundled
+fiber. Its label and tooltip must not imply package install, launcher-config
+mutation, generation replacement, or uninstall. Reload, Package Store actions,
+and a configured-disabled plugin's enable control stay unavailable until the
+formal broker reports the matching operation.
 
 Favorite is a current-profile manager preference. Share requires a validated
 public canonical HTTPS source and never projects a local source/store path,
 configuration, or secret. Uninstall is destructive and remains behind a
 second Host-owned confirmation containing the reverse-dependency impact.
+The lifecycle broker is the sole source for product operation state: install
+and upgrade render `source snapshot/candidate → plan → permission review →
+generation-fenced activation → readiness → commit last-good`; an unresolved or
+denied required permission never activates. Reload renders the formal
+five-level ladder, while uninstall reports the actual `drain → dispose → lease
+→ GC` outcome after confirmation rather than an optimistic completion.
+
+### Search is part of the list pattern
+
+Every dynamic, user-manageable, or potentially growing list gets the common
+Host search component by default. This includes plugin, Marketplace, extension
+point, route, permission/capability, source, dependency, and call-log lists.
+The component is rendered only by the Host; a plugin supplies structured,
+authorized searchable fields and never contributes search DOM. A short,
+fixed, non-growing metadata list may omit it only when its call site declares
+`searchable: false` with a product reason; a current item count is never a
+reason to omit search.
+
+The component has one standard placement before its list, a Material `search`
+icon, clear control, Escape-to-clear behavior, keyboard focus ring, and an
+accessible label. It searches the applicable localized title/name, id,
+description, owner, source, capability, and declared keywords using
+case-insensitive NFKC and whitespace normalization for Chinese and Latin text.
+Matches are highlighted without changing the source text. Search never shows
+aggregate/result-count UI, reads unapproved fields, or triggers a permission
+request.
+
+Query, filter, sort, and scroll position are page/route state: returning from
+detail restores them, while separate plugin or source contexts never share
+them. Large sources must debounce and use an index or virtualization; async
+providers cancel or fence stale queries and distinguish loading, error,
+unconfigured, and no-match states. Current Manager lists are synchronous,
+bounded Host snapshots; their common component keeps the same state boundary
+when an async provider is introduced.
 
 Ordinary repeated records use a flat list with separators and whitespace. The
 container exposes list semantics and each item has a stable visible label plus

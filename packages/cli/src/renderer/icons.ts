@@ -4,7 +4,6 @@ import arrowBack from '@material-symbols/svg-400/rounded/arrow_back.svg'
 import check from '@material-symbols/svg-400/rounded/check.svg'
 import checkCircle from '@material-symbols/svg-400/rounded/check_circle.svg'
 import chevronLeft from '@material-symbols/svg-400/rounded/chevron_left.svg'
-import chevronRight from '@material-symbols/svg-400/rounded/chevron_right.svg'
 import close from '@material-symbols/svg-400/rounded/close.svg'
 import description from '@material-symbols/svg-400/rounded/description.svg'
 import diagnosis from '@material-symbols/svg-400/rounded/diagnosis.svg'
@@ -27,9 +26,11 @@ import person from '@material-symbols/svg-400/rounded/person.svg'
 import rocketLaunch from '@material-symbols/svg-400/rounded/rocket_launch.svg'
 import route from '@material-symbols/svg-400/rounded/route.svg'
 import refresh from '@material-symbols/svg-400/rounded/refresh.svg'
+import search from '@material-symbols/svg-400/rounded/search.svg'
 import send from '@material-symbols/svg-400/rounded/send.svg'
 import settings from '@material-symbols/svg-400/rounded/settings.svg'
 import shield from '@material-symbols/svg-400/rounded/shield.svg'
+import star from '@material-symbols/svg-400/rounded/star.svg'
 import storefront from '@material-symbols/svg-400/rounded/storefront.svg'
 import summarize from '@material-symbols/svg-400/rounded/summarize.svg'
 import tune from '@material-symbols/svg-400/rounded/tune.svg'
@@ -45,9 +46,11 @@ export const MANAGER_ICON_TOKENS = [
   'diagnostics',
   'document',
   'external-link',
+  'favorite',
   'launcher',
   'marketplace',
   'models-read',
+  'more',
   'outlets',
   'overview',
   'permissions',
@@ -55,6 +58,7 @@ export const MANAGER_ICON_TOKENS = [
   'point-info',
   'routes',
   'runtime',
+  'search',
   'settings',
   'tasks-catalog-read',
   'tasks-content-read',
@@ -62,7 +66,6 @@ export const MANAGER_ICON_TOKENS = [
   'tasks-create',
   'turns-control',
   'turns-submit',
-  'view-detail',
   'authors-source',
 ] as const
 
@@ -77,9 +80,11 @@ const MANAGER_ICON_SOURCES: Readonly<Record<ManagerIconToken, string>> = {
   diagnostics: diagnosis,
   document: description,
   'external-link': openInNew,
+  favorite: star,
   launcher: rocketLaunch,
   marketplace: storefront,
   'models-read': modelTraining,
+  more: moreHoriz,
   outlets: accountTree,
   overview,
   permissions: shield,
@@ -87,6 +92,7 @@ const MANAGER_ICON_SOURCES: Readonly<Record<ManagerIconToken, string>> = {
   'point-info': info,
   routes: route,
   runtime: monitorHeart,
+  search,
   settings,
   'tasks-catalog-read': viewList,
   'tasks-content-read': summarize,
@@ -94,7 +100,6 @@ const MANAGER_ICON_SOURCES: Readonly<Record<ManagerIconToken, string>> = {
   'tasks-create': noteAdd,
   'turns-control': pauseCircle,
   'turns-submit': send,
-  'view-detail': chevronRight,
   'authors-source': person,
 }
 
