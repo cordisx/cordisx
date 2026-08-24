@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { npmPackItem } from './npm-pack-report.mjs'
 
@@ -136,6 +136,22 @@ try {
   if (!Array.isArray(initialConfig.plugins) || initialConfig.plugins.length !== 0) {
     throw new Error('installed cordisx setup must create plugins: []')
   }
+  initialConfig.plugins.push({
+    id: 'cli-proxy-api',
+    entry: 'cordisx:cli-proxy-api',
+    enabled: true,
+    config: {},
+  })
+  await writeFile(configPath, `${JSON.stringify(initialConfig, null, 2)}\n`, 'utf8')
+  const installedCordisXRoot = path.join(runnerDirectory, 'node_modules', 'cordisx')
+  const [{ loadConfig }, { buildRendererBundle }] = await Promise.all([
+    import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/config.js')).href),
+    import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/bundle.js')).href),
+  ])
+  const installedBundle = await buildRendererBundle(await loadConfig(configPath))
+  if (!installedBundle.includes('# CLIProxy Providers') || !installedBundle.includes('External providers and the native connection')) {
+    throw new Error('installed built-in CLIProxy plugin bundle is missing its product README')
+  }
 
   const config = await run(executable('cordisx'), ['config'], {
     cwd: runnerDirectory,
@@ -181,7 +197,7 @@ try {
   await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
   await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
 
-  console.log('[cordisx] installed tarballs verified: licenses, CLI, both creator forms, generated checks, dev dry-run')
+  console.log('[cordisx] installed tarballs verified: licenses, CLI, built-in README, both creator forms, generated checks, dev dry-run')
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }

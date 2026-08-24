@@ -33,6 +33,7 @@ for (const required of [
   'dist/src/cli.js',
   'dist/src/contracts.js',
   'dist/src/contracts.d.ts',
+  'dist/src/plugins/cli-proxy-api/README.md',
   'dist/assets/brand/cordisx-mark-light.svg',
   'dist/assets/brand/cordisx-mark-dark.svg',
 ]) {

@@ -10,8 +10,8 @@ import {
   type CordisXPluginManifestV1,
   type CordisXSessionProjection,
   type CordisXSessionSummary,
-} from '../contracts.js'
-import type {} from '../contracts.js'
+} from '../../contracts.js'
+import type {} from '../../contracts.js'
 
 export const name = 'cli-proxy-api'
 export const inject = ['i18n', 'slots', 'pages', 'routes', 'platform']

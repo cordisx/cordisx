@@ -7,7 +7,11 @@ import { loadConfig } from '../packages/cli/src/launcher/config.js'
 
 interface RuntimeHandle {
   navigate(owner: string, reference: { id: string }): Promise<void>
-  snapshot(): { platform: { mode: string; diagnostics: readonly { code: string }[] }; permissions: readonly { capability: string; lastRequested?: unknown }[] }
+  snapshot(): {
+    plugins: readonly { id: string; readme?: string }[]
+    platform: { mode: string; diagnostics: readonly { code: string }[] }
+    permissions: readonly { capability: string; lastRequested?: unknown }[]
+  }
   dispose(): Promise<void>
 }
 
@@ -82,6 +86,9 @@ describe('CLIProxy provider plugin renderer', () => {
     const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
     expect(runtime?.snapshot().platform).toMatchObject({ mode: 'read-write' })
     expect(runtime?.snapshot().platform.diagnostics).toContainEqual(expect.objectContaining({ code: 'current-connection-client-unavailable' }))
+    const bundledPlugin = runtime?.snapshot().plugins.find(plugin => plugin.id === 'cli-proxy-api')
+    expect(bundledPlugin?.readme).toContain('# CLIProxy Providers')
+    expect(bundledPlugin?.readme).toContain('Every model is identified by both `providerId` and `modelId`')
     await runtime!.navigate('cli-proxy-api', { id: 'providers.sessions' })
     for (let attempt = 0; attempt < 100 && dom.window.document.querySelectorAll('[data-session]').length < 2; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
@@ -99,6 +106,15 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(requests.map(request => request.operation)).toEqual(expect.arrayContaining(['status', 'models.list', 'tasks.list']))
     expect(runtime!.snapshot().permissions.find(item => item.capability === 'tasks.catalog.read')?.lastRequested)
       .toMatchObject({ providerIds: ['gateway-a', 'gateway-b'] })
+
+    dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')?.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')?.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="cli-proxy-api"]')?.click()
+    const readmePanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="README"]')
+    expect(readmePanel?.querySelector('.cxm-readme h1')?.textContent).toBe('CLIProxy Providers')
+    expect(readmePanel?.textContent).toContain('Configure providers')
+    expect(readmePanel?.textContent).toContain('External providers and the native connection')
+    expect(readmePanel?.textContent).not.toContain('该插件没有随当前 bundle 提供 README.md')
     await runtime!.dispose()
     expect(dom.window.document.querySelector('[data-cordisx-provider-fleet]')).toBeNull()
   })
