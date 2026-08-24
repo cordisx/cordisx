@@ -70,6 +70,21 @@ describe('capability availability registry', () => {
     }).status).toBe('supported')
   })
 
+  it('does not let an unscoped current-connection route impersonate an explicit provider', () => {
+    const current = platformAdapterCapabilityProvider({
+      ...new UnavailablePlatformAdapter().status(),
+      mode: 'read-write',
+      supportedCapabilities: ['models.read'],
+      diagnostics: [],
+    }, {
+      providerId: 'desktop-current-connection',
+      kind: 'current-connection',
+    })
+    const available = new CapabilityAvailabilityRegistry([current])
+    expect(available.resolve('models.read', {}).status).toBe('supported')
+    expect(available.resolve('models.read', { providers: ['external-only'] }).status).toBe('unavailable')
+  })
+
   it('does not share a scoped result between plugin declarations', () => {
     const available = new CapabilityAvailabilityRegistry(externalProviderCapabilityProviders([
       { providerId: 'alpha', displayName: 'Alpha', state: 'ready' },
@@ -113,6 +128,20 @@ describe('capability availability registry', () => {
       ['console', 'unavailable', 0],
       ['package-lifecycle', 'unavailable', 0],
     ]))
+  })
+
+  it('uses the owning launcher lifecycle bridge as package-family authority', () => {
+    const providers = hostLocalCapabilityProviders({
+      agentStatus: agentStatus(),
+      historyStatus: historyStatus(),
+      configurationWritable: false,
+      packageLifecycleAvailable: true,
+    })
+    expect(providers.find(item => item.family === 'package-lifecycle')).toMatchObject({
+      providerId: 'host-package-lifecycle',
+      status: 'supported',
+      routes: [],
+    })
   })
 
   it('rejects duplicate provider identities', () => {

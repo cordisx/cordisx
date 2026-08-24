@@ -82,11 +82,14 @@ The current implementation has these distinct authorities:
 | Host Agent history | `agent.history.read` | the launcher history binding and its adapter status |
 | Host configuration | validated configuration descriptors and mutation bridge | the configuration registry/bridge; this is not a Platform-v1 permission name |
 | Host console | plugin DevTools Console contracts | its owning Host service; protocol presence alone does not claim runtime support |
-| Host package lifecycle | inspect/stage/activate/rollback contracts | its owning launcher service; protocol presence alone does not claim runtime support |
+| Host package lifecycle | inspect/stage/activate/rollback contracts | the launcher generation/lifecycle bridge introduced by the dynamic delivery runtime; protocol presence alone does not claim runtime support |
 
 The last three remain separate service planes. They are represented as distinct
 provider families for runtime diagnostics, but the Host does not invent
 Platform manifest capabilities for contracts that do not define one.
+Package-family availability therefore reuses the existing lifecycle bridge and
+activation registry; the Platform layer does not create a parallel package
+registry.
 
 Resolution is declaration-specific. Provider ids in `scope.providers` and
 Platform session references are matched against routable provider scopes. If

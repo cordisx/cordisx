@@ -50,7 +50,12 @@ describe('Platform runtime activation', () => {
       __cordisxRuntime?: {
         snapshot(): {
           plugins: readonly { id: string; status: string; blockedReason?: string }[]
-          permissions: readonly { capability: string; policy: string; blockedReason?: string }[]
+          permissions: readonly {
+            capability: string
+            policy: string
+            blockedReason?: string
+            availability: { status: string; reasonText: string; providers: readonly { providerId: string }[] }
+          }[]
         }
         permissionAuthorizationPlan(id: string): CordisXPermissionAuthorizationPlanV1
         authorizePlugin(id: string, decision: CordisXPermissionAuthorizationDecisionV1): Promise<void>
@@ -68,7 +73,16 @@ describe('Platform runtime activation', () => {
       capability: 'agent.events.read',
       policy: 'deny',
       blockedReason: 'Required capability agent.events.read is denied',
+      availability: { status: 'supported', providers: [{ providerId: 'host-agent-events' }] },
     })
+    expect(runtime?.snapshot().permissions[1]).toMatchObject({
+      capability: 'agent.history.read',
+      availability: { status: 'unavailable', providers: [{ providerId: 'host-agent-history' }] },
+    })
+    expect(runtime?.snapshot().permissions[0]?.availability.reasonText).toBe('Available')
+    dom.window.document.documentElement.lang = 'zh-CN'
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(runtime?.snapshot().permissions[0]?.availability.reasonText).toBe('当前可用')
     expect(dom.window.document.documentElement.dataset.agentEventsRequiredMounted).toBeUndefined()
 
     const plan = runtime?.permissionAuthorizationPlan('agent-events-required')
@@ -207,13 +221,20 @@ describe('Platform runtime activation', () => {
     await (dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
     let runtime = (dom.window as unknown as {
       __cordisxRuntime?: {
-        snapshot(): { plugins: readonly { status: string; blockedReason?: string }[] }
+        snapshot(): {
+          plugins: readonly { status: string; blockedReason?: string }[]
+          permissions: readonly { capability: string; availability: { status: string; providers: readonly { providerId: string }[] } }[]
+        }
         dispose(): Promise<void>
       }
     }).__cordisxRuntime
     expect(runtime?.snapshot().plugins[0]).toMatchObject({
       status: 'permission-blocked',
       blockedReason: 'Required capability unavailable: models.read',
+    })
+    expect(runtime?.snapshot().permissions[0]).toMatchObject({
+      capability: 'models.read',
+      availability: { status: 'unavailable' },
     })
     expect(dom.window.document.documentElement.dataset.platformRequiredMounted).toBeUndefined()
 
@@ -247,13 +268,23 @@ describe('Platform runtime activation', () => {
     await (dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
     runtime = (dom.window as unknown as typeof dom.window & {
       __cordisxRuntime?: {
-        snapshot(): { plugins: readonly { status: string; blockedReason?: string }[] }
+        snapshot(): {
+          plugins: readonly { status: string; blockedReason?: string }[]
+          permissions: readonly { capability: string; availability: { status: string; providers: readonly { providerId: string }[] } }[]
+        }
         dispose(): Promise<void>
       }
     }).__cordisxRuntime
     expect(runtime?.snapshot().plugins[0]).toMatchObject({ status: 'active' })
     expect(runtime?.snapshot().plugins[0]?.blockedReason).toBeUndefined()
     expect(dom.window.document.documentElement.dataset.platformRequiredMounted).toBe('true')
+    expect(runtime?.snapshot().permissions[0]).toMatchObject({
+      capability: 'models.read',
+      availability: { status: 'supported' },
+    })
+    expect(runtime?.snapshot().permissions[0]?.availability.providers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ providerId: 'external:gateway-a' }),
+    ]))
 
     await runtime?.dispose()
     dom.window.close()

@@ -21,7 +21,11 @@ interface RuntimeHandle {
       }
     }[]
     platform: { mode: string; diagnostics: readonly { code: string }[] }
-    permissions: readonly { capability: string; lastRequested?: unknown }[]
+    permissions: readonly {
+      capability: string
+      lastRequested?: unknown
+      availability: { status: string; providers: readonly { providerId: string; scope?: unknown }[] }
+    }[]
   }
   dispose(): Promise<void>
 }
@@ -198,6 +202,12 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(requests.map(request => request.operation)).toEqual(expect.arrayContaining(['status', 'availability', 'models.list', 'tasks.list']))
     expect(runtime!.snapshot().permissions.find(item => item.capability === 'tasks.catalog.read')?.lastRequested)
       .toMatchObject({ providerIds: ['gateway-a', 'gateway-b'] })
+    const catalogAvailability = runtime!.snapshot().permissions.find(item => item.capability === 'tasks.catalog.read')?.availability
+    expect(catalogAvailability?.status).toBe('supported')
+    expect(catalogAvailability?.providers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ providerId: 'external:gateway-a', scope: { providers: ['gateway-a'] } }),
+      expect.objectContaining({ providerId: 'external:gateway-b', scope: { providers: ['gateway-b'] } }),
+    ]))
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')?.click()

@@ -15,6 +15,7 @@ import type {
   CordisXPluginPackageManifestV1,
   CordisXPluginLifecycleOperationV1,
   CordisXPluginLifecycleResultV1,
+  CordisXLocalizedText,
   CordisXPluginManifestV1,
   CordisXPluginModule,
   CordisXRouteReference,
@@ -70,6 +71,7 @@ import {
 import { BindingPermissionPolicyStore } from './permission-binding.js'
 import { BrowserPluginLifecycleBridge } from './plugin-lifecycle-binding.js'
 import {
+  CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS,
   CapabilityAvailabilityRegistry,
   externalProviderCapabilityProviders,
   hostLocalCapabilityProviders,
@@ -309,7 +311,7 @@ async function start(
     : metadata.providers.map(provider => ({
       providerId: provider.id,
       displayName: provider.displayName,
-      state: bindingPlatformAdapter?.status().mode === 'unavailable' ? 'unavailable' as const : 'ready' as const,
+      state: 'unavailable' as const,
     }))
   const capabilityAvailability = new CapabilityAvailabilityRegistry([
     platformAdapterCapabilityProvider(agentAdapter.status(), {
@@ -512,6 +514,11 @@ async function start(
       || (left.owner < right.owner ? -1 : left.owner > right.owner ? 1 : 0)
       || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
     ))
+    const hostText = (value: CordisXLocalizedText, site: string): string => (
+      i18nService?.resolveFor('host', value, site).text
+      ?? value.fallback
+      ?? `[[host:${value.key}]]`
+    )
     return {
       version: metadata.version,
       plugins: controllers.map((controller): ManagerPluginSnapshot => ({
@@ -543,31 +550,54 @@ async function start(
       localeCatalogs: i18nService?.catalogs() ?? [],
       localizationDiagnostics: i18nService?.diagnostics() ?? [],
       platform: platformAdapter.status(),
+      capabilityProviders: capabilityAvailability.providerSnapshot().map(provider => ({
+        providerId: provider.providerId,
+        providerNameText: hostText(provider.providerName, `capability-provider:${provider.providerId}:name`),
+        kind: provider.kind,
+        family: provider.family,
+        status: provider.status,
+        reasonText: hostText(provider.reason, `capability-provider:${provider.providerId}:reason`),
+        ...(provider.generation === undefined ? {} : { generation: provider.generation }),
+      })),
       pluginLifecycle: {
         revision: currentActivation.revision,
         runtimeGeneration: generation,
         operationsAvailable: lifecycleBridge !== undefined,
       },
-      permissions: broker.snapshots().map((permission: PlatformPermissionSnapshot) => ({
-        identity: permission.identity,
-        capability: permission.capability,
-        required: permission.required,
-        reason: permission.reason,
-        reasonText: i18nService?.resolveFor(
-          permission.identity.id,
-          permission.reason,
-          `permission:${permission.identity.source}:${permission.identity.id}:${permission.capability}`,
-        ).text
-          ?? permission.reason.fallback
-          ?? `[[${permission.identity.id}:${permission.reason.key}]]`,
-        scope: permission.scope,
-        policy: permission.policy,
-        ...(permission.lastRequested === undefined ? {} : { lastRequested: permission.lastRequested }),
-        ...(permission.lastUsedAt === undefined ? {} : { lastUsedAt: permission.lastUsedAt }),
-        ...(permission.lastDeniedAt === undefined ? {} : { lastDeniedAt: permission.lastDeniedAt }),
-        denialCount: permission.denialCount,
-        ...(permission.blockedReason === undefined ? {} : { blockedReason: permission.blockedReason }),
-      })),
+      permissions: broker.snapshots().map((permission: PlatformPermissionSnapshot) => {
+        const availability = capabilityAvailability.resolve(permission.capability, permission.scope)
+        const site = `permission:${permission.identity.source}:${permission.identity.id}:${permission.capability}`
+        return {
+          identity: permission.identity,
+          capability: permission.capability,
+          required: permission.required,
+          reason: permission.reason,
+          reasonText: i18nService?.resolveFor(permission.identity.id, permission.reason, site).text
+            ?? permission.reason.fallback
+            ?? `[[${permission.identity.id}:${permission.reason.key}]]`,
+          scope: permission.scope,
+          policy: permission.policy,
+          ...(permission.lastRequested === undefined ? {} : { lastRequested: permission.lastRequested }),
+          ...(permission.lastUsedAt === undefined ? {} : { lastUsedAt: permission.lastUsedAt }),
+          ...(permission.lastDeniedAt === undefined ? {} : { lastDeniedAt: permission.lastDeniedAt }),
+          denialCount: permission.denialCount,
+          ...(permission.blockedReason === undefined ? {} : { blockedReason: permission.blockedReason }),
+          availability: {
+            status: availability.status,
+            reasonText: hostText(availability.reason, `${site}:availability`),
+            providers: availability.providers.map(provider => ({
+              providerId: provider.providerId,
+              providerNameText: hostText(provider.providerName, `${site}:provider:${provider.providerId}:name`),
+              kind: provider.kind,
+              family: provider.family,
+              status: provider.status,
+              reasonText: hostText(provider.reason, `${site}:provider:${provider.providerId}:reason`),
+              ...(provider.generation === undefined ? {} : { generation: provider.generation }),
+              scope: provider.scope,
+            })),
+          },
+        }
+      }),
       extensionPoints: buildExtensionPointRuntimeSnapshot({
         descriptors: extensionPointDescriptors,
         broker: extensionPointBroker,
@@ -1130,6 +1160,9 @@ async function start(
     await i18nFiber
     i18nService = ctx.i18n as CordisXI18nService
     for (const catalog of CORDISX_EXTENSION_POINT_LOCALE_CATALOGS) {
+      disposeExtensionPointCatalogs.push(i18nService.define(catalog))
+    }
+    for (const catalog of CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS) {
       disposeExtensionPointCatalogs.push(i18nService.define(catalog))
     }
     disposeI18nSubscription = i18nService.subscribeInternal(notify)

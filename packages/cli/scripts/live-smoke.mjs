@@ -452,7 +452,9 @@ const evaluated = await send('Runtime.evaluate', {
         scope: permission.scope,
         lastRequested: permission.lastRequested ?? null,
         denialCount: permission.denialCount,
+        availability: permission.availability,
       })) ?? [],
+      capabilityProviders: snapshot?.capabilityProviders ?? [],
       surfaceClick: globalThis.__cordisxSmokeSurfaceClick ?? null,
       localization: snapshot?.localization ?? null,
       contributions: snapshot?.registrations?.map(item => ({
@@ -2052,6 +2054,21 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             firstTabIconCenterX: tabIconRect.x + tabIconRect.width / 2,
             headingTitleX: titleRect.x,
             firstTabLabelX: tabLabelRect.x,
+          },
+          permissions: [...document.querySelectorAll('[data-permission-item]')].map(item => ({
+            capability: item.getAttribute('data-permission-item'),
+            availability: item.querySelector('[data-permission-availability]')?.getAttribute('data-availability-state') ?? null,
+            policyEditable: item.querySelector('select[data-permission-capability]') instanceof HTMLSelectElement,
+            nestedList: item.querySelector('[role="listitem"]') !== null,
+          })),
+          permissionDetail: document.querySelector('[data-permission-detail]') === null ? null : {
+            capability: document.querySelector('[data-permission-detail]')?.getAttribute('data-permission-detail') ?? null,
+            providers: [...document.querySelectorAll('[data-permission-provider]')].map(item => ({
+              id: item.getAttribute('data-permission-provider'),
+              text: item.textContent?.trim() ?? '',
+            })),
+            policyEditable: document.querySelector('[data-permission-detail] select[data-permission-capability]') instanceof HTMLSelectElement,
+            headings: [...document.querySelectorAll('[data-permission-detail] h1, [data-permission-detail] h2, [data-permission-detail] h3')].map(item => item.textContent?.trim() ?? ''),
           },
         },
       }

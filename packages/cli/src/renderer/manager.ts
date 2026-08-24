@@ -39,6 +39,11 @@ import type {
   ManagerPluginConfigSnapshot,
 } from './configuration.js'
 import type { CordisXConfigFieldSnapshot, CordisXJsonValue } from '../contracts.js'
+import type {
+  CordisXCapabilityAvailabilityState,
+  CordisXCapabilityProviderFamily,
+  CordisXCapabilityProviderKind,
+} from '../capability-availability-contracts.js'
 import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
 import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 
@@ -79,6 +84,24 @@ export interface ManagerPermissionSnapshot {
   readonly lastDeniedAt?: string
   readonly denialCount: number
   readonly blockedReason?: string
+  readonly availability: ManagerCapabilityAvailabilitySnapshot
+}
+
+export interface ManagerCapabilityProviderSnapshot {
+  readonly providerId: string
+  readonly providerNameText: string
+  readonly kind: CordisXCapabilityProviderKind
+  readonly family: CordisXCapabilityProviderFamily
+  readonly status: CordisXCapabilityAvailabilityState
+  readonly reasonText: string
+  readonly generation?: string
+  readonly scope?: CordisXCapabilityScope
+}
+
+export interface ManagerCapabilityAvailabilitySnapshot {
+  readonly status: CordisXCapabilityAvailabilityState
+  readonly reasonText: string
+  readonly providers: readonly ManagerCapabilityProviderSnapshot[]
 }
 
 export interface ManagerSnapshot {
@@ -92,6 +115,8 @@ export interface ManagerSnapshot {
   readonly localizationDiagnostics: readonly CordisXLocalizationDiagnostic[]
   readonly platform: CordisXPlatformAdapterStatus
   readonly permissions: readonly ManagerPermissionSnapshot[]
+  /** Host-owned providers; permission policy remains independently editable. */
+  readonly capabilityProviders?: readonly ManagerCapabilityProviderSnapshot[]
   /** Runtime-owned point catalog/policy projection; manager UX consumes it in the following slice. */
   readonly extensionPoints?: ExtensionPointRuntimeSnapshot
   readonly settingsTabs?: readonly ManagerSettingsTabSnapshot[]
@@ -247,6 +272,34 @@ const CAPABILITY_PRESENTATIONS: Readonly<Partial<Record<CordisXPlatformCapabilit
   'turns.control': {
     name: '控制对话轮次',
     icon: 'turns-control',
+  },
+  'agent.events.read': {
+    name: '读取 Agent 事件',
+    icon: 'capability-fallback',
+  },
+  'agent.history.read': {
+    name: '读取 Agent 历史',
+    icon: 'capability-fallback',
+  },
+  'agent.messages.append': {
+    name: '追加 Agent 消息',
+    icon: 'capability-fallback',
+  },
+  'agent.steps.reject': {
+    name: '拒绝 Agent 步骤',
+    icon: 'capability-fallback',
+  },
+  'agent.messages.transform': {
+    name: '转换 Agent 消息',
+    icon: 'capability-fallback',
+  },
+  'agent.prompt.section': {
+    name: '扩展系统提示词',
+    icon: 'capability-fallback',
+  },
+  'agent.prompt.context': {
+    name: '追加模型上下文',
+    icon: 'capability-fallback',
   },
 }
 
@@ -571,7 +624,7 @@ const MANAGER_STYLES = `
   .cxm-permission-item { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; gap: 18px; }
   .cxm-permission-open {
     display: grid;
-    grid-template-columns: 24px minmax(0, 1fr) 14px;
+    grid-template-columns: 24px minmax(0, 1fr);
     align-items: center;
     gap: 11px;
     min-width: 0;
@@ -591,14 +644,15 @@ const MANAGER_STYLES = `
   .cxm-permission-name { color: #e7e9ee; font-size: 12px; font-weight: 650; }
   .cxm-required-badge { padding: 2px 5px; border-radius: 5px; background: rgba(251, 191, 36, .1); color: #d6c37e; font-size: 9px; font-weight: 700; }
   .cxm-permission-reason { display: block; margin-top: 3px; overflow: hidden; color: #858fa1; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-  .cxm-permission-control { display: flex; align-items: center; justify-content: flex-end; min-width: 118px; }
+  .cxm-permission-control { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 118px; }
   .cxm-permission-control .cxm-source-input { width: 118px; padding-block: 7px; }
-  .cxm-permission-unavailable { color: #8d96a8; font-size: 11px; }
   .cxm-permission-detail-intro { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 12px; }
   .cxm-permission-detail-intro .cxm-capability-icon { width: 34px; height: 34px; }
   .cxm-permission-detail-intro .cxm-capability-icon svg { width: 26px; height: 26px; }
   .cxm-permission-detail-policy { display: grid; grid-template-columns: max-content minmax(160px, 260px); align-items: center; gap: 12px; margin-top: 18px; }
   .cxm-permission-detail-policy .cxm-field-label { white-space: nowrap; }
+  .cxm-permission-provider-item { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; gap: 8px 16px; }
+  .cxm-permission-provider-item > .cxm-code { grid-column: 1 / -1; margin: 0; }
   .cxm-permission-audit { margin-top: 16px; }
   .cxm-diagnostics { margin-top: 22px; border-top: 1px solid rgba(255, 255, 255, .08); }
   .cxm-diagnostics summary { padding: 14px 2px; color: #98a1b2; cursor: pointer; font-size: 11px; }
@@ -876,6 +930,10 @@ function capabilityPresentation(capability: CordisXPlatformCapability): Capabili
 
 function createCapabilityIcon(document: Document, capability: CordisXPlatformCapability): HTMLSpanElement {
   return createManagerIcon(document, capabilityPresentation(capability).icon, 'cxm-capability-icon')
+}
+
+function capabilityAvailabilityLabel(status: CordisXCapabilityAvailabilityState): string {
+  return status === 'supported' ? '可用' : status === 'degraded' ? '部分可用' : '不可用'
 }
 
 function createPermissionPolicySelect(
@@ -2250,7 +2308,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return
     }
 
-    const supported = snapshot.platform.supportedCapabilities.includes(permission.capability)
     const detail = create(document, 'div', 'cxm-permission-detail')
     detail.dataset.permissionDetail = permission.capability
     const intro = create(document, 'div', 'cxm-permission-detail-intro')
@@ -2262,7 +2319,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const fields = create(document, 'div', 'cxm-detail-grid')
     for (const [label, value] of [
       ['申请类型', permission.required ? '必需权限' : '可选权限'],
-      ['宿主支持', supported ? '当前宿主支持' : '当前宿主暂不支持'],
+      ['可用状态', capabilityAvailabilityLabel(permission.availability.status)],
       ['能力标识', permission.capability],
     ]) {
       const field = create(document, 'div', 'cxm-field')
@@ -2288,6 +2345,33 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (hasCapabilityScope(permission.scope)) {
       detail.append(createSectionTitle(document, '使用范围'))
       detail.append(create(document, 'pre', 'cxm-code', formatConfig(permission.scope)))
+    }
+
+    detail.append(createSectionTitle(document, '能力提供方'))
+    if (permission.availability.providers.length === 0) {
+      detail.append(create(document, 'div', 'cxm-empty', permission.availability.reasonText))
+    } else {
+      const providers = create(document, 'div', 'cxm-flat-list')
+      providers.setAttribute('role', 'list')
+      providers.dataset.permissionProviders = permission.capability
+      for (const provider of permission.availability.providers) {
+        const providerItem = create(document, 'div', 'cxm-flat-item cxm-permission-provider-item')
+        providerItem.setAttribute('role', 'listitem')
+        providerItem.dataset.permissionProvider = provider.providerId
+        const copy = create(document, 'div', 'cxm-permission-copy')
+        copy.append(
+          create(document, 'span', 'cxm-permission-name', provider.providerNameText),
+          create(document, 'span', 'cxm-permission-reason', provider.reasonText),
+        )
+        providerItem.append(copy, create(document, 'span', 'cxm-kind-badge', capabilityAvailabilityLabel(provider.status)))
+        if (provider.scope !== undefined && hasCapabilityScope(provider.scope)) {
+          const scope = create(document, 'pre', 'cxm-code', formatConfig(provider.scope))
+          scope.dataset.permissionProviderScope = provider.providerId
+          providerItem.append(scope)
+        }
+        providers.append(providerItem)
+      }
+      detail.append(providers)
     }
 
     detail.append(createSectionTitle(document, '本次运行审计'))
@@ -2541,7 +2625,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       permissionList.dataset.managerGroup = 'capability-declarations'
       for (const permission of permissions) {
         const presentation = capabilityPresentation(permission.capability)
-        const supported = snapshot.platform.supportedCapabilities.includes(permission.capability)
         const item = create(document, 'div', 'cxm-flat-item cxm-permission-item')
         item.setAttribute('role', 'listitem')
         item.setAttribute('aria-label', presentation.name)
@@ -2560,15 +2643,20 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           void navigateRoute({ kind: 'permission', pluginId: plugin.id, capability: permission.capability })
         })
         const control = create(document, 'div', 'cxm-permission-control')
-        if (supported) {
-          control.append(createPermissionPolicySelect(document, permission, async (policy, select) => {
+        const availability = create(
+          document,
+          'span',
+          'cxm-kind-badge cxm-permission-availability',
+          capabilityAvailabilityLabel(permission.availability.status),
+        )
+        availability.dataset.permissionAvailability = permission.capability
+        availability.dataset.availabilityState = permission.availability.status
+        control.append(
+          availability,
+          createPermissionPolicySelect(document, permission, async (policy, select) => {
             await commitPermissionPolicy(plugin.id, permission, policy, select)
-          }))
-        } else {
-          const unavailable = create(document, 'span', 'cxm-permission-unavailable', '暂不可用')
-          unavailable.dataset.permissionUnavailable = permission.capability
-          control.append(unavailable)
-        }
+          }),
+        )
         item.append(open, control)
         permissionList.append(item)
       }
@@ -2679,6 +2767,16 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         )
         configDiagnostics.dataset.configDiagnostics = plugin.id
         diagnosticsBody.append(configDiagnostics)
+      }
+      for (const provider of (snapshot.capabilityProviders ?? []).filter(item => item.kind !== 'current-connection')) {
+        const providerDiagnostic = create(
+          document,
+          'div',
+          'cxm-copy',
+          `${provider.providerNameText} · ${capabilityAvailabilityLabel(provider.status)} · ${provider.reasonText}`,
+        )
+        providerDiagnostic.dataset.capabilityProvider = provider.providerId
+        diagnosticsBody.append(providerDiagnostic)
       }
       diagnosticsBody.append(create(
         document,

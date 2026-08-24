@@ -233,7 +233,7 @@ function routeProviderIds(scope: CordisXCapabilityScope): ReadonlySet<string> {
 
 function providerRouteMatches(route: CordisXCapabilityProviderRoute, providerId: string): boolean {
   const scoped = routeProviderIds(route.scope)
-  return scoped.size === 0 || scoped.has(providerId)
+  return scoped.has(providerId)
 }
 
 function resolvedProvider(provider: CordisXCapabilityProviderReport, route: CordisXCapabilityProviderRoute): ResolvedCapabilityProvider {
