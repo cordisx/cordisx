@@ -21,7 +21,7 @@ The Timeline groups records by turn and step and projects four lanes:
 - **Injection / Prompt** for plugin delivery and prompt contributions.
 
 Sequence and time views, search, source/type/phase filters, record details, and
-an explicit 500-row rendering boundary make larger sessions inspectable. The
+a bounded, configurable Timeline window make larger sessions inspectable. The
 page distinguishes observed, CordisX-authored, and inferred facts and displays
 the current adapter capability and data completeness. A projected or forwarded
 record is never described as model-consumed unless the public event contract
@@ -42,10 +42,11 @@ private adapter store, DOM selector, or parallel trace ledger.
 Historical mode asks the Host's brokered `agent.history.read` service to
 project the selected Codex session's local JSONL into the same Timeline. The
 plugin and renderer receive neither filesystem access nor a raw path. Imported
-rows are labeled `historical/imported`, use stable opaque provenance, page at
-most 500 records, and merge with overlapping live observations without
-duplication. Tail updates remain incremental, so an older conversation can
-continue into the current live window.
+rows are labeled `historical/imported`, use stable opaque provenance, respect
+the configured page size within the Host's 500-record ceiling, and merge with
+overlapping live observations without duplication. Tail updates remain
+incremental, so an older conversation can continue into the current live
+window.
 
 History is evidence-limited. It may prove message, tool, content, timing,
 session/turn, and compaction facts found in the source JSONL. It never creates
@@ -56,6 +57,28 @@ than synthetic events.
 
 The plugin is development-only and opt-in. CordisX setup continues to create an
 empty `plugins: []` configuration.
+
+## Configuration
+
+The plugin exports the standard Schemastery `Config` schema consumed by the
+CordisX Manager. Configuration applies on plugin restart because changing the
+data source replaces the session provider, subscriptions, history cursor/tail
+timer, and plugin-owned pending contributions as one fiber-owned lifecycle.
+
+| Setting | Default | Allowed values | Purpose |
+| --- | --- | --- | --- |
+| `mode` | `live` | `live`, `historical`, `fixture` | Select the public live ledger, Host-brokered history merged with live observations, or deterministic fixture data. |
+| `historyPageSize` | `100` | `25`–`500`, step `25` | Set the number of historical records requested per opaque Host page. It is used only by historical mode. |
+| `timelineWindowSize` | `500` | `50`–`500`, step `50` | Bound the number of merged records retained by the current Timeline projection. |
+
+`live` does not request local history. `historical` combines imported evidence
+with public live observations in the same deduplicated Timeline. `fixture`
+remains deterministic and cannot target a configured session identity; the
+Host always binds the page to the active session.
+
+Session/provider/profile identity, local paths, contract versions, payload
+redaction, tail cadence, diagnostics, secrets, and permission policy are not
+ordinary plugin settings. They remain Host-owned, capability-scoped decisions.
 
 ## Explicit Agent demonstrations
 

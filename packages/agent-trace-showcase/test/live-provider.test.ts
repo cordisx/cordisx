@@ -158,6 +158,16 @@ describe('Agent Trace live v2 provider', () => {
     store.dispose()
   })
 
+  it('uses the configured bounded Timeline window for public ledger queries', async () => {
+    const input = service()
+    const live = controls()
+    const store = new LiveTraceShowcaseStore(input, live.agents, live.systemPrompt, 'session-a', 150)
+    await store.settled()
+    expect(input.query).toHaveBeenCalledWith({ sessionId: 'session-a', afterSeq: -1, limit: 150 })
+    expect(store.getSnapshot().range.renderedLimit).toBe(150)
+    store.dispose()
+  })
+
   it('never upgrades projected delivery into model-consumed proof', () => {
     const projected = projectAgentEvent({
       ...queued,

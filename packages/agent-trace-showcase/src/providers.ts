@@ -273,6 +273,8 @@ function demoSemantics(kind: TraceDemoKind): Readonly<Record<string, unknown>> {
 
 export interface FixtureProviderOptions {
   readonly sessionId: string
+  readonly windowSize?: number
+  /** Test-only permission projection; production fixture configuration never exposes broker policy. */
   readonly permissionPolicy?: 'allow' | 'ask' | 'deny'
 }
 
@@ -286,7 +288,8 @@ export class FixtureTraceShowcaseStore implements TraceShowcaseStore {
 
   constructor(private readonly options: FixtureProviderOptions) {
     this.allEvents = buildFixtureLedger(options.sessionId)
-    this.windowStart = Math.max(0, this.allEvents.length - 16)
+    const initialWindow = Math.min(options.windowSize ?? RENDERED_LIMIT, 16)
+    this.windowStart = Math.max(0, this.allEvents.length - initialWindow)
   }
 
   getSnapshot(): TraceSnapshot {
@@ -302,7 +305,7 @@ export class FixtureTraceShowcaseStore implements TraceShowcaseStore {
         ...(events.at(-1) === undefined ? {} : { lastSeq: events.at(-1)!.seq }),
         loaded: events.length,
         totalAvailable: this.allEvents.length,
-        renderedLimit: RENDERED_LIMIT,
+        renderedLimit: this.options.windowSize ?? RENDERED_LIMIT,
       }),
     })
   }
@@ -486,14 +489,14 @@ export class UnavailableTraceShowcaseStore implements TraceShowcaseStore {
     origins: Object.freeze([]),
   })
 
-  constructor(private readonly sessionId?: string) {}
+  constructor(private readonly sessionId?: string, private readonly windowSize = RENDERED_LIMIT) {}
 
   getSnapshot(): TraceSnapshot {
     return Object.freeze({
       ...(this.sessionId === undefined ? {} : { sessionId: this.sessionId }),
       status: this.status,
       events: Object.freeze([]), hasEarlier: false, loadingEarlier: false,
-      range: Object.freeze({ loaded: 0, renderedLimit: RENDERED_LIMIT }),
+      range: Object.freeze({ loaded: 0, renderedLimit: this.windowSize }),
     })
   }
 

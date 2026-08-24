@@ -155,6 +155,22 @@ describe('Agent Trace historical provider', () => {
     ])
   })
 
+  it('applies the configured Host page size and bounded merged window', async () => {
+    const service = history(page([
+      item({ id: 'hist-configured', seq: 0, time: 1_000, itemId: 'configured' }),
+    ]))
+    const store = new HistoricalTraceShowcaseStore(service, new LiveStub(), 'session-a', {
+      pageSize: 75,
+      windowSize: 150,
+    })
+    await store.settled()
+    expect(service.query).toHaveBeenCalledWith({
+      sessionId: 'session-a', limit: 75, payloadPolicy: 'summarized',
+    })
+    expect(store.getSnapshot().range.renderedLimit).toBe(150)
+    store.dispose()
+  })
+
   it('enforces one 500-row merged UI boundary for oversized imported windows', () => {
     const imported = Array.from({ length: 620 }, (_, index) => projectAgentEvent(item({
       id: `large-${index}`, seq: index, time: 1_000 + index, itemId: `item-${index}`,
