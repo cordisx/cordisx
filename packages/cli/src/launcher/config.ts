@@ -9,6 +9,11 @@ export interface CordisXConfigPlugin {
   readonly entry: string
   readonly enabled: boolean
   readonly config: unknown
+  readonly revision?: number
+}
+
+export interface LoadConfigOptions {
+  readonly profileId?: string
 }
 
 export interface CordisXConfig {
@@ -45,7 +50,7 @@ function pluginEntry(value: unknown, label: string, rootDir: string): string {
 }
 
 /** Read and validate the version-1 local composition file. */
-export async function loadConfig(configPath: string): Promise<CordisXConfig> {
+export async function loadConfig(configPath: string, options: LoadConfigOptions = {}): Promise<CordisXConfig> {
   const absolutePath = path.resolve(configPath)
   const raw = object(JSON.parse(await readFile(absolutePath, 'utf8')) as unknown, 'config')
   if (raw.version !== 1) throw new Error('config.version must be 1')
@@ -57,6 +62,9 @@ export async function loadConfig(configPath: string): Promise<CordisXConfig> {
   const executable = codex.executable === undefined
     ? undefined
     : nonEmptyString(codex.executable, 'config.codex.executable')
+  if (options.profileId !== undefined && !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(options.profileId)) {
+    throw new Error(`invalid profile id: ${options.profileId}`)
+  }
 
   if (!Array.isArray(raw.plugins)) throw new Error('config.plugins must be an array')
   const seen = new Set<string>()
@@ -71,11 +79,22 @@ export async function loadConfig(configPath: string): Promise<CordisXConfig> {
     if (plugin.enabled !== undefined && typeof plugin.enabled !== 'boolean') {
       throw new Error(`config.plugins[${index}].enabled must be a boolean`)
     }
+    let scoped: Record<string, unknown> | undefined
+    if (options.profileId !== undefined && plugin.profiles !== undefined) {
+      const profiles = object(plugin.profiles, `config.plugins[${index}].profiles`)
+      const value = Object.hasOwn(profiles, options.profileId) ? profiles[options.profileId] : undefined
+      if (value !== undefined) scoped = object(value, `config.plugins[${index}].profiles.${options.profileId}`)
+    }
+    const revision = scoped?.revision ?? 0
+    if (!Number.isInteger(revision) || (revision as number) < 0) {
+      throw new Error(`config.plugins[${index}] scoped revision must be a non-negative integer`)
+    }
     return {
       id,
       entry,
       enabled: plugin.enabled !== false,
-      config: plugin.config ?? {},
+      config: scoped?.config ?? plugin.config ?? {},
+      revision: revision as number,
     }
   })
 

@@ -11,6 +11,10 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `manager-settings-tabs.md` freezes the host-neutral extensible settings-tab
   surface/content outlet, single ordering model, controlled page-body mount,
   lifecycle, protocol/host/mono PR order, and validation matrix.
+- `plugin-configuration.md` defines Schemastery-first forms, the Standard
+  Schema validation boundary, revision-fenced persistence, live/restart
+  application, last-good recovery, secrets, and lifecycle-owned field
+  renderers.
 - `data-contribution-routing.md` defines the approved structured shell-contribution and
   page/outlet architecture that replaces direct plugin DOM rendering in native shell areas.
 - `extension-point-management.md` defines surfaces and outlets as the two

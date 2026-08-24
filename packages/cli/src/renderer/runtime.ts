@@ -48,6 +48,17 @@ import {
 import { BindingPlatformAdapter } from './provider-binding.js'
 import { BindingAgentHistoryAdapter, UnavailableAgentHistoryAdapter } from './agent-history-binding.js'
 import { CordisXAgentHistoryService } from './agent-history.js'
+import {
+  BrowserConfigBridge,
+  ConfigRendererRegistry,
+  CordisXConfigRendererService,
+  CordisXPluginSettingsService,
+  PluginConfigurationRegistry,
+  moduleConfigApplies,
+  moduleConfigSchema,
+  type ConfigCandidate,
+  type ConfigMutationOperation,
+} from './configuration.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 
@@ -56,6 +67,9 @@ interface CordisXRuntimeMetadata {
   readonly providers: readonly { readonly id: string; readonly displayName: string }[]
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
+  readonly profileId: string
+  readonly configBridgeToken?: string
+  readonly generation?: string
 }
 
 interface PluginController {
@@ -161,9 +175,14 @@ async function start(
   }
   const platformAdapter = bindingPlatformAdapter ?? agentAdapter
   const broker = new PermissionBroker(new BrowserPermissionPolicyStore(), new BrowserPermissionPrompt())
-  const generation = typeof globalThis.crypto?.randomUUID === 'function'
+  const generation = metadata.generation ?? (typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
-    : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  const configBridge = metadata.configBridgeToken === undefined
+    ? undefined
+    : new BrowserConfigBridge(metadata.configBridgeToken, metadata.profileId, generation)
+  const configuration = new PluginConfigurationRegistry()
+  const configRenderers = new ConfigRendererRegistry()
   const agentRuntime = new CordisXHostAgentRuntime({ adapter: agentAdapter, broker, generation })
   const historyAdapter = metadata.agentHistoryBridgeToken === undefined
     ? new UnavailableAgentHistoryAdapter()
@@ -180,6 +199,15 @@ async function start(
       controller.status = 'permission-blocked'
       controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
     }
+    const configSchema = moduleConfigSchema(controller.item.module)
+    configuration.register({
+      identity: controller.identity,
+      ...(configSchema === undefined ? {} : { schema: configSchema }),
+      applies: moduleConfigApplies(controller.item.module),
+      raw: controller.item.config,
+      revision: controller.item.revision,
+      writable: configBridge !== undefined && controller.item.enabled && controller.item.module !== undefined,
+    })
   }
   const listeners = new Set<() => void>()
   const knownRegistrations = new Map<string, readonly SurfaceContributionSnapshot[]>()
@@ -198,6 +226,8 @@ async function start(
   let pageFiber: Fiber | undefined
   let routeFiber: Fiber | undefined
   let slotFiber: Fiber | undefined
+  let settingsFiber: Fiber | undefined
+  let configRendererFiber: Fiber | undefined
   let disposeManager: (() => void) | undefined
   let undeclareManagerOutlet: (() => void) | undefined
   let unregisterManagerPointCatalog: (() => void) | undefined
@@ -233,7 +263,7 @@ async function start(
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
     })
-    const fiber = pluginContext.plugin(pluginFromModule(module), controller.item.config)
+    const fiber = pluginContext.plugin(pluginFromModule(module), configuration.get(controller.item.id))
     controller.fiber = fiber
     try {
       await fiber
@@ -306,7 +336,8 @@ async function start(
         source: controller.item.source,
         name: controller.manifest.name ?? controller.item.module?.name ?? controller.item.id,
         inject: pluginInject(controller.item.module),
-        config: controller.item.config,
+        config: configuration.descriptor(controller.item.id, i18nService?.getSnapshot().locale ?? 'en').value,
+        configuration: configuration.descriptor(controller.item.id, i18nService?.getSnapshot().locale ?? 'en'),
         ...(controller.item.readme === undefined ? {} : { readme: controller.item.readme }),
         status: controller.status,
         ...(controller.error === undefined ? {} : { error: controller.error }),
@@ -405,6 +436,83 @@ async function start(
     return task
   }
 
+  const remountLastGood = async (controller: PluginController): Promise<void> => {
+    configuration.abort(controller.item.id)
+    await controller.fiber?.dispose()
+    delete controller.fiber
+    await mountPlugin(controller)
+  }
+
+  const applyRestartCandidate = async (controller: PluginController, candidate: ConfigCandidate): Promise<void> => {
+    rememberRegistrations(controller.item.id)
+    agentRuntime.releaseOwner(controller.identity, 'owner-disposed')
+    await controller.fiber?.dispose()
+    await routeService?.settled()
+    delete controller.fiber
+    configuration.begin(controller.item.id, candidate)
+    await mountPlugin(controller)
+  }
+
+  const updatePluginConfig = (
+    id: string,
+    expectedRevision: number,
+    operations: readonly ConfigMutationOperation[],
+  ): Promise<void> => {
+    const task = operation.then(async () => {
+      if (disposed) throw new Error('CordisX runtime is disposed')
+      const controller = controllers.find(item => item.item.id === id)
+      if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+      if (configBridge === undefined) throw new Error('plugin configuration writer is unavailable in this launcher mode')
+      const descriptor = configuration.descriptor(id, i18nService?.getSnapshot().locale ?? 'en')
+      const candidate = configuration.stage(id, expectedRevision, operations)
+      const staged = await configBridge.stage(controller.identity, expectedRevision, candidate.raw)
+      let candidateMounted = false
+      try {
+        const mayMount = controller.item.enabled
+          && controller.item.module !== undefined
+          && !blockedPlugins.has(id)
+          && broker.requiredDenied(controller.identity).length === 0
+        if (descriptor.applies === 'restart' && mayMount) {
+          try {
+            await applyRestartCandidate(controller, candidate)
+            candidateMounted = true
+          } catch (restartError) {
+            configuration.abort(id)
+            await configBridge.abort(controller.identity, staged.candidateRevision).catch(() => undefined)
+            try {
+              await remountLastGood(controller)
+            } catch (rollbackError) {
+              controller.status = 'failed'
+              controller.error = `rollback-failed: ${errorMessage(rollbackError)}`
+              notify()
+              throw new Error(`plugin restart failed (${errorMessage(restartError)}); last-good rollback failed (${errorMessage(rollbackError)})`)
+            }
+            throw new Error(`plugin restart failed; last-good restored: ${errorMessage(restartError)}`)
+          }
+        }
+        const committed = await configBridge.commit(controller.identity, staged.candidateRevision)
+        configuration.commit(id, committed.revision, candidate)
+        notify()
+      } catch (error) {
+        if (candidateMounted) {
+          try {
+            await remountLastGood(controller)
+          } catch (rollbackError) {
+            controller.status = 'failed'
+            controller.error = `rollback-failed: ${errorMessage(rollbackError)}`
+          }
+        } else {
+          configuration.abort(id)
+        }
+        await configBridge.abort(controller.identity, staged.candidateRevision).catch(() => undefined)
+        notify()
+        throw error
+      }
+    })
+    operation = task.catch(() => {})
+    return task
+  }
+
   const setPermissionPolicy = (
     id: string,
     capability: CordisXPlatformCapability,
@@ -485,12 +593,19 @@ async function start(
       await controller.fiber?.dispose()
       delete controller.fiber
     }
+    configBridge?.dispose()
+    configRenderers.dispose()
+    configuration.dispose()
     adapterHandle?.dispose()
     adapterHandle = undefined
     undeclareManagerOutlet?.()
     undeclareManagerOutlet = undefined
     await slotFiber?.dispose()
     slotFiber = undefined
+    await configRendererFiber?.dispose()
+    configRendererFiber = undefined
+    await settingsFiber?.dispose()
+    settingsFiber = undefined
     await routeFiber?.dispose()
     routeFiber = undefined
     await pageFiber?.dispose()
@@ -550,6 +665,8 @@ async function start(
     setExtensionPointPolicy,
     snapshot,
     setPluginBlocked,
+    updatePluginConfig,
+    mountConfigRenderer: (pluginId, field, container, setDraft) => configRenderers.mount(pluginId, field, container, setDraft),
     setPermissionPolicy,
     subscribe,
     dispose,
@@ -565,6 +682,11 @@ async function start(
     disposeI18nSubscription = i18nService.subscribeInternal(notify)
     disposePermissionSubscription = broker.subscribe(notify)
     disposeExtensionPointSubscription = extensionPointBroker.subscribe(notify)
+    settingsFiber = ctx.plugin(CordisXPluginSettingsService, configuration)
+    await settingsFiber
+    configRendererFiber = ctx.plugin(CordisXConfigRendererService, configRenderers)
+    await configRendererFiber
+    registrySubscriptions.push(configuration.subscribe(notify))
     platformFiber = ctx.plugin(CordisXPlatformService, { adapter: platformAdapter, broker })
     await platformFiber
     agentEventFiber = ctx.plugin(CordisXAgentEventService, {

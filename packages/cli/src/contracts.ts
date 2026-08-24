@@ -650,6 +650,74 @@ export interface CordisXRoutes extends CordisXPageNavigation {
   register<Outlet extends CordisXOutletName>(definition: CordisXRouteDefinition<Outlet>): Disposable<void | Promise<void>>
 }
 
+export type CordisXConfigApplies = 'live' | 'restart'
+
+export interface CordisXStandardSchemaResult<T = unknown> {
+  readonly value?: T
+  readonly issues?: readonly {
+    readonly message: string
+    readonly path?: readonly (string | number | { readonly key: PropertyKey })[]
+  }[]
+}
+
+/** Structural Standard Schema boundary; validators must be synchronous in the renderer runtime. */
+export interface CordisXStandardSchema<T = unknown> {
+  readonly '~standard': {
+    readonly version: 1
+    readonly vendor: string
+    readonly validate: (value: unknown) => CordisXStandardSchemaResult<T> | Promise<CordisXStandardSchemaResult<T>>
+  }
+}
+
+export interface CordisXPluginSettings {
+  /** Return the calling plugin's current normalized, immutable config snapshot. */
+  get<T = unknown>(): T
+  /** Observe committed live snapshots. Restart mode recreates the owning fiber instead. */
+  watch<T = unknown>(listener: (value: T) => void): Disposable<void>
+}
+
+export type CordisXConfigFieldPath = readonly string[]
+
+export type CordisXConfigRendererSelector =
+  | { readonly role: string }
+  | { readonly path: CordisXConfigFieldPath }
+  | { readonly namespace: string }
+
+export interface CordisXConfigRendererOptions {
+  readonly id: string
+  readonly selector: CordisXConfigRendererSelector
+  readonly order?: number
+}
+
+export interface CordisXConfigFieldSnapshot {
+  readonly namespace: string
+  readonly path: CordisXConfigFieldPath
+  readonly type: string
+  readonly role?: string
+  readonly description?: string
+  readonly value: unknown
+  readonly disabled: boolean
+  readonly required: boolean
+  readonly min?: number
+  readonly max?: number
+  readonly step?: number
+  readonly choices?: readonly { readonly label: string; readonly value: CordisXJsonScalar }[]
+}
+
+export interface CordisXConfigFieldController extends CordisXConfigFieldSnapshot {
+  readonly signal: AbortSignal
+  setDraft(value: unknown): void
+}
+
+export type CordisXConfigRendererMount = (
+  container: HTMLElement,
+  field: CordisXConfigFieldController,
+) => void | Disposable<void> | Promise<void | Disposable<void>>
+
+export interface CordisXConfigRenderers {
+  register(options: CordisXConfigRendererOptions, mount: CordisXConfigRendererMount): Disposable<void>
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** DSH-style semantic UI slot service backed by Codex DOM adapters. */
@@ -659,6 +727,10 @@ declare module '@deepseek-ai/cordis' {
     routes: CordisXRoutes
     /** Fiber-owned locale dictionaries and typed translator seats. */
     i18n: CordisXI18n
+    /** Owner-bound config snapshots and live subscriptions. */
+    settings: CordisXPluginSettings
+    /** Fiber-owned custom field renderers inside Host-controlled form chrome. */
+    configRenderers: CordisXConfigRenderers
   }
 }
 
@@ -667,6 +739,8 @@ export interface CordisXPluginModule {
   readonly name?: string
   readonly manifest?: CordisXPluginManifestV1
   readonly inject?: readonly string[] | Record<string, unknown>
+  readonly Config?: CordisXStandardSchema
+  readonly configApplies?: CordisXConfigApplies
   readonly apply?: (ctx: Context, config: unknown) => unknown
   readonly default?: unknown
 }
@@ -679,6 +753,7 @@ export interface CordisXBrowserPlugin {
   readonly enabled: boolean
   readonly module?: CordisXPluginModule
   readonly config: unknown
+  readonly revision: number
   /** Adjacent README.md captured by the launcher for this browser generation. */
   readonly readme?: string
 }

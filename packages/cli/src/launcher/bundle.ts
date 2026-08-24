@@ -7,6 +7,9 @@ import type { CordisXConfig } from './config.js'
 export interface BuildRendererBundleOptions {
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
+  readonly profileId?: string
+  readonly configBridgeToken?: string
+  readonly generation?: string
 }
 
 function importSpecifier(fromDirectory: string, absolutePath: string): string {
@@ -70,10 +73,10 @@ export async function buildRendererBundle(config: CordisXConfig, options: BuildR
     const moduleField = index === undefined ? '' : `, module: plugin${index}`
     const readme = readmes[pluginIndex]
     const readmeField = readme === undefined ? '' : `, readme: ${JSON.stringify(readme)}`
-    return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}${readmeField}${moduleField} }`
+    return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${plugin.revision ?? 0}${readmeField}${moduleField} }`
   }).join(',')}]`
   const providers = config.providers.filter(provider => provider.enabled).map(provider => ({ id: provider.id, displayName: provider.displayName }))
-  const metadata = `{ version: ${JSON.stringify(version)}, providers: ${JSON.stringify(providers)}${options.providerBridgeToken === undefined ? '' : `, providerBridgeToken: ${JSON.stringify(options.providerBridgeToken)}`}${options.agentHistoryBridgeToken === undefined ? '' : `, agentHistoryBridgeToken: ${JSON.stringify(options.agentHistoryBridgeToken)}`} }`
+  const metadata = `{ version: ${JSON.stringify(version)}, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(options.profileId ?? 'development')}${options.generation === undefined ? '' : `, generation: ${JSON.stringify(options.generation)}`}${options.providerBridgeToken === undefined ? '' : `, providerBridgeToken: ${JSON.stringify(options.providerBridgeToken)}`}${options.agentHistoryBridgeToken === undefined ? '' : `, agentHistoryBridgeToken: ${JSON.stringify(options.agentHistoryBridgeToken)}`}${options.configBridgeToken === undefined ? '' : `, configBridgeToken: ${JSON.stringify(options.configBridgeToken)}`} }`
   const source = `${imports.join('\n')}\nvoid installCordisX(${composition}, ${metadata}).catch(error => console.error('[cordisx] boot failed', error))\n`
 
   const result = await build({
