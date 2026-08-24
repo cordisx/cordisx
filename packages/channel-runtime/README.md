@@ -1,27 +1,53 @@
 # CordisX Channel Runtime
 
 Launcher-side, host-neutral Channel core and local simulator. This package is
-private while the Node service loader, production store, manager projection,
-and real platform adapters are still being delivered.
+private while the Node service loader, production store, interactive Channel
+Manager page, and real platform adapters are still being delivered.
 
 ## Status
 
 | Area | Status | Evidence or boundary |
 | --- | --- | --- |
-| Channel identity, sourced input, binding, snapshot, and manifest v2 | implemented | `cordisx-protocol` main `643b0a35a407c452193d715fe45a98a3c252a399` |
+| Channel identity, sourced input, binding, snapshot, Host config/descriptor, and manifest v3 | implemented | `cordisx-protocol#21` / `e4c3a15` |
+| Launcher-only connection/route/retry/rate config parser and redacted Manager descriptor generator | verified | focused configuration compliance tests; `secretRef` never enters the result |
+| Explicit no-config service declaration | verified | `kind=none` returns no descriptor or placeholder form |
 | Host-neutral task gateway, JSON durable store, inbox/outbox, retry, binding, audit, generation fencing, and last-good activation | implemented | this package |
 | Local simulator create/query/open/continue/followup/steer/interrupt/archive/restore | verified | `tests/channel-runtime.integration.test.ts` |
 | Duplicate event, restart recovery, retry/backoff, permission denial, descriptor redaction, and generation disposal | verified | `tests/channel-runtime.integration.test.ts` |
 | Completion/failure/approval/reply outbox delivery handles | implemented; completion/reply verified | automated Agent notification subscription and approval resolution remain planned |
 | Node Cordis `channel` service connection list, sourced-message subscription, and queued send | verified | source-bound service integration test |
 | Cross-plugin subscription across launcher restart | experimental | current subscription is explicitly `live-experimental`; durable consumer checkpoints are not implemented |
-| Launcher manifest-v2 module loader and production policy/secret/store adapters | planned | no package entry is loaded by the launcher yet |
-| Manager Settings Tab and session header projection | planned | renderer receives no Channel runtime object |
+| Launcher manifest-v3 module loader, config writer/restart orchestration, and production policy/secret/store adapters | planned | no package entry is loaded and the credential broker is unavailable |
+| Dedicated Channel Manager Settings page and session header projection | planned | a safe descriptor exists, but renderer receives no Channel runtime/config object |
 | Feishu/Lark, WeCom, and WeChat Service Account adapters | planned | no credential, developer app, public webhook, or deployment is claimed |
 | Personal WeChat client automation | unavailable | reverse-engineered clients and unauthorized hooks are excluded |
 
 `implemented` does not imply `verified`. Real platform behavior remains
 unavailable until a named official adapter and credentialed smoke land.
+
+## Configuration boundary
+
+`parseChannelServiceConfig()` validates the version-1 launcher document and
+fails closed on unknown fields, incompatible official transport modes,
+duplicate/missing connection mappings, invalid retry ordering, inline secret
+schemes, and plaintext secret-like fields. It covers connections, route/user/
+group policy, provider/model/profile/workspace selectors, notifications,
+retry/rate/concurrency/backlog, and attachment limits.
+
+`projectChannelServiceConfig()` accepts an exact manifest-v3 declaration. A
+Host-configured service produces
+`cordisx.channel-service-config-descriptor/v1`; every connection loses
+`secretRef` and gains only `secretState`. A `kind=none` service produces no
+descriptor and rejects a supplied placeholder config. This descriptor is for a
+dedicated Host-owned Channel Settings page, not the ordinary renderer plugin
+form. Renderer-only preferences in a separate module should use Schemastery
+`Config`/`configApplies` from protocol #19 and Host #60.
+
+The parser/projection are implemented and verified. Manifest module loading,
+persistence/revision writes, service-fiber restart, Manager action wiring,
+credential resolution, full retry policy application, and rate-limit
+enforcement remain planned; this package does not claim that validated values
+are already operational.
 
 ## Runtime boundary
 
@@ -111,9 +137,10 @@ planned.
 
 ## Simulator
 
-`./simulator` exports a manual clock, permission broker, idempotent task
-gateway, simulated adapter, and sourced input fixtures. It requires no external
-account, secret, public callback, or network.
+`./simulator` exports a complete Host configuration/declaration, an explicit
+no-config declaration, a config-derived adapter, manual clock, permission
+broker, idempotent task gateway, and sourced input fixtures. It requires no
+external account, secret, public callback, or network.
 
 Run the isolated suite:
 
