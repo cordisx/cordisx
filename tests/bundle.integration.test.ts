@@ -664,24 +664,25 @@ describe('renderer bundle', () => {
     expect(pluginOpen?.querySelector('.cxm-chevron')).toBeNull()
     expect(pluginOpen?.parentElement?.getAttribute('role')).toBe('listitem')
     const pluginActions = [...(pluginOpen?.parentElement?.querySelectorAll<HTMLButtonElement>('[data-plugin-action]') ?? [])]
-    expect(pluginActions.map(action => action.dataset.pluginAction)).toEqual(['enable-disable', 'reload', 'favorite', 'more'])
-    expect(pluginActions.find(action => action.dataset.pluginAction === 'reload')).toMatchObject({ disabled: true, title: expect.stringMatching(/generation lifecycle 插件/) })
+    expect(pluginActions.map(action => action.dataset.pluginAction)).toEqual(['disable', 'reload', 'favorite'])
+    expect(pluginActions.find(action => action.dataset.pluginAction === 'disable')).toMatchObject({ disabled: true })
+    expect(pluginActions.find(action => action.dataset.pluginAction === 'reload')).toMatchObject({ disabled: true })
+    expect(pluginActions.find(action => action.dataset.pluginAction === 'reload')?.getAttribute('aria-label')).toMatch(/动态 package generation/)
     expect(pluginActions.every(action => action.querySelector('[data-material-icon]') !== null)).toBe(true)
     expect(pluginActions.find(action => action.dataset.pluginAction === 'favorite')?.getAttribute('aria-pressed')).toBe('false')
     pluginActions.find(action => action.dataset.pluginAction === 'favorite')?.click()
     expect(managerHeadings()).toEqual(['插件'])
-    expect(JSON.parse(dom.window.localStorage.getItem('cordisx.manager.favoritePlugins.v1') ?? '[]')).toEqual(['slot-showcase'])
-    const overflow = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-action="more"]')!
+    expect(JSON.parse(dom.window.localStorage.getItem('cordisx.manager.favoritePlugins.v1:development') ?? '[]')).toEqual(['slot-showcase'])
+    const overflow = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-menu="slot-showcase"] .cxm-plugin-menu-trigger')!
     overflow.click()
-    const overflowMenu = dom.window.document.querySelector<HTMLElement>('[data-plugin-overflow-menu="slot-showcase"]')
+    const overflowMenu = dom.window.document.querySelector<HTMLElement>('body > .cxm-plugin-menu-popup')
     expect(overflow.getAttribute('aria-expanded')).toBe('true')
     expect(overflowMenu?.getAttribute('role')).toBe('menu')
     expect([...overflowMenu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []].map(item => [item.dataset.pluginMenuAction, item.disabled])).toEqual([
-      ['share', true], ['uninstall', true], ['diagnostics-source', true],
+      ['reload', true], ['favorite', false], ['share', true], ['uninstall', true],
     ])
-    expect(overflowMenu?.textContent).toContain('该插件没有可用的 generation lifecycle 包')
     overflowMenu?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-    expect(dom.window.document.querySelector('[data-plugin-overflow-menu="slot-showcase"]')).toBeNull()
+    expect(dom.window.document.querySelector('body > .cxm-plugin-menu-popup')).toBeNull()
     expect(overflow.getAttribute('aria-expanded')).toBe('false')
     const aboutTab = dom.window.document.querySelector<HTMLButtonElement>('[data-tab="about"]')
     aboutTab?.focus()

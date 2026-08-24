@@ -560,6 +560,7 @@ async function start(
         ...(provider.generation === undefined ? {} : { generation: provider.generation }),
       })),
       pluginLifecycle: {
+        profileId: metadata.profileId,
         revision: currentActivation.revision,
         runtimeGeneration: generation,
         operationsAvailable: lifecycleBridge !== undefined,

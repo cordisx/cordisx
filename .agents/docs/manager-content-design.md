@@ -354,12 +354,9 @@ uninstall always live in that menu. Closing the menu restores focus to its
 trigger, and both menu and tooltips are constrained to the manager viewport.
 Unavailable lifecycle operations are absent or explicitly unavailable; a
 button must never restart the launcher while claiming to reload one plugin.
-Before the C/D Package Store and generation lifecycle runtime merges, the only
-related live action is a profile-local block/restore of an already bundled
-fiber. Its label and tooltip must not imply package install, launcher-config
-mutation, generation replacement, or uninstall. Reload, Package Store actions,
-and a configured-disabled plugin's enable control stay unavailable until the
-formal broker reports the matching operation.
+A launcher-configured legacy plugin remains explicitly unavailable for package
+generation actions; its block/restore behavior must not be relabeled as
+package install, reload, generation replacement, or uninstall.
 
 Favorite is a current-profile manager preference. Share requires a validated
 public canonical HTTPS source and never projects a local source/store path,
@@ -371,6 +368,11 @@ generation-fenced activation → readiness → commit last-good`; an unresolved 
 denied required permission never activates. Reload renders the formal
 five-level ladder, while uninstall reports the actual `drain → dispose → lease
 → GC` outcome after confirmation rather than an optimistic completion.
+The current v1 install action accepts one explicit absolute local package
+directory and states that remote download, signing, and sandboxing are not
+available. It never lets a renderer write activation/config files or load an
+arbitrary path directly; the launcher performs inspect/stage, authorization,
+readiness, and atomic activation.
 
 ### Search is part of the list pattern
 

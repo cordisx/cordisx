@@ -30,12 +30,16 @@ import search from '@material-symbols/svg-400/rounded/search.svg'
 import send from '@material-symbols/svg-400/rounded/send.svg'
 import settings from '@material-symbols/svg-400/rounded/settings.svg'
 import shield from '@material-symbols/svg-400/rounded/shield.svg'
-import star from '@material-symbols/svg-400/rounded/star.svg'
 import storefront from '@material-symbols/svg-400/rounded/storefront.svg'
 import summarize from '@material-symbols/svg-400/rounded/summarize.svg'
 import tune from '@material-symbols/svg-400/rounded/tune.svg'
 import viewList from '@material-symbols/svg-400/rounded/view_list.svg'
 import warning from '@material-symbols/svg-400/rounded/warning.svg'
+import deleteForever from '@material-symbols/svg-400/rounded/delete_forever.svg'
+import playCircle from '@material-symbols/svg-400/rounded/play_circle.svg'
+import share from '@material-symbols/svg-400/rounded/share.svg'
+import starFilled from '@material-symbols/svg-400/rounded/star-fill.svg'
+import starOutline from '@material-symbols/svg-400/rounded/star.svg'
 
 export const MANAGER_ICON_TOKENS = [
   'back',
@@ -46,11 +50,9 @@ export const MANAGER_ICON_TOKENS = [
   'diagnostics',
   'document',
   'external-link',
-  'favorite',
   'launcher',
   'marketplace',
   'models-read',
-  'more',
   'outlets',
   'overview',
   'permissions',
@@ -67,6 +69,14 @@ export const MANAGER_ICON_TOKENS = [
   'turns-control',
   'turns-submit',
   'authors-source',
+  'disable-plugin',
+  'enable-plugin',
+  'favorite',
+  'favorite-active',
+  'more',
+  'reload-plugin',
+  'share-plugin',
+  'uninstall-plugin',
 ] as const
 
 export type ManagerIconToken = typeof MANAGER_ICON_TOKENS[number]
@@ -80,11 +90,9 @@ const MANAGER_ICON_SOURCES: Readonly<Record<ManagerIconToken, string>> = {
   diagnostics: diagnosis,
   document: description,
   'external-link': openInNew,
-  favorite: star,
   launcher: rocketLaunch,
   marketplace: storefront,
   'models-read': modelTraining,
-  more: moreHoriz,
   outlets: accountTree,
   overview,
   permissions: shield,
@@ -101,6 +109,14 @@ const MANAGER_ICON_SOURCES: Readonly<Record<ManagerIconToken, string>> = {
   'turns-control': pauseCircle,
   'turns-submit': send,
   'authors-source': person,
+  'disable-plugin': pauseCircle,
+  'enable-plugin': playCircle,
+  favorite: starOutline,
+  'favorite-active': starFilled,
+  more: moreHoriz,
+  'reload-plugin': refresh,
+  'share-plugin': share,
+  'uninstall-plugin': deleteForever,
 }
 
 function svgMarkup(source: string): string {
