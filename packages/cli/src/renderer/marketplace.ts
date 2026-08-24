@@ -1,3 +1,10 @@
+import {
+  evaluateMarketplaceTrust,
+  type MarketplaceCertificationRecord,
+  type MarketplaceOfficialRecord,
+  type MarketplaceTrustEvaluation,
+} from './marketplace-trust.js'
+
 export const OFFICIAL_MARKETPLACE_SOURCE = 'https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json'
 export const MARKETPLACE_SOURCES_KEY = 'cordisx.manager.marketplaceSources.v1'
 
@@ -7,10 +14,12 @@ const SEMVER_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0
 const PLUGIN_SCHEMAS = Object.freeze({
   1: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v1.schema.json',
   2: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json',
+  3: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v3.schema.json',
 })
 const FEED_SCHEMAS = Object.freeze({
   1: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json',
   2: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json',
+  3: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v3.schema.json',
 })
 
 export interface MarketplaceAuthor {
@@ -29,8 +38,16 @@ export interface MarketplaceFeedLocalization {
   readonly name?: string
 }
 
+export interface MarketplaceArtifact {
+  readonly publisherIdentity: string
+  readonly packageNamespace: string
+  readonly packageName: string
+  readonly downloadUrl: string
+  readonly integrity: string
+}
+
 export interface MarketplacePlugin {
-  readonly schemaVersion: 1 | 2
+  readonly schemaVersion: 1 | 2 | 3
   readonly id: string
   /** Locale of the required base display metadata; v1 projects as legacy `en`. */
   readonly fallbackLocale: string
@@ -42,6 +59,7 @@ export interface MarketplacePlugin {
   readonly homepage?: string
   readonly icon?: string
   readonly manifest?: string
+  readonly artifact?: MarketplaceArtifact
   readonly license: string
   readonly compatibility: { readonly cordisx: string }
   readonly authors: readonly MarketplaceAuthor[]
@@ -55,6 +73,8 @@ export interface MarketplaceCatalogPlugin extends MarketplacePlugin {
   readonly feedFallbackLocale: string
   readonly feedLocalizations: Readonly<Record<string, MarketplaceFeedLocalization>>
   readonly feedHomepage: string
+  readonly official?: MarketplaceOfficialRecord
+  readonly certification?: MarketplaceCertificationRecord
 }
 
 export interface MarketplacePluginProjection {
@@ -75,6 +95,7 @@ export interface MarketplaceSourceSnapshot {
   readonly localizations?: Readonly<Record<string, MarketplaceFeedLocalization>>
   readonly homepage?: string
   readonly pluginCount?: number
+  readonly trusted?: boolean
   readonly error?: string
 }
 
@@ -114,12 +135,19 @@ export interface MarketplaceResponse {
 export type MarketplaceFetcher = (url: string, init: RequestInit) => Promise<MarketplaceResponse>
 
 interface ParsedFeed {
-  readonly schemaVersion: 1 | 2
+  readonly schemaVersion: 1 | 2 | 3
   readonly fallbackLocale: string
   readonly name: string
   readonly localizations: Readonly<Record<string, MarketplaceFeedLocalization>>
   readonly homepage: string
   readonly plugins: readonly MarketplacePlugin[]
+  readonly trust?: MarketplaceTrustEvaluation
+}
+
+export interface MarketplaceFeedParseOptions {
+  readonly feedUrl: string
+  readonly trustedRoots: readonly string[]
+  readonly now?: string
 }
 
 interface LoadResult {
@@ -318,6 +346,29 @@ function optionalHttpsUrl(value: unknown, label: string): string | undefined {
   return url.href
 }
 
+function parseArtifact(value: unknown, label: string): MarketplaceArtifact | undefined {
+  if (value === undefined) return undefined
+  const artifact = record(value)
+  assertKeys(artifact, ['publisherIdentity', 'packageNamespace', 'packageName', 'downloadUrl', 'integrity'], label)
+  const publisherIdentity = requiredString(artifact.publisherIdentity, `${label}.publisherIdentity`, 128)
+  const packageNamespace = requiredString(artifact.packageNamespace, `${label}.packageNamespace`, 128)
+  const packageName = requiredString(artifact.packageName, `${label}.packageName`, 214)
+  if (!/^npm:@[a-z0-9][a-z0-9._-]*$/.test(publisherIdentity)) throw new Error(`${label}.publisherIdentity 不受支持`)
+  if (!/^@[a-z0-9][a-z0-9._-]*$/.test(packageNamespace)) throw new Error(`${label}.packageNamespace 不受支持`)
+  if (!/^@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/.test(packageName)) throw new Error(`${label}.packageName 不受支持`)
+  if (publisherIdentity !== `npm:${packageNamespace}`) throw new Error(`${label}.publisherIdentity 与 packageNamespace 不匹配`)
+  if (!packageName.startsWith(`${packageNamespace}/`)) throw new Error(`${label}.packageName 不属于 packageNamespace`)
+  const downloadUrl = requiredString(artifact.downloadUrl, `${label}.downloadUrl`, 2048)
+  const parsedDownload = new URL(downloadUrl)
+  if (parsedDownload.protocol !== 'https:' || parsedDownload.username !== '' || parsedDownload.password !== ''
+    || parsedDownload.search !== '' || parsedDownload.hash !== '' || parsedDownload.href !== downloadUrl) {
+    throw new Error(`${label}.downloadUrl 必须是 canonical HTTPS artifact URL`)
+  }
+  const integrity = requiredString(artifact.integrity, `${label}.integrity`, 71)
+  if (!/^sha256:[a-f0-9]{64}$/.test(integrity)) throw new Error(`${label}.integrity 必须是 sha256 digest`)
+  return { publisherIdentity, packageNamespace, packageName, downloadUrl, integrity }
+}
+
 /** Normalize a configured JSON feed URL. Feed query parameters are allowed; credentials and fragments are not. */
 export function normalizeMarketplaceSource(value: string): string {
   const url = new URL(value)
@@ -350,7 +401,7 @@ export function marketplacePluginIdentity(source: string, id: string): string {
 function parsePlugin(value: unknown, index: number): MarketplacePlugin {
   const plugin = record(value)
   const schemaVersion = plugin.schemaVersion
-  if (schemaVersion !== 1 && schemaVersion !== 2) throw new Error(`plugins[${index}].schemaVersion 不受支持`)
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3) throw new Error(`plugins[${index}].schemaVersion 不受支持`)
   assertKeys(plugin, [
     '$schema',
     'schemaVersion',
@@ -366,7 +417,8 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
     'compatibility',
     'authors',
     'keywords',
-    ...(schemaVersion === 2 ? ['fallbackLocale', 'localizations'] : []),
+    ...(schemaVersion >= 2 ? ['fallbackLocale', 'localizations'] : []),
+    ...(schemaVersion === 3 ? ['artifact'] : []),
   ], `plugins[${index}]`)
   if (plugin.$schema !== PLUGIN_SCHEMAS[schemaVersion]) throw new Error(`plugins[${index}].$schema 不受支持`)
   const id = requiredString(plugin.id, `plugins[${index}].id`, 96)
@@ -402,15 +454,16 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
   })
   if (new Set(keywords).size !== keywords.length) throw new Error(`plugins[${index}].keywords 包含重复项`)
 
-  const fallbackLocale = schemaVersion === 2
+  const fallbackLocale = schemaVersion >= 2
     ? canonicalLocale(plugin.fallbackLocale, `plugins[${index}].fallbackLocale`)
     : 'en'
-  const localizations = schemaVersion === 2
+  const localizations = schemaVersion >= 2
     ? parsePluginLocalizations(plugin.localizations, fallbackLocale, authors.length, `plugins[${index}].localizations`)
     : Object.freeze({})
   const homepage = optionalHttpsUrl(plugin.homepage, `plugins[${index}].homepage`)
   const icon = optionalHttpsUrl(plugin.icon, `plugins[${index}].icon`)
   const manifest = optionalHttpsUrl(plugin.manifest, `plugins[${index}].manifest`)
+  const artifact = schemaVersion === 3 ? parseArtifact(plugin.artifact, `plugins[${index}].artifact`) : undefined
   return {
     schemaVersion,
     id,
@@ -423,6 +476,7 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
     ...(homepage === undefined ? {} : { homepage }),
     ...(icon === undefined ? {} : { icon }),
     ...(manifest === undefined ? {} : { manifest }),
+    ...(artifact === undefined ? {} : { artifact }),
     license: requiredString(plugin.license, `plugins[${index}].license`, 80),
     compatibility: { cordisx: requiredString(compatibility.cordisx, `plugins[${index}].compatibility.cordisx`, 120) },
     authors,
@@ -430,22 +484,23 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
   }
 }
 
-export function parseMarketplaceFeed(value: unknown): ParsedFeed {
+export function parseMarketplaceFeed(value: unknown, options?: MarketplaceFeedParseOptions): ParsedFeed {
   const feed = record(value)
   const schemaVersion = feed.schemaVersion
-  if (schemaVersion !== 1 && schemaVersion !== 2) throw new Error('schemaVersion 不受支持')
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3) throw new Error('schemaVersion 不受支持')
   assertKeys(feed, [
     '$schema',
     'schemaVersion',
     'name',
     'homepage',
     'plugins',
-    ...(schemaVersion === 2 ? ['fallbackLocale', 'localizations'] : []),
+    ...(schemaVersion >= 2 ? ['fallbackLocale', 'localizations'] : []),
+    ...(schemaVersion === 3 ? ['generatedAt', 'trust', 'official', 'certifications'] : []),
   ], 'feed')
   if (feed.$schema !== FEED_SCHEMAS[schemaVersion]) throw new Error('$schema 不受支持')
-  const fallbackLocale = schemaVersion === 2 ? canonicalLocale(feed.fallbackLocale, 'fallbackLocale') : 'en'
+  const fallbackLocale = schemaVersion >= 2 ? canonicalLocale(feed.fallbackLocale, 'fallbackLocale') : 'en'
   const name = requiredString(feed.name, 'name', 100)
-  const localizations = schemaVersion === 2
+  const localizations = schemaVersion >= 2
     ? parseFeedLocalizations(feed.localizations, fallbackLocale, 'localizations')
     : Object.freeze({})
   const homepage = optionalHttpsUrl(feed.homepage, 'homepage')
@@ -463,7 +518,13 @@ export function parseMarketplaceFeed(value: unknown): ParsedFeed {
     || left.id.localeCompare(right.id)
     || left.version.localeCompare(right.version))
   if (plugins.some((plugin, index) => plugin !== sorted[index])) throw new Error('plugins 没有按照 source/id/version 确定性排序')
-  return { schemaVersion, fallbackLocale, name, localizations, homepage, plugins }
+  const trust = schemaVersion === 3
+    ? evaluateMarketplaceTrust(value, plugins.map(plugin => ({ ...plugin, identity: marketplacePluginIdentity(plugin.source, plugin.id) })), options ?? {
+      feedUrl: OFFICIAL_MARKETPLACE_SOURCE,
+      trustedRoots: [],
+    })
+    : undefined
+  return { schemaVersion, fallbackLocale, name, localizations, homepage, plugins, ...(trust === undefined ? {} : { trust }) }
 }
 
 function normalizeSources(sources: readonly string[]): string[] {
@@ -503,6 +564,7 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
   constructor(
     private readonly storage: MarketplaceStorage | undefined,
     private readonly fetcher: MarketplaceFetcher | undefined,
+    private readonly trustedRoots: readonly string[] = [OFFICIAL_MARKETPLACE_SOURCE],
   ) {
     this.sources = readSources(storage)
     this.sourceStates = this.sources.map(url => ({ url, status: 'loading' }))
@@ -549,7 +611,7 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         const text = await response.text()
         if (new Blob([text]).size > MAX_FEED_BYTES) throw new Error('feed 超过 2 MiB 限制')
-        const feed = parseMarketplaceFeed(JSON.parse(text) as unknown)
+        const feed = parseMarketplaceFeed(JSON.parse(text) as unknown, { feedUrl: url, trustedRoots: this.trustedRoots })
         return {
           state: {
             url,
@@ -559,6 +621,7 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
             localizations: feed.localizations,
             homepage: feed.homepage,
             pluginCount: feed.plugins.length,
+            ...(feed.trust === undefined ? {} : { trusted: feed.trust.trusted }),
           },
           feed,
         }
@@ -577,6 +640,7 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
       if (result?.feed === undefined || feedUrl === undefined) continue
       for (const plugin of result.feed.plugins) {
         const identity = marketplacePluginIdentity(plugin.source, plugin.id)
+        const pluginTrust = result.feed.trust?.byPluginIdentity.get(identity)
         const winner = winners.get(identity)
         if (winner !== undefined) {
           duplicates.push({ identity, winnerFeedUrl: winner.feedUrl, duplicateFeedUrl: feedUrl })
@@ -590,6 +654,8 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
           feedFallbackLocale: result.feed.fallbackLocale,
           feedLocalizations: result.feed.localizations,
           feedHomepage: result.feed.homepage,
+          ...(pluginTrust?.official === undefined ? {} : { official: pluginTrust.official }),
+          ...(pluginTrust?.certification === undefined ? {} : { certification: pluginTrust.certification }),
         })
       }
     }

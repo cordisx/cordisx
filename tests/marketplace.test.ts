@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BrowserMarketplaceModel,
   MARKETPLACE_SOURCES_KEY,
+  OFFICIAL_MARKETPLACE_SOURCE,
   canonicalPluginSource,
   marketplacePluginIdentity,
   normalizeMarketplaceSource,
@@ -15,6 +16,13 @@ const PLUGIN_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protoco
 const FEED_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json'
 const PLUGIN_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json'
 const FEED_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json'
+const PLUGIN_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v3.schema.json'
+const FEED_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v3.schema.json'
+const OFFICIAL_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v1.schema.json'
+const CERTIFICATION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certification.v1.schema.json'
+const TRUST_SOURCE = 'https://github.com/cordisx/trusted'
+const TRUST_DIGEST = `sha256:${'a'.repeat(64)}`
+const TRUST_EVIDENCE = `https://github.com/cordisx/marketplace/commit/${'b'.repeat(40)}`
 
 function plugin(id: string, name: string, source = `https://github.com/example/${id}`): Record<string, unknown> {
   return {
@@ -72,6 +80,78 @@ function localizedFeed(): Record<string, unknown> {
       compatibility: { cordisx: '^0.1.0' },
       authors: [{ name: 'CordisX Team', url: 'https://cordisx.github.io/' }],
       keywords: ['extensions', 'ui'],
+    }],
+  }
+}
+
+function trustedFeed(certificationStatus: 'active' | 'revoked' = 'active'): Record<string, unknown> {
+  return {
+    $schema: FEED_SCHEMA_V3,
+    schemaVersion: 3,
+    generatedAt: '2026-08-24T12:31:00Z',
+    trust: {
+      authority: 'cordisx.marketplace.codeowners/v1',
+      root: OFFICIAL_MARKETPLACE_SOURCE,
+      grantModel: 'protected-merge-chain-v1',
+      cryptographicAttestation: 'unsupported',
+    },
+    fallbackLocale: 'en',
+    name: 'CordisX Marketplace',
+    localizations: { 'zh-CN': { name: 'CordisX 插件商店' } },
+    homepage: 'https://cordisx.github.io/marketplace/',
+    plugins: [{
+      $schema: PLUGIN_SCHEMA_V3,
+      schemaVersion: 3,
+      id: 'trusted',
+      fallbackLocale: 'en',
+      name: 'Trusted Plugin',
+      description: 'A versioned artifact used by trust projection tests.',
+      localizations: { 'zh-CN': { name: '受信插件', description: '用于信任投影测试的版本化发布物。' } },
+      version: '1.2.3',
+      source: TRUST_SOURCE,
+      artifact: {
+        publisherIdentity: 'npm:@cordisx',
+        packageNamespace: '@cordisx',
+        packageName: '@cordisx/trusted',
+        downloadUrl: 'https://registry.npmjs.org/@cordisx/trusted/-/trusted-1.2.3.tgz',
+        integrity: TRUST_DIGEST,
+      },
+      license: 'MIT',
+      compatibility: { cordisx: '^0.1.0' },
+      authors: [{ name: 'CordisX Team', url: 'https://cordisx.github.io/' }],
+      keywords: ['trusted'],
+    }],
+    official: [{
+      $schema: OFFICIAL_SCHEMA,
+      schemaVersion: 1,
+      designation: 'cordisx-official',
+      identity: {
+        pluginId: 'trusted',
+        canonicalSource: TRUST_SOURCE,
+        publisherIdentity: 'npm:@cordisx',
+        packageNamespace: '@cordisx',
+        packageName: '@cordisx/trusted',
+      },
+      verificationPolicy: { id: 'cordisx-official-publisher', version: '1.0.0' },
+      verifiedAt: '2026-08-20T00:00:00Z',
+      reviewer: { authority: 'cordisx.marketplace.codeowners/v1', evidenceRef: TRUST_EVIDENCE },
+      status: 'active',
+      label: { key: 'official.label', fallback: 'Official' },
+      description: { key: 'official.description', fallback: 'Created and maintained by CordisX.' },
+    }],
+    certifications: [{
+      $schema: CERTIFICATION_SCHEMA,
+      schemaVersion: 1,
+      level: 'cordisx-certified',
+      identity: { pluginId: 'trusted', version: '1.2.3', canonicalSource: TRUST_SOURCE, integrity: TRUST_DIGEST },
+      reviewPolicy: { id: 'cordisx-marketplace-review', version: '1.0.0' },
+      reviewedAt: '2026-08-20T00:00:00Z',
+      expiresAt: '2027-08-20T00:00:00Z',
+      reviewer: { authority: 'cordisx.marketplace.codeowners/v1', evidenceRef: TRUST_EVIDENCE },
+      status: certificationStatus,
+      ...(certificationStatus === 'revoked' ? { revokedAt: '2026-08-23T00:00:00Z' } : {}),
+      label: { key: 'certified.label', fallback: 'CordisX Certified' },
+      description: { key: 'certified.description', fallback: 'Reviewed under policy 1.0.0.' },
     }],
   }
 }
@@ -140,6 +220,27 @@ describe('marketplace feed', () => {
     const noncanonical = structuredClone(localizedFeed())
     noncanonical.fallbackLocale = 'zh-cn'
     expect(() => parseMarketplaceFeed(noncanonical)).toThrow('canonical locale')
+  })
+
+  it('accepts v3 artifact metadata but projects trust only for an explicitly configured root', () => {
+    const untrusted = parseMarketplaceFeed(trustedFeed())
+    const trusted = parseMarketplaceFeed(trustedFeed(), {
+      feedUrl: OFFICIAL_MARKETPLACE_SOURCE,
+      trustedRoots: [OFFICIAL_MARKETPLACE_SOURCE],
+      now: '2026-08-24T13:00:00Z',
+    })
+
+    expect(untrusted.trust).toEqual(expect.objectContaining({ trusted: false }))
+    expect(untrusted.trust?.byPluginIdentity.size).toBe(0)
+    expect(trusted.plugins[0]?.artifact).toEqual(expect.objectContaining({ integrity: TRUST_DIGEST }))
+    expect(trusted.trust?.byPluginIdentity.get(`${TRUST_SOURCE}\u0000trusted`)).toEqual(expect.objectContaining({
+      official: expect.objectContaining({ designation: 'cordisx-official' }),
+      certification: expect.objectContaining({ level: 'cordisx-certified' }),
+    }))
+
+    const selfDeclared = structuredClone(trustedFeed())
+    ;(selfDeclared.plugins as Record<string, unknown>[])[0]!.official = true
+    expect(() => parseMarketplaceFeed(selfDeclared)).toThrow('不支持的字段: official')
   })
 })
 
@@ -217,6 +318,30 @@ describe('BrowserMarketplaceModel', () => {
       'slot-showcase', '1.2.3',
     ]))
     expect(requests).toBe(1)
+    model.dispose()
+  })
+
+  it('projects independent trust records and applies certification revocation on reload', async () => {
+    let currentFeed = trustedFeed()
+    const model = new BrowserMarketplaceModel(undefined, async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(currentFeed),
+    }))
+
+    await model.reload()
+    expect(model.snapshot().sourceStates[0]).toEqual(expect.objectContaining({ trusted: true }))
+    expect(model.snapshot().plugins[0]).toEqual(expect.objectContaining({
+      official: expect.objectContaining({ designation: 'cordisx-official' }),
+      certification: expect.objectContaining({ level: 'cordisx-certified' }),
+    }))
+
+    currentFeed = trustedFeed('revoked')
+    await model.reload()
+    expect(model.snapshot().plugins[0]).toEqual(expect.objectContaining({
+      official: expect.objectContaining({ designation: 'cordisx-official' }),
+    }))
+    expect(model.snapshot().plugins[0]?.certification).toBeUndefined()
     model.dispose()
   })
 })
