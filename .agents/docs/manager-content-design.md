@@ -531,14 +531,17 @@ unconfigured, and no-match states. Current Manager lists are synchronous,
 bounded Host snapshots; their common component keeps the same state boundary
 when an async provider is introduced.
 
-Ordinary repeated records use a flat list with separators and whitespace. The
-container exposes list semantics and each item has a stable visible label plus
-list-item semantics. A capability declaration is a flat item whose host-owned,
+Ordinary Manager catalogs use a flat list with separators and whitespace.
+Settings/configuration pages instead use a macOS System Settings information
+architecture: a centered, limited-width body; semantic section title and only
+necessary section copy; one rounded group card per section; label/help on the
+left and the Host control on the right; and fine separators between related
+rows. A capability declaration is a grouped setting row whose host-owned,
 localized product name is the visible label. Its primary row contains only a
 frameless semantic icon, name, one-sentence reason, a `必需` badge when
-applicable, and either a localized policy selector or `暂不可用` when the
-current host does not support that capability. Optional declarations do not
-need an `可选` badge.
+applicable, and an official TDesign Select/Option policy control. Runtime
+availability never replaces or disables policy editing. Optional declarations
+do not need an `可选` badge.
 
 The primary permission list never exposes capability ids, scope objects,
 audit counters, blocked reasons, adapter diagnostics, transport facts, raw
@@ -555,7 +558,8 @@ in the plugin `运行状态` tab under one collapsed `诊断` disclosure. The su
 is concise; raw diagnostic codes and security-boundary detail are visible only
 after the user expands it.
 
-Cards are reserved for a genuine independent boundary: a separately
+Cards are reserved for a genuine independent boundary: a settings section,
+separately
 actionable source, an independently mounted outlet or contribution, an
 isolated status summary, or content whose background/border conveys state. A
 card must not be placed inside another card solely to reproduce page, tab, or
@@ -586,9 +590,10 @@ the visible manager-owned heading sequence and stable panel/list structure.
 At minimum they prove:
 
 - the `权限` tab contains no `Platform 权限` or `能力声明` heading;
-- supported capability selectors are inside flat list items, not
-  `.cxm-slot-card` or nested `section section` structures, while unsupported
-  declarations show only `暂不可用` in the list control seat;
+- every capability policy uses the shared official TDesign Select adapter
+  inside its group-card row, not a native `select`, `.cxm-slot-card`, or plugin
+  renderer; unsupported runtime availability remains a secondary status and
+  does not remove the policy control;
 - permission items use host-owned names and semantic icons, expose only a
   `必需` badge, and hide ids, scope, audit, blocked reasons, adapter facts, and
   security notices until their owning deeper or diagnostic view;
@@ -608,6 +613,8 @@ At minimum they prove:
   empty state rather than raw JSON or schema implementation prose;
 - Host-owned secret/credential unavailable states remain single, redacted, and
   unavailable to custom renderers;
+- a static production-renderer scan fails on Host-owned native `select`
+  creation, and runtime smoke records zero native selects in Manager Host UI;
 - installed-plugin rows have no detail chevron, keep navigation and action
   activation mutually exclusive, support pointer/Enter/Space navigation, and
   preserve the deterministic enable/reload/favorite overflow priority;

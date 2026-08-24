@@ -26,6 +26,7 @@ async function waitForState(predicate: () => boolean, label: string, timeoutMs =
     await new Promise(resolve => setTimeout(resolve, 10))
   }
 }
+type TestTDesignSelect = HTMLElement & { setSelectedValue(value: string | undefined, notify?: boolean): void }
 
 describe('plugin DevTools Console runtime', () => {
   let bundle = ''
@@ -196,18 +197,15 @@ describe('plugin DevTools Console runtime', () => {
     const resetSearch = dom.window.document.querySelector<HTMLInputElement>('[data-console-search="console-showcase"]')
     resetSearch!.value = ''
     resetSearch!.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-    const source = dom.window.document.querySelector<HTMLSelectElement>('select[aria-label="日志来源"]')
-    source!.value = 'console.warn'
-    source!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    const source = dom.window.document.querySelector<TestTDesignSelect>('t-select[aria-label="日志来源"]')
+    source!.setSelectedValue('console.warn', true)
     await waitForState(() => dom.window.document.querySelector('[data-console-entry]') !== null, 'source projection')
     expect(dom.window.document.querySelector('[data-console-entry]')?.getAttribute('data-console-source')).toBe('console.warn')
     expect(dom.window.document.querySelector('[data-console-source="console.log"]')).toBeNull()
-    const resetSource = dom.window.document.querySelector<HTMLSelectElement>('select[aria-label="日志来源"]')
-    resetSource!.value = 'all'
-    resetSource!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
-    const kind = dom.window.document.querySelector<HTMLSelectElement>('select[aria-label="API / 类型"]')
-    kind!.value = 'console'
-    kind!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    const resetSource = dom.window.document.querySelector<TestTDesignSelect>('t-select[aria-label="日志来源"]')
+    resetSource!.setSelectedValue('all', true)
+    const kind = dom.window.document.querySelector<TestTDesignSelect>('t-select[aria-label="API / 类型"]')
+    kind!.setSelectedValue('console', true)
     const scopedFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
     await waitForState(() => scopedFrame?.querySelector('[data-console-source="console.log"]') !== null, 'Console-only projection')
     expect(scopedFrame?.querySelector('[data-console-source="console.log"]')).not.toBeNull()

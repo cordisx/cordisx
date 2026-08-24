@@ -17,6 +17,30 @@ licenses remain with their respective copyright holders:
 | `tar` | `7.5.22` | BlueOak-1.0.0 |
 | `ws` | `^8.18.3` | MIT |
 
+CordisX also bundles a generated, production-controlled subset of these
+packages inside the renderer rather than installing their full npm graphs:
+
+| Bundled package | Exact version | License |
+| --- | --- | --- |
+| `tdesign-web-components` | `1.2.10` | MIT |
+| `omi` | `7.7.13` | MIT |
+| `reactive-signal` | `2.0.1` | MIT |
+| `weakmap-polyfill` | `2.0.4` | MIT |
+| `clsx` | `2.1.1` | MIT |
+| `tailwind-merge` | `2.6.1` | MIT |
+| `lodash-es` | `4.18.1` | MIT |
+| `omi-transition` | `0.1.11` | MIT |
+| `@popperjs/core` | `2.11.8` | MIT |
+
+The TDesign subset is generated from npm tarball SHA-256
+`e1929f06eda5c3d2ee194da0d6bc9f81e187184fe1054627afeabad2ae71db0e`.
+Only Input, Textarea, InputNumber, Select/Option, Checkbox, Switch, Radio,
+Slider, Button, Alert, and Loading are imported. Embedded CSS source maps and Omi's
+legacy replacement of the native `HTMLElement` constructor are removed; no
+component behavior is reimplemented or represented as a different library.
+The retained notices and MIT terms are at
+`third_party/tdesign-web-components-subset-MIT.txt`.
+
 CordisX copies selected Material Symbols SVG assets into its built output. The
 complete Apache License 2.0 text distributed by that package is included at
 `third_party/material-symbols-APACHE-2.0.txt`.
@@ -33,11 +57,6 @@ liriliri contributors). CordisX inserts each safe structured `method + args[]`
 record independently into Luna Console. The separate Host Inspector contains
 metadata only. There is no runtime CDN dependency.
 
-## Evaluated but not distributed
-
-`tdesign-web-components@1.2.10` (MIT) was evaluated for the Host-owned form
-system. CordisX does not depend on, copy, bundle, or load that package or its
-assets in this release, so it is intentionally absent from the dependency and
-license-text inventory above. The package-size, dependency, component-coverage,
-style-isolation, and future-adoption gates are recorded in
+The package-size, dependency, component-coverage, style-isolation, and
+reproducible-generation evidence for the TDesign subset is recorded in
 `.agents/docs/host-form-system.md`.

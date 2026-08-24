@@ -14,6 +14,10 @@ import {
 } from '../packages/cli/src/renderer/manager.js'
 
 const identity = { source: 'file:///plugins/demo/index.ts', id: 'demo' }
+type TestTDesignSelect = HTMLElement & {
+  options: readonly { readonly value: string; readonly label: string }[]
+  setSelectedValue(value: string | undefined, notify?: boolean): void
+}
 
 function permission(
   capability: ManagerPermissionSnapshot['capability'],
@@ -257,7 +261,7 @@ describe('Platform permission presentation hierarchy', () => {
       expect(content.querySelectorAll('[data-permission-availability][data-availability-state="unavailable"]')).toHaveLength(7)
       expect(content.querySelectorAll('[data-permission-capability]')).toHaveLength(7)
       expect(content.querySelector('.cxm-slot-card')).toBeNull()
-      expect(content.querySelector('h3')).toBeNull()
+      expect([...content.querySelectorAll('h3')].map(item => item.textContent)).toContain('权限策略')
 
       const text = content.textContent ?? ''
       for (const hidden of [
@@ -275,16 +279,15 @@ describe('Platform permission presentation hierarchy', () => {
     const { dom, dispose, policies } = install(state)
     try {
       const content = openPluginTab(dom.window.document, 'demo', 'permissions')
-      const models = content.querySelector<HTMLSelectElement>('[data-permission-capability="models.read"]')
-      const createTask = content.querySelector<HTMLSelectElement>('[data-permission-capability="tasks.create"]')
+      const models = content.querySelector<TestTDesignSelect>('t-select[data-permission-capability="models.read"]')
+      const createTask = content.querySelector<TestTDesignSelect>('t-select[data-permission-capability="tasks.create"]')
       expect(models).not.toBeNull()
       expect(createTask).not.toBeNull()
-      expect([...models!.options].map(option => [option.value, option.textContent])).toEqual([
+      expect(models!.options.map(option => [option.value, option.label])).toEqual([
         ['ask', '每次询问'], ['allow', '始终允许'], ['deny', '始终拒绝'],
       ])
       expect(content.querySelector('[data-permission-capability="tasks.catalog.read"]')).not.toBeNull()
-      models!.value = 'allow'
-      models!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+      models!.setSelectedValue('allow', true)
       await new Promise(resolve => setTimeout(resolve, 0))
       expect(policies).toEqual(['models.read:allow'])
     } finally {
@@ -319,10 +322,9 @@ describe('Platform permission presentation hierarchy', () => {
       expect(detail?.textContent).toContain('最近拒绝：2026-08-23T00:00:00.000Z')
       expect(detail?.textContent).not.toContain('current-connection-client-unavailable')
 
-      const policy = detail?.querySelector<HTMLSelectElement>('[data-permission-capability="tasks.create"]')
-      expect([...policy!.options].map(option => option.textContent)).toEqual(['每次询问', '始终允许', '始终拒绝'])
-      policy!.value = 'ask'
-      policy!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+      const policy = detail?.querySelector<TestTDesignSelect>('t-select[data-permission-capability="tasks.create"]')
+      expect(policy!.options.map(option => option.label)).toEqual(['每次询问', '始终允许', '始终拒绝'])
+      policy!.setSelectedValue('ask', true)
       await new Promise(resolve => setTimeout(resolve, 0))
       expect(policies).toEqual(['tasks.create:ask'])
       dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()

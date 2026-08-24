@@ -282,16 +282,16 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect([...form.querySelectorAll<HTMLElement>('[data-config-path]')].map(field => field.dataset.configPath)).toEqual([
       'mode', 'historyPageSize', 'timelineWindowSize',
     ])
-    const mode = form.querySelector<HTMLSelectElement>('[data-config-path="mode"] select')!
-    expect(mode.value).toBe(JSON.stringify('historical'))
-    expect([...mode.options].map(option => option.textContent)).toEqual(['live', 'historical', 'fixture'])
-    const pageSize = form.querySelector<HTMLInputElement>('[data-config-path="historyPageSize"] input')!
+    const mode = form.querySelector<HTMLElement & { selectedValue: string; options: readonly { label: string }[] }>('[data-config-path="mode"] t-select')!
+    expect(mode.selectedValue).toBe('historical')
+    expect(mode.options.map(option => option.label)).toEqual(['live', 'historical', 'fixture'])
+    const pageSize = form.querySelector<HTMLElement & { value: number; min: number; max: number; step: number }>('[data-config-path="historyPageSize"] t-input-number')!
     expect({ value: pageSize.value, min: pageSize.min, max: pageSize.max, step: pageSize.step }).toEqual({
-      value: '100', min: '25', max: '500', step: '25',
+      value: 100, min: 25, max: 500, step: 25,
     })
-    const windowSize = form.querySelector<HTMLInputElement>('[data-config-path="timelineWindowSize"] input')!
+    const windowSize = form.querySelector<HTMLElement & { value: number; min: number; max: number; step: number }>('[data-config-path="timelineWindowSize"] t-input-number')!
     expect({ value: windowSize.value, min: windowSize.min, max: windowSize.max, step: windowSize.step }).toEqual({
-      value: '500', min: '50', max: '500', step: '50',
+      value: 500, min: 50, max: 500, step: 50,
     })
     expect(form.textContent).toContain('选择实时公开账本、与实时观察合并的 Host 历史导入')
     expect(form.textContent).not.toMatch(/permissionPolicy|sessionId|providerId|profileId|CODEX_HOME|\.jsonl/)

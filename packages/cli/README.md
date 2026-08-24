@@ -40,6 +40,6 @@ and should receive legal review before stable.
 
 See the [user getting-started guide](https://github.com/cordisx/cordisx/blob/main/.agents/docs/getting-started.md)
 and [CLI/distribution contract](https://github.com/cordisx/cordisx/blob/main/.agents/docs/distribution-and-cli.md).
-The scoped Host form architecture and the reason the current official TDesign
-Web Components runtime is not distributed are documented in the
+The scoped Host form architecture and the reproducible official TDesign Web
+Components subset are documented in the
 [Host-owned form system](https://github.com/cordisx/cordisx/blob/main/.agents/docs/host-form-system.md).

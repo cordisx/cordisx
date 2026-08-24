@@ -5,6 +5,11 @@ import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 
+type TestTDesignSelect = HTMLElement & {
+  options: readonly { readonly value: string; readonly label: string }[]
+  setSelectedValue(value: string | undefined, notify?: boolean): void
+}
+
 interface RuntimeSnapshot {
   plugins: readonly {
     id: string
@@ -861,17 +866,15 @@ describe('renderer bundle', () => {
     expect(breadcrumbLabels()).toEqual(['扩展点', '侧边栏导航', '点位信息'])
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
     expect(breadcrumbLabels()).toEqual(['扩展点', '侧边栏导航', '使用情况'])
-    const pointPolicy = dom.window.document.querySelector<HTMLSelectElement>('[aria-label="Slot Showcase使用侧边栏导航的策略"]')
+    const pointPolicy = dom.window.document.querySelector<TestTDesignSelect>('t-select[aria-label="Slot Showcase使用侧边栏导航的策略"]')
     expect(pointPolicy).not.toBeNull()
-    pointPolicy!.value = 'deny'
-    pointPolicy!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    pointPolicy!.setSelectedValue('deny', true)
     for (let attempt = 0; attempt < 20 && runtime?.snapshot().extensionPoints.policies.find(item => item.identity.pointId === 'sidebar.navigation.items')?.policy !== 'deny'; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     expect(runtime?.snapshot().extensionPoints.policies.find(item => item.identity.pointId === 'sidebar.navigation.items')?.policy).toBe('deny')
-    const deniedPointPolicy = dom.window.document.querySelector<HTMLSelectElement>('[aria-label="Slot Showcase使用侧边栏导航的策略"]')
-    deniedPointPolicy!.value = 'allow'
-    deniedPointPolicy!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    const deniedPointPolicy = dom.window.document.querySelector<TestTDesignSelect>('t-select[aria-label="Slot Showcase使用侧边栏导航的策略"]')
+    deniedPointPolicy!.setSelectedValue('allow', true)
     for (let attempt = 0; attempt < 20 && runtime?.snapshot().extensionPoints.policies.find(item => item.identity.pointId === 'sidebar.navigation.items')?.policy !== 'allow'; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
@@ -947,8 +950,8 @@ describe('renderer bundle', () => {
     expect(sessionField?.querySelector('.cxf-label')?.textContent).toBe('原生会话 ID')
     expect(sessionField?.querySelector('.cxf-help')?.textContent)
       .toBe('可选会话分析操作使用的当前原生会话 ID；留空时隐藏该操作。')
-    expect(sessionField?.querySelector<HTMLInputElement>('input')?.value).toBe(sessionId)
-    expect(configPanel?.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true)
+    expect(sessionField?.querySelector<HTMLElement & { value: string }>('t-input')?.value).toBe(sessionId)
+    expect(configPanel?.querySelector('t-button[data-variant="primary"]')).toBeNull()
     expect(configPanel?.textContent).not.toContain('此插件未提供可编辑设置。')
     expect(configPanel?.textContent).not.toContain('{}')
     expect(configPanel?.textContent).not.toContain('Schema')
@@ -994,10 +997,9 @@ describe('renderer bundle', () => {
     expect(dom.window.location.href).toBe('https://codex.local/native')
     expect(dom.window.document.querySelector('[data-permission-detail="models.read"]')?.textContent).toContain('models.read')
     expect(dom.window.document.querySelector('[data-permission-provider="desktop-current-connection"]')).not.toBeNull()
-    const permissionPolicy = dom.window.document.querySelector<HTMLSelectElement>('[data-permission-capability="models.read"]')
-    expect([...permissionPolicy!.options].map(option => option.textContent)).toEqual(['每次询问', '始终允许', '始终拒绝'])
-    permissionPolicy!.value = 'deny'
-    permissionPolicy!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    const permissionPolicy = dom.window.document.querySelector<TestTDesignSelect>('t-select[data-permission-capability="models.read"]')
+    expect(permissionPolicy!.options.map(option => option.label)).toEqual(['每次询问', '始终允许', '始终拒绝'])
+    permissionPolicy!.setSelectedValue('deny', true)
     for (let attempt = 0; attempt < 20 && runtime?.snapshot().permissions[0]?.policy !== 'deny'; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
@@ -1024,7 +1026,7 @@ describe('renderer bundle', () => {
     expect(platformDiagnostics?.open).toBe(false)
     expect(platformDiagnostics?.querySelector('summary')?.textContent).toBe('诊断')
     expect(platformDiagnostics?.querySelector('[data-config-diagnostics="slot-showcase"]')?.textContent)
-      .toBe('配置：Schemastery · restart · revision 0 · last-good 0 · writer unavailable')
+      .toBe('配置：Schemastery · plugin-restart · revision 0 · last-good 0 · writer unavailable')
     expect(platformDiagnostics?.textContent).toContain('current-connection-client-unavailable')
     expect(platformDiagnostics?.textContent).toContain('当前权限仅适用于 Host API 调用。')
     expect(platformDiagnostics?.textContent).toContain('查看权限说明')

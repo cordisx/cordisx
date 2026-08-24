@@ -300,17 +300,17 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(providerField?.querySelector('.cxf-help')?.textContent)
       .toBe('Choose the providers to show; leave empty for all.')
     expect(cwdField?.querySelector('.cxf-label')?.textContent).toBe('Default working directory')
-    expect(providerField?.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('[]')
-    expect(cwdField?.querySelector<HTMLInputElement>('input')?.value).toBe('')
+    expect(providerField?.querySelector<HTMLElement & { value?: unknown }>('t-textarea')?.value).toBe('[]')
+    expect(cwdField?.querySelector<HTMLElement & { value?: unknown }>('t-input')?.value).toBe('')
     expect(configPanel?.textContent).not.toContain('renderer 不会直接写配置文件')
     expect(configPanel?.querySelector('[data-config-path="baseUrl"]')).toBeNull()
     expect(configPanel?.querySelector('[data-config-path="apiKey"]')).toBeNull()
     expect(configPanel?.querySelector('[data-config-path="codexExecutable"]')).toBeNull()
-    const providerInput = providerField!.querySelector<HTMLTextAreaElement>('textarea')!
-    const submit = configPanel!.querySelector<HTMLButtonElement>('button[type="submit"]')!
-    expect(submit.disabled).toBe(true)
+    const providerInput = providerField!.querySelector<HTMLElement & { value: string; onChange?: (value: string) => void }>('t-textarea')!
+    expect(configPanel!.querySelector('t-button[type="submit"]')).toBeNull()
     providerInput.value = '["Gateway-A"]'
-    providerInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    providerInput.onChange?.(providerInput.value)
+    const submit = configPanel!.querySelector<HTMLElement & { disabled: boolean }>('t-button[type="submit"]')!
     expect(submit.disabled).toBe(false)
     configPanel!.querySelector<HTMLFormElement>('form')!
       .dispatchEvent(new dom.window.SubmitEvent('submit', { bubbles: true, cancelable: true }))
@@ -321,9 +321,9 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(configRequests).toEqual([])
 
     const validPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="配置管理"]')!
-    const validInput = validPanel.querySelector<HTMLTextAreaElement>('[data-config-path="providerIds"] textarea')!
+    const validInput = validPanel.querySelector<HTMLElement & { value: string; onChange?: (value: string) => void }>('[data-config-path="providerIds"] t-textarea')!
     validInput.value = '["gateway-a"]'
-    validInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    validInput.onChange?.(validInput.value)
     validPanel.querySelector<HTMLFormElement>('form')!
       .dispatchEvent(new dom.window.SubmitEvent('submit', { bubbles: true, cancelable: true }))
     for (let attempt = 0; attempt < 100 && configRevision < 1; attempt += 1) {

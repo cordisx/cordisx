@@ -54,6 +54,31 @@ type CopyKey =
   | 'permission.deny'
   | 'permission.allow-once'
   | 'permission.allow-always'
+  | 'form.saving'
+  | 'form.dirty-prefix'
+  | 'form.apply-live'
+  | 'form.apply-plugin-restart'
+  | 'form.apply-service-restart'
+  | 'form.apply-app-restart'
+  | 'form.required'
+  | 'form.choice-invalid'
+  | 'form.number-invalid'
+  | 'form.natural-invalid'
+  | 'form.json-invalid'
+  | 'form.sensitive-unavailable'
+  | 'form.unsupported'
+  | 'form.select-placeholder'
+  | 'form.switch-on'
+  | 'form.switch-off'
+  | 'form.section-general'
+  | 'form.empty-no-schema'
+  | 'form.empty-no-fields'
+  | 'form.restore-default'
+  | 'form.undo-changes'
+  | 'form.save-configuration'
+  | 'form.configuration-saved'
+  | 'form.readonly-note'
+  | 'form.conflict-retained'
 
 const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, string>>>> = Object.freeze({
   'channel.title': { en: 'Channels', 'zh-CN': '渠道' },
@@ -103,6 +128,31 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'permission.deny': { en: 'Deny', 'zh-CN': '拒绝' },
   'permission.allow-once': { en: 'Allow this time', 'zh-CN': '仅此次允许' },
   'permission.allow-always': { en: 'Always allow', 'zh-CN': '始终允许' },
+  'form.saving': { en: 'Saving…', 'zh-CN': '正在保存…' },
+  'form.dirty-prefix': { en: 'Unsaved changes', 'zh-CN': '有未保存更改' },
+  'form.apply-live': { en: 'Applies immediately after saving', 'zh-CN': '保存后立即生效' },
+  'form.apply-plugin-restart': { en: 'Takes effect after restarting the plugin', 'zh-CN': '保存后重启插件生效' },
+  'form.apply-service-restart': { en: 'Takes effect after restarting the service', 'zh-CN': '保存后重启相关服务生效' },
+  'form.apply-app-restart': { en: 'Takes effect after restarting the app', 'zh-CN': '保存后重启 App 生效' },
+  'form.required': { en: 'Required', 'zh-CN': '此项为必填项' },
+  'form.choice-invalid': { en: 'Choose a value from the list', 'zh-CN': '请选择列表中的有效值' },
+  'form.number-invalid': { en: 'Enter a valid number', 'zh-CN': '请输入有效数字' },
+  'form.natural-invalid': { en: 'Enter a non-negative integer', 'zh-CN': '请输入非负整数' },
+  'form.json-invalid': { en: 'Enter valid JSON', 'zh-CN': '请输入有效 JSON' },
+  'form.sensitive-unavailable': { en: 'Managed by Host credentials; unavailable here.', 'zh-CN': '敏感字段由 Host 凭据边界管理；此处不可编辑。' },
+  'form.unsupported': { en: 'This setting cannot be edited safely.', 'zh-CN': '此设置的结构当前无法安全编辑。' },
+  'form.select-placeholder': { en: 'Choose', 'zh-CN': '选择' },
+  'form.switch-on': { en: 'On', 'zh-CN': '已开启' },
+  'form.switch-off': { en: 'Off', 'zh-CN': '已关闭' },
+  'form.section-general': { en: 'General', 'zh-CN': '常规' },
+  'form.empty-no-schema': { en: 'This plugin does not provide editable settings.', 'zh-CN': '此插件未提供可编辑设置。' },
+  'form.empty-no-fields': { en: 'This plugin has no editable settings.', 'zh-CN': '此插件没有可编辑设置。' },
+  'form.restore-default': { en: 'Restore default', 'zh-CN': '恢复默认值' },
+  'form.undo-changes': { en: 'Undo changes', 'zh-CN': '撤销更改' },
+  'form.save-configuration': { en: 'Save configuration', 'zh-CN': '保存配置' },
+  'form.configuration-saved': { en: 'Configuration saved', 'zh-CN': '配置已保存' },
+  'form.readonly-note': { en: 'These settings are read-only. Connect CordisX to a writable configuration service to change them.', 'zh-CN': '这些设置当前为只读。将 CordisX 连接到可写配置服务后即可修改。' },
+  'form.conflict-retained': { en: 'Configuration changed in another window or process. Your draft is retained; refresh and review before saving again.', 'zh-CN': '配置已在其他窗口或进程中更新。你的草稿仍保留；刷新后请重新核对再保存。' },
 })
 
 export function productLocale(locale: string): CordisXProductLocale {
