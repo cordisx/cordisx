@@ -23,6 +23,40 @@ type CopyKey =
   | 'channel.diagnostics.description'
   | 'channel.diagnostics.empty'
   | 'channel.search.empty'
+  | 'channel.search.label'
+  | 'channel.search.placeholder'
+  | 'channel.search.clear'
+  | 'channel.open'
+  | 'channel.back'
+  | 'channel.create'
+  | 'channel.create.description'
+  | 'channel.create.local-only'
+  | 'channel.create.name'
+  | 'channel.create.platform'
+  | 'channel.create.unavailable'
+  | 'channel.create.save'
+  | 'channel.configuration'
+  | 'channel.configuration.description'
+  | 'channel.configuration.unavailable'
+  | 'channel.logs'
+  | 'channel.logs.unavailable'
+  | 'channel.logs.native-semantics'
+  | 'channel.sessions'
+  | 'channel.sessions.unavailable'
+  | 'channel.field.platform'
+  | 'channel.field.transport'
+  | 'channel.field.enabled'
+  | 'channel.field.status'
+  | 'channel.field.credentials'
+  | 'channel.credentials.help'
+  | 'channel.real-readiness'
+  | 'channel.real-readiness.description'
+  | 'channel.real-readiness.app'
+  | 'channel.real-readiness.events'
+  | 'channel.real-readiness.credentials'
+  | 'channel.real-readiness.adapter'
+  | 'channel.real-readiness.events-label'
+  | 'channel.real-readiness.adapter-label'
   | 'marketplace.description'
   | 'marketplace.source-label'
   | 'marketplace.add'
@@ -97,6 +131,40 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'channel.diagnostics.description': { en: 'Implementation and external dependency status.', 'zh-CN': '查看实现状态与外部依赖。' },
   'channel.diagnostics.empty': { en: 'No diagnostics.', 'zh-CN': '暂无诊断。' },
   'channel.search.empty': { en: 'No matching items.', 'zh-CN': '没有匹配项。' },
+  'channel.search.label': { en: 'Search configured channels', 'zh-CN': '搜索已配置频道' },
+  'channel.search.placeholder': { en: 'Search configured channels', 'zh-CN': '搜索已配置频道' },
+  'channel.search.clear': { en: 'Clear channel search', 'zh-CN': '清除频道搜索' },
+  'channel.open': { en: 'Open channel details', 'zh-CN': '打开频道详情' },
+  'channel.back': { en: 'Back to channels', 'zh-CN': '返回频道列表' },
+  'channel.create': { en: 'New channel', 'zh-CN': '新建频道' },
+  'channel.create.description': { en: 'Create a safe local candidate before any external connection is available.', 'zh-CN': '在外部连接可用前创建安全的本地候选频道。' },
+  'channel.create.local-only': { en: 'This candidate stays in this Manager session. It contains no credential and makes no external change.', 'zh-CN': '候选频道仅保留在本次管理器会话，不含凭据且不会产生外部变更。' },
+  'channel.create.name': { en: 'Channel name', 'zh-CN': '频道名称' },
+  'channel.create.platform': { en: 'Platform', 'zh-CN': '平台' },
+  'channel.create.unavailable': { en: 'Connection setup is currently unavailable. Saving only creates a local candidate.', 'zh-CN': '连接配置当前不可用。保存只会创建本地候选频道。' },
+  'channel.create.save': { en: 'Save local candidate', 'zh-CN': '保存本地候选频道' },
+  'channel.configuration': { en: 'Configuration', 'zh-CN': '配置' },
+  'channel.configuration.description': { en: 'Host-rendered, read-only connection information.', 'zh-CN': '由宿主渲染的只读连接信息。' },
+  'channel.configuration.unavailable': { en: 'Editing requires a launcher-owned service and credential reference. Neither is available yet.', 'zh-CN': '编辑需要启动器持有的服务和凭据引用；当前均不可用。' },
+  'channel.logs': { en: 'Logs', 'zh-CN': '日志' },
+  'channel.logs.unavailable': { en: 'No channel logs are available yet.', 'zh-CN': '当前没有可用的频道日志。' },
+  'channel.logs.native-semantics': { en: 'When available, logs preserve native console argument arrays and structured event records. This page does not synthesize log entries.', 'zh-CN': '日志可用后将保留原生 console 参数数组和结构化事件记录；当前页面不会伪造日志。' },
+  'channel.sessions': { en: 'Connections & sessions', 'zh-CN': '连接与会话管理' },
+  'channel.sessions.unavailable': { en: 'Connection and session actions are currently unavailable.', 'zh-CN': '连接与会话操作当前不可用。' },
+  'channel.field.platform': { en: 'Platform', 'zh-CN': '平台' },
+  'channel.field.transport': { en: 'Transport', 'zh-CN': '传输方式' },
+  'channel.field.enabled': { en: 'Enabled', 'zh-CN': '已启用' },
+  'channel.field.status': { en: 'Connection status', 'zh-CN': '连接状态' },
+  'channel.field.credentials': { en: 'Credentials', 'zh-CN': '凭据' },
+  'channel.credentials.help': { en: 'Only readiness is projected; credential references and values are never rendered.', 'zh-CN': '仅展示就绪状态；不会渲染凭据引用或值。' },
+  'channel.real-readiness': { en: 'Real connection readiness', 'zh-CN': '真实连接就绪状态' },
+  'channel.real-readiness.description': { en: 'Known test-target information is not evidence of a connected channel.', 'zh-CN': '已知测试目标不代表频道已连接。' },
+  'channel.real-readiness.app': { en: 'Feishu test application: enabled candidate cli_aaba90fcc4389cb3; not connected.', 'zh-CN': '飞书测试应用：已启用候选 cli_aaba90fcc4389cb3；尚未连接。' },
+  'channel.real-readiness.events': { en: 'Events and callbacks: not configured.', 'zh-CN': '事件与回调：未配置。' },
+  'channel.real-readiness.credentials': { en: 'Credential reference: not configured.', 'zh-CN': '凭据引用：未配置。' },
+  'channel.real-readiness.adapter': { en: 'Official adapter and launcher transport: unavailable.', 'zh-CN': '官方 adapter 与启动器 transport：不可用。' },
+  'channel.real-readiness.events-label': { en: 'Events & callbacks', 'zh-CN': '事件与回调' },
+  'channel.real-readiness.adapter-label': { en: 'Adapter & transport', 'zh-CN': 'Adapter 与传输' },
   'marketplace.description': { en: 'Manage plugin marketplace sources.', 'zh-CN': '管理插件商店来源。' },
   'marketplace.source-label': { en: 'Marketplace JSON URL', 'zh-CN': '插件商店 JSON 地址' },
   'marketplace.add': { en: 'Add marketplace', 'zh-CN': '添加商店' },

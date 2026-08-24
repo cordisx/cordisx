@@ -132,8 +132,14 @@ checks. The internal Host body renderer consumes a bounded, redacted Channel
 Manager projection for
 read-only accounts, routes, composite task bindings, and diagnostics; it never
 receives service configuration, `secretRef`, transports, queues, or credential
-values. Live launcher projection, configuration writes, credential actions,
-and a single launcher-to-Manager simulator orchestration remain planned. The
+values. It presents a Host-owned searchable card list and card-detail tabs;
+the only create result available before a Host writer exists is an explicitly
+session-local, credential-free candidate, never an external connection. The
+read-only Feishu target `cli_aaba90fcc4389cb3` is a known enabled test
+application, not a connected account; no secret, callback, event subscription,
+or external configuration is read or written by this renderer. Live launcher
+projection, configuration writes, credential actions, and a single
+launcher-to-Manager simulator orchestration remain planned. The
 Channel config adapter consumes the shared
 launcher service-configuration foundation: the closed manifest `restart`
 declaration maps to `service-restart`, the schema is
