@@ -130,6 +130,15 @@ describe('renderer bundle', () => {
       x: left, y: top, left, top, right: left + width, bottom: top + height, width, height,
       toJSON: () => ({}),
     }) as DOMRect
+    const getBoundingClientRect = dom.window.HTMLElement.prototype.getBoundingClientRect
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'getBoundingClientRect', {
+      value(this: HTMLElement) {
+        if (this.dataset.cordisxSurfaceHost === 'toolbar.before' || this.dataset.cordisxSurfaceHost === 'toolbar.after') {
+          return rect(0, 0, 28, 28)
+        }
+        return getBoundingClientRect.call(this)
+      },
+    })
     Object.defineProperty(dom.window.document.querySelector('[data-app-shell-application-menu-bar]'), 'getBoundingClientRect', { value: () => rect(0, 0, 1200, 46) })
     Object.defineProperty(dom.window.document.querySelector('[data-testid="app-shell-header-context-menu-surface"]'), 'getBoundingClientRect', { value: () => rect(240, 0, 960, 46) })
     Object.defineProperty(dom.window.document.querySelector('[data-codex-composer-root]'), 'getBoundingClientRect', { value: () => rect(420, 700, 600, 120) })
@@ -220,6 +229,7 @@ describe('renderer bundle', () => {
     expect(toolbarAction.getAttribute('aria-label')).toBe('Open main page')
     expect(toolbarAction.dataset.cordisxTooltip).toBe('Open main page')
     expect(toolbarAction.querySelector('[data-host-icon="host:open"] svg')).not.toBeNull()
+    expect(toolbarAction.closest<HTMLElement>('[data-test-id="header-shell-slot"]')?.style.width).toBe('126px')
     const sessionHeaderAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="session.header.actions"] button')!
     expect(sessionHeaderAction.className).toContain('codex-toolbar-button')
     expect(dom.window.getComputedStyle(sessionHeaderAction).width).toBe('28px')
