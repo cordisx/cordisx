@@ -11,14 +11,14 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `ui-copy-principles.md` defines the product UI copy hierarchy: concise
   current state first, clear document actions for context, and diagnostics for
   implementation detail.
-- `manager-settings-tabs.md` freezes the host-neutral extensible settings-tab
-  surface/content outlet, single ordering model, controlled page-body mount,
-  lifecycle, historical delivery, current v5 compatibility, and validation
-  matrix.
-- `manager-settings-navigation.md` separates those Settings content tabs from
-  plugin-owned first-level Manager destinations, and freezes the v5/catalog-v4
-  route-v2/page-v3 projection, standard `manager.content` shell, ordering,
-  lifecycle, overlap audit, delivery boundary, and real-renderer matrix.
+- `manager-settings-tabs.md` preserves the host-neutral Settings content-tab
+  compatibility contract. The current Manager IA has no top-level Settings
+  page, so its surface/outlet remain diagnosable as `not-mounted` rather than
+  manufacturing an empty shell.
+- `manager-settings-navigation.md` defines real plugin-owned first-level
+  Manager destinations across the stable virtual settings seam, the v5/
+  catalog-v4 route-v2/page-v3 projection, standard `manager.content` shell,
+  fallback, configuration planes, overlap boundary, and renderer matrix.
 - `plugin-configuration.md` defines Schemastery-first forms, the Standard
   Schema validation boundary, revision-fenced persistence, live/restart
   application, last-good recovery, secrets, and lifecycle-owned field

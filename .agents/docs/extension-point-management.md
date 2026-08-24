@@ -26,20 +26,23 @@ outlet and a page. A page supplies trusted-local content for that outlet. The
 manager may join these resources into a point's usage view, but it must not
 inflate the point count or describe a command, route, or page as a point.
 
-The manager-settings surface v4/catalog v3 delivery adds the CordisX manager
-pair
+The manager-settings surface v4/catalog v3 delivery preserves the CordisX
+manager A pair
 `manager.settings.tabs` (surface) and `manager.settings.content` (outlet).
-They are independent of the Codex adapter: the manager owns the tab/header DOM
-and panel, and a same-owner page mounts only in the panel-body child. Their
-single ordering/fallback model and lifecycle are specified in
+They are independent of the Codex adapter. A Host that exposes Settings owns
+the tab/header DOM and panel, and a same-owner page mounts only in the
+panel-body child. The current CordisX IA has no top-level Settings destination,
+so both identities remain visible to policy/diagnostics with context
+`not-mounted` and do not create an empty page. Their compatibility model is specified in
 [`manager-settings-tabs.md`](manager-settings-tabs.md).
 
 Catalog v4 keeps that A pair and adds the distinct B pair
 `manager.settings.navigation-items` (surface) and `manager.content` (outlet).
-B contributes a route-only first-level Manager destination; route v2 supplies
-navigation text and same-owner page v3 supplies the standard header text,
-required Host icon, actions, and controlled body. A and B must appear as four
-separate rows and use cases in the Manager catalog. See
+B contributes a route-only first-level Manager destination across the stable
+virtual settings seam; route v2 supplies navigation text and same-owner page
+v3 supplies the standard header text, required Host icon, actions, and
+controlled body. The group names do not require a visible Settings row. A and
+B appear as four separate rows and use cases in the Manager catalog. See
 [`manager-settings-navigation.md`](manager-settings-navigation.md).
 
 The distinction is stable even when adapters add new points. The catalog count
@@ -125,9 +128,9 @@ both required locale dictionaries. The shared namespace is
 | outlet | `app` | `outlet.app.title`; Application page | `outlet.app.description`; Opens a CordisX page over the renderer application region without replacing native content. | `host:open` |
 | outlet | `main` | `outlet.main.title`; Main workspace page | `outlet.main.description`; Opens a CordisX page over the region to the right of the sidebar and follows the current main context. | `host:layers` |
 | outlet | `session.content` | `outlet.session.content.title`; Session content page | `outlet.session.content.description`; Opens a CordisX page below the active session header while preserving side and bottom panels. | `host:history` |
-| surface | `manager.settings.tabs` | `manager.settings.tabs.title`; Manager settings content tabs | `manager.settings.tabs.description`; Switches Host-rendered content inside Manager Settings. | `host:settings` |
-| outlet | `manager.settings.content` | `manager.settings.content.title`; Manager settings content | `manager.settings.content.description`; Mounts a trusted-local body inside the active Settings content tab. | `host:settings` |
-| surface | `manager.settings.navigation-items` | `manager.settings.navigation-items.title`; Manager settings navigation items | `manager.settings.navigation-items.description`; Adds a Host-rendered first-level plugin destination near Settings. | `host:layers` |
+| surface | `manager.settings.tabs` | `manager.settings.tabs.title`; Manager settings content tabs | `manager.settings.tabs.description`; Compatibility point for Hosts that expose Settings; not mounted in the current IA. | `host:settings` |
+| outlet | `manager.settings.content` | `manager.settings.content.title`; Manager settings content | `manager.settings.content.description`; Compatibility body outlet for a mounted Settings content tab; not mounted in the current IA. | `host:settings` |
+| surface | `manager.settings.navigation-items` | `manager.settings.navigation-items.title`; Manager settings navigation items | `manager.settings.navigation-items.description`; Adds a Host-rendered first-level plugin destination across the settings extension seam. | `host:layers` |
 | outlet | `manager.content` | `manager.content.title`; Manager content | `manager.content.description`; Mounts a trusted-local body beneath a standard Host-owned Manager page shell. | `host:layers` |
 
 The catalog owns point identity only. Plugin-provided contribution labels,

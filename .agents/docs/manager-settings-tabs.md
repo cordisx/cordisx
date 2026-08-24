@@ -1,21 +1,25 @@
 # Extensible manager settings tabs
 
-Status: implemented A/content-tab architecture and compatibility contract.
-This document freezes the host-neutral extension-point names, contribution
-shape, lifecycle, dependency order, PR boundaries, and validation matrix.
+Status: implemented A/content-tab compatibility contract. The current CordisX
+Manager IA has no top-level Settings page, so the Host retains these point
+identities and diagnostics with current context `not-mounted` rather than
+manufacturing an empty shell.
 
-This point switches content **inside** Manager `配置`; it is not the first-level
-left-navigation contribution. That separate B capability is specified in
+This point switches content **inside** Manager Settings only for a Host that
+exposes that page; it is not the first-level left-navigation contribution.
+The current product uses the separate B capability specified in
 [`manager-settings-navigation.md`](manager-settings-navigation.md).
 
 ## Outcome
 
-CordisX manager `配置` becomes an extensible, host-rendered tab surface. A
-plugin contributes structured tab data, associates it with one of its own
-routes and pages, and mounts trusted-local content only inside the selected
-panel body. CordisX continues to own the settings page header, tab DOM, icons,
-localization, ordering, selection, overflow, keyboard behavior, accessibility,
-focus restoration, error projection, scroll ownership, and cleanup.
+The closed A contract lets a compatible Host expose an extensible,
+host-rendered Settings tab surface. A plugin contributes structured tab data,
+associates it with one of its own routes and pages, and mounts trusted-local
+content only inside the selected panel body. Such a Host owns the settings
+page header, tab DOM, icons, localization, ordering, selection, overflow,
+keyboard behavior, accessibility, focus restoration, error projection, scroll
+ownership, and cleanup. CordisX's current IA projects none of that DOM because
+the containing page is absent.
 
 The versioned host-neutral extension points are frozen as:
 
@@ -119,15 +123,20 @@ switch a native workspace/session.
 
 ## One projection and deterministic order
 
-The three built-in tabs and external contributions enter one
-`ManagerSettingsTabProjection`. Built-ins are host records, not spoofable
-plugin registrations:
+When a Host exposes Settings, the historical three built-in tabs and external
+contributions enter one `ManagerSettingsTabProjection`. Built-ins are host
+records, not spoofable plugin registrations:
 
 | Qualified id | Stable order | Content owner |
 | --- | ---: | --- |
 | `host:marketplace` | 100 | CordisX marketplace settings |
-| `host:runtime` | 200 | CordisX profile/runtime settings |
-| `host:launcher` | 300 | CordisX launcher boundary |
+| `host:runtime` | 200 | Historical runtime placeholder |
+| `host:launcher` | 300 | Historical launcher placeholder |
+
+The current CordisX Host does not expose this projection. In particular it
+does not render the historical Runtime or Launcher placeholders. Their removal
+does not delete plugin runtime status, CLI parsing, launcher validation, or
+redacted diagnostics from their owning product areas.
 
 Plugin ids cannot be `host` or start with `cordisx.`, so a local id such as
 `marketplace` cannot replace a built-in record. It remains a distinct qualified
@@ -199,8 +208,9 @@ generation-fenced origin:
 The originating source/plugin/point/contribution tuple is launcher-bound. A
 plugin cannot supply it through route params, page props, or mount content.
 
-The active qualified id survives title, locale, icon, disabled state of other
-tabs, and order changes. The host aborts and disposes the active plugin mount,
+For a Host that mounts Settings, the active qualified id survives title,
+locale, icon, disabled state of other tabs, and order changes. The host aborts
+and disposes the active plugin mount,
 clears its body, and falls back to `host:marketplace` when the active tab:
 
 - becomes hidden or is removed;
@@ -211,9 +221,10 @@ clears its body, and falls back to `host:marketplace` when the active tab:
 
 Abort happens before the plugin disposer. Cleanup is idempotent. Restoring a
 plugin or policy makes its tab eligible again but does not steal activation
-from the current built-in tab. Reopening the manager starts on the stable
-built-in fallback and mounts plugin content only after a new explicit
-activation.
+from the current built-in tab. Reopening that Settings context starts on the
+stable built-in fallback and mounts plugin content only after a new explicit
+activation. The current Host has no active A mount and therefore no A
+activation to normalize.
 
 If a page mount throws, the host aborts and disposes any partial mount, clears
 the body, retains the attributed diagnostic, and renders a CordisX-owned error
@@ -223,9 +234,10 @@ projection or body.
 
 ## Extension Points projection
 
-The existing Extension Points manager page lists both
+The Extension Points manager page lists both
 `manager.settings.tabs` and `manager.settings.content` with localized host
-descriptors, availability, payload/context policy, and diagnostics.
+descriptors, payload/context policy, and current-context `not-mounted`
+diagnostics.
 
 Usage for the surface attributes every external tab, order, visibility,
 disabled/pending state, and route reference to its plugin identity. Usage for
@@ -239,11 +251,12 @@ A was delivered architecture first, then surface v4/catalog v3 Protocol,
 Host/demo, real-renderer verification, and its historical mono pin. Its owning
 contracts and tests remain the compatibility baseline.
 
-The current B delivery does not reopen that history. Architecture is frozen in
+The current B/IA delivery does not reopen that history. Architecture is frozen in
 [`manager-settings-navigation.md`](manager-settings-navigation.md); formal
-Protocol `f350899` adds surface v5/catalog v4 while retaining A's stable id;
-then one Host PR from latest formal main appends B and updates the demo to
-explain both capabilities. Normal CI and a head-fenced Host merge are required.
+Protocol `f350899` adds surface v5/catalog v4 while retaining A's stable id,
+and Protocol `20053fb` makes the no-Settings IA explicit. One Host PR from
+latest formal main appends B, keeps A as not-mounted compatibility state, and
+uses the demo for a real B page. Normal CI and a head-fenced Host merge are required.
 No mono update belongs to the B delivery, and no source branch head is a
 dependency.
 
@@ -259,8 +272,8 @@ dependency.
 | Lifecycle | Block/restore, required-permission deny/recovery, active removal fallback, point deny/allow, stale generation, close/reopen, mount throw/retry, Abort-before-dispose, idempotent cleanup, and no activation theft after restore. |
 | Native data flow | Opening and switching settings content does not change `app://`, browser/Codex history, primary outlet presentation, native node identity, visibility, subscriptions, or simulated data updates. |
 | Extension Points | Both descriptors are searchable; surface/outlet usage is attributed to the plugin and exposes policy, pending, route/page, mount, and diagnostic state without counting resources as points. |
-| Demo | A real plugin contributes one localized settings tab, updates its content/state, mounts only in the panel body, uses no selector/header DOM, and disposes all effects with its fiber. |
-| Isolated renderer | Real `app://` report and screenshots prove built-in plus demo order, structured header DOM, body mount, pointer/keyboard activation, block/restore, locale reprojection, generation cleanup, unchanged native flow, and the exact host/CordisX revisions. |
+| Demo | Compatibility fixtures still prove A validation, controlled body mount, no selector/header DOM, and fiber cleanup; the shipped demo uses B for its real first-level page. |
+| Isolated renderer | Real `app://` evidence proves A is not mounted and no empty Settings/Runtime/Launcher shell appears; B evidence belongs to the navigation architecture. |
 | Release | Preserve all A tests/evidence while adding B; focused tests, typecheck, build, full `npm run check`, `git diff --check`, normal Protocol/Host PR checks and head-fenced merges, exact merged revision evidence, and no mono update. |
 
 Screenshots complement machine assertions; they do not prove lifecycle or
