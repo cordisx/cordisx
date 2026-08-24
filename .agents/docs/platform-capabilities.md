@@ -55,11 +55,44 @@ identity. `ctx.platform` reads the identity from the calling Cordis context;
 no public method accepts an identity argument.
 
 The Permission Broker normalizes and freezes declarations before plugin
-activation. Its persisted policy key includes source, id, capability, and a
-deterministic fingerprint of required/reason/scope. A changed declaration has
-policy `ask`. The broker records in-memory audit timestamps and denial counts.
-Policy storage and prompt UI are host-owned, while current trusted renderer
-execution means neither is a tamper-proof security boundary.
+activation. Its authorization key is the launcher profile, canonical source,
+plugin id, capability, and normalized scope. A capability or scope change, or
+a profile/source/id change, has policy `ask`. `required` and localized `reason`
+are current declaration metadata rather than authority-key material. The broker
+records in-memory audit timestamps and denial counts. Policy storage and prompt
+UI are host-owned, while current trusted renderer execution means neither is a
+tamper-proof security boundary.
+
+## Authorization duration, persistence, and migration
+
+Persisted policy remains `ask` / `deny` / `allow`. A runtime prompt resolves
+`ask` with three host-owned actions: persistent `始终允许` as the primary
+action, `仅此次允许` as a secondary action, and `拒绝`. Persistent allow is
+written successfully before adapter dispatch. Allow-once authorizes only the
+current matching Broker request and never enters browser storage or launcher
+configuration.
+
+Product launches pass only the selected profile id and that profile's
+validated permission projection into the bundle. Writes cross an authenticated,
+bounded CDP binding whose launcher handler can mutate only one bounded batch of
+normalized permission records through the existing exclusive-lock/atomic Home
+configuration writer. Required and optional decisions from one review therefore
+commit together or not at all. The renderer and plugins receive neither the Home path nor an arbitrary
+configuration document/writer. Development launches without that binding use
+an explicitly profile-scoped browser fallback and do not claim launcher-durable
+authorization.
+
+The previous `cordisx.platform.permissionPolicies.v1` renderer ledger is
+migrated only when its source/id, capability, and fingerprint parse to the exact
+current normalized scope. The launcher-selected profile is added; required and
+reason fields are discarded. Malformed or non-matching records fall back to
+`ask`. The old entry is removed only after the new configuration write is
+acknowledged.
+
+The persistent configuration key excludes runtime generation. An allow-once
+ticket is instead bound to profile, identity, capability, exact scope, and the
+current generation; it is consumed once and cleared by plugin disable,
+identity replacement, or generation disposal.
 
 ## Activation and manager behavior
 
@@ -68,6 +101,26 @@ with current policy `deny` prevents that plugin fiber from mounting and yields
 `permission-blocked` plus an explicit reason. `ask` is unresolved authority,
 not automatic denial or grant; the host prompts at call time. Optional denial
 does not stop the fiber.
+
+Installing or enabling uses one normalized authorization plan containing all
+required and optional manifest declarations. The Host renders a single flat
+review, keeps required declarations selected, lets the user decline individual
+optional declarations, and applies the resulting per-capability decisions through
+the Broker before activation. Persistent allow is the batch primary action. A batch allow-once decision creates one
+generation-bound ticket for the first matching call after activation. A denied
+or unresolved required declaration blocks activation; optional denial stays
+active with explicit degradation. The same boundary is implemented for
+enable/restore now and is reserved for a future installer; Marketplace package
+download, signature verification, and code installation are not introduced by
+this task.
+
+The decision returns the protocol envelope rather than a bare array. The Broker
+checks its schema version, generation-bound `planId`, operation, profile,
+source/plugin identity, and every exact normalized capability scope before one
+atomic commit. A stale plan or a caller-supplied profile, identity, capability,
+or scope is rejected. `decisionRequired` distinguishes a missing exact-key
+record from an explicit persisted `ask`; only the former identifies new or
+expanded authority.
 
 The installed-plugin detail page adds a `权限` tab. Its model retains:
 
@@ -99,6 +152,12 @@ Policy changes reconcile the plugin fiber: changing a required capability to
 `allow` permits a fresh mount. Denying an optional declaration never stops the
 plugin. Locale changes reproject permission reasons through the existing
 LocalizationKernel subscription.
+
+Runtime and activation prompts follow the same hierarchy rules. The review
+body does not repeat its dialog title, required and optional capabilities are
+flat rows rather than nested cards, and decision text appears once beside the
+owning declaration. Light and dark themes retain visible focus, primary,
+secondary, and destructive states.
 
 ## Platform service and adapter boundary
 
@@ -146,11 +205,13 @@ rollback are outside this task.
    LocalizedText/MessageRef are merged dependencies.
 2. `cordisx/cordisx#3` LocalizationKernel is the real projection dependency;
    Platform does not create a second localization service.
-3. The protocol PR owns the version-1 specification, plugin-manifest schema,
-   vectors, and conformance.
-4. The host PR owns TypeScript contracts, broker, adapters, service, manager
-   projection/UI, tests, and live smoke. It depends on the protocol PR but does
-   not import a checkout at runtime.
+3. The protocol PR owns authorization-key/duration/install-or-enable semantics,
+   policy and authorization-plan schemas, vectors, and conformance. It does not
+   modify Agent event or Agent Trace contracts.
+4. The host PR owns TypeScript contracts, profile-scoped Home configuration,
+   bounded persistence RPC, Broker duration behavior, enable/restore batch UI,
+   runtime prompt, manager projection/UI, tests, and live smoke. It depends on
+   the merged protocol PR but does not import a checkout at runtime.
 5. A future private current-connection adapter is a separate experimental PR
    blocked on a stable auditable host seat.
 6. CordisXMono updates the two pushed gitlinks only after compatible validation.
@@ -177,3 +238,12 @@ third-level detail, then confirms the adapter-unavailable facts are confined
 to the collapsed runtime diagnostic disclosure while the existing UI still
 mounts/disposes. It cannot claim real model/task writes until the private
 current-connection adapter exists.
+
+Authorization-specific validation additionally covers exact profile/source/id/
+capability/scope separation; capability/scope upgrade re-prompt; fail-closed
+legacy migration; runtime allow-once consumption with zero durable write;
+persistent allow before dispatch; deny; required/optional batch behavior;
+bounded RPC identity/scope rejection; atomic configuration readback; manager
+`ask`/`allow`/`deny` editing; non-duplicated visible headings; keyboard/focus;
+and both renderer color schemes. Agent event contracts and Agent Trace special
+cases are an explicit negative diff boundary.

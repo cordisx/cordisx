@@ -2,7 +2,10 @@ import {
   type CordisXCapabilityScope,
   type CordisXLocalizationDiagnostic,
   type CordisXLocalizationSnapshot,
+  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
+  type CordisXPermissionAuthorizationDecisionV1,
   type CordisXPermissionPolicy,
+  type CordisXPermissionAuthorizationPlanV1,
   type CordisXPlatformAdapterStatus,
   type CordisXPlatformCapability,
   type CordisXPluginIdentity,
@@ -106,6 +109,8 @@ export interface ManagerModel {
     setDraft: (value: unknown) => void,
   ): Promise<ConfigRendererMountHandle>
   setPermissionPolicy(id: string, capability: CordisXPlatformCapability, policy: CordisXPermissionPolicy): Promise<void>
+  permissionAuthorizationPlan?(id: string): CordisXPermissionAuthorizationPlanV1
+  authorizePlugin?(id: string, decision: CordisXPermissionAuthorizationDecisionV1): Promise<void>
   setExtensionPointPolicy?(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
   mountSettingsTab?(id: string, panelBody: HTMLElement): Promise<ManagedSettingsPageMount>
   closeSettingsTabContent?(): Promise<void>
@@ -782,6 +787,126 @@ function createPermissionPolicySelect(
   return policy
 }
 
+export async function requestPluginAuthorization(
+  document: Document,
+  plugin: Pick<ManagerPluginSnapshot, 'id' | 'name'>,
+  plan: CordisXPermissionAuthorizationPlanV1,
+  permissions: readonly ManagerPermissionSnapshot[],
+): Promise<CordisXPermissionAuthorizationDecisionV1 | undefined> {
+  const decisionEnvelope = (
+    decision: CordisXPermissionAuthorizationDecisionV1['decisions'][number]['decision'],
+    selected: (capability: CordisXPlatformCapability) => boolean,
+  ): CordisXPermissionAuthorizationDecisionV1 => ({
+    $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
+    schemaVersion: 1,
+    planId: plan.planId,
+    operation: plan.operation,
+    profileId: plan.profileId,
+    identity: plan.identity,
+    decisions: plan.declarations.map(declaration => ({
+      capability: declaration.capability,
+      scope: declaration.scope,
+      decision: decision === 'deny' || !selected(declaration.capability) ? 'deny' : decision,
+    })),
+  })
+  if (plan.declarations.length === 0) return decisionEnvelope('allow', () => true)
+  return await new Promise((resolve) => {
+    const overlay = create(document, 'div', 'cxm-authorization-overlay')
+    overlay.dataset.permissionAuthorization = plugin.id
+    overlay.setAttribute('role', 'dialog')
+    overlay.setAttribute('aria-modal', 'true')
+    const titleId = `cxm-authorization-${plugin.id}`
+    overlay.setAttribute('aria-labelledby', titleId)
+    const style = document.createElement('style')
+    style.textContent = `
+      .cxm-authorization-overlay { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / 55%); }
+      .cxm-authorization-dialog { width: min(600px, 100%); max-height: min(720px, calc(100vh - 48px)); overflow: auto; border: 1px solid #3b4048; border-radius: 14px; padding: 20px; background: #202226; color: #edf0f4; box-shadow: 0 24px 80px rgb(0 0 0 / 45%); }
+      .cxm-authorization-dialog h2 { margin: 0; font-size: 18px; }
+      .cxm-authorization-dialog > p { margin: 9px 0 16px; color: #bfc5ce; line-height: 1.5; }
+      .cxm-authorization-list { display: grid; }
+      .cxm-authorization-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 14px; padding: 12px 0; border-top: 1px solid #343840; }
+      .cxm-authorization-item:first-child { border-top: 0; }
+      .cxm-authorization-name { font-weight: 600; }
+      .cxm-authorization-reason { color: #aeb4be; line-height: 1.45; }
+      .cxm-authorization-choice { grid-column: 2; grid-row: 1 / span 2; align-self: center; display: flex; align-items: center; gap: 9px; color: #c9ced6; cursor: pointer; }
+      .cxm-authorization-choice input { width: 17px; height: 17px; accent-color: #c7ccd4; }
+      .cxm-authorization-choice input:disabled { cursor: not-allowed; }
+      .cxm-authorization-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+      .cxm-authorization-actions button { border: 1px solid #494f59; border-radius: 9px; padding: 8px 12px; background: #2a2d32; color: #edf0f4; cursor: pointer; }
+      .cxm-authorization-actions button[data-primary="true"] { border-color: #aeb4bd; background: #c7ccd4; color: #17191c; font-weight: 600; }
+      .cxm-authorization-actions button[data-tone="danger"] { color: #ff9292; }
+      .cxm-authorization-actions button:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
+    `
+    const dialog = create(document, 'div', 'cxm-authorization-dialog')
+    const operationLabel = plan.operation === 'install' ? '安装' : '启用'
+    const title = create(document, 'h2', undefined, `${operationLabel}授权`)
+    title.id = titleId
+    dialog.append(title, create(document, 'p', undefined, `${plugin.name} 声明了以下宿主能力。持久授权是默认主操作。`))
+    const list = create(document, 'div', 'cxm-authorization-list')
+    list.setAttribute('role', 'list')
+    const choices = new Map<CordisXPlatformCapability, HTMLInputElement>()
+    for (const declaration of plan.declarations) {
+      const projected = permissions.find(item => item.capability === declaration.capability)
+      const presentation = capabilityPresentation(declaration.capability)
+      const item = create(document, 'div', 'cxm-authorization-item')
+      item.setAttribute('role', 'listitem')
+      item.dataset.authorizationCapability = declaration.capability
+      const choice = document.createElement('input')
+      choice.type = 'checkbox'
+      choice.checked = true
+      choice.disabled = declaration.required
+      choice.dataset.authorizationChoice = declaration.capability
+      choice.setAttribute('aria-label', `${presentation.name}（${declaration.required ? '必需' : '可选'}）`)
+      choices.set(declaration.capability, choice)
+      const choiceLabel = create(document, 'label', 'cxm-authorization-choice')
+      choiceLabel.append(choice, create(document, 'span', undefined, `当前：${POLICY_LABELS[declaration.policy]}`))
+      item.append(
+        create(document, 'div', 'cxm-authorization-name', `${presentation.name} · ${declaration.required ? '必需' : '可选'}`),
+        create(document, 'div', 'cxm-authorization-reason', projected?.reasonText ?? declaration.reason.fallback ?? declaration.reason.key),
+        choiceLabel,
+      )
+      list.append(item)
+    }
+    dialog.append(list)
+    const actions = create(document, 'div', 'cxm-authorization-actions')
+    const finish = (decision: CordisXPermissionAuthorizationDecisionV1['decisions'][number]['decision'] | undefined): void => {
+      overlay.remove()
+      resolve(decision === undefined ? undefined : decisionEnvelope(
+        decision,
+        capability => choices.get(capability)?.checked === true,
+      ))
+    }
+    const cancel = create(document, 'button', undefined, '取消')
+    cancel.type = 'button'
+    cancel.dataset.authorizationDecision = 'cancel'
+    cancel.addEventListener('click', () => finish(undefined), { once: true })
+    const deny = create(document, 'button', undefined, `拒绝并保持${operationLabel === '安装' ? '未安装' : '停用'}`)
+    deny.type = 'button'
+    deny.dataset.authorizationDecision = 'deny'
+    deny.dataset.tone = 'danger'
+    deny.addEventListener('click', () => finish('deny'), { once: true })
+    const once = create(document, 'button', undefined, `仅此次允许并${operationLabel}`)
+    once.type = 'button'
+    once.dataset.authorizationDecision = 'allow-once'
+    once.addEventListener('click', () => finish('allow-once'), { once: true })
+    const allow = create(document, 'button', undefined, `始终允许并${operationLabel}`)
+    allow.type = 'button'
+    allow.dataset.authorizationDecision = 'allow'
+    allow.dataset.primary = 'true'
+    allow.addEventListener('click', () => finish('allow'), { once: true })
+    overlay.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      finish(undefined)
+    })
+    actions.append(cancel, deny, once, allow)
+    dialog.append(actions)
+    overlay.append(style, dialog)
+    document.body.append(overlay)
+    allow.focus()
+  })
+}
+
 function hasCapabilityScope(scope: CordisXCapabilityScope): boolean {
   return Object.values(scope).some(value => Array.isArray(value) && value.length > 0)
 }
@@ -1079,6 +1204,21 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const disposeConfigRenderers = (): void => {
     for (const mount of configRendererMounts) void mount.dispose()
     configRendererMounts.clear()
+  }
+
+  const authorizeAndRestore = async (plugin: ManagerPluginSnapshot): Promise<void> => {
+    const createPlan = model.permissionAuthorizationPlan
+    const authorize = model.authorizePlugin
+    if (createPlan === undefined || authorize === undefined) {
+      throw new Error('插件授权服务当前不可用，未恢复插件')
+    }
+    const plan = createPlan(plugin.id)
+    const permissions = model.snapshot().permissions.filter(item => (
+      item.identity.source === plugin.source && item.identity.id === plugin.id
+    ))
+    const decision = await requestPluginAuthorization(document, plugin, plan, permissions)
+    if (decision === undefined) return
+    await authorize(plugin.id, decision)
   }
 
   const hideForExternalNavigation = (): void => {
@@ -1925,21 +2065,24 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const action = create(document, 'button', 'cxm-action cxm-plugin-runtime-action')
       action.type = 'button'
       const blocked = plugin.status === 'blocked' || plugin.status === 'failed'
+      const permissionBlocked = plugin.status === 'permission-blocked'
+      const restorable = blocked || permissionBlocked
       action.textContent = busyPluginId === plugin.id
         ? '处理中…'
         : plugin.status === 'configured-disabled'
           ? '配置中已禁用'
-          : plugin.status === 'permission-blocked'
-            ? '由必需权限阻止'
+          : permissionBlocked
+            ? '重新授权'
           : blocked ? '恢复插件' : '屏蔽插件'
-      action.disabled = busyPluginId !== undefined || plugin.status === 'configured-disabled' || plugin.status === 'permission-blocked'
-      if (!blocked) action.dataset.tone = 'danger'
+      action.disabled = busyPluginId !== undefined || plugin.status === 'configured-disabled'
+      if (!restorable) action.dataset.tone = 'danger'
       action.addEventListener('click', async () => {
         busyPluginId = plugin.id
         operationError = undefined
         renderContent()
         try {
-          await model.setPluginBlocked(plugin.id, !blocked)
+          if (restorable) await authorizeAndRestore(plugin)
+          else await model.setPluginBlocked(plugin.id, true)
         } catch (error) {
           operationError = error instanceof Error ? error.message : String(error)
         } finally {
@@ -2343,7 +2486,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const renderRuntimeSettings = (target: HTMLElement): void => {
     const panel = create(document, 'div', 'cxm-settings-builtin')
     const runtime = model.snapshot()
-    const blocked = runtime.plugins.filter(plugin => plugin.status === 'blocked' || plugin.status === 'failed')
+    const blocked = runtime.plugins.filter(plugin => (
+      plugin.status === 'blocked' || plugin.status === 'permission-blocked' || plugin.status === 'failed'
+    ))
     if (blocked.length === 0) {
       panel.append(create(document, 'p', 'cxm-copy', '当前没有被 profile 本地状态屏蔽的插件。单个插件可在插件详情页屏蔽或恢复。'))
     } else {
@@ -2360,7 +2505,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           busyPluginId = plugin.id
           renderContent()
           try {
-            await model.setPluginBlocked(plugin.id, false)
+            await authorizeAndRestore(plugin)
           } catch (error) {
             sourceOperationError = error instanceof Error ? error.message : String(error)
           } finally {

@@ -33,6 +33,10 @@ const parsed = parseArgs({
     'session-id': { type: 'string' },
     'permission-capability': { type: 'string', multiple: true },
     'permission-policy': { type: 'string' },
+    'authorization-plugin': { type: 'string' },
+    'authorization-decision': { type: 'string' },
+    'authorization-decline-optional': { type: 'boolean', default: false },
+    'authorization-screenshot': { type: 'string' },
     'demo-kind': { type: 'string', multiple: true },
     'clear-demo': { type: 'boolean', default: false },
     'plugin-lifecycle': { type: 'boolean', default: false },
@@ -58,6 +62,11 @@ if (parsed.values['open-route'] !== undefined && parsed.values['click-surface'] 
 if ((parsed.values['permission-capability'] === undefined) !== (parsed.values['permission-policy'] === undefined)) {
   throw new Error('--permission-capability and --permission-policy must be provided together')
 }
+if (parsed.values['authorization-plugin'] === undefined && (
+  parsed.values['authorization-decision'] !== undefined
+  || parsed.values['authorization-decline-optional']
+  || parsed.values['authorization-screenshot'] !== undefined
+)) throw new Error('authorization smoke options require --authorization-plugin')
 
 const response = await fetch(`http://127.0.0.1:${port}/json/list`)
 if (!response.ok) throw new Error(`CDP target list returned HTTP ${response.status}`)
@@ -1712,6 +1721,87 @@ if (parsed.values['app-screenshot'] !== undefined) {
   console.log(`app-screenshot=${screenshotPath}`)
 }
 
+let authorizationReport
+if (parsed.values['authorization-plugin'] !== undefined) {
+  const pluginId = parsed.values['authorization-plugin']
+  const decision = parsed.values['authorization-decision']
+  if (decision !== undefined && !['allow', 'allow-once', 'deny'].includes(decision)) {
+    throw new Error(`unknown authorization decision: ${decision}`)
+  }
+  const opened = await evaluateByValue(`(async () => {
+    const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+    const runtime = globalThis.__cordisxRuntime
+    if (runtime === undefined) throw new Error('CordisX runtime is unavailable')
+    document.querySelector('[data-permission-authorization] [data-authorization-decision="cancel"]')?.click()
+    document.querySelector('.cxm-close')?.click()
+    await runtime.setPluginBlocked(${JSON.stringify(pluginId)}, true)
+    document.querySelector('[data-cordisx-manager-trigger]')?.click()
+    document.querySelector('[data-tab="plugins"]')?.click()
+    document.querySelector('[data-plugin-id=${JSON.stringify(pluginId)}]')?.click()
+    document.querySelector('[data-plugin-detail-tab="runtime"]')?.click()
+    document.querySelector('.cxm-plugin-runtime-action')?.click()
+    await wait(180)
+    const dialog = document.querySelector('[data-permission-authorization=${JSON.stringify(pluginId)}]')
+    const rect = dialog?.getBoundingClientRect()
+    const items = [...(dialog?.querySelectorAll('[role="listitem"]') ?? [])]
+    const primary = dialog?.querySelector('[data-authorization-decision="allow"]')
+    return rect === undefined ? null : {
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      title: dialog.querySelector('h2')?.textContent ?? null,
+      headings: dialog.querySelectorAll('h2').length,
+      titleOccurrences: (dialog.textContent?.match(/启用授权/g) ?? []).length,
+      flat: dialog.querySelector('.cxm-slot-card') === null && items.every(item => item.querySelector('[role="listitem"]') === null),
+      primary: primary?.textContent ?? null,
+      primaryFocused: document.activeElement === primary,
+      colorScheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+      items: items.map(item => ({
+        capability: item.getAttribute('data-authorization-capability'),
+        text: item.textContent?.trim() ?? '',
+        checked: item.querySelector('input')?.checked ?? null,
+        disabled: item.querySelector('input')?.disabled ?? null,
+      })),
+    }
+  })()`, true)
+  if (opened?.rect === undefined) throw new Error(`authorization dialog did not open for ${pluginId}`)
+  if (parsed.values['authorization-screenshot'] !== undefined) {
+    await capture(opened.rect, parsed.values['authorization-screenshot'], 'CordisX authorization dialog')
+  }
+  let completed
+  if (decision !== undefined) {
+    if (parsed.values['authorization-decline-optional']) {
+      const optionalRect = await evaluateByValue(`(() => {
+        const choice = [...document.querySelectorAll('[data-permission-authorization=${JSON.stringify(pluginId)}] [data-authorization-choice]')]
+          .find(item => !item.disabled)
+        const rect = choice?.getBoundingClientRect()
+        return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+      })()`)
+      if (optionalRect === null) throw new Error('authorization dialog has no optional capability choice')
+      await pointerClick(optionalRect)
+    }
+    const actionRect = await evaluateByValue(`(() => {
+      const action = document.querySelector('[data-permission-authorization=${JSON.stringify(pluginId)}] [data-authorization-decision=${JSON.stringify(decision)}]')
+      const rect = action?.getBoundingClientRect()
+      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    })()`)
+    if (actionRect === null) throw new Error(`authorization action is unavailable: ${decision}`)
+    await pointerClick(actionRect)
+    await new Promise(resolve => setTimeout(resolve, 400))
+    completed = await evaluateByValue(`(() => {
+      const snapshot = globalThis.__cordisxRuntime.snapshot()
+      return {
+        dialogPresent: document.querySelector('[data-permission-authorization=${JSON.stringify(pluginId)}]') !== null,
+        plugin: snapshot.plugins.find(item => item.id === ${JSON.stringify(pluginId)}) ?? null,
+        permissions: snapshot.permissions.filter(item => item.identity.id === ${JSON.stringify(pluginId)}).map(item => ({
+          capability: item.capability, required: item.required, policy: item.policy,
+        })),
+        browserPolicies: localStorage.getItem('cordisx.platform.permissionPolicies.v2'),
+      }
+    })()`)
+  }
+  authorizationReport = { pluginId, opened, decision: decision ?? null, completed: completed ?? null }
+  console.log(`authorization=${JSON.stringify(authorizationReport, null, 2)}`)
+}
+
 if (parsed.values['manager-screenshot'] !== undefined) {
   const managerTab = parsed.values['manager-tab'] ?? 'plugins'
   if (!['about', 'extension-points', 'routes', 'plugins', 'marketplace', 'settings'].includes(managerTab)) throw new Error(`unknown manager tab: ${managerTab}`)
@@ -1872,6 +1962,7 @@ if (parsed.values.report !== undefined) {
     ...(configExerciseReport === undefined ? {} : { pluginConfiguration: configExerciseReport }),
     ...(demoReport === undefined ? {} : { agentTraceDemo: demoReport }),
     ...(pluginLifecycleReport === undefined ? {} : { pluginLifecycle: pluginLifecycleReport }),
+    ...(authorizationReport === undefined ? {} : { authorization: authorizationReport }),
     ...(uiCatalogReport === undefined ? {} : { uiCatalog: uiCatalogReport }),
     ...(generationReport === undefined ? {} : { generation: generationReport }),
   }

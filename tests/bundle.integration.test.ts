@@ -834,6 +834,8 @@ describe('renderer bundle', () => {
     expect(runtime!.snapshot().commands).toEqual([])
     expect(dom.window.document.querySelector('.cordisx-nav-row')).toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-plugin-runtime-action')?.click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    dom.window.document.querySelector<HTMLButtonElement>('[data-authorization-decision="allow"]')?.click()
     for (let attempt = 0; attempt < 20 && runtime?.snapshot().plugins[0]?.status !== 'active'; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }

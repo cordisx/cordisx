@@ -1,7 +1,12 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import {
+  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
+  CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
+} from '../packages/cli/src/contracts.js'
+import {
   installCordisXManager,
+  requestPluginAuthorization,
   type ManagerModel,
   type ManagerPermissionSnapshot,
   type ManagerSnapshot,
@@ -94,6 +99,88 @@ function openPluginTab(document: Document, pluginId: string, tab: 'permissions' 
 }
 
 describe('Platform permission presentation hierarchy', () => {
+  it('reviews required and optional declarations once with persistent allow as the primary action', async () => {
+    const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
+    const permissions = [
+      permission('models.read', { required: true, reasonText: '读取当前账号模型' }),
+      permission('turns.submit', { reasonText: '提交后续消息', policy: 'deny' }),
+    ]
+    const pending = requestPluginAuthorization(dom.window.document, { id: 'demo', name: 'Demo' }, {
+      $schema: CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
+      schemaVersion: 1,
+      planId: 'generation-1:demo',
+      operation: 'enable',
+      profileId: 'work',
+      identity: { source: identity.source, pluginId: identity.id },
+      defaultDecision: 'allow',
+      declarations: permissions.map(item => ({
+        capability: item.capability,
+        required: item.required,
+        reason: item.reason,
+        scope: item.scope,
+        policy: item.policy,
+        decisionRequired: item.policy === 'ask',
+      })),
+    }, permissions)
+    const dialog = dom.window.document.querySelector<HTMLElement>('[data-permission-authorization="demo"]')
+    expect(dialog?.querySelectorAll('h2')).toHaveLength(1)
+    expect(dialog?.textContent?.match(/启用授权/g)).toHaveLength(1)
+    expect(dialog?.querySelectorAll('[role="listitem"]')).toHaveLength(2)
+    expect(dialog?.querySelector('[data-authorization-capability="models.read"]')?.textContent).toContain('必需')
+    expect(dialog?.querySelector('[data-authorization-capability="turns.submit"]')?.textContent).toContain('可选')
+    const required = dialog?.querySelector<HTMLInputElement>('[data-authorization-choice="models.read"]')
+    const optional = dialog?.querySelector<HTMLInputElement>('[data-authorization-choice="turns.submit"]')
+    expect(required).toMatchObject({ checked: true, disabled: true })
+    expect(optional).toMatchObject({ checked: true, disabled: false })
+    expect(dialog?.querySelector('.cxm-slot-card')).toBeNull()
+    const primary = dialog?.querySelector<HTMLButtonElement>('[data-authorization-decision="allow"]')
+    expect(primary?.dataset.primary).toBe('true')
+    expect(dom.window.document.activeElement).toBe(primary)
+    optional?.click()
+    primary?.click()
+    await expect(pending).resolves.toEqual({
+      $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
+      schemaVersion: 1,
+      planId: 'generation-1:demo',
+      operation: 'enable',
+      profileId: 'work',
+      identity: { source: identity.source, pluginId: identity.id },
+      decisions: [
+        { capability: 'models.read', scope: {}, decision: 'allow' },
+        { capability: 'turns.submit', scope: {}, decision: 'deny' },
+      ],
+    })
+    dom.window.close()
+  })
+
+  it('reuses the same centralized review contract for a future installer', async () => {
+    const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
+    const modelPermission = permission('models.read', { required: true })
+    const pending = requestPluginAuthorization(dom.window.document, { id: 'demo', name: 'Demo' }, {
+      $schema: CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
+      schemaVersion: 1,
+      planId: 'generation-1:demo',
+      operation: 'install',
+      profileId: 'work',
+      identity: { source: identity.source, pluginId: identity.id },
+      defaultDecision: 'allow',
+      declarations: [{
+        capability: modelPermission.capability,
+        required: true,
+        reason: modelPermission.reason,
+        scope: modelPermission.scope,
+        policy: 'ask',
+        decisionRequired: true,
+      }],
+    }, [modelPermission])
+    const dialog = dom.window.document.querySelector<HTMLElement>('[data-permission-authorization="demo"]')
+    expect(dialog?.querySelector('h2')?.textContent).toBe('安装授权')
+    expect(dialog?.querySelector('[data-authorization-decision="allow"]')?.textContent).toBe('始终允许并安装')
+    dialog?.querySelector<HTMLButtonElement>('[data-authorization-decision="cancel"]')?.click()
+    await expect(pending).resolves.toBeUndefined()
+    dom.window.close()
+  })
+
   it('renders a concise flat list with host-owned names, icons, support state, and no engineering details', () => {
     const { dom, dispose } = install(snapshot())
     try {

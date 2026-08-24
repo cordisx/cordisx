@@ -5,7 +5,7 @@ import os from 'node:os'
 import type { ChildProcess } from 'node:child_process'
 import { resolveHostAdapter } from '../adapters/registry.js'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
-import { ensureHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
+import { ensureHomeConfig, loadHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
 import { watchAndInject } from '../launcher/cdp.js'
 import { loadConfig, type CordisXConfig } from '../launcher/config.js'
@@ -23,6 +23,8 @@ import { resolveProfileSelection } from './profiles.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
 import { createConfigBridgeHandler, type ConfigBridgeHandler } from '../launcher/config-rpc.js'
+import type { CordisXPermissionPolicyRecordV1, CordisXPluginIdentity } from '../platform-contracts.js'
+import type { PermissionPersistenceContext } from '../launcher/permission-rpc.js'
 
 const HELP = `Usage:
   cordisx [app] [profile] [--data shared|isolated] [options] [-- host-arguments...]
@@ -96,22 +98,41 @@ interface RendererComposition {
   readonly agentHistoryBridgeToken: string
   readonly configBridgeToken?: string
   readonly generation: string
+  readonly permissionBridgeToken?: string
 }
 
 async function bundle(
   config: CordisXConfig,
   stdout: (line: string) => void,
-  options: { readonly profileId?: string; readonly writable?: boolean } = {},
+  options: {
+    readonly profileId?: string
+    readonly writable?: boolean
+    readonly permission?: {
+      readonly profileId: string
+      readonly policies: readonly CordisXPermissionPolicyRecordV1[]
+      readonly persistent: boolean
+    }
+  } = {},
 ): Promise<RendererComposition> {
   const providerBridgeToken = config.providers.some(provider => provider.enabled) ? randomBytes(32).toString('hex') : undefined
   const agentHistoryBridgeToken = randomBytes(32).toString('hex')
   const configBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
+  const permissionBridgeToken = options.permission?.persistent === true ? randomBytes(32).toString('hex') : undefined
   const generation = randomBytes(16).toString('hex')
   const source = await buildRendererBundle(config, {
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
-    ...(options.profileId === undefined ? {} : { profileId: options.profileId }),
+    ...(options.permission === undefined
+      ? (options.profileId === undefined ? {} : { profileId: options.profileId })
+      : {
+          profileId: options.permission.profileId,
+          permission: {
+            profileId: options.permission.profileId,
+            policies: options.permission.policies,
+            ...(permissionBridgeToken === undefined ? {} : { bridgeToken: permissionBridgeToken }),
+          },
+        }),
     generation,
   })
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
@@ -122,6 +143,7 @@ async function bundle(
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
     generation,
+    ...(permissionBridgeToken === undefined ? {} : { permissionBridgeToken }),
   }
 }
 
@@ -144,6 +166,10 @@ function agentHistoryHost(
   })
 }
 
+function pluginIdentities(config: CordisXConfig): readonly CordisXPluginIdentity[] {
+  return config.plugins.map(plugin => ({ source: pathToFileURL(plugin.entry).href, id: plugin.id }))
+}
+
 function printPlan(plan: ResolvedLaunchPlan, stdout: (line: string) => void): void {
   stdout(JSON.stringify({ status: 'ready', plan }, null, 2))
 }
@@ -155,6 +181,7 @@ async function runInjectedHost(input: {
   readonly agentHistoryHost: CodexAgentHistoryHost
   readonly agentHistoryBridgeToken: string
   readonly configBridge?: ConfigBridgeHandler
+  readonly permissionPersistence?: PermissionPersistenceContext
   readonly executable?: string
   readonly debugPort: number
   readonly hostArgs: readonly string[]
@@ -178,6 +205,7 @@ async function runInjectedHost(input: {
     agentHistoryHost: input.agentHistoryHost,
     agentHistoryBridgeToken: input.agentHistoryBridgeToken,
     ...(input.configBridge === undefined ? {} : { configBridge: input.configBridge }),
+    ...(input.permissionPersistence === undefined ? {} : { permissionPersistence: input.permissionPersistence }),
     onStatus: message => input.stdout(`[cordisx] ${message}`),
   })
   let launched: ChildProcess | undefined
@@ -227,7 +255,10 @@ async function runDevelopment(
   const config = invocation.pluginPath === undefined
     ? await loadConfig(path.resolve(cwd, invocation.configPath ?? 'cordisx.config.json'))
     : developmentPluginConfig(invocation.pluginPath, cwd)
-  const composition = await bundle(config, stdout)
+  const composition = await bundle(config, stdout, {
+    profileId: 'development',
+    permission: { profileId: 'development', policies: [], persistent: false },
+  })
   if (invocation.options.dryRun) {
     stdout(JSON.stringify({
       status: 'ready',
@@ -347,7 +378,16 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   }
 
   const composition = await loadConfig(configPath, { profileId: selection.profileId })
-  const rendererComposition = await bundle(composition, stdout, { profileId: selection.profileId, writable: true })
+  const currentHomeConfig = await loadHomeConfig(configPath)
+  const rendererComposition = await bundle(composition, stdout, {
+    profileId: selection.profileId,
+    writable: true,
+    permission: {
+      profileId: selection.profileId,
+      policies: currentHomeConfig.permissions.filter(policy => policy.key.profileId === selection.profileId),
+      persistent: true,
+    },
+  })
   const configBridge = rendererComposition.configBridgeToken === undefined
     ? undefined
     : createConfigBridgeHandler({
@@ -357,6 +397,12 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         configPath,
         composition,
       })
+  const permissionPersistence = rendererComposition.permissionBridgeToken === undefined ? undefined : {
+    configPath,
+    profileId: selection.profileId,
+    token: rendererComposition.permissionBridgeToken,
+    identities: pluginIdentities(composition),
+  }
   if (invocation.options.attach) {
     const debugPort = invocation.options.debugPort ?? composition.codex.debugPort
     if (invocation.options.dryRun) {
@@ -372,6 +418,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         providerBridgeToken: rendererComposition.providerBridgeToken,
       }),
       ...(configBridge === undefined ? {} : { configBridge }),
+      ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
       debugPort,
       hostArgs: invocation.hostArgs,
       launcher: invocation.options,
@@ -421,6 +468,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       providerBridgeToken: rendererComposition.providerBridgeToken,
     }),
     ...(configBridge === undefined ? {} : { configBridge }),
+    ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
     executable: plan.executable,
     debugPort,
     hostArgs: invocation.hostArgs,

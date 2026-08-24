@@ -9,12 +9,20 @@ export const manifest = {
   schemaVersion: 1,
   id: 'platform-required',
   name: 'Platform Required Fixture',
-  capabilities: [{
-    name: 'models.read',
-    required: true,
-    reason: { key: 'permission.required', fallback: 'Models are required for this fixture' },
-    scope: {},
-  }],
+  capabilities: [
+    {
+      name: 'models.read',
+      required: true,
+      reason: { key: 'permission.required', fallback: 'Models are required for this fixture' },
+      scope: {},
+    },
+    {
+      name: 'tasks.catalog.read',
+      required: false,
+      reason: { key: 'permission.optional', fallback: 'Task catalog access is optional for this fixture' },
+      scope: {},
+    },
+  ],
 } as const satisfies CordisXPluginManifestV1
 
 export function apply(ctx: Context): void {

@@ -3,6 +3,12 @@ import type { CordisXLocalizedText } from './contracts.js'
 
 export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v1.schema.json'
+export const CORDISX_PERMISSION_POLICY_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v1.schema.json'
+export const CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-plan.v1.schema.json'
+export const CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v1.schema.json'
 
 export const CORDISX_PLATFORM_CAPABILITIES = [
   'models.read',
@@ -23,6 +29,7 @@ export const CORDISX_PLATFORM_CAPABILITIES = [
 
 export type CordisXPlatformCapability = typeof CORDISX_PLATFORM_CAPABILITIES[number]
 export type CordisXPermissionPolicy = 'ask' | 'deny' | 'allow'
+export type CordisXPermissionDecision = CordisXPermissionPolicy | 'allow-once'
 
 /** Host-bound identity. Plugin calls never supply or override this value. */
 export interface CordisXPluginIdentity {
@@ -43,6 +50,62 @@ export interface CordisXCapabilityDeclaration {
   readonly required: boolean
   readonly reason: CordisXLocalizedText
   readonly scope: CordisXCapabilityScope
+}
+
+export interface CordisXPermissionIdentityV1 {
+  readonly source: string
+  readonly pluginId: string
+}
+
+export interface CordisXPermissionAuthorizationKeyV1 {
+  readonly profileId: string
+  readonly identity: CordisXPermissionIdentityV1
+  readonly capability: CordisXPlatformCapability
+  readonly scope: CordisXCapabilityScope
+}
+
+/** Launcher-owned durable policy. `allow-once` is intentionally absent. */
+export interface CordisXPermissionPolicyRecordV1 {
+  readonly $schema: typeof CORDISX_PERMISSION_POLICY_SCHEMA_V1
+  readonly schemaVersion: 1
+  readonly key: CordisXPermissionAuthorizationKeyV1
+  readonly policy: CordisXPermissionPolicy
+}
+
+export interface CordisXPermissionAuthorizationItemV1 {
+  readonly capability: CordisXPlatformCapability
+  readonly required: boolean
+  readonly reason: CordisXLocalizedText
+  readonly scope: CordisXCapabilityScope
+  readonly policy: CordisXPermissionPolicy
+  readonly decisionRequired: boolean
+}
+
+export interface CordisXPermissionAuthorizationPlanV1 {
+  readonly $schema: typeof CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1
+  readonly schemaVersion: 1
+  readonly planId: string
+  readonly operation: 'install' | 'enable'
+  readonly profileId: string
+  readonly identity: CordisXPermissionIdentityV1
+  readonly defaultDecision: 'allow'
+  readonly declarations: readonly CordisXPermissionAuthorizationItemV1[]
+}
+
+export interface CordisXPermissionAuthorizationDecisionItemV1 {
+  readonly capability: CordisXPlatformCapability
+  readonly scope: CordisXCapabilityScope
+  readonly decision: CordisXPermissionDecision
+}
+
+export interface CordisXPermissionAuthorizationDecisionV1 {
+  readonly $schema: typeof CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1
+  readonly schemaVersion: 1
+  readonly planId: string
+  readonly operation: 'install' | 'enable'
+  readonly profileId: string
+  readonly identity: CordisXPermissionIdentityV1
+  readonly decisions: readonly CordisXPermissionAuthorizationDecisionItemV1[]
 }
 
 export interface CordisXPluginManifestV1 {
