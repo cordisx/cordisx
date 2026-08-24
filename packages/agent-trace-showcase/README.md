@@ -27,7 +27,7 @@ the current adapter capability and data completeness. A projected or forwarded
 record is never described as model-consumed unless the public event contract
 provides proof.
 
-## Fixture and live modes
+## Fixture, live, and historical modes
 
 Fixture mode uses one centralized deterministic provider. It can demonstrate
 the complete Timeline interaction and permission states without reading or
@@ -38,6 +38,21 @@ Live mode reads only the public, session-scoped Agent event ledger. It can show
 partial history when the Host has a public ledger but the current Codex
 connection cannot forward Agent messages. It never falls back to a raw bridge,
 private adapter store, DOM selector, or parallel trace ledger.
+
+Historical mode asks the Host's brokered `agent.history.read` service to
+project the selected Codex session's local JSONL into the same Timeline. The
+plugin and renderer receive neither filesystem access nor a raw path. Imported
+rows are labeled `historical/imported`, use stable opaque provenance, page at
+most 500 records, and merge with overlapping live observations without
+duplication. Tail updates remain incremental, so an older conversation can
+continue into the current live window.
+
+History is evidence-limited. It may prove message, tool, content, timing,
+session/turn, and compaction facts found in the source JSONL. It never creates
+permission decisions, CordisX delivery or prompt-contribution stages,
+successful forwarding, or model-consumption claims. Corrupt or truncated
+lines and incomplete indexing appear as partial coverage diagnostics rather
+than synthetic events.
 
 The plugin is development-only and opt-in. CordisX setup continues to create an
 empty `plugins: []` configuration.
@@ -61,10 +76,11 @@ disposal clean up the entry, route, subscriptions, and pending contributions.
 
 ## Permissions and honest availability
 
-Live mode declares four optional capabilities, all enforced by the Host
+Live and historical modes declare five optional capabilities, all enforced by the Host
 Permission Broker:
 
 - `agent.events.read`;
+- `agent.history.read`;
 - `agent.messages.append`;
 - `agent.prompt.section`;
 - `agent.prompt.context`.
@@ -74,9 +90,17 @@ or implement a private permission prompt. If ledger access is denied or fails,
 the live controls are disabled because their result could not be audited.
 
 When the Host reports `current-connection-client-unavailable`, the page remains
-honestly partial. A user-triggered delivery may be recorded as requested,
+honestly partial while imported history can still remain available. A
+user-triggered delivery may be recorded as requested,
 permission-checked, queued, and then failed. That validates the public control
 and ledger path, not successful Codex forwarding and not model consumption.
+
+History payloads default to summarized projection. Inline content is still
+redacted and bounded by the Host; secrets, raw local paths, tool arguments,
+tool results, diffs, instructions, encrypted blobs, and unrequested bodies are
+not sent to the renderer. Provider/profile/session scope is matched exactly and
+fails closed on denial, mismatch, symlinks, source replacement, or stale plugin
+generation.
 
 Architecture, contract mapping, lifecycle, and validation boundaries are
 documented in the
