@@ -1,68 +1,77 @@
 # CordisX Agent Trace Showcase
 
-Development-only CordisX plugin for validating the public Agent injection and
-session event-ledger contract through a session-scoped Timeline.
+Agent Trace Showcase is a development and validation plugin for inspecting how
+a CordisX Agent session evolves. It opens a session-scoped Timeline from the
+current Codex conversation header without replacing the conversation, changing
+the app URL, or taking ownership of Codex UI nodes.
 
-The package is intentionally independent from CordisX core. It uses structured
-host surfaces and the `session.content` page outlet; CordisX never imports the
-plugin. The default launcher/setup configuration does not enable it.
+## Timeline
 
-Current stacked state:
+The Timeline groups records by turn and step and projects four lanes:
 
-- fixture UI and a deterministic typed fake are allowed;
-- fixture operations never touch a real conversation;
-- merged Agent protocol
-  `cordisx-protocol@08dcdc11aae38ea9c0e91e4ad17cf31b8c756747` supplies
-  `cordisx.agent-events/v2`, `cordisx.agent-delivery/v1`, and the reference
-  `test-vectors/agent-events-v2/valid/control-and-contributions.json` fixture;
-- merged host `e0929a0ca7bc0e0b5f32c1c4f1b0f487928f0dc4` supplies the public
-  Agent ledger, fenced delivery handles/clear, pre-step, and prompt disposables;
-- current Codex observations still report partial/unavailable when the private
-  current-connection seat is absent; user-triggered deliveries then retain the
-  Host's real failed terminal events and are never called model-consumed;
-- the current-session entry contribution uses catalog v2 and the public
-  `ctx.slots.register` service from merged host
-  `e0929a0ca7bc0e0b5f32c1c4f1b0f487928f0dc4`; the host renders the unique
-  native session-header seat;
-- no raw Electron, app-server, CDP, DOM-session, adapter-store, or Permission
-  Broker access is permitted.
+- **Input** for observed user input;
+- **Model** for model lifecycle and output records;
+- **Tools** for tool and command activity;
+- **Injection / Prompt** for plugin delivery and prompt contributions.
 
-See
-[`../../.agents/docs/agent-trace-showcase.md`](../../.agents/docs/agent-trace-showcase.md)
-for product behavior, dependency mapping, lifecycle, and validation boundaries.
+Sequence and time views, search, source/type/phase filters, record details, and
+an explicit 500-row rendering boundary make larger sessions inspectable. The
+page distinguishes observed, CordisX-authored, and inferred facts and displays
+the current adapter capability and data completeness. A projected or forwarded
+record is never described as model-consumed unless the public event contract
+provides proof.
 
-Fixture mode is opt-in and requires the active native session id:
+## Fixture and live modes
 
-```json
-{
-  "entry": "./packages/agent-trace-showcase/src/index.ts",
-  "config": {
-    "mode": "fixture",
-    "sessionId": "<active-session-id>",
-    "permissionPolicy": "allow"
-  }
-}
-```
+Fixture mode uses one centralized deterministic provider. It can demonstrate
+the complete Timeline interaction and permission states without reading or
+modifying a real conversation. Fixture rows are visibly labeled and cannot be
+mistaken for live Agent events.
 
-The fixture exposes six explicit page controls and never runs one on plugin
-activation or page mount. Its host-rendered `session.header.actions` entry
-opens the registered route for the explicitly configured fixture session; it
-accepts only the immutable host-owned invocation context and rejects direct or
-plugin-spoofed identity.
+Live mode reads only the public, session-scoped Agent event ledger. It can show
+partial history when the Host has a public ledger but the current Codex
+connection cannot forward Agent messages. It never falls back to a raw bridge,
+private adapter store, DOM selector, or parallel trace ledger.
 
-Live mode binds the route and every public Agent operation to the host-issued
-current session key:
+The plugin is development-only and opt-in. CordisX setup continues to create an
+empty `plugins: []` configuration.
 
-```json
-{
-  "entry": "./packages/agent-trace-showcase/src/index.ts",
-  "config": { "mode": "live" }
-}
-```
+## Explicit Agent demonstrations
 
-It requests optional `agent.events.read`, `agent.messages.append`,
-`agent.prompt.section`, and `agent.prompt.context` through the manifest and
-Permission Broker. Every operation requires an explicit page click; cancel,
-clear, page close, block, and generation disposal use only the public fenced
-handle or contribution disposable. It never reads a raw bridge or writes a
-parallel trace event.
+Nothing is injected when the plugin loads, the page opens, or the session
+changes. Each operation requires a visible user click:
+
+- **Followup** queues a waking message for the next turn;
+- **Steer** queues a waking message for the next step;
+- **Inject** queues a non-waking message for the next step;
+- **Pre-step append** registers a one-shot, source-attributed append handler;
+- **Prompt section** registers a named system-prompt section;
+- **Prompt context** registers session-scoped system-prompt context.
+
+Queued deliveries use owner- and generation-fenced public handles for cancel
+and `clearPending`. Pre-step and prompt contributions are removed through their
+public disposables. Page close, plugin block, generation replacement, and fiber
+disposal clean up the entry, route, subscriptions, and pending contributions.
+
+## Permissions and honest availability
+
+Live mode declares four optional capabilities, all enforced by the Host
+Permission Broker:
+
+- `agent.events.read`;
+- `agent.messages.append`;
+- `agent.prompt.section`;
+- `agent.prompt.context`.
+
+Allow, ask, and deny remain Host decisions; the plugin does not persist grants
+or implement a private permission prompt. If ledger access is denied or fails,
+the live controls are disabled because their result could not be audited.
+
+When the Host reports `current-connection-client-unavailable`, the page remains
+honestly partial. A user-triggered delivery may be recorded as requested,
+permission-checked, queued, and then failed. That validates the public control
+and ledger path, not successful Codex forwarding and not model consumption.
+
+Architecture, contract mapping, lifecycle, and validation boundaries are
+documented in the
+[Agent Trace Showcase design](https://github.com/cordisx/cordisx/blob/main/.agents/docs/agent-trace-showcase.md).
