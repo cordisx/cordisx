@@ -30,12 +30,14 @@ import {
   OFFICIAL_MARKETPLACE_SOURCE,
   normalizeMarketplaceSource,
   projectMarketplacePlugin,
-  projectMarketplaceSourceName,
+  projectMarketplaceSource,
   searchMarketplaceCatalog,
   type MarketplaceCatalogEligibility,
   type MarketplaceCatalogPlugin,
   type MarketplaceFetcher,
   type MarketplaceModel,
+  type MarketplaceSourceRecord,
+  type MarketplaceSourceSnapshot,
   type MarketplaceStorage,
 } from './marketplace.js'
 import { renderSafeMarkdown } from './markdown.js'
@@ -85,6 +87,7 @@ import { BrowserPermissionAuthorizationDialog } from './permission-authorization
 import { managerCopy, productLocale } from './ui-copy.js'
 import { sortManagerSettingsNavigationItems } from './manager-settings-navigation.js'
 import type { MarketplaceRankingExplanation } from './marketplace-ranking.js'
+import { createHostCollection, HOST_COLLECTION_STYLES, type HostCollectionItem, type HostCollectionView } from './host-collection.js'
 import lunaConsoleCss from 'luna-console/luna-console.css'
 import lunaDataGridCss from 'luna-data-grid/luna-data-grid.css'
 import lunaDomViewerCss from 'luna-dom-viewer/luna-dom-viewer.css'
@@ -240,12 +243,14 @@ type ManagerTab = 'about' | 'extension-points' | 'routes' | 'plugins' | 'marketp
 type PluginDetailTab = 'readme' | 'config' | 'permissions' | 'runtime' | 'extension-points' | 'routes'
 type ExtensionPointDetailTab = 'usage' | 'information' | 'diagnostics'
 type MarketplaceDetailTab = 'overview' | 'authors-source'
+type MarketplaceSourcePage = 'index' | 'create' | 'edit'
 type LocalTabIcon = ManagerIconToken
 type ManagerRouteState =
   | { readonly kind: 'primary'; readonly primary: ManagerTab }
   | { readonly kind: 'plugin'; readonly pluginId: string; readonly facet: PluginDetailTab }
   | { readonly kind: 'permission'; readonly pluginId: string; readonly capability: CordisXPlatformCapability }
   | { readonly kind: 'marketplace'; readonly identity: string; readonly facet: MarketplaceDetailTab }
+  | { readonly kind: 'marketplace-source'; readonly page: MarketplaceSourcePage; readonly url?: string }
   | { readonly kind: 'extension-point'; readonly pointId: string; readonly facet: ExtensionPointDetailTab }
   | { readonly kind: 'route'; readonly qualifiedId: string }
   /** Legacy route state is normalized to Plugins; no global Settings page is mounted. */
@@ -631,6 +636,16 @@ const MANAGER_STYLES = `
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
   }
+  .cxm-content[data-marketplace-discovery="true"] { overflow: hidden; }
+  .cxm-marketplace-discovery { display: flex; min-width: 0; min-height: 0; height: 100%; flex-direction: column; }
+  .cxm-marketplace-discovery-tools { flex: 0 0 auto; }
+  .cxm-marketplace-filter-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+  .cxm-marketplace-results { min-width: 0; min-height: 0; flex: 1 1 auto; margin: 12px -8px -24px; padding: 0 8px 24px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .cxm-marketplace-source-page { min-width: 0; }
+  .cxm-marketplace-source-page .cxf-form { inline-size: 100%; max-inline-size: none; margin-inline: 0; }
+  .cxm-marketplace-source-page .cxf-form-grid { inline-size: 100%; }
+  .cxm-marketplace-source-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 12px; }
+  .cxm-marketplace-source-readonly { overflow-wrap: anywhere; color: var(--cx-muted); font: 11px/1.5 ui-monospace, monospace; user-select: text; }
   .cxm-tabs {
     display: flex;
     gap: 5px;
@@ -828,11 +843,11 @@ const MANAGER_STYLES = `
     justify-content: center;
     gap: 6px;
     min-width: max-content;
-    height: 38px;
+    min-height: 28px;
     box-sizing: border-box;
-    padding: 0 11px;
+    padding: 4px 9px;
     border: 1px solid rgba(255, 255, 255, .1);
-    border-radius: 9px;
+    border-radius: 999px;
     background: rgba(255, 255, 255, .045);
     color: #aab2c0;
     cursor: pointer;
@@ -863,7 +878,7 @@ const MANAGER_STYLES = `
   }
   .cxm-search:focus, .cxm-source-input:focus { border-color: rgba(199, 204, 212, .65); }
   .cxm-search:focus-visible, .cxm-source-input:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
-  .cxm-plugin-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+  .cxm-plugin-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 8px; margin-top: 12px; }
   .cxm-plugin-row {
     container-type: inline-size;
     display: flex;
@@ -1103,15 +1118,11 @@ const MANAGER_STYLES = `
   .cxm-link-row-copy { min-width: 0; }
   .cxm-link-row-title { color: #d8dce3; font-size: 11px; font-weight: 650; }
   .cxm-link-row-value { display: block; margin-top: 3px; overflow-wrap: anywhere; color: #778295; font: 10px/1.4 ui-monospace, monospace; }
-  .cxm-source-form { display: flex; gap: 8px; margin-top: 16px; }
   .cxm-source-list { display: grid; gap: 8px; margin-top: 14px; }
   .cxm-source-row { display: flex; align-items: center; gap: 10px; padding: 11px; }
-  .cxm-source-index { display: grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: 7px; background: rgba(199, 204, 212, .11); color: #d8dce3; font-size: 10px; font-weight: 700; }
   .cxm-source-body { min-width: 0; flex: 1; }
   .cxm-source-url { display: block; overflow: hidden; color: #c6ccd8; font: 10px/1.35 ui-monospace, monospace; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
-  a.cxm-source-url:hover { color: #fff; text-decoration: underline; }
   .cxm-source-state { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: #737e90; font-size: 10px; }
-  .cxm-source-actions { display: flex; flex: none; gap: 5px; }
   .cxm-mini-action { padding: 5px 7px; border: 1px solid rgba(255, 255, 255, .09); border-radius: 7px; background: transparent; color: #99a2b2; cursor: pointer; font: 10px/1.2 system-ui, sans-serif; }
   .cxm-mini-action:hover:not(:disabled) { color: #fff; border-color: rgba(199, 204, 212, .4); }
   .cxm-mini-action:disabled { cursor: default; opacity: .35; }
@@ -1809,7 +1820,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   document.getElementById(MANAGER_STYLE_ID)?.remove()
   const style = create(document, 'style')
   style.id = MANAGER_STYLE_ID
-  style.textContent = `${lunaObjectViewerCss}\n${lunaDataGridCss}\n${lunaDomViewerCss}\n${lunaConsoleCss}\n${MANAGER_STYLES}\n${HOST_THEME_OVERLAY_STYLES}`
+  style.textContent = `${lunaObjectViewerCss}\n${lunaDataGridCss}\n${lunaDomViewerCss}\n${lunaConsoleCss}\n${HOST_COLLECTION_STYLES}\n${MANAGER_STYLES}\n${HOST_THEME_OVERLAY_STYLES}`
   ;(document.head ?? document.documentElement).append(style)
 
   const trigger = create(document, 'button')
@@ -1955,7 +1966,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     message?: string
   }>()
   let sourceOperationError: string | undefined
+  let sourceOperationNotice: string | undefined
   let sourcesBusy = false
+  let sourceQuery = ''
+  let marketplaceCollectionView: HostCollectionView | undefined
   const lifecycleBusy = new Map<string, ManagerPluginStatus>()
   let lifecycleInstallBusy = false
   const configRendererMounts = new Set<ConfigRendererMountHandle>()
@@ -2372,7 +2386,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (route.kind === 'plugin' || route.kind === 'permission') return 'plugins'
     if (route.kind === 'extension-point') return 'extension-points'
     if (route.kind === 'route') return 'routes'
-    if (route.kind === 'marketplace') return 'marketplace'
+    if (route.kind === 'marketplace' || route.kind === 'marketplace-source') return 'marketplace'
     return 'plugins'
   }
 
@@ -2481,6 +2495,40 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         ],
       }
     }
+    if (route.kind === 'marketplace-source') {
+      const source = route.url === undefined
+        ? undefined
+        : marketplace.snapshot().sourceStates.find(item => item.url === route.url)
+      const projection = source === undefined ? undefined : projectMarketplaceSource(source, snapshot.localization.locale)
+      const sourceRoot: ManagerBreadcrumbSegment = {
+        id: 'marketplace-sources',
+        label: '商店来源',
+        target: { kind: 'marketplace-source', page: 'index' },
+      }
+      if (route.page === 'index') {
+        return {
+          id: 'marketplace-sources',
+          primary,
+          segments: [root('marketplace'), { id: sourceRoot.id, label: sourceRoot.label }],
+        }
+      }
+      if (route.page === 'create') {
+        return {
+          id: 'marketplace-source:create',
+          primary,
+          segments: [root('marketplace'), sourceRoot, { id: 'marketplace-source:create', label: '新增来源' }],
+        }
+      }
+      return {
+        id: `marketplace-source:edit:${route.url ?? ''}`,
+        primary,
+        segments: [
+          root('marketplace'),
+          sourceRoot,
+          { id: `marketplace-source:edit:${route.url ?? ''}`, label: projection?.name ?? '来源详情' },
+        ],
+      }
+    }
     if (route.kind === 'manager-content') {
       const item = settingsNavigationItems(snapshot).find(candidate => candidate.id === route.id)
       return {
@@ -2515,6 +2563,15 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const marketplaceSnapshot = marketplace.snapshot()
       if (!marketplaceSnapshot.loading && !marketplaceSnapshot.plugins.some(item => item.identity === candidate.identity)) {
         return { kind: 'primary', primary: 'marketplace' }
+      }
+    }
+    if (candidate.kind === 'marketplace-source') {
+      if (candidate.page === 'edit') {
+        if (candidate.url === undefined || !marketplace.snapshot().sourceRecords.some(item => item.url === candidate.url)) {
+          return { kind: 'marketplace-source', page: 'index' }
+        }
+      } else if (candidate.url !== undefined) {
+        return { kind: 'marketplace-source', page: candidate.page }
       }
     }
     if (candidate.kind === 'settings') return { kind: 'primary', primary: 'plugins' }
@@ -4598,12 +4655,130 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     return badge
   }
 
+  type ManagerActionMenuItem = {
+    readonly id: string
+    readonly label: string
+    readonly icon: ManagerIconToken
+    readonly disabled?: boolean
+    readonly invoke: () => void | Promise<void>
+  }
+
+  const openManagerActionMenu = (
+    trigger: HTMLButtonElement,
+    label: string,
+    items: readonly ManagerActionMenuItem[],
+  ): void => {
+    closePluginActionMenu(false)
+    tooltips.hide()
+    const popup = create(document, 'div', 'cxm-plugin-menu-popup')
+    popup.dataset.managerActionMenu = label
+    popup.setAttribute('role', 'menu')
+    popup.setAttribute('aria-label', label)
+    for (const item of items) {
+      const action = create(document, 'button', 'cxm-plugin-menu-item')
+      action.type = 'button'
+      action.dataset.managerMenuAction = item.id
+      action.setAttribute('role', 'menuitem')
+      action.disabled = item.disabled === true
+      action.append(createManagerIcon(document, item.icon), create(document, 'span', undefined, item.label))
+      action.addEventListener('click', () => {
+        closePluginActionMenu(false)
+        void item.invoke()
+      })
+      popup.append(action)
+    }
+    const unmount = mountPortal(popup)
+    trigger.setAttribute('aria-expanded', 'true')
+    const closeMenu = (restoreFocus = false): void => {
+      pluginActionMenuOpen = false
+      pluginActionMenuContainsEvent = () => false
+      repositionPluginActionMenu = () => {}
+      trigger.setAttribute('aria-expanded', 'false')
+      unmount()
+      if (closePluginActionMenu === closeMenu) closePluginActionMenu = () => {}
+      if (restoreFocus && trigger.isConnected) trigger.focus()
+    }
+    const enabledItems = (): HTMLButtonElement[] => [...popup.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
+    const positionMenu = (): void => {
+      if (!popup.isConnected || !trigger.isConnected) return closeMenu(false)
+      const triggerRect = trigger.getBoundingClientRect()
+      const popupRect = popup.getBoundingClientRect()
+      const view = document.defaultView
+      const edge = 8
+      const left = Math.min(
+        Math.max(edge, triggerRect.right - popupRect.width),
+        Math.max(edge, (view?.innerWidth ?? document.documentElement.clientWidth) - popupRect.width - edge),
+      )
+      const below = triggerRect.bottom + 6
+      const top = below + popupRect.height <= (view?.innerHeight ?? document.documentElement.clientHeight) - edge
+        ? below
+        : Math.max(edge, triggerRect.top - popupRect.height - 6)
+      popup.style.left = `${Math.round(left)}px`
+      popup.style.top = `${Math.round(top)}px`
+    }
+    popup.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        closeMenu(true)
+        return
+      }
+      const enabled = enabledItems()
+      const current = enabled.indexOf(document.activeElement as HTMLButtonElement)
+      const next = event.key === 'ArrowDown'
+        ? enabled[(current + 1 + enabled.length) % enabled.length]
+        : event.key === 'ArrowUp'
+          ? enabled[(current - 1 + enabled.length) % enabled.length]
+          : event.key === 'Home' ? enabled[0] : event.key === 'End' ? enabled.at(-1) : undefined
+      if (next === undefined) return
+      event.preventDefault()
+      event.stopPropagation()
+      next.focus()
+    })
+    closePluginActionMenu = closeMenu
+    pluginActionMenuOpen = true
+    pluginActionMenuContainsEvent = event => event.composedPath().some(item => item === popup || item === trigger)
+    repositionPluginActionMenu = positionMenu
+    positionMenu()
+    enabledItems()[0]?.focus()
+  }
+
+  const sourceMenuItems = (): readonly ManagerActionMenuItem[] => [
+    {
+      id: 'create', label: '新增商店来源', icon: 'marketplace-source-add',
+      invoke: () => navigateRoute({ kind: 'marketplace-source', page: 'create' }),
+    },
+    {
+      id: 'clipboard', label: '从剪贴板导入', icon: 'marketplace-source-copy',
+      invoke: () => importMarketplaceSourceFromClipboard(),
+    },
+    {
+      id: 'manage', label: '管理商店来源', icon: 'marketplace-source-edit',
+      invoke: () => navigateRoute({ kind: 'marketplace-source', page: 'index' }),
+    },
+  ]
+
   const renderMarketplaceList = (managerSnapshot: ManagerSnapshot): void => {
     const snapshot = marketplace.snapshot()
-    setHeading('浏览插件商店', managerSnapshot, { icon: 'marketplace' })
-    content.append(documentationLink('查看插件商店文档', PRODUCT_DOCUMENTATION.marketplace))
+    setHeading('发现适用于 CordisX 的插件', managerSnapshot, { icon: 'marketplace' })
+    content.dataset.marketplaceDiscovery = 'true'
+    const page = create(document, 'section', 'cxm-marketplace-discovery')
+    page.dataset.marketplaceDiscoveryPage = 'true'
+    const tools = create(document, 'div', 'cxm-marketplace-discovery-tools')
     const toolbar = create(document, 'div', 'cxm-toolbar')
     const search = createListSearch('marketplace', '搜索 CordisX 插件商店', '搜索商店插件、作者、关键词或来源…', marketplaceQuery, value => { marketplaceQuery = value })
+    const sourceMenu = managerIconAction('marketplace-source-add', '新增或管理商店来源', {
+      className: 'cxm-toolbar-icon-action',
+      description: '新增来源、从剪贴板导入或管理现有来源',
+    })
+    sourceMenu.dataset.marketplaceSourceMenu = 'true'
+    sourceMenu.setAttribute('aria-haspopup', 'menu')
+    sourceMenu.setAttribute('aria-expanded', 'false')
+    sourceMenu.addEventListener('click', event => {
+      event.stopPropagation()
+      if (sourceMenu.getAttribute('aria-expanded') === 'true') closePluginActionMenu(true)
+      else openManagerActionMenu(sourceMenu, '商店来源操作', sourceMenuItems())
+    })
     const certifiedFilter = create(document, 'button', 'cxm-marketplace-filter')
     certifiedFilter.type = 'button'
     certifiedFilter.dataset.marketplaceCertifiedOnly = 'true'
@@ -4624,9 +4799,15 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       certifiedOnly: marketplaceCertifiedOnly,
       ...(model.marketplaceEligibility === undefined ? {} : { eligibility: plugin => model.marketplaceEligibility!(plugin) }),
     })
-    toolbar.append(search, certifiedFilter)
-    content.append(toolbar)
+    toolbar.append(search, sourceMenu)
+    const filters = create(document, 'div', 'cxm-marketplace-filter-row')
+    filters.setAttribute('aria-label', '插件商店筛选')
+    filters.append(certifiedFilter)
+    tools.append(toolbar, filters)
+    page.append(tools)
 
+    const results = create(document, 'div', 'cxm-marketplace-results')
+    results.dataset.marketplaceResultsScroll = 'true'
     const list = create(document, 'div', 'cxm-plugin-list')
     list.setAttribute('role', 'list')
     list.setAttribute('aria-label', '插件商店列表')
@@ -4681,7 +4862,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       row.append(primary)
       list.append(row)
     }
-    content.append(list)
+    results.append(list)
+    page.append(results)
+    content.append(page)
   }
 
   const renderMarketplaceDetail = (managerSnapshot: ManagerSnapshot, identityValue: string): void => {
@@ -4794,129 +4977,289 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     content.append(panel)
   }
 
-  const commitSources = async (sources: readonly string[]): Promise<void> => {
+  const marketplaceSourceState = (
+    record: MarketplaceSourceRecord,
+    snapshot = marketplace.snapshot(),
+  ): MarketplaceSourceSnapshot => snapshot.sourceStates.find(item => item.url === record.url) ?? {
+    url: record.url,
+    enabled: record.enabled,
+    official: record.url === OFFICIAL_MARKETPLACE_SOURCE,
+    ...(record.local === undefined ? {} : { local: record.local }),
+    status: 'loading',
+    phase: record.enabled ? 'idle' : 'disabled',
+    stale: false,
+    revalidating: false,
+    attempts: 0,
+  }
+
+  const runMarketplaceSourceOperation = async (
+    operation: () => Promise<void>,
+    success: string,
+  ): Promise<boolean> => {
     sourcesBusy = true
     sourceOperationError = undefined
+    sourceOperationNotice = undefined
     renderContent()
     try {
-      await marketplace.setSources(sources)
+      await operation()
+      sourceOperationNotice = success
+      return true
     } catch (error) {
       sourceOperationError = error instanceof Error ? error.message : String(error)
+      return false
     } finally {
       sourcesBusy = false
       renderContent()
     }
   }
 
-  const renderMarketplaceSettings = (target: HTMLElement): void => {
-    const snapshot = marketplace.snapshot()
-    const panel = create(document, 'div', 'cxm-settings-builtin cxf-scope')
-    const intro = create(document, 'div', 'cxm-toolbar')
-    intro.append(create(document, 'p', 'cxm-copy', '管理插件商店来源。'), documentationLink('查看配置文档', PRODUCT_DOCUMENTATION.marketplace))
-    panel.append(intro)
-
-    const form = forms.form('marketplace-source')
-    const item = forms.item({ id: 'cxm-marketplace-source', label: '插件商店 JSON 地址', required: true, fullWidth: true })
-    let sourceValue = ''
-    const sourceField: CordisXConfigFieldSnapshot = {
-      namespace: 'cordisx.host', path: ['marketplaceSource'], type: 'string', role: 'url', value: '', disabled: sourcesBusy, required: true,
+  const importMarketplaceSourceFromClipboard = async (): Promise<void> => {
+    let value: string | null | undefined
+    const navigator = document.defaultView?.navigator as Navigator & { clipboard?: { readText(): Promise<string> } }
+    try {
+      value = typeof navigator?.clipboard?.readText === 'function'
+        ? await navigator.clipboard.readText()
+        : document.defaultView?.prompt('粘贴 HTTPS 地址或 marketplace-source.v1 JSON')
+    } catch {
+      sourceOperationError = '无法读取剪贴板，请允许剪贴板访问后重试。'
+      sourceOperationNotice = undefined
+      renderContent()
+      return
     }
-    const sourceControl = forms.control(sourceField, 'cxm-marketplace-source', value => {
-      sourceValue = typeof value === 'string' ? value.trim() : ''
-      item.setError(sourceValue === '' ? undefined : /^https:\/\//iu.test(sourceValue) ? undefined : '请输入 HTTPS 地址')
-    })
-    setTDesignProps(sourceControl.focusTarget as TDesignElement, { placeholder: 'https://example.com/cordisx-marketplace.json' })
-    forms.connect(item, sourceControl)
-    item.control.append(sourceControl.root)
-    const sourceSection = forms.section(
-      '商店来源',
-      '按优先级管理 Marketplace JSON 地址。',
+    if (value === undefined || value === null) return
+    const imported = await runMarketplaceSourceOperation(
+      async () => { await marketplace.importSource(value!) },
+      '已从剪贴板导入商店来源。',
     )
-    sourceSection.content.append(item.root)
-    form.append(sourceSection.root)
-    const add = forms.button('添加商店', { type: 'submit', variant: 'primary' })
-    setTDesignDisabled(add, sourcesBusy)
-    const sourceActions = create(document, 'div', 'cxf-actions')
-    sourceActions.append(add)
-    form.append(sourceActions)
-    form.addEventListener('submit', (event) => {
+    if (imported) await navigateRoute({ kind: 'marketplace-source', page: 'index' })
+  }
+
+  const renderMarketplaceSourceIndex = (managerSnapshot: ManagerSnapshot): void => {
+    const snapshot = marketplace.snapshot()
+    setHeading('查看、停用或调整插件发现来源', managerSnapshot)
+    const page = create(document, 'section', 'cxm-marketplace-source-page')
+    page.dataset.marketplaceSourcePage = 'index'
+    const toolbar = create(document, 'div', 'cxm-marketplace-source-toolbar')
+    const add = managerIconAction('marketplace-source-add', '新增商店来源', { disabled: sourcesBusy })
+    add.dataset.marketplaceSourceCreate = 'true'
+    add.addEventListener('click', () => { void navigateRoute({ kind: 'marketplace-source', page: 'create' }) })
+    const clipboard = managerIconAction('marketplace-source-copy', '从剪贴板导入', { disabled: sourcesBusy })
+    clipboard.dataset.marketplaceSourceClipboard = 'true'
+    clipboard.addEventListener('click', () => { void importMarketplaceSourceFromClipboard() })
+    toolbar.append(add, clipboard)
+    page.append(toolbar)
+    if (sourceOperationNotice !== undefined) page.append(forms.alert(sourceOperationNotice, 'info'))
+    if (sourceOperationError !== undefined) page.append(forms.alert(sourceOperationError, 'error'))
+
+    const items: HostCollectionItem[] = snapshot.sourceRecords.map((record, index) => {
+      const state = marketplaceSourceState(record, snapshot)
+      const projection = projectMarketplaceSource(state, managerSnapshot.localization.locale)
+      const status = !record.enabled
+        ? { label: '已停用', detail: '此来源已停用，不参与自动更新。', tone: 'neutral' as const }
+        : state.status === 'failed'
+          ? { label: '更新失败', detail: state.error ?? '自动更新失败，继续使用上次成功内容。', tone: 'danger' as const }
+          : state.revalidating
+            ? { label: '正在更新', detail: 'Host 正在后台更新此来源。', tone: 'progress' as const }
+            : state.stale
+              ? { label: '使用缓存', detail: '当前展示上次成功缓存，Host 会在后台重试。', tone: 'warning' as const }
+              : undefined
+      return {
+        id: record.url,
+        title: projection.name,
+        description: projection.description ?? '未提供来源说明',
+        machineId: record.url,
+        searchText: projection.searchValues,
+        icon: () => createManagerIcon(document, record.url === OFFICIAL_MARKETPLACE_SOURCE ? 'marketplace-official' : 'marketplace'),
+        ...(status === undefined ? {} : { status }),
+        openLabel: `打开 ${projection.name} 来源详情`,
+        onOpen: () => { void navigateRoute({ kind: 'marketplace-source', page: 'edit', url: record.url }) },
+        actions: [
+          {
+            id: record.enabled ? 'disable' : 'enable',
+            label: record.enabled ? '停用来源' : '启用来源',
+            icon: () => createManagerIcon(document, record.enabled ? 'disable-plugin' : 'enable-plugin'),
+            placement: 'direct',
+            disabled: sourcesBusy,
+            onInvoke: async () => {
+              await runMarketplaceSourceOperation(
+                async () => { await marketplace.setSourceEnabled(record.url, !record.enabled) },
+                record.enabled ? '已停用商店来源。' : '已启用商店来源。',
+              )
+            },
+          },
+          {
+            id: 'edit', label: '编辑本地显示信息', icon: () => createManagerIcon(document, 'marketplace-source-edit'), placement: 'overflow',
+            disabled: sourcesBusy,
+            onInvoke: () => { void navigateRoute({ kind: 'marketplace-source', page: 'edit', url: record.url }) },
+          },
+          {
+            id: 'move-up', label: '上移', icon: () => createManagerIcon(document, 'marketplace-source-move-up'), placement: 'overflow',
+            disabled: sourcesBusy || index === 0,
+            onInvoke: async () => { await runMarketplaceSourceOperation(async () => { await marketplace.moveSource(record.url, index - 1) }, '已调整来源顺序。') },
+          },
+          {
+            id: 'move-down', label: '下移', icon: () => createManagerIcon(document, 'marketplace-source-move-down'), placement: 'overflow',
+            disabled: sourcesBusy || index === snapshot.sourceRecords.length - 1,
+            onInvoke: async () => { await runMarketplaceSourceOperation(async () => { await marketplace.moveSource(record.url, index + 1) }, '已调整来源顺序。') },
+          },
+          {
+            id: 'remove', label: '移除来源', icon: () => createManagerIcon(document, 'uninstall-plugin'), placement: 'overflow', tone: 'danger',
+            disabled: sourcesBusy || record.url === OFFICIAL_MARKETPLACE_SOURCE,
+            ...(record.url === OFFICIAL_MARKETPLACE_SOURCE ? { unavailableReason: '官方来源不能删除，只能停用' } : {}),
+            onInvoke: async () => { await runMarketplaceSourceOperation(async () => { await marketplace.removeSource(record.url) }, '已移除商店来源。') },
+          },
+        ],
+      }
+    })
+    marketplaceCollectionView?.dispose()
+    marketplaceCollectionView = createHostCollection(document, {
+      id: 'marketplace-sources',
+      label: '插件商店来源',
+      layout: 'rows',
+      items,
+      search: {
+        label: '搜索商店来源',
+        placeholder: '搜索名称、说明、备注或 URL…',
+        query: sourceQuery,
+        onQueryChange: query => { sourceQuery = query },
+        icon: () => createManagerIcon(document, 'search'),
+        clearIcon: () => createManagerIcon(document, 'close'),
+      },
+      emptyLabel: '暂无商店来源',
+      noMatchesLabel: '没有匹配的商店来源',
+      moreLabel: '更多来源操作',
+      moreIcon: () => createManagerIcon(document, 'more'),
+      tooltips,
+      attachPortalTheme: portal => theme.attach(portal),
+    })
+    page.append(marketplaceCollectionView.element)
+    content.append(page)
+  }
+
+  const renderMarketplaceSourceForm = (
+    managerSnapshot: ManagerSnapshot,
+    mode: 'create' | 'edit',
+    existing?: MarketplaceSourceRecord,
+  ): void => {
+    const isCreate = mode === 'create'
+    const state = existing === undefined ? undefined : marketplaceSourceState(existing)
+    const projection = state === undefined ? undefined : projectMarketplaceSource(state, managerSnapshot.localization.locale)
+    setHeading(isCreate ? '添加新的插件发现来源' : '编辑本地显示信息与来源状态', managerSnapshot)
+    const page = create(document, 'section', 'cxm-marketplace-source-page cxf-scope')
+    page.dataset.marketplaceSourcePage = mode
+    const form = forms.form(`marketplace-source-${mode}`)
+    let urlValue = existing?.url ?? ''
+    let nameValue = existing?.local?.name ?? ''
+    let descriptionValue = existing?.local?.description ?? ''
+    let noteValue = existing?.local?.note ?? ''
+    let sourceUrlItem: ReturnType<HostFormAdapter['item']> | undefined
+    const identitySection = forms.section(
+      isCreate ? '来源地址' : projection?.name ?? '来源详情',
+      isCreate ? 'URL 是来源身份，添加后不可在本地改写。' : 'Canonical URL 是此来源的稳定身份，不会被本地显示信息覆盖。',
+    )
+    if (isCreate) {
+      const urlItem = forms.item({ id: 'cxm-marketplace-source-url', label: 'Marketplace JSON 地址', required: true, fullWidth: true })
+      sourceUrlItem = urlItem
+      const field: CordisXConfigFieldSnapshot = {
+        namespace: 'cordisx.host', path: ['marketplaceSource', 'url'], type: 'string', role: 'url', value: urlValue, disabled: sourcesBusy, required: true,
+      }
+      const control = forms.control(field, 'cxm-marketplace-source-url', value => {
+        urlValue = typeof value === 'string' ? value.trim() : ''
+        urlItem.setError(urlValue === '' || /^https:\/\//iu.test(urlValue) ? undefined : '请输入 HTTPS 插件商店地址')
+      })
+      setTDesignProps(control.focusTarget as TDesignElement, { placeholder: 'https://example.com/cordisx-marketplace.json' })
+      forms.connect(urlItem, control)
+      urlItem.control.append(control.root)
+      identitySection.content.append(urlItem.root)
+    } else {
+      const urlItem = forms.item({ id: 'cxm-marketplace-source-url-readonly', label: 'Canonical URL', fullWidth: true })
+      const value = create(document, 'div', 'cxm-marketplace-source-readonly', existing!.url)
+      value.dataset.marketplaceSourceCanonicalUrl = existing!.url
+      urlItem.control.append(value)
+      identitySection.content.append(urlItem.root)
+    }
+    form.append(identitySection.root)
+
+    const localSection = forms.section('本地显示信息', '只保存在当前 profile；不会改写远端 feed、信任记录或 canonical identity。')
+    const appendTextField = (
+      id: string,
+      label: string,
+      role: 'url' | 'textarea' | undefined,
+      value: string,
+      onChange: (value: string) => void,
+      help: string,
+    ): void => {
+      const item = forms.item({ id, label, help, fullWidth: role === 'textarea' })
+      const field: CordisXConfigFieldSnapshot = {
+        namespace: 'cordisx.host', path: ['marketplaceSource', 'local', id], type: 'string', value, disabled: sourcesBusy, required: false,
+        ...(role === undefined ? {} : { role }),
+      }
+      const control = forms.control(field, id, next => onChange(typeof next === 'string' ? next : ''))
+      forms.connect(item, control)
+      item.control.append(control.root)
+      localSection.content.append(item.root)
+    }
+    appendTextField('cxm-marketplace-source-name', '名称', undefined, nameValue, value => { nameValue = value }, '留空时使用当前语言的 feed 名称。')
+    appendTextField('cxm-marketplace-source-description', '说明', 'textarea', descriptionValue, value => { descriptionValue = value }, '说明这个来源包含什么内容。')
+    appendTextField('cxm-marketplace-source-note', '备注', 'textarea', noteValue, value => { noteValue = value }, '仅供当前 profile 管理与搜索。')
+    form.append(localSection.root)
+
+    const submit = forms.button(isCreate ? '添加来源' : '保存本地信息', { type: 'submit', variant: 'primary' })
+    setTDesignDisabled(submit, sourcesBusy)
+    const actions = create(document, 'div', 'cxf-actions')
+    actions.append(submit)
+    form.append(actions)
+    form.addEventListener('submit', event => {
       event.preventDefault()
-      try {
-        const normalized = normalizeMarketplaceSource(sourceValue)
-        if (snapshot.sources.includes(normalized)) throw new Error('这个商店地址已经配置')
-        void commitSources([...snapshot.sources, normalized])
-      } catch (error) {
-        sourceOperationError = error instanceof Error ? error.message : String(error)
-        item.setError(sourceOperationError)
+      let normalized = existing?.url
+      if (isCreate) {
+        if (urlValue === '') {
+          sourceUrlItem?.setError('请输入插件商店地址')
+          return
+        }
+        try {
+          normalized = normalizeMarketplaceSource(urlValue)
+        } catch {
+          sourceUrlItem?.setError('请输入有效的 HTTPS 插件商店地址')
+          return
+        }
+        if (marketplace.snapshot().sourceRecords.some(item => item.url === normalized)) {
+          sourceUrlItem?.setError('这个商店来源已经存在')
+          return
+        }
       }
-    })
-    panel.append(form)
-    if (sourceOperationError !== undefined) panel.append(forms.alert(sourceOperationError, 'error'))
-
-    const sourceList = create(document, 'div', 'cxm-source-list')
-    if (snapshot.sources.length === 0) sourceList.append(forms.empty('暂无插件商店。'))
-    snapshot.sources.forEach((url, index) => {
-      const state = snapshot.sourceStates[index]
-      const row = create(document, 'div', 'cxm-source-row')
-      row.append(create(document, 'span', 'cxm-source-index', String(index + 1)))
-      const body = create(document, 'div', 'cxm-source-body')
-      body.append(configureExternalLink(create(document, 'a', 'cxm-source-url', url), url))
-      const status = create(document, 'div', 'cxm-source-state')
-      const dot = create(document, 'span', 'cxm-status-dot')
-      markDecorative(dot)
-      dot.dataset.status = state?.status ?? 'loading'
-      const stateText = state?.status === 'loaded'
-        ? `${projectMarketplaceSourceName(state, model.snapshot().localization.locale) ?? '已验证 feed'} · 已加载`
-        : state?.status === 'failed' ? '加载失败' : '加载中…'
-      status.append(dot, create(document, 'span', undefined, stateText))
-      body.append(status)
-      if (state?.status === 'failed' && state.error !== undefined) {
-        const error = create(document, 'details', 'cxm-diagnostics')
-        error.append(create(document, 'summary', undefined, '查看错误详情'), create(document, 'div', 'cxm-diagnostics-body', state.error))
-        body.append(error)
+      if (normalized === undefined) return
+      const name = nameValue.trim()
+      const description = descriptionValue.trim()
+      const note = noteValue.trim()
+      const local = {
+        ...(name === '' ? {} : { name }),
+        ...(description === '' ? {} : { description }),
+        ...(note === '' ? {} : { note }),
       }
-      row.append(body)
-      const actions = create(document, 'div', 'cxm-source-actions')
-      const up = forms.button('上移')
-      setTDesignDisabled(up, index === 0 || sourcesBusy)
-      up.addEventListener('click', () => {
-        const next = [...snapshot.sources]
-        const previous = next[index - 1]
-        if (previous === undefined) return
-        next[index - 1] = url
-        next[index] = previous
-        void commitSources(next)
+      const source: MarketplaceSourceRecord = {
+        url: normalized,
+        enabled: existing?.enabled ?? true,
+        ...(Object.keys(local).length === 0 ? {} : { local }),
+      }
+      void runMarketplaceSourceOperation(
+        async () => { await marketplace.upsertSource(source) },
+        isCreate ? '已添加商店来源。' : '已保存本地显示信息。',
+      ).then(saved => {
+        if (saved) void navigateRoute({ kind: 'marketplace-source', page: 'index' })
       })
-      const down = forms.button('下移')
-      setTDesignDisabled(down, index === snapshot.sources.length - 1 || sourcesBusy)
-      down.addEventListener('click', () => {
-        const next = [...snapshot.sources]
-        const following = next[index + 1]
-        if (following === undefined) return
-        next[index + 1] = url
-        next[index] = following
-        void commitSources(next)
-      })
-      const remove = forms.button('移除', { tone: 'danger' })
-      setTDesignDisabled(remove, sourcesBusy)
-      remove.addEventListener('click', () => void commitSources(snapshot.sources.filter(item => item !== url)))
-      actions.append(up, down, remove)
-      row.append(actions)
-      sourceList.append(row)
     })
-    panel.append(sourceList)
+    page.append(form)
+    if (sourceOperationError !== undefined) page.append(forms.alert(sourceOperationError, 'error'))
+    content.append(page)
+  }
 
-    const footerActions = create(document, 'div', 'cxm-toolbar')
-    footerActions.style.marginTop = '14px'
-    const reset = forms.button('恢复官方商店')
-    setTDesignDisabled(reset, sourcesBusy || (snapshot.sources.length === 1 && snapshot.sources[0] === OFFICIAL_MARKETPLACE_SOURCE))
-    reset.addEventListener('click', () => void commitSources([OFFICIAL_MARKETPLACE_SOURCE]))
-    const reload = forms.button(snapshot.loading ? '加载中…' : '重新加载')
-    setTDesignDisabled(reload, snapshot.loading || sourcesBusy)
-    reload.addEventListener('click', () => void marketplace.reload())
-    footerActions.append(reset, reload)
-    panel.append(footerActions)
-    target.append(panel)
+  const renderMarketplaceSourcePage = (managerSnapshot: ManagerSnapshot, route: Extract<ManagerRouteState, { kind: 'marketplace-source' }>): void => {
+    if (route.page === 'index') return renderMarketplaceSourceIndex(managerSnapshot)
+    if (route.page === 'create') return renderMarketplaceSourceForm(managerSnapshot, 'create')
+    const source = marketplace.snapshot().sourceRecords.find(item => item.url === route.url)
+    if (source === undefined) return renderMarketplaceSourceIndex(managerSnapshot)
+    renderMarketplaceSourceForm(managerSnapshot, 'edit', source)
   }
 
   const settingsTabs = (snapshot: ManagerSnapshot): readonly ManagerSettingsTabSnapshot[] => (
@@ -5104,7 +5447,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (settingsPanelBody === undefined || settingsMountId === settingsTab) return
     settingsPanelBody.replaceChildren()
     settingsPanel?.removeAttribute('aria-busy')
-    if (settingsTab === 'host:marketplace') renderMarketplaceSettings(settingsPanelBody)
     if (!settingsTab.startsWith('host:')) {
       settingsPanel?.setAttribute('aria-busy', 'true')
       settingsPanelBody.append(create(document, 'div', 'cxm-notice', settingsTransitioning ? '正在切换配置页面…' : '正在加载插件配置页面…'))
@@ -5330,6 +5672,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     closePluginActionMenu(false)
     tooltips.hide()
     disposeLunaConsoles()
+    marketplaceCollectionView?.dispose()
+    marketplaceCollectionView = undefined
+    delete content.dataset.marketplaceDiscovery
     const snapshot = model.snapshot()
     const normalized = normalizeRoute(snapshot)
     const normalizedRouteChanged = routeKey(normalized) !== routeKey(routeState)
@@ -5357,6 +5702,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (routeState.kind === 'permission') return renderPermissionDetail(snapshot, routeState.pluginId, routeState.capability)
     if (routeState.kind === 'plugin') return renderPluginDetail(snapshot, routeState.pluginId)
     if (routeState.kind === 'marketplace') return renderMarketplaceDetail(snapshot, routeState.identity)
+    if (routeState.kind === 'marketplace-source') return renderMarketplaceSourcePage(snapshot, routeState)
     if (routeState.kind === 'extension-point') return renderExtensionPointDetail(snapshot, routeState.pointId)
     if (routeState.kind === 'route') return renderRouteDetail(snapshot, routeState.qualifiedId)
     if (routeState.kind === 'manager-content') return renderManagerContent(snapshot, routeState.id)
@@ -5380,6 +5726,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     closePluginActionMenu(false)
     disposeConfigRenderers()
     disposeLunaConsoles()
+    marketplaceCollectionView?.dispose()
+    marketplaceCollectionView = undefined
     settingsMount?.abort()
     if (settingsMount !== undefined || settingsMountId !== undefined) void resetSettings().catch(() => {})
     if (managerContentMount !== undefined || managerContentMountId !== undefined) void resetManagerContent().catch(() => {})
@@ -5480,6 +5828,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     breadcrumbCleanup()
     disposeConfigRenderers()
     disposeLunaConsoles()
+    marketplaceCollectionView?.dispose()
+    marketplaceCollectionView = undefined
     settingsMount?.abort()
     void stopSettingsContent().catch(() => {})
     observer?.disconnect()

@@ -47,6 +47,7 @@ import share from '@material-symbols/svg-400/rounded/share.svg'
 import starFilled from '@material-symbols/svg-400/rounded/star-fill.svg'
 import starOutline from '@material-symbols/svg-400/rounded/star.svg'
 import verticalAlignBottom from '@material-symbols/svg-400/rounded/vertical_align_bottom.svg'
+import verticalAlignTop from '@material-symbols/svg-400/rounded/vertical_align_top.svg'
 
 export const MANAGER_ICON_TOKENS = [
   'back',
@@ -66,6 +67,11 @@ export const MANAGER_ICON_TOKENS = [
   'marketplace',
   'marketplace-certified',
   'marketplace-official',
+  'marketplace-source-add',
+  'marketplace-source-copy',
+  'marketplace-source-edit',
+  'marketplace-source-move-down',
+  'marketplace-source-move-up',
   'models-read',
   'outlets',
   'overview',
@@ -114,6 +120,11 @@ const MANAGER_ICON_SOURCES: Readonly<Record<ManagerIconToken, string>> = {
   marketplace: storefront,
   'marketplace-certified': workspacePremium,
   'marketplace-official': domainVerification,
+  'marketplace-source-add': noteAdd,
+  'marketplace-source-copy': contentCopy,
+  'marketplace-source-edit': tune,
+  'marketplace-source-move-down': verticalAlignBottom,
+  'marketplace-source-move-up': verticalAlignTop,
   'models-read': modelTraining,
   outlets: accountTree,
   overview,

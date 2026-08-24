@@ -133,6 +133,9 @@ records, not spoofable plugin registrations:
 | `host:runtime` | 200 | Historical runtime placeholder |
 | `host:launcher` | 300 | Historical launcher placeholder |
 
+Marketplace source management moved to the Marketplace discovery area. It is
+reached from the icon menu beside Marketplace search and is not a Settings tab.
+
 The current CordisX Host does not expose this projection. In particular it
 does not render the historical Runtime or Launcher placeholders. Their removal
 does not delete plugin runtime status, CLI parsing, launcher validation, or

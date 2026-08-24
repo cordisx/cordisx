@@ -49,7 +49,8 @@ leaf:
 - extension-point facets use `扩展点 / 点位名 / 使用情况`, `点位信息`, or
   `诊断`;
 - a route detail uses `路由 / 路由名`;
-- marketplace facets use `插件商店 / 插件名 / 概览` or `作者与来源`; and
+- marketplace facets use `插件商店 / 插件名 / 概览` or `作者与来源`, while
+  source tasks use `插件商店 / 商店来源 / 新增来源` or a source name; and
 - settings facets use `配置 / 插件商店`, `运行状态`, `启动器`, or the
   current localized external settings-tab title.
 

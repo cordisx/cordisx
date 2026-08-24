@@ -65,8 +65,38 @@ retry. When revalidation exhausts retries:
 There is no manual-refresh correctness dependency and no React/SWR dependency.
 The vanilla TypeScript model exposes `phase`, `stale`, `revalidating`, attempt
 count, last-success time, and error as orthogonal data for any Host renderer.
-The Manager UI consumes these states after its shared form/collection
-primitives have formally merged.
+The Manager UI consumes these states through the shared Host form and compact
+collection primitives.
+
+## Manager information architecture
+
+The Marketplace primary page is a discovery surface. Its header, search, and
+filter chips remain fixed inside the Manager content viewport; only the plugin
+results list scrolls. Plugin cards use the full available width and open their
+detail route. Documentation and source administration are not primary calls to
+action on this page.
+
+An icon action beside search opens one Host-owned, themed menu with three
+structured tasks: add a source, import `marketplace-source.v1` from the
+clipboard, or manage existing sources. Source creation is a third-level
+Manager route (`Marketplace / Sources / Add source`). Existing source cards
+open a corresponding detail route where profile-local name, description, and
+note overrides can be edited. The canonical URL is displayed as read-only
+machine identity.
+
+Sources use the shared compact collection renderer. Enable/disable is the
+direct action; ordering and removal are overflow actions. Removal is disabled
+for the official trust-root source with an accessible reason. A normal loaded
+source has no status badge. Disabled, refreshing, stale, and failed states use
+the collection's icon-seat indicator and accessible description without
+squeezing the source name, description, or URL.
+
+Source administration is not a top-level Settings tab and has no manual reload
+control. Empty untouched URL fields render no validation error. Submit or user
+editing produces concise product validation; native URL constructor messages
+never enter the UI. All menus are Host-owned portals with theme, Escape,
+arrow-key, focus restoration, outside-click, resize, route-change, and Manager
+dispose cleanup.
 
 ## Cache limits and cleanup
 
@@ -75,3 +105,17 @@ bounded 3 MiB most-recent set in profile storage. Persistence is best-effort:
 quota or corruption drops cache data, never source configuration. Removing a
 custom source prunes its cache. Disabling a source retains last-good data so a
 later re-enable can render immediately before revalidation.
+
+## Release validation
+
+The isolated `app://-/index.html` smoke owns a deterministic clipboard path.
+`--manager-marketplace-clipboard-exercise` requires a canonical source URL, a
+closed-schema feed fixture, and `--generation`. One machine-readable report
+must therefore prove that the public `marketplace-source.v1` payload was read
+through the actual clipboard action, its profile-local name, description, and
+note were persisted and projected in the compact row, the official delete
+action remained disabled, and runtime disposal removed every Host surface,
+outlet, page, tooltip, style, and Manager trigger. Wide/dark and narrow/light
+captures additionally cover discovery scrolling, portal bounds and keyboard
+focus, the third-level create route, untouched validation, and responsive
+layout.

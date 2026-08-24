@@ -1166,6 +1166,15 @@ describe('renderer bundle', () => {
     managerTrigger?.click()
     expect(dom.window.document.querySelector('[data-marketplace-detail-tab="authors-source"]')?.getAttribute('aria-selected')).toBe('true')
     expect(managerModal?.querySelector('.cxm-detail')).toBeNull()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-breadcrumb-target="primary:marketplace"]')?.click()
+
+    const sourceMenu = dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-source-menu]')!
+    sourceMenu.click()
+    expect(dom.window.document.querySelector('[data-manager-action-menu="商店来源操作"]')?.parentElement).toBe(dom.window.document.body)
+    dom.window.document.querySelector<HTMLButtonElement>('[data-manager-menu-action="manage"]')!.click()
+    expect(dom.window.document.querySelector('[data-marketplace-source-page="index"]')).not.toBeNull()
+    expect(dom.window.document.querySelector('[data-host-collection="marketplace-sources"]')).not.toBeNull()
+    expect(managerModal?.textContent).not.toContain('重新加载')
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
 
     expect(dom.window.document.querySelector('[data-tab="settings"]')).toBeNull()
