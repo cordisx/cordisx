@@ -54,7 +54,7 @@ function extensionPoints(locale: 'en' | 'zh-CN', withUsage = false): ExtensionPo
         anchor: 'submit', placement: 'before', command: { id: 'refresh' },
       },
       visible: true, authorized: true, pointPolicy: 'inherit', effectivePointPolicy: 'allow',
-      disabled: false, valid: true, pending: false, rendered: true,
+      disabled: false, valid: true, pending: false, currentContext: 'active', rendered: true,
     }] : [],
     commands: [],
     navigation: {
@@ -67,10 +67,10 @@ function extensionPoints(locale: 'en' | 'zh-CN', withUsage = false): ExtensionPo
         { id: 'manager.settings.content', placement: 'manager-settings', available: true, mounted: false, presentation: 'inactive' },
       ],
     },
-    surfaceAvailability: [
-      { surface: 'session.header.actions', state: 'pending', code: 'seat-pending', detail: 'No unique seat.' },
-      { surface: 'sidebar.footer.before-control', state: 'unavailable', code: 'seat-unavailable', detail: 'Seat unavailable.' },
-      { surface: 'composer.toolbar.items', state: 'available' },
+    surfaceCurrentContext: [
+      { surface: 'session.header.actions', state: 'not-mounted', code: 'session.not-mounted', detail: { key: 'session.not-mounted', fallback: 'No session page is mounted.' } },
+      { surface: 'sidebar.footer.before-control', state: 'not-mounted', code: 'sidebar.not-mounted', detail: { key: 'sidebar.not-mounted', fallback: 'The sidebar is not mounted.' } },
+      { surface: 'composer.toolbar.items', state: 'active' },
     ],
   })
   unregister()
@@ -123,19 +123,23 @@ describe('Manager extension point catalog', () => {
       expect(list.querySelector('.cxm-chevron')).toBeNull()
 
       const available = list.querySelector<HTMLButtonElement>('[data-extension-point-id="composer.toolbar.items"]')!
-      expect(available.dataset.extensionPointState).toBe('available')
+      expect(available.dataset.extensionPointState).toBe('supported')
       expect(available.querySelector('.cxm-catalog-status')).toBeNull()
       expect(available.querySelector('.cxm-catalog-title')?.textContent).toBe('输入区工具栏')
       expect(available.querySelector('.cxm-catalog-description')?.textContent).toContain('语义输入区锚点')
       expect(available.querySelector('code')?.textContent).toBe('composer.toolbar.items')
       expect(available.querySelector('[data-host-icon]')?.getAttribute('aria-hidden')).toBe('true')
 
-      const pending = list.querySelector<HTMLButtonElement>('[data-extension-point-id="session.header.actions"]')!
+      const contextAbsent = list.querySelector<HTMLButtonElement>('[data-extension-point-id="session.header.actions"]')!
+      expect(contextAbsent.dataset.extensionPointState).toBe('supported')
+      expect(contextAbsent.querySelector('.cxm-catalog-status')).toBeNull()
+      expect(contextAbsent.children).toHaveLength(2)
+
+      const pending = list.querySelector<HTMLButtonElement>('[data-extension-point-id="composer.command-menu.items"]')!
       expect(pending.dataset.extensionPointState).toBe('pending')
       expect(pending.querySelector('.cxm-catalog-status')?.textContent).toBe('待定位')
-      expect(pending.children).toHaveLength(3)
 
-      const unavailable = list.querySelector<HTMLButtonElement>('[data-extension-point-id="sidebar.footer.before-control"]')!
+      const unavailable = list.querySelector<HTMLButtonElement>('[data-extension-point-id="panel.right.content"]')!
       expect(unavailable.dataset.extensionPointState).toBe('unavailable')
       expect(unavailable.querySelector('.cxm-catalog-status')?.textContent).toBe('不可用')
 

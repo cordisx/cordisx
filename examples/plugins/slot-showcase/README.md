@@ -9,7 +9,14 @@
 - workspace toolbar 语义锚点前、后及菜单项
 - 环境信息 panel header action、section、section action、row 与 trailing action
 - `app`、`main`、`session.content` 三类 page outlet
-- 英文/简体中文词典、动态消息参数与 locale 重新投影
+- 每条 route/page 的英文与简体中文产品标题、用途、入口和目标区域说明
+- 动态消息参数与 locale 重新投影；路径、outlet、参数和稳定 id 保持机器值
+
+Manager 的“路由”详情会把三类 route 与 page 分组展示，并使用当前 Host locale
+投影这些说明。`app.overview` 从侧栏底部或演示设置入口打开应用级概览，
+`main.analytics` 从导航行、工具栏或会话页头入口打开主区域分析，
+`session.analytics` 在配置原生会话 ID 后从导航快捷操作打开当前会话正文分析。
+插件只声明结构化 `LocalizedText`；Host 负责列表 DOM、搜索、诊断和无障碍。
 
 ## 配置示例
 

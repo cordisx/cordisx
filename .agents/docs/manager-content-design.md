@@ -111,6 +111,27 @@ Breadcrumbs, tabs, groups, records, notices, and footers must not progressively
 restate it. A diagnostic, blocked reason, adapter fact, or security boundary is
 attached to its owning group and is not repeated as a general page notice.
 
+The installed-plugin `路由` facet is the intentional multi-group case. It
+projects separate `路由` and `页面` sections, each as one rounded Host-owned
+group card with row dividers. Route rows lead with the current-locale product
+title and one or two lines of purpose, followed by canonical path, outlet,
+associated page, named parameters, contribution identity, and owner. Page rows
+lead with the current-locale title and content/context description, followed by
+canonical page id, the outlets derived from referencing routes, and the
+`standard` or `body-only` chrome value. Machine identity is never translated
+or repeated merely to fill a visual row.
+
+The product title and description come only from the route/page structured
+metadata and the shared localization kernel. Search indexes their current
+locale projection plus path, outlet, parameter, page/contribution identity,
+and owner, and reprojects immediately after locale change. Legacy records that
+lack metadata use the stable id and a restrained localized `未提供说明` / `No
+description provided` fallback. The same row exposes a muted author diagnostic;
+the Host never guesses purpose from a path, outlet, mounted DOM, or plugin
+implementation. Normal route/page rows have no type or availability badge.
+Only invalid, denied, missing-metadata, or unavailable state adds concise
+diagnostic text.
+
 ## Configuration task surfaces
 
 The default plugin `配置管理` panel is a user task surface, not an implementation
@@ -148,8 +169,8 @@ border, background, or redundant heading merely to make the panel visible.
 Local tabs pair every label with a host-owned semantic icon. The icon is part
 of the structured tab descriptor, is hidden from accessibility APIs, and is
 rendered directly without its own border, background, chip, or card. The label
-remains the accessible tab name and the active underline remains the only
-persistent selection accent. Local tablists use the horizontal ARIA tabs
+remains the accessible tab name and the shared rounded active background is
+the only persistent selection accent. Local tablists use the horizontal ARIA tabs
 keyboard pattern: only the active tab has `tabindex="0"`; inactive tabs use
 `tabindex="-1"`; Left/Right wrap and activate the adjacent tab; Home/End
 activate the first/last tab. After an activation re-renders manager-owned DOM,
@@ -277,6 +298,15 @@ the right. After that row it exposes flat, actionable links such as issue
 feedback, contribution, and documentation. It does not repeat manager
 diagnostics, plugin counts, routes, outlets, locale metrics, trust notices, or
 blocking semantics that belong to their owning pages.
+
+Each About action is one full-width anchor row inside the same rounded Manager
+group-card boundary. The anchor—not its title span—is the pointer,
+`:focus-visible`, and open unit. Title, description, and the decorative
+external-link icon stay inside that hit target and retain transparent child
+backgrounds; hover/focus applies one low-contrast Host-token background to the
+complete padded row and raises the icon foreground without moving it. Row
+separators remain outside the hover paint, the first/last row keep the group
+inset and radius, and narrow layouts clamp copy without horizontal overflow.
 
 Every manager-owned external link uses ordinary browser navigation with
 `target="_blank"` and `rel="noopener noreferrer"`. Its click handler only
@@ -589,6 +619,9 @@ At minimum they prove:
 - the About identity uses the runtime version, its action links have verified
   public destinations and safe external-link attributes, and the old runtime
   metric grid and generic boundary copy are absent;
+- every About action uses the whole padded anchor row for hover/focus/open,
+  while title/copy remain transparent and the icon strengthens inside the same
+  interaction target;
 - every local tab has one decorative semantic icon and an unchanged accessible
   label, with no icon frame; roving tabindex, wrapped arrow navigation,
   Home/End, and focus restoration survive manager re-rendering; the first icon

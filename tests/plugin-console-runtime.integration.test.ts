@@ -89,9 +89,10 @@ describe('plugin DevTools Console runtime', () => {
     dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger="true"]')?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="console-showcase"]')?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.click()
-    const consoleFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
+    let consoleFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
     for (let attempt = 0; attempt < 20 && !consoleFrame?.textContent?.includes('settings.get'); attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
+      consoleFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
     }
     expect(consoleFrame?.textContent).toContain('settings.get')
     expect(consoleFrame?.classList.contains('luna-console')).toBe(true)

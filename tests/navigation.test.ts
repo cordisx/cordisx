@@ -1,7 +1,11 @@
 import { Context, type Disposable } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
-import type { CordisXLocalizationSeat } from '../packages/cli/src/contracts.js'
+import {
+  CORDISX_PAGE_SCHEMA_V3,
+  CORDISX_ROUTE_SCHEMA_V2,
+  type CordisXLocalizationSeat,
+} from '../packages/cli/src/contracts.js'
 import { CommandRegistry } from '../packages/cli/src/renderer/commands.js'
 import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
@@ -95,6 +99,77 @@ async function settle(): Promise<void> {
 }
 
 describe('NavigationRegistry', () => {
+  it('projects localized route/page metadata and diagnoses legacy omissions without inventing purpose', async () => {
+    const pages = new PageRegistry()
+    const outlets = new OutletRegistry()
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    pages.register('demo', {
+      $schema: CORDISX_PAGE_SCHEMA_V3,
+      schemaVersion: 3,
+      id: 'documented',
+      title: { key: 'page.documented.title', fallback: 'Documented page' },
+      description: { key: 'page.documented.description', fallback: 'Shows documented content for this workspace.' },
+    }, () => undefined)
+    navigation.register('demo', {
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'documented',
+      path: '/documented',
+      outlet: 'app',
+      page: 'documented',
+      title: { key: 'route.documented.title', fallback: 'Open documented page' },
+      description: { key: 'route.documented.description', fallback: 'Opens documented content from the demo entry.' },
+    })
+    pages.register('legacy', { id: 'page', title: { key: 'legacy.page', fallback: 'Legacy page' } }, () => undefined)
+    navigation.register('legacy', { id: 'route', path: '/legacy', outlet: 'app', page: 'page' })
+    expect(() => pages.register('invalid', {
+      id: 'description-without-version',
+      title: { key: 'invalid.page.title' },
+      description: { key: 'invalid.page.description' },
+    }, () => undefined)).toThrow('legacy page metadata cannot declare description; use page.v3')
+    expect(() => pages.register('invalid', {
+      $schema: CORDISX_PAGE_SCHEMA_V3,
+      schemaVersion: 3,
+      id: 'missing-description',
+      title: { key: 'invalid.page.title' },
+    }, () => undefined)).toThrow('page.v3 requires localized description metadata')
+    expect(() => navigation.register('invalid', {
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'missing-description', path: '/invalid', outlet: 'app', page: 'missing-description',
+      title: { key: 'invalid.route.title' },
+    })).toThrow('route.v2 requires localized title and description metadata')
+
+    const snapshot = navigation.snapshot()
+    expect(snapshot.routes.find(item => item.qualifiedId === 'demo:documented')?.productMetadata).toEqual({
+      title: 'Open documented page',
+      description: 'Opens documented content from the demo entry.',
+      diagnostics: [],
+    })
+    expect(snapshot.pages.find(item => item.qualifiedId === 'demo:documented')?.productMetadata).toEqual({
+      title: 'Documented page',
+      description: 'Shows documented content for this workspace.',
+      diagnostics: [],
+    })
+    expect(snapshot.routes.find(item => item.qualifiedId === 'legacy:route')?.productMetadata).toEqual({
+      title: undefined,
+      description: undefined,
+      diagnostics: [
+        expect.objectContaining({ code: 'metadata.missing-title', field: 'title' }),
+        expect.objectContaining({ code: 'metadata.missing-description', field: 'description' }),
+      ],
+    })
+    expect(snapshot.pages.find(item => item.qualifiedId === 'legacy:page')?.productMetadata).toEqual({
+      title: 'Legacy page',
+      description: undefined,
+      diagnostics: [expect.objectContaining({ code: 'metadata.missing-description', field: 'description' })],
+    })
+
+    await navigation.dispose()
+    pages.dispose()
+    outlets.dispose()
+  })
+
   it('allows same-path page/route generations while projecting one coherent view', () => {
     const activation = (revision: number, generation: string): CordisXPluginActivationRecordV1 => ({
       $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, schemaVersion: 1,

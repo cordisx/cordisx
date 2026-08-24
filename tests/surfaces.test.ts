@@ -196,6 +196,52 @@ describe('SurfaceRegistry', () => {
     contexts.dispose()
   })
 
+  it('fails closed on static anchor support and keeps current mount state out of policy', () => {
+    const contexts = new HostContextStore()
+    const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
+    descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
+    const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
+    broker.register({ source: 'https://plugins.example/demo', id: 'demo' })
+    const registry = new SurfaceRegistry(contexts)
+    registry.setResolvers({ command: () => true, route: () => true })
+    registry.setAccessResolver(broker)
+    registry.setSurfaceAnchors('composer.toolbar.items', [
+      { id: 'submit', placements: ['before'] },
+      { id: 'leading', placements: ['before'] },
+    ])
+    registry.setCurrentContext([{
+      surface: 'composer.toolbar.items', state: 'active', anchors: [
+        { id: 'submit', placements: ['before'], state: 'active' },
+        { id: 'leading', placements: ['before'], state: 'active' },
+      ],
+    }])
+    registry.register('demo', { name: 'composer.toolbar.items', id: 'submit' }, {
+      anchor: 'submit', placement: 'before', label: { key: 'submit' }, command: { id: 'submit' },
+    })
+    registry.register('demo', { name: 'composer.toolbar.items', id: 'leading' }, {
+      anchor: 'leading', placement: 'before', label: { key: 'leading' }, command: { id: 'leading' },
+    })
+    expect(registry.snapshot().find(item => item.id === 'submit')).toMatchObject({
+      authorized: true, pending: false, currentContext: 'active',
+    })
+    expect(registry.snapshot().find(item => item.id === 'leading')).toMatchObject({
+      authorized: false, pointPolicyReason: expect.stringContaining('adapter support is unverified'),
+    })
+
+    registry.setCurrentContext([{
+      surface: 'composer.toolbar.items', state: 'not-mounted', code: 'composer.not-mounted',
+      detail: { key: 'composer.not-mounted', fallback: 'Composer is not mounted.' },
+    }])
+    expect(registry.snapshot().find(item => item.id === 'submit')).toMatchObject({
+      authorized: true, pending: true, currentContext: 'not-mounted',
+      availabilityCode: 'composer.not-mounted', availabilityDetail: 'Composer is not mounted.',
+    })
+    registry.dispose()
+    broker.dispose()
+    descriptors.dispose()
+    contexts.dispose()
+  })
+
   it('validates manager settings tabs as structured headers and keeps envelope order as the single source', () => {
     const contexts = new HostContextStore()
     contexts.replace({ enabled: true })

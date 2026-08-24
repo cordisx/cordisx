@@ -1,9 +1,10 @@
 # UI extension catalog and Codex adapter
 
 Status: approved architecture and delivery contract. The catalog is
-host-neutral. The availability column records the target state of the current
-Codex adapter and must be reconciled with automated fixtures and an isolated
-real-renderer report before a release claims a point is available.
+host-neutral. Catalog v5 records maturity and release-level adapter support;
+runtime context v1 separately records whether a seat is active, inactive, or
+not mounted on the current page. Automated fixtures and an isolated
+real-renderer report remain required before a release claims support.
 
 ## Outcome
 
@@ -23,21 +24,25 @@ The five feasibility-era free-DOM slots (`header.actions`, `composer.before`,
 `composer.after`, `sidebar.footer`, and `shell.overlay`) remain retired. New
 structured surfaces are neither aliases nor downgrade targets for those APIs.
 
-## Catalog states
+## Catalog and runtime state axes
 
-- **implemented**: the adapter has a unique semantic seat, deterministic
+- **stable / experimental / reserved** is contract maturity. It does not say
+  whether a DOM seat happens to be mounted now.
+- **supported**: the adapter has a unique semantic seat, deterministic
   projection and cleanup, automated replacement fixtures, and isolated live
   evidence for the supported host version.
-- **experimental**: the protocol shape and adapter diagnostic exist, but the
-  adapter keeps a contribution pending unless it resolves one unique native
-  seat in the current state. Experimental never means overlay fallback.
-- **reserved**: the host-neutral identity and payload family are documented so
-  plugins do not invent incompatible names, but the Codex adapter does not
-  declare or project the point.
+- **unverified / unsupported** states release-level adapter support. Unverified
+  includes an experimental seat without release proof or a correct-context
+  resolver that observes zero or multiple candidates. Unsupported includes a
+  reserved point that this adapter intentionally does not project.
+- **active / inactive / not-mounted** is current context only. Manager or a
+  non-session page legitimately makes session/composer points not mounted; an
+  unopened environment panel is also not mounted. None of those observations
+  downgrades a supported descriptor or creates a warning in the primary list.
 
-Availability is adapter- and host-version-specific. A registered contribution
-to an unavailable or ambiguous point is retained for diagnostics and is never
-visually simulated.
+Adapter support is adapter- and host-version-specific. A registered
+contribution to an unsupported, unverified, inactive, or ambiguous point is
+retained for diagnostics and is never visually simulated.
 
 The verified Codex/ChatGPT host `26.818.41509` (build `6962`) can emit the
 earlier thread-reference marker around the exact current main-thread timeline

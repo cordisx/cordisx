@@ -49,8 +49,29 @@ interface HostExtensionPointDescriptor {
   readonly title: LocalizedText
   readonly description: LocalizedText
   readonly icon: HostIconToken
+  readonly payloadFamily: PayloadFamily
+  readonly maturity: 'stable' | 'experimental' | 'reserved'
+  readonly adapterSupport: 'supported' | 'unsupported' | 'unverified'
 }
 ```
+
+Catalog v5 makes three state axes explicit and forbids collapsing them back
+into one availability word:
+
+- `maturity` is the versioned product/contract promise;
+- `adapterSupport` is the installed adapter build's release-supported,
+  unsupported, or unverified declaration; and
+- runtime context v1 reports only whether that point is `active`, `inactive`,
+  or `not-mounted` on the current page.
+
+Opening Manager, leaving a session page, collapsing the sidebar, or not
+opening the environment panel may change runtime context, but cannot rewrite a
+supported stable descriptor to unverified. Conversely, zero or multiple
+semantic-seat candidates while the correct context is present produce an
+`anchor.unresolved` observation: the runtime projection becomes effectively
+unverified and fails closed without mutating the static descriptor. Policy
+authorization uses adapter support; contribution rendering additionally
+requires the current context to be active.
 
 `title` and `description` are retained `LocalizedText`/`MessageRef` values.
 They are resolved through the LocalizationKernel at projection time and
@@ -71,8 +92,8 @@ change.
 
 The table records the original eleven-surface/three-outlet baseline. The
 current runtime aggregates the complete public catalog: 28 structured surfaces
-and five page outlets from catalog v2, plus the Manager surface/outlet pair from
-catalog v3. The authoritative current values live in the owning catalog
+and five page outlets, plus the Manager surface/outlet pair in catalog v5. The
+authoritative current values live in the owning catalog
 constants and protocol fixtures; an exact-set regression requires all 35 ids
 and every referenced message to pass both required locale dictionaries. The
 shared namespace is `cordisx.manager.extension-points`.
@@ -121,10 +142,11 @@ one primary flex row containing, in order:
 1. the descriptor icon;
 2. localized title and one concise localized description;
 3. the stable id as secondary technical text;
-4. a short, accessible pending/unavailable/error prompt only when it changes
+4. a short, accessible unverified/unsupported/error prompt only when it changes
    the row's meaning.
 
-Normal rows show no state text. Type labels such as `Surface`, `Outlet`,
+Normal supported rows show no state text even when their current context is
+inactive or not mounted. Type labels such as `Surface`, `Outlet`,
 `页面出口`, or `界面点位`, and the normal-state `Available`/`可用` label are
 not persistent tags: the page already supplies catalog context. The abnormal
 prompt stays in the same primary row as the copy, uses muted/warning text or a
@@ -194,15 +216,15 @@ plugin manager inside the point page.
 
 `Point information` explains the host contract: localized descriptor, stable
 id, kind, schema version, supported structured shape or outlet context policy,
-current adapter declaration, and availability. Surface information includes
+maturity, adapter support, and current context as separate fields. Surface information includes
 target and placement rules. Outlet information includes compatible path
 family, overlay placement, and `contextKey` behavior. It does not list plugin
 configuration or Platform capabilities.
 
 ### Diagnostics
 
-`Diagnostics` owns information that helps explain invalid, pending, or failed
-use: descriptor validation, adapter anchor/outlet availability, unresolved
+`Diagnostics` owns information that helps explain invalid, unverified, or failed
+use: descriptor validation, adapter anchor/outlet support, current-page state, unresolved
 targets, unknown icons/context keys, missing localized messages, route/path/
 page mismatch, policy rejection, mount state, and the latest relevant error.
 Diagnostics retain stable ids and machine codes; ordinary titles and

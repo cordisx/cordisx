@@ -757,7 +757,7 @@ async function start(
       if (!nextContributionSites.has(site)) i18nService?.clearDiagnosticSite(owner, site)
     }
     extensionContributionProjectionSites = nextContributionSites
-    const navigation = routeService?.snapshot() ?? { routes: [], pages: pageService?.snapshot() ?? [], outlets: [] }
+    const navigation = routeService?.snapshot() ?? { routes: [], pages: [], outlets: [] }
     const nextSettingsSites = new Set<string>()
     const externalSettingsTabs = liveRegistrations
       .filter(item => item.surface === 'manager.settings.tabs' && item.valid && item.visible && item.authorized && !item.pending)

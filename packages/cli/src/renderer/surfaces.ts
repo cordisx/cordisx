@@ -7,6 +7,7 @@ import {
   type CordisXContributionOptions,
   type CordisXContributionPresentationOptions,
   type CordisXDisabledState,
+  type CordisXExtensionPointCurrentContextState,
   type CordisXEnvironmentRow,
   type CordisXEnvironmentRowAction,
   type CordisXEnvironmentSection,
@@ -98,23 +99,27 @@ export interface SurfaceContributionSnapshot {
   readonly error?: string
   readonly availabilityCode?: string
   readonly availabilityDetail?: string
+  readonly currentContext: CordisXExtensionPointCurrentContextState
 }
 
-export interface SurfaceAnchorAvailability {
+export interface SurfaceAnchorCurrentContext {
   readonly id: string
   readonly placements: readonly ('before' | 'after' | 'menu')[]
-  readonly state: 'available' | 'pending' | 'unavailable'
+  readonly state: CordisXExtensionPointCurrentContextState
   readonly code?: string
-  readonly detail?: string
+  readonly detail?: CordisXLocalizedText
 }
 
-export interface SurfaceAvailabilitySnapshot {
+export interface SurfaceCurrentContextSnapshot {
   readonly surface: string
-  readonly state: 'available' | 'pending' | 'unavailable'
+  readonly state: CordisXExtensionPointCurrentContextState
   readonly code?: string
-  readonly detail?: string
-  readonly anchors?: readonly SurfaceAnchorAvailability[]
+  readonly detail?: CordisXLocalizedText
+  readonly anchors?: readonly SurfaceAnchorCurrentContext[]
 }
+
+/** @deprecated Runtime context replaced the overloaded availability axis. */
+export type SurfaceAvailabilitySnapshot = SurfaceCurrentContextSnapshot
 
 export interface SurfaceResolvers {
   command(owner: string, reference: CordisXCommandReference, view?: PluginGenerationView): boolean
@@ -310,7 +315,7 @@ export class SurfaceRegistry {
   private readonly listeners = new Set<() => void>()
   private readonly declared = new Set<string>(CORDISX_IMPLEMENTED_SURFACE_NAMES)
   private readonly surfaceAnchors = new Map<string, Map<string, ReadonlySet<string>>>()
-  private readonly availability = new Map<string, SurfaceAvailabilitySnapshot>()
+  private readonly currentContext = new Map<string, SurfaceCurrentContextSnapshot>()
   private nextSequence = 0
   private disposed = false
   private readonly disconnectVisibility: (() => void) | undefined
@@ -331,7 +336,6 @@ export class SurfaceRegistry {
 
   setAccessResolver(access: ExtensionPointAccessResolver): void {
     this.access = access
-    access.setSurfaceAvailability(this.availabilitySnapshot())
     this.notify()
   }
 
@@ -364,18 +368,23 @@ export class SurfaceRegistry {
     this.notify()
   }
 
-  setAvailability(items: readonly SurfaceAvailabilitySnapshot[]): void {
+  setCurrentContext(items: readonly SurfaceCurrentContextSnapshot[]): void {
     const next = new Map(items.map(item => [item.surface, immutableSnapshot(item)]))
-    if (JSON.stringify([...this.availability]) === JSON.stringify([...next])) return
-    this.availability.clear()
-    for (const [surface, item] of next) this.availability.set(surface, item)
-    this.access?.setSurfaceAvailability(this.availabilitySnapshot())
+    if (JSON.stringify([...this.currentContext]) === JSON.stringify([...next])) return
+    this.currentContext.clear()
+    for (const [surface, item] of next) this.currentContext.set(surface, item)
     this.notify()
   }
 
-  availabilitySnapshot(): readonly SurfaceAvailabilitySnapshot[] {
-    return [...this.availability.values()].sort((left, right) => left.surface < right.surface ? -1 : left.surface > right.surface ? 1 : 0)
+  /** @deprecated Use setCurrentContext. */
+  setAvailability(items: readonly SurfaceCurrentContextSnapshot[]): void { this.setCurrentContext(items) }
+
+  currentContextSnapshot(): readonly SurfaceCurrentContextSnapshot[] {
+    return [...this.currentContext.values()].sort((left, right) => left.surface < right.surface ? -1 : left.surface > right.surface ? 1 : 0)
   }
+
+  /** @deprecated Use currentContextSnapshot. */
+  availabilitySnapshot(): readonly SurfaceCurrentContextSnapshot[] { return this.currentContextSnapshot() }
 
   isDeclared(name: string): boolean {
     return this.declared.has(name)
@@ -502,6 +511,10 @@ export class SurfaceRegistry {
         const item = record.item as Record<string, unknown> | undefined
         const pointAccess = this.access?.decision(record.owner, record.options.name, 'surface', view ?? record.candidateView)
           ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }
+        const toolbarItem = item as unknown as CordisXToolbarItem | undefined
+        const anchorSupport = toolbarItem !== undefined && (record.options.name === 'workspace.toolbar.items' || record.options.name === 'composer.toolbar.items')
+          ? this.access?.surfaceAnchorSupport(record.options.name, toolbarItem.anchor)
+          : undefined
         if (error === undefined && !this.declared.has(record.options.name)) error = `surface ${record.options.name} is not declared by the host`
         const unknownWhen = whenContextKeys(record.options.when).find(key => !knownKeys.has(key))
         if (error === undefined && unknownWhen !== undefined) error = `when context key ${unknownWhen} is not declared by the host`
@@ -540,8 +553,14 @@ export class SurfaceRegistry {
             if (!rows.has(target)) pending = true
           }
         }
-        const availability = this.availability.get(record.options.name)
-        if (availability !== undefined && availability.state !== 'available') pending = true
+        const currentContext = this.currentContext.get(record.options.name)
+        const currentAnchor = toolbarItem === undefined ? undefined : currentContext?.anchors?.find(anchor => anchor.id === toolbarItem.anchor)
+        if (this.access !== undefined && currentContext !== undefined && currentContext.state !== 'active') pending = true
+        if (currentAnchor !== undefined && currentAnchor.state !== 'active') pending = true
+        const authorized = pointAccess.authorized && anchorSupport?.supported !== false
+        const contextDetail = currentAnchor?.detail ?? currentContext?.detail
+        const contextCode = currentAnchor?.code ?? currentContext?.code
+        const accessReason = anchorSupport?.reason ?? pointAccess.reason
         return {
           owner: record.owner,
           id: record.options.id,
@@ -551,18 +570,19 @@ export class SurfaceRegistry {
           order: record.options.order ?? 0,
           item: record.item,
           visible: error === undefined && evaluateWhen(record.options.when, contexts),
-          authorized: pointAccess.authorized,
+          authorized,
           pointPolicy: pointAccess.policy,
           effectivePointPolicy: pointAccess.effectivePolicy,
-          ...(pointAccess.reason === undefined ? {} : { pointPolicyReason: pointAccess.reason }),
+          ...(accessReason === undefined ? {} : { pointPolicyReason: accessReason }),
           disabled: record.options.disabled?.value ?? false,
           ...(record.options.disabled?.reason === undefined ? {} : { disabledReason: record.options.disabled.reason }),
           valid: error === undefined,
           pending,
+          currentContext: currentAnchor?.state ?? currentContext?.state ?? 'not-mounted',
           rendered: record.rendered,
           ...(error === undefined ? {} : { error }),
-          ...(availability?.code === undefined ? {} : { availabilityCode: availability.code }),
-          ...(availability?.detail === undefined ? {} : { availabilityDetail: availability.detail }),
+          ...(contextCode === undefined ? {} : { availabilityCode: contextCode }),
+          ...(contextDetail === undefined ? {} : { availabilityDetail: contextDetail.fallback ?? contextDetail.key }),
         }
       })
   }
@@ -580,7 +600,7 @@ export class SurfaceRegistry {
     this.listeners.clear()
     this.declared.clear()
     this.surfaceAnchors.clear()
-    this.availability.clear()
+    this.currentContext.clear()
   }
 
   private notify(): void {

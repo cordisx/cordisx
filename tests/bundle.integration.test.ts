@@ -21,8 +21,18 @@ interface RuntimeSnapshot {
   registrations: readonly { owner: string; surface: string; valid: boolean; authorized: boolean; rendered: boolean; item: unknown }[]
   commands: readonly { owner: string; qualifiedId: string }[]
   navigation: {
-    routes: readonly { owner: string; qualifiedId: string; valid: boolean; authorized: boolean }[]
-    pages: readonly { owner: string; qualifiedId: string }[]
+    routes: readonly {
+      owner: string
+      qualifiedId: string
+      valid: boolean
+      authorized: boolean
+      productMetadata: { title?: string; description?: string; diagnostics: readonly unknown[] }
+    }[]
+    pages: readonly {
+      owner: string
+      qualifiedId: string
+      productMetadata: { title?: string; description?: string; diagnostics: readonly unknown[] }
+    }[]
     outlets: readonly { id: string; available: boolean; error?: string; contextKey?: string; activeRoute?: string; mounted: boolean; presentation: 'inactive' | 'presented' | 'suspended'; suspendedBy?: string }[]
   }
   localization: { locale: string; direction: string; version: number }
@@ -206,6 +216,16 @@ describe('renderer bundle', () => {
     expect(snapshot.navigation.routes).toHaveLength(3)
     expect(snapshot.navigation.routes.every(item => item.valid)).toBe(true)
     expect(snapshot.navigation.pages).toHaveLength(3)
+    expect(snapshot.navigation.routes.find(item => item.qualifiedId === 'slot-showcase:main.analytics')?.productMetadata).toEqual({
+      title: 'Main outlet',
+      description: 'Open from the showcase navigation row, workspace toolbar, or session-header action to show analytics in the main outlet.',
+      diagnostics: [],
+    })
+    expect(snapshot.navigation.pages.find(item => item.qualifiedId === 'slot-showcase:session.analytics')?.productMetadata).toEqual({
+      title: 'Session analytics',
+      description: 'Presents analytics for the currently selected native session below its persistent session header.',
+      diagnostics: [],
+    })
     expect(snapshot.navigation.outlets).toHaveLength(4)
     expect(snapshot.extensionPoints.points).toHaveLength(35)
     expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(29)
@@ -507,6 +527,16 @@ describe('renderer bundle', () => {
     await settle()
     await settle()
     expect(runtime!.snapshot().localization.locale).toBe('zh-CN')
+    expect(runtime!.snapshot().navigation.routes.find(item => item.qualifiedId === 'slot-showcase:main.analytics')?.productMetadata).toEqual({
+      title: '主区域 outlet',
+      description: '从演示导航行、工作区工具栏或会话页头操作进入，在 main outlet 中展示分析内容。',
+      diagnostics: [],
+    })
+    expect(runtime!.snapshot().navigation.pages.find(item => item.qualifiedId === 'slot-showcase:session.analytics')?.productMetadata).toEqual({
+      title: '会话分析',
+      description: '在保留当前原生会话页头的前提下，于会话正文区域展示该会话的分析内容。',
+      diagnostics: [],
+    })
     expect(runtime!.snapshot().extensionPoints.points.find(item => item.id === 'sidebar.navigation.items')?.titleProjection.text).toBe('侧边栏导航')
     expect(dom.window.document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')?.textContent).toContain('主区域 outlet')
 
@@ -720,6 +750,7 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('.cxm-heading-icon [data-cordisx-brand-mark]')).toBeNull()
     expect(dom.window.document.querySelector('.cxm-heading-icon')?.matches('[data-cordisx-brand-mark]')).toBe(true)
     const aboutDirectMarks = [...(managerModal?.querySelectorAll<HTMLImageElement>('img[data-cordisx-brand-mark][data-brand-rendering="direct-host"]') ?? [])]
+    const currentAboutMarks = () => [...(managerModal?.querySelectorAll<HTMLImageElement>('img[data-cordisx-brand-mark][data-brand-rendering="direct-host"]') ?? [])]
     expect(aboutDirectMarks).toHaveLength(3)
     expect(dom.window.document.querySelectorAll('[data-brand-rendering="direct-host"]')).toHaveLength(4)
     expect(aboutDirectMarks.every(mark => mark.getAttribute('aria-hidden') === 'true' && mark.alt === '')).toBe(true)
@@ -729,15 +760,15 @@ describe('renderer bundle', () => {
     expect(new Set([...directSvg.matchAll(/stroke="(#[0-9a-f]{6})"/gi)].map(match => match[1])).size).toBeGreaterThan(10)
     dom.window.document.documentElement.className = 'electron-light'
     await settle()
-    expect(aboutDirectMarks.every(mark => mark.dataset.hostBackground === 'light')).toBe(true)
-    expect(aboutDirectMarks.every(mark => decodeURIComponent(mark.src).includes('CordisX mark for light backgrounds'))).toBe(true)
+    expect(currentAboutMarks().every(mark => mark.dataset.hostBackground === 'light')).toBe(true)
+    expect(currentAboutMarks().every(mark => decodeURIComponent(mark.src).includes('CordisX mark for light backgrounds'))).toBe(true)
     expect(dom.window.getComputedStyle(primaryNavigation[0]!.querySelector<HTMLElement>('.cxm-nav-icon')!).color).toBe('var(--cx-muted)')
     expect(managerModal?.style.getPropertyValue('--cx-muted')).toBe('#526071')
     expect(dom.window.getComputedStyle(dom.window.document.querySelector<HTMLElement>('.cxm-heading-leading')!).color).toBe('var(--cx-text)')
     expect(managerModal?.style.getPropertyValue('--cx-text')).toBe('#18212f')
     dom.window.document.documentElement.className = 'electron-dark'
     await settle()
-    expect(aboutDirectMarks.every(mark => mark.dataset.hostBackground === 'dark')).toBe(true)
+    expect(currentAboutMarks().every(mark => mark.dataset.hostBackground === 'dark')).toBe(true)
     expect(dom.window.document.querySelector('.cxm-about-name')?.textContent).toBe('CordisX')
     expect(dom.window.document.querySelector('.cxm-about-version')?.textContent).toBe('v0.1.0-beta.0')
     expect(dom.window.document.querySelector('.cxm-about-identity [data-cordisx-brand-mark]')).not.toBeNull()
@@ -760,6 +791,26 @@ describe('renderer bundle', () => {
     expect(aboutActions.every(link => link.getAttribute('role') === null)).toBe(true)
     expect(aboutActions.every(link => link.querySelector('.cxm-about-action-arrow')?.getAttribute('aria-hidden') === 'true')).toBe(true)
     expect(aboutActions.every(link => link.querySelector('.cxm-about-action-arrow')?.getAttribute('data-material-icon') === 'external-link')).toBe(true)
+    expect(aboutActions.every(link => link.children.length === 2
+      && link.children[0]?.classList.contains('cxm-about-action-body')
+      && link.children[1]?.classList.contains('cxm-about-action-arrow'))).toBe(true)
+    expect(aboutActions.every(link => link.parentElement?.matches('.cxm-about-action-item[role="listitem"]'))).toBe(true)
+    expect(aboutActions.every(link => [...(link.querySelector('.cxm-about-action-body')?.children ?? [])]
+      .map(child => child.className).join(' ') === 'cxm-about-action-title cxm-about-action-copy')).toBe(true)
+    expect(aboutActions.every(link => dom.window.getComputedStyle(link).display === 'flex')).toBe(true)
+    expect(aboutActions.every(link => dom.window.getComputedStyle(link).padding === '14px 12px')).toBe(true)
+    const transparentBackgrounds = new Set(['transparent', 'rgba(0, 0, 0, 0)'])
+    expect(aboutActions.every(link => transparentBackgrounds.has(dom.window.getComputedStyle(link.querySelector<HTMLElement>('.cxm-about-action-title')!).backgroundColor))).toBe(true)
+    expect(aboutActions.every(link => transparentBackgrounds.has(dom.window.getComputedStyle(link.querySelector<HTMLElement>('.cxm-about-action-copy')!).backgroundColor))).toBe(true)
+    const aboutStyles = [...dom.window.document.querySelectorAll('style')].map(style => style.textContent ?? '').join('\n')
+    expect(aboutStyles).toMatch(/\.cxm-about-action\s*\{[^}]*width:\s*100%;[^}]*box-sizing:\s*border-box;[^}]*border-radius:\s*9px;[^}]*background:\s*transparent;/)
+    expect(aboutStyles).toMatch(/\.cxm-about-actions\s*\{[^}]*overflow:\s*hidden;[^}]*border:\s*1px solid[^}]*border-radius:\s*12px;/)
+    expect(aboutStyles).toContain('.cxm-about-action-item + .cxm-about-action-item { border-top: 1px solid rgba(255, 255, 255, .08); }')
+    expect(aboutStyles).toContain('.cxm-about-action:hover, .cxm-about-action:focus-visible { background: var(--cx-hover); color: var(--cx-text); }')
+    expect(aboutStyles).toContain('.cxm-about-action-title, .cxm-about-action-copy { background: transparent; }')
+    expect(aboutStyles).not.toMatch(/\.cxm-about-action:hover \.cxm-about-action-title\s*\{[^}]*background:/)
+    aboutActions[0]?.focus()
+    expect(dom.window.document.activeElement).toBe(aboutActions[0])
     const externalClick = new dom.window.MouseEvent('click', { bubbles: true, cancelable: true })
     expect(aboutActions[0]?.dispatchEvent(externalClick)).toBe(true)
     expect(externalClick.defaultPrevented).toBe(false)
@@ -827,11 +878,26 @@ describe('renderer bundle', () => {
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="routes"]')?.click()
     expect(managerHeadings()).toEqual(['路由'])
     expect(dom.window.document.querySelectorAll('[data-route-id]')).toHaveLength(3)
+    expect(dom.window.document.querySelectorAll('[data-page-product-row]')).toHaveLength(3)
+    expect([...managerModal!.querySelectorAll('.cxm-route-section-heading')].map(item => item.textContent)).toEqual(['路由', '页面'])
     expect(dom.window.document.querySelector('[role="list"] [role="listitem"] button[data-route-id]')).not.toBeNull()
     expect(managerModal?.textContent).toContain('/main/showcase')
+    expect(managerModal?.querySelector('[data-route-product-row="slot-showcase:main.analytics"] .cxm-route-card-title')?.textContent).toBe('主区域 outlet')
+    expect(managerModal?.querySelector('[data-route-product-row="slot-showcase:main.analytics"] .cxm-route-card-description')?.textContent)
+      .toContain('从演示导航行、工作区工具栏或会话页头操作进入')
+    expect(managerModal?.querySelector('[data-route-product-row="slot-showcase:session.analytics"]')?.textContent).toContain(':sessionId')
+    expect(managerModal?.querySelector('.cxm-kind-badge')).toBeNull()
+    const catalogRouteSearch = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="routes"] .cxm-search')!
+    catalogRouteSearch.value = '/sessions/:sessionId/analytics'
+    catalogRouteSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    expect(dom.window.document.querySelectorAll('[data-route-product-row]')).toHaveLength(1)
+    expect(dom.window.document.querySelectorAll('[data-page-product-row]')).toHaveLength(1)
+    const resetCatalogRouteSearch = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="routes"] .cxm-search')!
+    resetCatalogRouteSearch.value = ''
+    resetCatalogRouteSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     dom.window.document.querySelector<HTMLButtonElement>('[data-route-id="slot-showcase:main.analytics"]')?.click()
-    expect(managerHeadings()).toEqual(['slot-showcase:main.analytics'])
-    expect(breadcrumbLabels()).toEqual(['路由', 'slot-showcase:main.analytics'])
+    expect(managerHeadings()).toEqual(['主区域 outlet'])
+    expect(breadcrumbLabels()).toEqual(['路由', '主区域 outlet'])
     expect(managerModal?.textContent).toContain('slot-showcase:main.analytics')
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')?.click()
@@ -974,9 +1040,39 @@ describe('renderer bundle', () => {
     for (let attempt = 0; attempt < 20 && runtime?.snapshot().plugins[0]?.status !== 'active'; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
+    await settle()
     expect(runtime?.snapshot().plugins[0]?.status).toBe('active')
     expect(JSON.parse(dom.window.localStorage.getItem('cordisx.manager.blockedPlugins.v1') ?? '[]')).toEqual([])
+    expect(runtime?.snapshot().extensionPoints.points.find(item => item.id === 'sidebar.navigation.items')).toMatchObject({
+      adapterSupport: 'supported',
+      effectiveAdapterSupport: 'supported',
+      currentContext: 'not-mounted',
+      availabilityCode: 'context.not-mounted',
+    })
+    expect(runtime?.snapshot().registrations.find(item => item.surface === 'sidebar.navigation.items')).toMatchObject({
+      currentContext: 'not-mounted',
+      availabilityCode: 'context.not-mounted',
+      valid: true,
+      authorized: true,
+      pending: true,
+      rendered: false,
+    })
+    expect(dom.window.document.querySelector('.cordisx-nav-row')).toBeNull()
+    dom.window.document.querySelector<HTMLButtonElement>('.cxm-close')?.click()
+    await settle()
+    expect(runtime?.snapshot().extensionPoints.points.find(item => item.id === 'sidebar.navigation.items')).toMatchObject({
+      adapterSupport: 'supported',
+      effectiveAdapterSupport: 'supported',
+      currentContext: 'active',
+    })
+    expect(runtime?.snapshot().registrations.find(item => item.surface === 'sidebar.navigation.items')).toMatchObject({
+      currentContext: 'active',
+      pending: false,
+      rendered: true,
+    })
     expect(dom.window.document.querySelector('.cordisx-nav-row')).not.toBeNull()
+    managerTrigger?.click()
+    await settle()
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="extension-points"]')?.click()
     expect(dom.window.document.querySelector('[data-list-search="plugin-extension-points-slot-showcase"]')).not.toBeNull()
@@ -989,6 +1085,24 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('[data-list-search="plugin-routes-slot-showcase"]')).not.toBeNull()
     expect(managerModal?.textContent).toContain('/main/showcase')
     expect(managerModal?.textContent).toContain('slot-showcase:main.analytics')
+    const pluginRoutePanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="路由"]')!
+    expect([...pluginRoutePanel.querySelectorAll('.cxm-route-section-heading')].map(item => item.textContent)).toEqual(['路由', '页面'])
+    expect(pluginRoutePanel.querySelectorAll('[data-route-product-row]')).toHaveLength(3)
+    expect(pluginRoutePanel.querySelectorAll('[data-page-product-row]')).toHaveLength(3)
+    expect(pluginRoutePanel.querySelector('[data-route-product-row="slot-showcase:app.overview"] .cxm-route-card-description')?.textContent)
+      .toContain('从侧栏底部或演示设置操作进入')
+    expect(pluginRoutePanel.querySelector('[data-page-product-row="slot-showcase:session.analytics"] .cxm-route-card-description')?.textContent)
+      .toContain('当前原生会话页头')
+    expect(pluginRoutePanel.querySelector('.cxm-kind-badge')).toBeNull()
+    expect(pluginRoutePanel.textContent).not.toContain('受控页面 mount')
+    const pluginRouteSearch = pluginRoutePanel.querySelector<HTMLInputElement>('[data-list-search="plugin-routes-slot-showcase"] .cxm-search')!
+    pluginRouteSearch.value = '当前原生会话页头'
+    pluginRouteSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    expect(dom.window.document.querySelectorAll('[data-route-product-row]')).toHaveLength(0)
+    expect(dom.window.document.querySelectorAll('[data-page-product-row]')).toHaveLength(1)
+    const resetPluginRouteSearch = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="plugin-routes-slot-showcase"] .cxm-search')!
+    resetPluginRouteSearch.value = ''
+    resetPluginRouteSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     expect(breadcrumbLabels()).toEqual(['插件', 'Slot Showcase', '路由'])
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-breadcrumb-target="primary:plugins"]')?.click()

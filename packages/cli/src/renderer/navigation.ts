@@ -1,4 +1,11 @@
 import { Context, Service, type Disposable } from '@deepseek-ai/cordis'
+import {
+  CORDISX_PAGE_SCHEMA_V1,
+  CORDISX_PAGE_SCHEMA_V2,
+  CORDISX_PAGE_SCHEMA_V3,
+  CORDISX_ROUTE_SCHEMA_V1,
+  CORDISX_ROUTE_SCHEMA_V2,
+} from '../contracts.js'
 import type {
   CordisXJsonScalar,
   CordisXMessageDefinition,
@@ -43,6 +50,51 @@ const ROUTE_PATH_PATTERN = /^\/(?:[a-z0-9._~-]+|:[a-z][a-zA-Z0-9]*)(?:\/(?:[a-z0
 function assertKeys(value: object, allowed: readonly string[], label: string): void {
   const unknown = Object.keys(value).find(key => !allowed.includes(key))
   if (unknown !== undefined) throw new Error(`${label} has unknown field ${unknown}`)
+}
+
+function assertPageMetadataVersion(metadata: CordisXPageMetadata): void {
+  const hasSchema = metadata.$schema !== undefined
+  const hasVersion = metadata.schemaVersion !== undefined
+  if (!hasSchema && !hasVersion) {
+    if (metadata.description !== undefined) throw new Error('legacy page metadata cannot declare description; use page.v3')
+    return
+  }
+  if (!hasSchema || !hasVersion) throw new Error('page metadata requires a complete $schema/schemaVersion tuple')
+  if (metadata.schemaVersion === 1 && metadata.$schema === CORDISX_PAGE_SCHEMA_V1) {
+    if (metadata.description !== undefined || metadata.chrome !== undefined) throw new Error('page.v1 cannot declare description or chrome')
+    return
+  }
+  if (metadata.schemaVersion === 2 && metadata.$schema === CORDISX_PAGE_SCHEMA_V2) {
+    if (metadata.description !== undefined) throw new Error('page.v2 cannot declare description')
+    return
+  }
+  if (metadata.schemaVersion === 3 && metadata.$schema === CORDISX_PAGE_SCHEMA_V3) {
+    if (metadata.description === undefined) throw new Error('page.v3 requires localized description metadata')
+    if (metadata.localeNamespace !== undefined) throw new Error('page.v3 uses owner-default i18n and cannot declare localeNamespace')
+    return
+  }
+  throw new Error('page metadata has an unsupported $schema/schemaVersion tuple')
+}
+
+function assertRouteDefinitionVersion(definition: CordisXRouteDefinition): void {
+  const hasSchema = definition.$schema !== undefined
+  const hasVersion = definition.schemaVersion !== undefined
+  if (!hasSchema && !hasVersion) {
+    if (definition.description !== undefined) throw new Error('legacy route definition cannot declare description; use route.v2')
+    return
+  }
+  if (!hasSchema || !hasVersion) throw new Error('route definition requires a complete $schema/schemaVersion tuple')
+  if (definition.schemaVersion === 1 && definition.$schema === CORDISX_ROUTE_SCHEMA_V1) {
+    if (definition.description !== undefined) throw new Error('route.v1 cannot declare description')
+    return
+  }
+  if (definition.schemaVersion === 2 && definition.$schema === CORDISX_ROUTE_SCHEMA_V2) {
+    if (definition.title === undefined || definition.description === undefined) {
+      throw new Error('route.v2 requires localized title and description metadata')
+    }
+    return
+  }
+  throw new Error('route definition has an unsupported $schema/schemaVersion tuple')
 }
 
 export type OutletPlacement = 'fixed' | 'absolute' | 'portal'
@@ -171,6 +223,22 @@ export interface PageSnapshot {
   readonly metadata: CordisXPageMetadata
 }
 
+export interface NavigationMetadataDiagnostic {
+  readonly code: 'metadata.missing-title' | 'metadata.missing-description'
+  readonly field: 'title' | 'description'
+  readonly message: string
+}
+
+export interface NavigationProductMetadata {
+  readonly title?: string
+  readonly description?: string
+  readonly diagnostics: readonly NavigationMetadataDiagnostic[]
+}
+
+export interface NavigationPageSnapshot extends PageSnapshot {
+  readonly productMetadata: NavigationProductMetadata
+}
+
 export interface ManagerSettingsRouteResolution {
   readonly state: 'available' | 'pending' | 'invalid'
   readonly detail?: string
@@ -258,9 +326,11 @@ export class PageRegistry {
       ? undefined
       : this.visibility?.view(ownerOrContext)
     assertLocalId(owner, 'page owner')
-    assertKeys(metadata, ['id', 'title', 'icon', 'chrome', 'breadcrumbs', 'tabs', 'headerActions', 'localeNamespace'], 'page metadata')
+    assertKeys(metadata, ['$schema', 'schemaVersion', 'id', 'title', 'description', 'icon', 'chrome', 'breadcrumbs', 'tabs', 'headerActions', 'localeNamespace'], 'page metadata')
+    assertPageMetadataVersion(metadata)
     assertLocalId(metadata.id, 'page id')
     assertLocalizedText(metadata.title, 'page title')
+    if (metadata.description !== undefined) assertLocalizedText(metadata.description, 'page description')
     assertHostIcon(metadata.icon, 'page')
     if (metadata.chrome !== undefined && !['standard', 'body-only'].includes(metadata.chrome)) {
       throw new Error(`page ${metadata.id} chrome policy is invalid`)
@@ -401,6 +471,7 @@ export interface RouteSnapshot {
   readonly id: string
   readonly qualifiedId: string
   readonly definition: CordisXRouteDefinition
+  readonly productMetadata: NavigationProductMetadata
   readonly valid: boolean
   readonly authorized: boolean
   readonly pointPolicy: 'inherit' | 'allow' | 'deny'
@@ -411,7 +482,7 @@ export interface RouteSnapshot {
 
 export interface NavigationSnapshot {
   readonly routes: readonly RouteSnapshot[]
-  readonly pages: readonly PageSnapshot[]
+  readonly pages: readonly NavigationPageSnapshot[]
   readonly outlets: readonly OutletSnapshot[]
 }
 
@@ -477,6 +548,7 @@ export class NavigationRegistry {
   private readonly records = new Map<string, RouteRecord>()
   private readonly states = new Map<string, OutletNavigationState>()
   private readonly listeners = new Set<() => void>()
+  private metadataProjectionSites = new Map<string, string>()
   private presentationOrder: string[] = []
   private managerSettingsMount: ManagedSettingsPageMountRecord | undefined
   private readonly unsubscribePages: () => void
@@ -519,12 +591,14 @@ export class NavigationRegistry {
       ? undefined
       : this.pages.visibility?.view(ownerOrContext)
     assertLocalId(owner, 'route owner')
-    assertKeys(definition, ['id', 'path', 'outlet', 'page', 'title', 'when'], 'route definition')
+    assertKeys(definition, ['$schema', 'schemaVersion', 'id', 'path', 'outlet', 'page', 'title', 'description', 'when'], 'route definition')
+    assertRouteDefinitionVersion(definition)
     assertLocalId(definition.id, 'route id')
     if (definition.path.length > 512 || !ROUTE_PATH_PATTERN.test(definition.path)) throw new Error(`invalid route path: ${definition.path}`)
     assertReference(definition.outlet, 'route outlet')
     assertReference(definition.page, 'route page')
     if (definition.title !== undefined) assertLocalizedText(definition.title, 'route title')
+    if (definition.description !== undefined) assertLocalizedText(definition.description, 'route description')
     assertWhenExpression(definition.when)
     const qualifiedId = qualifyOwnedId(owner, definition.id)
     const physicalId = `${qualifiedId}\u0000${generation.moduleGeneration ?? 'host'}`
@@ -801,6 +875,7 @@ export class NavigationRegistry {
   }
 
   snapshot(view?: PluginGenerationView): NavigationSnapshot {
+    const nextMetadataProjectionSites = new Map<string, string>()
     const routes = this.visibleRecords(view).map((record): RouteSnapshot => {
       const error = this.routeError(record)
       const pointAccess = this.access?.decision(record.owner, record.definition.outlet, 'outlet', view ?? record.candidateView)
@@ -810,6 +885,14 @@ export class NavigationRegistry {
         id: record.definition.id,
         qualifiedId: record.qualifiedId,
         definition: record.definition,
+        productMetadata: this.projectProductMetadata(
+          'route',
+          record.owner,
+          record.qualifiedId,
+          record.definition.title,
+          record.definition.description,
+          nextMetadataProjectionSites,
+        ),
         valid: error === undefined,
         authorized: pointAccess.authorized,
         pointPolicy: pointAccess.policy,
@@ -818,6 +901,21 @@ export class NavigationRegistry {
         ...(error === undefined ? {} : { error }),
       }
     }).sort((left, right) => left.qualifiedId.localeCompare(right.qualifiedId))
+    const pages = this.pages.snapshot(view).map((page): NavigationPageSnapshot => ({
+      ...page,
+      productMetadata: this.projectProductMetadata(
+        'page',
+        page.owner,
+        page.qualifiedId,
+        page.metadata.title,
+        page.metadata.description,
+        nextMetadataProjectionSites,
+      ),
+    }))
+    for (const [site, owner] of this.metadataProjectionSites) {
+      if (!nextMetadataProjectionSites.has(site)) this.i18n.clearDiagnosticSite(owner, site)
+    }
+    this.metadataProjectionSites = nextMetadataProjectionSites
     const outlets = this.outlets.descriptors().map((descriptor): OutletSnapshot => {
       const host = this.outlets.get(descriptor.id)!.controller.getSnapshot()
       const state = this.states.get(descriptor.id)
@@ -834,7 +932,7 @@ export class NavigationRegistry {
         ...(state?.error === undefined ? {} : { error: state.error }),
       }
     })
-    return { routes, pages: this.pages.snapshot(view), outlets }
+    return { routes, pages, outlets }
   }
 
   subscribe(listener: () => void): () => void {
@@ -859,6 +957,42 @@ export class NavigationRegistry {
     this.presentationOrder = []
     this.listeners.clear()
     this.disconnectVisibility?.()
+    for (const [site, owner] of this.metadataProjectionSites) this.i18n.clearDiagnosticSite(owner, site)
+    this.metadataProjectionSites.clear()
+  }
+
+  private projectProductMetadata(
+    kind: 'route' | 'page',
+    owner: string,
+    qualifiedId: string,
+    title: CordisXPageMetadata['title'] | undefined,
+    description: CordisXPageMetadata['description'] | undefined,
+    sites: Map<string, string>,
+  ): NavigationProductMetadata {
+    const diagnostics: NavigationMetadataDiagnostic[] = []
+    const project = (
+      field: 'title' | 'description',
+      value: CordisXPageMetadata['title'] | undefined,
+    ): string | undefined => {
+      if (value === undefined) {
+        diagnostics.push(Object.freeze({
+          code: `metadata.missing-${field}`,
+          field,
+          message: `${kind} ${qualifiedId} should declare localized ${field} metadata`,
+        }) as NavigationMetadataDiagnostic)
+        return undefined
+      }
+      const site = `navigation:${kind}:${qualifiedId}:${field}`
+      sites.set(site, owner)
+      return this.i18n.resolveFor(owner, value, site).text
+    }
+    const projectedTitle = project('title', title)
+    const projectedDescription = project('description', description)
+    return Object.freeze({
+      ...(projectedTitle === undefined ? {} : { title: projectedTitle }),
+      ...(projectedDescription === undefined ? {} : { description: projectedDescription }),
+      diagnostics: Object.freeze(diagnostics),
+    })
   }
 
   private enqueue(action: () => void | Promise<void>): Promise<void> {

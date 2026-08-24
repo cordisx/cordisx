@@ -657,16 +657,24 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
   })
 
-  it('keeps an unavailable native seat pending without a fallback control', async () => {
+  it('reports an inactive supported seat as current context without a fallback control', async () => {
     const { dom, runtime } = await fixture('session-a', { headerAvailable: false })
     expect(runtime.snapshot().registrations).toEqual([
       expect.objectContaining({
         surface: 'session.header.actions', pending: true, rendered: false,
-        availabilityCode: 'anchor-unresolved',
+        authorized: true, currentContext: 'inactive', availabilityCode: 'anchor.unresolved',
       }),
     ])
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"]')).toBeNull()
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
+    dom.window.document.getElementById('selected-thread')?.remove()
+    await settle(3)
+    expect(runtime.snapshot().registrations).toEqual([
+      expect.objectContaining({
+        surface: 'session.header.actions', authorized: true, pending: true,
+        currentContext: 'not-mounted', availabilityCode: 'session.not-mounted',
+      }),
+    ])
     await runtime.dispose()
   })
 

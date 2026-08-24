@@ -1,7 +1,9 @@
 import type { Context, Disposable } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import {
+  CORDISX_PAGE_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+  CORDISX_ROUTE_SCHEMA_V2,
   type CordisXLocalizedText,
   type CordisXMessageParams,
   type CordisXPageMountContext,
@@ -33,6 +35,9 @@ interface Messages {
   'body.description': undefined
   'body.label': undefined
   'body.title': undefined
+  'page.description': undefined
+  'route.description': undefined
+  'route.title': undefined
   'tab.title': undefined
 }
 
@@ -111,6 +116,9 @@ export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})):
       'body.description': 'Settings for this demo plugin.',
       'body.label': 'Demo value',
       'body.title': 'Plugin settings content',
+      'page.description': 'Shows the demo value editor in the CordisX settings area while the Host owns the tab header and panel chrome.',
+      'route.description': 'Open from the Demo plugin settings tab and mount its controlled body-only settings page in manager.settings.content.',
+      'route.title': 'Plugin settings content',
       'tab.title': 'Demo plugin',
     },
   })
@@ -121,21 +129,30 @@ export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})):
       'body.description': '此演示插件的设置。',
       'body.label': '演示值',
       'body.title': '插件设置内容',
+      'page.description': '在 CordisX 配置区域展示演示值编辑器，Tab header 与 panel chrome 仍由 Host 所有。',
+      'route.description': '从“演示插件”设置 Tab 进入，并在 manager.settings.content 中挂载受控的 body-only 设置页面。',
+      'route.title': '插件设置内容',
       'tab.title': '演示插件',
     },
   })
 
   ctx.pages.register<Messages>({
+    $schema: CORDISX_PAGE_SCHEMA_V3,
+    schemaVersion: 3,
     id: 'settings',
     title: message('body.title'),
+    description: message('page.description'),
     chrome: 'body-only',
-    localeNamespace: 'settings-demo',
   }, context => mountSettings(context, config))
   ctx.routes.register({
+    $schema: CORDISX_ROUTE_SCHEMA_V2,
+    schemaVersion: 2,
     id: 'settings',
     path: '/manager/settings/settings-tab-demo',
     outlet: 'manager.settings.content',
     page: 'settings',
+    title: message('route.title'),
+    description: message('route.description'),
   })
   ctx.slots.register({
     name: 'manager.settings.tabs',
