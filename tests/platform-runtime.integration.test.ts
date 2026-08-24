@@ -15,10 +15,10 @@ describe('Platform runtime activation', () => {
   it('blocks a required denied capability and mounts fresh after policy recovery', async () => {
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const baseConfig = await loadConfig(path.join(projectRoot, 'cordisx.config.example.json'))
-    const entry = path.join(projectRoot, 'tests/fixtures/platform-required-plugin.ts')
+    const entry = path.join(projectRoot, 'tests/fixtures/agent-events-required-plugin.ts')
     const config = {
       ...baseConfig,
-      plugins: [{ id: 'platform-required', entry, enabled: true, config: {} }],
+      plugins: [{ id: 'agent-events-required', entry, enabled: true, config: {} }],
     }
     const bundle = await buildRendererBundle(config)
     const dom = new JSDOM(`
@@ -28,16 +28,16 @@ describe('Platform runtime activation', () => {
     `, { runScripts: 'dangerously', url: 'https://codex.local/' })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
 
-    const identityKey = JSON.stringify([pathToFileURL(entry).href, 'platform-required'])
+    const identityKey = JSON.stringify([pathToFileURL(entry).href, 'agent-events-required'])
     const fingerprint = JSON.stringify({
-      name: 'models.read',
+      name: 'agent.events.read',
       required: true,
-      reason: { key: 'permission.required', fallback: 'Models are required for this fixture' },
+      reason: { key: 'permission.required', fallback: 'Agent events are required for this fixture' },
       scope: {},
     })
     dom.window.localStorage.setItem('cordisx.platform.permissionPolicies.v1', JSON.stringify([{
       identityKey,
-      capability: 'models.read',
+      capability: 'agent.events.read',
       fingerprint,
       policy: 'deny',
     }]))
@@ -55,29 +55,29 @@ describe('Platform runtime activation', () => {
         permissionAuthorizationPlan(id: string): CordisXPermissionAuthorizationPlanV1
         authorizePlugin(id: string, decision: CordisXPermissionAuthorizationDecisionV1): Promise<void>
         setPluginBlocked(id: string, blocked: boolean): Promise<void>
-        setPermissionPolicy(id: string, capability: 'models.read', policy: 'allow'): Promise<void>
+        setPermissionPolicy(id: string, capability: 'agent.events.read', policy: 'allow'): Promise<void>
         dispose(): Promise<void>
       }
     }).__cordisxRuntime
     expect(runtime?.snapshot().plugins[0]).toMatchObject({
-      id: 'platform-required',
+      id: 'agent-events-required',
       status: 'permission-blocked',
-      blockedReason: 'Required capability denied: models.read',
+      blockedReason: 'Required capability denied: agent.events.read',
     })
     expect(runtime?.snapshot().permissions[0]).toMatchObject({
-      capability: 'models.read',
+      capability: 'agent.events.read',
       policy: 'deny',
-      blockedReason: 'Required capability models.read is denied',
+      blockedReason: 'Required capability agent.events.read is denied',
     })
-    expect(dom.window.document.documentElement.dataset.platformRequiredMounted).toBeUndefined()
+    expect(dom.window.document.documentElement.dataset.agentEventsRequiredMounted).toBeUndefined()
 
-    const plan = runtime?.permissionAuthorizationPlan('platform-required')
+    const plan = runtime?.permissionAuthorizationPlan('agent-events-required')
     expect(plan).toMatchObject({
       profileId: 'development',
       defaultDecision: 'allow',
       declarations: [
-        { capability: 'models.read', required: true, policy: 'deny' },
-        { capability: 'tasks.catalog.read', required: false, policy: 'ask' },
+        { capability: 'agent.events.read', required: true, policy: 'deny' },
+        { capability: 'agent.history.read', required: false, policy: 'ask' },
       ],
     })
     if (plan === undefined) throw new Error('authorization plan is unavailable')
@@ -93,32 +93,32 @@ describe('Platform runtime activation', () => {
       decisions: plan.declarations.map(item => ({
         capability: item.capability,
         scope: item.scope,
-        decision: item.capability === 'models.read' ? required : 'deny',
+        decision: item.capability === 'agent.events.read' ? required : 'deny',
       })),
     })
-    await runtime?.authorizePlugin('platform-required', decide('allow-once'))
+    await runtime?.authorizePlugin('agent-events-required', decide('allow-once'))
     expect(runtime?.snapshot().plugins[0]?.status).toBe('active')
     expect(runtime?.snapshot().permissions[0]?.policy).toBe('deny')
     expect(dom.window.localStorage.getItem('cordisx.platform.permissionPolicies.v2')).not.toContain('allow-once')
-    await runtime?.setPluginBlocked('platform-required', true)
+    await runtime?.setPluginBlocked('agent-events-required', true)
 
-    await runtime?.authorizePlugin('platform-required', decide('allow'))
+    await runtime?.authorizePlugin('agent-events-required', decide('allow'))
     expect(runtime?.snapshot().plugins[0]?.status).toBe('active')
-    expect(dom.window.document.documentElement.dataset.platformRequiredMounted).toBe('true')
+    expect(dom.window.document.documentElement.dataset.agentEventsRequiredMounted).toBe('true')
 
     await runtime?.dispose()
-    expect(dom.window.document.documentElement.dataset.platformRequiredMounted).toBeUndefined()
+    expect(dom.window.document.documentElement.dataset.agentEventsRequiredMounted).toBeUndefined()
     dom.window.close()
   })
 
   it('uses the launcher profile projection and acknowledged narrow RPC for persistent policy changes', async () => {
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const baseConfig = await loadConfig(path.join(projectRoot, 'cordisx.config.example.json'))
-    const entry = path.join(projectRoot, 'tests/fixtures/platform-required-plugin.ts')
-    const config = { ...baseConfig, plugins: [{ id: 'platform-required', entry, enabled: true, config: {} }] }
-    const identity = { source: pathToFileURL(entry).href, id: 'platform-required' }
+    const entry = path.join(projectRoot, 'tests/fixtures/agent-events-required-plugin.ts')
+    const config = { ...baseConfig, plugins: [{ id: 'agent-events-required', entry, enabled: true, config: {} }] }
+    const identity = { source: pathToFileURL(entry).href, id: 'agent-events-required' }
     const initial = createPermissionPolicyRecord({
-      profileId: 'work', identity, capability: 'models.read', scope: {}, policy: 'allow',
+      profileId: 'work', identity, capability: 'agent.events.read', scope: {}, policy: 'allow',
     })
     const token = 'permission-persistence-token'
     const bundle = await buildRendererBundle(config, {
@@ -150,7 +150,7 @@ describe('Platform runtime activation', () => {
     const runtime = (dom.window as unknown as {
       __cordisxRuntime?: {
         snapshot(): { plugins: readonly { status: string }[]; permissions: readonly { policy: string }[] }
-        setPermissionPolicy(id: string, capability: 'models.read', policy: 'deny'): Promise<void>
+        setPermissionPolicy(id: string, capability: 'agent.events.read', policy: 'deny'): Promise<void>
         dispose(): Promise<void>
       }
     }).__cordisxRuntime
@@ -158,14 +158,103 @@ describe('Platform runtime activation', () => {
       plugins: [{ status: 'active' }],
       permissions: [{ policy: 'allow' }, { policy: 'ask' }],
     })
-    await runtime?.setPermissionPolicy('platform-required', 'models.read', 'deny')
+    await runtime?.setPermissionPolicy('agent-events-required', 'agent.events.read', 'deny')
     expect(runtime?.snapshot()).toMatchObject({
       plugins: [{ status: 'permission-blocked' }],
       permissions: [{ policy: 'deny' }, { policy: 'ask' }],
     })
     expect(payloads).toHaveLength(1)
-    expect(payloads[0]).toMatchObject({ token, records: [{ key: { profileId: 'work', identity: { pluginId: 'platform-required' } }, policy: 'deny' }] })
+    expect(payloads[0]).toMatchObject({ token, records: [{ key: { profileId: 'work', identity: { pluginId: 'agent-events-required' } }, policy: 'deny' }] })
     expect(JSON.stringify(payloads[0])).not.toContain('configPath')
+    await runtime?.dispose()
+    dom.window.close()
+  })
+
+  it('blocks a truly unavailable required capability and restores it from a new provider generation', async () => {
+    const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const baseConfig = await loadConfig(path.join(projectRoot, 'cordisx.config.example.json'))
+    const entry = path.join(projectRoot, 'tests/fixtures/platform-required-plugin.ts')
+    const plugin = { id: 'platform-required', entry, enabled: true, config: {} }
+    const unavailableBundle = await buildRendererBundle({ ...baseConfig, plugins: [plugin] }, {
+      generation: 'generation-unavailable',
+    })
+    const providerBundle = await buildRendererBundle({
+      ...baseConfig,
+      providers: [{
+        id: 'gateway-a',
+        kind: 'cli-proxy-api',
+        displayName: 'Gateway A',
+        baseUrl: 'https://gateway-a.test/v1',
+        apiKeyEnv: 'GATEWAY_A_KEY',
+        codexExecutable: 'codex',
+        codexHome: '/tmp/cordisx-gateway-a',
+        enabled: true,
+        timeoutMs: 1_000,
+      }],
+      plugins: [plugin],
+    }, {
+      providerBridgeToken: 'provider-generation-token',
+      generation: 'generation-provider-ready',
+    })
+    const dom = new JSDOM(`
+      <html lang="en"><head></head><body>
+        <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
+      </body></html>
+    `, { runScripts: 'dangerously', url: 'https://codex.local/' })
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+
+    dom.window.eval(unavailableBundle)
+    await (dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
+    let runtime = (dom.window as unknown as {
+      __cordisxRuntime?: {
+        snapshot(): { plugins: readonly { status: string; blockedReason?: string }[] }
+        dispose(): Promise<void>
+      }
+    }).__cordisxRuntime
+    expect(runtime?.snapshot().plugins[0]).toMatchObject({
+      status: 'permission-blocked',
+      blockedReason: 'Required capability unavailable: models.read',
+    })
+    expect(dom.window.document.documentElement.dataset.platformRequiredMounted).toBeUndefined()
+
+    Object.defineProperty(dom.window, '__cordisxProviderRequestV1', {
+      configurable: true,
+      value: (payload: string) => {
+        const request = JSON.parse(payload) as { requestId: string; token: string; operation: string }
+        expect(request.token).toBe('provider-generation-token')
+        const value = request.operation === 'status'
+          ? {
+              hostId: 'cordisx-provider-fleet',
+              hostName: 'CordisX External Provider Fleet',
+              mode: 'read-write',
+              supportedCapabilities: [
+                'models.read', 'tasks.catalog.read', 'tasks.content.read', 'tasks.create',
+                'tasks.control', 'turns.submit', 'turns.control',
+              ],
+              diagnostics: [],
+              secondConnectionCreated: false,
+              rawBridgeExposed: false,
+            }
+          : request.operation === 'availability'
+            ? [{ providerId: 'gateway-a', displayName: 'Gateway A', generation: 'provider-a-1', state: 'ready' }]
+            : undefined
+        queueMicrotask(() => (dom.window as unknown as {
+          __cordisxProviderReceiveV1?: (response: string) => void
+        }).__cordisxProviderReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value })))
+      },
+    })
+    dom.window.eval(providerBundle)
+    await (dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
+    runtime = (dom.window as unknown as typeof dom.window & {
+      __cordisxRuntime?: {
+        snapshot(): { plugins: readonly { status: string; blockedReason?: string }[] }
+        dispose(): Promise<void>
+      }
+    }).__cordisxRuntime
+    expect(runtime?.snapshot().plugins[0]).toMatchObject({ status: 'active' })
+    expect(runtime?.snapshot().plugins[0]?.blockedReason).toBeUndefined()
+    expect(dom.window.document.documentElement.dataset.platformRequiredMounted).toBe('true')
+
     await runtime?.dispose()
     dom.window.close()
   })

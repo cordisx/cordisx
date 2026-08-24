@@ -56,7 +56,27 @@ describe('Provider Fleet', () => {
     expect(created.ok && created.value.ref).toEqual({ providerId: 'beta', remoteSessionId: 'beta-created' })
     expect(calls.filter(call => call.method === 'thread/start').map(call => call.provider)).toEqual(['beta'])
     expect(fleet.status()).toMatchObject({ mode: 'read-write', secondConnectionCreated: false, rawBridgeExposed: false })
+    expect(fleet.providerStatuses()).toEqual([
+      { providerId: 'alpha', displayName: 'ALPHA', generation: 'generation-alpha', state: 'ready' },
+      { providerId: 'beta', displayName: 'BETA', generation: 'generation-beta', state: 'ready' },
+    ])
     expect(fleet.status().diagnostics).toContainEqual(expect.objectContaining({ code: 'current-connection-client-unavailable' }))
+    await fleet.close()
+  })
+
+  it('reports availability per configured provider instead of flattening a partial Fleet failure', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-fleet-'))
+    const fleet = await ProviderFleet.create([config(root, 'alpha'), config(root, 'beta')], {
+      startServer: async provider => {
+        if (provider.id === 'beta') throw new Error('beta is offline')
+        return server(provider.id, [])
+      },
+    })
+    expect(fleet.status().mode).toBe('read-write')
+    expect(fleet.providerStatuses()).toEqual([
+      { providerId: 'alpha', displayName: 'ALPHA', generation: 'generation-alpha', state: 'ready' },
+      { providerId: 'beta', displayName: 'BETA', state: 'unavailable' },
+    ])
     await fleet.close()
   })
 

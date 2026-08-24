@@ -69,6 +69,12 @@ import {
 } from './configuration.js'
 import { BindingPermissionPolicyStore } from './permission-binding.js'
 import { BrowserPluginLifecycleBridge } from './plugin-lifecycle-binding.js'
+import {
+  CapabilityAvailabilityRegistry,
+  externalProviderCapabilityProviders,
+  hostLocalCapabilityProviders,
+  platformAdapterCapabilityProvider,
+} from './capability-availability.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 
@@ -297,9 +303,37 @@ async function start(
   const historyAdapter = metadata.agentHistoryBridgeToken === undefined
     ? new UnavailableAgentHistoryAdapter()
     : await BindingAgentHistoryAdapter.connect(metadata.agentHistoryBridgeToken).catch(() => new UnavailableAgentHistoryAdapter())
+  const boundProviderStatuses = bindingPlatformAdapter?.capabilityProviderStatuses() ?? []
+  const externalProviderStatuses = boundProviderStatuses.length > 0
+    ? boundProviderStatuses
+    : metadata.providers.map(provider => ({
+      providerId: provider.id,
+      displayName: provider.displayName,
+      state: bindingPlatformAdapter?.status().mode === 'unavailable' ? 'unavailable' as const : 'ready' as const,
+    }))
+  const capabilityAvailability = new CapabilityAvailabilityRegistry([
+    platformAdapterCapabilityProvider(agentAdapter.status(), {
+      providerId: 'desktop-current-connection',
+      kind: 'current-connection',
+    }),
+    ...externalProviderCapabilityProviders(externalProviderStatuses),
+    ...hostLocalCapabilityProviders({
+      agentStatus: agentRuntime.status(),
+      historyStatus: historyAdapter.status(),
+      configurationWritable: configBridge !== undefined,
+      packageLifecycleAvailable: lifecycleBridge !== undefined,
+    }),
+  ])
   const extensionPointDescriptors = new ExtensionPointDescriptorRegistry()
   const extensionPointBroker = new ExtensionPointPolicyBroker(extensionPointDescriptors, new BrowserExtensionPointPolicyStore(), generation)
   const controllers: PluginController[] = plugins.map(createController)
+  const requiredBlockReason = (controller: PluginController): string | undefined => {
+    const denied = broker.requiredDenied(controller.identity)
+    if (denied.length > 0) return `Required capability denied: ${denied.join(', ')}`
+    const unavailable = capabilityAvailability.unavailableRequired(controller.manifest.capabilities)
+    if (unavailable.length > 0) return `Required capability unavailable: ${unavailable.join(', ')}`
+    return undefined
+  }
   const registerController = (controller: PluginController): void => {
     controller.unregisterPermissions = broker.register(controller.identity, controller.manifest)
     controller.unregisterExtensionPoints = extensionPointBroker.register(controller.identity)
@@ -328,10 +362,10 @@ async function start(
   }
   await broker.settled()
   for (const controller of controllers) {
-    const denied = broker.requiredDenied(controller.identity)
-    if (controller.status === 'active' && denied.length > 0) {
+    const blockedReason = requiredBlockReason(controller)
+    if (controller.status === 'active' && blockedReason !== undefined) {
       controller.status = 'permission-blocked'
-      controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+      controller.blockedReason = blockedReason
     }
   }
   const listeners = new Set<() => void>()
@@ -401,10 +435,10 @@ async function start(
   const mountPlugin = async (controller: PluginController): Promise<void> => {
     const module = controller.item.module
     if (module === undefined) throw new Error(`plugin ${controller.item.id} is not bundled because it is disabled in configuration`)
-    const denied = broker.requiredDenied(controller.identity)
-    if (denied.length > 0) {
+    const blockedReason = requiredBlockReason(controller)
+    if (blockedReason !== undefined) {
       controller.status = 'permission-blocked'
-      controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+      controller.blockedReason = blockedReason
       return
     }
     const pluginContext = ctx.extend({
@@ -579,10 +613,10 @@ async function start(
       if (controller.status === 'active') return
       blockedPlugins.delete(id)
       writeBlockedPlugins(blockedPlugins)
-      const denied = broker.requiredDenied(controller.identity)
-      if (denied.length > 0) {
+      const blockedReason = requiredBlockReason(controller)
+      if (blockedReason !== undefined) {
         controller.status = 'permission-blocked'
-        controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+        controller.blockedReason = blockedReason
         notify()
         return
       }
@@ -635,7 +669,7 @@ async function start(
         const mayMount = controller.item.enabled
           && controller.item.module !== undefined
           && !blockedPlugins.has(id)
-          && broker.requiredDenied(controller.identity).length === 0
+          && requiredBlockReason(controller) === undefined
         if (descriptor.applies === 'restart' && mayMount) {
           try {
             await applyRestartCandidate(controller, candidate)
@@ -687,15 +721,15 @@ async function start(
       const controller = controllers.find(item => item.item.id === id)
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
       await broker.setPolicy(controller.identity, capability, policy)
-      const denied = broker.requiredDenied(controller.identity)
-      if (denied.length > 0) {
+      const blockedReason = requiredBlockReason(controller)
+      if (blockedReason !== undefined) {
         rememberRegistrations(id)
         agentRuntime.releaseOwner(controller.identity, 'permission-blocked')
         await controller.fiber?.dispose()
         await routeService?.settled()
         delete controller.fiber
         controller.status = 'permission-blocked'
-        controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+        controller.blockedReason = blockedReason
         notify()
         return
       }
@@ -759,15 +793,15 @@ async function start(
       await broker.authorizeActivation(controller.identity, decision, 'enable')
       blockedPlugins.delete(id)
       writeBlockedPlugins(blockedPlugins)
-      const denied = broker.requiredDenied(controller.identity)
-      if (denied.length > 0) {
+      const blockedReason = requiredBlockReason(controller)
+      if (blockedReason !== undefined) {
         rememberRegistrations(id)
         agentRuntime.releaseOwner(controller.identity, 'permission-blocked')
         await controller.fiber?.dispose()
         await routeService?.settled()
         delete controller.fiber
         controller.status = 'permission-blocked'
-        controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+        controller.blockedReason = blockedReason
         notify()
         return
       }

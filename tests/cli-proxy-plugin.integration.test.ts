@@ -132,6 +132,11 @@ describe('CLIProxy provider plugin renderer', () => {
             diagnostics: [{ code: 'current-connection-client-unavailable', message: 'native remains unavailable' }],
             secondConnectionCreated: false, rawBridgeExposed: false,
           }
+        } else if (request.operation === 'availability') {
+          value = [
+            { providerId: 'gateway-a', displayName: 'Gateway A', generation: 'generation-a', state: 'ready' },
+            { providerId: 'gateway-b', displayName: 'Gateway B', generation: 'generation-b', state: 'ready' },
+          ]
         } else if (request.operation === 'models.list') {
           value = { ok: true, value: {
             contract: 'cordisx.platform-model-page/v1', schemaVersion: 1, providerIds: ['gateway-a', 'gateway-b'],
@@ -190,7 +195,7 @@ describe('CLIProxy provider plugin renderer', () => {
       JSON.stringify(['gateway-a', 'shared-session']),
       JSON.stringify(['gateway-b', 'shared-session']),
     ])
-    expect(requests.map(request => request.operation)).toEqual(expect.arrayContaining(['status', 'models.list', 'tasks.list']))
+    expect(requests.map(request => request.operation)).toEqual(expect.arrayContaining(['status', 'availability', 'models.list', 'tasks.list']))
     expect(runtime!.snapshot().permissions.find(item => item.capability === 'tasks.catalog.read')?.lastRequested)
       .toMatchObject({ providerIds: ['gateway-a', 'gateway-b'] })
 

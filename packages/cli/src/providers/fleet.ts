@@ -21,6 +21,7 @@ import type {
   CordisXTurnSubmitInput,
 } from '../contracts.js'
 import type { CordisXPlatformAdapter } from '../renderer/platform.js'
+import type { CordisXExternalProviderAvailabilityStatus } from '../capability-availability-contracts.js'
 import { ProviderAdapterRegistry, ProviderRegistryError } from '../renderer/provider-registry.js'
 import { startCodexAppServer, type CodexAppServerOptions, type CodexAppServerRpc } from './codex-app-server.js'
 import { CliProxyProviderAdapter } from './cli-proxy-adapter.js'
@@ -141,7 +142,7 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     }
   }
 
-  providerStatuses(): readonly { providerId: string; displayName: string; generation?: string; state: 'ready' | 'unavailable' }[] {
+  providerStatuses(): readonly CordisXExternalProviderAvailabilityStatus[] {
     const generations = new Map(this.registry.snapshots().filter(item => item.state === 'active').map(item => [item.providerId, item.generation]))
     return [...this.names].map(([providerId, displayName]) => {
       const generation = generations.get(providerId)
