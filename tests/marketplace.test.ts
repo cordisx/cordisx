@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   BrowserMarketplaceModel,
+  MARKETPLACE_SOURCE_RECORDS_KEY,
   MARKETPLACE_SOURCES_KEY,
   OFFICIAL_MARKETPLACE_SOURCE,
   canonicalPluginSource,
@@ -9,6 +10,7 @@ import {
   normalizeMarketplaceSource,
   parseMarketplaceFeed,
   projectMarketplacePlugin,
+  projectMarketplaceSource,
   searchMarketplaceCatalog,
   type MarketplaceFetcher,
   type MarketplaceStorage,
@@ -264,12 +266,13 @@ describe('BrowserMarketplaceModel', () => {
       [first, feed('First', [plugin('shared', 'First winner', sharedSource)])],
       [failed, new Error('network unavailable')],
       [later, feed('Later', [plugin('shared', 'Later duplicate', sharedSource), plugin('unique', 'Unique plugin')])],
-    ])))
+    ])), [OFFICIAL_MARKETPLACE_SOURCE], { retryDelays: [] })
 
     await model.reload()
     const snapshot = model.snapshot()
     expect(snapshot.loading).toBe(false)
     expect(snapshot.sourceStates).toEqual([
+      expect.objectContaining({ url: OFFICIAL_MARKETPLACE_SOURCE, phase: 'disabled', enabled: false, official: true }),
       expect.objectContaining({ url: first, status: 'loaded', pluginCount: 1 }),
       expect.objectContaining({ url: failed, status: 'failed', error: 'network unavailable' }),
       expect.objectContaining({ url: later, status: 'loaded', pluginCount: 2 }),
@@ -286,18 +289,33 @@ describe('BrowserMarketplaceModel', () => {
     model.dispose()
   })
 
-  it('persists an ordered, URL-unique source list and supports an empty catalog', async () => {
+  it('persists ordered URL-unique records and retains a disabled official source for an empty catalog', async () => {
     const source = 'https://catalog.example/feed.json'
     const storage = new MemoryStorage()
     const model = new BrowserMarketplaceModel(storage, fetcher(new Map([[source, feed('Catalog', [])]])))
 
     await model.setSources([source, source])
-    expect(model.snapshot().sources).toEqual([source])
-    expect(storage.getItem(MARKETPLACE_SOURCES_KEY)).toBe(JSON.stringify([source]))
+    expect(model.snapshot().sourceRecords).toEqual([
+      { url: OFFICIAL_MARKETPLACE_SOURCE, enabled: false },
+      { url: source, enabled: true },
+    ])
+    expect(JSON.parse(storage.getItem(MARKETPLACE_SOURCE_RECORDS_KEY)!)).toEqual({
+      schemaVersion: 2,
+      sources: [
+        { url: OFFICIAL_MARKETPLACE_SOURCE, enabled: false },
+        { url: source, enabled: true },
+      ],
+    })
 
     await model.setSources([])
-    expect(model.snapshot()).toEqual(expect.objectContaining({ sources: [], sourceStates: [], plugins: [], loading: false }))
-    expect(storage.getItem(MARKETPLACE_SOURCES_KEY)).toBe('[]')
+    expect(model.snapshot()).toEqual(expect.objectContaining({
+      sources: [OFFICIAL_MARKETPLACE_SOURCE],
+      sourceRecords: [{ url: OFFICIAL_MARKETPLACE_SOURCE, enabled: false }],
+      sourceStates: [expect.objectContaining({ phase: 'disabled' })],
+      plugins: [],
+      loading: false,
+    }))
+    expect(storage.getItem(MARKETPLACE_SOURCES_KEY)).toBeNull()
     model.dispose()
   })
 
@@ -350,6 +368,146 @@ describe('BrowserMarketplaceModel', () => {
       official: expect.objectContaining({ designation: 'cordisx-official' }),
     }))
     expect(model.snapshot().plugins[0]?.certification).toBeUndefined()
+    model.dispose()
+  })
+
+  it('projects last-good cache immediately and keeps it stale when background revalidation fails', async () => {
+    const source = 'https://catalog.example/stale.json'
+    const storage = new MemoryStorage()
+    let now = 1_000
+    const seeded = new BrowserMarketplaceModel(storage, fetcher(new Map([
+      [source, feed('Cached catalog', [plugin('cached', 'Cached plugin')])],
+    ])), [OFFICIAL_MARKETPLACE_SOURCE], { now: () => now, retryDelays: [] })
+    await seeded.setSources([source])
+    seeded.dispose()
+
+    now = 20_000
+    let requests = 0
+    const model = new BrowserMarketplaceModel(storage, async () => {
+      requests += 1
+      throw new Error('network offline')
+    }, [OFFICIAL_MARKETPLACE_SOURCE], {
+      now: () => now,
+      staleAfterMs: 1_000,
+      retryDelays: [],
+    })
+
+    expect(model.snapshot()).toEqual(expect.objectContaining({
+      plugins: [expect.objectContaining({ id: 'cached' })],
+      sourceStates: [
+        expect.objectContaining({ phase: 'disabled' }),
+        expect.objectContaining({ url: source, phase: 'stale', stale: true }),
+      ],
+    }))
+    const refresh = model.reload()
+    expect(model.snapshot()).toEqual(expect.objectContaining({
+      plugins: [expect.objectContaining({ id: 'cached' })],
+      revalidating: true,
+    }))
+    await refresh
+    expect(requests).toBe(1)
+    expect(model.snapshot()).toEqual(expect.objectContaining({
+      plugins: [expect.objectContaining({ id: 'cached' })],
+      sourceStates: [
+        expect.objectContaining({ phase: 'disabled' }),
+        expect.objectContaining({ url: source, phase: 'stale', error: 'network offline', attempts: 1 }),
+      ],
+      loading: false,
+      revalidating: false,
+    }))
+    model.dispose()
+  })
+
+  it('deduplicates concurrent revalidation and bounds retries to transient failures', async () => {
+    const source = 'https://catalog.example/retry.json'
+    const storage = new MemoryStorage()
+    let requests = 0
+    const sleeps: number[] = []
+    let release: (() => void) | undefined
+    const firstRequest = new Promise<void>(resolve => { release = resolve })
+    const model = new BrowserMarketplaceModel(storage, async () => {
+      requests += 1
+      if (requests === 1) {
+        await firstRequest
+        return { ok: false, status: 503, text: async () => '' }
+      }
+      if (requests === 2) return { ok: false, status: 429, text: async () => '' }
+      return { ok: true, status: 200, text: async () => feed('Recovered', [plugin('recovered', 'Recovered plugin')]) }
+    }, [OFFICIAL_MARKETPLACE_SOURCE], {
+      retryDelays: [10, 20],
+      sleep: async milliseconds => { sleeps.push(milliseconds) },
+    })
+    const configured = model.setSources([source])
+    const duplicate = model.reload()
+    expect(requests).toBe(1)
+    release?.()
+    await Promise.all([configured, duplicate])
+
+    expect(requests).toBe(3)
+    expect(sleeps).toEqual([10, 20])
+    expect(model.snapshot()).toEqual(expect.objectContaining({
+      plugins: [expect.objectContaining({ id: 'recovered' })],
+      sourceStates: [
+        expect.objectContaining({ phase: 'disabled' }),
+        expect.objectContaining({ url: source, phase: 'fresh', attempts: 3 }),
+      ],
+    }))
+    model.dispose()
+  })
+
+  it('fences a late source generation and never fetches disabled records', async () => {
+    const first = 'https://catalog.example/first.json'
+    const second = 'https://catalog.example/second.json'
+    let releaseFirst: (() => void) | undefined
+    const firstPending = new Promise<void>(resolve => { releaseFirst = resolve })
+    const requests: string[] = []
+    const model = new BrowserMarketplaceModel(undefined, async (url) => {
+      requests.push(url)
+      if (url === first) await firstPending
+      return {
+        ok: true,
+        status: 200,
+        text: async () => feed(url === first ? 'First' : 'Second', [plugin(url === first ? 'first' : 'second', 'Plugin')]),
+      }
+    }, [OFFICIAL_MARKETPLACE_SOURCE], { retryDelays: [] })
+
+    const oldGeneration = model.setSourceRecords([{ url: first, enabled: true }])
+    await Promise.resolve()
+    const currentGeneration = model.setSourceRecords([
+      { url: first, enabled: false },
+      { url: second, enabled: true },
+    ])
+    await currentGeneration
+    releaseFirst?.()
+    await oldGeneration
+
+    expect(requests).toEqual([first, second])
+    expect(model.snapshot()).toEqual(expect.objectContaining({
+      plugins: [expect.objectContaining({ id: 'second' })],
+      sourceStates: [
+        expect.objectContaining({ phase: 'disabled', official: true }),
+        expect.objectContaining({ url: first, phase: 'disabled' }),
+        expect.objectContaining({ url: second, phase: 'fresh' }),
+      ],
+    }))
+    model.dispose()
+  })
+
+  it('projects local source metadata ahead of remote locale while retaining all search terms', async () => {
+    const source = 'https://catalog.example/local.json'
+    const model = new BrowserMarketplaceModel(undefined, fetcher(new Map([[source, JSON.stringify(localizedFeed())]])))
+    await model.setSourceRecords([{
+      url: source,
+      enabled: true,
+      local: { name: 'My catalog', description: 'Local introduction.', note: 'Team preview.' },
+    }])
+    const projection = projectMarketplaceSource(model.snapshot().sourceStates[1]!, 'zh-CN')
+    expect(projection).toEqual(expect.objectContaining({
+      name: 'My catalog',
+      description: 'Local introduction.',
+      note: 'Team preview.',
+      searchValues: expect.arrayContaining(['My catalog', 'CordisX 插件商店', source, 'catalog.example']),
+    }))
     model.dispose()
   })
 
