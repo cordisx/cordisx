@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { MANAGER_PRODUCT_COPY, managerCopy } from '../packages/cli/src/renderer/ui-copy.js'
 
 const managerPath = fileURLToPath(new URL('../packages/cli/src/renderer/manager.ts', import.meta.url))
 const tracePath = fileURLToPath(new URL('../packages/agent-trace-showcase/src/view.ts', import.meta.url))
@@ -35,6 +36,18 @@ describe('UI copy principles', () => {
     expect(launcher).toContain('启动器配置由 cordisx.config.json 管理。')
     expect(launcher).toContain('查看配置文档')
     expect(launcher).not.toMatch(/composition|generation/)
+  })
+
+  it('keeps the Host catalog complete and locale-first for every governed primary state', () => {
+    for (const [key, messages] of Object.entries(MANAGER_PRODUCT_COPY)) {
+      expect(messages.en, `${key}: en`).toMatch(/\S/u)
+      expect(messages['zh-CN'], `${key}: zh-CN`).toMatch(/\S/u)
+      expect(managerCopy('en-US', key as keyof typeof MANAGER_PRODUCT_COPY)).toBe(messages.en)
+      expect(managerCopy('zh-Hans-CN', key as keyof typeof MANAGER_PRODUCT_COPY)).toBe(messages['zh-CN'])
+    }
+    expect(managerCopy('en', 'marketplace.failed')).toBe('Failed to load')
+    expect(managerCopy('zh-CN', 'status.file-not-found')).toBe('文件不存在')
+    expect(managerCopy('en', 'status.restart-required')).toBe('Restart required')
   })
 
   it('keeps diagnostics and documentation as the home for developer terminology', async () => {
