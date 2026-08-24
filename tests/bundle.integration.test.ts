@@ -241,8 +241,13 @@ describe('renderer bundle', () => {
     expect(toolbarAction.className).not.toContain('codex-toolbar-button')
     expect(toolbarAction.className).toContain('cordisx-toolbar-action')
     expect(toolbarAction.className).toContain('cordisx-icon-only-control')
-    expect(dom.window.getComputedStyle(toolbarAction).width).toBe(dom.window.getComputedStyle(dom.window.document.getElementById('native-toolbar-primary')!).width)
-    expect(dom.window.getComputedStyle(toolbarAction).height).toBe(dom.window.getComputedStyle(dom.window.document.getElementById('native-toolbar-primary')!).height)
+    expect(toolbarAction.dataset.cordisxIconControlVariant).toBe('toolbar')
+    const toolbarSeat = toolbarAction.closest<HTMLElement>('[data-cordisx-surface-host="toolbar.before"]')!
+    expect(dom.window.getComputedStyle(toolbarSeat).getPropertyValue('--cordisx-toolbar-action-target-size')).toBe('28px')
+    expect(dom.window.getComputedStyle(toolbarSeat).getPropertyValue('--cordisx-toolbar-action-corner-radius')).toBe('8px')
+    expect(dom.window.getComputedStyle(toolbarAction).width).toBe('var(--cordisx-toolbar-action-target-size)')
+    expect(dom.window.getComputedStyle(toolbarAction).height).toBe('var(--cordisx-toolbar-action-target-size)')
+    expect(dom.window.getComputedStyle(toolbarSeat).getPropertyValue('--cordisx-toolbar-action-target-size')).toBe(dom.window.getComputedStyle(dom.window.document.getElementById('native-toolbar-primary')!).width)
     expect(dom.window.getComputedStyle(toolbarAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('16px')
     const toolbarIcon = toolbarAction.querySelector<HTMLElement>('.cordisx-host-icon')!
     const toolbarGlyph = toolbarIcon.querySelector<SVGElement>('svg')!
@@ -262,8 +267,8 @@ describe('renderer bundle', () => {
     const sessionHeaderAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="session.header.actions"] button')!
     expect(sessionHeaderAction.className).not.toContain('codex-toolbar-button')
     expect(sessionHeaderAction.className).toContain('cordisx-toolbar-action')
-    expect(dom.window.getComputedStyle(sessionHeaderAction).width).toBe('28px')
-    expect(dom.window.getComputedStyle(sessionHeaderAction).height).toBe('28px')
+    expect(dom.window.getComputedStyle(sessionHeaderAction).width).toBe('var(--cordisx-toolbar-action-target-size)')
+    expect(dom.window.getComputedStyle(sessionHeaderAction).height).toBe('var(--cordisx-toolbar-action-target-size)')
     expect(dom.window.getComputedStyle(sessionHeaderAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('16px')
     expect(sessionHeaderAction.getAttribute('aria-label')).toBe('Open main page')
     expect(sessionHeaderAction.dataset.cordisxTooltip).toBe('Open main page')
@@ -271,6 +276,7 @@ describe('renderer bundle', () => {
     const composerAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="composer.submit.before"] button')!
     expect(composerAction.className).toContain('cordisx-composer-action')
     expect(composerAction.className).not.toContain('codex-composer-button')
+    expect(composerAction.dataset.cordisxIconControlVariant).toBe('composer')
     expect(composerAction.classList.contains('cordisx-icon-only-control')).toBe(false)
     expect(dom.window.getComputedStyle(composerAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('')
     expect(dom.window.getComputedStyle(composerAction.querySelector('.cordisx-host-icon')!).width).toBe('16px')

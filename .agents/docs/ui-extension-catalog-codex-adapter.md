@@ -89,14 +89,20 @@ Host-projected route toggle may carry `aria-pressed="true"` and
 hover, focus-visible, open, and disabled presentation is evaluated on the
 individual generated button.
 
-The current Host semantic pressed token mixes the native theme text color at
-five percent over transparency, matching the adjacent pinned-summary control
+The Host has separate icon-control variants per semantic seat. The current
+workspace and session toolbar variant is a 28 by 28 pixel target with a
+centered 16-pixel glyph and the resolved adjacent native control's corner
+radius; the Composer submit-adjacent variant remains circular. Toolbar idle,
+hover/open, pressed, focus-visible, and disabled tokens are scoped to the
+generated toolbar root, including its Host overflow summary. The semantic
+pressed token mixes the native theme text color
+at five percent over transparency, matching the adjacent pinned-summary control
 without copying its private class. A hovered or open pressed control uses the
 same text color at ten percent. Pressed foreground uses the primary text token;
-focus-visible keeps the shared two-pixel ring and disabled keeps 40 percent
-opacity. These tokens apply only to the generated button whose exact route is
-presented; neither its CordisX siblings nor the adjacent native control inherit
-them.
+focus-visible keeps the shared two-pixel ring and disabled keeps 40
+percent opacity. These tokens apply only to the generated button whose exact
+route is presented; neither its CordisX siblings nor the adjacent native
+control inherit them.
 
 For the current host, independent actions inside a CordisX titlebar seat use
 the six-pixel `--cordisx-toolbar-action-gap`. The seat uses a separate
