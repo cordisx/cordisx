@@ -330,7 +330,7 @@ localized descriptors, usage details, and policy enforcement are specified in
 Future host/adapter packages may add `panel.right`, `panel.bottom`, `sidebar`,
 or other outlet ids without changing a closed union in core.
 
-The manager-settings v3 delivery additionally declares
+The manager-settings v4 delivery additionally declares
 `manager.settings.content`. It is a host-neutral manager-local body outlet,
 not a Codex adapter region. Compatible routes live below
 `/manager/settings/`, keep `app://` and browser/Codex history unchanged, and

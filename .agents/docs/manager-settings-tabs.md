@@ -57,16 +57,20 @@ or settings-specific page API.
 
 ## Contract shape and versioning
 
-`surface-contribution.v1` and `.v2` contain closed surface enums. Version 2 is
-already documented as the complete catalog for that version, and old
+`surface-contribution.v1`, `.v2`, and `.v3` contain closed surface enums.
+Version 3 already owns route-toggle behavior, and old
 validators must be able to reject a newer document without guessing whether an
 unknown surface is safe. The protocol delivery therefore adds
-`surface-contribution.v3` and `host-extension-point-catalog.v3`. It does not
-append these ids to either stable v1/v2 enum or conformance map.
+`surface-contribution.v4` and `host-extension-point-catalog.v3`. It does not
+append these ids to a stable v1/v2/v3 surface enum or the v1/v2 catalog maps.
 
-Version 3 is an explicit additive superset. A v1/v2 host rejects v3. A v3 host
-may normalize conforming v1/v2 contributions, while retaining their original
-version in diagnostics. There is no downgrade to a retired free-DOM slot.
+Version 4 is an explicit additive surface superset. A v1/v2/v3 host rejects
+v4. A v4 host may normalize conforming v1/v2/v3 contributions, while retaining
+their original version in diagnostics. There is no downgrade to a retired
+free-DOM slot. Page bodies use the already versioned `page.v2`
+`chrome: 'body-only'` contract; catalog v3 adds
+`manager.settings.content` to the outlet policies that allow it rather than
+changing the frozen page schema.
 
 The Settings Tab contribution has one source of truth:
 
@@ -223,7 +227,7 @@ not extra extension points.
 
 1. **Architecture (`cordisx`)**: this document plus the architecture, manager,
    routing, extension-point, and catalog indexes. No runtime code lands first.
-2. **Protocol (`cordisx-protocol`)**: v3 contribution/catalog schemas,
+2. **Protocol (`cordisx-protocol`)**: surface v4 and catalog v3 schemas,
    human-readable contract, valid/invalid vectors, and conformance for the two
    points, header-data boundary, ownership, route/path compatibility, order,
    collisions, pending states, and generation-fenced origin.
@@ -247,7 +251,7 @@ Source branch heads are never used as final gitlinks.
 
 | Layer | Required evidence |
 | --- | --- |
-| Protocol versions | v1/v2 validators reject v3; v3 normalizes valid v1/v2 data without adding this point to older closed enums; unknown v3 fields/versions fail closed. |
+| Protocol versions | v1/v2/v3 surface validators reject v4; v4 normalizes valid v1/v2/v3 data without adding this point to older closed enums; catalog v1/v2 reject v3; unknown fields/versions fail closed. |
 | Protocol boundary | Accept localized title, required known host icon, same-owner route, envelope order/when/disabled; reject HTML, SVG, CSS, selector, node/component/render callback, `children`, header seat, arbitrary icon, badge, group, cross-owner route/page, wrong path/outlet, and plugin-supplied access origin. |
 | Protocol projection | Built-in and plugin same-local-id records coexist; exact identity conflicts fail; deterministic `order -> owner -> qualified id`; unresolved route/page/outlet is pending; stale generation is rejected. |
 | Registry/runtime | Registration and immutable item/options updates; unknown context; disabled and visibility transitions; locale reprojection without re-registration; policy and route/page dependency reconciliation; update-after-dispose and stale generation rejection. |

@@ -113,22 +113,23 @@ environment family is not duplicated under generic panel names.
 | Environment | `environment.section.actions` | action | implemented | Existing declared-section target. |
 | Environment | `environment.section.rows` | environment row | implemented | Existing declared-section row target. |
 | Environment | `environment.row.trailing-actions` | action | implemented | Existing declared-row target. |
-| CordisX manager | `manager.settings.tabs` | manager settings tab | planned v3 | Host-rendered configuration tabs joined to same-owner manager-local routes/pages; no Codex selector or header callback. |
+| CordisX manager | `manager.settings.tabs` | manager settings tab | planned v4 | Host-rendered configuration tabs joined to same-owner manager-local routes/pages; no Codex selector or header callback. |
 | Page | `app` | outlet | implemented | Existing generation-scoped renderer page. |
 | Page | `main` | outlet | implemented | Existing semantic main-region page following sidebar geometry. |
 | Page | `session.content` | outlet | implemented | Existing active-session body page below the session header. |
 | Panel page | `panel.right.content` | outlet | reserved | No declaration until the adapter proves a stable right-panel content region and context key. |
 | Panel page | `panel.bottom.content` | outlet | reserved | No declaration until the adapter proves a stable bottom-panel content region and context key. |
-| CordisX manager page | `manager.settings.content` | outlet | planned v3 | CordisX-owned settings panel body; isolated from primary page presentation and independent of the Codex adapter. |
+| CordisX manager page | `manager.settings.content` | outlet | planned v4 | CordisX-owned settings panel body; isolated from primary page presentation and independent of the Codex adapter. |
 
 An adapter may report an experimental point as pending with a machine code,
 but it must not add it to the live declared catalog as available merely because
 a protocol id exists. Reserved outlets are valid future route targets only in
 the version that declares them; current navigation fails closed.
 
-`planned v3` is an architecture-only marker, not a protocol availability
-value. Until the v3 protocol and host slices merge and pass the required live
-evidence, the current runtime does not declare either manager-settings point.
+`planned v4` is an architecture-only marker, not a protocol availability
+value. Until the surface v4/catalog v3 protocol and host slices merge and pass
+the required live evidence, the current runtime does not declare either
+manager-settings point.
 
 ## Contextual invocation
 

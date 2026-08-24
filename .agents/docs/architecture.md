@@ -116,7 +116,7 @@ The catalog distinguishes implemented, experimental, and reserved points;
 protocol reservation is never evidence that the current Codex adapter can
 project a point.
 
-The planned manager-settings v3 delivery exposes a separate host-neutral pair:
+The planned manager-settings v4 delivery exposes a separate host-neutral pair:
 `manager.settings.tabs` accepts structured tab records and
 `manager.settings.content` accepts same-owner routes/pages for controlled body
 mounts. These are manager extension points, not Codex adapter surfaces; they
