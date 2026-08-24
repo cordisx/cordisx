@@ -1113,7 +1113,7 @@ function installStyles(document: Document): () => void {
   style.id = 'cordisx-structured-styles'
   style.textContent = `
     [data-cordisx-no-drag="true"], [data-cordisx-no-drag="true"] * { -webkit-app-region: no-drag !important; }
-    .cordisx-native-seat { --cordisx-toolbar-outer-group-gap: 6px; --cordisx-toolbar-action-gap: 6px; box-sizing: border-box; color: inherit; font: inherit; pointer-events: auto; -webkit-app-region: no-drag; }
+    .cordisx-native-seat { --cordisx-toolbar-outer-group-gap: 6px; --cordisx-toolbar-action-gap: 6px; --cordisx-toolbar-action-pressed-background: color-mix(in oklab,var(--color-text,currentColor) 5%,transparent); --cordisx-toolbar-action-pressed-hover-background: color-mix(in oklab,var(--color-text,currentColor) 10%,transparent); --cordisx-toolbar-action-pressed-foreground: var(--color-text,currentColor); box-sizing: border-box; color: inherit; font: inherit; pointer-events: auto; -webkit-app-region: no-drag; }
     .cordisx-native-seat[hidden] { display: none !important; }
     .cordisx-sidebar-navigation { display: block; width: 100%; min-width: 0; }
     .cordisx-sidebar-footer-before, .cordisx-sidebar-footer-after { display: flex; flex: 0 0 auto; height: 32px; align-items: center; gap: 4px; min-width: 0; }
@@ -1138,7 +1138,8 @@ function installStyles(document: Document): () => void {
     .cordisx-native-seat > .cordisx-toolbar-action:focus { outline: none; }
     .cordisx-native-seat > .cordisx-toolbar-action:focus-visible { outline: 2px solid var(--color-ring,rgba(131,195,255,.76)); outline-offset: 0; }
     .cordisx-native-seat > .cordisx-toolbar-action:disabled { cursor: default; opacity: .4; }
-    .cordisx-native-seat > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"] { background-color: var(--color-background-elevated-secondary,rgba(127,127,127,.08)); color: var(--color-text,currentColor); }
+    .cordisx-native-seat > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"] { background-color: var(--cordisx-toolbar-action-pressed-background); color: var(--cordisx-toolbar-action-pressed-foreground); }
+    .cordisx-native-seat > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"]:hover:not(:disabled), .cordisx-native-seat > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"][data-state="open"] { background-color: var(--cordisx-toolbar-action-pressed-hover-background); }
     .cordisx-shortcut-action:not([class*="size-"]):not([class*="h-"]) { display: inline-flex; width: 24px; min-width: 24px; height: 24px; min-height: 24px; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: var(--radius-lg,8px); background: transparent; color: var(--color-text-tertiary,rgba(255,255,255,.5)); }
     .cordisx-composer-action { display: inline-flex; flex: 0 0 auto; width: 28px; min-width: 28px; height: 28px; min-height: 28px; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 9999px; background: transparent; color: var(--color-text-tertiary,currentColor); cursor: default; }
     .cordisx-composer-action:hover:not(:disabled), .cordisx-composer-action[data-state="open"] { background: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); }

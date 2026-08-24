@@ -173,6 +173,11 @@ would project one native toggle's state onto every CordisX sibling. CordisX
 uses a stable 28-pixel toolbar variant and projects idle, hover, focus-visible,
 open, disabled, and route-toggle pressed states on each generated button. Only
 an exact presented route produces `aria-pressed="true"` and the pressed style.
+The Host-owned pressed semantic token uses the current theme text color at five
+percent, with a ten-percent hover/open layer, primary foreground, the existing
+focus ring, and 40-percent disabled opacity. It is scoped to the exact
+generated button state rather than its toolbar seat, so no sibling or native
+control is activated with it.
 The independent `--cordisx-toolbar-action-gap` and
 `--cordisx-toolbar-outer-group-gap` tokens are both verified as six pixels for
 the current host: the first separates actions inside the CordisX seat and the
