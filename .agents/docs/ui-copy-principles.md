@@ -17,6 +17,12 @@ actionable link such as `查看配置文档` / `View configuration docs` or
 `查看错误详情` / `View error details`. Never present a bare URL or an ambiguous
 `了解更多` / `Learn more` action.
 
+Marketplace discovery keeps documentation out of its primary actions. Source
+management shows concise states such as `已停用` / `Disabled` and `更新失败` /
+`Failed to update`; a source URL is a secondary machine field. Do not expose
+raw fetch errors, cache implementation, profile storage, or identity-model
+terms in the source list or form.
+
 ## Copy layers
 
 | Layer | Include | Do not include |

@@ -1821,6 +1821,7 @@ function createMarketplaceFetcher(view: Window | null): MarketplaceFetcherHandle
 /** Mount the reversible, host-owned CordisX manager UI. */
 export function installCordisXManager(document: Document, model: ManagerModel): () => void {
   const theme = new HostThemeProjection(document)
+  const copy = (key: Parameters<typeof managerCopy>[1]): string => managerCopy(model.snapshot().localization.locale, key)
   const ownedPortals = new Map<HTMLElement, () => void>()
   const mountPortal = <Element extends HTMLElement>(portal: Element): (() => void) => {
     const detachTheme = theme.attach(portal)
@@ -1981,6 +1982,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     message?: string
   }>()
   let sourceOperationError: string | undefined
+  let sourceOperationDiagnostic: string | undefined
   let sourceOperationNotice: string | undefined
   let sourcesBusy = false
   let sourceQuery = ''
@@ -2517,7 +2519,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const projection = source === undefined ? undefined : projectMarketplaceSource(source, snapshot.localization.locale)
       const sourceRoot: ManagerBreadcrumbSegment = {
         id: 'marketplace-sources',
-        label: '商店来源',
+        label: managerCopy(snapshot.localization.locale, 'marketplace.source.index-heading'),
         target: { kind: 'marketplace-source', page: 'index' },
       }
       if (route.page === 'index') {
@@ -2531,7 +2533,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         return {
           id: 'marketplace-source:create',
           primary,
-          segments: [root('marketplace'), sourceRoot, { id: 'marketplace-source:create', label: '新增来源' }],
+          segments: [root('marketplace'), sourceRoot, { id: 'marketplace-source:create', label: managerCopy(snapshot.localization.locale, 'marketplace.source.create') }],
         }
       }
       return {
@@ -2540,7 +2542,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         segments: [
           root('marketplace'),
           sourceRoot,
-          { id: `marketplace-source:edit:${route.url ?? ''}`, label: projection?.name ?? '来源详情' },
+          { id: `marketplace-source:edit:${route.url ?? ''}`, label: projection?.name ?? managerCopy(snapshot.localization.locale, 'marketplace.source.edit-heading') },
         ],
       }
     }
@@ -4899,15 +4901,15 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const sourceMenuItems = (): readonly ManagerActionMenuItem[] => [
     {
-      id: 'create', label: '新增商店来源', icon: 'marketplace-source-add',
+      id: 'create', label: copy('marketplace.source-menu.create'), icon: 'marketplace-source-add',
       invoke: () => navigateRoute({ kind: 'marketplace-source', page: 'create' }),
     },
     {
-      id: 'clipboard', label: '从剪贴板导入', icon: 'marketplace-source-copy',
+      id: 'clipboard', label: copy('marketplace.source-menu.clipboard'), icon: 'marketplace-source-copy',
       invoke: () => importMarketplaceSourceFromClipboard(),
     },
     {
-      id: 'manage', label: '管理商店来源', icon: 'marketplace-source-edit',
+      id: 'manage', label: copy('marketplace.source-menu.manage'), icon: 'marketplace-source-edit',
       invoke: () => navigateRoute({ kind: 'marketplace-source', page: 'index' }),
     },
   ]
@@ -4921,9 +4923,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const tools = create(document, 'div', 'cxm-marketplace-discovery-tools')
     const toolbar = create(document, 'div', 'cxm-toolbar')
     const search = createListSearch('marketplace', '搜索 CordisX 插件商店', '搜索商店插件、作者、关键词或来源…', marketplaceQuery, value => { marketplaceQuery = value })
-    const sourceMenu = managerIconAction('marketplace-source-add', '新增或管理商店来源', {
+    const sourceMenu = managerIconAction('marketplace-source-add', copy('marketplace.source-menu-label'), {
       className: 'cxm-toolbar-icon-action',
-      description: '新增来源、从剪贴板导入或管理现有来源',
+      description: copy('marketplace.source-menu-description'),
     })
     sourceMenu.dataset.marketplaceSourceMenu = 'true'
     sourceMenu.setAttribute('aria-haspopup', 'menu')
@@ -4931,7 +4933,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     sourceMenu.addEventListener('click', event => {
       event.stopPropagation()
       if (sourceMenu.getAttribute('aria-expanded') === 'true') closePluginActionMenu(true)
-      else openManagerActionMenu(sourceMenu, '商店来源操作', sourceMenuItems())
+      else openManagerActionMenu(sourceMenu, copy('marketplace.source-menu-label'), sourceMenuItems())
     })
     const certifiedFilter = create(document, 'button', 'cxm-marketplace-filter')
     certifiedFilter.type = 'button'
@@ -5152,6 +5154,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   ): Promise<boolean> => {
     sourcesBusy = true
     sourceOperationError = undefined
+    sourceOperationDiagnostic = undefined
     sourceOperationNotice = undefined
     renderContent()
     try {
@@ -5159,12 +5162,20 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       sourceOperationNotice = success
       return true
     } catch (error) {
-      sourceOperationError = error instanceof Error ? error.message : String(error)
+      sourceOperationError = copy('marketplace.source.operation-failed')
+      sourceOperationDiagnostic = error instanceof Error ? error.message : String(error)
       return false
     } finally {
       sourcesBusy = false
       renderContent()
     }
+  }
+
+  const sourceErrorAlert = (): HTMLElement | undefined => {
+    if (sourceOperationError === undefined) return undefined
+    const alert = forms.alert(sourceOperationError, 'error')
+    if (sourceOperationDiagnostic !== undefined && sourceOperationDiagnostic !== '') alert.title = sourceOperationDiagnostic
+    return alert
   }
 
   const importMarketplaceSourceFromClipboard = async (): Promise<void> => {
@@ -5173,9 +5184,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     try {
       value = typeof navigator?.clipboard?.readText === 'function'
         ? await navigator.clipboard.readText()
-        : document.defaultView?.prompt('粘贴 HTTPS 地址或 marketplace-source.v1 JSON')
-    } catch {
-      sourceOperationError = '无法读取剪贴板，请允许剪贴板访问后重试。'
+        : document.defaultView?.prompt(copy('marketplace.source.clipboard-prompt'))
+    } catch (error) {
+      sourceOperationError = copy('marketplace.source.clipboard-unavailable')
+      sourceOperationDiagnostic = error instanceof Error ? error.message : String(error)
       sourceOperationNotice = undefined
       renderContent()
       return
@@ -5183,84 +5195,85 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (value === undefined || value === null) return
     const imported = await runMarketplaceSourceOperation(
       async () => { await marketplace.importSource(value!) },
-      '已从剪贴板导入商店来源。',
+      copy('marketplace.source.imported'),
     )
     if (imported) await navigateRoute({ kind: 'marketplace-source', page: 'index' })
   }
 
   const renderMarketplaceSourceIndex = (managerSnapshot: ManagerSnapshot): void => {
     const snapshot = marketplace.snapshot()
-    setHeading('查看、停用或调整插件发现来源', managerSnapshot)
+    setHeading(copy('marketplace.source.index-heading'), managerSnapshot)
     const page = create(document, 'section', 'cxm-marketplace-source-page')
     page.dataset.marketplaceSourcePage = 'index'
     const toolbar = create(document, 'div', 'cxm-marketplace-source-toolbar')
-    const add = managerIconAction('marketplace-source-add', '新增商店来源', { disabled: sourcesBusy })
+    const add = managerIconAction('marketplace-source-add', copy('marketplace.source.add'), { disabled: sourcesBusy })
     add.dataset.marketplaceSourceCreate = 'true'
     add.addEventListener('click', () => { void navigateRoute({ kind: 'marketplace-source', page: 'create' }) })
-    const clipboard = managerIconAction('marketplace-source-copy', '从剪贴板导入', { disabled: sourcesBusy })
+    const clipboard = managerIconAction('marketplace-source-copy', copy('marketplace.source-menu.clipboard'), { disabled: sourcesBusy })
     clipboard.dataset.marketplaceSourceClipboard = 'true'
     clipboard.addEventListener('click', () => { void importMarketplaceSourceFromClipboard() })
     toolbar.append(add, clipboard)
     page.append(toolbar)
     if (sourceOperationNotice !== undefined) page.append(forms.alert(sourceOperationNotice, 'info'))
-    if (sourceOperationError !== undefined) page.append(forms.alert(sourceOperationError, 'error'))
+    const errorAlert = sourceErrorAlert()
+    if (errorAlert !== undefined) page.append(errorAlert)
 
     const items: HostCollectionItem[] = snapshot.sourceRecords.map((record, index) => {
       const state = marketplaceSourceState(record, snapshot)
       const projection = projectMarketplaceSource(state, managerSnapshot.localization.locale)
       const status = !record.enabled
-        ? { label: '已停用', detail: '此来源已停用，不参与自动更新。', tone: 'neutral' as const }
+        ? { label: copy('marketplace.source.disabled'), tone: 'neutral' as const }
         : state.status === 'failed'
-          ? { label: '更新失败', detail: state.error ?? '自动更新失败，继续使用上次成功内容。', tone: 'danger' as const }
+          ? { label: copy('marketplace.source.failed'), tone: 'danger' as const }
           : state.revalidating
-            ? { label: '正在更新', detail: 'Host 正在后台更新此来源。', tone: 'progress' as const }
+            ? { label: copy('marketplace.source.updating'), tone: 'progress' as const }
             : state.stale
-              ? { label: '使用缓存', detail: '当前展示上次成功缓存，Host 会在后台重试。', tone: 'warning' as const }
+              ? { label: copy('marketplace.source.cached'), tone: 'warning' as const }
               : undefined
       return {
         id: record.url,
         title: projection.name,
-        description: projection.description ?? '未提供来源说明',
+        description: projection.description ?? copy('marketplace.source.no-description'),
         machineId: record.url,
         searchText: projection.searchValues,
         icon: () => createManagerIcon(document, record.url === OFFICIAL_MARKETPLACE_SOURCE ? 'marketplace-official' : 'marketplace'),
         ...(status === undefined ? {} : { status }),
-        openLabel: `打开 ${projection.name} 来源详情`,
+        openLabel: `${copy('marketplace.source.open')} · ${projection.name}`,
         onOpen: () => { void navigateRoute({ kind: 'marketplace-source', page: 'edit', url: record.url }) },
         actions: [
           {
             id: record.enabled ? 'disable' : 'enable',
-            label: record.enabled ? '停用来源' : '启用来源',
+            label: record.enabled ? copy('marketplace.source.disable') : copy('marketplace.source.enable'),
             icon: () => createManagerIcon(document, record.enabled ? 'disable-plugin' : 'enable-plugin'),
             placement: 'direct',
             disabled: sourcesBusy,
             onInvoke: async () => {
               await runMarketplaceSourceOperation(
                 async () => { await marketplace.setSourceEnabled(record.url, !record.enabled) },
-                record.enabled ? '已停用商店来源。' : '已启用商店来源。',
+                record.enabled ? copy('marketplace.source.disabled-notice') : copy('marketplace.source.enabled-notice'),
               )
             },
           },
           {
-            id: 'edit', label: '编辑本地显示信息', icon: () => createManagerIcon(document, 'marketplace-source-edit'), placement: 'overflow',
+            id: 'edit', label: copy('marketplace.source.edit'), icon: () => createManagerIcon(document, 'marketplace-source-edit'), placement: 'overflow',
             disabled: sourcesBusy,
             onInvoke: () => { void navigateRoute({ kind: 'marketplace-source', page: 'edit', url: record.url }) },
           },
           {
-            id: 'move-up', label: '上移', icon: () => createManagerIcon(document, 'marketplace-source-move-up'), placement: 'overflow',
+            id: 'move-up', label: copy('marketplace.source.move-up'), icon: () => createManagerIcon(document, 'marketplace-source-move-up'), placement: 'overflow',
             disabled: sourcesBusy || index === 0,
-            onInvoke: async () => { await runMarketplaceSourceOperation(async () => { await marketplace.moveSource(record.url, index - 1) }, '已调整来源顺序。') },
+            onInvoke: async () => { await runMarketplaceSourceOperation(async () => { await marketplace.moveSource(record.url, index - 1) }, copy('marketplace.source.moved-notice')) },
           },
           {
-            id: 'move-down', label: '下移', icon: () => createManagerIcon(document, 'marketplace-source-move-down'), placement: 'overflow',
+            id: 'move-down', label: copy('marketplace.source.move-down'), icon: () => createManagerIcon(document, 'marketplace-source-move-down'), placement: 'overflow',
             disabled: sourcesBusy || index === snapshot.sourceRecords.length - 1,
-            onInvoke: async () => { await runMarketplaceSourceOperation(async () => { await marketplace.moveSource(record.url, index + 1) }, '已调整来源顺序。') },
+            onInvoke: async () => { await runMarketplaceSourceOperation(async () => { await marketplace.moveSource(record.url, index + 1) }, copy('marketplace.source.moved-notice')) },
           },
           {
-            id: 'remove', label: '移除来源', icon: () => createManagerIcon(document, 'uninstall-plugin'), placement: 'overflow', tone: 'danger',
+            id: 'remove', label: copy('marketplace.source.remove'), icon: () => createManagerIcon(document, 'uninstall-plugin'), placement: 'overflow', tone: 'danger',
             disabled: sourcesBusy || record.url === OFFICIAL_MARKETPLACE_SOURCE,
-            ...(record.url === OFFICIAL_MARKETPLACE_SOURCE ? { unavailableReason: '官方来源不能删除，只能停用' } : {}),
-            onInvoke: async () => { await runMarketplaceSourceOperation(async () => { await marketplace.removeSource(record.url) }, '已移除商店来源。') },
+            ...(record.url === OFFICIAL_MARKETPLACE_SOURCE ? { unavailableReason: copy('marketplace.source.official-remove-unavailable') } : {}),
+            onInvoke: async () => { await runMarketplaceSourceOperation(async () => { await marketplace.removeSource(record.url) }, copy('marketplace.source.removed-notice')) },
           },
         ],
       }
@@ -5268,20 +5281,20 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     marketplaceCollectionView?.dispose()
     marketplaceCollectionView = createHostCollection(document, {
       id: 'marketplace-sources',
-      label: '插件商店来源',
+      label: copy('marketplace.source.collection-label'),
       layout: 'rows',
       items,
       search: {
-        label: '搜索商店来源',
-        placeholder: '搜索名称、说明、备注或 URL…',
+        label: copy('marketplace.source.search-label'),
+        placeholder: copy('marketplace.source.search-placeholder'),
         query: sourceQuery,
         onQueryChange: query => { sourceQuery = query },
         icon: () => createManagerIcon(document, 'search'),
         clearIcon: () => createManagerIcon(document, 'close'),
       },
-      emptyLabel: '暂无商店来源',
-      noMatchesLabel: '没有匹配的商店来源',
-      moreLabel: '更多来源操作',
+      emptyLabel: copy('marketplace.source.empty'),
+      noMatchesLabel: copy('marketplace.source.no-matches'),
+      moreLabel: copy('marketplace.source.more-actions'),
       moreIcon: () => createManagerIcon(document, 'more'),
       tooltips,
       attachPortalTheme: portal => theme.attach(portal),
@@ -5298,7 +5311,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const isCreate = mode === 'create'
     const state = existing === undefined ? undefined : marketplaceSourceState(existing)
     const projection = state === undefined ? undefined : projectMarketplaceSource(state, managerSnapshot.localization.locale)
-    setHeading(isCreate ? '添加新的插件发现来源' : '编辑本地显示信息与来源状态', managerSnapshot)
+    setHeading(isCreate ? copy('marketplace.source.create-heading') : copy('marketplace.source.edit-heading'), managerSnapshot)
     const page = create(document, 'section', 'cxm-marketplace-source-page cxf-scope')
     page.dataset.marketplaceSourcePage = mode
     const form = forms.form(`marketplace-source-${mode}`)
@@ -5308,25 +5321,25 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     let noteValue = existing?.local?.note ?? ''
     let sourceUrlItem: ReturnType<HostFormAdapter['item']> | undefined
     const identitySection = forms.section(
-      isCreate ? '来源地址' : projection?.name ?? '来源详情',
-      isCreate ? 'URL 是来源身份，添加后不可在本地改写。' : 'Canonical URL 是此来源的稳定身份，不会被本地显示信息覆盖。',
+      isCreate ? copy('marketplace.source.url-section') : projection?.name ?? copy('marketplace.source.edit-heading'),
+      isCreate ? copy('marketplace.source.url-help') : copy('marketplace.source.readonly-url-help'),
     )
     if (isCreate) {
-      const urlItem = forms.item({ id: 'cxm-marketplace-source-url', label: 'Marketplace JSON 地址', required: true, fullWidth: true })
+      const urlItem = forms.item({ id: 'cxm-marketplace-source-url', label: copy('marketplace.source.url-label'), required: true, fullWidth: true })
       sourceUrlItem = urlItem
       const field: CordisXConfigFieldSnapshot = {
         namespace: 'cordisx.host', path: ['marketplaceSource', 'url'], type: 'string', role: 'url', value: urlValue, disabled: sourcesBusy, required: true,
       }
       const control = forms.control(field, 'cxm-marketplace-source-url', value => {
         urlValue = typeof value === 'string' ? value.trim() : ''
-        urlItem.setError(urlValue === '' || /^https:\/\//iu.test(urlValue) ? undefined : '请输入 HTTPS 插件商店地址')
+        urlItem.setError(urlValue === '' || /^https:\/\//iu.test(urlValue) ? undefined : copy('marketplace.source.url-invalid'))
       })
       setTDesignProps(control.focusTarget as TDesignElement, { placeholder: 'https://example.com/cordisx-marketplace.json' })
       forms.connect(urlItem, control)
       urlItem.control.append(control.root)
       identitySection.content.append(urlItem.root)
     } else {
-      const urlItem = forms.item({ id: 'cxm-marketplace-source-url-readonly', label: 'Canonical URL', fullWidth: true })
+      const urlItem = forms.item({ id: 'cxm-marketplace-source-url-readonly', label: copy('marketplace.source.url-label'), fullWidth: true })
       const value = create(document, 'div', 'cxm-marketplace-source-readonly', existing!.url)
       value.dataset.marketplaceSourceCanonicalUrl = existing!.url
       urlItem.control.append(value)
@@ -5334,7 +5347,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }
     form.append(identitySection.root)
 
-    const localSection = forms.section('本地显示信息', '只保存在当前 profile；不会改写远端 feed、信任记录或 canonical identity。')
+    const localSection = forms.section(copy('marketplace.source.local-section'), copy('marketplace.source.local-help'))
     const appendTextField = (
       id: string,
       label: string,
@@ -5353,12 +5366,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       item.control.append(control.root)
       localSection.content.append(item.root)
     }
-    appendTextField('cxm-marketplace-source-name', '名称', undefined, nameValue, value => { nameValue = value }, '留空时使用当前语言的 feed 名称。')
-    appendTextField('cxm-marketplace-source-description', '说明', 'textarea', descriptionValue, value => { descriptionValue = value }, '说明这个来源包含什么内容。')
-    appendTextField('cxm-marketplace-source-note', '备注', 'textarea', noteValue, value => { noteValue = value }, '仅供当前 profile 管理与搜索。')
+    appendTextField('cxm-marketplace-source-name', copy('marketplace.source.name-label'), undefined, nameValue, value => { nameValue = value }, copy('marketplace.source.name-help'))
+    appendTextField('cxm-marketplace-source-description', copy('marketplace.source.description-label'), 'textarea', descriptionValue, value => { descriptionValue = value }, copy('marketplace.source.description-help'))
+    appendTextField('cxm-marketplace-source-note', copy('marketplace.source.note-label'), 'textarea', noteValue, value => { noteValue = value }, copy('marketplace.source.note-help'))
     form.append(localSection.root)
 
-    const submit = forms.button(isCreate ? '添加来源' : '保存本地信息', { type: 'submit', variant: 'primary' })
+    const submit = forms.button(isCreate ? copy('marketplace.source.create') : copy('marketplace.source.save'), { type: 'submit', variant: 'primary' })
     setTDesignDisabled(submit, sourcesBusy)
     const actions = create(document, 'div', 'cxf-actions')
     actions.append(submit)
@@ -5368,17 +5381,17 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       let normalized = existing?.url
       if (isCreate) {
         if (urlValue === '') {
-          sourceUrlItem?.setError('请输入插件商店地址')
+          sourceUrlItem?.setError(copy('marketplace.source.url-required'))
           return
         }
         try {
           normalized = normalizeMarketplaceSource(urlValue)
         } catch {
-          sourceUrlItem?.setError('请输入有效的 HTTPS 插件商店地址')
+          sourceUrlItem?.setError(copy('marketplace.source.url-invalid'))
           return
         }
         if (marketplace.snapshot().sourceRecords.some(item => item.url === normalized)) {
-          sourceUrlItem?.setError('这个商店来源已经存在')
+          sourceUrlItem?.setError(copy('marketplace.source.duplicate'))
           return
         }
       }
@@ -5398,13 +5411,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       }
       void runMarketplaceSourceOperation(
         async () => { await marketplace.upsertSource(source) },
-        isCreate ? '已添加商店来源。' : '已保存本地显示信息。',
+        isCreate ? copy('marketplace.source.added') : copy('marketplace.source.saved'),
       ).then(saved => {
         if (saved) void navigateRoute({ kind: 'marketplace-source', page: 'index' })
       })
     })
     page.append(form)
-    if (sourceOperationError !== undefined) page.append(forms.alert(sourceOperationError, 'error'))
+    const errorAlert = sourceErrorAlert()
+    if (errorAlert !== undefined) page.append(errorAlert)
     content.append(page)
   }
 

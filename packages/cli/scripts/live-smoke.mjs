@@ -3676,13 +3676,13 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           menuTrigger?.click()
         }
         await nextPaint()
-        const openedPopup = document.querySelector('[data-manager-action-menu="商店来源操作"], .cxc-menu-popup')
+        const openedPopup = document.querySelector('.cxc-menu-popup')
         const initialFocus = document.activeElement
         initialFocus?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
         const arrowMoved = openedPopup?.contains(document.activeElement) === true && document.activeElement !== initialFocus
         document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
         await nextPaint()
-        const closed = document.querySelector('[data-manager-action-menu="商店来源操作"], .cxc-menu-popup') === null
+        const closed = document.querySelector('.cxc-menu-popup') === null
         const focusRestored = document.activeElement === menuTrigger
         menuTrigger?.click()
         await nextPaint()
@@ -3690,7 +3690,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           arrowMoved,
           closed,
           focusRestored,
-          reopened: document.querySelector('[data-manager-action-menu="商店来源操作"], .cxc-menu-popup') !== null,
+          reopened: document.querySelector('.cxc-menu-popup') !== null,
         }
       }
       if (${JSON.stringify(parsed.values['manager-open-local-path-form'])}) {
@@ -3922,7 +3922,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             const results = discovery?.querySelector('[data-marketplace-results-scroll]')
             const sourcePage = document.querySelector('[data-marketplace-source-page]')
             const sourceForm = sourcePage?.querySelector('[data-host-form^="marketplace-source-"]')
-            const popup = document.querySelector('[data-manager-action-menu="商店来源操作"], .cxc-menu-popup')
+            const popup = document.querySelector('.cxc-menu-popup')
             const box = element => {
               const rect = element?.getBoundingClientRect()
               return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
@@ -3956,7 +3956,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
                 resultsOverflowY: resultsStyle?.overflowY ?? null,
                 onlyResultsScroll: contentStyle?.overflowY === 'hidden' && ['auto', 'scroll'].includes(resultsStyle?.overflowY ?? ''),
                 filterBelowSearch: searchRect !== undefined && filterRect !== undefined && filterRect.top >= searchRect.bottom - 1,
-                documentationPrimaryActionAbsent: ![...document.querySelectorAll('a,button')].some(item => item.textContent?.includes('查看插件商店文档')),
+                documentationPrimaryActionAbsent: ![...document.querySelectorAll('a,button')].some(item => /docs|文档/iu.test(item.textContent ?? '')),
                 fullWidth: discovery.clientWidth >= (managerContent?.clientWidth ?? 0)
                   - Number.parseFloat(contentStyle?.paddingLeft ?? '0')
                   - Number.parseFloat(contentStyle?.paddingRight ?? '0') - 1,
@@ -3972,13 +3972,14 @@ if (parsed.values['manager-screenshot'] !== undefined) {
                   ? null : sourceForm.getBoundingClientRect().width >= sourcePage.getBoundingClientRect().width - 1,
                 untouchedErrorAbsent: sourceForm == null || sourceForm.querySelector('.cxf-error:not([hidden])') === null,
                 nativeUrlErrorAbsent: !document.body.textContent?.includes("Failed to construct 'URL'"),
+                primaryDeveloperTermsAbsent: !/Host|profile|canonical identity|marketplace-source\.v1|renderer|启动器|渲染器|规范标识/iu.test(sourcePage?.textContent ?? ''),
                 clipboardImport: marketplaceClipboardExercise ? {
                   rowPresent: imported !== undefined,
                   title: imported?.querySelector('.cxc-title')?.textContent?.trim() ?? null,
                   description: imported?.querySelector('.cxc-description')?.textContent?.trim() ?? null,
                   machineId: imported?.querySelector('.cxc-machine-id')?.textContent?.trim() ?? null,
                   local: persistedImported?.local ?? null,
-                  noticeVisible: (sourcePage.textContent ?? '').includes('已从剪贴板导入商店来源'),
+                  noticeVisible: sourcePage?.querySelector('.cxf-alert[data-tone="info"]') !== null,
                 } : null,
               },
               menu: popup === null ? null : {
@@ -4198,6 +4199,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         || sources.formFullWidth === false
         || sources.untouchedErrorAbsent !== true
         || sources.nativeUrlErrorAbsent !== true
+        || sources.primaryDeveloperTermsAbsent !== true
         || (requestedView === 'sources' && sources.officialPresent !== true)) {
         throw new Error(`Marketplace source IA assertions failed: ${JSON.stringify(sources)}`)
       }
