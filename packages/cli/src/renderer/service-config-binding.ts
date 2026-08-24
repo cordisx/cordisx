@@ -31,6 +31,7 @@ function clone<Value>(value: Value): Value {
 /** Renderer client for descriptors and full-CAS service configuration mutation. */
 export class BrowserServiceConfigBridge {
   private readonly pending = new Map<string, Pending>()
+  private readonly listRequests = new Map<string, Promise<readonly HostServiceConfigDescriptor[]>>()
   private closed = false
 
   private constructor(private readonly token: string, private readonly profileId: string, private readonly generation: string) {
@@ -48,7 +49,18 @@ export class BrowserServiceConfigBridge {
   }
 
   async list(pluginId: string): Promise<readonly HostServiceConfigDescriptor[]> {
-    return clone(await this.request('list', { pluginId, scope: { profileId: this.profileId, generation: this.generation } }) as readonly HostServiceConfigDescriptor[])
+    const active = this.listRequests.get(pluginId)
+    if (active !== undefined) return clone(await active)
+    const request = this.request('list', {
+      pluginId,
+      scope: { profileId: this.profileId, generation: this.generation },
+    }) as Promise<readonly HostServiceConfigDescriptor[]>
+    this.listRequests.set(pluginId, request)
+    try {
+      return clone(await request)
+    } finally {
+      if (this.listRequests.get(pluginId) === request) this.listRequests.delete(pluginId)
+    }
   }
 
   async mutate(mutation: HostServiceConfigMutation): Promise<HostServiceConfigMutationResult> {
