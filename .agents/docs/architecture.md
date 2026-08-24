@@ -72,6 +72,14 @@ chain, and private Codex event adapter are specified in
 adapter generation, retain only stable projection identities, and define no
 Timeline, session header, DOM surface, or outlet.
 
+The planned Channel runtime is specified in
+[`channel-runtime.md`](channel-runtime.md). It adds a launcher-owned Node
+service extension point, durable inbox/outbox and binding core, and
+Feishu/WeCom/WeChat adapters over the existing Platform/Agent authority. A
+renderer plugin receives only a brokered snapshot/action API and controlled
+manager/session surfaces; it never owns credentials, webhook/long-connection
+transport, queues, cursors, or retry workers.
+
 Online Chrome DevTools support is opt-in. `--online-devtools` adds `https://chrome-devtools-frontend.appspot.com` to `--remote-allow-origins`; once connected, that origin has full renderer debugging authority for the isolated instance.
 
 ### Renderer plane

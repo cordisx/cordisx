@@ -32,6 +32,10 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `agent-trace-showcase.md` defines the independent development-only Agent
   Trace Showcase plugin, its stacked core-contract dependency, session Timeline
   product boundary, fixture seam, lifecycle, and validation matrix.
+- `channel-runtime.md` defines the Channel product operations, composite
+  account/tenant/conversation/thread/task binding, Node-side service boundary,
+  official Feishu/WeCom/WeChat feasibility, security and reliability contracts,
+  DSH/OneWorks facade, PR order, and simulator-first validation matrix.
 - `development-plan.md` records staged implementation and validation boundaries.
 
 Normative plugin contracts belong in `cordisx/cordisx-protocol`; private or provisional planning belongs in `cordisx/roadmap`.

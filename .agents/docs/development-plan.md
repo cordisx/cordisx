@@ -204,6 +204,25 @@ merged protocol baseline is `2ec9ca`, which retains provider sessions from
 `00113dc` and adds the UI extension catalog without experimental Agent adapter
 fields or changes to provider-neutral ledger identity.
 
+### Channel runtime slice
+
+Status: approved architecture; implementation follows
+[`channel-runtime.md`](channel-runtime.md).
+
+This slice adds a host-neutral Channel facade over Platform/Agent, a versioned
+Node-side service extension point, complete account/tenant/conversation/thread
+to provider/session bindings, sourced user input, durable inbox/outbox,
+generation/last-good recovery, and simulated plus official platform adapters.
+Credentials, webhook/long-connection transport, cursors, queues, retry workers,
+and attachments remain on the launcher side. Renderer code receives only a
+brokered snapshot/action API and controlled Settings/session contributions.
+
+Delivery order is architecture, required protocol, Node host/core plus the
+mandatory simulator lifecycle matrix, independent official adapter packages,
+generic Settings host and Channel UI, visible simulated end-to-end demo,
+credentialed opt-in real smoke, then exact merged mono pins. No new repository,
+public webhook, developer account, or deployment is implied or authorized.
+
 ## Stage 4 — upstream-compatible bridge
 
 Package portable task UI as standard MCP UI resources. A CordisX package may carry both:
