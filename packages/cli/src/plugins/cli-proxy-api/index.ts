@@ -86,14 +86,14 @@ export const Config = Schema.object({
   ).default([]).max(64)
     .extra('extra', { label: { 'zh-CN': 'Provider 过滤范围', en: 'Provider filter' } })
     .extra('description', {
-      'zh-CN': '仅显示已由 launcher 配置并启用的这些 Provider ID；留空表示全部，最多 64 个。此处不能添加连接或凭据。',
-      en: 'Show only these launcher-configured, enabled Provider IDs; leave empty for all, with at most 64 IDs. Connections and credentials cannot be added here.',
+      'zh-CN': '选择要显示的 Provider；留空表示全部。',
+      en: 'Choose the providers to show; leave empty for all.',
     }),
   defaultCwd: Schema.string().default('').max(4096).pattern(/^[^\u0000]*$/)
     .extra('extra', { label: { 'zh-CN': '默认工作目录', en: 'Default working directory' } })
     .extra('description', {
-      'zh-CN': '预填新会话的工作目录；留空时在 Provider 页面逐次选择，最长 4096 个字符且不能包含 NUL。',
-      en: 'Prefill the working directory for new sessions; leave empty to choose it on the Provider page. Maximum 4096 characters; NUL is rejected.',
+      'zh-CN': '新会话的默认工作目录。',
+      en: 'Default working directory for new sessions.',
     }),
 })
 
@@ -458,8 +458,8 @@ function mountFleet(ctx: Context, context: CordisXPageMountContext<Messages>, co
 export function apply(ctx: Context, config: Config = Config({})): void {
   ctx.i18n.define<Messages>({
     namespace: 'cli-proxy-api', locale: 'en', default: true, messages: {
-      'navigation.title': 'Providers', 'navigation.description': 'Models and sessions across external CLIProxyAPI providers',
-      'page.title': 'Provider sessions', 'page.subtitle': 'Each model and session keeps its provider identity through create, list, search, resume, and control.',
+      'navigation.title': 'Providers', 'navigation.description': 'Manage provider models and sessions',
+      'page.title': 'Provider sessions', 'page.subtitle': 'Choose a model and manage its sessions.',
       'field.provider': 'Provider', 'field.model': 'Model', 'field.cwd': 'Working directory', 'field.search': 'Search sessions',
       'field.initial-message': 'Initial message (recommended for persistence)',
       'action.refresh': 'Refresh', 'action.create': 'New session', 'action.load-more': 'Load more', 'action.continue': 'Continue',
@@ -476,8 +476,8 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   })
   ctx.i18n.define<Messages>({
     namespace: 'cli-proxy-api', locale: 'zh-CN', messages: {
-      'navigation.title': 'Providers', 'navigation.description': '统一管理多个 CLIProxyAPI Provider 的模型与会话',
-      'page.title': 'Provider 会话', 'page.subtitle': '模型、创建、列表、搜索、续聊和控制始终携带 Provider 复合身份。',
+      'navigation.title': 'Providers', 'navigation.description': '管理 Provider 模型和会话',
+      'page.title': 'Provider 会话', 'page.subtitle': '选择模型并管理会话。',
       'field.provider': 'Provider', 'field.model': '模型', 'field.cwd': '工作目录', 'field.search': '搜索会话',
       'field.initial-message': '首条消息（建议填写以立即持久化）',
       'action.refresh': '刷新', 'action.create': '新建会话', 'action.load-more': '加载更多', 'action.continue': '继续',

@@ -8,6 +8,9 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `manager-content-design.md` is the reusable design guideline for manager
   hierarchy, title de-duplication, tabs, flat lists, cards, states, and
   accessibility/screenshot regression evidence.
+- `ui-copy-principles.md` defines the product UI copy hierarchy: concise
+  current state first, clear document actions for context, and diagnostics for
+  implementation detail.
 - `manager-settings-tabs.md` freezes the host-neutral extensible settings-tab
   surface/content outlet, single ordering model, controlled page-body mount,
   lifecycle, protocol/host/mono PR order, and validation matrix.

@@ -277,6 +277,13 @@ const ABOUT_ACTIONS = [
   },
 ] as const
 
+const PRODUCT_DOCUMENTATION = Object.freeze({
+  marketplace: 'https://github.com/cordisx/cordisx/blob/main/.agents/docs/dynamic-plugin-lifecycle.md',
+  runtime: 'https://github.com/cordisx/cordisx/blob/main/.agents/docs/dynamic-plugin-lifecycle.md',
+  launcher: 'https://github.com/cordisx/cordisx/blob/main/.agents/docs/distribution-and-cli.md',
+  permissions: 'https://github.com/cordisx/cordisx/blob/main/.agents/docs/platform-capabilities.md',
+})
+
 interface CapabilityPresentation {
   readonly name: string
   readonly icon: ManagerIconToken
@@ -1892,6 +1899,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     return link
   }
 
+  const documentationLink = (label: string, href: string): HTMLAnchorElement => {
+    const link = configureExternalLink(create(document, 'a', 'cxm-action'), href)
+    link.append(create(document, 'span', undefined, label), createManagerIcon(document, 'external-link', 'cxm-action-icon'))
+    return link
+  }
+
   const favoriteStorageKey = (snapshot: ManagerSnapshot): string => (
     `cordisx.manager.favoritePlugins.v1:${snapshot.pluginLifecycle?.profileId ?? 'development'}`
   )
@@ -1962,7 +1975,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const panel = create(document, 'div', 'cxm-lifecycle-dialog')
     panel.append(
       create(document, 'h2', undefined, '导入本地插件'),
-      create(document, 'p', undefined, '输入本地包的绝对目录路径。Host 将通过 Package Store 检查候选包、请求授权并原子激活；当前版本不下载远程包，也不宣称签名验证或安全沙箱。'),
+      create(document, 'p', undefined, '选择本地插件目录以导入。'),
+      documentationLink('查看导入说明', PRODUCT_DOCUMENTATION.runtime),
     )
     const form = forms.form('local-package-directory')
     const item = forms.item({
@@ -2644,7 +2658,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderExtensionPointList = (snapshot: ManagerSnapshot): void => {
-    setHeading('浏览宿主声明的界面点位，并管理每个插件对点位的使用权限', snapshot, { icon: 'contributions' })
+    setHeading('扩展点位', snapshot, { icon: 'contributions' })
     const search = createListSearch('extension-points', '搜索 CordisX 扩展点', '搜索名称、介绍、点位 id 或插件…', extensionPointQuery, value => { extensionPointQuery = value })
     content.append(search)
 
@@ -2684,7 +2698,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderExtensionPointDetail = (snapshot: ManagerSnapshot, id: string): void => {
     const point = snapshot.extensionPoints?.points.find(item => item.id === id)
-    setHeading(point?.descriptionProjection.text ?? '扩展点已不在当前宿主目录中', snapshot)
+    setHeading(point?.titleProjection.text ?? '扩展点当前不可用', snapshot)
     if (point === undefined) {
       content.append(create(document, 'div', 'cxm-empty', '该扩展点已不在当前宿主目录中'))
       return
@@ -2848,7 +2862,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderRouteList = (snapshot: ManagerSnapshot): void => {
-    setHeading('查看插件页面如何匹配路径并覆盖到宿主 outlet', snapshot, { icon: 'routes' })
+    setHeading('路由', snapshot, { icon: 'routes' })
     const search = createListSearch('routes', '搜索 CordisX 路由', '搜索路由、路径、页面、outlet 或插件…', routeQuery, value => { routeQuery = value })
     content.append(search)
     const filtered = snapshot.navigation.routes.filter(route => matchesManagerSearch(routeQuery, [
@@ -2892,7 +2906,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderRouteDetail = (snapshot: ManagerSnapshot, qualifiedId: string): void => {
     const route = snapshot.navigation.routes.find(item => item.qualifiedId === qualifiedId)
-    setHeading('插件页面路由与宿主出口关联', snapshot)
+    setHeading('路由详情', snapshot)
     if (route === undefined) {
       content.append(create(document, 'div', 'cxm-empty', '该路由已不在当前 bundle 中'))
       return
@@ -2928,7 +2942,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderPluginList = (snapshot: ManagerSnapshot): void => {
-    setHeading('管理当前 profile 的插件；选择卡片主体进入详情', snapshot, { icon: 'plugins' })
+    setHeading('插件', snapshot, { icon: 'plugins' })
     const toolbar = create(document, 'div', 'cxm-toolbar')
     const search = createListSearch('plugins', '搜索 CordisX 插件', '搜索插件、扩展点或 contribution id…', pluginQuery, value => { pluginQuery = value })
     const install = create(document, 'button', 'cxm-action')
@@ -3678,7 +3692,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderPluginDetail = (snapshot: ManagerSnapshot, id: string): void => {
     const plugin = snapshot.plugins.find(item => item.id === id)
-    setHeading('当前 bundle 中的本地插件详情', snapshot)
+    setHeading('插件详情', snapshot)
     if (plugin === undefined) {
       content.append(create(document, 'div', 'cxm-empty', '插件已不在当前 bundle 中'))
       return
@@ -3972,20 +3986,20 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       if (plugin.blockedReason !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', plugin.blockedReason))
       if (operationError !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', operationError))
       lifecycleBody.append(create(document, 'code', 'cxm-detail-id', plugin.id))
-      lifecycleBody.append(createSectionTitle(document, '本地化'))
       const localeCatalogs = snapshot.localeCatalogs.filter(item => item.owner === plugin.id)
-      lifecycleBody.append(create(document, 'div', 'cxm-copy', localeCatalogs.length === 0
+      const localizationDiagnostics = create(document, 'div', 'cxm-copy', localeCatalogs.length === 0
         ? '当前插件没有活跃 locale dictionary'
-        : localeCatalogs.map(item => `${item.namespace} · ${item.locale} · ${item.messageCount} keys`).join('\n')))
-      lifecycleBody.append(createSectionTitle(document, '结构化运行时'))
-      lifecycleBody.append(create(document, 'div', 'cxm-copy', pluginCommands.length === 0
+        : localeCatalogs.map(item => `${item.namespace} · ${item.locale} · ${item.messageCount} keys`).join('\n'))
+      const runtimeDiagnostics = create(document, 'div', 'cxm-copy', pluginCommands.length === 0
         ? '当前插件没有 command 注册'
-        : pluginCommands.map(command => `${command.qualifiedId} · running ${command.running}`).join('\n')))
+        : pluginCommands.map(command => `${command.qualifiedId} · running ${command.running}`).join('\n'))
       const adapter = snapshot.platform
       const diagnostics = create(document, 'details', 'cxm-diagnostics')
       diagnostics.dataset.runtimeDiagnostics = 'platform'
       diagnostics.append(create(document, 'summary', undefined, '诊断'))
       const diagnosticsBody = create(document, 'div', 'cxm-diagnostics-body')
+      diagnosticsBody.append(createSectionTitle(document, '本地化'), localizationDiagnostics)
+      diagnosticsBody.append(createSectionTitle(document, '运行时详情'), runtimeDiagnostics)
       if (plugin.configuration !== undefined) {
         const configSchema = plugin.configuration.schemaKind === 'schemastery'
           ? 'Schemastery'
@@ -4012,9 +4026,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         `宿主：${adapter.hostName} · adapter ${adapter.mode} · 二次连接 ${adapter.secondConnectionCreated ? '是' : '否'} · 原始 bridge 暴露 ${adapter.rawBridgeExposed ? '是' : '否'}`,
       ))
       for (const diagnostic of adapter.diagnostics) diagnosticsBody.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
-      const securityBoundary = create(document, 'div', 'cxm-notice', '权限策略只约束通过 CordisX Host API 的调用；当前 trusted renderer code 不是安全沙箱。')
+      const securityBoundary = create(document, 'div', 'cxm-notice', '当前权限仅适用于 Host API 调用。')
       securityBoundary.dataset.tone = 'warning'
-      diagnosticsBody.append(securityBoundary)
+      diagnosticsBody.append(securityBoundary, documentationLink('查看权限说明', PRODUCT_DOCUMENTATION.permissions))
       diagnostics.append(diagnosticsBody)
       lifecycleBody.append(diagnostics)
       lifecycle.append(lifecycleBody)
@@ -4132,7 +4146,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderMarketplaceList = (managerSnapshot: ManagerSnapshot): void => {
     const snapshot = marketplace.snapshot()
-    setHeading('从已配置 JSON feed 浏览插件元数据；当前只读，不提供安装', managerSnapshot, { icon: 'marketplace' })
+    setHeading('浏览插件商店', managerSnapshot, { icon: 'marketplace' })
+    content.append(documentationLink('查看插件商店文档', PRODUCT_DOCUMENTATION.marketplace))
     const toolbar = create(document, 'div', 'cxm-toolbar')
     const search = createListSearch('marketplace', '搜索 CordisX 插件商店', '搜索商店插件、作者、关键词或来源…', marketplaceQuery, value => { marketplaceQuery = value })
     const certifiedFilter = create(document, 'button', 'cxm-marketplace-filter')
@@ -4217,7 +4232,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderMarketplaceDetail = (managerSnapshot: ManagerSnapshot, identityValue: string): void => {
     const plugin = marketplace.snapshot().plugins.find(item => item.identity === identityValue)
-    setHeading('来自已配置插件商店的只读元数据', managerSnapshot)
+    setHeading('插件详情', managerSnapshot)
     if (plugin === undefined) {
       content.append(create(document, 'div', 'cxm-empty', '该插件已不在当前聚合结果中'))
       return
@@ -4282,9 +4297,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           trustList.append(item)
         }
         panel.append(trustList)
-        const boundary = create(document, 'div', 'cxm-notice', 'v1 只信任受保护的 CordisX Marketplace 合入链；当前没有密码学证明。官方身份与认证都不会自动授予权限、绕过安装审核、PermissionBroker、沙箱或 lifecycle gate。')
+        const boundary = create(document, 'div', 'cxm-notice', '认证不等于安全保障。')
         boundary.dataset.marketplaceTrustBoundary = 'true'
-        panel.append(boundary)
+        panel.append(boundary, documentationLink('查看信任说明', PRODUCT_DOCUMENTATION.marketplace))
       }
       if (metadata.keywords.length > 0) {
         panel.append(createSectionTitle(document, '关键词'))
@@ -4342,7 +4357,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const renderMarketplaceSettings = (target: HTMLElement): void => {
     const snapshot = marketplace.snapshot()
     const panel = create(document, 'div', 'cxm-settings-builtin cxf-scope')
-    panel.append(create(document, 'p', 'cxm-copy', '按优先级保存多个 marketplace JSON 地址。feed 地址只记录目录来源；插件唯一性由 canonical source 与小写 id 共同决定。'))
+    const intro = create(document, 'div', 'cxm-toolbar')
+    intro.append(create(document, 'p', 'cxm-copy', '管理插件商店来源。'), documentationLink('查看配置文档', PRODUCT_DOCUMENTATION.marketplace))
+    panel.append(intro)
 
     const form = forms.form('marketplace-source')
     const item = forms.item({ id: 'cxm-marketplace-source', label: '插件商店 JSON 地址', required: true, fullWidth: true })
@@ -4380,7 +4397,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (sourceOperationError !== undefined) panel.append(forms.alert(sourceOperationError, 'error'))
 
     const sourceList = create(document, 'div', 'cxm-source-list')
-    if (snapshot.sources.length === 0) sourceList.append(forms.empty('没有已配置商店；插件商店页会保持为空'))
+    if (snapshot.sources.length === 0) sourceList.append(forms.empty('暂无插件商店。'))
     snapshot.sources.forEach((url, index) => {
       const state = snapshot.sourceStates[index]
       const row = create(document, 'div', 'cxm-source-row')
@@ -4393,9 +4410,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       dot.dataset.status = state?.status ?? 'loading'
       const stateText = state?.status === 'loaded'
         ? `${projectMarketplaceSourceName(state, model.snapshot().localization.locale) ?? '已验证 feed'} · 已加载`
-        : state?.status === 'failed' ? `加载失败 · ${state.error ?? '未知错误'}` : '加载中…'
+        : state?.status === 'failed' ? '加载失败' : '加载中…'
       status.append(dot, create(document, 'span', undefined, stateText))
       body.append(status)
+      if (state?.status === 'failed' && state.error !== undefined) {
+        const error = create(document, 'details', 'cxm-diagnostics')
+        error.append(create(document, 'summary', undefined, '查看错误详情'), create(document, 'div', 'cxm-diagnostics-body', state.error))
+        body.append(error)
+      }
       row.append(body)
       const actions = create(document, 'div', 'cxm-source-actions')
       const up = forms.button('上移')
@@ -4447,7 +4469,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       plugin.status === 'blocked' || plugin.status === 'permission-blocked' || plugin.status === 'failed'
     ))
     if (blocked.length === 0) {
-      panel.append(create(document, 'p', 'cxm-copy', '当前没有被 profile 本地状态屏蔽的插件。单个插件可在插件详情页屏蔽或恢复。'))
+      panel.append(create(document, 'p', 'cxm-copy', '暂无被屏蔽的插件。'))
     } else {
       const list = create(document, 'div', 'cxm-source-list')
       for (const plugin of blocked) {
@@ -4475,17 +4497,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       }
       panel.append(list)
     }
-    const boundary = create(document, 'div', 'cxm-notice', '屏蔽状态保存在当前隔离 Chromium profile，只控制已打包插件的 Cordis fiber；它不是卸载、权限隔离或 package 禁用。')
-    boundary.dataset.tone = 'warning'
-    panel.append(boundary)
+    panel.append(documentationLink('查看运行状态说明', PRODUCT_DOCUMENTATION.runtime))
     target.append(panel)
   }
 
   const renderLauncherSettings = (target: HTMLElement): void => {
     const panel = create(document, 'div', 'cxm-settings-builtin')
-    const launcherNotice = create(document, 'div', 'cxm-notice', '`cordisx.config.json` 仍负责 Codex 可执行文件、插件 composition 和插件配置。修改这些字段需要重新打包并启动新 generation，当前页面只读展示这条边界。')
-    launcherNotice.dataset.tone = 'warning'
-    panel.append(launcherNotice)
+    panel.append(create(document, 'p', 'cxm-copy', '启动器配置由 cordisx.config.json 管理。'))
+    panel.append(documentationLink('查看配置文档', PRODUCT_DOCUMENTATION.launcher))
     target.append(panel)
   }
 
@@ -4583,7 +4602,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderSettings = (snapshot: ManagerSnapshot): void => {
-    setHeading('管理 CordisX 设置与当前 profile 状态', snapshot, { icon: 'settings' })
+    setHeading('配置', snapshot, { icon: 'settings' })
     const items = settingsTabs(snapshot)
     const settingsTab = currentSettingsTab()
     const active = items.find(item => item.id === settingsTab)

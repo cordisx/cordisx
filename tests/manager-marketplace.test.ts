@@ -323,9 +323,10 @@ describe('Manager Marketplace product list', () => {
       expect(certifiedDetail.textContent).toContain('认证不是绝对安全保证')
       expect(certifiedDetail.querySelector<HTMLAnchorElement>('a')?.href).toBe(EVIDENCE)
       const boundary = dom.window.document.querySelector<HTMLElement>('[data-marketplace-trust-boundary]')!
-      expect(boundary.textContent).toContain('当前没有密码学证明')
-      expect(boundary.textContent).toContain('不会自动授予权限')
-      expect(boundary.textContent).toContain('PermissionBroker')
+      expect(boundary.textContent).toBe('认证不等于安全保障。')
+      const documentation = [...dom.window.document.querySelectorAll<HTMLAnchorElement>('a')]
+        .find(link => link.textContent?.includes('查看信任说明'))
+      expect(documentation?.href).toContain('/.agents/docs/dynamic-plugin-lifecycle.md')
     } finally {
       dispose()
       dom.window.close()

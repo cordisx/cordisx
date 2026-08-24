@@ -394,7 +394,8 @@ describe('Platform permission presentation hierarchy', () => {
       expect(diagnostics?.textContent).toContain('current-connection-client-unavailable')
       expect(diagnostics?.textContent).toContain('二次连接 否')
       expect(diagnostics?.textContent).toContain('原始 bridge 暴露 否')
-      expect(diagnostics?.textContent).toContain('不是安全沙箱')
+      expect(diagnostics?.textContent).toContain('当前权限仅适用于 Host API 调用。')
+      expect(diagnostics?.textContent).toContain('查看权限说明')
     } finally {
       dispose()
       dom.window.close()
