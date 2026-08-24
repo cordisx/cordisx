@@ -631,14 +631,14 @@ describe('renderer bundle', () => {
     expect(managerModal?.querySelector('.cxm-version')).toBeNull()
     expect(managerModal?.querySelector('.cxm-sidebar')?.firstElementChild?.classList.contains('cxm-nav')).toBe(true)
     const navigation = managerModal?.querySelector<HTMLElement>('.cxm-nav')
-    expect(navigation?.getAttribute('role')).toBe('tablist')
+    expect(navigation?.tagName).toBe('NAV')
     expect(navigation?.getAttribute('aria-label')).toBe('CordisX 管理器页面')
     const primaryNavigation = [...(navigation?.querySelectorAll<HTMLElement>('.cxm-nav-button') ?? [])]
-    expect(primaryNavigation.map(item => item.dataset.tab)).toEqual(['plugins', 'extension-points', 'routes', 'marketplace', 'settings', 'about'])
-    expect(primaryNavigation.map(item => item.tabIndex)).toEqual([0, 0, 0, 0, 0, 0])
-    expect(primaryNavigation.map(item => item.getAttribute('aria-selected'))).toEqual(['true', 'false', 'false', 'false', 'false', 'false'])
-    expect(primaryNavigation.slice(0, 5).map(item => item.querySelector('[data-material-icon]')?.getAttribute('data-material-icon'))).toEqual([
-      'plugins', 'contributions', 'routes', 'marketplace', 'settings',
+    expect(primaryNavigation.map(item => item.dataset.tab)).toEqual(['plugins', 'extension-points', 'routes', 'marketplace', 'about'])
+    expect(primaryNavigation.map(item => item.tabIndex)).toEqual([0, -1, -1, -1, -1])
+    expect(primaryNavigation.map(item => item.getAttribute('aria-current'))).toEqual(['page', null, null, null, null])
+    expect(primaryNavigation.slice(0, 4).map(item => item.querySelector('[data-material-icon]')?.getAttribute('data-material-icon'))).toEqual([
+      'plugins', 'contributions', 'routes', 'marketplace',
     ])
     expect(primaryNavigation.at(0)?.textContent).toContain('插件')
     expect(primaryNavigation.at(-1)?.textContent).toContain('关于 CordisX')
@@ -652,7 +652,7 @@ describe('renderer bundle', () => {
     expect(aboutNavigationMark?.getAttribute('aria-hidden')).toBe('true')
     expect(aboutNavigationMark?.alt).toBe('')
     expect(aboutNavigationMark?.style.getPropertyValue('--cordisx-brand-mask')).toBe('')
-    expect(primaryNavigation.find(item => item.dataset.tab === 'settings')?.nextElementSibling?.getAttribute('data-tab')).toBe('about')
+    expect(primaryNavigation.find(item => item.dataset.tab === 'marketplace')?.nextElementSibling?.getAttribute('data-tab')).toBe('about')
     const managerStyles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
     expect(managerStyles).toContain('.cxm-nav-button[data-tab="about"] { margin-top: auto; }')
     expect(managerStyles).toContain('grid-template-columns: 26px minmax(0, 1fr)')
@@ -1168,53 +1168,9 @@ describe('renderer bundle', () => {
     expect(managerModal?.querySelector('.cxm-detail')).toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
 
-    dom.window.document.querySelector<HTMLButtonElement>('[data-tab="settings"]')?.click()
-    expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain('配置')
-    expect(dom.window.document.querySelector<HTMLElement>('.cxm-heading-icon')?.dataset.materialIcon).toBe('settings')
-    expect(dom.window.document.querySelectorAll('[data-settings-tab]')).toHaveLength(3)
-    const settingsTabs = [...dom.window.document.querySelectorAll<HTMLElement>('[data-settings-tab]')]
-    expect(settingsTabs.every(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('aria-hidden') === 'true')).toBe(true)
-    expect(settingsTabs.every(tab => tab.querySelector('.cxm-tab-icon svg') !== null)).toBe(true)
-    expect(settingsTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-host-icon'))).toEqual([
-      'host:open', 'host:analytics', 'host:settings',
-    ])
-    expect(settingsTabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1])
-    expect(settingsTabs.map(tab => tab.textContent)).toEqual(['插件商店', '运行状态', '启动器'])
-    expectLocalTabLeadingSeat('[data-settings-tab]')
-    expect(managerModal?.textContent).toContain('管理插件商店来源。')
-    expect(managerModal?.textContent).toContain('查看配置文档')
-    expect(managerModal?.textContent).toContain('https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json')
-    expect(managerModal?.textContent).toContain('CordisX 社区插件商店')
-    expect(managerModal?.textContent).not.toMatch(/\d+ 个插件/)
-    expect(managerModal?.textContent).not.toContain('启动器配置')
-    expect(managerHeadings()).toEqual(['配置'])
-    expect(breadcrumbLabels()).toEqual(['配置'])
-    const settingsPanel = dom.window.document.querySelector<HTMLElement>('[data-settings-root] [role="tabpanel"]')!
-    const settingsPanelLabel = (): string | undefined => dom.window.document
-      .getElementById(settingsPanel.getAttribute('aria-labelledby') ?? '')?.textContent ?? undefined
-    expect(settingsPanelLabel()).toBe('插件商店')
-    dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="host:runtime"]')?.click()
-    await settle()
-    expect(dom.window.document.activeElement?.getAttribute('data-settings-tab')).toBe('host:runtime')
-    expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-settings-tab]')].map(tab => tab.tabIndex)).toEqual([-1, 0, -1])
-    expect(managerModal?.textContent).not.toContain('插件运行状态')
-    expect(managerModal?.textContent).toContain('暂无被屏蔽的插件。')
-    expect(managerModal?.textContent).not.toContain('Cordis fiber')
-    expect(managerHeadings()).toEqual(['运行状态'])
-    expect(breadcrumbLabels()).toEqual(['配置', '运行状态'])
-    expect(settingsPanelLabel()).toBe('运行状态')
-    dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="host:runtime"]')?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
-    await settle()
-    expect(dom.window.document.activeElement?.getAttribute('data-settings-tab')).toBe('host:launcher')
-    expect(settingsPanel.textContent).toContain('启动器配置由 cordisx.config.json 管理。')
-    expect(settingsPanel.textContent).toContain('查看配置文档')
-    expect(managerHeadings()).toEqual(['启动器'])
-    expect(breadcrumbLabels()).toEqual(['配置', '启动器'])
-    expect(settingsPanelLabel()).toBe('启动器')
-    dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
-    await settle()
-    expect(settingsPanelLabel()).toBe('运行状态')
-    expect(breadcrumbLabels()).toEqual(['配置', '运行状态'])
+    expect(dom.window.document.querySelector('[data-tab="settings"]')).toBeNull()
+    expect(dom.window.document.querySelector('[data-settings-tab]')).toBeNull()
+    expect(managerModal?.textContent).not.toContain('启动器配置由 cordisx.config.json 管理。')
 
     await runtime?.dispose()
     expect(dom.window.document.documentElement.dataset.cordisxReady).toBeUndefined()

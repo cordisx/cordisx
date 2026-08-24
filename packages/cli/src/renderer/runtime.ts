@@ -34,7 +34,6 @@ import { CordisXAgentService, CordisXHostAgentRuntime, CordisXSystemPromptServic
 import { CordisXAgentEventService } from './agent-events.js'
 import {
   installCordisXManager,
-  CORDISX_BUILTIN_MANAGER_SETTINGS_TABS,
   type ManagerModel,
   type ManagerPluginSnapshot,
   type ManagerPluginStatus,
@@ -607,6 +606,7 @@ async function start(
   let notificationsSuppressed = false
   const generationNotificationTrace: { source: string; registryEpoch: number; suppressed: boolean }[] = []
   let settingsProjectionSites = new Set<string>()
+  let settingsNavigationProjectionSites = new Map<string, string>()
   let extensionContributionProjectionSites = new Map<string, string>()
 
   const traceNotification = (source: string, suppressed: boolean): void => {
@@ -804,15 +804,17 @@ async function start(
       }
     }
     settingsProjectionSites = nextSettingsSites
-    const settingsTabs = [...CORDISX_BUILTIN_MANAGER_SETTINGS_TABS, ...externalSettingsTabs].sort((left, right) => (
-      left.order - right.order
-      || (left.owner < right.owner ? -1 : left.owner > right.owner ? 1 : 0)
-      || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
-    ))
+    // Keep resolving compatibility descriptors for diagnostic/localization cleanup;
+    // they deliberately have no live Manager projection.
+    void externalSettingsTabs
+    // A is a retained protocol/catalog contract, not a current Manager product
+    // surface. Do not project a hidden Settings page or a clickable empty tab.
+    const settingsTabs: readonly ManagerSettingsTabSnapshot[] = Object.freeze([])
+    const nextSettingsNavigationSites = new Map<string, string>()
     const settingsNavigationItems = sortManagerSettingsNavigationItems(
       liveRegistrations
         .filter(item => item.surface === 'manager.settings.navigation-items'
-          && item.valid && item.visible && item.authorized && !item.pending && !item.disabled
+          && item.valid && item.visible && item.authorized && !item.pending
           && (item.group === 'before-settings' || item.group === 'after-settings'))
         .flatMap((registration): readonly ManagerSettingsNavigationItemSnapshot[] => {
           const item = registration.item as CordisXManagerSettingsNavigationItem
@@ -831,6 +833,8 @@ async function start(
           const pageTitle = page.productMetadata.title
           const pageDescription = page.productMetadata.description
           if (title === undefined || description === undefined || pageTitle === undefined || pageDescription === undefined) return []
+          const disabledSite = `manager-settings-navigation:${registration.qualifiedId}:disabled`
+          if (registration.disabledReason !== undefined) nextSettingsNavigationSites.set(disabledSite, registration.owner)
           return [Object.freeze({
             id: registration.qualifiedId,
             owner: registration.owner,
@@ -841,10 +845,22 @@ async function start(
             pageTitle,
             pageDescription,
             icon: page.metadata.icon!,
+            disabled: registration.disabled,
+            ...(registration.disabledReason === undefined ? {} : {
+              disabledReason: i18nService?.resolveFor(
+                registration.owner,
+                registration.disabledReason,
+                disabledSite,
+              ).text ?? registration.disabledReason.fallback ?? registration.disabledReason.key,
+            }),
             route: item.route,
           })]
         }),
     )
+    for (const [site, owner] of settingsNavigationProjectionSites) {
+      if (!nextSettingsNavigationSites.has(site)) i18nService?.clearDiagnosticSite(owner, site)
+    }
+    settingsNavigationProjectionSites = nextSettingsNavigationSites
     const hostText = (value: CordisXLocalizedText, site: string): string => (
       i18nService?.resolveFor('host', value, site).text
       ?? value.fallback
@@ -1739,6 +1755,7 @@ async function start(
     extensionPointBroker.dispose()
     extensionPointDescriptors.dispose()
     settingsProjectionSites.clear()
+    settingsNavigationProjectionSites.clear()
     extensionContributionProjectionSites.clear()
     if (globalThis.__cordisxRuntime === handle) globalThis.__cordisxRuntime = undefined
     document.documentElement.removeAttribute('data-cordisx-ready')
@@ -1870,7 +1887,7 @@ async function start(
     routeService = ctx.routes as CordisXRouteService
     unregisterManagerPointCatalog = extensionPointDescriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
     const managerOutletController = {
-      getSnapshot: () => ({ available: true, contextKey: generation, placement: 'absolute' as const }),
+      getSnapshot: () => ({ available: false, contextKey: generation, placement: 'absolute' as const }),
       subscribe: (_listener: () => void) => () => {},
       show: () => {},
       hide: () => {},

@@ -203,11 +203,11 @@ npm run smoke -- --port <printed-port> \
   --screenshot artifacts/live-smoke/main-page.png
 npm run smoke -- --port <printed-port> --generation \
   --report artifacts/live-smoke/generation.json
-npm run smoke -- --port <printed-port> --manager-settings-exercise \
-  --plugin-owner settings-tab-demo --manager-tab settings \
-  --manager-settings-tab settings-tab-demo:settings --generation \
-  --manager-screenshot artifacts/live-smoke/settings-demo.png \
-  --report artifacts/live-smoke/settings-demo.json
+npm run smoke -- --port <printed-port> --manager-settings-navigation-exercise \
+  --plugin-owner settings-tab-demo --generation \
+  --manager-settings-navigation-item settings-tab-demo:navigation \
+  --manager-screenshot artifacts/live-smoke/settings-navigation-demo.png \
+  --report artifacts/live-smoke/settings-navigation-demo.json
 ```
 
 `--manager-form-exercise` records the visible Host form primitive map,
@@ -232,11 +232,12 @@ switching, plugin block/restore, and native-DOM continuity. `--generation`
 disposes the current injected generation and records deterministic cleanup; run
 it last because a fresh launcher generation is required afterwards.
 
-`--manager-settings-exercise` uses pointer and keyboard input against the real
-manager tablist, checks the controlled body-only mount, surface/outlet policy
-deny and restore, plugin block and restore, locale reprojection, stable fallback,
-native-node continuity, and `app://` history. Combine it with `--generation`
-to record active settings-content cleanup after the screenshot is captured.
+`--manager-settings-navigation-exercise` uses pointer and keyboard input
+against the real first-level Manager navigation entry. It checks the Host-owned
+standard header and controlled body mount, policy deny/restore, locale
+reprojection, Plugins fallback/focus, and unchanged `app://` URL. Combine it
+with `--generation` to record active Manager-content cleanup after the
+screenshot is captured.
 
 ## Minimal plugin
 

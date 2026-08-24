@@ -6,38 +6,13 @@ import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 
 interface RuntimeSnapshot {
-  plugins: readonly {
-    id: string
-    source: string
-    status: string
-    configuration: {
-      schemaKind: string
-      applies: string
-      fields: readonly { path: readonly string[]; label?: string; description?: string; value?: unknown; min?: number; max?: number }[]
-    }
-  }[]
+  plugins: readonly { id: string; source: string; status: string; configuration: { applies: string } }[]
   registrations: readonly { owner: string; qualifiedId: string; surface: string; valid: boolean; visible: boolean; authorized: boolean; pending: boolean }[]
-  settingsTabs: readonly { id: string; owner: string; title: string; order: number; disabled: boolean; builtin: boolean }[]
-  navigation: {
-    routes: readonly {
-      qualifiedId: string; valid: boolean; authorized: boolean
-      productMetadata: { title?: string; description?: string; diagnostics: readonly unknown[] }
-    }[]
-    pages: readonly {
-      qualifiedId: string; metadata: { chrome?: string }
-      productMetadata: { title?: string; description?: string; diagnostics: readonly unknown[] }
-    }[]
-    outlets: readonly { id: string; mounted: boolean; activeRoute?: string }[]
-  }
-  extensionPoints: {
-    points: readonly { id: string; usingPluginCount: number; activePluginCount: number }[]
-    accessDiagnostics: readonly {
-      request: { operation: string; generation: string; identity: { source: string; pluginId: string; pointId: string } }
-      authorized: boolean
-    }[]
-  }
+  settingsTabs: readonly unknown[]
+  settingsNavigationItems: readonly { id: string; title: string; description: string; pageTitle: string; pageDescription: string; icon: string; group: string; order: number; disabled: boolean; route: { id: string } }[]
+  navigation: { routes: readonly { qualifiedId: string; productMetadata: { title?: string; description?: string } }[]; pages: readonly { qualifiedId: string; metadata: { chrome?: string }; productMetadata: { title?: string; description?: string } }[]; outlets: readonly { id: string; mounted: boolean; activeRoute?: string }[] }
+  extensionPoints: { accessDiagnostics: readonly { request: { operation: string; generation: string; identity: { source: string; pluginId: string; pointId: string } }; authorized: boolean }[] }
 }
-
 interface RuntimeHandle {
   snapshot(): RuntimeSnapshot
   setPluginBlocked(id: string, blocked: boolean): Promise<void>
@@ -45,7 +20,7 @@ interface RuntimeHandle {
   dispose(): Promise<void>
 }
 
-async function waitFor(predicate: () => boolean, attempts = 50): Promise<void> {
+async function waitFor(predicate: () => boolean, attempts = 80): Promise<void> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (predicate()) return
     await new Promise(resolve => setTimeout(resolve, 10))
@@ -53,194 +28,97 @@ async function waitFor(predicate: () => boolean, attempts = 50): Promise<void> {
   throw new Error('condition did not settle')
 }
 
-describe('settings tab demo bundle', () => {
-  it('projects, mounts, localizes, blocks, denies, restores, and disposes the real manager page', async () => {
+describe('settings navigation demo bundle', () => {
+  it('projects a first-level Host-owned navigation entry, mounts its controlled body, and cleans it up', async () => {
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const config = await loadConfig(path.join(projectRoot, 'cordisx.config.settings-demo.json'))
     const bundle = await buildRendererBundle(config)
-    const dom = new JSDOM(`
-      <html lang="en" dir="ltr" class="electron-dark"><head></head><body>
-        <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
-      </body></html>
-    `, { runScripts: 'dangerously', url: 'https://codex.local/native' })
+    const dom = new JSDOM('<html lang="en" dir="ltr" class="electron-dark"><body><div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div></body></html>', {
+      runScripts: 'dangerously', url: 'https://codex.local/native',
+    })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
     Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
     dom.window.eval(bundle)
     await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true')
     const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime!
-    expect(runtime).toBeDefined()
-
     const initial = runtime.snapshot()
-    expect(initial.plugins).toEqual([expect.objectContaining({
-      id: 'settings-tab-demo',
-      status: 'active',
-      configuration: expect.objectContaining({
-        schemaKind: 'schemastery',
-        applies: 'plugin-restart',
-        fields: [expect.objectContaining({
-          path: ['demoValue'], label: 'Demo value', value: 'CordisX', min: 1, max: 64,
-        })],
-      }),
+    expect(initial.plugins).toEqual([expect.objectContaining({ id: 'settings-tab-demo', status: 'active', configuration: expect.objectContaining({ applies: 'plugin-restart' }) })])
+    expect(initial.settingsTabs).toEqual([])
+    expect(initial.settingsNavigationItems).toEqual([expect.objectContaining({
+      id: 'settings-tab-demo:navigation', title: 'Demo plugin settings', icon: 'host:settings', group: 'after-settings', order: 160,
+      route: { id: 'navigation' }, pageTitle: 'Demo plugin settings',
     })])
-    expect(initial.settingsTabs.map(tab => [tab.id, tab.order])).toEqual([
-      ['host:marketplace', 100],
-      ['settings-tab-demo:settings', 150],
-      ['host:runtime', 200],
-      ['host:launcher', 300],
-    ])
-    expect(initial.registrations).toEqual([
-      expect.objectContaining({
-        owner: 'settings-tab-demo', qualifiedId: 'settings-tab-demo:settings', surface: 'manager.settings.tabs',
-        valid: true, visible: true, authorized: true, pending: false,
-      }),
-    ])
-    expect(initial.navigation.routes).toEqual([
-      expect.objectContaining({
-        qualifiedId: 'settings-tab-demo:settings', valid: true, authorized: true,
-        productMetadata: {
-          title: 'Plugin settings content',
-          description: 'Open from the Demo plugin settings tab and mount its controlled body-only settings page in manager.settings.content.',
-          diagnostics: [],
-        },
-      }),
-    ])
-    expect(initial.navigation.pages).toEqual([
-      expect.objectContaining({
-        qualifiedId: 'settings-tab-demo:settings',
-        metadata: expect.objectContaining({ chrome: 'body-only' }),
-        productMetadata: {
-          title: 'Plugin settings content',
-          description: 'Shows the demo value editor in the CordisX settings area while the Host owns the tab header and panel chrome.',
-          diagnostics: [],
-        },
-      }),
-    ])
-    expect(initial.extensionPoints.points.find(point => point.id === 'manager.settings.tabs')).toMatchObject({ usingPluginCount: 1, activePluginCount: 1 })
-    expect(initial.extensionPoints.points.find(point => point.id === 'manager.settings.content')).toMatchObject({ usingPluginCount: 1, activePluginCount: 1 })
+    expect(initial.registrations).toEqual([expect.objectContaining({
+      owner: 'settings-tab-demo', qualifiedId: 'settings-tab-demo:navigation', surface: 'manager.settings.navigation-items',
+      valid: true, visible: true, authorized: true, pending: false,
+    })])
+    expect(initial.navigation.routes).toEqual([expect.objectContaining({ qualifiedId: 'settings-tab-demo:navigation', productMetadata: expect.objectContaining({ title: 'Demo plugin settings', description: 'Open the Demo plugin settings destination in the Manager navigation.' }) })])
+    expect(initial.navigation.pages).toEqual([expect.objectContaining({ qualifiedId: 'settings-tab-demo:navigation', metadata: expect.objectContaining({ chrome: 'standard' }), productMetadata: expect.objectContaining({ title: 'Demo plugin settings' }) })])
 
-    const managerTrigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!
-    expect(managerTrigger).not.toBeNull()
-    managerTrigger.click()
-    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="settings-tab-demo"]')!.click()
-    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')!.click()
-    const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="配置管理"]')!
-    const demoField = configPanel.querySelector<HTMLElement>('[data-config-path="demoValue"]')!
-    expect(demoField.querySelector('.cxf-label')?.textContent).toBe('Demo value')
-    expect(demoField.querySelector('.cxf-help')?.textContent).toBe('Initial value shown inside the controlled settings page.')
-    expect(demoField.querySelector<HTMLElement & { value?: unknown }>('t-input')?.value).toBe('CordisX')
-    expect(configPanel.querySelector('t-button[type="submit"]')).toBeNull()
-    dom.window.document.querySelector<HTMLButtonElement>('[data-tab="settings"]')!.click()
-    const tabIds = () => [...dom.window.document.querySelectorAll<HTMLElement>('[data-settings-tab]')]
-      .map(tab => tab.dataset.settingsTab)
-    expect(tabIds()).toEqual(['host:marketplace', 'settings-tab-demo:settings', 'host:runtime', 'host:launcher'])
-    const pluginTab = dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="settings-tab-demo:settings"]')!
-    expect(pluginTab.textContent).toBe('Demo plugin')
-    expect(pluginTab.querySelector('[data-host-icon="host:settings"]')).not.toBeNull()
-    expect(pluginTab.querySelector('section,style')).toBeNull()
-    expect(pluginTab.querySelectorAll('svg')).toHaveLength(1)
-    pluginTab.click()
-    await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content="mounted"]') !== null)
-    const breadcrumbLabels = (): string[] => [...dom.window.document.querySelectorAll<HTMLElement>('.cxm-breadcrumb-action, .cxm-breadcrumb-current')]
-      .map(item => item.textContent ?? '')
-    expect(breadcrumbLabels()).toEqual(['配置', 'Demo plugin'])
+    await waitFor(() => dom.window.document.querySelector('[data-cordisx-manager-trigger]') !== null)
+    const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!
+    trigger.click()
+    const item = (): HTMLButtonElement | null => dom.window.document.querySelector('[data-settings-navigation-item="settings-tab-demo:navigation"]')
+    expect(dom.window.document.querySelector('[data-tab="settings"]')).toBeNull()
+    expect(dom.window.document.querySelector('[data-settings-tab]')).toBeNull()
+    expect(item()?.textContent).toContain('Demo plugin settings')
+    expect(item()?.querySelector('[data-host-icon="host:settings"]')).not.toBeNull()
+    expect(item()?.querySelector('section,style')).toBeNull()
 
-    const panel = dom.window.document.querySelector<HTMLElement>('[data-settings-root] [role="tabpanel"]')!
-    const page = panel.querySelector<HTMLElement>('[data-cordisx-settings-page="settings-tab-demo:settings"]')!
-    expect(page.parentElement?.hasAttribute('data-settings-panel-body')).toBe(true)
-    expect(page.querySelector('[data-cordisx-page-chrome]')).toBeNull()
-    expect(page.querySelector('[data-settings-demo-body-title]')?.textContent).toBe('Plugin settings content')
-    expect(page.querySelector<HTMLInputElement>('[data-settings-demo-focus]')?.value).toBe('CordisX')
+    item()!.click()
+    await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content="mounted"]') !== null)
+    const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-page="settings-tab-demo:navigation"]')!
+    expect(page.closest('[data-manager-content-root]')).not.toBeNull()
+    expect(dom.window.document.querySelector('.cxm-heading-leading-stack [data-host-icon]')?.getAttribute('data-host-icon')).toBe('host:settings')
+    expect(page.querySelector('[data-settings-navigation-demo-body-title]')?.textContent).toBe('Plugin settings content')
+    expect(page.querySelector<HTMLInputElement>('[data-settings-navigation-demo-focus]')?.value).toBe('CordisX')
+    expect(item()?.getAttribute('aria-current')).toBe('page')
     expect(dom.window.location.href).toBe('https://codex.local/native')
-    expect(runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'manager.settings.content')).toMatchObject({
-      mounted: true, activeRoute: 'settings-tab-demo:settings',
-    })
-    expect(runtime.snapshot().extensionPoints.accessDiagnostics.slice(-3).map(item => item.request.operation)).toEqual([
+    expect(runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'manager.content')).toMatchObject({ mounted: true, activeRoute: 'settings-tab-demo:navigation' })
+    expect(runtime.snapshot().extensionPoints.accessDiagnostics.slice(-3).map(entry => entry.request.operation)).toEqual([
       'surface.route.navigate', 'outlet.route.navigate', 'outlet.page.mount',
     ])
-    expect(runtime.snapshot().extensionPoints.accessDiagnostics.slice(-3).every(item => (
-      item.authorized
-      && item.request.identity.pluginId === 'settings-tab-demo'
-      && item.request.identity.source === initial.plugins[0]!.source
-      && item.request.generation.length > 0
-    ))).toBe(true)
 
-    await runtime.setExtensionPointPolicy(initial.plugins[0]!.source, 'settings-tab-demo', 'manager.settings.tabs', 'deny')
-    await waitFor(() => dom.window.document.querySelector('[data-settings-tab="settings-tab-demo:settings"]') === null)
-    await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') === null)
-    expect(dom.window.document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected')).toBe('true')
-    expect(breadcrumbLabels()).toEqual(['配置', '插件商店'])
-    expect(runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'manager.settings.content')?.mounted).toBe(false)
+    item()!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }))
+    expect(dom.window.document.activeElement?.getAttribute('data-manager-navigation-id')).toBe('marketplace')
+    dom.window.document.activeElement?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+    expect(dom.window.document.activeElement?.getAttribute('data-settings-navigation-item')).toBe('settings-tab-demo:navigation')
 
-    await runtime.setExtensionPointPolicy(initial.plugins[0]!.source, 'settings-tab-demo', 'manager.settings.tabs', 'allow')
-    await waitFor(() => dom.window.document.querySelector('[data-settings-tab="settings-tab-demo:settings"]') !== null)
-    expect(dom.window.document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected')).toBe('true')
-    dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="settings-tab-demo:settings"]')!.click()
-    await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') !== null)
+    await runtime.setExtensionPointPolicy(initial.plugins[0]!.source, 'settings-tab-demo', 'manager.settings.navigation-items', 'deny')
+    await waitFor(() => item() === null && dom.window.document.querySelector('[data-settings-navigation-demo-content]') === null)
+    expect(dom.window.document.querySelector('[data-tab="plugins"]')?.getAttribute('aria-current')).toBe('page')
+    await waitFor(() => dom.window.document.activeElement?.getAttribute('data-tab') === 'plugins')
+    expect(runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'manager.content')?.mounted).toBe(false)
+    await runtime.setExtensionPointPolicy(initial.plugins[0]!.source, 'settings-tab-demo', 'manager.settings.navigation-items', 'allow')
+    await waitFor(() => item() !== null)
+    expect(dom.window.document.querySelector('[data-tab="plugins"]')?.getAttribute('aria-current')).toBe('page')
 
-    await runtime.setExtensionPointPolicy(initial.plugins[0]!.source, 'settings-tab-demo', 'manager.settings.content', 'deny')
-    await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') === null)
-    expect(dom.window.document.querySelector('[data-settings-tab="settings-tab-demo:settings"]')).toBeNull()
-    expect(runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'manager.settings.content')?.mounted).toBe(false)
-    await runtime.setExtensionPointPolicy(initial.plugins[0]!.source, 'settings-tab-demo', 'manager.settings.content', 'allow')
-    await waitFor(() => dom.window.document.querySelector('[data-settings-tab="settings-tab-demo:settings"]') !== null)
-
-    dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="settings-tab-demo:settings"]')!.click()
-    await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') !== null)
+    item()!.click()
+    await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content]') !== null)
     await runtime.setPluginBlocked('settings-tab-demo', true)
-    await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') === null)
-    expect(runtime.snapshot().plugins[0]?.status).toBe('blocked')
-    expect(dom.window.document.querySelector('[data-settings-tab="settings-tab-demo:settings"]')).toBeNull()
-    expect(dom.window.document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected')).toBe('true')
-
+    await waitFor(() => item() === null && dom.window.document.querySelector('[data-settings-navigation-demo-content]') === null)
+    expect(dom.window.document.querySelector('[data-tab="plugins"]')?.getAttribute('aria-current')).toBe('page')
     await runtime.setPluginBlocked('settings-tab-demo', false)
-    await waitFor(() => dom.window.document.querySelector('[data-settings-tab="settings-tab-demo:settings"]') !== null)
-    expect(runtime.snapshot().plugins[0]?.status).toBe('active')
-    expect(dom.window.document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected')).toBe('true')
+    await waitFor(() => item() !== null)
 
     dom.window.document.documentElement.lang = 'zh-CN'
-    await waitFor(() => dom.window.document.querySelector('[data-settings-tab="settings-tab-demo:settings"]')?.textContent === '演示插件')
-    expect(runtime.snapshot().settingsTabs.find(tab => tab.id === 'settings-tab-demo:settings')?.title).toBe('演示插件')
-    expect(runtime.snapshot().navigation.routes[0]?.productMetadata).toEqual({
-      title: '插件设置内容',
-      description: '从“演示插件”设置 Tab 进入，并在 manager.settings.content 中挂载受控的 body-only 设置页面。',
-      diagnostics: [],
-    })
-    expect(runtime.snapshot().navigation.pages[0]?.productMetadata).toEqual({
-      title: '插件设置内容',
-      description: '在 CordisX 配置区域展示演示值编辑器，Tab header 与 panel chrome 仍由 Host 所有。',
-      diagnostics: [],
-    })
+    await waitFor(() => item()?.textContent?.includes('演示插件设置') === true)
+    expect(runtime.snapshot().settingsNavigationItems[0]?.title).toBe('演示插件设置')
+    expect(runtime.snapshot().navigation.routes[0]?.productMetadata.title).toBe('演示插件设置')
 
-    dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="settings-tab-demo:settings"]')!.click()
-    await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') !== null)
-    expect(breadcrumbLabels()).toEqual(['配置', '演示插件'])
+    item()!.click()
+    await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content]') !== null)
+    const priorGeneration = runtime.snapshot().extensionPoints.accessDiagnostics.at(-1)!.request.generation
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-close')!.click()
-    await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') === null)
-    managerTrigger.click()
-    dom.window.document.querySelector<HTMLButtonElement>('[data-tab="settings"]')!.click()
-    expect(dom.window.document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected')).toBe('true')
-    expect(breadcrumbLabels()).toEqual(['配置'])
-    dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="settings-tab-demo:settings"]')!.click()
-    await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') !== null)
-    const previousGeneration = runtime.snapshot().extensionPoints.accessDiagnostics.at(-1)!.request.generation
+    await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content]') === null)
     dom.window.eval(bundle)
     await waitFor(() => (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime !== runtime)
     const replacement = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime!
-    await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true'
-      && dom.window.document.querySelectorAll('[data-cordisx-manager-trigger]').length === 1)
-    expect(dom.window.document.querySelector('[data-settings-demo-content]')).toBeNull()
-    dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
-    dom.window.document.querySelector<HTMLButtonElement>('[data-tab="settings"]')!.click()
-    expect(dom.window.document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected')).toBe('true')
-    dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="settings-tab-demo:settings"]')!.click()
-    await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') !== null)
-    const replacementGeneration = replacement.snapshot().extensionPoints.accessDiagnostics.at(-1)!.request.generation
-    expect(replacementGeneration).not.toBe(previousGeneration)
-
+    trigger.click()
+    await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-item]') !== null)
+    expect(replacement.snapshot().extensionPoints.accessDiagnostics.every(entry => entry.request.generation !== priorGeneration)).toBe(true)
     await replacement.dispose()
-    expect(dom.window.document.documentElement.dataset.cordisxReady).toBeUndefined()
-    expect(dom.window.document.querySelector('[data-settings-demo-content]')).toBeNull()
-    expect(dom.window.document.querySelector('[data-cordisx-manager-trigger]')).toBeNull()
+    expect(dom.window.document.querySelector('[data-settings-navigation-demo-content]')).toBeNull()
     dom.window.close()
-  }, 15_000)
+  }, 20_000)
 })

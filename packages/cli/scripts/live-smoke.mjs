@@ -16,7 +16,7 @@ const parsed = parseArgs({
     'manager-permission-capability': { type: 'string' },
     'manager-settings-tab': { type: 'string' },
     'manager-settings-navigation-item': { type: 'string' },
-    'manager-settings-exercise': { type: 'boolean', default: false },
+    'manager-settings-navigation-exercise': { type: 'boolean', default: false },
     'manager-form-exercise': { type: 'boolean', default: false },
     'manager-open-local-path-form': { type: 'boolean', default: false },
     'manager-open-select': { type: 'boolean', default: false },
@@ -180,8 +180,9 @@ if (locale !== undefined) {
       globalThis.__cordisxRestoreSmokeLocale?.()
       const root = document.documentElement
       const previousLang = root.getAttribute('lang')
+      let desired = ${JSON.stringify(locale)}
       const enforce = () => {
-        if (root.lang !== ${JSON.stringify(locale)}) root.lang = ${JSON.stringify(locale)}
+        if (root.lang !== desired) root.lang = desired
       }
       const observer = new MutationObserver(enforce)
       observer.observe(root, { attributes: true, attributeFilter: ['lang'] })
@@ -190,6 +191,12 @@ if (locale !== undefined) {
         if (previousLang === null) root.removeAttribute('lang')
         else root.setAttribute('lang', previousLang)
         delete globalThis.__cordisxRestoreSmokeLocale
+        delete globalThis.__cordisxSetSmokeLocale
+      }
+      globalThis.__cordisxSetSmokeLocale = next => {
+        if (!['en', 'zh-CN'].includes(next)) throw new Error('unsupported smoke locale')
+        desired = next
+        enforce()
       }
       enforce()
     })()`,
@@ -695,7 +702,7 @@ async function evaluateByValue(expression, awaitPromise = false) {
 let exerciseReport
 let settingsTabsReport
 let configExerciseReport
-if (parsed.values['manager-settings-exercise']) {
+if (false && parsed.values['manager-settings-exercise']) {
   const owner = parsed.values['plugin-owner'] ?? 'settings-tab-demo'
   const qualifiedTabId = `${owner}:settings`
   const initial = await evaluateByValue(`(async () => {
@@ -913,6 +920,78 @@ if (parsed.values['manager-settings-exercise']) {
       && final.access.allAttributed === true,
   }
   console.log(`manager-settings=${JSON.stringify(settingsTabsReport, null, 2)}`)
+}
+
+if (parsed.values['manager-settings-navigation-exercise']) {
+  const owner = parsed.values['plugin-owner'] ?? 'settings-tab-demo'
+  const qualifiedId = `${owner}:navigation`
+  const source = await evaluateByValue(`globalThis.__cordisxRuntime?.snapshot?.().plugins?.find(item => item.id === ${JSON.stringify(owner)})?.source ?? null`)
+  if (source === null) throw new Error(`settings navigation demo plugin source not found: ${owner}`)
+  const initial = await evaluateByValue(`(async () => {
+    const waitFor = async predicate => {
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        if (predicate()) return true
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      return false
+    }
+    document.querySelector('[data-cordisx-manager-trigger]')?.click()
+    const ready = await waitFor(() => document.querySelector('[data-settings-navigation-item="${qualifiedId}"]') !== null)
+    const row = document.querySelector('[data-settings-navigation-item="${qualifiedId}"]')
+    row?.click()
+    const mounted = await waitFor(() => document.querySelector('[data-settings-navigation-demo-content="mounted"]') !== null)
+    const runtime = globalThis.__cordisxRuntime.snapshot()
+    return {
+      ready, mounted,
+      rows: [...document.querySelectorAll('[data-settings-navigation-item]')].map(row => ({ id: row.getAttribute('data-settings-navigation-item'), icon: row.querySelector('[data-host-icon]')?.getAttribute('data-host-icon') ?? null, disabled: row.disabled })),
+      settingsTabs: runtime.settingsTabs,
+      legacySettings: document.querySelector('[data-tab="settings"],[data-settings-tab]') !== null,
+      page: document.querySelector('[data-cordisx-manager-page="${qualifiedId}"]') !== null,
+      hostHeader: document.querySelector('.cxm-heading-leading-stack [data-host-icon="host:settings"]') !== null,
+      outlet: runtime.navigation.outlets.find(item => item.id === 'manager.content') ?? null,
+    }
+  })()`, true)
+  await evaluateByValue(`document.querySelector('[data-settings-navigation-item="${qualifiedId}"]')?.focus()`)
+  await pressKey('ArrowUp', 'ArrowUp', 38)
+  const keyboardUp = await evaluateByValue(`document.activeElement?.getAttribute('data-manager-navigation-id') ?? null`)
+  await pressKey('ArrowDown', 'ArrowDown', 40)
+  const keyboardDown = await evaluateByValue(`document.activeElement?.getAttribute('data-settings-navigation-item') ?? null`)
+  const lifecycle = await evaluateByValue(`(async () => {
+    const runtime = globalThis.__cordisxRuntime
+    await runtime.setExtensionPointPolicy(${JSON.stringify(source)}, ${JSON.stringify(owner)}, 'manager.settings.navigation-items', 'deny')
+    await new Promise(resolve => setTimeout(resolve, 140))
+    const denied = { row: document.querySelector('[data-settings-navigation-item="${qualifiedId}"]') !== null, body: document.querySelector('[data-settings-navigation-demo-content]') !== null, fallback: document.querySelector('[data-tab="plugins"]')?.getAttribute('aria-current') === 'page', mounted: runtime.snapshot().navigation.outlets.find(item => item.id === 'manager.content')?.mounted ?? null }
+    await runtime.setExtensionPointPolicy(${JSON.stringify(source)}, ${JSON.stringify(owner)}, 'manager.settings.navigation-items', 'allow')
+    await new Promise(resolve => setTimeout(resolve, 140))
+    const restored = document.querySelector('[data-settings-navigation-item="${qualifiedId}"]') !== null
+    return { denied, restored }
+  })()`, true)
+  const localeResult = await evaluateByValue(`(async () => {
+    const target = document.documentElement.lang.toLowerCase().startsWith('zh') ? 'en' : 'zh-CN'
+    globalThis.__cordisxSetSmokeLocale(target)
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const snapshot = globalThis.__cordisxRuntime.snapshot().localization.locale
+      if (document.documentElement.lang === target && snapshot === target) break
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    const title = document.querySelector('[data-settings-navigation-item="${qualifiedId}"]')?.textContent?.trim() ?? null
+    globalThis.__cordisxSetSmokeLocale(${JSON.stringify(locale ?? 'en')})
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const snapshot = globalThis.__cordisxRuntime.snapshot().localization.locale
+      if (document.documentElement.lang === ${JSON.stringify(locale ?? 'en')} && snapshot === ${JSON.stringify(locale ?? 'en')}) break
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    return { target, title, restored: document.documentElement.lang, snapshot: globalThis.__cordisxRuntime.snapshot().localization.locale }
+  })()`, true)
+  settingsTabsReport = {
+    initial, keyboard: { up: keyboardUp, down: keyboardDown }, lifecycle, locale: localeResult,
+    passed: initial.ready === true && initial.mounted === true && initial.rows.some(item => item.id === qualifiedId && item.icon === 'host:settings' && item.disabled === false)
+      && initial.settingsTabs.length === 0 && initial.legacySettings === false && initial.page === true && initial.hostHeader === true && initial.outlet?.mounted === true
+      && keyboardUp === 'marketplace' && keyboardDown === qualifiedId
+      && lifecycle.denied.row === false && lifecycle.denied.body === false && lifecycle.denied.fallback === true && lifecycle.denied.mounted === false && lifecycle.restored === true
+      && localeResult.snapshot === (locale ?? 'en') && localeResult.restored === (locale ?? 'en'),
+  }
+  console.log(`manager-settings-navigation=${JSON.stringify(settingsTabsReport, null, 2)}`)
 }
 
 if (parsed.values['config-exercise']) {

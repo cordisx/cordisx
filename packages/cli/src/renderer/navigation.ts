@@ -913,6 +913,7 @@ export class NavigationRegistry {
       const content = container.ownerDocument.createElement('div')
       content.dataset.cordisxManagerPage = page.qualifiedId
       content.dataset.cordisxRoute = record.qualifiedId
+      content.dataset.cxmSettingsPlacement = 'page'
       content.dataset.cordisxNoDrag = 'true'
       content.style.cssText = 'min-width:0;min-height:100%;box-sizing:border-box'
       content.style.setProperty('-webkit-app-region', 'no-drag')
@@ -1441,8 +1442,6 @@ export class NavigationRegistry {
         return () => this.i18n.clearDiagnosticSite(page.owner, titleSite)
       })
       titleGroup.append(title)
-      const close = pageChromeButton(content.ownerDocument, 'Close', 'host:close')
-      close.addEventListener('click', () => { void this.close(page.owner, name as CordisXOutletName) })
       chrome.append(leading, titleGroup)
       for (const action of page.metadata.headerActions ?? []) {
         const button = pageChromeButton(content.ownerDocument, action.id, action.icon ?? 'host:more')
@@ -1496,7 +1495,13 @@ export class NavigationRegistry {
         })
         chrome.append(button)
       }
-      chrome.append(close)
+      // Manager owns the modal close affordance. A manager.content page may expose
+      // Back in its Host shell, but must not create a second adjacent close button.
+      if (name !== 'manager.content') {
+        const close = pageChromeButton(content.ownerDocument, 'Close', 'host:close')
+        close.addEventListener('click', () => { void this.close(page.owner, name as CordisXOutletName) })
+        chrome.append(close)
+      }
       content.append(chrome)
       if ((page.metadata.breadcrumbs?.length ?? 0) > 0) {
         const breadcrumbs = content.ownerDocument.createElement('nav')

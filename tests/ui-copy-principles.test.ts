@@ -16,26 +16,13 @@ function section(source: string, start: string, end: string): string {
 }
 
 describe('UI copy principles', () => {
-  it('keeps settings primary states short and sends implementation detail to docs or expandable diagnostics', async () => {
+  it('keeps configuration out of retired global placeholder pages', async () => {
     const manager = await readFile(managerPath, 'utf8')
-    const marketplace = section(manager, 'const renderMarketplaceSettings', 'const renderRuntimeSettings')
-    const runtime = section(manager, 'const renderRuntimeSettings', 'const renderLauncherSettings')
-    const launcher = section(manager, 'const renderLauncherSettings', 'const settingsTabs')
-
-    expect(marketplace).toContain('管理插件商店来源。')
-    expect(marketplace).toContain('查看配置文档')
-    expect(marketplace).toContain('暂无插件商店。')
-    expect(marketplace).toContain('加载失败')
-    expect(marketplace).toContain('查看错误详情')
-    expect(marketplace).not.toMatch(/canonical source|小写 id/)
-
-    expect(runtime).toContain('暂无被屏蔽的插件。')
-    expect(runtime).toContain('查看运行状态说明')
-    expect(runtime).not.toMatch(/profile|Cordis fiber|卸载、权限隔离/)
-
-    expect(launcher).toContain('启动器配置由 cordisx.config.json 管理。')
-    expect(launcher).toContain('查看配置文档')
-    expect(launcher).not.toMatch(/composition|generation/)
+    expect(manager).toContain('CORDISX_BUILTIN_MANAGER_SETTINGS_TABS: readonly ManagerSettingsTabSnapshot[] = Object.freeze([])')
+    expect(manager).toContain("{ id: 'plugins', icon: 'plugins', label: '插件' }")
+    expect(manager).not.toContain("{ id: 'settings', label: '配置'")
+    expect(manager).not.toContain('renderRuntimeSettings')
+    expect(manager).not.toContain('renderLauncherSettings')
   })
 
   it('keeps the Host catalog complete and locale-first for every governed primary state', () => {
