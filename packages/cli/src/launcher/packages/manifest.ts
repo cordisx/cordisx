@@ -120,7 +120,7 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
   }
 
   async resolve(snapshotRoot: string): Promise<ResolvedPackageCandidate> {
-    const packageManifestPath = this.#options.packageManifestPath ?? './cordisx.package.json'
+    const packageManifestPath = this.#options.packageManifestPath ?? './cordisx-package.json'
     const manifestFile = await containedFile(snapshotRoot, safePath(packageManifestPath, JSON_PATH, 'package manifest path'), 'package manifest')
     const raw = JSON.parse(await readFile(manifestFile, 'utf8')) as unknown
     const manifest = object(raw, 'package manifest')

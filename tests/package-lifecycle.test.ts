@@ -12,9 +12,12 @@ import {
   PackageLifecycleError,
   PackageLifecycleHost,
   createHostPermissionReviewAuthority,
+  createHostRollbackCompletionAuthority,
   hashPackageTree,
   resolvePackageGraph,
   affectedClosure,
+  JsonPackageManifestV2Resolver,
+  resolvePluginPackageSourceV1,
   type HostPackageManifest,
   type PackageActivationPlan,
   type PackageCandidateAccess,
@@ -22,6 +25,9 @@ import {
   type PackageReadinessReceipt,
   type PackageStoreState,
 } from '../packages/cli/src/launcher/packages/index.js'
+
+const runtimeManifestV3Schema =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v3.schema.json'
 
 const runtime0 = 'runtime-0'
 const fingerprint = 'a'.repeat(64)
@@ -76,12 +82,30 @@ async function makePackage(
 function allowPermissions(requiredSatisfied = true) {
   return createHostPermissionReviewAuthority(async input => ({
     planId: `plan-${input.transactionId}`,
-    fingerprint: input.manifestPermissionFingerprint,
+    planRevision: 1,
+    decisionId: `decision-${input.transactionId}`,
+    decisionFingerprint: input.manifestPermissionFingerprint,
     requiredSatisfied,
     unresolvedRequired: requiredSatisfied ? [] : ['models.read'],
     deniedRequired: [],
+    oneShotGrantIds: [],
   }))
 }
+
+function tupleObservation(tuple: PackageActivationPlan['current']) {
+  return {
+    runtimeGeneration: tuple.runtimeGeneration,
+    plugins: Object.fromEntries(Object.entries(tuple.plugins).map(([pluginId, plugin]) => {
+      if (plugin.package === undefined) throw new Error(`tuple package missing for ${pluginId}`)
+      return [pluginId, { moduleGeneration: plugin.moduleGeneration, identity: plugin.package.identity }]
+    })),
+  }
+}
+
+const rollbackAuthority = createHostRollbackCompletionAuthority(async plan => ({
+  active: tupleObservation(plan.rollbackTarget),
+  disposedAfter: tupleObservation(plan.expectedPublished),
+}))
 
 async function createHost(requiredSatisfied = true, storeOptions = {}) {
   const root = await tempRoot()
@@ -91,6 +115,7 @@ async function createHost(requiredSatisfied = true, storeOptions = {}) {
     protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1],
     manifestResolver,
     permissionAuthority: allowPermissions(requiredSatisfied),
+    rollbackAuthority,
   })
   return { root, store, host }
 }
@@ -101,10 +126,10 @@ function stateFence(state: PackageStoreState, profileId = 'default'): PackageGen
   return {
     runtimeGeneration: profile.runtimeGeneration,
     plugins: Object.fromEntries(Object.entries(profile.plugins).flatMap(([pluginId, plugin]) => {
-      if (plugin.active === undefined) return []
-      const record = state.packages[plugin.active.packageKey]
-      if (record === undefined) throw new Error(`missing package ${plugin.active.packageKey}`)
-      return [[pluginId, { moduleGeneration: plugin.active.moduleGeneration, identity: record.identity }]]
+      if (plugin.installed === undefined || plugin.uninstalled === true) return []
+      const record = state.packages[plugin.installed.packageKey]
+      if (record === undefined) throw new Error(`missing package ${plugin.installed.packageKey}`)
+      return [[pluginId, { moduleGeneration: plugin.installed.moduleGeneration, identity: record.identity }]]
     })),
   }
 }
@@ -123,12 +148,28 @@ function readiness(candidate: PackageActivationPlan): PackageReadinessReceipt {
   }
 }
 
-function candidateAccess(candidateId: PackageCandidateAccess['candidateId'], profileId = 'default'): PackageCandidateAccess {
-  return { candidateId, ownerId: 'generation-runtime', profileId }
+function candidateAccess(
+  prepared: {
+    readonly candidateId: PackageCandidateAccess['candidateId']
+    readonly permissionReview?: { readonly permissionReviewToken: NonNullable<PackageCandidateAccess['permissionReviewToken']> }
+  },
+  profileId = 'default',
+): PackageCandidateAccess {
+  return {
+    candidateId: prepared.candidateId,
+    ownerId: 'generation-runtime',
+    profileId,
+    ...(prepared.permissionReview === undefined ? {} : {
+      permissionReviewToken: prepared.permissionReview.permissionReviewToken,
+    }),
+  }
 }
 
-async function activate(host: PackageLifecycleHost, prepared: { readonly candidateId: PackageCandidateAccess['candidateId'] }) {
-  const access = candidateAccess(prepared.candidateId)
+async function activate(host: PackageLifecycleHost, prepared: {
+  readonly candidateId: PackageCandidateAccess['candidateId']
+  readonly permissionReview?: { readonly permissionReviewToken: NonNullable<PackageCandidateAccess['permissionReviewToken']> }
+}) {
+  const access = candidateAccess(prepared)
   const candidate = await host.requestActivation(access)
   const receipt = readiness(candidate)
   await host.confirmReadiness(access, receipt)
@@ -203,6 +244,112 @@ describe('immutable package intake', () => {
   })
 })
 
+describe('formal source and separated manifest adapters', () => {
+  it('maps all source-v1 forms without granting remote installation authority', async () => {
+    const directory = await tempRoot()
+    expect(resolvePluginPackageSourceV1({
+      kind: 'local-directory',
+      location: new URL(`file://${directory}`).href,
+    })).toMatchObject({ kind: 'local-directory', path: directory })
+    expect(resolvePluginPackageSourceV1({
+      kind: 'downloaded-tarball',
+      location: new URL(`file://${path.join(directory, 'package.tgz')}`).href,
+      downloadedFrom: 'https://plugins.example/package.tgz',
+      expectedDigest: `sha256:${'a'.repeat(64)}`,
+    })).toMatchObject({
+      kind: 'downloaded-tarball',
+      downloadedFrom: 'https://plugins.example/package.tgz',
+      expectedIntegrity: `sha256:${'a'.repeat(64)}`,
+    })
+    expect(() => resolvePluginPackageSourceV1({
+      kind: 'downloaded-tarball',
+      location: new URL(`file://${path.join(directory, 'package.tgz')}`).href,
+    })).toThrow('requires its HTTPS discovery URL')
+    expect(() => resolvePluginPackageSourceV1({
+      kind: 'local-package',
+      location: 'https://plugins.example/package.tgz',
+    })).toThrow('file URL')
+  })
+
+  it('resolves package v2 and preserves only the manifest-v3 Host configuration declaration', async () => {
+    const root = await tempRoot()
+    await mkdir(path.join(root, 'dist'), { recursive: true })
+    await writeFile(path.join(root, 'dist', 'index.js'), 'export default {}\n')
+    const runtimeManifest = {
+      $schema: runtimeManifestV3Schema,
+      schemaVersion: 3,
+      id: 'channel-demo',
+      capabilities: [],
+      services: [{
+        id: 'channel',
+        kind: 'channel-adapter',
+        entry: './dist/channel.js',
+        configuration: {
+          kind: 'host',
+          schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json',
+          configApplies: 'restart',
+        },
+      }],
+    } as const
+    const runtimeBytes = Buffer.from(`${JSON.stringify(runtimeManifest, null, 2)}\n`)
+    await writeFile(path.join(root, 'cordisx-runtime.json'), runtimeBytes)
+    const runtimeDigest = `sha256:${createHash('sha256').update(runtimeBytes).digest('hex')}`
+    await writeFile(path.join(root, 'cordisx-package.json'), `${JSON.stringify({
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v2.schema.json',
+      schemaVersion: 2,
+      id: 'channel-demo',
+      version: '1.0.0',
+      entry: './dist/index.js',
+      distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
+      compatibility: { runtimeAbi: 1, protocolSchemas: [runtimeManifestV3Schema] },
+      dependencies: [],
+      runtimeManifest: { path: './cordisx-runtime.json', schema: runtimeManifestV3Schema, digest: runtimeDigest },
+    }, null, 2)}\n`)
+    const resolver = new JsonPackageManifestV2Resolver({
+      runtimeValidators: { [runtimeManifestV3Schema]: value => value as typeof runtimeManifest },
+    })
+    const resolved = await resolver.resolve(root)
+    expect(resolved.runtime.manifest.services?.[0]?.configuration).toEqual(runtimeManifest.services[0].configuration)
+    expect(JSON.stringify(resolved)).not.toMatch(/secretRef|secretState|transport|dataDir/)
+
+    const tunneled = structuredClone(runtimeManifest) as unknown as Record<string, unknown>
+    ;(tunneled.services as Array<Record<string, unknown>>)[0]!.secretRef = 'keychain:cordisx/channel/demo'
+    const tunneledBytes = Buffer.from(`${JSON.stringify(tunneled)}\n`)
+    await writeFile(path.join(root, 'cordisx-runtime.json'), tunneledBytes)
+    const packageManifest = JSON.parse(await readFile(path.join(root, 'cordisx-package.json'), 'utf8')) as {
+      runtimeManifest: { digest: string }
+    }
+    packageManifest.runtimeManifest.digest = `sha256:${createHash('sha256').update(tunneledBytes).digest('hex')}`
+    await writeFile(path.join(root, 'cordisx-package.json'), `${JSON.stringify(packageManifest)}\n`)
+    await expect(resolver.resolve(root)).rejects.toMatchObject({ code: 'launcher-config-tunnel' })
+  })
+
+  it('rejects a separately referenced runtime manifest integrity mismatch', async () => {
+    const root = await tempRoot()
+    await mkdir(path.join(root, 'dist'), { recursive: true })
+    await writeFile(path.join(root, 'dist', 'index.js'), 'export default {}\n')
+    await writeFile(path.join(root, 'cordisx-runtime.json'), '{}\n')
+    await writeFile(path.join(root, 'cordisx-package.json'), `${JSON.stringify({
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v2.schema.json',
+      schemaVersion: 2,
+      id: 'bad-runtime',
+      version: '1.0.0',
+      entry: './dist/index.js',
+      distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
+      compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1] },
+      dependencies: [],
+      runtimeManifest: {
+        path: './cordisx-runtime.json', schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+        digest: `sha256:${'0'.repeat(64)}`,
+      },
+    })}\n`)
+    const resolver = new JsonPackageManifestV2Resolver({
+      runtimeValidators: { [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1]: value => value as never },
+    })
+    await expect(resolver.resolve(root)).rejects.toMatchObject({ code: 'integrity-mismatch' })
+  })
+})
+
 describe('package dependency graph', () => {
   const node = (pluginId: string, dependencies: HostPackageManifest['dependencies'] = []) => ({
     pluginId,
@@ -257,7 +404,7 @@ describe('launcher package transactions', () => {
     })
     expect(prepared.transaction.status).toBe('ready')
     expect(prepared.transaction.permission?.requiredSatisfied).toBe(true)
-    const plan = await host.resolveCandidate(candidateAccess(prepared.candidateId), 'plan')
+    const plan = await host.resolveCandidate(candidateAccess(prepared), 'plan')
     const impact = await host.resolveImpact({
       impactToken: prepared.impactToken,
       ownerId: 'generation-runtime',
@@ -267,6 +414,11 @@ describe('launcher package transactions', () => {
     expect(plan.current).toEqual(plan.expected)
     expect(plan.after.revision).toBe(1)
     expect(impact.affectedPluginIds).toEqual(['demo'])
+    expect((await host.resolveRuntimeModule(candidateAccess(prepared), 'plan', 'demo'))).toMatchObject({
+      identity: { pluginId: 'demo' },
+      runtimeEntry: expect.stringContaining('/objects/sha256/'),
+    })
+    expect(JSON.stringify(prepared.state.transactions[prepared.transaction.transactionId])).not.toMatch(/capabilities|scope|secret/i)
     const { candidate, committed } = await activate(host, prepared)
     expect(candidate.after.plugins.demo?.package?.identity).toMatchObject({ pluginId: 'demo', version: '1.0.0' })
     expect(candidate.after.plugins.demo?.package?.runtimeEntry).toContain('/objects/sha256/')
@@ -288,8 +440,71 @@ describe('launcher package transactions', () => {
     })
     expect(prepared.activationAvailable).toBe(false)
     expect(prepared.transaction.permission?.unresolvedRequired).toEqual(['models.read'])
-    await expect(host.requestActivation(candidateAccess(prepared.candidateId)))
+    await expect(host.resolveCandidate(candidateAccess(prepared), 'plan'))
       .rejects.toMatchObject({ code: 'permission-review-required' })
+    await expect(host.requestActivation(candidateAccess(prepared)))
+      .rejects.toMatchObject({ code: 'permission-review-required' })
+  })
+
+  it('binds Host permission review to tokens/fences and clears allow-once on generation disposal', async () => {
+    const revoked: string[][] = []
+    const reviews: Array<{ candidateId: string; impactToken: string; ownerId: string; expected: PackageGenerationFence }> = []
+    const permissionAuthority = createHostPermissionReviewAuthority(async input => {
+      reviews.push(input)
+      return {
+        planId: `plan-${input.transactionId}`,
+        planRevision: 7,
+        decisionId: `decision-${input.transactionId}`,
+        decisionFingerprint: input.manifestPermissionFingerprint,
+        requiredSatisfied: true,
+        unresolvedRequired: [],
+        deniedRequired: [],
+        oneShotGrantIds: ['grant:allow-once:demo'],
+      }
+    }, async ids => { revoked.push([...ids]) })
+    const root = await tempRoot()
+    const store = await JsonPackageStore.open(path.join(root, 'store'))
+    const host = new PackageLifecycleHost(store, {
+      runtimeAbi: 1,
+      protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1],
+      manifestResolver,
+      permissionAuthority,
+      rollbackAuthority,
+    })
+    const source = await makePackage(root, 'permission-bound', '1.0.0')
+    const prepared = await host.prepare({
+      ownerId: 'generation-runtime', operation: 'install', profileId: 'default', expectedRevision: 0,
+      expected: { runtimeGeneration: runtime0, plugins: {} }, proposedRuntimeGeneration: 'runtime-1',
+      source: { kind: 'local-directory', path: source },
+    })
+    expect(reviews).toMatchObject([{
+      candidateId: prepared.candidateId,
+      impactToken: prepared.impactToken,
+      ownerId: 'generation-runtime',
+      expected: { runtimeGeneration: runtime0, plugins: {} },
+    }])
+    expect(prepared.transaction.permission).toMatchObject({ planRevision: 7, oneShotGrantIds: ['grant:allow-once:demo'] })
+    expect(JSON.stringify(prepared.transaction.permission)).not.toMatch(/capabilities|scope|secret/i)
+    await expect(host.resolveCandidate({
+      candidateId: prepared.candidateId,
+      ownerId: 'generation-runtime',
+      profileId: 'default',
+    }, 'plan')).rejects.toMatchObject({ code: 'permission-review-token-invalid' })
+    await expect(host.resolveCandidate({
+      ...candidateAccess(prepared),
+      permissionReviewToken: 'permission-token:forged' as NonNullable<PackageCandidateAccess['permissionReviewToken']>,
+    }, 'plan')).rejects.toMatchObject({ code: 'permission-review-token-invalid' })
+    const installed = (await activate(host, prepared)).committed
+    expect(installed.profiles.default?.plugins['permission-bound']?.oneShotGrantIds).toEqual(['grant:allow-once:demo'])
+    expect(revoked).toEqual([[]])
+
+    const disabled = await host.prepare({
+      ownerId: 'generation-runtime', operation: 'disable', pluginId: 'permission-bound', profileId: 'default',
+      expectedRevision: installed.profiles.default!.revision,
+      expected: stateFence(installed), proposedRuntimeGeneration: 'runtime-2',
+    })
+    await activate(host, disabled)
+    expect(revoked).toEqual([[], ['grant:allow-once:demo']])
   })
 
   it('rejects forged tokens, wrong owners, and readiness with a mismatched package identity', async () => {
@@ -302,14 +517,14 @@ describe('launcher package transactions', () => {
       source: { kind: 'local-directory', path: source },
     })
     await expect(host.resolveCandidate({
-      ...candidateAccess(prepared.candidateId),
+      ...candidateAccess(prepared),
       ownerId: 'renderer',
     }, 'plan')).rejects.toMatchObject({ code: 'candidate-owner-mismatch' })
     await expect(host.resolveCandidate({
-      ...candidateAccess(prepared.candidateId),
+      ...candidateAccess(prepared),
       candidateId: 'candidate:forged' as typeof prepared.candidateId,
     }, 'plan')).rejects.toMatchObject({ code: 'candidate-token-invalid' })
-    const access = candidateAccess(prepared.candidateId)
+    const access = candidateAccess(prepared)
     const candidate = await host.requestActivation(access)
     const receipt = readiness(candidate)
     const identity = receipt.plugins.fenced!.identity
@@ -328,31 +543,108 @@ describe('launcher package transactions', () => {
       expected: { runtimeGeneration: runtime0, plugins: {} }, proposedRuntimeGeneration: 'runtime-1',
       source: { kind: 'local-directory', path: source },
     })
-    const candidate = await host.requestActivation(candidateAccess(prepared.candidateId))
+    const candidate = await host.requestActivation(candidateAccess(prepared))
     const receipt = readiness(candidate)
     const reopened = await JsonPackageStore.open(store.root)
     const recoveredHost = new PackageLifecycleHost(reopened, {
       runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1], manifestResolver,
       permissionAuthority: allowPermissions(),
+      rollbackAuthority,
     })
     const recovery = await recoveredHost.recover({
       default: { runtimeGeneration: receipt.runtimeGeneration, plugins: receipt.plugins },
     })
     expect(recovery.directives).toMatchObject([{ action: 'rollback-published' }])
-    expect(recovery.state.transactions[prepared.transaction.transactionId]?.status).toBe('recovered-aborted')
+    expect(recovery.state.transactions[prepared.transaction.transactionId]?.status).toBe('rollback-pending')
     expect(recovery.state.profiles.default?.runtimeGeneration).toBe(runtime0)
+    const directive = recovery.directives[0]!
+    if (directive.rollbackToken === undefined) throw new Error('rollback token missing')
+    const recovered = await recoveredHost.completeRollback({
+      rollbackToken: directive.rollbackToken,
+      ownerId: directive.ownerId,
+      profileId: directive.profileId,
+    })
+    expect(recovered.transactions[prepared.transaction.transactionId]?.status).toBe('aborted')
 
     const secondSource = await makePackage(root, 'interrupted', '1.0.0')
     const second = await recoveredHost.prepare({
       ownerId: 'generation-runtime', operation: 'install', profileId: 'default',
-      expectedRevision: recovery.state.profiles.default!.revision,
-      expected: stateFence(recovery.state), proposedRuntimeGeneration: 'runtime-2',
+      expectedRevision: recovered.profiles.default!.revision,
+      expected: stateFence(recovered), proposedRuntimeGeneration: 'runtime-2',
       source: { kind: 'local-directory', path: secondSource },
     })
     const aborted = await recoveredHost.recover({})
     expect(aborted.directives).toMatchObject([{ action: 'discard-staged' }])
     expect(aborted.state.transactions[second.transaction.transactionId]?.status).toBe('recovered-aborted')
     expect(aborted.state.profiles.default?.runtimeGeneration).toBe(runtime0)
+  })
+
+  it('pins a published candidate through authenticated rollback completion', async () => {
+    const { root, store, host } = await createHost()
+    const v1 = await makePackage(root, 'rollback-demo', '1.0.0')
+    const first = await host.prepare({
+      ownerId: 'generation-runtime', operation: 'install', profileId: 'default', expectedRevision: 0,
+      expected: { runtimeGeneration: runtime0, plugins: {} }, proposedRuntimeGeneration: 'runtime-1',
+      source: { kind: 'local-directory', path: v1 },
+    })
+    const installed = (await activate(host, first)).committed
+    const v2 = await makePackage(root, 'rollback-demo', '2.0.0')
+    const update = await host.prepare({
+      ownerId: 'generation-runtime', operation: 'update', pluginId: 'rollback-demo', profileId: 'default',
+      expectedRevision: installed.profiles.default!.revision,
+      expected: stateFence(installed), proposedRuntimeGeneration: 'runtime-2',
+      source: { kind: 'local-directory', path: v2 },
+    })
+    const access = candidateAccess(update)
+    const published = await host.requestActivation(access)
+    const rollback = await host.beginRollback(access, 'readiness-failed')
+    const candidateKey = `${published.after.plugins['rollback-demo']!.package!.identity.pluginId}@2.0.0#${published.after.plugins['rollback-demo']!.package!.identity.integrity}`
+    await expect(host.abort(access, 'unsafe-abort')).rejects.toMatchObject({ code: 'rollback-required' })
+    await expect(host.prepare({
+      ownerId: 'generation-runtime', operation: 'disable', pluginId: 'rollback-demo', profileId: 'default',
+      expectedRevision: installed.profiles.default!.revision,
+      expected: stateFence(installed), proposedRuntimeGeneration: 'runtime-3',
+    })).rejects.toMatchObject({ code: 'transaction-in-progress' })
+    expect((await host.collectGarbage(0)).removed).not.toContain(candidateKey)
+
+    const forgedHost = new PackageLifecycleHost(await JsonPackageStore.open(store.root), {
+      runtimeAbi: 1,
+      protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1],
+      manifestResolver,
+      permissionAuthority: allowPermissions(),
+      rollbackAuthority: {
+        complete: async plan => ({
+          active: tupleObservation(plan.rollbackTarget),
+          disposedAfter: tupleObservation(plan.expectedPublished),
+          inputFingerprint: 'forged',
+        }),
+      },
+    })
+    const rollbackAccess = {
+      rollbackToken: rollback.rollbackToken,
+      ownerId: 'generation-runtime',
+      profileId: 'default',
+    } as const
+    await expect(forgedHost.completeRollback(rollbackAccess))
+      .rejects.toMatchObject({ code: 'untrusted-rollback-receipt' })
+
+    const staleHost = new PackageLifecycleHost(await JsonPackageStore.open(store.root), {
+      runtimeAbi: 1,
+      protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1],
+      manifestResolver,
+      permissionAuthority: allowPermissions(),
+      rollbackAuthority: createHostRollbackCompletionAuthority(async plan => ({
+        active: { ...tupleObservation(plan.rollbackTarget), runtimeGeneration: 'runtime-stale' },
+        disposedAfter: tupleObservation(plan.expectedPublished),
+      })),
+    })
+    await expect(staleHost.completeRollback(rollbackAccess))
+      .rejects.toMatchObject({ code: 'stale-rollback-receipt' })
+
+    const rolledBack = await host.completeRollback(rollbackAccess)
+    expect(rolledBack.transactions[update.transaction.transactionId]?.status).toBe('aborted')
+    expect(rolledBack.profiles.default?.runtimeGeneration).toBe('runtime-1')
+    expect((await host.collectGarbage(0)).removed).toContain(candidateKey)
   })
 
   it('refuses uninstall while an enabled dependent exists', async () => {
@@ -399,6 +691,11 @@ describe('launcher package transactions', () => {
       source: { kind: 'local-directory', path: v2 },
     })
     const upgraded = (await activate(host, upgrade)).committed
+    const records = host.activationRecords('default')
+    expect(records.find(record => record.recordKind === 'active')?.plugins)
+      .toMatchObject([{ id: 'upgradeable', version: '2.0.0', enabled: true }])
+    expect(records.find(record => record.recordKind === 'last-good')?.plugins)
+      .toMatchObject([{ id: 'upgradeable', version: '1.0.0', enabled: true }])
     expect(host.leases('default')[0]).toMatchObject({ lastGood: oldLease, rollbackLeases: [oldLease] })
     const retained = await host.collectGarbage(0)
     expect(retained.removed).not.toContain(oldLease.packageKey)
@@ -415,7 +712,7 @@ describe('launcher package transactions', () => {
     await initial.transaction(0, draft => {
       draft.profiles.default = {
         revision: 0, lastGoodRevision: 0, runtimeGeneration: runtime0,
-        lastGoodRuntimeGeneration: runtime0, plugins: {},
+        lastGoodRuntimeGeneration: runtime0, lastGoodPlugins: {}, plugins: {},
       }
     })
     const interrupted = await JsonPackageStore.open(storeRoot, {
@@ -426,7 +723,7 @@ describe('launcher package transactions', () => {
     await expect(interrupted.transaction(1, draft => {
       draft.profiles.default = {
         revision: 1, lastGoodRevision: 0, runtimeGeneration: 'runtime-bad',
-        lastGoodRuntimeGeneration: runtime0, plugins: {},
+        lastGoodRuntimeGeneration: runtime0, lastGoodPlugins: {}, plugins: {},
       }
     })).rejects.toThrow('injected process interruption')
     const recovered = await JsonPackageStore.open(storeRoot)

@@ -68,6 +68,11 @@ export interface ResolvedRuntimeModule {
   readonly manifest: HostResolvedRuntimeManifest
 }
 
+export interface StoredRuntimeModule {
+  readonly entry: string
+  readonly manifestIntegrity: string
+}
+
 export interface ResolvedPackageCandidate {
   readonly packageManifest: HostPackageManifest
   readonly runtime: ResolvedRuntimeModule
@@ -82,7 +87,7 @@ export interface PackageObjectRecord {
   readonly key: string
   readonly identity: PackageIdentity
   readonly manifest: HostPackageManifest
-  readonly runtime: ResolvedRuntimeModule
+  readonly runtime: StoredRuntimeModule
   readonly objectDirectory: string
   readonly sources: readonly CanonicalPackageSource[]
   readonly createdAt: string
@@ -109,7 +114,13 @@ export interface PluginPackageState {
   readonly active?: PackageLease
   readonly lastGood?: PackageLease
   readonly rollbackLeases: readonly PackageLease[]
+  readonly oneShotGrantIds: readonly string[]
   readonly uninstalled?: boolean
+}
+
+export interface PackageActivationSelection {
+  readonly enabled: boolean
+  readonly lease: PackageLease
 }
 
 export interface PackageProfileState {
@@ -117,6 +128,7 @@ export interface PackageProfileState {
   readonly lastGoodRevision: number
   readonly runtimeGeneration: string
   readonly lastGoodRuntimeGeneration: string
+  readonly lastGoodPlugins: Readonly<Record<string, PackageActivationSelection>>
   readonly plugins: Readonly<Record<string, PluginPackageState>>
 }
 
@@ -138,11 +150,17 @@ export interface PackageCandidatePlugin {
 }
 
 export interface PackagePermissionReview {
+  readonly permissionReviewId: HostPermissionReviewId
+  readonly permissionReviewTokenHash: string
   readonly planId: string
-  readonly fingerprint: string
+  readonly planRevision: number
+  readonly decisionId: string
+  readonly decisionFingerprint: string
+  readonly inputFingerprint: string
   readonly requiredSatisfied: boolean
   readonly unresolvedRequired: readonly string[]
   readonly deniedRequired: readonly string[]
+  readonly oneShotGrantIds: readonly string[]
 }
 
 export type PackageTransactionStatus =
@@ -150,6 +168,7 @@ export type PackageTransactionStatus =
   | 'ready'
   | 'activation-requested'
   | 'readiness-confirmed'
+  | 'rollback-pending'
   | 'committed'
   | 'aborted'
   | 'recovered-aborted'
@@ -174,6 +193,7 @@ export interface PackageTransactionRecord {
   readonly candidateFingerprint: string
   readonly candidateTokenHash: string
   readonly impactTokenHash: string
+  readonly rollbackTokenHash?: string
   readonly permission?: PackagePermissionReview
   readonly failureCode?: string
 }
@@ -192,8 +212,8 @@ export interface ActivationPackageProjection {
   readonly artifactDirectory: string
   readonly runtimeEntry: string
   readonly runtimeManifestIntegrity: string
-  readonly runtimeManifest: HostResolvedRuntimeManifest
   readonly dependencies: readonly PackageDependency[]
+  readonly canonicalSource?: string
 }
 
 export interface PackageActivationPlugin {
@@ -208,6 +228,26 @@ export interface PackageActivationTuple {
   readonly revision: number
   readonly runtimeGeneration: string
   readonly plugins: Readonly<Record<string, PackageActivationPlugin>>
+}
+
+export interface PackageActivationRecordV1 {
+  readonly $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-activation.v1.schema.json'
+  readonly schemaVersion: 1
+  readonly recordKind: 'active' | 'candidate' | 'last-good'
+  readonly transactionId?: string
+  readonly profileId: string
+  readonly revision: number
+  readonly lastGoodRevision: number
+  readonly runtimeGeneration: string
+  readonly plugins: readonly {
+    readonly id: string
+    readonly version: string
+    readonly digest: string
+    readonly moduleGeneration: string
+    readonly enabled: boolean
+    readonly dependencies: readonly PackageDependency[]
+    readonly canonicalSource?: string
+  }[]
 }
 
 export type PackageResolutionBoundary = 'plan' | 'stage' | 'publish' | 'rollback'
@@ -252,6 +292,7 @@ export interface PackageCandidateAccess {
   readonly candidateId: PackageCandidateToken
   readonly ownerId: string
   readonly profileId: string
+  readonly permissionReviewToken?: HostPermissionReviewToken
 }
 
 export interface PackageImpactAccess {
@@ -267,17 +308,44 @@ export interface PackageRuntimeObservation {
 
 export interface PackageRecoveryDirective {
   readonly transactionId: string
+  readonly ownerId: string
   readonly profileId: string
   readonly action: 'discard-staged' | 'rollback-published'
+  readonly rollbackToken?: PackageRollbackToken
   readonly expectedPublished: PackageActivationTuple
   readonly rollbackTarget: PackageActivationTuple
 }
 
+export interface PackageRollbackAccess {
+  readonly rollbackToken: PackageRollbackToken
+  readonly ownerId: string
+  readonly profileId: string
+}
+
+export interface PackageRollbackPlan {
+  readonly transactionId: string
+  readonly rollbackToken: PackageRollbackToken
+  readonly profileId: string
+  readonly expectedPublished: PackageActivationTuple
+  readonly rollbackTarget: PackageActivationTuple
+}
+
+export interface PackageRollbackObservation {
+  readonly active: PackageRuntimeObservation
+  readonly disposedAfter: PackageRuntimeObservation
+}
+
 declare const candidateTokenBrand: unique symbol
 declare const impactTokenBrand: unique symbol
+declare const permissionReviewIdBrand: unique symbol
+declare const permissionReviewTokenBrand: unique symbol
+declare const rollbackTokenBrand: unique symbol
 
 export type PackageCandidateToken = string & { readonly [candidateTokenBrand]: true }
 export type PackageImpactToken = string & { readonly [impactTokenBrand]: true }
+export type HostPermissionReviewId = string & { readonly [permissionReviewIdBrand]: true }
+export type HostPermissionReviewToken = string & { readonly [permissionReviewTokenBrand]: true }
+export type PackageRollbackToken = string & { readonly [rollbackTokenBrand]: true }
 
 export class PackageStoreConflictError extends Error {
   constructor(readonly actualRevision: number, message = `package store revision conflict; actual revision is ${actualRevision}`) {

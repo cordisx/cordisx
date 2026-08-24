@@ -82,6 +82,7 @@ function validateState(value: unknown): MutablePackageStoreState {
       || typeof profile.lastGoodRuntimeGeneration !== 'string') {
       throw new PackageLifecycleError('invalid-package-store', `profile ${profileId} activation record is malformed`)
     }
+    object(profile.lastGoodPlugins, `profile ${profileId} last-good plugins`)
     object(profile.plugins, `profile ${profileId} plugins`)
   }
   for (const [transactionId, raw] of Object.entries(transactions)) {

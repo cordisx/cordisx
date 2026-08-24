@@ -3,10 +3,13 @@ import { lstat, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import type {
   ActivationPackageProjection,
+  HostPermissionReviewId,
+  HostPermissionReviewToken,
   HostPackageManifest,
   LocalPackageSource,
   PackageActivationPlan,
   PackageActivationPlugin,
+  PackageActivationRecordV1,
   PackageActivationTuple,
   PackageCandidateAccess,
   PackageCandidatePlugin,
@@ -24,6 +27,10 @@ import type {
   PackageProfileState,
   PackageReadinessReceipt,
   PackageRecoveryDirective,
+  PackageRollbackAccess,
+  PackageRollbackObservation,
+  PackageRollbackPlan,
+  PackageRollbackToken,
   PackageReloadLevel,
   PackageResolutionBoundary,
   PackageRuntimeObservation,
@@ -31,6 +38,7 @@ import type {
   PackageTransactionRecord,
   PluginPackageState,
   ResolvedPackageCandidate,
+  ResolvedRuntimeModule,
 } from './types.js'
 import { PackageLifecycleError } from './types.js'
 import {
@@ -51,8 +59,13 @@ const RELATIVE_ENTRY = /^\.\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/
 
 export interface HostPermissionReviewInput {
   readonly transactionId: string
+  readonly ownerId: string
+  readonly candidateId: PackageCandidateToken
+  readonly impactToken: PackageImpactToken
+  readonly candidateFingerprint: string
   readonly operation: 'install' | 'update' | 'enable'
   readonly profileId: string
+  readonly expected: PackageGenerationFence
   readonly identity: {
     readonly source: string
     readonly pluginId: string
@@ -65,31 +78,67 @@ export interface HostPermissionReviewInput {
 
 export interface HostPermissionReviewDecision {
   readonly planId: string
-  readonly fingerprint: string
+  readonly planRevision: number
+  readonly decisionId: string
+  readonly decisionFingerprint: string
   readonly requiredSatisfied: boolean
   readonly unresolvedRequired: readonly string[]
   readonly deniedRequired: readonly string[]
+  readonly oneShotGrantIds: readonly string[]
 }
 
 const issuedPermissionReceipts = new WeakSet<object>()
 
 export interface HostPermissionReviewReceipt extends HostPermissionReviewDecision {
+  readonly permissionReviewId: HostPermissionReviewId
+  readonly permissionReviewToken: HostPermissionReviewToken
   readonly inputFingerprint: string
 }
 
 export interface HostPermissionReviewAuthority {
   review(input: HostPermissionReviewInput): Promise<HostPermissionReviewReceipt>
+  revokeOneShot(grantIds: readonly string[]): Promise<void>
 }
 
 /** Wrap the launcher Permission Broker. Renderer booleans cannot mint receipts. */
 export function createHostPermissionReviewAuthority(
   review: (input: HostPermissionReviewInput) => Promise<HostPermissionReviewDecision>,
+  revokeOneShot: (grantIds: readonly string[]) => Promise<void> = async () => undefined,
 ): HostPermissionReviewAuthority {
   return {
     review: async (input) => {
       const decision = await review(structuredClone(input))
-      const receipt = Object.freeze({ ...structuredClone(decision), inputFingerprint: fingerprint(input) })
+      const receipt = Object.freeze({
+        ...structuredClone(decision),
+        permissionReviewId: `permission-review:${randomUUID()}` as HostPermissionReviewId,
+        permissionReviewToken: `permission-token:${randomUUID()}` as HostPermissionReviewToken,
+        inputFingerprint: fingerprint(input),
+      })
       issuedPermissionReceipts.add(receipt)
+      return receipt
+    },
+    revokeOneShot: async grantIds => await revokeOneShot([...grantIds]),
+  }
+}
+
+export interface HostRollbackCompletionReceipt extends PackageRollbackObservation {
+  readonly inputFingerprint: string
+}
+
+const issuedRollbackReceipts = new WeakSet<object>()
+
+export interface HostRollbackCompletionAuthority {
+  complete(plan: PackageRollbackPlan): Promise<HostRollbackCompletionReceipt>
+}
+
+export function createHostRollbackCompletionAuthority(
+  complete: (plan: PackageRollbackPlan) => Promise<PackageRollbackObservation>,
+): HostRollbackCompletionAuthority {
+  return {
+    complete: async (plan) => {
+      const observation = await complete(freeze(structuredClone(plan)) as PackageRollbackPlan)
+      const receipt = Object.freeze({ ...structuredClone(observation), inputFingerprint: fingerprint(plan) })
+      issuedRollbackReceipts.add(receipt)
       return receipt
     },
   }
@@ -100,6 +149,7 @@ export interface PackageLifecycleHostOptions {
   readonly protocolSchemas: readonly string[]
   readonly manifestResolver: PackageManifestResolver
   readonly permissionAuthority: HostPermissionReviewAuthority
+  readonly rollbackAuthority: HostRollbackCompletionAuthority
   readonly now?: () => Date
 }
 
@@ -119,6 +169,10 @@ export interface PreparedPackageTransaction {
   readonly transaction: PackageTransactionRecord
   readonly candidateId: PackageCandidateToken
   readonly impactToken: PackageImpactToken
+  readonly permissionReview?: {
+    readonly permissionReviewId: HostPermissionReviewId
+    readonly permissionReviewToken: HostPermissionReviewToken
+  }
   readonly state: PackageStoreState
   readonly activationAvailable: boolean
 }
@@ -172,6 +226,7 @@ function stateProfile(state: PackageStoreState, profileId: string, expected: Pac
     lastGoodRevision: 0,
     runtimeGeneration: expected.runtimeGeneration,
     lastGoodRuntimeGeneration: expected.runtimeGeneration,
+    lastGoodPlugins: {},
     plugins: {},
   }
 }
@@ -188,10 +243,10 @@ function selectedPackageKeys(profile: PackageProfileState, enabledOnly: boolean)
 function currentFence(state: PackageStoreState, profile: PackageProfileState): PackageGenerationFence {
   const plugins: Record<string, PackageFenceEntry> = Object.create(null) as Record<string, PackageFenceEntry>
   for (const [pluginId, plugin] of Object.entries(profile.plugins)) {
-    if (plugin.active === undefined) continue
-    const record = state.packages[plugin.active.packageKey]
-    if (record === undefined) throw new PackageLifecycleError('missing-package-object', `missing active package ${plugin.active.packageKey}`)
-    plugins[pluginId] = { moduleGeneration: plugin.active.moduleGeneration, identity: record.identity }
+    if (plugin.installed === undefined || plugin.uninstalled === true) continue
+    const record = state.packages[plugin.installed.packageKey]
+    if (record === undefined) throw new PackageLifecycleError('missing-package-object', `missing installed package ${plugin.installed.packageKey}`)
+    plugins[pluginId] = { moduleGeneration: plugin.installed.moduleGeneration, identity: record.identity }
   }
   return { runtimeGeneration: profile.runtimeGeneration, plugins }
 }
@@ -233,12 +288,23 @@ function permissionSummary(receipt: HostPermissionReviewReceipt): PackagePermiss
   if (!issuedPermissionReceipts.has(receipt)) {
     throw new PackageLifecycleError('untrusted-permission-review', 'permission review was not issued by the Host authority')
   }
+  if (!GENERATION_ID.test(receipt.planId) || !Number.isInteger(receipt.planRevision) || receipt.planRevision < 0
+    || !GENERATION_ID.test(receipt.decisionId) || !/^[a-f0-9]{64}$/.test(receipt.decisionFingerprint)
+    || receipt.oneShotGrantIds.some(id => !GENERATION_ID.test(id))) {
+    throw new PackageLifecycleError('invalid-permission-review', 'Host permission review metadata is invalid')
+  }
   return {
+    permissionReviewId: receipt.permissionReviewId,
+    permissionReviewTokenHash: tokenHash(receipt.permissionReviewToken),
     planId: receipt.planId,
-    fingerprint: receipt.fingerprint,
+    planRevision: receipt.planRevision,
+    decisionId: receipt.decisionId,
+    decisionFingerprint: receipt.decisionFingerprint,
+    inputFingerprint: receipt.inputFingerprint,
     requiredSatisfied: receipt.requiredSatisfied,
     unresolvedRequired: [...receipt.unresolvedRequired],
     deniedRequired: [...receipt.deniedRequired],
+    oneShotGrantIds: [...receipt.oneShotGrantIds],
   }
 }
 
@@ -285,6 +351,7 @@ function referenceCounts(state: PackageStoreState): Record<string, number> {
     if (lease !== undefined) counts[lease.packageKey] = (counts[lease.packageKey] ?? 0) + 1
   }
   for (const profile of Object.values(state.profiles)) {
+    for (const selection of Object.values(profile.lastGoodPlugins)) add(selection.lease)
     for (const plugin of Object.values(profile.plugins)) {
       add(plugin.installed)
       add(plugin.active)
@@ -305,7 +372,7 @@ function boundaryAllows(boundary: PackageResolutionBoundary, status: PackageTran
   if (boundary === 'plan') return status === 'ready'
   if (boundary === 'stage') return status === 'ready' || status === 'activation-requested'
   if (boundary === 'publish') return status === 'activation-requested'
-  return status === 'activation-requested' || status === 'readiness-confirmed'
+  return status === 'activation-requested' || status === 'readiness-confirmed' || status === 'rollback-pending'
 }
 
 function freeze<Value>(value: Value): Readonly<Value> {
@@ -344,6 +411,33 @@ export class PackageLifecycleHost {
     }))
   }
 
+  activationRecords(profileId: string): readonly PackageActivationRecordV1[] {
+    const state = this.#store.snapshot()
+    const profile = state.profiles[profileId]
+    if (profile === undefined) return []
+    const active = this.#activeTuple(state, profileId, profile)
+    const lastGood = this.#selectionTuple(
+      state,
+      profileId,
+      profile.lastGoodRevision,
+      profile.lastGoodRuntimeGeneration,
+      profile.lastGoodPlugins,
+    )
+    const candidates = Object.values(state.transactions)
+      .filter(transaction => transaction.profileId === profileId && !isTerminal(transaction.status))
+      .map(transaction => this.#activationRecord(
+        this.#afterTuple(state, transaction, profile),
+        'candidate',
+        profile.lastGoodRevision,
+        transaction.transactionId,
+      ))
+    return freeze([
+      this.#activationRecord(active, 'active', profile.lastGoodRevision),
+      this.#activationRecord(lastGood, 'last-good', profile.lastGoodRevision),
+      ...candidates,
+    ]) as readonly PackageActivationRecordV1[]
+  }
+
   async prepare(input: PreparePackageTransactionInput): Promise<PreparedPackageTransaction> {
     assertInputIdentity(input.ownerId, input.profileId, input.expected.runtimeGeneration, 'expected runtime generation')
     assertInputIdentity(input.ownerId, input.profileId, input.proposedRuntimeGeneration, 'proposed runtime generation')
@@ -353,6 +447,8 @@ export class PackageLifecycleHost {
     const now = (this.#options.now?.() ?? new Date()).toISOString()
     let imported: PackageObjectRecord | undefined
     let permission: PackagePermissionReview | undefined
+    let permissionReceipt: HostPermissionReviewReceipt | undefined
+    let permissionSubject: Pick<HostPermissionReviewInput, 'operation' | 'identity' | 'runtimeManifest' | 'manifestPermissionFingerprint'> | undefined
 
     if (input.operation === 'install' || input.operation === 'update') {
       if (input.source === undefined) throw new PackageLifecycleError('missing-package-source', `${input.operation} requires a package source`)
@@ -366,26 +462,19 @@ export class PackageLifecycleHost {
           version: resolved.packageManifest.version,
           integrity: staged.integrity,
         }
-        const reviewInput: HostPermissionReviewInput = {
-          transactionId,
+        permissionSubject = {
           operation: input.operation,
-          profileId: input.profileId,
           identity: { source: staged.source.url, ...identity },
           runtimeManifest: resolved.runtime.manifest,
           manifestPermissionFingerprint: resolved.packageManifest.permissionFingerprint,
         }
-        const receipt = await this.#options.permissionAuthority.review(reviewInput)
-        if (!issuedPermissionReceipts.has(receipt) || receipt.inputFingerprint !== fingerprint(reviewInput)) {
-          throw new PackageLifecycleError('untrusted-permission-review', 'permission review is stale or not Host-issued')
-        }
-        permission = permissionSummary(receipt)
         await this.#objects.publish(staged)
         const key = packageKey(identity.pluginId, identity.version, identity.integrity)
         imported = {
           key,
           identity,
           manifest: resolved.packageManifest,
-          runtime: resolved.runtime,
+          runtime: { entry: resolved.runtime.entry, manifestIntegrity: resolved.runtime.manifestIntegrity },
           objectDirectory: this.#objects.objectDirectory(staged.digest),
           sources: [staged.source],
           createdAt: now,
@@ -431,19 +520,13 @@ export class PackageLifecycleHost {
     } else if (input.operation === 'enable') {
       enabled.add(pluginId)
       const record = allPackages[existing!.installed!.packageKey]!
-      const reviewInput: HostPermissionReviewInput = {
-        transactionId,
+      const resolved = await this.#resolveRecordRuntime(record)
+      permissionSubject = {
         operation: 'enable',
-        profileId: input.profileId,
         identity: { source: record.sources[0]!.url, ...record.identity },
-        runtimeManifest: record.runtime.manifest,
+        runtimeManifest: resolved.manifest,
         manifestPermissionFingerprint: record.manifest.permissionFingerprint,
       }
-      const receipt = await this.#options.permissionAuthority.review(reviewInput)
-      if (!issuedPermissionReceipts.has(receipt) || receipt.inputFingerprint !== fingerprint(reviewInput)) {
-        throw new PackageLifecycleError('untrusted-permission-review', 'permission review is stale or not Host-issued')
-      }
-      permission = permissionSummary(receipt)
     } else if (input.operation === 'disable') {
       enabled.delete(pluginId)
     } else {
@@ -501,6 +584,24 @@ export class PackageLifecycleHost {
       activationOrder,
       drainOrder,
     })
+    if (permissionSubject !== undefined) {
+      const reviewInput: HostPermissionReviewInput = {
+        transactionId,
+        ownerId: input.ownerId,
+        candidateId,
+        impactToken,
+        candidateFingerprint,
+        profileId: input.profileId,
+        expected: structuredClone(input.expected),
+        ...permissionSubject,
+      }
+      permissionReceipt = await this.#options.permissionAuthority.review(reviewInput)
+      if (!issuedPermissionReceipts.has(permissionReceipt)
+        || permissionReceipt.inputFingerprint !== fingerprint(reviewInput)) {
+        throw new PackageLifecycleError('untrusted-permission-review', 'permission review is stale or not Host-issued')
+      }
+      permission = permissionSummary(permissionReceipt)
+    }
     const transaction: PackageTransactionRecord = {
       transactionId,
       ownerId: input.ownerId,
@@ -547,6 +648,12 @@ export class PackageLifecycleHost {
       transaction: result.value,
       candidateId,
       impactToken,
+      ...(permissionReceipt === undefined ? {} : {
+        permissionReview: {
+          permissionReviewId: permissionReceipt.permissionReviewId,
+          permissionReviewToken: permissionReceipt.permissionReviewToken,
+        },
+      }),
       state: result.state,
       activationAvailable: transaction.status === 'ready',
     }
@@ -574,6 +681,26 @@ export class PackageLifecycleHost {
       changedPluginIds: [...transaction.changedPluginIds],
       ...impact,
     }) as PackageImpactPlan
+  }
+
+  async resolveRuntimeModule(
+    access: PackageCandidateAccess,
+    boundary: PackageResolutionBoundary,
+    pluginId: string,
+  ): Promise<ActivationPackageProjection> {
+    const state = await this.#store.refresh()
+    const transaction = this.#transactionForCandidate(state, access)
+    this.#assertResolvable(transaction, state, boundary)
+    if (!transaction.affectedPluginIds.includes(pluginId)) {
+      throw new PackageLifecycleError('plugin-outside-candidate', `${pluginId} is outside the Host-computed closure`)
+    }
+    const target = transaction.target[pluginId]
+    const profile = stateProfile(state, transaction.profileId, transaction.expected)
+    const packageKey = target?.packageKey ?? profile.plugins[pluginId]?.installed?.packageKey
+    const record = packageKey === undefined ? undefined : state.packages[packageKey]
+    if (record === undefined) throw new PackageLifecycleError('missing-package-object', `missing runtime package for ${pluginId}`)
+    await this.#resolveRecordRuntime(record)
+    return freeze(this.#packageProjection(record)) as ActivationPackageProjection
   }
 
   async requestActivation(access: PackageCandidateAccess): Promise<PackageActivationPlan> {
@@ -616,6 +743,8 @@ export class PackageLifecycleHost {
     const before = await this.#store.refresh()
     const transaction = this.#transactionForCandidate(before, access)
     this.#assertResolvable(transaction, before, 'rollback')
+    const profile = before.profiles[transaction.profileId]
+    const retiredGrantIds = transaction.affectedPluginIds.flatMap(pluginId => profile?.plugins[pluginId]?.oneShotGrantIds ?? [])
     const result = await this.#store.transaction(before.revision, (draft) => {
       const current = draft.transactions[transaction.transactionId]!
       if (current.status !== 'readiness-confirmed') {
@@ -624,12 +753,17 @@ export class PackageLifecycleHost {
       assertReceipt(current, draft as unknown as PackageStoreState, access, receipt)
       this.#commitDraft(draft as unknown as MutableStoreDraft, current)
     })
+    await this.#options.permissionAuthority.revokeOneShot(retiredGrantIds)
     return result.state
   }
 
   async abort(access: PackageCandidateAccess, failureCode: string): Promise<PackageStoreState> {
     const before = await this.#store.refresh()
     const transaction = this.#transactionForCandidate(before, access)
+    if (transaction.status === 'activation-requested' || transaction.status === 'readiness-confirmed'
+      || transaction.status === 'rollback-pending') {
+      throw new PackageLifecycleError('rollback-required', 'published or potentially published candidate requires rollback completion')
+    }
     const result = await this.#store.transaction(before.revision, (draft) => {
       const current = draft.transactions[transaction.transactionId]!
       if (isTerminal(current.status)) return
@@ -641,6 +775,59 @@ export class PackageLifecycleHost {
       }
       this.#markGcEligibility(draft as unknown as PackageStoreState)
     })
+    await this.#options.permissionAuthority.revokeOneShot(transaction.permission?.oneShotGrantIds ?? [])
+    return result.state
+  }
+
+  async beginRollback(access: PackageCandidateAccess, failureCode: string): Promise<PackageRollbackPlan> {
+    const before = await this.#store.refresh()
+    const transaction = this.#transactionForCandidate(before, access)
+    this.#assertResolvable(transaction, before, 'rollback')
+    if (transaction.status !== 'activation-requested' && transaction.status !== 'readiness-confirmed') {
+      throw new PackageLifecycleError('rollback-not-required', `transaction is ${transaction.status}`)
+    }
+    const rollbackToken = `rollback:${randomUUID()}` as PackageRollbackToken
+    const result = await this.#store.transaction(before.revision, (draft) => {
+      const current = draft.transactions[transaction.transactionId]!
+      draft.transactions[current.transactionId] = {
+        ...current,
+        status: 'rollback-pending',
+        rollbackTokenHash: tokenHash(rollbackToken),
+        failureCode,
+        updatedAt: (this.#options.now?.() ?? new Date()).toISOString(),
+      }
+      return draft.transactions[current.transactionId]!
+    })
+    return this.#rollbackPlan(result.value, result.state, rollbackToken)
+  }
+
+  async completeRollback(access: PackageRollbackAccess): Promise<PackageStoreState> {
+    const before = await this.#store.refresh()
+    const transaction = this.#transactionForRollback(before, access)
+    const plan = this.#rollbackPlan(transaction, before, access.rollbackToken)
+    const receipt = await this.#options.rollbackAuthority.complete(plan)
+    if (!issuedRollbackReceipts.has(receipt) || receipt.inputFingerprint !== fingerprint(plan)) {
+      throw new PackageLifecycleError('untrusted-rollback-receipt', 'rollback completion was not issued by Host authority')
+    }
+    if (fingerprint(receipt.active) !== fingerprint(this.#tupleObservation(plan.rollbackTarget))
+      || fingerprint(receipt.disposedAfter) !== fingerprint(this.#tupleObservation(plan.expectedPublished))) {
+      throw new PackageLifecycleError('stale-rollback-receipt', 'rollback active/disposed tuple is stale')
+    }
+
+    const currentState = await this.#store.refresh()
+    const current = this.#transactionForRollback(currentState, access)
+    this.#assertResolvable(current, currentState, 'rollback')
+    const result = await this.#store.transaction(currentState.revision, (draft) => {
+      const pending = draft.transactions[current.transactionId]!
+      const { rollbackTokenHash: _rollbackTokenHash, ...withoutRollbackToken } = pending
+      draft.transactions[pending.transactionId] = {
+        ...withoutRollbackToken,
+        status: 'aborted',
+        updatedAt: (this.#options.now?.() ?? new Date()).toISOString(),
+      }
+      this.#markGcEligibility(draft as unknown as PackageStoreState)
+    })
+    await this.#options.permissionAuthority.revokeOneShot(transaction.permission?.oneShotGrantIds ?? [])
     return result.state
   }
 
@@ -651,6 +838,7 @@ export class PackageLifecycleHost {
   }> {
     const before = await this.#store.refresh()
     const directives: PackageRecoveryDirective[] = []
+    const revokeGrantIds: string[] = []
     const result = await this.#store.transaction(before.revision, (draft) => {
       const now = (this.#options.now?.() ?? new Date()).toISOString()
       for (const [transactionId, transaction] of Object.entries(draft.transactions)) {
@@ -660,26 +848,50 @@ export class PackageLifecycleHost {
         this.#recomputeImpact(transaction, draft as unknown as PackageStoreState)
         const observation = observations[transaction.profileId]
         const expectedPlugins = exactReceiptPlugins(transaction, draft as unknown as PackageStoreState)
-        const wasPublished = (transaction.status === 'activation-requested' || transaction.status === 'readiness-confirmed')
-          && observation !== undefined
+        const observedAfter = observation !== undefined
           && observation.runtimeGeneration === transaction.proposedRuntimeGeneration
           && fingerprint(observation.plugins) === fingerprint(expectedPlugins)
-        directives.push({
-          transactionId,
-          profileId: transaction.profileId,
-          action: wasPublished ? 'rollback-published' : 'discard-staged',
-          expectedPublished: this.#afterTuple(draft as unknown as PackageStoreState, transaction, profile),
-          rollbackTarget: this.#activeTuple(draft as unknown as PackageStoreState, transaction.profileId, profile),
-        })
-        draft.transactions[transactionId] = {
-          ...transaction,
-          status: 'recovered-aborted',
-          failureCode: wasPublished ? 'interrupted-after-publish' : 'interrupted-before-publish',
-          updatedAt: now,
+        const potentiallyPublished = observedAfter || transaction.status === 'activation-requested'
+          || transaction.status === 'readiness-confirmed' || transaction.status === 'rollback-pending'
+        if (potentiallyPublished) {
+          const rollbackToken = `rollback:${randomUUID()}` as PackageRollbackToken
+          directives.push({
+            transactionId,
+            ownerId: transaction.ownerId,
+            profileId: transaction.profileId,
+            action: 'rollback-published',
+            rollbackToken,
+            expectedPublished: this.#afterTuple(draft as unknown as PackageStoreState, transaction, profile),
+            rollbackTarget: this.#activeTuple(draft as unknown as PackageStoreState, transaction.profileId, profile),
+          })
+          draft.transactions[transactionId] = {
+            ...transaction,
+            status: 'rollback-pending',
+            rollbackTokenHash: tokenHash(rollbackToken),
+            failureCode: 'interrupted-after-or-during-publish',
+            updatedAt: now,
+          }
+        } else {
+          revokeGrantIds.push(...(transaction.permission?.oneShotGrantIds ?? []))
+          directives.push({
+            transactionId,
+            ownerId: transaction.ownerId,
+            profileId: transaction.profileId,
+            action: 'discard-staged',
+            expectedPublished: this.#afterTuple(draft as unknown as PackageStoreState, transaction, profile),
+            rollbackTarget: this.#activeTuple(draft as unknown as PackageStoreState, transaction.profileId, profile),
+          })
+          draft.transactions[transactionId] = {
+            ...transaction,
+            status: 'recovered-aborted',
+            failureCode: 'interrupted-before-publish',
+            updatedAt: now,
+          }
         }
       }
       this.#markGcEligibility(draft as unknown as PackageStoreState)
     })
+    await this.#options.permissionAuthority.revokeOneShot(revokeGrantIds)
     return { state: result.state, directives: freeze(directives) as readonly PackageRecoveryDirective[] }
   }
 
@@ -692,7 +904,13 @@ export class PackageLifecycleHost {
         throw new PackageLifecycleError('stale-package-lease', 'last-good lease is stale')
       }
       const { lastGood: _lastGood, ...withoutLastGood } = plugin
-      draft.profiles[profileId] = { ...profile, plugins: { ...profile.plugins, [pluginId]: withoutLastGood } }
+      const lastGoodPlugins = { ...profile.lastGoodPlugins }
+      if (fingerprint(lastGoodPlugins[pluginId]?.lease) === fingerprint(expectedLease)) delete lastGoodPlugins[pluginId]
+      draft.profiles[profileId] = {
+        ...profile,
+        lastGoodPlugins,
+        plugins: { ...profile.plugins, [pluginId]: withoutLastGood },
+      }
       this.#markGcEligibility(draft as unknown as PackageStoreState)
     })
     return result.state
@@ -742,6 +960,11 @@ export class PackageLifecycleHost {
     const transaction = Object.values(state.transactions).find(item => item.candidateTokenHash === tokenHash(access.candidateId))
     if (transaction === undefined) throw new PackageLifecycleError('candidate-token-invalid', 'candidate token is invalid')
     this.#assertAccess(transaction, access.ownerId, access.profileId)
+    if (transaction.permission !== undefined
+      && (access.permissionReviewToken === undefined
+        || tokenHash(access.permissionReviewToken) !== transaction.permission.permissionReviewTokenHash)) {
+      throw new PackageLifecycleError('permission-review-token-invalid', 'Host permission review token is missing or stale')
+    }
     return transaction
   }
 
@@ -750,6 +973,18 @@ export class PackageLifecycleHost {
     const transaction = Object.values(state.transactions).find(item => item.impactTokenHash === tokenHash(access.impactToken))
     if (transaction === undefined) throw new PackageLifecycleError('impact-token-invalid', 'impact token is invalid')
     this.#assertAccess(transaction, access.ownerId, access.profileId)
+    return transaction
+  }
+
+  #transactionForRollback(state: PackageStoreState, access: PackageRollbackAccess): PackageTransactionRecord {
+    assertInputIdentity(access.ownerId, access.profileId, 'access', 'access generation marker')
+    const transaction = Object.values(state.transactions)
+      .find(item => item.rollbackTokenHash === tokenHash(access.rollbackToken))
+    if (transaction === undefined) throw new PackageLifecycleError('rollback-token-invalid', 'rollback token is invalid')
+    this.#assertAccess(transaction, access.ownerId, access.profileId)
+    if (transaction.status !== 'rollback-pending') {
+      throw new PackageLifecycleError('rollback-not-pending', `transaction is ${transaction.status}`)
+    }
     return transaction
   }
 
@@ -827,16 +1062,91 @@ export class PackageLifecycleHost {
     }) as PackageActivationPlan
   }
 
+  #rollbackPlan(
+    transaction: PackageTransactionRecord,
+    state: PackageStoreState,
+    rollbackToken: PackageRollbackToken,
+  ): PackageRollbackPlan {
+    this.#assertResolvable(transaction, state, 'rollback')
+    const profile = stateProfile(state, transaction.profileId, transaction.expected)
+    return freeze({
+      transactionId: transaction.transactionId,
+      rollbackToken,
+      profileId: transaction.profileId,
+      expectedPublished: this.#afterTuple(state, transaction, profile),
+      rollbackTarget: this.#activeTuple(state, transaction.profileId, profile),
+    }) as PackageRollbackPlan
+  }
+
+  #tupleObservation(tuple: PackageActivationTuple): PackageRuntimeObservation {
+    const plugins: Record<string, PackageFenceEntry> = Object.create(null) as Record<string, PackageFenceEntry>
+    for (const [pluginId, plugin] of Object.entries(tuple.plugins)) {
+      if (plugin.package === undefined) throw new PackageLifecycleError('missing-package-fence', `tuple lacks package ${pluginId}`)
+      plugins[pluginId] = { moduleGeneration: plugin.moduleGeneration, identity: plugin.package.identity }
+    }
+    return { runtimeGeneration: tuple.runtimeGeneration, plugins }
+  }
+
   #activeTuple(state: PackageStoreState, profileId: string, profile: PackageProfileState): PackageActivationTuple {
     const plugins: Record<string, PackageActivationPlugin> = Object.create(null) as Record<string, PackageActivationPlugin>
     for (const [pluginId, plugin] of Object.entries(profile.plugins)) {
-      const lease = plugin.active
-      if (lease === undefined) continue
+      const lease = plugin.installed
+      if (lease === undefined || plugin.uninstalled === true) continue
       const record = state.packages[lease.packageKey]
-      if (record === undefined) throw new PackageLifecycleError('missing-package-object', `missing active package ${lease.packageKey}`)
+      if (record === undefined) throw new PackageLifecycleError('missing-package-object', `missing installed package ${lease.packageKey}`)
       plugins[pluginId] = { enabled: plugin.enabled, moduleGeneration: lease.moduleGeneration, package: this.#packageProjection(record) }
     }
     return { profileId, revision: profile.revision, runtimeGeneration: profile.runtimeGeneration, plugins }
+  }
+
+  #selectionTuple(
+    state: PackageStoreState,
+    profileId: string,
+    revision: number,
+    runtimeGeneration: string,
+    selections: PackageProfileState['lastGoodPlugins'],
+  ): PackageActivationTuple {
+    const plugins: Record<string, PackageActivationPlugin> = Object.create(null) as Record<string, PackageActivationPlugin>
+    for (const [pluginId, selection] of Object.entries(selections)) {
+      const record = state.packages[selection.lease.packageKey]
+      if (record === undefined) throw new PackageLifecycleError('missing-package-object', `missing last-good package ${selection.lease.packageKey}`)
+      plugins[pluginId] = {
+        enabled: selection.enabled,
+        moduleGeneration: selection.lease.moduleGeneration,
+        package: this.#packageProjection(record),
+      }
+    }
+    return { profileId, revision, runtimeGeneration, plugins }
+  }
+
+  #activationRecord(
+    tuple: PackageActivationTuple,
+    recordKind: PackageActivationRecordV1['recordKind'],
+    lastGoodRevision: number,
+    transactionId?: string,
+  ): PackageActivationRecordV1 {
+    return {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-activation.v1.schema.json',
+      schemaVersion: 1,
+      recordKind,
+      ...(transactionId === undefined ? {} : { transactionId }),
+      profileId: tuple.profileId,
+      revision: tuple.revision,
+      lastGoodRevision,
+      runtimeGeneration: tuple.runtimeGeneration,
+      plugins: Object.entries(tuple.plugins).sort(([left], [right]) => left.localeCompare(right)).map(([id, plugin]) => {
+        if (plugin.package === undefined) throw new PackageLifecycleError('missing-package-fence', `activation tuple lacks ${id}`)
+        return {
+          id,
+          version: plugin.package.identity.version,
+          digest: plugin.package.identity.integrity,
+          moduleGeneration: plugin.moduleGeneration,
+          enabled: plugin.enabled,
+          dependencies: plugin.package.dependencies,
+          ...(plugin.package.canonicalSource === undefined ? {} : { canonicalSource: plugin.package.canonicalSource }),
+        }
+      }),
+    }
   }
 
   #afterTuple(state: PackageStoreState, transaction: PackageTransactionRecord, profile: PackageProfileState): PackageActivationTuple {
@@ -865,9 +1175,21 @@ export class PackageLifecycleHost {
       artifactDirectory: record.objectDirectory,
       runtimeEntry: objectEntry(record.objectDirectory, record.runtime.entry),
       runtimeManifestIntegrity: record.runtime.manifestIntegrity,
-      runtimeManifest: record.runtime.manifest,
       dependencies: record.manifest.dependencies,
+      ...(record.manifest.canonicalSource === undefined ? {} : { canonicalSource: record.manifest.canonicalSource }),
     }
+  }
+
+  async #resolveRecordRuntime(record: PackageObjectRecord): Promise<ResolvedRuntimeModule> {
+    const resolved = await this.#options.manifestResolver.resolve(record.objectDirectory)
+    await validateResolvedCandidate(record.objectDirectory, resolved)
+    if (resolved.packageManifest.pluginId !== record.identity.pluginId
+      || resolved.packageManifest.version !== record.identity.version
+      || resolved.runtime.manifestIntegrity !== record.runtime.manifestIntegrity
+      || resolved.runtime.entry !== record.runtime.entry) {
+      throw new PackageLifecycleError('object-integrity-mismatch', 'resolved runtime module differs from immutable package record')
+    }
+    return resolved.runtime
   }
 
   #commitDraft(draft: MutableStoreDraft, transaction: PackageTransactionRecord): void {
@@ -878,7 +1200,7 @@ export class PackageLifecycleHost {
     )
     const plugins: Record<string, PluginPackageState> = { ...profile.plugins }
     for (const pluginId of transaction.affectedPluginIds) {
-      const previous = plugins[pluginId] ?? { enabled: false, rollbackLeases: [] }
+      const previous = plugins[pluginId] ?? { enabled: false, rollbackLeases: [], oneShotGrantIds: [] }
       const target = transaction.target[pluginId]!
       if (target.remove === true) {
         const lastGood = previous.active ?? previous.installed ?? previous.lastGood
@@ -889,6 +1211,7 @@ export class PackageLifecycleHost {
           enabled: false,
           ...(lastGood === undefined ? {} : { lastGood }),
           rollbackLeases,
+          oneShotGrantIds: [],
           uninstalled: true,
         }
         continue
@@ -907,13 +1230,21 @@ export class PackageLifecycleHost {
         ...(target.enabled ? { active: installed } : {}),
         ...(lastGood === undefined ? {} : { lastGood }),
         rollbackLeases,
+        oneShotGrantIds: pluginId === transaction.changedPluginIds[0]
+          ? (transaction.permission?.oneShotGrantIds ?? [])
+          : [],
       }
     }
+    const lastGoodPlugins = Object.fromEntries(Object.entries(profile.plugins).flatMap(([pluginId, plugin]) => {
+      if (plugin.installed === undefined || plugin.uninstalled === true) return []
+      return [[pluginId, { enabled: plugin.enabled, lease: plugin.installed }]]
+    }))
     draft.profiles[transaction.profileId] = {
       revision: profile.revision + 1,
       lastGoodRevision: profile.revision,
       runtimeGeneration: transaction.proposedRuntimeGeneration,
       lastGoodRuntimeGeneration: profile.runtimeGeneration,
+      lastGoodPlugins,
       plugins,
     }
     draft.transactions[transaction.transactionId] = {
