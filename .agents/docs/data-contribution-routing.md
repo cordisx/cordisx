@@ -391,6 +391,25 @@ name, a host icon token, a command reference, and optional host-evaluated
 visibility/disabled state. Arbitrary `Node`, component, render callback, raw
 HTML, `children`, or header mount container values are rejected.
 
+Page metadata v2 adds only `chrome: standard | body-only`. `standard` preserves
+the complete host chrome projection. `body-only` mounts the page body directly,
+without creating the chrome, breadcrumb, tab, or header-action rows; the host
+still uses the localized title for accessible naming and diagnostics. This is
+a general contract gated by outlet policy: the current host accepts it only in
+`session.content`, where the native session header remains present and provides
+an external control seat. `app` and `main` reject it instead of leaving an
+unclosable page. Plugins cannot provide substitute DOM/CSS/selectors.
+
+Surface contribution v3 route actions may declare
+`routeBehavior: navigate | toggle`. Toggle state is derived from the exact
+owner-qualified active route plus resolved parameters and presented outlet
+state, then projected through the host control as `aria-pressed`. Contextual
+`session.header.actions` binds `:sessionId` from the current host session, not
+plugin arguments. Re-activation closes the route; Escape uses the same close
+path and focus returns to the connected trigger when practical. A session
+change, route close, policy block, plugin disposal, or generation replacement
+clears state without a plugin boolean.
+
 The host renders those values through one chrome component and owns layout,
 macOS safe insets, drag/no-drag regions, native button interaction, i18n,
 keyboard/a11y behavior, command dispatch, and current outlet-policy checks.

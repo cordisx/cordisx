@@ -222,10 +222,17 @@ export class PageRegistry {
   ): () => void {
     if (this.disposed) throw new Error('CordisX page registry is disposed')
     assertLocalId(owner, 'page owner')
-    assertKeys(metadata, ['id', 'title', 'icon', 'breadcrumbs', 'tabs', 'headerActions', 'localeNamespace'], 'page metadata')
+    assertKeys(metadata, ['id', 'title', 'icon', 'chrome', 'breadcrumbs', 'tabs', 'headerActions', 'localeNamespace'], 'page metadata')
     assertLocalId(metadata.id, 'page id')
     assertLocalizedText(metadata.title, 'page title')
     assertHostIcon(metadata.icon, 'page')
+    if (metadata.chrome !== undefined && !['standard', 'body-only'].includes(metadata.chrome)) {
+      throw new Error(`page ${metadata.id} chrome policy is invalid`)
+    }
+    if (metadata.chrome === 'body-only'
+      && (metadata.breadcrumbs !== undefined || metadata.tabs !== undefined || metadata.headerActions !== undefined)) {
+      throw new Error(`body-only page ${metadata.id} cannot declare breadcrumbs, tabs, or header actions`)
+    }
     if (metadata.localeNamespace !== undefined) assertReference(metadata.localeNamespace, 'page locale namespace')
     for (const breadcrumb of metadata.breadcrumbs ?? []) assertLocalizedText(breadcrumb, 'page breadcrumb')
     const tabIds = new Set<string>()
@@ -316,6 +323,7 @@ interface OutletNavigationState {
   stack: RouteEntry[]
   mount?: MountedPage
   contextKey?: string
+  returnFocus?: HTMLElement
   error?: string
   presentation?: 'presented' | 'suspended'
   suspendedBy?: string
@@ -338,6 +346,22 @@ export interface NavigationSnapshot {
   readonly routes: readonly RouteSnapshot[]
   readonly pages: readonly PageSnapshot[]
   readonly outlets: readonly OutletSnapshot[]
+}
+
+export interface RouteProjection {
+  readonly active: boolean
+  readonly presented: boolean
+  readonly outlet?: CordisXOutletName
+}
+
+function sameRouteParams(
+  left: Readonly<Record<string, CordisXJsonScalar>>,
+  right: Readonly<Record<string, CordisXJsonScalar>>,
+): boolean {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every(key => Object.hasOwn(right, key) && Object.is(left[key], right[key]))
 }
 
 function routeParameters(path: string): readonly string[] {
@@ -457,13 +481,56 @@ export class NavigationRegistry {
     reference: CordisXRouteReference,
     pointId: string,
     contributionId: string,
+    returnFocus?: HTMLElement,
   ): Promise<void> {
     const routeId = qualifyOwnedId(requestingOwner, reference.id)
     const decision = this.access?.authorizeSurfaceRoute(requestingOwner, pointId, contributionId, routeId)
     if (decision !== undefined && !decision.authorized) {
       return Promise.reject(new Error(decision.reason ?? `extension point ${pointId} is denied for plugin ${requestingOwner}`))
     }
-    return this.navigate(requestingOwner, reference)
+    return this.enqueue(() => this.navigateNow(requestingOwner, reference, returnFocus))
+  }
+
+  routeProjection(requestingOwner: string, reference: CordisXRouteReference): RouteProjection {
+    const record = this.records.get(qualifyOwnedId(requestingOwner, reference.id))
+    if (record === undefined || record.owner !== requestingOwner || this.routeError(record) !== undefined) return { active: false, presented: false }
+    const params = reference.params ?? {}
+    try {
+      buildPath(record, params)
+    } catch {
+      return { active: false, presented: false, outlet: record.definition.outlet }
+    }
+    const state = this.states.get(record.definition.outlet)
+    const current = state?.stack.at(-1)
+    const active = current?.record === record && sameRouteParams(current.params, params) && state?.mount !== undefined
+    return {
+      active,
+      presented: active && state?.presentation === 'presented',
+      outlet: record.definition.outlet,
+    }
+  }
+
+  toggleFromSurface(
+    requestingOwner: string,
+    reference: CordisXRouteReference,
+    pointId: string,
+    contributionId: string,
+    returnFocus?: HTMLElement,
+  ): Promise<void> {
+    return this.enqueue(async () => {
+      const routeId = qualifyOwnedId(requestingOwner, reference.id)
+      const decision = this.access?.authorizeSurfaceRoute(requestingOwner, pointId, contributionId, routeId)
+      if (decision !== undefined && !decision.authorized) {
+        throw new Error(decision.reason ?? `extension point ${pointId} is denied for plugin ${requestingOwner}`)
+      }
+      if (this.routeProjection(requestingOwner, reference).active) {
+        const record = this.records.get(routeId)
+        if (record !== undefined) await this.closeNow(record.definition.outlet, true)
+        this.notify()
+        return
+      }
+      await this.navigateNow(requestingOwner, reference, returnFocus)
+    })
   }
 
   back(requestingOwner: string, outlet?: CordisXOutletName): Promise<void> {
@@ -472,7 +539,7 @@ export class NavigationRegistry {
       if (name === undefined) throw new Error(`plugin ${requestingOwner} has no open route`)
       const state = this.states.get(name)
       if (state === undefined || state.stack.length < 2) {
-        await this.closeNow(name)
+        await this.closeNow(name, true)
         return
       }
       await this.unmount(state)
@@ -487,7 +554,7 @@ export class NavigationRegistry {
     return this.enqueue(async () => {
       const name = outlet ?? this.currentOutletFor(requestingOwner)
       if (name === undefined) return
-      await this.closeNow(name)
+      await this.closeNow(name, true)
       this.notify()
     })
   }
@@ -577,14 +644,18 @@ export class NavigationRegistry {
     if (!this.outlets.get(record.definition.outlet)!.validatePath(record.definition.path)) {
       return `route path ${record.definition.path} is incompatible with outlet ${record.definition.outlet}`
     }
-    if (this.pages.get(record.owner, record.definition.page) === undefined) return `page ${record.definition.page} is not registered by plugin ${record.owner}`
+    const page = this.pages.get(record.owner, record.definition.page)
+    if (page === undefined) return `page ${record.definition.page} is not registered by plugin ${record.owner}`
+    if (page.metadata.chrome === 'body-only' && record.definition.outlet !== 'session.content') {
+      return `body-only page ${record.definition.page} requires an outlet with persistent external chrome`
+    }
     const values = this.contexts.getSnapshot()
     const unknownKey = whenContextKeys(record.definition.when).find(key => !Object.hasOwn(values, key))
     if (unknownKey !== undefined) return `when context key ${unknownKey} is not declared by the host adapter`
     if (!evaluateWhen(record.definition.when, values)) return 'route when condition is not satisfied'
   }
 
-  private async navigateNow(requestingOwner: string, reference: CordisXRouteReference): Promise<void> {
+  private async navigateNow(requestingOwner: string, reference: CordisXRouteReference, returnFocus?: HTMLElement): Promise<void> {
     assertKeys(reference, ['id', 'params'], 'route reference')
     assertReference(reference.id, 'route reference')
     const record = this.records.get(qualifyOwnedId(requestingOwner, reference.id))
@@ -616,8 +687,10 @@ export class NavigationRegistry {
     if (state.contextKey !== undefined && state.contextKey !== host.contextKey) {
       await this.unmount(state)
       state.stack = []
+      delete state.returnFocus
     }
     state.contextKey = host.contextKey
+    if (returnFocus !== undefined) state.returnFocus = returnFocus
     await this.unmount(state)
     state.stack.push({ record, params, path })
     await this.mountCurrent(record.definition.outlet, state)
@@ -680,6 +753,9 @@ export class NavigationRegistry {
     state.mount = mount
     delete state.error
     try {
+      const bodyOnly = page.metadata.chrome === 'body-only'
+      content.dataset.cordisxPageChromePolicy = bodyOnly ? 'body-only' : 'standard'
+      if (!bodyOnly) {
       const chrome = content.ownerDocument.createElement('header')
       chrome.dataset.cordisxPageChrome = 'true'
       chrome.dataset.cordisxDrag = 'true'
@@ -810,6 +886,13 @@ export class NavigationRegistry {
         }
         content.append(tabs)
       }
+      } else {
+        const titleSite = `page:${page.qualifiedId}:body.accessible-title`
+        localization.effect(() => {
+          content.setAttribute('aria-label', this.i18n.resolveFor(page.owner, page.metadata.title, titleSite).text)
+          return () => this.i18n.clearDiagnosticSite(page.owner, titleSite)
+        })
+      }
       const body = content.ownerDocument.createElement('div')
       body.dataset.cordisxPageBody = 'true'
       body.style.cssText = 'position:relative;flex:1;min-height:0;overflow:auto'
@@ -830,6 +913,14 @@ export class NavigationRegistry {
         t: localization.t,
         localization,
       }
+      const onEscape = (event: KeyboardEvent): void => {
+        if (event.key !== 'Escape' || event.defaultPrevented) return
+        event.preventDefault()
+        event.stopPropagation()
+        void this.close(page.owner, name as CordisXOutletName)
+      }
+      content.addEventListener('keydown', onEscape)
+      effects.push(() => content.removeEventListener('keydown', onEscape))
       const disposer = page.mount(context)
       if (typeof disposer === 'function') mount.dispose = disposer
     } catch (error) {
@@ -860,18 +951,21 @@ export class NavigationRegistry {
     mount.content.remove()
   }
 
-  private async closeNow(name: string): Promise<void> {
+  private async closeNow(name: string, restoreFocus = false): Promise<void> {
     const state = this.states.get(name)
+    const returnFocus = restoreFocus ? state?.returnFocus : undefined
     if (state !== undefined) {
       await this.unmount(state)
       state.stack = []
       delete state.contextKey
+      delete state.returnFocus
       delete state.presentation
       delete state.suspendedBy
     }
     this.presentationOrder = this.presentationOrder.filter(candidate => candidate !== name)
     await this.outlets.get(name)?.controller.hide()
     await this.reconcilePresentation()
+    if (returnFocus?.isConnected === true && !returnFocus.matches(':disabled')) returnFocus.focus()
   }
 
   private currentOutletFor(owner: string): CordisXOutletName | undefined {
@@ -1035,8 +1129,23 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
     reference: CordisXRouteReference,
     pointId: string,
     contributionId: string,
+    returnFocus?: HTMLElement,
   ): Promise<void> {
-    return this.registry.navigateFromSurface(owner, reference, pointId, contributionId)
+    return this.registry.navigateFromSurface(owner, reference, pointId, contributionId, returnFocus)
+  }
+
+  toggleFromSurface(
+    owner: string,
+    reference: CordisXRouteReference,
+    pointId: string,
+    contributionId: string,
+    returnFocus?: HTMLElement,
+  ): Promise<void> {
+    return this.registry.toggleFromSurface(owner, reference, pointId, contributionId, returnFocus)
+  }
+
+  routeProjection(owner: string, reference: CordisXRouteReference): RouteProjection {
+    return this.registry.routeProjection(owner, reference)
   }
 
   snapshot(): NavigationSnapshot {

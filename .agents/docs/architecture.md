@@ -99,6 +99,13 @@ state, while a changed key aborts/disposes the page. Native React nodes remain
 in place, visible, and subscribed. The complete contract and test matrix live
 in [`data-contribution-routing.md`](data-contribution-routing.md).
 
+The current Codex session tree may retain a legacy thread drop-target around
+the newer main-thread timeline seat. `session.content` treats that nesting as
+one semantic region: one identity-matched current timeline seat wins, and the
+legacy drop-target is considered only when no current seat exists. Multiple
+matching seats at the same priority remain unavailable. This ordering is an
+adapter compatibility rule, never a geometry or application-body fallback.
+
 Structured shell surfaces are not page overlays. The private Codex adapter
 projects them through minimal host-owned insertion seats in the resolved native
 layout. Buttons sit before or after their semantic control, navigation rows
@@ -134,6 +141,32 @@ token reduces only the decorative SVG by four pixels while preserving the
 existing wrapper, native button hit box, alignment, tooltip, focus, and
 accessible name; the separately sized brand manager trigger and composer
 toolbar appearance are excluded.
+
+For `session.header.actions`, the host renders a new button inside its own
+`no-drag` seat before the complete adjacent native control wrapper. A native
+TooltipTrigger may use a `display: contents` wrapper; CordisX anchors beside
+that wrapper and never inserts into it, delegates activation to it, or reuses
+its tooltip. The CordisX tooltip is a body portal owned and disposed by the
+current renderer generation. The same public host control boundary marks the
+seat, icon button, and every rendered descendant as Electron `no-drag`; this is
+shared by title-bar/header structured controls rather than implemented by an
+Agent Trace selector or plugin listener. Native drag space stays outside the
+seat, and the host verifies the button remains the pointer hit-test target.
+
+Route-backed controls may opt into protocol-v3 `toggle` behavior. The host
+binds contextual session parameters, compares the exact owner-qualified route
+and parameters with current outlet state, and projects `aria-pressed`; plugins
+do not keep a parallel open boolean. Re-activation, Escape, policy close,
+session change, plugin block, and generation disposal all converge on the same
+outlet lifecycle. An explicit close restores focus to the still-connected
+host-rendered trigger when practical.
+
+Page-v2 `body-only` is a general structured chrome policy with a host outlet
+gate. The current adapter accepts it only for `session.content`, whose overlay
+begins below the retained native session header. The host does not create a
+CordisX header/title/close row in that mode; `app` and `main` reject it because
+they cover native chrome. No plugin can supply substitute header DOM, CSS, or a
+selector.
 
 Route and page outlets remain independent overlays. `app` paints through the
 native title-bar and supplies its own draggable chrome with a macOS

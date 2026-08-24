@@ -5,6 +5,12 @@ a CordisX Agent session evolves. It opens a session-scoped Timeline from the
 current Codex conversation header without replacing the conversation, changing
 the app URL, or taking ownership of Codex UI nodes.
 
+The header icon is a Host-rendered toggle. Its pressed state comes from the
+exact active session route, not plugin state: click once to open, click again or
+press Escape in the Timeline to close. The Timeline body begins directly below
+the preserved native session header; it does not add a second CordisX title/X
+row.
+
 ## Timeline
 
 The Timeline groups records by turn and step and projects four lanes:
@@ -50,7 +56,7 @@ changes. Each operation requires a visible user click:
 
 Queued deliveries use owner- and generation-fenced public handles for cancel
 and `clearPending`. Pre-step and prompt contributions are removed through their
-public disposables. Page close, plugin block, generation replacement, and fiber
+public disposables. Toggle/Escape close, plugin block, generation replacement, and fiber
 disposal clean up the entry, route, subscriptions, and pending contributions.
 
 ## Permissions and honest availability

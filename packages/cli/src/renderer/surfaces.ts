@@ -137,6 +137,15 @@ function assertAction(action: CordisXStructuredAction, label: string): void {
   if (action.command === undefined && action.route === undefined) throw new Error(`${label} requires a command or route reference`)
   if (action.command !== undefined) assertCommand(action.command, label)
   if (action.route !== undefined) assertRoute(action.route, label)
+  if (action.routeBehavior !== undefined && !['navigate', 'toggle'].includes(action.routeBehavior)) {
+    throw new Error(`${label} routeBehavior is invalid`)
+  }
+  if (action.routeBehavior !== undefined && action.route === undefined) {
+    throw new Error(`${label} routeBehavior requires a route reference`)
+  }
+  if (action.routeBehavior === 'toggle' && action.command !== undefined) {
+    throw new Error(`${label} route toggle cannot also reference a command`)
+  }
 }
 
 function assertDisabled(disabled: CordisXDisabledState | undefined): void {
@@ -165,7 +174,7 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
     || surface === 'composer.command-menu.items'
     || surface === 'panel.right.header-actions'
     || surface === 'panel.bottom.header-actions') {
-    assertKeys(snapshot, ['label', 'ariaLabel', 'icon', 'command', 'route'], surface)
+    assertKeys(snapshot, ['label', 'ariaLabel', 'icon', 'command', 'route', 'routeBehavior'], surface)
     assertAction(snapshot as CordisXStructuredAction, surface)
   } else if (surface === 'sidebar.navigation.items') {
     const navigation = snapshot as CordisXNavigationItem
@@ -190,7 +199,7 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
     }
   } else if (surface === 'workspace.toolbar.items' || surface === 'composer.toolbar.items') {
     const toolbar = snapshot as CordisXToolbarItem
-    assertKeys(snapshot, ['label', 'ariaLabel', 'icon', 'command', 'route', 'anchor', 'placement'], 'toolbar item')
+    assertKeys(snapshot, ['label', 'ariaLabel', 'icon', 'command', 'route', 'routeBehavior', 'anchor', 'placement'], 'toolbar item')
     assertAction(toolbar, 'toolbar item')
     if (surface === 'composer.toolbar.items') {
       if (!['leading', 'model', 'submit'].includes(toolbar.anchor)) throw new Error('composer toolbar anchor is invalid')

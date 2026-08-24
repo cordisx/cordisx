@@ -303,6 +303,8 @@ export interface CordisXStructuredAction {
   readonly icon?: CordisXIconToken
   readonly command?: CordisXCommandReference
   readonly route?: CordisXRouteReference
+  /** Host-owned route activation and selected/pressed projection. Defaults to navigate. */
+  readonly routeBehavior?: 'navigate' | 'toggle'
 }
 
 export interface CordisXNavigationAction extends CordisXStructuredAction {
@@ -557,6 +559,8 @@ export interface CordisXPageMetadata {
   readonly id: string
   readonly title: CordisXLocalizedText
   readonly icon?: CordisXIconToken
+  /** Host-rendered chrome policy. Body-only remains subject to the target outlet policy. */
+  readonly chrome?: 'standard' | 'body-only'
   readonly breadcrumbs?: readonly CordisXLocalizedText[]
   readonly tabs?: readonly CordisXPageTab[]
   readonly headerActions?: readonly CordisXPageHeaderAction[]

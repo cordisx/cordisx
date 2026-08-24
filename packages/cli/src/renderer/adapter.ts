@@ -1,6 +1,7 @@
 import {
   CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1,
   type CordisXLocalizedText,
+  type CordisXRouteReference,
   type CordisXStructuredAction,
   type CordisXSurfaceInvocationContextV1,
   type CordisXSurfaceName,
@@ -102,20 +103,18 @@ function uniqueAttribute(document: Document, selector: string, attribute: string
 }
 
 function currentSessionId(document: Document): string | undefined {
-  const candidates = [
-    selectedSessionId(document),
+  const selected = selectedSessionId(document)
+  if (selected === undefined) return undefined
+  const observed = [
     uniqueAttribute(document, '[data-response-annotation-conversation]', 'data-response-annotation-conversation'),
     uniqueAttribute(document, '[data-above-composer-conversation-id]', 'data-above-composer-conversation-id'),
   ].filter((value): value is string => value !== undefined)
-  if (candidates.length < 2 || new Set(candidates).size !== 1) return undefined
-  return candidates[0]
+  if (observed.length === 0 || observed.some(value => value !== selected)) return undefined
+  return selected
 }
 
-function sessionContentAnchor(document: Document, sessionId: string): HTMLElement | undefined {
-  const candidates = [...document.querySelectorAll([
-    '[data-codex-thread-reference-drop-target]',
-    '[data-pip-anchor-host="codex-main-thread"][data-app-action-timeline-scroll]',
-  ].join(','))]
+function matchingSessionContentAnchors(document: Document, selector: string, sessionId: string): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>(selector)]
     .filter(visible)
     .filter((candidate) => {
       const response = [...candidate.querySelectorAll('[data-response-annotation-conversation]')]
@@ -124,7 +123,21 @@ function sessionContentAnchor(document: Document, sessionId: string): HTMLElemen
         .some(element => element.getAttribute('data-above-composer-conversation-id') === sessionId)
       return response && composer
     })
-  return candidates.length === 1 ? candidates[0] : undefined
+}
+
+function sessionContentAnchor(document: Document, sessionId: string): HTMLElement | undefined {
+  const current = matchingSessionContentAnchors(
+    document,
+    '[data-pip-anchor-host="codex-main-thread"][data-app-action-timeline-scroll]',
+    sessionId,
+  )
+  if (current.length > 0) return current.length === 1 ? current[0] : undefined
+  const legacy = matchingSessionContentAnchors(
+    document,
+    '[data-codex-thread-reference-drop-target]',
+    sessionId,
+  )
+  return legacy.length === 1 ? legacy[0] : undefined
 }
 
 /** One host-owned overlay layer. Native anchors are observed and never mutated except by appending this layer. */
@@ -489,6 +502,7 @@ class StructuredSurfaceRenderer {
   private rebuildScheduled = false
   private disposed = false
   private nextContext = 0
+  private readonly routeProjectors = new Map<HTMLButtonElement, () => void>()
 
   constructor(
     private readonly document: Document,
@@ -506,7 +520,7 @@ class StructuredSurfaceRenderer {
     this.unsubscribers = [
       slots.subscribeInternal(() => this.schedule(true)),
       commands.subscribeInternal(() => this.schedule(true)),
-      routes.subscribeInternal(() => this.schedule(true)),
+      routes.subscribeInternal(() => this.schedule(false)),
       i18n.subscribeInternal(() => this.schedule(true)),
     ]
     const Observer = document.defaultView?.MutationObserver
@@ -534,6 +548,7 @@ class StructuredSurfaceRenderer {
     for (const unsubscribe of this.unsubscribers) unsubscribe()
     for (const root of this.roots.values()) root.remove()
     this.roots.clear()
+    this.routeProjectors.clear()
     for (const site of this.sites) {
       const [owner, ...rest] = site.split('\u0000')
       this.i18n.clearDiagnosticSite(owner!, rest.join('\u0000'))
@@ -704,6 +719,13 @@ class StructuredSurfaceRenderer {
     for (const [key, root] of this.roots) {
       if (!usedRoots.has(key)) root.remove()
     }
+    for (const [button, project] of this.routeProjectors) {
+      if (!button.isConnected) {
+        this.routeProjectors.delete(button)
+        continue
+      }
+      project()
+    }
     for (const snapshot of snapshots) {
       const rendered = snapshot.visible && snapshot.authorized && snapshot.valid && !snapshot.pending
         && availableSurfaces.has(snapshot.surface)
@@ -793,6 +815,22 @@ class StructuredSurfaceRenderer {
     }
   }
 
+  private contextualRouteReference(
+    snapshot: SurfaceContributionSnapshot,
+    action: CordisXStructuredAction,
+  ): CordisXRouteReference | undefined {
+    if (action.route === undefined) return undefined
+    const qualifiedId = action.route.id.includes(':') ? action.route.id : `${snapshot.owner}:${action.route.id}`
+    const route = this.routes.snapshot().routes.find(candidate => candidate.qualifiedId === qualifiedId)
+    const params = { ...(action.route.params ?? {}) }
+    if (snapshot.surface === 'session.header.actions' && route?.definition.path.split('/').includes(':sessionId')) {
+      const sessionId = currentSessionId(this.document)
+      if (sessionId === undefined) return undefined
+      params.sessionId = sessionId
+    }
+    return { id: action.route.id, ...(Object.keys(params).length === 0 ? {} : { params }) }
+  }
+
   private button(
     snapshot: SurfaceContributionSnapshot,
     action: CordisXStructuredAction,
@@ -806,6 +844,7 @@ class StructuredSurfaceRenderer {
     const button = this.document.createElement('button')
     button.type = 'button'
     const nativeClasses = nativePattern === 'composer' ? '' : nativeTemplate?.className ?? ''
+    button.draggable = false
     button.className = nativePattern === undefined
       ? 'cordisx-action'
       : `${nativeClasses} cordisx-action${reduceGlyph ? ' cordisx-icon-only-control' : ''} cordisx-native-icon-action cordisx-${nativePattern}-action`.trim()
@@ -833,6 +872,18 @@ class StructuredSurfaceRenderer {
     button.disabled = snapshot.disabled || actionState.disabled?.value === true || (command?.running ?? 0) > 0
     const reason = actionState.disabled?.reason
     if (button.disabled && reason !== undefined) button.dataset.cordisxTooltip = this.text(snapshot, reason, `${path}.disabled`, nextSites)
+    if (action.route !== undefined && action.routeBehavior === 'toggle') {
+      const project = (): void => {
+        const reference = this.contextualRouteReference(snapshot, action)
+        const projection = reference === undefined
+          ? { active: false, presented: false }
+          : this.routes.routeProjection(snapshot.owner, reference)
+        button.setAttribute('aria-pressed', String(projection.presented))
+        button.dataset.cordisxRouteState = projection.presented ? 'presented' : projection.active ? 'active' : 'inactive'
+      }
+      this.routeProjectors.set(button, project)
+      project()
+    }
     button.addEventListener('click', (event) => {
       event.stopPropagation()
       afterActivate?.()
@@ -846,7 +897,13 @@ class StructuredSurfaceRenderer {
             ...(context === undefined ? {} : { context }),
           })
         : action.route !== undefined
-          ? this.routes.navigateFromSurface(snapshot.owner, action.route, snapshot.surface, snapshot.qualifiedId)
+          ? (() => {
+              const reference = this.contextualRouteReference(snapshot, action)
+              if (reference === undefined) return Promise.reject(new Error('active session identity is unavailable'))
+              return action.routeBehavior === 'toggle'
+                ? this.routes.toggleFromSurface(snapshot.owner, reference, snapshot.surface, snapshot.qualifiedId, button)
+                : this.routes.navigateFromSurface(snapshot.owner, reference, snapshot.surface, snapshot.qualifiedId, button)
+            })()
           : Promise.reject(new Error('surface action has no activation'))
       void operation.catch(error => {
         button.dataset.error = error instanceof Error ? error.message : String(error)
@@ -874,11 +931,16 @@ class StructuredSurfaceRenderer {
       if (description !== undefined) primary.dataset.cordisxTooltip = description
       primary.append(copy)
       if (item.route !== undefined) {
-        const routeId = item.route.id.includes(':') ? item.route.id : `${snapshot.owner}:${item.route.id}`
-        const outlet = this.routes.snapshot().outlets.find(candidate => candidate.activeRoute === routeId)
-        const presentation = outlet?.presentation ?? 'inactive'
-        row.dataset.cordisxRouteState = presentation
-        if (presentation === 'presented') primary.setAttribute('aria-current', 'page')
+        const project = (): void => {
+          const routeId = item.route!.id.includes(':') ? item.route!.id : `${snapshot.owner}:${item.route!.id}`
+          const outlet = this.routes.snapshot().outlets.find(candidate => candidate.activeRoute === routeId)
+          const presentation = outlet?.presentation ?? 'inactive'
+          row.dataset.cordisxRouteState = presentation
+          if (presentation === 'presented') primary.setAttribute('aria-current', 'page')
+          else primary.removeAttribute('aria-current')
+        }
+        this.routeProjectors.set(primary, project)
+        project()
       }
       const activate = (): void => {
         const operation = item.command !== undefined
@@ -1045,7 +1107,7 @@ function installStyles(document: Document): () => void {
   const style = document.createElement('style')
   style.id = 'cordisx-structured-styles'
   style.textContent = `
-    [data-cordisx-no-drag="true"] { -webkit-app-region: no-drag !important; }
+    [data-cordisx-no-drag="true"], [data-cordisx-no-drag="true"] * { -webkit-app-region: no-drag !important; }
     .cordisx-native-seat { box-sizing: border-box; color: inherit; font: inherit; pointer-events: auto; -webkit-app-region: no-drag; }
     .cordisx-native-seat[hidden] { display: none !important; }
     .cordisx-sidebar-navigation { display: block; width: 100%; min-width: 0; }

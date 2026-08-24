@@ -88,6 +88,27 @@ describe('SurfaceRegistry', () => {
     contexts.dispose()
   })
 
+  it('accepts structured route toggles and rejects command or parameterless toggle ambiguity', () => {
+    const contexts = new HostContextStore()
+    const registry = new SurfaceRegistry(contexts)
+    registry.setResolvers({ command: () => true, route: () => true })
+    registry.register('demo', { name: 'session.header.actions', id: 'trace' }, {
+      label: { key: 'trace' }, route: { id: 'trace' }, routeBehavior: 'toggle',
+    })
+    registry.register('demo', { name: 'session.header.actions', id: 'ambiguous' }, {
+      label: { key: 'ambiguous' }, command: { id: 'toggle' }, route: { id: 'trace' }, routeBehavior: 'toggle',
+    } as never)
+    registry.register('demo', { name: 'session.header.actions', id: 'missing-route' }, {
+      label: { key: 'missing-route' }, command: { id: 'toggle' }, routeBehavior: 'navigate',
+    } as never)
+
+    expect(registry.snapshot().find(item => item.id === 'trace')).toMatchObject({ valid: true })
+    expect(registry.snapshot().find(item => item.id === 'ambiguous')?.error).toMatch(/cannot also reference a command/)
+    expect(registry.snapshot().find(item => item.id === 'missing-route')?.error).toMatch(/requires a route reference/)
+    registry.dispose()
+    contexts.dispose()
+  })
+
   it('retains denied contributions while removing them from authorized projection', () => {
     const contexts = new HostContextStore()
     const descriptors = new ExtensionPointDescriptorRegistry()

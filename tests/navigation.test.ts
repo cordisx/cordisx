@@ -179,6 +179,74 @@ describe('NavigationRegistry', () => {
     dom.window.close()
   })
 
+  it('projects exact route toggles and mounts body-only pages under persistent session chrome', async () => {
+    const dom = new JSDOM(`
+      <body>
+        <header id="native-session-header"><button id="trigger">Trace</button></header>
+        <main id="session"><div id="native-thread">native</div></main>
+      </body>
+    `)
+    const pages = new PageRegistry()
+    const outlets = new OutletRegistry()
+    const controller = new FakeOutlet(dom.window.document.getElementById('session')!, 'session:one', 'one')
+    outlets.declare({
+      schemaVersion: 1, id: 'session.content', authority: 'host-adapter', scope: 'session', preferredPlacement: 'absolute', contextPolicy: 'semantic',
+    }, controller, path => path.startsWith('/sessions/:sessionId/'))
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    pages.register('demo', {
+      id: 'trace', title: { key: 'trace', fallback: 'Agent Trace' }, icon: 'host:history', chrome: 'body-only',
+    }, ({ container }) => {
+      const bodyButton = container.ownerDocument.createElement('button')
+      bodyButton.textContent = 'Timeline body'
+      container.append(bodyButton)
+    })
+    navigation.register('demo', {
+      id: 'trace', path: '/sessions/:sessionId/trace', outlet: 'session.content', page: 'trace',
+    })
+    const trigger = dom.window.document.getElementById('trigger') as HTMLButtonElement
+    const reference = { id: 'trace', params: { sessionId: 'one' } } as const
+
+    expect(navigation.routeProjection('demo', reference)).toMatchObject({ active: false, presented: false })
+    await navigation.toggleFromSurface('demo', reference, 'session.header.actions', 'demo:trace', trigger)
+    expect(navigation.routeProjection('demo', reference)).toMatchObject({
+      active: true, presented: true, outlet: 'session.content',
+    })
+    expect(navigation.routeProjection('demo', { id: 'trace', params: { sessionId: 'two' } })).toMatchObject({
+      active: false, presented: false,
+    })
+    const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="demo:trace"]')!
+    expect(page.dataset.cordisxPageChromePolicy).toBe('body-only')
+    expect(page.getAttribute('aria-label')).toBe('Agent Trace')
+    expect(page.querySelector('[data-cordisx-page-chrome]')).toBeNull()
+    expect(page.querySelector('[data-cordisx-page-title]')).toBeNull()
+    expect(page.querySelector('button[aria-label="Close"]')).toBeNull()
+    expect(page.firstElementChild?.getAttribute('data-cordisx-page-body')).toBe('true')
+    expect(dom.window.document.getElementById('native-session-header')?.isConnected).toBe(true)
+    expect(dom.window.document.getElementById('native-thread')?.textContent).toBe('native')
+
+    page.querySelector('button')!.focus()
+    page.querySelector('button')!.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      key: 'Escape', bubbles: true, cancelable: true,
+    }))
+    await navigation.settled()
+    expect(navigation.routeProjection('demo', reference)).toMatchObject({ active: false, presented: false })
+    expect(dom.window.document.activeElement).toBe(trigger)
+
+    await navigation.toggleFromSurface('demo', reference, 'session.header.actions', 'demo:trace', trigger)
+    trigger.focus()
+    await navigation.toggleFromSurface('demo', reference, 'session.header.actions', 'demo:trace', trigger)
+    expect(navigation.routeProjection('demo', reference)).toMatchObject({ active: false, presented: false })
+    expect(dom.window.document.activeElement).toBe(trigger)
+    await expect(navigation.toggleFromSurface(
+      'demo', { id: 'trace', params: { sessionId: 'two' } }, 'session.header.actions', 'demo:trace', trigger,
+    )).rejects.toThrow(/does not match native session one/)
+
+    await navigation.dispose()
+    pages.dispose()
+    outlets.dispose()
+    dom.window.close()
+  })
+
   it('suspends an overlapping outlet without remounting and restores it after close', async () => {
     const dom = new JSDOM('<body><main id="main"></main><main id="app"></main></body>')
     const pages = new PageRegistry()
@@ -334,7 +402,33 @@ describe('NavigationRegistry', () => {
         children: [],
       }],
     } as never, () => undefined)).toThrow(/unknown field children/)
+    expect(() => pages.register('demo', {
+      id: 'body-only-header',
+      title: { key: 'body-only-header' },
+      chrome: 'body-only',
+      breadcrumbs: [],
+    }, () => undefined)).toThrow(/body-only page body-only-header cannot declare/)
     pages.dispose()
+  })
+
+  it('rejects body-only page chrome from app outlets without persistent external chrome', () => {
+    const dom = new JSDOM('<body><main id="app"></main></body>')
+    const pages = new PageRegistry()
+    const outlets = new OutletRegistry()
+    outlets.declare({
+      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
+    }, new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer'), path => path === '/trace')
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    pages.register('demo', { id: 'trace', title: { key: 'trace' }, chrome: 'body-only' }, () => undefined)
+    navigation.register('demo', { id: 'trace', path: '/trace', outlet: 'app', page: 'trace' })
+    expect(navigation.snapshot().routes[0]).toMatchObject({
+      valid: false,
+      error: 'body-only page trace requires an outlet with persistent external chrome',
+    })
+    void navigation.dispose()
+    pages.dispose()
+    outlets.dispose()
+    dom.window.close()
   })
 
   it('diagnoses missing dependencies and makes both path conflicts unavailable', () => {

@@ -20,6 +20,7 @@ interface RuntimeSnapshot {
     readonly pages: readonly { owner: string; qualifiedId: string }[]
     readonly outlets: readonly {
       id: string
+      available: boolean
       contextKey?: string
       activeRoute?: string
       mounted: boolean
@@ -72,6 +73,7 @@ async function fixture(sessionId: string, options: { headerAvailable?: boolean; 
   runtime: RuntimeHandle
   nativeConversation: HTMLElement
   thread: HTMLElement
+  sessionContent: HTMLElement
 }> {
   const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const config: CordisXConfig = {
@@ -90,7 +92,7 @@ async function fixture(sessionId: string, options: { headerAvailable?: boolean; 
   }
   const bundle = await buildRendererBundle(config)
   const dom = new JSDOM(`
-    <html lang="en" class="electron-dark"><head></head><body>
+    <html lang="zh-CN" class="electron-dark"><head></head><body>
       <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
       <header data-app-shell-application-menu-bar>
         <div data-test-id="header-shell-slot"><button id="native-header-action">Native action</button></div>
@@ -109,12 +111,16 @@ async function fixture(sessionId: string, options: { headerAvailable?: boolean; 
         <header data-testid="app-shell-header-context-menu-surface" style="display:flex">
           <div id="native-session-title">Current session</div>
           <div id="native-session-actions" style="display:flex">
-            <button id="native-session-menu" class="codex-toolbar-button">Session menu</button>
+            <span id="native-session-tooltip-trigger" data-state="closed" style="display:contents">
+              <button id="native-session-menu" class="codex-toolbar-button" title="切换置顶摘要">Session menu</button>
+            </span>
           </div>
         </header>
         <section id="native-thread" data-codex-thread-reference-drop-target>
-          <div id="native-conversation" data-response-annotation-conversation="${sessionId}">Native conversation</div>
-          <div id="native-composer" data-above-composer-conversation-id="${sessionId}"></div>
+          <div id="native-session-content" data-pip-anchor-host="codex-main-thread" data-app-action-timeline-scroll>
+            <div id="native-conversation" data-response-annotation-conversation="${sessionId}">Native conversation</div>
+            <div id="native-composer" data-above-composer-conversation-id="${sessionId}"></div>
+          </div>
         </section>
       </main>
       <aside id="native-right-panel" data-pip-home-surface="thread-summary-panel"></aside>
@@ -128,12 +134,14 @@ async function fixture(sessionId: string, options: { headerAvailable?: boolean; 
   const body = dom.window.document.body
   const main = dom.window.document.querySelector<HTMLElement>('main')!
   const thread = dom.window.document.getElementById('native-thread')!
+  const sessionContent = dom.window.document.getElementById('native-session-content')!
   const sessionHeader = dom.window.document.querySelector<HTMLElement>(
     '[data-testid="app-shell-header-context-menu-surface"]',
   )!
   Object.defineProperty(body, 'getBoundingClientRect', { value: () => rect(0, 0, 1280, 900) })
   Object.defineProperty(main, 'getBoundingClientRect', { value: () => rect(248, 46, 840, 854) })
   Object.defineProperty(thread, 'getBoundingClientRect', { value: () => rect(248, 46, 840, 854) })
+  Object.defineProperty(sessionContent, 'getBoundingClientRect', { value: () => rect(248, 46, 840, 854) })
   if (options.headerAvailable !== false) {
     Object.defineProperty(sessionHeader, 'getBoundingClientRect', { value: () => rect(248, 46, 840, 46) })
   }
@@ -149,22 +157,21 @@ async function fixture(sessionId: string, options: { headerAvailable?: boolean; 
     runtime,
     nativeConversation: dom.window.document.getElementById('native-conversation')!,
     thread,
+    sessionContent,
   }
 }
 
 describe('Agent Trace Showcase renderer integration', () => {
   it('mounts a session-scoped fixture page without owning native shell DOM', async () => {
     const sessionId = 'session-a'
-    const { dom, runtime, nativeConversation, thread } = await fixture(sessionId)
+    const { dom, runtime, nativeConversation, thread, sessionContent } = await fixture(sessionId)
     const nativeParent = nativeConversation.parentElement
     const nativeUrl = dom.window.location.href
 
     expect(runtime.snapshot().plugins).toEqual([
       expect.objectContaining({ id: 'agent-trace-showcase', status: 'active' }),
     ])
-    expect(runtime.snapshot().commands).toEqual([
-      expect.objectContaining({ qualifiedId: 'agent-trace-showcase:open-timeline' }),
-    ])
+    expect(runtime.snapshot().commands).toEqual([])
     expect(runtime.snapshot().navigation.routes).toEqual([
       expect.objectContaining({ qualifiedId: 'agent-trace-showcase:session.timeline', valid: true }),
     ])
@@ -181,32 +188,52 @@ describe('Agent Trace Showcase renderer integration', () => {
     )!
     const entryButton = entrySeat.querySelector<HTMLButtonElement>('button')!
     expect(entrySeat.parentElement?.id).toBe('native-session-actions')
-    expect(entrySeat.nextElementSibling?.id).toBe('native-session-menu')
-    expect(dom.window.document.getElementById('native-session-menu')?.parentElement?.id).toBe('native-session-actions')
+    expect(entrySeat.nextElementSibling?.id).toBe('native-session-tooltip-trigger')
+    expect(dom.window.document.getElementById('native-session-tooltip-trigger')?.parentElement?.id).toBe('native-session-actions')
+    expect(dom.window.document.getElementById('native-session-tooltip-trigger')?.querySelector('[data-cordisx-surface-host]')).toBeNull()
+    expect(dom.window.document.getElementById('native-session-menu')?.parentElement?.id).toBe('native-session-tooltip-trigger')
     expect(entrySeat.dataset.cordisxNoDrag).toBe('true')
     expect(entryButton.className).toContain('codex-toolbar-button')
+    expect(entryButton.classList.contains('cordisx-icon-only-control')).toBe(true)
+    expect(dom.window.getComputedStyle(entryButton).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('16px')
     expect(entryButton.textContent).toBe('')
-    expect(entryButton.getAttribute('aria-label')).toBe('Open Agent Trace Timeline')
-    expect(entryButton.dataset.cordisxTooltip).toBe('Open Agent Trace Timeline')
+    expect(entryButton.getAttribute('aria-label')).toBe('打开 Agent Trace 时间线')
+    expect(entryButton.dataset.cordisxTooltip).toBe('打开 Agent Trace 时间线')
+    expect(entryButton.dataset.cordisxNoDrag).toBe('true')
+    expect(entryButton.draggable).toBe(false)
+    expect(entryButton.getAttribute('draggable')).toBe('false')
+    expect(entryButton.getAttribute('aria-pressed')).toBe('false')
     expect(dom.window.document.getElementById('cordisx-structured-styles')?.textContent)
-      .toContain('[data-cordisx-no-drag="true"]')
-    expect(entryButton.querySelector('[data-host-icon="host:history"] svg')).not.toBeNull()
+      .toContain('[data-cordisx-no-drag="true"], [data-cordisx-no-drag="true"] *')
+    const entryIcon = entryButton.querySelector<HTMLElement>('[data-host-icon="host:history"]')!
+    const entryGlyph = entryIcon.querySelector<SVGElement>('svg')!
+    expect(entryIcon.matches('[data-cordisx-no-drag="true"] *')).toBe(true)
+    expect(entryGlyph.matches('[data-cordisx-no-drag="true"] *')).toBe(true)
     expect(dom.window.document.getElementById('native-header-action')?.textContent).toBe('Native action')
 
-    await expect(runtime.execute('agent-trace-showcase', {
-      id: 'open-timeline', arguments: { sessionId, hostContext: { identity: { agent: { sessionKey: sessionId } } } },
-    })).rejects.toThrow(/host-issued current Agent session identity is unavailable/)
-    expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
+    entryButton.focus()
+    await new Promise(resolve => setTimeout(resolve, 675))
+    const tooltip = dom.window.document.querySelector<HTMLElement>('.cordisx-host-tooltip')!
+    expect(tooltip.parentElement).toBe(dom.window.document.body)
+    expect(tooltip.getAttribute('role')).toBe('tooltip')
+    expect(tooltip.textContent).toBe('打开 Agent Trace 时间线')
+    expect(entryButton.getAttribute('aria-describedby')).toBe(tooltip.id)
+    expect(dom.window.document.getElementById('native-session-tooltip-trigger')?.contains(tooltip)).toBe(false)
+    entryButton.blur()
+    expect(dom.window.document.querySelector('.cordisx-host-tooltip')).toBeNull()
 
+    let nativeActivations = 0
+    dom.window.document.getElementById('native-session-menu')?.addEventListener('click', () => { nativeActivations += 1 })
     entryButton.click()
     await settle(4)
+    expect(nativeActivations).toBe(0)
     const invocationDiagnostics = runtime.snapshot().extensionPoints.accessDiagnostics.slice(-3).map(item => ({
       operation: item.request.operation,
       generation: item.request.generation,
       authorized: item.authorized,
     }))
     expect(invocationDiagnostics).toEqual([
-      { operation: 'surface.command.invoke', generation: expect.any(String), authorized: true },
+      { operation: 'surface.route.navigate', generation: expect.any(String), authorized: true },
       { operation: 'outlet.route.navigate', generation: expect.any(String), authorized: true },
       { operation: 'outlet.page.mount', generation: expect.any(String), authorized: true },
     ])
@@ -218,7 +245,15 @@ describe('Agent Trace Showcase renderer integration', () => {
       mounted: true,
       presentation: 'presented',
     })
+    expect(entrySeat.querySelector('button')).toBe(entryButton)
+    expect(entryButton.getAttribute('aria-pressed')).toBe('true')
     const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="agent-trace-showcase:session.timeline"]')!
+    expect(page.dataset.cordisxPageChromePolicy).toBe('body-only')
+    expect(page.getAttribute('aria-label')).toBe('Agent Trace')
+    expect(page.querySelector('[data-cordisx-page-chrome]')).toBeNull()
+    expect(page.querySelector('[data-cordisx-page-title]')).toBeNull()
+    expect(page.querySelector('button[aria-label="Close"]')).toBeNull()
+    expect(page.firstElementChild?.getAttribute('data-cordisx-page-body')).toBe('true')
     expect(page.querySelector('[data-agent-trace-showcase="true"]')).not.toBeNull()
     expect(page.textContent).toContain('Overview')
     expect(page.textContent).toContain('fixture')
@@ -234,24 +269,72 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(thread.contains(page)).toBe(false)
     expect(dom.window.document.getElementById('native-right-panel')).not.toBeNull()
 
-    page.querySelector<HTMLButtonElement>('[data-demo-kind="system-prompt-context"]')!.click()
+    entryButton.focus()
+    entryButton.click()
+    await settle(4)
+    expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
+    expect(entryButton.getAttribute('aria-pressed')).toBe('false')
+    expect(dom.window.document.activeElement).toBe(entryButton)
+    entryButton.click()
+    await settle(4)
+    expect(entryButton.getAttribute('aria-pressed')).toBe('true')
+    const reopenedPage = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="agent-trace-showcase:session.timeline"]')!
+    reopenedPage.querySelector<HTMLButtonElement>('.cxt-clear')!.focus()
+    reopenedPage.querySelector<HTMLButtonElement>('.cxt-clear')!.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      key: 'Escape', bubbles: true, cancelable: true,
+    }))
+    await settle(4)
+    expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
+    expect(entryButton.getAttribute('aria-pressed')).toBe('false')
+    expect(dom.window.document.activeElement).toBe(entryButton)
+    entryButton.click()
+    await settle(4)
+    const remountedPage = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="agent-trace-showcase:session.timeline"]')!
+
+    const outletContainer = remountedPage.parentElement!
+    const replacementSessionContent = sessionContent.cloneNode(true) as HTMLElement
+    Object.defineProperty(replacementSessionContent, 'getBoundingClientRect', { value: () => rect(248, 46, 840, 854) })
+    sessionContent.replaceWith(replacementSessionContent)
+    await settle(4)
+    expect(runtime.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({
+      activeRoute: 'agent-trace-showcase:session.timeline',
+      contextKey: `session:${sessionId}`,
+      mounted: true,
+      presentation: 'presented',
+    })
+    expect(remountedPage.parentElement).toBe(outletContainer)
+    expect(remountedPage.isConnected).toBe(true)
+    expect(dom.window.document.getElementById('native-session-content')).toBe(replacementSessionContent)
+
+    remountedPage.querySelector<HTMLButtonElement>('[data-demo-kind="system-prompt-context"]')!.click()
     await settle(2)
-    expect(page.querySelector('.cxt-integrity')?.textContent).toContain('loaded 18/26')
-    const generated = [...page.querySelectorAll<HTMLElement>('.cxt-row')].at(-1)!
+    expect(remountedPage.querySelector('.cxt-integrity')?.textContent).toContain('loaded 18/26')
+    const generated = [...remountedPage.querySelectorAll<HTMLElement>('.cxt-row')].at(-1)!
     generated.click()
-    expect(page.querySelector('.cxt-detail-scroll')?.textContent).toContain('agent-trace-showcase@0.1.0')
-    expect(page.querySelector('.cxt-detail-scroll')?.textContent).toContain('fixture-generation-7')
+    expect(remountedPage.querySelector('.cxt-detail-scroll')?.textContent).toContain('agent-trace-showcase@0.1.0')
+    expect(remountedPage.querySelector('.cxt-detail-scroll')?.textContent).toContain('fixture-generation-7')
 
     await expect(runtime.navigate('agent-trace-showcase', {
       id: 'session.timeline', params: { sessionId: 'session-b' },
     })).rejects.toThrow(/does not match native session session-a/)
     expect(dom.window.location.href).toBe(nativeUrl)
 
-    page.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click()
+    entryButton.click()
+    await settle(4)
+    expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
+    expect(entryButton.getAttribute('aria-pressed')).toBe('false')
+    expect(dom.window.document.getElementById('native-conversation')?.isConnected).toBe(true)
+    entryButton.click()
+    await settle(4)
+    expect(entryButton.getAttribute('aria-pressed')).toBe('true')
+    expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).not.toBeNull()
+    await runtime.dispose()
+    expect(entryButton.isConnected).toBe(false)
+    expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
+    expect(dom.window.document.querySelector('[data-cordisx-page]')).toBeNull()
+    entryButton.click()
     await settle(2)
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
-    expect(nativeConversation.isConnected).toBe(true)
-    await runtime.dispose()
   })
 
   it('cleans the route, page, subscriptions, and fixture generation on block and session change', async () => {
@@ -260,7 +343,9 @@ describe('Agent Trace Showcase renderer integration', () => {
       '[data-cordisx-surface-host="session.header.actions"] button',
     )!
     await runtime.navigate('agent-trace-showcase', { id: 'session.timeline', params: { sessionId: 'session-a' } })
+    await settle(2)
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).not.toBeNull()
+    expect(firstGenerationEntry.getAttribute('aria-pressed')).toBe('true')
 
     await runtime.setPluginBlocked('agent-trace-showcase', true)
     expect(runtime.snapshot().plugins[0]?.status).toBe('blocked')
@@ -281,7 +366,7 @@ describe('Agent Trace Showcase renderer integration', () => {
 
     await runtime.setPluginBlocked('agent-trace-showcase', false)
     expect(runtime.snapshot().plugins[0]?.status).toBe('active')
-    expect(runtime.snapshot().commands).toHaveLength(1)
+    expect(runtime.snapshot().commands).toEqual([])
     expect(runtime.snapshot().registrations).toEqual([
       expect.objectContaining({ surface: 'session.header.actions', rendered: true }),
     ])
@@ -290,12 +375,29 @@ describe('Agent Trace Showcase renderer integration', () => {
       '[data-cordisx-surface-host="session.header.actions"] button',
     )!
     expect(restoredEntry).not.toBe(firstGenerationEntry)
+    expect(restoredEntry.getAttribute('aria-pressed')).toBe('false')
     expect(runtime.snapshot().platform).toMatchObject({
       mode: 'unavailable', secondConnectionCreated: false, rawBridgeExposed: false,
     })
 
-    await runtime.navigate('agent-trace-showcase', { id: 'session.timeline', params: { sessionId: 'session-a' } })
     const selected = dom.window.document.getElementById('selected-thread')!
+    selected.removeAttribute('data-app-action-sidebar-thread-selected')
+    await settle(4)
+    expect(runtime.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({
+      available: false, mounted: false,
+    })
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"]')).toBeNull()
+    restoredEntry.click()
+    await settle(2)
+    expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
+    selected.setAttribute('data-app-action-sidebar-thread-selected', 'true')
+    await settle(4)
+    const reselectedEntry = dom.window.document.querySelector<HTMLButtonElement>(
+      '[data-cordisx-surface-host="session.header.actions"] button',
+    )!
+    expect(reselectedEntry).not.toBe(restoredEntry)
+
+    await runtime.navigate('agent-trace-showcase', { id: 'session.timeline', params: { sessionId: 'session-a' } })
     const conversation = dom.window.document.getElementById('native-conversation')!
     const composer = dom.window.document.getElementById('native-composer')!
     selected.setAttribute('data-app-action-sidebar-thread-id', 'local:session-b')
@@ -304,6 +406,7 @@ describe('Agent Trace Showcase renderer integration', () => {
     await settle(4)
     expect(runtime.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({ mounted: false })
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
+    expect(reselectedEntry.getAttribute('aria-pressed')).toBe('false')
     await expect(runtime.navigate('agent-trace-showcase', {
       id: 'session.timeline', params: { sessionId: 'session-a' },
     })).rejects.toThrow(/does not match native session session-b/)
@@ -315,12 +418,12 @@ describe('Agent Trace Showcase renderer integration', () => {
     await runtime.dispose()
     expect(dom.window.document.querySelector('[data-cordisx-page]')).toBeNull()
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"]')).toBeNull()
-    restoredEntry.click()
+    reselectedEntry.click()
     await settle(2)
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
   })
 
-  it('keeps an unavailable native seat pending and refuses direct identity spoofing', async () => {
+  it('keeps an unavailable native seat pending without a fallback control', async () => {
     const { dom, runtime } = await fixture('session-a', { headerAvailable: false })
     expect(runtime.snapshot().registrations).toEqual([
       expect.objectContaining({
@@ -329,10 +432,6 @@ describe('Agent Trace Showcase renderer integration', () => {
       }),
     ])
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"]')).toBeNull()
-    await expect(runtime.execute('agent-trace-showcase', {
-      id: 'open-timeline',
-      arguments: { sessionId: 'session-a', hostContext: { identity: { agent: { sessionKey: 'session-a' } } } },
-    })).rejects.toThrow(/host-issued current Agent session identity is unavailable/)
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
     await runtime.dispose()
   })
@@ -378,16 +477,19 @@ describe('Agent Trace Showcase renderer integration', () => {
     composer.setAttribute('data-above-composer-conversation-id', 'session-b')
     await settle(5)
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
-
-    dom.window.document.querySelector<HTMLButtonElement>(
+    const sessionBEntry = dom.window.document.querySelector<HTMLButtonElement>(
       '[data-cordisx-surface-host="session.header.actions"] button',
-    )!.click()
+    )!
+    expect(sessionBEntry.getAttribute('aria-pressed')).toBe('false')
+
+    sessionBEntry.click()
     await settle(20)
     page = dom.window.document.querySelector<HTMLElement>('[data-agent-trace-showcase="true"]')!
     expect(page).not.toBeNull()
     expect(runtime.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({
       contextKey: 'session:session-b', mounted: true,
     })
+    expect(sessionBEntry.getAttribute('aria-pressed')).toBe('true')
     expect(runtime.snapshot().permissions.find(item => item.capability === 'agent.events.read')).toMatchObject({ policy: 'allow' })
 
     await runtime.setPluginBlocked('agent-trace-showcase', true)

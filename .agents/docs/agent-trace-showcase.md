@@ -113,13 +113,13 @@ task API.
 The main structured-UI task owns one general session action surface. The
 Showcase consumes the merged protocol shape and the fixed stacked host API:
 
-- `session.header.actions` provides an icon-only action in the current
-  conversation header, using a host icon token plus command/route activation;
+- `session.header.actions` provides an icon-only route toggle in the current
+  conversation header, using a host icon token plus protocol-v3 toggle data;
 - one plugin-local entry adapter maps the frozen envelope to
   `ctx.slots.register`; it contains no selector, DOM, or renderer code;
-- the host command invocation supplies an opaque, generation-fenced
-  Agent `sessionKey`; it is distinct from Platform provider identity and is
-  used to navigate a route owned by this plugin;
+- the host binds the current, host-issued Agent `sessionKey` to the route's
+  `:sessionId`, projects exact route/outlet state as `aria-pressed`, and closes
+  the same route on re-activation;
 - `/sessions/:sessionId/agent-trace` targets `session.content` and is rejected
   when its parameter is not the active native session.
 
@@ -133,25 +133,27 @@ product copy or maintains a second README source.
 This consumer branch does not add `session.header.actions` to the catalog,
 protocol, or Codex adapter and does not use `workspace.toolbar.items` as a
 temporary parallel entry. In fixture mode, the explicit configuration pins
-one provider-neutral fixture session id; the host-rendered entry supplies a
-fresh immutable invocation context, the command rejects direct/plugin-spoofed
-identity and mismatched fixture identity, and the session outlet rejects
-navigation when that id is not the active native session.
+one provider-neutral fixture session id; the host-rendered entry ignores any
+plugin attempt to override contextual session identity, and the session outlet
+rejects navigation when the resolved id is not the active native session.
 
-The host records surface-command and outlet-route/page authorization as v2
+The host records surface-route and outlet-route/page authorization as v2
 access requests carrying its current generation. A pending or unavailable
 surface renders no activatable entry and fails closed; block, restore, and
-generation disposal invalidate the old button and command before any later
+generation disposal invalidate the old button and route projection before any later
 route/outlet policy check. The plugin does not retain or replay invocation
 contexts across generations.
 
-The plugin provides only structured action data and commands for native shell
+The plugin provides only structured route-toggle data for native shell
 chrome. It never supplies a toolbar DOM node, selector, SVG, tooltip, or event
 listener. The host owns the icon-only button, Material/host icon rendering,
 hover/focus/tooltip, keyboard semantics, `draggable=false`, and macOS
 `no-drag`. The `session.content` outlet preserves the native conversation
 title header, sidebar, and right/bottom panels and does not change the app URL
-or native router.
+or native router. Its page-v2 `body-only` policy means the Timeline begins
+directly below that native header; CordisX creates no second header, title, or X
+row. The same top toggle and Escape remain keyboard-reachable close paths, and
+explicit close restores focus to the toggle.
 
 ## Explicit demo actions
 
@@ -186,8 +188,8 @@ cancellation and clear use only the fenced handle and `clearPending` result.
 ## Timeline information architecture
 
 The page is a flat session workspace, not a dashboard card inside another
-card. Host page chrome provides one title, icon, close/back behavior, and
-optional actions. The body begins with a compact integrity/capability strip,
+card. The preserved native session header and its Agent Trace toggle provide
+the only top chrome. The body begins with a compact integrity/capability strip,
 then controls, filters, the event list, and one record-detail pane.
 
 Four lanes follow DSH Trajectory while retaining CordisX-specific evidence:
@@ -257,7 +259,7 @@ Empty states distinguish no events from unavailable data and partial history.
 All registrations and subscriptions belong to the plugin Cordis fiber. Block,
 unload, required-capability denial, or generation replacement disposes:
 
-- the session-header contribution and command;
+- the session-header route-toggle contribution;
 - route and page registration;
 - ledger subscriptions and in-flight page queries;
 - page event listeners and DOM owned inside the outlet;
@@ -267,7 +269,7 @@ unload, required-capability denial, or generation replacement disposes:
 - all fixture timers and state listeners.
 
 The page reads exactly one session id: explicit fixture configuration, or the
-host-issued Agent key supplied by structured invocation in live mode. An A-to-B
+host-issued Agent key bound to the route by the Host in live mode. An A-to-B
 session switch changes the `session.content` context key,
 aborts the old mount and query, and never carries selection, filters, queued
 contributions, or fixture rows into the new session. Returning to A starts a
@@ -275,9 +277,9 @@ fresh page projection from the ledger.
 
 ## PR stack and landing rule
 
-1. UI catalog protocol remains verified at
-   `2ec9ca15234e778853104d1667c7d1c4bffff1d9`; Agent v2 protocol is its
-   orthogonal merged successor `08dcdc11aae38ea9c0e91e4ad17cf31b8c756747`.
+1. Page-v2 body-only chrome and surface-v3 route toggles are merged in protocol
+   `8036d7228fdc6ebdba41734c5cc7aa6fc850fc58`; Agent v2 remains its
+   orthogonal predecessor `08dcdc11aae38ea9c0e91e4ad17cf31b8c756747`.
 2. Merged host `e0929a0ca7bc0e0b5f32c1c4f1b0f487928f0dc4` supplies both the
    structured UI host and the v2 Agent delivery/contribution lifecycle. The
    provider-neutral Agent projection consumes no Platform session identity or
