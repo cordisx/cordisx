@@ -23,6 +23,7 @@ import type {
   PackagePermissionReview,
   PackageProfileState,
   PackageReadinessReceipt,
+  PackageRecoveryDirective,
   PackageReloadLevel,
   PackageResolutionBoundary,
   PackageRuntimeObservation,
@@ -96,7 +97,7 @@ export function createHostPermissionReviewAuthority(
 
 export interface PackageLifecycleHostOptions {
   readonly runtimeAbi: 1
-  readonly protocolVersion: 1
+  readonly protocolSchemas: readonly string[]
   readonly manifestResolver: PackageManifestResolver
   readonly permissionAuthority: HostPermissionReviewAuthority
   readonly now?: () => Date
@@ -209,6 +210,10 @@ async function validateResolvedCandidate(snapshotRoot: string, candidate: Resolv
   validateHostPackageManifest(candidate.packageManifest)
   if (candidate.runtime.manifest.id !== candidate.packageManifest.pluginId) {
     throw new PackageLifecycleError('package-identity-mismatch', 'runtime manifest id must match package manifest plugin id')
+  }
+  if (!SHA256_INTEGRITY.test(candidate.runtime.manifestIntegrity)
+    || !candidate.packageManifest.compatibility.protocolSchemas.includes(candidate.runtime.manifest.$schema)) {
+    throw new PackageLifecycleError('incompatible-runtime', 'runtime manifest digest/schema is not package-bound')
   }
   if (!RELATIVE_ENTRY.test(candidate.runtime.entry) || candidate.runtime.entry.includes('..')) {
     throw new PackageLifecycleError('invalid-package-entry', 'runtime entry must be a package-relative path')
@@ -640,8 +645,12 @@ export class PackageLifecycleHost {
   }
 
   /** Launcher-start recovery is privileged and therefore does not require lost in-memory raw tokens. */
-  async recover(observations: Readonly<Record<string, PackageRuntimeObservation>>): Promise<PackageStoreState> {
+  async recover(observations: Readonly<Record<string, PackageRuntimeObservation>>): Promise<{
+    readonly state: PackageStoreState
+    readonly directives: readonly PackageRecoveryDirective[]
+  }> {
     const before = await this.#store.refresh()
+    const directives: PackageRecoveryDirective[] = []
     const result = await this.#store.transaction(before.revision, (draft) => {
       const now = (this.#options.now?.() ?? new Date()).toISOString()
       for (const [transactionId, transaction] of Object.entries(draft.transactions)) {
@@ -651,23 +660,27 @@ export class PackageLifecycleHost {
         this.#recomputeImpact(transaction, draft as unknown as PackageStoreState)
         const observation = observations[transaction.profileId]
         const expectedPlugins = exactReceiptPlugins(transaction, draft as unknown as PackageStoreState)
-        const canCommit = (transaction.status === 'activation-requested' || transaction.status === 'readiness-confirmed')
+        const wasPublished = (transaction.status === 'activation-requested' || transaction.status === 'readiness-confirmed')
           && observation !== undefined
           && observation.runtimeGeneration === transaction.proposedRuntimeGeneration
           && fingerprint(observation.plugins) === fingerprint(expectedPlugins)
-        if (canCommit) this.#commitDraft(draft as unknown as MutableStoreDraft, transaction)
-        else {
-          draft.transactions[transactionId] = {
-            ...transaction,
-            status: 'recovered-aborted',
-            failureCode: 'interrupted-or-stale-generation',
-            updatedAt: now,
-          }
+        directives.push({
+          transactionId,
+          profileId: transaction.profileId,
+          action: wasPublished ? 'rollback-published' : 'discard-staged',
+          expectedPublished: this.#afterTuple(draft as unknown as PackageStoreState, transaction, profile),
+          rollbackTarget: this.#activeTuple(draft as unknown as PackageStoreState, transaction.profileId, profile),
+        })
+        draft.transactions[transactionId] = {
+          ...transaction,
+          status: 'recovered-aborted',
+          failureCode: wasPublished ? 'interrupted-after-publish' : 'interrupted-before-publish',
+          updatedAt: now,
         }
       }
       this.#markGcEligibility(draft as unknown as PackageStoreState)
     })
-    return result.state
+    return { state: result.state, directives: freeze(directives) as readonly PackageRecoveryDirective[] }
   }
 
   async releaseLastGood(profileId: string, pluginId: string, expectedLease: PackageLease): Promise<PackageStoreState> {
@@ -851,6 +864,7 @@ export class PackageLifecycleHost {
       identity: record.identity,
       artifactDirectory: record.objectDirectory,
       runtimeEntry: objectEntry(record.objectDirectory, record.runtime.entry),
+      runtimeManifestIntegrity: record.runtime.manifestIntegrity,
       runtimeManifest: record.runtime.manifest,
       dependencies: record.manifest.dependencies,
     }

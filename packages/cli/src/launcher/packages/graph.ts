@@ -28,8 +28,13 @@ export function validateHostPackageManifest(manifest: HostPackageManifest, label
   if (valid(manifest.version) === null) {
     throw new PackageLifecycleError('invalid-package-version', `${label}.version must be a valid semantic version`)
   }
-  if (manifest.compatibility.runtimeAbi !== 1 || manifest.compatibility.protocol !== 1) {
-    throw new PackageLifecycleError('incompatible-runtime', `${label} requires unsupported runtime ABI or protocol`)
+  if (manifest.compatibility.runtimeAbi !== 1 || manifest.compatibility.protocolSchemas.length === 0
+    || new Set(manifest.compatibility.protocolSchemas).size !== manifest.compatibility.protocolSchemas.length
+    || manifest.compatibility.protocolSchemas.some(schema => !/^https:\/\//.test(schema))) {
+    throw new PackageLifecycleError('incompatible-runtime', `${label} requires unsupported runtime ABI or protocol schemas`)
+  }
+  if (manifest.distribution.mode !== 'explicit-local-v1' || manifest.distribution.signature !== 'unsupported') {
+    throw new PackageLifecycleError('unsupported-package-distribution', `${label} must declare explicit local unsigned distribution`)
   }
   if (!/^[a-f0-9]{64}$/.test(manifest.permissionFingerprint)) {
     throw new PackageLifecycleError('invalid-permission-fingerprint', `${label}.permissionFingerprint must be lowercase SHA-256`)
@@ -54,7 +59,7 @@ export function validateHostPackageManifest(manifest: HostPackageManifest, label
 
 export function assertPackageCompatibility(
   manifest: HostPackageManifest,
-  versions: { readonly runtimeAbi: 1; readonly protocolVersion: 1 },
+  versions: { readonly runtimeAbi: 1; readonly protocolSchemas: readonly string[] },
 ): void {
   if (manifest.compatibility.runtimeAbi !== versions.runtimeAbi) {
     throw new PackageLifecycleError(
@@ -62,10 +67,11 @@ export function assertPackageCompatibility(
       `${manifest.pluginId}@${manifest.version} requires runtime ABI ${manifest.compatibility.runtimeAbi}`,
     )
   }
-  if (manifest.compatibility.protocol !== versions.protocolVersion) {
+  const unsupported = manifest.compatibility.protocolSchemas.filter(schema => !versions.protocolSchemas.includes(schema))
+  if (unsupported.length !== 0) {
     throw new PackageLifecycleError(
       'protocol-incompatible',
-      `${manifest.pluginId}@${manifest.version} requires protocol ${manifest.compatibility.protocol}`,
+      `${manifest.pluginId}@${manifest.version} requires unsupported protocol schema ${unsupported.join(', ')}`,
     )
   }
 }

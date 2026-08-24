@@ -1,4 +1,5 @@
 import { link, mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import { c as createTar } from 'tar'
@@ -28,8 +29,16 @@ const fingerprint = 'a'.repeat(64)
 const manifestResolver = {
   async resolve(snapshotRoot: string) {
     const packageManifest = JSON.parse(await readFile(path.join(snapshotRoot, 'cordisx-package.json'), 'utf8')) as HostPackageManifest
-    const runtimeManifest = JSON.parse(await readFile(path.join(snapshotRoot, 'cordisx.plugin.json'), 'utf8'))
-    return { packageManifest, runtime: { entry: './dist/index.js', manifest: runtimeManifest } }
+    const runtimeBytes = await readFile(path.join(snapshotRoot, 'cordisx.plugin.json'))
+    const runtimeManifest = JSON.parse(runtimeBytes.toString('utf8'))
+    return {
+      packageManifest,
+      runtime: {
+        entry: './dist/index.js',
+        manifestIntegrity: `sha256:${createHash('sha256').update(runtimeBytes).digest('hex')}`,
+        manifest: runtimeManifest,
+      },
+    }
   },
 }
 
@@ -49,7 +58,8 @@ async function makePackage(
     pluginId,
     version,
     dependencies,
-    compatibility: { runtimeAbi: 1, protocol: 1 },
+    compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1] },
+    distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
     permissionFingerprint: fingerprint,
   }
   await writeFile(path.join(directory, 'cordisx-package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
@@ -78,7 +88,7 @@ async function createHost(requiredSatisfied = true, storeOptions = {}) {
   const store = await JsonPackageStore.open(path.join(root, 'store'), storeOptions)
   const host = new PackageLifecycleHost(store, {
     runtimeAbi: 1,
-    protocolVersion: 1,
+    protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1],
     manifestResolver,
     permissionAuthority: allowPermissions(requiredSatisfied),
   })
@@ -201,7 +211,8 @@ describe('package dependency graph', () => {
       pluginId,
       version: '1.0.0',
       dependencies,
-      compatibility: { runtimeAbi: 1, protocol: 1 },
+      compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1] },
+      distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
       permissionFingerprint: fingerprint,
     },
   })
@@ -321,24 +332,27 @@ describe('launcher package transactions', () => {
     const receipt = readiness(candidate)
     const reopened = await JsonPackageStore.open(store.root)
     const recoveredHost = new PackageLifecycleHost(reopened, {
-      runtimeAbi: 1, protocolVersion: 1, manifestResolver,
+      runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1], manifestResolver,
       permissionAuthority: allowPermissions(),
     })
-    const recovered = await recoveredHost.recover({
+    const recovery = await recoveredHost.recover({
       default: { runtimeGeneration: receipt.runtimeGeneration, plugins: receipt.plugins },
     })
-    expect(recovered.transactions[prepared.transaction.transactionId]?.status).toBe('committed')
+    expect(recovery.directives).toMatchObject([{ action: 'rollback-published' }])
+    expect(recovery.state.transactions[prepared.transaction.transactionId]?.status).toBe('recovered-aborted')
+    expect(recovery.state.profiles.default?.runtimeGeneration).toBe(runtime0)
 
     const secondSource = await makePackage(root, 'interrupted', '1.0.0')
     const second = await recoveredHost.prepare({
       ownerId: 'generation-runtime', operation: 'install', profileId: 'default',
-      expectedRevision: recovered.profiles.default!.revision,
-      expected: stateFence(recovered), proposedRuntimeGeneration: 'runtime-2',
+      expectedRevision: recovery.state.profiles.default!.revision,
+      expected: stateFence(recovery.state), proposedRuntimeGeneration: 'runtime-2',
       source: { kind: 'local-directory', path: secondSource },
     })
     const aborted = await recoveredHost.recover({})
-    expect(aborted.transactions[second.transaction.transactionId]?.status).toBe('recovered-aborted')
-    expect(aborted.profiles.default?.runtimeGeneration).toBe('runtime-1')
+    expect(aborted.directives).toMatchObject([{ action: 'discard-staged' }])
+    expect(aborted.state.transactions[second.transaction.transactionId]?.status).toBe('recovered-aborted')
+    expect(aborted.state.profiles.default?.runtimeGeneration).toBe(runtime0)
   })
 
   it('refuses uninstall while an enabled dependent exists', async () => {

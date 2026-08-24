@@ -1,16 +1,16 @@
-import type { CordisXPluginManifestV1 } from '../../platform-contracts.js'
-
 export type LocalPackageSourceKind = 'local-directory' | 'local-package' | 'downloaded-tarball'
 
 export interface LocalPackageSource {
   readonly kind: LocalPackageSourceKind
   readonly path: string
+  readonly downloadedFrom?: string
   readonly expectedIntegrity?: string
 }
 
 export interface CanonicalPackageSource {
   readonly kind: LocalPackageSourceKind
   readonly url: string
+  readonly downloadedFrom?: string
 }
 
 export interface PackageIdentity {
@@ -31,15 +31,41 @@ export interface HostPackageManifest {
   readonly dependencies: readonly PackageDependency[]
   readonly compatibility: {
     readonly runtimeAbi: 1
-    readonly protocol: 1
+    readonly protocolSchemas: readonly string[]
+  }
+  readonly distribution: {
+    readonly mode: 'explicit-local-v1'
+    readonly signature: 'unsupported'
   }
   readonly canonicalSource?: string
   readonly permissionFingerprint: string
 }
 
+export type HostServiceConfigurationDeclaration =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'host'; readonly schema: string; readonly configApplies: 'restart' }
+
+export interface HostRuntimeServiceDeclaration {
+  readonly id: string
+  readonly kind: string
+  readonly entry: string
+  /** Required by manifest v3; absent only for a frozen older manifest. */
+  readonly configuration?: HostServiceConfigurationDeclaration
+}
+
+export interface HostResolvedRuntimeManifest {
+  readonly $schema: string
+  readonly schemaVersion: 1 | 2 | 3
+  readonly id: string
+  readonly name?: string
+  readonly capabilities: readonly unknown[]
+  readonly services?: readonly HostRuntimeServiceDeclaration[]
+}
+
 export interface ResolvedRuntimeModule {
   readonly entry: string
-  readonly manifest: CordisXPluginManifestV1
+  readonly manifestIntegrity: string
+  readonly manifest: HostResolvedRuntimeManifest
 }
 
 export interface ResolvedPackageCandidate {
@@ -165,7 +191,8 @@ export interface ActivationPackageProjection {
   readonly identity: PackageIdentity
   readonly artifactDirectory: string
   readonly runtimeEntry: string
-  readonly runtimeManifest: CordisXPluginManifestV1
+  readonly runtimeManifestIntegrity: string
+  readonly runtimeManifest: HostResolvedRuntimeManifest
   readonly dependencies: readonly PackageDependency[]
 }
 
@@ -236,6 +263,14 @@ export interface PackageImpactAccess {
 export interface PackageRuntimeObservation {
   readonly runtimeGeneration: string
   readonly plugins: Readonly<Record<string, PackageFenceEntry>>
+}
+
+export interface PackageRecoveryDirective {
+  readonly transactionId: string
+  readonly profileId: string
+  readonly action: 'discard-staged' | 'rollback-published'
+  readonly expectedPublished: PackageActivationTuple
+  readonly rollbackTarget: PackageActivationTuple
 }
 
 declare const candidateTokenBrand: unique symbol

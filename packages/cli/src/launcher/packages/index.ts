@@ -1,5 +1,7 @@
 export * from './types.js'
 export * from './graph.js'
 export * from './integrity.js'
+export * from './manifest.js'
+export * from './source.js'
 export * from './store.js'
 export * from './service.js'

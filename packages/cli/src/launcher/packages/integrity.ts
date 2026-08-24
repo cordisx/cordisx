@@ -223,7 +223,11 @@ export class ImmutablePackageObjects {
       return {
         stagingDirectory,
         payloadDirectory,
-        source: { kind: source.kind, url: pathToFileURL(canonicalPath).href },
+        source: {
+          kind: source.kind,
+          url: pathToFileURL(canonicalPath).href,
+          ...(source.downloadedFrom === undefined ? {} : { downloadedFrom: source.downloadedFrom }),
+        },
         integrity: `sha256:${digest}`,
         digest,
       }
