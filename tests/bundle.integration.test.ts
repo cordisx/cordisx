@@ -664,7 +664,7 @@ describe('renderer bundle', () => {
     expect(pluginOpen?.parentElement?.getAttribute('role')).toBe('listitem')
     const pluginActions = [...(pluginOpen?.parentElement?.querySelectorAll<HTMLButtonElement>('[data-plugin-action]') ?? [])]
     expect(pluginActions.map(action => action.dataset.pluginAction)).toEqual(['enable-disable', 'reload', 'favorite', 'more'])
-    expect(pluginActions.find(action => action.dataset.pluginAction === 'reload')).toMatchObject({ disabled: true, title: expect.stringMatching(/generation lifecycle API/) })
+    expect(pluginActions.find(action => action.dataset.pluginAction === 'reload')).toMatchObject({ disabled: true, title: expect.stringMatching(/generation lifecycle 插件/) })
     expect(pluginActions.every(action => action.querySelector('[data-material-icon]') !== null)).toBe(true)
     expect(pluginActions.find(action => action.dataset.pluginAction === 'favorite')?.getAttribute('aria-pressed')).toBe('false')
     pluginActions.find(action => action.dataset.pluginAction === 'favorite')?.click()
@@ -678,7 +678,7 @@ describe('renderer bundle', () => {
     expect([...overflowMenu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []].map(item => [item.dataset.pluginMenuAction, item.disabled])).toEqual([
       ['share', true], ['uninstall', true], ['diagnostics-source', true],
     ])
-    expect(overflowMenu?.textContent).toContain('Package Store / generation lifecycle API')
+    expect(overflowMenu?.textContent).toContain('该插件没有可用的 generation lifecycle 包')
     overflowMenu?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(dom.window.document.querySelector('[data-plugin-overflow-menu="slot-showcase"]')).toBeNull()
     expect(overflow.getAttribute('aria-expanded')).toBe('false')

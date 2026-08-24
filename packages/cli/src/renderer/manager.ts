@@ -1087,6 +1087,14 @@ function statusLabel(status: ManagerPluginStatus): string {
   if (status === 'blocked') return '已屏蔽'
   if (status === 'permission-blocked') return '权限阻止'
   if (status === 'failed') return '启动失败'
+  if (status === 'installing') return '安装中'
+  if (status === 'updating') return '更新中'
+  if (status === 'enabling') return '启用中'
+  if (status === 'disabling') return '停用中'
+  if (status === 'reloading') return '重载中'
+  if (status === 'uninstalling') return '卸载中'
+  if (status === 'rolling-back') return '正在回滚'
+  if (status === 'rollback-failed') return '回滚失败'
   return '配置禁用'
 }
 
@@ -1379,6 +1387,87 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const decision = await requestPluginAuthorization(document, plugin, plan, permissions)
     if (decision === undefined) return
     await authorize(plugin.id, decision)
+  }
+
+  /**
+   * Dynamic package actions are deliberately gated on both the renderer bridge
+   * and a launcher-owned package identity. Configured bundle entries keep the
+   * older block/restore path: they are not package-store operations.
+   */
+  const lifecycleAvailableFor = (snapshot: ManagerSnapshot, plugin: ManagerPluginSnapshot): boolean => (
+    snapshot.pluginLifecycle?.operationsAvailable === true
+    && plugin.package !== undefined
+    && model.requestPluginLifecycle !== undefined
+  )
+
+  const applyLifecycleResult = (result: CordisXPluginLifecycleResultV1): boolean => {
+    if (result.outcome === 'applied') return true
+    operationError = result.error?.message
+      ?? (result.outcome === 'rolled-back' ? '操作未完成，已恢复到上一个可用版本。' : '插件生命周期操作未完成。')
+    return false
+  }
+
+  const requestLifecycleReload = async (plugin: ManagerPluginSnapshot): Promise<void> => {
+    if (model.requestPluginLifecycle === undefined) return
+    busyPluginId = plugin.id
+    operationError = undefined
+    try {
+      applyLifecycleResult(await model.requestPluginLifecycle({ kind: 'reload', pluginId: plugin.id }))
+    } catch (error) {
+      operationError = error instanceof Error ? error.message : String(error)
+    } finally {
+      busyPluginId = undefined
+      renderContent()
+    }
+  }
+
+  const requestLifecycleEnable = async (plugin: ManagerPluginSnapshot): Promise<void> => {
+    if (model.requestPluginLifecycle === undefined) return
+    busyPluginId = plugin.id
+    operationError = undefined
+    try {
+      const planned = await model.requestPluginLifecycle({ kind: 'enable', pluginId: plugin.id })
+      if (planned.outcome !== 'planned' || planned.authorizationPlan === undefined) {
+        applyLifecycleResult(planned)
+        return
+      }
+      const permissions = model.snapshot().permissions.filter(item => item.identity.id === plugin.id)
+      const decision = await requestPluginAuthorization(document, plugin, planned.authorizationPlan, permissions)
+      if (decision === undefined) return
+      applyLifecycleResult(await model.requestPluginLifecycle({ kind: 'enable', pluginId: plugin.id, authorizationDecision: decision }))
+    } catch (error) {
+      operationError = error instanceof Error ? error.message : String(error)
+    } finally {
+      busyPluginId = undefined
+      renderContent()
+    }
+  }
+
+  const requestLifecycleDestructive = async (plugin: ManagerPluginSnapshot, kind: 'disable' | 'uninstall'): Promise<void> => {
+    if (model.requestPluginLifecycle === undefined) return
+    busyPluginId = plugin.id
+    operationError = undefined
+    try {
+      // The broker intentionally turns a non-matching token into a read-only
+      // impact plan. It prevents a destructive operation before the user has
+      // seen the reverse-dependency closure.
+      const planned = await model.requestPluginLifecycle({ kind, pluginId: plugin.id, impactToken: 'unconfirmed' })
+      if (planned.outcome !== 'planned' || planned.impactToken === undefined) {
+        applyLifecycleResult(planned)
+        return
+      }
+      const affected = planned.affectedPluginIds.join('、') || plugin.name
+      const confirmed = document.defaultView?.confirm(
+        `${kind === 'uninstall' ? '卸载' : '停用'} ${plugin.name}？\n\n受影响的插件：${affected}\n\n将依次停止接入、排空、释放资源并等待租约回收。`,
+      ) === true
+      if (!confirmed) return
+      applyLifecycleResult(await model.requestPluginLifecycle({ kind, pluginId: plugin.id, impactToken: planned.impactToken }))
+    } catch (error) {
+      operationError = error instanceof Error ? error.message : String(error)
+    } finally {
+      busyPluginId = undefined
+      renderContent()
+    }
   }
 
   const hideForExternalNavigation = (): void => {
@@ -2059,11 +2148,30 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         button.addEventListener('click', event => { event.stopPropagation(); handler?.() })
         return button
       }
-      const profile = action('enable-disable', plugin.status === 'active' ? '停用此 profile 中的插件' : '启用此 profile 中的插件', plugin.status === 'active' ? 'close' : 'plugins', plugin.status === 'configured-disabled', () => {
-        if (plugin.status === 'active') void model.setPluginBlocked(plugin.id, true).finally(renderContent)
-        else void authorizeAndRestore(plugin).finally(renderContent)
-      })
-      const reload = action('reload', '按插件重载需要 generation lifecycle API；当前不可用。', 'runtime', true)
+      const lifecycleAvailable = lifecycleAvailableFor(snapshot, plugin)
+      const lifecycleBusy = busyPluginId === plugin.id
+      const profile = action(
+        'enable-disable',
+        plugin.status === 'active' ? '停用此 profile 中的插件' : '启用此 profile 中的插件',
+        plugin.status === 'active' ? 'close' : 'plugins',
+        plugin.status === 'configured-disabled' || lifecycleBusy,
+        () => {
+          if (lifecycleAvailable) {
+            if (plugin.status === 'active') void requestLifecycleDestructive(plugin, 'disable')
+            else void requestLifecycleEnable(plugin)
+          } else if (plugin.status === 'active') void model.setPluginBlocked(plugin.id, true).finally(renderContent)
+          else void authorizeAndRestore(plugin).finally(renderContent)
+        },
+      )
+      const reload = action(
+        'reload',
+        lifecycleAvailable && plugin.status === 'active'
+          ? '重新加载插件'
+          : '重载仅适用于可用的 generation lifecycle 插件。',
+        'runtime',
+        !lifecycleAvailable || plugin.status !== 'active' || lifecycleBusy,
+        () => { void requestLifecycleReload(plugin) },
+      )
       const favorite = action('favorite', favoritePluginIds.has(plugin.id) ? '取消收藏插件' : '收藏插件', 'favorite', false, () => toggleFavoritePlugin(plugin.id))
       favorite.setAttribute('aria-pressed', String(favoritePluginIds.has(plugin.id)))
       const more = action('more', '更多插件操作', 'more', false, () => {
@@ -2071,15 +2179,31 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         prior?.remove()
         const menu = create(document, 'div', 'cxm-plugin-overflow-menu')
         menu.dataset.pluginOverflowMenu = plugin.id; menu.setAttribute('role', 'menu'); menu.tabIndex = -1
-        for (const [id, label] of [['share', '分享公开来源'], ['uninstall', '卸载'], ['diagnostics-source', '诊断与来源']] as const) {
+        const closeMenu = (): void => {
+          menu.remove()
+          more.setAttribute('aria-expanded', 'false')
+          more.focus()
+        }
+        const menuAction = (id: 'share' | 'uninstall' | 'diagnostics-source', label: string, disabled: boolean, handler?: () => void): void => {
           const item = create(document, 'button', 'cxm-plugin-menu-item', label)
-          item.type = 'button'; item.disabled = true; item.dataset.pluginMenuAction = id; item.setAttribute('role', 'menuitem')
+          item.type = 'button'; item.disabled = disabled; item.dataset.pluginMenuAction = id; item.setAttribute('role', 'menuitem')
+          item.addEventListener('click', event => { event.stopPropagation(); closeMenu(); handler?.() })
           menu.append(item)
         }
-        menu.append(create(document, 'span', 'cxm-plugin-menu-item', 'Package Store / generation lifecycle API 当前不可用。'))
+        menuAction('share', '分享公开来源', plugin.package?.canonicalSource === undefined, () => {
+          const source = plugin.package?.canonicalSource
+          if (source === undefined) return
+          void document.defaultView?.navigator.clipboard?.writeText(source).catch(error => {
+            operationError = error instanceof Error ? error.message : String(error)
+            renderContent()
+          })
+        })
+        menuAction('uninstall', '卸载', !lifecycleAvailable || lifecycleBusy, () => { void requestLifecycleDestructive(plugin, 'uninstall') })
+        menuAction('diagnostics-source', '诊断与来源', true)
+        if (!lifecycleAvailable) menu.append(create(document, 'span', 'cxm-plugin-menu-item', '该插件没有可用的 generation lifecycle 包。'))
         const bounds = more.getBoundingClientRect()
         menu.style.left = `${Math.max(8, bounds.right - 176)}px`; menu.style.top = `${Math.max(8, bounds.bottom + 6)}px`
-        menu.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); menu.remove(); more.setAttribute('aria-expanded', 'false'); more.focus() } })
+        menu.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu() } })
         more.setAttribute('aria-haspopup', 'menu'); more.setAttribute('aria-expanded', 'true')
         ;(document.body ?? document.documentElement).append(menu); menu.focus()
       })
