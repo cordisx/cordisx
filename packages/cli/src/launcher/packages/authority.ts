@@ -53,6 +53,7 @@ export interface HostPermissionReviewInput {
   readonly ownerId: string
   readonly profileId: string
   readonly transactionId: string
+  readonly transactionEpoch: string
   readonly candidateFingerprint: string
   readonly packageIdentity: PackageIdentity
   readonly permissionPlanRevision: number
@@ -98,17 +99,19 @@ export function createHostPermissionReviewAuthority(
 
 export interface SharedRegistryReadinessReceipt {
   readonly transactionId: string
+  readonly transactionEpoch: string
   readonly candidateFingerprint: string
   readonly expectedRegistryEpoch: number
-  readonly candidateRegistryEpoch: number
+  readonly afterRegistryEpoch: number
   readonly observation: PackageRuntimeObservation
   readonly receiptFingerprint: string
 }
 
 export interface SharedRegistryRollbackReceipt {
   readonly transactionId: string
+  readonly transactionEpoch: string
   readonly candidateFingerprint: string
-  readonly restoredRegistryEpoch: number
+  readonly registryEpoch: number
   readonly active: PackageRuntimeObservation
   readonly disposedAfter: PackageRuntimeObservation
   readonly receiptFingerprint: string
@@ -116,10 +119,11 @@ export interface SharedRegistryRollbackReceipt {
 
 export interface SharedRegistryCommitReceipt {
   readonly transactionId: string
+  readonly transactionEpoch: string
   readonly candidateFingerprint: string
-  readonly committedRegistryEpoch: number
+  readonly registryEpoch: number
   readonly active: PackageRuntimeObservation
-  readonly disposedPrevious: PackageRuntimeObservation
+  readonly disposedAfter: PackageRuntimeObservation
   readonly receiptFingerprint: string
 }
 
@@ -171,6 +175,7 @@ export interface RuntimeModuleAccess {
 
 export interface RollbackPlan {
   readonly transactionId: string
+  readonly transactionEpoch: string
   readonly rollbackToken: PackageRollbackToken
   readonly candidateFingerprint: string
   readonly expectedPublished: PackageActivationTuple
@@ -200,6 +205,7 @@ interface JournalPermission {
 
 interface JournalTransaction {
   readonly transactionId: string
+  readonly transactionEpoch: string
   readonly ownerId: string
   readonly profileId: string
   readonly operation: Operation
@@ -390,6 +396,7 @@ export class PackageLifecycleAuthority {
     readonly ownerId: string
     readonly operation: Operation
     readonly candidateId: string
+    readonly transactionEpoch: string
     readonly expectedRegistryEpoch: number
     readonly permissionPlanRevision: number
     readonly permissionPlanFingerprint: string
@@ -416,6 +423,7 @@ export class PackageLifecycleAuthority {
       ownerId: input.ownerId,
       profileId: this.options.profileId,
       transactionId: input.candidateId,
+      transactionEpoch: input.transactionEpoch,
       candidateFingerprint,
       packageIdentity: identity,
       permissionPlanRevision: input.permissionPlanRevision,
@@ -428,6 +436,7 @@ export class PackageLifecycleAuthority {
     }
     const transaction: JournalTransaction = {
       transactionId: input.candidateId,
+      transactionEpoch: input.transactionEpoch,
       ownerId: input.ownerId,
       profileId: this.options.profileId,
       operation: input.operation,
@@ -520,15 +529,17 @@ export class PackageLifecycleAuthority {
     if (transaction.status !== 'activation-requested' || !readinessReceipts.has(receipt)
       || receipt.receiptFingerprint !== fingerprint({
         transactionId: receipt.transactionId,
+        transactionEpoch: receipt.transactionEpoch,
         candidateFingerprint: receipt.candidateFingerprint,
         expectedRegistryEpoch: receipt.expectedRegistryEpoch,
-        candidateRegistryEpoch: receipt.candidateRegistryEpoch,
+        afterRegistryEpoch: receipt.afterRegistryEpoch,
         observation: receipt.observation,
       })
       || receipt.transactionId !== transaction.transactionId
+      || receipt.transactionEpoch !== transaction.transactionEpoch
       || receipt.candidateFingerprint !== transaction.candidateFingerprint
       || receipt.expectedRegistryEpoch !== transaction.expectedRegistryEpoch
-      || receipt.candidateRegistryEpoch !== transaction.afterRegistryEpoch
+      || receipt.afterRegistryEpoch !== transaction.afterRegistryEpoch
       || fingerprint(receipt.observation) !== fingerprint(observation(transaction.after, transaction.afterRegistryEpoch))) {
       throw new PackageLifecycleError('stale-readiness-receipt', 'shared registry readiness receipt is forged or stale')
     }
@@ -550,17 +561,19 @@ export class PackageLifecycleAuthority {
     if (transaction.status !== 'committed') throw new PackageLifecycleError('commit-not-pending', `transaction is ${transaction.status}`)
     const expectedInput = {
       transactionId: receipt.transactionId,
+      transactionEpoch: receipt.transactionEpoch,
       candidateFingerprint: receipt.candidateFingerprint,
-      committedRegistryEpoch: receipt.committedRegistryEpoch,
+      registryEpoch: receipt.registryEpoch,
       active: receipt.active,
-      disposedPrevious: receipt.disposedPrevious,
+      disposedAfter: receipt.disposedAfter,
     }
     if (!commitReceipts.has(receipt) || receipt.receiptFingerprint !== fingerprint(expectedInput)
       || receipt.transactionId !== transaction.transactionId
+      || receipt.transactionEpoch !== transaction.transactionEpoch
       || receipt.candidateFingerprint !== transaction.candidateFingerprint
-      || receipt.committedRegistryEpoch !== transaction.afterRegistryEpoch
+      || receipt.registryEpoch !== transaction.afterRegistryEpoch
       || fingerprint(receipt.active) !== fingerprint(observation(transaction.after, transaction.afterRegistryEpoch))
-      || fingerprint(receipt.disposedPrevious) !== fingerprint(observation(transaction.expected, transaction.expectedRegistryEpoch))) {
+      || fingerprint(receipt.disposedAfter) !== fingerprint(observation(transaction.expected, transaction.expectedRegistryEpoch))) {
       throw new PackageLifecycleError('stale-commit-receipt', 'commit-last-good receipt is forged or stale')
     }
     const active = await this.activation.loadActive()
@@ -613,16 +626,18 @@ export class PackageLifecycleAuthority {
     this.#access(transaction, access.ownerId, access.profileId)
     const expectedInput = {
       transactionId: receipt.transactionId,
+      transactionEpoch: receipt.transactionEpoch,
       candidateFingerprint: receipt.candidateFingerprint,
-      restoredRegistryEpoch: receipt.restoredRegistryEpoch,
+      registryEpoch: receipt.registryEpoch,
       active: receipt.active,
       disposedAfter: receipt.disposedAfter,
     }
     if (!rollbackReceipts.has(receipt) || receipt.receiptFingerprint !== fingerprint(expectedInput)
       || receipt.transactionId !== transaction.transactionId
+      || receipt.transactionEpoch !== transaction.transactionEpoch
       || receipt.candidateFingerprint !== transaction.candidateFingerprint
-      || receipt.restoredRegistryEpoch !== transaction.afterRegistryEpoch + 1
-      || fingerprint(receipt.active) !== fingerprint(observation(transaction.expected, receipt.restoredRegistryEpoch))
+      || receipt.registryEpoch !== transaction.afterRegistryEpoch + 1
+      || fingerprint(receipt.active) !== fingerprint(observation(transaction.expected, receipt.registryEpoch))
       || fingerprint(receipt.disposedAfter) !== fingerprint(observation(transaction.after, transaction.afterRegistryEpoch))) {
       throw new PackageLifecycleError('stale-rollback-receipt', 'rollback completion receipt is forged or stale')
     }
@@ -707,6 +722,7 @@ export class PackageLifecycleAuthority {
   #plan(transaction: JournalTransaction, current: CordisXPluginActivationRecordV1, boundary: PackageResolutionBoundary): PackageCandidatePlan {
     return deepFreeze({
       transactionId: transaction.transactionId,
+      transactionEpoch: transaction.transactionEpoch,
       boundary,
       profileActivationRevision: transaction.expected.revision,
       expectedRegistryEpoch: transaction.expectedRegistryEpoch,
@@ -724,6 +740,7 @@ export class PackageLifecycleAuthority {
   #rollbackPlan(transaction: JournalTransaction, rollbackToken: PackageRollbackToken): RollbackPlan {
     return {
       transactionId: transaction.transactionId,
+      transactionEpoch: transaction.transactionEpoch,
       rollbackToken,
       candidateFingerprint: transaction.candidateFingerprint,
       expectedPublished: tuple(transaction.after),

@@ -91,6 +91,7 @@ export interface PackageActivationTuple {
 
 export interface PackageCandidatePlan {
   readonly transactionId: string
+  readonly transactionEpoch: string
   readonly boundary: PackageResolutionBoundary
   readonly profileActivationRevision: number
   readonly expectedRegistryEpoch: number

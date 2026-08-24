@@ -94,6 +94,7 @@ async function setup(decision?: Partial<HostPermissionReviewDecision>) {
     ownerId: 'generation-runtime',
     operation: 'install',
     candidateId: 'transaction-1',
+    transactionEpoch: 'transaction-epoch-1',
     expectedRegistryEpoch: 4,
     permissionPlanRevision: 7,
     permissionPlanFingerprint: 'b'.repeat(64),
@@ -127,13 +128,14 @@ async function ready(setupResult: Awaited<ReturnType<typeof setup>>) {
   const plan = await authority.requestActivation(access)
   const receipt = registry.issueReadiness({
     transactionId: plan.transactionId,
+    transactionEpoch: plan.transactionEpoch,
     candidateFingerprint: prepared.plan.transactionId.length > 0
       ? (await authority.resolveCandidate(access, 'publish')).after.plugins.length > 0
         ? (await readCandidateFingerprint(setupResult))
         : ''
       : '',
     expectedRegistryEpoch: plan.expectedRegistryEpoch,
-    candidateRegistryEpoch: plan.afterRegistryEpoch,
+    afterRegistryEpoch: plan.afterRegistryEpoch,
     observation: runtimeObservation(plan.after, plan.afterRegistryEpoch),
   })
   await authority.confirmReadiness(access, receipt)
@@ -188,27 +190,46 @@ describe('Host-private package lifecycle authority', () => {
     const fingerprint = await readCandidateFingerprint(current)
     await expect(current.authority.confirmReadiness(current.access, {
       transactionId: plan.transactionId,
+      transactionEpoch: plan.transactionEpoch,
       candidateFingerprint: fingerprint,
       expectedRegistryEpoch: plan.expectedRegistryEpoch,
-      candidateRegistryEpoch: plan.afterRegistryEpoch,
+      afterRegistryEpoch: plan.afterRegistryEpoch,
       observation: runtimeObservation(plan.after, plan.afterRegistryEpoch),
       receiptFingerprint: '0'.repeat(64),
     })).rejects.toMatchObject({ code: 'stale-readiness-receipt' })
     const registry = createHostRegistryReceiptAuthority()
-    await current.authority.confirmReadiness(current.access, registry.issueReadiness({
+    await expect(current.authority.confirmReadiness(current.access, registry.issueReadiness({
       transactionId: plan.transactionId,
+      transactionEpoch: String(plan.expectedRegistryEpoch),
       candidateFingerprint: fingerprint,
       expectedRegistryEpoch: plan.expectedRegistryEpoch,
-      candidateRegistryEpoch: plan.afterRegistryEpoch,
+      afterRegistryEpoch: plan.afterRegistryEpoch,
+      observation: runtimeObservation(plan.after, plan.afterRegistryEpoch),
+    }))).rejects.toMatchObject({ code: 'stale-readiness-receipt' })
+    await expect(current.authority.confirmReadiness(current.access, registry.issueReadiness({
+      transactionId: plan.transactionId,
+      transactionEpoch: plan.transactionEpoch,
+      candidateFingerprint: fingerprint,
+      expectedRegistryEpoch: plan.expectedRegistryEpoch,
+      afterRegistryEpoch: plan.afterRegistryEpoch + 1,
+      observation: runtimeObservation(plan.after, plan.afterRegistryEpoch + 1),
+    }))).rejects.toMatchObject({ code: 'stale-readiness-receipt' })
+    await current.authority.confirmReadiness(current.access, registry.issueReadiness({
+      transactionId: plan.transactionId,
+      transactionEpoch: plan.transactionEpoch,
+      candidateFingerprint: fingerprint,
+      expectedRegistryEpoch: plan.expectedRegistryEpoch,
+      afterRegistryEpoch: plan.afterRegistryEpoch,
       observation: runtimeObservation(plan.after, plan.afterRegistryEpoch),
     }))
     expect(await current.authority.commit(current.access)).toMatchObject({ revision: 1, plugins: [{ id: 'candidate' }] })
     await current.authority.completeCommit(current.access, registry.issueCommit({
       transactionId: plan.transactionId,
+      transactionEpoch: plan.transactionEpoch,
       candidateFingerprint: fingerprint,
-      committedRegistryEpoch: plan.afterRegistryEpoch,
+      registryEpoch: plan.afterRegistryEpoch,
       active: runtimeObservation(plan.after, plan.afterRegistryEpoch),
-      disposedPrevious: runtimeObservation(plan.expected, plan.expectedRegistryEpoch),
+      disposedAfter: runtimeObservation(plan.expected, plan.expectedRegistryEpoch),
     }))
   })
 
@@ -222,6 +243,7 @@ describe('Host-private package lifecycle authority', () => {
       ownerId: 'generation-runtime',
       operation: 'install',
       candidateId: 'transaction-1',
+      transactionEpoch: 'transaction-epoch-2',
       expectedRegistryEpoch: 6,
       permissionPlanRevision: 8,
       permissionPlanFingerprint: 'c'.repeat(64),
@@ -236,8 +258,9 @@ describe('Host-private package lifecycle authority', () => {
       rollbackToken: rollback.rollbackToken,
     }, { ...registry.issueRollback({
       transactionId: rollback.transactionId,
+      transactionEpoch: rollback.transactionEpoch,
       candidateFingerprint: rollback.candidateFingerprint,
-      restoredRegistryEpoch: rollback.rollbackRegistryEpoch,
+      registryEpoch: rollback.rollbackRegistryEpoch,
       active,
       disposedAfter,
     }), receiptFingerprint: 'f'.repeat(64) })).rejects.toMatchObject({ code: 'stale-rollback-receipt' })
@@ -248,8 +271,9 @@ describe('Host-private package lifecycle authority', () => {
       rollbackToken: rollback.rollbackToken,
     }, registry.issueRollback({
       transactionId: rollback.transactionId,
+      transactionEpoch: rollback.transactionEpoch,
       candidateFingerprint: rollback.candidateFingerprint,
-      restoredRegistryEpoch: rollback.rollbackRegistryEpoch,
+      registryEpoch: rollback.rollbackRegistryEpoch,
       active,
       disposedAfter,
     }))
