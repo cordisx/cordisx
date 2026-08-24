@@ -29,6 +29,9 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `extension-point-management.md` defines surfaces and outlets as the two
   extension-point families, their localized host catalog, manager search and
   detail experience, point-policy enforcement, and delivery/validation order.
+- `marketplace-trust-and-ranking.md` defines the independent Official and
+  Certified dimensions, protected Marketplace trust root, exact-artifact
+  revocation behavior, bounded stable search order, and Manager projection.
 - `ui-extension-catalog-codex-adapter.md` defines the complete host-neutral UI
   catalog, Codex adapter availability, structured payload families, DeepSeek
   Harness mapping/refusals, contextual identity boundary, and validation matrix.
