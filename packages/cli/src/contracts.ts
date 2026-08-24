@@ -1,8 +1,10 @@
 import type { Context, Disposable, Effect } from '@deepseek-ai/cordis'
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
+import type { CordisXPluginDependencyV1 } from './plugin-lifecycle-contracts.js'
 
 export * from './platform-contracts.js'
 export * from './agent-contracts.js'
+export * from './plugin-lifecycle-contracts.js'
 
 /** Scalar parameter values accepted by LocalizedText and the protocol. */
 export type CordisXMessageParam = string | number | boolean | null
@@ -755,6 +757,16 @@ export interface CordisXBrowserPlugin {
   readonly module?: CordisXPluginModule
   readonly config: unknown
   readonly revision: number
+  /** Package-authoritative manifest, used instead of executing module metadata when present. */
+  readonly manifest?: CordisXPluginManifestV1
+  /** Immutable package and module generation metadata owned by the launcher. */
+  readonly package?: {
+    readonly version: string
+    readonly digest: `sha256:${string}`
+    readonly moduleGeneration: string
+    readonly dependencies: readonly CordisXPluginDependencyV1[]
+    readonly canonicalSource?: string
+  }
   /** Adjacent README.md captured by the launcher for this browser generation. */
   readonly readme?: string
 }

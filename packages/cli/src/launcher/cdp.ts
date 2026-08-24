@@ -1,6 +1,15 @@
 import WebSocket from 'ws'
 import { fetchMarketplaceFeed } from './marketplace.js'
 import type { ProviderFleet } from '../providers/fleet.js'
+import type { PluginLifecycleRuntime, PluginRuntimeMutation } from './plugin-lifecycle.js'
+import {
+  handlePluginLifecycleBindingRequest,
+  MAX_PLUGIN_LIFECYCLE_REQUEST_BYTES,
+  parsePluginLifecycleBindingRequest,
+  PLUGIN_LIFECYCLE_BINDING,
+  PLUGIN_LIFECYCLE_RECEIVER,
+  type PluginLifecycleBridgeHandler,
+} from './plugin-lifecycle-rpc.js'
 import {
   handleProviderBindingRequest,
   MAX_PROVIDER_REQUEST_BYTES,
@@ -34,6 +43,7 @@ import {
   parsePermissionBindingRequest,
   persistPermissionPolicies,
   type PermissionPersistenceContext,
+  type PluginPermissionIdentityRegistry,
 } from './permission-rpc.js'
 
 const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
@@ -135,6 +145,140 @@ class CdpSession {
   }
 }
 
+async function evaluateRuntimeOperation(session: CdpSession, expression: string): Promise<void> {
+  const response = await session.send('Runtime.evaluate', {
+    expression,
+    awaitPromise: true,
+    returnByValue: true,
+    allowUnsafeEvalBlockedByCSP: true,
+  })
+  const value = (response.result as { value?: unknown } | undefined)?.value as { ok?: unknown; error?: unknown } | undefined
+  if (value?.ok !== true) throw new Error(typeof value?.error === 'string' ? value.error : 'renderer lifecycle operation failed')
+}
+
+/** Broadcast one reversible generation transaction to every injected Codex renderer. */
+export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
+  private readonly sessions = new Set<CdpSession>()
+  private readonly staged = new Map<string, readonly CdpSession[]>()
+
+  constructor(private readonly permissionIdentities?: PluginPermissionIdentityRegistry) {}
+
+  register(session: CdpSession): () => void {
+    this.sessions.add(session)
+    return () => {
+      this.sessions.delete(session)
+      for (const [transactionId, sessions] of this.staged) {
+        const remaining = sessions.filter(item => item !== session)
+        if (remaining.length === 0) this.staged.delete(transactionId)
+        else if (remaining.length !== sessions.length) this.staged.set(transactionId, remaining)
+      }
+    }
+  }
+
+  async stage(mutation: PluginRuntimeMutation): Promise<void> {
+    const sessions = [...this.sessions]
+    if (sessions.length === 0) throw new Error('no ready CordisX renderer is available')
+    const rendererMutation = {
+      ...mutation,
+      ...(mutation.package === undefined ? {} : {
+        package: {
+          manifest: mutation.package.manifest,
+          digest: mutation.package.digest,
+          identitySource: mutation.package.identitySource,
+          ...(mutation.package.readme === undefined ? {} : { readme: mutation.package.readme }),
+        },
+      }),
+    }
+    const completed: CdpSession[] = []
+    this.permissionIdentities?.stage(
+      mutation.transactionId,
+      mutation.operation,
+      mutation.targetId,
+      mutation.affectedPluginIds,
+      mutation.package?.identitySource,
+    )
+    try {
+      for (const session of sessions) {
+        if (mutation.package !== undefined) {
+          await session.send('Runtime.evaluate', {
+            expression: 'delete globalThis.__cordisxPendingPluginModuleV1',
+            allowUnsafeEvalBlockedByCSP: true,
+          })
+          const artifact = await session.send('Runtime.evaluate', {
+            expression: mutation.package.artifactSource,
+            allowUnsafeEvalBlockedByCSP: true,
+          })
+          if (artifact.exceptionDetails !== undefined) throw new Error('plugin artifact evaluation failed')
+        }
+        const serialized = JSON.stringify(rendererMutation)
+        await evaluateRuntimeOperation(session, `(async () => { try {
+          const module = globalThis.__cordisxPendingPluginModuleV1
+          delete globalThis.__cordisxPendingPluginModuleV1
+          const runtime = globalThis.__cordisxRuntime
+          if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
+          await runtime.stagePluginMutation(${serialized}, module)
+          return { ok: true }
+        } catch (error) {
+          delete globalThis.__cordisxPendingPluginModuleV1
+          return { ok: false, error: error instanceof Error ? error.message : String(error) }
+        } })()`)
+        completed.push(session)
+      }
+      this.staged.set(mutation.transactionId, sessions)
+    } catch (error) {
+      await Promise.allSettled(completed.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
+        const runtime = globalThis.__cordisxRuntime
+        if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
+        await runtime.abortPluginMutation(${JSON.stringify(mutation.transactionId)})
+        return { ok: true }
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+      this.permissionIdentities?.abort(mutation.transactionId)
+      throw error
+    }
+  }
+
+  async commit(transactionId: string): Promise<void> {
+    const sessions = this.staged.get(transactionId) ?? []
+    try {
+      await Promise.all(sessions.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
+        const runtime = globalThis.__cordisxRuntime
+        if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
+        await runtime.commitPluginMutation(${JSON.stringify(transactionId)})
+        return { ok: true }
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    } finally {
+      this.staged.delete(transactionId)
+      this.permissionIdentities?.commit(transactionId)
+    }
+  }
+
+  async abort(transactionId: string): Promise<void> {
+    const sessions = this.staged.get(transactionId) ?? []
+    try {
+      await Promise.all(sessions.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
+        const runtime = globalThis.__cordisxRuntime
+        if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
+        await runtime.abortPluginMutation(${JSON.stringify(transactionId)})
+        return { ok: true }
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    } finally {
+      this.staged.delete(transactionId)
+      this.permissionIdentities?.abort(transactionId)
+    }
+  }
+
+  async reload(input: { readonly pluginId: string; readonly moduleGeneration: string; readonly runtimeGeneration: string }): Promise<void> {
+    const sessions = [...this.sessions]
+    if (sessions.length === 0) throw new Error('no ready CordisX renderer is available')
+    await Promise.all(sessions.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
+      const runtime = globalThis.__cordisxRuntime
+      if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
+      await runtime.reloadPluginGeneration(${JSON.stringify(input.pluginId)}, ${JSON.stringify(input.moduleGeneration)}, ${JSON.stringify(input.runtimeGeneration)})
+      return { ok: true }
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+  }
+}
+
 async function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted === true) return
   await new Promise<void>((resolve) => {
@@ -193,6 +337,10 @@ interface InstalledScript {
   readonly permissionController?: AbortController
   readonly removePermissionBindingListener?: () => void
   readonly permissionBindingInstalled: boolean
+  readonly lifecycleController?: AbortController
+  readonly removeLifecycleBindingListener?: () => void
+  readonly lifecycleBindingInstalled: boolean
+  readonly unregisterLifecycleSession?: () => void
 }
 
 interface MarketplaceBindingRequest {
@@ -247,6 +395,13 @@ async function sendPermissionBindingResponse(session: CdpSession, payload: Recor
   })
 }
 
+async function sendPluginLifecycleBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
+  await session.send('Runtime.evaluate', {
+    expression: `void globalThis.${PLUGIN_LIFECYCLE_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    allowUnsafeEvalBlockedByCSP: true,
+  })
+}
+
 async function install(
   target: CdpTarget,
   source: string,
@@ -254,6 +409,7 @@ async function install(
   history?: { readonly host: CodexAgentHistoryHost; readonly token: string },
   config?: ConfigBridgeHandler,
   permission?: PermissionPersistenceContext,
+  lifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime },
 ): Promise<InstalledScript> {
   const url = target.webSocketDebuggerUrl
   if (url === undefined) throw new Error(`target ${target.id} has no websocket URL`)
@@ -263,11 +419,14 @@ async function install(
   const historyController = history === undefined ? undefined : new AbortController()
   const configController = config === undefined ? undefined : new AbortController()
   const permissionController = permission === undefined ? undefined : new AbortController()
+  const lifecycleController = lifecycle === undefined ? undefined : new AbortController()
   let removeBindingListener = (): void => {}
   let removeProviderBindingListener = (): void => {}
   let removeHistoryBindingListener = (): void => {}
   let removeConfigBindingListener = (): void => {}
   let removePermissionBindingListener = (): void => {}
+  let removeLifecycleBindingListener = (): void => {}
+  let unregisterLifecycleSession = (): void => {}
   try {
     await session.send('Runtime.enable')
     await session.send('Page.enable')
@@ -276,6 +435,7 @@ async function install(
     if (history !== undefined) await session.send('Runtime.addBinding', { name: AGENT_HISTORY_BINDING })
     if (config !== undefined) await session.send('Runtime.addBinding', { name: CONFIG_BINDING })
     if (permission !== undefined) await session.send('Runtime.addBinding', { name: PERMISSION_BINDING })
+    if (lifecycle !== undefined) await session.send('Runtime.addBinding', { name: PLUGIN_LIFECYCLE_BINDING })
     let activeMarketplaceRequests = 0
     removeBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
       if (params.name !== MARKETPLACE_BINDING || typeof params.payload !== 'string') return
@@ -429,6 +589,32 @@ async function install(
         })()
       })
     }
+    let activeLifecycleRequests = 0
+    if (lifecycle !== undefined) {
+      removeLifecycleBindingListener = session.onEvent('Runtime.bindingCalled', params => {
+        if (params.name !== PLUGIN_LIFECYCLE_BINDING || typeof params.payload !== 'string') return
+        const payload = params.payload
+        void (async () => {
+          let requestId = 'invalid'
+          try {
+            if (Buffer.byteLength(payload) > MAX_PLUGIN_LIFECYCLE_REQUEST_BYTES) throw new Error('plugin lifecycle request exceeds maximum size')
+            const request = parsePluginLifecycleBindingRequest(JSON.parse(payload) as unknown, lifecycle.handler)
+            requestId = request.requestId
+            if (lifecycleController?.signal.aborted === true) throw new Error('plugin lifecycle bridge is closed')
+            if (activeLifecycleRequests >= 1) throw new Error('another plugin lifecycle request is already active')
+            activeLifecycleRequests += 1
+            try {
+              const value = await handlePluginLifecycleBindingRequest(lifecycle.handler, request)
+              await sendPluginLifecycleBindingResponse(session, { requestId, ok: true, value })
+            } finally {
+              activeLifecycleRequests -= 1
+            }
+          } catch {
+            await sendPluginLifecycleBindingResponse(session, { requestId, ok: false, error: 'Plugin lifecycle request was rejected' }).catch(() => undefined)
+          }
+        })()
+      })
+    }
     const added = await session.send('Page.addScriptToEvaluateOnNewDocument', { source })
     const identifier = added.identifier
     if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
@@ -436,6 +622,13 @@ async function install(
       expression: source,
       allowUnsafeEvalBlockedByCSP: true,
     })
+    if (lifecycle !== undefined) {
+      await evaluateRuntimeOperation(session, `(async () => { try {
+        await globalThis.__cordisxBoot
+        return { ok: globalThis.__cordisxRuntime !== undefined }
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)
+      unregisterLifecycleSession = lifecycle.runtime.register(session)
+    }
     return {
       target,
       identifier,
@@ -450,6 +643,8 @@ async function install(
       configBindingInstalled: config !== undefined,
       ...(permissionController === undefined ? {} : { permissionController, removePermissionBindingListener }),
       permissionBindingInstalled: permission !== undefined,
+      ...(lifecycleController === undefined ? {} : { lifecycleController, removeLifecycleBindingListener, unregisterLifecycleSession }),
+      lifecycleBindingInstalled: lifecycle !== undefined,
     }
   } catch (error) {
     marketplaceController.abort()
@@ -457,11 +652,14 @@ async function install(
     historyController?.abort()
     configController?.abort()
     permissionController?.abort()
+    lifecycleController?.abort()
     removeBindingListener()
     removeProviderBindingListener()
     removeHistoryBindingListener()
     removeConfigBindingListener()
     removePermissionBindingListener()
+    removeLifecycleBindingListener()
+    unregisterLifecycleSession()
     session.close()
     throw error
   }
@@ -473,11 +671,14 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.historyController?.abort()
   installed.configController?.abort()
   installed.permissionController?.abort()
+  installed.lifecycleController?.abort()
   installed.removeBindingListener()
   installed.removeProviderBindingListener?.()
   installed.removeHistoryBindingListener?.()
   installed.removeConfigBindingListener?.()
   installed.removePermissionBindingListener?.()
+  installed.removeLifecycleBindingListener?.()
+  installed.unregisterLifecycleSession?.()
   try {
     await Promise.allSettled([
       installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }),
@@ -498,6 +699,9 @@ async function uninstall(installed: InstalledScript): Promise<void> {
       ...(installed.permissionBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: PERMISSION_BINDING })]
         : []),
+      ...(installed.lifecycleBindingInstalled
+        ? [installed.session.send('Runtime.removeBinding', { name: PLUGIN_LIFECYCLE_BINDING })]
+        : []),
     ])
   } finally {
     installed.session.close()
@@ -515,6 +719,7 @@ export interface WatchInjectionOptions {
   readonly agentHistoryBridgeToken?: string
   readonly configBridge?: ConfigBridgeHandler
   readonly permissionPersistence?: PermissionPersistenceContext
+  readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
 }
 
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
@@ -550,6 +755,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             history,
             options.configBridge,
             options.permissionPersistence,
+            options.pluginLifecycle,
           )
           installed.set(target.id, record)
           options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)

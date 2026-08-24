@@ -12,6 +12,8 @@ import {
   type CordisXIconToken,
   type CordisXLocalizedText,
   type CordisXRouteReference,
+  type CordisXPluginLifecycleOperationV1,
+  type CordisXPluginLifecycleResultV1,
 } from '../contracts.js'
 import type { LocaleCatalogSnapshot } from './i18n.js'
 import {
@@ -40,7 +42,9 @@ import type { CordisXConfigFieldSnapshot, CordisXJsonValue } from '../contracts.
 import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
 import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 
-export type ManagerPluginStatus = 'active' | 'blocked' | 'permission-blocked' | 'configured-disabled' | 'failed'
+export type ManagerPluginStatus =
+  | 'active' | 'blocked' | 'permission-blocked' | 'configured-disabled' | 'failed'
+  | 'installing' | 'updating' | 'enabling' | 'disabling' | 'reloading' | 'uninstalling' | 'rolling-back' | 'rollback-failed'
 
 export interface ManagerPluginSnapshot {
   readonly id: string
@@ -53,6 +57,13 @@ export interface ManagerPluginSnapshot {
   readonly status: ManagerPluginStatus
   readonly error?: string
   readonly blockedReason?: string
+  readonly package?: {
+    readonly version: string
+    readonly digest: `sha256:${string}`
+    readonly moduleGeneration: string
+    readonly dependencies: readonly string[]
+    readonly canonicalSource?: string
+  }
 }
 
 export interface ManagerPermissionSnapshot {
@@ -84,6 +95,11 @@ export interface ManagerSnapshot {
   /** Runtime-owned point catalog/policy projection; manager UX consumes it in the following slice. */
   readonly extensionPoints?: ExtensionPointRuntimeSnapshot
   readonly settingsTabs?: readonly ManagerSettingsTabSnapshot[]
+  readonly pluginLifecycle?: {
+    readonly revision: number
+    readonly runtimeGeneration: string
+    readonly operationsAvailable: boolean
+  }
 }
 
 export interface ManagerSettingsTabSnapshot {
@@ -111,6 +127,7 @@ export interface ManagerModel {
   setPermissionPolicy(id: string, capability: CordisXPlatformCapability, policy: CordisXPermissionPolicy): Promise<void>
   permissionAuthorizationPlan?(id: string): CordisXPermissionAuthorizationPlanV1
   authorizePlugin?(id: string, decision: CordisXPermissionAuthorizationDecisionV1): Promise<void>
+  requestPluginLifecycle?(operation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1>
   setExtensionPointPolicy?(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
   mountSettingsTab?(id: string, panelBody: HTMLElement): Promise<ManagedSettingsPageMount>
   closeSettingsTabContent?(): Promise<void>

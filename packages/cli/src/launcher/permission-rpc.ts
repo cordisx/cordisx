@@ -19,6 +19,39 @@ export interface PermissionPersistenceContext {
   readonly profileId: string
   readonly token: string
   readonly identities: readonly CordisXPluginIdentity[]
+  readonly identityAllowed?: (identity: CordisXPluginIdentity) => boolean
+}
+
+/** Mutable Host-owned identity fence for package generations not present in launcher config. */
+export class PluginPermissionIdentityRegistry {
+  private current = new Map<string, string>()
+  private readonly previous = new Map<string, Map<string, string>>()
+
+  constructor(identities: readonly CordisXPluginIdentity[] = []) {
+    this.current = new Map(identities.map(identity => [identity.id, identity.source]))
+  }
+
+  allowed(identity: CordisXPluginIdentity): boolean {
+    return this.current.get(identity.id) === identity.source
+  }
+
+  stage(transactionId: string, operation: string, targetId: string, affected: readonly string[], source?: string): void {
+    if (this.previous.has(transactionId)) throw new Error('permission identity transaction already exists')
+    this.previous.set(transactionId, new Map(this.current))
+    if (operation === 'uninstall') for (const id of affected) this.current.delete(id)
+    else if (source !== undefined) this.current.set(targetId, source)
+  }
+
+  commit(transactionId: string): void {
+    this.previous.delete(transactionId)
+  }
+
+  abort(transactionId: string): void {
+    const previous = this.previous.get(transactionId)
+    if (previous === undefined) return
+    this.current = previous
+    this.previous.delete(transactionId)
+  }
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -52,7 +85,9 @@ export function parsePermissionBindingRequest(
     if (record.key.profileId !== context.profileId) throw new Error('permission request profile is invalid')
     if (!context.identities.some(identity => (
       identity.source === record.key.identity.source && identity.id === record.key.identity.pluginId
-    ))) throw new Error('permission request identity is invalid')
+    )) && context.identityAllowed?.({ source: record.key.identity.source, id: record.key.identity.pluginId }) !== true) {
+      throw new Error('permission request identity is invalid')
+    }
     const key = permissionRecordKey(record)
     if (keys.has(key)) throw new Error('permission request contains a duplicate policy key')
     keys.add(key)

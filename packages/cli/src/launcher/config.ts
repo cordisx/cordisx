@@ -3,6 +3,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveProviderConfigs } from '../providers/config.js'
 import type { CliProxyProviderConfig } from '../providers/contracts.js'
+import type { CordisXPluginDependencyV1 } from '../plugin-lifecycle-contracts.js'
+import type { CordisXPluginManifestV1 } from '../platform-contracts.js'
 
 export interface CordisXConfigPlugin {
   readonly id: string
@@ -10,6 +12,16 @@ export interface CordisXConfigPlugin {
   readonly enabled: boolean
   readonly config: unknown
   readonly revision?: number
+  readonly source?: string
+  readonly manifest?: CordisXPluginManifestV1
+  readonly package?: {
+    readonly version: string
+    readonly digest: `sha256:${string}`
+    readonly moduleGeneration: string
+    readonly dependencies: readonly CordisXPluginDependencyV1[]
+    readonly canonicalSource?: string
+  }
+  readonly readme?: string
 }
 
 export interface LoadConfigOptions {
