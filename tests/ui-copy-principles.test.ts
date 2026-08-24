@@ -60,4 +60,45 @@ describe('UI copy principles', () => {
     expect(principles).toContain('`fiber`, `generation`, `canonical identity`')
     expect(principles).toContain('`en` and `zh-CN`')
   })
+
+  it('routes Manager primary headings and controls through locale-aware copy', async () => {
+    const manager = await readFile(managerPath, 'utf8')
+    const primaryUi = [
+      section(manager, 'const renderPluginList', 'const renderMarketplaceList'),
+      section(manager, 'const renderPluginDetail', 'const marketplaceSourceState'),
+    ].join('\n')
+
+    expect(primaryUi).not.toMatch(/setHeading\('[\p{Script=Han}]/u)
+    expect(primaryUi).not.toMatch(/createTabPanel\(document, '[\p{Script=Han}]/u)
+    expect(primaryUi).not.toMatch(/openLabel: `打开/u)
+    expect(primaryUi).toContain("setHeading(copy('plugins.heading')")
+    expect(primaryUi).toContain("placeholder: copy('plugins.search-placeholder')")
+    expect(primaryUi).toContain("placeholder: copy('marketplace.search-placeholder')")
+  })
+
+  it('keeps Console chrome locale-aware and leaves raw diagnostics out of its primary controls', async () => {
+    const manager = await readFile(managerPath, 'utf8')
+    const consoleChrome = section(manager, "if (activeFacet === 'runtime')", "const lifecycle = create")
+
+    expect(consoleChrome).not.toMatch(/[\p{Script=Han}]/u)
+    expect(consoleChrome).toContain("copy('console.toolbar')")
+    expect(consoleChrome).toContain("copy('console.entry-details')")
+    expect(consoleChrome).toContain("copy('console.close-details')")
+  })
+
+  it('keeps every primary collection heading, search control, and demo card description locale-aware', async () => {
+    const manager = await readFile(managerPath, 'utf8')
+    const primaryCollections = [
+      section(manager, 'const renderExtensionPointList', 'const renderExtensionPointDetail'),
+      section(manager, 'const renderRouteList', 'const renderRouteDetail'),
+      section(manager, 'const renderPluginList', 'const commitPermissionPolicy'),
+    ].join('\n')
+
+    expect(primaryCollections).not.toMatch(/[\p{Script=Han}]/u)
+    expect(primaryCollections).toContain("copy('extension.search-placeholder')")
+    expect(primaryCollections).toContain("copy('routes.search-placeholder')")
+    expect(primaryCollections).toContain("'plugins.demo.form-schema-gallery-description'")
+    expect(managerCopy('en', 'plugins.demo.slot-showcase-description')).toBe('Explore plugins, navigation, pages, and status.')
+    expect(managerCopy('zh-CN', 'plugins.demo.slot-showcase-description')).toBe('查看插件、导航、页面与状态。')
+  })
 })

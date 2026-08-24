@@ -687,7 +687,7 @@ describe('renderer bundle', () => {
     expect(managerStyles).not.toContain('.cxm-feed-summary')
     expect(managerStyles).toContain('.cxm-about-identity-copy { min-width: 0; white-space: nowrap; }')
     const pluginCard = managerModal?.querySelector<HTMLElement>('[data-plugin-card="slot-showcase"]')
-    expect(pluginCard?.querySelector('.cxc-description')?.textContent).toBe('在插件管理器中展示扩展点、导航、页面与状态交互的完整示例。')
+    expect(pluginCard?.querySelector('.cxc-description')?.textContent).toBe('查看插件、导航、页面与状态。')
     expect(pluginCard?.querySelector('.cxc-machine-id')?.textContent).toBe('slot-showcase')
     expect(pluginCard?.querySelector('.cxc-status')?.getAttribute('data-tone')).toBe('success')
     expect(pluginCard?.querySelector('[data-plugin-primary]')?.getAttribute('aria-description')).toBe('运行中')

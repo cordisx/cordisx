@@ -81,6 +81,7 @@ type CopyKey =
   | 'manager.close'
   | 'manager.dialog'
   | 'manager.navigation'
+  | 'manager.back'
   | 'plugins.install'
   | 'plugins.install-checking'
   | 'plugins.enable'
@@ -88,6 +89,48 @@ type CopyKey =
   | 'plugins.favorite'
   | 'plugins.unfavorite'
   | 'plugins.reload'
+  | 'plugins.open'
+  | 'plugins.heading'
+  | 'console.requests'
+  | 'console.successes'
+  | 'console.failures'
+  | 'console.denied'
+  | 'console.performance'
+  | 'console.no-host-api-metrics'
+  | 'console.search-placeholder'
+  | 'console.all'
+  | 'console.level'
+  | 'console.kind'
+  | 'console.source'
+  | 'console.toolbar'
+  | 'console.pause'
+  | 'console.resume'
+  | 'console.follow'
+  | 'console.stop-following'
+  | 'console.clear'
+  | 'console.irreversible'
+  | 'console.copy'
+  | 'console.ownership-warning'
+  | 'console.dismiss-ownership-warning'
+  | 'console.empty'
+  | 'console.no-matches'
+  | 'console.back-to-latest'
+  | 'console.entry-details'
+  | 'console.close-details'
+  | 'console.field.plugin'
+  | 'console.field.generation'
+  | 'console.field.source'
+  | 'console.field.kind'
+  | 'console.field.coverage'
+  | 'console.field.correlation'
+  | 'console.field.phase'
+  | 'console.field.status'
+  | 'console.field.duration'
+  | 'console.field.session'
+  | 'console.field.trigger'
+  | 'console.field.owner'
+  | 'console.field.request-metrics'
+  | 'console.field.result-metrics'
   | 'plugins.share'
   | 'plugins.share-unavailable'
   | 'plugins.open-source'
@@ -103,6 +146,13 @@ type CopyKey =
   | 'plugins.empty'
   | 'plugins.no-matches'
   | 'plugins.more-actions'
+  | 'plugins.operation-busy'
+  | 'plugins.enable-unavailable'
+  | 'plugins.disable-unavailable'
+  | 'plugins.reload-unavailable'
+  | 'plugins.demo.slot-showcase-description'
+  | 'plugins.demo.hello-toolbar-description'
+  | 'plugins.demo.form-schema-gallery-description'
   | 'plugin-tab.readme'
   | 'plugin-tab.configuration'
   | 'plugin-tab.permissions'
@@ -112,8 +162,22 @@ type CopyKey =
   | 'extension-tab.usage'
   | 'extension-tab.information'
   | 'extension-tab.diagnostics'
+  | 'extension.heading'
+  | 'extension.collection-label'
+  | 'extension.search-label'
+  | 'extension.search-placeholder'
+  | 'extension.empty'
+  | 'extension.no-matches'
   | 'marketplace-tab.overview'
   | 'marketplace-tab.authors-source'
+  | 'routes.heading'
+  | 'routes.collection-label'
+  | 'routes.search-label'
+  | 'routes.search-placeholder'
+  | 'routes.empty'
+  | 'routes.no-matches'
+  | 'routes.open-route'
+  | 'routes.open-page'
   | 'marketplace.heading'
   | 'marketplace.filter-all'
   | 'marketplace.filter-certified'
@@ -214,6 +278,7 @@ type CopyKey =
   | 'form.sensitive-unavailable'
   | 'form.unsupported'
   | 'form.select-placeholder'
+  | 'form.text-placeholder'
   | 'form.switch-on'
   | 'form.switch-off'
   | 'form.section-general'
@@ -301,6 +366,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'manager.close': { en: 'Close CordisX Manager', 'zh-CN': '关闭 CordisX 管理器' },
   'manager.dialog': { en: 'CordisX Plugin Manager', 'zh-CN': 'CordisX 插件管理器' },
   'manager.navigation': { en: 'CordisX Manager pages', 'zh-CN': 'CordisX 管理器页面' },
+  'manager.back': { en: 'Back', 'zh-CN': '返回' },
   'plugins.install': { en: 'Import local plugin', 'zh-CN': '导入本地插件' },
   'plugins.install-checking': { en: 'Checking local package', 'zh-CN': '检查本地包中' },
   'plugins.enable': { en: 'Enable plugin', 'zh-CN': '启用插件' },
@@ -308,6 +374,48 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'plugins.favorite': { en: 'Favorite plugin', 'zh-CN': '收藏插件' },
   'plugins.unfavorite': { en: 'Remove from favorites', 'zh-CN': '取消收藏' },
   'plugins.reload': { en: 'Reload plugin', 'zh-CN': '重载插件' },
+  'plugins.open': { en: 'Open plugin details', 'zh-CN': '打开插件详情' },
+  'plugins.heading': { en: 'Plugin details', 'zh-CN': '插件详情' },
+  'console.requests': { en: 'Requests', 'zh-CN': '调用' },
+  'console.successes': { en: 'Succeeded', 'zh-CN': '成功' },
+  'console.failures': { en: 'Failed', 'zh-CN': '失败' },
+  'console.denied': { en: 'Denied', 'zh-CN': '拒绝' },
+  'console.performance': { en: 'Performance & usage · Average duration', 'zh-CN': '性能与消费 · 平均耗时' },
+  'console.no-host-api-metrics': { en: 'No Host API metrics.', 'zh-CN': '当前没有 Host API 调用计量。' },
+  'console.search-placeholder': { en: 'Search messages, sources, or correlation ID', 'zh-CN': '搜索消息、来源或 correlation id' },
+  'console.all': { en: 'All', 'zh-CN': '全部' },
+  'console.level': { en: 'Log level', 'zh-CN': '日志级别' },
+  'console.kind': { en: 'API / type', 'zh-CN': 'API / 类型' },
+  'console.source': { en: 'Log source', 'zh-CN': '日志来源' },
+  'console.toolbar': { en: 'Console display controls', 'zh-CN': 'Console 显示控制' },
+  'console.pause': { en: 'Pause capture', 'zh-CN': '暂停采集' },
+  'console.resume': { en: 'Resume capture', 'zh-CN': '继续采集' },
+  'console.follow': { en: 'Follow latest', 'zh-CN': '跟随最新' },
+  'console.stop-following': { en: 'Stop following', 'zh-CN': '停止跟随' },
+  'console.clear': { en: 'Clear logs', 'zh-CN': '清空日志' },
+  'console.irreversible': { en: 'Cannot be undone', 'zh-CN': '不可撤销' },
+  'console.copy': { en: 'Copy selected', 'zh-CN': '复制所选' },
+  'console.ownership-warning': { en: 'Detected {count} runtime errors with conflicting sources. Reload the plugin, then try again.', 'zh-CN': '检测到 {count} 条来源冲突的运行时错误。请重载插件后复现。' },
+  'console.dismiss-ownership-warning': { en: 'Dismiss attribution warning', 'zh-CN': '关闭归属异常提示' },
+  'console.empty': { en: 'Waiting for plugin logs or CordisX API calls…', 'zh-CN': '等待插件日志或 CordisX API 调用…' },
+  'console.no-matches': { en: 'No logs match the current filters', 'zh-CN': '没有匹配当前筛选的日志' },
+  'console.back-to-latest': { en: 'Back to latest', 'zh-CN': '回到最新' },
+  'console.entry-details': { en: 'Entry details', 'zh-CN': '日志详情' },
+  'console.close-details': { en: 'Close log details', 'zh-CN': '关闭日志详情' },
+  'console.field.plugin': { en: 'Plugin', 'zh-CN': '插件' },
+  'console.field.generation': { en: 'Generation', 'zh-CN': 'Generation' },
+  'console.field.source': { en: 'Capability / source', 'zh-CN': '能力 / 来源' },
+  'console.field.kind': { en: 'Type', 'zh-CN': '类型' },
+  'console.field.coverage': { en: 'Coverage', 'zh-CN': '采集' },
+  'console.field.correlation': { en: 'Correlation', 'zh-CN': 'Correlation' },
+  'console.field.phase': { en: 'Phase', 'zh-CN': '阶段' },
+  'console.field.status': { en: 'Status', 'zh-CN': '状态' },
+  'console.field.duration': { en: 'Duration', 'zh-CN': '耗时' },
+  'console.field.session': { en: 'Session', 'zh-CN': '会话' },
+  'console.field.trigger': { en: 'Trigger', 'zh-CN': '触发' },
+  'console.field.owner': { en: 'Effective owner', 'zh-CN': '有效 owner' },
+  'console.field.request-metrics': { en: 'Request metrics', 'zh-CN': '请求计量' },
+  'console.field.result-metrics': { en: 'Result metrics', 'zh-CN': '结果计量' },
   'plugins.share': { en: 'Share public source', 'zh-CN': '分享公开来源' },
   'plugins.share-unavailable': { en: 'Share public source (unavailable)', 'zh-CN': '分享公开来源（不可用）' },
   'plugins.open-source': { en: 'Open public source', 'zh-CN': '打开公开来源' },
@@ -323,6 +431,13 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'plugins.empty': { en: 'No plugins available', 'zh-CN': '暂无可用插件' },
   'plugins.no-matches': { en: 'No matching plugins', 'zh-CN': '没有匹配的插件' },
   'plugins.more-actions': { en: 'More plugin actions', 'zh-CN': '更多插件操作' },
+  'plugins.operation-busy': { en: 'Another plugin action is in progress', 'zh-CN': '当前有插件操作正在执行' },
+  'plugins.enable-unavailable': { en: 'This plugin cannot be enabled now', 'zh-CN': '插件当前不能启用' },
+  'plugins.disable-unavailable': { en: 'This plugin cannot be disabled now', 'zh-CN': '插件当前不能禁用' },
+  'plugins.reload-unavailable': { en: 'This plugin cannot be reloaded now', 'zh-CN': '插件当前不能重载' },
+  'plugins.demo.slot-showcase-description': { en: 'Explore plugins, navigation, pages, and status.', 'zh-CN': '查看插件、导航、页面与状态。' },
+  'plugins.demo.hello-toolbar-description': { en: 'Add a quick greeting to the workspace toolbar.', 'zh-CN': '在工作区工具栏添加快捷问候。' },
+  'plugins.demo.form-schema-gallery-description': { en: 'Explore editable workspace settings.', 'zh-CN': '查看可编辑的工作区设置。' },
   'plugin-tab.readme': { en: 'README', 'zh-CN': 'README' },
   'plugin-tab.configuration': { en: 'Configuration', 'zh-CN': '配置管理' },
   'plugin-tab.permissions': { en: 'Permissions', 'zh-CN': '权限' },
@@ -332,8 +447,22 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'extension-tab.usage': { en: 'Usage', 'zh-CN': '使用情况' },
   'extension-tab.information': { en: 'Information', 'zh-CN': '点位信息' },
   'extension-tab.diagnostics': { en: 'Diagnostics', 'zh-CN': '诊断' },
+  'extension.heading': { en: 'Extension points', 'zh-CN': '扩展点位' },
+  'extension.collection-label': { en: 'Extension points', 'zh-CN': '扩展点列表' },
+  'extension.search-label': { en: 'Search extension points', 'zh-CN': '搜索 CordisX 扩展点' },
+  'extension.search-placeholder': { en: 'Search names, descriptions, IDs, or plugins', 'zh-CN': '搜索名称、介绍、点位 id 或插件…' },
+  'extension.empty': { en: 'No extension points available', 'zh-CN': '当前宿主没有声明扩展点；请查看运行诊断。' },
+  'extension.no-matches': { en: 'No matching extension points', 'zh-CN': '没有匹配的扩展点' },
   'marketplace-tab.overview': { en: 'Overview', 'zh-CN': '概览' },
   'marketplace-tab.authors-source': { en: 'Authors and source', 'zh-CN': '作者与来源' },
+  'routes.heading': { en: 'Routes', 'zh-CN': '路由' },
+  'routes.collection-label': { en: 'Routes and pages', 'zh-CN': '路由和页面列表' },
+  'routes.search-label': { en: 'Search routes and pages', 'zh-CN': '搜索 CordisX 路由和页面' },
+  'routes.search-placeholder': { en: 'Search titles, descriptions, locations, pages, or plugins', 'zh-CN': '搜索标题、说明、位置、页面或插件…' },
+  'routes.empty': { en: 'No routes or pages available', 'zh-CN': '当前没有路由或页面' },
+  'routes.no-matches': { en: 'No matching routes or pages', 'zh-CN': '没有匹配的路由或页面' },
+  'routes.open-route': { en: 'Open route details', 'zh-CN': '打开路由详情' },
+  'routes.open-page': { en: 'Open page details', 'zh-CN': '打开页面详情' },
   'marketplace.heading': { en: 'Discover plugins', 'zh-CN': '发现插件' },
   'marketplace.filter-all': { en: 'Show all plugins', 'zh-CN': '显示全部插件' },
   'marketplace.filter-certified': { en: 'Show certified plugins only', 'zh-CN': '仅显示已认证插件' },
@@ -434,6 +563,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'form.sensitive-unavailable': { en: 'Managed by Host credentials; unavailable here.', 'zh-CN': '敏感字段由 Host 凭据边界管理；此处不可编辑。' },
   'form.unsupported': { en: 'This setting cannot be edited safely.', 'zh-CN': '此设置的结构当前无法安全编辑。' },
   'form.select-placeholder': { en: 'Choose', 'zh-CN': '选择' },
+  'form.text-placeholder': { en: 'Enter a value', 'zh-CN': '请输入' },
   'form.switch-on': { en: 'On', 'zh-CN': '已开启' },
   'form.switch-off': { en: 'Off', 'zh-CN': '已关闭' },
   'form.section-general': { en: 'General', 'zh-CN': '常规' },

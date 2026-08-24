@@ -485,7 +485,7 @@ export class HostFormAdapter {
         value: initial,
         defaultValue: initial,
         disabled: field.disabled,
-        placeholder: primitive === 'path-input' ? '/absolute/path' : undefined,
+        placeholder: primitive === 'path-input' ? '/absolute/path' : managerCopy(this.locale(), 'form.text-placeholder'),
         autosize: primitive === 'textarea' || primitive === 'json-textarea' ? { minRows: 4, maxRows: 12 } : undefined,
         onChange: (next: string) => {
           if (primitive !== 'json-textarea') {
