@@ -4,7 +4,7 @@ import {
   SHOWCASE_PLUGIN,
   UnavailableTraceShowcaseStore,
 } from '../src/providers.js'
-import { createTraceShowcaseStore } from '../src/index.js'
+import { Config, createTraceShowcaseStore } from '../src/index.js'
 
 describe('Agent Trace fixture provider', () => {
   it('owns every fake row, pages earlier history, and preserves exact session attribution', async () => {
@@ -104,6 +104,6 @@ describe('Agent Trace fixture provider', () => {
     })
     await expect(unavailable.requestDemo({ kind: 'inject' })).rejects.toThrow(/unavailable/)
 
-    expect(createTraceShowcaseStore({ mode: 'fixture' }).getSnapshot().status.mode).toBe('unavailable')
+    expect(createTraceShowcaseStore(Config({ mode: 'fixture' })).getSnapshot().status.mode).toBe('unavailable')
   })
 })

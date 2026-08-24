@@ -37,12 +37,13 @@ function eventOrder(left: TraceEvent, right: TraceEvent): number {
 export function mergeTraceEvents(
   historical: readonly TraceEvent[],
   live: readonly TraceEvent[],
+  windowLimit = WINDOW_LIMIT,
 ): readonly TraceEvent[] {
   const facts = new Map<string, TraceEvent>()
   for (const event of historical) facts.set(factualKey(event), event)
   for (const event of live) facts.set(factualKey(event), event)
   const ordered = [...facts.values()].sort(eventOrder)
-  const bounded = ordered.length <= WINDOW_LIMIT ? ordered : ordered.slice(-WINDOW_LIMIT)
+  const bounded = ordered.length <= windowLimit ? ordered : ordered.slice(-windowLimit)
   return Object.freeze(bounded.map((event, index) => Object.freeze({
     ...event,
     sourceSeq: event.sourceSeq ?? event.seq,
@@ -125,6 +126,10 @@ export class HistoricalTraceShowcaseStore implements TraceShowcaseStore {
     private readonly history: CordisXAgentHistory,
     private readonly live: TraceShowcaseStore,
     private readonly sessionId: string,
+    private readonly options: { readonly pageSize: number; readonly windowSize: number } = {
+      pageSize: WINDOW_LIMIT,
+      windowSize: WINDOW_LIMIT,
+    },
   ) {
     this.unsubscribeLive = live.subscribe(() => this.notify())
     this.operation = this.operation.then(() => this.initialQuery()).catch(error => this.fail(error))
@@ -132,7 +137,7 @@ export class HistoricalTraceShowcaseStore implements TraceShowcaseStore {
 
   getSnapshot(): TraceSnapshot {
     const live = this.live.getSnapshot()
-    const events = mergeTraceEvents(this.historical, live.events)
+    const events = mergeTraceEvents(this.historical, live.events, this.options.windowSize)
     return Object.freeze({
       sessionId: this.sessionId,
       status: statusFor(live.status, this.page, this.error),
@@ -143,7 +148,7 @@ export class HistoricalTraceShowcaseStore implements TraceShowcaseStore {
         ...(events[0] === undefined ? {} : { firstSeq: events[0].seq }),
         ...(events.at(-1) === undefined ? {} : { lastSeq: events.at(-1)!.seq }),
         loaded: events.length,
-        renderedLimit: WINDOW_LIMIT,
+        renderedLimit: this.options.windowSize,
       }),
     })
   }
@@ -162,12 +167,12 @@ export class HistoricalTraceShowcaseStore implements TraceShowcaseStore {
     const cursor = this.nextCursor
     this.operation = this.operation.then(async () => {
       const result = await this.history.query({
-        sessionId: this.sessionId, cursor, limit: WINDOW_LIMIT, payloadPolicy: 'summarized',
+        sessionId: this.sessionId, cursor, limit: this.options.pageSize, payloadPolicy: 'summarized',
       })
       if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
       if (this.disposed) return
       this.page = result.value
-      this.historical = Object.freeze(importedEvents(result.value).slice(0, WINDOW_LIMIT))
+      this.historical = Object.freeze(importedEvents(result.value).slice(0, this.options.windowSize))
       this.nextCursor = result.value.nextCursor
       this.tailCursor = result.value.tailCursor
       this.error = undefined
@@ -194,7 +199,7 @@ export class HistoricalTraceShowcaseStore implements TraceShowcaseStore {
     const tailCursor = this.tailCursor
     this.operation = this.operation.then(async () => {
       const result = await this.history.tail({
-        sessionId: this.sessionId, tailCursor, limit: WINDOW_LIMIT, payloadPolicy: 'summarized',
+        sessionId: this.sessionId, tailCursor, limit: this.options.pageSize, payloadPolicy: 'summarized',
       })
       if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
       if (this.disposed) return
@@ -203,7 +208,7 @@ export class HistoricalTraceShowcaseStore implements TraceShowcaseStore {
       const additions = importedEvents(result.value)
       const byId = new Map(this.historical.map(event => [event.id, event]))
       for (const event of additions) byId.set(event.id, event)
-      this.historical = Object.freeze([...byId.values()].sort(eventOrder).slice(-WINDOW_LIMIT))
+      this.historical = Object.freeze([...byId.values()].sort(eventOrder).slice(-this.options.windowSize))
       this.error = undefined
       this.notify()
     }).catch(error => this.fail(error))
@@ -226,12 +231,12 @@ export class HistoricalTraceShowcaseStore implements TraceShowcaseStore {
 
   private async initialQuery(): Promise<void> {
     const result = await this.history.query({
-      sessionId: this.sessionId, limit: WINDOW_LIMIT, payloadPolicy: 'summarized',
+      sessionId: this.sessionId, limit: this.options.pageSize, payloadPolicy: 'summarized',
     })
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
     if (this.disposed) return
     this.page = result.value
-    this.historical = importedEvents(result.value)
+    this.historical = Object.freeze(importedEvents(result.value).slice(-this.options.windowSize))
     this.nextCursor = result.value.nextCursor
     this.tailCursor = result.value.tailCursor
     this.error = undefined

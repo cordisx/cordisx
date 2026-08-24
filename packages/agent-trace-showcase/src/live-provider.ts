@@ -215,6 +215,7 @@ export class LiveTraceShowcaseStore implements TraceShowcaseStore {
     private readonly agents: CordisXAgents,
     private readonly systemPrompt: CordisXSystemPrompt,
     private readonly sessionId: string,
+    private readonly windowSize = RENDERED_LIMIT,
   ) {
     this.status = initialStatus(service)
     this.agent = agents.get(sessionId)
@@ -236,7 +237,7 @@ export class LiveTraceShowcaseStore implements TraceShowcaseStore {
         ...(lastSeq === undefined ? {} : { lastSeq }),
         loaded: events.length,
         ...(lastSeq === undefined ? {} : { totalAvailable: lastSeq + 1 }),
-        renderedLimit: RENDERED_LIMIT,
+        renderedLimit: this.windowSize,
       }),
     })
   }
@@ -335,10 +336,10 @@ export class LiveTraceShowcaseStore implements TraceShowcaseStore {
 
   private async sync(): Promise<void> {
     if (this.disposed) return
-    const remaining = RENDERED_LIMIT - this.events.length
+    const remaining = this.windowSize - this.events.length
     if (remaining <= 0) {
       this.boundaryReached = true
-      this.withDiagnostic('The live projection reached its explicit 500-event boundary; later events are not loaded.')
+      this.withDiagnostic(`The live projection reached its configured ${this.windowSize}-event window; later events are not loaded.`)
       return
     }
     const afterSeq = this.events.at(-1)?.seq ?? -1
@@ -359,9 +360,9 @@ export class LiveTraceShowcaseStore implements TraceShowcaseStore {
       .filter(event => event.seq > afterSeq)
       .map(event => projectAgentEvent(event))
     this.events.push(...additions)
-    if (result.value.nextAfterSeq !== undefined || this.events.length >= RENDERED_LIMIT) {
+    if (result.value.nextAfterSeq !== undefined || this.events.length >= this.windowSize) {
       this.boundaryReached = true
-      this.withDiagnostic('The live projection reached its explicit 500-event boundary; later events are not loaded.')
+      this.withDiagnostic(`The live projection reached its configured ${this.windowSize}-event window; later events are not loaded.`)
     }
     this.notify()
   }

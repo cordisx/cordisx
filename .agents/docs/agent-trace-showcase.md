@@ -1,7 +1,8 @@
 # Agent Trace Showcase plugin
 
 Status: independent development and validation plugin based on merged CordisX
-host `118fc26269fa04d368fa6bfb4129014b5b011d37`, Agent protocol
+host `90e1fcc14984e24f64464d9c8777fa364b886787`, current protocol main
+`f25e870ecb0bac285aeb69ddd061815d64511ee3`, Agent protocol
 `08dcdc11aae38ea9c0e91e4ad17cf31b8c756747`, and history protocol
 `e4c1fea227cb53e3a0833a0c84c5f9f487f107c5`. The fixture Timeline,
 structured session-header entry, session outlet, public live ledger projection,
@@ -90,8 +91,9 @@ model-consumption proof. Unsupported JSONL fields stay absent. Corrupt lines,
 oversized lines, partial tails, truncation, source replacement, indexing time
 limits, and privacy clamping appear only as structured coverage diagnostics.
 
-Pages are capped at 500 records and the view retains at most one 500-row
-historical window plus deduplicated current live records. “Load earlier” moves
+The plugin configuration defaults historical pages to 100 records and permits
+25–500 in steps of 25; the Host protocol ceiling remains 500. The merged view
+defaults to a 500-row window and permits 50–500 in steps of 50. “Load earlier” moves
 the historical window using the opaque Host cursor. Incremental tail requests
 advance from an opaque snapshot and never rescan already imported rows. A
 session or profile switch creates a new provider and disposes the old cursor,
@@ -142,7 +144,7 @@ identifiers are fixed as
 `agent.messages.transform`, `agent.prompt.section`, and
 `agent.prompt.context`.
 
-Merged Agent delivery/history host `118fc26269fa04d368fa6bfb4129014b5b011d37`
+Merged current host `90e1fcc14984e24f64464d9c8777fa364b886787`
 exports v2 event envelopes, query/subscription, immutable delivery snapshots,
 fenced handles, `clearPending`, pre-step decisions, and prompt disposables
 through `cordisx/contracts`; it also exports the read-only history page/tail
@@ -179,10 +181,10 @@ product copy or maintains a second README source.
 
 This consumer branch does not add `session.header.actions` to the catalog,
 protocol, or Codex adapter and does not use `workspace.toolbar.items` as a
-temporary parallel entry. In fixture mode, the explicit configuration pins
-one provider-neutral fixture session id; the host-rendered entry ignores any
-plugin attempt to override contextual session identity, and the session outlet
-rejects navigation when the resolved id is not the active native session.
+temporary parallel entry. Every mode, including fixture, receives only the
+Host-issued active Agent session identity. Configuration cannot override that
+identity, and the session outlet rejects navigation when the resolved id is not
+the active native session.
 
 The host records surface-route and outlet-route/page authorization as v2
 access requests carrying its current generation. A pending or unavailable
@@ -273,11 +275,10 @@ The minimum viable interaction supports:
 - text search;
 - source-truth, plugin source, lane, type, and phase filters;
 - record selection with a detail pane;
-- provider ledger pages of at most 500 records, matching the protocol bound,
-  and explicit next-page loading (the deterministic fixture uses eight-record
-  pages); and
-- a rendered-row ceiling of 500 records, after which the oldest loaded page is
-  discarded with a visible boundary notice.
+- configurable historical pages of 25–500 records, defaulting to 100 and never
+  exceeding the protocol bound, plus explicit next-page loading; and
+- a configurable rendered window of 50–500 records, defaulting to 500, after
+  which the oldest loaded rows are discarded with a visible boundary notice.
 
 High-volume chunks remain references or summaries according to the core
 contract. The plugin does not duplicate an unbounded content log.
@@ -301,6 +302,30 @@ The capability strip always states:
 
 Empty states distinguish no events from unavailable data and partial history.
 
+## Plugin configuration
+
+The package exports one `@deepseek-ai/schemastery` `Config` and
+`configApplies = 'restart'`, using the configuration protocol introduced in
+protocol PR #19 and the Host lifecycle merged through Host PR #60 and retained
+by the current main. Restart application is required because a mode change
+replaces the provider, query/subscription ownership, history cursor/tail timer,
+and pending demo ownership; a fresh Cordis fiber disposes the old tuple before
+publishing the new one.
+
+The public configuration contains only:
+
+- `mode`: `live` (default), `historical`, or `fixture`;
+- `historyPageSize`: default 100, minimum 25, maximum 500, step 25; and
+- `timelineWindowSize`: default 500, minimum 50, maximum 500, step 50.
+
+`live` consumes only the public ledger. `historical` selects the brokered
+history provider and merges it with live observations. `fixture` selects the
+deterministic provider. Session/provider/profile identity, paths, permission
+policy, payload/redaction policy, tail cadence, contract heads, diagnostics,
+secrets, and internal adapter switches are deliberately absent. They remain
+Host decisions and capability-gated runtime facts. The schema carries English
+and Simplified Chinese descriptions for the Manager form.
+
 ## Session and generation lifecycle
 
 All registrations and subscriptions belong to the plugin Cordis fiber. Block,
@@ -315,8 +340,8 @@ unload, required-capability denial, or generation replacement disposes:
   generation and permits it to cancel; and
 - all fixture timers and state listeners.
 
-The page reads exactly one session id: explicit fixture configuration, or the
-host-issued Agent key bound to the route by the Host in live mode. An A-to-B
+The page reads exactly one session id: the host-issued Agent key bound to the
+route by the Host in every mode. An A-to-B
 session switch changes the `session.content` context key,
 aborts the old mount and query, and never carries selection, filters, queued
 contributions, or fixture rows into the new session. Returning to A starts a
@@ -327,7 +352,7 @@ fresh page projection from the ledger.
 1. Page-v2 body-only chrome and surface-v3 route toggles are merged in protocol
    `8036d7228fdc6ebdba41734c5cc7aa6fc850fc58`; Agent v2 remains its
    orthogonal predecessor `08dcdc11aae38ea9c0e91e4ad17cf31b8c756747`.
-2. Merged host `118fc26269fa04d368fa6bfb4129014b5b011d37` supplies the
+2. Merged current host `90e1fcc14984e24f64464d9c8777fa364b886787` supplies the
    structured UI host, v2 Agent delivery/contribution lifecycle, and brokered
    history service. The
    provider-neutral Agent projection consumes no Platform session identity or
@@ -345,6 +370,9 @@ Package and component coverage:
 
 - manifest id, explicit development-only activation, and `plugins: []`
   default preservation;
+- exported Schemastery schema, localized Manager descriptors, bounded defaults
+  and ranges, restart application, and absence of identities, paths, policy,
+  diagnostics, and secrets from ordinary configuration;
 - byte-identical package/build README projection, launcher bundle capture, and
   manager README-tab rendering from the compiled plugin entry;
 - structured session-header contribution conformance, host icon, tooltip/a11y,

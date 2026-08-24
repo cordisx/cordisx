@@ -6,7 +6,17 @@ import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
 
 interface RuntimeSnapshot {
-  readonly plugins: readonly { id: string; status: string }[]
+  readonly plugins: readonly {
+    id: string
+    status: string
+    configuration: {
+      schemaKind: string
+      applies: string
+      revision: number
+      value: unknown
+      fields: readonly { path: readonly string[]; label?: string; description?: string }[]
+    }
+  }[]
   readonly registrations: readonly {
     owner: string
     surface: string
@@ -70,7 +80,7 @@ function rect(left: number, top: number, width: number, height: number): DOMRect
 
 async function fixture(sessionId: string, options: {
   headerAvailable?: boolean
-  mode?: 'fixture' | 'live'
+  mode?: 'fixture' | 'live' | 'historical'
   sibling?: boolean
   nativePressed?: boolean
 } = {}): Promise<{
@@ -91,9 +101,7 @@ async function fixture(sessionId: string, options: {
         id: 'agent-trace-showcase',
         entry: path.join(projectRoot, 'packages/agent-trace-showcase/src/index.ts'),
         enabled: true,
-        config: options.mode === 'live'
-          ? { mode: 'live' }
-          : { mode: 'fixture', sessionId, permissionPolicy: 'allow' },
+        config: { mode: options.mode ?? 'fixture' },
       },
       ...(options.sibling === true ? [{
         id: 'session-header-sibling-fixture',
@@ -178,6 +186,50 @@ async function fixture(sessionId: string, options: {
 }
 
 describe('Agent Trace Showcase renderer integration', () => {
+  it('renders the exported restart schema through the actual Manager form', async () => {
+    const { dom, runtime } = await fixture('session-config-form', { mode: 'historical' })
+    const descriptor = runtime.snapshot().plugins.find(plugin => plugin.id === 'agent-trace-showcase')?.configuration
+    expect(descriptor).toMatchObject({
+      schemaKind: 'schemastery', applies: 'restart', revision: 0,
+      value: { mode: 'historical' },
+    })
+    expect(descriptor?.fields.map(field => field.path.join('.'))).toEqual([
+      'mode', 'historyPageSize', 'timelineWindowSize',
+    ])
+    expect(descriptor?.fields.map(field => field.label)).toEqual([
+      '数据模式', '历史分页大小', '时间线窗口大小',
+    ])
+
+    dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
+    await settle(2)
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="agent-trace-showcase"]')!.click()
+    await settle(2)
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')!.click()
+    await settle(2)
+
+    const form = dom.window.document.querySelector<HTMLFormElement>(
+      '[data-plugin-config-form="agent-trace-showcase"]',
+    )!
+    expect(form.closest('[role="tabpanel"]')?.getAttribute('aria-label')).toBe('配置管理')
+    expect([...form.querySelectorAll<HTMLElement>('[data-config-path]')].map(field => field.dataset.configPath)).toEqual([
+      'mode', 'historyPageSize', 'timelineWindowSize',
+    ])
+    const mode = form.querySelector<HTMLSelectElement>('[data-config-path="mode"] select')!
+    expect(mode.value).toBe(JSON.stringify('historical'))
+    expect([...mode.options].map(option => option.textContent)).toEqual(['live', 'historical', 'fixture'])
+    const pageSize = form.querySelector<HTMLInputElement>('[data-config-path="historyPageSize"] input')!
+    expect({ value: pageSize.value, min: pageSize.min, max: pageSize.max, step: pageSize.step }).toEqual({
+      value: '100', min: '25', max: '500', step: '25',
+    })
+    const windowSize = form.querySelector<HTMLInputElement>('[data-config-path="timelineWindowSize"] input')!
+    expect({ value: windowSize.value, min: windowSize.min, max: windowSize.max, step: windowSize.step }).toEqual({
+      value: '500', min: '50', max: '500', step: '50',
+    })
+    expect(form.textContent).toContain('选择实时公开账本、与实时观察合并的 Host 历史导入')
+    expect(form.textContent).not.toMatch(/permissionPolicy|sessionId|providerId|profileId|CODEX_HOME|\.jsonl/)
+    await runtime.dispose()
+  })
+
   it('isolates each structured header action from a pressed native template and its siblings', async () => {
     const sessionId = 'session-state-isolation'
     const { dom, runtime } = await fixture(sessionId, { sibling: true, nativePressed: true })
@@ -543,10 +595,11 @@ describe('Agent Trace Showcase renderer integration', () => {
     await expect(runtime.navigate('agent-trace-showcase', {
       id: 'session.timeline', params: { sessionId: 'session-a' },
     })).rejects.toThrow(/does not match native session session-b/)
-    await expect(runtime.navigate('agent-trace-showcase', {
+    await runtime.navigate('agent-trace-showcase', {
       id: 'session.timeline', params: { sessionId: 'session-b' },
-    })).rejects.toThrow(/provider session session-a does not match route session session-b/)
-    expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
+    })
+    expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).not.toBeNull()
+    expect(dom.window.document.querySelector('.cxt-integrity')?.textContent).toContain('fixture')
 
     await runtime.dispose()
     expect(dom.window.document.querySelector('[data-cordisx-page]')).toBeNull()
@@ -570,7 +623,7 @@ describe('Agent Trace Showcase renderer integration', () => {
   })
 
   it('applies ask, deny, and allow to exact-session history reads without a fallback importer', async () => {
-    const { dom, runtime } = await fixture('session-history-permission', { mode: 'live' })
+    const { dom, runtime } = await fixture('session-history-permission', { mode: 'historical' })
     expect(runtime.snapshot().permissions).toEqual(expect.arrayContaining([
       expect.objectContaining({ capability: 'agent.history.read', policy: 'ask' }),
     ]))
