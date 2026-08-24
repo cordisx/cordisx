@@ -40,7 +40,6 @@ import {
 } from '../contracts.js'
 import {
   createPermissionPolicyRecord,
-  normalizePermissionPolicyRecord,
   normalizePermissionScope,
   permissionIdentityKey,
   permissionRecordKey,
@@ -60,6 +59,49 @@ import type {
   PluginPrincipalToken,
 } from './plugin-console.js'
 import { HostThemeProjection } from './host-theme.js'
+import {
+  type PermissionAuthorizationProjectionInput,
+  PermissionAuthorizationViewModel,
+} from '../permission-authorization-view-model.js'
+import { BrowserPermissionAuthorizationDialog } from './permission-authorization-dialog.js'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
+  CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+  type CordisXCapabilityDeclarationV2,
+  type CordisXPermissionAuthorizationBindingV2,
+  type CordisXPermissionAuthorizationDecisionV2,
+  type CordisXPermissionAuthorizationKeyV2,
+  type CordisXPermissionAuthorizationPlanV2,
+  type CordisXPermissionCapabilityV2,
+  type CordisXPermissionDecisionV2,
+  type CordisXPermissionPolicyRecordV2,
+  type CordisXPermissionPolicyV2,
+  type CordisXPermissionScopeV2,
+  type CordisXPluginManifestV4,
+} from '../permission-contracts.js'
+import {
+  CapabilityRiskCatalog,
+  buildPermissionAuthorizationPlanResultV2,
+} from '../capability-risk-catalog.js'
+import {
+  PermissionOnceGrantLedger,
+  assertPermissionAuthorizationDecisionV2,
+  migratePermissionPolicyV1,
+  normalizePluginManifestV4,
+  normalizePermissionAuthorizationBindingV2,
+  normalizePermissionPolicyRecordV2,
+  normalizePermissionScopeV2,
+  permissionRecordKeyV2,
+  permissionSecurityFingerprint,
+} from '../permission-model-v2.js'
+import {
+  isPermissionPolicyRecordV2,
+  normalizePersistedPermissionPolicyRecord,
+  persistedPermissionMigrationKey,
+  persistedPermissionRecordKey,
+  type CordisXPersistedPermissionPolicyRecord,
+} from '../permission-persistence.js'
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const LEGACY_POLICY_STORAGE_KEY = 'cordisx.platform.permissionPolicies.v1'
@@ -108,7 +150,10 @@ function normalizedReason(value: unknown, label: string): CordisXLocalizedText {
 }
 
 /** Validate and freeze one module manifest against its launcher-owned id. */
-export function normalizePluginManifest(value: unknown, expectedId: string): CordisXPluginManifestV1 {
+export function normalizePluginManifest(
+  value: unknown,
+  expectedId: string,
+): CordisXPluginManifestV1 | CordisXPluginManifestV4 {
   if (!ID_PATTERN.test(expectedId)) throw new Error(`launcher plugin id ${expectedId} is invalid`)
   if (value === undefined) {
     return Object.freeze({
@@ -119,6 +164,9 @@ export function normalizePluginManifest(value: unknown, expectedId: string): Cor
     })
   }
   const manifest = object(value, `plugin ${expectedId} manifest`)
+  if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 || manifest.schemaVersion === 4) {
+    return normalizePluginManifestV4(manifest, expectedId, new CapabilityRiskCatalog())
+  }
   const unknown = Object.keys(manifest).filter(key => !['$schema', 'schemaVersion', 'id', 'name', 'capabilities'].includes(key))
   if (unknown.length > 0) throw new Error(`plugin ${expectedId} manifest contains unknown field ${unknown[0]}`)
   if (manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V1) throw new Error(`plugin ${expectedId} manifest schema is unsupported`)
@@ -181,24 +229,47 @@ export interface LegacyStoredPolicy {
 export interface PermissionPolicyStore {
   read(): readonly CordisXPermissionPolicyRecordV1[]
   write(records: readonly CordisXPermissionPolicyRecordV1[]): void | Promise<void>
+  readV2?(): readonly CordisXPermissionPolicyRecordV2[]
+  writeV2?(records: readonly CordisXPermissionPolicyRecordV2[]): void | Promise<void>
   legacy?(): readonly LegacyStoredPolicy[]
   retireLegacy?(record: LegacyStoredPolicy): void | Promise<void>
 }
 
 export class MemoryPermissionPolicyStore implements PermissionPolicyStore {
-  records: readonly CordisXPermissionPolicyRecordV1[]
+  records: readonly CordisXPersistedPermissionPolicyRecord[]
 
-  constructor(records: readonly CordisXPermissionPolicyRecordV1[] = []) {
-    this.records = copy(records)
+  constructor(
+    records: readonly CordisXPermissionPolicyRecordV1[] = [],
+    recordsV2: readonly CordisXPermissionPolicyRecordV2[] = [],
+  ) {
+    this.records = copy([...records, ...recordsV2])
   }
 
   read(): readonly CordisXPermissionPolicyRecordV1[] {
-    return copy(this.records)
+    return copy(this.records.filter(record => !isPermissionPolicyRecordV2(record))) as readonly CordisXPermissionPolicyRecordV1[]
+  }
+
+  readV2(): readonly CordisXPermissionPolicyRecordV2[] {
+    return copy(this.records.filter(isPermissionPolicyRecordV2))
   }
 
   write(records: readonly CordisXPermissionPolicyRecordV1[]): void {
-    const keys = new Set(records.map(permissionRecordKey))
-    this.records = copy([...this.records.filter(item => !keys.has(permissionRecordKey(item))), ...records])
+    this.writeRecords(records)
+  }
+
+  writeV2(records: readonly CordisXPermissionPolicyRecordV2[]): void {
+    this.writeRecords(records)
+  }
+
+  private writeRecords(records: readonly CordisXPersistedPermissionPolicyRecord[]): void {
+    const normalized = records.map(item => normalizePersistedPermissionPolicyRecord(item))
+    const keys = new Set(normalized.map(persistedPermissionRecordKey))
+    const migrations = new Set(normalized.filter(isPermissionPolicyRecordV2).map(persistedPermissionMigrationKey))
+    this.records = copy([
+      ...this.records.filter(item => !keys.has(persistedPermissionRecordKey(item))
+        && !(migrations.has(persistedPermissionMigrationKey(item)) && !isPermissionPolicyRecordV2(item))),
+      ...normalized,
+    ])
   }
 }
 
@@ -206,34 +277,47 @@ export class BrowserPermissionPolicyStore implements PermissionPolicyStore {
   constructor(private readonly profileId = 'default') {}
 
   read(): readonly CordisXPermissionPolicyRecordV1[] {
+    return this.readAll().filter((record): record is CordisXPermissionPolicyRecordV1 => (
+      !isPermissionPolicyRecordV2(record) && record.key.profileId === this.profileId
+    ))
+  }
+
+  readV2(): readonly CordisXPermissionPolicyRecordV2[] {
+    return this.readAll().filter((record): record is CordisXPermissionPolicyRecordV2 => (
+      isPermissionPolicyRecordV2(record) && record.key.profileId === this.profileId
+    ))
+  }
+
+  write(nextRecords: readonly CordisXPermissionPolicyRecordV1[]): void {
+    this.writeRecords(nextRecords)
+  }
+
+  writeV2(nextRecords: readonly CordisXPermissionPolicyRecordV2[]): void {
+    this.writeRecords(nextRecords)
+  }
+
+  private readAll(): readonly CordisXPersistedPermissionPolicyRecord[] {
     try {
       const value = localStorage.getItem(POLICY_STORAGE_KEY)
-      if (value === null) return []
-      const records = JSON.parse(value) as unknown
-      if (!Array.isArray(records)) return []
-      return records.flatMap((item) => {
-        try {
-          const record = normalizePermissionPolicyRecord(item)
-          return record.key.profileId === this.profileId ? [record] : []
-        } catch {
-          return []
-        }
+      const parsed = value === null ? [] : JSON.parse(value) as unknown
+      if (!Array.isArray(parsed)) return []
+      return parsed.flatMap((item) => {
+        try { return [normalizePersistedPermissionPolicyRecord(item)] } catch { return [] }
       })
     } catch {
       return []
     }
   }
 
-  write(nextRecords: readonly CordisXPermissionPolicyRecordV1[]): void {
-    const value = localStorage.getItem(POLICY_STORAGE_KEY)
-    const parsed = value === null ? [] : JSON.parse(value) as unknown
-    const records = Array.isArray(parsed) ? parsed.flatMap((item) => {
-      try { return [normalizePermissionPolicyRecord(item)] } catch { return [] }
-    }) : []
-    const keys = new Set(nextRecords.map(permissionRecordKey))
+  private writeRecords(nextRecords: readonly CordisXPersistedPermissionPolicyRecord[]): void {
+    const normalized = nextRecords.map(item => normalizePersistedPermissionPolicyRecord(item))
+    const records = this.readAll()
+    const keys = new Set(normalized.map(persistedPermissionRecordKey))
+    const migrations = new Set(normalized.filter(isPermissionPolicyRecordV2).map(persistedPermissionMigrationKey))
     localStorage.setItem(POLICY_STORAGE_KEY, JSON.stringify([
-      ...records.filter(item => !keys.has(permissionRecordKey(item))),
-      ...nextRecords,
+      ...records.filter(item => !keys.has(persistedPermissionRecordKey(item))
+        && !(migrations.has(persistedPermissionMigrationKey(item)) && !isPermissionPolicyRecordV2(item))),
+      ...normalized,
     ]))
   }
 
@@ -288,6 +372,14 @@ export interface PermissionPromptRequest {
 
 export interface PermissionPrompt {
   request(input: PermissionPromptRequest): Promise<Exclude<CordisXPermissionDecision, 'ask'>>
+}
+
+export interface PermissionAuthorizationPromptV2 {
+  request(
+    plan: CordisXPermissionAuthorizationPlanV2,
+    identity: CordisXPluginIdentity,
+  ): Promise<CordisXPermissionAuthorizationDecisionV2 | undefined>
+  dispose?(): void
 }
 
 export class BrowserPermissionPrompt implements PermissionPrompt {
@@ -377,6 +469,43 @@ export class BrowserPermissionPrompt implements PermissionPrompt {
   }
 }
 
+export type PermissionAuthorizationProjectionFactoryV2 = (
+  plan: CordisXPermissionAuthorizationPlanV2,
+  identity: CordisXPluginIdentity,
+) => PermissionAuthorizationProjectionInput
+
+/** Host-owned v2 modal; plugin text is already validated and only reaches text nodes. */
+export class BrowserPermissionAuthorizationPromptV2 implements PermissionAuthorizationPromptV2 {
+  private readonly dialog: BrowserPermissionAuthorizationDialog
+
+  constructor(
+    document: Document = globalThis.document,
+    private readonly project: PermissionAuthorizationProjectionFactoryV2 = (_plan, identity) => ({
+      plugin: { name: identity.id, source: identity.source, trust: 'configured' },
+      availability: {},
+      resolve: message => message.fallback ?? `[[${message.namespace ?? 'permission'}:${message.key}]]`,
+      scope: scope => Object.keys(scope).length === 0 ? 'Host default scope' : JSON.stringify(scope),
+      requestSource: identity.source,
+    }),
+  ) {
+    this.dialog = new BrowserPermissionAuthorizationDialog(document)
+  }
+
+  async request(
+    plan: CordisXPermissionAuthorizationPlanV2,
+    identity: CordisXPluginIdentity,
+  ): Promise<CordisXPermissionAuthorizationDecisionV2 | undefined> {
+    const result = await this.dialog.show(new PermissionAuthorizationViewModel(plan), {
+      project: () => this.project(plan, identity),
+    })
+    return result.status === 'confirmed' ? result.decision : undefined
+  }
+
+  dispose(): void {
+    this.dialog.dispose()
+  }
+}
+
 interface AuditRecord {
   lastUsedAt?: string
   lastDeniedAt?: string
@@ -401,10 +530,22 @@ export interface PlatformPermissionSnapshot {
 
 interface Registration {
   readonly identity: CordisXPluginIdentity
-  readonly manifest: CordisXPluginManifestV1
+  readonly manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4
   readonly declarations: ReadonlyMap<CordisXPlatformCapability, CordisXCapabilityDeclaration>
+  readonly declarationsV2: ReadonlyMap<CordisXPermissionCapabilityV2, CordisXCapabilityDeclarationV2>
   readonly generation: PluginGenerationEffectIdentity
   readonly candidateView?: PluginGenerationView
+}
+
+function manifestDeclarationsV2(
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4,
+): readonly CordisXCapabilityDeclarationV2[] {
+  if (manifest.schemaVersion === 4) return manifest.capabilities
+  return Object.freeze(manifest.capabilities.map(declaration => Object.freeze({
+    name: declaration.name as CordisXPermissionCapabilityV2,
+    required: declaration.required,
+    scope: declaration.scope as CordisXPermissionScopeV2,
+  })))
 }
 
 interface AuthorizationGrant {
@@ -462,9 +603,11 @@ function isoNow(now: () => Date): string {
 
 export class PermissionBroker {
   private readonly registrations = new Map<string, Registration>()
-  private readonly policies = new Map<string, CordisXPermissionPolicyRecordV1>()
+  /** One profile ledger index for both the retiring v1 records and authoritative v2 records. */
+  private readonly policyRecords = new Map<string, CordisXPersistedPermissionPolicyRecord>()
   private readonly audit = new Map<string, AuditRecord>()
-  private readonly onceTickets = new Map<string, Set<string>>()
+  private readonly onceV2 = new PermissionOnceGrantLedger()
+  private readonly catalog = new CapabilityRiskCatalog()
   private readonly listeners = new Set<() => void>()
   private readonly migrationTasks: Promise<void>[] = []
 
@@ -477,23 +620,45 @@ export class PermissionBroker {
     private readonly generation = 'runtime',
     private readonly visibility?: GenerationVisibilityCoordinator,
     private readonly consoleObserver?: PluginConsolePermissionObserver,
+    private readonly promptV2?: PermissionAuthorizationPromptV2,
   ) {
     for (const record of store.read()) {
-      if (record.key.profileId === profileId) this.policies.set(permissionRecordKey(record), record)
+      if (record.key.profileId === profileId) this.policyRecords.set(persistedPermissionRecordKey(record), record)
+    }
+    for (const record of store.readV2?.() ?? []) {
+      if (record.key.profileId === profileId) this.policyRecords.set(persistedPermissionRecordKey(record), record)
     }
     visibility?.connect({ notify: () => this.changed() })
   }
 
   register(
     identity: CordisXPluginIdentity,
-    manifest: CordisXPluginManifestV1,
+    manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4,
     generation: PluginGenerationEffectIdentity = Object.freeze({ pluginId: identity.id }),
     candidateView?: PluginGenerationView,
   ): () => void {
     const key = `${platformIdentityKey(identity)}\u0000${generation.moduleGeneration ?? 'host'}`
-    const declarations = new Map(manifest.capabilities.map(item => [item.name, item]))
+    const declarations = new Map<CordisXPlatformCapability, CordisXCapabilityDeclaration>(
+      manifest.schemaVersion === 4
+        ? manifest.capabilities.flatMap(item => (
+            (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
+              ? [[item.name as CordisXPlatformCapability, {
+                  name: item.name as CordisXPlatformCapability,
+                  required: item.required,
+                  reason: item.rationale?.description ?? {
+                    namespace: 'permission',
+                    key: `permission.${item.name}.legacy-reason`,
+                    fallback: this.catalog.get(item.name).presentation.description.fallback,
+                  },
+                  scope: item.scope as CordisXCapabilityScope,
+                } as CordisXCapabilityDeclaration] as const]
+              : []
+          ))
+        : manifest.capabilities.map(item => [item.name, item] as const),
+    )
+    const declarationsV2 = new Map(manifestDeclarationsV2(manifest).map(item => [item.name, item]))
     const registration = {
-      identity: Object.freeze({ ...identity }), manifest, declarations, generation,
+      identity: Object.freeze({ ...identity }), manifest, declarations, declarationsV2, generation,
       ...(candidateView === undefined ? {} : { candidateView }),
     }
     if (this.registrations.has(key) && this.visibility !== undefined) {
@@ -501,12 +666,13 @@ export class PermissionBroker {
     }
     this.registrations.set(key, registration)
     this.migrateLegacy(registration)
+    this.migratePolicyRecordsV1(registration)
     if (this.visibility?.visible(generation) !== false) this.changed()
     return () => {
       if (this.registrations.get(key) !== registration) return
       this.registrations.delete(key)
       const identityKey = platformIdentityKey(identity)
-      this.onceTickets.delete(identityKey)
+      this.onceV2.clearGeneration(this.generation, generation.moduleGeneration)
       for (const auditKey of [...this.audit.keys()]) if (auditKey.startsWith(`${identityKey}\u0000`)) this.audit.delete(auditKey)
       if (this.visibility?.visible(generation) !== false) this.changed()
     }
@@ -517,17 +683,300 @@ export class PermissionBroker {
       && (this.visibility?.visible(item.generation, view) ?? true))
   }
 
+  private persistV2(records: readonly CordisXPermissionPolicyRecordV2[]): Promise<void> {
+    if (this.store.writeV2 === undefined) return Promise.reject(new Error('permission v2 persistence is unavailable'))
+    return Promise.resolve(this.store.writeV2(records))
+  }
+
+  private binding(
+    registration: Registration,
+    operationId: string,
+    requestId?: string,
+  ): CordisXPermissionAuthorizationPlanV2['binding'] {
+    return Object.freeze({
+      operationId,
+      runtimeGeneration: this.generation,
+      ...(registration.generation.moduleGeneration === undefined ? {} : {
+        moduleGeneration: registration.generation.moduleGeneration,
+      }),
+      ...(requestId === undefined ? {} : { requestId }),
+    })
+  }
+
+  private legacyAuthorizationKey(
+    registration: Registration,
+    declaration: CordisXCapabilityDeclaration,
+  ): CordisXPermissionAuthorizationKeyV2 {
+    const declarationV2 = registration.declarationsV2.get(declaration.name as CordisXPermissionCapabilityV2)!
+    return Object.freeze({
+      profileId: this.profileId,
+      identity: Object.freeze({ source: registration.identity.source, pluginId: registration.identity.id }),
+      capability: declarationV2.name,
+      scope: declarationV2.scope,
+      securityFingerprint: permissionSecurityFingerprint(this.catalog.version, declarationV2),
+    })
+  }
+
+  private planV2(
+    registration: Registration,
+    operation: CordisXPermissionAuthorizationPlanV2['operation'],
+    binding: CordisXPermissionAuthorizationPlanV2['binding'],
+    declarations: readonly CordisXCapabilityDeclarationV2[] = [...registration.declarationsV2.values()],
+  ): CordisXPermissionAuthorizationPlanV2 {
+    const built = buildPermissionAuthorizationPlanResultV2({
+      planId: binding.operationId,
+      operation,
+      profileId: this.profileId,
+      identity: { source: registration.identity.source, pluginId: registration.identity.id },
+      binding,
+      declarations,
+      policies: [...this.policyRecords.values()].filter(isPermissionPolicyRecordV2),
+      contextFor: declaration => {
+        const family = this.catalog.get(declaration.name).providerFamily
+        return {
+          operation,
+          providerKind: family === 'platform' ? 'current-connection' : 'host-local',
+          providerTrust: 'configured',
+          availability: 'supported',
+        }
+      },
+    }, this.catalog)
+    if (built.policyMigrations.length > 0) {
+      const previous = built.policyMigrations.map(record => this.policyRecords.get(permissionRecordKeyV2(record)))
+      for (const record of built.policyMigrations) this.policyRecords.set(permissionRecordKeyV2(record), record)
+      const task = this.persistV2(built.policyMigrations).catch((error) => {
+        built.policyMigrations.forEach((record, index) => {
+          const key = permissionRecordKeyV2(record)
+          const prior = previous[index]
+          if (prior === undefined) this.policyRecords.delete(key)
+          else this.policyRecords.set(key, prior)
+        })
+        this.changed()
+        throw error
+      })
+      this.migrationTasks.push(task)
+    }
+    return built.plan
+  }
+
+  policyV2(
+    identity: CordisXPluginIdentity,
+    capability: CordisXPermissionCapabilityV2,
+    view?: PluginGenerationView,
+  ): CordisXPermissionPolicyV2 {
+    const registration = this.registration(identity, view)
+    const declaration = registration?.declarationsV2.get(capability)
+    if (registration === undefined || declaration === undefined) return 'ask'
+    const operationId = `policy:${identity.id}:${capability}`
+    return this.planV2(registration, 'runtime', {
+      operationId,
+      runtimeGeneration: this.generation,
+      ...(registration.generation.moduleGeneration === undefined ? {} : {
+        moduleGeneration: registration.generation.moduleGeneration,
+      }),
+    }, [declaration]).declarations[0]!.policy
+  }
+
+  async setPolicyV2(
+    identity: CordisXPluginIdentity,
+    capability: CordisXPermissionCapabilityV2,
+    policy: CordisXPermissionPolicyV2,
+  ): Promise<void> {
+    const registration = this.registration(identity)
+    const declaration = registration?.declarationsV2.get(capability)
+    if (registration === undefined || declaration === undefined) {
+      throw new Error(`plugin ${identity.id} does not declare ${capability}`)
+    }
+    const plan = this.planV2(registration, 'runtime', {
+      operationId: `policy:${identity.id}:${capability}`,
+      runtimeGeneration: this.generation,
+      ...(registration.generation.moduleGeneration === undefined ? {} : {
+        moduleGeneration: registration.generation.moduleGeneration,
+      }),
+    }, [declaration])
+    const item = plan.declarations[0]!
+    if (policy === 'allow-persistent' && !item.persistentAllow) {
+      throw new Error(`${capability} does not permit persistent allow`)
+    }
+    if (policy === 'deny-persistent' && !item.persistentDeny) {
+      throw new Error(`${capability} does not permit persistent deny`)
+    }
+    const record = normalizePermissionPolicyRecordV2({
+      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+      schemaVersion: 2,
+      key: {
+        profileId: this.profileId,
+        identity: plan.identity,
+        capability,
+        scope: item.scope,
+        securityFingerprint: item.securityFingerprint,
+      },
+      policy,
+    })
+    const key = permissionRecordKeyV2(record)
+    const previous = this.policyRecords.get(key)
+    this.policyRecords.set(key, record)
+    this.changed()
+    try {
+      await this.persistV2([record])
+    } catch (error) {
+      if (previous === undefined) this.policyRecords.delete(key)
+      else this.policyRecords.set(key, previous)
+      this.changed()
+      throw error
+    }
+    this.onceV2.clearGeneration(this.generation, registration.generation.moduleGeneration)
+  }
+
+  authorizationPlanV2(
+    identity: CordisXPluginIdentity,
+    operation: 'install' | 'update' | 'enable' = 'enable',
+    view?: PluginGenerationView,
+    operationId = `${this.generation}:${identity.id}`,
+  ): CordisXPermissionAuthorizationPlanV2 {
+    const registration = this.registration(identity, view)
+    if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
+    return this.planV2(registration, operation, {
+      operationId,
+      runtimeGeneration: this.generation,
+      ...(registration.generation.moduleGeneration === undefined ? {} : {
+        moduleGeneration: registration.generation.moduleGeneration,
+      }),
+    })
+  }
+
+  async authorizeActivationV2(
+    identity: CordisXPluginIdentity,
+    authorization: CordisXPermissionAuthorizationDecisionV2,
+    operation: 'install' | 'update' | 'enable' = 'enable',
+    view?: PluginGenerationView,
+  ): Promise<void> {
+    const registration = this.registration(identity, view)
+    if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
+    const plan = this.planV2(registration, operation, authorization.binding)
+    this.assertDecisionV2(plan, authorization)
+    await this.commitDecisionV2(
+      plan,
+      authorization,
+      this.binding(registration, `${this.generation}:${identity.id}`),
+    )
+  }
+
+  private assertDecisionV2(
+    plan: CordisXPermissionAuthorizationPlanV2,
+    decision: CordisXPermissionAuthorizationDecisionV2,
+  ): void {
+    assertPermissionAuthorizationDecisionV2(plan, decision)
+  }
+
+  private authorizationKey(
+    plan: CordisXPermissionAuthorizationPlanV2,
+    capability: CordisXPermissionCapabilityV2,
+  ): CordisXPermissionAuthorizationKeyV2 {
+    const item = plan.declarations.find(candidate => candidate.capability === capability)
+    if (item === undefined) throw new Error(`permission plan does not declare ${capability}`)
+    return Object.freeze({
+      profileId: plan.profileId,
+      identity: plan.identity,
+      capability,
+      scope: item.scope,
+      securityFingerprint: item.securityFingerprint,
+    })
+  }
+
+  private async commitDecisionV2(
+    plan: CordisXPermissionAuthorizationPlanV2,
+    decision: CordisXPermissionAuthorizationDecisionV2,
+    oneShotBinding: CordisXPermissionAuthorizationBindingV2 = plan.binding,
+  ): Promise<void> {
+    const persistent = decision.decisions.flatMap((item): CordisXPermissionPolicyRecordV2[] => {
+      if (item.decision !== 'allow-persistent' && item.decision !== 'deny-persistent') return []
+      return [normalizePermissionPolicyRecordV2({
+        $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+        schemaVersion: 2,
+        key: this.authorizationKey(plan, item.capability),
+        policy: item.decision,
+      })]
+    })
+    const previous = persistent.map(record => this.policyRecords.get(permissionRecordKeyV2(record)))
+    for (const record of persistent) this.policyRecords.set(permissionRecordKeyV2(record), record)
+    try {
+      if (persistent.length > 0) await this.persistV2(persistent)
+    } catch (error) {
+      persistent.forEach((record, index) => {
+        const key = permissionRecordKeyV2(record)
+        const prior = previous[index]
+        if (prior === undefined) this.policyRecords.delete(key)
+        else this.policyRecords.set(key, prior)
+      })
+      this.changed()
+      throw error
+    }
+    this.onceV2.clearOperation(plan.binding.operationId)
+    for (const item of decision.decisions) {
+      if (item.decision === 'allow-once') {
+        this.onceV2.issue(this.authorizationKey(plan, item.capability), oneShotBinding)
+      }
+    }
+    this.changed()
+  }
+
+  private migratePolicyRecordsV1(registration: Registration): void {
+    if (registration.manifest.schemaVersion !== 4) return
+    const legacy = [...this.policyRecords.values()].filter((record): record is CordisXPermissionPolicyRecordV1 => (
+      !isPermissionPolicyRecordV2(record)
+      && record.key.profileId === this.profileId
+      && record.key.identity.source === registration.identity.source
+      && record.key.identity.pluginId === registration.identity.id
+    ))
+    for (const record of legacy) {
+      const declaration = registration.declarationsV2.get(record.key.capability as CordisXPermissionCapabilityV2)
+      if (declaration === undefined
+        || JSON.stringify(normalizePermissionScopeV2(record.key.scope)) !== JSON.stringify(declaration.scope)) continue
+      const plan = this.planV2(registration, 'runtime', {
+        operationId: `migration:${registration.identity.id}:${record.key.capability}`,
+        runtimeGeneration: this.generation,
+        ...(registration.generation.moduleGeneration === undefined ? {} : {
+          moduleGeneration: registration.generation.moduleGeneration,
+        }),
+      }, [declaration])
+      const item = plan.declarations[0]!
+      const migrated = migratePermissionPolicyV1(record.policy, {
+        key: this.authorizationKey(plan, item.capability),
+        persistentAllow: item.persistentAllow,
+        persistentDeny: item.persistentDeny,
+      })
+      const migratedKey = permissionRecordKeyV2(migrated)
+      if (this.policyRecords.has(migratedKey)) continue
+      this.policyRecords.set(migratedKey, migrated)
+      const legacyKey = permissionRecordKey(record)
+      const task = this.persistV2([migrated]).then(() => {
+        this.policyRecords.delete(legacyKey)
+      }).catch((error) => {
+        if (this.policyRecords.get(migratedKey) === migrated) this.policyRecords.delete(migratedKey)
+        this.changed()
+        throw error
+      })
+      this.migrationTasks.push(task)
+    }
+  }
+
   policy(identity: CordisXPluginIdentity, capability: CordisXPlatformCapability, view?: PluginGenerationView): CordisXPermissionPolicy {
     const registration = this.registration(identity, view)
     const declaration = registration?.declarations.get(capability)
-    if (declaration === undefined) return 'ask'
-    return this.policies.get(permissionRecordKey(createPermissionPolicyRecord({
-      profileId: this.profileId,
-      identity,
-      capability,
-      scope: declaration.scope,
-      policy: 'ask',
-    })))?.policy ?? 'ask'
+    if (registration === undefined || declaration === undefined) return 'ask'
+    if (registration.manifest.schemaVersion === 1) {
+      const record = this.policyRecords.get(permissionRecordKey(createPermissionPolicyRecord({
+        profileId: this.profileId,
+        identity,
+        capability,
+        scope: declaration.scope,
+        policy: 'ask',
+      })))
+      return record !== undefined && !isPermissionPolicyRecordV2(record) ? record.policy : 'ask'
+    }
+    const policy = this.policyV2(identity, capability as CordisXPermissionCapabilityV2, view)
+    return policy === 'allow-persistent' ? 'allow' : policy === 'deny-persistent' ? 'deny' : 'ask'
   }
 
   async setPolicy(
@@ -535,31 +984,37 @@ export class PermissionBroker {
     capability: CordisXPlatformCapability,
     policy: CordisXPermissionPolicy,
   ): Promise<void> {
-    const identityKey = platformIdentityKey(identity)
-    const declaration = this.registration(identity)?.declarations.get(capability)
-    if (declaration === undefined) throw new Error(`plugin ${identity.id} does not declare ${capability}`)
-    const record = createPermissionPolicyRecord({
-      profileId: this.profileId,
-      identity,
-      capability,
-      scope: declaration.scope,
-      policy,
-    })
-    const key = permissionRecordKey(record)
-    const previous = this.policies.get(key)
-    this.policies.set(key, record)
-    this.changed()
-    try {
-      await this.store.write([record])
-    } catch (error) {
-      if (previous === undefined) this.policies.delete(key)
-      else this.policies.set(key, previous)
+    const registration = this.registration(identity)
+    const declaration = registration?.declarations.get(capability)
+    if (registration === undefined || declaration === undefined) throw new Error(`plugin ${identity.id} does not declare ${capability}`)
+    if (registration.manifest.schemaVersion === 1) {
+      const record = createPermissionPolicyRecord({
+        profileId: this.profileId,
+        identity,
+        capability,
+        scope: declaration.scope,
+        policy,
+      })
+      const key = permissionRecordKey(record)
+      const previous = this.policyRecords.get(key)
+      this.policyRecords.set(key, record)
       this.changed()
-      throw error
+      try {
+        await this.store.write([record])
+      } catch (error) {
+        if (previous === undefined) this.policyRecords.delete(key)
+        else this.policyRecords.set(key, previous)
+        this.changed()
+        throw error
+      }
+      this.onceV2.clearGeneration(this.generation, registration.generation.moduleGeneration)
+      return
     }
-    const tickets = this.onceTickets.get(identityKey)
-    tickets?.delete(this.onceKey(declaration))
-    if (tickets?.size === 0) this.onceTickets.delete(identityKey)
+    await this.setPolicyV2(
+      identity,
+      capability as CordisXPermissionCapabilityV2,
+      policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
+    )
   }
 
   authorizationPlan(
@@ -569,6 +1024,35 @@ export class PermissionBroker {
   ): CordisXPermissionAuthorizationPlanV1 {
     const registration = this.registration(identity, view)
     if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
+    if (registration.manifest.schemaVersion === 1) {
+      return Object.freeze({
+        $schema: CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
+        schemaVersion: 1,
+        planId: `${this.generation}:${identity.id}`,
+        operation,
+        profileId: this.profileId,
+        identity: Object.freeze({ source: registration.identity.source, pluginId: registration.identity.id }),
+        defaultDecision: 'allow',
+        declarations: Object.freeze([...registration.declarations.values()].map(declaration => {
+          const record = createPermissionPolicyRecord({
+            profileId: this.profileId,
+            identity,
+            capability: declaration.name,
+            scope: declaration.scope,
+            policy: 'ask',
+          })
+          return Object.freeze({
+            capability: declaration.name,
+            required: declaration.required,
+            reason: declaration.reason,
+            scope: declaration.scope,
+            policy: this.policy(identity, declaration.name, view),
+            decisionRequired: !this.policyRecords.has(permissionRecordKey(record)),
+          })
+        })),
+      })
+    }
+    const v2 = this.authorizationPlanV2(identity, operation, view)
     return Object.freeze({
       $schema: CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
       schemaVersion: 1,
@@ -577,20 +1061,16 @@ export class PermissionBroker {
       profileId: this.profileId,
       identity: Object.freeze({ source: registration.identity.source, pluginId: registration.identity.id }),
       defaultDecision: 'allow',
-      declarations: Object.freeze([...registration.declarations.values()].map(declaration => Object.freeze({
+      declarations: Object.freeze([...registration.declarations.values()].map(declaration => {
+        const item = v2.declarations.find(candidate => candidate.capability === declaration.name)!
+        return Object.freeze({
         capability: declaration.name,
         required: declaration.required,
         reason: declaration.reason,
         scope: declaration.scope,
-        policy: this.policy(identity, declaration.name, view),
-        decisionRequired: !this.policies.has(permissionRecordKey(createPermissionPolicyRecord({
-          profileId: this.profileId,
-          identity,
-          capability: declaration.name,
-          scope: declaration.scope,
-          policy: 'ask',
-        }))),
-      }))),
+        policy: item.policy === 'allow-persistent' ? 'allow' : item.policy === 'deny-persistent' ? 'deny' : 'ask',
+        decisionRequired: item.decisionRequired,
+      }) })),
     })
   }
 
@@ -602,6 +1082,73 @@ export class PermissionBroker {
   ): Promise<void> {
     const registration = this.registration(identity, view)
     if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
+    if (registration.manifest.schemaVersion === 1) {
+      await this.authorizeActivationLegacy(registration, authorization, operation)
+      return
+    }
+    const plan = this.authorizationPlanV2(identity, operation, view)
+    if (authorization === null || typeof authorization !== 'object'
+      || authorization.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1
+      || authorization.schemaVersion !== 1
+      || authorization.planId !== `${this.generation}:${identity.id}`
+      || authorization.operation !== operation
+      || authorization.profileId !== this.profileId
+      || authorization.identity?.source !== identity.source
+      || authorization.identity.pluginId !== identity.id
+      || !Array.isArray(authorization.decisions)) {
+      throw new Error('authorization decision does not match the current plan')
+    }
+    const expected = new Set(plan.declarations.map(item => item.capability))
+    const seen = new Set<CordisXPlatformCapability>()
+    for (const item of authorization.decisions) {
+      if (item === null || typeof item !== 'object'
+        || (item.decision !== 'ask' && item.decision !== 'allow' && item.decision !== 'allow-once' && item.decision !== 'deny')
+        || !expected.has(item.capability) || seen.has(item.capability)
+        || JSON.stringify(normalizePermissionScopeV2(item.scope))
+          !== JSON.stringify(plan.declarations.find(candidate => candidate.capability === item.capability)?.scope)) {
+        throw new Error('authorization decision does not match the current manifest')
+      }
+      seen.add(item.capability)
+    }
+    if (seen.size !== expected.size) throw new Error('authorization decision is incomplete')
+    const decisionV2: CordisXPermissionAuthorizationDecisionV2 = {
+      $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
+      schemaVersion: 2,
+      planId: plan.planId,
+      operation: plan.operation,
+      profileId: plan.profileId,
+      identity: plan.identity,
+      binding: plan.binding,
+      decisions: authorization.decisions.map((item) => {
+        const declaration = plan.declarations.find(candidate => candidate.capability === item.capability)!
+        let decision: CordisXPermissionDecisionV2 = item.decision === 'allow-once'
+          ? 'allow-once'
+          : item.decision === 'allow'
+            ? 'allow-persistent'
+            : item.decision === 'deny'
+              ? 'deny-persistent'
+              : 'deny-once'
+        if (!declaration.allowedDecisions.includes(decision)) {
+          decision = item.decision === 'allow' ? 'allow-once' : 'deny-once'
+        }
+        return {
+          capability: declaration.capability,
+          scope: declaration.scope,
+          securityFingerprint: declaration.securityFingerprint,
+          decision,
+        }
+      }),
+    }
+    this.assertDecisionV2(plan, decisionV2)
+    await this.commitDecisionV2(plan, decisionV2)
+  }
+
+  private async authorizeActivationLegacy(
+    registration: Registration,
+    authorization: CordisXPermissionAuthorizationDecisionV1,
+    operation: 'install' | 'update' | 'enable',
+  ): Promise<void> {
+    const identity = registration.identity
     if (authorization === null || typeof authorization !== 'object'
       || authorization.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1
       || authorization.schemaVersion !== 1
@@ -626,69 +1173,83 @@ export class PermissionBroker {
       seen.add(item.capability)
     }
     if (seen.size !== expected.size) throw new Error('authorization decision is incomplete')
-    const records: CordisXPermissionPolicyRecordV1[] = []
-    const ticketKeys: string[] = []
-    const persistentTicketKeys: string[] = []
-    for (const item of authorization.decisions) {
-      const declaration = registration.declarations.get(item.capability)!
-      if (item.decision === 'allow-once') {
-        ticketKeys.push(this.onceKey(declaration))
-        continue
-      }
-      records.push(createPermissionPolicyRecord({
+    const records = authorization.decisions.flatMap((item): CordisXPermissionPolicyRecordV1[] => (
+      item.decision === 'allow-once' ? [] : [createPermissionPolicyRecord({
         profileId: this.profileId,
         identity,
         capability: item.capability,
-        scope: declaration.scope,
+        scope: registration.declarations.get(item.capability)!.scope,
         policy: item.decision,
-      }))
-      persistentTicketKeys.push(this.onceKey(declaration))
-    }
+      })]
+    ))
     if (records.length > 0) {
       await this.store.write(records)
-      for (const record of records) this.policies.set(permissionRecordKey(record), record)
+      for (const record of records) this.policyRecords.set(permissionRecordKey(record), record)
     }
-    const tickets = ticketKeys.length > 0 ? this.ticketSet(identity) : this.onceTickets.get(platformIdentityKey(identity))
-    for (const key of ticketKeys) tickets?.add(key)
-    for (const key of persistentTicketKeys) tickets?.delete(key)
-    if (tickets?.size === 0) this.onceTickets.delete(platformIdentityKey(identity))
+    const binding = this.binding(registration, `${this.generation}:${identity.id}`)
+    this.onceV2.clearOperation(binding.operationId)
+    for (const item of authorization.decisions) {
+      if (item.decision !== 'allow-once') continue
+      const declaration = registration.declarations.get(item.capability)!
+      this.onceV2.issue(this.legacyAuthorizationKey(registration, declaration), binding)
+    }
     this.changed()
   }
 
   clearOnce(identity: CordisXPluginIdentity): void {
-    if (this.onceTickets.delete(platformIdentityKey(identity))) this.changed()
+    const registration = this.registration(identity)
+    this.onceV2.clearOperation(`${this.generation}:${identity.id}`)
+    this.onceV2.clearGeneration(this.generation, registration?.generation.moduleGeneration)
+    this.changed()
   }
 
   async settled(): Promise<void> {
     await Promise.all(this.migrationTasks)
   }
 
-  async authorize(
+  authorize(
     identity: CordisXPluginIdentity,
     capability: CordisXPlatformCapability,
     requested: RequestedScope,
     view?: PluginGenerationView,
   ): Promise<CordisXPlatformResult<AuthorizationGrant>> {
-    const identityKey = platformIdentityKey(identity)
-    const declaration = this.registration(identity, view)?.declarations.get(capability)
-    if (declaration === undefined) {
+    const currentRegistration = this.registration(identity, view)
+    const declarationV2 = currentRegistration?.declarationsV2.get(capability as CordisXPermissionCapabilityV2)
+    if (currentRegistration === undefined || declarationV2 === undefined) {
       this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is not declared`)
-      this.denied(identityKey, capability, requested)
-      return failure('permission-undeclared', `Plugin ${identity.id} does not declare ${capability}`)
+      this.denied(platformIdentityKey(identity), capability, requested)
+      return Promise.resolve(failure('permission-undeclared', `Plugin ${identity.id} does not declare ${capability}`))
     }
+    if (currentRegistration.manifest.schemaVersion === 1) {
+      return this.authorizeCallLegacy(currentRegistration, capability, requested, view)
+    }
+    return this.authorizeCallV2(currentRegistration, declarationV2, capability, requested)
+  }
+
+  private async authorizeCallLegacy(
+    registration: Registration,
+    capability: CordisXPlatformCapability,
+    requested: RequestedScope,
+    view?: PluginGenerationView,
+  ): Promise<CordisXPlatformResult<AuthorizationGrant>> {
+    const identity = registration.identity
+    const identityKey = platformIdentityKey(identity)
+    const declaration = registration.declarations.get(capability)!
     if (!scopeAllows(declaration.scope, requested)) {
       this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is outside the declared scope`)
       this.denied(identityKey, capability, requested)
       return failure('permission-scope-denied', `Requested parameters are outside the declared ${capability} scope`)
     }
+    const activationBinding = this.binding(registration, `${this.generation}:${identity.id}`)
+    const key = this.legacyAuthorizationKey(registration, declaration)
+    const activationTicket = this.onceV2.consume(key, activationBinding)
     const policy = this.policy(identity, capability, view)
-    const ticket = this.consumeOnce(identity, declaration)
-    if (policy === 'deny' && !ticket) {
+    if (policy === 'deny' && !activationTicket) {
       this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is denied by policy`)
       this.denied(identityKey, capability, requested)
       return failure('permission-denied', `${capability} is denied for plugin ${identity.id}`)
     }
-    if (policy === 'ask' && !ticket) {
+    if (policy === 'ask' && !activationTicket) {
       this.consoleObserver?.permission(identity, capability, 'ask', `${capability} requires a decision`)
       let decision: Exclude<CordisXPermissionDecision, 'ask'> | 'timeout'
       let timer: ReturnType<typeof setTimeout> | undefined
@@ -720,6 +1281,16 @@ export class PermissionBroker {
           this.denied(identityKey, capability, requested)
           return failure('adapter-failure', `${capability} permission policy could not be persisted`)
         }
+      } else {
+        const requestId = typeof globalThis.crypto?.randomUUID === 'function'
+          ? globalThis.crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+        const binding = this.binding(registration, requestId, requestId)
+        this.onceV2.issue(key, binding)
+        if (!this.onceV2.consume(key, binding)) {
+          this.denied(identityKey, capability, requested)
+          return failure('permission-denied', `${capability} one-time authorization was not bound to this request`)
+        }
       }
     }
     const auditKey = this.auditKey(identityKey, capability)
@@ -732,12 +1303,125 @@ export class PermissionBroker {
     return { ok: true, value: { declaration } }
   }
 
-  requiredDenied(identity: CordisXPluginIdentity, view?: PluginGenerationView): readonly CordisXPlatformCapability[] {
+  private async authorizeCallV2(
+    registration: Registration,
+    declaration: CordisXCapabilityDeclarationV2,
+    capability: CordisXPlatformCapability,
+    requested: RequestedScope,
+  ): Promise<CordisXPlatformResult<AuthorizationGrant>> {
+    const identity = registration.identity
+    const identityKey = platformIdentityKey(identity)
+    const legacyDeclaration = registration.declarations.get(capability)
+    if (legacyDeclaration === undefined) {
+      this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is not declared`)
+      this.denied(identityKey, capability, requested)
+      return failure('permission-undeclared', `Plugin ${identity.id} does not declare ${capability}`)
+    }
+    if (!scopeAllows(declaration.scope as CordisXCapabilityScope, requested)) {
+      this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is outside the declared scope`)
+      this.denied(identityKey, capability, requested)
+      return failure('permission-scope-denied', `Requested parameters are outside the declared ${capability} scope`)
+    }
+    const requestId = typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const binding = {
+      operationId: requestId,
+      runtimeGeneration: this.generation,
+      ...(registration.generation.moduleGeneration === undefined ? {} : {
+        moduleGeneration: registration.generation.moduleGeneration,
+      }),
+      requestId,
+    }
+    const plan = this.planV2(registration, 'runtime', binding, [declaration])
+    const item = plan.declarations[0]!
+    const activationBinding = this.binding(registration, `${this.generation}:${identity.id}`)
+    const activationTicket = this.onceV2.consume(this.authorizationKey(plan, item.capability), activationBinding)
+    if (item.policy === 'deny-persistent' && !activationTicket) {
+      this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is denied by persistent policy`)
+      this.denied(identityKey, capability, requested)
+      return failure('permission-denied', `${capability} is denied for plugin ${identity.id}`)
+    }
+    let allowed = activationTicket || (item.policy === 'allow-persistent' && item.sensitivity !== 'high-risk')
+    if (!allowed) {
+      this.consoleObserver?.permission(identity, capability, 'ask', `${capability} requires a decision`)
+      let decision: CordisXPermissionAuthorizationDecisionV2 | undefined
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        decision = await Promise.race([
+          this.promptV2?.request(plan, identity) ?? Promise.resolve(undefined),
+          new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), this.promptTimeoutMs) }),
+        ])
+      } catch {
+        decision = undefined
+      } finally {
+        if (timer !== undefined) clearTimeout(timer)
+      }
+      if (decision === undefined) {
+        this.onceV2.clearOperation(binding.operationId)
+        this.consoleObserver?.permission(identity, capability, 'deny', `${capability} permission request was cancelled or timed out`)
+        this.denied(identityKey, capability, requested)
+        return failure('permission-denied', `${capability} was not authorized for this call`)
+      }
+      try {
+        this.assertDecisionV2(plan, decision)
+        await this.commitDecisionV2(plan, decision)
+      } catch {
+        this.onceV2.clearOperation(binding.operationId)
+        this.consoleObserver?.permission(identity, capability, 'deny', `${capability} decision was invalid`)
+        this.denied(identityKey, capability, requested)
+        return failure('permission-denied', `${capability} authorization was invalid`)
+      }
+      const selected = decision.decisions[0]!.decision
+      if (selected === 'deny-once' || selected === 'deny-persistent') {
+        this.onceV2.clearOperation(binding.operationId)
+        this.consoleObserver?.permission(identity, capability, 'deny', `${capability} was denied`)
+        this.denied(identityKey, capability, requested)
+        return failure('permission-denied', `${capability} was denied for this call`)
+      }
+      if (selected === 'allow-once') {
+        const key = {
+          profileId: this.profileId,
+          identity: plan.identity,
+          capability: item.capability,
+          scope: item.scope,
+          securityFingerprint: item.securityFingerprint,
+        }
+        allowed = this.onceV2.consume(key, binding)
+      } else {
+        allowed = true
+      }
+    }
+    this.onceV2.clearOperation(binding.operationId)
+    if (!allowed) {
+      this.denied(identityKey, capability, requested)
+      return failure('permission-denied', `${capability} one-time authorization was not bound to this request`)
+    }
+    const auditKey = this.auditKey(identityKey, capability)
+    const audit = this.audit.get(auditKey) ?? { denialCount: 0 }
+    audit.lastUsedAt = isoNow(this.now)
+    audit.lastRequested = requestedSnapshot(requested)
+    this.audit.set(auditKey, audit)
+    this.consoleObserver?.permission(identity, capability, 'allow', `${capability} allowed`)
+    this.changed()
+    return { ok: true, value: { declaration: legacyDeclaration } }
+  }
+
+  requiredDenied(identity: CordisXPluginIdentity, view?: PluginGenerationView): readonly CordisXPermissionCapabilityV2[] {
     const registration = this.registration(identity, view)
     if (registration === undefined) return []
-    return [...registration.declarations.values()]
-      .filter(item => item.required && this.policy(identity, item.name, view) === 'deny' && !this.hasOnce(identity, item))
-      .map(item => item.name)
+    if (registration.manifest.schemaVersion === 1) {
+      const binding = this.binding(registration, `${this.generation}:${identity.id}`)
+      return [...registration.declarations.values()]
+        .filter(item => item.required && this.policy(identity, item.name, view) === 'deny'
+          && !this.onceV2.has(this.legacyAuthorizationKey(registration, item), binding))
+        .map(item => item.name)
+    }
+    const plan = this.authorizationPlanV2(identity, 'enable', view)
+    return plan.declarations.filter(item => item.required
+      && item.policy !== 'allow-persistent'
+      && !this.onceV2.has(this.authorizationKey(plan, item.capability), plan.binding))
+      .map(item => item.capability)
   }
 
   recordScopeDenial(identity: CordisXPluginIdentity, capability: CordisXPlatformCapability, requested: RequestedScope): void {
@@ -751,19 +1435,27 @@ export class PermissionBroker {
       const identityKey = platformIdentityKey(registration.identity)
       const audit = this.audit.get(this.auditKey(identityKey, declaration.name)) ?? { denialCount: 0 }
       const policy = this.policy(registration.identity, declaration.name)
+      const item = registration.declarationsV2.get(declaration.name as CordisXPermissionCapabilityV2)
       return {
         identity: registration.identity,
         capability: declaration.name,
         required: declaration.required,
         reason: declaration.reason,
         scope: declaration.scope,
-        fingerprint: declarationFingerprint(declaration),
+        fingerprint: registration.manifest.schemaVersion === 1 || item === undefined
+          ? declarationFingerprint(declaration)
+          : this.authorizationPlanV2(registration.identity, 'enable').declarations
+              .find(candidate => candidate.capability === item.name)!.securityFingerprint,
         policy,
         ...(audit.lastRequested === undefined ? {} : { lastRequested: audit.lastRequested }),
         ...(audit.lastUsedAt === undefined ? {} : { lastUsedAt: audit.lastUsedAt }),
         ...(audit.lastDeniedAt === undefined ? {} : { lastDeniedAt: audit.lastDeniedAt }),
         denialCount: audit.denialCount,
-        ...(declaration.required && policy === 'deny' ? { blockedReason: `Required capability ${declaration.name} is denied` } : {}),
+        ...(this.requiredDenied(registration.identity).includes(declaration.name)
+          ? { blockedReason: registration.manifest.schemaVersion === 1
+              ? `Required capability ${declaration.name} is denied`
+              : `Required capability ${declaration.name} is not authorized` }
+          : {}),
       }
     }))
   }
@@ -776,7 +1468,8 @@ export class PermissionBroker {
   dispose(): void {
     this.registrations.clear()
     this.audit.clear()
-    this.onceTickets.clear()
+    this.onceV2.dispose()
+    this.promptV2?.dispose?.()
     this.listeners.clear()
   }
 
@@ -804,31 +1497,6 @@ export class PermissionBroker {
     }
   }
 
-  private ticketSet(identity: CordisXPluginIdentity): Set<string> {
-    const identityKey = platformIdentityKey(identity)
-    const tickets = this.onceTickets.get(identityKey) ?? new Set<string>()
-    this.onceTickets.set(identityKey, tickets)
-    return tickets
-  }
-
-  private onceKey(declaration: CordisXCapabilityDeclaration): string {
-    return `${this.generation}\u0000${declarationFingerprint(declaration)}`
-  }
-
-  private consumeOnce(identity: CordisXPluginIdentity, declaration: CordisXCapabilityDeclaration): boolean {
-    const tickets = this.onceTickets.get(platformIdentityKey(identity))
-    const key = this.onceKey(declaration)
-    if (tickets?.has(key) !== true) return false
-    tickets.delete(key)
-    if (tickets.size === 0) this.onceTickets.delete(platformIdentityKey(identity))
-    this.changed()
-    return true
-  }
-
-  private hasOnce(identity: CordisXPluginIdentity, declaration: CordisXCapabilityDeclaration): boolean {
-    return this.onceTickets.get(platformIdentityKey(identity))?.has(this.onceKey(declaration)) === true
-  }
-
   private migrateLegacy(registration: Registration): void {
     for (const legacy of this.store.legacy?.() ?? []) {
       if (legacy.identityKey !== platformIdentityKey(registration.identity)) continue
@@ -846,20 +1514,48 @@ export class PermissionBroker {
         continue
       }
       if (legacyFingerprint !== declarationFingerprint(declaration)) continue
-      const record = createPermissionPolicyRecord({
-        profileId: this.profileId,
-        identity: registration.identity,
-        capability: declaration.name,
-        scope: declaration.scope,
-        policy: legacy.policy,
+      if (registration.manifest.schemaVersion === 1) {
+        const record = createPermissionPolicyRecord({
+          profileId: this.profileId,
+          identity: registration.identity,
+          capability: declaration.name,
+          scope: declaration.scope,
+          policy: legacy.policy,
+        })
+        const key = permissionRecordKey(record)
+        if (this.policyRecords.has(key)) continue
+        this.policyRecords.set(key, record)
+        const task = Promise.resolve(this.store.write([record])).then(async () => {
+          await this.store.retireLegacy?.(legacy)
+        }).catch(() => {
+          if (this.policyRecords.get(key) === record) this.policyRecords.delete(key)
+          this.changed()
+        })
+        this.migrationTasks.push(task)
+        continue
+      }
+      const declarationV2 = registration.declarationsV2.get(declaration.name as CordisXPermissionCapabilityV2)
+      if (declarationV2 === undefined) continue
+      const plan = this.planV2(registration, 'runtime', {
+        operationId: `legacy-migration:${registration.identity.id}:${declaration.name}`,
+        runtimeGeneration: this.generation,
+        ...(registration.generation.moduleGeneration === undefined ? {} : {
+          moduleGeneration: registration.generation.moduleGeneration,
+        }),
+      }, [declarationV2])
+      const item = plan.declarations[0]!
+      const record = migratePermissionPolicyV1(legacy.policy, {
+        key: this.authorizationKey(plan, item.capability),
+        persistentAllow: item.persistentAllow,
+        persistentDeny: item.persistentDeny,
       })
-      const key = permissionRecordKey(record)
-      if (this.policies.has(key)) continue
-      this.policies.set(key, record)
-      const task = Promise.resolve(this.store.write([record])).then(async () => {
+      const key = permissionRecordKeyV2(record)
+      if (this.policyRecords.has(key)) continue
+      this.policyRecords.set(key, record)
+      const task = this.persistV2([record]).then(async () => {
         await this.store.retireLegacy?.(legacy)
       }).catch(() => {
-        if (this.policies.get(key) === record) this.policies.delete(key)
+        if (this.policyRecords.get(key) === record) this.policyRecords.delete(key)
         this.changed()
       })
       this.migrationTasks.push(task)

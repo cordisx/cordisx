@@ -19,6 +19,10 @@ import {
   type CordisXCapabilityDeclaration,
   type CordisXPluginManifestV1,
 } from '../platform-contracts.js'
+import type { CordisXPluginManifestV4 } from '../permission-contracts.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 } from '../permission-contracts.js'
+import { CapabilityRiskCatalog } from '../capability-risk-catalog.js'
+import { normalizePluginManifestV4 } from '../permission-model-v2.js'
 import {
   CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
   CORDISX_PLUGIN_PROTOCOL_V1,
@@ -36,7 +40,9 @@ const README = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:md|markdown)$/
 const DIGEST = /^sha256:([a-f0-9]{64})$/
 
 export interface StagedPluginPackage {
-  readonly manifest: CordisXPluginPackageManifestV1
+  readonly manifest: Omit<CordisXPluginPackageManifestV1, 'runtimeManifest'> & {
+    readonly runtimeManifest: CordisXPluginManifestV1 | CordisXPluginManifestV4
+  }
   readonly digest: `sha256:${string}`
   readonly moduleSource: string
   readonly artifactSource: string
@@ -94,7 +100,7 @@ function localizedReason(value: unknown, label: string): CordisXCapabilityDeclar
   }
 }
 
-function runtimeManifestV1(value: unknown, packageId: string): CordisXPluginManifestV1 {
+export function runtimeManifestV1(value: unknown, packageId: string): CordisXPluginManifestV1 {
   const manifest = object(value, 'package.runtimeManifest')
   exactKeys(manifest, ['$schema', 'schemaVersion', 'id', 'name', 'capabilities'], 'package.runtimeManifest')
   if (manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 || manifest.schemaVersion !== 1) {
@@ -371,10 +377,12 @@ export async function stageResolvedPluginPackage(
 ): Promise<StagedPluginPackage> {
   const root = await realpath(sourceDirectory)
   const runtime = resolved.runtimeManifest
-  if (runtime.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 || runtime.schemaVersion !== 1) {
-    throw new Error('the current renderer generation ABI accepts runtime plugin manifest v1 only')
-  }
-  const runtimeManifest = runtimeManifestV1(runtime, resolved.packageManifest.pluginId)
+  const runtimeManifest = runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && runtime.schemaVersion === 1
+    ? runtimeManifestV1(runtime, resolved.packageManifest.pluginId)
+    : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 && runtime.schemaVersion === 4
+      ? normalizePluginManifestV4(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
+      : undefined
+  if (runtimeManifest === undefined) throw new Error('the current renderer generation ABI accepts runtime plugin manifest v1 or v4 only')
   const entry = await regularContainedFile(root, resolved.packageManifest.entry, 'package entry')
   const readmePath = resolved.packageManifest.readme === undefined
     ? undefined
@@ -447,7 +455,7 @@ export async function loadStagedPluginPackage(homeDir: string, digest: `sha256:$
   ])
   if (artifactDigest(manifestText, moduleSource, artifactSource) !== digest) throw new Error('plugin package failed integrity readback')
   const parsed = JSON.parse(manifestText) as unknown
-  let manifest: CordisXPluginPackageManifestV1
+  let manifest: StagedPluginPackage['manifest']
   if (separatedPackage(parsed)) {
     const runtimeBytes = await readFile(path.join(directory, 'runtime-manifest.json'))
     const actualRuntimeDigest = `sha256:${createHash('sha256').update(runtimeBytes).digest('hex')}`
@@ -459,7 +467,14 @@ export async function loadStagedPluginPackage(homeDir: string, digest: `sha256:$
       throw new Error('runtime manifest source provenance failed integrity readback')
     }
     if (actualRuntimeDigest !== expectedRuntimeDigest) throw new Error('runtime manifest failed integrity readback')
-    const runtime = runtimeManifestV1(JSON.parse(runtimeBytes.toString('utf8')) as unknown, parsed.package.pluginId)
+    const rawRuntime = JSON.parse(runtimeBytes.toString('utf8')) as unknown
+    const candidate = rawRuntime as { readonly $schema?: unknown; readonly schemaVersion?: unknown }
+    const runtime = candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && candidate.schemaVersion === 1
+      ? runtimeManifestV1(rawRuntime, parsed.package.pluginId)
+      : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 && candidate.schemaVersion === 4
+        ? normalizePluginManifestV4(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
+        : undefined
+    if (runtime === undefined) throw new Error('stored runtime manifest schema is unsupported')
     manifest = {
       $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
       schemaVersion: 1,

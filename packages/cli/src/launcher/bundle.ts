@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import type { CordisXConfig } from './config.js'
-import type { CordisXPermissionPolicyRecordV1 } from '../platform-contracts.js'
+import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 
 export interface BuildRendererBundleOptions {
@@ -17,7 +17,7 @@ export interface BuildRendererBundleOptions {
   readonly initialRegistryEpoch?: number
   readonly permission?: {
     readonly profileId: string
-    readonly policies: readonly CordisXPermissionPolicyRecordV1[]
+    readonly policies: readonly CordisXPersistedPermissionPolicyRecord[]
     readonly bridgeToken?: string
   }
 }

@@ -1,5 +1,5 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
-import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
+import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
   CordisXBrowserPlugin,
   CordisXCommandReference,
@@ -7,9 +7,10 @@ import type {
   CordisXPermissionAuthorizationDecisionV1,
   CordisXPermissionPolicy,
   CordisXPermissionAuthorizationPlanV1,
-  CordisXPermissionPolicyRecordV1,
+  CordisXPluginManifestV4,
   CordisXPointPolicy,
   CordisXPlatformCapability,
+  CordisXCapabilityScope,
   CordisXPluginIdentity,
   CordisXPluginActivationRecordV1,
   CordisXPluginPackageManifestV1,
@@ -21,6 +22,11 @@ import type {
   CordisXPluginModule,
   CordisXRouteReference,
 } from '../contracts.js'
+import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import type {
+  CordisXPermissionAuthorizationDecisionV2,
+  CordisXPermissionAuthorizationPlanV2,
+} from '../permission-contracts.js'
 import { installCodexAdapter, type CodexAdapterHandle } from './adapter.js'
 import { UnavailableCodexHostAdapter } from '../adapters/codex-agent.js'
 import { CordisXAgentService, CordisXHostAgentRuntime, CordisXSystemPromptService } from './agent.js'
@@ -40,6 +46,7 @@ import { CordisXPageService, CordisXRouteService } from './navigation.js'
 import {
   BrowserPermissionPolicyStore,
   BrowserPermissionPrompt,
+  BrowserPermissionAuthorizationPromptV2,
   CordisXPlatformService,
   PermissionBroker,
   normalizePluginManifest,
@@ -98,7 +105,7 @@ interface CordisXRuntimeMetadata {
   readonly version: string
   readonly providers: readonly { readonly id: string; readonly displayName: string }[]
   readonly profileId: string
-  readonly permissionPolicies?: readonly CordisXPermissionPolicyRecordV1[]
+  readonly permissionPolicies?: readonly CordisXPersistedPermissionPolicyRecord[]
   readonly permissionBridgeToken?: string
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
@@ -112,7 +119,7 @@ interface CordisXRuntimeMetadata {
 interface PluginController {
   item: CordisXBrowserPlugin
   readonly identity: CordisXPluginIdentity
-  manifest: CordisXPluginManifestV1
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4
   principal: PluginPrincipalToken
   activation: number
   principalLive: boolean
@@ -187,7 +194,7 @@ export interface RendererPluginMutation {
     readonly identitySource: string
     readonly readme?: string
   }
-  readonly authorizationDecision?: CordisXPermissionAuthorizationDecisionV1
+  readonly authorizationDecision?: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2
 }
 
 interface CordisXRuntimeHandle extends ManagerModel {
@@ -198,6 +205,8 @@ interface CordisXRuntimeHandle extends ManagerModel {
   setExtensionPointPolicy(source: string, pluginId: string, pointId: string, policy: CordisXPointPolicy): Promise<void>
   permissionAuthorizationPlan(id: string): CordisXPermissionAuthorizationPlanV1
   authorizePlugin(id: string, decision: CordisXPermissionAuthorizationDecisionV1): Promise<void>
+  permissionAuthorizationPlanV2(id: string): CordisXPermissionAuthorizationPlanV2 | undefined
+  authorizePluginV2(id: string, decision: CordisXPermissionAuthorizationDecisionV2): Promise<void>
   /** Host-private readback of the registry authority; never used as renderer lifecycle input. */
   activePluginGeneration(): CordisXPluginActivationRecordV1
   /** Host-private bounded evidence for cross-registry batch notification assertions. */
@@ -417,6 +426,7 @@ async function start(
     generation,
     generationVisibility,
     pluginConsole,
+    new BrowserPermissionAuthorizationPromptV2(document),
   )
   for (const plugin of plugins) {
     if (plugin.package === undefined) generationVisibility.bindStable(plugin.id, `${generation}:${plugin.id}:bundled`)
@@ -481,7 +491,16 @@ async function start(
   const requiredBlockReason = (controller: PluginController): string | undefined => {
     const denied = broker.requiredDenied(controller.identity, controller.generationView)
     if (denied.length > 0) return `Required capability denied: ${denied.join(', ')}`
-    const unavailable = capabilityAvailability.unavailableRequired(controller.manifest.capabilities)
+    const declarations = controller.manifest.capabilities.flatMap(item => (
+      (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
+        ? [{
+            name: item.name as CordisXPlatformCapability,
+            required: item.required,
+            scope: item.scope as CordisXCapabilityScope,
+          }]
+        : []
+    ))
+    const unavailable = capabilityAvailability.unavailableRequired(declarations)
     if (unavailable.length > 0) return `Required capability unavailable: ${unavailable.join(', ')}`
     return undefined
   }
@@ -1078,9 +1097,17 @@ async function start(
     return broker.authorizationPlan(controller.identity, 'enable')
   }
 
-  const authorizePlugin = (
+  const permissionAuthorizationPlanV2 = (id: string): CordisXPermissionAuthorizationPlanV2 | undefined => {
+    const controller = activeController(id)
+    if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+    return controller.manifest.schemaVersion === 4
+      ? broker.authorizationPlanV2(controller.identity, 'enable', controller.generationView)
+      : undefined
+  }
+
+  const authorizePluginWith = (
     id: string,
-    decision: CordisXPermissionAuthorizationDecisionV1,
+    authorize: (controller: PluginController) => Promise<void>,
   ): Promise<void> => {
     const task = operation.then(async () => {
       if (disposed) throw new Error('CordisX runtime is disposed')
@@ -1089,7 +1116,7 @@ async function start(
       if (!controller.item.enabled || controller.item.module === undefined) {
         throw new Error(`plugin ${id} is disabled in cordisx.config.json and is not bundled`)
       }
-      await broker.authorizeActivation(controller.identity, decision, 'enable')
+      await authorize(controller)
       blockedPlugins.delete(id)
       writeBlockedPlugins(blockedPlugins)
       const blockedReason = requiredBlockReason(controller)
@@ -1111,6 +1138,21 @@ async function start(
     operation = task.catch(() => {})
     return task
   }
+
+  const authorizePlugin = (
+    id: string,
+    decision: CordisXPermissionAuthorizationDecisionV1,
+  ): Promise<void> => authorizePluginWith(id, async controller => {
+    await broker.authorizeActivation(controller.identity, decision, 'enable', controller.generationView)
+  })
+
+  const authorizePluginV2 = (
+    id: string,
+    decision: CordisXPermissionAuthorizationDecisionV2,
+  ): Promise<void> => authorizePluginWith(id, async controller => {
+    if (controller.manifest.schemaVersion !== 4) throw new Error(`plugin ${id} does not use permission v2`)
+    await broker.authorizeActivationV2(controller.identity, decision, 'enable', controller.generationView)
+  })
 
   const candidateController = (
     handle: PluginGenerationTransitionHandle,
@@ -1282,12 +1324,22 @@ async function start(
           if (candidate.controller.item.id === mutation.targetId
             && mutation.authorizationDecision !== undefined
             && (mutation.operation === 'install' || mutation.operation === 'update' || mutation.operation === 'enable')) {
-            await broker.authorizeActivation(
-              candidate.controller.identity,
-              mutation.authorizationDecision,
-              mutation.operation as 'install' | 'update' | 'enable',
-              candidate.controller.generationView,
-            )
+            if (mutation.authorizationDecision.schemaVersion === 2) {
+              if (candidate.controller.manifest.schemaVersion !== 4) throw new Error('permission v2 decision requires manifest-v4')
+              await broker.authorizeActivationV2(
+                candidate.controller.identity,
+                mutation.authorizationDecision,
+                mutation.operation as 'install' | 'update' | 'enable',
+                candidate.controller.generationView,
+              )
+            } else {
+              await broker.authorizeActivation(
+                candidate.controller.identity,
+                mutation.authorizationDecision,
+                mutation.operation as 'install' | 'update' | 'enable',
+                candidate.controller.generationView,
+              )
+            }
           }
         }
         await broker.settled()
@@ -1664,12 +1716,22 @@ async function start(
     setExtensionPointPolicy,
     permissionAuthorizationPlan,
     authorizePlugin,
+    permissionAuthorizationPlanV2,
+    authorizePluginV2,
     activePluginGeneration: () => structuredClone(currentActivation),
     generationNotificationTrace: () => generationNotificationTrace.map(item => ({ ...item })),
     settleRegistryProjection,
     requestPluginLifecycle: (lifecycleOperation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1> => {
       if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
       return lifecycleBridge.request(currentActivation.revision, lifecycleOperation)
+    },
+    permissionLifecycleReviewPlanV2: target => {
+      if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
+      return lifecycleBridge.permissionReviewPlanV2(currentActivation.revision, target)
+    },
+    applyPermissionLifecycleReviewV2: decision => {
+      if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
+      return lifecycleBridge.applyPermissionReviewV2(currentActivation.revision, decision)
     },
     stagePluginMutation,
     publishPluginMutation,

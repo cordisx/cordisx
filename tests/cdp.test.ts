@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CdpPluginLifecycleRuntime, injectableTargets, type CdpTarget } from '../packages/cli/src/launcher/cdp.js'
+import { CdpLifecycleRequestGate, CdpPluginLifecycleRuntime, injectableTargets, type CdpTarget } from '../packages/cli/src/launcher/cdp.js'
 import type { PluginRuntimeMutation } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authority.js'
@@ -125,5 +125,32 @@ describe('CdpPluginLifecycleRuntime', () => {
     expect(expressions.filter(expression => expression.includes('recoverPluginMutation'))).toHaveLength(1)
     expect(expressions.filter(expression => expression.includes('adoptRecoveredActivation'))).toHaveLength(1)
     expect(runtime.prepare('next')).toMatchObject({ expectedRegistryEpoch: 2 })
+  })
+})
+
+describe('CdpLifecycleRequestGate', () => {
+  it('releases the single-flight fence before a response-triggered follow-up', async () => {
+    const gate = new CdpLifecycleRequestGate()
+    const values: number[] = []
+    let followUp: Promise<void> | undefined
+
+    await gate.run(async () => 1, async value => {
+      values.push(value)
+      followUp = gate.run(async () => 2, async next => { values.push(next) })
+    })
+    await followUp
+
+    expect(values).toEqual([1, 2])
+  })
+
+  it('rejects a genuinely concurrent lifecycle task', async () => {
+    const gate = new CdpLifecycleRequestGate()
+    let release!: () => void
+    const blocked = new Promise<void>(resolve => { release = resolve })
+    const active = gate.run(async () => { await blocked }, async () => undefined)
+
+    await expect(gate.run(async () => undefined, async () => undefined)).rejects.toThrow(/already active/)
+    release()
+    await active
   })
 })

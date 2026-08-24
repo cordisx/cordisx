@@ -23,7 +23,8 @@ import { resolveProfileSelection } from './profiles.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
 import { createConfigBridgeHandler, type ConfigBridgeHandler } from '../launcher/config-rpc.js'
-import type { CordisXPermissionPolicyRecordV1, CordisXPluginIdentity } from '../platform-contracts.js'
+import type { CordisXPluginIdentity } from '../platform-contracts.js'
+import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import { PluginPermissionIdentityRegistry, type PermissionPersistenceContext } from '../launcher/permission-rpc.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { loadActivatedPluginComposition, loadPluginComposition } from '../launcher/plugin-composition.js'
@@ -119,7 +120,7 @@ async function bundle(
     readonly writable?: boolean
     readonly permission?: {
       readonly profileId: string
-      readonly policies: readonly CordisXPermissionPolicyRecordV1[]
+      readonly policies: readonly CordisXPersistedPermissionPolicyRecord[]
       readonly persistent: boolean
     }
     readonly generation?: string
@@ -418,6 +419,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
 
   const configuredComposition = await loadConfig(configPath, { profileId: selection.profileId })
   const currentHomeConfig = await loadHomeConfig(configPath)
+  const permissionPolicies = currentHomeConfig.permissions.filter(policy => policy.key.profileId === selection.profileId)
   const lifecycleGeneration = randomBytes(16).toString('hex')
   const lifecycleStore = new PluginActivationStore(rootFromConfigPath(configPath), selection.profileId, lifecycleGeneration)
   const lifecycleRuntime = new CdpPluginLifecycleRuntime()
@@ -426,7 +428,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     homeDir: rootFromConfigPath(configPath),
     profileId: selection.profileId,
     runtimeGeneration: lifecycleGeneration,
-    permissionPolicies: currentHomeConfig.permissions.filter(policy => policy.key.profileId === selection.profileId),
+    permissionPolicies,
+    loadPermissionPolicies: async () => (await loadHomeConfig(configPath)).permissions
+      .filter(policy => policy.key.profileId === selection.profileId),
     runtime: lifecycleRuntime,
     reservedPluginIds: [...configuredIds],
   })
@@ -465,7 +469,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     writable: true,
     permission: {
       profileId: selection.profileId,
-      policies: currentHomeConfig.permissions.filter(policy => policy.key.profileId === selection.profileId),
+      policies: permissionPolicies,
       persistent: true,
     },
     generation: lifecycleGeneration,

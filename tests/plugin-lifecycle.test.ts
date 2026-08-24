@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -25,6 +26,12 @@ import {
 } from '../packages/cli/src/platform-contracts.js'
 import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authority.js'
 import type { PackageActivationTuple } from '../packages/cli/src/launcher/packages/types.js'
+import {
+  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+  CORDISX_PLUGIN_PACKAGE_SCHEMA_V3,
+} from '../packages/cli/src/permission-contracts.js'
+import { partitionPermissionReviewPlan } from '../packages/cli/src/capability-risk-catalog.js'
 
 const temporary = new Set<string>()
 
@@ -243,6 +250,54 @@ async function localPackage(input: {
   return source
 }
 
+async function localPackageV4(root: string): Promise<string> {
+  const source = path.join(root, `permission-v4-${Math.random().toString(36).slice(2)}`)
+  await mkdir(path.join(source, 'src'), { recursive: true })
+  const runtime = {
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+    schemaVersion: 4,
+    id: 'permission-v4',
+    name: 'Permission V4',
+    capabilities: [
+      { name: 'models.read', required: true, scope: { providers: ['codex'] } },
+      {
+        name: 'tasks.control',
+        required: false,
+        rationale: {
+          title: { key: 'control-title', fallback: 'Control selected tasks' },
+          description: { key: 'control-description', fallback: 'Archives one selected task.' },
+          feature: { key: 'control-feature', fallback: 'Task cleanup' },
+          deniedBehavior: { key: 'control-denied', fallback: 'Task cleanup stays disabled.' },
+        },
+        security: { dataUse: 'ephemeral', retention: 'none', externalTransfer: false },
+        scope: { sessions: [{ providerId: 'codex', remoteSessionId: 'task-1' }] },
+      },
+    ],
+    services: [],
+  } as const
+  const runtimeText = `${JSON.stringify(runtime, null, 2)}\n`
+  await Promise.all([
+    writeFile(path.join(source, 'runtime.json'), runtimeText),
+    writeFile(path.join(source, 'src/index.ts'), 'export function apply() {}\n'),
+  ])
+  await writeFile(path.join(source, 'cordisx-package.json'), `${JSON.stringify({
+    $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V3,
+    schemaVersion: 3,
+    id: runtime.id,
+    version: '1.0.0',
+    entry: './src/index.ts',
+    distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
+    compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V4] },
+    dependencies: [],
+    runtimeManifest: {
+      path: './runtime.json',
+      schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+      digest: `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`,
+    },
+  }, null, 2)}\n`)
+  return source
+}
+
 function request(
   operation: CordisXPluginLifecycleRequestV1['operation'],
   expectedRevision = 0,
@@ -288,6 +343,79 @@ async function install(
 }
 
 describe('launcher plugin lifecycle coordinator', () => {
+  it('reviews package-v3/manifest-v4 through the Host-private V2 seam and the existing lifecycle authority', async () => {
+    const { root, home } = await workspace()
+    const runtime = new FormalRuntime()
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      runtime,
+    })
+    const planned = await coordinator.handle(request({ kind: 'inspect-local', sourceDirectory: await localPackageV4(root) }))
+    expect(planned).toMatchObject({ outcome: 'planned', operation: 'install', package: { id: 'permission-v4' } })
+    expect(planned.authorizationPlan).toBeUndefined()
+    const plan = await coordinator.permissionReviewPlanV2({
+      requestId: 'private-plan',
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      expectedRevision: 0,
+      target: { kind: 'candidate', candidateId: planned.candidateId! },
+    })
+    expect(plan).toMatchObject({
+      schemaVersion: 2,
+      operation: 'install',
+      binding: { runtimeGeneration: 'runtime-1', requestId: planned.candidateId },
+    })
+    const groups = partitionPermissionReviewPlan(plan!)
+    expect(groups.batchEligible.map(item => item.capability)).toEqual(['models.read'])
+    expect(groups.explicit.map(item => item.capability)).toEqual(['tasks.control'])
+    const reviewed = {
+      $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
+      schemaVersion: 2 as const,
+      planId: plan!.planId,
+      operation: plan!.operation,
+      profileId: plan!.profileId,
+      identity: plan!.identity,
+      binding: plan!.binding,
+      decisions: plan!.declarations.map(item => ({
+        capability: item.capability,
+        scope: item.scope,
+        securityFingerprint: item.securityFingerprint,
+        decision: item.capability === 'models.read' ? 'allow-persistent' as const : 'deny-once' as const,
+      })),
+    }
+    const applied = await coordinator.applyPermissionReviewV2({
+      requestId: 'private-apply',
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      expectedRevision: 0,
+      decision: reviewed,
+    })
+    expect(applied).toMatchObject({ outcome: 'applied', operation: 'install', revision: 1 })
+    expect(runtime.calls).toEqual(['prepare', 'stage', 'publish', 'complete', 'finalize'])
+    expect(runtime.lastStaged?.authorizationDecision).toEqual(reviewed)
+
+    const disablePlan = await coordinator.handle(request({ kind: 'disable', pluginId: 'permission-v4', impactToken: 'probe' }, 1))
+    expect(disablePlan).toMatchObject({ outcome: 'planned', operation: 'disable', revision: 1 })
+    expect(disablePlan.authorizationPlan).toBeUndefined()
+    const disabled = await coordinator.handle(request({
+      kind: 'disable', pluginId: 'permission-v4', impactToken: disablePlan.impactToken!,
+    }, 1))
+    expect(disabled).toMatchObject({ outcome: 'applied', operation: 'disable', revision: 2 })
+    expect(runtime.lastStaged?.authorizationDecision).toMatchObject({ schemaVersion: 2, operation: 'enable' })
+
+    const uninstallPlan = await coordinator.handle(request({ kind: 'uninstall', pluginId: 'permission-v4', impactToken: 'probe' }, 2))
+    expect(uninstallPlan).toMatchObject({ outcome: 'planned', operation: 'uninstall', revision: 2 })
+    expect(uninstallPlan.authorizationPlan).toBeUndefined()
+    const uninstalled = await coordinator.handle(request({
+      kind: 'uninstall', pluginId: 'permission-v4', impactToken: uninstallPlan.impactToken!,
+    }, 2))
+    expect(uninstalled).toMatchObject({ outcome: 'applied', operation: 'uninstall', revision: 3 })
+    expect((await coordinator.store.loadActive()).plugins).toEqual([])
+  })
+
   it('binds the formal authority epochs, immutable runtime module, receipts, and cleanup sequence', async () => {
     const { root, home } = await workspace()
     const runtime = new FormalRuntime()

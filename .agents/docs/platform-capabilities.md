@@ -1,7 +1,9 @@
 # Platform capabilities architecture
 
-Status: approved implementation architecture for the version-1 Platform
-slice. Normative plugin-visible behavior lives in `cordisx-protocol`.
+Status: implemented Host architecture for Platform permission v1 compatibility
+and the formal permission-v2 contract. Normative plugin-visible behavior lives
+in `cordisx-protocol`; the Host consumes the formal permission-v2 merge and not
+the closed experimental lifecycle-schema branch.
 
 ## Evidence and safe landing boundary
 
@@ -104,12 +106,34 @@ scope cannot change another plugin's projection.
 
 ## Authorization duration, persistence, and migration
 
-Persisted policy remains `ask` / `deny` / `allow`. A runtime prompt resolves
-`ask` with three host-owned actions: persistent `始终允许` as the primary
-action, `仅此次允许` as a secondary action, and `拒绝`. Persistent allow is
-written successfully before adapter dispatch. Allow-once authorizes only the
-current matching Broker request and never enters browser storage or launcher
-configuration.
+Manifest-v4 uses the exhaustive 22-entry Host sensitivity catalog. Persisted
+policy is `ask` / `allow-persistent` / `deny-persistent`; runtime decisions are
+`allow-once` / `allow-persistent` / `deny-once` / `deny-persistent` subject to
+the catalog. High-risk capabilities never expose persistent allow. Required is
+orthogonal to sensitivity, and current availability is orthogonal to policy.
+The dedicated Host review surface renders catalog facts and validated plugin
+rationale as text nodes; plugin markup, links, security claims, and Host
+impersonation are rejected before projection.
+
+One `PermissionBroker` owns one profile ledger index and one policy engine.
+Version-1 manifests enter that Broker through a compatibility adapter; they do
+not create a second broker, registry, ledger, or policy store. The durable Home
+configuration and authenticated `__cordisxPermissionPolicyRequestV1` bridge
+carry both v1 and v2 records in one array. Persistent v2 identity is the exact
+profile/source/plugin/capability/normalized-scope/security-fingerprint tuple.
+Security fingerprint includes the catalog version plus the normalized
+declaration security and rationale. Proven narrowing may carry a compatible
+policy into one exact v2 record; expansion, unrelated scope change, source or
+profile change, security/rationale change, and ambiguous candidates return to
+`ask`.
+
+Allow-once is held only by the Broker's in-memory exact-grant ledger. Runtime
+requests bind operation id, runtime generation, module generation, and request
+id. Install/enable decisions are additionally fenced by the exact candidate
+id and are projected to the matching activation generation before first use.
+No allow-once value is accepted by persistence. Disable, identity replacement,
+candidate abort, rollback, generation disposal, and Broker disposal revoke the
+matching grants.
 
 Product launches pass only the selected profile id and that profile's
 validated permission projection into the bundle. Writes cross an authenticated,
@@ -121,12 +145,13 @@ configuration document/writer. Development launches without that binding use
 an explicitly profile-scoped browser fallback and do not claim launcher-durable
 authorization.
 
-The previous `cordisx.platform.permissionPolicies.v1` renderer ledger is
-migrated only when its source/id, capability, and fingerprint parse to the exact
-current normalized scope. The launcher-selected profile is added; required and
-reason fields are discarded. Malformed or non-matching records fall back to
-`ask`. The old entry is removed only after the new configuration write is
-acknowledged.
+The previous browser `cordisx.platform.permissionPolicies.v1` entry is a
+read-only migration source, not an active second ledger. It is migrated only
+when source/id/capability/fingerprint match the exact current normalized scope.
+Home configuration permission-policy v1 records migrate to v2 only when a
+manifest-v4 declaration has the same profile/source/id/capability/scope and the
+catalog permits the corresponding persistent outcome. The old entry is retired
+only after the atomic v2 write and readback are acknowledged.
 
 The persistent configuration key excludes runtime generation. An allow-once
 ticket is instead bound to profile, identity, capability, exact scope, and the
@@ -144,17 +169,23 @@ subset still fail through normal parameter/provider validation. `ask` is
 unresolved authority, not automatic denial or grant; the host prompts at call
 time. Optional denial or unavailability does not stop the fiber.
 
-Installing or enabling uses one normalized authorization plan containing all
-required and optional manifest declarations. The Host renders a single flat
-review, keeps required declarations selected, lets the user decline individual
-optional declarations, and applies the resulting per-capability decisions through
-the Broker before activation. Persistent allow is the batch primary action. A batch allow-once decision creates one
-generation-bound ticket for the first matching call after activation. A denied
-or unresolved required declaration blocks activation; optional denial stays
-active with explicit degradation. The same boundary is implemented for
-enable/restore now and is reserved for a future installer; Marketplace package
-download, signature verification, and code installation are not introduced by
-this task.
+Installing, updating, or enabling a manifest-v4 plugin uses one normalized v2
+authorization plan containing every required and optional declaration.
+Low/general declarations are batch-eligible; sensitive/high-risk declarations
+receive explicit per-capability review. The dedicated dialog shows Host facts,
+plugin rationale, scope, sensitivity, availability, and only the catalog-allowed
+decisions. A denied required declaration leaves the candidate inactive;
+optional denial remains an explicit degradation.
+
+Package-v3 is the only package boundary that may reference manifest-v4. The
+launcher snapshots and digests the separate runtime manifest, stages it in the
+existing immutable package store, and exposes the v2 plan over an authenticated
+Host-private lifecycle envelope. Public lifecycle request/result v1 schemas are
+unchanged. The reviewed v2 decision is then bound to the existing
+`PackageLifecycleAuthority` receipt and generation transaction, reaches the
+same renderer Broker before readiness, and is revoked on abort/rollback by that
+authority. Enable/restore of an already active permission-blocked v4 plugin
+uses the same Broker directly. No parallel installer authority is introduced.
 
 The decision returns the protocol envelope rather than a bare array. The Broker
 checks its schema version, generation-bound `planId`, operation, profile,
@@ -251,11 +282,11 @@ rollback are outside this task.
    LocalizedText/MessageRef are merged dependencies.
 2. `cordisx/cordisx#3` LocalizationKernel is the real projection dependency;
    Platform does not create a second localization service.
-3. The existing protocol owns authorization-key/duration/install-or-enable
-   semantics. This availability repair changes only the private Host provider
-   registry and Manager projection; it does not add a plugin-visible schema or
-   modify Agent event, Agent Trace, Console, configuration, or lifecycle
-   contracts.
+3. Permission v2 uses the formal Protocol manifest-v4, package-v3, catalog,
+   plan, decision, policy, schema vectors, and localized catalogs. The closed
+   experimental public lifecycle-schema branch is not consumed. Agent Trace is
+   a consumer only; Console, Luna Log, configuration, generation visibility,
+   theme, menu, and toolbar ownership remain unchanged.
 4. The host PR owns TypeScript contracts, profile-scoped Home configuration,
    bounded persistence RPC, Broker duration behavior, enable/restore batch UI,
    runtime prompt, capability provider aggregation, activation reconciliation,
@@ -265,8 +296,8 @@ rollback are outside this task.
    blocked on a stable auditable host seat.
 6. CordisXMono updates the two pushed gitlinks only after compatible validation.
 
-The task does not initialize or modify `roadmap`, and does not expand into a
-complete Marketplace implementation.
+The task does not initialize or modify `roadmap`, add a generic Dialog/theme
+framework, or expand into a complete Marketplace implementation.
 
 ## Validation boundary
 

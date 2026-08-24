@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v4.schema.json",
+  "schemaVersion": 4,
+  "id": "permission-v2-smoke",
+  "name": "Permission V2 Smoke",
+  "capabilities": [
+    {
+      "name": "agent.events.read",
+      "required": true,
+      "rationale": {
+        "title": { "key": "smoke-events-title", "fallback": "Probe one Agent event query" },
+        "description": { "key": "smoke-events-description", "fallback": "Checks one exact Host-local event-ledger permission grant." },
+        "feature": { "key": "smoke-events-feature", "fallback": "Permission smoke" },
+        "deniedBehavior": { "key": "smoke-events-denied", "fallback": "The smoke command remains blocked." }
+      },
+      "security": { "dataUse": "ephemeral", "retention": "none", "externalTransfer": false },
+      "scope": { "sessionIds": ["permission-smoke-session"] }
+    },
+    {
+      "name": "tasks.catalog.read",
+      "required": false,
+      "rationale": {
+        "title": { "key": "smoke-tasks-title", "fallback": "Probe an expanded task catalog" },
+        "description": { "key": "smoke-tasks-description", "fallback": "Checks that a wider provider scope requires review." },
+        "feature": { "key": "smoke-tasks-feature", "fallback": "Permission smoke" },
+        "deniedBehavior": { "key": "smoke-tasks-denied", "fallback": "The task probe remains unavailable." }
+      },
+      "security": { "dataUse": "ephemeral", "retention": "none", "externalTransfer": false },
+      "scope": { "providers": ["codex", "claude"] }
+    },
+    {
+      "name": "tasks.control",
+      "required": false,
+      "rationale": {
+        "title": { "key": "smoke-control-title", "fallback": "Keep destructive control denied" },
+        "description": { "key": "smoke-control-description", "fallback": "Checks explicit high-risk denial without invoking the operation." },
+        "feature": { "key": "smoke-control-feature", "fallback": "Permission smoke" },
+        "deniedBehavior": { "key": "smoke-control-denied", "fallback": "No task-control operation is enabled." }
+      },
+      "security": { "dataUse": "ephemeral", "retention": "none", "externalTransfer": false },
+      "scope": {
+        "sessions": [{ "providerId": "codex", "remoteSessionId": "permission-smoke-task" }]
+      }
+    }
+  ],
+  "services": []
+}

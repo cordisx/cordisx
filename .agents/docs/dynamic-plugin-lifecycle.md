@@ -371,12 +371,24 @@ does not fail readiness. Denying a required capability leaves the artifact
 staged but inactive and leaves last-good active state unchanged.
 
 The permission plan is built from the complete separate runtime manifest.
-Persistent `allow`/`deny` continues to use the exact formal authorization key.
-`allow-once` is non-durable, bound by the Host-private plan to the candidate
-package/module generation, and cleared by abort, disable, replacement, or
-generation disposal. A declaration that the current plan/broker cannot express
-or enforce blocks activation rather than being dropped; optional declarations
-degrade only without fallback authority.
+Manifest-v4 produces a permission-v2 plan from the Host's exhaustive catalog;
+batch-eligible low/general declarations and explicit sensitive/high-risk
+declarations remain in one atomic review. Persistent allow/deny uses the exact
+profile/source/plugin/capability/scope/security-fingerprint key in the same
+Home ledger as runtime authorization. `allow-once` is non-durable, bound by the
+Host-private plan to candidate id plus package/module/runtime generation, and
+cleared by abort, disable, replacement, or generation disposal. A declaration
+that the current plan/Broker cannot express or enforce blocks activation rather
+than being dropped; optional declarations degrade only without fallback
+authority.
+
+Public lifecycle v1 schemas stay frozen. The authenticated renderer binding
+has a Host-private review-plan/apply envelope for v2; its plan and decision are
+revalidated by the launcher and then attached to the existing
+`PackageLifecycleAuthority` permission receipt. The authority and Generation
+Runtime carry that same decision into the single renderer `PermissionBroker`
+before readiness. This is not a second lifecycle protocol, package registry,
+policy engine, or permission store.
 
 Upgrade is the same transaction with an existing active id. A failed build,
 manifest check, dependency check, permission decision, candidate startup, or
