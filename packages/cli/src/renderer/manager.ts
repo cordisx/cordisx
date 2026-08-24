@@ -83,6 +83,7 @@ import {
 } from './tdesign-form.js'
 import { BrowserPermissionAuthorizationDialog } from './permission-authorization-dialog.js'
 import { managerCopy, productLocale } from './ui-copy.js'
+import { sortManagerSettingsNavigationItems } from './manager-settings-navigation.js'
 import type { MarketplaceRankingExplanation } from './marketplace-ranking.js'
 import lunaConsoleCss from 'luna-console/luna-console.css'
 import lunaDataGridCss from 'luna-data-grid/luna-data-grid.css'
@@ -190,6 +191,8 @@ export interface ManagerSettingsNavigationItemSnapshot {
   readonly owner: string
   readonly group: 'before-settings' | 'after-settings'
   readonly order: number
+  readonly disabled: boolean
+  readonly disabledReason?: string
   readonly title: string
   readonly description: string
   readonly pageTitle: string
@@ -245,6 +248,7 @@ type ManagerRouteState =
   | { readonly kind: 'marketplace'; readonly identity: string; readonly facet: MarketplaceDetailTab }
   | { readonly kind: 'extension-point'; readonly pointId: string; readonly facet: ExtensionPointDetailTab }
   | { readonly kind: 'route'; readonly qualifiedId: string }
+  /** Legacy route state is normalized to Plugins; no global Settings page is mounted. */
   | { readonly kind: 'settings'; readonly tabId: string }
   | { readonly kind: 'manager-content'; readonly id: string }
 
@@ -284,11 +288,8 @@ const MARKETPLACE_DETAIL_TABS: readonly { readonly id: MarketplaceDetailTab; rea
   { id: 'overview', label: '概览', icon: 'overview' },
   { id: 'authors-source', label: '作者与来源', icon: 'authors-source' },
 ]
-export const CORDISX_BUILTIN_MANAGER_SETTINGS_TABS: readonly ManagerSettingsTabSnapshot[] = Object.freeze([
-  Object.freeze({ id: 'host:marketplace', owner: 'host', title: '插件商店', icon: 'host:open', order: 100, disabled: false, builtin: true }),
-  Object.freeze({ id: 'host:runtime', owner: 'host', title: '运行状态', icon: 'host:analytics', order: 200, disabled: false, builtin: true }),
-  Object.freeze({ id: 'host:launcher', owner: 'host', title: '启动器', icon: 'host:settings', order: 300, disabled: false, builtin: true }),
-])
+/** Compatibility export only. This Manager has no global Settings product page. */
+export const CORDISX_BUILTIN_MANAGER_SETTINGS_TABS: readonly ManagerSettingsTabSnapshot[] = Object.freeze([])
 const CORDISX_MARK_DARK_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkDark)}`
 const CORDISX_MARK_LIGHT_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkLight)}`
 const ABOUT_ACTIONS = [
@@ -489,7 +490,7 @@ const MANAGER_STYLES = `
     border-right: 1px solid rgba(255, 255, 255, .08);
     background: linear-gradient(180deg, #191c26, #141720);
   }
-  .cxm-nav { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 4px; }
+  .cxm-nav { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 4px; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
   .cxm-nav-button {
     display: flex;
     align-items: center;
@@ -505,7 +506,8 @@ const MANAGER_STYLES = `
     font: inherit;
   }
   .cxm-nav-button:hover { background: rgba(255, 255, 255, .05); color: #fff; }
-  .cxm-nav-button[aria-selected="true"] { background: rgba(199, 204, 212, .14); color: #eef0f3; }
+  .cxm-nav-button[aria-current="page"] { background: rgba(199, 204, 212, .14); color: #eef0f3; }
+  .cxm-nav-button:disabled { cursor: default; opacity: .48; }
   .cxm-nav-button[data-tab="about"] { margin-top: auto; }
   .cxm-nav-icon { width: 20px; height: 20px; color: #b8bec8; }
   .cxm-nav-icon svg { width: 18px; height: 18px; }
@@ -546,6 +548,7 @@ const MANAGER_STYLES = `
     color: #d8dce3;
     align-self: start;
   }
+  .cxm-heading-leading-stack { display: flex; width: 56px; gap: 4px; }
   .cxm-heading-icon svg { width: 18px; height: 18px; transform: translateY(-.5px); }
   .cxm-back {
     padding: 0;
@@ -1831,14 +1834,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const sidebar = create(document, 'aside', 'cxm-sidebar')
   const nav = create(document, 'nav', 'cxm-nav')
-  nav.setAttribute('role', 'tablist')
   nav.setAttribute('aria-label', 'CordisX 管理器页面')
   const tabs: readonly { id: ManagerTab; icon?: ManagerIconToken; label: string; brand?: boolean }[] = [
     { id: 'plugins', icon: 'plugins', label: '插件' },
     { id: 'extension-points', icon: 'contributions', label: '扩展点' },
     { id: 'routes', icon: 'routes', label: '路由' },
     { id: 'marketplace', icon: 'marketplace', label: '插件商店' },
-    { id: 'settings', icon: 'settings', label: '配置' },
     { id: 'about', label: '关于 CordisX', brand: true },
   ]
   let routeState: ManagerRouteState = { kind: 'primary', primary: 'plugins' }
@@ -1848,13 +1849,13 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const button = create(document, 'button', 'cxm-nav-button')
     button.type = 'button'
     button.dataset.tab = tab.id
-    button.setAttribute('role', 'tab')
+    button.dataset.managerNavigationId = tab.id
     const icon = tab.brand === true
       ? createAdaptiveBrandMark(document)
       : createManagerIcon(document, tab.icon ?? 'plugins', 'cxm-nav-icon')
     icon.classList.add('cxm-nav-icon')
     icon.setAttribute('aria-hidden', 'true')
-    button.append(icon, create(document, 'span', undefined, tab.label))
+    button.append(icon, create(document, 'span', 'cxm-nav-label', tab.label))
     navButtons.set(tab.id, button)
     nav.append(button)
   }
@@ -1926,6 +1927,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let selectedConsoleEntry: string | undefined
   const consoleScrollStates = new Map<string, { follow: boolean; scrollTop: number }>()
   const dismissedConsoleWarnings = new Map<string, number>()
+  // Legacy tab state remains only to dispose existing compatibility mounts; no route
+  // can normalize into it and no Manager navigation exposes it.
   let settingsRoot: HTMLDivElement | undefined
   let settingsPanel: HTMLDivElement | undefined
   let settingsPanelBody: HTMLDivElement | undefined
@@ -2009,8 +2012,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const hideForExternalNavigation = (): void => {
     closePluginActionMenu(false)
-    settingsMount?.abort()
-    if (settingsMount !== undefined || settingsMountId !== undefined) void resetSettings().catch(() => {})
     if (managerContentMount !== undefined || managerContentMountId !== undefined) void resetManagerContent().catch(() => {})
     modal.hidden = true
     trigger.setAttribute('aria-expanded', 'false')
@@ -2372,21 +2373,16 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (route.kind === 'extension-point') return 'extension-points'
     if (route.kind === 'route') return 'routes'
     if (route.kind === 'marketplace') return 'marketplace'
-    return 'settings'
+    return 'plugins'
   }
 
   const currentSettingsTab = (): string => routeState.kind === 'settings'
     ? routeState.tabId
     : MANAGER_SETTINGS_FALLBACK
 
-  const settingsNavigationItems = (snapshot: ManagerSnapshot): readonly ManagerSettingsNavigationItemSnapshot[] => Object.freeze([
-    ...(snapshot.settingsNavigationItems ?? []),
-  ].sort((left, right) => (
-    (left.group === right.group ? 0 : left.group === 'before-settings' ? -1 : 1)
-    || left.order - right.order
-    || left.owner.localeCompare(right.owner)
-    || left.id.localeCompare(right.id)
-  )))
+  const settingsNavigationItems = (snapshot: ManagerSnapshot): readonly ManagerSettingsNavigationItemSnapshot[] => (
+    sortManagerSettingsNavigationItems(snapshot.settingsNavigationItems ?? [])
+  )
 
   const pluginFacet = (id: PluginDetailTab): typeof PLUGIN_DETAIL_TABS[number] => (
     PLUGIN_DETAIL_TABS.find(item => item.id === id) ?? PLUGIN_DETAIL_TABS[0]!
@@ -2490,18 +2486,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return {
         id: `manager-content:${route.id}`,
         primary,
-        segments: [{ id: `manager-content:${route.id}`, label: item?.pageTitle ?? route.id }],
+        segments: [root('plugins'), { id: `manager-content:${route.id}`, label: item?.pageTitle ?? route.id }],
       }
     }
-    const settingsItem = settingsTabs(snapshot).find(item => item.id === route.tabId)
-    return {
-      id: `settings:${route.tabId}`,
-      primary,
-      segments: [
-        root('settings'),
-        { id: `settings:${route.tabId}`, label: settingsItem?.title ?? route.tabId },
-      ],
-    }
+    return { id: 'plugins', primary: 'plugins', segments: [{ id: 'primary:plugins', label: primaryLabels.plugins }] }
   }
 
   const normalizeRoute = (snapshot: ManagerSnapshot, candidate: ManagerRouteState = routeState): ManagerRouteState => {
@@ -2529,13 +2517,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         return { kind: 'primary', primary: 'marketplace' }
       }
     }
-    if (candidate.kind === 'settings') {
-      const item = settingsTabs(snapshot).find(item => item.id === candidate.tabId)
-      if (item === undefined || item.disabled) return { kind: 'primary', primary: 'settings' }
-    }
+    if (candidate.kind === 'settings') return { kind: 'primary', primary: 'plugins' }
     if (candidate.kind === 'manager-content'
       && !settingsNavigationItems(snapshot).some(item => item.id === candidate.id)) {
-      return { kind: 'primary', primary: 'settings' }
+      return { kind: 'primary', primary: 'plugins' }
     }
     return candidate
   }
@@ -2690,7 +2675,16 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       back.setAttribute('aria-label', '返回')
       back.append(createManagerIcon(document, 'back', 'cxm-back-icon'))
       back.addEventListener('click', () => { void navigateBack() })
-      row.append(back)
+      if (options.icon === undefined) row.append(back)
+      else {
+        const leading = create(document, 'div', 'cxm-heading-leading cxm-heading-leading-stack')
+        const icon = String(options.icon).startsWith('host:')
+          ? createHostSurfaceIcon(document, options.icon as CordisXIconToken)
+          : createManagerIcon(document, options.icon as ManagerIconToken)
+        icon.setAttribute('aria-hidden', 'true')
+        leading.append(back, icon)
+        row.append(leading)
+      }
     } else {
       const icon = options.brand === true
         ? createAdaptiveBrandMark(document)
@@ -4921,52 +4915,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     target.append(panel)
   }
 
-  const renderRuntimeSettings = (target: HTMLElement): void => {
-    const panel = create(document, 'div', 'cxm-settings-builtin')
-    const runtime = model.snapshot()
-    const blocked = runtime.plugins.filter(plugin => (
-      plugin.status === 'blocked' || plugin.status === 'permission-blocked' || plugin.status === 'failed'
-    ))
-    if (blocked.length === 0) {
-      panel.append(create(document, 'p', 'cxm-copy', '暂无被屏蔽的插件。'))
-    } else {
-      const list = create(document, 'div', 'cxm-source-list')
-      for (const plugin of blocked) {
-        const row = create(document, 'div', 'cxm-source-row')
-        row.append(createPluginIcon(document, plugin.name))
-        const body = create(document, 'div', 'cxm-source-body')
-        body.append(create(document, 'div', 'cxm-source-url', plugin.name), create(document, 'div', 'cxm-source-state', statusLabel(plugin.status)))
-        const restore = create(document, 'button', 'cxm-mini-action', '恢复')
-        restore.type = 'button'
-        restore.disabled = busyPluginId !== undefined
-        restore.addEventListener('click', async () => {
-          busyPluginId = plugin.id
-          renderContent()
-          try {
-            await authorizeAndRestore(plugin)
-          } catch (error) {
-            sourceOperationError = error instanceof Error ? error.message : String(error)
-          } finally {
-            busyPluginId = undefined
-            renderContent()
-          }
-        })
-        row.append(body, restore)
-        list.append(row)
-      }
-      panel.append(list)
-    }
-    panel.append(documentationLink('查看运行状态说明', PRODUCT_DOCUMENTATION.runtime))
-    target.append(panel)
-  }
-
-  const renderLauncherSettings = (target: HTMLElement): void => {
-    const panel = create(document, 'div', 'cxm-settings-builtin')
-    panel.append(create(document, 'p', 'cxm-copy', '启动器配置由 cordisx.config.json 管理。'))
-    panel.append(documentationLink('查看配置文档', PRODUCT_DOCUMENTATION.launcher))
-    target.append(panel)
-  }
-
   const settingsTabs = (snapshot: ManagerSnapshot): readonly ManagerSettingsTabSnapshot[] => (
     snapshot.settingsTabs ?? CORDISX_BUILTIN_MANAGER_SETTINGS_TABS
   )
@@ -5153,8 +5101,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     settingsPanelBody.replaceChildren()
     settingsPanel?.removeAttribute('aria-busy')
     if (settingsTab === 'host:marketplace') renderMarketplaceSettings(settingsPanelBody)
-    if (settingsTab === 'host:runtime') renderRuntimeSettings(settingsPanelBody)
-    if (settingsTab === 'host:launcher') renderLauncherSettings(settingsPanelBody)
     if (!settingsTab.startsWith('host:')) {
       settingsPanel?.setAttribute('aria-busy', 'true')
       settingsPanelBody.append(create(document, 'div', 'cxm-notice', settingsTransitioning ? '正在切换配置页面…' : '正在加载插件配置页面…'))
@@ -5253,10 +5199,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       managerContentMount?.abort()
       await stopManagerContent().catch(() => {})
       managerContentError = error instanceof Error ? error.message : String(error)
-      routeState = { kind: 'primary', primary: 'settings' }
+      routeState = { kind: 'primary', primary: 'plugins' }
       managerContentTransitioning = false
       renderContent()
-      if (restoreFocus) navButtons.get('settings')?.focus()
+      if (restoreFocus) navButtons.get('plugins')?.focus()
     }
   }
 
@@ -5279,36 +5225,60 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         })
       }
     }
-    if (managerContentError !== undefined) managerContentRoot.append(create(document, 'div', 'cxm-error', `插件页面错误：${managerContentError}`))
+    if (managerContentError !== undefined) managerContentRoot.append(create(document, 'div', 'cxm-error', '无法打开插件页面。'))
   }
 
   const syncSettingsNavigation = (snapshot: ManagerSnapshot): void => {
+    const focusedId = document.activeElement instanceof document.defaultView!.HTMLElement
+      ? document.activeElement.dataset.managerNavigationId
+      : undefined
     for (const [id] of navButtons) {
       if (id.startsWith('manager-content:')) navButtons.delete(id)
     }
     for (const previous of nav.querySelectorAll<HTMLElement>('[data-settings-navigation-item]')) previous.remove()
-    const settingsButton = navButtons.get('settings')
-    if (settingsButton === undefined) return
+    const aboutButton = navButtons.get('about')
+    if (aboutButton === undefined) return
     const items = settingsNavigationItems(snapshot)
     const build = (item: ManagerSettingsNavigationItemSnapshot): HTMLButtonElement => {
       const button = create(document, 'button', 'cxm-nav-button')
       button.type = 'button'
       button.dataset.settingsNavigationItem = item.id
-      button.dataset.tab = `manager-content:${item.id}`
+      button.dataset.managerNavigationId = `manager-content:${item.id}`
       button.dataset.settingsNavigationGroup = item.group
-      button.setAttribute('role', 'tab')
       button.setAttribute('aria-label', item.title)
+      button.setAttribute('aria-description', item.description)
+      button.disabled = item.disabled
+      if (item.disabled) button.setAttribute('aria-disabled', 'true')
+      if (item.disabledReason !== undefined) button.title = item.disabledReason
       const icon = createHostSurfaceIcon(document, item.icon)
       icon.classList.add('cxm-nav-icon')
       icon.setAttribute('aria-hidden', 'true')
-      button.append(icon, create(document, 'span', undefined, item.title))
-      button.addEventListener('click', () => { void activateManagerContent(item.id, true) })
+      button.append(icon, create(document, 'span', 'cxm-nav-label', item.title))
+      button.addEventListener('click', () => {
+        if (!item.disabled) void activateManagerContent(item.id, true)
+      })
+      button.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          if (!item.disabled) void activateManagerContent(item.id, true)
+          return
+        }
+        if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+        event.preventDefault()
+        const candidates = [...nav.querySelectorAll<HTMLButtonElement>('.cxm-nav-button')].filter(candidate => !candidate.disabled)
+        const index = candidates.indexOf(button)
+        const next = event.key === 'Home' ? candidates[0]
+          : event.key === 'End' ? candidates.at(-1)
+            : candidates.at((index + (event.key === 'ArrowDown' ? 1 : -1) + candidates.length) % candidates.length)
+        next?.focus()
+      })
       navButtons.set(`manager-content:${item.id}`, button)
       return button
     }
-    for (const item of items.filter(item => item.group === 'before-settings')) nav.insertBefore(build(item), settingsButton)
-    const after = settingsButton.nextSibling
-    for (const item of items.filter(item => item.group === 'after-settings')) nav.insertBefore(build(item), after)
+    // The old Settings row is intentionally absent. Both compatibility groups share
+    // this Host-owned virtual seam immediately before About, never a plugin anchor.
+    for (const item of items) nav.insertBefore(build(item), aboutButton)
+    if (focusedId !== undefined) navButtons.get(focusedId)?.focus()
   }
 
   const navigateRoute = async (
@@ -5357,37 +5327,41 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     tooltips.hide()
     disposeLunaConsoles()
     const snapshot = model.snapshot()
-    const normalized = routeState.kind === 'settings' ? routeState : normalizeRoute(snapshot)
+    const normalized = normalizeRoute(snapshot)
     const normalizedRouteChanged = routeKey(normalized) !== routeKey(routeState)
+    const removedActiveManagerContent = routeState.kind === 'manager-content'
+      && normalized.kind === 'primary' && normalized.primary === 'plugins'
     if (normalizedRouteChanged) {
-      if (routeState.kind === 'settings') {
-        void navigateRoute(normalized, { recordHistory: false })
-        return
-      }
       routeState = normalized
+      if (removedActiveManagerContent) void resetManagerContent().then(renderContent).catch(() => {})
     }
     const primary = activePrimary()
     syncSettingsNavigation(snapshot)
-    const preserveSettings = primary === 'settings' && settingsRoot?.isConnected === true
     const preserveManagerContent = routeState.kind === 'manager-content' && managerContentRoot?.isConnected === true
-    if (!preserveSettings && !preserveManagerContent) {
+    if (!preserveManagerContent) {
       disposeConfigRenderers()
       content.replaceChildren()
     }
-    for (const [id, button] of navButtons) button.setAttribute('aria-selected', String(id === primary))
+    for (const [id, button] of navButtons) {
+      const selected = id === primary
+      if (selected) button.setAttribute('aria-current', 'page')
+      else button.removeAttribute('aria-current')
+      button.removeAttribute('aria-selected')
+      button.tabIndex = selected ? 0 : -1
+    }
+    if (removedActiveManagerContent) queueMicrotask(() => navButtons.get('plugins')?.focus())
     if (routeState.kind === 'permission') return renderPermissionDetail(snapshot, routeState.pluginId, routeState.capability)
     if (routeState.kind === 'plugin') return renderPluginDetail(snapshot, routeState.pluginId)
     if (routeState.kind === 'marketplace') return renderMarketplaceDetail(snapshot, routeState.identity)
     if (routeState.kind === 'extension-point') return renderExtensionPointDetail(snapshot, routeState.pointId)
     if (routeState.kind === 'route') return renderRouteDetail(snapshot, routeState.qualifiedId)
-    if (routeState.kind === 'settings') return renderSettings(snapshot)
     if (routeState.kind === 'manager-content') return renderManagerContent(snapshot, routeState.id)
+    if (routeState.kind !== 'primary') return renderPluginList(snapshot)
     if (routeState.primary === 'about') renderAbout(snapshot)
     if (routeState.primary === 'extension-points') renderExtensionPointList(snapshot)
     if (routeState.primary === 'routes') renderRouteList(snapshot)
     if (routeState.primary === 'plugins') renderPluginList(snapshot)
     if (routeState.primary === 'marketplace') renderMarketplaceList(snapshot)
-    if (routeState.primary === 'settings') renderSettings(snapshot)
     if (normalizedRouteChanged) restoreListScroll()
   }
 
@@ -5440,6 +5414,21 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   for (const [id, button] of navButtons) {
     button.addEventListener('click', () => {
       void navigateRoute({ kind: 'primary', primary: id as ManagerTab })
+    })
+    button.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        void navigateRoute({ kind: 'primary', primary: id as ManagerTab }, { restoreFocus: true })
+        return
+      }
+      if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+      event.preventDefault()
+      const candidates = [...nav.querySelectorAll<HTMLButtonElement>('.cxm-nav-button')].filter(candidate => !candidate.disabled)
+      const index = candidates.indexOf(button)
+      const next = event.key === 'Home' ? candidates[0]
+        : event.key === 'End' ? candidates.at(-1)
+          : candidates.at((index + (event.key === 'ArrowDown' ? 1 : -1) + candidates.length) % candidates.length)
+      next?.focus()
     })
   }
 

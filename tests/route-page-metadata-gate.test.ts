@@ -31,8 +31,8 @@ const bundledFiles = ['packages/cli/scripts/live-smoke.mjs'] as const
 const expectedRegistrations = [
   'examples/plugins/lifecycle-smoke/index.ts|page|overview',
   'examples/plugins/lifecycle-smoke/index.ts|route|overview',
-  'examples/plugins/settings-tab-demo/index.ts|page|settings',
-  'examples/plugins/settings-tab-demo/index.ts|route|settings',
+  'examples/plugins/settings-tab-demo/index.ts|page|navigation',
+  'examples/plugins/settings-tab-demo/index.ts|route|navigation',
   'examples/plugins/slot-showcase/index.ts|page|app.overview',
   'examples/plugins/slot-showcase/index.ts|page|main.analytics',
   'examples/plugins/slot-showcase/index.ts|page|session.analytics',

@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   Config as HelloToolbarConfig,
@@ -33,6 +36,14 @@ function descriptor(
 }
 
 describe('UI demo Config Schemas', () => {
+  it('keeps the comprehensive ui-demos bundle free of first-level Settings navigation demos', async () => {
+    const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const config = JSON.parse(await readFile(path.join(projectRoot, 'cordisx.config.ui-demos.json'), 'utf8')) as {
+      plugins?: readonly { id?: string }[]
+    }
+    expect(config.plugins?.some(plugin => plugin.id === 'settings-tab-demo')).toBe(false)
+  })
+
   it('projects the slot showcase session option with defaults, bounds, i18n, and restart application', () => {
     expect(slotShowcaseConfigApplies).toBe('plugin-restart')
     expect(SlotShowcaseConfig({})).toEqual({ sessionId: '' })
