@@ -585,8 +585,8 @@ export class PackageLifecycleAuthority {
       .filter(item => item.transactionId !== transaction.transactionId && item.status === 'completed'
         && item.after.plugins.some(plugin => transaction.affectedPluginIds.includes(plugin.id)))
       .flatMap(item => item.permission.oneShotGrantIds)
-    await this.activation.releaseLastGood(transaction.expected.revision)
     await this.#setStatus(transaction.transactionId, 'completed')
+    await this.activation.releaseLastGood(transaction.expected.revision)
     await this.options.permissionAuthority.revokeOneShot(retiredGrantIds)
   }
 
@@ -648,6 +648,7 @@ export class PackageLifecycleAuthority {
     if (fingerprint(restored.plugins) !== fingerprint(transaction.expected.plugins)) {
       throw new PackageLifecycleError('rollback-active-mismatch', 'durable active closure does not match last-good')
     }
+    await this.activation.abortCandidate(transaction.transactionId)
     await this.#setStatus(transaction.transactionId, 'aborted', transaction.failureCode)
     await this.options.permissionAuthority.revokeOneShot(transaction.permission.oneShotGrantIds)
     return restored

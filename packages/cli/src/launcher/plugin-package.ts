@@ -376,26 +376,7 @@ export async function stageResolvedPluginPackage(
   const runtimeManifestText = `${JSON.stringify(runtimeManifest, null, 2)}\n`
   const digest = artifactDigest(manifestText, built.moduleSource, built.artifactSource)
   await publishPackage(homeDir, digest, manifestText, built.moduleSource, built.artifactSource, readme, runtimeManifestText)
-  const packageManifest: CordisXPluginPackageManifestV1 = {
-    $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
-    schemaVersion: 1,
-    id: resolved.packageManifest.pluginId,
-    version: resolved.packageManifest.version,
-    entry: resolved.packageManifest.entry,
-    ...(resolved.packageManifest.readme === undefined ? {} : { readme: resolved.packageManifest.readme }),
-    ...(resolved.packageManifest.canonicalSource === undefined ? {} : { canonicalSource: resolved.packageManifest.canonicalSource }),
-    compatibility: { runtimeAbi: CORDISX_RUNTIME_ABI_V1, protocol: CORDISX_PLUGIN_PROTOCOL_V1 },
-    dependencies: resolved.packageManifest.dependencies,
-    runtimeManifest,
-  }
-  return {
-    manifest: packageManifest,
-    digest,
-    moduleSource: built.moduleSource,
-    artifactSource: built.artifactSource,
-    ...(readme === undefined ? {} : { readme }),
-    identitySource: packageManifest.canonicalSource ?? `file:///cordisx-store/sha256/${digest.slice('sha256:'.length)}/entry.js`,
-  }
+  return await loadStagedPluginPackage(homeDir, digest)
 }
 
 /** Validate, build, hash, and publish one explicit local package into the immutable store. */

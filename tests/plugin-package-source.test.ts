@@ -103,6 +103,25 @@ describe('formal source-v1 and package-v2 edge adapter', () => {
     }, { homeDir, runtimeValidators })).rejects.toMatchObject({ code: 'integrity-mismatch' })
   })
 
+  it('rejects non-exact versions and duplicate or self dependencies', async () => {
+    const { homeDir, source } = await fixture()
+    const manifestPath = path.join(source, 'cordisx-package.json')
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as { version: string; dependencies: unknown[] }
+    manifest.version = '^1.0.0'
+    await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`)
+    await expect(stagePluginPackageSourceV1({ kind: 'local-directory', location: pathToFileURL(source).href }, {
+      homeDir,
+      runtimeValidators,
+    })).rejects.toMatchObject({ code: 'invalid-package-manifest' })
+    manifest.version = '1.0.0'
+    manifest.dependencies = [{ id: 'source-fixture', version: '1.0.0' }]
+    await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`)
+    await expect(stagePluginPackageSourceV1({ kind: 'local-directory', location: pathToFileURL(source).href }, {
+      homeDir,
+      runtimeValidators,
+    })).rejects.toMatchObject({ code: 'invalid-package-manifest' })
+  })
+
   it('rejects launcher-owned credential/transport/process values and invalid discovery attribution', async () => {
     const { homeDir, source } = await fixture()
     const runtimePath = path.join(source, 'runtime.json')

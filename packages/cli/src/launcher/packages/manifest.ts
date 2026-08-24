@@ -19,6 +19,7 @@ export const PLUGIN_RUNTIME_MANIFEST_SCHEMAS = [
 ] as const
 
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
+const SEMANTIC_VERSION = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 const DIGEST = /^sha256:[a-f0-9]{64}$/
 const ENTRY = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:mjs|js|ts)$/
 const JSON_PATH = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.json$/
@@ -83,14 +84,21 @@ async function containedFile(root: string, relative: string, label: string): Pro
   return target
 }
 
-function dependencies(value: unknown): readonly PackageDependency[] {
+function dependencies(value: unknown, packageId: string): readonly PackageDependency[] {
   if (!Array.isArray(value) || value.length > 32) {
     throw new PackageLifecycleError('invalid-package-manifest', 'package dependencies must be an array of at most 32 items')
   }
+  const seen = new Set<string>()
   return value.map((entry, index) => {
     const item = object(entry, `dependencies[${index}]`)
     exactKeys(item, ['id', 'version'], `dependencies[${index}]`)
-    return { id: string(item.id, `dependencies[${index}].id`), version: string(item.version, `dependencies[${index}].version`) }
+    const id = string(item.id, `dependencies[${index}].id`)
+    const version = string(item.version, `dependencies[${index}].version`)
+    if (!LOCAL_ID.test(id) || !SEMANTIC_VERSION.test(version) || id === packageId || seen.has(id)) {
+      throw new PackageLifecycleError('invalid-package-manifest', `dependencies[${index}] is invalid, duplicated, or self-referential`)
+    }
+    seen.add(id)
+    return { id, version }
   })
 }
 
@@ -133,6 +141,8 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     }
     const pluginId = string(manifest.id, 'package manifest id')
     if (!LOCAL_ID.test(pluginId)) throw new PackageLifecycleError('invalid-package-manifest', 'package manifest id is invalid')
+    const version = string(manifest.version, 'package version')
+    if (!SEMANTIC_VERSION.test(version)) throw new PackageLifecycleError('invalid-package-manifest', 'package manifest version is not exact semantic version')
     const entry = safePath(manifest.entry, ENTRY, 'package manifest entry')
     await containedFile(snapshotRoot, entry, 'package entry')
 
@@ -181,12 +191,12 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     }
     const packageManifest: HostPackageManifest = {
       pluginId,
-      version: string(manifest.version, 'package version'),
+      version,
       entry,
       ...(manifest.readme === undefined ? {} : {
         readme: safePath(manifest.readme, /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:md|markdown)$/, 'package readme'),
       }),
-      dependencies: dependencies(manifest.dependencies),
+      dependencies: dependencies(manifest.dependencies, pluginId),
       compatibility: {
         runtimeAbi: 1,
         protocolSchemas: [...compatibility.protocolSchemas as string[]],
