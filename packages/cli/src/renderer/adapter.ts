@@ -683,7 +683,7 @@ class StructuredSurfaceRenderer {
         && (item.item as { anchor: string; placement: string }).placement === 'before')
       if (items.length > 0) {
         const root = this.placeRoot(composerSubmitSeat, usedRoots)
-        if (rebuild || root.childElementCount === 0) this.renderActions(root, items, nextSites, 'submit.before', composerSubmitSeat.template, 'shortcut', 2)
+        if (rebuild || root.childElementCount === 0) this.renderActions(root, items, nextSites, 'submit.before', composerSubmitSeat.template, 'shortcut', 2, false)
       }
     }
     if (environment !== undefined) {
@@ -799,12 +799,13 @@ class StructuredSurfaceRenderer {
     nativePattern?: 'toolbar' | 'footer' | 'shortcut',
     nativeTemplate?: HTMLButtonElement,
     afterActivate?: () => void,
+    reduceGlyph = true,
   ): HTMLButtonElement {
     const button = this.document.createElement('button')
     button.type = 'button'
     button.className = nativePattern === undefined
       ? 'cordisx-action'
-      : `${nativeTemplate?.className ?? ''} cordisx-action cordisx-native-icon-action cordisx-${nativePattern}-action`.trim()
+      : `${nativeTemplate?.className ?? ''} cordisx-action${reduceGlyph ? ' cordisx-icon-only-control' : ''} cordisx-native-icon-action cordisx-${nativePattern}-action`.trim()
     button.dataset.cordisxNoDrag = 'true'
     button.style.setProperty('-webkit-app-region', 'no-drag')
     const label = this.text(snapshot, action.label, `${path}.label`, nextSites)
@@ -903,16 +904,18 @@ class StructuredSurfaceRenderer {
     template: HTMLButtonElement,
     preferredPattern?: 'toolbar' | 'footer' | 'shortcut',
     directLimit = Number.POSITIVE_INFINITY,
+    reduceGlyph = true,
   ): void {
     root.replaceChildren()
     const pattern = preferredPattern ?? (template.closest('header[data-app-shell-application-menu-bar]') === null ? 'footer' : 'toolbar')
     const partition = partitionDirectActions(snapshots, directLimit)
-    for (const snapshot of partition.direct) root.append(this.button(snapshot, snapshot.item as CordisXStructuredAction, path, sites, pattern, template))
+    for (const snapshot of partition.direct) root.append(this.button(snapshot, snapshot.item as CordisXStructuredAction, path, sites, pattern, template, undefined, reduceGlyph))
     if (partition.overflow.length === 0) return
     const overflow = this.document.createElement('details')
     overflow.className = 'cordisx-surface-overflow'
     overflow.dataset.cordisxNoDrag = 'true'
     const summary = this.document.createElement('summary')
+    if (reduceGlyph) summary.className = 'cordisx-icon-only-control'
     summary.setAttribute('aria-label', 'More actions')
     summary.dataset.cordisxTooltip = 'More actions'
     summary.append(createHostSurfaceIcon(this.document, 'host:more'))
@@ -1064,6 +1067,9 @@ function installStyles(document: Document): () => void {
     .cordisx-host-icon svg { display: block; width: 20px; height: 20px; fill: currentColor; pointer-events: none; }
     .cordisx-nav-primary > .cordisx-host-icon { width: 16px; height: 16px; }
     .cordisx-nav-primary > .cordisx-host-icon svg, .cordisx-shortcut-action .cordisx-host-icon, .cordisx-shortcut-action .cordisx-host-icon svg { width: 16px; height: 16px; }
+    .cordisx-icon-only-control { --cordisx-icon-only-glyph-size: 16px; }
+    .cordisx-icon-only-control.cordisx-shortcut-action { --cordisx-icon-only-glyph-size: 12px; }
+    .cordisx-icon-only-control .cordisx-host-icon svg { width: var(--cordisx-icon-only-glyph-size); height: var(--cordisx-icon-only-glyph-size); }
     .cordisx-native-menu-root { display: contents; }
     .cordisx-native-menu-item { -webkit-app-region: no-drag; }
     .cordisx-native-menu-row { display: flex; width: 100%; align-items: center; gap: 6px; }

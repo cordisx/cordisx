@@ -119,7 +119,11 @@ project a point.
 Native menu contributions use the same boundary: CordisX inserts host-rendered
 rows into the opened Codex Help or account menu and never adds an independent
 fallback menu trigger. Compact shell actions are icon-only and inherit the
-interaction pattern of adjacent native Codex controls.
+interaction pattern of adjacent native Codex controls. Their host-owned glyph
+token reduces only the decorative SVG by four pixels while preserving the
+existing wrapper, native button hit box, alignment, tooltip, focus, and
+accessible name; the separately sized brand manager trigger and composer
+toolbar appearance are excluded.
 
 Route and page outlets remain independent overlays. `app` paints through the
 native title-bar and supplies its own draggable chrome with a macOS

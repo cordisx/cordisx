@@ -253,6 +253,15 @@ Interactive surface projection must satisfy all of these rules:
   label remains available through the accessible name and native tooltip, and
   their size, hover, focus, disabled, and pressed behavior follow the adjacent
   native control pattern; and
+- icon-only surface glyph size is a host-owned component token, never plugin
+  CSS. Standard native toolbar/footer glyphs are 16 pixels and compact shortcut
+  glyphs are 12 pixels, a four-pixel visual reduction from their established
+  20- and 16-pixel sizes. The host keeps the existing icon wrapper and native
+  button hit box unchanged so both Material Symbols sources stay centered.
+  Text-bearing navigation/menu icons keep their existing size, and the
+  separately sized 20-pixel CordisX brand manager trigger is not part of this
+  surface token. Composer toolbar actions also retain their separate established
+  appearance and do not opt into this shell-glyph reduction; and
 - an inserted action is a sibling of the complete native control/tooltip
   trigger, never a child of that trigger. Its hit box, accessible name, and
   tooltip belong only to the CordisX contribution; hovering it must not open a
