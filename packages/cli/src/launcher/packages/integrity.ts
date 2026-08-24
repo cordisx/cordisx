@@ -270,4 +270,26 @@ export class ImmutablePackageObjects {
     }
     await rm(objectDirectory, { recursive: true, force: true })
   }
+
+  async orphanDigests(
+    knownDigests: ReadonlySet<string>,
+    graceMs: number,
+    now: Date,
+  ): Promise<readonly string[]> {
+    const directory = path.join(this.#root, 'objects', 'sha256')
+    const handle = await opendir(directory).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw error
+    })
+    if (handle === undefined) return []
+    const result: string[] = []
+    for await (const entry of handle) {
+      if (!SHA256_HEX.test(entry.name) || !entry.isDirectory() || knownDigests.has(entry.name)) continue
+      const target = path.join(directory, entry.name)
+      const metadata = await lstat(target)
+      if (metadata.isSymbolicLink() || !metadata.isDirectory()) continue
+      if (now.getTime() - metadata.mtimeMs >= graceMs) result.push(entry.name)
+    }
+    return result.sort()
+  }
 }

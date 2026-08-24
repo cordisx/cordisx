@@ -729,4 +729,18 @@ describe('launcher package transactions', () => {
     const recovered = await JsonPackageStore.open(storeRoot)
     expect(recovered.snapshot()).toMatchObject({ revision: 1, profiles: { default: { runtimeGeneration: runtime0 } } })
   })
+
+  it('reclaims an immutable orphan left between object publication and journal CAS', async () => {
+    const { ImmutablePackageObjects } = await import('../packages/cli/src/launcher/packages/index.js')
+    const { root, host, store } = await createHost()
+    const source = await makePackage(root, 'orphaned', '1.0.0')
+    const objects = new ImmutablePackageObjects(store.root)
+    const snapshot = await objects.snapshot({ kind: 'local-directory', path: source }, 'orphan-candidate')
+    const digest = snapshot.digest
+    await objects.publish(snapshot)
+    const collected = await host.collectGarbage(0, new Date(Date.now() + 1_000))
+    expect(collected.removed).toContain(`orphan#sha256:${digest}`)
+    await expect(readFile(path.join(objects.objectDirectory(digest), 'dist', 'index.js')))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+  })
 })

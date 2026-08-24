@@ -952,7 +952,14 @@ export class PackageLifecycleHost {
       }
     })
     for (const record of removed) await this.#objects.removeObject(record.identity.integrity.slice('sha256:'.length))
-    return { removed: removed.map(record => record.key), state: result.state }
+    const knownDigests = new Set(Object.values(result.state.packages)
+      .map(record => record.identity.integrity.slice('sha256:'.length)))
+    const orphanDigests = await this.#objects.orphanDigests(knownDigests, graceMs, now)
+    for (const digest of orphanDigests) await this.#objects.removeObject(digest)
+    return {
+      removed: [...removed.map(record => record.key), ...orphanDigests.map(digest => `orphan#sha256:${digest}`)],
+      state: result.state,
+    }
   }
 
   #transactionForCandidate(state: PackageStoreState, access: PackageCandidateAccess): PackageTransactionRecord {
