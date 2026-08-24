@@ -16,6 +16,13 @@ structured UI contribution, TypeScript build, manifest test, and
 `cordisx dev --dry-run` script. It does not install to a marketplace, sign the
 plugin, provide a permission sandbox, or promise hot reload.
 
+The minimal generated entry has no route or page. Plugin authors who add them
+must use closed route-v2/page-v3 documents with the matching `$schema` URI and
+`schemaVersion`: separate localized `title` and `description` references on
+both registrations, backed by real locale dictionaries. Page v3 omits the
+legacy `localeNamespace` hint. Canonical ids, path, outlet, params, and chrome
+remain untranslated machine fields.
+
 The `create-cordisx-plugin` tool itself is licensed under
 `AGPL-3.0-or-later`. Files under its marked `template` directory and projects
 generated from them receive the included CordisX Independent Plugin Exception.

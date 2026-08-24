@@ -536,11 +536,17 @@ class StructuredSurfaceRenderer {
           const target = record.target.nodeType === 1
             ? record.target as Element
             : record.target.parentElement
+          if (record.type === 'attributes' && target?.matches('[data-cordisx-manager-modal]') === true) return true
           return target?.closest('[data-cordisx-surface-host], [data-cordisx-page-outlet], [data-cordisx-manager-modal]') === null
         })
         if (nativeMutation) this.schedule(false)
       })
-      this.observer.observe(document.documentElement, { childList: true, subtree: true })
+      this.observer.observe(document.documentElement, {
+        childList: true,
+        attributes: true,
+        attributeFilter: ['hidden', 'aria-hidden', 'data-app-action-sidebar-thread-selected'],
+        subtree: true,
+      })
     }
     this.schedule(true)
   }
@@ -580,16 +586,22 @@ class StructuredSurfaceRenderer {
     if (!rebuild) for (const site of this.sites) nextSites.add(site)
     const usedRoots = new Set<string>()
     const availableSurfaces = new Set<string>()
-    const sidebar = uniqueVisible(this.document, '[data-app-action-sidebar-scroll]')
-    const toolbar = uniqueVisible(this.document, 'header[data-app-shell-application-menu-bar]')
-    const environment = uniqueStrictlyVisible(this.document, '[data-pip-home-surface="thread-summary-panel"]')
-      ?? uniqueStrictlyVisible(this.document, '[data-app-shell-focus-area="right-panel"]')
+    const managerOverlay = [...this.document.querySelectorAll<HTMLElement>('[data-cordisx-manager-modal]')]
+      .some(element => !element.hidden)
+    const sidebar = managerOverlay ? undefined : uniqueVisible(this.document, '[data-app-action-sidebar-scroll]')
+    const toolbar = managerOverlay ? undefined : uniqueVisible(this.document, 'header[data-app-shell-application-menu-bar]')
+    const environmentCandidates = managerOverlay ? [] : [
+      ...this.document.querySelectorAll<HTMLElement>('[data-pip-home-surface="thread-summary-panel"], [data-app-shell-focus-area="right-panel"]'),
+    ].filter(strictlyVisible)
+    const environment = managerOverlay ? undefined
+      : uniqueStrictlyVisible(this.document, '[data-pip-home-surface="thread-summary-panel"]')
+        ?? uniqueStrictlyVisible(this.document, '[data-app-shell-focus-area="right-panel"]')
     const sidebarNavigation = sidebar === undefined ? undefined : resolveSidebarNavigationParent(this.document, sidebar)
     const sidebarFooterControl = sidebar === undefined ? undefined : resolveSidebarFooterControl(this.document, sidebar)
     const accountControl = sidebar === undefined ? undefined : resolveAccountControl(sidebar)
     const toolbarControl = toolbar === undefined ? undefined : resolveToolbarControl(toolbar)
     const toolbarMenuControl = toolbar === undefined ? undefined : resolveToolbarMenuControl(toolbar)
-    const sessionId = currentSessionId(this.document)
+    const sessionId = managerOverlay ? undefined : currentSessionId(this.document)
     const sessionHeaderSeat = resolveSessionHeaderSeat(this.document, sessionId)
     const composerSubmitSeat = resolveComposerSubmitSeat(this.document, sessionId)
     const contextValues = {
@@ -602,25 +614,38 @@ class StructuredSurfaceRenderer {
     this.routes.contexts.replace(contextValues)
     this.slots.registry.setToolbarAnchors(toolbarControl === undefined ? [] : ['workspace.primary'])
     this.slots.registry.setSurfaceAnchors('composer.toolbar.items', composerSubmitSeat === undefined ? [] : [{ id: 'submit', placements: ['before'] }])
-    this.slots.registry.setAvailability([
-      { surface: 'sidebar.navigation.items', state: sidebarNavigation === undefined ? 'pending' : 'available', ...(sidebarNavigation === undefined ? { code: 'anchor-unresolved', detail: 'unique visible sidebar navigation seat is unavailable' } : {}) },
-      { surface: 'sidebar.footer.before-control', state: sidebarFooterControl === undefined ? 'pending' : 'available', ...(sidebarFooterControl === undefined ? { code: 'anchor-unresolved', detail: 'unique visible sidebar footer control is unavailable' } : {}) },
-      { surface: 'sidebar.footer.after-control', state: sidebarFooterControl === undefined ? 'pending' : 'available', ...(sidebarFooterControl === undefined ? { code: 'anchor-unresolved', detail: 'unique visible sidebar footer control is unavailable' } : {}) },
-      { surface: 'sidebar.footer.menu', state: sidebarFooterControl === undefined ? 'pending' : 'available', ...(sidebarFooterControl === undefined ? { code: 'anchor-unresolved', detail: 'native sidebar footer menu control is unavailable' } : {}) },
-      { surface: 'sidebar.account.menu', state: accountControl === undefined ? 'pending' : 'available', ...(accountControl === undefined ? { code: 'anchor-unresolved', detail: 'native account menu control is unavailable' } : {}) },
-      { surface: 'workspace.toolbar.items', state: toolbarControl === undefined ? 'pending' : 'available', ...(toolbarControl === undefined ? { code: 'anchor-unresolved', detail: 'unique visible workspace toolbar control is unavailable' } : {}) },
-      { surface: 'session.header.actions', state: sessionHeaderSeat === undefined ? 'pending' : 'available', ...(sessionHeaderSeat === undefined ? { code: 'anchor-unresolved', detail: 'unique visible active-session header action seat is unavailable' } : {}) },
+    const contextDetail = (key: string, fallback: string) => ({ key: `runtime-context.${key}`, fallback })
+    const sessionContextState = sessionId === undefined ? 'not-mounted' as const : 'inactive' as const
+    const shellContextState = managerOverlay ? 'not-mounted' as const : 'inactive' as const
+    const shellContextCode = managerOverlay ? 'context.not-mounted' : 'anchor.unresolved'
+    const shellDetail = (key: string, label: string) => managerOverlay
+      ? contextDetail(`${key}.not-mounted`, `The ${label} context is not mounted while CordisX Manager is open.`)
+      : contextDetail(`${key}.unresolved`, `The ${label} anchor could not be resolved uniquely.`)
+    const environmentState = environment !== undefined ? 'active' as const
+      : environmentCandidates.length > 0 ? 'inactive' as const : 'not-mounted' as const
+    this.slots.registry.setCurrentContext([
+      { surface: 'sidebar.navigation.items', state: sidebarNavigation === undefined ? shellContextState : 'active', ...(sidebarNavigation === undefined ? { code: shellContextCode, detail: shellDetail('sidebar-navigation', 'sidebar navigation') } : {}) },
+      { surface: 'sidebar.footer.before-control', state: sidebarFooterControl === undefined ? shellContextState : 'active', ...(sidebarFooterControl === undefined ? { code: shellContextCode, detail: shellDetail('sidebar-footer', 'sidebar footer') } : {}) },
+      { surface: 'sidebar.footer.after-control', state: sidebarFooterControl === undefined ? shellContextState : 'active', ...(sidebarFooterControl === undefined ? { code: shellContextCode, detail: shellDetail('sidebar-footer', 'sidebar footer') } : {}) },
+      { surface: 'sidebar.footer.menu', state: sidebarFooterControl === undefined ? shellContextState : 'active', ...(sidebarFooterControl === undefined ? { code: shellContextCode, detail: shellDetail('sidebar-footer-menu', 'sidebar footer menu') } : {}) },
+      { surface: 'sidebar.account.menu', state: accountControl === undefined ? shellContextState : 'active', ...(accountControl === undefined ? { code: shellContextCode, detail: shellDetail('account-menu', 'account menu') } : {}) },
+      { surface: 'workspace.toolbar.items', state: toolbarControl === undefined ? shellContextState : 'active', ...(toolbarControl === undefined ? { code: shellContextCode, detail: shellDetail('workspace-toolbar', 'workspace toolbar') } : {}) },
+      { surface: 'session.header.actions', state: sessionHeaderSeat === undefined ? sessionContextState : 'active', ...(sessionHeaderSeat === undefined ? { code: sessionId === undefined ? 'session.not-mounted' : 'anchor.unresolved', detail: contextDetail(sessionId === undefined ? 'session-header.not-mounted' : 'session-header.unresolved', sessionId === undefined ? 'The session header is not mounted in the current page.' : 'The active session header anchor could not be resolved uniquely.') } : {}) },
       {
-        surface: 'composer.toolbar.items', state: composerSubmitSeat === undefined ? 'pending' : 'available',
-        ...(composerSubmitSeat === undefined ? { code: 'anchor-unresolved', detail: 'unique visible active-session composer submit seat is unavailable' } : {}),
+        surface: 'composer.toolbar.items', state: composerSubmitSeat === undefined ? sessionContextState : 'active',
+        ...(composerSubmitSeat === undefined ? { code: sessionId === undefined ? 'session.not-mounted' : 'anchor.unresolved', detail: contextDetail(sessionId === undefined ? 'composer.not-mounted' : 'composer.unresolved', sessionId === undefined ? 'The composer is not mounted in the current page.' : 'The active session composer anchor could not be resolved uniquely.') } : {}),
         anchors: [
-          { id: 'submit', placements: ['before'], state: composerSubmitSeat === undefined ? 'pending' : 'available', ...(composerSubmitSeat === undefined ? { code: 'anchor-unresolved', detail: 'terminal native composer control is unavailable' } : {}) },
-          { id: 'leading', placements: ['before', 'after'], state: 'pending', code: 'release-unverified', detail: 'composer leading anchor is not release-verified' },
-          { id: 'model', placements: ['before', 'after', 'menu'], state: 'pending', code: 'release-unverified', detail: 'composer model anchor is not release-verified' },
+          { id: 'submit', placements: ['before'], state: composerSubmitSeat === undefined ? sessionContextState : 'active', ...(composerSubmitSeat === undefined ? { code: sessionId === undefined ? 'session.not-mounted' : 'anchor.unresolved', detail: contextDetail(sessionId === undefined ? 'composer-submit.not-mounted' : 'composer-submit.unresolved', sessionId === undefined ? 'The native submit control is not mounted in the current context.' : 'The native submit anchor could not be resolved uniquely.') } : {}) },
+          { id: 'leading', placements: ['before', 'after'], state: 'not-mounted', code: 'anchor.not-mounted', detail: contextDetail('composer-leading.not-mounted', 'The leading anchor is not mounted by this adapter.') },
+          { id: 'model', placements: ['before', 'after', 'menu'], state: 'not-mounted', code: 'anchor.not-mounted', detail: contextDetail('composer-model.not-mounted', 'The model anchor is not mounted by this adapter.') },
         ],
       },
       ...(['environment.panel.header-actions', 'environment.panel.sections', 'environment.section.actions', 'environment.section.rows', 'environment.row.trailing-actions'] as const)
-        .map(surface => ({ surface, state: environment === undefined ? 'pending' as const : 'available' as const, ...(environment === undefined ? { code: 'anchor-unresolved', detail: 'visible environment panel is unavailable' } : {}) })),
+        .map(surface => ({ surface, state: environmentState, ...(environment === undefined
+          ? environmentCandidates.length > 0
+            ? { code: 'anchor.unresolved', detail: contextDetail('environment.unresolved', 'The environment panel anchor could not be resolved uniquely.') }
+            : { code: 'context.not-mounted', detail: contextDetail('environment.not-mounted', 'The environment panel context is not mounted.') }
+          : {}) })),
     ])
 
     const snapshots = this.slots.snapshot()

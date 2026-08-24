@@ -42,7 +42,12 @@ import { renderSafeMarkdown } from './markdown.js'
 import type { CommandSnapshot } from './commands.js'
 import { resolveManagerTriggerTarget } from './host-probes.js'
 import { createHostSurfaceIcon, createManagerIcon, type ManagerIconToken } from './icons.js'
-import type { ManagedSettingsPageMount, NavigationSnapshot } from './navigation.js'
+import type {
+  ManagedSettingsPageMount,
+  NavigationPageSnapshot,
+  NavigationSnapshot,
+  RouteSnapshot,
+} from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
 import type {
   ExtensionPointPluginUsageSnapshot,
@@ -631,15 +636,17 @@ const MANAGER_STYLES = `
   .cxm-about-mark.cxm-brand-mark { width: 54px; height: 54px; }
   .cxm-about-name { color: #f5f6f8; font-size: 22px; font-weight: 720; letter-spacing: -.02em; }
   .cxm-about-version { margin-top: 3px; color: #8d96a8; font: 11px/1.4 ui-monospace, monospace; }
-  .cxm-about-actions { border-top: 1px solid rgba(255, 255, 255, .08); border-bottom: 1px solid rgba(255, 255, 255, .08); }
-  .cxm-about-action { display: flex; align-items: center; gap: 16px; padding: 15px 2px; color: inherit; text-decoration: none; }
+  .cxm-about-actions { overflow: hidden; border: 1px solid rgba(255, 255, 255, .08); border-radius: 12px; background: rgba(255, 255, 255, .025); }
+  .cxm-about-action { display: flex; width: 100%; min-width: 0; box-sizing: border-box; align-items: center; gap: 16px; padding: 14px 12px; border-radius: 9px; background: transparent; color: inherit; text-decoration: none; }
   .cxm-about-action-item + .cxm-about-action-item { border-top: 1px solid rgba(255, 255, 255, .08); }
-  .cxm-about-action:hover .cxm-about-action-title { color: #fff; }
-  .cxm-about-action:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 3px; }
-  .cxm-about-action-body { min-width: 0; flex: 1; }
-  .cxm-about-action-title { display: block; color: #d8dce3; font-size: 12px; font-weight: 650; }
-  .cxm-about-action-copy { display: block; margin-top: 3px; color: #838d9f; font-size: 11px; }
-  .cxm-about-action-arrow { width: 16px; height: 16px; color: #747e8e; }
+  .cxm-about-action:hover, .cxm-about-action:focus-visible { background: rgba(199, 204, 212, .08); color: #fff; }
+  .cxm-about-action:focus-visible { outline: 2px solid #c7ccd4; outline-offset: -2px; }
+  .cxm-about-action-body { min-width: 0; overflow: hidden; flex: 1; }
+  .cxm-about-action-title { display: block; overflow: hidden; background: transparent; color: #d8dce3; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .cxm-about-action-copy { display: -webkit-box; margin-top: 3px; overflow: hidden; background: transparent; color: #838d9f; font-size: 11px; line-height: 1.42; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .cxm-about-action-arrow { width: 16px; height: 16px; flex: none; color: #747e8e; transition: color .12s ease; }
+  .cxm-about-action:hover .cxm-about-action-title, .cxm-about-action:focus-visible .cxm-about-action-title { color: currentColor; }
+  .cxm-about-action:hover .cxm-about-action-arrow, .cxm-about-action:focus-visible .cxm-about-action-arrow { color: currentColor; }
   .cxm-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
   .cxm-card, .cxm-slot-card, .cxm-source-row {
     border: 1px solid rgba(255, 255, 255, .09);
@@ -998,6 +1005,39 @@ const MANAGER_STYLES = `
   .cxm-catalog-status-icon { width: 14px; height: 14px; }
   .cxm-catalog-status-icon svg { width: 14px; height: 14px; }
   .cxm-kind-badge { padding: 3px 7px; border-radius: 6px; background: rgba(199, 204, 212, .09); color: #aeb6c5; font-size: 9px; }
+  .cxm-route-section { margin-top: 18px; }
+  .cxm-route-section:first-of-type { margin-top: 12px; }
+  .cxm-route-section-heading { margin: 0; color: var(--cx-text); font-size: 13px; font-weight: 700; }
+  .cxm-route-section-copy { margin: 4px 0 9px; color: var(--cx-muted); font-size: 10px; line-height: 1.45; }
+  .cxm-route-group { overflow: hidden; border: 1px solid var(--cx-border); border-radius: 12px; background: var(--cx-surface-raised); }
+  .cxm-route-group-item + .cxm-route-group-item { border-top: 1px solid var(--cx-border); }
+  .cxm-route-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 13px 14px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+  }
+  button.cxm-route-card { cursor: pointer; }
+  button.cxm-route-card:hover { background: color-mix(in srgb, var(--cx-text) 5%, transparent); }
+  button.cxm-route-card:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: -3px; border-radius: 10px; }
+  .cxm-route-card-icon { width: 28px; height: 28px; flex: none; color: var(--cx-muted); }
+  .cxm-route-card-icon svg { width: 19px; height: 19px; }
+  .cxm-route-card-body { min-width: 0; flex: 1 1 auto; }
+  .cxm-route-card-title { display: block; overflow: hidden; color: var(--cx-text); font-size: 12px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+  .cxm-route-card-description { display: -webkit-box; margin-top: 3px; overflow: hidden; color: var(--cx-muted); font-size: 11px; line-height: 1.42; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .cxm-route-machine { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; }
+  .cxm-route-machine-item { display: grid; min-width: 0; grid-template-columns: max-content minmax(0, 1fr); gap: 5px; font-size: 10px; line-height: 1.4; }
+  .cxm-route-machine dt { color: var(--cx-muted); }
+  .cxm-route-machine dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--cx-text); font-family: ui-monospace, monospace; user-select: text; }
+  .cxm-route-metadata-diagnostic { display: flex; min-width: 0; align-items: center; gap: 5px; margin-top: 7px; color: var(--cx-muted); font-size: 10px; line-height: 1.35; }
+  .cxm-route-metadata-diagnostic .cxm-material-icon { width: 13px; height: 13px; flex: none; }
+  .cxm-route-state { display: flex; min-width: 0; align-items: center; gap: 5px; margin-top: 7px; color: var(--cx-danger); font-size: 10px; line-height: 1.35; }
   .cxm-usage-list { border-top: 1px solid rgba(255, 255, 255, .08); border-bottom: 1px solid rgba(255, 255, 255, .08); }
   .cxm-usage-item { padding: 12px 2px; }
   .cxm-usage-item + .cxm-usage-item { border-top: 1px solid rgba(255, 255, 255, .08); }
@@ -1043,6 +1083,9 @@ const MANAGER_STYLES = `
     .cxm-catalog-row { gap: 8px; padding: 12px 2px; }
     .cxm-catalog-icon { width: 24px; height: 24px; }
     .cxm-catalog-status { max-width: 34%; }
+    .cxm-route-card { gap: 9px; padding: 12px; }
+    .cxm-route-card-icon { width: 24px; height: 24px; }
+    .cxm-route-machine { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
   }
   @media (max-width: 520px) {
     .cxm-console-controls { grid-template-columns: minmax(0, 1fr) minmax(72px, 1fr); }
@@ -1057,10 +1100,15 @@ const HOST_THEME_OVERLAY_STYLES = `
   .cxm-dialog, .cxm-lifecycle-dialog, .cxm-authorization-dialog { border-color: var(--cx-border); background: var(--cx-surface); color: var(--cx-text); box-shadow: 0 24px 80px var(--cx-shadow); }
   .cxm-sidebar { border-color: var(--cx-border); background: var(--cx-surface-raised); }
   .cxm-header, .cxm-about-actions, .cxm-about-action-item + .cxm-about-action-item, .cxm-flat-item + .cxm-flat-item { border-color: var(--cx-border); }
+  .cxm-about-actions { background: var(--cx-surface-raised); }
   .cxm-nav-button, .cxm-heading p, .cxm-detail-description, .cxm-permission-reason, .cxm-copy, .cxm-source-state, .cxm-detail-id, .cxm-plugin-description, .cxm-plugin-meta, .cxm-catalog-description, .cxm-catalog-id, .cxm-catalog-status, .cxm-marketplace-trust-copy, .cxm-marketplace-trust-meta, .cxm-field-label { color: var(--cx-muted); }
   .cxm-nav-icon { color: currentColor; }
   .cxm-heading-leading { color: var(--cx-text); }
-  .cxm-nav-button:hover, .cxm-nav-button[aria-selected="true"], .cxm-back:hover, .cxm-breadcrumb-action:hover, .cxm-breadcrumb-overflow > summary:hover, .cxm-tab:hover, .cxm-tab[aria-selected="true"], .cxm-about-action:hover .cxm-about-action-title { background: var(--cx-hover); color: var(--cx-text); }
+  .cxm-nav-button:hover, .cxm-nav-button[aria-selected="true"], .cxm-back:hover, .cxm-breadcrumb-action:hover, .cxm-breadcrumb-overflow > summary:hover, .cxm-tab:hover, .cxm-tab[aria-selected="true"], .cxm-about-action:hover, .cxm-about-action:focus-visible { background: var(--cx-hover); color: var(--cx-text); }
+  .cxm-about-action-title, .cxm-about-action-copy { background: transparent; }
+  .cxm-about-action-title { color: var(--cx-text); }
+  .cxm-about-action-copy, .cxm-about-action-arrow { color: var(--cx-muted); }
+  .cxm-about-action:hover .cxm-about-action-arrow, .cxm-about-action:focus-visible .cxm-about-action-arrow { color: var(--cx-text); }
   .cxm-heading-title, .cxm-breadcrumb-current, .cxm-card-value, .cxm-section-title, .cxm-about-name, .cxm-search, .cxm-source-input, .cxm-plugin-name, .cxm-catalog-title, .cxm-marketplace-trust-title, .cxm-field-value { color: var(--cx-text); }
   .cxm-card, .cxm-slot-card, .cxm-source-row, .cxm-field, .cxm-lifecycle-impact, .cxm-marketplace-trust-item, .cxm-marketplace-trust-badge { border-color: var(--cx-border); background: var(--cx-hover); }
   .cxm-search, .cxm-source-input, .cxm-close, .cxm-action, .cxm-mini-action, .cxm-marketplace-filter { border-color: var(--cx-border); background: var(--cx-surface-raised); color: var(--cx-text); }
@@ -2315,10 +2363,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       }
     }
     if (route.kind === 'route') {
+      const routeSnapshot = snapshot.navigation.routes.find(item => item.qualifiedId === route.qualifiedId)
       return {
         id: `route:${route.qualifiedId}`,
         primary,
-        segments: [root('routes'), { id: `route:${route.qualifiedId}`, label: route.qualifiedId }],
+        segments: [root('routes'), {
+          id: `route:${route.qualifiedId}`,
+          label: routeSnapshot?.productMetadata.title ?? route.qualifiedId,
+        }],
       }
     }
     if (route.kind === 'marketplace') {
@@ -2601,10 +2653,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         icon: 'host:error',
       }
     }
-    if (point.availability === 'unavailable') {
+    if (point.effectiveAdapterSupport === 'unsupported') {
       return { state: 'unavailable', text: catalogText?.status.unavailable.text ?? '[[catalog.status.unavailable]]', icon: 'host:error' }
     }
-    if (point.availability === 'pending' || (usage !== undefined && !usage.active)) {
+    if (point.effectiveAdapterSupport === 'unverified') {
       return { state: 'pending', text: catalogText?.status.pending.text ?? '[[catalog.status.pending]]', icon: 'host:warning' }
     }
     return undefined
@@ -2622,7 +2674,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     row.type = 'button'
     row.dataset.extensionPointId = point.id
     const status = extensionPointRowStatus(snapshot, point, usage)
-    row.dataset.extensionPointState = status?.state ?? 'available'
+    row.dataset.extensionPointState = status?.state ?? point.effectiveAdapterSupport
     const icon = createHostSurfaceIcon(document, point.icon)
     icon.classList.add('cxm-catalog-icon')
     const copy = create(document, 'span', 'cxm-catalog-copy')
@@ -2663,11 +2715,13 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       catalogText?.category[point.kind].text ?? '',
       catalogText?.owner.host.text ?? '',
       point.payloadFamily,
-      point.stability,
-      point.availability,
-      point.availabilityCode ?? '',
-      point.availabilityDetail ?? '',
-      ...(point.anchors ?? []).flatMap(anchor => [anchor.id, anchor.availability, anchor.availabilityCode ?? '', anchor.availabilityDetail ?? '']),
+      point.maturity,
+      point.adapterSupport,
+      point.effectiveAdapterSupport,
+      point.currentContext,
+      point.currentContextCode ?? '',
+      point.currentContextDetail ?? '',
+      ...(point.anchors ?? []).flatMap(anchor => [anchor.id, anchor.adapterSupport, anchor.effectiveAdapterSupport, anchor.currentContext, anchor.availabilityCode ?? '', anchor.availabilityDetail ?? '']),
       ...point.plugins.flatMap(plugin => [plugin.name, plugin.identity.id, plugin.identity.source]),
       ...point.plugins.flatMap(plugin => plugin.registrations.map(item => item.id)),
       ...point.plugins.flatMap(plugin => plugin.routes.map(item => item.qualifiedId)),
@@ -2805,20 +2859,24 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const panel = createTabPanel(document, '点位信息')
       const fields = create(document, 'div', 'cxm-detail-grid')
       const outlet = point.kind === 'outlet' ? snapshot.navigation.outlets.find(item => item.id === point.id) : undefined
-      const stabilityLabel = point.stability === 'stable' ? '稳定' : point.stability === 'experimental' ? '实验性' : '协议保留'
-      const availabilityLabel = point.availability === 'available' ? '当前可用' : point.availability === 'pending' ? '等待宿主定位' : '当前不可用'
+      const maturityLabel = point.maturity === 'stable' ? '稳定' : point.maturity === 'experimental' ? '实验性' : '协议保留'
+      const supportLabel = point.effectiveAdapterSupport === 'supported' ? '已支持' : point.effectiveAdapterSupport === 'unverified' ? '尚未验证' : '不支持'
+      const declaredSupportLabel = point.adapterSupport === 'supported' ? '已支持' : point.adapterSupport === 'unverified' ? '尚未验证' : '不支持'
+      const contextLabel = point.currentContext === 'active' ? '当前已挂载' : point.currentContext === 'inactive' ? '当前上下文未激活' : '当前页面未挂载'
       const rows: readonly (readonly [string, string])[] = [
         ['稳定标识', point.id],
         ['类型', point.kind === 'surface' ? '结构化界面点位' : '覆盖页面出口'],
         ['载荷族', point.payloadFamily],
         ['宿主图标', point.icon],
-        ['稳定性', stabilityLabel],
-        ['可用状态', availabilityLabel],
-        ...(point.availabilityCode === undefined ? [] : [['诊断代码', point.availabilityCode]] as const),
-        ...(point.availabilityDetail === undefined ? [] : [['诊断详情', point.availabilityDetail]] as const),
+        ['成熟度', maturityLabel],
+        ['适配器支持', supportLabel],
+        ...(point.effectiveAdapterSupport === point.adapterSupport ? [] : [['目录声明支持', declaredSupportLabel]] as const),
+        ['当前上下文', contextLabel],
+        ...(point.currentContextCode === undefined ? [] : [['上下文代码', point.currentContextCode]] as const),
+        ...(point.currentContextDetail === undefined ? [] : [['上下文详情', point.currentContextDetail]] as const),
         ...(point.anchors ?? []).map(anchor => [
           `语义锚点 ${anchor.id}`,
-          `${anchor.placements.join('/')} · ${anchor.availability}${anchor.availabilityCode === undefined ? '' : ` · ${anchor.availabilityCode}`}${anchor.availabilityDetail === undefined ? '' : ` · ${anchor.availabilityDetail}`}`,
+          `${anchor.placements.join('/')} · ${anchor.effectiveAdapterSupport} · ${anchor.currentContext}${anchor.availabilityCode === undefined ? '' : ` · ${anchor.availabilityCode}`}${anchor.availabilityDetail === undefined ? '' : ` · ${anchor.availabilityDetail}`}`,
         ] as const),
         ...(outlet === undefined ? [] : [
           ['覆盖方式', outlet.placement],
@@ -2837,8 +2895,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
     const panel = createTabPanel(document, '诊断')
     const diagnostics = [
-      ...(point.availabilityCode === undefined ? [] : [point.availabilityCode]),
-      ...(point.availabilityDetail === undefined ? [] : [point.availabilityDetail]),
+      ...(point.currentContextCode === undefined ? [] : [point.currentContextCode]),
+      ...(point.currentContextDetail === undefined ? [] : [point.currentContextDetail]),
       ...(point.anchors ?? []).flatMap(anchor => [
         ...(anchor.availabilityCode === undefined ? [] : [`${anchor.id} · ${anchor.availabilityCode}`]),
         ...(anchor.availabilityDetail === undefined ? [] : [`${anchor.id} · ${anchor.availabilityDetail}`]),
@@ -2852,47 +2910,228 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     content.append(panel)
   }
 
+  const managerLanguage = (snapshot: ManagerSnapshot): string => {
+    try {
+      return new Intl.Locale(snapshot.localization.locale).language
+    } catch {
+      return 'en'
+    }
+  }
+
+  const missingMetadataText = (snapshot: ManagerSnapshot, field: 'title' | 'description'): string => {
+    const zh = managerLanguage(snapshot) === 'zh'
+    if (field === 'title') return zh ? '未提供标题' : 'No title provided'
+    return zh ? '未提供说明' : 'No description provided'
+  }
+
+  const qualifiedNavigationId = (owner: string, id: string): string => id.includes(':') ? id : `${owner}:${id}`
+
+  const routeParameterNames = (path: string): readonly string[] => (
+    [...path.matchAll(/:([a-z][a-zA-Z0-9]*)/g)].map(match => `:${match[1]}`)
+  )
+
+  const createRouteMachineMetadata = (
+    items: readonly { readonly label: string; readonly value: string }[],
+  ): HTMLElement => {
+    const metadata = create(document, 'dl', 'cxm-route-machine')
+    for (const item of items) {
+      const field = create(document, 'div', 'cxm-route-machine-item')
+      field.append(create(document, 'dt', undefined, item.label), create(document, 'dd', undefined, item.value))
+      metadata.append(field)
+    }
+    return metadata
+  }
+
+  const createRouteMetadataDiagnostic = (
+    snapshot: ManagerSnapshot,
+    item: RouteSnapshot | NavigationPageSnapshot,
+  ): HTMLElement | undefined => {
+    if (item.productMetadata.diagnostics.length === 0) return undefined
+    const fields = item.productMetadata.diagnostics.map(diagnostic => diagnostic.field)
+    const zh = managerLanguage(snapshot) === 'zh'
+    const names = fields.map(field => field === 'title'
+      ? (zh ? '标题' : 'title')
+      : (zh ? '说明' : 'description'))
+    const diagnostic = create(document, 'div', 'cxm-route-metadata-diagnostic')
+    diagnostic.dataset.metadataDiagnostic = fields.join(',')
+    diagnostic.title = item.productMetadata.diagnostics.map(entry => `${entry.code}: ${entry.message}`).join('\n')
+    diagnostic.append(
+      createManagerIcon(document, 'diagnostics'),
+      create(document, 'span', undefined, zh
+        ? `贡献作者应补充本地化${names.join('、')} metadata`
+        : `Contribution author should add localized ${names.join(' and ')} metadata`),
+    )
+    return diagnostic
+  }
+
+  const routeSearchValues = (route: RouteSnapshot): readonly string[] => [
+    route.productMetadata.title ?? '',
+    route.productMetadata.description ?? '',
+    route.qualifiedId,
+    route.id,
+    route.owner,
+    route.definition.path,
+    route.definition.outlet,
+    route.definition.page,
+    ...routeParameterNames(route.definition.path),
+    route.error ?? '',
+  ]
+
+  const pageSearchValues = (
+    page: NavigationPageSnapshot,
+    routes: readonly RouteSnapshot[],
+  ): readonly string[] => [
+    page.productMetadata.title ?? '',
+    page.productMetadata.description ?? '',
+    page.qualifiedId,
+    page.id,
+    page.owner,
+    page.metadata.chrome ?? 'standard',
+    ...routes.flatMap(route => [route.definition.path, route.definition.outlet, route.qualifiedId]),
+  ]
+
+  const createRouteProductRow = (
+    snapshot: ManagerSnapshot,
+    route: RouteSnapshot,
+    onActivate?: () => void,
+  ): HTMLElement => {
+    const item = create(document, 'div', 'cxm-route-group-item')
+    item.setAttribute('role', 'listitem')
+    const row = onActivate === undefined
+      ? create(document, 'div', 'cxm-route-card')
+      : create(document, 'button', 'cxm-route-card')
+    if (row instanceof document.defaultView!.HTMLButtonElement) row.type = 'button'
+    row.dataset.routeId = route.qualifiedId
+    row.dataset.routeProductRow = route.qualifiedId
+    const title = route.productMetadata.title ?? route.qualifiedId
+    const description = route.productMetadata.description ?? missingMetadataText(snapshot, 'description')
+    row.setAttribute('aria-label', `${title}，${description}，${route.definition.path}，${route.definition.outlet}`)
+    const body = create(document, 'span', 'cxm-route-card-body')
+    const pageId = qualifiedNavigationId(route.owner, route.definition.page)
+    const identityItems = pageId === route.qualifiedId
+      ? [{ label: '页面 / 贡献', value: route.qualifiedId }]
+      : [{ label: '页面', value: pageId }, { label: '贡献', value: route.qualifiedId }]
+    body.append(
+      create(document, 'span', 'cxm-route-card-title', title),
+      create(document, 'span', 'cxm-route-card-description', description),
+      createRouteMachineMetadata([
+        { label: '路径', value: route.definition.path },
+        { label: '出口', value: route.definition.outlet },
+        ...identityItems,
+        { label: '参数', value: routeParameterNames(route.definition.path).join(', ') || '—' },
+        { label: '来源插件', value: route.owner },
+      ]),
+    )
+    const metadataDiagnostic = createRouteMetadataDiagnostic(snapshot, route)
+    if (metadataDiagnostic !== undefined) body.append(metadataDiagnostic)
+    if (!route.valid || !route.authorized) {
+      const state = create(document, 'span', 'cxm-route-state', route.error ?? (route.authorized ? '路由不可用' : '扩展点策略已拒绝'))
+      state.dataset.routeState = route.valid ? 'denied' : 'invalid'
+      body.append(state)
+    }
+    row.append(createManagerIcon(document, 'routes', 'cxm-route-card-icon'), body)
+    if (onActivate !== undefined && row instanceof document.defaultView!.HTMLButtonElement) {
+      activateManagerListRow(row, onActivate)
+    }
+    item.append(row)
+    return item
+  }
+
+  const createPageProductRow = (
+    snapshot: ManagerSnapshot,
+    page: NavigationPageSnapshot,
+    routes: readonly RouteSnapshot[],
+  ): HTMLElement => {
+    const item = create(document, 'div', 'cxm-route-group-item')
+    item.setAttribute('role', 'listitem')
+    const row = create(document, 'div', 'cxm-route-card')
+    row.dataset.pageProductRow = page.qualifiedId
+    const title = page.productMetadata.title ?? page.qualifiedId
+    const description = page.productMetadata.description ?? missingMetadataText(snapshot, 'description')
+    row.setAttribute('aria-label', `${title}，${description}`)
+    const body = create(document, 'div', 'cxm-route-card-body')
+    const outlets = [...new Set(routes.map(route => route.definition.outlet))].sort()
+    body.append(
+      create(document, 'span', 'cxm-route-card-title', title),
+      create(document, 'span', 'cxm-route-card-description', description),
+      createRouteMachineMetadata([
+        { label: '页面', value: page.qualifiedId },
+        { label: '目标出口', value: outlets.join(', ') || '—' },
+        { label: 'Chrome', value: page.metadata.chrome ?? 'standard' },
+        { label: '来源插件', value: page.owner },
+      ]),
+    )
+    const metadataDiagnostic = createRouteMetadataDiagnostic(snapshot, page)
+    if (metadataDiagnostic !== undefined) body.append(metadataDiagnostic)
+    row.append(createManagerIcon(document, 'document', 'cxm-route-card-icon'), body)
+    item.append(row)
+    return item
+  }
+
+  const createRoutePageSection = (
+    id: string,
+    title: string,
+    copy: string,
+    ariaLabel: string,
+  ): { readonly section: HTMLElement; readonly list: HTMLElement } => {
+    const section = create(document, 'section', 'cxm-route-section')
+    const headingId = `cxm-route-section-${id}`
+    const heading = create(document, 'h3', 'cxm-route-section-heading', title)
+    heading.id = headingId
+    section.setAttribute('aria-labelledby', headingId)
+    section.append(heading, create(document, 'p', 'cxm-route-section-copy', copy))
+    const list = create(document, 'div', 'cxm-route-group')
+    list.setAttribute('role', 'list')
+    list.setAttribute('aria-label', ariaLabel)
+    section.append(list)
+    return { section, list }
+  }
+
   const renderRouteList = (snapshot: ManagerSnapshot): void => {
     setHeading('路由', snapshot, { icon: 'routes' })
-    const search = createListSearch('routes', '搜索 CordisX 路由', '搜索路由、路径、页面、outlet 或插件…', routeQuery, value => { routeQuery = value })
+    const search = createListSearch('routes', '搜索 CordisX 路由和页面', '搜索标题、说明、路径、页面、outlet 或插件…', routeQuery, value => { routeQuery = value })
     content.append(search)
-    const filtered = snapshot.navigation.routes.filter(route => matchesManagerSearch(routeQuery, [
-      route.qualifiedId,
-      route.owner,
-      route.definition.path,
-      route.definition.outlet,
-      route.definition.page,
-      route.error ?? '',
-    ]))
-    const list = create(document, 'div', 'cxm-catalog-list')
-    list.setAttribute('role', 'list')
-    list.setAttribute('aria-label', '路由列表')
-    if (filtered.length === 0) list.append(create(document, 'div', 'cxm-empty', '没有匹配的路由'))
-    for (const route of filtered) {
-      const listItem = create(document, 'div', 'cxm-catalog-item')
-      listItem.setAttribute('role', 'listitem')
-      const row = create(document, 'button', 'cxm-catalog-row')
-      row.type = 'button'
-      row.dataset.routeId = route.qualifiedId
-      const copy = create(document, 'span', 'cxm-catalog-copy')
-      copy.append(
-        create(document, 'span', 'cxm-catalog-title', route.qualifiedId),
-        create(document, 'span', 'cxm-catalog-description', `${route.definition.path} → ${route.definition.outlet}`),
-        create(document, 'code', 'cxm-catalog-id', `${route.owner}:${route.definition.page}`),
-      )
-      row.append(
-        createManagerIcon(document, 'routes', 'cxm-catalog-icon'),
-        copy,
-        create(document, 'span', 'cxm-kind-badge', route.valid && route.authorized ? '可用' : '受限'),
-      )
-      activateManagerListRow(row, () => {
-        rememberListScroll()
-        void navigateRoute({ kind: 'route', qualifiedId: route.qualifiedId })
-      })
-      listItem.append(row)
-      list.append(listItem)
+    const filteredRoutes = snapshot.navigation.routes.filter(route => matchesManagerSearch(routeQuery, routeSearchValues(route)))
+    const filteredPages = snapshot.navigation.pages.filter(page => matchesManagerSearch(
+      routeQuery,
+      pageSearchValues(page, snapshot.navigation.routes.filter(route => (
+        qualifiedNavigationId(route.owner, route.definition.page) === page.qualifiedId
+      ))),
+    ))
+    if (filteredRoutes.length === 0 && filteredPages.length === 0) {
+      content.append(create(document, 'div', 'cxm-empty', '没有匹配的路由或页面'))
+      return
     }
-    content.append(list)
+    if (filteredRoutes.length > 0) {
+      const { section, list } = createRoutePageSection(
+        'catalog-routes',
+        '路由',
+        '用户入口与 Host outlet 之间的结构化导航关系。',
+        '路由列表',
+      )
+      for (const route of filteredRoutes) {
+        list.append(createRouteProductRow(snapshot, route, () => {
+          rememberListScroll()
+          void navigateRoute({ kind: 'route', qualifiedId: route.qualifiedId })
+        }))
+      }
+      content.append(section)
+    }
+    if (filteredPages.length > 0) {
+      const { section, list } = createRoutePageSection(
+        'catalog-pages',
+        '页面',
+        'Host 可挂载的结构化页面与其目标 outlet、chrome 范围。',
+        '页面列表',
+      )
+      for (const page of filteredPages) {
+        const routes = snapshot.navigation.routes.filter(route => (
+          qualifiedNavigationId(route.owner, route.definition.page) === page.qualifiedId
+        ))
+        list.append(createPageProductRow(snapshot, page, routes))
+      }
+      content.append(section)
+    }
   }
 
   const renderRouteDetail = (snapshot: ManagerSnapshot, qualifiedId: string): void => {
@@ -2902,7 +3141,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       content.append(create(document, 'div', 'cxm-empty', '该路由已不在当前 bundle 中'))
       return
     }
-    const pageId = `${route.owner}:${route.definition.page}`
+    const pageId = qualifiedNavigationId(route.owner, route.definition.page)
     const page = snapshot.navigation.pages.find(item => item.qualifiedId === pageId)
     const outlet = snapshot.navigation.outlets.find(item => item.id === route.definition.outlet)
     const presentation = outlet?.activeRoute !== route.qualifiedId
@@ -2912,12 +3151,15 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         : outlet.presentation === 'suspended'
           ? `已暂停${outlet.suspendedBy === undefined ? '' : ` · 由 ${outlet.suspendedBy} 覆盖`}`
           : '未打开'
-    const fields = create(document, 'div', 'cxm-detail-grid')
+    const routeSection = createRoutePageSection(
+      'detail-route',
+      '路由',
+      '本地化用途与不可翻译的导航机器信息。',
+      `${route.productMetadata.title ?? route.qualifiedId}路由详情`,
+    )
+    routeSection.list.append(createRouteProductRow(snapshot, route))
+    const statusFields = create(document, 'div', 'cxm-detail-grid')
     for (const [label, value] of [
-      ['路径', route.definition.path],
-      ['宿主出口', route.definition.outlet],
-      ['页面', pageId],
-      ['拥有插件', route.owner],
       ['路由状态', !route.valid ? '无效' : route.authorized ? '已授权' : '已拒绝'],
       ['页面注册', page === undefined ? '缺失' : '已注册'],
       ['出口状态', outlet === undefined ? '未声明' : outlet.available ? '可用' : '不可用'],
@@ -2925,9 +3167,23 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     ]) {
       const field = create(document, 'div', 'cxm-field')
       field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
-      fields.append(field)
+      statusFields.append(field)
     }
-    content.append(fields)
+    content.append(routeSection.section)
+    if (page !== undefined) {
+      const pageRoutes = snapshot.navigation.routes.filter(item => (
+        qualifiedNavigationId(item.owner, item.definition.page) === page.qualifiedId
+      ))
+      const pageSection = createRoutePageSection(
+        'detail-page',
+        '页面',
+        'Host 渲染的页面信息与受控 chrome 范围。',
+        `${page.productMetadata.title ?? page.qualifiedId}页面详情`,
+      )
+      pageSection.list.append(createPageProductRow(snapshot, page, pageRoutes))
+      content.append(pageSection.section)
+    }
+    content.append(statusFields)
     if (route.error !== undefined) content.append(create(document, 'div', 'cxm-error', route.error))
     if (outlet?.error !== undefined) content.append(create(document, 'div', 'cxm-error', outlet.error))
   }
@@ -4158,44 +4414,40 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       query,
       value => { pluginRouteQueries.set(plugin.id, value) },
     ))
-    const filteredRoutes = pluginRoutes.filter(route => matchesManagerSearch(query, [
-      route.qualifiedId, route.owner, route.definition.path, route.definition.outlet, route.definition.page,
-    ]))
-    const filteredPages = pluginPages.filter(page => matchesManagerSearch(query, [page.qualifiedId]))
+    const routesForPage = (page: NavigationPageSnapshot): readonly RouteSnapshot[] => pluginRoutes.filter(route => (
+      qualifiedNavigationId(route.owner, route.definition.page) === page.qualifiedId
+    ))
+    const filteredRoutes = pluginRoutes.filter(route => matchesManagerSearch(query, routeSearchValues(route)))
+    const filteredPages = pluginPages.filter(page => matchesManagerSearch(query, pageSearchValues(page, routesForPage(page))))
     if (pluginRoutes.length === 0 && pluginPages.length === 0) {
       panel.append(create(document, 'div', 'cxm-empty', '当前插件没有注册路由或页面'))
     } else if (filteredRoutes.length === 0 && filteredPages.length === 0) {
       panel.append(create(document, 'div', 'cxm-empty', '没有匹配的路由或页面'))
     }
-    const routeList = create(document, 'div', 'cxm-catalog-list')
-    routeList.setAttribute('role', 'list')
-    routeList.setAttribute('aria-label', `${plugin.name}路由与页面列表`)
-    for (const route of filteredRoutes) {
-      const row = create(document, 'div', 'cxm-catalog-row')
-      row.setAttribute('role', 'listitem')
-      const copy = create(document, 'span', 'cxm-catalog-copy')
-      copy.append(
-        create(document, 'span', 'cxm-catalog-title', route.qualifiedId),
-        create(document, 'span', 'cxm-catalog-description', `${route.definition.path} → ${route.definition.outlet}`),
-        create(document, 'code', 'cxm-catalog-id', `${route.owner}:${route.definition.page}`),
+    if (filteredRoutes.length > 0) {
+      const routeSection = createRoutePageSection(
+        `plugin-${plugin.id}-routes`,
+        '路由',
+        '从用户入口导航到页面与 Host outlet。',
+        `${plugin.name}路由列表`,
       )
-      row.append(
-        createManagerIcon(document, 'routes', 'cxm-catalog-icon'),
-        copy,
-        create(document, 'span', 'cxm-kind-badge', route.valid && route.authorized ? '可用' : '受限'),
-        create(document, 'span'),
+      for (const route of filteredRoutes) {
+        routeSection.list.append(createRouteProductRow(snapshot, route, () => {
+          void navigateRoute({ kind: 'route', qualifiedId: route.qualifiedId })
+        }))
+      }
+      panel.append(routeSection.section)
+    }
+    if (filteredPages.length > 0) {
+      const pageSection = createRoutePageSection(
+        `plugin-${plugin.id}-pages`,
+        '页面',
+        '受控页面内容、适用上下文与 Host chrome 范围。',
+        `${plugin.name}页面列表`,
       )
-      routeList.append(row)
+      for (const page of filteredPages) pageSection.list.append(createPageProductRow(snapshot, page, routesForPage(page)))
+      panel.append(pageSection.section)
     }
-    for (const page of filteredPages) {
-      const row = create(document, 'div', 'cxm-catalog-row')
-      row.setAttribute('role', 'listitem')
-      const copy = create(document, 'span', 'cxm-catalog-copy')
-      copy.append(create(document, 'span', 'cxm-catalog-title', page.qualifiedId), create(document, 'span', 'cxm-catalog-description', '受控页面 mount'))
-      row.append(createManagerIcon(document, 'document', 'cxm-catalog-icon'), copy, create(document, 'span', 'cxm-kind-badge', '页面'), create(document, 'span'))
-      routeList.append(row)
-    }
-    if (filteredRoutes.length > 0 || filteredPages.length > 0) panel.append(routeList)
     content.append(panel)
   }
 

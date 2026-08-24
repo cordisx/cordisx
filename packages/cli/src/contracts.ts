@@ -211,6 +211,10 @@ export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v2.schema.json' as const
 export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v3.schema.json' as const
+export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v5.schema.json' as const
+export const CORDISX_EXTENSION_POINT_RUNTIME_CONTEXT_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-runtime-context.v1.schema.json' as const
 export const CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-policy.v1.schema.json' as const
 export const CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V1 =
@@ -229,6 +233,8 @@ export type CordisXExtensionPointPayloadFamily =
   | 'contextual-action'
   | 'tab'
   | 'manager-settings-tab'
+  | 'manager-settings-content-tab'
+  | 'manager-settings-navigation-item'
   | 'presenter'
   | 'navigation-item'
   | 'environment-section'
@@ -236,6 +242,9 @@ export type CordisXExtensionPointPayloadFamily =
   | 'outlet'
 export type CordisXExtensionPointStability = 'stable' | 'experimental' | 'reserved'
 export type CordisXExtensionPointAvailability = 'available' | 'pending' | 'unavailable'
+export type CordisXExtensionPointMaturity = 'stable' | 'experimental' | 'reserved'
+export type CordisXExtensionPointAdapterSupport = 'supported' | 'unsupported' | 'unverified'
+export type CordisXExtensionPointCurrentContextState = 'active' | 'inactive' | 'not-mounted'
 
 /** Protocol-v1 host-owned identity for one structured surface or controlled outlet. */
 export interface CordisXHostExtensionPointDescriptor {
@@ -287,6 +296,52 @@ export interface CordisXHostExtensionPointCatalogV3 {
   readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3
   readonly schemaVersion: 3
   readonly points: readonly CordisXHostExtensionPointDescriptorV3[]
+}
+
+export interface CordisXHostExtensionPointAnchorDescriptorV5 {
+  readonly id: string
+  readonly placements: readonly ('before' | 'after' | 'menu')[]
+  readonly adapterSupport: CordisXExtensionPointAdapterSupport
+  readonly diagnostic?: CordisXLocalizedText
+}
+
+/** Protocol-v5 static host support contract. Current page/DOM state is intentionally absent. */
+export interface CordisXHostExtensionPointDescriptorV5 extends CordisXHostExtensionPointDescriptor {
+  readonly payloadFamily: CordisXExtensionPointPayloadFamily
+  readonly maturity: CordisXExtensionPointMaturity
+  readonly adapterSupport: CordisXExtensionPointAdapterSupport
+  readonly diagnostic?: CordisXLocalizedText
+  readonly anchors?: readonly CordisXHostExtensionPointAnchorDescriptorV5[]
+  readonly pageChrome?: readonly CordisXPageChrome[]
+  readonly presentationGroup?: string
+  readonly routePathFamily?: 'app' | 'main' | 'session' | 'manager-settings' | 'manager' | 'host-defined'
+}
+
+export interface CordisXHostExtensionPointCatalogV5 {
+  readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5
+  readonly schemaVersion: 5
+  readonly points: readonly CordisXHostExtensionPointDescriptorV5[]
+}
+
+export interface CordisXExtensionPointAnchorCurrentContextV1 {
+  readonly id: string
+  readonly state: CordisXExtensionPointCurrentContextState
+  readonly code?: string
+  readonly detail?: CordisXLocalizedText
+}
+
+export interface CordisXExtensionPointCurrentContextV1 {
+  readonly id: string
+  readonly state: CordisXExtensionPointCurrentContextState
+  readonly code?: string
+  readonly detail?: CordisXLocalizedText
+  readonly anchors?: readonly CordisXExtensionPointAnchorCurrentContextV1[]
+}
+
+export interface CordisXExtensionPointRuntimeContextV1 {
+  readonly $schema: typeof CORDISX_EXTENSION_POINT_RUNTIME_CONTEXT_SCHEMA_V1
+  readonly schemaVersion: 1
+  readonly points: readonly CordisXExtensionPointCurrentContextV1[]
 }
 
 /** Launcher-bound canonical tuple; plugins never provide or override source. */
@@ -687,9 +742,26 @@ export interface CordisXPageHeaderAction extends CordisXStructuredAction {
   readonly disabled?: CordisXDisabledState
 }
 
+export const CORDISX_PAGE_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/page.v1.schema.json' as const
+export const CORDISX_PAGE_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/page.v2.schema.json' as const
+export const CORDISX_PAGE_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/page.v3.schema.json' as const
+export const CORDISX_ROUTE_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/route.v1.schema.json' as const
+export const CORDISX_ROUTE_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/route.v2.schema.json' as const
+
 export interface CordisXPageMetadata {
+  /** Omitted only for the pre-versioned third-party compatibility path. */
+  readonly $schema?: typeof CORDISX_PAGE_SCHEMA_V1 | typeof CORDISX_PAGE_SCHEMA_V2 | typeof CORDISX_PAGE_SCHEMA_V3
+  /** Omitted only for the pre-versioned third-party compatibility path. */
+  readonly schemaVersion?: 1 | 2 | 3
   readonly id: string
   readonly title: CordisXLocalizedText
+  /** User-facing purpose and applicable context; never an implementation note. */
+  readonly description?: CordisXLocalizedText
   readonly icon?: CordisXIconToken
   /** Host-rendered chrome policy. Body-only remains subject to the target outlet policy. */
   readonly chrome?: CordisXPageChrome
@@ -697,6 +769,16 @@ export interface CordisXPageMetadata {
   readonly tabs?: readonly CordisXPageTab[]
   readonly headerActions?: readonly CordisXPageHeaderAction[]
   readonly localeNamespace?: string
+}
+
+/** Closed protocol page.v3 document. Owner-default i18n replaces the legacy localeNamespace hint. */
+export type CordisXPageMetadataV3 = Omit<
+  CordisXPageMetadata,
+  '$schema' | 'schemaVersion' | 'description' | 'localeNamespace'
+> & {
+  readonly $schema: typeof CORDISX_PAGE_SCHEMA_V3
+  readonly schemaVersion: 3
+  readonly description: CordisXLocalizedText
 }
 
 export interface CordisXPageNavigation {
@@ -733,12 +815,29 @@ export interface CordisXPages {
 }
 
 export interface CordisXRouteDefinition<Outlet extends CordisXOutletName = CordisXOutletName> {
+  /** Omitted only for the pre-versioned third-party compatibility path. */
+  readonly $schema?: typeof CORDISX_ROUTE_SCHEMA_V1 | typeof CORDISX_ROUTE_SCHEMA_V2
+  /** Omitted only for the pre-versioned third-party compatibility path. */
+  readonly schemaVersion?: 1 | 2
   readonly id: string
   readonly path: string
   readonly outlet: Outlet
   readonly page: string
   readonly title?: CordisXLocalizedText
+  /** User-facing purpose and entry context; canonical route fields remain untranslated. */
+  readonly description?: CordisXLocalizedText
   readonly when?: CordisXWhen
+}
+
+/** Closed protocol route.v2 document with required localized product metadata. */
+export type CordisXRouteDefinitionV2<Outlet extends CordisXOutletName = CordisXOutletName> = Omit<
+  CordisXRouteDefinition<Outlet>,
+  '$schema' | 'schemaVersion' | 'title' | 'description'
+> & {
+  readonly $schema: typeof CORDISX_ROUTE_SCHEMA_V2
+  readonly schemaVersion: 2
+  readonly title: CordisXLocalizedText
+  readonly description: CordisXLocalizedText
 }
 
 export interface CordisXRoutes extends CordisXPageNavigation {

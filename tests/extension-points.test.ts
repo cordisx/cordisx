@@ -13,9 +13,11 @@ import {
 import {
   CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1,
   CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2,
+  CORDISX_EXTENSION_POINT_RUNTIME_CONTEXT_SCHEMA_V1,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
   type CordisXExtensionPointPolicyRecordV1,
 } from '../packages/cli/src/contracts.js'
 import type { CordisXI18nService } from '../packages/cli/src/renderer/i18n.js'
@@ -71,18 +73,18 @@ describe('extension point runtime contract', () => {
     descriptors.dispose()
   })
 
-  it('declares the complete v2 catalog and diagnoses cross-family duplicates', () => {
+  it('declares the complete v5 catalog with static maturity and adapter support', () => {
     const registry = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     const remove = registry.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     expect(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG).toMatchObject({
-      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
-      schemaVersion: 2,
+      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
+      schemaVersion: 5,
     })
     expect(registry.descriptors()).toHaveLength(33)
     expect(registry.descriptors().filter(item => item.kind === 'surface')).toHaveLength(28)
     expect(registry.descriptors().filter(item => item.kind === 'outlet')).toHaveLength(5)
     expect(registry.descriptors()
-      .filter(item => item.stability === 'stable' && item.availability === 'available')
+      .filter(item => item.maturity === 'stable' && item.adapterSupport === 'supported')
       .map(item => item.id)
       .sort()).toEqual([
       'app',
@@ -108,18 +110,20 @@ describe('extension point runtime contract', () => {
       icon: 'host:history',
     })
     expect(registry.descriptor('session.header.actions')).toMatchObject({
-      kind: 'surface', payloadFamily: 'contextual-action', stability: 'stable', availability: 'available',
+      kind: 'surface', payloadFamily: 'contextual-action', maturity: 'stable', adapterSupport: 'supported',
     })
+    expect(registry.descriptor('session.header.actions')).not.toHaveProperty('availability')
+    expect(registry.descriptor('session.header.actions')).not.toHaveProperty('currentContext')
     expect(registry.descriptor('composer.toolbar.items')).toMatchObject({
-      kind: 'surface', stability: 'stable', availability: 'available',
+      kind: 'surface', maturity: 'stable', adapterSupport: 'supported',
       anchors: [
-        { id: 'submit', placements: ['before'], availability: 'available' },
-        { id: 'leading', availability: 'pending' },
-        { id: 'model', availability: 'pending' },
+        { id: 'submit', placements: ['before'], adapterSupport: 'supported' },
+        { id: 'leading', adapterSupport: 'unverified' },
+        { id: 'model', adapterSupport: 'unverified' },
       ],
     })
     expect(registry.descriptor('panel.right.content')).toMatchObject({
-      kind: 'outlet', stability: 'reserved', availability: 'unavailable',
+      kind: 'outlet', maturity: 'reserved', adapterSupport: 'unsupported',
       diagnostic: { fallback: expect.stringContaining('Reserved') },
     })
     expect(Object.isFrozen(registry.descriptor('session.content')?.title)).toBe(true)
@@ -155,7 +159,7 @@ describe('extension point runtime contract', () => {
     registry.dispose()
   })
 
-  it('normalizes a v1 catalog into stable available descriptors without weakening v2 validation', () => {
+  it('normalizes a v1 catalog into stable supported descriptors without weakening v5 validation', () => {
     const legacyCatalogs = [
       ...CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
       { namespace: 'host', locale: 'en', default: true, messages: { 'legacy.title': 'Legacy', 'legacy.description': 'Legacy v1 surface' } },
@@ -171,10 +175,25 @@ describe('extension point runtime contract', () => {
       }],
     })
     expect(registry.descriptor('legacy.surface')).toMatchObject({
-      payloadFamily: 'action', stability: 'stable', availability: 'available',
+      payloadFamily: 'action', maturity: 'stable', adapterSupport: 'supported',
     })
     expect(registry.diagnostics()).toEqual([])
     remove()
+    const removeInvalidV5 = registry.registerCatalog({
+      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
+      schemaVersion: 5,
+      points: [{
+        id: 'stable.unverified', kind: 'surface',
+        title: { key: 'stable.unverified.title', fallback: 'Stable unverified' },
+        description: { key: 'stable.unverified.description', fallback: 'Invalid v5 point' },
+        icon: 'host:info', payloadFamily: 'action', maturity: 'stable', adapterSupport: 'unverified',
+        diagnostic: { key: 'stable.unverified.diagnostic', fallback: 'Not verified' },
+      }],
+    })
+    expect(registry.diagnostics()).toEqual([
+      expect.objectContaining({ code: 'invalid-descriptor', pointId: 'stable.unverified', message: expect.stringContaining('must be supported') }),
+    ])
+    removeInvalidV5()
     registry.dispose()
   })
 
@@ -204,21 +223,21 @@ describe('extension point runtime contract', () => {
     registry.dispose()
   })
 
-  it('registers the manager-neutral v3 surface and isolated outlet with exact policy metadata', () => {
+  it('registers the manager-neutral v5 surface and isolated outlet with exact policy metadata', () => {
     const registry = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     const remove = registry.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
     expect(CORDISX_MANAGER_EXTENSION_POINT_CATALOG).toMatchObject({
-      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3,
-      schemaVersion: 3,
+      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
+      schemaVersion: 5,
     })
     expect(registry.descriptors()).toHaveLength(2)
     expect(registry.descriptor('manager.settings.tabs')).toMatchObject({
-      kind: 'surface', payloadFamily: 'manager-settings-tab', stability: 'stable', availability: 'available',
+      kind: 'surface', payloadFamily: 'manager-settings-content-tab', maturity: 'stable', adapterSupport: 'supported',
     })
     expect(registry.descriptor('manager.settings.content')).toMatchObject({
       kind: 'outlet', payloadFamily: 'outlet', routePathFamily: 'manager-settings',
       presentationGroup: 'manager.settings', pageChrome: ['body-only'],
-      stability: 'stable', availability: 'available',
+      maturity: 'stable', adapterSupport: 'supported',
     })
     expect(registry.descriptor('manager.settings.tabs')?.description.fallback).toContain('host-rendered')
     expect(registry.descriptor('manager.settings.content')?.description.fallback).toContain('trusted-local page body')
@@ -227,7 +246,7 @@ describe('extension point runtime contract', () => {
     registry.dispose()
   })
 
-  it('projects live surface and anchor availability instead of hardcoding surfaces available', () => {
+  it('projects current context separately from maturity and adapter support', () => {
     const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore(), 'generation-test')
@@ -254,28 +273,44 @@ describe('extension point runtime contract', () => {
           { id: 'session.content', placement: 'session', available: true, mounted: false, presentation: 'inactive' },
         ],
       },
-      surfaceAvailability: [{
-        surface: 'session.header.actions', state: 'pending', code: 'session-header-seat-missing', detail: 'No unique native header seat.',
+      surfaceCurrentContext: [{
+        surface: 'session.header.actions', state: 'not-mounted', code: 'session.not-mounted', detail: { key: 'session.not-mounted', fallback: 'No native session header is mounted.' },
       }, {
-        surface: 'composer.toolbar.items', state: 'available', anchors: [
-          { id: 'submit', placements: ['before'], state: 'available' },
-          { id: 'leading', placements: ['before', 'after'], state: 'pending', code: 'anchor-unverified', detail: 'Leading is not verified.' },
-          { id: 'model', placements: ['before', 'after', 'menu'], state: 'pending', code: 'anchor-unverified', detail: 'Model is not verified.' },
+        surface: 'workspace.toolbar.items', state: 'inactive', code: 'anchor.unresolved', detail: { key: 'workspace.unresolved', fallback: 'Workspace anchor is ambiguous.' },
+      }, {
+        surface: 'composer.toolbar.items', state: 'active', anchors: [
+          { id: 'submit', placements: ['before'], state: 'active' },
+          { id: 'leading', placements: ['before', 'after'], state: 'not-mounted', code: 'anchor.not-mounted', detail: { key: 'leading.not-mounted', fallback: 'Leading is not mounted.' } },
+          { id: 'model', placements: ['before', 'after', 'menu'], state: 'not-mounted', code: 'anchor.not-mounted', detail: { key: 'model.not-mounted', fallback: 'Model is not mounted.' } },
         ],
       }],
     })
     expect(snapshot.points.find(item => item.id === 'session.header.actions')).toMatchObject({
-      stability: 'stable', availability: 'pending', available: false,
-      availabilityCode: 'session-header-seat-missing', availabilityDetail: 'No unique native header seat.',
+      maturity: 'stable', adapterSupport: 'supported', currentContext: 'not-mounted',
+      effectiveAdapterSupport: 'supported', availability: 'available', available: true,
+      availabilityCode: 'session.not-mounted', availabilityDetail: 'No native session header is mounted.',
     })
     expect(snapshot.points.find(item => item.id === 'composer.toolbar.items')?.anchors).toEqual([
-      expect.objectContaining({ id: 'submit', availability: 'available', placements: ['before'] }),
-      expect.objectContaining({ id: 'leading', availability: 'pending', availabilityCode: 'anchor-unverified' }),
-      expect.objectContaining({ id: 'model', availability: 'pending', availabilityCode: 'anchor-unverified' }),
+      expect.objectContaining({ id: 'submit', adapterSupport: 'supported', currentContext: 'active', availability: 'available', placements: ['before'] }),
+      expect.objectContaining({ id: 'leading', adapterSupport: 'unverified', effectiveAdapterSupport: 'unverified', currentContext: 'not-mounted', availability: 'pending', availabilityCode: 'anchor.not-mounted' }),
+      expect.objectContaining({ id: 'model', adapterSupport: 'unverified', effectiveAdapterSupport: 'unverified', currentContext: 'not-mounted', availability: 'pending', availabilityCode: 'anchor.not-mounted' }),
     ])
     expect(snapshot.points.find(item => item.id === 'panel.right.content')).toMatchObject({
-      stability: 'reserved', availability: 'unavailable', available: false,
+      maturity: 'reserved', adapterSupport: 'unsupported', currentContext: 'not-mounted', availability: 'unavailable', available: false,
       availabilityDetail: expect.stringContaining('Reserved'),
+    })
+    expect(snapshot.points.find(item => item.id === 'workspace.toolbar.items')).toMatchObject({
+      adapterSupport: 'supported', effectiveAdapterSupport: 'unverified', currentContext: 'inactive',
+      availability: 'pending', availabilityCode: 'anchor.unresolved',
+    })
+    expect(descriptors.descriptor('workspace.toolbar.items')).toMatchObject({ adapterSupport: 'supported' })
+    expect(snapshot.currentContext).toMatchObject({
+      $schema: CORDISX_EXTENSION_POINT_RUNTIME_CONTEXT_SCHEMA_V1,
+      schemaVersion: 1,
+      points: expect.arrayContaining([
+        expect.objectContaining({ id: 'session.header.actions', state: 'not-mounted', code: 'session.not-mounted' }),
+        expect.objectContaining({ id: 'composer.toolbar.items', state: 'active' }),
+      ]),
     })
     broker.dispose()
     descriptors.dispose()
@@ -337,11 +372,12 @@ describe('extension point runtime contract', () => {
       expect.objectContaining({ operation: 'outlet.route.navigate', routeId: 'demo:route', pageId: 'demo:page' }),
       expect.objectContaining({ operation: 'outlet.page.mount', routeId: 'demo:route', pageId: 'demo:page' }),
     ])
-    broker.setSurfaceAvailability([{
-      surface: 'session.header.actions', state: 'pending', code: 'anchor-unresolved', detail: 'No unique seat.',
-    }])
+    // Current mount state is not a policy input: supported points remain authorized while not mounted.
     expect(broker.authorizeSurfaceRoute('demo', 'session.header.actions', 'demo:trace', 'demo:trace.route')).toMatchObject({
-      authorized: false, reason: 'extension point session.header.actions is pending',
+      authorized: true,
+    })
+    expect(broker.authorizeSurfaceRoute('demo', 'sidebar.workspace.menu', 'demo:workspace', 'demo:workspace.route')).toMatchObject({
+      authorized: false, reason: 'extension point sidebar.workspace.menu adapter support is unverified',
     })
     broker.dispose()
     descriptors.dispose()

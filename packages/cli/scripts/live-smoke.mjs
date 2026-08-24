@@ -1440,6 +1440,8 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       const target = snapshot.plugins.find(plugin => plugin.id === targetId)
       if (target?.package === undefined) throw new Error('lifecycle smoke activation package is unavailable')
       const schema = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/'
+      const CORDISX_PAGE_SCHEMA_V3 = schema + 'page.v3.schema.json'
+      const CORDISX_ROUTE_SCHEMA_V2 = schema + 'route.v2.schema.json'
       let previous
       for (let attempt = 0; attempt < 160; attempt += 1) {
         const activation = runtime.activePluginGeneration()
@@ -1472,16 +1474,45 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
         },
       }
       const candidateModuleFactory = console => ({
-        name: 'Lifecycle Smoke Candidate', inject: ['commands', 'pages', 'routes', 'slots'],
+        name: 'Lifecycle Smoke Candidate', inject: ['i18n', 'commands', 'pages', 'routes', 'slots'],
         apply(ctx) {
           globalThis.__cordisxGenerationLiveSmoke = { candidateReady: true, selfCommand: false }
           console.log('generation-candidate-ready', { transactionId })
-          const label = { key: 'lifecycle-smoke-candidate', fallback: 'Lifecycle smoke candidate' }
+          const message = key => ({ namespace: 'lifecycle-smoke-candidate', key })
+          ctx.i18n.define({
+            namespace: 'lifecycle-smoke-candidate', locale: 'en', default: true,
+            messages: {
+              'command.invoke': 'Run candidate lifecycle smoke',
+              'page.title': 'Lifecycle candidate status',
+              'page.description': 'Shows the staged generation status inside the controlled main workspace page.',
+              'route.title': 'Open lifecycle candidate status',
+              'route.description': 'Open from the lifecycle smoke navigation item to inspect the staged candidate in the main outlet.',
+            },
+          })
+          ctx.i18n.define({
+            namespace: 'lifecycle-smoke-candidate', locale: 'zh-CN',
+            messages: {
+              'command.invoke': '运行候选生命周期冒烟',
+              'page.title': '生命周期候选状态',
+              'page.description': '在受控主工作区页面内展示 staged generation 的当前状态。',
+              'route.title': '打开生命周期候选状态',
+              'route.description': '从生命周期冒烟导航项进入，在 main outlet 中检查 staged candidate。',
+            },
+          })
+          const label = message('command.invoke')
           ctx.commands.register({ id: 'invoke', title: label }, () => {
             globalThis.__cordisxGenerationLiveSmoke.selfCommand = true
           })
-          ctx.pages.register({ id: 'overview', title: label, icon: 'host:refresh', chrome: 'body-only' }, () => () => undefined)
-          ctx.routes.register({ id: 'overview', path: '/lifecycle-smoke', outlet: 'main', page: 'overview' })
+          ctx.pages.register({
+            $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3, id: 'overview',
+            title: message('page.title'), description: message('page.description'),
+            icon: 'host:refresh', chrome: 'body-only',
+          }, () => () => undefined)
+          ctx.routes.register({
+            $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2, id: 'overview',
+            path: '/lifecycle-smoke', outlet: 'main', page: 'overview',
+            title: message('route.title'), description: message('route.description'),
+          })
           ctx.slots.register({ name: 'sidebar.navigation.items', id: 'open', group: 'utility', order: 95 }, {
             label, icon: 'host:refresh', route: { id: 'overview' },
           })
@@ -3337,6 +3368,56 @@ if (parsed.values['manager-screenshot'] !== undefined) {
               }
             }),
           },
+          routePageCatalog: document.querySelector('.cxm-route-section') === null ? null : (() => {
+            const panel = document.querySelector('.cxm-content')
+            const rows = [...document.querySelectorAll('.cxm-route-group-item')].map(item => {
+              const row = item.querySelector('.cxm-route-card')
+              const rect = row?.getBoundingClientRect()
+              const machine = [...(row?.querySelectorAll('.cxm-route-machine-item') ?? [])].map(field => ({
+                label: field.querySelector('dt')?.textContent?.trim() ?? null,
+                value: field.querySelector('dd')?.textContent?.trim() ?? null,
+              }))
+              return {
+                kind: row?.hasAttribute('data-route-product-row') === true ? 'route' : 'page',
+                id: row?.getAttribute('data-route-product-row') ?? row?.getAttribute('data-page-product-row'),
+                title: row?.querySelector('.cxm-route-card-title')?.textContent?.trim() ?? null,
+                description: row?.querySelector('.cxm-route-card-description')?.textContent?.trim() ?? null,
+                ariaLabel: row?.getAttribute('aria-label') ?? null,
+                hostIcon: row?.querySelector('[data-material-icon]')?.getAttribute('data-material-icon') ?? null,
+                machine,
+                metadataDiagnostic: row?.querySelector('[data-metadata-diagnostic]')?.textContent?.trim() ?? null,
+                status: row?.querySelector('[data-route-state]')?.textContent?.trim() ?? null,
+                chevron: row?.querySelector('.cxm-chevron') !== null,
+                tags: row?.querySelectorAll('.cxm-kind-badge,.cxm-badge,.cxm-status').length ?? 0,
+                horizontalOverflow: row instanceof HTMLElement ? row.scrollWidth > row.clientWidth + 1 : null,
+                insidePanel: rect === undefined || panel === null ? null : (() => {
+                  const panelRect = panel.getBoundingClientRect()
+                  return rect.left >= panelRect.left - 1 && rect.right <= panelRect.right + 1
+                })(),
+              }
+            })
+            return {
+              locale: document.documentElement.lang,
+              pageRoute: document.querySelector('[data-manager-page-route]')?.getAttribute('data-manager-page-route') ?? null,
+              sections: [...document.querySelectorAll('.cxm-route-section')].map(section => ({
+                heading: section.querySelector('.cxm-route-section-heading')?.textContent?.trim() ?? null,
+                description: section.querySelector('.cxm-route-section-copy')?.textContent?.trim() ?? null,
+                ariaLabelledBy: section.getAttribute('aria-labelledby'),
+                listRole: section.querySelector('.cxm-route-group')?.getAttribute('role') ?? null,
+                rowCount: section.querySelectorAll('.cxm-route-group-item').length,
+              })),
+              rows,
+              fallbackPlaceholderVisible: (panel?.textContent ?? '').includes('受控页面 mount'),
+              contentHorizontalOverflow: panel instanceof HTMLElement ? panel.scrollWidth > panel.clientWidth + 1 : null,
+              search: (() => {
+                const input = document.querySelector('input[type="search"]')
+                return input === null ? null : {
+                  ariaLabel: input.getAttribute('aria-label'),
+                  placeholder: input.getAttribute('placeholder'),
+                }
+              })(),
+            }
+          })(),
           marketplaceCatalog: document.querySelector('[aria-label="插件商店列表"]') === null ? null : {
             locale: document.documentElement.lang,
             permanentTrustWarning: (document.querySelector('.cxm-content')?.textContent ?? '').includes('商店收录、schema 校验和页面展示都不代表'),
@@ -3390,6 +3471,80 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   }
   const managerResult = evaluatedManager.result?.value ?? null
   managerReport = managerResult?.state ?? null
+  if (managerTab === 'about') {
+    const aboutState = async () => await evaluateByValue(`(() => {
+      const action = document.querySelector('.cxm-about-action')
+      const item = action?.closest('.cxm-about-action-item')
+      const actions = action?.closest('.cxm-about-actions')
+      const title = action?.querySelector('.cxm-about-action-title')
+      const copy = action?.querySelector('.cxm-about-action-copy')
+      const arrow = action?.querySelector('.cxm-about-action-arrow')
+      if (!(action instanceof HTMLAnchorElement) || !(item instanceof HTMLElement) || !(actions instanceof HTMLElement)
+        || !(title instanceof HTMLElement) || !(copy instanceof HTMLElement) || !(arrow instanceof HTMLElement)) return null
+      const rect = action.getBoundingClientRect()
+      const itemRect = item.getBoundingClientRect()
+      const style = element => getComputedStyle(element)
+      const simpleRect = value => ({ x: value.x, y: value.y, width: value.width, height: value.height })
+      const leftTarget = document.elementFromPoint(rect.left + 2, rect.top + rect.height / 2)
+      const rightTarget = document.elementFromPoint(rect.right - 2, rect.top + rect.height / 2)
+      return {
+        rect: simpleRect(rect), itemRect: simpleRect(itemRect),
+        hovered: action.matches(':hover'), focused: document.activeElement === action,
+        focusVisible: action.matches(':focus-visible'),
+        anchorBackground: style(action).backgroundColor,
+        anchorOutline: style(action).outlineColor,
+        anchorOutlineOffset: style(action).outlineOffset,
+        titleColor: style(title).color, titleBackground: style(title).backgroundColor,
+        copyColor: style(copy).color, copyBackground: style(copy).backgroundColor,
+        arrowColor: style(arrow).color,
+        wholeRowHitTarget: action.contains(leftTarget) && action.contains(rightTarget),
+        rowOwnsTextAndIcon: action.contains(title) && action.contains(copy) && action.contains(arrow),
+        fillsItem: Math.abs(rect.width - itemRect.width) <= 1,
+        horizontalOverflow: actions.scrollWidth > actions.clientWidth + 1 || action.scrollWidth > action.clientWidth + 1,
+        separatorColor: style(item).borderTopColor,
+        containerBorder: [style(actions).borderTopColor, style(actions).borderBottomColor],
+      }
+    })()`)
+    const rest = await aboutState()
+    if (rest === null) throw new Error('manager About action row is unavailable')
+    await send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x: rest.rect.x + rest.rect.width / 2, y: rest.rect.y + rest.rect.height / 2, pointerType: 'mouse',
+    })
+    await evaluateByValue(`new Promise(resolve => setTimeout(resolve, 120))`, true)
+    const hover = await aboutState()
+    await evaluateByValue(`(() => { document.querySelector('.cxm-about-action')?.focus(); return true })()`)
+    await send('Input.dispatchKeyEvent', {
+      type: 'rawKeyDown', key: 'Tab', code: 'Tab', modifiers: 8, windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+    })
+    await send('Input.dispatchKeyEvent', {
+      type: 'keyUp', key: 'Tab', code: 'Tab', modifiers: 8, windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+    })
+    await send('Input.dispatchKeyEvent', {
+      type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+    })
+    await send('Input.dispatchKeyEvent', {
+      type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+    })
+    await evaluateByValue(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, true)
+    const focus = await aboutState()
+    const transparent = value => value === 'transparent' || value === 'rgba(0, 0, 0, 0)'
+    const sameRect = (left, right) => left !== null && right !== null
+      && ['x', 'y', 'width', 'height'].every(key => Math.abs(left.rect[key] - right.rect[key]) <= 0.5)
+    const passed = hover?.hovered === true
+      && hover.anchorBackground !== rest.anchorBackground
+      && transparent(rest.titleBackground) && transparent(rest.copyBackground)
+      && transparent(hover.titleBackground) && transparent(hover.copyBackground)
+      && hover.arrowColor !== rest.arrowColor
+      && hover.wholeRowHitTarget === true && hover.rowOwnsTextAndIcon === true && hover.fillsItem === true
+      && hover.horizontalOverflow === false && sameRect(rest, hover)
+      && focus?.focused === true && focus.focusVisible === true
+      && focus.anchorBackground === hover.anchorBackground
+      && focus.titleBackground === hover.titleBackground && focus.copyBackground === hover.copyBackground
+      && hover.separatorColor === rest.separatorColor
+      && JSON.stringify(hover.containerBorder) === JSON.stringify(rest.containerBorder)
+    managerReport = { ...managerReport, aboutInteraction: { rest, hover, focus, passed } }
+    if (!passed) throw new Error('manager About whole-row hover/focus exercise failed')
+  }
   if (parsed.values['manager-form-exercise']) {
     const firstRect = managerReport?.hostForms?.find(form => form.firstControlRect !== null)?.firstControlRect
     if (firstRect === undefined || firstRect === null) throw new Error('manager form exercise found no visible Host form control')

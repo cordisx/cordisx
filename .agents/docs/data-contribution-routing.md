@@ -304,8 +304,9 @@ slot name is rejected with a migration diagnostic rather than mounted.
 
 ## Route, page, and outlet separation
 
-A route is data: qualified id, path pattern, outlet id, page id, optional title
-and host-owned chrome metadata. A page is trusted-local executable UI: a mount
+A route is data: qualified id, path pattern, outlet id, page id, retained
+localized product metadata, and an optional condition. A page is trusted-local
+executable UI: a mount
 callback receiving a CordisX-owned container, immutable route state,
 navigation helpers, `AbortSignal`, and an optional disposer. An outlet is host
 infrastructure: a declared semantic region, resolver, context policy, and
@@ -316,6 +317,21 @@ declared outlet. Ordinary plugins cannot define any outlet that touches Codex
 DOM. The TypeScript outlet vocabulary is open through `OutletMap` module
 augmentation, while runtime declarations and route descriptors are always
 schema-validated. The initial built-ins are:
+
+New first-party and generated registrations use closed route-v2/page-v3
+documents. They include the matching protocol `$schema` URI and
+`schemaVersion`, and both retain localized `title` and `description`
+references. The owning plugin supplies real locale catalogs for every locale
+it claims. Route copy names the user entry and explains when navigation is
+useful; page copy names the destination and explains what the user can do after
+it mounts. These are separate messages even when their short titles happen to
+be similar. Page v3 uses owner-default localization and therefore does not
+carry the legacy `localeNamespace` hint. Paths, outlet ids, page ids, route
+ids, params, and chrome values remain untranslated. Missing metadata or an
+older version tuple is accepted only for explicit third-party legacy
+compatibility coverage; bundled plugins, official examples, generated
+fixtures, and Host-owned plugins must not rely on the manager fallback
+diagnostic.
 
 - `app`: entire renderer application region;
 - `main`: the region to the right of the sidebar;

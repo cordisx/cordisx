@@ -1,7 +1,9 @@
 import type { Context, Disposable } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import {
+  CORDISX_PAGE_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+  CORDISX_ROUTE_SCHEMA_V2,
   type CordisXPluginManifestV1,
   type CordisXEnvironmentRow,
   type CordisXLocalizedText,
@@ -60,14 +62,23 @@ interface Messages {
   'navigation.description': undefined
   'navigation.title': undefined
   'page.app.body': undefined
+  'page.app.description': undefined
   'page.app.title': undefined
   'page.main.body': undefined
+  'page.main.description': undefined
   'page.main.title': undefined
   'page.session.body': { readonly sessionId: string }
+  'page.session.description': undefined
   'page.session.title': undefined
   'page.tab.details': undefined
   'page.tab.overview': undefined
   'permission.models': undefined
+  'route.app.description': undefined
+  'route.app.title': undefined
+  'route.main.description': undefined
+  'route.main.title': undefined
+  'route.session.description': undefined
+  'route.session.title': undefined
 }
 
 function message<Key extends keyof Messages>(
@@ -133,14 +144,23 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'navigation.description': 'Open showcase pages.',
       'navigation.title': 'Structured UI showcase',
       'page.app.body': 'Showcase page for the application area.',
+      'page.app.description': 'Presents the complete structured UI showcase in the application-wide outlet, including its overview and details chrome.',
       'page.app.title': 'App outlet',
       'page.main.body': 'Showcase page for the main area.',
+      'page.main.description': 'Presents the showcase analytics content beside the native sidebar while preserving the surrounding application shell.',
       'page.main.title': 'Main outlet',
       'page.session.body': 'Session content page for native session {sessionId}.',
+      'page.session.description': 'Presents analytics for the currently selected native session below its persistent session header.',
       'page.session.title': 'Session analytics',
       'page.tab.details': 'Details',
       'page.tab.overview': 'Overview',
       'permission.models': 'Show models currently available through the host connection',
+      'route.app.description': 'Open from the sidebar footer or showcase settings action to replace the CordisX application region with the app-outlet overview.',
+      'route.app.title': 'App outlet',
+      'route.main.description': 'Open from the showcase navigation row, workspace toolbar, or session-header action to show analytics in the main outlet.',
+      'route.main.title': 'Main outlet',
+      'route.session.description': 'Open from the showcase navigation shortcut when a native session ID is configured to show analytics in that session content outlet.',
+      'route.session.title': 'Session analytics',
     },
   })
   ctx.i18n.define<Messages>({
@@ -158,23 +178,34 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'navigation.description': '打开演示页面。',
       'navigation.title': '结构化 UI 演示',
       'page.app.body': '应用区域的演示页面。',
+      'page.app.description': '在应用级 outlet 中展示完整的结构化 UI 演示，包括概览与详情页头。',
       'page.app.title': '应用 outlet',
       'page.main.body': '主区域的演示页面。',
+      'page.main.description': '在保留原生侧栏和应用外壳的同时，于主区域展示演示分析内容。',
       'page.main.title': '主区域 outlet',
       'page.session.body': '原生会话 {sessionId} 的正文分析页。',
+      'page.session.description': '在保留当前原生会话页头的前提下，于会话正文区域展示该会话的分析内容。',
       'page.session.title': '会话分析',
       'page.tab.details': '详情',
       'page.tab.overview': '概览',
       'permission.models': '显示当前宿主连接实际可用的模型',
       'command.open-session': '打开已配置原生会话的分析页',
+      'route.app.description': '从侧栏底部或演示设置操作进入，在 app outlet 中打开覆盖 CordisX 应用区域的概览页。',
+      'route.app.title': '应用 outlet',
+      'route.main.description': '从演示导航行、工作区工具栏或会话页头操作进入，在 main outlet 中展示分析内容。',
+      'route.main.title': '主区域 outlet',
+      'route.session.description': '配置原生会话 ID 后，从演示导航快捷操作进入，在当前 session.content outlet 中展示会话分析。',
+      'route.session.title': '会话分析',
     },
   })
 
   ctx.pages.register<Messages>({
+    $schema: CORDISX_PAGE_SCHEMA_V3,
+    schemaVersion: 3,
     id: 'app.overview',
     title: message('page.app.title'),
+    description: message('page.app.description'),
     icon: 'host:layers',
-    localeNamespace: 'showcase',
     headerActions: [{
       id: 'refresh',
       label: message('action.refresh'),
@@ -187,10 +218,12 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     ],
   }, context => mountCard(context, message('page.app.body')))
   ctx.pages.register<Messages>({
+    $schema: CORDISX_PAGE_SCHEMA_V3,
+    schemaVersion: 3,
     id: 'main.analytics',
     title: message('page.main.title'),
+    description: message('page.main.description'),
     icon: 'host:analytics',
-    localeNamespace: 'showcase',
     headerActions: [{
       id: 'refresh',
       label: message('action.refresh'),
@@ -199,19 +232,43 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     }],
   }, context => mountCard(context, message('page.main.body')))
   ctx.pages.register<Messages>({
+    $schema: CORDISX_PAGE_SCHEMA_V3,
+    schemaVersion: 3,
     id: 'session.analytics',
     title: message('page.session.title'),
+    description: message('page.session.description'),
     icon: 'host:analytics',
-    localeNamespace: 'showcase',
   }, context => mountCard(context, message('page.session.body', { sessionId: String(context.params.sessionId) })))
 
-  ctx.routes.register({ id: 'app.overview', path: '/showcase', outlet: 'app', page: 'app.overview' })
-  ctx.routes.register({ id: 'main.analytics', path: '/main/showcase', outlet: 'main', page: 'main.analytics' })
   ctx.routes.register({
+    $schema: CORDISX_ROUTE_SCHEMA_V2,
+    schemaVersion: 2,
+    id: 'app.overview',
+    path: '/showcase',
+    outlet: 'app',
+    page: 'app.overview',
+    title: message('route.app.title'),
+    description: message('route.app.description'),
+  })
+  ctx.routes.register({
+    $schema: CORDISX_ROUTE_SCHEMA_V2,
+    schemaVersion: 2,
+    id: 'main.analytics',
+    path: '/main/showcase',
+    outlet: 'main',
+    page: 'main.analytics',
+    title: message('route.main.title'),
+    description: message('route.main.description'),
+  })
+  ctx.routes.register({
+    $schema: CORDISX_ROUTE_SCHEMA_V2,
+    schemaVersion: 2,
     id: 'session.analytics',
     path: '/sessions/:sessionId/analytics',
     outlet: 'session.content',
     page: 'session.analytics',
+    title: message('route.session.title'),
+    description: message('route.session.description'),
   })
 
   let revision = 1

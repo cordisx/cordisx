@@ -19,8 +19,14 @@ interface RuntimeSnapshot {
   registrations: readonly { owner: string; qualifiedId: string; surface: string; valid: boolean; visible: boolean; authorized: boolean; pending: boolean }[]
   settingsTabs: readonly { id: string; owner: string; title: string; order: number; disabled: boolean; builtin: boolean }[]
   navigation: {
-    routes: readonly { qualifiedId: string; valid: boolean; authorized: boolean }[]
-    pages: readonly { qualifiedId: string; metadata: { chrome?: string } }[]
+    routes: readonly {
+      qualifiedId: string; valid: boolean; authorized: boolean
+      productMetadata: { title?: string; description?: string; diagnostics: readonly unknown[] }
+    }[]
+    pages: readonly {
+      qualifiedId: string; metadata: { chrome?: string }
+      productMetadata: { title?: string; description?: string; diagnostics: readonly unknown[] }
+    }[]
     outlets: readonly { id: string; mounted: boolean; activeRoute?: string }[]
   }
   extensionPoints: {
@@ -89,10 +95,25 @@ describe('settings tab demo bundle', () => {
       }),
     ])
     expect(initial.navigation.routes).toEqual([
-      expect.objectContaining({ qualifiedId: 'settings-tab-demo:settings', valid: true, authorized: true }),
+      expect.objectContaining({
+        qualifiedId: 'settings-tab-demo:settings', valid: true, authorized: true,
+        productMetadata: {
+          title: 'Plugin settings content',
+          description: 'Open from the Demo plugin settings tab and mount its controlled body-only settings page in manager.settings.content.',
+          diagnostics: [],
+        },
+      }),
     ])
     expect(initial.navigation.pages).toEqual([
-      expect.objectContaining({ qualifiedId: 'settings-tab-demo:settings', metadata: expect.objectContaining({ chrome: 'body-only' }) }),
+      expect.objectContaining({
+        qualifiedId: 'settings-tab-demo:settings',
+        metadata: expect.objectContaining({ chrome: 'body-only' }),
+        productMetadata: {
+          title: 'Plugin settings content',
+          description: 'Shows the demo value editor in the CordisX settings area while the Host owns the tab header and panel chrome.',
+          diagnostics: [],
+        },
+      }),
     ])
     expect(initial.extensionPoints.points.find(point => point.id === 'manager.settings.tabs')).toMatchObject({ usingPluginCount: 1, activePluginCount: 1 })
     expect(initial.extensionPoints.points.find(point => point.id === 'manager.settings.content')).toMatchObject({ usingPluginCount: 1, activePluginCount: 1 })
@@ -179,6 +200,16 @@ describe('settings tab demo bundle', () => {
     dom.window.document.documentElement.lang = 'zh-CN'
     await waitFor(() => dom.window.document.querySelector('[data-settings-tab="settings-tab-demo:settings"]')?.textContent === '演示插件')
     expect(runtime.snapshot().settingsTabs.find(tab => tab.id === 'settings-tab-demo:settings')?.title).toBe('演示插件')
+    expect(runtime.snapshot().navigation.routes[0]?.productMetadata).toEqual({
+      title: '插件设置内容',
+      description: '从“演示插件”设置 Tab 进入，并在 manager.settings.content 中挂载受控的 body-only 设置页面。',
+      diagnostics: [],
+    })
+    expect(runtime.snapshot().navigation.pages[0]?.productMetadata).toEqual({
+      title: '插件设置内容',
+      description: '在 CordisX 配置区域展示演示值编辑器，Tab header 与 panel chrome 仍由 Host 所有。',
+      diagnostics: [],
+    })
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="settings-tab-demo:settings"]')!.click()
     await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') !== null)
