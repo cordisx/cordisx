@@ -37,6 +37,30 @@ Breadcrumbs, tabs, groups, records, notices, and footers must not progressively
 restate it. A diagnostic, blocked reason, adapter fact, or security boundary is
 attached to its owning group and is not repeated as a general page notice.
 
+## Configuration task surfaces
+
+The default plugin `配置管理` panel is a user task surface, not an implementation
+inspector. In its normal state it contains only settings the user can act on,
+their product-facing labels and help or validation text, the Host-owned control
+or renderer seat, and necessary save, reset, unavailable, and operation-error
+feedback. It stays flat and compact; it does not wrap fields in summary cards or
+repeat the selected tab as a body heading.
+
+Schema implementation, application mode, revision, last-good state, writer
+availability, generation, and raw field paths are diagnostic facts. They do not
+occupy the normal configuration panel. Stable configuration diagnostics may
+appear inside the existing collapsed `运行状态` diagnostic disclosure; a
+conflict or failed write may expose only the facts needed to resolve that error
+beside the affected operation.
+
+Field labels use developer-supplied product text when available and otherwise
+fall back to a readable projection of the final field-path segment. The raw
+path/key is never shown beside that label in the default form. Fields that are
+neither editable nor a Host-owned sensitive boundary are omitted. Secret and
+credential roles remain visible only as a single Host-owned unavailable state:
+their value and path do not enter a normal control, custom renderer, or repeated
+summary notice.
+
 ## Tabs and panels
 
 Local tabs use `role="tablist"` and `role="tab"` with an accurate
@@ -290,6 +314,15 @@ At minimum they prove:
   `运行状态` diagnostic disclosure;
 - a plugin with no declarations retains an explicit permission empty state;
 - configuration and launcher tabs do not repeat their selected tab label; and
+- configuration panels expose no persistent schema, application-mode,
+  revision, last-good, writer, generation, or raw-path metadata; those facts
+  remain available only in the collapsed runtime diagnostics or an owning
+  conflict/error state;
+- editable configuration fields present one product label, never a second raw
+  key/path, and plugins without an editable structured form show one concise
+  empty state rather than raw JSON or schema implementation prose;
+- Host-owned secret/credential unavailable states remain single, redacted, and
+  unavailable to custom renderers;
 - plugin and marketplace detail bodies do not repeat the breadcrumb record
   name in manager-owned headings.
 - primary navigation exposes separate `扩展点` and `路由` pages; installed

@@ -222,11 +222,35 @@ describe('plugin config runtime', () => {
     for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('input[type="range"]') === null; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 0))
     }
+    const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="配置管理"]')
+    const timeoutField = configPanel?.querySelector<HTMLElement>('[data-config-path="timeout"]')
+    const secretField = configPanel?.querySelector<HTMLElement>('[data-config-path="apiKey"]')
+    expect(configPanel?.textContent).not.toContain('Schemastery')
+    expect(configPanel?.textContent).not.toContain('实时发布（不重载）')
+    expect(configPanel?.textContent).not.toContain('Revision')
+    expect(configPanel?.querySelector('.cxm-detail-grid')).toBeNull()
+    expect(configPanel?.querySelector('.cxm-config-path')).toBeNull()
+    expect(timeoutField?.querySelector('.cxm-config-label')?.textContent).toBe('Request timeout')
+    expect(timeoutField?.querySelector('.cxm-config-help')?.textContent).toBe('Live timeout')
+    expect(secretField?.querySelector('.cxm-config-label')?.textContent).toBe('Api Key')
+    expect(secretField?.querySelectorAll('.cxm-notice')).toHaveLength(1)
+    expect(configPanel?.textContent).not.toContain('Host 保留了')
     const state = (dom.window as unknown as {
       __cordisxConfigFixture: { rendererMount: number; rendererDispose: number; rendererAbort: number }
     }).__cordisxConfigFixture
-    expect(dom.window.document.querySelector('input[type="range"]')).not.toBeNull()
+    const range = dom.window.document.querySelector<HTMLInputElement>('input[type="range"]')
+    const save = configPanel?.querySelector<HTMLButtonElement>('button[type="submit"]')
+    expect(range).not.toBeNull()
+    expect(save?.disabled).toBe(true)
+    range!.value = '45'
+    range!.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    expect(save?.disabled).toBe(false)
     expect(state.rendererMount).toBe(1)
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.click()
+    const diagnostics = dom.window.document.querySelector<HTMLDetailsElement>('[data-runtime-diagnostics="platform"]')
+    expect(diagnostics?.open).toBe(false)
+    expect(diagnostics?.querySelector('[data-config-diagnostics="live-config"]')?.textContent)
+      .toBe('配置：Schemastery · live · revision 0 · last-good 0 · writer available')
     await runtime.setPluginBlocked('live-config', true)
     expect(state.rendererAbort).toBe(1)
     expect(state.rendererDispose).toBe(1)

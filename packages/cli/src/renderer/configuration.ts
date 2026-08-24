@@ -28,6 +28,9 @@ interface SchemaNode {
   readonly value?: unknown
   readonly meta?: {
     readonly role?: string
+    readonly extra?: {
+      readonly label?: string | Readonly<Record<string, string>>
+    }
     readonly description?: string | Readonly<Record<string, string>>
     readonly hidden?: boolean
     readonly disabled?: boolean
@@ -141,17 +144,16 @@ function setAtPath(input: unknown, path: CordisXConfigFieldPath, value: unknown,
   return root
 }
 
-function localizedDescription(value: SchemaNode['meta'], locale: string): string | undefined {
-  const description = value?.description
-  if (typeof description === 'string') return description
-  if (description === undefined) return undefined
+function localizedText(value: string | Readonly<Record<string, string>> | undefined, locale: string): string | undefined {
+  if (typeof value === 'string') return value
+  if (value === undefined) return undefined
   const candidates = [locale, locale.split('-')[0], '', 'en']
   for (const candidate of candidates) {
     if (candidate === undefined) continue
-    const result = description[candidate]
+    const result = value[candidate]
     if (typeof result === 'string' && result.trim() !== '') return result
   }
-  return Object.values(description).find(item => typeof item === 'string' && item.trim() !== '')
+  return Object.values(value).find(item => typeof item === 'string' && item.trim() !== '')
 }
 
 function sensitiveNodes(
@@ -250,13 +252,15 @@ function fields(
   if (path.length === 0) return []
   const role = schema.meta?.role
   const sensitive = role !== undefined && RESERVED_ROLES.has(role)
-  const description = localizedDescription(schema.meta, locale)
+  const label = localizedText(schema.meta?.extra?.label, locale)
+  const description = localizedText(schema.meta?.description, locale)
   const fieldChoices = choices(schema)
   return [{
     namespace,
     path,
     type: schema.type ?? 'unknown',
     ...(role === undefined ? {} : { role }),
+    ...(label === undefined ? {} : { label }),
     ...(description === undefined ? {} : { description }),
     value: sensitive ? undefined : immutable(hasOwnPath(raw, path) ? ownValue(raw, path) : ownValue(resolved, path)),
     disabled: schema.meta?.disabled === true || sensitive,

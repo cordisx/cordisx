@@ -822,6 +822,13 @@ if (parsed.values['config-exercise']) {
       const control = await waitFor(() => field?.querySelector(selector), owner + ' ' + path + ' control')
       const label = field?.querySelector('label')
       const labelOwnsControl = label?.htmlFor !== '' && label?.htmlFor === control.id
+      const panelText = form.closest('[role="tabpanel"]')?.textContent ?? ''
+      const productSurface = {
+        label: label?.textContent ?? null,
+        rawPathVisible: field?.querySelector('.cxm-config-path') !== null,
+        summaryGridVisible: form.closest('[role="tabpanel"]')?.querySelector('.cxm-detail-grid') !== null,
+        internalMetadataVisible: ['Schemastery', 'Revision', '实时发布（不重载）'].some(value => panelText.includes(value)),
+      }
       control.value = String(value)
       control.dispatchEvent(new Event('input', { bubbles: true }))
       form.requestSubmit()
@@ -836,6 +843,7 @@ if (parsed.values['config-exercise']) {
         labelOwnsControl,
         controlType: control.type,
         panelRole: form.closest('[role="tabpanel"]')?.getAttribute('role') ?? null,
+        productSurface,
       }
     }
     const liveState = globalThis.__cordisxConfigFixture
@@ -861,6 +869,9 @@ if (parsed.values['config-exercise']) {
       appRenderer: location.href === 'app://-/index.html',
       structuredForms: live.panelRole === 'tabpanel' && restart.panelRole === 'tabpanel',
       accessibleLabels: live.labelOwnsControl && restart.labelOwnsControl,
+      productTaskSurface: !live.productSurface.rawPathVisible && !restart.productSurface.rawPathVisible
+        && !live.productSurface.summaryGridVisible && !restart.productSurface.summaryGridVisible
+        && !live.productSurface.internalMetadataVisible && !restart.productSurface.internalMetadataVisible,
       customRenderer: live.controlType === 'range',
       liveWithoutReload: after.liveApply === before.liveApply && after.liveDispose === before.liveDispose
         && after.liveValues.at(-1) === 47,
@@ -1923,7 +1934,10 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   const evaluatedManager = await send('Runtime.evaluate', {
     expression: `(async () => {
       const trigger = document.querySelector('[data-cordisx-manager-trigger]')
-      trigger?.click()
+      const modal = document.querySelector('[data-cordisx-manager-modal]')
+      const openedBy = trigger === null ? 'host-smoke-fallback' : 'manager-trigger'
+      if (trigger !== null) trigger.click()
+      else if (modal instanceof HTMLElement) modal.hidden = false
       document.querySelector('[data-tab=${JSON.stringify(managerTab)}]')?.click()
       const pluginId = ${JSON.stringify(managerPlugin)}
       if (pluginId !== undefined) {
@@ -1960,11 +1974,11 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           externalDefaultPrevented = event.defaultPrevented
         }
       }
-      const modal = document.querySelector('[data-cordisx-manager-modal]')
       return rect === undefined ? null : {
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         state: {
           modalHidden: modal?.hidden,
+          openedBy,
           triggerExpanded: trigger?.getAttribute('aria-expanded'),
           externalDefaultPrevented,
           tabGeometry: leadingRect === undefined || tabIconRect === undefined || tabLabelRect === undefined || titleRect === undefined ? null : {

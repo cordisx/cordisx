@@ -2,7 +2,9 @@ import Schema from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
 
 export const Config = Schema.object({
-  label: Schema.string().default('good').description('Restart label'),
+  label: Schema.string().default('good')
+    .extra('extra', { label: { 'zh-CN': '显示名称', en: 'Display name' } })
+    .description('Restart label'),
 })
 
 export const configApplies = 'restart'

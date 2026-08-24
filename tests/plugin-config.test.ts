@@ -113,7 +113,9 @@ describe('plugin config registry', () => {
   it('uses Schemastery defaults and metadata, publishes live commits, and refuses secret paths', () => {
     const registry = new PluginConfigurationRegistry()
     const schema = Schema.object({
-      timeout: Schema.number().default(30).min(1).max(120).description('Timeout'),
+      timeout: Schema.number().default(30).min(1).max(120)
+        .extra('extra', { label: { 'zh-CN': '请求超时', en: 'Request timeout' } })
+        .description('Timeout'),
       apiKey: Schema.string().role('secret'),
       mode: Schema.union([Schema.const('safe'), Schema.const('fast')]).default('safe'),
     })
@@ -127,6 +129,7 @@ describe('plugin config registry', () => {
     })
     const descriptor = registry.descriptor('example', 'en')
     expect(descriptor.schemaKind).toBe('schemastery')
+    expect(descriptor.fields.find(field => field.path.join('.') === 'timeout')?.label).toBe('Request timeout')
     expect(descriptor.value).toEqual({})
     expect(descriptor.fields.find(field => field.path.join('.') === 'timeout')).toMatchObject({ value: 30, min: 1, max: 120 })
     expect(descriptor.fields.find(field => field.path.join('.') === 'apiKey')).toMatchObject({ value: undefined, disabled: true })
