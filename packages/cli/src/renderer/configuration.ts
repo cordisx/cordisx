@@ -319,6 +319,15 @@ export class PluginConfigurationRegistry {
     })
   }
 
+  unregister(owner: string): void {
+    if (this.disposed) return
+    const record = this.records.get(owner)
+    if (record === undefined) return
+    record.watchers.clear()
+    this.records.delete(owner)
+    this.notify()
+  }
+
   get(owner: string): unknown {
     const record = this.require(owner)
     return record.candidate?.value ?? record.value

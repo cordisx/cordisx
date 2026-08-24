@@ -524,7 +524,7 @@ export class PermissionBroker {
 
   authorizationPlan(
     identity: CordisXPluginIdentity,
-    operation: 'install' | 'enable' = 'enable',
+    operation: 'install' | 'update' | 'enable' = 'enable',
   ): CordisXPermissionAuthorizationPlanV1 {
     const registration = this.registrations.get(platformIdentityKey(identity))
     if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
@@ -556,7 +556,7 @@ export class PermissionBroker {
   async authorizeActivation(
     identity: CordisXPluginIdentity,
     authorization: CordisXPermissionAuthorizationDecisionV1,
-    operation: 'install' | 'enable' = 'enable',
+    operation: 'install' | 'update' | 'enable' = 'enable',
   ): Promise<void> {
     const registration = this.registrations.get(platformIdentityKey(identity))
     if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)

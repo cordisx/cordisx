@@ -7,6 +7,9 @@ import {
 } from '../config/plugin-config.js'
 import type { JsonValue } from '../config/home-config.js'
 import type { CordisXConfig } from './config.js'
+import { PluginActivationStore } from './plugin-activation.js'
+import { loadStagedPluginPackage } from './plugin-package.js'
+import { PackagePluginConfigStore } from './package-plugin-config.js'
 
 export const CONFIG_BINDING = '__cordisxConfigRequestV1'
 export const CONFIG_RECEIVER = '__cordisxConfigReceiveV1'
@@ -102,14 +105,35 @@ export function createConfigBridgeHandler(input: {
   readonly generation: string
   readonly configPath: string
   readonly composition: CordisXConfig
+  readonly packagePlugins?: {
+    readonly homeDir: string
+    readonly runtimeGeneration: string
+  }
 }): ConfigBridgeHandler {
-  const identities = new Map(input.composition.plugins.map(plugin => [plugin.id, pathToFileURL(plugin.entry).href]))
+  const identities = new Map(input.composition.plugins
+    .filter(plugin => plugin.package === undefined)
+    .map(plugin => [plugin.id, plugin.source ?? pathToFileURL(plugin.entry).href]))
+  const activationStore = input.packagePlugins === undefined
+    ? undefined
+    : new PluginActivationStore(input.packagePlugins.homeDir, input.profileId, input.packagePlugins.runtimeGeneration)
+  const packageConfig = input.packagePlugins === undefined
+    ? undefined
+    : new PackagePluginConfigStore(input.packagePlugins.homeDir, input.profileId, input.packagePlugins.runtimeGeneration)
   return {
     token: input.token,
     profileId: input.profileId,
     generation: input.generation,
     async handle(request) {
-      if (identities.get(request.identity.pluginId) !== request.identity.source) throw new Error('config request plugin identity is stale or spoofed')
+      const configuredIdentity = identities.get(request.identity.pluginId)
+      let packageOwned = false
+      if (configuredIdentity !== request.identity.source) {
+        const active = await activationStore?.loadActive()
+        const item = active?.plugins.find(plugin => plugin.id === request.identity.pluginId)
+        if (item === undefined) throw new Error('config request plugin identity is stale or spoofed')
+        const staged = await loadStagedPluginPackage(activationStore!.homeDir, item.digest)
+        if (staged.identitySource !== request.identity.source) throw new Error('config request plugin identity is stale or spoofed')
+        packageOwned = true
+      }
       const scope = {
         profileId: request.scope.profileId,
         pluginId: request.identity.pluginId,
@@ -117,6 +141,7 @@ export function createConfigBridgeHandler(input: {
         ownerToken: input.token,
       }
       if (request.operation === 'stage') {
+        if (packageOwned) return await packageConfig!.stage(request.identity.pluginId, request.expectedRevision!, request.config!, input.token)
         return stagePluginConfigCandidate({
           ...scope,
           expectedRevision: request.expectedRevision!,
@@ -124,8 +149,10 @@ export function createConfigBridgeHandler(input: {
         }, input.configPath)
       }
       if (request.operation === 'commit') {
+        if (packageOwned) return await packageConfig!.commit(request.identity.pluginId, request.candidateRevision!, input.token)
         return commitPluginConfigCandidate({ ...scope, candidateRevision: request.candidateRevision! }, input.configPath)
       }
+      if (packageOwned) return await packageConfig!.abort(request.identity.pluginId, request.candidateRevision!, input.token)
       await abortPluginConfigCandidate({ ...scope, candidateRevision: request.candidateRevision! }, input.configPath)
       return undefined
     },

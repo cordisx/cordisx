@@ -85,7 +85,7 @@ export interface CordisXPermissionAuthorizationPlanV1 {
   readonly $schema: typeof CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1
   readonly schemaVersion: 1
   readonly planId: string
-  readonly operation: 'install' | 'enable'
+  readonly operation: 'install' | 'update' | 'enable'
   readonly profileId: string
   readonly identity: CordisXPermissionIdentityV1
   readonly defaultDecision: 'allow'
@@ -102,7 +102,7 @@ export interface CordisXPermissionAuthorizationDecisionV1 {
   readonly $schema: typeof CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1
   readonly schemaVersion: 1
   readonly planId: string
-  readonly operation: 'install' | 'enable'
+  readonly operation: 'install' | 'update' | 'enable'
   readonly profileId: string
   readonly identity: CordisXPermissionIdentityV1
   readonly decisions: readonly CordisXPermissionAuthorizationDecisionItemV1[]
