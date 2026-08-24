@@ -139,7 +139,7 @@ function permission(event: CordisXAgentEvent): TracePermission | undefined {
 }
 
 /** Projects only the public v2 envelope; it does not infer adapter-private state. */
-export function projectAgentEvent(event: CordisXAgentEvent): TraceEvent {
+export function projectAgentEvent(event: CordisXAgentEvent, origin: TraceEvent['origin'] = 'live'): TraceEvent {
   const projectedPhase = phase(event)
   const lane = laneFor(event)
   const plugin = pluginAttribution(event.source)
@@ -149,6 +149,7 @@ export function projectAgentEvent(event: CordisXAgentEvent): TraceEvent {
     sessionId: event.sessionId,
     seq: event.seq,
     recordedAt: new Date(event.time).toISOString(),
+    origin,
     ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
     ...(event.stepId === undefined ? {} : { stepId: event.stepId }),
     ...(event.itemId === undefined ? {} : { itemId: event.itemId }),
@@ -192,6 +193,7 @@ function initialStatus(service: CordisXAgentEvents): TraceAdapterStatus {
     ]),
     supportedOperations: LIVE_OPERATIONS,
     payloadPolicy: 'inline',
+    origins: Object.freeze(['live'] as const),
   })
 }
 
@@ -355,7 +357,7 @@ export class LiveTraceShowcaseStore implements TraceShowcaseStore {
     }
     const additions = result.value.events
       .filter(event => event.seq > afterSeq)
-      .map(projectAgentEvent)
+      .map(event => projectAgentEvent(event))
     this.events.push(...additions)
     if (result.value.nextAfterSeq !== undefined || this.events.length >= RENDERED_LIMIT) {
       this.boundaryReached = true

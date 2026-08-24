@@ -1,12 +1,14 @@
 # Agent Trace Showcase plugin
 
 Status: independent development and validation plugin based on merged CordisX
-host `e0929a0ca7bc0e0b5f32c1c4f1b0f487928f0dc4` and Agent protocol
-`08dcdc11aae38ea9c0e91e4ad17cf31b8c756747`. The fixture Timeline,
+host `118fc26269fa04d368fa6bfb4129014b5b011d37`, Agent protocol
+`08dcdc11aae38ea9c0e91e4ad17cf31b8c756747`, and history protocol
+`e4c1fea227cb53e3a0833a0c84c5f9f487f107c5`. The fixture Timeline,
 structured session-header entry, session outlet, public live ledger projection,
 owner/generation-fenced delivery controls, and contribution disposables are
-integrated. Current Codex connection availability remains an honest runtime
-fact rather than a claimed live-forwarding success.
+integrated. The Host owns a brokered read-only Codex JSONL importer. Current
+Codex connection availability remains an honest runtime fact rather than a
+claimed live-forwarding success.
 
 ## Product goal
 
@@ -53,11 +55,55 @@ the provider-session architecture merged through `cordisx#39` at
 `4e1f06a605550c3786a7378be8d7bec6aed97a00`; that document remains context,
 not a runtime or ledger dependency.
 
-The page reads one local **consumer store port**. A deterministic typed fake
-and the public `ctx.agentEvents` query/subscription adapter implement that
+The page reads one local **consumer store port**. A deterministic typed fake,
+the public `ctx.agentEvents` query/subscription adapter, and the public
+`ctx.agentHistory` query/tail adapter implement that
 port; it is not added to the Cordis context or exported as a parallel CordisX
 API. The live provider projects only public envelopes and never imports the
 host ledger, broker, adapter, or private connection implementation.
+
+## Historical Codex session projection
+
+Historical mode consumes `cordisx.agent-history/v1` through the exact
+`agent.history.read` capability. JSONL discovery, selected profile resolution,
+realpath containment, parsing, sparse indexing, pagination, tailing, rotation,
+truncation detection, stable fingerprinting, and redaction all remain in the
+Node/Host service. The renderer sends only `sessionId`, opaque cursor, page
+limit, and payload policy; it receives no HOME/CODEX_HOME path or arbitrary
+file handle.
+
+Imported records use the same `TraceShowcaseStore` and Timeline as fixture and
+live records. Each projected event carries one explicit origin:
+`live/observed`, `historical/imported`, or `fixture`. Native event/item/message/
+tool ids are the first dedupe keys. When those are absent, the Host event id is
+a stable opaque fingerprint of profile, source identity, byte offset, and
+schema version. The consumer merges by factual identity, prefers a public live
+observation over an overlapping imported projection, and orders by recorded
+time, origin priority, sequence, and event id. Re-query, restart, tail, and
+active-to-archive rotation therefore do not duplicate a row.
+
+Historical projection is deliberately narrower than the live Agent ledger. It
+may emit only source-supported session/turn/step/item/message/content/tool/
+timing/compaction facts. It cannot emit `message.delivery` or
+`input.contribution`, permission decisions, forwarding success, or
+model-consumption proof. Unsupported JSONL fields stay absent. Corrupt lines,
+oversized lines, partial tails, truncation, source replacement, indexing time
+limits, and privacy clamping appear only as structured coverage diagnostics.
+
+Pages are capped at 500 records and the view retains at most one 500-row
+historical window plus deduplicated current live records. “Load earlier” moves
+the historical window using the opaque Host cursor. Incremental tail requests
+advance from an opaque snapshot and never rescan already imported rows. A
+session or profile switch creates a new provider and disposes the old cursor,
+timer, and subscriptions; block, unload, and generation replacement make the
+Host caller stale and fail closed.
+
+The Host defaults history payloads to `summarized`. `referenced` shows only
+bounded metadata; `inline` is still bounded and redacted. Secret-like values,
+raw local paths, tool arguments/results, diffs, instructions, encrypted data,
+replacement histories, and unrequested bodies never enter the renderer or
+diagnostics. Provider and profile identity remain Host-owned opaque references,
+separate from the provider-neutral Agent `sessionId`.
 
 The Agent baseline pinned by the fixture/provider is merged
 `cordisx-protocol@08dcdc11aae38ea9c0e91e4ad17cf31b8c756747` from PR #13:
@@ -86,21 +132,22 @@ generation-fenced `surface.route.navigate`. The package now supplies an exact
 `session.header.actions` contribution containing localized label/aria label,
 `host:history`, and the plugin command reference. It registers that data only
 through the public `ctx.slots.register` service provided by merged host
-`cordisx@e0929a0ca7bc0e0b5f32c1c4f1b0f487928f0dc4`; the host owns the unique
+`cordisx@118fc26269fa04d368fa6bfb4129014b5b011d37`; the host owns the unique
 native seat, icon-only button, tooltip, focus, and no-drag behavior. The
 command accepts the immutable host-generated invocation
 context from this service and ignores plugin arguments that resemble identity;
 the plugin never creates or overrides that context. The Agent capability
 identifiers are fixed as
-`agent.events.read`, `agent.messages.append`, `agent.steps.reject`,
+`agent.events.read`, `agent.history.read`, `agent.messages.append`, `agent.steps.reject`,
 `agent.messages.transform`, `agent.prompt.section`, and
 `agent.prompt.context`.
 
-Merged Agent delivery host `e0929a0ca7bc0e0b5f32c1c4f1b0f487928f0dc4`
+Merged Agent delivery/history host `118fc26269fa04d368fa6bfb4129014b5b011d37`
 exports v2 event envelopes, query/subscription, immutable delivery snapshots,
 fenced handles, `clearPending`, pre-step decisions, and prompt disposables
-through `cordisx/contracts`. Live mode declares optional
-`agent.events.read`, `agent.messages.append`, `agent.prompt.section`, and
+through `cordisx/contracts`; it also exports the read-only history page/tail
+service. Live/historical mode declares optional
+`agent.events.read`, `agent.history.read`, `agent.messages.append`, `agent.prompt.section`, and
 `agent.prompt.context`; it deliberately does not request step rejection or
 message transformation. The adapter can honestly remain `unavailable` while
 the CordisX-owned ledger and control plane are available, so the page reports
@@ -280,11 +327,12 @@ fresh page projection from the ledger.
 1. Page-v2 body-only chrome and surface-v3 route toggles are merged in protocol
    `8036d7228fdc6ebdba41734c5cc7aa6fc850fc58`; Agent v2 remains its
    orthogonal predecessor `08dcdc11aae38ea9c0e91e4ad17cf31b8c756747`.
-2. Merged host `e0929a0ca7bc0e0b5f32c1c4f1b0f487928f0dc4` supplies both the
-   structured UI host and the v2 Agent delivery/contribution lifecycle. The
+2. Merged host `118fc26269fa04d368fa6bfb4129014b5b011d37` supplies the
+   structured UI host, v2 Agent delivery/contribution lifecycle, and brokered
+   history service. The
    provider-neutral Agent projection consumes no Platform session identity or
    private provider API.
-3. This `cordisx` consumer PR lands the independent package, fixture/live
+3. This `cordisx` consumer PR lands the independent package, fixture/live/history
    providers, component/integration coverage, structured entry, and
    current-build renderer evidence after complete gates and normal CI.
 4. Merge the owning `cordisx` PR after required review and CI. CordisXMono may
@@ -305,7 +353,15 @@ Package and component coverage:
 - four lanes, turn/step grouping, time/sequence order, every filter, selection,
   detail projection, pagination, and row ceiling;
 - `observed`/`cordisx`/`inferred` distinction and honest
-  unavailable/partial/fixture states;
+  unavailable/partial/fixture states plus explicit live/historical/fixture
+  origin;
+- real Codex JSONL message/tool/timing/compaction projection, summarized and
+  referenced payload policies, corrupt/partial/oversized lines, 500-row page
+  bound, opaque earlier cursor, incremental tail, truncation/rotation, stable
+  restart identity, and history/live dedupe;
+- exact session/profile isolation, permission ask/allow/deny, raw-path/secret
+  absence, block/restore, generation disposal, and current-connection
+  unavailable with historical/partial coverage;
 - six explicit demo triggers, no activation-time writes, source/version/
   generation attribution, allow/ask/deny, queue ordering, cancellation, and
   clear;

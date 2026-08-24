@@ -42,11 +42,12 @@ describe('Agent Trace session header contribution', () => {
     expect('command' in TRACE_SESSION_HEADER_ACTION.item).toBe(false)
   })
 
-  it('declares only the four optional public capabilities used by live demos', () => {
+  it('declares only the five optional public capabilities used by live and historical modes', () => {
     expect(manifest.capabilities.map(capability => ({
       name: capability.name, required: capability.required, scope: capability.scope,
     }))).toEqual([
       { name: 'agent.events.read', required: false, scope: {} },
+      { name: 'agent.history.read', required: false, scope: {} },
       { name: 'agent.messages.append', required: false, scope: {} },
       { name: 'agent.prompt.section', required: false, scope: {} },
       { name: 'agent.prompt.context', required: false, scope: {} },

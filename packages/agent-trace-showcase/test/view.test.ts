@@ -56,6 +56,7 @@ describe('Agent Trace Timeline page', () => {
     expect(document.querySelector('.cxt-detail-title')?.textContent).toContain('Steer requested')
     expect(document.querySelector('.cxt-detail-scroll')?.textContent).toContain('agent-trace-showcase@0.1.0')
     expect(document.querySelector('.cxt-detail-scroll')?.textContent).toContain('not-applicable')
+    expect(document.querySelector('.cxt-detail-scroll')?.textContent).toContain('Originfixture')
     document.querySelector<HTMLTableRowElement>('[data-event-id="fixture-session-a-17"]')!.click()
     expect(document.querySelector('.cxt-detail-scroll')?.textContent).toContain('unproved')
 

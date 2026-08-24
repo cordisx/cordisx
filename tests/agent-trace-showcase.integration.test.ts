@@ -553,14 +553,44 @@ describe('Agent Trace Showcase renderer integration', () => {
     await runtime.dispose()
   })
 
+  it('applies ask, deny, and allow to exact-session history reads without a fallback importer', async () => {
+    const { dom, runtime } = await fixture('session-history-permission', { mode: 'live' })
+    expect(runtime.snapshot().permissions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capability: 'agent.history.read', policy: 'ask' }),
+    ]))
+    await runtime.setPermissionPolicy('agent-trace-showcase', 'agent.events.read', 'allow')
+    await runtime.setPermissionPolicy('agent-trace-showcase', 'agent.history.read', 'deny')
+    const entry = dom.window.document.querySelector<HTMLButtonElement>(
+      '[data-cordisx-surface-host="session.header.actions"] button',
+    )!
+    entry.click()
+    await settle(20)
+    let page = dom.window.document.querySelector<HTMLElement>('[data-agent-trace-showcase="true"]')!
+    expect(page.querySelector<HTMLElement>('.cxt-integrity')?.title).toContain('permission-denied')
+    expect(runtime.snapshot().permissions.find(item => item.capability === 'agent.history.read')).toMatchObject({
+      policy: 'deny', lastRequested: { agentSessionId: 'session-history-permission' },
+    })
+
+    entry.click()
+    await settle(4)
+    await runtime.setPermissionPolicy('agent-trace-showcase', 'agent.history.read', 'allow')
+    entry.click()
+    await settle(20)
+    page = dom.window.document.querySelector<HTMLElement>('[data-agent-trace-showcase="true"]')!
+    expect(page.querySelector<HTMLElement>('.cxt-integrity')?.title).toContain('adapter-unavailable: Agent history is unavailable')
+    expect(page.querySelector('.cxt-integrity')?.textContent).toContain('live')
+    expect(dom.window.document.querySelector('[data-cordisx-history-path]')).toBeNull()
+    await runtime.dispose()
+  })
+
   it('binds public v2 ledger and controls to each host-issued session without crossing A/B data', async () => {
     const { dom, runtime } = await fixture('session-a', { mode: 'live' })
     expect(runtime.snapshot().permissions).toEqual(expect.arrayContaining([
-      ...['agent.events.read', 'agent.messages.append', 'agent.prompt.section', 'agent.prompt.context'].map(capability => expect.objectContaining({
+      ...['agent.events.read', 'agent.history.read', 'agent.messages.append', 'agent.prompt.section', 'agent.prompt.context'].map(capability => expect.objectContaining({
         identity: expect.objectContaining({ id: 'agent-trace-showcase' }), capability, policy: 'ask',
       })),
     ]))
-    for (const capability of ['agent.events.read', 'agent.messages.append', 'agent.prompt.section', 'agent.prompt.context']) {
+    for (const capability of ['agent.events.read', 'agent.history.read', 'agent.messages.append', 'agent.prompt.section', 'agent.prompt.context']) {
       await runtime.setPermissionPolicy('agent-trace-showcase', capability, 'allow')
     }
 

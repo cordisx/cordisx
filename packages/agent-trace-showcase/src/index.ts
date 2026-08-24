@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+  type CordisXAgentHistory,
   type CordisXAgentEvents,
   type CordisXAgents,
   type CordisXPageMountContext,
@@ -17,11 +18,12 @@ import {
   UnavailableTraceShowcaseStore,
 } from './providers.js'
 import { LiveTraceShowcaseStore } from './live-provider.js'
+import { HistoricalTraceShowcaseStore } from './history-provider.js'
 import type { TraceShowcaseStore } from './types.js'
 import { mountTraceShowcase } from './view.js'
 
 export const name = 'agent-trace-showcase'
-export const inject = ['i18n', 'pages', 'routes', 'slots', 'agentEvents', 'agents', 'systemPrompt']
+export const inject = ['i18n', 'pages', 'routes', 'slots', 'agentEvents', 'agentHistory', 'agents', 'systemPrompt']
 
 /** Live authority is optional, user-triggered, brokered, and generation-fenced. */
 export const manifest = {
@@ -33,6 +35,11 @@ export const manifest = {
     {
       name: 'agent.events.read', required: false,
       reason: { namespace: 'agent-trace-showcase', key: 'permission.agent-events-read', fallback: 'Read the public Agent event ledger for the active session Timeline.' },
+      scope: {},
+    },
+    {
+      name: 'agent.history.read', required: false,
+      reason: { namespace: 'agent-trace-showcase', key: 'permission.agent-history-read', fallback: 'Read the Host-redacted historical projection for the active Agent session.' },
       scope: {},
     },
     {
@@ -80,6 +87,7 @@ export function createTraceShowcaseStore(
   agents?: CordisXAgents,
   systemPrompt?: CordisXSystemPrompt,
   routeSessionId?: string,
+  agentHistory?: CordisXAgentHistory,
 ): TraceShowcaseStore {
   const sessionId = routeSessionId ?? config.sessionId
   if (config.mode === 'fixture' && config.sessionId !== undefined && sessionId === config.sessionId) {
@@ -89,7 +97,8 @@ export function createTraceShowcaseStore(
     })
   }
   if (config.mode === 'live' && sessionId !== undefined && agentEvents !== undefined && agents !== undefined && systemPrompt !== undefined) {
-    return new LiveTraceShowcaseStore(agentEvents, agents, systemPrompt, sessionId)
+    const live = new LiveTraceShowcaseStore(agentEvents, agents, systemPrompt, sessionId)
+    return agentHistory === undefined ? live : new HistoricalTraceShowcaseStore(agentHistory, live, sessionId)
   }
   return new UnavailableTraceShowcaseStore(sessionId)
 }
@@ -100,6 +109,7 @@ function mountSessionTimeline(
   agentEvents: CordisXAgentEvents,
   agents: CordisXAgents,
   systemPrompt: CordisXSystemPrompt,
+  agentHistory: CordisXAgentHistory,
 ): () => void {
   const routeSessionId = context.params.sessionId
   if (typeof routeSessionId !== 'string' || routeSessionId.length === 0) {
@@ -110,7 +120,7 @@ function mountSessionTimeline(
       `Agent Trace provider session ${config.sessionId ?? '<unavailable>'} does not match route session ${routeSessionId}`,
     )
   }
-  const store = createTraceShowcaseStore(config, agentEvents, agents, systemPrompt, routeSessionId)
+  const store = createTraceShowcaseStore(config, agentEvents, agents, systemPrompt, routeSessionId, agentHistory)
   const unmount = mountTraceShowcase(context, store)
   return () => {
     unmount()
@@ -133,6 +143,7 @@ export function installAgentTraceShowcase(
       'action.open': 'Open Agent Trace Timeline',
       'page.title': 'Agent Trace',
       'permission.agent-events-read': 'Read the public Agent event ledger for the active session Timeline.',
+      'permission.agent-history-read': 'Read the Host-redacted historical projection for the active Agent session.',
       'permission.messages-append': 'Run explicit followup, steer, inject, and append-only pre-step demonstrations.',
       'permission.prompt-section': 'Register an explicit source-attributed system prompt section demonstration.',
       'permission.prompt-context': 'Register an explicit source-attributed system prompt context demonstration.',
@@ -145,6 +156,7 @@ export function installAgentTraceShowcase(
       'action.open': '打开 Agent Trace 时间线',
       'page.title': 'Agent Trace',
       'permission.agent-events-read': '读取当前会话的公开 Agent 事件账本以呈现时间线。',
+      'permission.agent-history-read': '读取 Host 脱敏后的当前 Agent 会话历史投影。',
       'permission.messages-append': '运行明确触发的 followup、steer、inject 与只追加 pre-step 演示。',
       'permission.prompt-section': '注册带明确插件来源的 system prompt section 演示。',
       'permission.prompt-context': '注册带明确插件来源的 system prompt context 演示。',
@@ -160,7 +172,7 @@ export function installAgentTraceShowcase(
     icon: 'host:history',
     chrome: 'body-only',
     localeNamespace: 'agent-trace-showcase',
-  }, context => mountSessionTimeline(context, config, ctx.agentEvents, ctx.agents, ctx.systemPrompt))
+  }, context => mountSessionTimeline(context, config, ctx.agentEvents, ctx.agents, ctx.systemPrompt, ctx.agentHistory))
   ctx.routes.register({
     id: 'session.timeline',
     path: '/sessions/:sessionId/agent-trace',

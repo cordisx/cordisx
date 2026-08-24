@@ -12,6 +12,7 @@ import type {
   TraceDemoKind,
   TraceEvent,
   TraceLane,
+  TraceOrigin,
   TracePhase,
   TraceShowcaseStore,
   TraceSnapshot,
@@ -20,6 +21,7 @@ import type {
 
 const LANES: readonly TraceLane[] = ['input', 'model', 'tools', 'injection']
 const TRUTHS: readonly TraceTruth[] = ['observed', 'cordisx', 'inferred']
+const ORIGINS: readonly TraceOrigin[] = ['live', 'historical', 'fixture']
 const PHASES: readonly TracePhase[] = [
   'requested', 'permission', 'queued', 'claimed', 'registered', 'evaluated',
   'projected', 'forwarded', 'released', 'failed', 'expired', 'cancelled',
@@ -135,6 +137,7 @@ export function mountTraceShowcase(
     search: string
     lane: TraceFilters['lane']
     truth: TraceFilters['truth']
+    origin: TraceFilters['origin']
     source: TraceFilters['source']
     type: TraceFilters['type']
     phase: TraceFilters['phase']
@@ -165,6 +168,7 @@ export function mountTraceShowcase(
       create(document, 'strong', undefined, snapshot.status.completeness),
       document.createTextNode(` · loaded ${loaded} · ${snapshot.status.payloadPolicy} payloads · `),
       document.createTextNode(snapshot.status.contractVersion === undefined ? 'core contract pending' : `contract ${snapshot.status.contractVersion}`),
+      document.createTextNode(snapshot.status.origins.length === 0 ? ' · no source available' : ` · ${snapshot.status.origins.join('+')}`),
     )
     integrity.append(badge, fact)
     integrity.title = snapshot.status.diagnostics.join('\n')
@@ -246,7 +250,7 @@ export function mountTraceShowcase(
             const phase = create(document, 'td', 'cxt-phase', event.phase ?? '—')
             if (event.phase !== undefined) phase.dataset.phase = event.phase
             const summary = create(document, 'td', 'cxt-summary')
-            summary.append(document.createTextNode(event.summary), create(document, 'span', 'cxt-truth', event.truth))
+            summary.append(document.createTextNode(event.summary), create(document, 'span', 'cxt-truth', `${event.origin}/${event.truth}`))
             const select = (): void => { selectedId = event.id; renderData() }
             row.addEventListener('click', select, { once: true })
             row.addEventListener('keydown', keyEvent => {
@@ -272,7 +276,9 @@ export function mountTraceShowcase(
       const list = create(document, 'dl')
       addDetail(document, list, 'Event id', selected.id)
       addDetail(document, list, 'Sequence', selected.seq)
+      addDetail(document, list, 'Source sequence', selected.sourceSeq)
       addDetail(document, list, 'Recorded', formatClock(selected.recordedAt))
+      addDetail(document, list, 'Origin', selected.origin)
       addDetail(document, list, 'Lane', selected.lane)
       addDetail(document, list, 'Event type', selected.type)
       addDetail(document, list, 'Semantic', selected.semanticType)
@@ -375,6 +381,10 @@ export function mountTraceShowcase(
   syncOptions(truthFilter, TRUTHS, 'All truth')
   truthFilter.setAttribute('aria-label', 'Filter by truth source')
   truthFilter.addEventListener('change', () => { filters.truth = truthFilter.value as TraceFilters['truth']; renderData() })
+  const originFilter = create(document, 'select', 'cxt-filter')
+  syncOptions(originFilter, ORIGINS, 'All origins')
+  originFilter.setAttribute('aria-label', 'Filter by acquisition origin')
+  originFilter.addEventListener('change', () => { filters.origin = originFilter.value as TraceFilters['origin']; renderData() })
   const sourceFilter = create(document, 'select', 'cxt-filter')
   sourceFilter.setAttribute('aria-label', 'Filter by source')
   sourceFilter.addEventListener('change', () => { filters.source = sourceFilter.value as TraceFilters['source']; renderData() })
@@ -385,7 +395,7 @@ export function mountTraceShowcase(
   syncOptions(phaseFilter, PHASES, 'All phases')
   phaseFilter.setAttribute('aria-label', 'Filter by lifecycle phase')
   phaseFilter.addEventListener('change', () => { filters.phase = phaseFilter.value as TraceFilters['phase']; renderData() })
-  toolbar.append(laneFilter, truthFilter, sourceFilter, typeFilter, phaseFilter, create(document, 'span', 'cxt-count'))
+  toolbar.append(laneFilter, truthFilter, originFilter, sourceFilter, typeFilter, phaseFilter, create(document, 'span', 'cxt-count'))
 
   cleanup.push(store.subscribe(() => {
     snapshot = store.getSnapshot()
