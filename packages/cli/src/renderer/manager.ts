@@ -122,18 +122,51 @@ type PluginDetailTab = 'readme' | 'config' | 'permissions' | 'runtime' | 'extens
 type ExtensionPointDetailTab = 'usage' | 'information' | 'diagnostics'
 type MarketplaceDetailTab = 'overview' | 'authors-source'
 type LocalTabIcon = ManagerIconToken
-type SecondaryView =
-  | { readonly kind: 'plugin'; readonly id: string }
-  | { readonly kind: 'marketplace'; readonly identity: string }
-  | { readonly kind: 'extension-point'; readonly id: string }
+type ManagerRouteState =
+  | { readonly kind: 'primary'; readonly primary: ManagerTab }
+  | { readonly kind: 'plugin'; readonly pluginId: string; readonly facet: PluginDetailTab }
+  | { readonly kind: 'permission'; readonly pluginId: string; readonly capability: CordisXPlatformCapability }
+  | { readonly kind: 'marketplace'; readonly identity: string; readonly facet: MarketplaceDetailTab }
+  | { readonly kind: 'extension-point'; readonly pointId: string; readonly facet: ExtensionPointDetailTab }
   | { readonly kind: 'route'; readonly qualifiedId: string }
-type PermissionDetailView = {
-  readonly pluginId: string
-  readonly capability: CordisXPlatformCapability
+  | { readonly kind: 'settings'; readonly tabId: string }
+
+interface ManagerBreadcrumbSegment {
+  readonly id: string
+  readonly label: string
+  readonly target?: ManagerRouteState
+}
+
+interface ManagerPageRoute {
+  readonly id: string
+  readonly primary: ManagerTab
+  readonly segments: readonly ManagerBreadcrumbSegment[]
+}
+
+interface BreadcrumbProjection {
+  readonly visible: readonly number[]
+  readonly overflow: readonly number[]
 }
 
 const MANAGER_STYLE_ID = 'cordisx-manager-style'
 const MANAGER_SETTINGS_FALLBACK = 'host:marketplace'
+const PLUGIN_DETAIL_TABS: readonly { readonly id: PluginDetailTab; readonly label: string; readonly icon: LocalTabIcon }[] = [
+  { id: 'readme', label: 'README', icon: 'document' },
+  { id: 'config', label: '配置管理', icon: 'configuration' },
+  { id: 'permissions', label: '权限', icon: 'permissions' },
+  { id: 'runtime', label: '运行状态', icon: 'runtime' },
+  { id: 'extension-points', label: '扩展点位', icon: 'outlets' },
+  { id: 'routes', label: '路由', icon: 'routes' },
+]
+const EXTENSION_POINT_DETAIL_TABS: readonly { readonly id: ExtensionPointDetailTab; readonly label: string; readonly icon: LocalTabIcon }[] = [
+  { id: 'usage', label: '使用情况', icon: 'plugins' },
+  { id: 'information', label: '点位信息', icon: 'point-info' },
+  { id: 'diagnostics', label: '诊断', icon: 'diagnostics' },
+]
+const MARKETPLACE_DETAIL_TABS: readonly { readonly id: MarketplaceDetailTab; readonly label: string; readonly icon: LocalTabIcon }[] = [
+  { id: 'overview', label: '概览', icon: 'overview' },
+  { id: 'authors-source', label: '作者与来源', icon: 'authors-source' },
+]
 export const CORDISX_BUILTIN_MANAGER_SETTINGS_TABS: readonly ManagerSettingsTabSnapshot[] = Object.freeze([
   Object.freeze({ id: 'host:marketplace', owner: 'host', title: '插件商店', icon: 'host:open', order: 100, disabled: false, builtin: true }),
   Object.freeze({ id: 'host:runtime', owner: 'host', title: '运行状态', icon: 'host:analytics', order: 200, disabled: false, builtin: true }),
@@ -337,14 +370,16 @@ const MANAGER_STYLES = `
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 16px;
     min-height: 72px;
     flex: 0 0 auto;
     padding: 0 22px;
     border-bottom: 1px solid rgba(255, 255, 255, .08);
   }
-  .cxm-heading { display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: start; column-gap: 9px; min-width: 0; }
+  .cxm-heading { display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: start; column-gap: 9px; min-width: 0; flex: 1 1 auto; }
   .cxm-heading-row { display: contents; }
-  .cxm-heading h2 { display: flex; grid-column: 2; align-items: center; min-width: 0; min-height: 26px; margin: 0; overflow: hidden; color: #fff; font-size: 16px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+  .cxm-heading-title { display: flex; grid-column: 2; align-items: center; min-width: 0; min-height: 26px; color: #fff; font-size: 16px; font-weight: 700; line-height: 1.2; }
+  .cxm-heading-current-heading { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .cxm-heading p { grid-column: 1 / -1; margin: 3px 0 0; color: #7f899a; font-size: 11px; }
   .cxm-heading-leading {
     display: grid;
@@ -368,8 +403,56 @@ const MANAGER_STYLES = `
   .cxm-back-icon svg { transform: translateY(-.5px); }
   .cxm-back:hover { background: rgba(199, 204, 212, .14); color: #eef0f3; }
   .cxm-back:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
-  .cxm-breadcrumb-root { color: #a9b1c0; font-weight: 500; }
-  .cxm-breadcrumb-separator { padding: 0 5px; color: #656e7e; }
+  .cxm-breadcrumbs { min-width: 0; width: 100%; }
+  .cxm-breadcrumb-list { display: flex; min-width: 0; margin: 0; padding: 0; align-items: center; list-style: none; white-space: nowrap; }
+  .cxm-breadcrumb-item { display: inline-flex; min-width: 0; flex: 0 0 auto; align-items: center; }
+  .cxm-breadcrumb-separator { padding: 0 6px; color: #656e7e; font-weight: 400; }
+  .cxm-breadcrumb-action {
+    min-width: 0;
+    padding: 2px 3px;
+    overflow: hidden;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: #a9b1c0;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cxm-breadcrumb-action:hover { background: rgba(199, 204, 212, .1); color: #eef0f3; }
+  .cxm-breadcrumb-action:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 1px; }
+  .cxm-breadcrumb-current { min-width: 0; overflow: hidden; color: #fff; text-overflow: ellipsis; white-space: nowrap; }
+  .cxm-breadcrumb-overflow { position: relative; }
+  .cxm-breadcrumb-overflow > summary {
+    display: grid;
+    width: 28px;
+    height: 24px;
+    place-items: center;
+    border-radius: 5px;
+    color: #a9b1c0;
+    cursor: pointer;
+    list-style: none;
+  }
+  .cxm-breadcrumb-overflow > summary::-webkit-details-marker { display: none; }
+  .cxm-breadcrumb-overflow > summary:hover { background: rgba(199, 204, 212, .1); color: #eef0f3; }
+  .cxm-breadcrumb-overflow > summary:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 1px; }
+  .cxm-breadcrumb-menu {
+    position: absolute;
+    z-index: 2;
+    top: calc(100% + 6px);
+    left: 0;
+    display: grid;
+    min-width: 180px;
+    max-width: min(360px, calc(100vw - 80px));
+    padding: 6px;
+    border: 1px solid rgba(255, 255, 255, .12);
+    border-radius: 9px;
+    background: #1a1e28;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .42);
+  }
+  .cxm-breadcrumb-menu .cxm-breadcrumb-action { width: 100%; padding: 7px 9px; text-align: left; }
   .cxm-close {
     display: grid;
     place-items: center;
@@ -1003,6 +1086,33 @@ function safeStorage(view: Window | null): MarketplaceStorage | undefined {
   }
 }
 
+/** Keep breadcrumb identity explicit when constrained instead of clipping ancestors. */
+export function projectManagerBreadcrumbs(
+  itemWidths: readonly number[],
+  availableWidth: number,
+  overflowWidth = 42,
+): BreadcrumbProjection {
+  const all = itemWidths.map((_, index) => index)
+  if (itemWidths.length <= 2 || availableWidth <= 0) return { visible: all, overflow: [] }
+  const total = itemWidths.reduce((sum, width) => sum + Math.max(0, width), 0)
+  if (total <= availableWidth) return { visible: all, overflow: [] }
+
+  const visible = new Set<number>([0, itemWidths.length - 1])
+  let used = Math.max(0, itemWidths[0] ?? 0)
+    + Math.max(0, itemWidths.at(-1) ?? 0)
+    + Math.max(0, overflowWidth)
+  for (let index = itemWidths.length - 2; index >= 1; index -= 1) {
+    const width = Math.max(0, itemWidths[index] ?? 0)
+    if (used + width > availableWidth) break
+    visible.add(index)
+    used += width
+  }
+  return {
+    visible: all.filter(index => visible.has(index)),
+    overflow: all.filter(index => index > 0 && index < itemWidths.length - 1 && !visible.has(index)),
+  }
+}
+
 interface MarketplaceBridgePayload {
   readonly requestId: string
   readonly ok: boolean
@@ -1138,7 +1248,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     { id: 'settings', icon: 'settings', label: '配置' },
     { id: 'about', label: '关于 CordisX', brand: true },
   ]
-  let activeTab: ManagerTab = 'plugins'
+  let routeState: ManagerRouteState = { kind: 'primary', primary: 'plugins' }
+  const navigationHistory: ManagerRouteState[] = []
   const navButtons = new Map<ManagerTab, HTMLButtonElement>()
   for (const tab of tabs) {
     const button = create(document, 'button', 'cxm-nav-button')
@@ -1180,12 +1291,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let marketplaceQuery = ''
   let extensionPointQuery = ''
   let routeQuery = ''
-  let secondaryView: SecondaryView | undefined
-  let permissionDetail: PermissionDetailView | undefined
-  let pluginDetailTab: PluginDetailTab = 'readme'
-  let extensionPointDetailTab: ExtensionPointDetailTab = 'usage'
-  let marketplaceDetailTab: MarketplaceDetailTab = 'overview'
-  let settingsTab = MANAGER_SETTINGS_FALLBACK
   let settingsRoot: HTMLDivElement | undefined
   let settingsPanel: HTMLDivElement | undefined
   let settingsPanelBody: HTMLDivElement | undefined
@@ -1200,6 +1305,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let sourceOperationError: string | undefined
   let sourcesBusy = false
   const configRendererMounts = new Set<ConfigRendererMountHandle>()
+  let breadcrumbCleanup = (): void => {}
 
   const disposeConfigRenderers = (): void => {
     for (const mount of configRendererMounts) void mount.dispose()
@@ -1223,7 +1329,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const hideForExternalNavigation = (): void => {
     settingsMount?.abort()
-    void resetSettings().catch(() => {})
+    if (settingsMount !== undefined || settingsMountId !== undefined) void resetSettings().catch(() => {})
     modal.hidden = true
     trigger.setAttribute('aria-expanded', 'false')
   }
@@ -1236,27 +1342,269 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     return link
   }
 
+  const activePrimary = (route: ManagerRouteState = routeState): ManagerTab => {
+    if (route.kind === 'primary') return route.primary
+    if (route.kind === 'plugin' || route.kind === 'permission') return 'plugins'
+    if (route.kind === 'extension-point') return 'extension-points'
+    if (route.kind === 'route') return 'routes'
+    if (route.kind === 'marketplace') return 'marketplace'
+    return 'settings'
+  }
+
+  const currentSettingsTab = (): string => routeState.kind === 'settings'
+    ? routeState.tabId
+    : MANAGER_SETTINGS_FALLBACK
+
+  const pluginFacet = (id: PluginDetailTab): typeof PLUGIN_DETAIL_TABS[number] => (
+    PLUGIN_DETAIL_TABS.find(item => item.id === id) ?? PLUGIN_DETAIL_TABS[0]!
+  )
+  const extensionPointFacet = (id: ExtensionPointDetailTab): typeof EXTENSION_POINT_DETAIL_TABS[number] => (
+    EXTENSION_POINT_DETAIL_TABS.find(item => item.id === id) ?? EXTENSION_POINT_DETAIL_TABS[0]!
+  )
+  const marketplaceFacet = (id: MarketplaceDetailTab): typeof MARKETPLACE_DETAIL_TABS[number] => (
+    MARKETPLACE_DETAIL_TABS.find(item => item.id === id) ?? MARKETPLACE_DETAIL_TABS[0]!
+  )
+
+  const resolvePageRoute = (snapshot: ManagerSnapshot): ManagerPageRoute => {
+    const route = routeState
+    const primary = activePrimary()
+    const primaryLabels: Readonly<Record<ManagerTab, string>> = {
+      plugins: '插件',
+      'extension-points': '扩展点',
+      routes: '路由',
+      marketplace: '插件商店',
+      settings: '配置',
+      about: '关于 CordisX',
+    }
+    const root = (id: ManagerTab): ManagerBreadcrumbSegment => ({
+      id: `primary:${id}`,
+      label: primaryLabels[id],
+      target: { kind: 'primary', primary: id },
+    })
+    if (route.kind === 'primary') {
+      return {
+        id: `primary:${route.primary}`,
+        primary,
+        segments: [{ id: `primary:${route.primary}`, label: primaryLabels[route.primary] }],
+      }
+    }
+    if (route.kind === 'plugin') {
+      const plugin = snapshot.plugins.find(item => item.id === route.pluginId)
+      const facet = pluginFacet(route.facet)
+      return {
+        id: `plugin:${route.pluginId}:${route.facet}`,
+        primary,
+        segments: [
+          root('plugins'),
+          { id: `plugin:${route.pluginId}`, label: plugin?.name ?? route.pluginId, target: { kind: 'plugin', pluginId: route.pluginId, facet: 'readme' } },
+          { id: `plugin:${route.pluginId}:facet:${route.facet}`, label: facet.label },
+        ],
+      }
+    }
+    if (route.kind === 'permission') {
+      const plugin = snapshot.plugins.find(item => item.id === route.pluginId)
+      return {
+        id: `plugin:${route.pluginId}:permission:${route.capability}`,
+        primary,
+        segments: [
+          root('plugins'),
+          { id: `plugin:${route.pluginId}`, label: plugin?.name ?? route.pluginId, target: { kind: 'plugin', pluginId: route.pluginId, facet: 'readme' } },
+          { id: `plugin:${route.pluginId}:facet:permissions`, label: pluginFacet('permissions').label, target: { kind: 'plugin', pluginId: route.pluginId, facet: 'permissions' } },
+          { id: `plugin:${route.pluginId}:permission:${route.capability}`, label: capabilityPresentation(route.capability).name },
+        ],
+      }
+    }
+    if (route.kind === 'extension-point') {
+      const point = snapshot.extensionPoints?.points.find(item => item.id === route.pointId)
+      const facet = extensionPointFacet(route.facet)
+      return {
+        id: `extension-point:${route.pointId}:${route.facet}`,
+        primary,
+        segments: [
+          root('extension-points'),
+          { id: `extension-point:${route.pointId}`, label: point?.titleProjection.text ?? route.pointId, target: { kind: 'extension-point', pointId: route.pointId, facet: 'usage' } },
+          { id: `extension-point:${route.pointId}:facet:${route.facet}`, label: facet.label },
+        ],
+      }
+    }
+    if (route.kind === 'route') {
+      return {
+        id: `route:${route.qualifiedId}`,
+        primary,
+        segments: [root('routes'), { id: `route:${route.qualifiedId}`, label: route.qualifiedId }],
+      }
+    }
+    if (route.kind === 'marketplace') {
+      const plugin = marketplace.snapshot().plugins.find(item => item.identity === route.identity)
+      const facet = marketplaceFacet(route.facet)
+      return {
+        id: `marketplace:${route.identity}:${route.facet}`,
+        primary,
+        segments: [
+          root('marketplace'),
+          { id: `marketplace:${route.identity}`, label: plugin?.name ?? '已移除的插件', target: { kind: 'marketplace', identity: route.identity, facet: 'overview' } },
+          { id: `marketplace:${route.identity}:facet:${route.facet}`, label: facet.label },
+        ],
+      }
+    }
+    const settingsItem = settingsTabs(snapshot).find(item => item.id === route.tabId)
+    return {
+      id: `settings:${route.tabId}`,
+      primary,
+      segments: [
+        root('settings'),
+        { id: `settings:${route.tabId}`, label: settingsItem?.title ?? route.tabId },
+      ],
+    }
+  }
+
+  const normalizeRoute = (snapshot: ManagerSnapshot, candidate: ManagerRouteState = routeState): ManagerRouteState => {
+    if (candidate.kind === 'plugin' || candidate.kind === 'permission') {
+      const plugin = snapshot.plugins.find(item => item.id === candidate.pluginId)
+      if (plugin === undefined) return { kind: 'primary', primary: 'plugins' }
+      if (candidate.kind === 'permission') {
+        const declared = snapshot.permissions.some(item => (
+          item.identity.id === plugin.id
+          && item.identity.source === plugin.source
+          && item.capability === candidate.capability
+        ))
+        if (!declared) return { kind: 'plugin', pluginId: plugin.id, facet: 'permissions' }
+      }
+    }
+    if (candidate.kind === 'extension-point' && !snapshot.extensionPoints?.points.some(item => item.id === candidate.pointId)) {
+      return { kind: 'primary', primary: 'extension-points' }
+    }
+    if (candidate.kind === 'route' && !snapshot.navigation.routes.some(item => item.qualifiedId === candidate.qualifiedId)) {
+      return { kind: 'primary', primary: 'routes' }
+    }
+    if (candidate.kind === 'marketplace') {
+      const marketplaceSnapshot = marketplace.snapshot()
+      if (!marketplaceSnapshot.loading && !marketplaceSnapshot.plugins.some(item => item.identity === candidate.identity)) {
+        return { kind: 'primary', primary: 'marketplace' }
+      }
+    }
+    if (candidate.kind === 'settings') {
+      const item = settingsTabs(snapshot).find(item => item.id === candidate.tabId)
+      if (item === undefined || item.disabled) return { kind: 'primary', primary: 'settings' }
+    }
+    return candidate
+  }
+
+  const routeKey = (route: ManagerRouteState): string => JSON.stringify(route)
+
+  const renderBreadcrumbs = (route: ManagerPageRoute): HTMLElement => {
+    breadcrumbCleanup()
+    breadcrumbCleanup = () => {}
+    const breadcrumbs = create(document, 'nav', 'cxm-breadcrumbs')
+    breadcrumbs.setAttribute('aria-label', '面包屑')
+    breadcrumbs.dataset.managerPageRoute = route.id
+    const list = create(document, 'ol', 'cxm-breadcrumb-list')
+    breadcrumbs.append(list)
+
+    const renderProjection = (projection: BreadcrumbProjection): void => {
+      list.replaceChildren()
+      breadcrumbs.dataset.breadcrumbOverflowCount = String(projection.overflow.length)
+      const visible = new Set(projection.visible)
+      const firstOverflow = projection.overflow[0]
+      const appendSeparator = (item: HTMLElement): void => {
+        if (list.childElementCount > 0) item.append(create(document, 'span', 'cxm-breadcrumb-separator', '/'))
+      }
+      for (const [index, segment] of route.segments.entries()) {
+        if (index === firstOverflow) {
+          const item = create(document, 'li', 'cxm-breadcrumb-item')
+          appendSeparator(item)
+          const overflow = create(document, 'details', 'cxm-breadcrumb-overflow')
+          const summary = create(document, 'summary', undefined, '…')
+          summary.setAttribute('aria-label', '显示省略的上级页面')
+          const menu = create(document, 'div', 'cxm-breadcrumb-menu')
+          menu.setAttribute('role', 'menu')
+          for (const hiddenIndex of projection.overflow) {
+            const hidden = route.segments[hiddenIndex]
+            if (hidden?.target === undefined) continue
+            const action = create(document, 'button', 'cxm-breadcrumb-action', hidden.label)
+            action.type = 'button'
+            action.dataset.breadcrumbTarget = hidden.id
+            action.setAttribute('role', 'menuitem')
+            action.addEventListener('click', () => {
+              overflow.open = false
+              void navigateRoute(hidden.target!)
+            })
+            menu.append(action)
+          }
+          overflow.append(summary, menu)
+          item.append(overflow)
+          list.append(item)
+        }
+        if (!visible.has(index)) continue
+        const item = create(document, 'li', 'cxm-breadcrumb-item')
+        item.dataset.breadcrumbIndex = String(index)
+        appendSeparator(item)
+        if (index === route.segments.length - 1) {
+          const current = create(document, 'span', 'cxm-breadcrumb-current', segment.label)
+          current.dataset.breadcrumbCurrent = segment.id
+          current.setAttribute('aria-current', 'page')
+          item.append(current)
+        } else if (segment.target !== undefined) {
+          const action = create(document, 'button', 'cxm-breadcrumb-action', segment.label)
+          action.type = 'button'
+          action.dataset.breadcrumbTarget = segment.id
+          action.addEventListener('click', () => { void navigateRoute(segment.target!) })
+          item.append(action)
+        }
+        list.append(item)
+      }
+    }
+
+    const full: BreadcrumbProjection = { visible: route.segments.map((_, index) => index), overflow: [] }
+    renderProjection(full)
+    const view = document.defaultView
+    const recalculate = (): void => {
+      if (!breadcrumbs.isConnected || breadcrumbs.clientWidth <= 0) return
+      renderProjection(full)
+      const widths = route.segments.map((_, index) => {
+        const item = list.querySelector<HTMLElement>(`[data-breadcrumb-index="${index}"]`)
+        return item === null ? 0 : Math.max(item.getBoundingClientRect().width, item.scrollWidth)
+      })
+      const projection = projectManagerBreadcrumbs(widths, breadcrumbs.clientWidth)
+      renderProjection(projection)
+    }
+    const ResizeObserverConstructor = view?.ResizeObserver
+    const resizeObserver = ResizeObserverConstructor === undefined
+      ? undefined
+      : new ResizeObserverConstructor(recalculate)
+    resizeObserver?.observe(breadcrumbs)
+    view?.addEventListener('resize', recalculate)
+    if (typeof view?.requestAnimationFrame === 'function') view.requestAnimationFrame(recalculate)
+    else queueMicrotask(recalculate)
+    breadcrumbCleanup = () => {
+      resizeObserver?.disconnect()
+      view?.removeEventListener('resize', recalculate)
+    }
+    return breadcrumbs
+  }
+
   const rememberListScroll = (): void => {
-    listScrollPositions.set(activeTab, content.scrollTop)
+    listScrollPositions.set(activePrimary(), content.scrollTop)
   }
 
   const restoreListScroll = (): void => {
-    content.scrollTop = listScrollPositions.get(activeTab) ?? 0
+    content.scrollTop = listScrollPositions.get(activePrimary()) ?? 0
   }
 
   const setHeading = (
-    title: string,
     copy: string,
-    options: { readonly icon?: ManagerIconToken; readonly brand?: boolean; readonly root?: string; readonly onBack?: () => void } = {},
+    snapshot: ManagerSnapshot,
+    options: { readonly icon?: ManagerIconToken; readonly brand?: boolean } = {},
   ): void => {
     heading.replaceChildren()
+    const pageRoute = resolvePageRoute(snapshot)
     const row = create(document, 'div', 'cxm-heading-row')
-    if (options.onBack !== undefined) {
+    if (pageRoute.segments.length > 1) {
       const back = create(document, 'button', 'cxm-heading-leading cxm-back')
       back.type = 'button'
       back.setAttribute('aria-label', '返回')
       back.append(createManagerIcon(document, 'back', 'cxm-back-icon'))
-      back.addEventListener('click', options.onBack)
+      back.addEventListener('click', () => { void navigateBack() })
       row.append(back)
     } else {
       const icon = options.brand === true
@@ -1266,22 +1614,15 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       icon.setAttribute('aria-hidden', 'true')
       row.append(icon)
     }
-    const headingTitle = create(document, 'h2')
-    if (options.root === undefined) {
-      headingTitle.textContent = title
-    } else {
-      headingTitle.append(
-        create(document, 'span', 'cxm-breadcrumb-root', options.root),
-        create(document, 'span', 'cxm-breadcrumb-separator', '/'),
-        create(document, 'span', undefined, title),
-      )
-    }
-    row.append(headingTitle)
+    const title = create(document, 'div', 'cxm-heading-title')
+    const current = pageRoute.segments.at(-1)?.label ?? ''
+    title.append(create(document, 'h2', 'cxm-heading-current-heading', current), renderBreadcrumbs(pageRoute))
+    row.append(title)
     heading.append(row, create(document, 'p', undefined, copy))
   }
 
   const renderAbout = (snapshot: ManagerSnapshot): void => {
-    setHeading('关于 CordisX', '项目、社区与支持入口', { brand: true })
+    setHeading('项目、社区与支持入口', snapshot, { brand: true })
     const identity = create(document, 'div', 'cxm-about-identity')
     const mark = createDarkBackgroundBrandMark(document)
     mark.classList.add('cxm-about-mark')
@@ -1318,7 +1659,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   )
 
   const renderExtensionPointList = (snapshot: ManagerSnapshot): void => {
-    setHeading('扩展点', '浏览宿主声明的界面点位，并管理每个插件对点位的使用权限', { icon: 'contributions' })
+    setHeading('浏览宿主声明的界面点位，并管理每个插件对点位的使用权限', snapshot, { icon: 'contributions' })
     const search = create(document, 'input', 'cxm-search')
     search.type = 'search'
     search.placeholder = '搜索名称、介绍、点位 id 或插件…'
@@ -1369,10 +1710,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       )
       row.addEventListener('click', () => {
         rememberListScroll()
-        secondaryView = { kind: 'extension-point', id: point.id }
-        extensionPointDetailTab = 'usage'
         operationError = undefined
-        renderContent()
+        void navigateRoute({ kind: 'extension-point', pointId: point.id, facet: 'usage' })
       })
       listItem.append(row)
       list.append(listItem)
@@ -1389,28 +1728,17 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderExtensionPointDetail = (snapshot: ManagerSnapshot, id: string): void => {
     const point = snapshot.extensionPoints?.points.find(item => item.id === id)
-    setHeading(point?.titleProjection.text ?? id, point?.descriptionProjection.text ?? '扩展点已不在当前宿主目录中', {
-      root: '扩展点',
-      onBack: () => {
-        secondaryView = undefined
-        renderContent()
-        restoreListScroll()
-      },
-    })
+    setHeading(point?.descriptionProjection.text ?? '扩展点已不在当前宿主目录中', snapshot)
     if (point === undefined) {
       content.append(create(document, 'div', 'cxm-empty', '该扩展点已不在当前宿主目录中'))
       return
     }
-    content.append(createLocalTabs(document, [
-      { id: 'usage', label: '使用情况', icon: 'plugins' },
-      { id: 'information', label: '点位信息', icon: 'point-info' },
-      { id: 'diagnostics', label: '诊断', icon: 'diagnostics' },
-    ], extensionPointDetailTab, 'data-extension-point-detail-tab', (tab) => {
-      extensionPointDetailTab = tab as ExtensionPointDetailTab
-      renderContent()
+    const activeFacet = routeState.kind === 'extension-point' ? routeState.facet : 'usage'
+    content.append(createLocalTabs(document, EXTENSION_POINT_DETAIL_TABS, activeFacet, 'data-extension-point-detail-tab', (tab) => {
+      void navigateRoute({ kind: 'extension-point', pointId: id, facet: tab as ExtensionPointDetailTab })
     }))
 
-    if (extensionPointDetailTab === 'usage') {
+    if (activeFacet === 'usage') {
       const panel = createTabPanel(document, '使用情况')
       if (point.plugins.length === 0) panel.append(create(document, 'div', 'cxm-empty', '当前没有插件使用这个扩展点'))
       const list = create(document, 'div', 'cxm-usage-list')
@@ -1469,7 +1797,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return
     }
 
-    if (extensionPointDetailTab === 'information') {
+    if (activeFacet === 'information') {
       const panel = createTabPanel(document, '点位信息')
       const fields = create(document, 'div', 'cxm-detail-grid')
       const outlet = point.kind === 'outlet' ? snapshot.navigation.outlets.find(item => item.id === point.id) : undefined
@@ -1521,7 +1849,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderRouteList = (snapshot: ManagerSnapshot): void => {
-    setHeading('路由', '查看插件页面如何匹配路径并覆盖到宿主 outlet', { icon: 'routes' })
+    setHeading('查看插件页面如何匹配路径并覆盖到宿主 outlet', snapshot, { icon: 'routes' })
     const search = create(document, 'input', 'cxm-search')
     search.type = 'search'
     search.placeholder = '搜索路由、路径、页面、outlet 或插件…'
@@ -1561,8 +1889,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       )
       row.addEventListener('click', () => {
         rememberListScroll()
-        secondaryView = { kind: 'route', qualifiedId: route.qualifiedId }
-        renderContent()
+        void navigateRoute({ kind: 'route', qualifiedId: route.qualifiedId })
       })
       listItem.append(row)
       list.append(listItem)
@@ -1579,14 +1906,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderRouteDetail = (snapshot: ManagerSnapshot, qualifiedId: string): void => {
     const route = snapshot.navigation.routes.find(item => item.qualifiedId === qualifiedId)
-    setHeading(route?.qualifiedId ?? qualifiedId, '插件页面路由与宿主出口关联', {
-      root: '路由',
-      onBack: () => {
-        secondaryView = undefined
-        renderContent()
-        restoreListScroll()
-      },
-    })
+    setHeading('插件页面路由与宿主出口关联', snapshot)
     if (route === undefined) {
       content.append(create(document, 'div', 'cxm-empty', '该路由已不在当前 bundle 中'))
       return
@@ -1622,7 +1942,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderPluginList = (snapshot: ManagerSnapshot): void => {
-    setHeading('插件', '搜索当前 bundle 中的插件；选择一项进入二级详情', { icon: 'plugins' })
+    setHeading('搜索当前 bundle 中的插件；选择一项进入二级详情', snapshot, { icon: 'plugins' })
     const toolbar = create(document, 'div', 'cxm-toolbar')
     const search = create(document, 'input', 'cxm-search')
     search.type = 'search'
@@ -1658,11 +1978,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       row.append(body, createManagerIcon(document, 'view-detail', 'cxm-chevron'))
       row.addEventListener('click', () => {
         rememberListScroll()
-        secondaryView = { kind: 'plugin', id: plugin.id }
-        permissionDetail = undefined
-        pluginDetailTab = 'readme'
         operationError = undefined
-        renderContent()
+        void navigateRoute({ kind: 'plugin', pluginId: plugin.id, facet: 'readme' })
       })
       list.append(row)
     }
@@ -1694,22 +2011,19 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }
   }
 
-  const renderPermissionDetail = (snapshot: ManagerSnapshot, view: PermissionDetailView): void => {
-    const plugin = snapshot.plugins.find(item => item.id === view.pluginId)
+  const renderPermissionDetail = (
+    snapshot: ManagerSnapshot,
+    pluginId: string,
+    capability: CordisXPlatformCapability,
+  ): void => {
+    const plugin = snapshot.plugins.find(item => item.id === pluginId)
     const permission = snapshot.permissions.find(item => (
-      item.identity.id === view.pluginId
+      item.identity.id === pluginId
       && item.identity.source === plugin?.source
-      && item.capability === view.capability
+      && item.capability === capability
     ))
-    const presentation = capabilityPresentation(view.capability)
-    setHeading(presentation.name, plugin === undefined ? '插件权限详情' : `${plugin.name} 申请的权限`, {
-      root: '权限',
-      onBack: () => {
-        permissionDetail = undefined
-        pluginDetailTab = 'permissions'
-        renderContent()
-      },
-    })
+    const presentation = capabilityPresentation(capability)
+    setHeading(plugin === undefined ? '插件权限详情' : `${plugin.name} 申请的权限`, snapshot)
     if (plugin === undefined || permission === undefined) {
       content.append(create(document, 'div', 'cxm-empty', '该权限声明已不在当前 bundle 中'))
       return
@@ -1964,32 +2278,18 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderPluginDetail = (snapshot: ManagerSnapshot, id: string): void => {
     const plugin = snapshot.plugins.find(item => item.id === id)
-    setHeading(plugin?.name ?? id, '当前 bundle 中的本地插件详情', {
-      root: '插件',
-      onBack: () => {
-        secondaryView = undefined
-        renderContent()
-        restoreListScroll()
-      },
-    })
+    setHeading('当前 bundle 中的本地插件详情', snapshot)
     if (plugin === undefined) {
       content.append(create(document, 'div', 'cxm-empty', '插件已不在当前 bundle 中'))
       return
     }
 
-    content.append(createLocalTabs(document, [
-      { id: 'readme', label: 'README', icon: 'document' },
-      { id: 'config', label: '配置管理', icon: 'configuration' },
-      { id: 'permissions', label: '权限', icon: 'permissions' },
-      { id: 'runtime', label: '运行状态', icon: 'runtime' },
-      { id: 'extension-points', label: '扩展点位', icon: 'outlets' },
-      { id: 'routes', label: '路由', icon: 'routes' },
-    ], pluginDetailTab, 'data-plugin-detail-tab', (tab) => {
-      pluginDetailTab = tab as PluginDetailTab
-      renderContent()
+    const activeFacet = routeState.kind === 'plugin' ? routeState.facet : 'readme'
+    content.append(createLocalTabs(document, PLUGIN_DETAIL_TABS, activeFacet, 'data-plugin-detail-tab', (tab) => {
+      void navigateRoute({ kind: 'plugin', pluginId: id, facet: tab as PluginDetailTab })
     }))
 
-    if (pluginDetailTab === 'readme') {
+    if (activeFacet === 'readme') {
       const panel = createTabPanel(document, 'README')
       if (plugin.readme?.trim() === '') {
         panel.append(create(document, 'div', 'cxm-empty', '该插件没有随当前 bundle 提供 README.md'))
@@ -2002,14 +2302,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return
     }
 
-    if (pluginDetailTab === 'config') {
+    if (activeFacet === 'config') {
       const panel = createTabPanel(document, '配置管理')
       renderPluginConfiguration(plugin, panel)
       content.append(panel)
       return
     }
 
-    if (pluginDetailTab === 'permissions') {
+    if (activeFacet === 'permissions') {
       const panel = createTabPanel(document, '权限')
       const permissions = snapshot.permissions.filter(item => item.identity.source === plugin.source && item.identity.id === plugin.id)
       if (permissions.length === 0) {
@@ -2035,9 +2335,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         copy.append(title, create(document, 'span', 'cxm-permission-reason', permission.reasonText))
         open.append(createCapabilityIcon(document, permission.capability), copy, createManagerIcon(document, 'view-detail', 'cxm-chevron'))
         open.addEventListener('click', () => {
-          permissionDetail = { pluginId: plugin.id, capability: permission.capability }
           operationError = undefined
-          renderContent()
+          void navigateRoute({ kind: 'permission', pluginId: plugin.id, capability: permission.capability })
         })
         const control = create(document, 'div', 'cxm-permission-control')
         if (supported) {
@@ -2062,7 +2361,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const pluginCommands = snapshot.commands.filter(item => item.owner === plugin.id)
     const pluginRoutes = snapshot.navigation.routes.filter(item => item.owner === plugin.id)
     const pluginPages = snapshot.navigation.pages.filter(item => item.owner === plugin.id)
-    if (pluginDetailTab === 'runtime') {
+    if (activeFacet === 'runtime') {
       const panel = createTabPanel(document, '运行状态')
       const runtimeToolbar = create(document, 'div', 'cxm-runtime-toolbar')
       const identity = create(document, 'code', 'cxm-detail-id', plugin.id)
@@ -2176,7 +2475,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return
     }
 
-    if (pluginDetailTab === 'extension-points') {
+    if (activeFacet === 'extension-points') {
       const panel = createTabPanel(document, '扩展点位')
       const points = (snapshot.extensionPoints?.points ?? []).filter(point => point.plugins.some(usage => (
         usage.identity.source === plugin.source && usage.identity.id === plugin.id
@@ -2251,9 +2550,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     content.append(panel)
   }
 
-  const renderMarketplaceList = (): void => {
+  const renderMarketplaceList = (managerSnapshot: ManagerSnapshot): void => {
     const snapshot = marketplace.snapshot()
-    setHeading('插件商店', '从已配置 JSON feed 浏览插件元数据；当前只读，不提供安装', { icon: 'marketplace' })
+    setHeading('从已配置 JSON feed 浏览插件元数据；当前只读，不提供安装', managerSnapshot, { icon: 'marketplace' })
     const toolbar = create(document, 'div', 'cxm-toolbar')
     const search = create(document, 'input', 'cxm-search')
     search.type = 'search'
@@ -2293,9 +2592,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       row.append(body, createManagerIcon(document, 'view-detail', 'cxm-chevron'))
       row.addEventListener('click', () => {
         rememberListScroll()
-        secondaryView = { kind: 'marketplace', identity: plugin.identity }
-        marketplaceDetailTab = 'overview'
-        renderContent()
+        void navigateRoute({ kind: 'marketplace', identity: plugin.identity, facet: 'overview' })
       })
       list.append(row)
     }
@@ -2313,29 +2610,19 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     })
   }
 
-  const renderMarketplaceDetail = (identityValue: string): void => {
+  const renderMarketplaceDetail = (managerSnapshot: ManagerSnapshot, identityValue: string): void => {
     const plugin = marketplace.snapshot().plugins.find(item => item.identity === identityValue)
-    setHeading(plugin?.name ?? '已移除的插件', '来自已配置插件商店的只读元数据', {
-      root: '插件商店',
-      onBack: () => {
-        secondaryView = undefined
-        renderContent()
-        restoreListScroll()
-      },
-    })
+    setHeading('来自已配置插件商店的只读元数据', managerSnapshot)
     if (plugin === undefined) {
       content.append(create(document, 'div', 'cxm-empty', '该插件已不在当前聚合结果中'))
       return
     }
-    content.append(createLocalTabs(document, [
-      { id: 'overview', label: '概览', icon: 'overview' },
-      { id: 'authors-source', label: '作者与来源', icon: 'authors-source' },
-    ], marketplaceDetailTab, 'data-marketplace-detail-tab', (tab) => {
-      marketplaceDetailTab = tab as MarketplaceDetailTab
-      renderContent()
+    const activeFacet = routeState.kind === 'marketplace' ? routeState.facet : 'overview'
+    content.append(createLocalTabs(document, MARKETPLACE_DETAIL_TABS, activeFacet, 'data-marketplace-detail-tab', (tab) => {
+      void navigateRoute({ kind: 'marketplace', identity: identityValue, facet: tab as MarketplaceDetailTab })
     }))
 
-    if (marketplaceDetailTab === 'overview') {
+    if (activeFacet === 'overview') {
       const panel = createTabPanel(document, '概览')
       panel.append(create(document, 'p', 'cxm-detail-description', plugin.description))
       const fields = create(document, 'div', 'cxm-detail-grid')
@@ -2568,7 +2855,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const resetSettings = async (): Promise<void> => {
     settingsTransition += 1
     if (settingsMount === undefined && settingsMountId === undefined) {
-      settingsTab = MANAGER_SETTINGS_FALLBACK
+      if (activePrimary() === 'settings') routeState = { kind: 'primary', primary: 'settings' }
       settingsError = undefined
       settingsTransitioning = false
       settingsRoot = undefined
@@ -2580,7 +2867,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     try {
       await stopSettingsContent()
     } finally {
-      settingsTab = MANAGER_SETTINGS_FALLBACK
+      if (activePrimary() === 'settings') routeState = { kind: 'primary', primary: 'settings' }
       settingsError = undefined
       settingsTransitioning = false
       settingsRoot = undefined
@@ -2595,16 +2882,23 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     button?.focus()
   }
 
-  const activateSettingsTab = async (id: string, restoreFocus: boolean): Promise<void> => {
+  const activateSettingsTab = async (id: string, restoreFocus: boolean, recordHistory = true): Promise<void> => {
     const tab = settingsTabs(model.snapshot()).find(candidate => candidate.id === id)
     if (tab === undefined || tab.disabled || settingsTransitioning) return
+    const previousRoute = routeState
+    const nextRoute: ManagerRouteState = { kind: 'settings', tabId: id }
+    if (routeKey(previousRoute) === routeKey(nextRoute) && (tab.builtin || settingsMountId === id)) {
+      if (restoreFocus) focusSettingsTab(id)
+      return
+    }
+    if (recordHistory && routeKey(previousRoute) !== routeKey(nextRoute)) navigationHistory.push(previousRoute)
     const token = ++settingsTransition
     settingsTransitioning = true
     settingsMount?.abort()
     try {
       await stopSettingsContent()
       if (token !== settingsTransition) return
-      settingsTab = id
+      routeState = nextRoute
       settingsError = undefined
       settingsTransitioning = false
       renderContent()
@@ -2614,7 +2908,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         settingsPanelBody.replaceChildren()
         settingsMountId = id
         const mount = await model.mountSettingsTab(id, settingsPanelBody)
-        if (token !== settingsTransition || settingsTab !== id) {
+        if (token !== settingsTransition || currentSettingsTab() !== id) {
           mount.abort()
           await mount.dispose()
           return
@@ -2629,7 +2923,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       settingsMount?.abort()
       await stopSettingsContent().catch(() => {})
       settingsError = error instanceof Error ? error.message : String(error)
-      settingsTab = MANAGER_SETTINGS_FALLBACK
+      routeState = { kind: 'settings', tabId: MANAGER_SETTINGS_FALLBACK }
       settingsTransitioning = false
       renderContent()
       if (restoreFocus) focusSettingsTab(MANAGER_SETTINGS_FALLBACK)
@@ -2637,8 +2931,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderSettings = (snapshot: ManagerSnapshot): void => {
-    setHeading('配置', '管理 CordisX 设置与当前 profile 状态', { icon: 'settings' })
+    setHeading('管理 CordisX 设置与当前 profile 状态', snapshot, { icon: 'settings' })
     const items = settingsTabs(snapshot)
+    const settingsTab = currentSettingsTab()
     const active = items.find(item => item.id === settingsTab)
     if ((active === undefined || active.disabled) && !settingsTransitioning) {
       settingsTransition += 1
@@ -2647,7 +2942,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       void stopSettingsContent().catch(error => {
         settingsError = error instanceof Error ? error.message : String(error)
       }).finally(() => {
-        settingsTab = MANAGER_SETTINGS_FALLBACK
+        routeState = { kind: 'settings', tabId: MANAGER_SETTINGS_FALLBACK }
         settingsTransitioning = false
         renderContent()
       })
@@ -2737,40 +3032,90 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (settingsError !== undefined) settingsPanelBody.append(create(document, 'div', 'cxm-error', `插件配置页面错误：${settingsError}`))
   }
 
+  const disposeSettingsForRouteChange = async (): Promise<void> => {
+    settingsTransition += 1
+    settingsTransitioning = true
+    settingsMount?.abort()
+    try {
+      await stopSettingsContent()
+    } finally {
+      settingsTransitioning = false
+      settingsError = undefined
+      settingsRoot = undefined
+      settingsPanel = undefined
+      settingsPanelBody = undefined
+    }
+  }
+
+  const navigateRoute = async (
+    target: ManagerRouteState,
+    options: { readonly recordHistory?: boolean; readonly restoreFocus?: boolean } = {},
+  ): Promise<void> => {
+    const recordHistory = options.recordHistory ?? true
+    const restoreFocus = options.restoreFocus ?? false
+    const next = normalizeRoute(model.snapshot(), target)
+    if (routeKey(next) === routeKey(routeState)) return
+    if (next.kind === 'settings') {
+      await activateSettingsTab(next.tabId, restoreFocus, recordHistory)
+      return
+    }
+    const previous = routeState
+    if (recordHistory) navigationHistory.push(previous)
+    if (activePrimary(previous) === 'settings') await disposeSettingsForRouteChange()
+    routeState = next
+    renderContent()
+    if (next.kind === 'primary') restoreListScroll()
+  }
+
+  const navigateBack = async (): Promise<void> => {
+    const snapshot = model.snapshot()
+    let target: ManagerRouteState | undefined
+    while (navigationHistory.length > 0 && target === undefined) {
+      const candidate = navigationHistory.pop()
+      if (candidate === undefined) break
+      const normalized = normalizeRoute(snapshot, candidate)
+      if (routeKey(normalized) !== routeKey(routeState)) target = normalized
+    }
+    if (target === undefined) {
+      const segments = resolvePageRoute(snapshot).segments
+      target = [...segments].reverse().find(segment => (
+        segment.target !== undefined && routeKey(segment.target) !== routeKey(routeState)
+      ))?.target
+    }
+    if (target !== undefined) await navigateRoute(target, { recordHistory: false, restoreFocus: true })
+  }
+
   function renderContent(): void {
     const snapshot = model.snapshot()
-    const preserveSettings = activeTab === 'settings' && settingsRoot?.isConnected === true
+    const normalized = routeState.kind === 'settings' ? routeState : normalizeRoute(snapshot)
+    const normalizedRouteChanged = routeKey(normalized) !== routeKey(routeState)
+    if (normalizedRouteChanged) {
+      if (routeState.kind === 'settings') {
+        void navigateRoute(normalized, { recordHistory: false })
+        return
+      }
+      routeState = normalized
+    }
+    const primary = activePrimary()
+    const preserveSettings = primary === 'settings' && settingsRoot?.isConnected === true
     if (!preserveSettings) {
       disposeConfigRenderers()
       content.replaceChildren()
     }
-    for (const [id, button] of navButtons) button.setAttribute('aria-selected', String(id === activeTab))
-    if (permissionDetail !== undefined && secondaryView?.kind === 'plugin' && activeTab === 'plugins') {
-      renderPermissionDetail(snapshot, permissionDetail)
-      return
-    }
-    if (secondaryView?.kind === 'plugin' && activeTab === 'plugins') {
-      renderPluginDetail(snapshot, secondaryView.id)
-      return
-    }
-    if (secondaryView?.kind === 'marketplace' && activeTab === 'marketplace') {
-      renderMarketplaceDetail(secondaryView.identity)
-      return
-    }
-    if (secondaryView?.kind === 'extension-point' && activeTab === 'extension-points') {
-      renderExtensionPointDetail(snapshot, secondaryView.id)
-      return
-    }
-    if (secondaryView?.kind === 'route' && activeTab === 'routes') {
-      renderRouteDetail(snapshot, secondaryView.qualifiedId)
-      return
-    }
-    if (activeTab === 'about') renderAbout(snapshot)
-    if (activeTab === 'extension-points') renderExtensionPointList(snapshot)
-    if (activeTab === 'routes') renderRouteList(snapshot)
-    if (activeTab === 'plugins') renderPluginList(snapshot)
-    if (activeTab === 'marketplace') renderMarketplaceList()
-    if (activeTab === 'settings') renderSettings(snapshot)
+    for (const [id, button] of navButtons) button.setAttribute('aria-selected', String(id === primary))
+    if (routeState.kind === 'permission') return renderPermissionDetail(snapshot, routeState.pluginId, routeState.capability)
+    if (routeState.kind === 'plugin') return renderPluginDetail(snapshot, routeState.pluginId)
+    if (routeState.kind === 'marketplace') return renderMarketplaceDetail(snapshot, routeState.identity)
+    if (routeState.kind === 'extension-point') return renderExtensionPointDetail(snapshot, routeState.pointId)
+    if (routeState.kind === 'route') return renderRouteDetail(snapshot, routeState.qualifiedId)
+    if (routeState.kind === 'settings') return renderSettings(snapshot)
+    if (routeState.primary === 'about') renderAbout(snapshot)
+    if (routeState.primary === 'extension-points') renderExtensionPointList(snapshot)
+    if (routeState.primary === 'routes') renderRouteList(snapshot)
+    if (routeState.primary === 'plugins') renderPluginList(snapshot)
+    if (routeState.primary === 'marketplace') renderMarketplaceList(snapshot)
+    if (routeState.primary === 'settings') renderSettings(snapshot)
+    if (normalizedRouteChanged) restoreListScroll()
   }
 
   const open = (): void => {
@@ -2782,7 +3127,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const dismiss = (): void => {
     disposeConfigRenderers()
     settingsMount?.abort()
-    void resetSettings().catch(() => {})
+    if (settingsMount !== undefined || settingsMountId !== undefined) void resetSettings().catch(() => {})
     modal.hidden = true
     trigger.setAttribute('aria-expanded', 'false')
     trigger.focus()
@@ -2802,14 +3147,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   document.addEventListener('keydown', onKeydown)
   for (const [id, button] of navButtons) {
     button.addEventListener('click', () => {
-      const activate = async (): Promise<void> => {
-        if (activeTab === 'settings' && id !== 'settings') await resetSettings()
-        activeTab = id
-        secondaryView = undefined
-        permissionDetail = undefined
-        renderContent()
-      }
-      void activate()
+      void navigateRoute({ kind: 'primary', primary: id })
     })
   }
 
@@ -2845,6 +3183,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   void marketplace.reload()
 
   return () => {
+    breadcrumbCleanup()
     disposeConfigRenderers()
     settingsMount?.abort()
     void stopSettingsContent().catch(() => {})

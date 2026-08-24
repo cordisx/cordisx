@@ -119,6 +119,9 @@ describe('settings tab demo bundle', () => {
     expect(pluginTab.querySelectorAll('svg')).toHaveLength(1)
     pluginTab.click()
     await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content="mounted"]') !== null)
+    const breadcrumbLabels = (): string[] => [...dom.window.document.querySelectorAll<HTMLElement>('.cxm-breadcrumb-action, .cxm-breadcrumb-current')]
+      .map(item => item.textContent ?? '')
+    expect(breadcrumbLabels()).toEqual(['配置', 'Demo plugin'])
 
     const panel = dom.window.document.querySelector<HTMLElement>('[data-settings-root] [role="tabpanel"]')!
     const page = panel.querySelector<HTMLElement>('[data-cordisx-settings-page="settings-tab-demo:settings"]')!
@@ -144,6 +147,7 @@ describe('settings tab demo bundle', () => {
     await waitFor(() => dom.window.document.querySelector('[data-settings-tab="settings-tab-demo:settings"]') === null)
     await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') === null)
     expect(dom.window.document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected')).toBe('true')
+    expect(breadcrumbLabels()).toEqual(['配置', '插件商店'])
     expect(runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'manager.settings.content')?.mounted).toBe(false)
 
     await runtime.setExtensionPointPolicy(initial.plugins[0]!.source, 'settings-tab-demo', 'manager.settings.tabs', 'allow')
@@ -176,6 +180,15 @@ describe('settings tab demo bundle', () => {
     await waitFor(() => dom.window.document.querySelector('[data-settings-tab="settings-tab-demo:settings"]')?.textContent === '演示插件')
     expect(runtime.snapshot().settingsTabs.find(tab => tab.id === 'settings-tab-demo:settings')?.title).toBe('演示插件')
 
+    dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="settings-tab-demo:settings"]')!.click()
+    await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') !== null)
+    expect(breadcrumbLabels()).toEqual(['配置', '演示插件'])
+    dom.window.document.querySelector<HTMLButtonElement>('.cxm-close')!.click()
+    await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') === null)
+    managerTrigger.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-tab="settings"]')!.click()
+    expect(dom.window.document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected')).toBe('true')
+    expect(breadcrumbLabels()).toEqual(['配置'])
     dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="settings-tab-demo:settings"]')!.click()
     await waitFor(() => dom.window.document.querySelector('[data-settings-demo-content]') !== null)
     const previousGeneration = runtime.snapshot().extensionPoints.accessDiagnostics.at(-1)!.request.generation

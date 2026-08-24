@@ -25,6 +25,80 @@ Embedded plugin-owned documents such as README content retain their own
 document outline. The manager does not rewrite third-party headings to imitate
 host navigation.
 
+## Structured navigation and breadcrumb ancestry
+
+The Host owns one structured `ManagerRouteState` and derives one
+`ManagerPageRoute` from it. A page route has a stable page id, primary area,
+record identity where applicable, selected facet, optional leaf identity, and
+an ordered ancestor chain. Breadcrumb DOM is projected only from that chain.
+Plugins may contribute localized settings-tab data and a same-owner route/page
+reference through the existing structured contracts, but they never receive a
+breadcrumb container, create breadcrumb nodes, or concatenate a display path.
+
+The semantic path includes every page context needed to return to the current
+leaf:
+
+- primary pages use one current segment, such as `插件`;
+- installed-plugin facets use `插件 / 插件名 / README`, `配置管理`, `权限`,
+  `运行状态`, `扩展点位`, or `路由` as the current segment;
+- permission leaves use `插件 / 插件名 / 权限 / 能力名`;
+- extension-point facets use `扩展点 / 点位名 / 使用情况`, `点位信息`, or
+  `诊断`;
+- a route detail uses `路由 / 路由名`;
+- marketplace facets use `插件商店 / 插件名 / 概览` or `作者与来源`; and
+- settings facets use `配置 / 插件商店`, `运行状态`, `启动器`, or the
+  current localized external settings-tab title.
+
+The selected facet is not repeated as a body heading. It appears as the
+current breadcrumb segment and as the selected tab label because those two
+controls serve different navigation and tab-selection semantics. The current
+breadcrumb item is text with `aria-current="page"`; it is never a link or
+button. Every preceding segment is a Host-owned button that navigates to that
+exact structured ancestor. A record ancestor resolves to its stable default
+facet (`README`, `使用情况`, or `概览`), while a primary ancestor resolves to
+its browse page and restores that page's query and scroll state.
+
+The leading back control is present whenever the route has more than one
+segment. It follows the manager's internal history stack rather than assuming
+that the immediate structural parent was the previous page. Opening a record,
+switching a local or settings tab, opening a permission leaf, selecting a
+primary area, and explicitly choosing an ancestor each create a normal history
+entry. Back restores the most recent surviving route, so a tab switch can go
+back to the prior tab while an explicit ancestor click can go directly to a
+list or default facet. Manager navigation never changes `app://`, calls
+`window.history`, invokes the Codex router, or mutates native Codex route state.
+
+Breadcrumb overflow is also a Host projection. When every segment fits, the
+complete path stays inline. When it does not fit, the root and current segment
+always remain visible, the nearest fitting ancestors remain visible from the
+current page outward, and the omitted middle ancestors move into one
+structured ellipsis menu in their original order. The menu uses real buttons
+with the same ancestor targets. CSS clipping, text replacement, or silent
+ancestor removal is not an overflow strategy.
+
+Route validity is reconciled against every new Manager snapshot:
+
+- plugin block or restore keeps built-in plugin detail routes inspectable, but
+  an active external settings page falls back to `配置 / 插件商店` and cannot
+  steal activation when restored;
+- owner disposal or generation replacement aborts active external content
+  before disposal and replaces a missing leaf or record with its nearest
+  surviving ancestor without adding a history entry;
+- locale reprojection replaces segment labels from the current structured
+  snapshot without changing page identity, history, query, or scroll state;
+- an unavailable permission, extension point, route, marketplace record, or
+  settings tab similarly falls back to its nearest surviving ancestor; and
+- closing the dialog records no navigation entry. Host-owned routes and list
+  state remain available for reopening, while the existing settings-content
+  lifecycle still aborts external content and resets that surface to the
+  built-in marketplace fallback before it can mount again.
+
+Queries, filters, and list scroll offsets belong to their primary browse page,
+not to a breadcrumb label or DOM node. Re-render, locale changes, leaf
+navigation, history Back, explicit ancestor navigation, dialog close/reopen,
+block/restore, and generation reconciliation must not clear them unless the
+user explicitly edits or clears the filter.
+
 ## Groups and titles
 
 A single content group is presented directly, without a section title that
@@ -101,9 +175,9 @@ route/page ownership, lifecycle, and protocol versioning are defined in
 ## Page headers
 
 Every primary page reserves the same fixed-width leading seat immediately to
-the left of its title. Secondary and deeper pages replace the icon in that
-seat with an icon-only back button. The title never moves when navigation
-depth changes.
+the left of its title. Any structured route with more than one breadcrumb
+segment replaces the icon in that seat with an icon-only history-back button.
+The title never moves when navigation depth changes.
 
 The title occupies the first row. The description occupies its own second row
 and spans the complete header grid, so its left edge aligns with the leading
@@ -386,9 +460,20 @@ At minimum they prove:
   and cannot be selected, dragged, focused, or intercept pointer activation;
 - primary and breadcrumb headers keep a fixed 26-pixel frameless leading seat,
   optically center its SVG with the title row, align the second-row description
-  with that seat, and retain visible back button hover/focus feedback; and
+  with that seat, and retain visible back button hover/focus feedback;
+- every primary, record, facet, and leaf page projects the documented complete
+  Host-owned ancestor chain; current items are non-interactive, every visible
+  or overflowed ancestor is navigable, and no plugin-provided HTML or path
+  string enters breadcrumb DOM;
+- internal history Back, explicit ancestor navigation, dialog close/reopen,
+  plugin block/restore, generation disposal, missing-record fallback, locale
+  reprojection, and query/filter/scroll restoration follow the structured
+  state rules above without touching browser or Codex history;
+- constrained-width breadcrumb evidence keeps root and current inline and
+  exposes omitted middle ancestors through one ordered, keyboard-accessible
+  ellipsis menu rather than clipping or deleting them; and
 - manager CSS contains no purple accent tokens while preserving semantic
-  success, warning, and error colors.
+  success, warning, and error colors; and
 - the desktop modal reaches `min(1440px, calc(100vw - 40px))` by
   `min(960px, calc(100vh - 40px))`, retains a 248-pixel sidebar, and remains
   bounded and usable on smaller viewports.
@@ -397,3 +482,24 @@ Run the repository's complete `check` and `build` gates after DOM changes.
 Then capture a real isolated `app://` renderer screenshot of the affected
 manager panel and inspect the visible heading/list hierarchy. Screenshots
 complement DOM and accessibility assertions; they do not replace them.
+
+## Navigation delivery and PR boundary
+
+This navigation correction is Host-internal and lands in one owning
+`cordisx` PR after this document. It may add Host route-state, breadcrumb, DOM,
+style, and focused Manager tests, but it does not change `cordisx-protocol`,
+plugin contracts, the Config Schema or persistence lifecycle, dynamic plugin
+delivery, README rendering, external settings body ownership, Codex native DOM
+data flow, or add a free-DOM slot. The PR must audit every primary page and the
+installed-plugin, permission, extension-point, route, marketplace, built-in
+settings, and external settings projections.
+
+The owning PR gate is focused Manager/navigation/lifecycle coverage, full
+`npm run check`, `npm run build`, package audit, and `git diff --check`, followed
+by an isolated real `app://` renderer report and screenshots at normal and
+constrained widths. The smoke report records the complete permission path,
+clickable ancestor targets, non-clickable current item, back behavior,
+structured overflow menu, query restoration, external settings close and
+block fallback, locale reprojection, generation cleanup, and unchanged native
+node identity/data flow. After normal CI and squash merge, one separate mono PR
+from the latest mono `main` updates only the exact merged `cordisx` gitlink.
