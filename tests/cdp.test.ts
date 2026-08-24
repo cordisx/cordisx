@@ -35,7 +35,7 @@ describe('injectableTargets', () => {
 describe('service config CDP responses', () => {
   it('returns to the exact execution context that issued the binding request', () => {
     const params = serviceConfigResponseEvaluation({ requestId: 'request-1', ok: true, value: [] }, 73)
-    expect(params).toMatchObject({ contextId: 73, allowUnsafeEvalBlockedByCSP: true })
+    expect(params).toMatchObject({ contextId: 73, allowUnsafeEvalBlockedByCSP: true, returnByValue: true })
     expect(params.expression).toContain('__cordisxServiceConfigReceiveV1')
     expect(serviceConfigResponseEvaluation({ requestId: 'request-2', ok: false })).not.toHaveProperty('contextId')
   })

@@ -6,7 +6,9 @@ import type {
 
 const SERVICE_CONFIG_BINDING = '__cordisxServiceConfigRequestV1'
 const SERVICE_CONFIG_RECEIVER = '__cordisxServiceConfigReceiveV1'
-const REQUEST_TIMEOUT_MS = 15_000
+const REQUEST_TIMEOUT_MS = 4_000
+const LIST_ATTEMPTS = 3
+const LIST_RETRY_DELAY_MS = 100
 
 type Binding = (payload: string) => void
 interface Pending {
@@ -51,16 +53,32 @@ export class BrowserServiceConfigBridge {
   async list(pluginId: string): Promise<readonly HostServiceConfigDescriptor[]> {
     const active = this.listRequests.get(pluginId)
     if (active !== undefined) return clone(await active)
-    const request = this.request('list', {
-      pluginId,
-      scope: { profileId: this.profileId, generation: this.generation },
-    }) as Promise<readonly HostServiceConfigDescriptor[]>
+    const request = this.listWithRetry(pluginId)
     this.listRequests.set(pluginId, request)
     try {
       return clone(await request)
     } finally {
       if (this.listRequests.get(pluginId) === request) this.listRequests.delete(pluginId)
     }
+  }
+
+  private async listWithRetry(pluginId: string): Promise<readonly HostServiceConfigDescriptor[]> {
+    let failure: unknown
+    for (let attempt = 0; attempt < LIST_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.request('list', {
+          pluginId,
+          scope: { profileId: this.profileId, generation: this.generation },
+        }) as readonly HostServiceConfigDescriptor[]
+      } catch (error) {
+        failure = error
+        const retryable = error instanceof Error
+          && (error.message === 'unavailable' || error.message === 'Service configuration bridge request timed out')
+        if (!retryable || attempt + 1 === LIST_ATTEMPTS) throw error
+        await new Promise(resolve => setTimeout(resolve, LIST_RETRY_DELAY_MS))
+      }
+    }
+    throw failure instanceof Error ? failure : new Error('Service configuration bridge is unavailable')
   }
 
   async mutate(mutation: HostServiceConfigMutation): Promise<HostServiceConfigMutationResult> {

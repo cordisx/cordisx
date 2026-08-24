@@ -3160,6 +3160,7 @@ if (parsed.values['authorization-plugin'] !== undefined) {
 
 let managerReport
 let managerFormExerciseFailure
+let managerServiceConfigurationFailure
 let pluginConsoleReport
 if (parsed.values['plugin-console-exercise']) {
   const owner = parsed.values['plugin-owner'] ?? 'console-showcase'
@@ -3583,12 +3584,21 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           }
           if (pluginId === 'cli-proxy-api') {
             const serviceDeadline = Date.now() + 15_000
-            while (document.querySelectorAll('[data-plugin-service-config="cli-proxy-api"] [data-service-config]').length < 2
-              && Date.now() < serviceDeadline) {
+            let readySince = 0
+            while (Date.now() < serviceDeadline) {
+              const seats = [...document.querySelectorAll('[data-plugin-service-config="cli-proxy-api"]')]
+              const ready = seats.length === 1 && seats[0].querySelectorAll('[data-service-config]').length === 2
+              if (ready) {
+                if (readySince === 0) readySince = Date.now()
+                if (Date.now() - readySince >= 750) break
+              } else {
+                readySince = 0
+              }
               await new Promise(resolve => setTimeout(resolve, 50))
             }
-            if (document.querySelectorAll('[data-plugin-service-config="cli-proxy-api"] [data-service-config]').length !== 2) {
-              throw new Error('CLIProxy Provider service configuration did not become available')
+            const seats = [...document.querySelectorAll('[data-plugin-service-config="cli-proxy-api"]')]
+            if (readySince === 0 || seats.length !== 1 || seats[0].querySelectorAll('[data-service-config]').length !== 2) {
+              throw new Error('CLIProxy Provider service configuration did not become stably available')
             }
           }
         }
@@ -4277,7 +4287,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
     if (!Array.isArray(serviceConfigs) || serviceConfigs.length !== 2
       || serviceConfigs.some(config => config.fullWidth !== 'true' || config.nativeSelects !== 0
         || config.nestedControlChrome !== false || config.stickyFooter !== false || config.orphanedFooter !== false)) {
-      throw new Error(`CLIProxy Provider detail form assertions failed: ${JSON.stringify(serviceConfigs)}`)
+      managerServiceConfigurationFailure = `CLIProxy Provider detail form assertions failed: ${JSON.stringify(managerReport?.serviceConfigs)}`
     }
   }
   if (managerTab === 'about') {
@@ -4737,3 +4747,4 @@ if (interactionSafety.pendingPermissionDialogs !== 0 || interactionSafety.pendin
   throw new Error('live smoke left an interactive permission or lifecycle dialog open')
 }
 if (managerFormExerciseFailure !== undefined) throw new Error(managerFormExerciseFailure)
+if (managerServiceConfigurationFailure !== undefined) throw new Error(managerServiceConfigurationFailure)

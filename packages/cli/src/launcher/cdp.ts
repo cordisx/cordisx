@@ -599,10 +599,16 @@ export function serviceConfigResponseEvaluation(
   executionContextId?: number,
 ): Record<string, unknown> {
   return {
-    expression: `void globalThis.${SERVICE_CONFIG_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    expression: `(() => { const receiver = globalThis.${SERVICE_CONFIG_RECEIVER}; if (typeof receiver !== 'function') return false; receiver(${JSON.stringify(JSON.stringify(payload))}); return true })()`,
     allowUnsafeEvalBlockedByCSP: true,
+    returnByValue: true,
     ...(executionContextId === undefined ? {} : { contextId: executionContextId }),
   }
+}
+
+function serviceConfigResponseDelivered(result: Record<string, unknown>): boolean {
+  const remote = result.result
+  return remote !== null && typeof remote === 'object' && (remote as Record<string, unknown>).value === true
 }
 
 async function sendServiceConfigBindingResponse(
@@ -610,7 +616,9 @@ async function sendServiceConfigBindingResponse(
   payload: Record<string, unknown>,
   executionContextId?: number,
 ): Promise<void> {
-  await session.send('Runtime.evaluate', serviceConfigResponseEvaluation(payload, executionContextId))
+  const exact = await session.send('Runtime.evaluate', serviceConfigResponseEvaluation(payload, executionContextId))
+  if (serviceConfigResponseDelivered(exact) || executionContextId === undefined) return
+  await session.send('Runtime.evaluate', serviceConfigResponseEvaluation(payload))
 }
 
 async function sendPermissionBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
