@@ -622,10 +622,7 @@ export class PackageLifecycleAuthority {
   }
 
   async completeRollback(access: RollbackAccess, receipt: SharedRegistryRollbackReceipt): Promise<CordisXPluginActivationRecordV1> {
-    const state = await this.#journal.read()
-    const transaction = Object.values(state.transactions).find(item => item.rollbackTokenHash === tokenHash(access.rollbackToken))
-    if (transaction === undefined || transaction.status !== 'rollback-pending') throw new PackageLifecycleError('rollback-token-invalid', 'rollback token is invalid')
-    this.#access(transaction, access.ownerId, access.profileId)
+    const transaction = await this.#rollbackTransaction(access)
     const expectedInput = {
       transactionId: receipt.transactionId,
       transactionEpoch: receipt.transactionEpoch,
@@ -654,6 +651,12 @@ export class PackageLifecycleAuthority {
     await this.#setStatus(transaction.transactionId, 'aborted', transaction.failureCode)
     await this.options.permissionAuthority.revokeOneShot(transaction.permission.oneShotGrantIds)
     return restored
+  }
+
+  /** Rebuild the authoritative rollback plan after restart using only the recovery token. */
+  async resolveRollback(access: RollbackAccess): Promise<RollbackPlan> {
+    const transaction = await this.#rollbackTransaction(access)
+    return deepFreeze(this.#rollbackPlan(transaction, access.rollbackToken))
   }
 
   async recover(): Promise<{ readonly directives: readonly RecoveryDirective[] }> {
@@ -762,6 +765,17 @@ export class PackageLifecycleAuthority {
     if (transaction.permission.reviewTokenHash !== tokenHash(access.permissionReviewToken ?? '')) {
       throw new PackageLifecycleError('permission-review-token-invalid', 'permission review token is missing or stale')
     }
+    return transaction
+  }
+
+  async #rollbackTransaction(access: RollbackAccess): Promise<JournalTransaction> {
+    const state = await this.#journal.read()
+    const transaction = Object.values(state.transactions)
+      .find(item => item.rollbackTokenHash === tokenHash(access.rollbackToken))
+    if (transaction === undefined || transaction.status !== 'rollback-pending') {
+      throw new PackageLifecycleError('rollback-token-invalid', 'rollback token is invalid')
+    }
+    this.#access(transaction, access.ownerId, access.profileId)
     return transaction
   }
 

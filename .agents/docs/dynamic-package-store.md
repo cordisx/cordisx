@@ -108,7 +108,10 @@ After an atomic after-epoch publish, a later failure follows this sequence:
 Abort, another transaction, last-good release, and GC cannot cross
 `rollback-pending`. Recovery returns `rollback-published` for any possibly
 published transaction and `discard-staged` only for definitely pre-publication
-work. A recovered review never binds to a new candidate.
+work. After restart, `resolveRollback(rollbackAccess)` authenticates the
+fresh recovery token and returns the complete expected-published/rollback-target
+tuple plus candidate fingerprint needed to sign the shared-registry receipt. A
+recovered review never binds to a new candidate.
 
 ## Leases and GC
 
