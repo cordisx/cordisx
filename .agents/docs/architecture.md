@@ -116,6 +116,16 @@ The catalog distinguishes implemented, experimental, and reserved points;
 protocol reservation is never evidence that the current Codex adapter can
 project a point.
 
+The planned manager-settings v3 delivery exposes a separate host-neutral pair:
+`manager.settings.tabs` accepts structured tab records and
+`manager.settings.content` accepts same-owner routes/pages for controlled body
+mounts. These are manager extension points, not Codex adapter surfaces; they
+require no selector or native anchor. CordisX renders every tab header and the
+accessible panel, while the trusted-local plugin receives only the panel-body
+child. The single merge/order model, stable built-in fallback, lifecycle,
+versioning, PR order, and validation contract are specified in
+[`manager-settings-tabs.md`](manager-settings-tabs.md).
+
 Native menu contributions use the same boundary: CordisX inserts host-rendered
 rows into the opened Codex Help or account menu and never adds an independent
 fallback menu trigger. Compact shell actions are icon-only and inherit the
@@ -215,11 +225,15 @@ Marketplace discovery adds two manager views without adding execution
 authority: a searchable catalog assembled from validated feeds with a
 two-tab `概览` / `作者与来源` detail, and a general
 CordisX settings view whose first editable section owns the ordered list of
-marketplace JSON URLs and profile-local block state. The settings page is also
-local tab navigation: `插件商店` owns feed URLs, `运行状态` explains the
-profile-local activation state, and `启动器` exposes the current read-only
-`cordisx.config.json` boundary. Launcher-owned composition fields remain visibly
-file-managed until generation-aware configuration writes exist. Feed aggregation keys
+marketplace JSON URLs and profile-local block state. The settings page will use
+one
+host projection containing stable built-in tabs and eligible external
+`manager.settings.tabs` contributions. The built-ins remain `插件商店` for feed
+URLs, `运行状态` for profile-local activation state, and `启动器` for the
+current read-only `cordisx.config.json` boundary. External content routes only
+to `manager.settings.content`; it cannot render a tab header. Launcher-owned
+composition fields remain visibly file-managed until generation-aware
+configuration writes exist. Feed aggregation keys
 plugins by canonical `(source, id)` identity; the first configured feed wins a
 duplicate. Source settings and blocked plugin ids are separate profile-local
 state. Catalog entries can link to authors, their public source, optional

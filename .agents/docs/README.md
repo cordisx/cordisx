@@ -8,6 +8,9 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `manager-content-design.md` is the reusable design guideline for manager
   hierarchy, title de-duplication, tabs, flat lists, cards, states, and
   accessibility/screenshot regression evidence.
+- `manager-settings-tabs.md` freezes the host-neutral extensible settings-tab
+  surface/content outlet, single ordering model, controlled page-body mount,
+  lifecycle, protocol/host/mono PR order, and validation matrix.
 - `data-contribution-routing.md` defines the approved structured shell-contribution and
   page/outlet architecture that replaces direct plugin DOM rendering in native shell areas.
 - `extension-point-management.md` defines surfaces and outlets as the two

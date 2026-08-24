@@ -26,6 +26,16 @@ outlet and a page. A page supplies trusted-local content for that outlet. The
 manager may join these resources into a point's usage view, but it must not
 inflate the point count or describe a command, route, or page as a point.
 
+The manager-settings v3 catalog delivery adds the CordisX manager pair
+`manager.settings.tabs` (surface) and `manager.settings.content` (outlet).
+They are independent of the Codex adapter: the manager owns the tab/header DOM
+and panel, and a same-owner page mounts only in the panel-body child. Their
+single ordering/fallback model and lifecycle are specified in
+[`manager-settings-tabs.md`](manager-settings-tabs.md).
+
+Until that protocol/runtime delivery merges, these two names are architecture
+only and must not be reported as declared or available by the current host.
+
 The distinction is stable even when adapters add new points. The catalog count
 is the number of currently declared surface and outlet descriptors, not the
 number of plugin contributions or registered resources.

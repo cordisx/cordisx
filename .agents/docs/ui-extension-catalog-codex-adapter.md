@@ -113,16 +113,22 @@ environment family is not duplicated under generic panel names.
 | Environment | `environment.section.actions` | action | implemented | Existing declared-section target. |
 | Environment | `environment.section.rows` | environment row | implemented | Existing declared-section row target. |
 | Environment | `environment.row.trailing-actions` | action | implemented | Existing declared-row target. |
+| CordisX manager | `manager.settings.tabs` | manager settings tab | planned v3 | Host-rendered configuration tabs joined to same-owner manager-local routes/pages; no Codex selector or header callback. |
 | Page | `app` | outlet | implemented | Existing generation-scoped renderer page. |
 | Page | `main` | outlet | implemented | Existing semantic main-region page following sidebar geometry. |
 | Page | `session.content` | outlet | implemented | Existing active-session body page below the session header. |
 | Panel page | `panel.right.content` | outlet | reserved | No declaration until the adapter proves a stable right-panel content region and context key. |
 | Panel page | `panel.bottom.content` | outlet | reserved | No declaration until the adapter proves a stable bottom-panel content region and context key. |
+| CordisX manager page | `manager.settings.content` | outlet | planned v3 | CordisX-owned settings panel body; isolated from primary page presentation and independent of the Codex adapter. |
 
 An adapter may report an experimental point as pending with a machine code,
 but it must not add it to the live declared catalog as available merely because
 a protocol id exists. Reserved outlets are valid future route targets only in
 the version that declares them; current navigation fails closed.
+
+`planned v3` is an architecture-only marker, not a protocol availability
+value. Until the v3 protocol and host slices merge and pass the required live
+evidence, the current runtime does not declare either manager-settings point.
 
 ## Contextual invocation
 
@@ -184,7 +190,7 @@ resembles an identity never becomes host context.
 | assistant actions | `session.message.actions` | Host-generated message context; no message node. |
 | `turnTail` | `session.turn.footer` | Structured presenter with turn context; no tail component. |
 | `details.tool` | right-panel route/outlet plus `session.tool.actions` | Reserved until stable right-panel and tool identity seats exist. |
-| settings sections | CordisX manager/configuration schema | Manager-owned UI, not a Codex shell surface. |
+| settings sections | `manager.settings.tabs` plus `manager.settings.content` | Host-neutral CordisX manager points; structured header plus controlled page body, never a Codex shell selector. |
 | keyed chat/message/tool renderers | refused | No keyed renderer or native-node replacement registry. |
 | whole composer/session/header/chat replacement | refused | CordisX does not grant native React ownership. |
 
