@@ -19,6 +19,12 @@ import {
   type CordisXPluginLifecycleResultV1,
 } from '../contracts.js'
 import type { LocaleCatalogSnapshot } from './i18n.js'
+import type {
+  CordisXPermissionAuthorizationDecisionV2,
+  CordisXPermissionAuthorizationPlanV2,
+  CordisXPermissionCapabilityV2,
+} from '../permission-contracts.js'
+import { PermissionAuthorizationViewModel } from '../permission-authorization-view-model.js'
 import {
   BrowserMarketplaceModel,
   OFFICIAL_MARKETPLACE_SOURCE,
@@ -58,6 +64,7 @@ import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 import { HostTooltipController } from './tooltips.js'
 import { HostThemeProjection, resolveHostTheme } from './host-theme.js'
 import { HOST_FORM_STYLES, HostFormAdapter, selectHostFormPrimitive, validateHostFormValue } from './host-form.js'
+import { BrowserPermissionAuthorizationDialog } from './permission-authorization-dialog.js'
 import lunaTextViewerCss from 'luna-text-viewer/luna-text-viewer.css'
 
 export type ManagerPluginStatus =
@@ -170,6 +177,14 @@ export interface ManagerModel {
   setPermissionPolicy(id: string, capability: CordisXPlatformCapability, policy: CordisXPermissionPolicy): Promise<void>
   permissionAuthorizationPlan?(id: string): CordisXPermissionAuthorizationPlanV1
   authorizePlugin?(id: string, decision: CordisXPermissionAuthorizationDecisionV1): Promise<void>
+  permissionAuthorizationPlanV2?(id: string): CordisXPermissionAuthorizationPlanV2 | undefined
+  authorizePluginV2?(id: string, decision: CordisXPermissionAuthorizationDecisionV2): Promise<void>
+  permissionLifecycleReviewPlanV2?(
+    target: { readonly kind: 'candidate'; readonly candidateId: string } | { readonly kind: 'enable'; readonly pluginId: string },
+  ): Promise<CordisXPermissionAuthorizationPlanV2 | undefined>
+  applyPermissionLifecycleReviewV2?(
+    decision: CordisXPermissionAuthorizationDecisionV2,
+  ): Promise<CordisXPluginLifecycleResultV1>
   requestPluginLifecycle?(operation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1>
   setExtensionPointPolicy?(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
   mountSettingsTab?(id: string, panelBody: HTMLElement): Promise<ManagedSettingsPageMount>
@@ -1291,6 +1306,50 @@ export async function requestPluginAuthorization(
   })
 }
 
+export async function requestPluginAuthorizationV2(
+  document: Document,
+  plugin: Pick<ManagerPluginSnapshot, 'id' | 'source' | 'name'>,
+  plan: CordisXPermissionAuthorizationPlanV2,
+  permissions: readonly ManagerPermissionSnapshot[],
+): Promise<CordisXPermissionAuthorizationDecisionV2 | undefined> {
+  if (plan.declarations.length === 0) {
+    const result = new PermissionAuthorizationViewModel(plan).confirm()
+    return result.status === 'confirmed' ? result.decision : undefined
+  }
+  const availability = Object.fromEntries(plan.declarations.flatMap(declaration => {
+    const permission = permissions.find(item => item.capability === declaration.capability)
+    if (permission === undefined) return []
+    return [[declaration.capability, Object.freeze({
+      status: permission.availability.status,
+      reason: Object.freeze({
+        namespace: 'cordisx.permission.host',
+        key: `availability.${declaration.capability}`,
+        fallback: permission.availability.reasonText,
+      }),
+      providerIds: Object.freeze(permission.availability.providers.map(provider => provider.providerId)),
+    })]]
+  })) as Partial<Record<CordisXPermissionCapabilityV2, {
+    readonly status: 'supported' | 'degraded' | 'unavailable'
+    readonly reason: CordisXLocalizedText
+    readonly providerIds: readonly string[]
+  }>>
+  const dialog = new BrowserPermissionAuthorizationDialog(document)
+  try {
+    const result = await dialog.show(new PermissionAuthorizationViewModel(plan), {
+      project: () => ({
+        plugin: { name: plugin.name, source: plugin.source, trust: 'configured' },
+        availability,
+        resolve: message => message.fallback ?? `[[${message.namespace ?? 'permission'}:${message.key}]]`,
+        scope: scope => Object.keys(scope).length === 0 ? 'Host default scope' : JSON.stringify(scope),
+        requestSource: plugin.source,
+      }),
+    })
+    return result.status === 'confirmed' ? result.decision : undefined
+  } finally {
+    dialog.dispose()
+  }
+}
+
 function hasCapabilityScope(scope: CordisXCapabilityScope): boolean {
   return Object.values(scope).some(value => Array.isArray(value) && value.length > 0)
 }
@@ -1723,15 +1782,24 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const authorizeAndRestore = async (plugin: ManagerPluginSnapshot): Promise<void> => {
+    const createPlanV2 = model.permissionAuthorizationPlanV2
+    const authorizeV2 = model.authorizePluginV2
+    const permissions = model.snapshot().permissions.filter(item => (
+      item.identity.source === plugin.source && item.identity.id === plugin.id
+    ))
+    const planV2 = createPlanV2?.(plugin.id)
+    if (planV2 !== undefined) {
+      if (authorizeV2 === undefined) throw new Error('插件 V2 授权服务当前不可用，未恢复插件')
+      const decision = await requestPluginAuthorizationV2(document, plugin, planV2, permissions)
+      if (decision !== undefined) await authorizeV2(plugin.id, decision)
+      return
+    }
     const createPlan = model.permissionAuthorizationPlan
     const authorize = model.authorizePlugin
     if (createPlan === undefined || authorize === undefined) {
       throw new Error('插件授权服务当前不可用，未恢复插件')
     }
     const plan = createPlan(plugin.id)
-    const permissions = model.snapshot().permissions.filter(item => (
-      item.identity.source === plugin.source && item.identity.id === plugin.id
-    ))
     const decision = await requestPluginAuthorization(document, plugin, plan, permissions)
     if (decision === undefined) return
     await authorize(plugin.id, decision)
@@ -1904,28 +1972,51 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       if (inspection.outcome !== 'planned'
         || inspection.candidateId === undefined
         || inspection.package === undefined
-        || inspection.authorizationPlan === undefined
         || (inspection.operation !== 'install' && inspection.operation !== 'update')) {
         throw new Error('本地包检查没有返回可应用的候选版本')
       }
       packageId = inspection.package.id
       lifecycleBusy.set(packageId, inspection.operation === 'install' ? 'installing' : 'updating')
       renderContent()
-      const decision = await requestPluginAuthorization(
-        document,
-        { id: inspection.package.id, name: inspection.package.name ?? inspection.package.id },
-        inspection.authorizationPlan,
-        model.snapshot().permissions.filter(item => (
-          item.identity.id === inspection.package!.id
-          && item.identity.source === inspection.authorizationPlan!.identity.source
-        )),
-      )
-      if (decision === undefined) return
-      const applied = await requestLifecycle({
-        kind: inspection.operation,
+      const planV2 = await model.permissionLifecycleReviewPlanV2?.({
+        kind: 'candidate',
         candidateId: inspection.candidateId,
-        authorizationDecision: decision,
       })
+      let applied: CordisXPluginLifecycleResultV1
+      if (planV2 !== undefined) {
+        if (model.applyPermissionLifecycleReviewV2 === undefined) throw new Error('安装权限 V2 服务不可用')
+        const decision = await requestPluginAuthorizationV2(
+          document,
+          {
+            id: inspection.package.id,
+            source: planV2.identity.source,
+            name: inspection.package.name ?? inspection.package.id,
+          },
+          planV2,
+          model.snapshot().permissions.filter(item => (
+            item.identity.id === inspection.package!.id && item.identity.source === planV2.identity.source
+          )),
+        )
+        if (decision === undefined) return
+        applied = await model.applyPermissionLifecycleReviewV2(decision)
+      } else {
+        if (inspection.authorizationPlan === undefined) throw new Error('本地包检查没有返回可应用的授权计划')
+        const decision = await requestPluginAuthorization(
+          document,
+          { id: inspection.package.id, name: inspection.package.name ?? inspection.package.id },
+          inspection.authorizationPlan,
+          model.snapshot().permissions.filter(item => (
+            item.identity.id === inspection.package!.id
+            && item.identity.source === inspection.authorizationPlan!.identity.source
+          )),
+        )
+        if (decision === undefined) return
+        applied = await requestLifecycle({
+          kind: inspection.operation,
+          candidateId: inspection.candidateId,
+          authorizationDecision: decision,
+        })
+      }
       if (applied.outcome !== 'applied') throw new Error('插件候选版本没有激活')
     } catch (error) {
       operationError = error instanceof Error ? error.message : String(error)
@@ -1961,15 +2052,30 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       if (operation === 'enable') {
         const plan = await requestLifecycle({ kind: 'enable', pluginId: plugin.id })
         if (plan.outcome === 'applied') return
-        if (plan.outcome !== 'planned' || plan.authorizationPlan === undefined) throw new Error('插件启用计划不可用')
-        const decision = await requestPluginAuthorization(
-          document,
-          plugin,
-          plan.authorizationPlan,
-          snapshot.permissions.filter(item => item.identity.id === plugin.id && item.identity.source === plugin.source),
-        )
-        if (decision === undefined) return
-        const result = await requestLifecycle({ kind: 'enable', pluginId: plugin.id, authorizationDecision: decision })
+        if (plan.outcome !== 'planned') throw new Error('插件启用计划不可用')
+        const planV2 = await model.permissionLifecycleReviewPlanV2?.({ kind: 'enable', pluginId: plugin.id })
+        let result: CordisXPluginLifecycleResultV1
+        if (planV2 !== undefined) {
+          if (model.applyPermissionLifecycleReviewV2 === undefined) throw new Error('启用权限 V2 服务不可用')
+          const decision = await requestPluginAuthorizationV2(
+            document,
+            plugin,
+            planV2,
+            snapshot.permissions.filter(item => item.identity.id === plugin.id && item.identity.source === plugin.source),
+          )
+          if (decision === undefined) return
+          result = await model.applyPermissionLifecycleReviewV2(decision)
+        } else {
+          if (plan.authorizationPlan === undefined) throw new Error('插件启用授权计划不可用')
+          const decision = await requestPluginAuthorization(
+            document,
+            plugin,
+            plan.authorizationPlan,
+            snapshot.permissions.filter(item => item.identity.id === plugin.id && item.identity.source === plugin.source),
+          )
+          if (decision === undefined) return
+          result = await requestLifecycle({ kind: 'enable', pluginId: plugin.id, authorizationDecision: decision })
+        }
         if (result.outcome !== 'applied') throw new Error('插件没有完成启用')
         return
       }

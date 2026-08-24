@@ -12,7 +12,7 @@ export interface StagePluginPackageSourceOptions extends JsonPackageManifestV2Re
 
 /**
  * Snapshot any formal explicit-local source before parsing or building it, then
- * project package-v2 into the single #73 StagedPluginPackage object store.
+ * project package-v2/v3 into the single #73 StagedPluginPackage object store.
  */
 export async function stagePluginPackageSourceV1(
   source: PluginPackageSourceV1,

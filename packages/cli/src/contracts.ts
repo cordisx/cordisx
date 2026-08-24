@@ -1,8 +1,10 @@
 import type { Context, Disposable, Effect } from '@deepseek-ai/cordis'
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
+import type { CordisXPluginManifestV4 } from './permission-contracts.js'
 import type { CordisXPluginDependencyV1 } from './plugin-lifecycle-contracts.js'
 
 export * from './platform-contracts.js'
+export * from './permission-contracts.js'
 export * from './agent-contracts.js'
 export * from './plugin-lifecycle-contracts.js'
 
@@ -831,7 +833,7 @@ declare module '@deepseek-ai/cordis' {
 /** Cordis plugin module after browser bundling. */
 export interface CordisXPluginModule {
   readonly name?: string
-  readonly manifest?: CordisXPluginManifestV1
+  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly Config?: CordisXStandardSchema
   readonly configApplies?: CordisXConfigApplies
@@ -851,7 +853,7 @@ export interface CordisXBrowserPlugin {
   readonly config: unknown
   readonly revision: number
   /** Package-authoritative manifest, used instead of executing module metadata when present. */
-  readonly manifest?: CordisXPluginManifestV1
+  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4
   /** Immutable package and module generation metadata owned by the launcher. */
   readonly package?: {
     readonly version: string

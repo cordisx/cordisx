@@ -4,6 +4,10 @@ import {
   type CordisXPluginLifecycleRequestV1,
   type CordisXPluginLifecycleResultV1,
 } from '../plugin-lifecycle-contracts.js'
+import type {
+  CordisXPermissionAuthorizationDecisionV2,
+  CordisXPermissionAuthorizationPlanV2,
+} from '../permission-contracts.js'
 
 const BINDING = '__cordisxPluginLifecycleRequestV1'
 const RECEIVER = '__cordisxPluginLifecycleReceiveV1'
@@ -17,7 +21,7 @@ declare global {
 
 export class BrowserPluginLifecycleBridge {
   private readonly pending = new Map<string, {
-    readonly resolve: (value: CordisXPluginLifecycleResultV1) => void
+    readonly resolve: (value: unknown) => void
     readonly reject: (error: Error) => void
     readonly timer: ReturnType<typeof setTimeout>
   }>()
@@ -47,14 +51,63 @@ export class BrowserPluginLifecycleBridge {
       runtimeGeneration: this.generation,
       operation,
     }
-    return new Promise((resolve, reject) => {
+    return this.send<CordisXPluginLifecycleResultV1>(requestId, { token: this.token, request })
+  }
+
+  permissionReviewPlanV2(
+    expectedRevision: number,
+    target: { readonly kind: 'candidate'; readonly candidateId: string } | { readonly kind: 'enable'; readonly pluginId: string },
+  ): Promise<CordisXPermissionAuthorizationPlanV2 | undefined> {
+    const requestId = this.requestId()
+    return this.send(requestId, {
+      token: this.token,
+      privateRequest: {
+        kind: 'permission-review-plan-v2',
+        requestId,
+        profileId: this.profileId,
+        runtimeGeneration: this.generation,
+        expectedRevision,
+        target,
+      },
+    })
+  }
+
+  applyPermissionReviewV2(
+    expectedRevision: number,
+    decision: CordisXPermissionAuthorizationDecisionV2,
+  ): Promise<CordisXPluginLifecycleResultV1> {
+    const requestId = this.requestId()
+    return this.send(requestId, {
+      token: this.token,
+      privateRequest: {
+        kind: 'permission-review-apply-v2',
+        requestId,
+        profileId: this.profileId,
+        runtimeGeneration: this.generation,
+        expectedRevision,
+        decision,
+      },
+    })
+  }
+
+  private requestId(): string {
+    return typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  }
+
+  private send<Value>(requestId: string, envelope: object): Promise<Value> {
+    if (this.disposed) return Promise.reject(new Error('plugin lifecycle bridge is disposed'))
+    const binding = window[BINDING]
+    if (typeof binding !== 'function') return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
+    return new Promise<Value>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId)
         reject(new Error('plugin lifecycle request timed out'))
       }, 60_000)
-      this.pending.set(requestId, { resolve, reject, timer })
+      this.pending.set(requestId, { resolve: value => resolve(value as Value), reject, timer })
       try {
-        binding(JSON.stringify({ token: this.token, request }))
+        binding(JSON.stringify(envelope))
       } catch (error) {
         this.pending.delete(requestId)
         clearTimeout(timer)
@@ -82,7 +135,7 @@ export class BrowserPluginLifecycleBridge {
     if (pending === undefined) return
     this.pending.delete(response.requestId)
     clearTimeout(pending.timer)
-    if (response.ok === true) pending.resolve(response.value as CordisXPluginLifecycleResultV1)
+    if (response.ok === true) pending.resolve(response.value)
     else pending.reject(new Error(typeof response.error === 'string' ? response.error : 'plugin lifecycle request failed'))
   }
 }

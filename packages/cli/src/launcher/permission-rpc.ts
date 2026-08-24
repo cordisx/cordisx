@@ -1,17 +1,23 @@
 import { timingSafeEqual } from 'node:crypto'
-import type { CordisXPermissionPolicyRecordV1, CordisXPluginIdentity } from '../platform-contracts.js'
+import type { CordisXPluginIdentity } from '../platform-contracts.js'
 import { updateHomeConfigAtomic } from '../config/home-config.js'
-import { normalizePermissionPolicyRecord, permissionRecordKey } from '../permissions.js'
+import {
+  isPermissionPolicyRecordV2,
+  normalizePersistedPermissionPolicyRecord,
+  persistedPermissionMigrationKey,
+  persistedPermissionRecordKey,
+  type CordisXPersistedPermissionPolicyRecord,
+} from '../permission-persistence.js'
 
 export const PERMISSION_BINDING = '__cordisxPermissionPolicyRequestV1'
 export const PERMISSION_RECEIVER = '__cordisxPermissionPolicyReceiveV1'
 export const MAX_PERMISSION_REQUEST_BYTES = 32 * 1024
 export const MAX_PERMISSION_REQUESTS = 4
-export const MAX_PERMISSION_POLICY_BATCH = 14
+export const MAX_PERMISSION_POLICY_BATCH = 22
 
 export interface PermissionBindingRequest {
   readonly requestId: string
-  readonly records: readonly CordisXPermissionPolicyRecordV1[]
+  readonly records: readonly CordisXPersistedPermissionPolicyRecord[]
 }
 
 export interface PermissionPersistenceContext {
@@ -79,7 +85,7 @@ export function parsePermissionBindingRequest(
   if (!Array.isArray(request.records) || request.records.length < 1 || request.records.length > MAX_PERMISSION_POLICY_BATCH) {
     throw new Error('permission request records are invalid')
   }
-  const records = request.records.map(item => normalizePermissionPolicyRecord(item))
+  const records = request.records.map(item => normalizePersistedPermissionPolicyRecord(item))
   const keys = new Set<string>()
   for (const record of records) {
     if (record.key.profileId !== context.profileId) throw new Error('permission request profile is invalid')
@@ -88,7 +94,7 @@ export function parsePermissionBindingRequest(
     )) && context.identityAllowed?.({ source: record.key.identity.source, id: record.key.identity.pluginId }) !== true) {
       throw new Error('permission request identity is invalid')
     }
-    const key = permissionRecordKey(record)
+    const key = persistedPermissionRecordKey(record)
     if (keys.has(key)) throw new Error('permission request contains a duplicate policy key')
     keys.add(key)
   }
@@ -97,19 +103,22 @@ export function parsePermissionBindingRequest(
 
 export async function persistPermissionPolicies(
   context: Pick<PermissionPersistenceContext, 'configPath'>,
-  records: readonly CordisXPermissionPolicyRecordV1[],
-): Promise<readonly CordisXPermissionPolicyRecordV1[]> {
-  const keys = new Set(records.map(permissionRecordKey))
+  records: readonly CordisXPersistedPermissionPolicyRecord[],
+): Promise<readonly CordisXPersistedPermissionPolicyRecord[]> {
+  const normalized = records.map(item => normalizePersistedPermissionPolicyRecord(item))
+  const keys = new Set(normalized.map(persistedPermissionRecordKey))
+  const migrated = new Set(normalized.filter(isPermissionPolicyRecordV2).map(persistedPermissionMigrationKey))
   const updated = await updateHomeConfigAtomic(current => ({
     ...current,
     permissions: [
-      ...current.permissions.filter(item => !keys.has(permissionRecordKey(item))),
-      ...records,
+      ...current.permissions.filter(item => !keys.has(persistedPermissionRecordKey(item))
+        && !(migrated.has(persistedPermissionMigrationKey(item)) && !isPermissionPolicyRecordV2(item))),
+      ...normalized,
     ],
   }), context.configPath)
-  const persisted = new Map(updated.permissions.map(item => [permissionRecordKey(item), item]))
-  return records.map((record) => {
-    const readback = persisted.get(permissionRecordKey(record))
+  const persisted = new Map(updated.permissions.map(item => [persistedPermissionRecordKey(item), item]))
+  return normalized.map((record) => {
+    const readback = persisted.get(persistedPermissionRecordKey(record))
     if (readback === undefined) throw new Error('permission policy persistence readback failed')
     return readback
   })

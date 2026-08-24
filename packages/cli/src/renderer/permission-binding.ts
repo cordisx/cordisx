@@ -2,7 +2,14 @@ import {
   CORDISX_PLATFORM_CAPABILITIES,
   type CordisXPermissionPolicyRecordV1,
 } from '../platform-contracts.js'
-import { normalizePermissionPolicyRecord, permissionRecordKey } from '../permissions.js'
+import type { CordisXPermissionPolicyRecordV2 } from '../permission-contracts.js'
+import {
+  isPermissionPolicyRecordV2,
+  normalizePersistedPermissionPolicyRecord,
+  persistedPermissionMigrationKey,
+  persistedPermissionRecordKey,
+  type CordisXPersistedPermissionPolicyRecord,
+} from '../permission-persistence.js'
 import type { LegacyStoredPolicy, PermissionPolicyStore } from './platform.js'
 
 const PERMISSION_BINDING = '__cordisxPermissionPolicyRequestV1'
@@ -13,7 +20,7 @@ const REQUEST_TIMEOUT_MS = 5_000
 type PermissionBinding = (payload: string) => void
 
 interface Pending {
-  readonly resolve: (records: readonly CordisXPermissionPolicyRecordV1[]) => void
+  readonly resolve: (records: readonly CordisXPersistedPermissionPolicyRecord[]) => void
   readonly reject: (error: Error) => void
   readonly timer: ReturnType<typeof setTimeout>
 }
@@ -38,24 +45,24 @@ function clone<Value>(value: Value): Value {
 /** Launcher-backed, profile-projected persistent policy store. */
 export class BindingPermissionPolicyStore implements PermissionPolicyStore {
   private readonly pending = new Map<string, Pending>()
-  private readonly records = new Map<string, CordisXPermissionPolicyRecordV1>()
+  private readonly records = new Map<string, CordisXPersistedPermissionPolicyRecord>()
   private closed = false
 
   private constructor(
     private readonly token: string,
     private readonly binding: PermissionBinding,
-    initial: readonly CordisXPermissionPolicyRecordV1[],
+    initial: readonly CordisXPersistedPermissionPolicyRecord[],
   ) {
     for (const record of initial) {
-      const normalized = normalizePermissionPolicyRecord(record)
-      this.records.set(permissionRecordKey(normalized), normalized)
+      const normalized = normalizePersistedPermissionPolicyRecord(record)
+      this.records.set(persistedPermissionRecordKey(normalized), normalized)
     }
     globalThis[PERMISSION_RECEIVER] = this.receive
   }
 
   static connect(
     token: string,
-    initial: readonly CordisXPermissionPolicyRecordV1[],
+    initial: readonly CordisXPersistedPermissionPolicyRecord[],
   ): BindingPermissionPolicyStore {
     const binding = globalThis[PERMISSION_BINDING]
     if (typeof binding !== 'function') throw new Error('Permission policy persistence bridge is unavailable')
@@ -63,19 +70,37 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
   }
 
   read(): readonly CordisXPermissionPolicyRecordV1[] {
-    return clone([...this.records.values()])
+    return clone([...this.records.values()].filter(record => !isPermissionPolicyRecordV2(record)))
+  }
+
+  readV2(): readonly CordisXPermissionPolicyRecordV2[] {
+    return clone([...this.records.values()].filter(isPermissionPolicyRecordV2))
   }
 
   async write(records: readonly CordisXPermissionPolicyRecordV1[]): Promise<void> {
-    const normalized = records.map(item => normalizePermissionPolicyRecord(item))
+    await this.writeRecords(records)
+  }
+
+  async writeV2(records: readonly CordisXPermissionPolicyRecordV2[]): Promise<void> {
+    await this.writeRecords(records)
+  }
+
+  private async writeRecords(records: readonly CordisXPersistedPermissionPolicyRecord[]): Promise<void> {
+    const normalized = records.map(item => normalizePersistedPermissionPolicyRecord(item))
     const persisted = await this.request(normalized)
     if (persisted.length !== normalized.length || persisted.some((record, index) => (
-      permissionRecordKey(record) !== permissionRecordKey(normalized[index]!)
+      persistedPermissionRecordKey(record) !== persistedPermissionRecordKey(normalized[index]!)
       || record.policy !== normalized[index]!.policy
     ))) {
       throw new Error('Permission policy persistence returned mismatched records')
     }
-    for (const record of persisted) this.records.set(permissionRecordKey(record), record)
+    const migrations = new Set(persisted.filter(isPermissionPolicyRecordV2).map(persistedPermissionMigrationKey))
+    for (const [key, record] of this.records) {
+      if (!isPermissionPolicyRecordV2(record) && migrations.has(persistedPermissionMigrationKey(record))) {
+        this.records.delete(key)
+      }
+    }
+    for (const record of persisted) this.records.set(persistedPermissionRecordKey(record), record)
   }
 
   legacy(): readonly LegacyStoredPolicy[] {
@@ -119,7 +144,9 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
     this.pending.clear()
   }
 
-  private request(records: readonly CordisXPermissionPolicyRecordV1[]): Promise<readonly CordisXPermissionPolicyRecordV1[]> {
+  private request(
+    records: readonly CordisXPersistedPermissionPolicyRecord[],
+  ): Promise<readonly CordisXPersistedPermissionPolicyRecord[]> {
     if (this.closed) return Promise.reject(new Error('Permission policy persistence bridge is closed'))
     const requestId = typeof globalThis.crypto?.randomUUID === 'function'
       ? globalThis.crypto.randomUUID()
@@ -154,7 +181,7 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
     }
     try {
       if (!Array.isArray(response.value)) throw new Error('response value must be an array')
-      pending.resolve(response.value.map(item => normalizePermissionPolicyRecord(item)))
+      pending.resolve(response.value.map(item => normalizePersistedPermissionPolicyRecord(item)))
     } catch {
       pending.reject(new Error('Permission policy persistence response was invalid'))
     }

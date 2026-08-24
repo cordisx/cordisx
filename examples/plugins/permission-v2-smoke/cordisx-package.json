@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v3.schema.json",
+  "schemaVersion": 3,
+  "id": "permission-v2-smoke",
+  "version": "1.0.0",
+  "entry": "./index.ts",
+  "canonicalSource": "https://github.com/cordisx/cordisx/tree/main/examples/plugins/permission-v2-smoke",
+  "distribution": { "mode": "explicit-local-v1", "signature": "unsupported" },
+  "compatibility": {
+    "runtimeAbi": 1,
+    "protocolSchemas": ["https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v4.schema.json"]
+  },
+  "dependencies": [],
+  "runtimeManifest": {
+    "path": "./runtime.json",
+    "schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v4.schema.json",
+    "digest": "sha256:a3baf0f70ec4aef059e9fa5b33ecfb3c52e25b61898ab69dcd6b35608baa0229"
+  }
+}

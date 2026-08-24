@@ -597,6 +597,23 @@ async function sendPluginLifecycleBindingResponse(session: CdpSession, payload: 
   })
 }
 
+/** Keep lifecycle mutations single-flight while allowing a response-triggered follow-up request. */
+export class CdpLifecycleRequestGate {
+  #active = false
+
+  async run<Value>(task: () => Promise<Value>, respond: (value: Value) => Promise<void>): Promise<void> {
+    if (this.#active) throw new Error('another plugin lifecycle request is already active')
+    this.#active = true
+    let value: Value
+    try {
+      value = await task()
+    } finally {
+      this.#active = false
+    }
+    await respond(value)
+  }
+}
+
 async function install(
   target: CdpTarget,
   source: string,
@@ -784,7 +801,7 @@ async function install(
         })()
       })
     }
-    let activeLifecycleRequests = 0
+    const lifecycleRequests = new CdpLifecycleRequestGate()
     if (lifecycle !== undefined) {
       removeLifecycleBindingListener = session.onEvent('Runtime.bindingCalled', params => {
         if (params.name !== PLUGIN_LIFECYCLE_BINDING || typeof params.payload !== 'string') return
@@ -796,14 +813,10 @@ async function install(
             const request = parsePluginLifecycleBindingRequest(JSON.parse(payload) as unknown, lifecycle.handler)
             requestId = request.requestId
             if (lifecycleController?.signal.aborted === true) throw new Error('plugin lifecycle bridge is closed')
-            if (activeLifecycleRequests >= 1) throw new Error('another plugin lifecycle request is already active')
-            activeLifecycleRequests += 1
-            try {
-              const value = await handlePluginLifecycleBindingRequest(lifecycle.handler, request)
-              await sendPluginLifecycleBindingResponse(session, { requestId, ok: true, value })
-            } finally {
-              activeLifecycleRequests -= 1
-            }
+            await lifecycleRequests.run(
+              async () => await handlePluginLifecycleBindingRequest(lifecycle.handler, request),
+              async value => await sendPluginLifecycleBindingResponse(session, { requestId, ok: true, value }),
+            )
           } catch {
             await sendPluginLifecycleBindingResponse(session, { requestId, ok: false, error: 'Plugin lifecycle request was rejected' }).catch(() => undefined)
           }

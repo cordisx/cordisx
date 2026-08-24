@@ -11,8 +11,11 @@ import {
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { CordisXPermissionPolicyRecordV1 } from '../platform-contracts.js'
-import { normalizePermissionPolicyRecord, permissionRecordKey } from '../permissions.js'
+import {
+  normalizePersistedPermissionPolicyRecord,
+  persistedPermissionRecordKey,
+  type CordisXPersistedPermissionPolicyRecord,
+} from '../permission-persistence.js'
 
 export type HomeDataMode = 'shared' | 'isolated'
 
@@ -66,7 +69,7 @@ export interface HomeConfig {
   readonly defaultApp: string
   readonly providers: readonly HomeConfigProvider[]
   readonly plugins: readonly HomeConfigPlugin[]
-  readonly permissions: readonly CordisXPermissionPolicyRecordV1[]
+  readonly permissions: readonly CordisXPersistedPermissionPolicyRecord[]
   readonly apps: Readonly<Record<string, HomeConfigApp>>
 }
 
@@ -291,8 +294,8 @@ export function parseHomeConfig(value: unknown): HomeConfig {
   if (config.permissions !== undefined && !Array.isArray(config.permissions)) throw new Error('config.permissions must be an array')
   const seenPermissions = new Set<string>()
   const permissions = (config.permissions ?? []).map((value, index) => {
-    const policy = normalizePermissionPolicyRecord(value, `config.permissions[${index}]`)
-    const key = permissionRecordKey(policy)
+    const policy = normalizePersistedPermissionPolicyRecord(value, `config.permissions[${index}]`)
+    const key = persistedPermissionRecordKey(policy)
     if (seenPermissions.has(key)) throw new Error(`duplicate permission policy key at config.permissions[${index}]`)
     seenPermissions.add(key)
     return policy

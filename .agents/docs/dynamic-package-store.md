@@ -37,9 +37,12 @@ store. Its private v3 durable envelope preserves the source runtime-manifest
 digest as provenance and separately records the digest of the normalized bytes
 persisted as the immutable runtime object. Entry validation checks the source
 digest; store readback checks the normalized-object digest. The two identities
-are never substituted for each other. The current renderer generation ABI
-consumes runtime manifest v1. Validators may inspect v2/v3 Host manifests at the
-edge, but they are not projected into the renderer loader.
+are never substituted for each other. Package-v2 remains limited to the prior
+runtime manifests. Package-v3 may reference formal manifest-v4; the Host
+revalidates its 22-capability declarations against the sensitivity catalog both
+before staging and after immutable readback, then projects the same manifest
+into the renderer generation loader. Runtime manifest v1 remains a compatibility
+input.
 
 Runtime manifest parsing rejects connection, transport, mapping, limits,
 credential, `secretRef`, `secretState`, process-lifetime, and data-directory
@@ -50,7 +53,7 @@ service plane. `none` does not synthesize an empty configuration. CLIProxy,
 Agent Trace, UI demos, and ordinary Schemastery Config remain separate renderer
 configuration planes.
 
-This v1 delivery slice makes no claim of remote signature verification,
+This delivery slice makes no claim of remote signature verification,
 Marketplace install trust, or security sandboxing.
 
 ## Host-private authority seam
