@@ -41,6 +41,7 @@ import type {
 import type { CordisXConfigFieldSnapshot, CordisXJsonValue } from '../contracts.js'
 import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
 import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
+import { HostTooltipController } from './tooltips.js'
 
 export type ManagerPluginStatus =
   | 'active' | 'blocked' | 'permission-blocked' | 'configured-disabled' | 'failed'
@@ -96,6 +97,7 @@ export interface ManagerSnapshot {
   readonly extensionPoints?: ExtensionPointRuntimeSnapshot
   readonly settingsTabs?: readonly ManagerSettingsTabSnapshot[]
   readonly pluginLifecycle?: {
+    readonly profileId: string
     readonly revision: number
     readonly runtimeGeneration: string
     readonly operationsAvailable: boolean
@@ -658,17 +660,33 @@ const MANAGER_STYLES = `
   .cxm-search:focus-visible, .cxm-source-input:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
   .cxm-plugin-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
   .cxm-plugin-row {
+    container-type: inline-size;
     display: flex;
     align-items: center;
-    gap: 4px;
     width: 100%;
     min-width: 0;
-    padding: 4px;
     border: 1px solid rgba(255, 255, 255, .075);
     border-radius: 11px;
     background: rgba(255, 255, 255, .025);
+    color: inherit;
   }
-  .cxm-plugin-row:hover { border-color: rgba(199, 204, 212, .3); background: rgba(199, 204, 212, .07); }
+  .cxm-plugin-row:hover, .cxm-plugin-row:focus-within { border-color: rgba(199, 204, 212, .3); background: rgba(199, 204, 212, .07); }
+  .cxm-plugin-primary { display: flex; align-items: center; gap: 11px; min-width: 0; flex: 1; align-self: stretch; padding: 12px; border: 0; border-radius: 10px; background: transparent; color: inherit; cursor: pointer; text-align: left; font: inherit; }
+  .cxm-plugin-primary:focus-visible { outline: 2px solid #c7ccd4; outline-offset: -3px; }
+  .cxm-plugin-actions { display: flex; align-items: center; flex: none; gap: 2px; padding: 8px 8px 8px 0; }
+  .cxm-plugin-icon-action, .cxm-plugin-menu-trigger { display: inline-grid; place-items: center; width: 30px; height: 30px; flex: none; box-sizing: border-box; border: 0; border-radius: 8px; background: transparent; color: #aeb5c3; cursor: pointer; }
+  .cxm-plugin-icon-action:hover:not(:disabled), .cxm-plugin-menu-trigger:hover { background: rgba(199, 204, 212, .12); color: #eef0f4; }
+  .cxm-plugin-icon-action:focus-visible, .cxm-plugin-menu-trigger:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 1px; }
+  .cxm-plugin-icon-action:disabled { cursor: default; opacity: .34; }
+  .cxm-plugin-icon-action .cxm-material-icon, .cxm-plugin-menu-trigger .cxm-material-icon { width: 17px; height: 17px; }
+  .cxm-plugin-menu { position: relative; }
+  .cxm-plugin-menu-popup { position: fixed; z-index: 2147483646; top: 0; left: 0; width: max-content; min-width: 160px; max-width: min(240px, calc(100vw - 32px)); padding: 5px; border: 1px solid rgba(255,255,255,.13); border-radius: 10px; background: #20242d; box-shadow: 0 14px 44px rgba(0,0,0,.45); }
+  .cxm-plugin-menu-item { display: flex; align-items: center; gap: 9px; width: 100%; border: 0; border-radius: 7px; padding: 8px 9px; background: transparent; color: #d9dde5; cursor: pointer; text-align: left; font: inherit; }
+  .cxm-plugin-menu-item:hover:not(:disabled), .cxm-plugin-menu-item:focus-visible { background: rgba(199,204,212,.11); outline: none; }
+  .cxm-plugin-menu-item:disabled { cursor: default; opacity: .42; }
+  .cxm-plugin-menu-item[data-tone="danger"] { color: #ff9da5; }
+  .cxm-plugin-menu-item .cxm-material-icon { width: 16px; height: 16px; }
+  .cxm-plugin-menu-responsive { display: none; }
   .cxm-plugin-icon {
     display: grid;
     place-items: center;
@@ -690,14 +708,22 @@ const MANAGER_STYLES = `
   .cxm-status-dot[data-status="active"], .cxm-status-dot[data-status="loaded"] { background: #4ade80; }
   .cxm-status-dot[data-status="failed"] { background: #fb7185; }
   .cxm-status-dot[data-status="blocked"], .cxm-status-dot[data-status="loading"] { background: #fbbf24; }
-  .cxm-plugin-open { display: flex; align-items: center; gap: 11px; min-width: 0; flex: 1; padding: 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; text-align: left; }
-  .cxm-plugin-actions { display: flex; align-items: center; flex: none; gap: 2px; padding-right: 2px; }
-  .cxm-plugin-action { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #9fa8b8; cursor: pointer; }
-  .cxm-plugin-action:hover:not(:disabled), .cxm-plugin-action[aria-expanded="true"] { background: rgba(199, 204, 212, .14); color: #eef0f3; }
-  .cxm-plugin-action:disabled { cursor: not-allowed; opacity: .4; }
-  .cxm-plugin-action-icon { width: 16px; height: 16px; }
-  .cxm-plugin-overflow-menu { position: fixed; z-index: 2147483646; display: grid; min-width: 176px; padding: 4px; border: 1px solid rgba(255,255,255,.16); border-radius: 9px; background: #20242d; box-shadow: 0 14px 40px rgba(0,0,0,.42); }
-  .cxm-plugin-menu-item { min-height: 30px; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: #7d8798; text-align: left; font: 11px/1.3 system-ui,sans-serif; }
+  .cxm-status-dot[data-status="installing"], .cxm-status-dot[data-status="updating"], .cxm-status-dot[data-status="enabling"], .cxm-status-dot[data-status="disabling"], .cxm-status-dot[data-status="reloading"], .cxm-status-dot[data-status="uninstalling"], .cxm-status-dot[data-status="rolling-back"] { background: #60a5fa; }
+  .cxm-status-dot[data-status="rollback-failed"] { background: #fb7185; }
+  .cxm-lifecycle-overlay { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / 58%); }
+  .cxm-lifecycle-dialog { width: min(520px, 100%); max-height: min(700px, calc(100vh - 48px)); overflow: auto; box-sizing: border-box; border: 1px solid #3b4048; border-radius: 14px; padding: 20px; background: #20242b; color: #edf0f4; box-shadow: 0 24px 80px rgb(0 0 0 / 45%); }
+  .cxm-lifecycle-dialog h2 { margin: 0; font-size: 18px; }
+  .cxm-lifecycle-dialog p { color: #bfc5ce; line-height: 1.5; }
+  .cxm-lifecycle-impact { margin: 12px 0; padding: 10px 12px; border-radius: 9px; background: rgba(255,255,255,.05); color: #d7dbe3; }
+  .cxm-lifecycle-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  @container (max-width: 470px) {
+    .cxm-plugin-icon-action[data-action-priority="3"] { display: none; }
+    .cxm-plugin-menu-responsive[data-action-priority="3"] { display: flex; }
+  }
+  @container (max-width: 390px) {
+    .cxm-plugin-icon-action[data-action-priority="2"] { display: none; }
+    .cxm-plugin-menu-responsive[data-action-priority="2"] { display: flex; }
+  }
   .cxm-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   .cxm-detail-id { color: #747f91; font: 10px/1.3 ui-monospace, monospace; }
   .cxm-detail-description { max-width: 680px; margin: 14px 0 0; color: #a7afbe; font-size: 12px; }
@@ -950,7 +976,7 @@ export async function requestPluginAuthorization(
       .cxm-authorization-actions button:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
     `
     const dialog = create(document, 'div', 'cxm-authorization-dialog')
-    const operationLabel = plan.operation === 'install' ? '安装' : '启用'
+    const operationLabel = plan.operation === 'install' ? '安装' : plan.operation === 'update' ? '更新' : '启用'
     const title = create(document, 'h2', undefined, `${operationLabel}授权`)
     title.id = titleId
     dialog.append(title, create(document, 'p', undefined, `${plugin.name} 声明了以下宿主能力。持久授权是默认主操作。`))
@@ -1090,11 +1116,11 @@ function statusLabel(status: ManagerPluginStatus): string {
   if (status === 'installing') return '安装中'
   if (status === 'updating') return '更新中'
   if (status === 'enabling') return '启用中'
-  if (status === 'disabling') return '停用中'
+  if (status === 'disabling') return '禁用中'
   if (status === 'reloading') return '重载中'
   if (status === 'uninstalling') return '卸载中'
-  if (status === 'rolling-back') return '正在回滚'
-  if (status === 'rollback-failed') return '回滚失败'
+  if (status === 'rolling-back') return '正在恢复'
+  if (status === 'rollback-failed') return '恢复失败'
   return '配置禁用'
 }
 
@@ -1343,16 +1369,11 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     safeStorage(document.defaultView),
     marketplaceFetcher.fetcher,
   )
+  const tooltips = new HostTooltipController(document)
   let pluginQuery = ''
   let marketplaceQuery = ''
   let extensionPointQuery = ''
   let routeQuery = ''
-  const favoritePluginIds = (() => {
-    try {
-      const stored = JSON.parse(safeStorage(document.defaultView)?.getItem('cordisx.manager.favoritePlugins.v1') ?? '[]')
-      return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : [])
-    } catch { return new Set<string>() }
-  })()
   let settingsRoot: HTMLDivElement | undefined
   let settingsPanel: HTMLDivElement | undefined
   let settingsPanelBody: HTMLDivElement | undefined
@@ -1366,8 +1387,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let operationError: string | undefined
   let sourceOperationError: string | undefined
   let sourcesBusy = false
+  const lifecycleBusy = new Map<string, ManagerPluginStatus>()
+  let lifecycleInstallBusy = false
   const configRendererMounts = new Set<ConfigRendererMountHandle>()
   let breadcrumbCleanup = (): void => {}
+  let closePluginActionMenu = (_restoreFocus = false): void => {}
+  let pendingPluginMenuFocus: string | undefined
 
   const disposeConfigRenderers = (): void => {
     for (const mount of configRendererMounts) void mount.dispose()
@@ -1389,87 +1414,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     await authorize(plugin.id, decision)
   }
 
-  /**
-   * Dynamic package actions are deliberately gated on both the renderer bridge
-   * and a launcher-owned package identity. Configured bundle entries keep the
-   * older block/restore path: they are not package-store operations.
-   */
-  const lifecycleAvailableFor = (snapshot: ManagerSnapshot, plugin: ManagerPluginSnapshot): boolean => (
-    snapshot.pluginLifecycle?.operationsAvailable === true
-    && plugin.package !== undefined
-    && model.requestPluginLifecycle !== undefined
-  )
-
-  const applyLifecycleResult = (result: CordisXPluginLifecycleResultV1): boolean => {
-    if (result.outcome === 'applied') return true
-    operationError = result.error?.message
-      ?? (result.outcome === 'rolled-back' ? '操作未完成，已恢复到上一个可用版本。' : '插件生命周期操作未完成。')
-    return false
-  }
-
-  const requestLifecycleReload = async (plugin: ManagerPluginSnapshot): Promise<void> => {
-    if (model.requestPluginLifecycle === undefined) return
-    busyPluginId = plugin.id
-    operationError = undefined
-    try {
-      applyLifecycleResult(await model.requestPluginLifecycle({ kind: 'reload', pluginId: plugin.id }))
-    } catch (error) {
-      operationError = error instanceof Error ? error.message : String(error)
-    } finally {
-      busyPluginId = undefined
-      renderContent()
-    }
-  }
-
-  const requestLifecycleEnable = async (plugin: ManagerPluginSnapshot): Promise<void> => {
-    if (model.requestPluginLifecycle === undefined) return
-    busyPluginId = plugin.id
-    operationError = undefined
-    try {
-      const planned = await model.requestPluginLifecycle({ kind: 'enable', pluginId: plugin.id })
-      if (planned.outcome !== 'planned' || planned.authorizationPlan === undefined) {
-        applyLifecycleResult(planned)
-        return
-      }
-      const permissions = model.snapshot().permissions.filter(item => item.identity.id === plugin.id)
-      const decision = await requestPluginAuthorization(document, plugin, planned.authorizationPlan, permissions)
-      if (decision === undefined) return
-      applyLifecycleResult(await model.requestPluginLifecycle({ kind: 'enable', pluginId: plugin.id, authorizationDecision: decision }))
-    } catch (error) {
-      operationError = error instanceof Error ? error.message : String(error)
-    } finally {
-      busyPluginId = undefined
-      renderContent()
-    }
-  }
-
-  const requestLifecycleDestructive = async (plugin: ManagerPluginSnapshot, kind: 'disable' | 'uninstall'): Promise<void> => {
-    if (model.requestPluginLifecycle === undefined) return
-    busyPluginId = plugin.id
-    operationError = undefined
-    try {
-      // The broker intentionally turns a non-matching token into a read-only
-      // impact plan. It prevents a destructive operation before the user has
-      // seen the reverse-dependency closure.
-      const planned = await model.requestPluginLifecycle({ kind, pluginId: plugin.id, impactToken: 'unconfirmed' })
-      if (planned.outcome !== 'planned' || planned.impactToken === undefined) {
-        applyLifecycleResult(planned)
-        return
-      }
-      const affected = planned.affectedPluginIds.join('、') || plugin.name
-      const confirmed = document.defaultView?.confirm(
-        `${kind === 'uninstall' ? '卸载' : '停用'} ${plugin.name}？\n\n受影响的插件：${affected}\n\n将依次停止接入、排空、释放资源并等待租约回收。`,
-      ) === true
-      if (!confirmed) return
-      applyLifecycleResult(await model.requestPluginLifecycle({ kind, pluginId: plugin.id, impactToken: planned.impactToken }))
-    } catch (error) {
-      operationError = error instanceof Error ? error.message : String(error)
-    } finally {
-      busyPluginId = undefined
-      renderContent()
-    }
-  }
-
   const hideForExternalNavigation = (): void => {
     settingsMount?.abort()
     if (settingsMount !== undefined || settingsMountId !== undefined) void resetSettings().catch(() => {})
@@ -1483,6 +1427,255 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     link.rel = 'noopener noreferrer'
     link.addEventListener('click', hideForExternalNavigation)
     return link
+  }
+
+  const favoriteStorageKey = (snapshot: ManagerSnapshot): string => (
+    `cordisx.manager.favoritePlugins.v1:${snapshot.pluginLifecycle?.profileId ?? 'development'}`
+  )
+
+  const favoritePlugins = (snapshot: ManagerSnapshot): Set<string> => {
+    try {
+      const value = safeStorage(document.defaultView)?.getItem(favoriteStorageKey(snapshot))
+      if (value === null || value === undefined) return new Set()
+      const parsed = JSON.parse(value) as unknown
+      return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [])
+    } catch {
+      return new Set()
+    }
+  }
+
+  const setFavorite = (snapshot: ManagerSnapshot, pluginId: string, favorite: boolean): void => {
+    const next = favoritePlugins(snapshot)
+    if (favorite) next.add(pluginId)
+    else next.delete(pluginId)
+    try { safeStorage(document.defaultView)?.setItem(favoriteStorageKey(snapshot), JSON.stringify([...next].sort())) } catch {}
+  }
+
+  const requestLifecycleConfirmation = (
+    title: string,
+    description: string,
+    affectedPluginIds: readonly string[],
+    confirmLabel: string,
+    danger = false,
+  ): Promise<boolean> => new Promise(resolve => {
+    const overlay = create(document, 'div', 'cxm-lifecycle-overlay')
+    overlay.setAttribute('role', 'dialog')
+    overlay.setAttribute('aria-modal', 'true')
+    const panel = create(document, 'div', 'cxm-lifecycle-dialog')
+    const heading = create(document, 'h2', undefined, title)
+    panel.append(heading, create(document, 'p', undefined, description))
+    if (affectedPluginIds.length > 0) {
+      panel.append(create(document, 'div', 'cxm-lifecycle-impact', `影响插件：${affectedPluginIds.join('、')}`))
+    }
+    const actions = create(document, 'div', 'cxm-lifecycle-actions')
+    const finish = (confirmed: boolean): void => {
+      overlay.remove()
+      resolve(confirmed)
+    }
+    const cancel = create(document, 'button', 'cxm-action', '取消')
+    cancel.type = 'button'
+    cancel.addEventListener('click', () => finish(false), { once: true })
+    const confirm = create(document, 'button', 'cxm-action', confirmLabel)
+    confirm.type = 'button'
+    if (danger) confirm.dataset.tone = 'danger'
+    confirm.addEventListener('click', () => finish(true), { once: true })
+    overlay.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      finish(false)
+    })
+    actions.append(cancel, confirm)
+    panel.append(actions)
+    overlay.append(panel)
+    document.body.append(overlay)
+    cancel.focus()
+  })
+
+  const requestLocalPackageDirectory = (): Promise<string | undefined> => new Promise(resolve => {
+    const overlay = create(document, 'div', 'cxm-lifecycle-overlay')
+    overlay.setAttribute('role', 'dialog')
+    overlay.setAttribute('aria-modal', 'true')
+    const panel = create(document, 'div', 'cxm-lifecycle-dialog')
+    panel.append(
+      create(document, 'h2', undefined, '安装本地插件'),
+      create(document, 'p', undefined, '选择显式本地包目录。当前版本不下载远程包，也不宣称签名验证或安全沙箱。'),
+    )
+    const input = create(document, 'input', 'cxm-source-input')
+    input.type = 'text'
+    input.placeholder = '/absolute/path/to/plugin'
+    input.setAttribute('aria-label', '本地插件包绝对路径')
+    panel.append(input)
+    const actions = create(document, 'div', 'cxm-lifecycle-actions')
+    const finish = (value?: string): void => {
+      overlay.remove()
+      resolve(value)
+    }
+    const cancel = create(document, 'button', 'cxm-action', '取消')
+    cancel.type = 'button'
+    cancel.addEventListener('click', () => finish(), { once: true })
+    const inspect = create(document, 'button', 'cxm-action', '检查并继续')
+    inspect.type = 'button'
+    inspect.addEventListener('click', () => {
+      const value = input.value.trim()
+      if (value === '') {
+        input.setCustomValidity('请输入本地包绝对路径')
+        input.reportValidity()
+        return
+      }
+      finish(value)
+    })
+    input.addEventListener('input', () => input.setCustomValidity(''))
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') inspect.click()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        finish()
+      }
+    })
+    actions.append(cancel, inspect)
+    panel.append(actions)
+    overlay.append(panel)
+    document.body.append(overlay)
+    input.focus()
+  })
+
+  const lifecycleFailure = (result: CordisXPluginLifecycleResultV1): Error | undefined => {
+    if (result.outcome === 'applied' || result.outcome === 'planned') return undefined
+    return new Error(result.error?.message ?? `插件操作未完成：${result.outcome}`)
+  }
+
+  const requestLifecycle = async (
+    operation: CordisXPluginLifecycleOperationV1,
+  ): Promise<CordisXPluginLifecycleResultV1> => {
+    if (model.requestPluginLifecycle === undefined) throw new Error('当前 launcher 未提供插件生命周期服务')
+    const result = await model.requestPluginLifecycle(operation)
+    const failure = lifecycleFailure(result)
+    if (failure !== undefined) throw failure
+    return result
+  }
+
+  const runLocalPackageInstall = async (): Promise<void> => {
+    const sourceDirectory = await requestLocalPackageDirectory()
+    if (sourceDirectory === undefined) return
+    lifecycleInstallBusy = true
+    operationError = undefined
+    renderContent()
+    let packageId: string | undefined
+    try {
+      const inspection = await requestLifecycle({ kind: 'inspect-local', sourceDirectory })
+      if (inspection.outcome !== 'planned'
+        || inspection.candidateId === undefined
+        || inspection.package === undefined
+        || inspection.authorizationPlan === undefined
+        || (inspection.operation !== 'install' && inspection.operation !== 'update')) {
+        throw new Error('本地包检查没有返回可应用的候选版本')
+      }
+      packageId = inspection.package.id
+      lifecycleBusy.set(packageId, inspection.operation === 'install' ? 'installing' : 'updating')
+      renderContent()
+      const decision = await requestPluginAuthorization(
+        document,
+        { id: inspection.package.id, name: inspection.package.name ?? inspection.package.id },
+        inspection.authorizationPlan,
+        model.snapshot().permissions.filter(item => (
+          item.identity.id === inspection.package!.id
+          && item.identity.source === inspection.authorizationPlan!.identity.source
+        )),
+      )
+      if (decision === undefined) return
+      const applied = await requestLifecycle({
+        kind: inspection.operation,
+        candidateId: inspection.candidateId,
+        authorizationDecision: decision,
+      })
+      if (applied.outcome !== 'applied') throw new Error('插件候选版本没有激活')
+    } catch (error) {
+      operationError = error instanceof Error ? error.message : String(error)
+    } finally {
+      lifecycleInstallBusy = false
+      if (packageId !== undefined) lifecycleBusy.delete(packageId)
+      renderContent()
+    }
+  }
+
+  const runPluginLifecycle = async (
+    snapshot: ManagerSnapshot,
+    plugin: ManagerPluginSnapshot,
+    operation: 'enable' | 'disable' | 'reload' | 'uninstall',
+    restoreMenuFocus = false,
+  ): Promise<void> => {
+    const busyStatus: Readonly<Record<typeof operation, ManagerPluginStatus>> = {
+      enable: 'enabling',
+      disable: 'disabling',
+      reload: 'reloading',
+      uninstall: 'uninstalling',
+    }
+    lifecycleBusy.set(plugin.id, busyStatus[operation])
+    operationError = undefined
+    if (restoreMenuFocus) pendingPluginMenuFocus = plugin.id
+    renderContent()
+    try {
+      if (operation === 'reload') {
+        const result = await requestLifecycle({ kind: 'reload', pluginId: plugin.id })
+        if (result.outcome !== 'applied') throw new Error('插件没有完成重载')
+        return
+      }
+      if (operation === 'enable') {
+        const plan = await requestLifecycle({ kind: 'enable', pluginId: plugin.id })
+        if (plan.outcome === 'applied') return
+        if (plan.outcome !== 'planned' || plan.authorizationPlan === undefined) throw new Error('插件启用计划不可用')
+        const decision = await requestPluginAuthorization(
+          document,
+          plugin,
+          plan.authorizationPlan,
+          snapshot.permissions.filter(item => item.identity.id === plugin.id && item.identity.source === plugin.source),
+        )
+        if (decision === undefined) return
+        const result = await requestLifecycle({ kind: 'enable', pluginId: plugin.id, authorizationDecision: decision })
+        if (result.outcome !== 'applied') throw new Error('插件没有完成启用')
+        return
+      }
+      const planned = await requestLifecycle({ kind: operation, pluginId: plugin.id, impactToken: '' })
+      if (planned.outcome !== 'planned' || planned.impactToken === undefined) throw new Error('插件影响计划不可用')
+      const confirmed = await requestLifecycleConfirmation(
+        operation === 'uninstall' ? `卸载 ${plugin.name}` : `禁用 ${plugin.name}`,
+        operation === 'uninstall'
+          ? '卸载会停止新调用，清理目标及其依赖闭包拥有的服务、页面、路由、命令、界面和订阅，并删除激活记录；包文件会延迟回收。'
+          : '禁用会停止目标插件及依赖它的插件，但不会删除已安装包。',
+        planned.affectedPluginIds,
+        operation === 'uninstall' ? '确认卸载' : '确认禁用',
+        operation === 'uninstall',
+      )
+      if (!confirmed) return
+      const result = await requestLifecycle({ kind: operation, pluginId: plugin.id, impactToken: planned.impactToken })
+      if (result.outcome !== 'applied') throw new Error(`插件没有完成${operation === 'uninstall' ? '卸载' : '禁用'}`)
+    } catch (error) {
+      operationError = error instanceof Error ? error.message : String(error)
+    } finally {
+      lifecycleBusy.delete(plugin.id)
+      if (restoreMenuFocus) pendingPluginMenuFocus = plugin.id
+      renderContent()
+    }
+  }
+
+  const sharePlugin = async (plugin: ManagerPluginSnapshot): Promise<void> => {
+    const url = plugin.package?.canonicalSource
+    if (url === undefined) return
+    const navigator = document.defaultView?.navigator as Navigator & {
+      share?: (data: ShareData) => Promise<void>
+      clipboard?: { writeText(value: string): Promise<void> }
+    }
+    if (typeof navigator?.share === 'function') {
+      await navigator.share({ title: plugin.name, url })
+      return
+    }
+    if (typeof navigator?.clipboard?.writeText === 'function') {
+      await navigator.clipboard.writeText(url)
+      return
+    }
+    document.defaultView?.prompt('复制插件公开来源地址', url)
   }
 
   const activePrimary = (route: ManagerRouteState = routeState): ManagerTab => {
@@ -1767,13 +1960,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     clear.addEventListener('click', () => update(''))
     root.append(input, clear)
     return root
-  }
-
-  const toggleFavoritePlugin = (id: string): void => {
-    if (favoritePluginIds.has(id)) favoritePluginIds.delete(id)
-    else favoritePluginIds.add(id)
-    try { safeStorage(document.defaultView)?.setItem('cordisx.manager.favoritePlugins.v1', JSON.stringify([...favoritePluginIds].sort())) } catch {}
-    renderContent()
   }
 
   const setHeading = (
@@ -2101,15 +2287,31 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderPluginList = (snapshot: ManagerSnapshot): void => {
-    setHeading('搜索当前 bundle 中的插件；选择一项进入二级详情', snapshot, { icon: 'plugins' })
+    setHeading('管理当前 profile 的插件；选择卡片主体进入详情', snapshot, { icon: 'plugins' })
     const toolbar = create(document, 'div', 'cxm-toolbar')
     const search = createListSearch('plugins', '搜索 CordisX 插件', '搜索插件、扩展点或 contribution id…', pluginQuery, value => { pluginQuery = value })
+    const install = create(document, 'button', 'cxm-action', lifecycleInstallBusy ? '检查本地包中…' : '安装本地插件')
+    install.type = 'button'
+    install.dataset.installLocalPlugin = 'true'
+    install.disabled = lifecycleInstallBusy
+      || lifecycleBusy.size > 0
+      || snapshot.pluginLifecycle?.operationsAvailable !== true
+      || model.requestPluginLifecycle === undefined
+    install.addEventListener('click', () => { void runLocalPackageInstall() })
+
+    const favorites = favoritePlugins(snapshot)
     const filtered = snapshot.plugins.filter((plugin) => {
       const registrations = snapshot.registrations.filter(item => item.owner === plugin.id)
-      return matchesManagerSearch(pluginQuery, [plugin.id, plugin.name, plugin.source, ...plugin.inject, ...registrations.flatMap(item => [item.surface, item.id])])
-    }).sort((left, right) => Number(favoritePluginIds.has(right.id)) - Number(favoritePluginIds.has(left.id)))
-    toolbar.append(search)
+      return matchesManagerSearch(pluginQuery, [
+        plugin.id,
+        plugin.name,
+        ...plugin.inject,
+        ...registrations.flatMap(item => [item.surface, item.id]),
+      ])
+    }).sort((left, right) => Number(favorites.has(right.id)) - Number(favorites.has(left.id)))
+    toolbar.append(search, install)
     content.append(toolbar)
+    if (operationError !== undefined) content.append(create(document, 'div', 'cxm-error', operationError))
 
     const list = create(document, 'div', 'cxm-plugin-list')
     list.setAttribute('role', 'list')
@@ -2118,21 +2320,24 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     for (const plugin of filtered) {
       const row = create(document, 'div', 'cxm-plugin-row')
       row.setAttribute('role', 'listitem')
-      const open = create(document, 'button', 'cxm-plugin-open')
-      open.type = 'button'
-      open.dataset.pluginId = plugin.id
-      open.setAttribute('aria-label', `查看${plugin.name}详情`)
-      open.append(createPluginIcon(document, plugin.name))
+      row.dataset.pluginCard = plugin.id
+      const primary = create(document, 'button', 'cxm-plugin-primary')
+      primary.type = 'button'
+      primary.dataset.pluginId = plugin.id
+      primary.dataset.pluginPrimary = plugin.id
+      primary.setAttribute('aria-label', `打开 ${plugin.name} 详情`)
+      primary.append(createPluginIcon(document, plugin.name))
       const body = create(document, 'span', 'cxm-plugin-body')
       body.append(create(document, 'span', 'cxm-plugin-name', plugin.name))
       const meta = create(document, 'span', 'cxm-plugin-meta')
       const dot = create(document, 'span', 'cxm-status-dot')
       markDecorative(dot)
-      dot.dataset.status = plugin.status
-      meta.append(dot, create(document, 'span', undefined, statusLabel(plugin.status)), create(document, 'span', undefined, plugin.id))
+      const status = lifecycleBusy.get(plugin.id) ?? plugin.status
+      dot.dataset.status = status
+      meta.append(dot, create(document, 'span', undefined, statusLabel(status)), create(document, 'span', undefined, plugin.id))
       body.append(meta)
-      open.append(body)
-      activateManagerListRow(open, () => {
+      primary.append(body)
+      activateManagerListRow(primary, () => {
         rememberListScroll()
         operationError = undefined
         void navigateRoute({ kind: 'plugin', pluginId: plugin.id, facet: 'readme' })
@@ -2140,78 +2345,179 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const actions = create(document, 'div', 'cxm-plugin-actions')
       actions.setAttribute('role', 'group')
       actions.setAttribute('aria-label', `${plugin.name}的快速操作`)
-      const action = (id: string, label: string, icon: ManagerIconToken, disabled: boolean, handler?: () => void): HTMLButtonElement => {
-        const button = create(document, 'button', 'cxm-plugin-action')
-        button.type = 'button'; button.dataset.pluginAction = id; button.dataset.pluginActionPlugin = plugin.id
-        button.setAttribute('aria-label', label); button.disabled = disabled; button.title = label
-        button.append(createManagerIcon(document, icon, 'cxm-plugin-action-icon'))
-        button.addEventListener('click', event => { event.stopPropagation(); handler?.() })
+      actions.dataset.cordisxNoDrag = 'true'
+      const managed = plugin.package !== undefined
+        && snapshot.pluginLifecycle?.operationsAvailable === true
+        && model.requestPluginLifecycle !== undefined
+      const globallyBusy = lifecycleInstallBusy || lifecycleBusy.size > 0
+      const attachActionTooltip = (button: HTMLElement, label: string): void => {
+        tooltips.attach(button, () => label, 'top')
+      }
+      const iconAction = (
+        action: string,
+        icon: ManagerIconToken,
+        label: string,
+        priority: 1 | 2 | 3,
+        disabled: boolean,
+        invoke: () => void,
+      ): HTMLButtonElement => {
+        const button = create(document, 'button', 'cxm-plugin-icon-action')
+        button.type = 'button'
+        button.dataset.pluginAction = action
+        button.dataset.actionPriority = String(priority)
+        button.dataset.cordisxNoDrag = 'true'
+        button.setAttribute('aria-label', label)
+        button.disabled = disabled
+        button.append(createManagerIcon(document, icon))
+        button.addEventListener('click', invoke)
+        attachActionTooltip(button, label)
         return button
       }
-      const lifecycleAvailable = lifecycleAvailableFor(snapshot, plugin)
-      const lifecycleBusy = busyPluginId === plugin.id
-      const profile = action(
-        'enable-disable',
-        plugin.status === 'active' ? '停用此 profile 中的插件' : '启用此 profile 中的插件',
-        plugin.status === 'active' ? 'close' : 'plugins',
-        plugin.status === 'configured-disabled' || lifecycleBusy,
+      const enable = plugin.status === 'configured-disabled'
+      const toggleLabel = enable ? '启用插件' : '禁用插件'
+      const toggleDisabled = !managed || globallyBusy || (plugin.status !== 'active' && !enable)
+      actions.append(iconAction(
+        enable ? 'enable' : 'disable',
+        enable ? 'enable-plugin' : 'disable-plugin',
+        managed ? toggleLabel : '启动配置插件需由 launcher 配置管理',
+        1,
+        toggleDisabled,
+        () => { void runPluginLifecycle(snapshot, plugin, enable ? 'enable' : 'disable') },
+      ))
+      actions.append(iconAction(
+        'reload', 'reload-plugin', managed ? '重载插件' : '该插件不属于动态 package generation', 3,
+        !managed || globallyBusy || plugin.status !== 'active',
+        () => { void runPluginLifecycle(snapshot, plugin, 'reload') },
+      ))
+      const favorite = favorites.has(plugin.id)
+      const favoriteAction = iconAction(
+        'favorite', favorite ? 'favorite-active' : 'favorite', favorite ? '取消收藏' : '收藏插件', 2, false,
         () => {
-          if (lifecycleAvailable) {
-            if (plugin.status === 'active') void requestLifecycleDestructive(plugin, 'disable')
-            else void requestLifecycleEnable(plugin)
-          } else if (plugin.status === 'active') void model.setPluginBlocked(plugin.id, true).finally(renderContent)
-          else void authorizeAndRestore(plugin).finally(renderContent)
+          setFavorite(snapshot, plugin.id, !favorite)
+          renderContent()
         },
       )
-      const reload = action(
-        'reload',
-        lifecycleAvailable && plugin.status === 'active'
-          ? '重新加载插件'
-          : '重载仅适用于可用的 generation lifecycle 插件。',
-        'runtime',
-        !lifecycleAvailable || plugin.status !== 'active' || lifecycleBusy,
-        () => { void requestLifecycleReload(plugin) },
-      )
-      const favorite = action('favorite', favoritePluginIds.has(plugin.id) ? '取消收藏插件' : '收藏插件', 'favorite', false, () => toggleFavoritePlugin(plugin.id))
-      favorite.setAttribute('aria-pressed', String(favoritePluginIds.has(plugin.id)))
-      const more = action('more', '更多插件操作', 'more', false, () => {
-        const prior = document.querySelector('[data-plugin-overflow-menu]')
-        prior?.remove()
-        const menu = create(document, 'div', 'cxm-plugin-overflow-menu')
-        menu.dataset.pluginOverflowMenu = plugin.id; menu.setAttribute('role', 'menu'); menu.tabIndex = -1
-        const closeMenu = (): void => {
-          menu.remove()
-          more.setAttribute('aria-expanded', 'false')
-          more.focus()
+      favoriteAction.setAttribute('aria-pressed', String(favorite))
+      actions.append(favoriteAction)
+
+      const menu = create(document, 'div', 'cxm-plugin-menu')
+      menu.dataset.pluginMenu = plugin.id
+      const menuTrigger = create(document, 'button', 'cxm-plugin-menu-trigger')
+      menuTrigger.type = 'button'
+      menuTrigger.dataset.cordisxNoDrag = 'true'
+      menuTrigger.setAttribute('aria-label', `更多 ${plugin.name} 操作`)
+      menuTrigger.setAttribute('aria-haspopup', 'menu')
+      menuTrigger.setAttribute('aria-expanded', 'false')
+      menuTrigger.append(createManagerIcon(document, 'more'))
+      attachActionTooltip(menuTrigger, '更多操作')
+      const popup = create(document, 'div', 'cxm-plugin-menu-popup')
+      popup.setAttribute('role', 'menu')
+      popup.hidden = true
+      const closeMenu = (restoreFocus = false): void => {
+        popup.hidden = true
+        popup.remove()
+        menuTrigger.setAttribute('aria-expanded', 'false')
+        if (closePluginActionMenu === closeMenu) closePluginActionMenu = () => {}
+        if (restoreFocus && menuTrigger.isConnected) menuTrigger.focus()
+      }
+      const openMenu = (): void => {
+        closePluginActionMenu(false)
+        tooltips.hide()
+        popup.hidden = false
+        document.body.append(popup)
+        const cardWidth = row.getBoundingClientRect().width
+        for (const item of popup.querySelectorAll<HTMLElement>('.cxm-plugin-menu-responsive')) {
+          const priority = Number(item.dataset.actionPriority)
+          item.style.display = (priority === 3 && cardWidth <= 470) || (priority === 2 && cardWidth <= 390)
+            ? 'flex'
+            : 'none'
         }
-        const menuAction = (id: 'share' | 'uninstall' | 'diagnostics-source', label: string, disabled: boolean, handler?: () => void): void => {
-          const item = create(document, 'button', 'cxm-plugin-menu-item', label)
-          item.type = 'button'; item.disabled = disabled; item.dataset.pluginMenuAction = id; item.setAttribute('role', 'menuitem')
-          item.addEventListener('click', event => { event.stopPropagation(); closeMenu(); handler?.() })
-          menu.append(item)
-        }
-        menuAction('share', '分享公开来源', plugin.package?.canonicalSource === undefined, () => {
-          const source = plugin.package?.canonicalSource
-          if (source === undefined) return
-          void document.defaultView?.navigator.clipboard?.writeText(source).catch(error => {
-            operationError = error instanceof Error ? error.message : String(error)
-            renderContent()
-          })
-        })
-        menuAction('uninstall', '卸载', !lifecycleAvailable || lifecycleBusy, () => { void requestLifecycleDestructive(plugin, 'uninstall') })
-        menuAction('diagnostics-source', '诊断与来源', true)
-        if (!lifecycleAvailable) menu.append(create(document, 'span', 'cxm-plugin-menu-item', '该插件没有可用的 generation lifecycle 包。'))
-        const bounds = more.getBoundingClientRect()
-        menu.style.left = `${Math.max(8, bounds.right - 176)}px`; menu.style.top = `${Math.max(8, bounds.bottom + 6)}px`
-        menu.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu() } })
-        more.setAttribute('aria-haspopup', 'menu'); more.setAttribute('aria-expanded', 'true')
-        ;(document.body ?? document.documentElement).append(menu); menu.focus()
+        const triggerRect = menuTrigger.getBoundingClientRect()
+        const popupRect = popup.getBoundingClientRect()
+        const viewportWidth = document.defaultView?.innerWidth ?? document.documentElement.clientWidth
+        const viewportHeight = document.defaultView?.innerHeight ?? document.documentElement.clientHeight
+        const edge = 8
+        const left = Math.min(
+          Math.max(edge, triggerRect.right - popupRect.width),
+          Math.max(edge, viewportWidth - popupRect.width - edge),
+        )
+        const below = triggerRect.bottom + 6
+        const top = below + popupRect.height <= viewportHeight - edge
+          ? below
+          : Math.max(edge, triggerRect.top - popupRect.height - 6)
+        popup.style.left = `${Math.round(left)}px`
+        popup.style.top = `${Math.round(top)}px`
+        menuTrigger.setAttribute('aria-expanded', 'true')
+        closePluginActionMenu = closeMenu
+        popup.querySelector<HTMLButtonElement>('.cxm-plugin-menu-item:not(:disabled)')?.focus()
+      }
+      menuTrigger.addEventListener('click', () => {
+        if (menuTrigger.getAttribute('aria-expanded') === 'true') closeMenu(true)
+        else openMenu()
       })
-      actions.append(profile, reload, favorite, more)
-      row.append(open, actions)
+      const menuItem = (
+        action: string,
+        icon: ManagerIconToken,
+        label: string,
+        disabled: boolean,
+        invoke: () => void,
+        options: { readonly danger?: boolean; readonly priority?: 2 | 3 } = {},
+      ): HTMLButtonElement => {
+        const button = create(document, 'button', 'cxm-plugin-menu-item')
+        button.type = 'button'
+        button.dataset.pluginMenuAction = action
+        button.dataset.cordisxNoDrag = 'true'
+        button.setAttribute('role', 'menuitem')
+        button.disabled = disabled
+        if (options.danger === true) button.dataset.tone = 'danger'
+        if (options.priority !== undefined) {
+          button.classList.add('cxm-plugin-menu-responsive')
+          button.dataset.actionPriority = String(options.priority)
+        }
+        button.append(createManagerIcon(document, icon), create(document, 'span', undefined, label))
+        button.addEventListener('click', () => {
+          closeMenu(true)
+          invoke()
+        })
+        return button
+      }
+      popup.append(
+        menuItem('reload', 'reload-plugin', '重载', !managed || globallyBusy || plugin.status !== 'active', () => {
+          void runPluginLifecycle(snapshot, plugin, 'reload', true)
+        }, { priority: 3 }),
+        menuItem('favorite', favorite ? 'favorite-active' : 'favorite', favorite ? '取消收藏' : '收藏', false, () => {
+          pendingPluginMenuFocus = plugin.id
+          setFavorite(snapshot, plugin.id, !favorite)
+          renderContent()
+        }, { priority: 2 }),
+        menuItem(
+          'share', 'share-plugin', plugin.package?.canonicalSource === undefined ? '分享（无公开来源）' : '分享',
+          plugin.package?.canonicalSource === undefined,
+          () => { void sharePlugin(plugin).catch(error => {
+            operationError = error instanceof Error ? error.message : String(error)
+            pendingPluginMenuFocus = plugin.id
+            renderContent()
+          }) },
+        ),
+        menuItem(
+          'uninstall', 'uninstall-plugin', managed ? '卸载' : '卸载（不可用）', !managed || globallyBusy,
+          () => { void runPluginLifecycle(snapshot, plugin, 'uninstall', true) }, { danger: true },
+        ),
+      )
+      menu.append(menuTrigger)
+      actions.append(menu)
+      row.append(primary, actions)
       list.append(row)
     }
     content.append(list)
+    if (pendingPluginMenuFocus !== undefined) {
+      const pluginId = pendingPluginMenuFocus
+      pendingPluginMenuFocus = undefined
+      const menu = [...content.querySelectorAll<HTMLElement>('[data-plugin-menu]')]
+        .find(item => item.dataset.pluginMenu === pluginId)
+      const target = menu?.querySelector<HTMLButtonElement>('.cxm-plugin-menu-trigger') ?? install
+      target.focus()
+    }
 
   }
 
@@ -3297,6 +3603,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   function renderContent(): void {
+    closePluginActionMenu(false)
+    tooltips.hide()
     const snapshot = model.snapshot()
     const normalized = routeState.kind === 'settings' ? routeState : normalizeRoute(snapshot)
     const normalizedRouteChanged = routeKey(normalized) !== routeKey(routeState)
@@ -3344,7 +3652,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     trigger.focus()
   }
   const onKeydown = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape' && !modal.hidden) dismiss()
+    if (event.key !== 'Escape' || modal.hidden) return
+    const menuTrigger = content.querySelector<HTMLElement>('.cxm-plugin-menu-trigger[aria-expanded="true"]')
+    if (menuTrigger !== null) {
+      event.preventDefault()
+      closePluginActionMenu(true)
+      return
+    }
+    dismiss()
   }
   trigger.addEventListener('click', open)
   close.addEventListener('click', dismiss)
@@ -3352,6 +3667,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const target = event.target instanceof document.defaultView!.Element ? event.target : undefined
     if (target?.closest('a[href]') !== null && target !== undefined) hideForExternalNavigation()
   })
+  const closeMenuOutside = (event: PointerEvent): void => {
+    const target = event.target instanceof document.defaultView!.Element ? event.target : undefined
+    if (target?.closest('.cxm-plugin-menu-popup, .cxm-plugin-menu-trigger') !== null && target !== undefined) return
+    closePluginActionMenu(false)
+  }
+  document.addEventListener('pointerdown', closeMenuOutside)
   backdrop.addEventListener('click', (event) => {
     if (event.target === backdrop) dismiss()
   })
@@ -3403,8 +3724,11 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     unsubscribeRuntime()
     unsubscribeMarketplace()
     marketplace.dispose()
+    tooltips.dispose()
     marketplaceFetcher.dispose()
     document.removeEventListener('keydown', onKeydown)
+    document.removeEventListener('pointerdown', closeMenuOutside)
+    closePluginActionMenu(false)
     trigger.removeEventListener('click', open)
     trigger.remove()
     modal.remove()

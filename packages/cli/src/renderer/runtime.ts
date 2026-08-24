@@ -510,6 +510,7 @@ async function start(
       localizationDiagnostics: i18nService?.diagnostics() ?? [],
       platform: platformAdapter.status(),
       pluginLifecycle: {
+        profileId: metadata.profileId,
         revision: currentActivation.revision,
         runtimeGeneration: generation,
         operationsAvailable: lifecycleBridge !== undefined,
