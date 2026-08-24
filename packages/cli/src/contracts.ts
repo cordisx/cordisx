@@ -114,6 +114,8 @@ export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v1.schema.json' as const
 export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v2.schema.json' as const
+export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v3.schema.json' as const
 export const CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-policy.v1.schema.json' as const
 export const CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V1 =
@@ -131,6 +133,7 @@ export type CordisXExtensionPointPayloadFamily =
   | 'menu-item'
   | 'contextual-action'
   | 'tab'
+  | 'manager-settings-tab'
   | 'presenter'
   | 'navigation-item'
   | 'environment-section'
@@ -174,6 +177,21 @@ export interface CordisXHostExtensionPointCatalogV2 {
   readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2
   readonly schemaVersion: 2
   readonly points: readonly CordisXHostExtensionPointDescriptorV2[]
+}
+
+export type CordisXPageChrome = 'standard' | 'body-only'
+
+/** Protocol-v3 descriptor additions for controlled outlet compatibility. */
+export interface CordisXHostExtensionPointDescriptorV3 extends CordisXHostExtensionPointDescriptorV2 {
+  readonly pageChrome?: readonly CordisXPageChrome[]
+  readonly presentationGroup?: string
+  readonly routePathFamily?: 'app' | 'main' | 'session' | 'manager-settings' | 'host-defined'
+}
+
+export interface CordisXHostExtensionPointCatalogV3 {
+  readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3
+  readonly schemaVersion: 3
+  readonly points: readonly CordisXHostExtensionPointDescriptorV3[]
 }
 
 /** Launcher-bound canonical tuple; plugins never provide or override source. */
@@ -338,6 +356,13 @@ export interface CordisXTabItem {
   readonly when?: CordisXWhen
 }
 
+/** Protocol-v4 manager tab header data. Envelope options own identity/order/state. */
+export interface CordisXManagerSettingsTabItem {
+  readonly title: CordisXLocalizedText
+  readonly icon: CordisXIconToken
+  readonly route: CordisXRouteReference
+}
+
 export interface CordisXPresenterItem {
   readonly kind: 'banner' | 'status' | 'chip' | 'progress'
   readonly text: CordisXLocalizedText
@@ -405,6 +430,7 @@ export interface CordisXSurfaceMap {
   'environment.section.actions': CordisXEnvironmentSectionAction
   'environment.section.rows': CordisXEnvironmentRow
   'environment.row.trailing-actions': CordisXEnvironmentRowAction
+  'manager.settings.tabs': CordisXManagerSettingsTabItem
 }
 
 export type CordisXSurfaceName = Extract<keyof CordisXSurfaceMap, string>
@@ -438,6 +464,7 @@ export const CORDISX_SURFACE_NAMES = [
   'environment.section.actions',
   'environment.section.rows',
   'environment.row.trailing-actions',
+  'manager.settings.tabs',
 ] as const satisfies readonly CordisXSurfaceName[]
 
 export const CORDISX_IMPLEMENTED_SURFACE_NAMES = [
@@ -454,6 +481,7 @@ export const CORDISX_IMPLEMENTED_SURFACE_NAMES = [
   'environment.section.actions',
   'environment.section.rows',
   'environment.row.trailing-actions',
+  'manager.settings.tabs',
 ] as const satisfies readonly CordisXSurfaceName[]
 
 export interface CordisXContributionOptions<Name extends CordisXSurfaceName = CordisXSurfaceName> {
@@ -465,11 +493,19 @@ export interface CordisXContributionOptions<Name extends CordisXSurfaceName = Co
   readonly disabled?: CordisXDisabledState
 }
 
+export interface CordisXContributionPresentationOptions {
+  readonly group?: string
+  readonly order?: number
+  readonly when?: CordisXWhen
+  readonly disabled?: CordisXDisabledState
+}
+
 /** Callable fiber-owned disposer with immutable snapshot replacement. */
 export interface CordisXContributionHandle<Item> {
   (): void
   dispose(): void
   update(snapshot: Item): void
+  updateOptions(options: CordisXContributionPresentationOptions): void
 }
 
 /** DSH-style slot service with structured data instead of a DOM component. */
@@ -537,6 +573,7 @@ export interface CordisXOutletMap {
   app: { readonly scope: 'renderer' }
   main: { readonly scope: 'main' }
   'session.content': { readonly scope: 'session' }
+  'manager.settings.content': { readonly scope: 'manager-settings' }
 }
 
 export type CordisXOutletName = Extract<keyof CordisXOutletMap, string>
@@ -560,7 +597,7 @@ export interface CordisXPageMetadata {
   readonly title: CordisXLocalizedText
   readonly icon?: CordisXIconToken
   /** Host-rendered chrome policy. Body-only remains subject to the target outlet policy. */
-  readonly chrome?: 'standard' | 'body-only'
+  readonly chrome?: CordisXPageChrome
   readonly breadcrumbs?: readonly CordisXLocalizedText[]
   readonly tabs?: readonly CordisXPageTab[]
   readonly headerActions?: readonly CordisXPageHeaderAction[]

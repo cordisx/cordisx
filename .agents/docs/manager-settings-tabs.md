@@ -47,6 +47,7 @@ ctx.routes.register({
 ctx.pages.register({
   id: 'settings.preferences',
   title: { key: 'settings.title', fallback: 'Preferences' },
+  chrome: 'body-only',
 }, ({ container, signal }) => {
   // Mount only in the CordisX-owned panel-body child.
 })

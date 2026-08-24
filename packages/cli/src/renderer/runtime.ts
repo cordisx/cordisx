@@ -2,6 +2,7 @@ import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import type {
   CordisXBrowserPlugin,
   CordisXCommandReference,
+  CordisXManagerSettingsTabItem,
   CordisXPermissionPolicy,
   CordisXPointPolicy,
   CordisXPlatformCapability,
@@ -16,10 +17,12 @@ import { CordisXAgentService, CordisXHostAgentRuntime, CordisXSystemPromptServic
 import { CordisXAgentEventService } from './agent-events.js'
 import {
   installCordisXManager,
+  CORDISX_BUILTIN_MANAGER_SETTINGS_TABS,
   type ManagerModel,
   type ManagerPluginSnapshot,
   type ManagerPluginStatus,
   type ManagerSnapshot,
+  type ManagerSettingsTabSnapshot,
 } from './manager.js'
 import { CordisXCommandService } from './commands.js'
 import { CordisXI18nService } from './i18n.js'
@@ -37,6 +40,7 @@ import type { SurfaceContributionSnapshot } from './surfaces.js'
 import {
   BrowserExtensionPointPolicyStore,
   CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
+  CORDISX_MANAGER_EXTENSION_POINT_CATALOG,
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
   buildExtensionPointRuntimeSnapshot,
@@ -188,6 +192,8 @@ async function start(
   let routeFiber: Fiber | undefined
   let slotFiber: Fiber | undefined
   let disposeManager: (() => void) | undefined
+  let undeclareManagerOutlet: (() => void) | undefined
+  let unregisterManagerPointCatalog: (() => void) | undefined
   let adapterHandle: CodexAdapterHandle | undefined
   let disposeI18nSubscription: (() => void) | undefined
   let disposePermissionSubscription: (() => void) | undefined
@@ -196,6 +202,7 @@ async function start(
   const registrySubscriptions: (() => void)[] = []
   let operation = Promise.resolve()
   let disposed = false
+  let settingsProjectionSites = new Set<string>()
 
   const notify = (): void => {
     for (const listener of listeners) listener()
@@ -248,6 +255,43 @@ async function start(
         error: item.error ?? 'owning plugin is inactive',
       })))
     const navigation = routeService?.snapshot() ?? { routes: [], pages: pageService?.snapshot() ?? [], outlets: [] }
+    const nextSettingsSites = new Set<string>()
+    const externalSettingsTabs = liveRegistrations
+      .filter(item => item.surface === 'manager.settings.tabs' && item.valid && item.visible && item.authorized && !item.pending)
+      .map((registration): ManagerSettingsTabSnapshot => {
+        const item = registration.item as CordisXManagerSettingsTabItem
+        const titleSite = `manager-settings:${registration.qualifiedId}:title`
+        nextSettingsSites.add(titleSite)
+        const disabledSite = `manager-settings:${registration.qualifiedId}:disabled`
+        if (registration.disabledReason !== undefined) nextSettingsSites.add(disabledSite)
+        return {
+          id: registration.qualifiedId,
+          owner: registration.owner,
+          title: i18nService?.resolveFor(registration.owner, item.title, titleSite).text ?? item.title.fallback ?? item.title.key,
+          icon: item.icon,
+          order: registration.order,
+          disabled: registration.disabled,
+          ...(registration.disabledReason === undefined ? {} : {
+            disabledReason: i18nService?.resolveFor(registration.owner, registration.disabledReason, disabledSite).text
+              ?? registration.disabledReason.fallback
+              ?? registration.disabledReason.key,
+          }),
+          builtin: false,
+          route: item.route,
+        }
+      })
+    for (const site of settingsProjectionSites) {
+      if (!nextSettingsSites.has(site)) {
+        const owner = site.split(':')[1]
+        if (owner !== undefined) i18nService?.clearDiagnosticSite(owner, site)
+      }
+    }
+    settingsProjectionSites = nextSettingsSites
+    const settingsTabs = [...CORDISX_BUILTIN_MANAGER_SETTINGS_TABS, ...externalSettingsTabs].sort((left, right) => (
+      left.order - right.order
+      || (left.owner < right.owner ? -1 : left.owner > right.owner ? 1 : 0)
+      || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+    ))
     return {
       version: metadata.version,
       plugins: controllers.map((controller): ManagerPluginSnapshot => ({
@@ -264,6 +308,7 @@ async function start(
       registrations: [...liveRegistrations, ...inactiveRegistrations],
       commands: commandService?.snapshot() ?? [],
       navigation,
+      settingsTabs,
       localization: i18nService?.getSnapshot() ?? { locale: 'en', direction: 'ltr', version: 0 },
       localeCatalogs: i18nService?.catalogs() ?? [],
       localizationDiagnostics: i18nService?.diagnostics() ?? [],
@@ -435,6 +480,8 @@ async function start(
     }
     adapterHandle?.dispose()
     adapterHandle = undefined
+    undeclareManagerOutlet?.()
+    undeclareManagerOutlet = undefined
     await slotFiber?.dispose()
     slotFiber = undefined
     await routeFiber?.dispose()
@@ -455,6 +502,8 @@ async function start(
     bindingPlatformAdapter?.dispose()
     bindingPlatformAdapter = undefined
     for (const remove of disposeExtensionPointCatalogs.splice(0).reverse()) await remove()
+    unregisterManagerPointCatalog?.()
+    unregisterManagerPointCatalog = undefined
     await i18nFiber?.dispose()
     i18nFiber = undefined
     listeners.clear()
@@ -463,6 +512,7 @@ async function start(
     broker.dispose()
     extensionPointBroker.dispose()
     extensionPointDescriptors.dispose()
+    settingsProjectionSites.clear()
     if (globalThis.__cordisxRuntime === handle) globalThis.__cordisxRuntime = undefined
     document.documentElement.removeAttribute('data-cordisx-ready')
   }
@@ -478,6 +528,15 @@ async function start(
       if (routeService === undefined) return Promise.reject(new Error('CordisX routes are not ready'))
       return routeService.navigateFor(owner, reference)
     },
+    mountSettingsTab: (id, panelBody) => {
+      if (routeService === undefined || slotService === undefined) return Promise.reject(new Error('CordisX manager settings are not ready'))
+      const registration = slotService.snapshot().find(item => item.surface === 'manager.settings.tabs'
+        && item.qualifiedId === id && item.valid && item.visible && item.authorized && !item.pending && !item.disabled)
+      if (registration === undefined) return Promise.reject(new Error(`manager settings tab ${id} is not activatable`))
+      const item = registration.item as CordisXManagerSettingsTabItem
+      return routeService.mountManagerSettingsFor(registration.owner, item.route, registration.qualifiedId, panelBody)
+    },
+    closeSettingsTabContent: () => routeService?.closeManagerSettings() ?? Promise.resolve(),
     setExtensionPointPolicy,
     snapshot,
     setPluginBlocked,
@@ -517,12 +576,30 @@ async function start(
     routeFiber = ctx.plugin(CordisXRouteService)
     await routeFiber
     routeService = ctx.routes as CordisXRouteService
+    unregisterManagerPointCatalog = extensionPointDescriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
+    const managerOutletController = {
+      getSnapshot: () => ({ available: true, contextKey: generation, placement: 'absolute' as const }),
+      subscribe: (_listener: () => void) => () => {},
+      show: () => {},
+      hide: () => {},
+    }
+    undeclareManagerOutlet = routeService.outlets.declare({
+      schemaVersion: 1,
+      id: 'manager.settings.content',
+      authority: 'host-adapter',
+      scope: 'manager-settings',
+      preferredPlacement: 'absolute',
+      contextPolicy: 'generation',
+      presentationGroup: 'manager.settings',
+    }, managerOutletController, path => path.startsWith('/manager/settings/') && path.length > '/manager/settings/'.length)
     slotFiber = ctx.plugin(CordisXSlotService)
     await slotFiber
     slotService = ctx.slots as CordisXSlotService
     slotService.setResolvers({
       command: (owner, reference) => commandService?.hasFor(owner, reference) ?? false,
       route: (owner, id) => routeService?.hasFor(owner, id) ?? false,
+      managerSettingsRoute: (owner, id) => routeService?.managerSettingsRouteFor(owner, id)
+        ?? { state: 'pending', detail: 'CordisX routes are not ready' },
     })
     commandService.setAccessResolver(extensionPointBroker)
     routeService.setAccessResolver(extensionPointBroker)
