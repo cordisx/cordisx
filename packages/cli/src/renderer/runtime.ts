@@ -580,6 +580,7 @@ async function start(
   let configRendererFiber: Fiber | undefined
   let disposeManager: (() => void) | undefined
   let undeclareManagerOutlet: (() => void) | undefined
+  let undeclareManagerContentOutlet: (() => void) | undefined
   let unregisterManagerPointCatalog: (() => void) | undefined
   let adapterHandle: CodexAdapterHandle | undefined
   let disposeI18nSubscription: (() => void) | undefined
@@ -1632,6 +1633,8 @@ async function start(
     configuration.dispose()
     adapterHandle?.dispose()
     adapterHandle = undefined
+    undeclareManagerContentOutlet?.()
+    undeclareManagerContentOutlet = undefined
     undeclareManagerOutlet?.()
     undeclareManagerOutlet = undefined
     await slotFiber?.dispose()
@@ -1810,6 +1813,23 @@ async function start(
       contextPolicy: 'generation',
       presentationGroup: 'manager.settings',
     }, managerOutletController, path => path.startsWith('/manager/settings/') && path.length > '/manager/settings/'.length)
+    const managerContentOutletController = {
+      getSnapshot: () => ({ available: false, contextKey: generation, placement: 'absolute' as const }),
+      subscribe: (_listener: () => void) => () => {},
+      show: () => {},
+      hide: () => {},
+    }
+    undeclareManagerContentOutlet = routeService.outlets.declare({
+      schemaVersion: 1,
+      id: 'manager.content',
+      authority: 'host-adapter',
+      scope: 'manager',
+      preferredPlacement: 'absolute',
+      contextPolicy: 'generation',
+      presentationGroup: 'manager',
+    }, managerContentOutletController, path => (
+      path.startsWith('/manager/extensions/') && path.length > '/manager/extensions/'.length
+    ))
     slotFiber = ctx.plugin(CordisXSlotService, { console: pluginConsole })
     await slotFiber
     slotService = ctx.slots as CordisXSlotService
@@ -1817,6 +1837,8 @@ async function start(
       command: (owner, reference, view) => commandService?.hasFor(owner, reference, view) ?? false,
       route: (owner, id, view) => routeService?.hasFor(owner, id, view) ?? false,
       managerSettingsRoute: (owner, id, view) => routeService?.managerSettingsRouteFor(owner, id, view)
+        ?? { state: 'pending', detail: 'CordisX routes are not ready' },
+      managerSettingsNavigationRoute: (owner, id, view) => routeService?.managerSettingsNavigationRouteFor(owner, id, view)
         ?? { state: 'pending', detail: 'CordisX routes are not ready' },
     })
     commandService.setAccessResolver(extensionPointBroker)

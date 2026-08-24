@@ -65,6 +65,7 @@ function extensionPoints(locale: 'en' | 'zh-CN', withUsage = false): ExtensionPo
         { id: 'main', placement: 'main', available: true, mounted: false, presentation: 'inactive' },
         { id: 'session.content', placement: 'session', available: true, mounted: false, presentation: 'inactive' },
         { id: 'manager.settings.content', placement: 'manager-settings', available: true, mounted: false, presentation: 'inactive' },
+        { id: 'manager.content', placement: 'manager', available: false, mounted: false, presentation: 'inactive' },
       ],
     },
     surfaceCurrentContext: [
@@ -118,7 +119,7 @@ describe('Manager extension point catalog', () => {
     try {
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="extension-points"]')!.click()
       const list = dom.window.document.querySelector<HTMLElement>('[aria-label="扩展点列表"]')!
-      expect(list.querySelectorAll('[data-extension-point-id]')).toHaveLength(35)
+      expect(list.querySelectorAll('[data-extension-point-id]')).toHaveLength(37)
       expect(list.querySelector('.cxm-kind-badge')).toBeNull()
       expect(list.querySelector('.cxm-chevron')).toBeNull()
 

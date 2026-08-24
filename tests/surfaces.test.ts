@@ -296,7 +296,7 @@ describe('SurfaceRegistry', () => {
     registry.register('demo', { name: 'manager.settings.tabs', id: 'dom' }, {
       title: { key: 'dom' }, icon: 'host:settings', route: { id: 'settings' }, html: '<b>owned</b>',
     } as never)
-    expect(registry.snapshot().find(item => item.id === 'settings')?.error).toMatch(/invalid manager settings tab route id/)
+    expect(registry.snapshot().find(item => item.id === 'settings')?.error).toMatch(/invalid manager settings content tab route id/)
     expect(registry.snapshot().find(item => item.id === 'dom')?.error).toMatch(/unknown field html/)
     expect(() => registry.register('demo', { name: 'manager.settings.tabs', id: 'dom' }, {
       title: { key: 'again' }, icon: 'host:settings', route: { id: 'settings' },

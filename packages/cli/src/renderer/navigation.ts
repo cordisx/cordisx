@@ -244,6 +244,19 @@ export interface ManagerSettingsRouteResolution {
   readonly detail?: string
 }
 
+export interface ManagerSettingsNavigationResolvedRoute {
+  readonly owner: string
+  readonly qualifiedId: string
+  readonly definition: CordisXRouteDefinition<'manager.content'>
+  readonly page: PageSnapshot
+}
+
+export interface ManagerSettingsNavigationRouteResolution {
+  readonly state: 'available' | 'pending' | 'invalid'
+  readonly detail?: string
+  readonly resolved?: ManagerSettingsNavigationResolvedRoute
+}
+
 export interface ManagedSettingsPageMount {
   readonly owner: string
   readonly contributionId: string
@@ -677,6 +690,87 @@ export class NavigationRegistry {
     return { state: 'available' }
   }
 
+  managerSettingsNavigationRoute(
+    requestingOwner: string,
+    id: string,
+    view?: PluginGenerationView,
+  ): ManagerSettingsNavigationRouteResolution {
+    const record = this.findRecord(requestingOwner, id, view)
+    if (record === undefined || record.owner !== requestingOwner) {
+      return { state: 'pending', detail: `route ${id} is not registered by plugin ${requestingOwner}` }
+    }
+    if (record.definition.outlet !== 'manager.content') {
+      return { state: 'invalid', detail: `route ${record.qualifiedId} must target manager.content` }
+    }
+    if (record.definition.path === '/manager/extensions' || record.definition.path === '/manager/extensions/'
+      || !record.definition.path.startsWith('/manager/extensions/')) {
+      return { state: 'invalid', detail: `route ${record.qualifiedId} must be strictly below /manager/extensions/` }
+    }
+    if (record.definition.page.includes(':')) {
+      return { state: 'invalid', detail: `route ${record.qualifiedId} must reference a same-owner local page` }
+    }
+    if (record.definition.schemaVersion !== 2
+      || record.definition.title === undefined
+      || record.definition.description === undefined) {
+      return { state: 'invalid', detail: `route ${record.qualifiedId} requires route-v2 title and description` }
+    }
+    const outlet = this.outlets.get('manager.content')
+    if (outlet === undefined) return { state: 'pending', detail: 'outlet manager.content is not declared by the host' }
+    if (!outlet.validatePath(record.definition.path)) {
+      return { state: 'invalid', detail: `route path ${record.definition.path} is incompatible with manager.content` }
+    }
+    const pathConflict = this.visibleRecords(view).find(candidate => (
+      candidate.qualifiedId !== record.qualifiedId
+      && candidate.definition.outlet === 'manager.content'
+      && candidate.definition.path === record.definition.path
+    ))
+    if (pathConflict !== undefined) {
+      return {
+        state: 'invalid',
+        detail: `route path ${record.definition.path} conflicts with ${pathConflict.qualifiedId}`,
+      }
+    }
+    const page = this.pages.get(record.owner, record.definition.page, view ?? record.candidateView)
+    if (page === undefined) {
+      return { state: 'pending', detail: `page ${record.definition.page} is not registered by plugin ${record.owner}` }
+    }
+    if (page.metadata.schemaVersion !== 3 || page.metadata.description === undefined) {
+      return { state: 'invalid', detail: `page ${page.qualifiedId} requires page-v3 title and description` }
+    }
+    if (page.metadata.chrome === 'body-only') {
+      return { state: 'invalid', detail: `page ${page.qualifiedId} must use standard chrome` }
+    }
+    if (page.metadata.icon === undefined) {
+      return { state: 'invalid', detail: `page ${page.qualifiedId} requires a host icon token` }
+    }
+    const values = this.contexts.getSnapshot()
+    const unknownKey = whenContextKeys(record.definition.when).find(key => !Object.hasOwn(values, key))
+    if (unknownKey !== undefined) {
+      return { state: 'invalid', detail: `when context key ${unknownKey} is not declared by the host adapter` }
+    }
+    if (!evaluateWhen(record.definition.when, values)) {
+      return { state: 'pending', detail: 'route when condition is not satisfied' }
+    }
+    const outletAccess = this.access?.decision(record.owner, 'manager.content', 'outlet', view ?? record.candidateView)
+    if (outletAccess !== undefined && !outletAccess.authorized) {
+      return { state: 'invalid', detail: outletAccess.reason ?? `extension point manager.content is denied for plugin ${record.owner}` }
+    }
+    return {
+      state: 'available',
+      resolved: {
+        owner: record.owner,
+        qualifiedId: record.qualifiedId,
+        definition: record.definition as CordisXRouteDefinition<'manager.content'>,
+        page: {
+          owner: page.owner,
+          id: page.metadata.id,
+          qualifiedId: page.qualifiedId,
+          metadata: page.metadata,
+        },
+      },
+    }
+  }
+
   mountManagerSettings(
     requestingOwner: string,
     reference: CordisXRouteReference,
@@ -1050,6 +1144,26 @@ export class NavigationRegistry {
     }
     const page = this.pages.get(record.owner, record.definition.page, view)
     if (page === undefined) return `page ${record.definition.page} is not registered by plugin ${record.owner}`
+    if (record.definition.outlet === 'manager.content') {
+      if (record.definition.path === '/manager/extensions'
+        || record.definition.path === '/manager/extensions/'
+        || !record.definition.path.startsWith('/manager/extensions/')) {
+        return `route path ${record.definition.path} must be strictly below /manager/extensions/`
+      }
+      if (record.definition.page.includes(':')) return `page ${record.definition.page} must be a same-owner local page`
+      if (record.definition.schemaVersion !== 2
+        || record.definition.title === undefined
+        || record.definition.description === undefined) {
+        return 'manager.content routes require route-v2 title and description'
+      }
+      if (page.metadata.schemaVersion !== 3 || page.metadata.description === undefined) {
+        return `page ${page.qualifiedId} requires page-v3 title and description`
+      }
+      if (page.metadata.chrome === 'body-only') {
+        return `page ${page.qualifiedId} must use standard chrome for manager.content`
+      }
+      if (page.metadata.icon === undefined) return `page ${page.qualifiedId} requires a host icon token`
+    }
     if (record.definition.outlet === 'manager.settings.content' && page.metadata.chrome !== 'body-only') {
       return `page ${page.qualifiedId} must use body-only chrome for manager.settings.content`
     }
@@ -1611,6 +1725,14 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
 
   managerSettingsRouteFor(owner: string, id: string, view?: PluginGenerationView): ManagerSettingsRouteResolution {
     return this.registry.managerSettingsRoute(owner, id, view)
+  }
+
+  managerSettingsNavigationRouteFor(
+    owner: string,
+    id: string,
+    view?: PluginGenerationView,
+  ): ManagerSettingsNavigationRouteResolution {
+    return this.registry.managerSettingsNavigationRoute(owner, id, view)
   }
 
   mountManagerSettingsFor(
