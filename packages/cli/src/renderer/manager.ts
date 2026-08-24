@@ -23,6 +23,8 @@ import {
   BrowserMarketplaceModel,
   OFFICIAL_MARKETPLACE_SOURCE,
   normalizeMarketplaceSource,
+  projectMarketplacePlugin,
+  projectMarketplaceSourceName,
   type MarketplaceCatalogPlugin,
   type MarketplaceFetcher,
   type MarketplaceModel,
@@ -34,7 +36,11 @@ import { resolveManagerTriggerTarget } from './host-probes.js'
 import { createHostSurfaceIcon, createManagerIcon, type ManagerIconToken } from './icons.js'
 import type { ManagedSettingsPageMount, NavigationSnapshot } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
-import type { ExtensionPointRuntimeSnapshot, ExtensionPointSnapshot } from './extension-points.js'
+import type {
+  ExtensionPointPluginUsageSnapshot,
+  ExtensionPointRuntimeSnapshot,
+  ExtensionPointSnapshot,
+} from './extension-points.js'
 import type { RequestedScope } from './platform.js'
 import type {
   ConfigMutationOperation,
@@ -809,7 +815,9 @@ const MANAGER_STYLES = `
   .cxm-plugin-body { min-width: 0; flex: 1; }
   .cxm-plugin-name { overflow: hidden; color: #f0f2f6; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
   .cxm-plugin-description { display: -webkit-box; margin-top: 4px; overflow: hidden; color: #818b9d; font-size: 10px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-  .cxm-plugin-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: #7d8798; font-size: 10px; }
+  .cxm-plugin-meta { display: flex; min-width: 0; align-items: center; gap: 6px; margin-top: 4px; color: #7d8798; font-size: 10px; }
+  .cxm-plugin-meta-version { flex: none; }
+  .cxm-plugin-meta-source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cxm-status-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: #6b7280; }
   .cxm-status-dot[data-status="active"], .cxm-status-dot[data-status="loaded"] { background: #4ade80; }
   .cxm-status-dot[data-status="failed"] { background: #fb7185; }
@@ -883,8 +891,7 @@ const MANAGER_STYLES = `
   .cxm-error { margin-top: 12px; color: #fda4af; font-size: 11px; }
   .cxm-catalog-list { margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, .08); border-bottom: 1px solid rgba(255, 255, 255, .08); }
   .cxm-catalog-row {
-    display: grid;
-    grid-template-columns: 32px minmax(0, 1fr) max-content;
+    display: flex;
     align-items: center;
     gap: 12px;
     width: 100%;
@@ -899,12 +906,19 @@ const MANAGER_STYLES = `
   .cxm-catalog-item + .cxm-catalog-item { border-top: 1px solid rgba(255, 255, 255, .08); }
   .cxm-catalog-row:hover .cxm-catalog-title { color: #fff; }
   .cxm-catalog-row:focus-visible { outline: 2px solid #c7ccd4; outline-offset: -2px; border-radius: 7px; }
-  .cxm-catalog-icon { width: 32px; height: 32px; color: #bfc5ce; }
+  .cxm-catalog-icon { width: 32px; height: 32px; flex: none; color: #bfc5ce; }
   .cxm-catalog-icon svg { width: 21px; height: 21px; }
-  .cxm-catalog-copy { min-width: 0; }
-  .cxm-catalog-title { color: #e7e9ee; font-size: 12px; font-weight: 650; }
+  .cxm-catalog-copy { min-width: 0; flex: 1 1 auto; }
+  .cxm-catalog-title, .cxm-catalog-description, .cxm-catalog-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cxm-catalog-title { display: block; color: #e7e9ee; font-size: 12px; font-weight: 650; }
   .cxm-catalog-description { display: block; margin-top: 3px; color: #858fa1; font-size: 11px; }
-  .cxm-catalog-id { display: block; margin-top: 4px; color: #697386; font: 10px/1.35 ui-monospace, monospace; }
+  .cxm-catalog-id { display: block; margin-top: 4px; color: #697386; cursor: text; font: 10px/1.35 ui-monospace, monospace; -webkit-user-select: text; user-select: text; }
+  .cxm-catalog-status { display: inline-flex; min-width: 0; max-width: min(168px, 38%); flex: 0 1 auto; align-items: center; gap: 5px; overflow: hidden; color: #8f98a9; font-size: 10px; white-space: nowrap; }
+  .cxm-catalog-status[data-tone="pending"] { color: #b8a574; }
+  .cxm-catalog-status[data-tone="unavailable"], .cxm-catalog-status[data-tone="error"] { color: #d8948f; }
+  .cxm-catalog-status-copy { overflow: hidden; text-overflow: ellipsis; }
+  .cxm-catalog-status-icon { width: 14px; height: 14px; }
+  .cxm-catalog-status-icon svg { width: 14px; height: 14px; }
   .cxm-kind-badge { padding: 3px 7px; border-radius: 6px; background: rgba(199, 204, 212, .09); color: #aeb6c5; font-size: 9px; }
   .cxm-usage-list { border-top: 1px solid rgba(255, 255, 255, .08); border-bottom: 1px solid rgba(255, 255, 255, .08); }
   .cxm-usage-item { padding: 15px 2px; }
@@ -938,6 +952,9 @@ const MANAGER_STYLES = `
     .cxm-usage-header .cxm-source-input { grid-column: 2; }
     .cxm-console-controls { grid-template-columns: minmax(0, 1fr) repeat(2, minmax(90px, max-content)); }
     .cxm-console-workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr); }
+    .cxm-catalog-row { gap: 8px; padding: 12px 2px; }
+    .cxm-catalog-icon { width: 24px; height: 24px; }
+    .cxm-catalog-status { max-width: 34%; }
   }
 `
 
@@ -947,15 +964,17 @@ const HOST_THEME_OVERLAY_STYLES = `
   .cxm-dialog, .cxm-lifecycle-dialog, .cxm-authorization-dialog { border-color: var(--cx-border); background: var(--cx-surface); color: var(--cx-text); box-shadow: 0 24px 80px var(--cx-shadow); }
   .cxm-sidebar { border-color: var(--cx-border); background: var(--cx-surface-raised); }
   .cxm-header, .cxm-about-actions, .cxm-about-action-item + .cxm-about-action-item, .cxm-flat-item + .cxm-flat-item { border-color: var(--cx-border); }
-  .cxm-nav-button, .cxm-heading p, .cxm-detail-description, .cxm-permission-reason, .cxm-copy, .cxm-source-state, .cxm-detail-id { color: var(--cx-muted); }
+  .cxm-nav-button, .cxm-heading p, .cxm-detail-description, .cxm-permission-reason, .cxm-copy, .cxm-source-state, .cxm-detail-id, .cxm-plugin-description, .cxm-plugin-meta, .cxm-catalog-description, .cxm-catalog-id, .cxm-catalog-status { color: var(--cx-muted); }
   .cxm-nav-button:hover, .cxm-nav-button[aria-selected="true"], .cxm-back:hover, .cxm-breadcrumb-action:hover, .cxm-breadcrumb-overflow > summary:hover, .cxm-tab:hover, .cxm-tab[aria-selected="true"], .cxm-about-action:hover .cxm-about-action-title { background: var(--cx-hover); color: var(--cx-text); }
-  .cxm-heading-title, .cxm-breadcrumb-current, .cxm-card-value, .cxm-section-title, .cxm-about-name, .cxm-search, .cxm-source-input { color: var(--cx-text); }
+  .cxm-heading-title, .cxm-breadcrumb-current, .cxm-card-value, .cxm-section-title, .cxm-about-name, .cxm-search, .cxm-source-input, .cxm-plugin-name, .cxm-catalog-title { color: var(--cx-text); }
   .cxm-card, .cxm-slot-card, .cxm-source-row, .cxm-field, .cxm-lifecycle-impact { border-color: var(--cx-border); background: var(--cx-hover); }
   .cxm-search, .cxm-source-input, .cxm-close, .cxm-action, .cxm-mini-action { border-color: var(--cx-border); background: var(--cx-surface-raised); color: var(--cx-text); }
   .cxm-action:hover:not(:disabled), .cxm-mini-action:hover:not(:disabled), .cxm-plugin-menu-item:hover:not(:disabled), .cxm-plugin-menu-item:focus-visible { border-color: var(--cx-primary); background: var(--cx-hover); color: var(--cx-text); }
   .cxm-plugin-menu-popup, .cxm-breadcrumb-menu { border-color: var(--cx-border); background: var(--cx-surface-raised); box-shadow: 0 12px 32px var(--cx-shadow); }
   .cxm-plugin-menu-item, .cxm-authorization-dialog > p, .cxm-authorization-reason, .cxm-authorization-choice { color: var(--cx-text); }
   .cxm-action[data-tone="danger"], .cxm-plugin-menu-item[data-tone="danger"] { color: var(--cx-danger); }
+  .cxm-catalog-status[data-tone="pending"] { color: var(--cx-primary); }
+  .cxm-catalog-status[data-tone="unavailable"], .cxm-catalog-status[data-tone="error"] { color: var(--cx-danger); }
   .cxm-required-badge { background: var(--cx-hover); color: var(--cx-primary); }
   .cxm-tab[aria-selected="true"]::after { background: var(--cx-primary); }
   .cxm-nav-button:focus-visible, .cxm-close:focus-visible, .cxm-tab:focus-visible, .cxm-plugin-row:focus-visible, .cxm-action:focus-visible, .cxm-mini-action:focus-visible, .cxm-search:focus-visible, .cxm-source-input:focus-visible, .cxm-authorization-actions button:focus-visible { outline-color: var(--cx-focus); }
@@ -1377,7 +1396,13 @@ function matchesManagerSearch(query: string, fields: readonly string[]): boolean
 }
 
 function activateManagerListRow(row: HTMLButtonElement, action: () => void): void {
-  row.addEventListener('click', action)
+  row.addEventListener('click', event => {
+    const selection = row.ownerDocument.defaultView?.getSelection()
+    if (event.detail > 0 && selection !== undefined && selection !== null && !selection.isCollapsed && selection.toString() !== ''
+      && selection.anchorNode !== null && selection.focusNode !== null
+      && row.contains(selection.anchorNode) && row.contains(selection.focusNode)) return
+    action()
+  })
   row.addEventListener('keydown', event => {
     if (event.key !== 'Enter' && event.key !== ' ') return
     event.preventDefault()
@@ -2071,13 +2096,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }
     if (route.kind === 'marketplace') {
       const plugin = marketplace.snapshot().plugins.find(item => item.identity === route.identity)
+      const projection = plugin === undefined ? undefined : projectMarketplacePlugin(plugin, snapshot.localization.locale)
       const facet = marketplaceFacet(route.facet)
       return {
         id: `marketplace:${route.identity}:${route.facet}`,
         primary,
         segments: [
           root('marketplace'),
-          { id: `marketplace:${route.identity}`, label: plugin?.name ?? '已移除的插件', target: { kind: 'marketplace', identity: route.identity, facet: 'overview' } },
+          { id: `marketplace:${route.identity}`, label: projection?.name ?? '已移除的插件', target: { kind: 'marketplace', identity: route.identity, facet: 'overview' } },
           { id: `marketplace:${route.identity}:facet:${route.facet}`, label: facet.label },
         ],
       }
@@ -2324,9 +2350,76 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     content.append(identity, actions)
   }
 
-  const extensionPointIcon = (point: ExtensionPointSnapshot): ManagerIconToken => (
-    point.kind === 'outlet' ? 'outlets' : point.icon === 'host:info' ? 'point-info' : 'contributions'
-  )
+  type ExtensionPointRowStatus = Readonly<{
+    state: 'pending' | 'unavailable' | 'error'
+    text: string
+    icon: 'host:warning' | 'host:error'
+  }>
+
+  const extensionPointRowStatus = (
+    snapshot: ManagerSnapshot,
+    point: ExtensionPointSnapshot,
+    usage?: ExtensionPointPluginUsageSnapshot,
+  ): ExtensionPointRowStatus | undefined => {
+    const catalogText = snapshot.extensionPoints?.catalogText
+    const descriptorError = snapshot.extensionPoints?.descriptorDiagnostics.some(item => item.pointId === point.id) === true
+      || point.titleProjection.diagnostic !== undefined
+      || point.descriptionProjection.diagnostic !== undefined
+    if (descriptorError || usage?.authorized === false) {
+      return {
+        state: 'error',
+        text: usage?.authorized === false
+          ? catalogText?.status.denied.text ?? '[[catalog.status.denied]]'
+          : catalogText?.status.error.text ?? '[[catalog.status.error]]',
+        icon: 'host:error',
+      }
+    }
+    if (point.availability === 'unavailable') {
+      return { state: 'unavailable', text: catalogText?.status.unavailable.text ?? '[[catalog.status.unavailable]]', icon: 'host:error' }
+    }
+    if (point.availability === 'pending' || (usage !== undefined && !usage.active)) {
+      return { state: 'pending', text: catalogText?.status.pending.text ?? '[[catalog.status.pending]]', icon: 'host:warning' }
+    }
+    return undefined
+  }
+
+  const createExtensionPointCatalogItem = (
+    snapshot: ManagerSnapshot,
+    point: ExtensionPointSnapshot,
+    action: (facet: ExtensionPointDetailTab) => void,
+    usage?: ExtensionPointPluginUsageSnapshot,
+  ): HTMLDivElement => {
+    const listItem = create(document, 'div', 'cxm-catalog-item')
+    listItem.setAttribute('role', 'listitem')
+    const row = create(document, 'button', 'cxm-catalog-row')
+    row.type = 'button'
+    row.dataset.extensionPointId = point.id
+    const status = extensionPointRowStatus(snapshot, point, usage)
+    row.dataset.extensionPointState = status?.state ?? 'available'
+    const icon = createHostSurfaceIcon(document, point.icon)
+    icon.classList.add('cxm-catalog-icon')
+    const copy = create(document, 'span', 'cxm-catalog-copy')
+    const stableId = create(document, 'code', 'cxm-catalog-id', point.id)
+    stableId.dataset.copyableExtensionPointId = point.id
+    copy.append(
+      create(document, 'span', 'cxm-catalog-title', point.titleProjection.text),
+      create(document, 'span', 'cxm-catalog-description', point.descriptionProjection.text),
+      stableId,
+    )
+    row.append(icon, copy)
+    if (status !== undefined) {
+      const prompt = create(document, 'span', 'cxm-catalog-status')
+      prompt.dataset.tone = status.state
+      prompt.setAttribute('aria-label', status.text)
+      const statusIcon = createHostSurfaceIcon(document, status.icon)
+      statusIcon.classList.add('cxm-catalog-status-icon')
+      prompt.append(statusIcon, create(document, 'span', 'cxm-catalog-status-copy', status.text))
+      row.append(prompt)
+    }
+    activateManagerListRow(row, () => action(status === undefined ? 'usage' : 'diagnostics'))
+    listItem.append(row)
+    return listItem
+  }
 
   const renderExtensionPointList = (snapshot: ManagerSnapshot): void => {
     setHeading('浏览宿主声明的界面点位，并管理每个插件对点位的使用权限', snapshot, { icon: 'contributions' })
@@ -2334,11 +2427,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     content.append(search)
 
     const points = snapshot.extensionPoints?.points ?? []
+    const catalogText = snapshot.extensionPoints?.catalogText
     const filtered = points.filter(point => matchesManagerSearch(extensionPointQuery, [
       point.titleProjection.text,
       point.descriptionProjection.text,
       point.id,
       point.kind,
+      catalogText?.category[point.kind].text ?? '',
+      catalogText?.owner.host.text ?? '',
       point.payloadFamily,
       point.stability,
       point.availability,
@@ -2355,30 +2451,11 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (points.length === 0) list.append(create(document, 'div', 'cxm-empty', '当前宿主没有声明扩展点；请查看运行诊断。'))
     else if (filtered.length === 0) list.append(create(document, 'div', 'cxm-empty', '没有匹配的扩展点'))
     for (const point of filtered) {
-      const listItem = create(document, 'div', 'cxm-catalog-item')
-      listItem.setAttribute('role', 'listitem')
-      const row = create(document, 'button', 'cxm-catalog-row')
-      row.type = 'button'
-      row.dataset.extensionPointId = point.id
-      const copy = create(document, 'span', 'cxm-catalog-copy')
-      copy.append(
-        create(document, 'span', 'cxm-catalog-title', point.titleProjection.text),
-        create(document, 'span', 'cxm-catalog-description', point.descriptionProjection.text),
-        create(document, 'code', 'cxm-catalog-id', point.id),
-      )
-      row.append(
-        createManagerIcon(document, extensionPointIcon(point), 'cxm-catalog-icon'),
-        copy,
-        create(document, 'span', 'cxm-kind-badge', point.kind === 'surface' ? '界面点位' : '页面出口'),
-        create(document, 'span', 'cxm-kind-badge', point.availability === 'available' ? '可用' : point.availability === 'pending' ? '待定位' : '不可用'),
-      )
-      activateManagerListRow(row, () => {
+      list.append(createExtensionPointCatalogItem(snapshot, point, facet => {
         rememberListScroll()
         operationError = undefined
-        void navigateRoute({ kind: 'extension-point', pointId: point.id, facet: 'usage' })
-      })
-      listItem.append(row)
-      list.append(listItem)
+        void navigateRoute({ kind: 'extension-point', pointId: point.id, facet })
+      }))
     }
     content.append(list)
   }
@@ -3343,7 +3420,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       content.append(create(document, 'div', 'cxm-empty', '插件已不在当前 bundle 中'))
       return
     }
-
     const activeFacet = routeState.kind === 'plugin' ? routeState.facet : 'readme'
     content.append(createLocalTabs(document, PLUGIN_DETAIL_TABS, activeFacet, 'data-plugin-detail-tab', (tab) => {
       void navigateRoute({ kind: 'plugin', pluginId: id, facet: tab as PluginDetailTab })
@@ -3694,30 +3770,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       list.setAttribute('role', 'list')
       for (const point of points) {
         const usage = point.plugins.find(item => item.identity.source === plugin.source && item.identity.id === plugin.id)
-        const item = create(document, 'div', 'cxm-catalog-row')
-        item.setAttribute('role', 'listitem')
-        const copy = create(document, 'span', 'cxm-catalog-copy')
-        copy.append(
-          create(document, 'span', 'cxm-catalog-title', point.titleProjection.text),
-          create(document, 'span', 'cxm-catalog-description', point.descriptionProjection.text),
-          create(document, 'code', 'cxm-catalog-id', point.id),
-        )
-        const state = usage?.authorized === false ? '已拒绝' : usage?.active === true ? '使用中' : '已登记'
-        item.append(
-          createManagerIcon(document, extensionPointIcon(point), 'cxm-catalog-icon'),
-          copy,
-          create(document, 'span', 'cxm-kind-badge', state),
-          create(document, 'span'),
-        )
-        if (point.kind === 'surface' && usage !== undefined && usage.registrations.length > 0) {
-          const resources = create(document, 'div', 'cxm-usage-resources')
-          resources.style.gridColumn = '2 / -1'
-          for (const registration of usage.registrations) {
-            resources.append(create(document, 'div', 'cxm-resource-row', registration.id))
-          }
-          item.append(resources)
-        }
-        list.append(item)
+        list.append(createExtensionPointCatalogItem(snapshot, point, facet => {
+          operationError = undefined
+          void navigateRoute({ kind: 'extension-point', pointId: point.id, facet })
+        }, usage))
       }
       if (points.length > 0) panel.append(list)
       content.append(panel)
@@ -3764,15 +3820,11 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     setHeading('从已配置 JSON feed 浏览插件元数据；当前只读，不提供安装', managerSnapshot, { icon: 'marketplace' })
     const toolbar = create(document, 'div', 'cxm-toolbar')
     const search = createListSearch('marketplace', '搜索 CordisX 插件商店', '搜索商店插件、作者、关键词或来源…', marketplaceQuery, value => { marketplaceQuery = value })
-    const filtered = snapshot.plugins.filter(plugin => matchesManagerSearch(marketplaceQuery, [
-      plugin.id,
-      plugin.name,
-      plugin.description,
-      plugin.source,
-      plugin.feedName,
-      ...plugin.keywords,
-      ...plugin.authors.map(author => author.name),
-    ]))
+    const projected = snapshot.plugins.map(plugin => ({
+      plugin,
+      metadata: projectMarketplacePlugin(plugin, managerSnapshot.localization.locale),
+    }))
+    const filtered = projected.filter(item => matchesManagerSearch(marketplaceQuery, item.metadata.searchValues))
     toolbar.append(search)
     content.append(toolbar)
 
@@ -3782,31 +3834,34 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (!snapshot.loading && filtered.length === 0) {
       list.append(create(document, 'div', 'cxm-empty', snapshot.sources.length === 0 ? '尚未配置插件商店地址' : '没有可展示的匹配插件'))
     }
-    for (const plugin of filtered) {
-      const row = create(document, 'button', 'cxm-plugin-row')
-      row.type = 'button'
+    for (const { plugin, metadata } of filtered) {
+      const row = create(document, 'div', 'cxm-plugin-row')
+      row.setAttribute('role', 'listitem')
       row.dataset.marketplacePlugin = plugin.id
-      row.append(createPluginIcon(document, plugin.name))
+      const primary = create(document, 'button', 'cxm-plugin-primary')
+      primary.type = 'button'
+      primary.setAttribute('aria-label', `${metadata.name} · v${plugin.version} · ${metadata.feedName}`)
+      primary.append(createPluginIcon(document, metadata.name))
       const body = create(document, 'span', 'cxm-plugin-body')
       body.append(
-        create(document, 'span', 'cxm-plugin-name', plugin.name),
-        create(document, 'span', 'cxm-plugin-description', plugin.description),
+        create(document, 'span', 'cxm-plugin-name', metadata.name),
+        create(document, 'span', 'cxm-plugin-description', metadata.description),
       )
       const meta = create(document, 'span', 'cxm-plugin-meta')
-      meta.append(create(document, 'span', undefined, `v${plugin.version}`), create(document, 'span', undefined, plugin.feedName))
+      const version = create(document, 'span', 'cxm-plugin-meta-version', `v${plugin.version}`)
+      const source = create(document, 'span', 'cxm-plugin-meta-source', metadata.feedName)
+      source.title = metadata.feedName
+      meta.append(version, source)
       body.append(meta)
-      row.append(body)
-      activateManagerListRow(row, () => {
+      primary.append(body)
+      activateManagerListRow(primary, () => {
         rememberListScroll()
         void navigateRoute({ kind: 'marketplace', identity: plugin.identity, facet: 'overview' })
       })
+      row.append(primary)
       list.append(row)
     }
     content.append(list)
-    const boundary = create(document, 'div', 'cxm-notice', '商店收录、schema 校验和页面展示都不代表代码审计、签名验证、安全批准或可安装性。')
-    boundary.dataset.tone = 'warning'
-    content.append(boundary)
-
   }
 
   const renderMarketplaceDetail = (managerSnapshot: ManagerSnapshot, identityValue: string): void => {
@@ -3816,6 +3871,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       content.append(create(document, 'div', 'cxm-empty', '该插件已不在当前聚合结果中'))
       return
     }
+    const metadata = projectMarketplacePlugin(plugin, managerSnapshot.localization.locale)
     const activeFacet = routeState.kind === 'marketplace' ? routeState.facet : 'overview'
     content.append(createLocalTabs(document, MARKETPLACE_DETAIL_TABS, activeFacet, 'data-marketplace-detail-tab', (tab) => {
       void navigateRoute({ kind: 'marketplace', identity: identityValue, facet: tab as MarketplaceDetailTab })
@@ -3823,7 +3879,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
     if (activeFacet === 'overview') {
       const panel = createTabPanel(document, '概览')
-      panel.append(create(document, 'p', 'cxm-detail-description', plugin.description))
+      panel.append(create(document, 'p', 'cxm-detail-description', metadata.description))
       const fields = create(document, 'div', 'cxm-detail-grid')
       for (const [label, value] of [
         ['版本', `v${plugin.version}`],
@@ -3836,9 +3892,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         fields.append(field)
       }
       panel.append(fields)
-      if (plugin.keywords.length > 0) {
+      if (metadata.keywords.length > 0) {
         panel.append(createSectionTitle(document, '关键词'))
-        panel.append(create(document, 'p', 'cxm-copy', plugin.keywords.join(' · ')))
+        panel.append(create(document, 'p', 'cxm-copy', metadata.keywords.join(' · ')))
       }
       content.append(panel)
       return
@@ -3857,7 +3913,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       row.append(copy, link)
       links.append(row)
     }
-    for (const author of plugin.authors) {
+    for (const author of metadata.authors) {
       if (author.url === undefined) {
         const row = create(document, 'div', 'cxm-link-row')
         row.setAttribute('role', 'listitem')
@@ -3869,12 +3925,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (plugin.homepage !== undefined) appendLink('插件主页', plugin.homepage, plugin.homepage)
     if (plugin.manifest !== undefined) appendLink('插件 Manifest', plugin.manifest, plugin.manifest)
     if (plugin.icon !== undefined) appendLink('插件图标', plugin.icon, plugin.icon)
-    appendLink(`商店来源 · ${plugin.feedName}`, plugin.feedUrl, plugin.feedUrl)
+    appendLink(`商店来源 · ${metadata.feedName}`, plugin.feedUrl, plugin.feedUrl)
     appendLink('商店主页', plugin.feedHomepage, plugin.feedHomepage)
     panel.append(links)
-    const boundary = create(document, 'div', 'cxm-notice', '商店元数据与外部链接不代表代码审计、签名验证、安全批准或可安装性；当前不会下载、执行、安装或激活这个插件。')
-    boundary.dataset.tone = 'warning'
-    panel.append(boundary)
     content.append(panel)
   }
 
@@ -3934,7 +3987,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       markDecorative(dot)
       dot.dataset.status = state?.status ?? 'loading'
       const stateText = state?.status === 'loaded'
-        ? `${state.name ?? '已验证 feed'} · 已加载`
+        ? `${projectMarketplaceSourceName(state, model.snapshot().localization.locale) ?? '已验证 feed'} · 已加载`
         : state?.status === 'failed' ? `加载失败 · ${state.error ?? '未知错误'}` : '加载中…'
       status.append(dot, create(document, 'span', undefined, stateText))
       body.append(status)

@@ -22,11 +22,13 @@ const parsed = parseArgs({
     'manager-extension-point-tab': { type: 'string' },
     'manager-route': { type: 'string' },
     'manager-marketplace-tab': { type: 'string' },
+    'manager-marketplace-source': { type: 'string' },
     'manager-click-external': { type: 'boolean', default: false },
     'manager-viewport-width': { type: 'string' },
     'manager-breadcrumb-width': { type: 'string' },
     'trigger-screenshot': { type: 'string' },
     'color-scheme': { type: 'string' },
+    locale: { type: 'string' },
     'fetch-url': { type: 'string' },
     report: { type: 'string' },
     'select-thread': { type: 'string' },
@@ -57,7 +59,7 @@ const parsed = parseArgs({
 })
 const port = Number(parsed.values.port)
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--screenshot <png>] [--app-screenshot <png>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-permission-capability <name> --manager-settings-tab <tab> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-click-external --manager-viewport-width <pixels> --manager-breadcrumb-width <pixels>] [--manager-lifecycle-source <absolute-directory> --report <json>] [--trigger-screenshot <png>]')
+  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--locale en|zh-CN] [--screenshot <png>] [--app-screenshot <png>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-permission-capability <name> --manager-settings-tab <tab> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-marketplace-source <https-url> --manager-click-external --manager-viewport-width <pixels> --manager-breadcrumb-width <pixels>] [--manager-lifecycle-source <absolute-directory> --report <json>] [--trigger-screenshot <png>]')
 }
 if (parsed.values['ui-catalog'] && parsed.values.report === undefined) {
   throw new Error('--ui-catalog requires --report so screenshots and machine-readable assertions share one artifact directory')
@@ -140,6 +142,15 @@ async function pressKey(key, code, keyCode) {
 
 await send('Runtime.enable')
 await send('Page.enable')
+const locale = parsed.values.locale
+if (locale !== undefined) {
+  if (!['en', 'zh-CN'].includes(locale)) throw new Error(`unknown smoke locale: ${locale}`)
+  await send('Runtime.evaluate', {
+    expression: `document.documentElement.lang = ${JSON.stringify(locale)}`,
+    returnByValue: true,
+  })
+  await new Promise(resolve => setTimeout(resolve, 120))
+}
 const colorScheme = parsed.values['color-scheme']
 if (colorScheme !== undefined) {
   if (!['light', 'dark'].includes(colorScheme)) throw new Error(`unknown color scheme: ${colorScheme}`)
@@ -154,14 +165,22 @@ if (colorScheme !== undefined) {
       const host = trigger?.parentElement
       if (!(trigger instanceof HTMLElement) || !(switcher instanceof HTMLElement) || !(host instanceof HTMLElement)) return false
       const records = [host, switcher, trigger].map(element => ({ element, style: element.getAttribute('style') }))
+      const themeRecords = [document.documentElement, document.body]
+        .filter(element => element instanceof HTMLElement)
+        .map(element => ({ element, value: element.getAttribute('data-theme') }))
       globalThis.__cordisxRestoreSmokeTheme = () => {
         for (const record of records) {
           if (record.style === null) record.element.removeAttribute('style')
           else record.element.setAttribute('style', record.style)
         }
+        for (const record of themeRecords) {
+          if (record.value === null) record.element.removeAttribute('data-theme')
+          else record.element.setAttribute('data-theme', record.value)
+        }
         delete globalThis.__cordisxRestoreSmokeTheme
       }
       const dark = ${JSON.stringify(colorScheme)} === 'dark'
+      document.documentElement.setAttribute('data-theme', ${JSON.stringify(colorScheme)})
       host.style.setProperty('background-color', dark ? '#1a1c1f' : '#ffffff', 'important')
       host.style.setProperty('color', dark ? '#f7f8f8' : '#1a1c1f', 'important')
       switcher.style.setProperty('color', 'inherit', 'important')
@@ -2576,6 +2595,13 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   const managerRoute = parsed.values['manager-route']
   const managerMarketplaceTab = parsed.values['manager-marketplace-tab']
   if (managerMarketplaceTab !== undefined && !['overview', 'authors-source'].includes(managerMarketplaceTab)) throw new Error(`unknown manager marketplace tab: ${managerMarketplaceTab}`)
+  const managerMarketplaceSource = parsed.values['manager-marketplace-source']
+  if (managerMarketplaceSource !== undefined) {
+    const sourceUrl = new URL(managerMarketplaceSource)
+    if (sourceUrl.protocol !== 'https:' || sourceUrl.username !== '' || sourceUrl.password !== '' || sourceUrl.hash !== '') {
+      throw new Error('--manager-marketplace-source must be a credential-free HTTPS URL without a fragment')
+    }
+  }
   const managerViewportWidth = parsed.values['manager-viewport-width'] === undefined
     ? undefined
     : Number(parsed.values['manager-viewport-width'])
@@ -2598,17 +2624,57 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   }
   const evaluatedManager = await send('Runtime.evaluate', {
     expression: `(async () => {
+      const smokeLocale = ${JSON.stringify(locale)}
+      const smokeTheme = ${JSON.stringify(colorScheme)}
+      if (smokeLocale !== undefined) document.documentElement.lang = smokeLocale
+      if (smokeTheme !== undefined) document.documentElement.setAttribute('data-theme', smokeTheme)
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       const trigger = document.querySelector('[data-cordisx-manager-trigger]')
       const modal = document.querySelector('[data-cordisx-manager-modal]')
       const openedBy = trigger === null ? 'host-smoke-fallback' : 'manager-trigger'
       if (trigger !== null) trigger.click()
       else if (modal instanceof HTMLElement) modal.hidden = false
+      const marketplaceSource = ${JSON.stringify(managerMarketplaceSource)}
+      if (marketplaceSource !== undefined) {
+        document.querySelector('[data-tab="settings"]')?.click()
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        document.querySelector('[data-settings-tab="host:marketplace"]')?.click()
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        const existingRows = [...document.querySelectorAll('.cxm-source-list .cxm-source-row')]
+        for (const row of existingRows) row.querySelector('.cxm-source-actions .cxm-mini-action:last-child')?.click()
+        const removalDeadline = Date.now() + 5_000
+        while (document.querySelector('.cxm-source-list .cxm-source-row') !== null && Date.now() < removalDeadline) {
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+        const input = document.querySelector('.cxm-source-form .cxm-source-input')
+        const form = document.querySelector('.cxm-source-form')
+        if (!(input instanceof HTMLInputElement) || !(form instanceof HTMLFormElement)) throw new Error('marketplace source form is unavailable')
+        input.value = marketplaceSource
+        form.requestSubmit()
+        const sourceDeadline = Date.now() + 12_000
+        let sourceState
+        while (Date.now() < sourceDeadline) {
+          const sourceRow = [...document.querySelectorAll('.cxm-source-list .cxm-source-row')]
+            .find(row => row.querySelector('.cxm-source-url')?.textContent?.trim() === marketplaceSource)
+          sourceState = sourceRow?.querySelector('.cxm-source-state')?.textContent?.trim()
+          if (sourceState?.includes('已加载') === true || sourceState?.includes('加载失败') === true) break
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+        if (sourceState?.includes('已加载') !== true) throw new Error('marketplace smoke source failed to load: ' + (sourceState ?? 'timeout'))
+      }
       document.querySelector('[data-tab=${JSON.stringify(managerTab)}]')?.click()
+      if (${JSON.stringify(managerTab)} === 'marketplace') {
+        const deadline = Date.now() + 12_000
+        while (document.querySelector('[aria-label="插件商店列表"] [data-marketplace-plugin], [aria-label="插件商店列表"] .cxm-empty') === null && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+      }
       const pluginId = ${JSON.stringify(managerPlugin)}
       if (pluginId !== undefined) {
         const row = [...document.querySelectorAll('[data-plugin-id], [data-marketplace-plugin]')]
           .find(element => element.getAttribute('data-plugin-id') === pluginId || element.getAttribute('data-marketplace-plugin') === pluginId)
-        row?.click()
+        const primary = row?.matches('button') === true ? row : row?.querySelector('.cxm-plugin-primary')
+        primary?.click()
       }
       const detailTab = ${JSON.stringify(managerDetailTab)}
       if (detailTab !== undefined) document.querySelector('[data-plugin-detail-tab="' + detailTab + '"]')?.click()
@@ -2625,6 +2691,8 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       if (routeId !== undefined) document.querySelector('[data-route-id="' + CSS.escape(routeId) + '"]')?.click()
       const marketplaceTab = ${JSON.stringify(managerMarketplaceTab)}
       if (marketplaceTab !== undefined) document.querySelector('[data-marketplace-detail-tab="' + marketplaceTab + '"]')?.click()
+      if (smokeLocale !== undefined) document.documentElement.lang = smokeLocale
+      if (smokeTheme !== undefined) document.documentElement.setAttribute('data-theme', smokeTheme)
       const breadcrumbWidth = ${JSON.stringify(managerBreadcrumbWidth)}
       const heading = document.querySelector('.cxm-heading')
       if (breadcrumbWidth !== undefined && heading instanceof HTMLElement) {
@@ -2667,6 +2735,12 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         state: {
           modalHidden: modal?.hidden,
           openedBy,
+          theme: {
+            root: document.documentElement.getAttribute('data-theme'),
+            projected: modal?.getAttribute('data-cordisx-app-theme') ?? null,
+            source: modal?.getAttribute('data-cordisx-theme-source') ?? null,
+            dialogBackground: dialog === null ? null : getComputedStyle(dialog).backgroundColor,
+          },
           triggerExpanded: trigger?.getAttribute('aria-expanded'),
           externalDefaultPrevented,
           breadcrumb: {
@@ -2707,12 +2781,57 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             policyEditable: document.querySelector('[data-permission-detail] select[data-permission-capability]') instanceof HTMLSelectElement,
             headings: [...document.querySelectorAll('[data-permission-detail] h1, [data-permission-detail] h2, [data-permission-detail] h3')].map(item => item.textContent?.trim() ?? ''),
           },
+          extensionPointCatalog: document.querySelector('[aria-label="扩展点列表"]') === null ? null : {
+            locale: document.documentElement.lang,
+            rows: [...document.querySelectorAll('[aria-label="扩展点列表"] [data-extension-point-id]')].map(row => {
+              const rect = row.getBoundingClientRect()
+              const status = row.querySelector('.cxm-catalog-status')
+              const statusRect = status?.getBoundingClientRect()
+              return {
+                id: row.getAttribute('data-extension-point-id'),
+                state: row.getAttribute('data-extension-point-state'),
+                title: row.querySelector('.cxm-catalog-title')?.textContent?.trim() ?? null,
+                description: row.querySelector('.cxm-catalog-description')?.textContent?.trim() ?? null,
+                stableId: row.querySelector('.cxm-catalog-id')?.textContent?.trim() ?? null,
+                hostIcon: row.querySelector('[data-host-icon]')?.getAttribute('data-host-icon') ?? null,
+                status: status?.textContent?.trim() ?? null,
+                typeOrNormalTag: [...row.querySelectorAll('.cxm-kind-badge')].map(item => item.textContent?.trim() ?? ''),
+                statusInsidePrimaryRow: statusRect === undefined || (statusRect.top >= rect.top && statusRect.bottom <= rect.bottom),
+                chevron: row.querySelector('.cxm-chevron') !== null,
+              }
+            }),
+          },
+          marketplaceCatalog: document.querySelector('[aria-label="插件商店列表"]') === null ? null : {
+            locale: document.documentElement.lang,
+            permanentTrustWarning: (document.querySelector('.cxm-content')?.textContent ?? '').includes('商店收录、schema 校验和页面展示都不代表'),
+            rows: [...document.querySelectorAll('[aria-label="插件商店列表"] [data-marketplace-plugin]')].map(row => {
+              const primary = row.querySelector('.cxm-plugin-primary')
+              const style = primary === null ? null : getComputedStyle(primary)
+              return {
+                id: row.getAttribute('data-marketplace-plugin'),
+                role: row.getAttribute('role'),
+                primaryButton: primary?.matches('button') ?? false,
+                padding: style === null ? null : [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft],
+                name: row.querySelector('.cxm-plugin-name')?.textContent?.trim() ?? null,
+                description: row.querySelector('.cxm-plugin-description')?.textContent?.trim() ?? null,
+                version: row.querySelector('.cxm-plugin-meta-version')?.textContent?.trim() ?? null,
+                source: row.querySelector('.cxm-plugin-meta-source')?.textContent?.trim() ?? null,
+                chevron: row.querySelector('.cxm-chevron') !== null,
+              }
+            }),
+          },
         },
       }
     })()`,
     awaitPromise: true,
     returnByValue: true,
   })
+  if (evaluatedManager.exceptionDetails !== undefined) {
+    const detail = evaluatedManager.exceptionDetails.exception?.description
+      ?? evaluatedManager.exceptionDetails.text
+      ?? 'unknown renderer exception'
+    throw new Error(`CordisX manager smoke evaluation failed: ${detail}`)
+  }
   const managerResult = evaluatedManager.result?.value ?? null
   managerReport = managerResult?.state ?? null
   console.log(`manager-state=${JSON.stringify(managerReport)}`)

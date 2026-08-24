@@ -116,16 +116,24 @@ describe('renderer bundle', () => {
     Object.defineProperty(dom.window.navigator, 'platform', { value: 'MacIntel', configurable: true })
     Object.defineProperty(dom.window, 'fetch', {
       value: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json',
-        schemaVersion: 1,
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json',
+        schemaVersion: 2,
+        fallbackLocale: 'en',
         name: 'CordisX Community Marketplace',
+        localizations: { 'zh-CN': { name: 'CordisX 社区插件商店' } },
         homepage: 'https://cordisx.github.io/marketplace/',
         plugins: [{
-          $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v1.schema.json',
-          schemaVersion: 1,
+          $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json',
+          schemaVersion: 2,
           id: 'slot-showcase',
+          fallbackLocale: 'en',
           name: 'Slot Showcase Catalog',
           description: 'Marketplace hierarchy fixture',
+          localizations: {
+            'zh-CN': {
+              name: '点位展示目录', description: '插件商店层级夹具', authors: ['CordisX 团队'], keywords: ['结构化界面', '演示'],
+            },
+          },
           version: '0.1.0',
           source: 'https://github.com/cordisx/slot-showcase',
           homepage: 'https://github.com/cordisx/slot-showcase',
@@ -973,16 +981,17 @@ describe('renderer bundle', () => {
     for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-marketplace-plugin="slot-showcase"]') === null; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
-    expect(managerModal?.textContent).toContain('CordisX Community Marketplace')
-    expect(managerModal?.textContent).toContain('Slot Showcase Catalog')
+    expect(managerModal?.textContent).toContain('CordisX 社区插件商店')
+    expect(managerModal?.textContent).toContain('点位展示目录')
+    expect(managerModal?.textContent).not.toContain('Marketplace hierarchy fixture')
     expect(managerModal?.querySelector('.cxm-feed-summary')).toBeNull()
     expect(managerModal?.querySelector('.cxm-result-count')).toBeNull()
     expect(managerHeadings()).toEqual(['插件商店'])
-    dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-plugin="slot-showcase"]')?.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-plugin="slot-showcase"] .cxm-plugin-primary')?.click()
     expect(managerHeadings()).toEqual(['概览', '关键词'])
-    expect(breadcrumbLabels()).toEqual(['插件商店', 'Slot Showcase Catalog', '概览'])
-    expect(managerModal?.textContent?.match(/Slot Showcase Catalog/g)).toHaveLength(1)
-    expect(managerModal?.textContent).toContain('Marketplace hierarchy fixture')
+    expect(breadcrumbLabels()).toEqual(['插件商店', '点位展示目录', '概览'])
+    expect(managerModal?.textContent?.match(/点位展示目录/g)).toHaveLength(1)
+    expect(managerModal?.textContent).toContain('插件商店层级夹具')
     const marketplaceTabs = [...dom.window.document.querySelectorAll<HTMLElement>('[data-marketplace-detail-tab]')]
     expect(marketplaceTabs.map(tab => tab.textContent)).toEqual(['概览', '作者与来源'])
     expect(marketplaceTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-material-icon'))).toEqual(['overview', 'authors-source'])
@@ -992,7 +1001,7 @@ describe('renderer bundle', () => {
     expect(managerModal?.textContent).not.toContain('安装')
     dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-detail-tab="authors-source"]')?.click()
     expect(dom.window.document.activeElement?.getAttribute('data-marketplace-detail-tab')).toBe('authors-source')
-    expect(breadcrumbLabels()).toEqual(['插件商店', 'Slot Showcase Catalog', '作者与来源'])
+    expect(breadcrumbLabels()).toEqual(['插件商店', '点位展示目录', '作者与来源'])
     const marketplaceLinks = [...dom.window.document.querySelectorAll<HTMLAnchorElement>('[role="tabpanel"][aria-label="作者与来源"] a')]
     expect(marketplaceLinks.length).toBeGreaterThan(2)
     expect(marketplaceLinks.every(link => link.target === '_blank' && link.rel === 'noopener noreferrer')).toBe(true)
@@ -1021,7 +1030,7 @@ describe('renderer bundle', () => {
     expectLocalTabLeadingSeat('[data-settings-tab]')
     expect(managerModal?.textContent).not.toContain('插件商店来源')
     expect(managerModal?.textContent).toContain('https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json')
-    expect(managerModal?.textContent).toContain('CordisX Community Marketplace')
+    expect(managerModal?.textContent).toContain('CordisX 社区插件商店')
     expect(managerModal?.textContent).not.toMatch(/\d+ 个插件/)
     expect(managerModal?.textContent).not.toContain('启动器配置')
     expect(managerHeadings()).toEqual(['配置'])

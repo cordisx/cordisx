@@ -424,7 +424,7 @@ async function start(
       packageLifecycleAvailable: lifecycleBridge !== undefined,
     }),
   ])
-  const extensionPointDescriptors = new ExtensionPointDescriptorRegistry()
+  const extensionPointDescriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
   const extensionPointBroker = new ExtensionPointPolicyBroker(
     extensionPointDescriptors,
     new BrowserExtensionPointPolicyStore(),

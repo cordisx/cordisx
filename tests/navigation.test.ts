@@ -16,6 +16,7 @@ import {
 } from '../packages/cli/src/renderer/navigation.js'
 import {
   CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
+  CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
   CORDISX_MANAGER_EXTENSION_POINT_CATALOG,
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
@@ -303,7 +304,7 @@ describe('NavigationRegistry', () => {
       contextPolicy: 'generation',
       presentationGroup: 'manager-settings',
     }, controller, path => path.startsWith('/manager/settings/'))
-    const descriptors = new ExtensionPointDescriptorRegistry()
+    const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     descriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
     const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore(), 'generation-one')
@@ -380,7 +381,7 @@ describe('NavigationRegistry', () => {
     navigation.register('other', { id: 'second', path: '/manager/settings/shared', outlet: 'manager.settings.content', page: 'ready' })
     expect(navigation.managerSettingsRoute('demo', 'first')).toMatchObject({ state: 'invalid', detail: expect.stringContaining('conflicts') })
 
-    const descriptors = new ExtensionPointDescriptorRegistry()
+    const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
     const store = new MemoryExtensionPointPolicyStore()
     const broker = new ExtensionPointPolicyBroker(descriptors, store)
@@ -459,7 +460,7 @@ describe('NavigationRegistry', () => {
     `)
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
-    const descriptors = new ExtensionPointDescriptorRegistry()
+    const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
     const identity = { source: 'https://plugins.example/demo', id: 'demo' }
@@ -633,7 +634,7 @@ describe('NavigationRegistry', () => {
     outlets.declare({
       schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
     }, controller, path => !path.startsWith('/main/') && !path.startsWith('/sessions/'))
-    const descriptors = new ExtensionPointDescriptorRegistry()
+    const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
     const identity = { source: 'https://plugins.example/demo', id: 'demo' }

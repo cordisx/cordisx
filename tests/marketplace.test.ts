@@ -6,12 +6,15 @@ import {
   marketplacePluginIdentity,
   normalizeMarketplaceSource,
   parseMarketplaceFeed,
+  projectMarketplacePlugin,
   type MarketplaceFetcher,
   type MarketplaceStorage,
 } from '../packages/cli/src/renderer/marketplace.js'
 
 const PLUGIN_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v1.schema.json'
 const FEED_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json'
+const PLUGIN_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json'
+const FEED_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json'
 
 function plugin(id: string, name: string, source = `https://github.com/example/${id}`): Record<string, unknown> {
   return {
@@ -38,6 +41,39 @@ function feed(name: string, plugins: readonly Record<string, unknown>[]): string
     homepage: `https://example.com/${name.toLowerCase()}`,
     plugins,
   })
+}
+
+function localizedFeed(): Record<string, unknown> {
+  return {
+    $schema: FEED_SCHEMA_V2,
+    schemaVersion: 2,
+    fallbackLocale: 'en',
+    name: 'CordisX Marketplace',
+    localizations: { 'zh-CN': { name: 'CordisX 插件商店' } },
+    homepage: 'https://marketplace.example/',
+    plugins: [{
+      $schema: PLUGIN_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'slot-showcase',
+      fallbackLocale: 'en',
+      name: 'Slot Showcase',
+      description: 'Shows structured CordisX extension points.',
+      localizations: {
+        'zh-CN': {
+          name: '点位展示',
+          description: '展示结构化 CordisX 扩展点。',
+          authors: ['CordisX 团队'],
+          keywords: ['扩展点', '界面'],
+        },
+      },
+      version: '1.2.3',
+      source: 'https://github.com/cordisx/slot-showcase',
+      license: 'MIT',
+      compatibility: { cordisx: '^0.1.0' },
+      authors: [{ name: 'CordisX Team', url: 'https://cordisx.github.io/' }],
+      keywords: ['extensions', 'ui'],
+    }],
+  }
 }
 
 class MemoryStorage implements MarketplaceStorage {
@@ -87,6 +123,24 @@ describe('marketplace feed', () => {
     expect(() => normalizeMarketplaceSource('http://example.com/feed.json')).toThrow('HTTPS URL')
     expect(() => normalizeMarketplaceSource('https://user@example.com/feed.json')).toThrow('无凭据')
   })
+
+  it('accepts v2 localized discovery metadata and rejects identity-shifting locale data', () => {
+    const parsed = parseMarketplaceFeed(localizedFeed())
+    expect(parsed).toMatchObject({ schemaVersion: 2, fallbackLocale: 'en', name: 'CordisX Marketplace' })
+    expect(parsed.plugins[0]).toMatchObject({
+      schemaVersion: 2,
+      fallbackLocale: 'en',
+      localizations: { 'zh-CN': { name: '点位展示', authors: ['CordisX 团队'] } },
+    })
+
+    const wrongAuthors = structuredClone(localizedFeed())
+    ;((wrongAuthors.plugins as Record<string, unknown>[])[0]!.localizations as Record<string, Record<string, unknown>>)['zh-CN']!.authors = ['甲', '乙']
+    expect(() => parseMarketplaceFeed(wrongAuthors)).toThrow('保持作者顺序和数量')
+
+    const noncanonical = structuredClone(localizedFeed())
+    noncanonical.fallbackLocale = 'zh-cn'
+    expect(() => parseMarketplaceFeed(noncanonical)).toThrow('canonical locale')
+  })
 })
 
 describe('BrowserMarketplaceModel', () => {
@@ -135,6 +189,34 @@ describe('BrowserMarketplaceModel', () => {
     await model.setSources([])
     expect(model.snapshot()).toEqual(expect.objectContaining({ sources: [], sourceStates: [], plugins: [], loading: false }))
     expect(storage.getItem(MARKETPLACE_SOURCES_KEY)).toBe('[]')
+    model.dispose()
+  })
+
+  it('reprojects cached v2 metadata and indexes current plus fallback locale without refetching', async () => {
+    const source = 'https://catalog.example/localized.json'
+    let requests = 0
+    const model = new BrowserMarketplaceModel(undefined, async () => {
+      requests += 1
+      return { ok: true, status: 200, text: async () => JSON.stringify(localizedFeed()) }
+    })
+    await model.setSources([source])
+    const plugin = model.snapshot().plugins[0]!
+    const zh = projectMarketplacePlugin(plugin, 'zh-CN')
+    const en = projectMarketplacePlugin(plugin, 'en')
+    expect(zh).toMatchObject({
+      name: '点位展示',
+      description: '展示结构化 CordisX 扩展点。',
+      authors: [{ name: 'CordisX 团队', url: 'https://cordisx.github.io/' }],
+      keywords: ['扩展点', '界面'],
+      feedName: 'CordisX 插件商店',
+    })
+    expect(en).toMatchObject({ name: 'Slot Showcase', feedName: 'CordisX Marketplace' })
+    expect(zh.searchValues).toEqual(expect.arrayContaining([
+      '点位展示', '扩展点', 'CordisX 插件商店',
+      'Slot Showcase', 'extensions', 'CordisX Marketplace',
+      'slot-showcase', '1.2.3',
+    ]))
+    expect(requests).toBe(1)
     model.dispose()
   })
 })

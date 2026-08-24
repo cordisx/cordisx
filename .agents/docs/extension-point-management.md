@@ -34,9 +34,6 @@ and panel, and a same-owner page mounts only in the panel-body child. Their
 single ordering/fallback model and lifecycle are specified in
 [`manager-settings-tabs.md`](manager-settings-tabs.md).
 
-Until that protocol/runtime delivery merges, these two names are architecture
-only and must not be reported as declared or available by the current host.
-
 The distinction is stable even when adapters add new points. The catalog count
 is the number of currently declared surface and outlet descriptors, not the
 number of plugin contributions or registered resources.
@@ -57,20 +54,28 @@ interface HostExtensionPointDescriptor {
 
 `title` and `description` are retained `LocalizedText`/`MessageRef` values.
 They are resolved through the LocalizationKernel at projection time and
-reproject when locale or dictionary version changes. A manager list must never
-promote the stable id to the visible title merely because a translation is
-missing. It uses the message fallback and records the missing key in
-diagnostics. `icon` is a host token; plugins cannot replace point identity with
-arbitrary SVG, HTML, URLs, or CSS.
+reproject when locale or dictionary version changes. Every public descriptor
+message, including diagnostics and anchor diagnostics, must resolve to
+non-empty `en` and `zh-CN` entries in its owner-default namespace. A missing
+required locale invalidates the descriptor during catalog registration and
+fails conformance/tests; the Manager does not maintain a parallel translation
+table or silently mix raw English into a localized list. Message fallbacks
+remain transport/debugging guards, not an accepted public catalog projection.
+`icon` is a host token; plugins cannot replace point identity with arbitrary
+SVG, HTML, URLs, or CSS.
 
 Adapters may augment the descriptor catalog, but a runtime declaration without
 all five validated fields is invalid. Descriptor ids are unique across both
 families. A changed kind for an existing id is an incompatible protocol
 change.
 
-The initial catalog contains eleven surfaces and three outlets. The message
-namespace is `cordisx.manager.extension-points`; the table freezes the message
-keys and English fallbacks. Host dictionaries provide localized projections.
+The table records the original eleven-surface/three-outlet baseline. The
+current runtime aggregates the complete public catalog: 28 structured surfaces
+and five page outlets from catalog v2, plus the Manager surface/outlet pair from
+catalog v3. The authoritative current values live in the owning catalog
+constants and protocol fixtures; an exact-set regression requires all 35 ids
+and every referenced message to pass both required locale dictionaries. The
+shared namespace is `cordisx.manager.extension-points`.
 
 | Kind | Stable id | Title message (`key`; fallback) | Description message (`key`; fallback) | Icon |
 | --- | --- | --- | --- | --- |
@@ -110,24 +115,35 @@ pattern; localized labels remain accessible names and tooltip text.
 ## Primary catalog page
 
 The primary manager page lists extension points directly. It does not combine
-commands, routes, and pages into a generic engineering inventory. Each row
-contains, in order:
+commands, routes, and pages into a generic engineering inventory. Each item is
+one primary flex row containing, in order:
 
 1. the descriptor icon;
 2. localized title and one concise localized description;
 3. the stable id as secondary technical text;
-4. a localized `Surface` or `Outlet` kind label; and
-5. unavailable or diagnostic state only when it changes the row's meaning.
+4. a short, accessible pending/unavailable/error prompt only when it changes
+   the row's meaning.
+
+Normal rows show no state text. Type labels such as `Surface`, `Outlet`,
+`页面出口`, or `界面点位`, and the normal-state `Available`/`可用` label are
+not persistent tags: the page already supplies catalog context. The abnormal
+prompt stays in the same primary row as the copy, uses muted/warning text or a
+Host Material icon rather than a capsule, and opens the diagnostics facet.
+Narrow layouts may truncate the description and prompt but must not move
+status/action into an orphan second grid row. The stable monospace id is
+selectable/copyable, while the whole card remains the pointer/Enter/Space
+detail target and never adds a chevron.
 
 Selecting a row opens that point's second-level page. Point policy is not
 edited inline in the catalog, because an isolated selector without plugin
 source identity is ambiguous.
 
 The page has a search field before the list. Matching is case-insensitive over
-the current localized title and description, stable point id, kind, host-owned
-search keywords, and attributed plugin display names, ids, and canonical
-sources. It does not search arbitrary page or README content. Locale changes
-recompute the searchable localized fields without losing the query.
+the current localized title and description, stable point id, surface/category,
+Host owner label, host-owned search keywords, and attributed plugin display
+names, ids, and canonical sources. It does not search arbitrary page or README
+content. Locale changes recompute the searchable localized fields without
+losing the query.
 
 Search does not display a result summary, catalog total, in-use count, or row
 usage count. The runtime may retain usage cardinality for diagnostics and
@@ -282,8 +298,8 @@ policy.
 | Layer | Required evidence |
 | --- | --- |
 | Protocol | Schema acceptance/rejection for both kinds; all descriptor text retained as message references; unique ids; host icons; tuple identity; `inherit`/`allow`/`deny`; origin and outlet enforcement vectors; compatible default allow. |
-| Runtime | Exactly fourteen built-in descriptors; locale and dictionary reprojection; adapter augmentation and invalid declaration diagnostics; retained usage attribution; source identity non-spoofing; surface render plus command-origin denial; outlet navigation plus active-page disposal; plugin block, capability policy, context, and generation orthogonality. |
-| Manager | Search every declared field without aggregate/result counts; both empty states; one content scroll owner; list/detail/back query and scroll restoration; localized names and descriptions; `Usage`/`Point information`/`Diagnostics` tabs; policy controls keyed by source/plugin/point; keyboard, focus, tab, list, and accessible-name semantics. |
+| Runtime | Exact set of 35 descriptors (28+5 UI catalog plus 1+1 Manager pair); required `en`/`zh-CN` coverage and locale/dictionary reprojection; missing-locale and invalid declaration diagnostics; retained usage attribution; source identity non-spoofing; surface render plus command-origin denial; outlet navigation plus active-page disposal; plugin block, capability policy, context, and generation orthogonality. |
+| Manager | Search every declared field without aggregate/result counts; normal/pending/unavailable/error at wide and narrow widths; no type/normal-state tags or orphan status row; both empty states; one content scroll owner; list/detail/back query and scroll restoration; live locale reprojection; selectable stable id; `Usage`/`Point information`/`Diagnostics` tabs; policy controls keyed by source/plugin/point; keyboard, focus, tab, list, and accessible-name semantics. |
 | Live renderer | Scroll to the final point; filter by localized title, stable id, and plugin; open each point kind; change allow/deny and observe surface disappearance/restore plus outlet close/reopen rejection; keep native React nodes visible, connected, and updating; capture screenshots and a machine-readable report. |
 | Mono | Exact pushed protocol and runtime/manager revisions, clean registered submodules, public modules initialized, private roadmap still `update = none`, and no unrelated pointer changes. |
 

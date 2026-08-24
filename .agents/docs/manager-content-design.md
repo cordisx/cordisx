@@ -308,12 +308,23 @@ contributions. `路由` owns routes, pages, and outlet associations. The runtime
 tab does not repeat route or page inventory.
 
 Marketplace detail reuses the same local-tab component, breadcrumb/back seat,
-roving tabindex, focus restoration, and panel semantics. Version 1 exposes
-only two honest facets: `概览` for description, version, compatibility,
+roving tabindex, focus restoration, and panel semantics. Discovery v1/v2
+exposes only two honest facets: `概览` for description, version, compatibility,
 license, and keywords; and `作者与来源` for authors, source, optional homepage,
-manifest/icon links, feed provenance, and the trust boundary. The catalog does
-not synthesize README, permission, extension-point, route, runtime, install,
-or activation tabs when the feed schema does not provide those capabilities.
+manifest/icon links, and feed provenance. Version 2 localizes only human-facing
+feed metadata. The Host reprojects name, description, author/publisher display
+name, keywords, and feed source display name from its cached structured feed;
+stable id, version, canonical source, artifact URL, and integrity remain raw
+machine values. Current-locale and fallback/English projections are searchable,
+and a locale change never reloads the feed.
+
+Marketplace does not host, build, publish, copy, or execute plugin code. Plugin
+source and package artifacts remain in their owning repositories. Official,
+provenance, and certification records belong to a separate trust-root contract
+and do not enter discovery v2 or list sorting in this UI delivery. The catalog
+does not synthesize README, permission, extension-point, route, runtime,
+install, activation, certification, or official-state facets when their owning
+contracts do not provide them.
 
 Manager-owned interaction accents use a neutral silver-grey palette for
 selected navigation, local tabs, icons, focus rings, hover backgrounds, links,
@@ -502,6 +513,16 @@ At minimum they prove:
 - installed-plugin rows have no detail chevron, keep navigation and action
   activation mutually exclusive, support pointer/Enter/Space navigation, and
   preserve the deterministic enable/reload/favorite overflow priority;
+- Marketplace rows reuse the same `cxm-plugin-row` plus padded
+  `cxm-plugin-primary` structure: fixed Host icon, vertically ordered localized
+  name/description, compact version/source metadata, whole-card
+  pointer/Enter/Space navigation, no chevron, and no permanent generic trust or
+  installability warning below the browse list;
+- extension-point rows use one flex row with a Host Material icon and three
+  text levels (localized name, localized description, selectable stable id);
+  type and normal-state tags are absent, while only pending/unavailable/error
+  emits a concise same-row diagnostic target that never becomes an orphan
+  second grid row at constrained width;
 - overflow restores focus, stays within the manager viewport, keeps uninstall
   behind dependency-aware confirmation, and exposes share only for a safe
   public canonical URL;
