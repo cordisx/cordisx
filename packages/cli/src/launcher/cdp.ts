@@ -47,6 +47,14 @@ import {
   type ConfigBridgeHandler,
 } from './config-rpc.js'
 import {
+  MAX_SERVICE_CONFIG_REQUEST_BYTES,
+  SERVICE_CONFIG_BINDING,
+  SERVICE_CONFIG_RECEIVER,
+  parseServiceConfigBindingRequest,
+  serviceConfigBridgeError,
+  type ServiceConfigBridgeHandler,
+} from './service-config-rpc.js'
+import {
   MAX_PERMISSION_REQUEST_BYTES,
   MAX_PERMISSION_REQUESTS,
   PERMISSION_BINDING,
@@ -529,6 +537,9 @@ interface InstalledScript {
   readonly configController?: AbortController
   readonly removeConfigBindingListener?: () => void
   readonly configBindingInstalled: boolean
+  readonly serviceConfigController?: AbortController
+  readonly removeServiceConfigBindingListener?: () => void
+  readonly serviceConfigBindingInstalled: boolean
   readonly permissionController?: AbortController
   readonly removePermissionBindingListener?: () => void
   readonly permissionBindingInstalled: boolean
@@ -583,6 +594,13 @@ async function sendConfigBindingResponse(session: CdpSession, payload: Record<st
   })
 }
 
+async function sendServiceConfigBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
+  await session.send('Runtime.evaluate', {
+    expression: `void globalThis.${SERVICE_CONFIG_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    allowUnsafeEvalBlockedByCSP: true,
+  })
+}
+
 async function sendPermissionBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
   await session.send('Runtime.evaluate', {
     expression: `void globalThis.${PERMISSION_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
@@ -620,6 +638,7 @@ async function install(
   provider?: { readonly fleet: ProviderFleet; readonly token: string },
   history?: { readonly host: CodexAgentHistoryHost; readonly token: string },
   config?: ConfigBridgeHandler,
+  serviceConfig?: ServiceConfigBridgeHandler,
   permission?: PermissionPersistenceContext,
   lifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime },
 ): Promise<InstalledScript> {
@@ -630,12 +649,14 @@ async function install(
   const providerController = provider === undefined ? undefined : new AbortController()
   const historyController = history === undefined ? undefined : new AbortController()
   const configController = config === undefined ? undefined : new AbortController()
+  const serviceConfigController = serviceConfig === undefined ? undefined : new AbortController()
   const permissionController = permission === undefined ? undefined : new AbortController()
   const lifecycleController = lifecycle === undefined ? undefined : new AbortController()
   let removeBindingListener = (): void => {}
   let removeProviderBindingListener = (): void => {}
   let removeHistoryBindingListener = (): void => {}
   let removeConfigBindingListener = (): void => {}
+  let removeServiceConfigBindingListener = (): void => {}
   let removePermissionBindingListener = (): void => {}
   let removeLifecycleBindingListener = (): void => {}
   let unregisterLifecycleSession = (): void => {}
@@ -646,6 +667,7 @@ async function install(
     if (provider !== undefined) await session.send('Runtime.addBinding', { name: PROVIDER_BINDING })
     if (history !== undefined) await session.send('Runtime.addBinding', { name: AGENT_HISTORY_BINDING })
     if (config !== undefined) await session.send('Runtime.addBinding', { name: CONFIG_BINDING })
+    if (serviceConfig !== undefined) await session.send('Runtime.addBinding', { name: SERVICE_CONFIG_BINDING })
     if (permission !== undefined) await session.send('Runtime.addBinding', { name: PERMISSION_BINDING })
     if (lifecycle !== undefined) await session.send('Runtime.addBinding', { name: PLUGIN_LIFECYCLE_BINDING })
     let activeMarketplaceRequests = 0
@@ -771,6 +793,32 @@ async function install(
         })()
       })
     }
+    let activeServiceConfigRequests = 0
+    if (serviceConfig !== undefined) {
+      removeServiceConfigBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
+        if (params.name !== SERVICE_CONFIG_BINDING || typeof params.payload !== 'string') return
+        const payload = params.payload
+        void (async () => {
+          let requestId = 'invalid'
+          try {
+            if (Buffer.byteLength(payload) > MAX_SERVICE_CONFIG_REQUEST_BYTES) throw new Error('service configuration request exceeds maximum size')
+            const request = parseServiceConfigBindingRequest(JSON.parse(payload) as unknown, serviceConfig.token, serviceConfig.profileId, serviceConfig.generation)
+            requestId = request.requestId
+            if (serviceConfigController?.signal.aborted === true) throw new Error('service configuration bridge is closed')
+            if (activeServiceConfigRequests >= 1) throw new Error('another service configuration request is already active')
+            activeServiceConfigRequests += 1
+            try {
+              const value = await serviceConfig.handle(request)
+              await sendServiceConfigBindingResponse(session, { requestId, ok: true, value })
+            } finally {
+              activeServiceConfigRequests -= 1
+            }
+          } catch (error) {
+            await sendServiceConfigBindingResponse(session, { requestId, ok: false, ...serviceConfigBridgeError(error) }).catch(() => undefined)
+          }
+        })()
+      })
+    }
     let activePermissionRequests = 0
     if (permission !== undefined) {
       removePermissionBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
@@ -853,6 +901,8 @@ async function install(
       historyBindingInstalled: history !== undefined,
       ...(configController === undefined ? {} : { configController, removeConfigBindingListener }),
       configBindingInstalled: config !== undefined,
+      ...(serviceConfigController === undefined ? {} : { serviceConfigController, removeServiceConfigBindingListener }),
+      serviceConfigBindingInstalled: serviceConfig !== undefined,
       ...(permissionController === undefined ? {} : { permissionController, removePermissionBindingListener }),
       permissionBindingInstalled: permission !== undefined,
       ...(lifecycleController === undefined ? {} : { lifecycleController, removeLifecycleBindingListener, unregisterLifecycleSession }),
@@ -863,12 +913,14 @@ async function install(
     providerController?.abort()
     historyController?.abort()
     configController?.abort()
+    serviceConfigController?.abort()
     permissionController?.abort()
     lifecycleController?.abort()
     removeBindingListener()
     removeProviderBindingListener()
     removeHistoryBindingListener()
     removeConfigBindingListener()
+    removeServiceConfigBindingListener()
     removePermissionBindingListener()
     removeLifecycleBindingListener()
     unregisterLifecycleSession()
@@ -882,12 +934,14 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.providerController?.abort()
   installed.historyController?.abort()
   installed.configController?.abort()
+  installed.serviceConfigController?.abort()
   installed.permissionController?.abort()
   installed.lifecycleController?.abort()
   installed.removeBindingListener()
   installed.removeProviderBindingListener?.()
   installed.removeHistoryBindingListener?.()
   installed.removeConfigBindingListener?.()
+  installed.removeServiceConfigBindingListener?.()
   installed.removePermissionBindingListener?.()
   installed.removeLifecycleBindingListener?.()
   installed.unregisterLifecycleSession?.()
@@ -907,6 +961,9 @@ async function uninstall(installed: InstalledScript): Promise<void> {
         : []),
       ...(installed.configBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: CONFIG_BINDING })]
+        : []),
+      ...(installed.serviceConfigBindingInstalled
+        ? [installed.session.send('Runtime.removeBinding', { name: SERVICE_CONFIG_BINDING })]
         : []),
       ...(installed.permissionBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: PERMISSION_BINDING })]
@@ -930,6 +987,7 @@ export interface WatchInjectionOptions {
   readonly agentHistoryHost?: CodexAgentHistoryHost
   readonly agentHistoryBridgeToken?: string
   readonly configBridge?: ConfigBridgeHandler
+  readonly serviceConfigBridge?: ServiceConfigBridgeHandler
   readonly permissionPersistence?: PermissionPersistenceContext
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
 }
@@ -966,6 +1024,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             provider,
             history,
             options.configBridge,
+            options.serviceConfigBridge,
             options.permissionPersistence,
             options.pluginLifecycle,
           )

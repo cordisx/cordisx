@@ -1,9 +1,10 @@
 # Plugin-owned service configuration
 
-Status: Host data/API foundation implemented against the formally merged
-`cordisx-protocol@871f028c57cffaa3080b06f6319baebfb4107438` contracts. Manager
-call-site wiring waits for the formal TDesign/Manager dependency and is not part
-of this foundation slice.
+Status: Host data/API foundation and the CLIProxy Providers plugin-detail
+bridge are implemented against the formally merged
+`cordisx-protocol@871f028c57cffaa3080b06f6319baebfb4107438` contracts. The
+Manager bridge uses the existing Host TDesign form and a token/profile/generation
+fenced CDP binding; it does not create a global Provider settings category.
 
 ## Boundary
 
@@ -88,4 +89,6 @@ state is never written to a CordisX core settings category.
 The final Manager slice must migrate through the narrow API, preserve a
 recoverable last-good value, remove product documentation that instructs users
 to edit top-level providers, and prove the plugin-detail flow in an isolated
-`app://` renderer before legacy write guidance can be removed.
+`app://` renderer before legacy write guidance can be removed. The bridge
+projects only `providers` and configured-secret state; it never sends a secret
+reference value or credential value to the renderer.

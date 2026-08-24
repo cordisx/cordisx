@@ -53,6 +53,7 @@ interface RuntimeHandle {
     }[]
   }
   dispose(): Promise<void>
+  listServiceConfigs?(pluginId: string): Promise<readonly unknown[]>
 }
 
 function session(providerId: string) {
@@ -93,9 +94,11 @@ describe('CLIProxy provider plugin renderer', () => {
     const config = await loadConfig(path.join(root, 'cordisx.cli-proxy.example.json'))
     const token = 'integration-provider-token'
     const configToken = 'c'.repeat(64)
+    const serviceConfigToken = 'd'.repeat(64)
     const bundle = await buildRendererBundle(config, {
       providerBridgeToken: token,
       configBridgeToken: configToken,
+      serviceConfigBridgeToken: serviceConfigToken,
       profileId: 'default',
       generation: 'cli-proxy-config-test',
     })
@@ -143,6 +146,42 @@ describe('CLIProxy provider plugin renderer', () => {
         }
         queueMicrotask(() => {
           const receiver = (dom.window as unknown as { __cordisxConfigReceiveV1?: (response: string) => void }).__cordisxConfigReceiveV1
+          receiver?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
+        })
+      },
+    })
+    const serviceConfigRequests: { operation: string; pluginId?: string; mutation?: unknown }[] = []
+    const serviceDescriptors = [
+      {
+        contract: 'cordisx.service-config-descriptor/v1', schemaVersion: 1,
+        identity: { source: 'https://github.com/cordisx/cordisx/tree/main/packages/cli/src/plugins/cli-proxy-api', pluginId: 'cli-proxy-api', serviceId: 'providers-runtime' },
+        scope: { profileId: 'default', generation: 'cli-proxy-config-test' },
+        schema: { id: 'https://example.test/runtime', projection: { kind: 'schemastery', envelope: {} } },
+        revision: 0, lastGoodRevision: 0, configApplies: 'service-restart', writable: true, restartRequired: false,
+        configuration: { contract: 'cordisx.cli-proxy-provider-runtime-config/v1', schemaVersion: 1, providers: [] },
+        secrets: [],
+      },
+      {
+        contract: 'cordisx.service-config-descriptor/v1', schemaVersion: 1,
+        identity: { source: 'https://github.com/cordisx/cordisx/tree/main/packages/cli/src/plugins/cli-proxy-api', pluginId: 'cli-proxy-api', serviceId: 'providers-startup' },
+        scope: { profileId: 'default', generation: 'cli-proxy-config-test' },
+        schema: { id: 'https://example.test/startup', projection: { kind: 'schemastery', envelope: {} } },
+        revision: 0, lastGoodRevision: 0, configApplies: 'app-restart', writable: true, restartRequired: false,
+        configuration: { contract: 'cordisx.cli-proxy-provider-startup-config/v1', schemaVersion: 1, providers: [] },
+        secrets: [],
+      },
+    ]
+    Object.defineProperty(dom.window, '__cordisxServiceConfigRequestV1', {
+      configurable: true,
+      value: (payload: string) => {
+        const request = JSON.parse(payload) as { requestId: string; token: string; operation: string; pluginId?: string; mutation?: unknown }
+        expect(request.token).toBe(serviceConfigToken)
+        serviceConfigRequests.push({ operation: request.operation, ...(request.pluginId === undefined ? {} : { pluginId: request.pluginId }), ...(request.mutation === undefined ? {} : { mutation: request.mutation }) })
+        const value = request.operation === 'list'
+          ? serviceDescriptors
+          : { contract: 'cordisx.service-config-result/v1', schemaVersion: 1, identity: serviceDescriptors[0]!.identity, scope: serviceDescriptors[0]!.scope, revision: 1, status: 'applied', configApplies: 'service-restart', serviceGeneration: 'test-generation' }
+        queueMicrotask(() => {
+          const receiver = (dom.window as unknown as { __cordisxServiceConfigReceiveV1?: (response: string) => void }).__cordisxServiceConfigReceiveV1
           receiver?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
         })
       },
@@ -267,7 +306,11 @@ describe('CLIProxy provider plugin renderer', () => {
     const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-provider-fleet="true"]')
     expect(page?.closest('[data-cordisx-page-outlet="main"]')).not.toBeNull()
     expect(dom.window.document.getElementById('native-conversation')?.textContent).toBe('native session remains')
-    const modelLabels = [...page!.querySelectorAll('select[aria-label="Model"] option')].map(option => option.textContent)
+    expect(page!.querySelector('select')).toBeNull()
+    const modelControl = page!.querySelector<HTMLElement>('[data-cordisx-host-page-control="select"] [aria-label="Model"]')
+    expect(modelControl?.tagName).toBe('T-SELECT')
+    const modelLabels = [...(dom.window.document.querySelector<HTMLElement>('[data-cxf-tdesign-portal-host="true"]')?.shadowRoot
+      ?.querySelectorAll<HTMLElement>('[role="listbox"][aria-label="Model"] t-option') ?? [])].map(option => option.textContent)
     expect(modelLabels).toEqual(['[gateway-a] Shared model', '[gateway-b] Shared model'])
     const keys = [...page!.querySelectorAll<HTMLElement>('[data-session]')].map(row => row.dataset.session)
     expect(keys).toEqual([
@@ -283,6 +326,7 @@ describe('CLIProxy provider plugin renderer', () => {
       expect.objectContaining({ providerId: 'external:gateway-a', scope: { providers: ['gateway-a'] } }),
       expect.objectContaining({ providerId: 'external:gateway-b', scope: { providers: ['gateway-b'] } }),
     ]))
+    expect(await runtime!.listServiceConfigs?.('cli-proxy-api')).toHaveLength(2)
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')?.click()
@@ -306,8 +350,38 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(configPanel?.querySelector('[data-config-path="baseUrl"]')).toBeNull()
     expect(configPanel?.querySelector('[data-config-path="apiKey"]')).toBeNull()
     expect(configPanel?.querySelector('[data-config-path="codexExecutable"]')).toBeNull()
+    for (let attempt = 0; attempt < 20 && configPanel?.querySelectorAll('[data-service-config]').length !== 2; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0))
+    }
+    expect(configPanel?.querySelectorAll('[data-service-config]')).toHaveLength(2)
+    expect(configPanel?.querySelector('[data-service-config="providers-runtime"]')?.getAttribute('data-config-applies')).toBe('service-restart')
+    expect(configPanel?.querySelector('[data-service-config="providers-startup"]')?.getAttribute('data-config-applies')).toBe('app-restart')
+    expect(configPanel?.querySelectorAll('[data-service-config] select')).toHaveLength(0)
+    expect(serviceConfigRequests).toEqual(expect.arrayContaining([{ operation: 'list', pluginId: 'cli-proxy-api' }]))
+    const serviceForm = configPanel!.querySelector<HTMLFormElement>('form[data-service-config-form="providers-runtime"]')!
+    const serviceInput = serviceForm.querySelector<HTMLElement & { value: string; onChange?: (value: string) => void }>('t-textarea')!
+    serviceInput.value = JSON.stringify([{
+      id: 'gateway-a', displayName: 'Gateway A', enabled: true,
+      endpoint: { baseUrl: 'https://proxy.example.test/v1', secretRef: 'host-secret:env/GATEWAY_A_KEY' },
+      models: { mappings: [] }, timeoutMs: 30_000,
+    }])
+    serviceInput.onChange?.(serviceInput.value)
+    expect(serviceForm.querySelector<HTMLElement & { disabled: boolean }>('t-button[type="submit"]')?.disabled).toBe(false)
+    serviceForm.dispatchEvent(new dom.window.SubmitEvent('submit', { bubbles: true, cancelable: true }))
+    for (let attempt = 0; attempt < 100 && !serviceConfigRequests.some(request => request.operation === 'mutate'); attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(serviceConfigRequests.find(request => request.operation === 'mutate')?.mutation).toMatchObject({
+      identity: { pluginId: 'cli-proxy-api', serviceId: 'providers-runtime' },
+      configuration: {
+        providers: [expect.objectContaining({
+          id: 'gateway-a',
+          endpoint: { baseUrl: 'https://proxy.example.test/v1', secretRef: 'host-secret:env/GATEWAY_A_KEY' },
+        })],
+      },
+    })
     const providerInput = providerField!.querySelector<HTMLElement & { value: string; onChange?: (value: string) => void }>('t-textarea')!
-    expect(configPanel!.querySelector('t-button[type="submit"]')).toBeNull()
+    expect(configPanel!.querySelector('form[data-plugin-config-form] t-button[type="submit"]')).toBeNull()
     providerInput.value = '["Gateway-A"]'
     providerInput.onChange?.(providerInput.value)
     const submit = configPanel!.querySelector<HTMLElement & { disabled: boolean }>('t-button[type="submit"]')!

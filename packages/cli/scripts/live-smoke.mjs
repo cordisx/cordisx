@@ -602,6 +602,10 @@ const evaluated = await send('Runtime.evaluate', {
         availability: permission.availability,
       })) ?? [],
       capabilityProviders: snapshot?.capabilityProviders ?? [],
+      serviceConfigBinding: {
+        request: typeof globalThis.__cordisxServiceConfigRequestV1,
+        receiver: typeof globalThis.__cordisxServiceConfigReceiveV1,
+      },
       surfaceClick: globalThis.__cordisxSmokeSurfaceClick ?? null,
       localization: snapshot?.localization ?? null,
       contributions: snapshot?.registrations?.map(item => ({
@@ -3576,6 +3580,16 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           while (document.querySelector('[data-plugin-config-form="' + CSS.escape(pluginId) + '"]') === null && Date.now() < formDeadline) {
             await new Promise(resolve => setTimeout(resolve, 50))
           }
+          if (pluginId === 'cli-proxy-api') {
+            const serviceDeadline = Date.now() + 5_000
+            while (document.querySelectorAll('[data-plugin-service-config="cli-proxy-api"] [data-service-config]').length < 2
+              && Date.now() < serviceDeadline) {
+              await new Promise(resolve => setTimeout(resolve, 50))
+            }
+            if (document.querySelectorAll('[data-plugin-service-config="cli-proxy-api"] [data-service-config]').length !== 2) {
+              throw new Error('CLIProxy Provider service configuration did not become available')
+            }
+          }
         }
       }
       const permissionCapability = ${JSON.stringify(managerPermissionCapability)}
@@ -3784,6 +3798,17 @@ if (parsed.values['manager-screenshot'] !== undefined) {
               firstControlRect: firstRect === undefined ? null : { x: firstRect.x, y: firstRect.y, width: firstRect.width, height: firstRect.height },
             }
           }),
+          serviceConfigs: [...document.querySelectorAll('[data-plugin-service-config]')].map(seat => ({
+            pluginId: seat.getAttribute('data-plugin-service-config'),
+            services: [...seat.querySelectorAll('[data-service-config]')].map(section => ({
+              id: section.getAttribute('data-service-config'),
+              applies: section.getAttribute('data-config-applies'),
+              form: section.closest('form')?.getAttribute('data-service-config-form') ?? null,
+              fullWidth: section.querySelector('.cxf-item')?.getAttribute('data-full-width') ?? null,
+              nativeSelects: section.querySelectorAll('select').length,
+            })),
+            message: seat.textContent?.trim() ?? '',
+          })),
           breadcrumb: {
             route: breadcrumb?.getAttribute('data-manager-page-route') ?? null,
             ordered: breadcrumbOrdered,

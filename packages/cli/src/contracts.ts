@@ -808,6 +808,32 @@ export interface CordisXPageNavigation {
   close(outlet?: CordisXOutletName): Promise<void>
 }
 
+/**
+ * A small Host-owned control surface for contributed pages.  Plugins receive
+ * a semantic select model, never a framework instance, selector, or styling
+ * handle.  The Host owns the actual control, portal, keyboard behaviour, and
+ * disposal.
+ */
+export interface CordisXPageSelectControl<Value extends CordisXJsonScalar = CordisXJsonScalar> {
+  readonly root: HTMLElement
+  readonly value: Value | undefined
+  set(options: readonly { readonly label: string; readonly value: Value; readonly disabled?: boolean }[], value?: Value): void
+  dispose(): void
+}
+
+export interface CordisXPageControls {
+  select<Value extends CordisXJsonScalar>(options: {
+    readonly id?: string
+    readonly label: string
+    readonly options: readonly { readonly label: string; readonly value: Value; readonly disabled?: boolean }[]
+    readonly value?: Value
+    readonly disabled?: boolean
+    readonly clearable?: boolean
+    readonly onChange: (value: Value | undefined) => void
+  }): CordisXPageSelectControl<Value>
+  dispose(): void
+}
+
 export interface CordisXPageMountContext<
   Messages extends CordisXMessageDefinition<Messages> = CordisXMessageSchema,
 >
@@ -819,6 +845,8 @@ export interface CordisXPageMountContext<
   readonly outlet: CordisXOutletName
   readonly params: Readonly<Record<string, CordisXJsonScalar>>
   readonly navigation: CordisXPageNavigation
+  /** Host-owned semantic controls available to contributed page bodies. */
+  readonly controls: CordisXPageControls
   readonly tabId?: string
 }
 

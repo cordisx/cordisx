@@ -10,54 +10,31 @@ The canonical route id `providers.sessions`, path `/main/providers/sessions`, `m
 
 ## Configure providers
 
-Run `cordisx config` to locate the active CordisX configuration. The default location is `~/.cordisx/config.json`. Add each external provider to the top-level `providers` list and enable the built-in plugin with `cordisx:cli-proxy-api`:
+Open **Plugins → CLIProxy Providers → Configuration**. This is the only
+product entry point for Provider connections: CordisX does not provide a
+global Providers, Runtime, Launcher, or Demo settings page.
 
-```json
-{
-  "version": 1,
-  "defaultApp": "codex",
-  "apps": {
-    "codex": {
-      "defaultProfile": "default",
-      "profiles": {
-        "default": {
-          "displayName": "Default",
-          "dataMode": "shared"
-        }
-      }
-    }
-  },
-  "providers": [
-    {
-      "id": "gateway-a",
-      "kind": "cli-proxy-api",
-      "displayName": "Gateway A",
-      "baseUrl": "https://proxy.example.com/v1",
-      "apiKeyEnv": "CLIPROXY_A_API_KEY"
-    }
-  ],
-  "plugins": [
-    {
-      "id": "cli-proxy-api",
-      "entry": "cordisx:cli-proxy-api",
-      "enabled": true,
-      "config": {
-        "providerIds": ["gateway-a"],
-        "defaultCwd": "/path/to/workspace"
-      }
-    }
-  ]
-}
-```
+The **Provider connections** group holds the runtime Provider list: stable
+`providerId`, display name, HTTPS endpoint, enabled state, timeout, and
+provider-local model mappings. Saving it restarts only the external Provider
+Fleet. The **Next launch** group holds the optional executable and isolated
+provider data directory; it is staged and takes effect after the app restarts.
 
-Set the environment variable named by `apiKeyEnv` before launching CordisX. Keep secrets out of `config.json`. Use HTTPS for remote endpoints; loopback HTTP is supported for a provider running on the same machine.
+Credentials are submitted as Host-managed secure references such as an
+approved `host-secret:` reference. Values are never shown in the plugin,
+renderer metadata, App Server arguments, or this README. Remote endpoints must
+use HTTPS; loopback HTTP is accepted only for a local provider.
 
 The Manager **Configuration** tab exposes only this plugin's renderer behavior:
 
 - `providerIds` defaults to `[]`. It filters the page to Provider IDs that the launcher has already configured and enabled; an empty list shows every enabled Provider. The list accepts at most 64 IDs, each using the same lower-case `[a-z0-9][a-z0-9._-]{0,95}` format as the launcher.
 - `defaultCwd` defaults to `""`. It prefills the new-session working directory; an empty value lets you choose a directory on the Provider page. The value is limited to 4096 characters and cannot contain NUL.
 
-Invalid values are rejected in the Manager before the launcher writer is called. Valid settings use the Host's profile- and generation-bound configuration RPC and take effect after the plugin restarts. Adding or removing Provider connections, changing endpoints, selecting a process, and editing credentials are unavailable in this Manager form. Those settings remain in the launcher-owned top-level `providers` configuration, and the plugin never writes the CordisX home configuration directly.
+Invalid values are rejected by the Host's profile- and generation-bound CAS
+service configuration API. A conflicting revision must be reviewed before it
+is saved again. A permission denial is shown as a permission denial, never as
+validation failure. The plugin never receives a home-config writer, credential
+value, process handle, selector, or raw bridge.
 
 Provider IDs are persistent identity, not display labels. Keep each `id` unique and stable after creating conversations.
 
@@ -82,7 +59,12 @@ Review these capabilities under **Plugins → CLIProxy Providers → Permissions
 
 ## Empty and unavailable states
 
-With no enabled provider, there are no external models or conversations to display. Add a provider, set its credential environment variable, and relaunch CordisX. If a configured provider is unavailable, verify its endpoint, credential environment variable, network access, and Codex executable. Other provider identities remain isolated, and an unavailable provider is never silently replaced by another one.
+With no enabled provider, there are no external models or conversations to
+display. Open the CLIProxy Providers plugin detail to add one. If a configured
+provider is unavailable, verify its endpoint, secure credential reference,
+network access, and Codex executable. Other provider identities remain
+isolated, and an unavailable provider is never silently replaced by another
+one.
 
 ## Current boundary
 

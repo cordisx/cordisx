@@ -64,6 +64,7 @@ import type {
   ManagerPluginConfigSnapshot,
 } from './configuration.js'
 import type { CordisXConfigFieldSnapshot, CordisXJsonValue } from '../contracts.js'
+import type { HostServiceConfigDescriptor, HostServiceConfigMutation, HostServiceConfigMutationResult } from '../launcher/service-config.js'
 import type {
   CordisXCapabilityAvailabilityState,
   CordisXCapabilityProviderFamily,
@@ -211,6 +212,9 @@ export interface ManagerModel {
   subscribePluginConsole?(listener: (pluginId: string) => void): () => void
   setPluginBlocked(id: string, blocked: boolean): Promise<void>
   updatePluginConfig?(id: string, expectedRevision: number, operations: readonly ConfigMutationOperation[]): Promise<void>
+  /** Host-owned launcher services are rendered only inside their owning plugin detail. */
+  listServiceConfigs?(pluginId: string): Promise<readonly HostServiceConfigDescriptor[]>
+  updateServiceConfig?(mutation: HostServiceConfigMutation): Promise<HostServiceConfigMutationResult>
   mountConfigRenderer?(
     pluginId: string,
     field: CordisXConfigFieldSnapshot,
@@ -3820,11 +3824,149 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       .replace(/^./, character => character.toUpperCase())
   }
 
+  /**
+   * Launcher services deliberately do not appear in Manager Settings.  The
+   * owning plugin is the only product entry point, while this Host-rendered
+   * adapter keeps schema projection, CAS, portal controls, and error policy
+   * out of the plugin bundle.
+   */
+  const renderPluginServiceConfiguration = (plugin: ManagerPluginSnapshot, panel: HTMLElement): void => {
+    if (plugin.id !== 'cli-proxy-api' || model.listServiceConfigs === undefined) return
+    const seat = create(document, 'div', 'cxm-plugin-service-config')
+    seat.dataset.pluginServiceConfig = plugin.id
+    seat.append(forms.empty(productLocale(model.snapshot().localization.locale) === 'zh-CN' ? '正在读取 Provider 配置…' : 'Loading Provider configuration…'))
+    panel.append(seat)
+
+    const unavailable = (reason: unknown): string => {
+      const code = reason instanceof Error ? reason.message : String(reason)
+      if (code === 'permission-denied') return productLocale(model.snapshot().localization.locale) === 'zh-CN'
+        ? '没有权限查看 Provider 配置。' : 'You do not have permission to view Provider configuration.'
+      return productLocale(model.snapshot().localization.locale) === 'zh-CN'
+        ? 'Provider 配置当前不可用。' : 'Provider configuration is currently unavailable.'
+    }
+    const render = (descriptors: readonly HostServiceConfigDescriptor[]): void => {
+      if (!seat.isConnected) return
+      seat.replaceChildren()
+      if (descriptors.length === 0) {
+        seat.append(forms.empty(productLocale(model.snapshot().localization.locale) === 'zh-CN'
+          ? 'Provider 配置当前不可用。' : 'Provider configuration is currently unavailable.'))
+        return
+      }
+      for (const descriptor of descriptors) {
+        const locale = model.snapshot().localization.locale
+        const runtime = descriptor.identity.serviceId === 'providers-runtime'
+        const title = productLocale(locale) === 'zh-CN'
+          ? (runtime ? 'Provider 连接' : '下次启动')
+          : (runtime ? 'Provider connections' : 'Next launch')
+        const description = productLocale(locale) === 'zh-CN'
+          ? (runtime ? '保存后重启 Provider 服务；当前连接不会被伪造成原生连接。' : '保存为下次应用启动候选值；重启应用后生效。')
+          : (runtime ? 'Saving restarts the Provider service; it never impersonates the native connection.' : 'Saved as the next app-start candidate and takes effect after restart.')
+        const section = forms.section(title, description)
+        section.root.dataset.serviceConfig = descriptor.identity.serviceId
+        section.root.dataset.configApplies = descriptor.configApplies
+        section.root.classList.add('cxm-settings-group')
+        const form = forms.form(`${plugin.id}-${descriptor.identity.serviceId}`)
+        form.dataset.serviceConfigForm = descriptor.identity.serviceId
+        const configuration = descriptor.configuration as unknown as Record<string, CordisXJsonValue>
+        const field: CordisXConfigFieldSnapshot = {
+          namespace: plugin.id,
+          path: ['providers'],
+          type: 'array',
+          label: productLocale(locale) === 'zh-CN' ? 'Provider 列表' : 'Provider list',
+          description: productLocale(locale) === 'zh-CN'
+            ? '使用已声明的 providerId、端点和模型映射；凭据引用由 Host 安全保管。'
+            : 'Use declared providerId, endpoint, and model mappings; credential references stay Host-managed.',
+          value: Array.isArray(configuration.providers) ? configuration.providers : [],
+          disabled: !descriptor.writable,
+          required: true,
+        }
+        const item = forms.item({ id: `cxm-service-${descriptor.identity.serviceId}-providers`, label: field.label!, ...(field.description === undefined ? {} : { help: field.description }), required: true, fullWidth: true })
+        item.root.dataset.serviceConfigPath = `${descriptor.identity.serviceId}.providers`
+        const candidate = (typeof globalThis.structuredClone === 'function'
+          ? globalThis.structuredClone(descriptor.configuration)
+          : JSON.parse(JSON.stringify(descriptor.configuration))) as Record<string, CordisXJsonValue>
+        let dirty = false
+        const control = forms.control(field, item.label.htmlFor, (value, issue) => {
+          item.setError(issue)
+          if (issue === undefined && Array.isArray(value)) {
+            candidate.providers = value as unknown as CordisXJsonValue
+            dirty = true
+            setTDesignDisabled(save, false)
+          } else {
+            setTDesignDisabled(save, true)
+          }
+        })
+        forms.connect(item, control)
+        item.control.append(control.root)
+        section.content.append(item.root)
+        const footer = create(document, 'div', 'cxf-actions cxf-form-footer')
+        const status = create(document, 'span', 'cxf-status')
+        status.setAttribute('role', 'status')
+        if (descriptor.restartRequired) {
+          status.dataset.state = 'dirty'
+          status.textContent = productLocale(locale) === 'zh-CN' ? '已有候选配置，重启应用后生效。' : 'A candidate is waiting for app restart.'
+        }
+        const save = forms.button(productLocale(locale) === 'zh-CN' ? '保存 Provider 配置' : 'Save Provider configuration', { type: 'submit', variant: 'primary' })
+        setTDesignDisabled(save, true)
+        footer.append(status, save)
+        form.append(section.root, footer)
+        form.addEventListener('submit', event => {
+          event.preventDefault()
+          if (!dirty || item.root.dataset.invalid === 'true' || model.updateServiceConfig === undefined) return
+          setTDesignDisabled(save, true)
+          form.setAttribute('aria-busy', 'true')
+          status.dataset.state = 'saving'
+          status.textContent = hostConfigApplyMessage(descriptor.configApplies, 'saving', locale)
+          const mutation: HostServiceConfigMutation = {
+            contract: 'cordisx.service-config-mutation/v1', schemaVersion: 1,
+            identity: descriptor.identity, scope: descriptor.scope, expectedRevision: descriptor.revision,
+            configuration: candidate as unknown as HostServiceConfigMutation['configuration'],
+          }
+          void model.updateServiceConfig(mutation).then(async result => {
+            if (result.status === 'rejected' || result.status === 'conflict') {
+              const text = result.error.code === 'permission-denied'
+                ? (productLocale(locale) === 'zh-CN' ? '没有权限修改 Provider 配置。' : 'You do not have permission to modify Provider configuration.')
+                : result.error.code === 'conflict'
+                  ? (productLocale(locale) === 'zh-CN' ? '配置已更新，请重新检查后再保存。' : 'Configuration changed; review it before saving again.')
+                  : (productLocale(locale) === 'zh-CN' ? 'Provider 配置未保存。' : 'Provider configuration was not saved.')
+              status.dataset.state = 'error'
+              status.textContent = text
+              return
+            }
+            status.dataset.state = 'saved'
+            status.textContent = result.status === 'staged'
+              ? (productLocale(locale) === 'zh-CN' ? '已保存，重启应用后生效。' : 'Saved; it takes effect after app restart.')
+              : (productLocale(locale) === 'zh-CN' ? '已保存，Provider 服务已重启。' : 'Saved; the Provider service restarted.')
+            dirty = false
+            const fresh = await model.listServiceConfigs?.(plugin.id)
+            if (fresh !== undefined) render(fresh)
+          }).catch(error => {
+            status.dataset.state = 'error'
+            status.textContent = unavailable(error)
+          }).finally(() => {
+            form.removeAttribute('aria-busy')
+          })
+        })
+        seat.append(form)
+        if (descriptor.secrets.length > 0) {
+          seat.append(forms.note(productLocale(locale) === 'zh-CN'
+            ? '凭据仅以安全引用保存；此处不会显示或读取凭据值。'
+            : 'Credentials are stored only as secure references; values are never displayed or read here.'))
+        }
+      }
+    }
+    void model.listServiceConfigs(plugin.id).then(render).catch(error => {
+      if (!seat.isConnected) return
+      seat.replaceChildren(forms.alert(unavailable(error), 'warning'))
+    })
+  }
+
   const renderPluginConfiguration = (plugin: ManagerPluginSnapshot, panel: HTMLElement): void => {
     const locale = model.snapshot().localization.locale
     const descriptor = plugin.configuration
     if (descriptor === undefined || descriptor.schemaKind !== 'schemastery') {
       panel.append(forms.empty(managerCopy(locale, 'form.empty-no-schema')))
+      renderPluginServiceConfiguration(plugin, panel)
       return
     }
     const sensitiveRoles = ['secret', 'credential', 'credential-ref', 'permission', 'capability']
@@ -3837,6 +3979,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       && !sensitiveRoles.includes(field.role ?? '') && selectHostFormPrimitive(field) !== 'unsupported') : []
     if (visibleFields.length === 0) {
       panel.append(forms.empty(managerCopy(locale, 'form.empty-no-fields')))
+      renderPluginServiceConfiguration(plugin, panel)
       return
     }
 
@@ -4015,6 +4158,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     panel.append(form)
     if (!descriptor.writable) panel.append(forms.note(managerCopy(locale, 'form.readonly-note')))
     if (draft.message !== undefined) panel.append(forms.alert(draft.message, draft.state === 'saved' ? 'info' : 'error'))
+    renderPluginServiceConfiguration(plugin, panel)
   }
 
   const mountLunaConsole = (

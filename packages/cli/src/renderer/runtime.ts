@@ -78,6 +78,8 @@ import {
   type ConfigCandidate,
   type ConfigMutationOperation,
 } from './configuration.js'
+import { BrowserServiceConfigBridge } from './service-config-binding.js'
+import type { HostServiceConfigDescriptor, HostServiceConfigMutation, HostServiceConfigMutationResult } from '../launcher/service-config.js'
 import { BindingPermissionPolicyStore } from './permission-binding.js'
 import { BrowserPluginLifecycleBridge } from './plugin-lifecycle-binding.js'
 import {
@@ -116,6 +118,7 @@ interface CordisXRuntimeMetadata {
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
   readonly configBridgeToken?: string
+  readonly serviceConfigBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
   readonly pluginActivation?: CordisXPluginActivationRecordV1
   readonly initialRegistryEpoch?: number
@@ -379,6 +382,9 @@ async function start(
   const configBridge = metadata.configBridgeToken === undefined
     ? undefined
     : new BrowserConfigBridge(metadata.configBridgeToken, metadata.profileId, generation)
+  const serviceConfigBridge = metadata.serviceConfigBridgeToken === undefined
+    ? undefined
+    : BrowserServiceConfigBridge.connect(metadata.serviceConfigBridgeToken, metadata.profileId, generation)
   const lifecycleBridge = metadata.pluginLifecycleBridgeToken === undefined
     ? undefined
     : new BrowserPluginLifecycleBridge(metadata.pluginLifecycleBridgeToken, metadata.profileId, generation)
@@ -1701,6 +1707,7 @@ async function start(
     }
     generationTransactions.clear()
     configBridge?.dispose()
+    serviceConfigBridge?.dispose()
     lifecycleBridge?.dispose()
     configRenderers.dispose()
     configuration.dispose()
@@ -1835,6 +1842,14 @@ async function start(
     snapshot,
     setPluginBlocked,
     updatePluginConfig,
+    listServiceConfigs: async (pluginId: string): Promise<readonly HostServiceConfigDescriptor[]> => {
+      if (serviceConfigBridge === undefined) return []
+      return await serviceConfigBridge.list(pluginId)
+    },
+    updateServiceConfig: async (mutation: HostServiceConfigMutation): Promise<HostServiceConfigMutationResult> => {
+      if (serviceConfigBridge === undefined) throw new Error('service-config-unavailable')
+      return await serviceConfigBridge.mutate(mutation)
+    },
     mountConfigRenderer: (pluginId, field, container, setDraft) => configRenderers.mount(pluginId, field, container, setDraft),
     setPermissionPolicy,
     subscribe,
