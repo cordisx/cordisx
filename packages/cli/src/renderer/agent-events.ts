@@ -15,6 +15,7 @@ import {
 import type { CordisXPlatformResult, CordisXPluginIdentity } from '../platform-contracts.js'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
 import { PermissionBroker } from './platform.js'
+import type { PluginConsoleAspect, PluginPrincipalToken } from './plugin-console.js'
 
 const MAX_PAGE_SIZE = 500
 
@@ -330,6 +331,7 @@ interface AgentEventServiceOptions {
   readonly ledger: CordisXAgentEventLedger
   readonly broker: PermissionBroker
   readonly status: () => CordisXAgentEventStatus
+  readonly console?: PluginConsoleAspect
 }
 
 const options = new WeakMap<object, AgentEventServiceOptions>()
@@ -369,11 +371,20 @@ export class CordisXAgentEventService extends Service implements CordisXAgentEve
   }
 
   async query(input: CordisXAgentEventQuery): Promise<CordisXPlatformResult<CordisXAgentEventPage>> {
-    const caller = identity(this.ctx)
+    const console = serviceOptions(this).console
+    const token = console?.tokenFromContext(this.ctx)
+    return token === undefined || console === undefined ? await this.queryBound(input) : await console.run(
+      token, 'agentEvents.query', input, invocation => this.queryBound(input, token, invocation), { sessionId: input.sessionId },
+    )
+  }
+
+  private async queryBound(input: CordisXAgentEventQuery, token?: PluginPrincipalToken, invocation?: { dispatch(message?: string): void }): Promise<CordisXPlatformResult<CordisXAgentEventPage>> {
+    const caller = token === undefined ? identity(this.ctx) : serviceOptions(this).console?.owner(token)
     if (caller === undefined) return denied('permission-denied', 'Agent events require a plugin context')
     if (!validId(input.sessionId)) return denied('invalid-request', 'sessionId must be a non-empty opaque id')
     const grant = await serviceOptions(this).broker.authorize(caller, 'agent.events.read', { agentSessionId: input.sessionId })
     if (!grant.ok) return grant
+    invocation?.dispatch('Dispatched to Host Agent event ledger')
     try {
       return { ok: true, value: serviceOptions(this).ledger.query(input) }
     } catch (error) {

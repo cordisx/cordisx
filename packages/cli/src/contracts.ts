@@ -110,6 +110,97 @@ export interface CordisXI18n {
 export type CordisXJsonScalar = string | number | boolean | null
 export type CordisXJsonValue = CordisXJsonScalar | readonly CordisXJsonValue[] | { readonly [key: string]: CordisXJsonValue }
 
+export const CORDISX_PLUGIN_CONSOLE_ENTRY_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-console-entry.v1.schema.json' as const
+export const CORDISX_PLUGIN_CONSOLE_PAGE_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-console-page.v1.schema.json' as const
+
+export type CordisXPluginConsoleKind = 'console' | 'invocation' | 'permission' | 'lifecycle' | 'diagnostic'
+export type CordisXPluginConsoleMethod = 'debug' | 'log' | 'info' | 'warn' | 'error'
+export type CordisXPluginConsoleCoverage = 'host-mediated' | 'scoped-console' | 'best-effort' | 'unknown'
+export type CordisXPluginConsolePhase =
+  | 'requested' | 'ask' | 'allow' | 'deny' | 'dispatch'
+  | 'success' | 'failure' | 'cancel' | 'activate' | 'dispose' | 'reload'
+export type CordisXPluginConsoleStatus = 'pending' | 'success' | 'failure' | 'denied' | 'cancelled'
+
+export interface CordisXPluginConsoleIdentityV1 {
+  readonly source: string
+  readonly pluginId: string
+}
+
+export interface CordisXPluginConsoleValueSummaryV1 {
+  readonly type: 'undefined' | 'null' | 'boolean' | 'number' | 'string' | 'bigint' | 'symbol' | 'function' | 'error' | 'array' | 'object' | 'element' | 'circular' | 'unavailable' | 'redacted'
+  readonly preview: string
+  readonly value?: string | number | boolean | null
+  readonly name?: string
+  readonly stack?: string
+  readonly items?: readonly CordisXPluginConsoleValueSummaryV1[]
+  readonly entries?: readonly { readonly key: string; readonly value: CordisXPluginConsoleValueSummaryV1 }[]
+  readonly itemCount?: number
+  readonly byteCount?: number
+  readonly truncated?: boolean
+}
+
+export interface CordisXPluginConsoleConsumptionSummaryV1 {
+  readonly type: string
+  readonly itemCount?: number
+  readonly byteCount?: number
+  readonly preview?: string
+  readonly truncated?: boolean
+}
+
+export interface CordisXPluginConsoleEntryV1 {
+  readonly contract: 'cordisx.plugin-console-entry/v1'
+  readonly schemaVersion: 1
+  readonly entryId: string
+  readonly seq: number
+  readonly time: number
+  readonly plugin: CordisXPluginConsoleIdentityV1
+  readonly effectiveOwner?: CordisXPluginConsoleIdentityV1
+  readonly generation: string
+  readonly coverage: CordisXPluginConsoleCoverage
+  readonly kind: CordisXPluginConsoleKind
+  readonly method: CordisXPluginConsoleMethod
+  readonly source: string
+  readonly message: string
+  readonly phase?: CordisXPluginConsolePhase
+  readonly status?: CordisXPluginConsoleStatus
+  readonly correlationId?: string
+  readonly sessionId?: string
+  readonly context?: { readonly page?: string; readonly invocationKey?: string }
+  readonly trigger?: {
+    readonly kind: 'capability' | 'registration' | 'lifecycle' | 'error-boundary'
+    readonly registrationId?: string
+    readonly parentCorrelationId?: string
+  }
+  readonly durationMs?: number
+  readonly args: readonly CordisXPluginConsoleValueSummaryV1[]
+  readonly request?: CordisXPluginConsoleConsumptionSummaryV1
+  readonly result?: CordisXPluginConsoleConsumptionSummaryV1
+  readonly stack?: string
+}
+
+export interface CordisXPluginConsolePageV1 {
+  readonly contract: 'cordisx.plugin-console-page/v1'
+  readonly schemaVersion: 1
+  readonly plugin: CordisXPluginConsoleIdentityV1
+  readonly generation: string
+  readonly generatedAt: number
+  readonly partialObservability: true
+  readonly droppedEntries?: number
+  readonly unattributedEntries?: number
+  readonly entries: readonly CordisXPluginConsoleEntryV1[]
+}
+
+/** Browser-compatible console subset lexically injected into one plugin bundle. */
+export interface CordisXPluginConsoleFacade {
+  debug(...data: unknown[]): void
+  log(...data: unknown[]): void
+  info(...data: unknown[]): void
+  warn(...data: unknown[]): void
+  error(...data: unknown[]): void
+}
+
 export type CordisXIconToken = `${string}:${string}`
 
 export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1 =
@@ -755,6 +846,8 @@ export interface CordisXBrowserPlugin {
   readonly source: string
   readonly enabled: boolean
   readonly module?: CordisXPluginModule
+  /** Launcher-created lazy module factory with a lexical, owner-scoped console. */
+  readonly moduleFactory?: (console: CordisXPluginConsoleFacade) => CordisXPluginModule
   readonly config: unknown
   readonly revision: number
   /** Package-authoritative manifest, used instead of executing module metadata when present. */

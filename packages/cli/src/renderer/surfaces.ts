@@ -26,6 +26,7 @@ import {
 } from '../contracts.js'
 import { ownerFromContext, qualifyOwnedId } from './ownership.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
+import type { PluginConsoleAspect } from './plugin-console.js'
 import {
   HostContextStore,
   ICON_TOKEN_PATTERN,
@@ -551,9 +552,12 @@ export class SurfaceRegistry {
 export class CordisXSlotService extends Service implements CordisXSlots {
   readonly registry: SurfaceRegistry
   readonly contexts: HostContextStore
+  private readonly console: PluginConsoleAspect | undefined
 
-  constructor(ctx: Context, registry?: SurfaceRegistry) {
+  constructor(ctx: Context, input?: SurfaceRegistry | { readonly registry?: SurfaceRegistry; readonly console: PluginConsoleAspect }) {
     super(ctx, 'slots')
+    const registry = input instanceof SurfaceRegistry ? input : input?.registry
+    this.console = input instanceof SurfaceRegistry ? undefined : input?.console
     this.contexts = new HostContextStore()
     this.registry = registry ?? new SurfaceRegistry(this.contexts)
     ctx.effect(() => () => {
@@ -566,16 +570,39 @@ export class CordisXSlotService extends Service implements CordisXSlots {
     if (!this.registry.isDeclared(name)) {
       throw new Error(`surface ${JSON.stringify(name)} is not declared; direct-DOM slots were removed in structured UI v1`)
     }
-    return this.ctx.effect(setup, `slots.inject(${JSON.stringify(name)})`)
+    const token = this.console?.tokenFromContext(this.ctx)
+    const scoped = token === undefined || this.console === undefined
+      ? setup
+      : () => this.console!.runInPluginContext(
+          token,
+          { trigger: { kind: 'registration', registrationId: `surface:${name}` } },
+          setup,
+        ) as Effect
+    const register = (): ReturnType<CordisXSlots['inject']> => this.ctx.effect(scoped, `slots.inject(${JSON.stringify(name)})`)
+    return token === undefined || this.console === undefined ? register() : this.console.runSync(token, 'slots.inject', { name }, register)
   }
 
   register<Name extends CordisXSurfaceName>(
     options: CordisXContributionOptions<Name>,
     item: CordisXSurfaceMap[Name],
   ): CordisXContributionHandle<CordisXSurfaceMap[Name]> {
-    const handle = this.registry.register(ownerFromContext(this.ctx), options, item)
-    this.ctx.effect(() => handle, `slots.register(${JSON.stringify(options.name)}, ${JSON.stringify(options.id)})`)
-    return handle
+    const owner = ownerFromContext(this.ctx)
+    const token = this.console?.tokenFromContext(this.ctx)
+    const register = (): CordisXContributionHandle<CordisXSurfaceMap[Name]> => this.registry.register(owner, options, item)
+    const handle = token === undefined || this.console === undefined
+      ? register()
+      : this.console.runSync(token, 'slots.register', { options, item }, register)
+    if (token === undefined || this.console === undefined) {
+      this.ctx.effect(() => handle, `slots.register(${JSON.stringify(options.name)}, ${JSON.stringify(options.id)})`)
+      return handle
+    }
+    const console = this.console
+    const dispose = (() => console.runSync(token, 'slots.dispose', { name: options.name, id: options.id }, handle.dispose)) as CordisXContributionHandle<CordisXSurfaceMap[Name]>
+    dispose.dispose = dispose
+    dispose.update = next => console.runSync(token, 'slots.update', { name: options.name, id: options.id, item: next }, () => handle.update(next))
+    dispose.updateOptions = next => console.runSync(token, 'slots.updateOptions', { name: options.name, id: options.id, options: next }, () => handle.updateOptions(next))
+    this.ctx.effect(() => dispose, `slots.register(${JSON.stringify(options.name)}, ${JSON.stringify(options.id)})`)
+    return dispose
   }
 
   snapshot(): readonly SurfaceContributionSnapshot[] {

@@ -77,6 +77,11 @@ import {
   hostLocalCapabilityProviders,
   platformAdapterCapabilityProvider,
 } from './capability-availability.js'
+import {
+  CORDISX_PLUGIN_PRINCIPAL,
+  PluginConsoleAspect,
+  type PluginPrincipalToken,
+} from './plugin-console.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 
@@ -96,8 +101,11 @@ interface CordisXRuntimeMetadata {
 
 interface PluginController {
   item: CordisXBrowserPlugin
-  identity: CordisXPluginIdentity
+  readonly identity: CordisXPluginIdentity
   manifest: CordisXPluginManifestV1
+  principal: PluginPrincipalToken
+  activation: number
+  principalLive: boolean
   unregisterPermissions?: () => void
   unregisterExtensionPoints?: () => void
   fiber?: Fiber
@@ -212,19 +220,29 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function createController(item: CordisXBrowserPlugin): PluginController {
+function createController(item: CordisXBrowserPlugin, pluginConsole: PluginConsoleAspect): PluginController {
   const identity = Object.freeze({ source: item.source, id: item.id })
+  const activation = 1
+  const principal = pluginConsole.issue(identity, `${pluginConsole.generation}:${item.id}:${activation}`)
   try {
+    const module = item.moduleFactory?.(pluginConsole.consoleFacade(principal)) ?? item.module
+    const boundItem: CordisXBrowserPlugin = module === undefined || module === item.module ? item : { ...item, module }
     return {
-      item,
+      item: boundItem,
       identity,
-      manifest: normalizePluginManifest(item.manifest ?? item.module?.manifest, item.id),
-      status: !item.enabled || item.module === undefined ? 'configured-disabled' : 'active',
+      principal,
+      activation,
+      principalLive: true,
+      manifest: normalizePluginManifest(item.manifest ?? module?.manifest, item.id),
+      status: !item.enabled || module === undefined ? 'configured-disabled' : 'active',
     }
   } catch (error) {
     return {
       item,
       identity,
+      principal,
+      activation,
+      principalLive: true,
       manifest: normalizePluginManifest(undefined, item.id),
       status: 'failed',
       error: errorMessage(error),
@@ -269,6 +287,10 @@ async function start(
   const generation = metadata.generation ?? (typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  const pluginConsole = new PluginConsoleAspect(generation)
+  const recordUnknownError = (event: Event): void => pluginConsole.recordUnattributedError(event.type)
+  window.addEventListener('error', recordUnknownError)
+  window.addEventListener('unhandledrejection', recordUnknownError)
   const permissionStore = metadata.permissionBridgeToken === undefined
     ? new BrowserPermissionPolicyStore(metadata.profileId)
     : BindingPermissionPolicyStore.connect(metadata.permissionBridgeToken, metadata.permissionPolicies ?? [])
@@ -279,6 +301,7 @@ async function start(
     30_000,
     metadata.profileId,
     generation,
+    pluginConsole,
   )
   const configBridge = metadata.configBridgeToken === undefined
     ? undefined
@@ -328,7 +351,7 @@ async function start(
   ])
   const extensionPointDescriptors = new ExtensionPointDescriptorRegistry()
   const extensionPointBroker = new ExtensionPointPolicyBroker(extensionPointDescriptors, new BrowserExtensionPointPolicyStore(), generation)
-  const controllers: PluginController[] = plugins.map(createController)
+  const controllers: PluginController[] = plugins.map(item => createController(item, pluginConsole))
   const requiredBlockReason = (controller: PluginController): string | undefined => {
     const denied = broker.requiredDenied(controller.identity)
     if (denied.length > 0) return `Required capability denied: ${denied.join(', ')}`
@@ -431,10 +454,31 @@ async function start(
     agentRuntime.releaseOwner(controller.identity, reason)
     await controller.fiber?.dispose()
     await routeService?.settled()
+    retirePrincipal(controller, `Plugin disposed: ${reason}`)
     delete controller.fiber
   }
 
+  const renewPrincipal = (controller: PluginController): void => {
+    if (controller.principalLive) return
+    controller.activation += 1
+    controller.principal = pluginConsole.issue(
+      controller.identity,
+      `${generation}:${controller.item.id}:${controller.activation}`,
+    )
+    controller.principalLive = true
+    const module = controller.item.moduleFactory?.(pluginConsole.consoleFacade(controller.principal)) ?? controller.item.module
+    controller.item = module === undefined || module === controller.item.module ? controller.item : { ...controller.item, module }
+    controller.manifest = normalizePluginManifest(controller.item.manifest ?? module?.manifest, controller.item.id)
+  }
+
+  const retirePrincipal = (controller: PluginController, message: string): void => {
+    if (!controller.principalLive) return
+    pluginConsole.deactivate(controller.principal, message)
+    controller.principalLive = false
+  }
+
   const mountPlugin = async (controller: PluginController): Promise<void> => {
+    renewPrincipal(controller)
     const module = controller.item.module
     if (module === undefined) throw new Error(`plugin ${controller.item.id} is not bundled because it is disabled in configuration`)
     const blockedReason = requiredBlockReason(controller)
@@ -447,20 +491,25 @@ async function start(
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: controller.item.package?.moduleGeneration ?? `${generation}:${controller.item.id}:bundled`,
+      [CORDISX_PLUGIN_PRINCIPAL]: controller.principal,
     })
+    pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation started')
     const fiber = pluginContext.plugin(pluginFromModule(module), configuration.get(controller.item.id))
     controller.fiber = fiber
     try {
       await fiber
       controller.status = 'active'
+      pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation completed')
       delete controller.error
       delete controller.blockedReason
       rememberRegistrations(controller.item.id)
     } catch (error) {
       controller.status = 'failed'
       controller.error = errorMessage(error)
+      pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Plugin activation failed', error)
       await fiber.dispose()
       delete controller.fiber
+      retirePrincipal(controller, 'Plugin disposed after activation failure')
       throw error
     }
   }
@@ -634,6 +683,7 @@ async function start(
         agentRuntime.releaseOwner(controller.identity, 'plugin-blocked')
         await controller.fiber?.dispose()
         await routeService?.settled()
+        retirePrincipal(controller, 'Plugin blocked')
         delete controller.fiber
         controller.status = 'blocked'
         delete controller.error
@@ -668,6 +718,7 @@ async function start(
   const remountLastGood = async (controller: PluginController): Promise<void> => {
     configuration.abort(controller.item.id)
     await controller.fiber?.dispose()
+    retirePrincipal(controller, 'Plugin disposed for configuration rollback')
     delete controller.fiber
     await mountPlugin(controller)
   }
@@ -677,6 +728,7 @@ async function start(
     agentRuntime.releaseOwner(controller.identity, 'owner-disposed')
     await controller.fiber?.dispose()
     await routeService?.settled()
+    retirePrincipal(controller, 'Plugin disposed for configuration restart')
     delete controller.fiber
     configuration.begin(controller.item.id, candidate)
     await mountPlugin(controller)
@@ -758,6 +810,7 @@ async function start(
         agentRuntime.releaseOwner(controller.identity, 'permission-blocked')
         await controller.fiber?.dispose()
         await routeService?.settled()
+        retirePrincipal(controller, 'Plugin disposed after required permission denial')
         delete controller.fiber
         controller.status = 'permission-blocked'
         controller.blockedReason = blockedReason
@@ -830,6 +883,7 @@ async function start(
         agentRuntime.releaseOwner(controller.identity, 'permission-blocked')
         await controller.fiber?.dispose()
         await routeService?.settled()
+        retirePrincipal(controller, 'Plugin disposed after activation authorization denial')
         delete controller.fiber
         controller.status = 'permission-blocked'
         controller.blockedReason = blockedReason
@@ -858,7 +912,7 @@ async function start(
       if (affected.has(controllers[index]!.item.id)) controllers.splice(index, 1)
     }
     const restored = previous.map(item => {
-      const controller = createController(item.item)
+      const controller = createController(item.item, pluginConsole)
       controller.status = item.status
       if (item.error !== undefined) controller.error = item.error
       if (item.blockedReason !== undefined) controller.blockedReason = item.blockedReason
@@ -942,7 +996,7 @@ async function start(
                   ...(activation.canonicalSource === undefined ? {} : { canonicalSource: activation.canonicalSource }),
                 },
                 ...(mutation.package.readme === undefined ? {} : { readme: mutation.package.readme }),
-              })
+              }, pluginConsole)
               registerController(replacement)
               controllers.push(replacement)
               if (mutation.authorizationDecision !== undefined) {
@@ -1062,6 +1116,7 @@ async function start(
     for (const controller of [...controllers].reverse()) {
       agentRuntime.releaseOwner(controller.identity, 'generation-replaced')
       await controller.fiber?.dispose()
+      retirePrincipal(controller, 'Plugin disposed with runtime generation')
       delete controller.fiber
     }
     generationTransactions.clear()
@@ -1109,6 +1164,9 @@ async function start(
     for (const controller of controllers) controller.unregisterPermissions?.()
     for (const controller of controllers) controller.unregisterExtensionPoints?.()
     broker.dispose()
+    window.removeEventListener('error', recordUnknownError)
+    window.removeEventListener('unhandledrejection', recordUnknownError)
+    pluginConsole.dispose()
     extensionPointBroker.dispose()
     extensionPointDescriptors.dispose()
     settingsProjectionSites.clear()
@@ -1136,6 +1194,17 @@ async function start(
       return routeService.mountManagerSettingsFor(registration.owner, item.route, registration.qualifiedId, panelBody)
     },
     closeSettingsTabContent: () => routeService?.closeManagerSettings() ?? Promise.resolve(),
+    pluginConsole: (id) => {
+      const controller = controllers.find(item => item.item.id === id)
+      if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+      return pluginConsole.query(controller.identity)
+    },
+    clearPluginConsole: (id) => {
+      const controller = controllers.find(item => item.item.id === id)
+      if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+      pluginConsole.clear(controller.identity)
+    },
+    subscribePluginConsole: listener => pluginConsole.subscribe(listener),
     setExtensionPointPolicy,
     permissionAuthorizationPlan,
     authorizePlugin,
@@ -1169,32 +1238,33 @@ async function start(
     disposeI18nSubscription = i18nService.subscribeInternal(notify)
     disposePermissionSubscription = broker.subscribe(notify)
     disposeExtensionPointSubscription = extensionPointBroker.subscribe(notify)
-    settingsFiber = ctx.plugin(CordisXPluginSettingsService, configuration)
+    settingsFiber = ctx.plugin(CordisXPluginSettingsService, { registry: configuration, console: pluginConsole })
     await settingsFiber
-    configRendererFiber = ctx.plugin(CordisXConfigRendererService, configRenderers)
+    configRendererFiber = ctx.plugin(CordisXConfigRendererService, { registry: configRenderers, console: pluginConsole })
     await configRendererFiber
     registrySubscriptions.push(configuration.subscribe(notify))
-    platformFiber = ctx.plugin(CordisXPlatformService, { adapter: platformAdapter, broker })
+    platformFiber = ctx.plugin(CordisXPlatformService, { adapter: platformAdapter, broker, console: pluginConsole })
     await platformFiber
     agentEventFiber = ctx.plugin(CordisXAgentEventService, {
       ledger: agentRuntime.ledger,
       broker,
       status: () => agentRuntime.status(),
+      console: pluginConsole,
     })
     await agentEventFiber
-    agentHistoryFiber = ctx.plugin(CordisXAgentHistoryService, { adapter: historyAdapter, broker, generation })
+    agentHistoryFiber = ctx.plugin(CordisXAgentHistoryService, { adapter: historyAdapter, broker, generation, console: pluginConsole })
     await agentHistoryFiber
-    agentFiber = ctx.plugin(CordisXAgentService, agentRuntime)
+    agentFiber = ctx.plugin(CordisXAgentService, { runtime: agentRuntime, console: pluginConsole })
     await agentFiber
-    systemPromptFiber = ctx.plugin(CordisXSystemPromptService, agentRuntime)
+    systemPromptFiber = ctx.plugin(CordisXSystemPromptService, { runtime: agentRuntime, console: pluginConsole })
     await systemPromptFiber
-    commandFiber = ctx.plugin(CordisXCommandService)
+    commandFiber = ctx.plugin(CordisXCommandService, { console: pluginConsole })
     await commandFiber
     commandService = ctx.commands as CordisXCommandService
-    pageFiber = ctx.plugin(CordisXPageService)
+    pageFiber = ctx.plugin(CordisXPageService, pluginConsole)
     await pageFiber
     pageService = ctx.pages as CordisXPageService
-    routeFiber = ctx.plugin(CordisXRouteService)
+    routeFiber = ctx.plugin(CordisXRouteService, pluginConsole)
     await routeFiber
     routeService = ctx.routes as CordisXRouteService
     unregisterManagerPointCatalog = extensionPointDescriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
@@ -1213,7 +1283,7 @@ async function start(
       contextPolicy: 'generation',
       presentationGroup: 'manager.settings',
     }, managerOutletController, path => path.startsWith('/manager/settings/') && path.length > '/manager/settings/'.length)
-    slotFiber = ctx.plugin(CordisXSlotService)
+    slotFiber = ctx.plugin(CordisXSlotService, { console: pluginConsole })
     await slotFiber
     slotService = ctx.slots as CordisXSlotService
     slotService.setResolvers({

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "codex": {
+    "debugPort": 9229
+  },
+  "plugins": [
+    {
+      "id": "console-showcase",
+      "entry": "./plugins/console-showcase/index.ts",
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "silent-api",
+      "entry": "../tests/fixtures/silent-console-api-plugin.ts",
+      "enabled": true,
+      "config": {
+        "enabled": true
+      }
+    }
+  ]
+}

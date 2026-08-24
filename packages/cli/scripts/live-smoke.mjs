@@ -44,6 +44,7 @@ const parsed = parseArgs({
     'demo-kind': { type: 'string', multiple: true },
     'clear-demo': { type: 'boolean', default: false },
     'plugin-lifecycle': { type: 'boolean', default: false },
+    'plugin-console-exercise': { type: 'boolean', default: false },
     'adapter-commit': { type: 'string' },
     'protocol-commit': { type: 'string' },
     'host-version': { type: 'string' },
@@ -59,6 +60,9 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535) {
 }
 if (parsed.values['ui-catalog'] && parsed.values.report === undefined) {
   throw new Error('--ui-catalog requires --report so screenshots and machine-readable assertions share one artifact directory')
+}
+if (parsed.values['plugin-console-exercise'] && parsed.values.report === undefined) {
+  throw new Error('--plugin-console-exercise requires --report')
 }
 if (parsed.values['open-route'] !== undefined && parsed.values['click-surface'] !== undefined) {
   throw new Error('--open-route and --click-surface are mutually exclusive')
@@ -2184,6 +2188,76 @@ if (parsed.values['authorization-plugin'] !== undefined) {
 }
 
 let managerReport
+let pluginConsoleReport
+if (parsed.values['plugin-console-exercise']) {
+  const owner = parsed.values['plugin-owner'] ?? 'console-showcase'
+  pluginConsoleReport = await evaluateByValue(`(async () => {
+    const owner = ${JSON.stringify(owner)}
+    const runtime = globalThis.__cordisxRuntime
+    if (runtime?.pluginConsole === undefined) throw new Error('Plugin Console runtime API is unavailable')
+    document.querySelector('[data-permission-prompt] [data-permission-decision="deny"]')?.click()
+    await new Promise(resolve => setTimeout(resolve, 120))
+    const before = runtime.pluginConsole(owner)
+    const silent = runtime.pluginConsole('silent-api')
+    document.querySelector('[data-cordisx-manager-trigger]')?.click()
+    document.querySelector('[data-tab="plugins"]')?.click()
+    document.querySelector('[data-plugin-id="' + CSS.escape(owner) + '"]')?.click()
+    document.querySelector('[data-plugin-detail-tab="runtime"]')?.click()
+    const runtimePanel = document.querySelector('[role="tabpanel"][aria-label="运行状态"]')
+    const pause = [...(runtimePanel?.querySelectorAll('.cxm-console-controls button') ?? [])].find(item => item.textContent === '暂停')
+    pause?.click()
+    const pausedPanel = document.querySelector('[role="tabpanel"][aria-label="运行状态"]')
+    const paused = pause !== undefined && [...(pausedPanel?.querySelectorAll('.cxm-console-controls button') ?? [])].some(item => item.textContent === '继续')
+    pausedPanel?.querySelector('[data-console-entry]')?.click()
+    const detailOpened = document.querySelector('[data-console-detail]') !== null
+    const coverage = runtimePanel?.querySelector('select[aria-label="采集覆盖"]')
+    if (coverage instanceof HTMLSelectElement) {
+      coverage.value = 'scoped-console'
+      coverage.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    const scopedFiltered = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"] [aria-label*="console."]') !== null
+    const resumed = [...document.querySelectorAll('.cxm-console-controls button')].find(item => item.textContent === '继续')
+    resumed?.click()
+    const clear = [...document.querySelectorAll('.cxm-console-controls button')].find(item => item.textContent === '清空')
+    clear?.click()
+    const cleared = runtime.pluginConsole(owner).entries.length === 0
+    await runtime.setPluginBlocked(owner, true)
+    await runtime.setPluginBlocked(owner, false)
+    await new Promise(resolve => setTimeout(resolve, 80))
+    document.querySelector('[data-permission-prompt] [data-permission-decision="deny"]')?.click()
+    await new Promise(resolve => setTimeout(resolve, 120))
+    const after = runtime.pluginConsole(owner)
+    const automatic = after.entries.filter(entry => entry.coverage === 'host-mediated')
+    const terminal = automatic.filter(entry => ['success', 'failure', 'cancel'].includes(entry.phase))
+    return {
+      owner,
+      before: {
+        entries: before.entries.length,
+        methods: [...new Set(before.entries.filter(entry => entry.kind === 'console').map(entry => entry.method))],
+        sources: [...new Set(before.entries.map(entry => entry.source))],
+        permissionDenied: before.entries.some(entry => entry.kind === 'permission' && entry.phase === 'deny'),
+        success: before.entries.some(entry => entry.kind === 'invocation' && entry.phase === 'success'),
+        failure: before.entries.some(entry => entry.kind === 'invocation' && entry.phase === 'failure'),
+      },
+      silent: {
+        entries: silent.entries.length,
+        automaticWithoutConsole: silent.entries.some(entry => entry.source === 'settings.get' && entry.phase === 'success')
+          && !silent.entries.some(entry => entry.kind === 'console'),
+      },
+      ui: { paused, detailOpened, scopedFiltered, cleared },
+      reload: {
+        entries: after.entries.length,
+        lifecycle: after.entries.some(entry => entry.phase === 'reload'),
+        terminalCount: terminal.length,
+      },
+      privacy: {
+        structuredOnly: automatic.every(entry => !JSON.stringify(entry).includes('initialMessage') && !JSON.stringify(entry).includes('secretRef')),
+        partialObservability: after.partialObservability === true,
+      },
+    }
+  })()`, true)
+  console.log(`plugin-console=${JSON.stringify(pluginConsoleReport, null, 2)}`)
+}
 if (parsed.values['manager-screenshot'] !== undefined) {
   const managerTab = parsed.values['manager-tab'] ?? 'plugins'
   if (!['about', 'extension-points', 'routes', 'plugins', 'marketplace', 'settings'].includes(managerTab)) throw new Error(`unknown manager tab: ${managerTab}`)
@@ -2442,6 +2516,7 @@ if (parsed.values.report !== undefined) {
     ...(configExerciseReport === undefined ? {} : { pluginConfiguration: configExerciseReport }),
     ...(demoReport === undefined ? {} : { agentTraceDemo: demoReport }),
     ...(pluginLifecycleReport === undefined ? {} : { pluginLifecycle: pluginLifecycleReport }),
+    ...(pluginConsoleReport === undefined ? {} : { pluginConsole: pluginConsoleReport }),
     ...(authorizationReport === undefined ? {} : { authorization: authorizationReport }),
     ...(managerLifecycleReport === undefined ? {} : { managerLifecycle: managerLifecycleReport }),
     ...(uiCatalogReport === undefined ? {} : { uiCatalog: uiCatalogReport }),

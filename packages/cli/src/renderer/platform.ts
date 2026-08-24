@@ -47,6 +47,12 @@ import {
   permissionScopeFingerprint,
 } from '../permissions.js'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
+import type {
+  PluginConsoleAspect,
+  PluginConsoleInvocation,
+  PluginConsolePermissionObserver,
+  PluginPrincipalToken,
+} from './plugin-console.js'
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const LEGACY_POLICY_STORAGE_KEY = 'cordisx.platform.permissionPolicies.v1'
@@ -455,6 +461,7 @@ export class PermissionBroker {
     private readonly promptTimeoutMs = 30_000,
     private readonly profileId = 'default',
     private readonly generation = 'runtime',
+    private readonly consoleObserver?: PluginConsolePermissionObserver,
   ) {
     for (const record of store.read()) {
       if (record.key.profileId === profileId) this.policies.set(permissionRecordKey(record), record)
@@ -629,20 +636,24 @@ export class PermissionBroker {
     const identityKey = platformIdentityKey(identity)
     const declaration = this.registrations.get(identityKey)?.declarations.get(capability)
     if (declaration === undefined) {
+      this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is not declared`)
       this.denied(identityKey, capability, requested)
       return failure('permission-undeclared', `Plugin ${identity.id} does not declare ${capability}`)
     }
     if (!scopeAllows(declaration.scope, requested)) {
+      this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is outside the declared scope`)
       this.denied(identityKey, capability, requested)
       return failure('permission-scope-denied', `Requested parameters are outside the declared ${capability} scope`)
     }
     const policy = this.policy(identity, capability)
     const ticket = this.consumeOnce(identity, declaration)
     if (policy === 'deny' && !ticket) {
+      this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is denied by policy`)
       this.denied(identityKey, capability, requested)
       return failure('permission-denied', `${capability} is denied for plugin ${identity.id}`)
     }
     if (policy === 'ask' && !ticket) {
+      this.consoleObserver?.permission(identity, capability, 'ask', `${capability} requires a decision`)
       let decision: Exclude<CordisXPermissionDecision, 'ask'> | 'timeout'
       let timer: ReturnType<typeof setTimeout> | undefined
       try {
@@ -656,10 +667,12 @@ export class PermissionBroker {
         if (timer !== undefined) clearTimeout(timer)
       }
       if (decision === 'timeout') {
+        this.consoleObserver?.permission(identity, capability, 'deny', `${capability} permission request timed out`)
         this.denied(identityKey, capability, requested)
         return failure('timeout', `${capability} permission request timed out`)
       }
       if (decision === 'deny') {
+        this.consoleObserver?.permission(identity, capability, 'deny', `${capability} was denied for this call`)
         this.denied(identityKey, capability, requested)
         return failure('permission-denied', `${capability} was denied for this call`)
       }
@@ -667,6 +680,7 @@ export class PermissionBroker {
         try {
           await this.setPolicy(identity, capability, 'allow')
         } catch {
+          this.consoleObserver?.permission(identity, capability, 'deny', `${capability} allow decision could not be persisted`)
           this.denied(identityKey, capability, requested)
           return failure('adapter-failure', `${capability} permission policy could not be persisted`)
         }
@@ -677,6 +691,7 @@ export class PermissionBroker {
     audit.lastUsedAt = isoNow(this.now)
     audit.lastRequested = requestedSnapshot(requested)
     this.audit.set(auditKey, audit)
+    this.consoleObserver?.permission(identity, capability, 'allow', `${capability} allowed`)
     this.changed()
     return { ok: true, value: { declaration } }
   }
@@ -944,6 +959,7 @@ export class ProjectionPlatformAdapter implements CordisXPlatformAdapter {
 export interface CordisXPlatformServiceOptions {
   readonly adapter: CordisXPlatformAdapter
   readonly broker: PermissionBroker
+  readonly console?: PluginConsoleAspect
 }
 
 const platformServiceOptions = new WeakMap<object, CordisXPlatformServiceOptions>()
@@ -1014,22 +1030,40 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
   }
 
   get models(): CordisXPlatform['models'] {
-    return Object.freeze({ list: async (input = {}) => await this.listModels(input) })
+    const options = optionsFor(this)
+    const token = options.console?.tokenFromContext(this.ctx)
+    return Object.freeze({
+      list: async (input = {}) => token === undefined || options.console === undefined
+        ? await this.listModels(input)
+        : await options.console.run(token, 'platform.models.list', input, invocation => this.listModels(input, token, invocation)),
+    })
   }
 
   get tasks(): CordisXPlatform['tasks'] {
+    const options = optionsFor(this)
+    const token = options.console?.tokenFromContext(this.ctx)
+    const instrument = <Value>(source: string, input: unknown, operation: (invocation?: PluginConsoleInvocation) => Promise<Value>): Promise<Value> => (
+      token === undefined || options.console === undefined
+        ? operation()
+        : options.console.run(token, source, input, operation)
+    )
     return Object.freeze({
-      list: async (input = {}) => await this.listTasks(input),
-      read: async input => await this.readTask(input),
-      create: async input => await this.createTask(input),
-      control: async input => await this.controlTask(input),
+      list: async (input = {}) => await instrument('platform.tasks.list', input, invocation => this.listTasks(input, token, invocation)),
+      read: async input => await instrument('platform.tasks.read', input, invocation => this.readTask(input, token, invocation)),
+      create: async input => await instrument('platform.tasks.create', input, invocation => this.createTask(input, token, invocation)),
+      control: async input => await instrument('platform.tasks.control', input, invocation => this.controlTask(input, token, invocation)),
     })
   }
 
   get turns(): CordisXPlatform['turns'] {
+    const options = optionsFor(this)
+    const token = options.console?.tokenFromContext(this.ctx)
+    const instrument = <Value>(source: string, input: unknown, operation: (invocation?: PluginConsoleInvocation) => Promise<Value>): Promise<Value> => (
+      token === undefined || options.console === undefined ? operation() : options.console.run(token, source, input, operation)
+    )
     return Object.freeze({
-      submit: async input => await this.submitTurn(input),
-      control: async input => await this.controlTurn(input),
+      submit: async input => await instrument('platform.turns.submit', input, invocation => this.submitTurn(input, token, invocation)),
+      control: async input => await instrument('platform.turns.control', input, invocation => this.controlTurn(input, token, invocation)),
     })
   }
 
@@ -1040,8 +1074,9 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
   private async authorize(
     capability: CordisXPlatformCapability,
     requested: RequestedScope,
+    token?: PluginPrincipalToken,
   ): Promise<CordisXPlatformResult<AuthorizationGrant>> {
-    const identity = pluginIdentity(this.ctx)
+    const identity = token === undefined ? pluginIdentity(this.ctx) : optionsFor(this).console?.owner(token)
     if (identity === undefined) return failure('permission-undeclared', 'Platform calls require a runtime-bound plugin identity')
     return await optionsFor(this).broker.authorize(identity, capability, requested)
   }
@@ -1069,12 +1104,13 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     return failure('permission-scope-denied', `Session ${session.remoteSessionId} is outside the declared ${grant.declaration.name} scope`)
   }
 
-  private async listModels(input: CordisXModelsListInput): Promise<CordisXPlatformResult<CordisXModelPage>> {
+  private async listModels(input: CordisXModelsListInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXModelPage>> {
     if (input.providerIds !== undefined && !validProviderIds(input.providerIds)) return failure('invalid-request', 'providerIds must be a unique string array')
     const grant = await this.authorize('models.read', {
       ...(input.providerIds === undefined ? {} : { providerIds: input.providerIds }),
-    })
+    }, token)
     if (!grant.ok) return grant
+    invocation?.dispatch()
     const result = await this.guarded(async () => await optionsFor(this).adapter.listModels(input))
     if (!result.ok) return result
     return {
@@ -1086,7 +1122,7 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     }
   }
 
-  private async listTasks(input: CordisXTasksListInput): Promise<CordisXPlatformResult<CordisXSessionPage>> {
+  private async listTasks(input: CordisXTasksListInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXSessionPage>> {
     if (input.providerIds !== undefined && !validProviderIds(input.providerIds)) return failure('invalid-request', 'providerIds must be a unique string array')
     if (input.cwd !== undefined && (!validText(input.cwd) || !absolutePath(input.cwd))) return failure('invalid-request', 'cwd must be an absolute path')
     if (input.searchTerm !== undefined && !validText(input.searchTerm)) return failure('invalid-request', 'searchTerm must be a non-empty string')
@@ -1097,8 +1133,9 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     const grant = await this.authorize('tasks.catalog.read', {
       ...(input.providerIds === undefined ? {} : { providerIds: input.providerIds }),
       ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-    })
+    }, token)
     if (!grant.ok) return grant
+    invocation?.dispatch()
     const result = await this.guarded(async () => await optionsFor(this).adapter.listTasks(input))
     if (!result.ok) return result
     return {
@@ -1114,11 +1151,12 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     }
   }
 
-  private async readTask(input: CordisXTaskReadInput): Promise<CordisXPlatformResult<CordisXSessionProjection>> {
+  private async readTask(input: CordisXTaskReadInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXSessionProjection>> {
     if (!validSessionRef(input.session)) return failure('invalid-request', 'session must be a complete Platform session reference')
     const requested = { providerId: input.session.providerId, session: input.session }
-    const grant = await this.authorize('tasks.content.read', requested)
+    const grant = await this.authorize('tasks.content.read', requested, token)
     if (!grant.ok) return grant
+    invocation?.dispatch()
     const result = await this.guarded(async () => await optionsFor(this).adapter.readTask(input))
     if (!result.ok) return result
     if (!sameSession(result.value.ref, input.session) || result.value.model.providerId !== input.session.providerId) return safeAdapterFailure()
@@ -1128,12 +1166,13 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     return failure('permission-scope-denied', 'Session content is outside the declared scope')
   }
 
-  private async createTask(input: CordisXTaskCreateInput): Promise<CordisXPlatformResult<CordisXSessionCreateOutcome>> {
+  private async createTask(input: CordisXTaskCreateInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXSessionCreateOutcome>> {
     if (!validModelRef(input.model)) return failure('invalid-request', 'model must be a complete Platform model reference')
     if (!validText(input.cwd) || !absolutePath(input.cwd)) return failure('invalid-request', 'cwd must be an absolute path')
     if (input.initialMessage !== undefined && !validText(input.initialMessage)) return failure('invalid-request', 'initialMessage must be a non-empty string')
-    const grant = await this.authorize('tasks.create', { providerId: input.model.providerId, model: input.model, cwd: input.cwd })
+    const grant = await this.authorize('tasks.create', { providerId: input.model.providerId, model: input.model, cwd: input.cwd }, token)
     if (!grant.ok) return grant
+    invocation?.dispatch()
     const models = await this.guarded(async () => await optionsFor(this).adapter.listModels({ providerIds: [input.model.providerId] }))
     if (!models.ok) return models
     const providerModels = models.value.models.filter(model => model.ref.providerId === input.model.providerId)
@@ -1164,31 +1203,34 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     }
   }
 
-  private async controlTask(input: CordisXTaskControlInput): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>> {
+  private async controlTask(input: CordisXTaskControlInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>> {
     if (!validSessionRef(input.session) || !['continue', 'fork', 'archive', 'restore', 'delete'].includes(input.action)) {
       return failure('invalid-request', 'task control input is invalid')
     }
-    const grant = await this.authorize('tasks.control', { providerId: input.session.providerId, session: input.session })
+    const grant = await this.authorize('tasks.control', { providerId: input.session.providerId, session: input.session }, token)
     if (!grant.ok) return grant
+    invocation?.dispatch()
     const scope = await this.ensureSessionScope(grant.value, input.session)
     if (!scope.ok) return scope
     return await this.guarded(async () => await optionsFor(this).adapter.controlTask(input))
   }
 
-  private async submitTurn(input: CordisXTurnSubmitInput): Promise<CordisXPlatformResult<CordisXTurnStart>> {
+  private async submitTurn(input: CordisXTurnSubmitInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXTurnStart>> {
     if (!validSessionRef(input.session) || !validText(input.message)) return failure('invalid-request', 'session and message must be valid')
-    const grant = await this.authorize('turns.submit', { providerId: input.session.providerId, session: input.session })
+    const grant = await this.authorize('turns.submit', { providerId: input.session.providerId, session: input.session }, token)
     if (!grant.ok) return grant
+    invocation?.dispatch()
     const scope = await this.ensureSessionScope(grant.value, input.session)
     if (!scope.ok) return scope
     return await this.guarded(async () => await optionsFor(this).adapter.submitTurn(input))
   }
 
-  private async controlTurn(input: CordisXTurnControlInput): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>> {
+  private async controlTurn(input: CordisXTurnControlInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>> {
     if (!validSessionRef(input.session) || !['steer', 'interrupt'].includes(input.action)) return failure('invalid-request', 'turn control input is invalid')
     if (input.action === 'steer' && !validText(input.message)) return failure('invalid-request', 'steer message must be a non-empty string')
-    const grant = await this.authorize('turns.control', { providerId: input.session.providerId, session: input.session })
+    const grant = await this.authorize('turns.control', { providerId: input.session.providerId, session: input.session }, token)
     if (!grant.ok) return grant
+    invocation?.dispatch()
     const scope = await this.ensureSessionScope(grant.value, input.session)
     if (!scope.ok) return scope
     return await this.guarded(async () => await optionsFor(this).adapter.controlTurn(input))

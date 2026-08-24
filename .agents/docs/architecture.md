@@ -96,6 +96,11 @@ Durable adapter history is a separate Node/Host read service specified in
 redacted Agent-v2 pages and opaque cursors without renderer filesystem access
 or mutation of the live Agent ledger.
 
+The plugin detail development Console, issuance-bound attribution, automatic
+Host capability aspect, scoped console facade and explicit shared-renderer
+blind spots are specified in
+[`plugin-devtools-console.md`](plugin-devtools-console.md).
+
 The Channel runtime is specified in
 [`channel-runtime.md`](channel-runtime.md). It adds a launcher-owned Node
 service extension point, durable inbox/outbox and binding core, and

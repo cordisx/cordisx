@@ -33,6 +33,7 @@ import type {
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
 import { CordisXAgentEventLedger } from './agent-events.js'
 import { PermissionBroker } from './platform.js'
+import type { PluginConsoleAspect, PluginConsolePendingInvocation } from './plugin-console.js'
 
 function freeze<Value>(value: Value): Value {
   if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value
@@ -124,6 +125,7 @@ interface DeliveryRecord {
   stepId?: string
   contextId?: string
   diagnostic?: CordisXPlatformDiagnostic
+  readonly consoleTrace?: PluginConsolePendingInvocation
 }
 
 interface ContributionEvaluation {
@@ -193,6 +195,7 @@ export class CordisXHostAgentRuntime {
     input: CordisXAgentMessageInput,
     target: CordisXAgentTarget,
     wakeup: boolean,
+    consoleTrace?: PluginConsolePendingInvocation,
   ): CordisXAgentDeliveryHandle {
     this.assertLive()
     if (!validId(sessionId)) throw new Error('sessionId must be a non-empty opaque id')
@@ -217,6 +220,7 @@ export class CordisXHostAgentRuntime {
     const record: DeliveryRecord = {
       identity: clone(identity), owner, deliveryId, sessionId, message, target, wakeup,
       stage: 'requested', stageEventId: requested.eventId, valid: true,
+      ...(consoleTrace === undefined ? {} : { consoleTrace }),
     }
     this.deliveries.set(deliveryId, record)
     const operation = this.deliver(record)
@@ -434,7 +438,9 @@ export class CordisXHostAgentRuntime {
 
   private async deliver(record: DeliveryRecord): Promise<void> {
     const policy = this.broker.policy(record.identity, 'agent.messages.append')
+    if (policy === 'ask') record.consoleTrace?.permission('agent.messages.append', 'ask', 'Agent message append requires a decision')
     const grant = await this.broker.authorize(record.identity, 'agent.messages.append', { agentSessionId: record.sessionId })
+    record.consoleTrace?.permission('agent.messages.append', grant.ok ? 'allow' : 'deny', grant.ok ? 'Agent message append allowed' : grant.error.message)
     if (this.terminalStage(record.stage)) return
     this.deliveryStage(record, 'permission', this.runtimeSource('permission-broker'), {
       capability: 'agent.messages.append',
@@ -466,6 +472,7 @@ export class CordisXHostAgentRuntime {
 
     let outcome: CordisXAgentDeliveryOutcome
     try {
+      record.consoleTrace?.dispatch('Dispatched to Agent adapter')
       outcome = await this.adapter.deliver({
         sessionId: record.sessionId,
         target: record.target,
@@ -548,6 +555,7 @@ export class CordisXHostAgentRuntime {
     record.stageEventId = event.eventId
     if (resolvedDiagnostic === undefined) delete record.diagnostic
     else record.diagnostic = resolvedDiagnostic
+    if (terminal !== 'forwarded') record.consoleTrace?.failure(resolvedDiagnostic)
   }
 
   private deliveryHandle(identity: CordisXPluginIdentity, record: DeliveryRecord): CordisXAgentDeliveryHandle {
@@ -602,6 +610,7 @@ export class CordisXHostAgentRuntime {
       },
     })
     record.stage = 'cancelled'
+    record.consoleTrace?.cancel(diagnostic)
     record.stageEventId = event.eventId
     record.diagnostic = diagnostic
     return clone({ ok: true, snapshot: this.deliverySnapshot(record) })
@@ -850,6 +859,7 @@ export class CordisXHostAgentRuntime {
 }
 
 const runtimes = new WeakMap<object, CordisXHostAgentRuntime>()
+const consoles = new WeakMap<object, PluginConsoleAspect>()
 const CORDIS_ORIGINAL = Symbol.for('cordis.original')
 
 function runtimeFor(service: object): CordisXHostAgentRuntime {
@@ -863,6 +873,17 @@ function runtimeFor(service: object): CordisXHostAgentRuntime {
   throw new Error('CordisX Agent service is detached from its HostRuntime')
 }
 
+function consoleFor(service: object): PluginConsoleAspect | undefined {
+  const original = (service as { [CORDIS_ORIGINAL]?: object })[CORDIS_ORIGINAL]
+  for (const candidate of [original, service]) {
+    if (candidate !== undefined) {
+      const console = consoles.get(candidate)
+      if (console !== undefined) return console
+    }
+  }
+  return undefined
+}
+
 function caller(ctx: Context): CordisXPluginIdentity {
   const scoped = ctx as Context & { [CORDISX_PLUGIN_ID]?: string; [CORDISX_PLUGIN_SOURCE]?: string }
   if (scoped[CORDISX_PLUGIN_ID] === undefined || scoped[CORDISX_PLUGIN_SOURCE] === undefined) {
@@ -872,21 +893,28 @@ function caller(ctx: Context): CordisXPluginIdentity {
 }
 
 export class CordisXAgentService extends Service implements CordisXAgents {
-  constructor(ctx: Context, runtime: CordisXHostAgentRuntime) {
+  constructor(ctx: Context, input: CordisXHostAgentRuntime | { readonly runtime: CordisXHostAgentRuntime; readonly console: PluginConsoleAspect }) {
     super(ctx, 'agents')
+    const runtime = input instanceof CordisXHostAgentRuntime ? input : input.runtime
     runtimes.set(this, runtime)
+    if (!(input instanceof CordisXHostAgentRuntime)) consoles.set(this, input.console)
   }
 
   get(sessionId: string): CordisXAgent {
     if (!validId(sessionId)) throw new Error('sessionId must be a non-empty opaque id')
-    const identity = caller(this.ctx)
+    const console = consoleFor(this)
+    const token = console?.tokenFromContext(this.ctx)
+    const identity = token === undefined ? caller(this.ctx) : console!.owner(token)
     const runtime = runtimeFor(this)
     const send = (
       message: CordisXAgentMessageInput,
       target: CordisXAgentTarget,
       wakeup: boolean,
     ): CordisXAgentDeliveryHandle => {
-      const handle = runtime.send(identity, sessionId, message, target, wakeup)
+      const trace = token === undefined || console === undefined
+        ? undefined
+        : console.beginPending(token, 'agents.messages.append', { target, wakeup, message }, { sessionId })
+      const handle = runtime.send(identity, sessionId, message, target, wakeup, trace)
       this.ctx.effect(
         () => () => runtime.releaseOwner(identity, 'owner-disposed'),
         `agents.delivery(${JSON.stringify(handle.deliveryId)})`,
@@ -898,23 +926,32 @@ export class CordisXAgentService extends Service implements CordisXAgents {
       followup: (message: CordisXAgentMessageInput) => send(message, 'next-turn', true),
       steer: (message: CordisXAgentMessageInput) => send(message, 'next-step', true),
       inject: (message: CordisXAgentMessageInput) => send(message, 'next-step', false),
-      clearPending: () => runtime.clearPending(identity, sessionId),
+      clearPending: () => token === undefined || console === undefined
+        ? runtime.clearPending(identity, sessionId)
+        : console.runSync(token, 'agents.clearPending', { sessionId }, () => runtime.clearPending(identity, sessionId)),
     })
   }
 
   preStep(handler: CordisXPreStepHandler): Disposable<void> {
     if (typeof handler !== 'function') throw new Error('preStep handler must be a function')
-    return this.ctx.effect(
-      () => runtimeFor(this).registerPreStep(caller(this.ctx), handler),
+    const console = consoleFor(this)
+    const token = console?.tokenFromContext(this.ctx)
+    const identity = token === undefined ? caller(this.ctx) : console!.owner(token)
+    const scoped = token === undefined || console === undefined ? handler : console.wrapCallback(token, 'agents.preStep', handler)
+    const register = (): Disposable<void> => this.ctx.effect(
+      () => runtimeFor(this).registerPreStep(identity, scoped),
       'agents.preStep',
     ) as Disposable<void>
+    return token === undefined || console === undefined ? register() : console.runSync(token, 'agents.preStep.register', {}, register)
   }
 }
 
 export class CordisXSystemPromptService extends Service implements CordisXSystemPrompt {
-  constructor(ctx: Context, runtime: CordisXHostAgentRuntime) {
+  constructor(ctx: Context, input: CordisXHostAgentRuntime | { readonly runtime: CordisXHostAgentRuntime; readonly console: PluginConsoleAspect }) {
     super(ctx, 'systemPrompt')
+    const runtime = input instanceof CordisXHostAgentRuntime ? input : input.runtime
     runtimes.set(this, runtime)
+    if (!(input instanceof CordisXHostAgentRuntime)) consoles.set(this, input.console)
   }
 
   section(contribution: CordisXPromptContribution): Disposable<void> {
@@ -926,9 +963,13 @@ export class CordisXSystemPromptService extends Service implements CordisXSystem
   }
 
   private register(kind: 'section' | 'context', contribution: CordisXPromptContribution): Disposable<void> {
-    return this.ctx.effect(
-      () => runtimeFor(this).registerPrompt(caller(this.ctx), kind, contribution),
+    const console = consoleFor(this)
+    const token = console?.tokenFromContext(this.ctx)
+    const identity = token === undefined ? caller(this.ctx) : console!.owner(token)
+    const register = (): Disposable<void> => this.ctx.effect(
+      () => runtimeFor(this).registerPrompt(identity, kind, contribution),
       `systemPrompt.${kind}(${JSON.stringify(contribution.id)})`,
     ) as Disposable<void>
+    return token === undefined || console === undefined ? register() : console.runSync(token, `systemPrompt.${kind}.register`, contribution, register)
   }
 }

@@ -10,12 +10,14 @@ import { ownerFromContext, qualifyOwnedId } from './ownership.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
 import { ICON_TOKEN_PATTERN, assertLocalId, assertLocalizedText, assertReference, immutableSnapshot } from './validation.js'
+import type { PluginConsoleAspect, PluginPrincipalToken } from './plugin-console.js'
 
 interface CommandRecord {
   readonly owner: string
   readonly qualifiedId: string
   readonly metadata: CordisXCommandMetadata
   readonly handler: CordisXCommandHandler
+  readonly principal?: PluginPrincipalToken
   readonly running: Map<string, AbortController>
   lastError?: string
 }
@@ -41,13 +43,13 @@ export class CommandRegistry {
   private readonly listeners = new Set<() => void>()
   private disposed = false
 
-  constructor(private access?: ExtensionPointAccessResolver) {}
+  constructor(private access?: ExtensionPointAccessResolver, private readonly console?: PluginConsoleAspect) {}
 
   setAccessResolver(access: ExtensionPointAccessResolver): void {
     this.access = access
   }
 
-  register(owner: string, metadata: CordisXCommandMetadata, handler: CordisXCommandHandler): () => void {
+  register(owner: string, metadata: CordisXCommandMetadata, handler: CordisXCommandHandler, principal?: PluginPrincipalToken): () => void {
     if (this.disposed) throw new Error('CordisX command registry is disposed')
     assertLocalId(owner, 'command owner')
     assertLocalId(metadata.id, 'command id')
@@ -68,6 +70,7 @@ export class CommandRegistry {
       qualifiedId,
       metadata: immutableSnapshot(metadata),
       handler,
+      ...(principal === undefined ? {} : { principal }),
       running: new Map(),
     }
     this.records.set(qualifiedId, record)
@@ -88,6 +91,7 @@ export class CommandRegistry {
     reference: CordisXCommandReference,
     invocationKey = 'default',
     origin?: SurfaceCommandOrigin,
+    requestingPrincipal?: PluginPrincipalToken,
   ): Promise<unknown> {
     if (this.disposed) throw new Error('CordisX command registry is disposed')
     assertReference(reference.id, 'command reference')
@@ -116,14 +120,33 @@ export class CommandRegistry {
     record.running.set(executionId, abort)
     delete record.lastError
     this.notify()
-    try {
-      return await record.handler({
+    const invoke = async (correlationId?: string): Promise<unknown> => {
+      const executeHandler = async (): Promise<unknown> => await record.handler({
         owner: record.owner,
         id: qualifiedId,
         arguments: reference.arguments === undefined ? undefined : immutableSnapshot(reference.arguments),
         signal: abort.signal,
         invocationKey,
         ...(origin?.context === undefined ? {} : { hostContext: immutableSnapshot(origin.context) }),
+      })
+      return record.principal === undefined || this.console === undefined
+        ? await executeHandler()
+        : await this.console.runInPluginContext(record.principal, {
+            ...(correlationId === undefined ? {} : { correlationId }),
+            trigger: { kind: 'registration', registrationId: qualifiedId },
+          }, executeHandler)
+    }
+    try {
+      const principal = requestingPrincipal ?? record.principal
+      if (principal === undefined || this.console === undefined) return await invoke()
+      const principalOwner = this.console.owner(principal)
+      return await this.console.run(principal, `commands.${qualifiedId}`, reference.arguments, async invocation => {
+        invocation.dispatch('Dispatched to registered command handler')
+        return await invoke(invocation.correlationId)
+      }, {
+        invocationKey,
+        trigger: { kind: 'registration', registrationId: qualifiedId },
+        ...(principalOwner.id === record.owner ? {} : { effectiveOwner: this.console.owner(record.principal!) }),
       })
     } catch (error) {
       if (!abort.signal.aborted) record.lastError = error instanceof Error ? error.message : String(error)
@@ -173,19 +196,29 @@ export class CommandRegistry {
   }
 }
 
+export interface CordisXCommandServiceOptions { readonly registry?: CommandRegistry; readonly console?: PluginConsoleAspect }
+
 export class CordisXCommandService extends Service implements CordisXCommands {
-  constructor(ctx: Context, private readonly registry: CommandRegistry = new CommandRegistry()) {
+  private readonly registry: CommandRegistry
+  private readonly console: PluginConsoleAspect | undefined
+
+  constructor(ctx: Context, options: CommandRegistry | CordisXCommandServiceOptions = {}) {
     super(ctx, 'commands')
-    ctx.effect(() => () => registry.dispose(), 'cordisx: command registry')
+    this.console = options instanceof CommandRegistry ? undefined : options.console
+    this.registry = options instanceof CommandRegistry ? options : options.registry ?? new CommandRegistry(undefined, options.console)
+    ctx.effect(() => () => this.registry.dispose(), 'cordisx: command registry')
   }
 
   register(metadata: CordisXCommandMetadata, handler: CordisXCommandHandler): ReturnType<CordisXCommands['register']> {
     const owner = ownerFromContext(this.ctx)
-    return this.ctx.effect(() => this.registry.register(owner, metadata, handler), `commands.register(${JSON.stringify(metadata.id)})`)
+    const principal = this.console?.tokenFromContext(this.ctx)
+    return this.ctx.effect(() => this.registry.register(owner, metadata, handler, principal), `commands.register(${JSON.stringify(metadata.id)})`)
   }
 
   execute(reference: CordisXCommandReference, invocationKey?: string): Promise<unknown> {
-    return this.registry.execute(ownerFromContext(this.ctx), reference, invocationKey)
+    const principal = this.console?.tokenFromContext(this.ctx)
+    const owner = principal === undefined ? ownerFromContext(this.ctx) : this.console!.owner(principal).id
+    return this.registry.execute(owner, reference, invocationKey, undefined, principal)
   }
 
   executeFor(owner: string, reference: CordisXCommandReference, invocationKey?: string, origin?: SurfaceCommandOrigin): Promise<unknown> {

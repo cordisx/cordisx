@@ -55,9 +55,26 @@ async function readPluginReadme(entry: string): Promise<string | undefined> {
 export async function buildRendererBundle(config: CordisXConfig, options: BuildRendererBundleOptions = {}): Promise<string> {
   const enabled = config.plugins.filter(plugin => plugin.enabled)
   for (const plugin of enabled) await access(plugin.entry)
-  const [version, readmes] = await Promise.all([
+  const [version, readmes, pluginBundles] = await Promise.all([
     readCordisXVersion(),
     Promise.all(config.plugins.map(async plugin => plugin.readme ?? await readPluginReadme(plugin.entry))),
+    Promise.all(enabled.map(async plugin => {
+      const result = await build({
+        entryPoints: [plugin.entry],
+        bundle: true,
+        format: 'iife',
+        globalName: '__cordisxPluginModule',
+        platform: 'browser',
+        target: ['chrome120'],
+        sourcemap: 'inline',
+        loader: { '.svg': 'text', '.css': 'text' },
+        write: false,
+        logLevel: 'silent',
+      })
+      const output = result.outputFiles[0]
+      if (output === undefined) throw new Error(`esbuild produced no renderer bundle for plugin ${plugin.id}`)
+      return output.text
+    })),
   ])
 
   const runtimeCandidates = [
@@ -74,12 +91,11 @@ export async function buildRendererBundle(config: CordisXConfig, options: BuildR
   if (projectRuntime === undefined) throw new Error('CordisX renderer runtime could not be resolved')
   const imports = [
     `import { installCordisX } from ${JSON.stringify(importSpecifier(config.rootDir, projectRuntime))}`,
-    ...enabled.map((plugin, index) => `import * as plugin${index} from ${JSON.stringify(importSpecifier(config.rootDir, plugin.entry))}`),
   ]
   const enabledIndexes = new Map(enabled.map((plugin, index) => [plugin.id, index]))
   const composition = `[${config.plugins.map((plugin, pluginIndex) => {
     const index = enabledIndexes.get(plugin.id)
-    const moduleField = index === undefined ? '' : `, module: plugin${index}`
+    const moduleField = index === undefined ? '' : `, moduleFactory: (console) => { ${pluginBundles[index]}\nreturn __cordisxPluginModule }`
     const readme = readmes[pluginIndex]
     const readmeField = readme === undefined ? '' : `, readme: ${JSON.stringify(readme)}`
     const manifestField = plugin.manifest === undefined ? '' : `, manifest: ${JSON.stringify(plugin.manifest)}`
@@ -98,7 +114,7 @@ export async function buildRendererBundle(config: CordisXConfig, options: BuildR
     platform: 'browser',
     target: ['chrome120'],
     sourcemap: 'inline',
-    loader: { '.svg': 'text' },
+    loader: { '.svg': 'text', '.css': 'text' },
     write: false,
     logLevel: 'silent',
   })

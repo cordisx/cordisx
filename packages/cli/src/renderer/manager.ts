@@ -9,6 +9,8 @@ import {
   type CordisXPlatformAdapterStatus,
   type CordisXPlatformCapability,
   type CordisXPluginIdentity,
+  type CordisXPluginConsolePageV1,
+  type CordisXPluginConsoleEntryV1,
   type CordisXIconToken,
   type CordisXLocalizedText,
   type CordisXRouteReference,
@@ -47,6 +49,7 @@ import type {
 import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
 import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 import { HostTooltipController } from './tooltips.js'
+import lunaTextViewerCss from 'luna-text-viewer/luna-text-viewer.css'
 
 export type ManagerPluginStatus =
   | 'active' | 'blocked' | 'permission-blocked' | 'configured-disabled' | 'failed'
@@ -143,6 +146,9 @@ export interface ManagerSettingsTabSnapshot {
 
 export interface ManagerModel {
   snapshot(): ManagerSnapshot
+  pluginConsole?(id: string): CordisXPluginConsolePageV1
+  clearPluginConsole?(id: string): void
+  subscribePluginConsole?(listener: (pluginId: string) => void): () => void
   setPluginBlocked(id: string, blocked: boolean): Promise<void>
   updatePluginConfig?(id: string, expectedRevision: number, operations: readonly ConfigMutationOperation[]): Promise<void>
   mountConfigRenderer?(
@@ -661,6 +667,26 @@ const MANAGER_STYLES = `
   .cxm-diagnostics[open] summary { color: #d8dce3; }
   .cxm-diagnostics-body { padding: 0 2px 4px; }
   .cxm-runtime-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .cxm-console-summary { display: grid; grid-template-columns: repeat(5, minmax(84px, 1fr)); gap: 1px; margin: 12px 0; overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(255,255,255,.08); }
+  .cxm-console-metric { padding: 8px 10px; background: #191b1f; }
+  .cxm-console-metric strong { display: block; color: #eceef2; font: 600 16px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-console-metric span { color: #818a99; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+  .cxm-console-controls { display: grid; grid-template-columns: minmax(140px, 1fr) repeat(3, max-content); gap: 7px; align-items: center; margin: 10px 0; }
+  .cxm-console-controls input, .cxm-console-controls select { min-width: 0; height: 30px; border: 1px solid #353a42; border-radius: 6px; padding: 0 8px; background: #15171a; color: #d8dce3; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-console-controls button { height: 30px; border: 1px solid #353a42; border-radius: 6px; padding: 0 9px; background: #202328; color: #bfc5ce; font-size: 10px; cursor: pointer; }
+  .cxm-console-controls button[aria-pressed="true"] { border-color: #8992a1; color: #fff; }
+  .cxm-console-coverage { margin: 8px 0; color: #8d96a8; font-size: 10px; line-height: 1.45; }
+  .cxm-console-frame { position: relative; min-height: 180px; max-height: 420px; overflow: auto; border: 1px solid #30343a; border-radius: 7px; background: #101215; }
+  .cxm-console-luna { min-height: 100%; color: #cad0da; font: 11px/20px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-console-luna.luna-text-viewer { border: 0; background: #101215; color: #cad0da; }
+  .cxm-console-luna .luna-text-viewer-text { padding: 6px 8px; font: inherit; }
+  .cxm-console-hit-layer { position: absolute; inset: 6px 0 auto; pointer-events: none; }
+  .cxm-console-hit { position: absolute; left: 0; right: 0; height: 20px; border: 0; border-radius: 0; background: transparent; pointer-events: auto; cursor: default; }
+  .cxm-console-hit:hover, .cxm-console-hit[data-selected="true"] { background: rgba(118, 129, 147, .14); }
+  .cxm-console-detail { margin-top: 10px; border: 1px solid #30343a; border-radius: 7px; background: #141619; }
+  .cxm-console-detail summary { padding: 8px 10px; color: #cdd2db; cursor: pointer; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-console-detail pre { max-height: 300px; overflow: auto; margin: 0; padding: 10px; border-top: 1px solid #30343a; color: #b9c1ce; font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+  .cxm-console-empty { padding: 48px 16px; color: #737d8e; text-align: center; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-copy { margin: 0; color: #98a1b2; font-size: 12px; }
   .cxm-notice {
     margin-top: 14px;
@@ -1354,7 +1380,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   document.getElementById(MANAGER_STYLE_ID)?.remove()
   const style = create(document, 'style')
   style.id = MANAGER_STYLE_ID
-  style.textContent = MANAGER_STYLES
+  style.textContent = `${lunaTextViewerCss}\n${MANAGER_STYLES}`
   ;(document.head ?? document.documentElement).append(style)
 
   const trigger = create(document, 'button')
@@ -1432,6 +1458,20 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let marketplaceQuery = ''
   let extensionPointQuery = ''
   let routeQuery = ''
+  const favoritePluginIds = (() => {
+    try {
+      const stored = JSON.parse(safeStorage(document.defaultView)?.getItem('cordisx.manager.favoritePlugins.v1') ?? '[]')
+      return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : [])
+    } catch { return new Set<string>() }
+  })()
+  let consoleQuery = ''
+  let consoleMethod = 'all'
+  let consoleCoverage = 'all'
+  let consoleSource = 'all'
+  let consolePaused = false
+  let consolePausedPage: CordisXPluginConsolePageV1 | undefined
+  let consoleAutoScroll = true
+  let selectedConsoleEntry: string | undefined
   let settingsRoot: HTMLDivElement | undefined
   let settingsPanel: HTMLDivElement | undefined
   let settingsPanelBody: HTMLDivElement | undefined
@@ -2887,6 +2927,50 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }
   }
 
+  const consoleLine = (entry: CordisXPluginConsoleEntryV1, repeat = 1): string => {
+    const time = new Date(entry.time).toLocaleTimeString([], { hour12: false })
+    const terminal = entry.durationMs === undefined ? entry.status : `${entry.status ?? entry.phase} ${entry.durationMs.toFixed(1)}ms`
+    return `${time} ${entry.method.padEnd(5)} ${entry.source}  ${entry.message}${terminal === undefined ? '' : `  · ${terminal}`}${repeat > 1 ? `  repeat ${repeat}` : ''}`
+  }
+
+  const escapeConsoleText = (value: string): string => value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+
+  const mountLunaLog = (container: HTMLElement, log: string): void => {
+    if (globalThis.document === undefined) {
+      container.textContent = log
+      return
+    }
+    void import('luna-log/esm/log/index.js').then(module => {
+      if (!container.isConnected) return
+      const Constructor = module.default as unknown as new (
+        target: HTMLElement,
+        options?: { log?: string; wrapLongLines?: boolean; maxHeight?: number },
+      ) => { append(log: string): void }
+      const viewer = new Constructor(container, { log: '', wrapLongLines: false, maxHeight: 420 })
+      container.classList.add('luna-text-viewer-theme-dark')
+      viewer.append(escapeConsoleText(log))
+    }).catch(() => { container.textContent = log })
+  }
+
+  const copyConsoleText = async (value: string): Promise<void> => {
+    const clipboard = document.defaultView?.navigator.clipboard
+    if (clipboard !== undefined) {
+      await clipboard.writeText(value)
+      return
+    }
+    const textarea = create(document, 'textarea')
+    textarea.value = value
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    ;(document.body ?? document.documentElement).append(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    textarea.remove()
+  }
+
   const renderPluginDetail = (snapshot: ManagerSnapshot, id: string): void => {
     const plugin = snapshot.plugins.find(item => item.id === id)
     setHeading('当前 bundle 中的本地插件详情', snapshot)
@@ -2978,83 +3062,188 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const pluginPages = snapshot.navigation.pages.filter(item => item.owner === plugin.id)
     if (activeFacet === 'runtime') {
       const panel = createTabPanel(document, '运行状态')
-      const runtimeToolbar = create(document, 'div', 'cxm-runtime-toolbar')
-      const identity = create(document, 'code', 'cxm-detail-id', plugin.id)
+      const livePage = model.pluginConsole?.(plugin.id) ?? {
+        contract: 'cordisx.plugin-console-page/v1', schemaVersion: 1,
+        plugin: { source: plugin.source, pluginId: plugin.id }, generation: 'manager-unavailable',
+        generatedAt: Date.now(), partialObservability: true, entries: [],
+      }
+      if (consolePaused && (consolePausedPage === undefined || consolePausedPage.plugin.pluginId !== plugin.id)) consolePausedPage = livePage
+      const page = consolePaused ? consolePausedPage ?? livePage : livePage
+      const requested = page.entries.filter(entry => entry.kind === 'invocation' && entry.phase === 'requested')
+      const successes = page.entries.filter(entry => entry.kind === 'invocation' && entry.phase === 'success')
+      const failures = page.entries.filter(entry => entry.kind === 'invocation' && entry.phase === 'failure')
+      const denials = page.entries.filter(entry => entry.kind === 'permission' && entry.phase === 'deny')
+      const durations = page.entries.filter(entry => entry.kind === 'invocation' && entry.durationMs !== undefined).map(entry => entry.durationMs!)
+      const summary = create(document, 'div', 'cxm-console-summary')
+      for (const [label, value] of [
+        ['调用', requested.length], ['成功', successes.length], ['失败', failures.length], ['拒绝', denials.length],
+        ['平均耗时', durations.length === 0 ? '—' : `${(durations.reduce((sum, value) => sum + value, 0) / durations.length).toFixed(1)}ms`],
+      ]) {
+        const metric = create(document, 'div', 'cxm-console-metric')
+        metric.append(create(document, 'strong', undefined, String(value)), create(document, 'span', undefined, String(label)))
+        summary.append(metric)
+      }
+      panel.append(summary)
+      const callSources = new Map<string, { calls: number; items: number; bytes: number }>()
+      for (const entry of page.entries) {
+        if (entry.kind === 'invocation' && entry.phase === 'requested') {
+          const current = callSources.get(entry.source) ?? { calls: 0, items: 0, bytes: 0 }
+          current.calls += 1
+          callSources.set(entry.source, current)
+        }
+        if (entry.kind === 'invocation' && ['success', 'failure', 'cancel'].includes(entry.phase ?? '')) {
+          const current = callSources.get(entry.source) ?? { calls: 0, items: 0, bytes: 0 }
+          current.items += entry.result?.itemCount ?? 0
+          current.bytes += entry.result?.byteCount ?? 0
+          callSources.set(entry.source, current)
+        }
+      }
+      if (callSources.size > 0) panel.append(create(document, 'div', 'cxm-console-coverage', [...callSources]
+        .map(([source, value]) => `${source}: ${value.calls} calls${value.items === 0 ? '' : ` · ${value.items} items`}${value.bytes === 0 ? '' : ` · ${value.bytes} B`}`)
+        .join('   ')))
+
+      const sources = [...new Set(page.entries.map(entry => entry.source))].sort()
+      const controls = create(document, 'div', 'cxm-console-controls')
+      const search = create(document, 'input')
+      search.type = 'search'
+      search.placeholder = '搜索消息、来源或 correlation id'
+      search.value = consoleQuery
+      search.dataset.consoleSearch = plugin.id
+      search.addEventListener('input', () => { consoleQuery = search.value; renderContent() })
+      const select = (label: string, value: string, values: readonly string[], change: (value: string) => void): HTMLSelectElement => {
+        const element = create(document, 'select')
+        element.setAttribute('aria-label', label)
+        for (const item of values) {
+          const option = create(document, 'option', undefined, item === 'all' ? '全部' : item)
+          option.value = item
+          option.selected = item === value
+          element.append(option)
+        }
+        element.addEventListener('change', () => { change(element.value); renderContent() })
+        return element
+      }
+      controls.append(
+        search,
+        select('日志级别', consoleMethod, ['all', 'debug', 'log', 'info', 'warn', 'error'], value => { consoleMethod = value }),
+        select('采集覆盖', consoleCoverage, ['all', 'host-mediated', 'scoped-console', 'best-effort'], value => { consoleCoverage = value }),
+        select('日志来源', consoleSource, ['all', ...sources], value => { consoleSource = value }),
+      )
+      const pause = create(document, 'button', undefined, consolePaused ? '继续' : '暂停')
+      pause.type = 'button'
+      pause.ariaPressed = String(consolePaused)
+      pause.addEventListener('click', () => {
+        consolePaused = !consolePaused
+        consolePausedPage = consolePaused ? model.pluginConsole?.(plugin.id) ?? livePage : undefined
+        renderContent()
+      })
+      const autoScroll = create(document, 'button', undefined, '自动滚动')
+      autoScroll.type = 'button'
+      autoScroll.ariaPressed = String(consoleAutoScroll)
+      autoScroll.addEventListener('click', () => { consoleAutoScroll = !consoleAutoScroll; renderContent() })
+      const clear = create(document, 'button', undefined, '清空')
+      clear.type = 'button'
+      clear.addEventListener('click', () => { model.clearPluginConsole?.(plugin.id); selectedConsoleEntry = undefined; consolePausedPage = undefined; renderContent() })
+      const copy = create(document, 'button', undefined, '复制所选')
+      copy.type = 'button'
+      copy.disabled = selectedConsoleEntry === undefined
+      copy.addEventListener('click', () => {
+        const entry = page.entries.find(item => item.entryId === selectedConsoleEntry)
+        if (entry !== undefined) void copyConsoleText(`${consoleLine(entry)}\n${JSON.stringify(entry.args, null, 2)}`).catch(() => undefined)
+      })
+      controls.append(pause, autoScroll, clear, copy)
+      panel.append(controls)
+      panel.append(create(document, 'div', 'cxm-console-coverage', '覆盖范围：Host API 自动切面（强保证）与 owner-scoped console（强保证）。共享 renderer 中绕过 Host 的 DOM/网络、保存的 global console 与脱离 Host 注册的异步不可可靠归属；未知记录不计入本插件成功率。'))
+      if ((page.unattributedEntries ?? 0) > 0) {
+        const unknown = create(document, 'div', 'cxm-notice', `共享 renderer 检测到 ${page.unattributedEntries} 类无法唯一归属的 error / unhandledrejection；未猜测归入当前插件。`)
+        unknown.dataset.tone = 'warning'
+        panel.append(unknown)
+      }
+
+      const normalizedQuery = consoleQuery.trim().toLocaleLowerCase()
+      const filtered = page.entries.filter(entry => (
+        (consoleMethod === 'all' || entry.method === consoleMethod)
+        && (consoleCoverage === 'all' || entry.coverage === consoleCoverage)
+        && (consoleSource === 'all' || entry.source === consoleSource)
+        && (normalizedQuery === '' || `${entry.message} ${entry.source} ${entry.correlationId ?? ''}`.toLocaleLowerCase().includes(normalizedQuery))
+      ))
+      const folded: { entry: CordisXPluginConsoleEntryV1; count: number }[] = []
+      for (const entry of filtered) {
+        const previous = folded.at(-1)
+        if (previous !== undefined && previous.entry.method === entry.method && previous.entry.source === entry.source
+          && previous.entry.message === entry.message && previous.entry.status === entry.status) previous.count += 1
+        else folded.push({ entry, count: 1 })
+      }
+      const frame = create(document, 'div', 'cxm-console-frame')
+      frame.dataset.pluginConsole = plugin.id
+      if (folded.length === 0) {
+        frame.append(create(document, 'div', 'cxm-console-empty', page.entries.length === 0 ? '等待插件日志或 CordisX API 调用…' : '没有匹配当前筛选的日志'))
+      } else {
+        const luna = create(document, 'div', 'cxm-console-luna')
+        const lines = folded.map(item => consoleLine(item.entry, item.count)).join('\n')
+        mountLunaLog(luna, lines)
+        const hits = create(document, 'div', 'cxm-console-hit-layer')
+        hits.style.height = `${folded.length * 20}px`
+        for (const [index, item] of folded.entries()) {
+          const hit = create(document, 'button', 'cxm-console-hit')
+          hit.type = 'button'
+          hit.style.top = `${index * 20}px`
+          hit.dataset.consoleEntry = item.entry.entryId
+          hit.dataset.selected = String(selectedConsoleEntry === item.entry.entryId)
+          hit.setAttribute('aria-label', consoleLine(item.entry, item.count))
+          hit.addEventListener('click', () => { selectedConsoleEntry = item.entry.entryId; renderContent() })
+          hits.append(hit)
+        }
+        frame.append(luna, hits)
+        if (consoleAutoScroll && !consolePaused) queueMicrotask(() => { frame.scrollTop = frame.scrollHeight })
+      }
+      panel.append(frame)
+      const selected = page.entries.find(entry => entry.entryId === selectedConsoleEntry)
+      if (selected !== undefined) {
+        const detail = create(document, 'details', 'cxm-console-detail')
+        detail.open = true
+        detail.dataset.consoleDetail = selected.entryId
+        detail.append(
+          create(document, 'summary', undefined, `${selected.source} · ${selected.correlationId ?? 'no correlation'} · ${selected.coverage}`),
+          create(document, 'pre', undefined, JSON.stringify({
+            method: selected.method, args: selected.args, phase: selected.phase, status: selected.status,
+            durationMs: selected.durationMs, request: selected.request, result: selected.result,
+            stack: selected.stack, correlationId: selected.correlationId, trigger: selected.trigger,
+          }, null, 2)),
+        )
+        panel.append(detail)
+      }
+      const lifecycle = create(document, 'details', 'cxm-diagnostics')
+      lifecycle.append(create(document, 'summary', undefined, `生命周期 / 诊断 · ${statusLabel(plugin.status)}`))
+      const lifecycleBody = create(document, 'div', 'cxm-diagnostics-body')
+      lifecycleBody.append(create(document, 'div', 'cxm-copy', `注入服务：${plugin.inject.join(', ') || '无'} · 活跃贡献：${pluginRegistrations.filter(item => item.visible && item.valid).length} · Commands：${pluginCommands.length}`))
       const action = create(document, 'button', 'cxm-action cxm-plugin-runtime-action')
       action.type = 'button'
       const blocked = plugin.status === 'blocked' || plugin.status === 'failed'
       const permissionBlocked = plugin.status === 'permission-blocked'
       const restorable = blocked || permissionBlocked
-      action.textContent = busyPluginId === plugin.id
-        ? '处理中…'
-        : plugin.status === 'configured-disabled'
-          ? '配置中已禁用'
-          : permissionBlocked
-            ? '重新授权'
-          : blocked ? '恢复插件' : '屏蔽插件'
+      action.textContent = busyPluginId === plugin.id ? '处理中…' : plugin.status === 'configured-disabled' ? '配置中已禁用' : permissionBlocked ? '重新授权' : blocked ? '恢复插件' : '屏蔽插件'
       action.disabled = busyPluginId !== undefined || plugin.status === 'configured-disabled'
-      if (!restorable) action.dataset.tone = 'danger'
       action.addEventListener('click', async () => {
         busyPluginId = plugin.id
-        operationError = undefined
         renderContent()
-        try {
-          if (restorable) await authorizeAndRestore(plugin)
-          else await model.setPluginBlocked(plugin.id, true)
-        } catch (error) {
-          operationError = error instanceof Error ? error.message : String(error)
-        } finally {
-          busyPluginId = undefined
-          renderContent()
-        }
+        try { if (restorable) await authorizeAndRestore(plugin); else await model.setPluginBlocked(plugin.id, true) }
+        catch (error) { operationError = error instanceof Error ? error.message : String(error) }
+        finally { busyPluginId = undefined; renderContent() }
       })
-      runtimeToolbar.append(identity, action)
-      panel.append(runtimeToolbar)
-      const fields = create(document, 'div', 'cxm-detail-grid')
-      for (const [label, value] of [
-        ['状态', statusLabel(plugin.status)],
-        ['来源', plugin.source],
-        ['注入服务', plugin.inject.join(', ') || '无'],
-        ['活跃贡献', String(pluginRegistrations.filter(item => item.visible && item.valid).length)],
-        ['Commands', String(pluginCommands.length)],
-        ['元数据', '模块 manifest + launcher 绑定身份'],
-      ]) {
-        const field = create(document, 'div', 'cxm-field')
-        field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
-        fields.append(field)
-      }
-      panel.append(fields)
-      if (plugin.error !== undefined) panel.append(create(document, 'div', 'cxm-error', plugin.error))
-      if (plugin.blockedReason !== undefined) panel.append(create(document, 'div', 'cxm-error', plugin.blockedReason))
-      if (operationError !== undefined) panel.append(create(document, 'div', 'cxm-error', operationError))
+      lifecycleBody.append(action)
+      if (plugin.error !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', plugin.error))
+      if (plugin.blockedReason !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', plugin.blockedReason))
+      if (operationError !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', operationError))
+      lifecycleBody.append(create(document, 'code', 'cxm-detail-id', plugin.id))
+      lifecycleBody.append(createSectionTitle(document, '本地化'))
       const localeCatalogs = snapshot.localeCatalogs.filter(item => item.owner === plugin.id)
-      const localeDiagnostics = snapshot.localizationDiagnostics.filter(item => item.owner === plugin.id)
-      panel.append(createSectionTitle(document, '本地化'))
-      if (localeCatalogs.length === 0) {
-        panel.append(create(document, 'div', 'cxm-empty', '当前插件没有活跃 locale dictionary'))
-      } else {
-        for (const catalog of localeCatalogs) {
-          panel.append(create(
-            document,
-            'div',
-            'cxm-notice',
-            `${catalog.namespace} · ${catalog.locale} · ${catalog.messageCount} keys · ${catalog.active ? 'active' : 'shadowed'}`,
-          ))
-        }
-      }
-      for (const diagnostic of localeDiagnostics) {
-        panel.append(create(
-          document,
-          'div',
-          'cxm-error',
-          `${diagnostic.diagnostic ?? 'unknown'} · ${diagnostic.namespace}:${diagnostic.key} · ${diagnostic.text}`,
-        ))
-      }
-      panel.append(createSectionTitle(document, '结构化运行时'))
-      if (pluginCommands.length === 0) {
-        panel.append(create(document, 'div', 'cxm-empty', '当前插件没有 command 注册'))
-      }
-      for (const command of pluginCommands) panel.append(create(document, 'div', 'cxm-notice', `${command.qualifiedId} · running ${command.running}`))
+      lifecycleBody.append(create(document, 'div', 'cxm-copy', localeCatalogs.length === 0
+        ? '当前插件没有活跃 locale dictionary'
+        : localeCatalogs.map(item => `${item.namespace} · ${item.locale} · ${item.messageCount} keys`).join('\n')))
+      lifecycleBody.append(createSectionTitle(document, '结构化运行时'))
+      lifecycleBody.append(create(document, 'div', 'cxm-copy', pluginCommands.length === 0
+        ? '当前插件没有 command 注册'
+        : pluginCommands.map(command => `${command.qualifiedId} · running ${command.running}`).join('\n')))
       const adapter = snapshot.platform
       const diagnostics = create(document, 'details', 'cxm-diagnostics')
       diagnostics.dataset.runtimeDiagnostics = 'platform'
@@ -3065,12 +3254,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           ? 'Schemastery'
           : plugin.configuration.schemaKind === 'standard' ? 'Standard Schema' : '未声明'
         const configApplies = plugin.configuration.applies === 'live' ? 'live' : 'restart'
-        const configDiagnostics = create(
-          document,
-          'div',
-          'cxm-copy',
-          `配置：${configSchema} · ${configApplies} · revision ${plugin.configuration.revision} · last-good ${plugin.configuration.lastGoodRevision} · writer ${plugin.configuration.writable ? 'available' : 'unavailable'}`,
-        )
+        const configDiagnostics = create(document, 'div', 'cxm-copy', `配置：${configSchema} · ${configApplies} · revision ${plugin.configuration.revision} · last-good ${plugin.configuration.lastGoodRevision} · writer ${plugin.configuration.writable ? 'available' : 'unavailable'}`)
         configDiagnostics.dataset.configDiagnostics = plugin.id
         diagnosticsBody.append(configDiagnostics)
       }
@@ -3091,11 +3275,13 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         `宿主：${adapter.hostName} · adapter ${adapter.mode} · 二次连接 ${adapter.secondConnectionCreated ? '是' : '否'} · 原始 bridge 暴露 ${adapter.rawBridgeExposed ? '是' : '否'}`,
       ))
       for (const diagnostic of adapter.diagnostics) diagnosticsBody.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
-      const securityBoundary = create(document, 'div', 'cxm-notice', '权限策略只约束通过 CordisX Platform API 的调用；当前 trusted renderer code 不是安全沙箱。')
+      const securityBoundary = create(document, 'div', 'cxm-notice', '权限策略只约束通过 CordisX Host API 的调用；当前 trusted renderer code 不是安全沙箱。')
       securityBoundary.dataset.tone = 'warning'
       diagnosticsBody.append(securityBoundary)
       diagnostics.append(diagnosticsBody)
-      panel.append(diagnostics)
+      lifecycleBody.append(diagnostics)
+      lifecycle.append(lifecycleBody)
+      panel.append(lifecycle)
       content.append(panel)
       return
     }
@@ -3809,6 +3995,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   reconcile()
   renderContent()
   const unsubscribeRuntime = model.subscribe(renderContent)
+  const unsubscribePluginConsole = model.subscribePluginConsole?.(pluginId => {
+    if (!consolePaused && routeState.kind === 'plugin' && routeState.pluginId === pluginId && routeState.facet === 'runtime') renderContent()
+  }) ?? (() => {})
   const unsubscribeMarketplace = marketplace.subscribe(renderContent)
   void marketplace.reload()
 
@@ -3820,6 +4009,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     observer?.disconnect()
     themeObserver?.disconnect()
     unsubscribeRuntime()
+    unsubscribePluginConsole()
     unsubscribeMarketplace()
     marketplace.dispose()
     tooltips.dispose()

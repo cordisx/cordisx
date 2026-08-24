@@ -15,6 +15,7 @@ import type {
 } from '../contracts.js'
 import { ownerFromContext } from './ownership.js'
 import { assertLocalId } from './validation.js'
+import type { PluginConsoleAspect } from './plugin-console.js'
 
 const CONFIG_BINDING = '__cordisxConfigRequestV1'
 const CONFIG_RECEIVER = '__cordisxConfigReceiveV1'
@@ -562,28 +563,56 @@ async function disposeEffect(effect: Disposable<void> | undefined): Promise<void
 }
 
 export class CordisXPluginSettingsService extends Service implements CordisXPluginSettings {
-  constructor(ctx: Context, private readonly registry: PluginConfigurationRegistry) {
+  private readonly registry: PluginConfigurationRegistry
+  private readonly console: PluginConsoleAspect | undefined
+
+  constructor(ctx: Context, input: PluginConfigurationRegistry | { readonly registry: PluginConfigurationRegistry; readonly console?: PluginConsoleAspect }) {
     super(ctx, 'settings')
+    this.registry = input instanceof PluginConfigurationRegistry ? input : input.registry
+    this.console = input instanceof PluginConfigurationRegistry ? undefined : input.console
   }
 
   get<T = unknown>(): T {
-    return this.registry.get(ownerFromContext(this.ctx)) as T
+    const token = this.console?.tokenFromContext(this.ctx)
+    const read = (): T => this.registry.get(ownerFromContext(this.ctx)) as T
+    return token === undefined || this.console === undefined ? read() : this.console.runSync(token, 'settings.get', {}, read)
   }
 
   watch<T = unknown>(listener: (value: T) => void): Disposable<void> {
     const owner = ownerFromContext(this.ctx)
-    return this.ctx.effect(() => this.registry.watch(owner, listener as (value: unknown) => void), `settings.watch(${JSON.stringify(owner)})`)
+    const token = this.console?.tokenFromContext(this.ctx)
+    const scoped = token === undefined || this.console === undefined
+      ? listener
+      : this.console.wrapCallback(token, `settings.watch:${owner}`, listener)
+    const register = (): Disposable<void> => this.ctx.effect(
+      () => this.registry.watch(owner, scoped as (value: unknown) => void),
+      `settings.watch(${JSON.stringify(owner)})`,
+    )
+    return token === undefined || this.console === undefined ? register() : this.console.runSync(token, 'settings.watch', {}, register)
   }
 }
 
 export class CordisXConfigRendererService extends Service implements CordisXConfigRenderers {
-  constructor(ctx: Context, private readonly registry: ConfigRendererRegistry) {
+  private readonly registry: ConfigRendererRegistry
+  private readonly console: PluginConsoleAspect | undefined
+
+  constructor(ctx: Context, input: ConfigRendererRegistry | { readonly registry: ConfigRendererRegistry; readonly console?: PluginConsoleAspect }) {
     super(ctx, 'configRenderers')
+    this.registry = input instanceof ConfigRendererRegistry ? input : input.registry
+    this.console = input instanceof ConfigRendererRegistry ? undefined : input.console
   }
 
   register(options: CordisXConfigRendererOptions, mount: CordisXConfigRendererMount): Disposable<void> {
     const owner = ownerFromContext(this.ctx)
-    return this.ctx.effect(() => this.registry.register(owner, options, mount), `configRenderers.register(${JSON.stringify(options.id)})`)
+    const token = this.console?.tokenFromContext(this.ctx)
+    const scopedMount = token === undefined || this.console === undefined
+      ? mount
+      : this.console.wrapCallback(token, `configRenderer:${owner}:${options.id}`, mount)
+    const register = (): Disposable<void> => this.ctx.effect(
+      () => this.registry.register(owner, options, scopedMount),
+      `configRenderers.register(${JSON.stringify(options.id)})`,
+    )
+    return token === undefined || this.console === undefined ? register() : this.console.runSync(token, 'configRenderers.register', options, register)
   }
 }
 

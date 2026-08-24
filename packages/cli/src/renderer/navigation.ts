@@ -19,6 +19,7 @@ import { createHostSurfaceIcon } from './icons.js'
 import { ownerFromContext, qualifyOwnedId } from './ownership.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
 import { dismissHostTooltips, HostTooltipController } from './tooltips.js'
+import type { PluginConsoleAspect } from './plugin-console.js'
 import {
   ICON_TOKEN_PATTERN,
   HostContextStore,
@@ -1283,9 +1284,11 @@ export class NavigationRegistry {
 
 export class CordisXPageService extends Service implements CordisXPages {
   readonly registry = new PageRegistry()
+  private readonly console: PluginConsoleAspect | undefined
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, console?: PluginConsoleAspect) {
     super(ctx, 'pages')
+    this.console = console
     ctx.effect(() => () => this.registry.dispose(), 'cordisx: page registry')
   }
 
@@ -1293,10 +1296,20 @@ export class CordisXPageService extends Service implements CordisXPages {
     metadata: CordisXPageMetadata,
     mount: CordisXPageMount<Messages>,
   ): ReturnType<CordisXPages['register']> {
-    return this.ctx.effect(
-      () => this.registry.register(ownerFromContext(this.ctx), metadata, mount),
+    const owner = ownerFromContext(this.ctx)
+    const token = this.console?.tokenFromContext(this.ctx)
+    const scopedMount: CordisXPageMount<Messages> = token === undefined || this.console === undefined
+      ? mount
+      : context => this.console!.runInPluginContext(
+          token,
+          { trigger: { kind: 'registration', registrationId: `page:${owner}:${metadata.id}` } },
+          () => mount(context),
+        ) as ReturnType<CordisXPageMount<Messages>>
+    const register = (): ReturnType<CordisXPages['register']> => this.ctx.effect(
+      () => this.registry.register(owner, metadata, scopedMount),
       `pages.register(${JSON.stringify(metadata.id)})`,
     )
+    return token === undefined || this.console === undefined ? register() : this.console.runSync(token, 'pages.register', metadata, register)
   }
 
   snapshot(): readonly PageSnapshot[] {
@@ -1309,9 +1322,11 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
   readonly outlets = new OutletRegistry()
   readonly registry: NavigationRegistry
   readonly contexts = new HostContextStore()
+  private readonly console: PluginConsoleAspect | undefined
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, console?: PluginConsoleAspect) {
     super(ctx, 'routes')
+    this.console = console
     const pages = ctx.pages as CordisXPageService
     const i18n = ctx.i18n as CordisXI18nService
     const commands = ctx.commands as CordisXCommandService
@@ -1327,14 +1342,23 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
   }
 
   register(definition: CordisXRouteDefinition): ReturnType<CordisXRoutes['register']> {
-    return this.ctx.effect(
-      () => this.registry.register(ownerFromContext(this.ctx), definition),
+    const owner = ownerFromContext(this.ctx)
+    const token = this.console?.tokenFromContext(this.ctx)
+    const register = (): ReturnType<CordisXRoutes['register']> => this.ctx.effect(
+      () => this.registry.register(owner, definition),
       `routes.register(${JSON.stringify(definition.id)})`,
     )
+    return token === undefined || this.console === undefined ? register() : this.console.runSync(token, 'routes.register', definition, register)
   }
 
   navigate(reference: CordisXRouteReference): Promise<void> {
-    return this.registry.navigate(ownerFromContext(this.ctx), reference)
+    const token = this.console?.tokenFromContext(this.ctx)
+    if (token === undefined || this.console === undefined) return this.registry.navigate(ownerFromContext(this.ctx), reference)
+    const owner = this.console.owner(token)
+    return this.console.run(token, 'routes.navigate', reference, async invocation => {
+      invocation.dispatch('Dispatched to Host navigation registry')
+      await this.registry.navigate(owner.id, reference)
+    })
   }
 
   back(outlet?: CordisXOutletName): Promise<void> {
