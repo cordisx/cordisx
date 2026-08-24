@@ -5,10 +5,14 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   bindChannelPluginContext,
+  CHANNEL_SERVICE_CONFIG_SCHEMA_V1,
   ChannelGenerationFencedError,
   ChannelIntegrityError,
   ChannelRuntime,
   CordisXChannelService,
+  parseChannelServiceConfig,
+  parseChannelServiceConfigurationDeclaration,
+  projectChannelServiceConfig,
   type ChannelInboundEnvelope,
   type ChannelPluginIdentity,
   type ChannelThreadRef,
@@ -17,10 +21,14 @@ import {
 import {
   ManualChannelClock,
   SIMULATOR_ADAPTER_IDENTITY,
+  SIMULATOR_CHANNEL_SERVICE_CONFIG,
+  SIMULATOR_CHANNEL_SERVICE_DECLARATION,
   SIMULATOR_CONSUMER_IDENTITY,
+  STATIC_NOTIFIER_NO_CONFIG_DECLARATION,
   SimulatedChannelAdapter,
   SimulatedPermissionBroker,
   SimulatedTaskGateway,
+  simulatedAdapterFromConfig,
   simulatedInput,
 } from '../packages/channel-runtime/src/simulator.js'
 
@@ -66,6 +74,138 @@ function target(input: ChannelUserInput): ChannelThreadRef {
     semantics: event.semantics,
   }
 }
+
+describe('Channel service configuration compliance', () => {
+  it('validates connections, mappings, retry/rate limits and produces a renderer-safe Manager descriptor', () => {
+    const configured = {
+      ...structuredClone(SIMULATOR_CHANNEL_SERVICE_CONFIG),
+      connections: [
+        ...structuredClone(SIMULATOR_CHANNEL_SERVICE_CONFIG.connections),
+        {
+          ref: { adapterId: 'feishu', accountId: 'operations', tenantId: 'tenant-a' },
+          adapterKind: 'feishu',
+          enabled: false,
+          transport: { mode: 'websocket' },
+          secretRef: 'keychain:cordisx/channel/feishu/operations',
+        },
+      ],
+    }
+    const parsed = parseChannelServiceConfig(configured)
+    expect(parsed.routes[0]).toMatchObject({
+      id: 'default',
+      task: { provider: { id: 'codex' }, profile: { id: 'work' }, workspaceAlias: 'cordisx' },
+    })
+    expect(parsed.reliability).toMatchObject({
+      retry: { maxAttempts: 5, maxDelayMs: 60_000 },
+      rateLimit: { perUserPerMinute: 20, maxBacklog: 1_000 },
+    })
+
+    const descriptor = projectChannelServiceConfig({
+      declaration: SIMULATOR_CHANNEL_SERVICE_DECLARATION,
+      configuration: parsed,
+      identity: {
+        source: 'file:///opt/cordisx/plugins/channel-simulator.mjs',
+        pluginId: 'channel-simulator',
+        serviceId: 'simulator',
+      },
+      scope: { profileId: 'work', generation: 'launcher-3' },
+      revision: 4,
+      lastGoodRevision: 4,
+      writable: true,
+      resolveSecretState: secretRef => secretRef === undefined ? 'unavailable' : 'ready',
+    })
+    expect(descriptor).toMatchObject({
+      contract: 'cordisx.channel-service-config-descriptor/v1',
+      configApplies: 'restart',
+      revision: 4,
+      configuration: {
+        connections: [
+          { adapterKind: 'simulator', secretState: 'unavailable' },
+          { adapterKind: 'feishu', secretState: 'ready' },
+        ],
+      },
+    })
+    expect(JSON.stringify(descriptor)).not.toContain('secretRef')
+    expect(JSON.stringify(descriptor)).not.toContain('keychain:')
+    expect(Object.isFrozen(descriptor)).toBe(true)
+    expect(Object.isFrozen(descriptor?.configuration.connections[0])).toBe(true)
+  })
+
+  it('requires exact Host or none declarations without manufacturing placeholder config', () => {
+    expect(parseChannelServiceConfigurationDeclaration({
+      kind: 'host',
+      schema: CHANNEL_SERVICE_CONFIG_SCHEMA_V1,
+      configApplies: 'restart',
+    })).toEqual(SIMULATOR_CHANNEL_SERVICE_DECLARATION)
+    expect(projectChannelServiceConfig({
+      declaration: STATIC_NOTIFIER_NO_CONFIG_DECLARATION,
+      identity: {
+        source: 'file:///opt/cordisx/plugins/static-notifier.mjs',
+        pluginId: 'static-notifier',
+        serviceId: 'notifier',
+      },
+      scope: { profileId: 'default', generation: 'launcher-1' },
+      revision: 0,
+      lastGoodRevision: 0,
+      writable: false,
+    })).toBeUndefined()
+    expect(() => projectChannelServiceConfig({
+      declaration: STATIC_NOTIFIER_NO_CONFIG_DECLARATION,
+      configuration: {},
+      identity: {
+        source: 'file:///opt/cordisx/plugins/static-notifier.mjs',
+        pluginId: 'static-notifier',
+        serviceId: 'notifier',
+      },
+      scope: { profileId: 'default', generation: 'launcher-1' },
+      revision: 0,
+      lastGoodRevision: 0,
+      writable: false,
+    })).toThrow('must not receive a configuration value')
+    expect(() => parseChannelServiceConfigurationDeclaration({
+      kind: 'host', schema: CHANNEL_SERVICE_CONFIG_SCHEMA_V1, configApplies: 'live',
+    })).toThrow('unsupported')
+  })
+
+  it('fails closed on plaintext/inline secrets, incompatible transport, orphan mapping and invalid retry order', () => {
+    const base = structuredClone(SIMULATOR_CHANNEL_SERVICE_CONFIG) as unknown as Record<string, unknown>
+    const plaintext = structuredClone(base) as { connections: Array<Record<string, unknown>> }
+    plaintext.connections[0]!.secretValue = 'must-not-enter-config'
+    expect(() => parseChannelServiceConfig(plaintext)).toThrow('secretValue is not supported')
+
+    const inline = structuredClone(base) as { connections: Array<Record<string, unknown>> }
+    inline.connections[0] = {
+      ref: { adapterId: 'feishu', accountId: 'operations', tenantId: 'tenant-a' },
+      adapterKind: 'feishu', enabled: true, transport: { mode: 'websocket' }, secretRef: 'inline:plaintext-token',
+    }
+    expect(() => parseChannelServiceConfig(inline)).toThrow('secretRef is invalid')
+
+    const transport = structuredClone(base) as { connections: Array<Record<string, unknown>> }
+    transport.connections[0] = {
+      ref: { adapterId: 'wechat-service', accountId: 'official', tenantId: 'tenant-a' },
+      adapterKind: 'wechat-service', enabled: true, transport: { mode: 'websocket' },
+      secretRef: 'keychain:cordisx/channel/wechat/official',
+    }
+    expect(() => parseChannelServiceConfig(transport)).toThrow('not supported by wechat-service')
+
+    const orphan = structuredClone(base) as { routes: Array<{ connection: { accountId: string } }> }
+    orphan.routes[0]!.connection.accountId = 'missing'
+    expect(() => parseChannelServiceConfig(orphan)).toThrow('references a missing connection')
+
+    const retry = structuredClone(base) as { reliability: { retry: { baseDelayMs: number; maxDelayMs: number } } }
+    retry.reliability.retry.baseDelayMs = retry.reliability.retry.maxDelayMs + 1
+    expect(() => parseChannelServiceConfig(retry)).toThrow('baseDelayMs exceeds maxDelayMs')
+  })
+
+  it('constructs the local simulator from validated Host configuration', () => {
+    const adapter = simulatedAdapterFromConfig(SIMULATOR_CHANNEL_SERVICE_CONFIG, 7)
+    expect(adapter.descriptor).toMatchObject({
+      ref: { adapterId: 'simulator', accountId: 'local', tenantId: 'test' },
+      configurationRevision: 7,
+      secretState: 'unavailable',
+    })
+  })
+})
 
 async function fixture(options: { sendFailures?: number } = {}) {
   const clock = new ManualChannelClock()

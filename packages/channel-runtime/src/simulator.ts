@@ -1,4 +1,10 @@
 import { RetryableChannelError } from './runtime.js'
+import {
+  CHANNEL_SERVICE_CONFIG_SCHEMA_V1,
+  parseChannelServiceConfig,
+  type ChannelServiceConfigV1,
+  type ChannelServiceConfigurationDeclaration,
+} from './config.js'
 import type {
   ChannelAdapterDefinition,
   ChannelAdapterHost,
@@ -29,6 +35,69 @@ export const SIMULATOR_CONSUMER_IDENTITY: ChannelPluginIdentity = Object.freeze(
   source: 'workspace:@cordisx/channel-runtime/consumer-fixture',
   pluginId: 'channel-consumer-fixture',
   generation: 'consumer-plugin-generation-1',
+})
+
+export const SIMULATOR_CHANNEL_SERVICE_DECLARATION: ChannelServiceConfigurationDeclaration = Object.freeze({
+  kind: 'host',
+  schema: CHANNEL_SERVICE_CONFIG_SCHEMA_V1,
+  configApplies: 'restart',
+})
+
+/** Explicit no-config fixture for services that must not get a dummy form. */
+export const STATIC_NOTIFIER_NO_CONFIG_DECLARATION: ChannelServiceConfigurationDeclaration = Object.freeze({
+  kind: 'none',
+})
+
+/** Complete local-only configuration fixture; it needs no account or secret. */
+export const SIMULATOR_CHANNEL_SERVICE_CONFIG: ChannelServiceConfigV1 = parseChannelServiceConfig({
+  contract: 'cordisx.channel-service-config/v1',
+  schemaVersion: 1,
+  connections: [{
+    ref: { adapterId: 'simulator', accountId: 'local', tenantId: 'test' },
+    adapterKind: 'simulator',
+    enabled: true,
+    transport: { mode: 'simulator' },
+  }],
+  routes: [{
+    id: 'default',
+    connection: { adapterId: 'simulator', accountId: 'local', tenantId: 'test' },
+    enabled: true,
+    policy: {
+      conversationKinds: ['direct', 'group'],
+      allowedUserIds: ['alice'],
+      groupTrigger: 'mention-or-command',
+      commandPrefixes: ['/cordisx'],
+    },
+    task: {
+      provider: { id: 'codex' },
+      model: { useDefault: true },
+      profile: { id: 'work' },
+      workspaceAlias: 'cordisx',
+    },
+    notifications: ['completion', 'failure', 'approval-required'],
+  }],
+  reliability: {
+    leaseMs: 30_000,
+    retry: {
+      maxAttempts: 5,
+      baseDelayMs: 1_000,
+      maxDelayMs: 60_000,
+      maxAgeMs: 86_400_000,
+      jitterRatio: 0.2,
+    },
+    rateLimit: {
+      perAccountPerMinute: 120,
+      perUserPerMinute: 20,
+      perConversationPerMinute: 60,
+      maxConcurrent: 8,
+      maxBacklog: 1_000,
+    },
+    attachments: {
+      maxFiles: 4,
+      maxBytesPerFile: 10_485_760,
+      allowedMediaTypes: ['image/png', 'text/plain'],
+    },
+  },
 })
 
 export class ManualChannelClock implements ChannelClock {
@@ -188,6 +257,16 @@ export class SimulatedChannelAdapter implements ChannelAdapterDefinition {
     if (this.#host === undefined) throw new Error('Simulated adapter is not active')
     return await this.#host.receive(envelope)
   }
+}
+
+export function simulatedAdapterFromConfig(
+  value: unknown,
+  configurationRevision = 1,
+): SimulatedChannelAdapter {
+  const config = parseChannelServiceConfig(value)
+  const connection = config.connections.find(item => item.enabled && item.adapterKind === 'simulator')
+  if (connection === undefined) throw new Error('Channel simulator configuration has no enabled simulator connection')
+  return new SimulatedChannelAdapter({ ref: connection.ref, configurationRevision })
 }
 
 export function simulatedInput(

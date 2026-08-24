@@ -88,13 +88,25 @@ Durable adapter history is a separate Node/Host read service specified in
 redacted Agent-v2 pages and opaque cursors without renderer filesystem access
 or mutation of the live Agent ledger.
 
-The planned Channel runtime is specified in
+The Channel runtime is specified in
 [`channel-runtime.md`](channel-runtime.md). It adds a launcher-owned Node
 service extension point, durable inbox/outbox and binding core, and
 Feishu/WeCom/WeChat adapters over the existing Platform/Agent authority. A
 renderer plugin receives only a brokered snapshot/action API and controlled
 manager/session surfaces; it never owns credentials, webhook/long-connection
 transport, queues, cursors, or retry workers.
+
+The host-neutral core, simulator, and source-bound Node Cordis `channel` service
+are implemented. Manifest-v3 loading and real transports remain planned. The
+launcher-side package now also validates
+`cordisx.channel-service-config/v1` and generates the redacted
+`cordisx.channel-service-config-descriptor/v1`. Connection credential fields are
+restricted to opaque `keychain:` or `host-secret:` references and become only
+readiness state in that descriptor. A service declaring `configuration.kind=none`
+produces no placeholder document or Manager form. This Node service plane is
+separate from renderer plugin Schemastery `Config`/`configApplies`: the future
+Channel page consumes the dedicated descriptor rather than copying transport,
+queue, route, or credential state into ordinary plugin configuration.
 
 Online Chrome DevTools support is opt-in. `--online-devtools` adds `https://chrome-devtools-frontend.appspot.com` to `--remote-allow-origins`; once connected, that origin has full renderer debugging authority for the isolated instance.
 

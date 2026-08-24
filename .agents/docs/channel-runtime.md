@@ -47,10 +47,10 @@ written.
 | Provider Fleet | Launcher-owned provider processes, provider-specific persistence, generation fencing, and a token-bound normalized RPC exist. | implemented and reusable; native Desktop current connection remains unavailable |
 | Agent events and delivery | Agent event v2, delivery snapshots, `followup`, `steer`, `inject`, cancellation-before-claim, and generation/owner fencing exist. | implemented and reusable after an explicit Platform-to-Agent binding is added |
 | Permission Broker | Source-bound required/optional declarations, `ask`/`allow`/`deny`, scope checks, audit, and plugin activation reconciliation exist in the renderer runtime. | implemented foundation; Node service authority and policy-store ownership are a gap |
-| Manager Settings Tab | Protocol v4/catalog v3 and the owning architecture are merged. Host projection and demo remain planned. | protocol implemented; host UI unavailable |
+| Manager Settings Tab and plugin Config | Settings Tab Host #56, configuration protocol #19, Host #60, and the simplified default form #64 are merged. | implemented/reusable; the dedicated Channel page remains planned |
 | Agent Trace | Fixture, product package, event/delivery lifecycle, and README are merged. | useful notification evidence; not a Channel transport |
-| Node plugin surface | Renderer plugin modules and configured provider connections exist; there is no general Node-side plugin/service registration contract. | unavailable; a new service extension point is required |
-| Mono pins | The audited mono main still pins host `8391c22` and protocol `08dcdc1`, behind owning main `eaaf31d` and `19be00d`. | do not use the old mono pins as the Channel implementation base |
+| Node plugin surface | The host-neutral core and source-bound Node Cordis `channel` service are merged, but the launcher still has no manifest service module loader. | core implemented/verified; production service loading unavailable |
+| Mono pins | Audited remote mono main pins host `ace1bb8` and protocol `3a1509b`; this Config compliance slice deliberately advances neither pointer. | verified read-only; use owning main and leave mono unchanged |
 
 The current public `turns.submit` input is a plain string. Sending a remote
 message through it would discard Channel provenance. Real Channel ingress is
@@ -405,6 +405,44 @@ not a claim that every private Tencent integration was inspected. CordisX
 still treats it as unavailable unless Tencent publishes and authorizes a
 conforming public surface.
 
+## Config Schema compliance audit
+
+This audit was refreshed on 2026-08-24 against plugin configuration protocol
+`cordisx-protocol#19`, Host configuration `cordisx#60`, its simplified Manager
+projection `cordisx#64`, and Channel configuration protocol
+`cordisx-protocol#21` (`e4c3a15`).
+
+The earlier Channel service declaration carried only `configurationRevision`.
+That was runtime state, not a configuration contract: adapter connections,
+routes, task mappings, retry, and rate options had neither an exact schema nor a
+Manager projection. Manifest v2 is closed and cannot receive a new optional
+field without becoming incompatible with conforming v2 hosts. The protocol gap
+is therefore fixed by manifest v3 rather than an in-place v2 edit.
+
+| Configuration axis | Versioned source schema | Manager projection | Current Host status |
+| --- | --- | --- | --- |
+| Node service configuration presence | Every manifest-v3 service declares `configuration.kind=host` with the exact Channel schema and `configApplies=restart`, or `kind=none`. | A `none` service produces no descriptor, empty object, revision, or form. | declaration parser verified; launcher manifest-v3 loader planned |
+| Adapter connections | Tenant-qualified ref, official adapter kind, enabled state, compatible transport mode, callback alias where required, and optional opaque `secretRef`. | Same non-secret fields plus `secretState`; no reference string. | parser and projection verified; live transports planned |
+| Route/mapping | Route id, connection ref, conversation/user allowlists, group trigger/command prefix, explicit provider/model/profile selector, workspace alias, and notifications. | Same redacted structured values. | schema/parse/projection verified; policy/task-gateway enforcement integration planned |
+| Retry/reliability | Lease, attempt/base/max/age/jitter, account/user/conversation rate, concurrency/backlog, and attachment limits. | Same structured non-secret values. | schema/parse/projection verified; the current core still takes only lease/max-attempt/base-delay constructor options, so complete enforcement is planned |
+| Credential state | Source config accepts only `keychain:` or `host-secret:` references; inline/plaintext fields fail closed. | `missing`, `ready`, or `unavailable` only. | redaction verified; credential broker unavailable |
+| Persistence/application | Exact schema declares `restart`; service config is intended to use candidate, revision CAS, owning-generation restart, and last-good publication. | revision, last-good, generation, writable state. | descriptor verified; launcher writer/restart orchestration planned |
+
+This configuration does not use a renderer module's `Config` export. A Channel
+transport survives renderer reloads and owns Node queues, cursors, callbacks,
+and credentials, so copying its config into the ordinary plugin form would put
+the lifecycle and secret boundary in the wrong process. The dedicated Channel
+Settings page will consume the redacted service descriptor and invoke narrow
+Host actions. If a package separately has renderer-only product preferences,
+that renderer module should export Schemastery `Config` plus `configApplies` and
+remain an independently identified configuration document.
+
+The local simulator fixture is the first configuration-complete adapter. It
+validates connection, route/task mapping, notifications, retry/rate, and
+attachment limits without an account or secret. A separate static-notifier
+fixture declares `kind=none`, proving that no meaningless fields or default form
+are manufactured.
+
 ## Security model
 
 ### Access policy
@@ -596,10 +634,14 @@ capability or bypasses the native approval policy.
 ## Manager and session UI
 
 Channel management uses the already approved `manager.settings.tabs` and
-`manager.settings.content` mechanism after its host implementation lands. The
-Channel package contributes structured tab data and a same-owner controlled
-page mount. CordisX renders the Settings header, tabs, icons, selection,
-keyboard behavior, accessibility, scroll ownership, errors, and cleanup.
+`manager.settings.content` mechanism. Its generic Host implementation has
+landed. The Channel package now produces the versioned redacted service config
+descriptor, but the Channel tab/page registration and action wiring have not;
+therefore the descriptor is `implemented/verified` while an interactive Channel
+Manager page remains `planned`. The future package contributes structured tab
+data and a same-owner controlled page mount. CordisX renders the Settings
+header, tabs, icons, selection, keyboard behavior, accessibility, scroll
+ownership, errors, and cleanup.
 
 The Channel settings experience contains:
 
@@ -688,8 +730,10 @@ this plan.
 2. **Protocol (`cordisx-protocol`)**: versioned Node service declaration,
    Channel identities and binding projection, sourced user-input envelope,
    Channel scopes/capabilities, snapshots, compatibility/downgrade behavior,
-   schemas, vectors, and conformance. Older hosts reject the service entry.
-3. **Node host/core (`cordisx`)**: launcher service registry, Node Cordis
+   source config/redacted descriptor, explicit no-config mode, schemas, vectors,
+   and conformance. Older hosts reject manifest v3.
+3. **Node host/core (`cordisx`)**: versioned Host config parser/redacted
+   projection, launcher service registry, Node Cordis
    `channel` service, source/generation-bound cross-plugin list/subscribe/send,
    shared broker authority, secret handles, durable store, inbox/outbox, task
    gateway, attachment quarantine, simulator adapter, and headless tests.
@@ -720,7 +764,8 @@ reviewable. A source branch head is never a final gitlink.
 
 | Layer | Required evidence |
 | --- | --- |
-| Protocol/versioning | Older manifests/hosts reject a Node service entry; exact versions, closed enums, unknown fields, spoofed source/generation, naked session ids, plain-string Channel input, and secret values fail closed. |
+| Protocol/versioning | Older manifests/hosts reject manifest v3; exact versions, explicit `host`/`none`, closed enums, unknown fields, spoofed source/generation, naked session ids, plain-string Channel input, and secret values fail closed. |
+| Configuration | Connections, compatible official transport modes, routes/mappings, user/conversation/group policy, provider/model/profile/workspace selectors, notifications, retry/rate/backlog/attachment limits, duplicate/orphan references, revision/last-good, and explicit no-config; `secretRef` is launcher-only and absent from the Manager descriptor/default form. |
 | Identity | Same remote session id across providers, same conversation/user id across accounts/tenants, direct/group/topic/reply semantics, rebind revision/history, and stale binding selection cannot collide. |
 | Creation/query/control | Default and explicit provider/model/profile/workspace; invalid/ambiguous alias; created-plus-initial-turn-failure retention; list/search/read/status/open intent; continue/followup/steer/interrupt/archive/restore. |
 | Sourced input | Every remote message is `role=user` with immutable Channel provenance; adapters cannot request system/developer/trusted roles, mutate prior messages, or submit an unattributed batch. |
