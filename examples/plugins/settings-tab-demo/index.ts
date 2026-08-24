@@ -108,7 +108,7 @@ export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})):
     locale: 'en',
     default: true,
     messages: {
-      'body.description': 'This content is mounted below a CordisX-owned tab header and panel boundary.',
+      'body.description': 'Settings for this demo plugin.',
       'body.label': 'Demo value',
       'body.title': 'Plugin settings content',
       'tab.title': 'Demo plugin',
@@ -118,7 +118,7 @@ export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})):
     namespace: 'settings-demo',
     locale: 'zh-CN',
     messages: {
-      'body.description': '此内容挂载在 CordisX 所有的 Tab header 与 panel 边界之内。',
+      'body.description': '此演示插件的设置。',
       'body.label': '演示值',
       'body.title': '插件设置内容',
       'tab.title': '演示插件',

@@ -191,7 +191,8 @@ describe('Manager plugin card actions', () => {
       expect(input.hasAttribute('data-import-local-path')).toBe(true)
       expect(dom.window.document.querySelector('[data-import-local-submit]')?.textContent).toBe('检查并导入')
       expect(dom.window.document.querySelector('.cxm-lifecycle-dialog h2')?.textContent).toBe('导入本地插件')
-      expect(dom.window.document.querySelector('.cxm-lifecycle-dialog')?.textContent).toContain('Package Store')
+      expect(dom.window.document.querySelector('.cxm-lifecycle-dialog')?.textContent).toContain('选择本地插件目录以导入。')
+      expect(dom.window.document.querySelector('.cxm-lifecycle-dialog')?.textContent).toContain('查看导入说明')
       input.value = '/tmp/local-plugin'
       input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click()

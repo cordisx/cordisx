@@ -204,7 +204,7 @@ export function mountTraceShowcase(
     tableScroll.replaceChildren()
     if (snapshot.status.completeness === 'unavailable') {
       const empty = create(document, 'div', 'cxt-empty')
-      empty.textContent = 'Live Agent events are unavailable. This plugin will not inspect a raw bridge or private adapter store.'
+      empty.textContent = 'Agent events are currently unavailable.'
       tableScroll.append(empty)
     } else if (rendered.length === 0) {
       tableScroll.append(create(document, 'div', 'cxt-empty', snapshot.events.length === 0 ? 'No events in the loaded session window.' : 'No loaded events match these filters.'))
@@ -270,7 +270,7 @@ export function mountTraceShowcase(
     detailScroll.replaceChildren()
     const selected = selectedId === undefined ? undefined : snapshot.events.find(event => event.id === selectedId)
     if (selected === undefined) {
-      detailScroll.append(create(document, 'p', 'cxt-detail-empty', 'Select a ledger record or Overview span to inspect source, permission, timing, and payload facts.'))
+      detailScroll.append(create(document, 'p', 'cxt-detail-empty', 'Select an event to view details.'))
     } else {
       detailScroll.append(create(document, 'h3', 'cxt-detail-title', selected.summary))
       const list = create(document, 'dl')

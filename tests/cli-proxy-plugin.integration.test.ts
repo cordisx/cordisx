@@ -57,8 +57,8 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(Object.keys(Config.dict ?? {})).toEqual(['providerIds', 'defaultCwd'])
     expect(Config.dict?.providerIds?.meta.extra?.label).toEqual({ 'zh-CN': 'Provider 过滤范围', en: 'Provider filter' })
     expect(Config.dict?.providerIds?.meta.description).toMatchObject({
-      'zh-CN': expect.stringContaining('launcher 配置并启用'),
-      en: expect.stringContaining('launcher-configured, enabled Provider IDs'),
+      'zh-CN': '选择要显示的 Provider；留空表示全部。',
+      en: 'Choose the providers to show; leave empty for all.',
     })
     expect(Config.dict?.defaultCwd?.meta.extra?.label).toEqual({ 'zh-CN': '默认工作目录', en: 'Default working directory' })
   })
@@ -223,7 +223,7 @@ describe('CLIProxy provider plugin renderer', () => {
     const cwdField = configPanel?.querySelector<HTMLElement>('[data-config-path="defaultCwd"]')
     expect(providerField?.querySelector('.cxf-label')?.textContent).toBe('Provider filter')
     expect(providerField?.querySelector('.cxf-help')?.textContent)
-      .toBe('Show only these launcher-configured, enabled Provider IDs; leave empty for all, with at most 64 IDs. Connections and credentials cannot be added here.')
+      .toBe('Choose the providers to show; leave empty for all.')
     expect(cwdField?.querySelector('.cxf-label')?.textContent).toBe('Default working directory')
     expect(providerField?.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('[]')
     expect(cwdField?.querySelector<HTMLInputElement>('input')?.value).toBe('')
