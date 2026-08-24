@@ -15,6 +15,9 @@ This directory is the public, aggregatable source for CordisX product and archit
   Schema validation boundary, revision-fenced persistence, live/restart
   application, last-good recovery, secrets, and lifecycle-owned field
   renderers.
+- `dynamic-plugin-lifecycle.md` defines local package staging, dependency and
+  permission planning, minimum-scope plugin generations, atomic activation,
+  last-good rollback, uninstall cleanup, and Host-owned manager operations.
 - `data-contribution-routing.md` defines the approved structured shell-contribution and
   page/outlet architecture that replaces direct plugin DOM rendering in native shell areas.
 - `extension-point-management.md` defines surfaces and outlets as the two
