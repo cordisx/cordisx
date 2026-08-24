@@ -115,6 +115,14 @@ Manager root, Codex node, selector, or portal. This controlled seat is not a
 process or iframe sandbox; Platform and Agent calls still pass their existing
 permission brokers.
 
+The Host opens a B page only after the eligible contribution still resolves to
+the same owner-qualified route and page and passes surface, outlet-route, and
+outlet-page policy checks. It aborts and disposes the prior B mount before a
+route change, dialog close, owner removal, generation replacement, or policy
+withdrawal. Snapshot `manager.content.mounted` and `activeRoute` describe that
+controlled mount; they do not expose the child container as a general route
+target or grant plugins Manager DOM authority.
+
 ## Deterministic navigation projection
 
 The single fixed projection is:

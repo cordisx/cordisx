@@ -4,12 +4,16 @@ import {
   CORDISX_BUILTIN_MANAGER_SETTINGS_TABS,
   installCordisXManager,
   type ManagerModel,
+  type ManagerSettingsNavigationItemSnapshot,
   type ManagerSettingsTabSnapshot,
   type ManagerSnapshot,
 } from '../packages/cli/src/renderer/manager.js'
-import type { ManagedSettingsPageMount } from '../packages/cli/src/renderer/navigation.js'
+import type { ManagedManagerPageMount, ManagedSettingsPageMount } from '../packages/cli/src/renderer/navigation.js'
 
-function baseSnapshot(settingsTabs: readonly ManagerSettingsTabSnapshot[]): ManagerSnapshot {
+function baseSnapshot(
+  settingsTabs: readonly ManagerSettingsTabSnapshot[],
+  settingsNavigationItems: readonly ManagerSettingsNavigationItemSnapshot[] = [],
+): ManagerSnapshot {
   return {
     version: '0.1.0',
     plugins: [{
@@ -28,6 +32,7 @@ function baseSnapshot(settingsTabs: readonly ManagerSettingsTabSnapshot[]): Mana
     },
     permissions: [],
     settingsTabs,
+    settingsNavigationItems,
   }
 }
 
@@ -43,11 +48,83 @@ const externalTab = (overrides: Partial<ManagerSettingsTabSnapshot> = {}): Manag
   ...overrides,
 })
 
+const externalNavigation = (overrides: Partial<ManagerSettingsNavigationItemSnapshot> = {}): ManagerSettingsNavigationItemSnapshot => ({
+  id: 'channel:channels',
+  owner: 'channel',
+  group: 'after-settings',
+  order: 180,
+  title: 'Channels',
+  description: 'Open Host-rendered Channel accounts and diagnostics.',
+  pageTitle: 'Channels',
+  pageDescription: 'Host-rendered Channel service status and safe configuration projection.',
+  icon: 'host:layers',
+  route: { id: 'settings' },
+  ...overrides,
+})
+
 async function settle(): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, 0))
 }
 
 describe('CordisX manager settings tabs', () => {
+  it('projects B navigation as a Host-owned page and aborts/disposes it on close', async () => {
+    const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>')
+    const state = baseSnapshot([...CORDISX_BUILTIN_MANAGER_SETTINGS_TABS], [externalNavigation()])
+    const events: string[] = []
+    let current: { readonly body: HTMLElement; readonly controller: AbortController } | undefined
+    const model: ManagerModel = {
+      snapshot: () => state,
+      setPluginBlocked: async () => {},
+      setPermissionPolicy: async () => {},
+      subscribe: () => () => {},
+      mountManagerContent: async (id, container): Promise<ManagedManagerPageMount> => {
+        events.push(`mount:${id}`)
+        const body = container.ownerDocument.createElement('section')
+        body.dataset.externalManagerBody = id
+        body.textContent = 'Host service rendered Channel body'
+        container.append(body)
+        const controller = new AbortController()
+        current = { body, controller }
+        return {
+          owner: 'channel', contributionId: id, routeId: 'channel:settings', pageId: 'channel:settings', signal: controller.signal,
+          abort: () => { controller.abort(); events.push(`abort:${id}`) },
+          dispose: async () => { body.remove(); events.push(`dispose:${id}`) },
+        }
+      },
+      closeManagerContent: async () => {
+        if (current === undefined) return
+        current.controller.abort()
+        current.body.remove()
+        events.push('close')
+        current = undefined
+      },
+    }
+    const dispose = installCordisXManager(dom.window.document, model)
+    try {
+      dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')!.click()
+      const entry = dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="channel:channels"]')!
+      expect(entry.textContent).toContain('Channels')
+      expect(entry.querySelector('[data-host-icon="host:layers"]')).not.toBeNull()
+      entry.click()
+      await settle()
+      expect(events).toEqual(['mount:channel:channels'])
+      expect(dom.window.document.querySelector('[data-manager-content-root="true"]')?.getAttribute('data-manager-content-id')).toBe('channel:channels')
+      expect(dom.window.document.querySelector('[data-external-manager-body="channel:channels"]')?.textContent).toContain('Channel')
+      expect(dom.window.document.querySelector('.cxm-heading-current-heading')?.textContent).toBe('Channels')
+      dom.window.document.querySelector<HTMLButtonElement>('.cxm-close')!.click()
+      await settle()
+      expect(events).toEqual(['mount:channel:channels', 'abort:channel:channels', 'close'])
+      expect(dom.window.document.querySelector('[data-external-manager-body]')).toBeNull()
+      entry.click()
+      await settle()
+      expect(events).toEqual(['mount:channel:channels', 'abort:channel:channels', 'close', 'mount:channel:channels'])
+      expect(dom.window.document.querySelector('[data-external-manager-body="channel:channels"]')).not.toBeNull()
+    } finally {
+      dispose()
+      dom.window.close()
+    }
+  })
+
   it('renders one host-owned tablist/panel, preserves active identity across reprojection, and falls back on removal', async () => {
     const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
     let state = baseSnapshot([

@@ -4,6 +4,7 @@ import type {
   CordisXBrowserPlugin,
   CordisXCommandReference,
   CordisXManagerSettingsTabItem,
+  CordisXManagerSettingsNavigationItem,
   CordisXPermissionAuthorizationDecisionV1,
   CordisXPermissionPolicy,
   CordisXPermissionAuthorizationPlanV1,
@@ -39,6 +40,7 @@ import {
   type ManagerPluginStatus,
   type ManagerSnapshot,
   type ManagerSettingsTabSnapshot,
+  type ManagerSettingsNavigationItemSnapshot,
 } from './manager.js'
 import { CordisXCommandService } from './commands.js'
 import { CordisXI18nService } from './i18n.js'
@@ -62,6 +64,7 @@ import {
   ExtensionPointPolicyBroker,
   buildExtensionPointRuntimeSnapshot,
 } from './extension-points.js'
+import { sortManagerSettingsNavigationItems } from './manager-settings-navigation.js'
 import { BindingPlatformAdapter } from './provider-binding.js'
 import { BindingAgentHistoryAdapter, UnavailableAgentHistoryAdapter } from './agent-history-binding.js'
 import { CordisXAgentHistoryService } from './agent-history.js'
@@ -806,6 +809,42 @@ async function start(
       || (left.owner < right.owner ? -1 : left.owner > right.owner ? 1 : 0)
       || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
     ))
+    const settingsNavigationItems = sortManagerSettingsNavigationItems(
+      liveRegistrations
+        .filter(item => item.surface === 'manager.settings.navigation-items'
+          && item.valid && item.visible && item.authorized && !item.pending && !item.disabled
+          && (item.group === 'before-settings' || item.group === 'after-settings'))
+        .flatMap((registration): readonly ManagerSettingsNavigationItemSnapshot[] => {
+          const item = registration.item as CordisXManagerSettingsNavigationItem
+          const route = navigation.routes.find(candidate => candidate.owner === registration.owner
+            && candidate.qualifiedId === `${registration.owner}:${item.route.id}`
+            && candidate.valid && candidate.authorized
+            && candidate.productMetadata.title !== undefined && candidate.productMetadata.description !== undefined)
+          if (route === undefined) return []
+          const page = navigation.pages.find(candidate => candidate.owner === registration.owner
+            && candidate.qualifiedId === `${registration.owner}:${route.definition.page}`
+            && candidate.metadata.icon !== undefined
+            && candidate.productMetadata.title !== undefined && candidate.productMetadata.description !== undefined)
+          if (page === undefined) return []
+          const title = route.productMetadata.title
+          const description = route.productMetadata.description
+          const pageTitle = page.productMetadata.title
+          const pageDescription = page.productMetadata.description
+          if (title === undefined || description === undefined || pageTitle === undefined || pageDescription === undefined) return []
+          return [Object.freeze({
+            id: registration.qualifiedId,
+            owner: registration.owner,
+            group: registration.group as 'before-settings' | 'after-settings',
+            order: registration.order,
+            title,
+            description,
+            pageTitle,
+            pageDescription,
+            icon: page.metadata.icon!,
+            route: item.route,
+          })]
+        }),
+    )
     const hostText = (value: CordisXLocalizedText, site: string): string => (
       i18nService?.resolveFor('host', value, site).text
       ?? value.fallback
@@ -839,6 +878,7 @@ async function start(
       commands: commandService?.snapshot() ?? [],
       navigation,
       settingsTabs,
+      settingsNavigationItems,
       localization: i18nService?.getSnapshot() ?? { locale: 'en', direction: 'ltr', version: 0 },
       localeCatalogs: i18nService?.catalogs() ?? [],
       localizationDiagnostics: i18nService?.diagnostics() ?? [],
@@ -1724,6 +1764,16 @@ async function start(
       return routeService.mountManagerSettingsFor(registration.owner, item.route, registration.qualifiedId, panelBody)
     },
     closeSettingsTabContent: () => routeService?.closeManagerSettings() ?? Promise.resolve(),
+    mountManagerContent: (id, container) => {
+      if (routeService === undefined || slotService === undefined) return Promise.reject(new Error('CordisX manager content is not ready'))
+      const registration = slotService.snapshot().find(item => item.surface === 'manager.settings.navigation-items'
+        && item.qualifiedId === id && item.valid && item.visible && item.authorized && !item.pending && !item.disabled
+        && (item.group === 'before-settings' || item.group === 'after-settings'))
+      if (registration === undefined) return Promise.reject(new Error(`manager content item ${id} is not activatable`))
+      const item = registration.item as CordisXManagerSettingsNavigationItem
+      return routeService.mountManagerContentFor(registration.owner, item.route, registration.qualifiedId, container)
+    },
+    closeManagerContent: () => routeService?.closeManagerContent() ?? Promise.resolve(),
     pluginConsole: (id) => {
       const controller = activeController(id)
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)

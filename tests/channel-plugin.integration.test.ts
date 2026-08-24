@@ -17,6 +17,7 @@ interface RuntimeHandle {
     navigation: {
       routes: readonly { qualifiedId: string; valid: boolean; productMetadata: { title?: string; diagnostics: readonly unknown[] } }[]
       pages: readonly { qualifiedId: string; metadata: { chrome?: string }; productMetadata: { title?: string; diagnostics: readonly unknown[] } }[]
+      outlets: readonly { id: string; available: boolean; mounted: boolean; activeRoute?: string }[]
     }
   }
   dispose(): Promise<void>
@@ -115,6 +116,17 @@ describe('built-in Channel product bundle', () => {
       expect(snapshot.navigation.pages).toContainEqual(expect.objectContaining({
         qualifiedId: 'channel:settings', metadata: expect.objectContaining({ chrome: 'standard' }),
         productMetadata: expect.objectContaining({ title: 'Channels', diagnostics: [] }),
+      }))
+      dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')!.click()
+      const channelEntry = dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="channel:channels"]')!
+      expect(channelEntry.textContent).toContain('Channel settings')
+      expect(channelEntry.querySelector('[data-host-icon="host:layers"]')).not.toBeNull()
+      channelEntry.click()
+      await waitFor(() => dom.window.document.querySelector('[data-channel-manager="mounted"]') !== null)
+      expect(dom.window.document.querySelector('.cxm-heading-current-heading')?.textContent).toBe('Channels')
+      expect(dom.window.document.querySelector('[data-manager-content-root]')?.textContent).not.toContain('正在加载插件页面')
+      expect(runtime.snapshot().navigation.outlets).toContainEqual(expect.objectContaining({
+        id: 'manager.content', mounted: true, activeRoute: 'channel:settings',
       }))
       expect(dom.window.location.href).toBe('https://codex.local/native')
     } finally {
