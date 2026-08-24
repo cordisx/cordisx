@@ -72,6 +72,11 @@ chain, and private Codex event adapter are specified in
 adapter generation, retain only stable projection identities, and define no
 Timeline, session header, DOM surface, or outlet.
 
+Durable adapter history is a separate Node/Host read service specified in
+[`agent-history.md`](agent-history.md). It gives plugins permission-scoped,
+redacted Agent-v2 pages and opaque cursors without renderer filesystem access
+or mutation of the live Agent ledger.
+
 The planned Channel runtime is specified in
 [`channel-runtime.md`](channel-runtime.md). It adds a launcher-owned Node
 service extension point, durable inbox/outbox and binding core, and
