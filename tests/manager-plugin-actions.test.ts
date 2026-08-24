@@ -54,7 +54,7 @@ async function settle(): Promise<void> {
 
 describe('Manager plugin card actions', () => {
   it('separates card navigation from Host-owned actions, persists profile favorites, and confirms dependency impact', async () => {
-    const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
+    const dom = new JSDOM('<!doctype html><html class="electron-dark"><head></head><body></body></html>', { url: 'https://codex.local/' })
     let state = snapshot()
     const listeners = new Set<() => void>()
     const operations: CordisXPluginLifecycleOperationV1[] = []
@@ -82,6 +82,11 @@ describe('Manager plugin card actions', () => {
     Object.defineProperty(dom.window.navigator, 'clipboard', { value: { writeText: async () => {} }, configurable: true })
     const dispose = installCordisXManager(dom.window.document, model)
     try {
+      const manager = dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')!
+      expect(manager.dataset.cordisxAppTheme).toBe('dark')
+      dom.window.document.documentElement.className = 'electron-light'
+      await settle()
+      expect(manager.dataset.cordisxAppTheme).toBe('light')
       const card = dom.window.document.querySelector<HTMLElement>('[data-plugin-card="base"]')!
       const primary = card.querySelector<HTMLButtonElement>('[data-plugin-id="base"]')!
       expect(card.querySelector('.cxm-chevron')).toBeNull()
@@ -106,6 +111,7 @@ describe('Manager plugin card actions', () => {
       const trigger = menu.querySelector<HTMLElement>('.cxm-plugin-menu-trigger')!
       trigger.click()
       expect(trigger.getAttribute('aria-expanded')).toBe('true')
+      expect(dom.window.document.querySelector<HTMLElement>('body > .cxm-plugin-menu-popup')?.dataset.cordisxAppTheme).toBe('light')
       expect(menu.querySelector('.cxm-plugin-menu-popup')).toBeNull()
       expect([...dom.window.document.querySelectorAll<HTMLElement>('body > .cxm-plugin-menu-popup .cxm-plugin-menu-responsive')]
         .map(item => item.style.display)).toEqual(['flex', 'flex'])
