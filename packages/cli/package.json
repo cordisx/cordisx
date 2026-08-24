@@ -58,13 +58,11 @@
     "@material-symbols/svg-400": "0.46.0",
     "esbuild": "^0.25.9",
     "intl-messageformat": "11.2.14",
-    "semver": "7.8.5",
     "tar": "7.5.22",
     "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/node": "^22.18.1",
-    "@types/semver": "7.8.0",
     "@types/ws": "^8.18.1",
     "jsdom": "^26.1.0",
     "tsx": "^4.20.5",

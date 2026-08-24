@@ -329,6 +329,64 @@ export class PluginActivationStore {
     })
   }
 
+  async loadLastGood(revision: number): Promise<CordisXPluginActivationRecordV1> {
+    const record = await readActivation(path.join(this.root, 'history', `${revision}.json`))
+    if (record.recordKind !== 'last-good' || record.profileId !== this.profileId) {
+      throw new Error('last-good plugin activation is stale')
+    }
+    return record
+  }
+
+  async listCandidates(): Promise<readonly CordisXPluginActivationRecordV1[]> {
+    const directory = path.join(this.root, 'candidates')
+    const entries = await readdir(directory, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return []
+      throw error
+    })
+    return await Promise.all(entries
+      .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map(entry => readActivation(path.join(directory, entry.name))))
+  }
+
+  async listLastGood(): Promise<readonly CordisXPluginActivationRecordV1[]> {
+    const directory = path.join(this.root, 'history')
+    const entries = await readdir(directory, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return []
+      throw error
+    })
+    return await Promise.all(entries
+      .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map(entry => readActivation(path.join(directory, entry.name))))
+  }
+
+  async releaseLastGood(revision: number): Promise<void> {
+    await unlink(path.join(this.root, 'history', `${revision}.json`)).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error
+    })
+  }
+
+  /** CAS-publish a monotonic active record containing the last-good closure. */
+  async restoreLastGood(
+    expectedAfterRevision: number,
+    lastGood: CordisXPluginActivationRecordV1,
+  ): Promise<CordisXPluginActivationRecordV1> {
+    const active = await this.loadActive()
+    if (active.revision !== expectedAfterRevision && active.revision !== lastGood.revision) {
+      throw new Error('rollback active revision is stale')
+    }
+    const restored = normalizePluginActivation({
+      ...lastGood,
+      recordKind: 'active',
+      revision: Math.max(active.revision, expectedAfterRevision) + 1,
+      lastGoodRevision: lastGood.revision,
+      runtimeGeneration: this.runtimeGeneration,
+    })
+    await publishAtomic(this.activePath, restored)
+    return await readActivation(this.activePath)
+  }
+
   /** Move every incomplete candidate out of the live candidate namespace. */
   async recoverIncompleteCandidates(): Promise<readonly string[]> {
     const directory = path.join(this.root, 'candidates')

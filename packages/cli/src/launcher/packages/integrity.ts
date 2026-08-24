@@ -7,9 +7,7 @@ import {
   opendir,
   readFile,
   realpath,
-  rename,
   rm,
-  stat,
 } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -17,13 +15,11 @@ import { x as extractTar } from 'tar'
 import type { CanonicalPackageSource, LocalPackageSource } from './types.js'
 import { PackageLifecycleError } from './types.js'
 
-const SHA256_HEX = /^[a-f0-9]{64}$/
-
 export interface StagedPackageSnapshot {
   readonly stagingDirectory: string
   readonly payloadDirectory: string
   readonly source: CanonicalPackageSource
-  readonly integrity: string
+  readonly integrity: `sha256:${string}`
   readonly digest: string
 }
 
@@ -161,24 +157,13 @@ export async function hashPackageTree(root: string): Promise<string> {
   return hash.digest('hex')
 }
 
-async function makeReadOnly(root: string): Promise<void> {
-  const entries = [...await listTree(root)].reverse()
-  for (const relative of entries) {
-    const target = path.join(root, relative)
-    const metadata = await lstat(target)
-    if (metadata.isDirectory()) await chmod(target, 0o500)
-    else await chmod(target, metadata.mode & 0o111 ? 0o500 : 0o400)
-  }
-  await chmod(root, 0o500)
-}
-
 function parseExpectedIntegrity(value: string): string {
   const match = /^sha256:([a-f0-9]{64})$/.exec(value)
   if (match === null) throw new PackageLifecycleError('invalid-expected-integrity', 'expected integrity must be sha256:<lowercase hex>')
   return match[1]!
 }
 
-export class ImmutablePackageObjects {
+export class PluginPackageSourceSnapshotter {
   readonly #root: string
 
   constructor(root: string) {
@@ -187,11 +172,6 @@ export class ImmutablePackageObjects {
 
   get root(): string {
     return this.#root
-  }
-
-  objectDirectory(digest: string): string {
-    if (!SHA256_HEX.test(digest)) throw new PackageLifecycleError('invalid-integrity', 'invalid SHA-256 digest')
-    return path.join(this.#root, 'objects', 'sha256', digest)
   }
 
   async snapshot(source: LocalPackageSource, transactionId = randomUUID()): Promise<StagedPackageSnapshot> {
@@ -237,59 +217,7 @@ export class ImmutablePackageObjects {
     }
   }
 
-  async publish(snapshot: StagedPackageSnapshot): Promise<string> {
-    const destination = this.objectDirectory(snapshot.digest)
-    await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 })
-    try {
-      await rename(snapshot.payloadDirectory, destination)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' && (error as NodeJS.ErrnoException).code !== 'ENOTEMPTY') throw error
-      const existingDigest = await hashPackageTree(destination)
-      if (existingDigest !== snapshot.digest) {
-        throw new PackageLifecycleError('object-integrity-mismatch', `existing object ${snapshot.digest} has different contents`)
-      }
-      await rm(snapshot.payloadDirectory, { recursive: true, force: true })
-    } finally {
-      await rm(snapshot.stagingDirectory, { recursive: true, force: true })
-    }
-    const metadata = await stat(destination)
-    if (!metadata.isDirectory()) throw new PackageLifecycleError('invalid-package-object', 'published package object is not a directory')
-    await makeReadOnly(destination)
-    return destination
-  }
-
   async discard(snapshot: StagedPackageSnapshot): Promise<void> {
     await rm(snapshot.stagingDirectory, { recursive: true, force: true })
-  }
-
-  async removeObject(digest: string): Promise<void> {
-    const objectDirectory = this.objectDirectory(digest)
-    await chmod(objectDirectory, 0o700).catch(() => undefined)
-    for (const relative of await listTree(objectDirectory).catch(() => [])) {
-      await chmod(path.join(objectDirectory, relative), 0o700).catch(() => undefined)
-    }
-    await rm(objectDirectory, { recursive: true, force: true })
-  }
-
-  async orphanDigests(
-    knownDigests: ReadonlySet<string>,
-    graceMs: number,
-    now: Date,
-  ): Promise<readonly string[]> {
-    const directory = path.join(this.#root, 'objects', 'sha256')
-    const handle = await opendir(directory).catch((error) => {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
-      throw error
-    })
-    if (handle === undefined) return []
-    const result: string[] = []
-    for await (const entry of handle) {
-      if (!SHA256_HEX.test(entry.name) || !entry.isDirectory() || knownDigests.has(entry.name)) continue
-      const target = path.join(directory, entry.name)
-      const metadata = await lstat(target)
-      if (metadata.isSymbolicLink() || !metadata.isDirectory()) continue
-      if (now.getTime() - metadata.mtimeMs >= graceMs) result.push(entry.name)
-    }
-    return result.sort()
   }
 }

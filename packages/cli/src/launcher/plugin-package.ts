@@ -27,6 +27,7 @@ import {
   type CordisXPluginPackageManifestV1,
 } from '../plugin-lifecycle-contracts.js'
 import { normalizePermissionScope } from '../permissions.js'
+import type { ResolvedPackageCandidate } from './packages/types.js'
 
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const SEMANTIC_VERSION = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
@@ -93,7 +94,7 @@ function localizedReason(value: unknown, label: string): CordisXCapabilityDeclar
   }
 }
 
-function runtimeManifest(value: unknown, packageId: string): CordisXPluginManifestV1 {
+function runtimeManifestV1(value: unknown, packageId: string): CordisXPluginManifestV1 {
   const manifest = object(value, 'package.runtimeManifest')
   exactKeys(manifest, ['$schema', 'schemaVersion', 'id', 'name', 'capabilities'], 'package.runtimeManifest')
   if (manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 || manifest.schemaVersion !== 1) {
@@ -189,7 +190,7 @@ export function normalizePluginPackageManifest(value: unknown): CordisXPluginPac
     ...(canonicalSource === undefined ? {} : { canonicalSource }),
     compatibility: { runtimeAbi: CORDISX_RUNTIME_ABI_V1, protocol: CORDISX_PLUGIN_PROTOCOL_V1 },
     dependencies,
-    runtimeManifest: runtimeManifest(manifest.runtimeManifest, id),
+    runtimeManifest: runtimeManifestV1(manifest.runtimeManifest, id),
   }
 }
 
@@ -286,6 +287,7 @@ async function publishPackage(
   moduleSource: string,
   artifactSource: string,
   readme: string | undefined,
+  runtimeManifestText?: string,
 ): Promise<void> {
   const parent = path.join(homeDir, 'packages', 'sha256')
   await mkdir(parent, { recursive: true, mode: 0o700 })
@@ -312,6 +314,7 @@ async function publishPackage(
       writeFileSynced(path.join(temporary, 'manifest.json'), manifestText),
       writeFileSynced(path.join(temporary, 'module.js'), moduleSource),
       writeFileSynced(path.join(temporary, 'artifact.js'), artifactSource),
+      ...(runtimeManifestText === undefined ? [] : [writeFileSynced(path.join(temporary, 'runtime-manifest.json'), runtimeManifestText)]),
       ...(readme === undefined ? [] : [writeFileSynced(path.join(temporary, 'README.md'), readme)]),
     ])
     await rename(temporary, destination)
@@ -321,12 +324,77 @@ async function publishPackage(
         chmod(path.join(destination, 'manifest.json'), 0o444),
         chmod(path.join(destination, 'module.js'), 0o444),
         chmod(path.join(destination, 'artifact.js'), 0o444),
+        ...(runtimeManifestText === undefined ? [] : [chmod(path.join(destination, 'runtime-manifest.json'), 0o444)]),
         ...(readme === undefined ? [] : [chmod(path.join(destination, 'README.md'), 0o444)]),
       ])
       await chmod(destination, 0o555)
     }
   } finally {
     if (!published) await rm(temporary, { recursive: true, force: true })
+  }
+}
+
+interface StoredSeparatedPackageV2 {
+  readonly contract: 'cordisx.launcher-staged-package/v2'
+  readonly package: ResolvedPackageCandidate['packageManifest']
+}
+
+function separatedPackage(value: unknown): value is StoredSeparatedPackageV2 {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  return (value as { contract?: unknown }).contract === 'cordisx.launcher-staged-package/v2'
+}
+
+/**
+ * Build and publish a package-v2 candidate resolved by the Host-only source
+ * adapter. The durable package envelope stores only the runtime manifest digest;
+ * the immutable runtime document remains a separate readback-verified object.
+ */
+export async function stageResolvedPluginPackage(
+  homeDir: string,
+  sourceDirectory: string,
+  resolved: ResolvedPackageCandidate,
+): Promise<StagedPluginPackage> {
+  const root = await realpath(sourceDirectory)
+  const runtime = resolved.runtimeManifest
+  if (runtime.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 || runtime.schemaVersion !== 1) {
+    throw new Error('the current renderer generation ABI accepts runtime plugin manifest v1 only')
+  }
+  const runtimeManifest = runtimeManifestV1(runtime, resolved.packageManifest.pluginId)
+  const entry = await regularContainedFile(root, resolved.packageManifest.entry, 'package entry')
+  const readmePath = resolved.packageManifest.readme === undefined
+    ? undefined
+    : await regularContainedFile(root, resolved.packageManifest.readme, 'package README')
+  const [built, readme] = await Promise.all([
+    buildArtifact(root, entry),
+    readmePath === undefined ? Promise.resolve(undefined) : readFile(readmePath, 'utf8'),
+  ])
+  const stored: StoredSeparatedPackageV2 = {
+    contract: 'cordisx.launcher-staged-package/v2',
+    package: resolved.packageManifest,
+  }
+  const manifestText = `${JSON.stringify(stored, null, 2)}\n`
+  const runtimeManifestText = `${JSON.stringify(runtimeManifest, null, 2)}\n`
+  const digest = artifactDigest(manifestText, built.moduleSource, built.artifactSource)
+  await publishPackage(homeDir, digest, manifestText, built.moduleSource, built.artifactSource, readme, runtimeManifestText)
+  const packageManifest: CordisXPluginPackageManifestV1 = {
+    $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
+    schemaVersion: 1,
+    id: resolved.packageManifest.pluginId,
+    version: resolved.packageManifest.version,
+    entry: resolved.packageManifest.entry,
+    ...(resolved.packageManifest.readme === undefined ? {} : { readme: resolved.packageManifest.readme }),
+    ...(resolved.packageManifest.canonicalSource === undefined ? {} : { canonicalSource: resolved.packageManifest.canonicalSource }),
+    compatibility: { runtimeAbi: CORDISX_RUNTIME_ABI_V1, protocol: CORDISX_PLUGIN_PROTOCOL_V1 },
+    dependencies: resolved.packageManifest.dependencies,
+    runtimeManifest,
+  }
+  return {
+    manifest: packageManifest,
+    digest,
+    moduleSource: built.moduleSource,
+    artifactSource: built.artifactSource,
+    ...(readme === undefined ? {} : { readme }),
+    identitySource: packageManifest.canonicalSource ?? `file:///cordisx-store/sha256/${digest.slice('sha256:'.length)}/entry.js`,
   }
 }
 
@@ -377,7 +445,28 @@ export async function loadStagedPluginPackage(homeDir: string, digest: `sha256:$
     }),
   ])
   if (artifactDigest(manifestText, moduleSource, artifactSource) !== digest) throw new Error('plugin package failed integrity readback')
-  const manifest = normalizePluginPackageManifest(JSON.parse(manifestText) as unknown)
+  const parsed = JSON.parse(manifestText) as unknown
+  let manifest: CordisXPluginPackageManifestV1
+  if (separatedPackage(parsed)) {
+    const runtimeBytes = await readFile(path.join(directory, 'runtime-manifest.json'))
+    const actualRuntimeDigest = `sha256:${createHash('sha256').update(runtimeBytes).digest('hex')}`
+    if (actualRuntimeDigest !== parsed.package.runtimeManifest.digest) throw new Error('runtime manifest failed integrity readback')
+    const runtime = runtimeManifestV1(JSON.parse(runtimeBytes.toString('utf8')) as unknown, parsed.package.pluginId)
+    manifest = {
+      $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
+      schemaVersion: 1,
+      id: parsed.package.pluginId,
+      version: parsed.package.version,
+      entry: parsed.package.entry,
+      ...(parsed.package.readme === undefined ? {} : { readme: parsed.package.readme }),
+      ...(parsed.package.canonicalSource === undefined ? {} : { canonicalSource: parsed.package.canonicalSource }),
+      compatibility: { runtimeAbi: CORDISX_RUNTIME_ABI_V1, protocol: CORDISX_PLUGIN_PROTOCOL_V1 },
+      dependencies: parsed.package.dependencies,
+      runtimeManifest: runtime,
+    }
+  } else {
+    manifest = normalizePluginPackageManifest(parsed)
+  }
   const hex = digest.slice('sha256:'.length)
   return {
     manifest,

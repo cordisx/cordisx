@@ -1,155 +1,124 @@
-# Launcher package-store implementation mapping
+# Launcher package delivery hardening
 
 ## Authority and scope
 
-The normative dynamic package and lifecycle contract is
-`cordisx-protocol@832d319`, including package source v1, package/operation/
-result v2, activation v1, and the staged-registry/atomic-publication rules from
-`9fa3085`. [`dynamic-plugin-lifecycle.md`](dynamic-plugin-lifecycle.md) maps
-those contracts into the Host architecture. This document records only the
-Launcher implementation and does not define another public protocol.
+The normative contract is `cordisx-protocol@832d319` (package source v1,
+package/lifecycle v2, activation v1). This note maps that contract to the Host;
+it does not define another protocol.
 
-The implementation is under `packages/cli/src/launcher/packages/`. It is
-Node/Launcher-private: the `cordisx` package exports only `./contracts`, so
-renderer code receives no package-store API. This slice does not render
-Manager DOM and does not implement Generation Runtime registry publication.
+PR #73 remains the single owning implementation:
 
-## Intake and immutable objects
+- `launcher/plugin-package.ts` owns the immutable staged package and module;
+- `launcher/plugin-activation.ts` owns dependency validation plus active,
+  candidate, and last-good activation records;
+- `launcher/plugin-lifecycle.ts` owns the public lifecycle coordinator;
+- the existing renderer runtime/registries own generation visibility.
 
-`resolvePluginPackageSourceV1()` accepts exactly `local-directory`,
-`local-package`, or `downloaded-tarball`. It converts a query-free local
-`file:` URL into a Host path; `downloadedFrom` is required HTTPS attribution
-for the tarball form and never grants download authority. `ImmutablePackageObjects`
-then snapshots the complete source before manifest parsing. It rejects links,
-special files and escaping archive paths, calculates a deterministic SHA-256
-tree digest, and publishes a read-only object at `objects/sha256/<digest>`.
+`launcher/packages/` is only a Host-private hardening layer. It does not keep a
+second activation state, coordinator, graph, registry, loader, or public result
+projection. It is not exported to renderer code and does not touch Manager DOM.
 
-`JsonPackageManifestV2Resolver` keeps package metadata and runtime authority
-separate. It validates the package-v2 distribution statement
-`explicit-local-v1`/`signature: unsupported`, exact dependencies, required
-protocol schemas, the package-relative entry, the independent runtime-manifest
-path/digest/schema, and matching package/runtime ids. Formal runtime-manifest
-validators are injected by the owning Host instead of being reimplemented by
-the store.
+## Source v1 and separated package v2
 
-Manifest-v3 Channel configuration retains only its `kind=host|none`
-declaration. Connection, transport, mapping, limits, credentials, `secretRef`,
-`secretState`, process lifetime, and data-directory values are rejected as a
-runtime-manifest tunnel. Actual Channel service configuration stays in the
-launcher-owned plane implemented by `@cordisx/channel-runtime`; the renderer
-continues to receive only its redacted descriptor. CLIProxy, Agent Trace, and
-ordinary plugin Schemastery `Config` remain independent renderer configuration
-planes.
+`stagePluginPackageSourceV1()` accepts exactly `local-directory`,
+`local-package`, and `downloaded-tarball`. All locations are query-free `file:`
+URLs. A downloaded tarball additionally requires HTTPS discovery attribution;
+that attribution is not download or Marketplace trust authority.
 
-## Journal, graph, and activation records
+Every source is first copied/extracted into a private immutable candidate
+snapshot. Links, hard links, special files, escaping archive paths, and an
+optional SHA-256 mismatch are rejected before parsing. The package-v2 resolver
+then verifies explicit-local/unsigned distribution, entry and manifest paths,
+exact dependencies, compatibility schemas, canonical public source, runtime
+manifest digest, and package/runtime id equality.
 
-`JsonPackageStore` keeps a private atomically replaced `state.v1.json` behind
-an exclusive lock and filesystem CAS revision. Profile activation revision is
-separate from that storage revision. Records include immutable package
-identity `(pluginId, version, sha256 integrity)`, active/candidate/last-good
-selections, exact dependency bindings, transaction phases, rollback leases,
-and delayed-GC eligibility.
+The resolved candidate is projected into the existing `StagedPluginPackage`
+store. Its durable envelope contains the package metadata and runtime-manifest
+digest; the runtime document remains a separate immutable file whose digest is
+rechecked on every load. The current renderer generation ABI consumes runtime
+manifest v1. Validators may inspect v2/v3 Host manifests at the edge, but they
+are not projected into the renderer loader.
 
-The graph accepts exact dependency versions only. The Host recomputes the
-reverse dependent closure at every token resolution and rejects missing,
-conflicting, duplicate, self, or cyclic edges. Activation order is dependency
-first; drain/dispose order is the reverse. Uninstall/disable refuses an enabled
-required dependent unless a later confirmed lifecycle plan explicitly owns
-that entire closure.
+Runtime manifest parsing rejects connection, transport, mapping, limits,
+credential, `secretRef`, `secretState`, process-lifetime, and data-directory
+values as launcher-configuration tunnels. Manifest-v3 Channel declarations may
+only describe `configuration.kind=host|none`; the actual Channel configuration
+and allowed `keychain:`/`host-secret:` references remain in the launcher-owned
+service plane. `none` does not synthesize an empty configuration. CLIProxy,
+Agent Trace, UI demos, and ordinary Schemastery Config remain separate renderer
+configuration planes.
 
-`PackageLifecycleHost.activationRecords()` projects product-safe
-`plugin-activation.v1` active/candidate/last-good records. They contain no
-local/store/artifact path. Last-good is a profile-level snapshot, so a new
-installation is not incorrectly copied into the activation record that
-preceded it.
+This v1 delivery slice makes no claim of remote signature verification,
+Marketplace install trust, or security sandboxing.
 
-## Host-private Generation Runtime seam
+## Host-private authority seam
 
-`prepare()` returns random branded `PackageCandidateToken` and
-`PackageImpactToken`; only their SHA-256 hashes are journaled. Both are bound
-to owner, profile, activation revision, the full runtime/module/package fence,
-and the Host-computed closure. The Generation Runtime calls the same methods at
-all four boundaries:
+`PackageLifecycleAuthority` wraps the existing `PluginActivationStore`. Its
+atomic journal contains transaction/token/permission/rollback metadata plus
+frozen candidate fence snapshots; it is not another active package state.
 
-- `resolveCandidate(access, plan|stage|publish|rollback)` returns a frozen
-  `PackageActivationPlan` with `expected`, `current`, `after`, and `lastGood`
-  complete tuples;
-- `resolveImpact(access, boundary)` recomputes and verifies changed ids,
-  affected closure, activation order, and drain order;
-- each package projection contains exact identity/dependencies plus the
-  Launcher-only `artifactDirectory`, `runtimeEntry`, and runtime-manifest
-  digest; `resolveRuntimeModule(access, boundary, pluginId)` rereads and
-  validates the separate manifest from the immutable object on demand.
+`prepare()` reads the existing active and candidate activation records,
+recomputes the reverse dependency closure with `pluginDependentClosure()` and
+`topologicalPluginOrder()`, and issues random branded candidate, impact,
+permission-review, and later rollback tokens. Only token hashes are durable.
+Every access is bound to owner, profile, activation revision,
+runtimeGeneration, exact package version/digest, moduleGeneration, exact
+dependencies, permission plan revision, and the shared registry epoch.
 
-The renderer cannot submit a tuple or authoritative affected ids. Every
-boundary rereads the journal and verifies activation revision,
-`runtimeGeneration`, `moduleGeneration`, package digest, owner, profile, and
-token hash before Generation Runtime work proceeds.
+Generation Runtime uses the same resolver at four boundaries:
 
-## Permission gate
+- `resolveCandidate(access, 'plan'|'stage'|'publish'|'rollback')` returns a
+  frozen expected/current/after/last-good tuple and expected/after registry
+  epochs;
+- `resolveImpact()` returns only the Host-recomputed closure and ordering;
+- `resolveRuntimeModule()` returns package identity plus Launcher-only
+  `artifactDirectory` and `./module.js`; no runtime manifest or scope reaches
+  the renderer.
 
-`createHostPermissionReviewAuthority()` wraps the existing Permission Broker;
-it is not a policy store. The broker returns the exact authorization plan
-revision and decision plus opaque allow-once grant ids. The wrapper issues a
-branded `HostPermissionReviewToken`; its hash and a bounded decision/input
-fingerprint are journaled, never raw scope, capability, credential, or secret
-values. The durable package record likewise stores only the runtime entry and
-manifest digest; the immutable package object remains the single copy of the
-formal runtime document.
+The shared registry transaction remains D-owned. It gives the candidate a
+private readiness view, flips one active closure epoch atomically, and retains
+the hidden retiring closure until commit-last-good or rollback. C consumes only
+Host-branded readiness and rollback receipts for that shared epoch; it creates
+no registry.
 
-Install, update, and enable bind that review to owner, profile, candidate and
-impact tokens, immutable package identity, candidate fingerprint, and the full
-generation fence. `PackageCandidateAccess` must contain the Host review token.
-Unresolved or denied required authority fails before plan/stage/publication and
-readiness. Optional deny, allow-once, and persistent allow remain Permission
-Broker decisions. Candidate abort/recovery revokes candidate allow-once ids;
-disable, uninstall, update, or dependent generation replacement revokes the
-retired generation's ids. A terminal or recovered transaction cannot reuse a
-review token for another candidate.
+## Permission and rollback gates
 
-## Publication failure and rollback
+`createHostPermissionReviewAuthority()` is an authentication wrapper around
+the existing Permission Broker, not a second policy engine. It binds the broker
+result to the candidate identity/fence and stores only bounded fingerprints,
+decision ids, plan revision, and opaque allow-once ids. Required unresolved or
+denied authority fails closed before stage, readiness, and activation. Optional
+deny/allow-once/persistent allow retain Permission Broker semantics. Abort,
+rollback, recovery, uninstall/replacement cleanup revoke transaction one-shot
+grants; raw scope and secrets are never journaled.
 
-Generation Runtime owns transaction-local staged registries and the single
-closure publication. The store never makes a staged contribution visible.
-After `requestActivation()`, readiness produces a receipt that must match the
-candidate token/fingerprint and every affected runtime/module/package fence.
-Only the exact receipt may commit the new profile revision and last-good
-snapshot.
+After an atomic after-epoch publish, a later failure follows this sequence:
 
-If the `after` tuple may have published but commit-last-good does not complete,
-the required sequence is:
+1. `beginRollback()` durably records `rollback-pending` and pins both after and
+   last-good artifacts;
+2. Generation Runtime flips the shared registry back to the complete last-good
+   closure and disposes the after closure;
+3. it returns a Host-branded receipt containing the restored epoch, active
+   last-good observation, and disposed-after observation;
+4. `completeRollback()` re-resolves the rollback boundary, verifies the full
+   observations, restores the durable #73 active record when needed, revokes
+   one-shot grants, and ends the journal.
 
-1. `beginRollback(candidateAccess, failureCode)` durably records
-   `rollback-pending` and returns a branded `PackageRollbackToken` plus
-   `expectedPublished=after` and `rollbackTarget=lastGood`;
-2. Generation Runtime atomically restores the entire last-good closure and
-   drains/disposes every after-generation member through the injected
-   `HostRollbackCompletionAuthority`;
-3. `completeRollback(rollbackAccess)` accepts only that Host-issued receipt,
-   rereads the rollback boundary, verifies active observation equals
-   `rollbackTarget` and disposed observation equals `expectedPublished`, then
-   marks the journal aborted and releases candidate permission/artifact refs.
+Abort, another transaction, last-good release, and GC cannot cross
+`rollback-pending`. Recovery returns `rollback-published` for any possibly
+published transaction and `discard-staged` only for definitely pre-publication
+work. A recovered review never binds to a new candidate.
 
-While rollback is pending, ordinary abort fails, a new profile transaction is
-blocked, candidate/last-good objects remain referenced, and GC cannot cross
-the fence. Startup recovery returns `rollback-published` with a fresh rollback
-token for activation-requested, readiness-confirmed, observed-after, or an
-existing rollback-pending transaction. It never promotes an interrupted
-candidate or misclassifies a potentially live after-generation as disposable.
+## Leases and GC
 
-## Leases and validation
+GC derives references from the single #73 active, candidate, and last-good
+records plus non-terminal journal fences. Last-good history is an explicit
+lease released only after the Generation Runtime confirms old-generation
+disposal. Orphan package objects and logically uninstalled objects are removed
+only after all those references are absent and the grace period has elapsed.
 
-Reference counts cover installed, active, profile last-good, per-plugin
-last-good, rollback, non-terminal candidate, and transaction refs. Logical
-uninstall precedes physical cleanup. `collectGarbage()` removes an immutable
-object only after every lease is gone and its grace period has elapsed;
-cleanup failure cannot reactivate it.
-
-Focused coverage includes all three sources, package/runtime digest failure,
-link/archive rejection, Channel configuration-tunnel rejection, exact graph
-conflict/cycle/closure, required permission denial, permission-token forgery,
-allow-once cleanup, four-boundary stale fences, readiness mismatch, process
-interruption, rollback-pending concurrency/GC, forged and stale rollback
-receipts, uninstall-in-use, activation-v1 last-good projection, lease release,
-and atomic-store fault injection. Release gates are full `npm run check`,
-audit, focused fault tests, and `git diff --check`.
+Focused tests cover all three source forms, source/runtime integrity faults,
+configuration tunneling, owner/profile/token forgery, required permission
+denial and one-shot cleanup, full tuple/epoch fences, Host-branded readiness,
+publish-after rollback-pending, forged/stale rollback receipts, recovery,
+concurrent transaction/abort/GC gates, and immutable-object cleanup.

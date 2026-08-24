@@ -30,10 +30,13 @@ export function resolvePluginPackageSourceV1(source: PluginPackageSourceV1): Loc
   } else if (source.downloadedFrom !== undefined) {
     throw new PackageLifecycleError('invalid-package-source', 'downloadedFrom is valid only for downloaded tarballs')
   }
+  if (source.expectedDigest !== undefined && !/^sha256:[a-f0-9]{64}$/.test(source.expectedDigest)) {
+    throw new PackageLifecycleError('invalid-package-source', 'expectedDigest must be sha256:<lowercase hex>')
+  }
   return {
     kind: source.kind,
     path: fileURLToPath(location),
     ...(source.downloadedFrom === undefined ? {} : { downloadedFrom: source.downloadedFrom }),
-    ...(source.expectedDigest === undefined ? {} : { expectedIntegrity: source.expectedDigest }),
+    ...(source.expectedDigest === undefined ? {} : { expectedIntegrity: source.expectedDigest as `sha256:${string}` }),
   }
 }

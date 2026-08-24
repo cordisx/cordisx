@@ -182,6 +182,10 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     const packageManifest: HostPackageManifest = {
       pluginId,
       version: string(manifest.version, 'package version'),
+      entry,
+      ...(manifest.readme === undefined ? {} : {
+        readme: safePath(manifest.readme, /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:md|markdown)$/, 'package readme'),
+      }),
       dependencies: dependencies(manifest.dependencies),
       compatibility: {
         runtimeAbi: 1,
@@ -189,11 +193,16 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
       },
       distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
       ...(publicSource === undefined ? {} : { canonicalSource: publicSource as string }),
+      runtimeManifest: {
+        path: runtimePath,
+        schema: runtimeSchema,
+        digest: runtimeDigest as `sha256:${string}`,
+      },
       permissionFingerprint: createHash('sha256').update(JSON.stringify(runtimeManifest)).digest('hex'),
     }
     return {
       packageManifest,
-      runtime: { entry, manifestIntegrity: runtimeDigest, manifest: runtimeManifest },
+      runtimeManifest,
     }
   }
 }

@@ -56,10 +56,11 @@ slice lands, the single-bundle behavior in the next sections remains the
 implemented current state.
 
 The launcher implementation of that boundary is specified separately in
-[`dynamic-package-store.md`](dynamic-package-store.md): it owns immutable local
-objects, dependency resolution, the installation journal, crash recovery, the
-Permission Broker seam, and the narrow Generation Runtime candidate. It does
-not itself switch renderer generations or render Manager UI.
+[`dynamic-package-store.md`](dynamic-package-store.md): it maps source-v1 and
+package-v2 intake plus a Host-private journal/token/permission/rollback layer
+onto the single package and activation stores implemented by the generation
+runtime slice. It does not create another store/registry, switch renderer
+generations, or render Manager UI.
 
 The launcher binds CDP to `127.0.0.1`, records every `Page.addScriptToEvaluateOnNewDocument` identifier, and removes those identifiers on shutdown before asking the live page to dispose CordisX.
 
