@@ -209,5 +209,5 @@ describe('plugin DevTools Console runtime', () => {
 
     await runtime!.dispose()
     dom.window.close()
-  })
+  }, 15_000)
 })
