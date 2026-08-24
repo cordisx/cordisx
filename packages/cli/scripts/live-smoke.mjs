@@ -29,6 +29,9 @@ const parsed = parseArgs({
     'manager-extension-point-tab': { type: 'string' },
     'manager-route': { type: 'string' },
     'manager-marketplace-tab': { type: 'string' },
+    'manager-marketplace-view': { type: 'string' },
+    'manager-marketplace-open-menu': { type: 'boolean', default: false },
+    'manager-marketplace-clipboard-exercise': { type: 'boolean', default: false },
     'manager-marketplace-source': { type: 'string' },
     'manager-marketplace-fixture': { type: 'string' },
     'manager-click-external': { type: 'boolean', default: false },
@@ -74,7 +77,7 @@ const parsed = parseArgs({
 })
 const port = Number(parsed.values.port)
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--locale en|zh-CN] [--screenshot <png>] [--app-screenshot <png>] [--host-collection-menu-exercise --host-collection-menu-screenshot <png> --report <json>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-permission-capability <name> --manager-settings-tab <tab> --manager-settings-navigation-item <qualified-id> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-marketplace-source <https-url> --manager-marketplace-fixture <absolute-json> --manager-click-external --manager-viewport-width <pixels> --manager-breadcrumb-width <pixels>] [--manager-lifecycle-source <absolute-directory> --report <json>] [--trigger-screenshot <png>]')
+  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--locale en|zh-CN] [--screenshot <png>] [--app-screenshot <png>] [--host-collection-menu-exercise --host-collection-menu-screenshot <png> --report <json>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-permission-capability <name> --manager-settings-tab <tab> --manager-settings-navigation-item <qualified-id> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-marketplace-view discovery|sources|create --manager-marketplace-open-menu --manager-marketplace-clipboard-exercise --manager-marketplace-source <https-url> --manager-marketplace-fixture <absolute-json> --manager-click-external --manager-viewport-width <pixels> --manager-breadcrumb-width <pixels>] [--manager-lifecycle-source <absolute-directory> --report <json>] [--trigger-screenshot <png>]')
 }
 if (parsed.values['ui-catalog'] && parsed.values.report === undefined) {
   throw new Error('--ui-catalog requires --report so screenshots and machine-readable assertions share one artifact directory')
@@ -3385,6 +3388,13 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   const managerRoute = parsed.values['manager-route']
   const managerMarketplaceTab = parsed.values['manager-marketplace-tab']
   if (managerMarketplaceTab !== undefined && !['overview', 'authors-source'].includes(managerMarketplaceTab)) throw new Error(`unknown manager marketplace tab: ${managerMarketplaceTab}`)
+  const managerMarketplaceView = parsed.values['manager-marketplace-view']
+  if (managerMarketplaceView !== undefined && !['discovery', 'sources', 'create'].includes(managerMarketplaceView)) {
+    throw new Error(`unknown manager marketplace view: ${managerMarketplaceView}`)
+  }
+  if ((managerMarketplaceView !== undefined || parsed.values['manager-marketplace-open-menu']) && managerTab !== 'marketplace') {
+    throw new Error('--manager-marketplace-view and --manager-marketplace-open-menu require --manager-tab marketplace')
+  }
   const managerMarketplaceSource = parsed.values['manager-marketplace-source']
   if (managerMarketplaceSource !== undefined) {
     const sourceUrl = new URL(managerMarketplaceSource)
@@ -3393,6 +3403,13 @@ if (parsed.values['manager-screenshot'] !== undefined) {
     }
   }
   const managerMarketplaceFixturePath = parsed.values['manager-marketplace-fixture']
+  if (parsed.values['manager-marketplace-clipboard-exercise']
+    && (managerMarketplaceSource === undefined || managerMarketplaceFixturePath === undefined)) {
+    throw new Error('--manager-marketplace-clipboard-exercise requires --manager-marketplace-source and --manager-marketplace-fixture')
+  }
+  if (parsed.values['manager-marketplace-clipboard-exercise'] && !parsed.values.generation) {
+    throw new Error('--manager-marketplace-clipboard-exercise requires --generation so imported state and Host cleanup share one report')
+  }
   if (managerMarketplaceFixturePath !== undefined && managerMarketplaceSource === undefined) {
     throw new Error('--manager-marketplace-fixture requires --manager-marketplace-source')
   }
@@ -3431,10 +3448,26 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         const timer = setTimeout(resolve, 120)
         requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(timer); resolve() }))
       })
+      const waitForElement = async (selector, timeout = 4_000) => {
+        const deadline = Date.now() + timeout
+        while (Date.now() < deadline) {
+          const element = document.querySelector(selector)
+          if (element !== null) return element
+          await new Promise(resolve => setTimeout(resolve, 40))
+        }
+        return null
+      }
       if (smokeLocale !== undefined) document.documentElement.lang = smokeLocale
       if (smokeTheme !== undefined) document.documentElement.setAttribute('data-theme', smokeTheme)
       await nextPaint()
       const marketplaceFixtureText = ${JSON.stringify(managerMarketplaceFixture)}
+      const marketplaceClipboardExercise = ${JSON.stringify(parsed.values['manager-marketplace-clipboard-exercise'])}
+      const marketplaceClipboardLocal = {
+        name: '剪贴板团队来源',
+        description: '从结构化来源描述导入。',
+        note: '真实 app:// smoke',
+      }
+      let marketplaceMenuKeyboard = null
       const trigger = document.querySelector('[data-cordisx-manager-trigger]')
       const modal = document.querySelector('[data-cordisx-manager-modal]')
       const openedBy = trigger === null ? 'host-smoke-fallback' : 'manager-trigger'
@@ -3442,27 +3475,32 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       else if (modal instanceof HTMLElement && modal.hidden) modal.hidden = false
       const marketplaceSource = ${JSON.stringify(managerMarketplaceSource)}
       if (marketplaceSource !== undefined) {
-        document.querySelector('[data-tab="settings"]')?.click()
-        await nextPaint()
-        document.querySelector('[data-settings-tab="host:marketplace"]')?.click()
-        await nextPaint()
-        const existingRows = [...document.querySelectorAll('.cxm-source-list .cxm-source-row')]
-        for (const row of existingRows) row.querySelector('.cxm-source-actions button:last-child')?.click()
-        const removalDeadline = Date.now() + 5_000
-        while (document.querySelector('.cxm-source-list .cxm-source-row') !== null && Date.now() < removalDeadline) {
-          await new Promise(resolve => setTimeout(resolve, 50))
-        }
-        const input = document.querySelector('[data-host-form="marketplace-source"] t-input[data-host-form-primitive="input"]')
-        const form = document.querySelector('[data-host-form="marketplace-source"]')
-        if (!(input instanceof HTMLElement) || !(form instanceof HTMLFormElement)) throw new Error('marketplace source form is unavailable')
-        input.value = marketplaceSource
-        input.onChange?.(marketplaceSource)
-        if (marketplaceFixtureText === undefined) form.requestSubmit()
-        else {
+        document.querySelector('[data-tab="marketplace"]')?.click()
+        const sourceMenu = await waitForElement('[data-marketplace-source-menu]')
+        sourceMenu?.click()
+        if (marketplaceClipboardExercise) {
+          const clipboardPayload = JSON.stringify({
+            $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-source.v1.schema.json',
+            schemaVersion: 1,
+            url: marketplaceSource,
+            enabled: true,
+            local: marketplaceClipboardLocal,
+          })
+          Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { readText: async () => clipboardPayload },
+          })
+          const clipboardAction = await waitForElement('[data-manager-menu-action="clipboard"]')
+          if (!(clipboardAction instanceof HTMLButtonElement)) throw new Error('marketplace clipboard action is unavailable')
           const fixtureNow = 1_900_000_000_000
           const originalNow = Date.now
           Date.now = () => fixtureNow
-          try { form.requestSubmit() } finally { Date.now = originalNow }
+          try {
+            clipboardAction.click()
+            for (let turn = 0; turn < 8; turn += 1) await Promise.resolve()
+          } finally {
+            Date.now = originalNow
+          }
           const requestPrefix = fixtureNow.toString(36)
           for (let sequence = 1; sequence <= 16; sequence += 1) globalThis.__cordisxMarketplaceReceiveV1?.(JSON.stringify({
             requestId: requestPrefix + '-' + sequence.toString(36),
@@ -3471,17 +3509,45 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             url: marketplaceSource,
             text: marketplaceFixtureText,
           }))
+        } else {
+          const createAction = await waitForElement('[data-manager-menu-action="create"]')
+          createAction?.click()
+          const form = await waitForElement('[data-host-form="marketplace-source-create"]')
+          const input = form?.querySelector('#cxm-marketplace-source-url')
+          if (!(input instanceof HTMLElement) || !(form instanceof HTMLFormElement)) throw new Error('marketplace source form is unavailable')
+          input.value = marketplaceSource
+          input.onChange?.(marketplaceSource)
+          if (marketplaceFixtureText === undefined) form.requestSubmit()
+          else {
+            const fixtureNow = 1_900_000_000_000
+            const originalNow = Date.now
+            Date.now = () => fixtureNow
+            try { form.requestSubmit() } finally { Date.now = originalNow }
+            const requestPrefix = fixtureNow.toString(36)
+            for (let sequence = 1; sequence <= 16; sequence += 1) globalThis.__cordisxMarketplaceReceiveV1?.(JSON.stringify({
+              requestId: requestPrefix + '-' + sequence.toString(36),
+              ok: true,
+              status: 200,
+              url: marketplaceSource,
+              text: marketplaceFixtureText,
+            }))
+          }
         }
         const sourceDeadline = Date.now() + 12_000
-        let sourceState
+        let sourceState = 'timeout'
         while (Date.now() < sourceDeadline) {
-          const sourceRow = [...document.querySelectorAll('.cxm-source-list .cxm-source-row')]
-            .find(row => row.querySelector('.cxm-source-url')?.textContent?.trim() === marketplaceSource)
-          sourceState = sourceRow?.querySelector('.cxm-source-state')?.textContent?.trim()
-          if (sourceState?.includes('已加载') === true || sourceState?.includes('加载失败') === true) break
+          const sourceRow = [...document.querySelectorAll('[data-collection-item]')]
+            .find(row => row.getAttribute('data-collection-item') === marketplaceSource)
+          const status = sourceRow?.querySelector('.cxc-status')
+          if (sourceRow !== undefined && status?.getAttribute('data-tone') !== 'progress') {
+            sourceState = status?.getAttribute('aria-label') ?? 'loaded'
+            break
+          }
           await new Promise(resolve => setTimeout(resolve, 50))
         }
-        if (sourceState?.includes('已加载') !== true) throw new Error('marketplace smoke source failed to load: ' + (sourceState ?? 'timeout'))
+        if (sourceState !== 'loaded') throw new Error('marketplace smoke source failed to load: ' + sourceState)
+        document.querySelector('[data-breadcrumb-target="primary:marketplace"]')?.click()
+        await nextPaint()
       }
       document.querySelector('[data-tab=${JSON.stringify(managerTab)}]')?.click()
       if (${JSON.stringify(managerTab)} === 'marketplace') {
@@ -3574,6 +3640,44 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       if (routeId !== undefined) document.querySelector('[data-route-id="' + CSS.escape(routeId) + '"]')?.click()
       const marketplaceTab = ${JSON.stringify(managerMarketplaceTab)}
       if (marketplaceTab !== undefined) document.querySelector('[data-marketplace-detail-tab="' + marketplaceTab + '"]')?.click()
+      const marketplaceView = ${JSON.stringify(managerMarketplaceView)}
+      if (marketplaceView === 'sources' || marketplaceView === 'create') {
+        const sourceMenu = await waitForElement('[data-marketplace-source-menu]')
+        sourceMenu?.click()
+        const action = await waitForElement('[data-manager-menu-action="' + (marketplaceView === 'create' ? 'create' : 'manage') + '"]')
+        action?.click()
+        await waitForElement(marketplaceView === 'create'
+          ? '[data-marketplace-source-page="create"]'
+          : '[data-marketplace-source-page="index"]')
+      }
+      if (${JSON.stringify(parsed.values['manager-marketplace-open-menu'])}) {
+        const discoveryMenu = document.querySelector('[data-marketplace-source-menu]')
+        let menuTrigger = discoveryMenu
+        if (discoveryMenu !== null) discoveryMenu.click()
+        else {
+          const official = [...document.querySelectorAll('[data-collection-item]')]
+            .find(item => item.getAttribute('data-collection-item') === 'https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json')
+          menuTrigger = official?.querySelector('.cxc-menu-trigger') ?? null
+          menuTrigger?.click()
+        }
+        await nextPaint()
+        const openedPopup = document.querySelector('[data-manager-action-menu="商店来源操作"], .cxc-menu-popup')
+        const initialFocus = document.activeElement
+        initialFocus?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+        const arrowMoved = openedPopup?.contains(document.activeElement) === true && document.activeElement !== initialFocus
+        document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+        await nextPaint()
+        const closed = document.querySelector('[data-manager-action-menu="商店来源操作"], .cxc-menu-popup') === null
+        const focusRestored = document.activeElement === menuTrigger
+        menuTrigger?.click()
+        await nextPaint()
+        marketplaceMenuKeyboard = {
+          arrowMoved,
+          closed,
+          focusRestored,
+          reopened: document.querySelector('[data-manager-action-menu="商店来源操作"], .cxc-menu-popup') !== null,
+        }
+      }
       if (${JSON.stringify(parsed.values['manager-open-local-path-form'])}) {
         document.querySelector('[data-tab="plugins"]')?.click()
         await nextPaint()
@@ -3771,6 +3875,87 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             policyEditable: document.querySelector('[data-permission-detail] t-select[data-permission-capability][data-tdesign-version="1.2.10"]') !== null,
             headings: [...document.querySelectorAll('[data-permission-detail] h1, [data-permission-detail] h2, [data-permission-detail] h3')].map(item => item.textContent?.trim() ?? ''),
           },
+          marketplace: (() => {
+            const managerContent = document.querySelector('.cxm-content')
+            const discovery = document.querySelector('[data-marketplace-discovery-page]')
+            const tools = discovery?.querySelector('.cxm-marketplace-discovery-tools')
+            const search = tools?.querySelector('[data-list-search="marketplace"]')
+            const filters = tools?.querySelector('.cxm-marketplace-filter-row')
+            const results = discovery?.querySelector('[data-marketplace-results-scroll]')
+            const sourcePage = document.querySelector('[data-marketplace-source-page]')
+            const sourceForm = sourcePage?.querySelector('[data-host-form^="marketplace-source-"]')
+            const popup = document.querySelector('[data-manager-action-menu="商店来源操作"], .cxc-menu-popup')
+            const box = element => {
+              const rect = element?.getBoundingClientRect()
+              return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+            }
+            const contentStyle = managerContent === null ? null : getComputedStyle(managerContent)
+            const resultsStyle = results == null ? null : getComputedStyle(results)
+            const searchRect = search?.getBoundingClientRect()
+            const filterRect = filters?.getBoundingClientRect()
+            const official = [...document.querySelectorAll('[data-collection-item]')]
+              .find(item => item.getAttribute('data-collection-item') === 'https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json')
+            const imported = marketplaceSource === undefined ? undefined : [...document.querySelectorAll('[data-collection-item]')]
+              .find(item => item.getAttribute('data-collection-item') === marketplaceSource)
+            const persistedImported = marketplaceSource === undefined ? undefined : (() => {
+              try {
+                const value = JSON.parse(localStorage.getItem('cordisx.manager.marketplaceSources.v2') ?? 'null')
+                return value?.sources?.find?.(item => item?.url === marketplaceSource) ?? null
+              } catch {
+                return null
+              }
+            })()
+            const remove = popup?.querySelector('[data-collection-action="remove"]')
+            return {
+              view: discovery !== null
+                ? 'discovery'
+                : sourcePage?.getAttribute('data-marketplace-source-page') === 'index'
+                  ? 'sources'
+                  : sourcePage?.getAttribute('data-marketplace-source-page') ?? null,
+              geometry: { content: box(managerContent), discovery: box(discovery), tools: box(tools), search: box(search), filters: box(filters), results: box(results), sourceForm: box(sourceForm) },
+              discovery: discovery === null ? null : {
+                contentOverflowY: contentStyle?.overflowY ?? null,
+                resultsOverflowY: resultsStyle?.overflowY ?? null,
+                onlyResultsScroll: contentStyle?.overflowY === 'hidden' && ['auto', 'scroll'].includes(resultsStyle?.overflowY ?? ''),
+                filterBelowSearch: searchRect !== undefined && filterRect !== undefined && filterRect.top >= searchRect.bottom - 1,
+                documentationPrimaryActionAbsent: ![...document.querySelectorAll('a,button')].some(item => item.textContent?.includes('查看插件商店文档')),
+                fullWidth: discovery.clientWidth >= (managerContent?.clientWidth ?? 0)
+                  - Number.parseFloat(contentStyle?.paddingLeft ?? '0')
+                  - Number.parseFloat(contentStyle?.paddingRight ?? '0') - 1,
+                resultCount: document.querySelectorAll('[data-marketplace-plugin]').length,
+              },
+              sources: sourcePage === null ? null : {
+                count: document.querySelectorAll('[data-collection-item]').length,
+                officialPresent: official !== undefined,
+                officialDeleteDisabled: remove instanceof HTMLButtonElement ? remove.disabled : null,
+                manualReloadAbsent: ![...document.querySelectorAll('button')].some(item => item.textContent?.includes('重新加载')),
+                topLevelSettingsTabAbsent: document.querySelector('[data-settings-tab="host:marketplace"]') === null,
+                formFullWidth: sourceForm == null || sourcePage === null
+                  ? null : sourceForm.getBoundingClientRect().width >= sourcePage.getBoundingClientRect().width - 1,
+                untouchedErrorAbsent: sourceForm == null || sourceForm.querySelector('.cxf-error:not([hidden])') === null,
+                nativeUrlErrorAbsent: !document.body.textContent?.includes("Failed to construct 'URL'"),
+                clipboardImport: marketplaceClipboardExercise ? {
+                  rowPresent: imported !== undefined,
+                  title: imported?.querySelector('.cxc-title')?.textContent?.trim() ?? null,
+                  description: imported?.querySelector('.cxc-description')?.textContent?.trim() ?? null,
+                  machineId: imported?.querySelector('.cxc-machine-id')?.textContent?.trim() ?? null,
+                  local: persistedImported?.local ?? null,
+                  noticeVisible: (sourcePage.textContent ?? '').includes('已从剪贴板导入商店来源'),
+                } : null,
+              },
+              menu: popup === null ? null : {
+                portaled: popup.parentElement === document.body,
+                theme: popup.getAttribute('data-cordisx-app-theme'),
+                managerTheme: document.querySelector('[data-cordisx-manager-modal]')?.getAttribute('data-cordisx-app-theme') ?? null,
+                firstItemFocused: popup.querySelector('button:not(:disabled)') === document.activeElement,
+                keyboard: marketplaceMenuKeyboard,
+                bounded: (() => {
+                  const rect = popup.getBoundingClientRect()
+                  return rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight
+                })(),
+              },
+            }
+          })(),
           tdesign: {
             version: document.querySelector('[data-tdesign-version]')?.getAttribute('data-tdesign-version') ?? null,
             hostOwnedControlCount: document.querySelectorAll('[data-host-form-primitive][data-tdesign-version="1.2.10"]').length,
@@ -3954,6 +4139,57 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   }
   const managerResult = evaluatedManager.result?.value ?? null
   managerReport = managerResult?.state ?? null
+  if (managerTab === 'marketplace') {
+    const marketplaceState = managerReport?.marketplace
+    const requestedView = managerMarketplaceView ?? 'discovery'
+    if (marketplaceState?.view !== requestedView) {
+      throw new Error(`Marketplace smoke opened the wrong view: ${JSON.stringify(marketplaceState)}`)
+    }
+    if (requestedView === 'discovery') {
+      const discovery = marketplaceState.discovery
+      if (discovery?.onlyResultsScroll !== true
+        || discovery.filterBelowSearch !== true
+        || discovery.documentationPrimaryActionAbsent !== true
+        || discovery.fullWidth !== true) {
+        throw new Error(`Marketplace discovery IA assertions failed: ${JSON.stringify(discovery)}`)
+      }
+    } else {
+      const sources = marketplaceState.sources
+      if (sources?.manualReloadAbsent !== true
+        || sources.topLevelSettingsTabAbsent !== true
+        || sources.formFullWidth === false
+        || sources.untouchedErrorAbsent !== true
+        || sources.nativeUrlErrorAbsent !== true
+        || (requestedView === 'sources' && sources.officialPresent !== true)) {
+        throw new Error(`Marketplace source IA assertions failed: ${JSON.stringify(sources)}`)
+      }
+      if (requestedView === 'sources' && parsed.values['manager-marketplace-open-menu']
+        && sources.officialDeleteDisabled !== true) {
+        throw new Error(`Marketplace official source delete boundary failed: ${JSON.stringify(sources)}`)
+      }
+      if (parsed.values['manager-marketplace-clipboard-exercise']) {
+        const imported = sources.clipboardImport
+        if (imported?.rowPresent !== true
+          || imported.title !== '剪贴板团队来源'
+          || imported.description !== '从结构化来源描述导入。'
+          || imported.machineId !== managerMarketplaceSource
+          || imported.local?.name !== '剪贴板团队来源'
+          || imported.local?.description !== '从结构化来源描述导入。'
+          || imported.local?.note !== '真实 app:// smoke'
+          || imported.noticeVisible !== true) {
+          throw new Error(`Marketplace clipboard/local override assertions failed: ${JSON.stringify(imported)}`)
+        }
+      }
+    }
+    if (parsed.values['manager-marketplace-open-menu']) {
+      const menu = marketplaceState.menu
+      if (menu?.portaled !== true || menu.bounded !== true || menu.firstItemFocused !== true || menu.theme !== menu.managerTheme
+        || menu.keyboard?.arrowMoved !== true || menu.keyboard.closed !== true
+        || menu.keyboard.focusRestored !== true || menu.keyboard.reopened !== true) {
+        throw new Error(`Marketplace menu portal assertions failed: ${JSON.stringify(menu)}`)
+      }
+    }
+  }
   if (parsed.values['channel-data-plane']) {
     const channel = managerReport?.channelDataPlane
     const channelLocale = channel?.locale
@@ -4355,6 +4591,7 @@ if (parsed.values.generation) {
       && afterDispose.settingsPages === 0
       && afterDispose.styles === 0 && afterDispose.trigger === false }
   console.log(`generation=${JSON.stringify(generationReport, null, 2)}`)
+  if (generationReport.cleaned !== true) throw new Error(`generation cleanup smoke assertions failed: ${JSON.stringify(generationReport)}`)
 }
 
 const interactionSafety = await evaluateByValue(`(() => ({
