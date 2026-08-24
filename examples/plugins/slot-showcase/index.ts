@@ -1,4 +1,5 @@
 import type { Context, Disposable } from '@deepseek-ai/cordis'
+import Schema from '@deepseek-ai/schemastery'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   type CordisXPluginManifestV1,
@@ -11,6 +12,17 @@ import type {} from '../../../packages/cli/src/contracts.js'
 
 export const name = 'structured-showcase'
 export const inject = ['i18n', 'commands', 'slots', 'pages', 'routes']
+export const Config = Schema.object({
+  sessionId: Schema.string().default('').max(128).pattern(/^(?:|[A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/u)
+    .extra('extra', { label: { en: 'Native session ID', 'zh-CN': '原生会话 ID' } })
+    .description('Selected native session ID used by the optional session analytics action. Leave empty to hide it.')
+    .i18n({
+      en: 'Selected native session ID used by the optional session analytics action. Leave empty to hide it.',
+      'zh-CN': '可选会话分析操作使用的当前原生会话 ID；留空时隐藏该操作。',
+    }),
+})
+export type SlotShowcaseConfig = Schemastery.TypeT<typeof Config>
+export const configApplies = 'restart'
 export const manifest = {
   $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   schemaVersion: 1,
@@ -38,6 +50,7 @@ interface Messages {
   'action.settings': undefined
   'command.open-app': undefined
   'command.open-main': undefined
+  'command.open-session': undefined
   'command.quick': undefined
   'command.refresh': undefined
   'command.settings': undefined
@@ -55,10 +68,6 @@ interface Messages {
   'page.tab.details': undefined
   'page.tab.overview': undefined
   'permission.models': undefined
-}
-
-interface Config {
-  readonly sessionId?: string
 }
 
 function message<Key extends keyof Messages>(
@@ -101,7 +110,7 @@ function mountCard(context: CordisXPageMountContext, body: CordisXLocalizedText)
 }
 
 /** End-to-end demo for every structured shell surface and all three built-in page outlets. */
-export function apply(ctx: Context, config: Config = {}): void {
+export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): void {
   ctx.i18n.define<Messages>({
     namespace: 'showcase',
     locale: 'en',
@@ -114,6 +123,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       'action.settings': 'Showcase settings',
       'command.open-app': 'Open the full-app showcase',
       'command.open-main': 'Open the main-area showcase',
+      'command.open-session': 'Open analytics for the configured native session',
       'command.quick': 'Run the independent navigation action',
       'command.refresh': 'Refresh environment snapshot',
       'command.settings': 'Open showcase settings',
@@ -156,6 +166,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       'page.tab.details': '详情',
       'page.tab.overview': '概览',
       'permission.models': '显示当前宿主连接实际可用的模型',
+      'command.open-session': '打开已配置原生会话的分析页',
     },
   })
 
@@ -207,6 +218,12 @@ export function apply(ctx: Context, config: Config = {}): void {
   let rowHandle: ReturnType<Context['slots']['register']> | undefined
   ctx.commands.register({ id: 'open-app', title: message('command.open-app') }, () => ctx.routes.navigate({ id: 'app.overview' }))
   ctx.commands.register({ id: 'open-main', title: message('command.open-main') }, () => ctx.routes.navigate({ id: 'main.analytics' }))
+  if (config.sessionId !== '') {
+    ctx.commands.register({ id: 'open-session', title: message('command.open-session') }, () => ctx.routes.navigate({
+      id: 'session.analytics',
+      params: { sessionId: config.sessionId },
+    }))
+  }
   ctx.commands.register({ id: 'quick', title: message('command.quick') }, () => { revision += 1 })
   ctx.commands.register({ id: 'settings', title: message('command.settings') }, () => ctx.routes.navigate({ id: 'app.overview' }))
   ctx.commands.register({ id: 'refresh', title: message('command.refresh') }, () => {
@@ -237,11 +254,11 @@ export function apply(ctx: Context, config: Config = {}): void {
     route: { id: 'main.analytics' },
     actions: [
       { id: 'quick', ...action(message('action.quick'), 'quick', 'host:refresh') },
-      ...(config.sessionId === undefined ? [] : [{
+      ...(config.sessionId === '' ? [] : [{
         id: 'session',
         label: message('page.session.title'),
         icon: 'host:analytics' as const,
-        command: { id: 'open-main' },
+        command: { id: 'open-session' },
       }]),
     ],
   })

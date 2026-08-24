@@ -6,7 +6,17 @@ import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 
 interface RuntimeSnapshot {
-  plugins: readonly { id: string; source: string; status: string; readme?: string }[]
+  plugins: readonly {
+    id: string
+    source: string
+    status: string
+    readme?: string
+    configuration: {
+      schemaKind: string
+      applies: string
+      fields: readonly { path: readonly string[]; label?: string; description?: string; value?: unknown; min?: number; max?: number }[]
+    }
+  }[]
   registrations: readonly { owner: string; surface: string; valid: boolean; authorized: boolean; rendered: boolean; item: unknown }[]
   commands: readonly { owner: string; qualifiedId: string }[]
   navigation: {
@@ -50,16 +60,16 @@ async function settle(): Promise<void> {
 describe('renderer bundle', () => {
   it('boots the structured demo, routes all outlets, reprojects locale, and disposes one generation', async () => {
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const sessionId = '01a02d54-8adf-7043-944c-0bc9bb41bfd9'
     const baseConfig = await loadConfig(path.join(projectRoot, 'cordisx.config.example.json'))
     const config = {
       ...baseConfig,
       plugins: [
-        ...baseConfig.plugins,
+        ...baseConfig.plugins.map(plugin => ({ ...plugin, config: { sessionId } })),
         { id: 'configured-off', entry: path.join(projectRoot, 'missing-disabled-plugin.ts'), enabled: false, config: {} },
       ],
     }
     const bundle = await buildRendererBundle(config)
-    const sessionId = '01a02d54-8adf-7043-944c-0bc9bb41bfd9'
     const dom = new JSDOM(`
       <html lang="en" dir="ltr" class="electron-dark"><head><style>
         .codex-toolbar-button { width: 28px; height: 28px; }
@@ -158,7 +168,18 @@ describe('renderer bundle', () => {
     expect(runtime?.version).toBe('0.1.0-beta.0')
     const snapshot = runtime!.snapshot()
     expect(snapshot.plugins).toEqual([
-      expect.objectContaining({ id: 'slot-showcase', status: 'active', readme: expect.stringContaining('# Slot Showcase') }),
+      expect.objectContaining({
+        id: 'slot-showcase',
+        status: 'active',
+        readme: expect.stringContaining('# Slot Showcase'),
+        configuration: expect.objectContaining({
+          schemaKind: 'schemastery',
+          applies: 'restart',
+          fields: [expect.objectContaining({
+            path: ['sessionId'], label: 'Native session ID', value: sessionId, max: 128,
+          })],
+        }),
+      }),
       expect.objectContaining({ id: 'configured-off', status: 'configured-disabled' }),
     ])
     expect(snapshot.registrations).toHaveLength(15)
@@ -168,7 +189,10 @@ describe('renderer bundle', () => {
       'environment.section.actions', 'environment.section.rows', 'environment.row.trailing-actions',
     ]))
     expect(snapshot.registrations.every(item => item.valid && item.rendered)).toBe(true)
-    expect(snapshot.commands).toHaveLength(5)
+    expect(snapshot.commands).toHaveLength(6)
+    expect(snapshot.commands).toContainEqual(expect.objectContaining({
+      owner: 'slot-showcase', qualifiedId: 'slot-showcase:open-session',
+    }))
     expect(snapshot.navigation.routes).toHaveLength(3)
     expect(snapshot.navigation.routes.every(item => item.valid)).toBe(true)
     expect(snapshot.navigation.pages).toHaveLength(3)
@@ -442,7 +466,7 @@ describe('renderer bundle', () => {
       available: true,
       contextKey: `session:${sessionId}`,
     })
-    await runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId } })
+    await runtime!.execute('slot-showcase', { id: 'open-session' })
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({ activeRoute: 'slot-showcase:session.analytics', mounted: true, contextKey: `session:${sessionId}`, presentation: 'presented' })
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ presentation: 'suspended', suspendedBy: 'session.content' })
     expect(dom.window.document.getElementById('native-thread')?.hasAttribute('data-codex-thread-reference-drop-target')).toBe(true)
@@ -488,7 +512,7 @@ describe('renderer bundle', () => {
     await settle()
     const restoredSnapshot = runtime!.snapshot()
     expect(restoredSnapshot.plugins[0]?.status).toBe('active')
-    expect(restoredSnapshot.commands.length).toBe(5)
+    expect(restoredSnapshot.commands.length).toBe(6)
     expect(restoredSnapshot.registrations.filter(item => item.rendered).length).toBe(15)
     expect(restoredSnapshot.platform).toMatchObject({
       mode: 'unavailable',
@@ -504,7 +528,7 @@ describe('renderer bundle', () => {
     await runtime!.setExtensionPointPolicy(pluginSource, 'slot-showcase', 'sidebar.navigation.items', 'deny')
     await settle()
     const deniedSurface = runtime!.snapshot()
-    expect(deniedSurface.commands).toHaveLength(5)
+    expect(deniedSurface.commands).toHaveLength(6)
     expect(deniedSurface.registrations.find(item => item.surface === 'sidebar.navigation.items')).toMatchObject({ authorized: false, rendered: false })
     expect(dom.window.document.querySelector('.cordisx-nav-row')).toBeNull()
     await runtime!.setExtensionPointPolicy(pluginSource, 'slot-showcase', 'sidebar.navigation.items', 'allow')
@@ -765,7 +789,13 @@ describe('renderer bundle', () => {
     expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-plugin-detail-tab]')].map(tab => tab.tabIndex)).toEqual([-1, 0, -1, -1, -1, -1])
     expect(managerModal?.textContent).not.toContain('插件配置')
     const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="配置管理"]')
-    expect(configPanel?.textContent).toContain('此插件未提供可编辑设置。')
+    const sessionField = configPanel?.querySelector<HTMLElement>('[data-config-path="sessionId"]')
+    expect(sessionField?.querySelector('.cxm-config-label')?.textContent).toBe('原生会话 ID')
+    expect(sessionField?.querySelector('.cxm-config-help')?.textContent)
+      .toBe('可选会话分析操作使用的当前原生会话 ID；留空时隐藏该操作。')
+    expect(sessionField?.querySelector<HTMLInputElement>('input')?.value).toBe(sessionId)
+    expect(configPanel?.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true)
+    expect(configPanel?.textContent).not.toContain('此插件未提供可编辑设置。')
     expect(configPanel?.textContent).not.toContain('{}')
     expect(configPanel?.textContent).not.toContain('Schema')
     expect(configPanel?.textContent).not.toContain('Revision')
@@ -830,7 +860,7 @@ describe('renderer bundle', () => {
     expect(platformDiagnostics?.open).toBe(false)
     expect(platformDiagnostics?.querySelector('summary')?.textContent).toBe('诊断')
     expect(platformDiagnostics?.querySelector('[data-config-diagnostics="slot-showcase"]')?.textContent)
-      .toBe('配置：未声明 · restart · revision 0 · last-good 0 · writer unavailable')
+      .toBe('配置：Schemastery · restart · revision 0 · last-good 0 · writer unavailable')
     expect(platformDiagnostics?.textContent).toContain('current-connection-client-unavailable')
     expect(platformDiagnostics?.textContent).toContain('不是安全沙箱')
 

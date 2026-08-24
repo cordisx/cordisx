@@ -6,7 +6,16 @@ import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 
 interface RuntimeSnapshot {
-  plugins: readonly { id: string; source: string; status: string }[]
+  plugins: readonly {
+    id: string
+    source: string
+    status: string
+    configuration: {
+      schemaKind: string
+      applies: string
+      fields: readonly { path: readonly string[]; label?: string; description?: string; value?: unknown; min?: number; max?: number }[]
+    }
+  }[]
   registrations: readonly { owner: string; qualifiedId: string; surface: string; valid: boolean; visible: boolean; authorized: boolean; pending: boolean }[]
   settingsTabs: readonly { id: string; owner: string; title: string; order: number; disabled: boolean; builtin: boolean }[]
   navigation: {
@@ -56,7 +65,17 @@ describe('settings tab demo bundle', () => {
     expect(runtime).toBeDefined()
 
     const initial = runtime.snapshot()
-    expect(initial.plugins).toEqual([expect.objectContaining({ id: 'settings-tab-demo', status: 'active' })])
+    expect(initial.plugins).toEqual([expect.objectContaining({
+      id: 'settings-tab-demo',
+      status: 'active',
+      configuration: expect.objectContaining({
+        schemaKind: 'schemastery',
+        applies: 'restart',
+        fields: [expect.objectContaining({
+          path: ['demoValue'], label: 'Demo value', value: 'CordisX', min: 1, max: 64,
+        })],
+      }),
+    })])
     expect(initial.settingsTabs.map(tab => [tab.id, tab.order])).toEqual([
       ['host:marketplace', 100],
       ['settings-tab-demo:settings', 150],
@@ -81,6 +100,14 @@ describe('settings tab demo bundle', () => {
     const managerTrigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!
     expect(managerTrigger).not.toBeNull()
     managerTrigger.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="settings-tab-demo"]')!.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')!.click()
+    const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="配置管理"]')!
+    const demoField = configPanel.querySelector<HTMLElement>('[data-config-path="demoValue"]')!
+    expect(demoField.querySelector('.cxm-config-label')?.textContent).toBe('Demo value')
+    expect(demoField.querySelector('.cxm-config-help')?.textContent).toBe('Initial value shown inside the controlled settings page.')
+    expect(demoField.querySelector<HTMLInputElement>('input')?.value).toBe('CordisX')
+    expect(configPanel.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true)
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="settings"]')!.click()
     const tabIds = () => [...dom.window.document.querySelectorAll<HTMLElement>('[data-settings-tab]')]
       .map(tab => tab.dataset.settingsTab)
@@ -98,6 +125,7 @@ describe('settings tab demo bundle', () => {
     expect(page.parentElement?.hasAttribute('data-settings-panel-body')).toBe(true)
     expect(page.querySelector('[data-cordisx-page-chrome]')).toBeNull()
     expect(page.querySelector('[data-settings-demo-body-title]')?.textContent).toBe('Plugin settings content')
+    expect(page.querySelector<HTMLInputElement>('[data-settings-demo-focus]')?.value).toBe('CordisX')
     expect(dom.window.location.href).toBe('https://codex.local/native')
     expect(runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'manager.settings.content')).toMatchObject({
       mounted: true, activeRoute: 'settings-tab-demo:settings',
