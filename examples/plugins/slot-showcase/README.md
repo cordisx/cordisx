@@ -1,6 +1,8 @@
 # Slot Showcase
 
-这是 CordisX 的结构化 UI 端到端演示插件。它通过 `ctx.commands`、`ctx.routes`、`ctx.pages` 与 DSH 风格的 `ctx.slots.register` 提交数据；shell DOM、交互、排序、无障碍与清理由宿主统一负责。
+在插件管理器中展示扩展点、导航、页面与状态交互的完整示例。
+
+这是 CordisX 的结构化 UI 端到端演示插件实现。它通过 `ctx.commands`、`ctx.routes`、`ctx.pages` 与 DSH 风格的 `ctx.slots.register` 提交数据；shell DOM、交互、排序、无障碍与清理由宿主统一负责。
 
 ## 展示内容
 

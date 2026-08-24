@@ -89,19 +89,25 @@ export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})):
   ctx.i18n.define<Messages>({
     namespace: 'settings-demo', locale: 'en', default: true,
     messages: {
-      'body.description': 'Settings for this demo plugin.', 'body.label': 'Demo value', 'body.title': 'Plugin settings content',
-      'page.description': 'A plugin page in the Manager navigation. CordisX owns its navigation row, header, icon, keyboard behavior, and controlled content seat.',
+      'body.description': 'Settings for this demo plugin.',
+      'body.label': 'Demo value',
+      'body.title': 'Plugin settings content',
+      'page.description': 'Edit the example value for this demo plugin.',
       'page.title': 'Demo plugin settings',
-      'route.description': 'Open the Demo plugin settings destination in the Manager navigation.', 'route.title': 'Demo plugin settings',
+      'route.description': 'Open the demo plugin settings and edit its example value.',
+      'route.title': 'Demo plugin settings',
     },
   })
   ctx.i18n.define<Messages>({
     namespace: 'settings-demo', locale: 'zh-CN',
     messages: {
-      'body.description': '此演示插件的设置。', 'body.label': '演示值', 'body.title': '插件设置内容',
-      'page.description': 'Manager 左侧导航中的插件页面。CordisX 统一拥有导航入口、页头、图标、键盘行为和受控内容 seat。',
+      'body.description': '此演示插件的设置。',
+      'body.label': '演示值',
+      'body.title': '插件设置内容',
+      'page.description': '编辑此演示插件的示例值。',
       'page.title': '演示插件设置',
-      'route.description': '在 Manager 左侧导航打开“演示插件设置”目的地。', 'route.title': '演示插件设置',
+      'route.description': '打开“演示插件设置”并编辑示例值。',
+      'route.title': '演示插件设置',
     },
   })
   ctx.pages.register<Messages>({

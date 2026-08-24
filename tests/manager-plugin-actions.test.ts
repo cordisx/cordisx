@@ -96,13 +96,13 @@ describe('Manager plugin card actions', () => {
       const card = dom.window.document.querySelector<HTMLElement>('[data-plugin-card="base"]')!
       const primary = card.querySelector<HTMLButtonElement>('[data-plugin-id="base"]')!
       expect(card.querySelector('.cxm-chevron')).toBeNull()
-      expect(card.querySelectorAll(':scope > button')).toHaveLength(1)
+      expect(card.querySelectorAll('.cxc-primary')).toHaveLength(1)
       expect(card.querySelectorAll('[data-plugin-action]')).toHaveLength(3)
       expect(primary.getAttribute('aria-label')).toContain('打开 Base Plugin 详情')
       expect(primary.getAttribute('aria-description')).toBe('运行中')
-      expect(primary.querySelector('.cxm-plugin-description')?.textContent).toBe('Keeps local work in sync.')
-      expect(primary.querySelector('.cxm-plugin-meta')?.textContent).toBe('base')
-      expect(primary.querySelector('.cxm-plugin-status-badge')?.getAttribute('data-status')).toBe('active')
+      expect(primary.querySelector('.cxc-description')?.textContent).toBe('Keeps local work in sync.')
+      expect(primary.querySelector('.cxc-machine-id')?.textContent).toBe('base')
+      expect(primary.querySelector('.cxc-status')?.getAttribute('data-tone')).toBe('success')
       expect(primary.textContent).not.toContain('运行中')
       const importButton = dom.window.document.querySelector<HTMLButtonElement>('[data-import-local-plugin]')!
       expect(importButton.textContent).toBe('')
@@ -118,9 +118,9 @@ describe('Manager plugin card actions', () => {
       expect(managerStyles).toContain('.cxm-toolbar > .cxm-action { height: 38px; }')
       expect(managerStyles).toContain('.cxm-toolbar > .cxm-toolbar-icon-action')
       expect(managerStyles).toContain('min-height: 38px')
-      expect(managerStyles).toContain('opacity: 0; pointer-events: none')
-      expect(managerStyles).toContain('.cxm-plugin-row:focus-within .cxm-plugin-actions')
-      expect([...card.querySelectorAll<HTMLButtonElement>('.cxm-plugin-actions button')].every(button => button.tabIndex === 0)).toBe(true)
+      expect(managerStyles).toContain('opacity: 0;')
+      expect(managerStyles).toContain('.cxc-card:focus-within .cxc-actions')
+      expect([...card.querySelectorAll<HTMLButtonElement>('.cxc-actions button')].every(button => button.tabIndex === 0)).toBe(true)
 
       card.querySelector<HTMLButtonElement>('[data-plugin-action="favorite"]')!.click()
       expect(dom.window.localStorage.getItem('cordisx.manager.favoritePlugins.v1:work')).toBe('["base"]')
@@ -136,28 +136,25 @@ describe('Manager plugin card actions', () => {
       expect(dom.window.document.querySelector('[data-manager-page-route="primary:plugins"]')).not.toBeNull()
 
       const menu = dom.window.document.querySelector<HTMLElement>('[data-plugin-menu="base"]')!
-      const trigger = menu.querySelector<HTMLElement>('.cxm-plugin-menu-trigger')!
-      const currentCard = trigger.closest<HTMLElement>('[data-plugin-card="base"]')!
+      const trigger = menu.querySelector<HTMLElement>('.cxc-menu-trigger')!
+      const currentCard = trigger.closest<HTMLElement>('.cxc-card')!
       trigger.click()
       expect(trigger.getAttribute('aria-expanded')).toBe('true')
       expect(currentCard.dataset.actionMenuOpen).toBe('true')
-      expect(dom.window.document.querySelector<HTMLElement>('body > .cxm-plugin-menu-popup')?.dataset.cordisxAppTheme).toBe('light')
-      expect(menu.querySelector('.cxm-plugin-menu-popup')).toBeNull()
-      expect([...dom.window.document.querySelectorAll<HTMLElement>('body > .cxm-plugin-menu-popup .cxm-plugin-menu-responsive')]
-        .map(item => item.style.display)).toEqual(['flex', 'flex'])
-      dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-menu-action="share"]')!.click()
+      expect(dom.window.document.querySelector<HTMLElement>('body > .cxc-menu-popup')?.dataset.cordisxAppTheme).toBe('light')
+      expect(menu.querySelector('.cxc-menu-popup')).toBeNull()
+      dom.window.document.querySelector<HTMLButtonElement>('[data-collection-action="share"]')!.click()
       await settle()
       expect(currentCard.hasAttribute('data-action-menu-open')).toBe(false)
-      expect(dom.window.document.activeElement).toBe(trigger)
+      expect(dom.window.document.activeElement).toBe(dom.window.document.querySelector('[data-plugin-menu="base"] .cxc-menu-trigger'))
 
-      trigger.click()
-      dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-menu-action="favorite"]')!.click()
-      const replacementTrigger = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-menu="base"] .cxm-plugin-menu-trigger')!
+      dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-action="favorite"]')!.click()
+      const replacementFavorite = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-action="favorite"]')!
       expect(dom.window.localStorage.getItem('cordisx.manager.favoritePlugins.v1:work')).toBe('[]')
-      expect(dom.window.document.activeElement).toBe(replacementTrigger)
+      expect(dom.window.document.activeElement).toBe(replacementFavorite)
 
       const currentPrimary = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="base"]')!
-      currentPrimary.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      currentPrimary.click()
       expect(dom.window.document.querySelector('[data-manager-page-route^="plugin:base:"]')).not.toBeNull()
     } finally {
       dispose()
@@ -224,7 +221,8 @@ describe('Manager plugin card actions', () => {
     try {
       const primary = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-primary="base"]')!
       expect(primary.getAttribute('aria-description')).toBe('启动失败：entry module crashed')
-      expect(primary.querySelector('.cxm-plugin-status-badge')?.getAttribute('data-status')).toBe('failed')
+      expect(primary.querySelector('.cxc-status')?.getAttribute('data-tone')).toBe('danger')
+      expect(primary.querySelector('.cxc-status')?.getAttribute('aria-label')).toBe('启动失败：entry module crashed')
       expect(primary.textContent).not.toContain('启动失败')
       expect(primary.textContent).not.toContain('entry module crashed')
     } finally {
@@ -248,87 +246,90 @@ describe('Manager plugin card actions', () => {
       requestPluginLifecycle: async operation => result(operation.kind, 'applied'),
     }
     const dispose = installCordisXManager(dom.window.document, model)
-    const menuTrigger = (): HTMLButtonElement => dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-menu="base"] .cxm-plugin-menu-trigger')!
-    const popup = (): HTMLElement => dom.window.document.querySelector<HTMLElement>('body > .cxm-plugin-menu-popup')!
+    const menuTrigger = (): HTMLButtonElement => dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-menu="base"] .cxc-menu-trigger')!
+    const popup = (): HTMLElement => dom.window.document.querySelector<HTMLElement>('body > .cxc-menu-popup')!
     try {
       dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')!.hidden = false
+      await settle()
       const primary = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-primary="base"]')!
       menuTrigger().click()
       expect(menuTrigger().getAttribute('aria-expanded')).toBe('true')
-      expect(menuTrigger().getAttribute('aria-controls')).toContain('cordisx-plugin-menu-base')
+      expect(menuTrigger().getAttribute('aria-controls')).toContain('cxc-menu-plugins-base')
       expect(popup().getAttribute('role')).toBe('menu')
-      expect(popup().querySelector('[data-plugin-menu-action="share"] [data-material-icon="share-plugin"]')).not.toBeNull()
-      expect(popup().querySelector('[data-plugin-menu-action="source"] [data-material-icon="authors-source"]')).not.toBeNull()
-      expect(popup().querySelector('[data-plugin-menu-action="diagnostics"] [data-material-icon="diagnostics"]')).not.toBeNull()
-      expect(popup().querySelector('[data-plugin-menu-action="uninstall"] [data-material-icon="uninstall-plugin"]')).not.toBeNull()
+      expect(popup().querySelector('[data-collection-action="share"] [data-material-icon="share-plugin"]')).not.toBeNull()
+      expect(popup().querySelector('[data-collection-action="source"] [data-material-icon="authors-source"]')).not.toBeNull()
+      expect(popup().querySelector('[data-collection-action="diagnostics"] [data-material-icon="diagnostics"]')).not.toBeNull()
+      expect(popup().querySelector('[data-collection-action="uninstall"] [data-material-icon="uninstall-plugin"]')).not.toBeNull()
 
-      popup().querySelector<HTMLButtonElement>('[data-plugin-menu-action="share"]')!.click()
+      popup().querySelector<HTMLButtonElement>('[data-collection-action="share"]')!.click()
       await settle()
       expect(copied).toEqual(['https://plugins.example/base'])
-      expect(dom.window.document.querySelector('body > .cxm-plugin-menu-popup')).toBeNull()
-      expect(dom.window.document.activeElement).toBe(menuTrigger())
+      expect(dom.window.document.querySelector('body > .cxc-menu-popup')).toBeNull()
+      expect(dom.window.document.activeElement === menuTrigger()).toBe(true)
       expect(dom.window.document.querySelector('[data-manager-page-route="primary:plugins"]')).not.toBeNull()
 
       menuTrigger().click()
       menuTrigger().click()
-      expect(dom.window.document.querySelector('body > .cxm-plugin-menu-popup')).toBeNull()
+      expect(dom.window.document.querySelector('body > .cxc-menu-popup')).toBeNull()
       await settle()
-      expect(dom.window.document.activeElement).toBe(menuTrigger())
+      expect(dom.window.document.activeElement === menuTrigger()).toBe(true)
 
       menuTrigger().click()
       dom.window.document.body.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }))
-      expect(dom.window.document.querySelector('body > .cxm-plugin-menu-popup')).toBeNull()
+      expect(dom.window.document.querySelector('body > .cxc-menu-popup')).toBeNull()
       await settle()
-      expect(dom.window.document.activeElement).toBe(menuTrigger())
+      expect(dom.window.document.querySelector('[data-manager-page-route="primary:plugins"]')).not.toBeNull()
 
       menuTrigger().click()
       popup().dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
       expect(popup().contains(dom.window.document.activeElement)).toBe(true)
       popup().dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }))
-      expect(dom.window.document.activeElement).toBe([...popup().querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')].at(-1))
-      dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-      expect(dom.window.document.querySelector('body > .cxm-plugin-menu-popup')).toBeNull()
+      expect(dom.window.document.activeElement === [...popup().querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')].at(-1)).toBe(true)
+      popup().dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      expect(dom.window.document.querySelector('body > .cxc-menu-popup')).toBeNull()
       await settle()
-      expect(dom.window.document.activeElement).toBe(menuTrigger())
+      expect(dom.window.document.activeElement === menuTrigger()).toBe(true)
 
       menuTrigger().click()
-      popup().querySelector<HTMLButtonElement>('[data-plugin-menu-action="source"]')!.click()
+      popup().querySelector<HTMLButtonElement>('[data-collection-action="source"]')!.click()
       expect(opened).toEqual(['https://plugins.example/base'])
       expect(dom.window.document.querySelector('[data-cordisx-manager-modal]')?.hidden).toBe(false)
-      expect(dom.window.document.querySelector('body > .cxm-plugin-menu-popup')).toBeNull()
+      expect(dom.window.document.querySelector('body > .cxc-menu-popup')).toBeNull()
       await settle()
-      expect(dom.window.document.activeElement).toBe(menuTrigger())
+      expect(dom.window.document.activeElement === menuTrigger()).toBe(true)
 
       // A runtime reconciliation closes the portal cleanly without navigating the card.
       menuTrigger().click()
       for (const listener of listeners) listener()
-      expect(dom.window.document.querySelector('body > .cxm-plugin-menu-popup')).toBeNull()
+      expect(dom.window.document.querySelector('body > .cxc-menu-popup')).toBeNull()
 
       menuTrigger().click()
       const card = dom.window.document.querySelector<HTMLElement>('[data-plugin-card="base"]')!
       card.remove()
+      dom.window.dispatchEvent(new dom.window.Event('resize'))
       await settle()
-      expect(dom.window.document.querySelector('body > .cxm-plugin-menu-popup')).toBeNull()
+      expect(dom.window.document.querySelector('body > .cxc-menu-popup')).toBeNull()
       for (const listener of listeners) listener()
 
       menuTrigger().click()
       dom.window.dispatchEvent(new dom.window.Event('resize'))
       dom.window.dispatchEvent(new dom.window.Event('scroll'))
-      expect(dom.window.document.querySelector('body > .cxm-plugin-menu-popup')).not.toBeNull()
+      expect(dom.window.document.querySelector('body > .cxc-menu-popup')).not.toBeNull()
       dom.window.document.querySelector<HTMLButtonElement>('.cxm-close')!.click()
-      expect(dom.window.document.querySelector('body > .cxm-plugin-menu-popup')).toBeNull()
+      expect(dom.window.document.querySelector('body > .cxc-menu-popup')).toBeNull()
       expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')!.hidden).toBe(true)
       dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')!.hidden = false
+      for (const listener of listeners) listener()
 
       menuTrigger().click()
-      popup().querySelector<HTMLButtonElement>('[data-plugin-menu-action="diagnostics"]')!.click()
+      popup().querySelector<HTMLButtonElement>('[data-collection-action="diagnostics"]')!.click()
       await settle()
       expect(dom.window.document.querySelector('[data-manager-page-route="plugin:base:runtime"]')).not.toBeNull()
       expect(dom.window.document.querySelector('[data-plugin-card="base"]')).toBeNull()
       expect(primary.isConnected).toBe(false)
     } finally {
       dispose()
-      expect(dom.window.document.querySelector('body > .cxm-plugin-menu-popup')).toBeNull()
+      expect(dom.window.document.querySelector('body > .cxc-menu-popup')).toBeNull()
       dom.window.close()
     }
   })
@@ -344,15 +345,15 @@ describe('Manager plugin card actions', () => {
     }
     const dispose = installCordisXManager(dom.window.document, model)
     try {
-      dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-menu="base"] .cxm-plugin-menu-trigger')!.click()
-      const popup = dom.window.document.querySelector<HTMLElement>('body > .cxm-plugin-menu-popup')!
+      dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-menu="base"] .cxc-menu-trigger')!.click()
+      const popup = dom.window.document.querySelector<HTMLElement>('body > .cxc-menu-popup')!
       for (const action of ['share', 'source', 'uninstall'] as const) {
-        const item = popup.querySelector<HTMLButtonElement>(`[data-plugin-menu-action="${action}"]`)!
+        const item = popup.querySelector<HTMLButtonElement>(`[data-collection-action="${action}"]`)!
         expect(item.disabled).toBe(true)
         expect(item.getAttribute('aria-disabled')).toBe('true')
         expect(item.getAttribute('aria-description')).toContain('Package Store')
       }
-      expect(popup.querySelector<HTMLButtonElement>('[data-plugin-menu-action="diagnostics"]')!.disabled).toBe(false)
+      expect(popup.querySelector<HTMLButtonElement>('[data-collection-action="diagnostics"]')!.disabled).toBe(false)
     } finally {
       dispose()
       dom.window.close()

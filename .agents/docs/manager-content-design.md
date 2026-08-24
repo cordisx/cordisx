@@ -373,13 +373,22 @@ stable id, version, canonical source, artifact URL, and integrity remain raw
 machine values. Current-locale and fallback/English projections are searchable,
 and a locale change never reloads the feed.
 
+Marketplace browse keeps the Manager header and Host search fixed. Filter
+chips render on their own row immediately below search, and the compact result
+grid is the only vertical scroll owner. The primary browse surface contains no
+documentation CTA or ranking-policy prose; those explanations remain in
+detail, diagnostics, or owning documentation. Source management is a
+low-frequency Host action under the heading overflow menu; it opens a separate
+breadcrumb page and never competes with search, filters, or results.
+
 Marketplace does not host, build, publish, copy, or execute plugin code. Plugin
 source and package artifacts remain in their owning repositories. `Official`
 publisher identity and exact-artifact `CordisX Certified` review status are two
 independent v3 dimensions accepted only from the configured protected
-Marketplace trust root. They render as separate Host-owned Material indicators
-next to the name, with independent accessible names and tooltips; neither is a
-free-standing card. The toolbar may filter to active Certified records. Search
+Marketplace trust root. Browse projects their current combined state through
+the Host status indicator on the icon; detail keeps the dimensions separate
+with independent evidence and policy copy. Neither is a free-standing card.
+The chip row may filter to active Certified records. Search
 first removes Host-projected incompatible, invisible, and policy-blocked
 records, then preserves text-relevance tiers; Official and Certified each add
 at most one point inside the same tier, followed by a stable canonical-identity
@@ -396,16 +405,19 @@ and interactive borders. Purple is not a manager accent. Semantic status
 colors remain independent: green for success/active, yellow for warning or
 waiting, and red for failure, denial, or destructive affordances.
 
-## Flat lists and cards
+## Compact collections, rows, and settings
 
-Every Manager list follows one Host-owned list pattern. A normal navigation
-item has exactly one primary whole-row detail target, activated by pointer,
-Enter, or Space. It never carries a trailing chevron, arrow button, or any
-other second navigation affordance: navigation is already expressed by the
-row's accessible name and focus/hover treatment. This applies equally to
-plugins, extension points, routes, Marketplace records, capability
-declarations, configuration sources, dependency records, and future call-log
-or diagnostics records.
+Every dynamic Manager catalog whose records have a whole-item detail
+destination follows the Host-owned compact collection pattern. A normal item
+has exactly one primary whole-card detail target, activated by pointer, Enter,
+or Space. It never carries a trailing chevron, arrow button, or any other
+second navigation affordance: navigation is already expressed by the card's
+accessible name and focus/hover treatment. Installed plugins, extension
+points, routes/pages, and Marketplace browse records use this pattern.
+TDesign settings forms, permission controls, provider rows, and Marketplace
+source reorder controls remain semantic grouped rows because they are controls,
+not whole-card detail destinations. Marketplace reaches those source controls
+through `更多插件商店操作 / 管理商店来源`, not a primary browse button.
 
 A chevron is reserved solely for an in-place disclosure. Its owning control
 must expose `aria-expanded`, reference or contain real independently visible
@@ -413,14 +425,15 @@ expanded content, and have behavior distinct from route/detail navigation.
 It must never be a decorative route cue. Remove unused chevron DOM, handlers,
 and test assumptions instead of hiding the icon in CSS.
 
-The right edge of a navigation row contains only real state and Host-owned
-shortcut controls. Each shortcut stops propagation for pointer and keyboard
-activation, has an accessible name, no-drag/decorative icon treatment, and
-visible hover/focus/disabled feedback. Menus restore focus to their trigger on
-close and both menus and tooltips stay within the viewport. The installed
-plugin row is the canonical example: it has mutually exclusive navigation and
-action regions, with its complete body as the detail target and an icon-only
-action region at the right.
+The card action layer contains only Host-owned shortcut controls. It is
+absolutely positioned over the top-right of the content, so it never reserves
+copy width, changes wrapping, or shifts adjacent cards. Each shortcut stops
+propagation for pointer and keyboard activation, has an accessible name,
+no-drag/decorative icon treatment, and visible hover/focus/disabled feedback.
+The layer is visually hidden at rest and shown on hover, `focus-within`, or an
+open menu while remaining in the tab order. Menus restore focus to their
+trigger when it survives the close, and menus and tooltips stay within the
+viewport.
 
 The Host uses one Manager Material icon-control primitive for clear, familiar
 actions such as importing a local package, pausing or resuming Console capture,
@@ -432,14 +445,15 @@ visible text label for primary CTAs, ambiguous actions, and destructive or
 permission confirmations; an icon must never hide the information needed to
 understand a record or consequence.
 
-Wide rows reserve one stable right-side action seat so the card never changes
-width. Enable/disable, reload, favorite, and the overflow trigger are visually
-hidden at rest and become visible only while the card is hovered, contains
-keyboard focus, or owns an open menu; opacity hiding preserves their tab stops.
-They use that deterministic priority. When width is insufficient, lower-priority controls move into one
-Host-owned overflow menu without squeezing the plugin name or state. Share and
-uninstall always live in that menu. Closing the menu restores focus to its
-trigger, and both menu and tooltips are constrained to the manager viewport.
+Card collections use bounded `auto-fill` tracks rather than a fixed two-column
+grid: the minimum is 220 pixels when available and the maximum is 360 pixels.
+Narrow content becomes one column; medium and wide content add columns from
+actual available width. Enable/disable, favorite, reload, and the overflow
+trigger use deterministic direct-action priority. Share, public source,
+diagnostics, and uninstall live in the Host-owned overflow menu without
+squeezing the plugin name or state. Closing the menu restores focus to its
+trigger when it remains connected, and both menu and tooltips are constrained
+to the manager viewport.
 Unavailable lifecycle operations are absent or explicitly unavailable; a
 button must never restart the launcher while claiming to reload one plugin.
 A launcher-configured legacy plugin remains explicitly unavailable for package
@@ -454,8 +468,7 @@ second Host-owned confirmation containing the reverse-dependency impact.
 The overflow popup is a Host-owned `menu` portal with Host-created Material
 Symbol icons and `menuitem` controls. Its visible items include sharing and
 opening the validated public canonical source, runtime diagnostics, and
-uninstall; responsive reload/favorite entries join it only when their direct
-controls no longer fit. Disabled menu items retain `aria-disabled`, an exact
+uninstall. Disabled menu items retain `aria-disabled`, an exact
 unavailability reason, and no listener that claims execution. In particular,
 missing Package Store generation metadata, a missing lifecycle bridge, and a
 missing/non-HTTPS canonical source are distinct availability states, not a
@@ -533,7 +546,7 @@ unconfigured, and no-match states. Current Manager lists are synchronous,
 bounded Host snapshots; their common component keeps the same state boundary
 when an async provider is introduced.
 
-Ordinary Manager catalogs use a flat list with separators and whitespace.
+Ordinary Manager detail catalogs use the compact responsive collection.
 Settings/configuration pages instead use a macOS System Settings information
 architecture: a centered, limited-width body; semantic section title and only
 necessary section copy; one rounded group card per section; label/help on the
@@ -620,12 +633,12 @@ At minimum they prove:
 - installed-plugin rows have no detail chevron, keep navigation and action
   activation mutually exclusive, support pointer/Enter/Space navigation, and
   preserve the deterministic enable/reload/favorite overflow priority;
-- Marketplace rows reuse the same `cxm-plugin-row` plus padded
-  `cxm-plugin-primary` structure: fixed Host icon, vertically ordered localized
+- Marketplace browse cards reuse the Host collection structure: fixed Host
+  icon, vertically ordered localized
   name/description, compact version/source metadata, whole-card
   pointer/Enter/Space navigation, no chevron, and no permanent generic trust or
   installability warning below the browse list;
-- extension-point rows use one flex row with a Host Material icon and three
+- extension-point cards use the Host collection with a Material icon and three
   text levels (localized name, localized description, selectable stable id);
   type and normal-state tags are absent, while only pending/unavailable/error
   emits a concise same-row diagnostic target that never becomes an orphan

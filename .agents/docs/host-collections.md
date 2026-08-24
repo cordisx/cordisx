@@ -1,18 +1,22 @@
 # Host-owned collection primitive
 
-Status: approved implementation boundary for the CordisX Manager compact
-collection migration. The isolated primitive and tests may land independently;
-Manager call-site migration must rebase onto the formal TDesign form,
-Marketplace source, and settings-navigation merges before changing shared
-renderer files.
+Status: implemented Host primitive and Manager integration boundary. The
+primitive landed independently, and the Manager call sites consume it only
+after the formal TDesign form, Marketplace source, Settings navigation, and
+CLIProxy Provider UI merges.
 
 ## Product contract
 
 `createHostCollection()` is the single Host-owned renderer for dynamic Manager
-collections that are best expressed as compact cards or rows. It covers
-installed plugins, Marketplace records, extension points, routes/pages,
-Marketplace sources, permission/capability declarations, dependencies, and
-future diagnostics or call logs when their product semantics fit the pattern.
+collections that are best expressed as compact cards or rows. Current call
+sites cover installed plugins, Marketplace records, extension points, and
+routes/pages. Permission policy, configuration, provider, and Marketplace
+source reorder controls remain TDesign System Settings rows because they are
+forms or ordered controls rather than whole-card detail destinations. The
+Marketplace browse header exposes that low-frequency source-management page
+only through its Host-owned overflow menu. Future
+dependencies, diagnostics, or call logs use this primitive only when their
+product semantics fit the same contract.
 
 Every item is projected from Host-validated structured data. An item has a
 stable id, localized title, optional short description, optional machine id,
@@ -85,16 +89,17 @@ Marketplace, permission, and lifecycle contracts already provide the required
 data and command references. A future plugin-visible collection contract would
 require a separate protocol-first review; this module is not that contract.
 
-## Delivery sequence
+## Delivery record
 
-1. Land the isolated primitive, contract document, and focused DOM tests without
-   changing shared Manager integration files.
-2. Consume the formal TDesign/form merge and reuse its semantic tokens, portal
-   theme projection, and control ownership.
-3. Consume the formal Marketplace-source and settings-navigation merges.
-4. Migrate Manager call sites from current one-off rows/cards to this primitive,
-   preserving each page's structured route/query state and operation brokers.
-5. Run focused and full gates, then isolated `app://-/index.html` smoke in
-   light/dark and narrow/medium/wide layouts with pointer and keyboard input.
+1. The isolated primitive, contract document, and focused DOM tests landed
+   without changing the shared Manager renderer.
+2. Integration rebased onto the formal Host merges for TDesign forms,
+   Marketplace sources, Settings navigation, and CLIProxy Provider UI.
+3. Installed plugins, Marketplace browse, extension-point catalogs, and
+   route/page catalogs use the primitive while preserving structured query,
+   route, lifecycle, trust, and operation state.
+4. Owning delivery requires focused and full gates plus isolated
+   `app://-/index.html` smoke in light/dark and narrow/medium/wide layouts with
+   pointer and keyboard input.
 
 The mono repository is intentionally outside this owning delivery.

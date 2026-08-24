@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { MARKETPLACE_SOURCES_KEY, OFFICIAL_MARKETPLACE_SOURCE, parseMarketplaceFeed } from '../packages/cli/src/renderer/marketplace.js'
 import { installCordisXManager, type ManagerModel, type ManagerSnapshot } from '../packages/cli/src/renderer/manager.js'
+import { managerCopy } from '../packages/cli/src/renderer/ui-copy.js'
 
 const SOURCE = 'https://marketplace.example/feed.json'
 const PLUGIN_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json'
@@ -190,50 +191,68 @@ describe('Manager Marketplace product list', () => {
       for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-marketplace-plugin]') === null; attempt += 1) await settle()
 
       const card = dom.window.document.querySelector<HTMLElement>('[data-marketplace-plugin="slot-showcase"]')!
-      const primary = card.querySelector<HTMLButtonElement>(':scope > .cxm-plugin-primary')!
+      const primary = card.querySelector<HTMLButtonElement>('.cxc-primary')!
       expect(card.tagName).toBe('DIV')
       expect(card.getAttribute('role')).toBe('listitem')
       expect(primary).not.toBeNull()
       expect(primary.querySelector('.cxm-plugin-icon')).not.toBeNull()
-      expect(primary.querySelector('.cxm-plugin-name')?.textContent).toBe('点位展示')
-      expect(primary.querySelector('.cxm-plugin-description')?.textContent).toBe('展示结构化 CordisX 扩展点。')
-      expect(primary.querySelector('.cxm-plugin-meta-version')?.textContent).toBe('v1.2.3')
-      expect(primary.querySelector('.cxm-plugin-meta-source')?.textContent).toBe('CordisX 插件商店')
+      expect(primary.querySelector('.cxc-title')?.textContent).toBe('点位展示')
+      expect(primary.querySelector('.cxc-description')?.textContent).toBe('展示结构化 CordisX 扩展点。')
+      expect(primary.querySelector('.cxc-machine-id')?.textContent).toBe('slot-showcase')
       expect(card.querySelector('.cxm-chevron')).toBeNull()
+      const content = dom.window.document.querySelector<HTMLElement>('.cxm-content')!
+      const discovery = content.querySelector<HTMLElement>('[data-marketplace-discovery-page]')!
+      const tools = discovery.querySelector<HTMLElement>('.cxm-marketplace-discovery-tools')!
+      const results = discovery.querySelector<HTMLElement>('[data-marketplace-results-scroll]')!
+      expect(content.dataset.marketplaceDiscovery).toBe('true')
+      expect(tools.querySelector('.cxm-toolbar > .cxc-search [data-collection-search="marketplace"]')).not.toBeNull()
+      expect(tools.querySelector('.cxm-toolbar > [data-marketplace-source-menu]')).not.toBeNull()
+      expect(tools.querySelector('.cxm-marketplace-filter-row [data-marketplace-certified-only]')).not.toBeNull()
+      expect(results.contains(tools)).toBe(false)
+      expect([...dom.window.document.querySelectorAll('a')].some(link => link.textContent?.includes('插件商店文档'))).toBe(false)
       expect(dom.window.document.body.textContent).not.toContain('商店收录、schema 校验和页面展示都不代表')
       expect(dom.window.document.body.textContent).not.toContain('Shows structured CordisX extension points.')
 
-      const styles = [...dom.window.document.querySelectorAll('style')].map(item => item.textContent ?? '').join('\n')
-      expect(styles).toContain('.cxm-plugin-primary { display: flex;')
-      expect(styles).toContain('padding: 12px')
-      expect(styles).toContain('.cxm-plugin-meta-source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }')
-      expect(styles).toContain('.cxm-card-grid, .cxm-detail-grid, .cxm-plugin-list { grid-template-columns: 1fr; }')
+      const sourceMenu = tools.querySelector<HTMLButtonElement>('[data-marketplace-source-menu]')!
+      expect(sourceMenu.getAttribute('aria-expanded')).toBe('false')
+      sourceMenu.click()
+      expect(dom.window.document.querySelector<HTMLElement>(`[data-manager-action-menu="${managerCopy('zh-CN', 'marketplace.source-menu-label')}"]`)).not.toBeNull()
+      expect(sourceMenu.getAttribute('aria-expanded')).toBe('true')
+      dom.window.document.querySelector<HTMLButtonElement>('[data-manager-menu-action="manage"]')!.click()
+      for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-marketplace-source-page="index"]') === null; attempt += 1) await settle()
+      expect(dom.window.document.querySelector('[data-marketplace-source-page="index"]')).not.toBeNull()
+      dom.window.document.querySelector<HTMLButtonElement>('[data-tab="marketplace"]')!.click()
 
-      const search = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="marketplace"] input')!
+      const styles = [...dom.window.document.querySelectorAll('style')].map(item => item.textContent ?? '').join('\n')
+      expect(styles).toContain('.cxc-primary {')
+      expect(styles).toContain('repeat(auto-fill, minmax(min(100%, 220px), 360px))')
+      expect(styles).toContain('.cxc-card:focus-within .cxc-actions')
+      expect(styles).toContain('.cxm-content[data-marketplace-discovery="true"] { overflow: hidden; }')
+      expect(styles).toContain('.cxm-marketplace-results { min-width: 0; min-height: 0; flex: 1 1 auto;')
+
+      const search = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="marketplace"]')!
       search.value = 'Slot Showcase'
       search.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       expect(dom.window.document.querySelector('[data-marketplace-plugin="slot-showcase"]')).not.toBeNull()
-      const fallbackSearch = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="marketplace"] input')!
+      const fallbackSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="marketplace"]')!
       fallbackSearch.value = 'CordisX Team'
       fallbackSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       expect(dom.window.document.querySelector('[data-marketplace-plugin="slot-showcase"]')).not.toBeNull()
 
       state = snapshot('en')
       for (const listener of listeners) listener()
-      const enSearch = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="marketplace"] input')!
+      const enSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="marketplace"]')!
       enSearch.value = 'Slot Showcase'
       enSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-      expect(dom.window.document.querySelector('.cxm-plugin-name')?.textContent).toBe('Slot Showcase')
-      expect(dom.window.document.querySelector('.cxm-plugin-description')?.textContent).toBe('Shows structured CordisX extension points.')
-      expect(dom.window.document.querySelector('.cxm-plugin-meta-source')?.textContent).toBe('CordisX Marketplace')
+      expect(dom.window.document.querySelector('.cxc-title')?.textContent).toBe('Slot Showcase')
+      expect(dom.window.document.querySelector('.cxc-description')?.textContent).toBe('Shows structured CordisX extension points.')
       expect(requests).toBe(1)
 
       dom.window.document.documentElement.className = 'electron-light'
       await settle()
       expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')?.dataset.cordisxAppTheme).toBe('light')
 
-      dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-plugin] .cxm-plugin-primary')!
-        .dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+      dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-plugin] .cxc-primary')!.click()
       expect(dom.window.document.querySelector('[data-manager-page-route^="marketplace:"]')).not.toBeNull()
       expect(dom.window.document.querySelector('.cxm-detail-description')?.textContent).toBe('Shows structured CordisX extension points.')
       expect(dom.window.document.body.textContent).not.toContain('外部链接不代表代码审计')
@@ -276,26 +295,22 @@ describe('Manager Marketplace product list', () => {
       expect(trusted.dataset.marketplaceOfficial).toBe('true')
       expect(trusted.dataset.marketplaceCertified).toBe('true')
       expect(trusted.dataset.marketplaceRankingTrustBoost).toBe('2')
-      expect(trusted.querySelector('[data-trust-dimension="official"]')?.textContent).toContain('官方')
-      expect(trusted.querySelector('[data-trust-dimension="certified"]')?.textContent).toContain('已认证')
-      expect(trusted.querySelector('[data-material-icon="marketplace-official"]')).not.toBeNull()
-      expect(trusted.querySelector('[data-material-icon="marketplace-certified"]')).not.toBeNull()
-      expect(trusted.querySelector('[data-trust-dimension="official"]')?.getAttribute('aria-label')).toContain('不等于该版本已认证')
-      expect(trusted.querySelector('[data-trust-dimension="certified"]')?.getAttribute('aria-label')).toContain('不是绝对安全保证')
-      const trustedPrimary = trusted.querySelector<HTMLButtonElement>('.cxm-plugin-primary')!
-      expect(trustedPrimary.getAttribute('aria-label')).toContain('官方 · 已认证')
+      const trustedStatus = trusted.querySelector<HTMLElement>('.cxc-status')!
+      expect(trustedStatus.getAttribute('aria-label')).toContain('官方、已认证')
+      const trustedPrimary = trusted.querySelector<HTMLButtonElement>('.cxc-primary')!
+      expect(trustedPrimary.getAttribute('aria-description')).toContain('官方、已认证')
       trustedPrimary.focus()
       await new Promise(resolve => setTimeout(resolve, 700))
-      expect(dom.window.document.querySelector('[role="tooltip"]')?.textContent).toContain('信任加权只在同一文本相关性层级内生效')
+      expect(dom.window.document.querySelector('[role="tooltip"]')?.textContent).toBe('官方、已认证')
+      expect(dom.window.document.querySelector('[role="tooltip"]')?.textContent).not.toContain('信任加权')
       expect(trustedPrimary.getAttribute('aria-describedby')).toMatch(/^cordisx-host-tooltip-/)
       trustedPrimary.blur()
       const community = dom.window.document.querySelector<HTMLElement>('[data-marketplace-plugin="community-certified"]')!
       expect(community.dataset.marketplaceOfficial).toBe('false')
       expect(community.dataset.marketplaceCertified).toBe('true')
-      expect(community.querySelector('[data-trust-dimension="official"]')).toBeNull()
-      expect(community.querySelector('[data-trust-dimension="certified"]')).not.toBeNull()
+      expect(community.querySelector('.cxc-status')?.getAttribute('aria-label')).toContain('已认证')
 
-      const search = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="marketplace"] input')!
+      const search = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="marketplace"]')!
       search.value = 'exact-match'
       search.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       const searched = [...dom.window.document.querySelectorAll<HTMLElement>('[data-marketplace-plugin]')]
@@ -310,10 +325,10 @@ describe('Manager Marketplace product list', () => {
       expect(dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-certified-only]')?.getAttribute('aria-pressed')).toBe('true')
       expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-marketplace-plugin]')].map(row => row.dataset.marketplacePlugin)).toEqual(['trusted'])
 
-      const filteredSearch = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="marketplace"] input')!
+      const filteredSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="marketplace"]')!
       filteredSearch.value = ''
       filteredSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-      dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-plugin="trusted"] .cxm-plugin-primary')!.click()
+      dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-plugin="trusted"] .cxc-primary')!.click()
       const officialDetail = dom.window.document.querySelector<HTMLElement>('[data-marketplace-trust-dimension="official"]')!
       const certifiedDetail = dom.window.document.querySelector<HTMLElement>('[data-marketplace-trust-dimension="certified"]')!
       expect(officialDetail.textContent).toContain('cordisx-official-publisher@1.0.0')

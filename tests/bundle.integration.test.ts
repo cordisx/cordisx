@@ -197,7 +197,7 @@ describe('renderer bundle', () => {
         id: 'slot-showcase',
         status: 'active',
         readme: expect.stringContaining('# Slot Showcase'),
-        description: expect.stringContaining('这是 CordisX 的结构化 UI 端到端演示插件'),
+        description: '在插件管理器中展示扩展点、导航、页面与状态交互的完整示例。',
         configuration: expect.objectContaining({
           schemaKind: 'schemastery',
           applies: 'plugin-restart',
@@ -223,8 +223,8 @@ describe('renderer bundle', () => {
     expect(snapshot.navigation.routes.every(item => item.valid)).toBe(true)
     expect(snapshot.navigation.pages).toHaveLength(3)
     expect(snapshot.navigation.routes.find(item => item.qualifiedId === 'slot-showcase:main.analytics')?.productMetadata).toEqual({
-      title: 'Main outlet',
-      description: 'Open from the showcase navigation row, workspace toolbar, or session-header action to show analytics in the main outlet.',
+      title: 'Workspace analytics',
+      description: 'Open workspace analytics from showcase navigation, the workspace toolbar, or a session action.',
       diagnostics: [],
     })
     expect(snapshot.navigation.pages.find(item => item.qualifiedId === 'slot-showcase:session.analytics')?.productMetadata).toEqual({
@@ -534,8 +534,8 @@ describe('renderer bundle', () => {
     await settle()
     expect(runtime!.snapshot().localization.locale).toBe('zh-CN')
     expect(runtime!.snapshot().navigation.routes.find(item => item.qualifiedId === 'slot-showcase:main.analytics')?.productMetadata).toEqual({
-      title: '主区域 outlet',
-      description: '从演示导航行、工作区工具栏或会话页头操作进入，在 main outlet 中展示分析内容。',
+      title: '工作区分析',
+      description: '从演示导航、工作区工具栏或会话操作打开工作区分析。',
       diagnostics: [],
     })
     expect(runtime!.snapshot().navigation.pages.find(item => item.qualifiedId === 'slot-showcase:session.analytics')?.productMetadata).toEqual({
@@ -544,7 +544,7 @@ describe('renderer bundle', () => {
       diagnostics: [],
     })
     expect(runtime!.snapshot().extensionPoints.points.find(item => item.id === 'sidebar.navigation.items')?.titleProjection.text).toBe('侧边栏导航')
-    expect(dom.window.document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')?.textContent).toContain('主区域 outlet')
+    expect(dom.window.document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')?.textContent).toContain('工作区分析')
 
     expect(native.parentElement).toBe(nativeParent)
     expect(native.textContent).toBe('native data')
@@ -687,18 +687,18 @@ describe('renderer bundle', () => {
     expect(managerStyles).not.toContain('.cxm-feed-summary')
     expect(managerStyles).toContain('.cxm-about-identity-copy { min-width: 0; white-space: nowrap; }')
     const pluginCard = managerModal?.querySelector<HTMLElement>('[data-plugin-card="slot-showcase"]')
-    expect(pluginCard?.querySelector('.cxm-plugin-description')?.textContent).toContain('这是 CordisX 的结构化 UI 端到端演示插件')
-    expect(pluginCard?.querySelector('.cxm-plugin-meta')?.textContent).toBe('slot-showcase')
-    expect(pluginCard?.querySelector('.cxm-plugin-status-badge')?.getAttribute('data-status')).toBe('active')
+    expect(pluginCard?.querySelector('.cxc-description')?.textContent).toBe('在插件管理器中展示扩展点、导航、页面与状态交互的完整示例。')
+    expect(pluginCard?.querySelector('.cxc-machine-id')?.textContent).toBe('slot-showcase')
+    expect(pluginCard?.querySelector('.cxc-status')?.getAttribute('data-tone')).toBe('success')
     expect(pluginCard?.querySelector('[data-plugin-primary]')?.getAttribute('aria-description')).toBe('运行中')
     expect(pluginCard?.textContent).not.toContain('运行中')
     const importButton = managerModal?.querySelector<HTMLButtonElement>('[data-import-local-plugin]')
     expect(importButton?.textContent).toBe('')
     expect(importButton?.getAttribute('aria-label')).toBe('导入本地插件')
     expect(importButton?.querySelector('[data-material-icon="import-plugin"]')).not.toBeNull()
-    expect(managerStyles).toContain('.cxm-plugin-row:hover .cxm-plugin-actions')
-    expect(managerStyles).toContain('.cxm-plugin-row:focus-within .cxm-plugin-actions')
-    expect(managerStyles).toContain('.cxm-plugin-row[data-action-menu-open="true"] .cxm-plugin-actions')
+    expect(managerStyles).toContain('.cxc-card:hover .cxc-actions')
+    expect(managerStyles).toContain('.cxc-card:focus-within .cxc-actions')
+    expect(managerStyles).toContain('.cxc-card[data-action-menu-open="true"] .cxc-actions')
     const expectLocalTabLeadingSeat = (selector: string): void => {
       const firstTab = dom.window.document.querySelector<HTMLElement>(`${selector}:first-child`)
       const icon = firstTab?.querySelector<HTMLElement>('.cxm-tab-icon')
@@ -730,9 +730,9 @@ describe('renderer bundle', () => {
     expect(pluginList).not.toBeNull()
     expect(pluginOpen).not.toBeNull()
     expect(pluginOpen?.querySelector('.cxm-chevron')).toBeNull()
-    expect(pluginOpen?.parentElement?.getAttribute('role')).toBe('listitem')
-    const pluginActions = [...(pluginOpen?.parentElement?.querySelectorAll<HTMLButtonElement>('[data-plugin-action]') ?? [])]
-    expect(pluginActions.map(action => action.dataset.pluginAction)).toEqual(['disable', 'reload', 'favorite'])
+    expect(pluginOpen?.closest('[role="listitem"]')).not.toBeNull()
+    const pluginActions = [...(pluginOpen?.closest('.cxc-card')?.querySelectorAll<HTMLButtonElement>('[data-plugin-action]') ?? [])]
+    expect(pluginActions.map(action => action.dataset.pluginAction)).toEqual(['disable', 'favorite', 'reload'])
     expect(pluginActions.find(action => action.dataset.pluginAction === 'disable')).toMatchObject({ disabled: true })
     expect(pluginActions.find(action => action.dataset.pluginAction === 'reload')).toMatchObject({ disabled: true })
     expect(pluginActions.find(action => action.dataset.pluginAction === 'reload')?.getAttribute('aria-label')).toMatch(/动态 package generation/)
@@ -741,16 +741,16 @@ describe('renderer bundle', () => {
     pluginActions.find(action => action.dataset.pluginAction === 'favorite')?.click()
     expect(managerHeadings()).toEqual(['插件'])
     expect(JSON.parse(dom.window.localStorage.getItem('cordisx.manager.favoritePlugins.v1:development') ?? '[]')).toEqual(['slot-showcase'])
-    const overflow = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-menu="slot-showcase"] .cxm-plugin-menu-trigger')!
+    const overflow = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-menu="slot-showcase"] .cxc-menu-trigger')!
     overflow.click()
-    const overflowMenu = dom.window.document.querySelector<HTMLElement>('body > .cxm-plugin-menu-popup')
+    const overflowMenu = dom.window.document.querySelector<HTMLElement>('body > .cxc-menu-popup')
     expect(overflow.getAttribute('aria-expanded')).toBe('true')
     expect(overflowMenu?.getAttribute('role')).toBe('menu')
-    expect([...overflowMenu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []].map(item => [item.dataset.pluginMenuAction, item.disabled])).toEqual([
-      ['reload', true], ['favorite', false], ['share', true], ['source', true], ['diagnostics', false], ['uninstall', true],
+    expect([...overflowMenu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []].map(item => [item.dataset.collectionAction, item.disabled])).toEqual([
+      ['share', true], ['source', true], ['diagnostics', false], ['uninstall', true],
     ])
     overflowMenu?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-    expect(dom.window.document.querySelector('body > .cxm-plugin-menu-popup')).toBeNull()
+    expect(dom.window.document.querySelector('body > .cxc-menu-popup')).toBeNull()
     expect(overflow.getAttribute('aria-expanded')).toBe('false')
     const aboutTab = dom.window.document.querySelector<HTMLButtonElement>('[data-tab="about"]')
     aboutTab?.focus()
@@ -880,35 +880,37 @@ describe('renderer bundle', () => {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
-    expect(dom.window.document.querySelector<HTMLInputElement>('.cxm-search')?.value).toBe('侧边栏导航')
+    expect(dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="extension-points"]')?.value).toBe('侧边栏导航')
     expect(managerContent.scrollTop).toBe(37)
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="routes"]')?.click()
     expect(managerHeadings()).toEqual(['路由'])
     expect(dom.window.document.querySelectorAll('[data-route-id]')).toHaveLength(3)
     expect(dom.window.document.querySelectorAll('[data-page-product-row]')).toHaveLength(3)
-    expect([...managerModal!.querySelectorAll('.cxm-route-section-heading')].map(item => item.textContent)).toEqual(['路由', '页面'])
+    expect(managerModal?.querySelector('[data-host-collection="routes"]')).not.toBeNull()
     expect(dom.window.document.querySelector('[role="list"] [role="listitem"] button[data-route-id]')).not.toBeNull()
-    expect(managerModal?.textContent).toContain('/main/showcase')
-    expect(managerModal?.querySelector('[data-route-product-row="slot-showcase:main.analytics"] .cxm-route-card-title')?.textContent).toBe('主区域 outlet')
-    expect(managerModal?.querySelector('[data-route-product-row="slot-showcase:main.analytics"] .cxm-route-card-description')?.textContent)
-      .toContain('从演示导航行、工作区工具栏或会话页头操作进入')
-    expect(managerModal?.querySelector('[data-route-product-row="slot-showcase:session.analytics"]')?.textContent).toContain(':sessionId')
+    expect(managerModal?.textContent).not.toContain('/main/showcase')
+    expect(managerModal?.querySelector('[data-route-product-row="slot-showcase:main.analytics"] .cxc-title')?.textContent).toBe('工作区分析')
+    expect(managerModal?.querySelector('[data-route-product-row="slot-showcase:main.analytics"] .cxc-description')?.textContent)
+      .toContain('从演示导航、工作区工具栏或会话操作打开工作区分析')
+    expect(managerModal?.querySelector('[data-route-product-row="slot-showcase:session.analytics"] .cxc-machine-id')?.textContent).toBe('slot-showcase:session.analytics')
     expect(managerModal?.querySelector('.cxm-kind-badge')).toBeNull()
-    const catalogRouteSearch = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="routes"] .cxm-search')!
+    const catalogRouteSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="routes"]')!
     catalogRouteSearch.value = '/sessions/:sessionId/analytics'
     catalogRouteSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-    expect(dom.window.document.querySelectorAll('[data-route-product-row]')).toHaveLength(1)
-    expect(dom.window.document.querySelectorAll('[data-page-product-row]')).toHaveLength(1)
-    const resetCatalogRouteSearch = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="routes"] .cxm-search')!
+    expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-route-product-row]')]
+      .filter(item => item.closest<HTMLElement>('[role="listitem"]')?.hidden === false)).toHaveLength(1)
+    expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-page-product-row]')]
+      .filter(item => item.closest<HTMLElement>('[role="listitem"]')?.hidden === false)).toHaveLength(1)
+    const resetCatalogRouteSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="routes"]')!
     resetCatalogRouteSearch.value = ''
     resetCatalogRouteSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     dom.window.document.querySelector<HTMLButtonElement>('[data-route-id="slot-showcase:main.analytics"]')?.click()
-    expect(managerHeadings()).toEqual(['主区域 outlet'])
-    expect(breadcrumbLabels()).toEqual(['路由', '主区域 outlet'])
+    expect(managerHeadings()).toEqual(['工作区分析'])
+    expect(breadcrumbLabels()).toEqual(['路由', '工作区分析'])
     expect(managerModal?.textContent).toContain('slot-showcase:main.analytics')
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')?.click()
-    const search = dom.window.document.querySelector<HTMLInputElement>('.cxm-search')
+    const search = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="plugins"]')
     if (search !== null) {
       search.value = 'workspace.toolbar.items'
       search.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
@@ -1081,38 +1083,40 @@ describe('renderer bundle', () => {
     await settle()
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="extension-points"]')?.click()
-    expect(dom.window.document.querySelector('[data-list-search="plugin-extension-points-slot-showcase"]')).not.toBeNull()
+    expect(dom.window.document.querySelector('[data-host-collection="plugin-extension-points-slot-showcase"]')).not.toBeNull()
     expect(managerModal?.textContent).toContain('workspace.toolbar.items')
     expect(managerModal?.textContent).toContain('工作区工具栏')
     expect(managerModal?.textContent).not.toContain('/main/analytics')
     expect(managerHeadings()).toEqual(['扩展点位'])
     expect(breadcrumbLabels()).toEqual(['插件', 'Slot Showcase', '扩展点位'])
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="routes"]')?.click()
-    expect(dom.window.document.querySelector('[data-list-search="plugin-routes-slot-showcase"]')).not.toBeNull()
-    expect(managerModal?.textContent).toContain('/main/showcase')
+    expect(dom.window.document.querySelector('[data-host-collection="plugin-routes-slot-showcase"]')).not.toBeNull()
+    expect(managerModal?.textContent).not.toContain('/main/showcase')
     expect(managerModal?.textContent).toContain('slot-showcase:main.analytics')
     const pluginRoutePanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="路由"]')!
-    expect([...pluginRoutePanel.querySelectorAll('.cxm-route-section-heading')].map(item => item.textContent)).toEqual(['路由', '页面'])
+    expect(pluginRoutePanel.querySelector('[data-host-collection="plugin-routes-slot-showcase"]')).not.toBeNull()
     expect(pluginRoutePanel.querySelectorAll('[data-route-product-row]')).toHaveLength(3)
     expect(pluginRoutePanel.querySelectorAll('[data-page-product-row]')).toHaveLength(3)
-    expect(pluginRoutePanel.querySelector('[data-route-product-row="slot-showcase:app.overview"] .cxm-route-card-description')?.textContent)
-      .toContain('从侧栏底部或演示设置操作进入')
-    expect(pluginRoutePanel.querySelector('[data-page-product-row="slot-showcase:session.analytics"] .cxm-route-card-description')?.textContent)
+    expect(pluginRoutePanel.querySelector('[data-route-product-row="slot-showcase:app.overview"] .cxc-description')?.textContent)
+      .toContain('从侧栏底部或演示设置打开应用概览')
+    expect(pluginRoutePanel.querySelector('[data-page-product-row="slot-showcase:session.analytics"] .cxc-description')?.textContent)
       .toContain('当前原生会话页头')
     expect(pluginRoutePanel.querySelector('.cxm-kind-badge')).toBeNull()
     expect(pluginRoutePanel.textContent).not.toContain('受控页面 mount')
-    const pluginRouteSearch = pluginRoutePanel.querySelector<HTMLInputElement>('[data-list-search="plugin-routes-slot-showcase"] .cxm-search')!
+    const pluginRouteSearch = pluginRoutePanel.querySelector<HTMLInputElement>('[data-collection-search="plugin-routes-slot-showcase"]')!
     pluginRouteSearch.value = '当前原生会话页头'
     pluginRouteSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-    expect(dom.window.document.querySelectorAll('[data-route-product-row]')).toHaveLength(0)
-    expect(dom.window.document.querySelectorAll('[data-page-product-row]')).toHaveLength(1)
-    const resetPluginRouteSearch = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="plugin-routes-slot-showcase"] .cxm-search')!
+    expect([...pluginRoutePanel.querySelectorAll<HTMLElement>('[data-route-product-row]')]
+      .filter(item => item.closest<HTMLElement>('[role="listitem"]')?.hidden === false)).toHaveLength(0)
+    expect([...pluginRoutePanel.querySelectorAll<HTMLElement>('[data-page-product-row]')]
+      .filter(item => item.closest<HTMLElement>('[role="listitem"]')?.hidden === false)).toHaveLength(1)
+    const resetPluginRouteSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="plugin-routes-slot-showcase"]')!
     resetPluginRouteSearch.value = ''
     resetPluginRouteSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     expect(breadcrumbLabels()).toEqual(['插件', 'Slot Showcase', '路由'])
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-breadcrumb-target="primary:plugins"]')?.click()
-    const restoredSearch = dom.window.document.querySelector<HTMLInputElement>('.cxm-search')
+    const restoredSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="plugins"]')
     expect(restoredSearch?.value).toBe('workspace.toolbar.items')
     expect(managerModal?.textContent).not.toContain('插件配置')
 
@@ -1135,13 +1139,13 @@ describe('renderer bundle', () => {
     for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-marketplace-plugin="slot-showcase"]') === null; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
-    expect(managerModal?.textContent).toContain('CordisX 社区插件商店')
+    expect(managerModal?.textContent).toContain('发现适用于 CordisX 的插件')
     expect(managerModal?.textContent).toContain('点位展示目录')
     expect(managerModal?.textContent).not.toContain('Marketplace hierarchy fixture')
     expect(managerModal?.querySelector('.cxm-feed-summary')).toBeNull()
     expect(managerModal?.querySelector('.cxm-result-count')).toBeNull()
     expect(managerHeadings()).toEqual(['插件商店'])
-    dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-plugin="slot-showcase"] .cxm-plugin-primary')?.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-plugin="slot-showcase"] .cxc-primary')?.click()
     expect(managerHeadings()).toEqual(['概览', '关键词'])
     expect(breadcrumbLabels()).toEqual(['插件商店', '点位展示目录', '概览'])
     expect(managerModal?.textContent?.match(/点位展示目录/g)).toHaveLength(1)
