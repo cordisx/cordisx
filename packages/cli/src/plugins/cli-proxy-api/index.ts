@@ -1,14 +1,18 @@
 import type { Context, Disposable } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import {
+  CORDISX_PAGE_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+  CORDISX_ROUTE_SCHEMA_V2,
   type CordisXLocalizedText,
   type CordisXMessageParams,
   type CordisXModelDescriptor,
+  type CordisXPageMetadataV3,
   type CordisXPageMountContext,
   type CordisXPlatformModelRef,
   type CordisXPlatformSessionRef,
   type CordisXPluginManifestV1,
+  type CordisXRouteDefinitionV2,
   type CordisXSessionProjection,
   type CordisXSessionSummary,
 } from '../../contracts.js'
@@ -41,7 +45,10 @@ export const manifest = {
 interface Messages {
   'navigation.title': undefined
   'navigation.description': undefined
+  'route.title': undefined
+  'route.description': undefined
   'page.title': undefined
+  'page.description': undefined
   'page.subtitle': undefined
   'field.provider': undefined
   'field.model': undefined
@@ -110,6 +117,26 @@ function message<Key extends keyof Messages>(
 ): CordisXLocalizedText {
   return { namespace: 'cli-proxy-api', key, ...(args[0] === undefined ? {} : { params: args[0] }) }
 }
+
+const providerSessionsPage = {
+  $schema: CORDISX_PAGE_SCHEMA_V3,
+  schemaVersion: 3,
+  id: 'providers.sessions',
+  title: message('page.title'),
+  description: message('page.description'),
+  icon: 'host:layers',
+} satisfies CordisXPageMetadataV3
+
+const providerSessionsRoute = {
+  $schema: CORDISX_ROUTE_SCHEMA_V2,
+  schemaVersion: 2,
+  id: 'providers.sessions',
+  path: '/main/providers/sessions',
+  outlet: 'main',
+  page: 'providers.sessions',
+  title: message('route.title'),
+  description: message('route.description'),
+} satisfies CordisXRouteDefinitionV2<'main'>
 
 function style(element: HTMLElement, rules: Partial<CSSStyleDeclaration>): void {
   Object.assign(element.style, rules)
@@ -459,7 +486,11 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   ctx.i18n.define<Messages>({
     namespace: 'cli-proxy-api', locale: 'en', default: true, messages: {
       'navigation.title': 'Providers', 'navigation.description': 'Manage provider models and sessions',
-      'page.title': 'Provider sessions', 'page.subtitle': 'Choose a model and manage its sessions.',
+      'route.title': 'Open Provider sessions',
+      'route.description': 'Enter the external Provider sessions fleet from CordisX navigation or the Manager route catalog.',
+      'page.title': 'Provider sessions',
+      'page.description': 'Create, search, resume, and manage sessions for configured Providers in the main workspace.',
+      'page.subtitle': 'Choose a model and manage its sessions.',
       'field.provider': 'Provider', 'field.model': 'Model', 'field.cwd': 'Working directory', 'field.search': 'Search sessions',
       'field.initial-message': 'Initial message (recommended for persistence)',
       'action.refresh': 'Refresh', 'action.create': 'New session', 'action.load-more': 'Load more', 'action.continue': 'Continue',
@@ -477,7 +508,11 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   ctx.i18n.define<Messages>({
     namespace: 'cli-proxy-api', locale: 'zh-CN', messages: {
       'navigation.title': 'Providers', 'navigation.description': '管理 Provider 模型和会话',
-      'page.title': 'Provider 会话', 'page.subtitle': '选择模型并管理会话。',
+      'route.title': '打开 Provider 会话',
+      'route.description': '从 CordisX 导航或 Manager 路由目录进入外部 Provider 会话 Fleet。',
+      'page.title': 'Provider 会话',
+      'page.description': '在主工作区为已配置的 Provider 创建、搜索、续聊和管理会话。',
+      'page.subtitle': '选择模型并管理会话。',
       'field.provider': 'Provider', 'field.model': '模型', 'field.cwd': '工作目录', 'field.search': '搜索会话',
       'field.initial-message': '首条消息（建议填写以立即持久化）',
       'action.refresh': '刷新', 'action.create': '新建会话', 'action.load-more': '加载更多', 'action.continue': '继续',
@@ -492,8 +527,8 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'permission.turns.control': '引导或中断所选 turn',
     },
   })
-  ctx.pages.register<Messages>({ id: 'providers.sessions', title: message('page.title'), icon: 'host:layers', localeNamespace: 'cli-proxy-api' }, context => mountFleet(ctx, context, config))
-  ctx.routes.register({ id: 'providers.sessions', path: '/main/providers/sessions', outlet: 'main', page: 'providers.sessions' })
+  ctx.pages.register<Messages>(providerSessionsPage, context => mountFleet(ctx, context, config))
+  ctx.routes.register(providerSessionsRoute)
   ctx.slots.register({ name: 'sidebar.navigation.items', id: 'providers', order: -100 }, {
     label: message('navigation.title'), description: message('navigation.description'), icon: 'host:layers', route: { id: 'providers.sessions' },
   })
