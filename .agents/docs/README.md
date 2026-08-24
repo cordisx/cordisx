@@ -26,6 +26,9 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `host-form-system.md` defines the Host-owned TDesign-aligned primitive
   adapter, official Web Components audit, scoped theme/layout/a11y contract,
   schema selection, draft/validation states, and current Manager integration.
+- `service-configuration.md` defines plugin-owned launcher service schemas,
+  Host CAS/permission/secret boundaries, and explicit service/app restart
+  planes used by CLIProxy Providers.
 - `plugin-devtools-console.md` defines the plugin-scoped DevTools Console,
   issuance-bound Host instrumentation, native variadic arguments, coverage
   guarantees, Luna rendering, privacy and bounded lifetime.

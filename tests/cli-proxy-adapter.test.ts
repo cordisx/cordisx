@@ -99,4 +99,26 @@ describe('CLIProxy provider adapter', () => {
     expect(page.ok && page.value.sessions[0]?.model).toEqual({ providerId: 'alpha', modelId: 'shared-model' })
     await second.close()
   })
+
+  it('maps public model ids to one provider-local source id without changing provider identity', async () => {
+    const codexHome = await mkdtemp(path.join(os.tmpdir(), 'cordisx-adapter-'))
+    const calls: { method: string; params: unknown }[] = []
+    const mapped: CliProxyProviderConfig = {
+      ...config(codexHome),
+      modelMappings: [{
+        sourceModelId: 'shared-model', modelId: 'coder', displayName: 'Coder', enabled: true, isDefault: true,
+      }],
+    }
+    const adapter = new CliProxyProviderAdapter(mapped, rpc(calls))
+    const models = await adapter.listModels()
+    expect(models.ok && models.value[0]).toMatchObject({
+      ref: { providerId: 'alpha', modelId: 'coder' }, label: 'Coder', isDefault: true,
+    })
+    const created = await adapter.createSession({ model: { providerId: 'alpha', modelId: 'coder' }, cwd: '/workspace' })
+    expect(created.ok && created.value.model).toEqual({ providerId: 'alpha', modelId: 'coder' })
+    expect(calls.find(call => call.method === 'thread/start')?.params).toMatchObject({
+      modelProvider: 'alpha', model: 'shared-model',
+    })
+    await adapter.close()
+  })
 })

@@ -3,6 +3,15 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveProviderConfigs } from '../providers/config.js'
 import type { CliProxyProviderConfig } from '../providers/contracts.js'
+import {
+  CLI_PROXY_PROVIDER_RUNTIME_CONFIG_INITIAL,
+  CLI_PROXY_PROVIDER_RUNTIME_SERVICE_ID,
+  CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL,
+  CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID,
+  parseCliProxyProviderRuntimeConfig,
+  parseCliProxyProviderStartupConfig,
+  resolveCliProxyProviderConfigs,
+} from '../plugins/cli-proxy-api/service-config.js'
 import type { CordisXPluginDependencyV1 } from '../plugin-lifecycle-contracts.js'
 import type { CordisXPluginManifestV1 } from '../platform-contracts.js'
 import type { CordisXPluginManifestV4 } from '../permission-contracts.js'
@@ -62,6 +71,20 @@ function pluginEntry(value: unknown, label: string, rootDir: string): string {
   return path.resolve(rootDir, entry)
 }
 
+function serviceConfiguration(
+  plugin: Record<string, unknown>,
+  serviceId: string,
+  profileId: string,
+): unknown | undefined {
+  if (plugin.services === undefined) return undefined
+  const services = object(plugin.services, `config.plugins.${plugin.id as string}.services`)
+  if (!Object.hasOwn(services, serviceId)) return undefined
+  const service = object(services[serviceId], `config.plugins.${plugin.id as string}.services.${serviceId}`)
+  const profiles = object(service.profiles, `config.plugins.${plugin.id as string}.services.${serviceId}.profiles`)
+  if (!Object.hasOwn(profiles, profileId)) return undefined
+  return object(profiles[profileId], `config.plugins.${plugin.id as string}.services.${serviceId}.profiles.${profileId}`).config
+}
+
 /** Read and validate the version-1 local composition file. */
 export async function loadConfig(configPath: string, options: LoadConfigOptions = {}): Promise<CordisXConfig> {
   const absolutePath = path.resolve(configPath)
@@ -80,9 +103,9 @@ export async function loadConfig(configPath: string, options: LoadConfigOptions 
   }
 
   if (!Array.isArray(raw.plugins)) throw new Error('config.plugins must be an array')
+  const rawPlugins = raw.plugins.map((value, index) => object(value, `config.plugins[${index}]`))
   const seen = new Set<string>()
-  const plugins = raw.plugins.map((value, index): CordisXConfigPlugin => {
-    const plugin = object(value, `config.plugins[${index}]`)
+  const plugins = rawPlugins.map((plugin, index): CordisXConfigPlugin => {
     const id = nonEmptyString(plugin.id, `config.plugins[${index}].id`)
     if (!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(id)) throw new Error(`invalid plugin id: ${id}`)
     if (id === 'host' || id.startsWith('cordisx.')) throw new Error(`reserved plugin id: ${id}`)
@@ -111,6 +134,22 @@ export async function loadConfig(configPath: string, options: LoadConfigOptions 
     }
   })
 
+  const profileId = options.profileId ?? 'default'
+  const cliProxyPlugin = rawPlugins.find(plugin => plugin.id === 'cli-proxy-api' && plugin.enabled !== false)
+  const runtimeValue = cliProxyPlugin === undefined
+    ? undefined
+    : serviceConfiguration(cliProxyPlugin, CLI_PROXY_PROVIDER_RUNTIME_SERVICE_ID, profileId)
+  const providers = runtimeValue === undefined
+    ? resolveProviderConfigs(raw.providers, { rootDir: path.dirname(absolutePath) })
+    : resolveCliProxyProviderConfigs(
+        parseCliProxyProviderRuntimeConfig(runtimeValue ?? CLI_PROXY_PROVIDER_RUNTIME_CONFIG_INITIAL),
+        parseCliProxyProviderStartupConfig(
+          serviceConfiguration(cliProxyPlugin!, CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID, profileId)
+            ?? CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL,
+        ),
+        { rootDir: path.dirname(absolutePath) },
+      )
+
   return {
     version: 1,
     rootDir: path.dirname(absolutePath),
@@ -118,7 +157,7 @@ export async function loadConfig(configPath: string, options: LoadConfigOptions 
       debugPort: debugPort as number,
       ...(executable === undefined ? {} : { executable: path.resolve(path.dirname(absolutePath), executable) }),
     },
-    providers: resolveProviderConfigs(raw.providers, { rootDir: path.dirname(absolutePath) }),
+    providers,
     plugins,
   }
 }
