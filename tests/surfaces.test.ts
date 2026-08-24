@@ -8,6 +8,7 @@ import { partitionDirectActions } from '../packages/cli/src/renderer/adapter.js'
 import { HostContextStore } from '../packages/cli/src/renderer/validation.js'
 import {
   CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
+  CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
   MemoryExtensionPointPolicyStore,
@@ -157,7 +158,7 @@ describe('SurfaceRegistry', () => {
 
   it('retains denied contributions while removing them from authorized projection', () => {
     const contexts = new HostContextStore()
-    const descriptors = new ExtensionPointDescriptorRegistry()
+    const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
     const identity = { source: 'https://plugins.example/demo', id: 'demo' }

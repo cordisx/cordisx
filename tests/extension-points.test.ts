@@ -2,6 +2,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import {
   CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
+  CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
   CORDISX_MANAGER_EXTENSION_POINT_CATALOG,
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
@@ -38,7 +39,7 @@ describe('extension point runtime contract', () => {
     const previous = activation(1, 'demo-1', 'a')
     const candidate = activation(2, 'demo-2', 'b')
     const visibility = new GenerationVisibilityCoordinator(previous)
-    const descriptors = new ExtensionPointDescriptorRegistry()
+    const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore(), 'runtime-1', visibility)
     broker.register({ source: 'https://plugins.example/old', id: 'demo' }, { pluginId: 'demo', moduleGeneration: 'demo-1' })
@@ -71,7 +72,7 @@ describe('extension point runtime contract', () => {
   })
 
   it('declares the complete v2 catalog and diagnoses cross-family duplicates', () => {
-    const registry = new ExtensionPointDescriptorRegistry()
+    const registry = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     const remove = registry.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     expect(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG).toMatchObject({
       $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
@@ -155,7 +156,12 @@ describe('extension point runtime contract', () => {
   })
 
   it('normalizes a v1 catalog into stable available descriptors without weakening v2 validation', () => {
-    const registry = new ExtensionPointDescriptorRegistry()
+    const legacyCatalogs = [
+      ...CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
+      { namespace: 'host', locale: 'en', default: true, messages: { 'legacy.title': 'Legacy', 'legacy.description': 'Legacy v1 surface' } },
+      { namespace: 'host', locale: 'zh-CN', messages: { 'legacy.title': '旧版点位', 'legacy.description': '旧版 v1 界面点位' } },
+    ]
+    const registry = new ExtensionPointDescriptorRegistry(legacyCatalogs)
     const remove = registry.registerCatalog({
       $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1,
       schemaVersion: 1,
@@ -172,8 +178,34 @@ describe('extension point runtime contract', () => {
     registry.dispose()
   })
 
+  it('rejects a public descriptor when either required Host locale is missing', () => {
+    const registry = new ExtensionPointDescriptorRegistry([
+      { namespace: 'host', locale: 'en', default: true, messages: { 'missing.title': 'Title', 'missing.description': 'Description' } },
+    ])
+    const remove = registry.registerCatalog({
+      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1,
+      schemaVersion: 1,
+      points: [{
+        id: 'missing.locale', kind: 'surface',
+        title: { key: 'missing.title', fallback: 'Title' },
+        description: { key: 'missing.description', fallback: 'Description' },
+        icon: 'host:info',
+      }],
+    })
+    expect(registry.descriptor('missing.locale')).toBeUndefined()
+    expect(registry.diagnostics()).toEqual([
+      expect.objectContaining({
+        code: 'invalid-descriptor',
+        pointId: 'missing.locale',
+        message: expect.stringContaining('requires zh-CN localization'),
+      }),
+    ])
+    remove()
+    registry.dispose()
+  })
+
   it('registers the manager-neutral v3 surface and isolated outlet with exact policy metadata', () => {
-    const registry = new ExtensionPointDescriptorRegistry()
+    const registry = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     const remove = registry.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
     expect(CORDISX_MANAGER_EXTENSION_POINT_CATALOG).toMatchObject({
       $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3,
@@ -196,7 +228,7 @@ describe('extension point runtime contract', () => {
   })
 
   it('projects live surface and anchor availability instead of hardcoding surfaces available', () => {
-    const descriptors = new ExtensionPointDescriptorRegistry()
+    const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore(), 'generation-test')
     const i18n = {
@@ -250,7 +282,7 @@ describe('extension point runtime contract', () => {
   })
 
   it('keys inherit/allow/deny by canonical source, plugin id, and point id', () => {
-    const descriptors = new ExtensionPointDescriptorRegistry()
+    const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     const legacyIdentity = { source: 'file:///opt/cordisx/plugins/legacy.mjs', pluginId: 'legacy', pointId: 'app' }
     const stored: CordisXExtensionPointPolicyRecordV1 = {
@@ -281,7 +313,7 @@ describe('extension point runtime contract', () => {
   })
 
   it('emits exact host-generated surface and outlet access origins', () => {
-    const descriptors = new ExtensionPointDescriptorRegistry()
+    const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore(), 'generation-test')
     const identity = { source: 'https://plugins.example/demo', id: 'demo' }
@@ -316,7 +348,7 @@ describe('extension point runtime contract', () => {
   })
 
   it('fails closed on duplicate persisted policy tuples until the user replaces them', () => {
-    const descriptors = new ExtensionPointDescriptorRegistry()
+    const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     const identity = { source: 'https://plugins.example/demo', pluginId: 'demo', pointId: 'app' }
     const record = (policy: 'allow' | 'deny'): CordisXExtensionPointPolicyRecordV1 => ({

@@ -10,6 +10,7 @@ import {
 } from '../packages/cli/src/contracts.js'
 import {
   CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
+  CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
   MemoryExtensionPointPolicyStore,
@@ -107,7 +108,7 @@ describe('CommandRegistry', () => {
   })
 
   it('rechecks host-generated surface origin without disabling the command elsewhere', async () => {
-    const descriptors = new ExtensionPointDescriptorRegistry()
+    const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
     const identity = { source: 'https://plugins.example/demo', id: 'demo' }
@@ -132,7 +133,7 @@ describe('CommandRegistry', () => {
   })
 
   it('injects only matching immutable host context and never promotes plugin arguments', async () => {
-    const descriptors = new ExtensionPointDescriptorRegistry()
+    const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
     broker.register({ source: 'https://plugins.example/demo', id: 'demo' })

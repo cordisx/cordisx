@@ -42,6 +42,20 @@ import { ICON_TOKEN_PATTERN, assertLocalId, assertLocalizedText, immutableSnapsh
 const POINT_POLICY_STORAGE_KEY = 'cordisx.extensionPointPolicies.v1'
 const DESCRIPTOR_NAMESPACE = 'cordisx.manager.extension-points'
 
+function catalogMessage(key: string, fallback: string): CordisXLocalizedText {
+  return Object.freeze({ namespace: DESCRIPTOR_NAMESPACE, key, fallback })
+}
+
+const CATALOG_TEXT = Object.freeze({
+  categorySurface: catalogMessage('catalog.category.surface', 'Surface'),
+  categoryOutlet: catalogMessage('catalog.category.outlet', 'Page outlet'),
+  ownerHost: catalogMessage('catalog.owner.host', 'CordisX Host'),
+  statusPending: catalogMessage('catalog.status.pending', 'Pending location'),
+  statusUnavailable: catalogMessage('catalog.status.unavailable', 'Unavailable'),
+  statusError: catalogMessage('catalog.status.error', 'Needs attention'),
+  statusDenied: catalogMessage('catalog.status.denied', 'Access denied'),
+})
+
 export interface ExtensionPointDescriptorDiagnostic {
   readonly code: 'invalid-catalog' | 'invalid-descriptor' | 'duplicate-point-id'
   readonly message: string
@@ -57,6 +71,17 @@ export interface HostExtensionPointProjection extends CordisXHostExtensionPointD
   readonly descriptionProjection: CordisXLocalizedProjection
   readonly diagnosticProjection?: CordisXLocalizedProjection
   readonly anchors?: readonly HostExtensionPointAnchorProjection[]
+}
+
+export interface ExtensionPointCatalogTextProjection {
+  readonly category: Readonly<Record<CordisXExtensionPointKind, CordisXLocalizedProjection>>
+  readonly owner: Readonly<{ host: CordisXLocalizedProjection }>
+  readonly status: Readonly<{
+    pending: CordisXLocalizedProjection
+    unavailable: CordisXLocalizedProjection
+    error: CordisXLocalizedProjection
+    denied: CordisXLocalizedProjection
+  }>
 }
 
 interface DescriptorRegistration {
@@ -75,6 +100,37 @@ const PAYLOAD_FAMILIES = new Set<CordisXExtensionPointPayloadFamily>([
 ])
 const STABILITIES = new Set<CordisXExtensionPointStability>(['stable', 'experimental', 'reserved'])
 const AVAILABILITIES = new Set<CordisXExtensionPointAvailability>(['available', 'pending', 'unavailable'])
+const REQUIRED_DESCRIPTOR_LOCALES = Object.freeze(['en', 'zh-CN'] as const)
+
+function messageNamespace(message: CordisXLocalizedText): string {
+  return message.namespace ?? 'host'
+}
+
+function descriptorMessages(descriptor: CordisXHostExtensionPointDescriptorV3): readonly CordisXLocalizedText[] {
+  return [
+    descriptor.title,
+    descriptor.description,
+    ...(descriptor.diagnostic === undefined ? [] : [descriptor.diagnostic]),
+    ...(descriptor.anchors ?? []).flatMap(anchor => anchor.diagnostic === undefined ? [] : [anchor.diagnostic]),
+  ]
+}
+
+/** Fail closed when public descriptor text cannot be projected in every required Host locale. */
+export function assertExtensionPointDescriptorLocalization(
+  descriptor: CordisXHostExtensionPointDescriptorV3,
+  catalogs: readonly CordisXLocaleCatalog[],
+): void {
+  for (const message of descriptorMessages(descriptor)) {
+    const namespace = messageNamespace(message)
+    for (const locale of REQUIRED_DESCRIPTOR_LOCALES) {
+      const catalog = catalogs.find(item => item.namespace === namespace && item.locale === locale)
+      const translated = catalog?.messages[message.key]
+      if (typeof translated !== 'string' || translated.trim() === '') {
+        throw new Error(`extension point ${descriptor.id} message ${namespace}:${message.key} requires ${locale} localization`)
+      }
+    }
+  }
+}
 
 function normalizeAnchor(value: unknown, pointId: string): CordisXHostExtensionPointAnchorDescriptorV2 {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`extension point ${pointId} anchor must be an object`)
@@ -168,6 +224,12 @@ export class ExtensionPointDescriptorRegistry {
   private disposed = false
   private projectionI18n: CordisXI18nService | undefined
 
+  constructor(private readonly localeCatalogs: readonly CordisXLocaleCatalog[]) {
+    if (!Array.isArray(localeCatalogs) || localeCatalogs.length === 0) {
+      throw new Error('CordisX extension point descriptor registry requires locale catalogs')
+    }
+  }
+
   registerCatalog(value: CordisXHostExtensionPointCatalogV1 | CordisXHostExtensionPointCatalogV2 | CordisXHostExtensionPointCatalogV3 | unknown): () => void {
     if (this.disposed) throw new Error('CordisX extension point descriptor registry is disposed')
     const descriptors: CordisXHostExtensionPointDescriptorV3[] = []
@@ -195,6 +257,7 @@ export class ExtensionPointDescriptorRegistry {
             diagnostics.push({ code: 'duplicate-point-id', pointId: descriptor.id, message: `duplicate extension point id across families: ${descriptor.id}` })
             continue
           }
+          assertExtensionPointDescriptorLocalization(descriptor, this.localeCatalogs)
           descriptors.push(descriptor)
         } catch (error) {
           const pointId = candidate !== null && typeof candidate === 'object' && typeof (candidate as { id?: unknown }).id === 'string'
@@ -435,6 +498,7 @@ export interface ExtensionPointAnchorSnapshot extends HostExtensionPointAnchorPr
 
 export interface ExtensionPointRuntimeSnapshot {
   readonly schemaVersion: 1
+  readonly catalogText: ExtensionPointCatalogTextProjection
   readonly points: readonly ExtensionPointSnapshot[]
   readonly policies: readonly CordisXExtensionPointPolicyRecordV1[]
   readonly descriptorDiagnostics: readonly ExtensionPointDescriptorDiagnostic[]
@@ -472,6 +536,21 @@ export function buildExtensionPointRuntimeSnapshot(input: {
   readonly surfaceAvailability?: readonly SurfaceAvailabilitySnapshot[]
 }): ExtensionPointRuntimeSnapshot {
   const projections = input.descriptors.project(input.i18n)
+  const catalogText: ExtensionPointCatalogTextProjection = {
+    category: {
+      surface: input.i18n.resolveFor('host', CATALOG_TEXT.categorySurface, 'extension-point:catalog:category:surface'),
+      outlet: input.i18n.resolveFor('host', CATALOG_TEXT.categoryOutlet, 'extension-point:catalog:category:outlet'),
+    },
+    owner: {
+      host: input.i18n.resolveFor('host', CATALOG_TEXT.ownerHost, 'extension-point:catalog:owner:host'),
+    },
+    status: {
+      pending: input.i18n.resolveFor('host', CATALOG_TEXT.statusPending, 'extension-point:catalog:status:pending'),
+      unavailable: input.i18n.resolveFor('host', CATALOG_TEXT.statusUnavailable, 'extension-point:catalog:status:unavailable'),
+      error: input.i18n.resolveFor('host', CATALOG_TEXT.statusError, 'extension-point:catalog:status:error'),
+      denied: input.i18n.resolveFor('host', CATALOG_TEXT.statusDenied, 'extension-point:catalog:status:denied'),
+    },
+  }
   const points = projections.map((descriptor): ExtensionPointSnapshot => {
     const outlet = descriptor.kind === 'outlet'
       ? input.navigation.outlets.find(item => item.id === descriptor.id)
@@ -548,6 +627,7 @@ export function buildExtensionPointRuntimeSnapshot(input: {
   })
   return {
     schemaVersion: 1,
+    catalogText,
     points,
     policies: input.broker.policiesSnapshot(),
     descriptorDiagnostics: input.descriptors.diagnostics(),
@@ -904,15 +984,17 @@ const ALL_EXTENSION_POINT_DESCRIPTORS: readonly CordisXHostExtensionPointDescrip
   ...CORDISX_MANAGER_EXTENSION_POINT_CATALOG.points,
 ] as const
 
-const EN_MESSAGES = Object.fromEntries(ALL_EXTENSION_POINT_DESCRIPTORS.flatMap(point => [
-  [point.title.key, point.title.fallback!],
-  [point.description.key, point.description.fallback!],
-  ...(point.diagnostic === undefined ? [] : [[point.diagnostic.key, point.diagnostic.fallback!]]),
-  ...(point.anchors ?? []).flatMap(anchor => anchor.diagnostic === undefined ? [] : [[anchor.diagnostic.key, anchor.diagnostic.fallback!]]),
-]))
+const EN_MESSAGES = Object.fromEntries([
+  ...ALL_EXTENSION_POINT_DESCRIPTORS.flatMap(point => [
+    [point.title.key, point.title.fallback!],
+    [point.description.key, point.description.fallback!],
+    ...(point.diagnostic === undefined ? [] : [[point.diagnostic.key, point.diagnostic.fallback!]]),
+    ...(point.anchors ?? []).flatMap(anchor => anchor.diagnostic === undefined ? [] : [[anchor.diagnostic.key, anchor.diagnostic.fallback!]]),
+  ]),
+  ...Object.values(CATALOG_TEXT).map(message => [message.key, message.fallback!]),
+])
 
 const ZH_MESSAGES: Readonly<Record<string, string>> = {
-  ...EN_MESSAGES,
   'sidebar.footer.before-control.title': '侧边栏底部前置操作',
   'sidebar.footer.before-control.description': '在侧边栏底部指定控件左侧添加紧凑操作。',
   'sidebar.footer.after-control.title': '侧边栏底部后置操作',
@@ -923,12 +1005,42 @@ const ZH_MESSAGES: Readonly<Record<string, string>> = {
   'sidebar.account.menu.description': '向原生账户或个人资料菜单添加宿主渲染命令。',
   'sidebar.navigation.items.title': '侧边栏导航',
   'sidebar.navigation.items.description': '添加带主操作和独立快捷操作的导航条目。',
+  'sidebar.workspace.menu.title': '工作区菜单',
+  'sidebar.workspace.menu.description': '当原生位置已定位时，向工作区菜单添加由宿主渲染的条目。',
+  'sidebar.session.actions.title': '会话条目操作',
+  'sidebar.session.actions.description': '向已识别的原生会话条目添加上下文操作。',
+  'sidebar.session.menu.title': '会话条目菜单',
+  'sidebar.session.menu.description': '向已识别的原生会话菜单添加上下文条目。',
   'workspace.toolbar.items.title': '工作区工具栏',
   'workspace.toolbar.items.description': '在语义工具栏锚点前后或菜单中添加操作。',
   'session.header.actions.title': '会话标题操作',
   'session.header.actions.description': '向当前原生会话标题添加由宿主渲染的操作和工具分组。',
+  'session.tabs.title': '会话标签页',
+  'session.tabs.description': '添加由宿主导航和渲染的受控视图入口。',
+  'session.banner.items.title': '会话横幅',
+  'session.banner.items.description': '向当前会话添加有限的结构化横幅。',
+  'session.message.actions.title': '消息操作',
+  'session.message.actions.description': '向具有规范标识的消息添加上下文操作。',
+  'session.turn.footer.title': '轮次尾部',
+  'session.turn.footer.description': '在具有规范标识的轮次之后添加结构化展示项。',
+  'session.tool.actions.title': '工具项操作',
+  'session.tool.actions.description': '向具有规范标识的工具项添加上下文操作。',
   'composer.toolbar.items.title': '输入区工具栏',
   'composer.toolbar.items.description': '在已验证的语义输入区锚点添加由宿主渲染的操作。',
+  'composer.command-menu.items.title': '输入区命令菜单',
+  'composer.command-menu.items.description': '向现有原生输入区命令菜单添加由宿主渲染的条目。',
+  'composer.dock.above.title': '输入区上方停靠区',
+  'composer.dock.above.description': '在输入区上方添加有限的结构化展示项。',
+  'composer.dock.below.title': '输入区下方停靠区',
+  'composer.dock.below.description': '在输入区下方添加有限的结构化展示项。',
+  'panel.right.header-actions.title': '右侧面板操作',
+  'panel.right.header-actions.description': '向已验证且可见的右侧面板标题区添加上下文操作。',
+  'panel.right.tabs.title': '右侧面板标签页',
+  'panel.right.tabs.description': '向右侧面板添加由宿主控制的标签页。',
+  'panel.bottom.header-actions.title': '底部面板操作',
+  'panel.bottom.header-actions.description': '向已验证且可见的底部面板标题区添加上下文操作。',
+  'panel.bottom.tabs.title': '底部面板标签页',
+  'panel.bottom.tabs.description': '向底部面板添加由宿主控制的标签页。',
   'environment.panel.header-actions.title': '环境面板标题操作',
   'environment.panel.header-actions.description': '向环境面板标题区添加命令操作。',
   'environment.panel.sections.title': '环境面板分区',
@@ -945,6 +1057,10 @@ const ZH_MESSAGES: Readonly<Record<string, string>> = {
   'outlet.main.description': '在侧边栏右侧区域覆盖 CordisX 页面，并跟随当前主上下文。',
   'outlet.session.content.title': '会话内容页面',
   'outlet.session.content.description': '在当前会话标题下方覆盖 CordisX 页面，同时保留侧边和底部面板。',
+  'outlet.panel.right.content.title': '右侧面板内容',
+  'outlet.panel.right.content.description': '在右侧面板承载受控的可信本地页面内容。',
+  'outlet.panel.bottom.content.title': '底部面板内容',
+  'outlet.panel.bottom.content.description': '在底部面板承载受控的可信本地页面内容。',
   'manager.settings.tabs.title': '管理器配置标签页',
   'manager.settings.tabs.description': '向 CordisX 管理器配置页添加由宿主统一渲染的结构化标签。',
   'manager.settings.content.title': '管理器配置内容',
@@ -954,6 +1070,13 @@ const ZH_MESSAGES: Readonly<Record<string, string>> = {
   'diagnostic.message-identity': '当前无法取得规范消息标识。',
   'diagnostic.reserved': '协议已保留该点位；当前宿主未开放安全位置。',
   'diagnostic.tool-identity': '当前无法取得规范工具标识。',
+  'catalog.category.surface': '界面点位',
+  'catalog.category.outlet': '页面出口',
+  'catalog.owner.host': 'CordisX 宿主',
+  'catalog.status.pending': '待定位',
+  'catalog.status.unavailable': '不可用',
+  'catalog.status.error': '需要处理',
+  'catalog.status.denied': '访问已拒绝',
 }
 
 export const CORDISX_EXTENSION_POINT_LOCALE_CATALOGS: readonly CordisXLocaleCatalog[] = Object.freeze([
