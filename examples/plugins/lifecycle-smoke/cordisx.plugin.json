@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v1.schema.json",
+  "schemaVersion": 1,
+  "id": "lifecycle-smoke",
+  "version": "1.0.0",
+  "entry": "./index.ts",
+  "readme": "./README.md",
+  "canonicalSource": "https://github.com/cordisx/cordisx/tree/main/examples/plugins/lifecycle-smoke",
+  "compatibility": {
+    "runtimeAbi": 1,
+    "protocol": 1
+  },
+  "dependencies": [],
+  "runtimeManifest": {
+    "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v1.schema.json",
+    "schemaVersion": 1,
+    "id": "lifecycle-smoke",
+    "name": "Lifecycle Smoke",
+    "capabilities": [
+      {
+        "name": "models.read",
+        "required": false,
+        "reason": {
+          "key": "permission.models",
+          "fallback": "Exercise optional permission review during local package installation"
+        },
+        "scope": {}
+      }
+    ]
+  }
+}
