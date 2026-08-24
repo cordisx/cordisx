@@ -9,9 +9,32 @@ import {
   type MarketplaceOfficialRecord,
   type MarketplaceTrustEvaluation,
 } from './marketplace-trust.js'
+import {
+  BrowserMarketplaceFeedCache,
+  marketplaceCacheAge,
+} from './marketplace-cache.js'
+import {
+  BrowserMarketplaceSourceStore,
+  OFFICIAL_MARKETPLACE_SOURCE,
+  normalizeMarketplaceSource,
+  parseMarketplaceSourceImport,
+  type MarketplaceSourceRecord,
+  type MarketplaceStorage,
+} from './marketplace-source.js'
 
-export const OFFICIAL_MARKETPLACE_SOURCE = 'https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json'
-export const MARKETPLACE_SOURCES_KEY = 'cordisx.manager.marketplaceSources.v1'
+export {
+  MARKETPLACE_SOURCE_RECORDS_KEY,
+  MARKETPLACE_SOURCE_SCHEMA_V1,
+  MARKETPLACE_SOURCES_KEY,
+  OFFICIAL_MARKETPLACE_SOURCE,
+  isOfficialMarketplaceSource,
+  normalizeMarketplaceSource,
+  parseMarketplaceSourceImport,
+  type MarketplaceSourceImportV1,
+  type MarketplaceSourceLocalOverrides,
+  type MarketplaceSourceRecord,
+  type MarketplaceStorage,
+} from './marketplace-source.js'
 
 const MAX_FEED_BYTES = 2 * 1024 * 1024
 const PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/
@@ -115,13 +138,28 @@ export interface MarketplaceCatalogSearchResult {
 export interface MarketplaceSourceSnapshot {
   readonly url: string
   readonly status: 'loading' | 'loaded' | 'failed'
+  readonly phase: 'disabled' | 'idle' | 'revalidating' | 'fresh' | 'stale' | 'error'
+  readonly enabled: boolean
+  readonly official: boolean
+  readonly stale: boolean
+  readonly revalidating: boolean
+  readonly attempts: number
+  readonly local?: MarketplaceSourceRecord['local']
   readonly name?: string
   readonly fallbackLocale?: string
   readonly localizations?: Readonly<Record<string, MarketplaceFeedLocalization>>
   readonly homepage?: string
   readonly pluginCount?: number
   readonly trusted?: boolean
+  readonly lastSuccessAt?: string
   readonly error?: string
+}
+
+export interface MarketplaceSourceProjection {
+  readonly name: string
+  readonly description?: string
+  readonly note?: string
+  readonly searchValues: readonly string[]
 }
 
 export interface MarketplaceDuplicate {
@@ -132,23 +170,26 @@ export interface MarketplaceDuplicate {
 
 export interface MarketplaceSnapshot {
   readonly sources: readonly string[]
+  readonly sourceRecords: readonly MarketplaceSourceRecord[]
   readonly sourceStates: readonly MarketplaceSourceSnapshot[]
   readonly plugins: readonly MarketplaceCatalogPlugin[]
   readonly duplicates: readonly MarketplaceDuplicate[]
   readonly loading: boolean
+  readonly revalidating: boolean
 }
 
 export interface MarketplaceModel {
   snapshot(): MarketplaceSnapshot
   setSources(sources: readonly string[]): Promise<void>
+  setSourceRecords(sources: readonly MarketplaceSourceRecord[]): Promise<void>
+  upsertSource(source: MarketplaceSourceRecord): Promise<void>
+  removeSource(url: string): Promise<void>
+  setSourceEnabled(url: string, enabled: boolean): Promise<void>
+  moveSource(url: string, targetIndex: number): Promise<void>
+  importSource(value: string): Promise<MarketplaceSourceRecord>
   reload(): Promise<void>
   subscribe(listener: () => void): () => void
   dispose(): void
-}
-
-export interface MarketplaceStorage {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
 }
 
 export interface MarketplaceResponse {
@@ -178,6 +219,13 @@ export interface MarketplaceFeedParseOptions {
 interface LoadResult {
   readonly state: MarketplaceSourceSnapshot
   readonly feed?: ParsedFeed
+}
+
+export interface MarketplaceModelOptions {
+  readonly now?: () => number
+  readonly sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>
+  readonly retryDelays?: readonly number[]
+  readonly staleAfterMs?: number
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -353,6 +401,7 @@ export function projectMarketplacePlugin(plugin: MarketplaceCatalogPlugin, curre
 }
 
 export function projectMarketplaceSourceName(source: MarketplaceSourceSnapshot, currentLocale: string): string | undefined {
+  if (source.local?.name !== undefined) return source.local.name
   if (source.name === undefined) return undefined
   return projectLocalizedField(
     source.name,
@@ -361,6 +410,42 @@ export function projectMarketplaceSourceName(source: MarketplaceSourceSnapshot, 
     currentLocale,
     source.fallbackLocale ?? 'en',
   )
+}
+
+/** Project remote feed metadata with profile-local overrides without changing source identity or trust. */
+export function projectMarketplaceSource(source: MarketplaceSourceSnapshot, currentLocale: string): MarketplaceSourceProjection {
+  const remoteName = source.name === undefined
+    ? undefined
+    : projectLocalizedField(
+      source.name,
+      source.localizations ?? Object.freeze({}),
+      'name',
+      currentLocale,
+      source.fallbackLocale ?? 'en',
+    )
+  const officialChinese = canonicalDisplayLocale(currentLocale).toLowerCase().startsWith('zh')
+  const name = source.local?.name
+    ?? remoteName
+    ?? (source.official ? (officialChinese ? 'CordisX 官方插件商店' : 'CordisX Official Marketplace') : new URL(source.url).hostname)
+  const description = source.local?.description
+    ?? (source.official
+      ? (officialChinese ? '由 CordisX 维护的默认插件发现来源。' : 'The default plugin discovery source maintained by CordisX.')
+      : undefined)
+  const searchValues = [
+    name,
+    description ?? '',
+    source.local?.note ?? '',
+    remoteName ?? '',
+    source.name ?? '',
+    source.url,
+    new URL(source.url).hostname,
+  ].filter(value => value !== '')
+  return Object.freeze({
+    name,
+    ...(description === undefined ? {} : { description }),
+    ...(source.local?.note === undefined ? {} : { note: source.local.note }),
+    searchValues: Object.freeze([...new Set(searchValues)]),
+  })
 }
 
 interface MarketplaceCatalogRankingCandidate extends MarketplaceSearchCandidate {
@@ -431,15 +516,6 @@ function parseArtifact(value: unknown, label: string): MarketplaceArtifact | und
   const integrity = requiredString(artifact.integrity, `${label}.integrity`, 71)
   if (!/^sha256:[a-f0-9]{64}$/.test(integrity)) throw new Error(`${label}.integrity 必须是 sha256 digest`)
   return { publisherIdentity, packageNamespace, packageName, downloadUrl, integrity }
-}
-
-/** Normalize a configured JSON feed URL. Feed query parameters are allowed; credentials and fragments are not. */
-export function normalizeMarketplaceSource(value: string): string {
-  const url = new URL(value)
-  if (url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.hash !== '') {
-    throw new Error('插件商店地址必须是无凭据、无 fragment 的 HTTPS URL')
-  }
-  return url.href
 }
 
 /** Canonical plugin source used with the lowercase plugin id as cross-feed identity. */
@@ -591,56 +667,79 @@ export function parseMarketplaceFeed(value: unknown, options?: MarketplaceFeedPa
   return { schemaVersion, fallbackLocale, name, localizations, homepage, plugins, ...(trust === undefined ? {} : { trust }) }
 }
 
-function normalizeSources(sources: readonly string[]): string[] {
-  const result: string[] = []
-  const seen = new Set<string>()
-  for (const source of sources) {
-    const normalized = normalizeMarketplaceSource(source.trim())
-    if (seen.has(normalized)) continue
-    seen.add(normalized)
-    result.push(normalized)
+const DEFAULT_RETRY_DELAYS = Object.freeze([250, 1_000])
+const DEFAULT_STALE_AFTER_MS = 5 * 60_000
+
+class MarketplaceLoadError extends Error {
+  constructor(message: string, readonly retryable: boolean) {
+    super(message)
   }
-  return result
 }
 
-function readSources(storage: MarketplaceStorage | undefined): string[] {
-  if (storage === undefined) return [OFFICIAL_MARKETPLACE_SOURCE]
-  try {
-    const stored = storage.getItem(MARKETPLACE_SOURCES_KEY)
-    if (stored === null) return [OFFICIAL_MARKETPLACE_SOURCE]
-    const value = JSON.parse(stored) as unknown
-    if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) return [OFFICIAL_MARKETPLACE_SOURCE]
-    return normalizeSources(value)
-  } catch {
-    return [OFFICIAL_MARKETPLACE_SOURCE]
+async function abortableSleep(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, milliseconds)
+    signal.addEventListener('abort', () => {
+      clearTimeout(timer)
+      resolve()
+    }, { once: true })
+  })
+}
+
+function sourceIdentity(record: MarketplaceSourceRecord): Pick<MarketplaceSourceSnapshot, 'url' | 'enabled' | 'official' | 'local'> {
+  return {
+    url: record.url,
+    enabled: record.enabled,
+    official: record.url === OFFICIAL_MARKETPLACE_SOURCE,
+    ...(record.local === undefined ? {} : { local: record.local }),
   }
 }
 
 export class BrowserMarketplaceModel implements MarketplaceModel {
-  private sources: string[]
+  private readonly sourceStore: BrowserMarketplaceSourceStore
+  private readonly cache: BrowserMarketplaceFeedCache
+  private sourceRecords: MarketplaceSourceRecord[]
   private sourceStates: MarketplaceSourceSnapshot[]
   private plugins: MarketplaceCatalogPlugin[] = []
   private duplicates: MarketplaceDuplicate[] = []
+  private readonly loaded = new Map<string, LoadResult>()
   private readonly listeners = new Set<() => void>()
   private generation = 0
   private controller: AbortController | undefined
+  private refreshPromise: Promise<void> | undefined
+  private readonly now: () => number
+  private readonly sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>
+  private readonly retryDelays: readonly number[]
+  private readonly staleAfterMs: number
 
   constructor(
-    private readonly storage: MarketplaceStorage | undefined,
+    storage: MarketplaceStorage | undefined,
     private readonly fetcher: MarketplaceFetcher | undefined,
     private readonly trustedRoots: readonly string[] = [OFFICIAL_MARKETPLACE_SOURCE],
+    options: MarketplaceModelOptions = {},
   ) {
-    this.sources = readSources(storage)
-    this.sourceStates = this.sources.map(url => ({ url, status: 'loading' }))
+    this.sourceStore = new BrowserMarketplaceSourceStore(storage)
+    this.cache = new BrowserMarketplaceFeedCache(storage)
+    this.sourceRecords = [...this.sourceStore.snapshot()]
+    this.sourceStates = []
+    this.now = options.now ?? Date.now
+    this.sleep = options.sleep ?? abortableSleep
+    this.retryDelays = options.retryDelays ?? DEFAULT_RETRY_DELAYS
+    this.staleAfterMs = options.staleAfterMs ?? DEFAULT_STALE_AFTER_MS
+    this.cache.prune(this.sourceRecords.map(source => source.url))
+    this.hydrate()
   }
 
   snapshot(): MarketplaceSnapshot {
     return {
-      sources: [...this.sources],
+      sources: this.sourceRecords.map(source => source.url),
+      sourceRecords: this.sourceRecords.map(source => Object.freeze({ ...source, ...(source.local === undefined ? {} : { local: Object.freeze({ ...source.local }) }) })),
       sourceStates: [...this.sourceStates],
       plugins: [...this.plugins],
       duplicates: [...this.duplicates],
       loading: this.sourceStates.some(source => source.status === 'loading'),
+      revalidating: this.sourceStates.some(source => source.revalidating),
     }
   }
 
@@ -650,70 +749,265 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
   }
 
   async setSources(sources: readonly string[]): Promise<void> {
-    this.sources = normalizeSources(sources)
-    this.storage?.setItem(MARKETPLACE_SOURCES_KEY, JSON.stringify(this.sources))
-    await this.reload()
+    const previous = new Map(this.sourceRecords.map(source => [source.url, source]))
+    const seen = new Set<string>()
+    const records: MarketplaceSourceRecord[] = []
+    for (const value of sources) {
+      const url = normalizeMarketplaceSource(value.trim())
+      if (seen.has(url)) continue
+      seen.add(url)
+      records.push(previous.get(url) ?? { url, enabled: true })
+    }
+    await this.replaceRecords(this.sourceStore.replace(records))
+  }
+
+  async setSourceRecords(sources: readonly MarketplaceSourceRecord[]): Promise<void> {
+    await this.replaceRecords(this.sourceStore.replace(sources))
+  }
+
+  async upsertSource(source: MarketplaceSourceRecord): Promise<void> {
+    await this.replaceRecords(this.sourceStore.upsert(source))
+  }
+
+  async removeSource(url: string): Promise<void> {
+    await this.replaceRecords(this.sourceStore.remove(url))
+  }
+
+  async setSourceEnabled(url: string, enabled: boolean): Promise<void> {
+    await this.replaceRecords(this.sourceStore.setEnabled(url, enabled))
+  }
+
+  async moveSource(url: string, targetIndex: number): Promise<void> {
+    await this.replaceRecords(this.sourceStore.move(url, targetIndex))
+  }
+
+  async importSource(value: string): Promise<MarketplaceSourceRecord> {
+    const source = parseMarketplaceSourceImport(value)
+    await this.upsertSource(source)
+    return source
   }
 
   async reload(): Promise<void> {
+    if (this.refreshPromise !== undefined) return await this.refreshPromise
     const generation = ++this.generation
     this.controller?.abort()
     const controller = new AbortController()
     this.controller = controller
-    this.sourceStates = this.sources.map(url => ({ url, status: 'loading' }))
-    this.plugins = []
-    this.duplicates = []
+    this.sourceStates = this.sourceRecords.map((source): MarketplaceSourceSnapshot => {
+      if (!source.enabled) return this.disabledState(source)
+      const previous = this.loaded.get(source.url)
+      return {
+        ...sourceIdentity(source),
+        status: previous?.feed === undefined ? 'loading' : 'loaded',
+        phase: 'revalidating',
+        stale: previous?.state.stale ?? false,
+        revalidating: true,
+        attempts: 0,
+        ...(previous?.state.name === undefined ? {} : { name: previous.state.name }),
+        ...(previous?.state.fallbackLocale === undefined ? {} : { fallbackLocale: previous.state.fallbackLocale }),
+        ...(previous?.state.localizations === undefined ? {} : { localizations: previous.state.localizations }),
+        ...(previous?.state.homepage === undefined ? {} : { homepage: previous.state.homepage }),
+        ...(previous?.state.pluginCount === undefined ? {} : { pluginCount: previous.state.pluginCount }),
+        ...(previous?.state.trusted === undefined ? {} : { trusted: previous.state.trusted }),
+        ...(previous?.state.lastSuccessAt === undefined ? {} : { lastSuccessAt: previous.state.lastSuccessAt }),
+      }
+    })
     this.notify()
 
-    const results = await Promise.all(this.sources.map(async (url): Promise<LoadResult> => {
-      if (this.fetcher === undefined) return { state: { url, status: 'failed', error: '当前 renderer 不提供 fetch' } }
+    const task = (async (): Promise<void> => {
+      const results = await Promise.all(this.sourceRecords.map(async (source): Promise<LoadResult> => {
+        if (!source.enabled) return { state: this.disabledState(source) }
+        return await this.load(source, controller.signal, this.loaded.get(source.url))
+      }))
+      if (generation !== this.generation) return
+      this.loaded.clear()
+      results.forEach((result, index) => {
+        const source = this.sourceRecords[index]
+        if (source?.enabled === true && result.feed !== undefined) this.loaded.set(source.url, result)
+      })
+      this.sourceStates = results.map(result => result.state)
+      this.rebuildCatalog()
+      this.notify()
+    })()
+    this.refreshPromise = task
+    try {
+      await task
+    } finally {
+      if (this.refreshPromise === task) this.refreshPromise = undefined
+    }
+  }
+
+  dispose(): void {
+    this.generation += 1
+    this.controller?.abort()
+    this.controller = undefined
+    this.refreshPromise = undefined
+    this.listeners.clear()
+  }
+
+  private async replaceRecords(records: readonly MarketplaceSourceRecord[]): Promise<void> {
+    this.generation += 1
+    this.controller?.abort()
+    this.controller = undefined
+    this.refreshPromise = undefined
+    this.sourceRecords = [...records]
+    this.cache.prune(this.sourceRecords.map(source => source.url))
+    this.hydrate()
+    this.notify()
+    await this.reload()
+  }
+
+  private hydrate(): void {
+    this.loaded.clear()
+    this.sourceStates = this.sourceRecords.map((source): MarketplaceSourceSnapshot => {
+      if (!source.enabled) return this.disabledState(source)
+      const cached = this.cache.get(source.url)
+      if (cached === undefined) return this.idleState(source)
       try {
-        const response = await this.fetcher(url, {
-          headers: { accept: 'application/json' },
-          signal: controller.signal,
-        })
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        const text = await response.text()
-        if (new Blob([text]).size > MAX_FEED_BYTES) throw new Error('feed 超过 2 MiB 限制')
-        const feed = parseMarketplaceFeed(JSON.parse(text) as unknown, { feedUrl: url, trustedRoots: this.trustedRoots })
-        return {
-          state: {
-            url,
-            status: 'loaded',
-            name: feed.name,
-            fallbackLocale: feed.fallbackLocale,
-            localizations: feed.localizations,
-            homepage: feed.homepage,
-            pluginCount: feed.plugins.length,
-            ...(feed.trust === undefined ? {} : { trusted: feed.trust.trusted }),
-          },
+        const feed = parseMarketplaceFeed(JSON.parse(cached.text) as unknown, { feedUrl: source.url, trustedRoots: this.trustedRoots })
+        const stale = marketplaceCacheAge(cached, this.now()) > this.staleAfterMs
+        const result: LoadResult = {
+          state: this.feedState(source, feed, stale ? 'stale' : 'fresh', 0, cached.storedAt),
           feed,
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        return { state: { url, status: 'failed', error: message } }
+        this.loaded.set(source.url, result)
+        return result.state
+      } catch {
+        this.cache.delete(source.url)
+        return this.idleState(source)
       }
-    }))
-    if (generation !== this.generation) return
+    })
+    this.rebuildCatalog()
+  }
 
+  private idleState(source: MarketplaceSourceRecord): MarketplaceSourceSnapshot {
+    return {
+      ...sourceIdentity(source),
+      status: 'loading',
+      phase: 'idle',
+      stale: false,
+      revalidating: false,
+      attempts: 0,
+    }
+  }
+
+  private disabledState(source: MarketplaceSourceRecord): MarketplaceSourceSnapshot {
+    return {
+      ...sourceIdentity(source),
+      status: 'loaded',
+      phase: 'disabled',
+      stale: false,
+      revalidating: false,
+      attempts: 0,
+    }
+  }
+
+  private feedState(
+    source: MarketplaceSourceRecord,
+    feed: ParsedFeed,
+    phase: 'fresh' | 'stale',
+    attempts: number,
+    storedAt: number,
+    error?: string,
+  ): MarketplaceSourceSnapshot {
+    return {
+      ...sourceIdentity(source),
+      status: 'loaded',
+      phase,
+      stale: phase === 'stale',
+      revalidating: false,
+      attempts,
+      name: feed.name,
+      fallbackLocale: feed.fallbackLocale,
+      localizations: feed.localizations,
+      homepage: feed.homepage,
+      pluginCount: feed.plugins.length,
+      ...(feed.trust === undefined ? {} : { trusted: feed.trust.trusted }),
+      lastSuccessAt: new Date(storedAt).toISOString(),
+      ...(error === undefined ? {} : { error }),
+    }
+  }
+
+  private async load(source: MarketplaceSourceRecord, signal: AbortSignal, previous: LoadResult | undefined): Promise<LoadResult> {
+    let attempts = 0
+    let lastError = '插件商店加载失败'
+    const totalAttempts = this.retryDelays.length + 1
+    for (let index = 0; index < totalAttempts; index += 1) {
+      attempts = index + 1
+      try {
+        const loaded = await this.loadOnce(source.url, signal)
+        const storedAt = this.now()
+        this.cache.set({ url: source.url, text: loaded.text, storedAt })
+        return { state: this.feedState(source, loaded.feed, 'fresh', attempts, storedAt), feed: loaded.feed }
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error)
+        const retryable = error instanceof MarketplaceLoadError && error.retryable && !signal.aborted
+        const delay = this.retryDelays[index]
+        if (!retryable || delay === undefined) break
+        await this.sleep(delay, signal)
+      }
+    }
+    if (previous?.feed !== undefined) {
+      const lastSuccess = previous.state.lastSuccessAt === undefined ? this.now() : Date.parse(previous.state.lastSuccessAt)
+      return {
+        state: this.feedState(source, previous.feed, 'stale', attempts, Number.isFinite(lastSuccess) ? lastSuccess : this.now(), lastError),
+        feed: previous.feed,
+      }
+    }
+    return {
+      state: {
+        ...sourceIdentity(source),
+        status: 'failed',
+        phase: 'error',
+        stale: false,
+        revalidating: false,
+        attempts,
+        error: lastError,
+      },
+    }
+  }
+
+  private async loadOnce(url: string, signal: AbortSignal): Promise<{ readonly feed: ParsedFeed; readonly text: string }> {
+    if (this.fetcher === undefined) throw new MarketplaceLoadError('当前 renderer 不提供 fetch', false)
+    let response: MarketplaceResponse
+    try {
+      response = await this.fetcher(url, { headers: { accept: 'application/json' }, signal })
+    } catch (error) {
+      throw new MarketplaceLoadError(error instanceof Error ? error.message : String(error), true)
+    }
+    if (!response.ok) throw new MarketplaceLoadError(`HTTP ${response.status}`, response.status === 408 || response.status === 429 || response.status >= 500)
+    let text: string
+    try { text = await response.text() } catch (error) {
+      throw new MarketplaceLoadError(error instanceof Error ? error.message : String(error), true)
+    }
+    if (new Blob([text]).size > MAX_FEED_BYTES) throw new MarketplaceLoadError('feed 超过 2 MiB 限制', false)
+    try {
+      const feed = parseMarketplaceFeed(JSON.parse(text) as unknown, { feedUrl: url, trustedRoots: this.trustedRoots })
+      return { feed, text }
+    } catch (error) {
+      throw new MarketplaceLoadError(error instanceof Error ? error.message : String(error), false)
+    }
+  }
+
+  private rebuildCatalog(): void {
     const winners = new Map<string, MarketplaceCatalogPlugin>()
     const duplicates: MarketplaceDuplicate[] = []
-    for (let index = 0; index < results.length; index += 1) {
-      const result = results[index]
-      const feedUrl = this.sources[index]
-      if (result?.feed === undefined || feedUrl === undefined) continue
+    for (const source of this.sourceRecords) {
+      if (!source.enabled) continue
+      const result = this.loaded.get(source.url)
+      if (result?.feed === undefined) continue
       for (const plugin of result.feed.plugins) {
         const identity = marketplacePluginIdentity(plugin.source, plugin.id)
         const pluginTrust = result.feed.trust?.byPluginIdentity.get(identity)
         const winner = winners.get(identity)
         if (winner !== undefined) {
-          duplicates.push({ identity, winnerFeedUrl: winner.feedUrl, duplicateFeedUrl: feedUrl })
+          duplicates.push({ identity, winnerFeedUrl: winner.feedUrl, duplicateFeedUrl: source.url })
           continue
         }
         winners.set(identity, {
           ...plugin,
           identity,
-          feedUrl,
+          feedUrl: source.url,
           feedName: result.feed.name,
           feedFallbackLocale: result.feed.fallbackLocale,
           feedLocalizations: result.feed.localizations,
@@ -723,17 +1017,8 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
         })
       }
     }
-    this.sourceStates = results.map(result => result.state)
     this.plugins = [...winners.values()]
     this.duplicates = duplicates
-    this.notify()
-  }
-
-  dispose(): void {
-    this.generation += 1
-    this.controller?.abort()
-    this.controller = undefined
-    this.listeners.clear()
   }
 
   private notify(): void {
