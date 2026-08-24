@@ -77,6 +77,25 @@ function installFixture(records?: readonly unknown[], locale?: string): { readon
 }
 
 describe('Manager Marketplace discovery and source IA', () => {
+  it.each([
+    ['en-US', ['Plugins', 'Extension points', 'Routes', 'Marketplace', 'About CordisX']],
+    ['zh-CN', ['插件', '扩展点', '路由', '插件商店', '关于 CordisX']],
+  ])('uses locale-first Manager and Marketplace chrome for %s', async (locale, navigation) => {
+    const { dom, dispose } = installFixture([], locale)
+    try {
+      expect([...dom.window.document.querySelectorAll<HTMLElement>('.cxm-nav-label')].map(item => item.textContent)).toEqual(navigation)
+      dom.window.document.querySelector<HTMLButtonElement>('[data-tab="marketplace"]')!.click()
+      await waitFor(() => dom.window.document.querySelector('[data-marketplace-discovery-page]') !== null)
+      const page = dom.window.document.querySelector<HTMLElement>('[data-marketplace-discovery-page]')!
+      expect(page.textContent).toContain(managerCopy(locale, 'marketplace.filter-certified-only'))
+      expect(page.textContent).toContain(managerCopy(locale, 'marketplace.no-plugins'))
+      expect([...page.querySelectorAll('a, button')].map(item => item.textContent).join(' ')).not.toMatch(/docs|文档/iu)
+    } finally {
+      dispose()
+      dom.window.close()
+    }
+  })
+
   it('keeps discovery controls fixed, scrolls only results, and opens the Host-owned source menu portal', async () => {
     const { dom, dispose } = installFixture([
       { url: OFFICIAL_MARKETPLACE_SOURCE, enabled: true },

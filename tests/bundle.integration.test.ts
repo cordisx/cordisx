@@ -735,7 +735,7 @@ describe('renderer bundle', () => {
     expect(pluginActions.map(action => action.dataset.pluginAction)).toEqual(['disable', 'favorite', 'reload'])
     expect(pluginActions.find(action => action.dataset.pluginAction === 'disable')).toMatchObject({ disabled: true })
     expect(pluginActions.find(action => action.dataset.pluginAction === 'reload')).toMatchObject({ disabled: true })
-    expect(pluginActions.find(action => action.dataset.pluginAction === 'reload')?.getAttribute('aria-label')).toMatch(/动态 package generation/)
+    expect(pluginActions.find(action => action.dataset.pluginAction === 'reload')?.getAttribute('aria-label')).toBe('重载插件：当前不可用')
     expect(pluginActions.every(action => action.querySelector('[data-material-icon]') !== null)).toBe(true)
     expect(pluginActions.find(action => action.dataset.pluginAction === 'favorite')?.getAttribute('aria-pressed')).toBe('false')
     pluginActions.find(action => action.dataset.pluginAction === 'favorite')?.click()
@@ -1139,7 +1139,7 @@ describe('renderer bundle', () => {
     for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-marketplace-plugin="slot-showcase"]') === null; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
-    expect(managerModal?.textContent).toContain('发现适用于 CordisX 的插件')
+    expect(managerModal?.textContent).toContain('发现插件')
     expect(managerModal?.textContent).toContain('点位展示目录')
     expect(managerModal?.textContent).not.toContain('Marketplace hierarchy fixture')
     expect(managerModal?.querySelector('.cxm-feed-summary')).toBeNull()

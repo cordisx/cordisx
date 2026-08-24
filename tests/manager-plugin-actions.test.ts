@@ -104,15 +104,21 @@ describe('Manager plugin card actions', () => {
       expect(primary.querySelector('.cxc-machine-id')?.textContent).toBe('base')
       expect(primary.querySelector('.cxc-status')?.getAttribute('data-tone')).toBe('success')
       expect(primary.textContent).not.toContain('运行中')
+      expect([...card.querySelectorAll<HTMLButtonElement>('[data-plugin-action]')].map(button => button.getAttribute('aria-label')))
+        .toEqual(['Disable plugin', 'Favorite plugin', 'Reload plugin'])
+      expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain('Plugins')
+      expect(dom.window.document.querySelector('[role="list"]')?.getAttribute('aria-label')).toBe('Current bundle plugins')
+      expect(dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="plugins"]')?.getAttribute('aria-label')).toBe('Search plugins')
+      expect(dom.window.document.querySelector('[data-collection-search="plugins"]')?.parentElement?.querySelector('.cxc-search-clear')?.getAttribute('aria-label')).toBe('Clear plugin search')
       const importButton = dom.window.document.querySelector<HTMLButtonElement>('[data-import-local-plugin]')!
       expect(importButton.textContent).toBe('')
-      expect(importButton.getAttribute('aria-label')).toBe('导入本地插件')
+      expect(importButton.getAttribute('aria-label')).toBe('Import local plugin')
       expect(importButton.classList.contains('cxm-manager-icon-action')).toBe(true)
       expect(importButton.classList.contains('cxm-toolbar-icon-action')).toBe(true)
       expect(importButton.querySelector('[data-material-icon="import-plugin"]')).not.toBeNull()
       importButton.focus()
       await new Promise(resolve => setTimeout(resolve, 680))
-      expect(dom.window.document.querySelector('[role="tooltip"]')?.textContent).toBe('导入本地插件')
+      expect(dom.window.document.querySelector('[role="tooltip"]')?.textContent).toBe('Import local plugin')
       importButton.blur()
       const managerStyles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
       expect(managerStyles).toContain('.cxm-toolbar > .cxm-action { height: 38px; }')
@@ -334,7 +340,7 @@ describe('Manager plugin card actions', () => {
     }
   })
 
-  it('labels unavailable package operations precisely instead of presenting an inert menu', () => {
+  it('labels unavailable package operations without exposing implementation details', () => {
     const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
     const state = snapshot()
     state.plugins[0] = { ...state.plugins[0]!, package: undefined }
@@ -351,7 +357,7 @@ describe('Manager plugin card actions', () => {
         const item = popup.querySelector<HTMLButtonElement>(`[data-collection-action="${action}"]`)!
         expect(item.disabled).toBe(true)
         expect(item.getAttribute('aria-disabled')).toBe('true')
-        expect(item.getAttribute('aria-description')).toContain('Package Store')
+        expect(item.getAttribute('aria-description')).toBe('Currently unavailable')
       }
       expect(popup.querySelector<HTMLButtonElement>('[data-collection-action="diagnostics"]')!.disabled).toBe(false)
     } finally {
