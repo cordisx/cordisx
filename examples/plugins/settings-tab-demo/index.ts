@@ -1,4 +1,5 @@
 import type { Context, Disposable } from '@deepseek-ai/cordis'
+import Schema from '@deepseek-ai/schemastery'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   type CordisXLocalizedText,
@@ -9,6 +10,17 @@ import {
 
 export const name = 'settings-tab-demo'
 export const inject = ['i18n', 'slots', 'pages', 'routes']
+export const Config = Schema.object({
+  demoValue: Schema.string().default('CordisX').min(1).max(64).pattern(/\S/u)
+    .extra('extra', { label: { en: 'Demo value', 'zh-CN': '演示值' } })
+    .description('Initial value shown inside the controlled settings page.')
+    .i18n({
+      en: 'Initial value shown inside the controlled settings page.',
+      'zh-CN': '受控设置页面内显示的初始值。',
+    }),
+})
+export type SettingsTabDemoConfig = Schemastery.TypeT<typeof Config>
+export const configApplies = 'restart'
 export const manifest = {
   $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   schemaVersion: 1,
@@ -35,7 +47,7 @@ function message<Key extends keyof Messages>(
   }
 }
 
-function mountSettings(context: CordisXPageMountContext): Disposable<void> {
+function mountSettings(context: CordisXPageMountContext, config: SettingsTabDemoConfig): Disposable<void> {
   const section = context.document.createElement('section')
   section.dataset.settingsDemoContent = 'mounted'
   Object.assign(section.style, {
@@ -64,7 +76,7 @@ function mountSettings(context: CordisXPageMountContext): Disposable<void> {
   context.localization.bindText(labelText, message('body.label'))
   const input = context.document.createElement('input')
   input.dataset.settingsDemoFocus = 'true'
-  input.value = 'CordisX'
+  input.value = config.demoValue
   Object.assign(input.style, {
     width: 'min(320px, 100%)',
     boxSizing: 'border-box',
@@ -90,7 +102,7 @@ function mountSettings(context: CordisXPageMountContext): Disposable<void> {
 }
 
 /** Real manager-settings extension demo: structured tab header plus a controlled body-only page. */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})): void {
   ctx.i18n.define<Messages>({
     namespace: 'settings-demo',
     locale: 'en',
@@ -118,7 +130,7 @@ export function apply(ctx: Context): void {
     title: message('body.title'),
     chrome: 'body-only',
     localeNamespace: 'settings-demo',
-  }, mountSettings)
+  }, context => mountSettings(context, config))
   ctx.routes.register({
     id: 'settings',
     path: '/manager/settings/settings-tab-demo',

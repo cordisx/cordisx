@@ -14,7 +14,9 @@
 ## 配置示例
 
 ```json
-{ "sessionId": "当前原生会话 ID（可选）" }
+{ "sessionId": "当前选中的原生会话 UUID（不含 local: 前缀）" }
 ```
+
+插件导出 Schemastery `Config` 与 `configApplies = 'restart'`。`sessionId` 最长 128 个字符；留空时不显示会话分析快捷操作，设置为当前选中的原生会话 ID 时，该操作导航到受控的 `session.content` 页面。配置变更只重建本插件 fiber。
 
 屏蔽插件会销毁当前 Cordis fiber、撤销贡献并 Abort/dispose 活跃页面；恢复插件会从同一个可信本地 bundle 创建新的 generation。页面 mount 属于 trusted-local 受控 DOM，不是权限沙箱。

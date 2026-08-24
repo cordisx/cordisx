@@ -8,7 +8,9 @@
       "id": "settings-tab-demo",
       "entry": "./examples/plugins/settings-tab-demo/index.ts",
       "enabled": true,
-      "config": {}
+      "config": {
+        "demoValue": "CordisX"
+      }
     }
   ]
 }

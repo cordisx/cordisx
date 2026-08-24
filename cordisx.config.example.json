@@ -8,7 +8,9 @@
       "id": "slot-showcase",
       "entry": "./examples/plugins/slot-showcase/index.ts",
       "enabled": true,
-      "config": {}
+      "config": {
+        "sessionId": ""
+      }
     }
   ]
 }
