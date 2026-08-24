@@ -4,6 +4,9 @@ import path from 'node:path'
 import { c as createTar } from 'tar'
 import { describe, expect, it } from 'vitest'
 import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+} from '../packages/cli/src/platform-contracts.js'
+import {
   JsonPackageStore,
   PackageLifecycleError,
   PackageLifecycleHost,
@@ -12,7 +15,8 @@ import {
   resolvePackageGraph,
   affectedClosure,
   type HostPackageManifest,
-  type PackageActivationCandidate,
+  type PackageActivationPlan,
+  type PackageCandidateAccess,
   type PackageGenerationFence,
   type PackageReadinessReceipt,
   type PackageStoreState,
@@ -21,9 +25,11 @@ import {
 const runtime0 = 'runtime-0'
 const fingerprint = 'a'.repeat(64)
 
-const manifestReader = {
-  async read(snapshotRoot: string): Promise<HostPackageManifest> {
-    return JSON.parse(await readFile(path.join(snapshotRoot, 'cordisx-package.json'), 'utf8')) as HostPackageManifest
+const manifestResolver = {
+  async resolve(snapshotRoot: string) {
+    const packageManifest = JSON.parse(await readFile(path.join(snapshotRoot, 'cordisx-package.json'), 'utf8')) as HostPackageManifest
+    const runtimeManifest = JSON.parse(await readFile(path.join(snapshotRoot, 'cordisx.plugin.json'), 'utf8'))
+    return { packageManifest, runtime: { entry: './dist/index.js', manifest: runtimeManifest } }
   },
 }
 
@@ -42,12 +48,17 @@ async function makePackage(
   const manifest: HostPackageManifest = {
     pluginId,
     version,
-    entries: { renderer: './dist/index.js', node: [] },
     dependencies,
-    compatibility: { host: '>=0.1.0-beta.0', protocol: '>=1.0.0' },
+    compatibility: { runtimeAbi: 1, protocol: 1 },
     permissionFingerprint: fingerprint,
   }
   await writeFile(path.join(directory, 'cordisx-package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+  await writeFile(path.join(directory, 'cordisx.plugin.json'), `${JSON.stringify({
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+    schemaVersion: 1,
+    id: pluginId,
+    capabilities: [],
+  }, null, 2)}\n`)
   await writeFile(path.join(directory, 'dist', 'index.js'), `export const packageVersion = ${JSON.stringify(version)}\n`)
   return directory
 }
@@ -66,9 +77,9 @@ async function createHost(requiredSatisfied = true, storeOptions = {}) {
   const root = await tempRoot()
   const store = await JsonPackageStore.open(path.join(root, 'store'), storeOptions)
   const host = new PackageLifecycleHost(store, {
-    hostVersion: '0.1.0-beta.0',
-    protocolVersion: '1.0.0',
-    manifestReader,
+    runtimeAbi: 1,
+    protocolVersion: 1,
+    manifestResolver,
     permissionAuthority: allowPermissions(requiredSatisfied),
   })
   return { root, store, host }
@@ -83,30 +94,35 @@ function stateFence(state: PackageStoreState, profileId = 'default'): PackageGen
       if (plugin.active === undefined) return []
       const record = state.packages[plugin.active.packageKey]
       if (record === undefined) throw new Error(`missing package ${plugin.active.packageKey}`)
-      return [[pluginId, { pluginGeneration: plugin.active.pluginGeneration, identity: record.identity }]]
+      return [[pluginId, { moduleGeneration: plugin.active.moduleGeneration, identity: record.identity }]]
     })),
   }
 }
 
-function readiness(candidate: PackageActivationCandidate): PackageReadinessReceipt {
+function readiness(candidate: PackageActivationPlan): PackageReadinessReceipt {
   return {
     transactionId: candidate.transactionId,
-    storeRevision: candidate.storeRevision,
+    candidateId: candidate.candidateId,
     candidateFingerprint: candidate.candidateFingerprint,
-    runtimeGeneration: candidate.proposedRuntimeGeneration,
+    runtimeGeneration: candidate.after.runtimeGeneration,
     plugins: Object.fromEntries(candidate.affectedPluginIds.map((pluginId) => {
-      const plugin = candidate.plugins[pluginId]
+      const plugin = candidate.after.plugins[pluginId]
       if (plugin?.package === undefined) throw new Error(`candidate package missing for ${pluginId}`)
-      return [pluginId, { pluginGeneration: plugin.pluginGeneration, identity: plugin.package.identity }]
+      return [pluginId, { moduleGeneration: plugin.moduleGeneration, identity: plugin.package.identity }]
     })),
   }
 }
 
-async function activate(host: PackageLifecycleHost, transactionId: string, revision: number) {
-  const candidate = await host.requestActivation(transactionId, revision)
+function candidateAccess(candidateId: PackageCandidateAccess['candidateId'], profileId = 'default'): PackageCandidateAccess {
+  return { candidateId, ownerId: 'generation-runtime', profileId }
+}
+
+async function activate(host: PackageLifecycleHost, prepared: { readonly candidateId: PackageCandidateAccess['candidateId'] }) {
+  const access = candidateAccess(prepared.candidateId)
+  const candidate = await host.requestActivation(access)
   const receipt = readiness(candidate)
-  const confirmed = await host.confirmReadiness(receipt)
-  const committed = await host.commit(receipt, confirmed.revision)
+  await host.confirmReadiness(access, receipt)
+  const committed = await host.commit(access, receipt)
   return { candidate, receipt, committed }
 }
 
@@ -184,9 +200,8 @@ describe('package dependency graph', () => {
     manifest: {
       pluginId,
       version: '1.0.0',
-      entries: { renderer: './index.js' },
       dependencies,
-      compatibility: { host: '*' },
+      compatibility: { runtimeAbi: 1, protocol: 1 },
       permissionFingerprint: fingerprint,
     },
   })
@@ -194,8 +209,8 @@ describe('package dependency graph', () => {
   it('orders dependencies before consumers and computes reverse affected closure', () => {
     const graph = resolvePackageGraph({
       provider: node('provider'),
-      consumer: node('consumer', [{ pluginId: 'provider', range: '^1.0.0' }]),
-      leaf: node('leaf', [{ pluginId: 'consumer', range: '^1.0.0' }]),
+      consumer: node('consumer', [{ id: 'provider', version: '1.0.0' }]),
+      leaf: node('leaf', [{ id: 'consumer', version: '1.0.0' }]),
     })
     expect(graph.activationOrder).toEqual(['provider', 'consumer', 'leaf'])
     expect(graph.drainOrder).toEqual(['leaf', 'consumer', 'provider'])
@@ -205,13 +220,13 @@ describe('package dependency graph', () => {
   it('rejects dependency conflicts, missing providers, and cycles', () => {
     expect(() => resolvePackageGraph({
       provider: node('provider'),
-      consumer: node('consumer', [{ pluginId: 'provider', range: '^2.0.0' }]),
+      consumer: node('consumer', [{ id: 'provider', version: '2.0.0' }]),
     })).toThrow('selected 1.0.0')
-    expect(() => resolvePackageGraph({ consumer: node('consumer', [{ pluginId: 'provider', range: '*' }]) }))
+    expect(() => resolvePackageGraph({ consumer: node('consumer', [{ id: 'provider', version: '1.0.0' }]) }))
       .toThrow('missing dependency')
     expect(() => resolvePackageGraph({
-      left: node('left', [{ pluginId: 'right', range: '*' }]),
-      right: node('right', [{ pluginId: 'left', range: '*' }]),
+      left: node('left', [{ id: 'right', version: '1.0.0' }]),
+      right: node('right', [{ id: 'left', version: '1.0.0' }]),
     })).toThrow('dependency cycle')
   })
 })
@@ -221,6 +236,7 @@ describe('launcher package transactions', () => {
     const { root, host } = await createHost()
     const source = await makePackage(root, 'demo', '1.0.0')
     const prepared = await host.prepare({
+      ownerId: 'generation-runtime',
       operation: 'install',
       profileId: 'default',
       expectedRevision: 0,
@@ -230,43 +246,63 @@ describe('launcher package transactions', () => {
     })
     expect(prepared.transaction.status).toBe('ready')
     expect(prepared.transaction.permission?.requiredSatisfied).toBe(true)
-    const { candidate, committed } = await activate(host, prepared.transaction.transactionId, prepared.state.revision)
-    expect(candidate.plugins.demo?.package?.identity).toMatchObject({ pluginId: 'demo', version: '1.0.0' })
-    expect(candidate.plugins.demo?.package?.rendererEntry).toContain('/objects/sha256/')
+    const plan = await host.resolveCandidate(candidateAccess(prepared.candidateId), 'plan')
+    const impact = await host.resolveImpact({
+      impactToken: prepared.impactToken,
+      ownerId: 'generation-runtime',
+      profileId: 'default',
+    }, 'plan')
+    expect(plan.profileActivationRevision).toBe(0)
+    expect(plan.current).toEqual(plan.expected)
+    expect(plan.after.revision).toBe(1)
+    expect(impact.affectedPluginIds).toEqual(['demo'])
+    const { candidate, committed } = await activate(host, prepared)
+    expect(candidate.after.plugins.demo?.package?.identity).toMatchObject({ pluginId: 'demo', version: '1.0.0' })
+    expect(candidate.after.plugins.demo?.package?.runtimeEntry).toContain('/objects/sha256/')
     expect(committed.profiles.default?.runtimeGeneration).toBe('runtime-1')
-    expect(committed.profiles.default?.plugins.demo?.active?.packageKey).toBe(candidate.plugins.demo?.package === undefined
+    expect(committed.profiles.default?.revision).toBe(1)
+    expect(committed.profiles.default?.plugins.demo?.active?.packageKey).toBe(candidate.after.plugins.demo?.package === undefined
       ? undefined
-      : `${candidate.plugins.demo.package.identity.pluginId}@${candidate.plugins.demo.package.identity.version}#${candidate.plugins.demo.package.identity.integrity}`)
+      : `${candidate.after.plugins.demo.package.identity.pluginId}@${candidate.after.plugins.demo.package.identity.version}#${candidate.after.plugins.demo.package.identity.integrity}`)
   })
 
   it('persists permission denial without exposing an activation candidate', async () => {
     const { root, host } = await createHost(false)
     const source = await makePackage(root, 'denied', '1.0.0')
     const prepared = await host.prepare({
+      ownerId: 'generation-runtime',
       operation: 'install', profileId: 'default', expectedRevision: 0,
       expected: { runtimeGeneration: runtime0, plugins: {} }, proposedRuntimeGeneration: 'runtime-1',
       source: { kind: 'local-package', path: source },
     })
     expect(prepared.activationAvailable).toBe(false)
     expect(prepared.transaction.permission?.unresolvedRequired).toEqual(['models.read'])
-    await expect(host.requestActivation(prepared.transaction.transactionId, prepared.state.revision))
-      .rejects.toMatchObject({ code: 'transaction-not-ready' })
+    await expect(host.requestActivation(candidateAccess(prepared.candidateId)))
+      .rejects.toMatchObject({ code: 'permission-review-required' })
   })
 
-  it('rejects stale store CAS and any readiness receipt with a mismatched package identity', async () => {
+  it('rejects forged tokens, wrong owners, and readiness with a mismatched package identity', async () => {
     const { root, host } = await createHost()
     const source = await makePackage(root, 'fenced', '1.0.0')
     const prepared = await host.prepare({
+      ownerId: 'generation-runtime',
       operation: 'install', profileId: 'default', expectedRevision: 0,
       expected: { runtimeGeneration: runtime0, plugins: {} }, proposedRuntimeGeneration: 'runtime-1',
       source: { kind: 'local-directory', path: source },
     })
-    await expect(host.abort(prepared.transaction.transactionId, 0, 'stale'))
-      .rejects.toMatchObject({ actualRevision: prepared.state.revision })
-    const candidate = await host.requestActivation(prepared.transaction.transactionId, prepared.state.revision)
+    await expect(host.resolveCandidate({
+      ...candidateAccess(prepared.candidateId),
+      ownerId: 'renderer',
+    }, 'plan')).rejects.toMatchObject({ code: 'candidate-owner-mismatch' })
+    await expect(host.resolveCandidate({
+      ...candidateAccess(prepared.candidateId),
+      candidateId: 'candidate:forged' as typeof prepared.candidateId,
+    }, 'plan')).rejects.toMatchObject({ code: 'candidate-token-invalid' })
+    const access = candidateAccess(prepared.candidateId)
+    const candidate = await host.requestActivation(access)
     const receipt = readiness(candidate)
     const identity = receipt.plugins.fenced!.identity
-    await expect(host.confirmReadiness({
+    await expect(host.confirmReadiness(access, {
       ...receipt,
       plugins: { fenced: { ...receipt.plugins.fenced!, identity: { ...identity, integrity: `sha256:${'0'.repeat(64)}` } } },
     })).rejects.toMatchObject({ code: 'stale-readiness-receipt' })
@@ -276,29 +312,31 @@ describe('launcher package transactions', () => {
     const { root, store, host } = await createHost()
     const source = await makePackage(root, 'recoverable', '1.0.0')
     const prepared = await host.prepare({
+      ownerId: 'generation-runtime',
       operation: 'install', profileId: 'default', expectedRevision: 0,
       expected: { runtimeGeneration: runtime0, plugins: {} }, proposedRuntimeGeneration: 'runtime-1',
       source: { kind: 'local-directory', path: source },
     })
-    const candidate = await host.requestActivation(prepared.transaction.transactionId, prepared.state.revision)
+    const candidate = await host.requestActivation(candidateAccess(prepared.candidateId))
     const receipt = readiness(candidate)
     const reopened = await JsonPackageStore.open(store.root)
     const recoveredHost = new PackageLifecycleHost(reopened, {
-      hostVersion: '0.1.0-beta.0', protocolVersion: '1.0.0', manifestReader,
+      runtimeAbi: 1, protocolVersion: 1, manifestResolver,
       permissionAuthority: allowPermissions(),
     })
-    const recovered = await recoveredHost.recover(candidate.storeRevision, {
+    const recovered = await recoveredHost.recover({
       default: { runtimeGeneration: receipt.runtimeGeneration, plugins: receipt.plugins },
     })
     expect(recovered.transactions[prepared.transaction.transactionId]?.status).toBe('committed')
 
     const secondSource = await makePackage(root, 'interrupted', '1.0.0')
     const second = await recoveredHost.prepare({
-      operation: 'install', profileId: 'default', expectedRevision: recovered.revision,
+      ownerId: 'generation-runtime', operation: 'install', profileId: 'default',
+      expectedRevision: recovered.profiles.default!.revision,
       expected: stateFence(recovered), proposedRuntimeGeneration: 'runtime-2',
       source: { kind: 'local-directory', path: secondSource },
     })
-    const aborted = await recoveredHost.recover(second.state.revision, {})
+    const aborted = await recoveredHost.recover({})
     expect(aborted.transactions[second.transaction.transactionId]?.status).toBe('recovered-aborted')
     expect(aborted.profiles.default?.runtimeGeneration).toBe('runtime-1')
   })
@@ -307,20 +345,23 @@ describe('launcher package transactions', () => {
     const { root, host } = await createHost()
     const provider = await makePackage(root, 'provider', '1.0.0')
     const first = await host.prepare({
+      ownerId: 'generation-runtime',
       operation: 'install', profileId: 'default', expectedRevision: 0,
       expected: { runtimeGeneration: runtime0, plugins: {} }, proposedRuntimeGeneration: 'runtime-1',
       source: { kind: 'local-directory', path: provider },
     })
-    const providerState = (await activate(host, first.transaction.transactionId, first.state.revision)).committed
-    const consumer = await makePackage(root, 'consumer', '1.0.0', [{ pluginId: 'provider', range: '^1.0.0' }])
+    const providerState = (await activate(host, first)).committed
+    const consumer = await makePackage(root, 'consumer', '1.0.0', [{ id: 'provider', version: '1.0.0' }])
     const second = await host.prepare({
-      operation: 'install', profileId: 'default', expectedRevision: providerState.revision,
+      ownerId: 'generation-runtime', operation: 'install', profileId: 'default',
+      expectedRevision: providerState.profiles.default!.revision,
       expected: stateFence(providerState), proposedRuntimeGeneration: 'runtime-2',
       source: { kind: 'local-directory', path: consumer },
     })
-    const consumerState = (await activate(host, second.transaction.transactionId, second.state.revision)).committed
+    const consumerState = (await activate(host, second)).committed
     await expect(host.prepare({
-      operation: 'uninstall', pluginId: 'provider', profileId: 'default', expectedRevision: consumerState.revision,
+      ownerId: 'generation-runtime', operation: 'uninstall', pluginId: 'provider', profileId: 'default',
+      expectedRevision: consumerState.profiles.default!.revision,
       expected: stateFence(consumerState), proposedRuntimeGeneration: 'runtime-3',
     })).rejects.toMatchObject({ code: 'package-in-use' })
   })
@@ -329,25 +370,27 @@ describe('launcher package transactions', () => {
     const { root, host } = await createHost()
     const v1 = await makePackage(root, 'upgradeable', '1.0.0')
     const first = await host.prepare({
+      ownerId: 'generation-runtime',
       operation: 'install', profileId: 'default', expectedRevision: 0,
       expected: { runtimeGeneration: runtime0, plugins: {} }, proposedRuntimeGeneration: 'runtime-1',
       source: { kind: 'local-directory', path: v1 },
     })
-    const v1State = (await activate(host, first.transaction.transactionId, first.state.revision)).committed
+    const v1State = (await activate(host, first)).committed
     const oldLease = v1State.profiles.default!.plugins.upgradeable!.active!
     const v2 = await makePackage(root, 'upgradeable', '2.0.0')
     const upgrade = await host.prepare({
-      operation: 'upgrade', pluginId: 'upgradeable', profileId: 'default', expectedRevision: v1State.revision,
+      ownerId: 'generation-runtime', operation: 'update', pluginId: 'upgradeable', profileId: 'default',
+      expectedRevision: v1State.profiles.default!.revision,
       expected: stateFence(v1State), proposedRuntimeGeneration: 'runtime-2',
       source: { kind: 'local-directory', path: v2 },
     })
-    const upgraded = (await activate(host, upgrade.transaction.transactionId, upgrade.state.revision)).committed
+    const upgraded = (await activate(host, upgrade)).committed
     expect(host.leases('default')[0]).toMatchObject({ lastGood: oldLease, rollbackLeases: [oldLease] })
-    const retained = await host.collectGarbage(upgraded.revision, 0)
+    const retained = await host.collectGarbage(0)
     expect(retained.removed).not.toContain(oldLease.packageKey)
-    const withoutLastGood = await host.releaseLastGood('default', 'upgradeable', retained.state.revision, oldLease)
-    const withoutRollback = await host.releaseRollbackLease('default', 'upgradeable', withoutLastGood.revision, oldLease)
-    const collected = await host.collectGarbage(withoutRollback.revision, 0)
+    await host.releaseLastGood('default', 'upgradeable', oldLease)
+    await host.releaseRollbackLease('default', 'upgradeable', oldLease)
+    const collected = await host.collectGarbage(0)
     expect(collected.removed).toContain(oldLease.packageKey)
   })
 
@@ -356,7 +399,10 @@ describe('launcher package transactions', () => {
     const storeRoot = path.join(root, 'store')
     const initial = await JsonPackageStore.open(storeRoot)
     await initial.transaction(0, draft => {
-      draft.profiles.default = { runtimeGeneration: runtime0, plugins: {} }
+      draft.profiles.default = {
+        revision: 0, lastGoodRevision: 0, runtimeGeneration: runtime0,
+        lastGoodRuntimeGeneration: runtime0, plugins: {},
+      }
     })
     const interrupted = await JsonPackageStore.open(storeRoot, {
       fault: (point) => {
@@ -364,7 +410,10 @@ describe('launcher package transactions', () => {
       },
     })
     await expect(interrupted.transaction(1, draft => {
-      draft.profiles.default = { runtimeGeneration: 'runtime-bad', plugins: {} }
+      draft.profiles.default = {
+        revision: 1, lastGoodRevision: 0, runtimeGeneration: 'runtime-bad',
+        lastGoodRuntimeGeneration: runtime0, plugins: {},
+      }
     })).rejects.toThrow('injected process interruption')
     const recovered = await JsonPackageStore.open(storeRoot)
     expect(recovered.snapshot()).toMatchObject({ revision: 1, profiles: { default: { runtimeGeneration: runtime0 } } })

@@ -1,4 +1,4 @@
-import { satisfies, valid, validRange } from 'semver'
+import { valid } from 'semver'
 import type {
   HostPackageManifest,
   PackageObjectRecord,
@@ -28,58 +28,45 @@ export function validateHostPackageManifest(manifest: HostPackageManifest, label
   if (valid(manifest.version) === null) {
     throw new PackageLifecycleError('invalid-package-version', `${label}.version must be a valid semantic version`)
   }
-  if (validRange(manifest.compatibility.host) === null) {
-    throw new PackageLifecycleError('invalid-host-range', `${label}.compatibility.host is not a semantic-version range`)
-  }
-  if (manifest.compatibility.protocol !== undefined && validRange(manifest.compatibility.protocol) === null) {
-    throw new PackageLifecycleError('invalid-protocol-range', `${label}.compatibility.protocol is not a semantic-version range`)
+  if (manifest.compatibility.runtimeAbi !== 1 || manifest.compatibility.protocol !== 1) {
+    throw new PackageLifecycleError('incompatible-runtime', `${label} requires unsupported runtime ABI or protocol`)
   }
   if (!/^[a-f0-9]{64}$/.test(manifest.permissionFingerprint)) {
     throw new PackageLifecycleError('invalid-permission-fingerprint', `${label}.permissionFingerprint must be lowercase SHA-256`)
   }
-  const entries = [manifest.entries.renderer, ...(manifest.entries.node ?? [])].filter((entry): entry is string => entry !== undefined)
-  if (entries.length === 0) throw new PackageLifecycleError('missing-package-entry', `${label} must declare at least one entry`)
-  for (const entry of entries) {
-    if (!/^\.\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/.test(entry) || entry.includes('..')) {
-      throw new PackageLifecycleError('invalid-package-entry', `${label} entry must be a package-relative path: ${entry}`)
-    }
-  }
   const seen = new Set<string>()
   for (const dependency of manifest.dependencies) {
-    if (!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(dependency.pluginId)) {
-      throw new PackageLifecycleError('invalid-dependency', `${label} dependency id is invalid: ${dependency.pluginId}`)
+    if (!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(dependency.id)) {
+      throw new PackageLifecycleError('invalid-dependency', `${label} dependency id is invalid: ${dependency.id}`)
     }
-    if (dependency.pluginId === manifest.pluginId) {
+    if (dependency.id === manifest.pluginId) {
       throw new PackageLifecycleError('dependency-cycle', `${manifest.pluginId} cannot depend on itself`)
     }
-    if (seen.has(dependency.pluginId)) {
-      throw new PackageLifecycleError('duplicate-dependency', `${manifest.pluginId} repeats dependency ${dependency.pluginId}`)
+    if (seen.has(dependency.id)) {
+      throw new PackageLifecycleError('duplicate-dependency', `${manifest.pluginId} repeats dependency ${dependency.id}`)
     }
-    seen.add(dependency.pluginId)
-    if (validRange(dependency.range) === null) {
-      throw new PackageLifecycleError('invalid-dependency-range', `${manifest.pluginId} dependency range is invalid: ${dependency.range}`)
+    seen.add(dependency.id)
+    if (valid(dependency.version) === null) {
+      throw new PackageLifecycleError('invalid-dependency-version', `${manifest.pluginId} dependency version is invalid: ${dependency.version}`)
     }
   }
 }
 
 export function assertPackageCompatibility(
   manifest: HostPackageManifest,
-  versions: { readonly hostVersion: string; readonly protocolVersion?: string },
+  versions: { readonly runtimeAbi: 1; readonly protocolVersion: 1 },
 ): void {
-  if (!satisfies(versions.hostVersion, manifest.compatibility.host, { includePrerelease: true })) {
+  if (manifest.compatibility.runtimeAbi !== versions.runtimeAbi) {
     throw new PackageLifecycleError(
       'host-incompatible',
-      `${manifest.pluginId}@${manifest.version} requires CordisX ${manifest.compatibility.host}; current ${versions.hostVersion}`,
+      `${manifest.pluginId}@${manifest.version} requires runtime ABI ${manifest.compatibility.runtimeAbi}`,
     )
   }
-  if (manifest.compatibility.protocol !== undefined) {
-    if (versions.protocolVersion === undefined
-      || !satisfies(versions.protocolVersion, manifest.compatibility.protocol, { includePrerelease: true })) {
-      throw new PackageLifecycleError(
-        'protocol-incompatible',
-        `${manifest.pluginId}@${manifest.version} requires protocol ${manifest.compatibility.protocol}`,
-      )
-    }
+  if (manifest.compatibility.protocol !== versions.protocolVersion) {
+    throw new PackageLifecycleError(
+      'protocol-incompatible',
+      `${manifest.pluginId}@${manifest.version} requires protocol ${manifest.compatibility.protocol}`,
+    )
   }
 }
 
@@ -99,22 +86,22 @@ export function resolvePackageGraph(nodes: Readonly<Record<string, ResolvedPacka
     const node = nodes[pluginId]
     if (node === undefined) throw new PackageLifecycleError('missing-dependency', `missing package for ${pluginId}`)
     visiting.add(pluginId)
-    for (const dependency of [...node.manifest.dependencies].sort((a, b) => a.pluginId.localeCompare(b.pluginId))) {
-      const provider = nodes[dependency.pluginId]
+    for (const dependency of [...node.manifest.dependencies].sort((a, b) => a.id.localeCompare(b.id))) {
+      const provider = nodes[dependency.id]
       if (provider === undefined) {
         throw new PackageLifecycleError(
           'missing-dependency',
-          `${pluginId} requires missing dependency ${dependency.pluginId}@${dependency.range}`,
+          `${pluginId} requires missing dependency ${dependency.id}@${dependency.version}`,
         )
       }
-      if (!satisfies(provider.manifest.version, dependency.range, { includePrerelease: true })) {
+      if (provider.manifest.version !== dependency.version) {
         throw new PackageLifecycleError(
           'dependency-conflict',
-          `${pluginId} requires ${dependency.pluginId}@${dependency.range}; selected ${provider.manifest.version}`,
+          `${pluginId} requires ${dependency.id}@${dependency.version}; selected ${provider.manifest.version}`,
         )
       }
-      reverse[dependency.pluginId]!.push(pluginId)
-      visit(dependency.pluginId, [...trail, pluginId])
+      reverse[dependency.id]!.push(pluginId)
+      visit(dependency.id, [...trail, pluginId])
     }
     visiting.delete(pluginId)
     visited.add(pluginId)

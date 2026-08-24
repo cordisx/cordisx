@@ -76,15 +76,21 @@ function validateState(value: unknown): MutablePackageStoreState {
   }
   for (const [profileId, raw] of Object.entries(profiles)) {
     const profile = object(raw, `profile ${profileId}`)
-    if (typeof profile.runtimeGeneration !== 'string') {
-      throw new PackageLifecycleError('invalid-package-store', `profile ${profileId} runtime generation is malformed`)
+    if (!Number.isInteger(profile.revision) || (profile.revision as number) < 0
+      || !Number.isInteger(profile.lastGoodRevision) || (profile.lastGoodRevision as number) < 0
+      || typeof profile.runtimeGeneration !== 'string'
+      || typeof profile.lastGoodRuntimeGeneration !== 'string') {
+      throw new PackageLifecycleError('invalid-package-store', `profile ${profileId} activation record is malformed`)
     }
     object(profile.plugins, `profile ${profileId} plugins`)
   }
   for (const [transactionId, raw] of Object.entries(transactions)) {
     const transaction = object(raw, `transaction ${transactionId}`)
     if (transaction.transactionId !== transactionId || typeof transaction.status !== 'string'
-      || typeof transaction.profileId !== 'string' || typeof transaction.candidateFingerprint !== 'string') {
+      || typeof transaction.ownerId !== 'string' || typeof transaction.profileId !== 'string'
+      || typeof transaction.candidateFingerprint !== 'string'
+      || typeof transaction.candidateTokenHash !== 'string' || typeof transaction.impactTokenHash !== 'string'
+      || !Array.isArray(transaction.changedPluginIds) || !Array.isArray(transaction.affectedPluginIds)) {
       throw new PackageLifecycleError('invalid-package-store', `transaction ${transactionId} is malformed`)
     }
   }

@@ -164,4 +164,3 @@ The release gate is focused tests, full `npm run check`, build/typecheck,
 `npm audit --audit-level=high`, package allowlists, and `git diff --check`.
 A real launcher smoke may verify store creation and a dry-run candidate, but
 this task cannot claim renderer generation switching or Manager installation UI.
-

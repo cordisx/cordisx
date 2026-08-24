@@ -1,3 +1,5 @@
+import type { CordisXPluginManifestV1 } from '../../platform-contracts.js'
+
 export type LocalPackageSourceKind = 'local-directory' | 'local-package' | 'downloaded-tarball'
 
 export interface LocalPackageSource {
@@ -18,45 +20,50 @@ export interface PackageIdentity {
 }
 
 export interface PackageDependency {
-  readonly pluginId: string
-  readonly range: string
+  readonly id: string
+  readonly version: string
 }
 
-/**
- * Host-normalized static package metadata. The protocol adapter constructs this
- * from the separate package manifest; runtime plugin manifests are not used as
- * package metadata.
- */
+/** Host-normalized package metadata. Runtime plugin metadata is deliberately separate. */
 export interface HostPackageManifest {
   readonly pluginId: string
   readonly version: string
-  readonly entries: {
-    readonly renderer?: string
-    readonly node?: readonly string[]
-  }
   readonly dependencies: readonly PackageDependency[]
   readonly compatibility: {
-    readonly host: string
-    readonly protocol?: string
+    readonly runtimeAbi: 1
+    readonly protocol: 1
   }
+  readonly canonicalSource?: string
   readonly permissionFingerprint: string
 }
 
-export interface PackageManifestReader {
-  read(snapshotRoot: string): Promise<HostPackageManifest>
+export interface ResolvedRuntimeModule {
+  readonly entry: string
+  readonly manifest: CordisXPluginManifestV1
+}
+
+export interface ResolvedPackageCandidate {
+  readonly packageManifest: HostPackageManifest
+  readonly runtime: ResolvedRuntimeModule
+}
+
+/** Edge adapter. Protocol source/manifest revisions change here, not in the store core. */
+export interface PackageManifestResolver {
+  resolve(snapshotRoot: string): Promise<ResolvedPackageCandidate>
 }
 
 export interface PackageObjectRecord {
   readonly key: string
   readonly identity: PackageIdentity
   readonly manifest: HostPackageManifest
+  readonly runtime: ResolvedRuntimeModule
   readonly objectDirectory: string
   readonly sources: readonly CanonicalPackageSource[]
   readonly createdAt: string
   readonly gcEligibleAt?: string
 }
 
-export type PackageOperation = 'install' | 'enable' | 'disable' | 'upgrade' | 'uninstall'
+export type PackageOperation = 'install' | 'enable' | 'disable' | 'update' | 'uninstall'
 
 export type PackageReloadLevel =
   | 'config-live'
@@ -67,7 +74,7 @@ export type PackageReloadLevel =
 
 export interface PackageLease {
   readonly packageKey: string
-  readonly pluginGeneration: string
+  readonly moduleGeneration: string
 }
 
 export interface PluginPackageState {
@@ -80,12 +87,15 @@ export interface PluginPackageState {
 }
 
 export interface PackageProfileState {
+  readonly revision: number
+  readonly lastGoodRevision: number
   readonly runtimeGeneration: string
+  readonly lastGoodRuntimeGeneration: string
   readonly plugins: Readonly<Record<string, PluginPackageState>>
 }
 
 export interface PackageFenceEntry {
-  readonly pluginGeneration: string
+  readonly moduleGeneration: string
   readonly identity: PackageIdentity
 }
 
@@ -97,7 +107,7 @@ export interface PackageGenerationFence {
 export interface PackageCandidatePlugin {
   readonly enabled: boolean
   readonly packageKey?: string
-  readonly pluginGeneration: string
+  readonly moduleGeneration: string
   readonly remove?: boolean
 }
 
@@ -120,6 +130,7 @@ export type PackageTransactionStatus =
 
 export interface PackageTransactionRecord {
   readonly transactionId: string
+  readonly ownerId: string
   readonly operation: PackageOperation
   readonly profileId: string
   readonly status: PackageTransactionStatus
@@ -129,11 +140,14 @@ export interface PackageTransactionRecord {
   readonly expected: PackageGenerationFence
   readonly proposedRuntimeGeneration: string
   readonly target: Readonly<Record<string, PackageCandidatePlugin>>
+  readonly changedPluginIds: readonly string[]
   readonly affectedPluginIds: readonly string[]
   readonly activationOrder: readonly string[]
   readonly drainOrder: readonly string[]
   readonly reloadLevel: PackageReloadLevel
   readonly candidateFingerprint: string
+  readonly candidateTokenHash: string
+  readonly impactTokenHash: string
   readonly permission?: PackagePermissionReview
   readonly failureCode?: string
 }
@@ -149,42 +163,86 @@ export interface PackageStoreState {
 
 export interface ActivationPackageProjection {
   readonly identity: PackageIdentity
-  readonly objectDirectory: string
-  readonly rendererEntry?: string
-  readonly nodeEntries: readonly string[]
+  readonly artifactDirectory: string
+  readonly runtimeEntry: string
+  readonly runtimeManifest: CordisXPluginManifestV1
   readonly dependencies: readonly PackageDependency[]
 }
 
-/** Narrow Node-only value consumed by the separate Generation Runtime. */
-export interface PackageActivationCandidate {
-  readonly transactionId: string
-  readonly storeRevision: number
+export interface PackageActivationPlugin {
+  readonly enabled: boolean
+  readonly moduleGeneration: string
+  readonly package?: ActivationPackageProjection
+}
+
+/** Complete Host-private activation tuple. Never accepted from renderer input. */
+export interface PackageActivationTuple {
   readonly profileId: string
-  readonly expected: PackageGenerationFence
-  readonly proposedRuntimeGeneration: string
+  readonly revision: number
+  readonly runtimeGeneration: string
+  readonly plugins: Readonly<Record<string, PackageActivationPlugin>>
+}
+
+export type PackageResolutionBoundary = 'plan' | 'stage' | 'publish' | 'rollback'
+
+/** Narrow Node-only plan consumed by the separate Generation Runtime. */
+export interface PackageActivationPlan {
+  readonly transactionId: string
+  readonly candidateId: PackageCandidateToken
+  readonly boundary: PackageResolutionBoundary
+  readonly profileId: string
+  readonly profileActivationRevision: number
   readonly candidateFingerprint: string
+  readonly expected: PackageActivationTuple
+  readonly current: PackageActivationTuple
+  readonly after: PackageActivationTuple
+  readonly lastGood: PackageActivationTuple
   readonly affectedPluginIds: readonly string[]
   readonly activationOrder: readonly string[]
   readonly drainOrder: readonly string[]
-  readonly plugins: Readonly<Record<string, {
-    readonly enabled: boolean
-    readonly pluginGeneration: string
-    readonly package?: ActivationPackageProjection
-  }>>
+}
+
+export interface PackageImpactPlan {
+  readonly transactionId: string
+  readonly impactToken: PackageImpactToken
+  readonly boundary: PackageResolutionBoundary
+  readonly profileId: string
+  readonly changedPluginIds: readonly string[]
+  readonly affectedPluginIds: readonly string[]
+  readonly activationOrder: readonly string[]
+  readonly drainOrder: readonly string[]
 }
 
 export interface PackageReadinessReceipt {
   readonly transactionId: string
-  readonly storeRevision: number
+  readonly candidateId: PackageCandidateToken
   readonly candidateFingerprint: string
   readonly runtimeGeneration: string
   readonly plugins: Readonly<Record<string, PackageFenceEntry>>
+}
+
+export interface PackageCandidateAccess {
+  readonly candidateId: PackageCandidateToken
+  readonly ownerId: string
+  readonly profileId: string
+}
+
+export interface PackageImpactAccess {
+  readonly impactToken: PackageImpactToken
+  readonly ownerId: string
+  readonly profileId: string
 }
 
 export interface PackageRuntimeObservation {
   readonly runtimeGeneration: string
   readonly plugins: Readonly<Record<string, PackageFenceEntry>>
 }
+
+declare const candidateTokenBrand: unique symbol
+declare const impactTokenBrand: unique symbol
+
+export type PackageCandidateToken = string & { readonly [candidateTokenBrand]: true }
+export type PackageImpactToken = string & { readonly [impactTokenBrand]: true }
 
 export class PackageStoreConflictError extends Error {
   constructor(readonly actualRevision: number, message = `package store revision conflict; actual revision is ${actualRevision}`) {
