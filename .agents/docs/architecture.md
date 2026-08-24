@@ -172,15 +172,30 @@ The catalog distinguishes implemented, experimental, and reserved points;
 protocol reservation is never evidence that the current Codex adapter can
 project a point.
 
-The planned manager-settings v4 delivery exposes a separate host-neutral pair:
+The manager-settings A compatibility pair remains host-neutral:
 `manager.settings.tabs` accepts structured tab records and
 `manager.settings.content` accepts same-owner routes/pages for controlled body
-mounts. These are manager extension points, not Codex adapter surfaces; they
-require no selector or native anchor. CordisX renders every tab header and the
-accessible panel, while the trusted-local plugin receives only the panel-body
-child. The single merge/order model, stable built-in fallback, lifecycle,
-versioning, PR order, and validation contract are specified in
+mounts. These are Manager extension points, not Codex adapter surfaces, and
+require no selector or native anchor. The current product IA has no top-level
+Settings destination, so both points remain registered and diagnosable but
+report current context `not-mounted`; CordisX must not manufacture an empty
+Settings page to project them. Their closed versions, point-policy identities,
+Host-owned header boundary, and fallback semantics for a Host that does expose
+Settings remain specified in
 [`manager-settings-tabs.md`](manager-settings-tabs.md).
+
+Catalog v4 adds the distinct B pair
+`manager.settings.navigation-items` / `manager.content`. B inserts a
+Host-rendered first-level Manager destination across the stable virtual
+settings seam and opens a standard Manager page; no visible Host Settings row
+is required. Its item contains only a same-owner route. Route v2 supplies
+navigation title and description, while page v3 supplies the required Host
+icon and standard header title/description/actions. The active destination
+falls back to `host:plugins` when it becomes ineligible. A's stable id and
+body-only outlet remain unchanged. The merge model, routing, lifecycle,
+configuration planes, file-overlap audit, delivery order, and validation
+matrix are normative in
+[`manager-settings-navigation.md`](manager-settings-navigation.md).
 
 Native menu contributions use the same boundary: CordisX inserts host-rendered
 rows into the opened Codex Help or account menu and never adds an independent
@@ -303,14 +318,18 @@ explicit reload as an owning-fiber operation and uses plugin generations only
 for code, entry, version, or dependency changes. The manager remains a brokered
 projection and never receives filesystem or arbitrary module-loading authority.
 
-The manager has six primary navigation views:
+The manager has five non-spoofable Host primary navigation views:
 
 1. searchable installed-plugin inventory and local runtime controls;
 2. semantic extension points with attributed plugin use and enforced policy;
 3. routes/pages as a separate associated-resource inventory;
-4. marketplace discovery from validated feeds;
-5. profile and launcher configuration; and
-6. product identity, version, and verified external support links on About.
+4. marketplace discovery from validated feeds; and
+5. product identity, version, and verified external support links on About.
+
+Eligible `manager.settings.navigation-items` records may join only on the two
+sides of the virtual settings seam. They are independent plugin pages rather
+than fixed Host views. Host core order and bottom-anchored About cannot be
+overridden.
 
 Manager-owned content follows one semantic context at a time: a title,
 breadcrumb, or selected tab is not restated by body headings or redundant
@@ -343,19 +362,14 @@ nodes and text nodes only: raw HTML is never interpreted, and remote media or
 script execution is not supported. A missing README produces an explicit empty
 state rather than synthesized package documentation.
 
-Marketplace discovery adds two manager views without adding execution
-authority: a searchable catalog assembled from validated feeds with a
-two-tab `概览` / `作者与来源` detail, and a general
-CordisX settings view whose first editable section owns the ordered list of
-marketplace JSON URLs and profile-local block state. The settings page will use
-one
-host projection containing stable built-in tabs and eligible external
-`manager.settings.tabs` contributions. The built-ins remain `插件商店` for feed
-URLs, `运行状态` for profile-local activation state, and `启动器` for the
-current read-only `cordisx.config.json` boundary. External content routes only
-to `manager.settings.content`; it cannot render a tab header. Launcher-owned
-composition fields remain visibly file-managed until generation-aware
-configuration writes exist. Feed aggregation keys
+Marketplace discovery adds a searchable catalog assembled from validated
+feeds with a two-tab `概览` / `作者与来源` detail. Source management belongs to
+the Plugin Store workflow rather than a general Manager Settings category.
+The current IA removes the top-level `配置` destination and its empty
+`运行状态` / `启动器` placeholders. The former settings-content extension
+points remain registered compatibility identities with current context
+`not-mounted`; the Host does not render a shell solely for them. Feed
+aggregation keys
 plugins by canonical `(source, id)` identity; the first configured feed wins a
 duplicate. Source settings and blocked plugin ids are separate profile-local
 state. Catalog entries can link to authors, their public source, optional
@@ -363,11 +377,22 @@ homepage, manifest/icon, and feed provenance, but cannot install or activate
 code in this stage. External navigation first hides the manager modal and then
 uses the browser's uncancelled `_blank` navigation with `noopener noreferrer`.
 
-The primary manager navigation keeps `插件`, `扩展点`, `路由`, `插件商店`, and
-`配置` as separate top-level contexts, with About anchored last. Searchable
-browse pages omit aggregate result and usage counts. The content viewport is
-the single vertical scroll owner and restores query/scroll state after a
-detail back action.
+The primary manager navigation keeps Host `插件`, `扩展点`, `路由`, and
+`插件商店` as separate top-level contexts. Eligible B entries are grouped on
+the two sides of the stable virtual settings seam; there is no rendered
+`配置` row. About remains anchored last. Searchable browse pages omit aggregate
+result and usage counts. The content viewport is the single vertical scroll
+owner and restores query/scroll state after a detail back action.
+
+Configuration has two distinct application planes. CLI-resolved executable,
+debug port, profile, launch environment, and other process-start values are
+frozen for the current process and are not Manager global settings. Runtime
+configuration stays in the owning plugin detail beside permissions and
+declares `live`, `plugin-restart`, `service-restart`, or `app-restart`.
+CLIProxy owns Provider configuration. A staged app-restart value does not
+mutate the current fiber or watchers; service-restart requires an owning
+launcher handler and is not downgraded to a plugin restart. Removing Manager
+placeholders does not remove CLI parsing, launcher stores, or diagnostics.
 
 Codex's `app://` renderer rejects direct arbitrary network reads, including the
 official raw GitHub feed. The launcher therefore owns a narrow, private CDP

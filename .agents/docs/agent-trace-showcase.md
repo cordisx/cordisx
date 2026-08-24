@@ -305,7 +305,7 @@ Empty states distinguish no events from unavailable data and partial history.
 ## Plugin configuration
 
 The package exports one `@deepseek-ai/schemastery` `Config` and
-`configApplies = 'restart'`, using the configuration protocol introduced in
+`configApplies = 'plugin-restart'`, using the configuration protocol introduced in
 protocol PR #19 and the Host lifecycle merged through Host PR #60 and retained
 by the current main. Restart application is required because a mode change
 replaces the provider, query/subscription ownership, history cursor/tail timer,

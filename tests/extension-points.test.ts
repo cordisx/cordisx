@@ -223,24 +223,43 @@ describe('extension point runtime contract', () => {
     registry.dispose()
   })
 
-  it('registers the manager-neutral v5 surface and isolated outlet with exact policy metadata', () => {
+  it('registers distinct Manager content-tab and first-level navigation points in the v5 catalog', () => {
     const registry = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     const remove = registry.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
     expect(CORDISX_MANAGER_EXTENSION_POINT_CATALOG).toMatchObject({
       $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
       schemaVersion: 5,
     })
-    expect(registry.descriptors()).toHaveLength(2)
+    expect(registry.descriptors()).toHaveLength(4)
     expect(registry.descriptor('manager.settings.tabs')).toMatchObject({
       kind: 'surface', payloadFamily: 'manager-settings-content-tab', maturity: 'stable', adapterSupport: 'supported',
+      title: { fallback: 'Manager settings content tabs' },
     })
     expect(registry.descriptor('manager.settings.content')).toMatchObject({
       kind: 'outlet', payloadFamily: 'outlet', routePathFamily: 'manager-settings',
       presentationGroup: 'manager.settings', pageChrome: ['body-only'],
       maturity: 'stable', adapterSupport: 'supported',
     })
-    expect(registry.descriptor('manager.settings.tabs')?.description.fallback).toContain('host-rendered')
-    expect(registry.descriptor('manager.settings.content')?.description.fallback).toContain('trusted-local page body')
+    expect(registry.descriptor('manager.settings.navigation-items')).toMatchObject({
+      kind: 'surface', payloadFamily: 'manager-settings-navigation-item',
+      title: { fallback: 'Manager settings navigation items' },
+      maturity: 'stable', adapterSupport: 'supported',
+    })
+    expect(registry.descriptor('manager.content')).toMatchObject({
+      kind: 'outlet', payloadFamily: 'outlet', routePathFamily: 'manager',
+      presentationGroup: 'manager', pageChrome: ['standard'],
+      maturity: 'stable', adapterSupport: 'supported',
+    })
+    expect(registry.descriptor('manager.settings.tabs')?.description.fallback).toContain('not mounted')
+    expect(registry.descriptor('manager.settings.content')?.description.fallback).toContain('not mounted')
+    expect(registry.descriptor('manager.settings.navigation-items')?.description.fallback).toContain('settings extension seam')
+    expect(registry.descriptor('manager.content')?.description.fallback).toContain('standard Host-owned Manager page header')
+    const zh = CORDISX_EXTENSION_POINT_LOCALE_CATALOGS.find(item => item.locale === 'zh-CN')!
+    expect(zh.messages['manager.settings.tabs.title']).toBe('管理器配置内容标签页')
+    expect(zh.messages['manager.settings.tabs.description']).toContain('当前管理器布局未挂载')
+    expect(zh.messages['manager.settings.navigation-items.title']).toBe('管理器配置导航条目')
+    expect(zh.messages['manager.settings.navigation-items.description']).toContain('配置扩展缝隙')
+    expect(zh.messages['manager.content.description']).toContain('标准管理器页面标题')
     expect(registry.diagnostics()).toEqual([])
     remove()
     registry.dispose()

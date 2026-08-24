@@ -194,7 +194,7 @@ describe('renderer bundle', () => {
         description: expect.stringContaining('这是 CordisX 的结构化 UI 端到端演示插件'),
         configuration: expect.objectContaining({
           schemaKind: 'schemastery',
-          applies: 'restart',
+          applies: 'plugin-restart',
           fields: [expect.objectContaining({
             path: ['sessionId'], label: 'Native session ID', value: sessionId, max: 128,
           })],
@@ -226,10 +226,10 @@ describe('renderer bundle', () => {
       description: 'Presents analytics for the currently selected native session below its persistent session header.',
       diagnostics: [],
     })
-    expect(snapshot.navigation.outlets).toHaveLength(4)
-    expect(snapshot.extensionPoints.points).toHaveLength(35)
-    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(29)
-    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'outlet')).toHaveLength(6)
+    expect(snapshot.navigation.outlets).toHaveLength(5)
+    expect(snapshot.extensionPoints.points).toHaveLength(37)
+    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(30)
+    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'outlet')).toHaveLength(7)
     expect(snapshot.extensionPoints.descriptorDiagnostics).toEqual([])
     expect(snapshot.localeCatalogs).toHaveLength(6)
     expect(snapshot.localeCatalogs.filter(item => item.owner === 'host')).toHaveLength(4)

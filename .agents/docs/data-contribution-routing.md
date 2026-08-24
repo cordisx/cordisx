@@ -306,8 +306,8 @@ slot name is rejected with a migration diagnostic rather than mounted.
 
 A route is data: qualified id, path pattern, outlet id, page id, retained
 localized product metadata, and an optional condition. A page is trusted-local
-executable UI: a mount
-callback receiving a CordisX-owned container, immutable route state,
+executable UI combined with versioned Host-owned chrome metadata. Its mount
+callback receives a CordisX-owned container, immutable route state,
 navigation helpers, `AbortSignal`, and an optional disposer. An outlet is host
 infrastructure: a declared semantic region, resolver, context policy, and
 overlay placement strategy.
@@ -346,7 +346,7 @@ localized descriptors, usage details, and policy enforcement are specified in
 Future host/adapter packages may add `panel.right`, `panel.bottom`, `sidebar`,
 or other outlet ids without changing a closed union in core.
 
-The manager-settings v4 delivery additionally declares
+The manager-settings A delivery additionally declares
 `manager.settings.content`. It is a host-neutral manager-local body outlet,
 not a Codex adapter region. Compatible routes live below
 `/manager/settings/`, keep `app://` and browser/Codex history unchanged, and
@@ -355,6 +355,16 @@ resolve only to a page owned by the contributing settings tab's owner. Its
 `app`/`main`/`session.content` group. The host renders the settings header,
 tablist, and panel; the page callback receives only the panel-body child. See
 [`manager-settings-tabs.md`](manager-settings-tabs.md).
+
+The distinct B delivery declares standard-chrome outlet `manager.content`.
+Compatible routes use route v2, live strictly below `/manager/extensions/`,
+and supply the left-navigation title/description. They resolve to same-owner
+page v3 records whose title/description/required Host icon supply the standard
+page header and navigation glyph. The B contribution item contains only its
+same-owner route reference. `manager.content` belongs to presentation group
+`manager`, never aliases the body-only A outlet, and remains independent of
+Codex adapter selectors. See
+[`manager-settings-navigation.md`](manager-settings-navigation.md).
 
 ## Paths and navigation
 
@@ -369,6 +379,9 @@ the runtime:
 - `/xxxx` uses `app`, except reserved `/main` and `/sessions` prefixes;
 - `/main/xxxx` uses `main`;
 - `/sessions/:sessionId/...` uses `session.content`.
+- `/manager/settings/xxxx` uses body-only `manager.settings.content`; and
+- `/manager/extensions/xxxx` uses standard `manager.content` with route-v2/
+  page-v3 metadata.
 
 `history` is only an example session page. Plugins may register analytics,
 files, review, or any other valid session page. For a session route, the
@@ -533,6 +546,11 @@ plugin. It reports:
 - host-declared outlets, current `contextKey`, direct/portal placement,
   geometry, and coverage state.
 
+For Manager points the projection keeps A and B separate: A usage reports
+content-tab order/body-only mount, while B usage reports before/after Settings
+group, route-v2 navigation metadata, page-v3 Host icon/standard header, and the
+`manager.content` mount. Associated routes/pages never inflate point counts.
+
 Invalid and pending entries remain inspectable. The manager must distinguish
 implemented runtime behavior from future capability enforcement, signing,
 installation, marketplace activation, isolation, and rollback; none of those
@@ -552,6 +570,12 @@ The compatibility unit is delivered in this order:
    manager diagnostics, demo, simulated tests, and isolated real-renderer
    validation in one `cordisx` runtime/adapter delivery PR;
 5. exact `cordisxmono` gitlink update.
+
+The later Manager B slice follows the narrower dependency order frozen in
+`manager-settings-navigation.md`: formal Protocol `f350899` first, then one
+Host implementation/demo PR from the latest formal main with head-fenced CI
+merge. It does not update mono. Route v2/page v3 are consumed directly rather
+than forked in Host code.
 
 Required automated coverage includes:
 
@@ -575,6 +599,13 @@ Required automated coverage includes:
 - assertions that native nodes retain identity/parentage, are never hidden or
   removed, and continue receiving synthetic native data updates while a page is
   open.
+
+For Manager B, focused coverage additionally proves route-only surface data,
+route-v2/page-v3 single-source localization, required page Host icon, fixed
+before/after Settings ordering, standard page chrome, Manager-local
+deep-link/Back/close-reopen behavior, all three point origins, active fallback
+to Host Settings, and Abort-before-dispose cleanup. The isolated renderer must
+cover wide/narrow plus light/dark presentation while A remains usable.
 
 The demo must contribute a sidebar navigation row with multiple independent
 shortcuts, footer actions/menu, toolbar action/menu, environment section/rows

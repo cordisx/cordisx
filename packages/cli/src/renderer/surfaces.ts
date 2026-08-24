@@ -14,7 +14,8 @@ import {
   type CordisXEnvironmentSectionAction,
   type CordisXIconToken,
   type CordisXNavigationItem,
-  type CordisXManagerSettingsTabItem,
+  type CordisXManagerSettingsContentTabItem,
+  type CordisXManagerSettingsNavigationItem,
   type CordisXLocalizedText,
   type CordisXSlots,
   type CordisXStructuredAction,
@@ -128,6 +129,10 @@ export interface SurfaceResolvers {
     state: 'available' | 'pending' | 'invalid'
     detail?: string
   }>
+  managerSettingsNavigationRoute?(owner: string, id: string, view?: PluginGenerationView): Readonly<{
+    state: 'available' | 'pending' | 'invalid'
+    detail?: string
+  }>
 }
 
 function assertKeys(value: object, allowed: readonly string[], label: string): void {
@@ -185,6 +190,11 @@ function assertPresentationOptions(
   assertKeys(options, ['group', 'order', 'when', 'disabled'], 'surface contribution presentation options')
   if (surface === 'manager.settings.tabs' && options.group !== undefined) {
     throw new Error('manager.settings.tabs does not accept a contribution group')
+  }
+  if (surface === 'manager.settings.navigation-items'
+    && options.group !== 'before-settings'
+    && options.group !== 'after-settings') {
+    throw new Error('manager.settings.navigation-items requires group before-settings or after-settings')
   }
   if (options.group !== undefined) assertLocalId(options.group, 'surface contribution group')
   if (options.order !== undefined && (!Number.isInteger(options.order) || options.order < -100000 || options.order > 100000)) {
@@ -272,14 +282,22 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
         || presenter.progress.current < 0 || presenter.progress.total <= 0) throw new Error('progress presenter requires finite current/total values')
     } else if (presenter.progress !== undefined) throw new Error('progress values require a progress presenter')
   } else if (surface === 'manager.settings.tabs') {
-    const tab = snapshot as CordisXManagerSettingsTabItem
-    assertKeys(snapshot, ['title', 'icon', 'route'], 'manager settings tab')
-    assertLocalizedText(tab.title, 'manager settings tab title')
-    if (tab.icon === undefined) throw new Error('manager settings tab requires a host icon token')
-    assertIcon(tab.icon, 'manager settings tab')
-    if (tab.route === null || typeof tab.route !== 'object') throw new Error('manager settings tab requires a route reference')
-    assertKeys(tab.route, ['id', 'params'], 'manager settings tab route')
-    assertLocalId(tab.route.id, 'manager settings tab route id')
+    const tab = snapshot as CordisXManagerSettingsContentTabItem
+    assertKeys(snapshot, ['title', 'icon', 'route'], 'manager settings content tab')
+    assertLocalizedText(tab.title, 'manager settings content tab title')
+    if (tab.icon === undefined) throw new Error('manager settings content tab requires a host icon token')
+    assertIcon(tab.icon, 'manager settings content tab')
+    if (tab.route === null || typeof tab.route !== 'object') throw new Error('manager settings content tab requires a route reference')
+    assertKeys(tab.route, ['id', 'params'], 'manager settings content tab route')
+    assertLocalId(tab.route.id, 'manager settings content tab route id')
+  } else if (surface === 'manager.settings.navigation-items') {
+    const navigation = snapshot as CordisXManagerSettingsNavigationItem
+    assertKeys(snapshot, ['route'], 'manager settings navigation item')
+    if (navigation.route === null || typeof navigation.route !== 'object') {
+      throw new Error('manager settings navigation item requires a route reference')
+    }
+    assertKeys(navigation.route, ['id', 'params'], 'manager settings navigation item route')
+    assertLocalId(navigation.route.id, 'manager settings navigation item route id')
   } else if (surface === 'environment.panel.sections') {
     const section = snapshot as CordisXEnvironmentSection
     assertKeys(snapshot, ['sectionId', 'title', 'description', 'icon'], 'environment section')
@@ -490,12 +508,22 @@ export class SurfaceRegistry {
     const sections = new Set<string>()
     const rows = new Set<string>()
     const records = [...this.records.values()].filter(record => this.visibility?.visible(record.generation, view) ?? true)
+    const managerNavigationRoutes = new Map<string, string[]>()
     for (const record of records) {
       if (record.options.name === 'environment.panel.sections' && record.item !== undefined) {
         sections.add(qualifyOwnedId(record.owner, (record.item as CordisXEnvironmentSection).sectionId))
       }
       if (record.options.name === 'environment.section.rows' && record.item !== undefined) {
         rows.add(qualifyOwnedId(record.owner, (record.item as CordisXEnvironmentRow).rowId))
+      }
+      if (record.options.name === 'manager.settings.navigation-items'
+        && record.validationError === undefined
+        && record.item !== undefined) {
+        const routeId = (record.item as CordisXManagerSettingsNavigationItem).route.id
+        const key = `${record.owner}\u0000${routeId}`
+        const contributions = managerNavigationRoutes.get(key) ?? []
+        contributions.push(record.qualifiedId)
+        managerNavigationRoutes.set(key, contributions)
       }
     }
     return records
@@ -509,6 +537,14 @@ export class SurfaceRegistry {
         let error = record.validationError
         let pending = false
         const item = record.item as Record<string, unknown> | undefined
+        if (error === undefined && record.options.name === 'manager.settings.navigation-items' && item !== undefined) {
+          const routeId = (item as unknown as CordisXManagerSettingsNavigationItem).route.id
+          const conflicts = managerNavigationRoutes.get(`${record.owner}\u0000${routeId}`)
+          if (conflicts !== undefined && conflicts.length > 1) {
+            const ids = [...conflicts].sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+            error = `manager settings navigation route ${qualifyOwnedId(record.owner, routeId)} is referenced by multiple contributions: ${ids.join(', ')}`
+          }
+        }
         const pointAccess = this.access?.decision(record.owner, record.options.name, 'surface', view ?? record.candidateView)
           ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }
         const toolbarItem = item as unknown as CordisXToolbarItem | undefined
@@ -530,6 +566,15 @@ export class SurfaceRegistry {
                 : { state: 'pending' as const, detail: `route ${route.id} is not available` })
             if (resolution.state === 'pending') pending = true
             if (resolution.state === 'invalid') error = resolution.detail ?? `route ${route.id} is incompatible with manager settings`
+          } else if (command === undefined && route !== undefined && record.options.name === 'manager.settings.navigation-items') {
+            const resolution = this.resolvers.managerSettingsNavigationRoute?.(record.owner, route.id, resolutionView)
+              ?? (this.resolvers.route(record.owner, route.id, resolutionView)
+                ? { state: 'available' as const }
+                : { state: 'pending' as const, detail: `route ${route.id} is not available` })
+            if (resolution.state === 'pending') pending = true
+            if (resolution.state === 'invalid') {
+              error = resolution.detail ?? `route ${route.id} is incompatible with manager settings navigation`
+            }
           } else if (command === undefined && route !== undefined && !this.resolvers.route(record.owner, route.id, resolutionView)) error = `route ${route.id} is not available`
           const actions = item.actions as readonly { command: CordisXCommandReference }[] | undefined
           const missingAction = actions?.find(action => !this.resolvers.command(record.owner, action.command, resolutionView))

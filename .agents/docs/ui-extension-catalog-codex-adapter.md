@@ -141,8 +141,17 @@ The catalog uses a small set of shapes instead of one API per visual style:
 5. **outlet**: a host declaration joined to a route and page. The trusted-local
    plugin mounts only the page body; CordisX renders chrome and owns abort,
    context migration, routing, and disposal.
+6. **Manager settings content tab**: the existing A item retains localized
+   title, Host icon, and same-owner route while CordisX renders the Settings
+   tablist and body-only panel.
+7. **Manager settings navigation item**: the B item contains only a same-owner
+   route. Required before/after Settings group and envelope order place it;
+   route v2 supplies navigation title/description and page v3 supplies the
+   required Host icon plus standard header metadata.
 
-Contribution-level `group`, `order`, `when`, and disabled state stay common.
+Contribution-level `group`, `order`, `when`, and disabled state stay common
+unless a point closes them more narrowly: A rejects group, while B requires
+exactly `before-settings` or `after-settings`.
 The host decides how many direct actions fit and moves the remainder into its
 own accessible overflow or an existing native menu. A plugin cannot demand a
 new popover.
@@ -182,23 +191,26 @@ environment family is not duplicated under generic panel names.
 | Environment | `environment.section.actions` | action | implemented | Existing declared-section target. |
 | Environment | `environment.section.rows` | environment row | implemented | Existing declared-section row target. |
 | Environment | `environment.row.trailing-actions` | action | implemented | Existing declared-row target. |
-| CordisX manager | `manager.settings.tabs` | manager settings tab | planned v4 | Host-rendered configuration tabs joined to same-owner manager-local routes/pages; no Codex selector or header callback. |
+| CordisX manager | `manager.settings.tabs` | manager settings content tab | implemented v4; compatible v5 | Host-rendered content tabs inside Settings joined to same-owner manager-local routes/pages; stable point id, no Codex selector or header callback. |
+| CordisX manager | `manager.settings.navigation-items` | manager settings navigation item | planned v5 Host | Route-only first-level plugin destinations grouped immediately before/after Host Settings; no Codex selector or plugin row renderer. |
 | Page | `app` | outlet | implemented | Existing generation-scoped renderer page. |
 | Page | `main` | outlet | implemented | Existing semantic main-region page following sidebar geometry. |
 | Page | `session.content` | outlet | implemented | Active-session body page below the retained native header; supports host-gated page-v2 `body-only` chrome. |
 | Panel page | `panel.right.content` | outlet | reserved | No declaration until the adapter proves a stable right-panel content region and context key. |
 | Panel page | `panel.bottom.content` | outlet | reserved | No declaration until the adapter proves a stable bottom-panel content region and context key. |
-| CordisX manager page | `manager.settings.content` | outlet | planned v4 | CordisX-owned settings panel body; isolated from primary page presentation and independent of the Codex adapter. |
+| CordisX manager page | `manager.settings.content` | outlet | implemented v4 | CordisX-owned body-only Settings tab panel; isolated from primary page presentation and independent of the Codex adapter. |
+| CordisX manager page | `manager.content` | outlet | planned v5 Host | Standard CordisX Manager page shell/body for B routes; presentation group `manager`, route family `manager`, no Codex adapter seat. |
 
 An adapter may report an experimental point as pending with a machine code,
 but it must not add it to the live declared catalog as available merely because
 a protocol id exists. Reserved outlets are valid future route targets only in
 the version that declares them; current navigation fails closed.
 
-`planned v4` is an architecture-only marker, not a protocol availability
-value. Until the surface v4/catalog v3 protocol and host slices merge and pass
-the required live evidence, the current runtime does not declare either
-manager-settings point.
+`planned v5 Host` is an architecture/Host-delivery marker, not a protocol
+availability value. The A pair is already declared. The B pair becomes
+available only after the Host consumes formal Protocol `f350899` and passes its
+automated plus real-renderer evidence; protocol existence alone does not make
+it a Codex adapter surface or permit an overlay fallback.
 
 ## Contextual invocation
 
@@ -260,7 +272,8 @@ resembles an identity never becomes host context.
 | assistant actions | `session.message.actions` | Host-generated message context; no message node. |
 | `turnTail` | `session.turn.footer` | Structured presenter with turn context; no tail component. |
 | `details.tool` | right-panel route/outlet plus `session.tool.actions` | Reserved until stable right-panel and tool identity seats exist. |
-| settings sections | `manager.settings.tabs` plus `manager.settings.content` | Host-neutral CordisX manager points; structured header plus controlled page body, never a Codex shell selector. |
+| Settings content switcher | `manager.settings.tabs` plus `manager.settings.content` | A: Host-rendered tabs inside Settings plus controlled body-only content; never a Codex shell selector. |
+| top-level Manager plugin destination | `manager.settings.navigation-items` plus `manager.content` | B: Host-rendered left-navigation row, route-v2 text, page-v3 standard header/body; no plugin DOM or Codex selector. |
 | keyed chat/message/tool renderers | refused | No keyed renderer or native-node replacement registry. |
 | whole composer/session/header/chat replacement | refused | CordisX does not grant native React ownership. |
 
@@ -274,30 +287,27 @@ and a separate presentation registry; it cannot be smuggled through a surface.
 
 1. **Architecture (`cordisx`)**: this catalog, compatibility/refusal table,
    adapter state model, dependency order, and validation matrix.
-2. **Protocol (`cordisx-protocol`)**: versioned catalog vocabulary, structured
-   payload families, contextual invocation origin, schemas, fixtures, and
-   conformance. The branch starts from the merged Agent event contract so its
-   identity vocabulary is preserved.
-3. **Host fixed head (`cordisx`)**: matching public types, registry validation,
-   permission/origin enforcement, host projection, adapter fixtures, and the
-   two required implemented points. This head is the dependency for consumers
-   such as Agent Trace Showcase.
-4. **Codex adapter completion (`cordisx`)**: experimental probes remain
-   fail-pending, diagnostics are exposed, and real-renderer smoke produces
-   screenshots and a machine-readable report.
-5. **Owning PRs and mono**: merge protocol and host through normal CI, then pin
-   exact merged commits in one separate CordisXMono PR. `roadmap` remains
-   `update = none`.
+2. **Protocol (`cordisx-protocol`)**: formal merge `f350899` owns surface v5,
+   catalog v4, the two Manager payload families, route-v2/page-v3 reuse,
+   generation-fenced origins, fixtures, and conformance.
+3. **Host (`cordisx`)**: from latest formal main, append matching types,
+   registry validation, point descriptors, B navigation/standard page
+   projection, permission/origin enforcement, diagnostics, lifecycle and the
+   bilingual A+B demo while preserving current catalog and Manager work.
+4. **Real renderer (`cordisx`)**: isolated `app://` smoke covers B wide/narrow,
+   light/dark, selection/history/fallback and A regression with screenshots
+   plus a machine-readable report.
+5. **Mono**: no gitlink update in this delivery.
 
 ## Validation matrix
 
 | Layer | Required evidence |
 | --- | --- |
-| Protocol | Accept every catalog id and payload family; reject free DOM, selector/HTML/SVG/CSS, arbitrary icons, invalid anchor/placement, spoofed context, unknown schema versions, and invalid status transitions; preserve Agent identity vocabulary. |
+| Protocol | Accept every catalog id and payload family; keep A stable across v4/v5; B item accepts route only; reject duplicated display metadata, free DOM, selector/HTML/SVG/CSS, missing/non-Host page icon, invalid group, spoofed context, unknown schema versions, and invalid lifecycle/origin transitions. |
 | Registry/runtime | Ownership and source binding, deterministic group/order, direct/overflow partition, native-menu-only projection, command/route resolution, point policy at render and invoke, frozen dynamic context, plugin-argument non-spoofing, `when`/disabled, update-after-dispose, locale reprojection, owner unload, block/restore, and renderer-generation cleanup. |
 | Adapter fixtures | Unique/pending/ambiguous anchors; native anchor replacement; sidebar collapse/resize; composer idle, busy, disabled, and send state; session switch; right/bottom panel absence and presence; no fallback overlay. |
-| Real renderer | Isolated `app://` report and screenshots prove `session.header.actions` and `composer.toolbar.items` at `submit`/`before` are real sibling layout insertion, not overlay; native nodes retain identity, parent, visibility, and subscription; per-button idle/pressed/hover/focus state, exact action/outer gaps, the 126-pixel workspace slot, tooltip, `no-drag`, titlebar safe inset, policy hide/restore, plugin block/restore, and generation disposal pass. |
-| Release | Focused tests, typecheck/build/full check, clean diff, pushed commits, normal PR checks and merges, compatible mono gitlinks only, and unchanged roadmap update policy. |
+| Real renderer | Existing shell-surface evidence remains valid. B evidence additionally proves exact Host/plugin order, pointer/keyboard and Manager-local deep link/Back, selected state, standard page-v3 header/body, constrained width, light/dark, policy/block/disable/uninstall/generation fallback, A usability, no raw bridge/selector, and unchanged outer URL/native data flow. |
+| Release | Focused tests, typecheck/build/full check, clean diff, normal Protocol/Host PR checks and head-fenced merges, exact merged revision evidence, and no mono update. |
 
 The smoke report records the Codex application version, adapter revision,
 resolved seat identities, contribution ids, DOM relationship (`before` or

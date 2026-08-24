@@ -1,6 +1,7 @@
 import { Context, Service, type Disposable } from '@deepseek-ai/cordis'
 import type {
   CordisXConfigApplies,
+  CordisXConfigAppliesInput,
   CordisXConfigFieldController,
   CordisXConfigFieldPath,
   CordisXConfigFieldSnapshot,
@@ -59,9 +60,11 @@ interface ConfigRecord {
   readonly applies: CordisXConfigApplies
   readonly writable: boolean
   revision: number
+  activeRevision: number
   raw: unknown
   value: unknown
   candidate?: { readonly raw: unknown; readonly value: unknown }
+  pendingAppRestart?: { readonly raw: unknown; readonly value: unknown }
   readonly secretPaths: readonly CordisXConfigFieldPath[]
   readonly watchers: Set<(value: unknown) => void>
 }
@@ -340,6 +343,7 @@ export class PluginConfigurationRegistry {
       applies: input.applies,
       writable: input.writable,
       revision: input.revision,
+      activeRevision: input.revision,
       raw: immutable(raw),
       value,
       secretPaths: secrets,
@@ -379,7 +383,7 @@ export class PluginConfigurationRegistry {
     if (!Array.isArray(operations) || operations.length === 0 || operations.length > 100) {
       throw new Error('plugin configuration mutation must contain 1 to 100 operations')
     }
-    let raw = record.raw
+    let raw = record.pendingAppRestart?.raw ?? record.raw
     for (const operation of operations) {
       if (operation === null || typeof operation !== 'object' || (operation.op !== 'set' && operation.op !== 'unset')) {
         throw new Error('config operation must be set or unset')
@@ -412,8 +416,19 @@ export class PluginConfigurationRegistry {
     record.raw = candidate.raw
     record.value = candidate.value
     record.revision = revision
+    record.activeRevision = revision
     delete record.candidate
+    delete record.pendingAppRestart
     for (const watcher of [...record.watchers]) watcher(record.value)
+    this.notify()
+  }
+
+  /** Persist an application-restart candidate without mutating the active process snapshot. */
+  commitForAppRestart(owner: string, revision: number, candidate: ConfigCandidate): void {
+    const record = this.require(owner)
+    record.revision = revision
+    record.pendingAppRestart = candidate
+    delete record.candidate
     this.notify()
   }
 
@@ -428,9 +443,15 @@ export class PluginConfigurationRegistry {
       applies: record.applies,
       writable: record.writable,
       revision: record.revision,
-      lastGoodRevision: record.revision,
-      value: immutable(removePaths(record.raw, record.secretPaths)),
-      fields: schemastery ? fields(record.schema, record.raw, record.value, record.namespace, locale) : [],
+      lastGoodRevision: record.activeRevision,
+      value: immutable(removePaths(record.pendingAppRestart?.raw ?? record.raw, record.secretPaths)),
+      fields: schemastery ? fields(
+        record.schema,
+        record.pendingAppRestart?.raw ?? record.raw,
+        record.pendingAppRestart?.value ?? record.value,
+        record.namespace,
+        locale,
+      ) : [],
       secrets: record.secretPaths.map(path => ({ path, set: false })),
     }
   }
@@ -807,12 +828,17 @@ export function moduleConfigSchema(module: { readonly Config?: CordisXStandardSc
   return undefined
 }
 
-export function moduleConfigApplies(module: { readonly configApplies?: CordisXConfigApplies; readonly default?: unknown } | undefined): CordisXConfigApplies {
+export function moduleConfigApplies(module: {
+  readonly configApplies?: CordisXConfigAppliesInput
+  readonly default?: unknown
+} | undefined): CordisXConfigApplies {
   const fallback = module?.default
   const value = module?.configApplies ?? (fallback !== null && typeof fallback === 'object'
-    ? (fallback as { readonly configApplies?: CordisXConfigApplies }).configApplies
+    ? (fallback as { readonly configApplies?: CordisXConfigAppliesInput }).configApplies
     : undefined)
-  if (value === undefined) return 'restart'
-  if (value !== 'live' && value !== 'restart') throw new Error('plugin configApplies must be live or restart')
+  if (value === undefined || value === 'restart') return 'plugin-restart'
+  if (!['live', 'plugin-restart', 'service-restart', 'app-restart'].includes(value)) {
+    throw new Error('plugin configApplies must be live, plugin-restart, service-restart, or app-restart')
+  }
   return value
 }

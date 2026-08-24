@@ -258,7 +258,7 @@ describe('Agent Trace Showcase renderer integration', () => {
     const { dom, runtime } = await fixture('session-config-form', { mode: 'historical' })
     const descriptor = runtime.snapshot().plugins.find(plugin => plugin.id === 'agent-trace-showcase')?.configuration
     expect(descriptor).toMatchObject({
-      schemaKind: 'schemastery', applies: 'restart', revision: 0,
+      schemaKind: 'schemastery', applies: 'plugin-restart', revision: 0,
       value: { mode: 'historical' },
     })
     expect(descriptor?.fields.map(field => field.path.join('.'))).toEqual([

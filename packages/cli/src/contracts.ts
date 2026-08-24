@@ -506,10 +506,18 @@ export interface CordisXTabItem {
   readonly when?: CordisXWhen
 }
 
-/** Protocol-v4 manager tab header data. Envelope options own identity/order/state. */
-export interface CordisXManagerSettingsTabItem {
+/** Manager Settings content-tab header data. Envelope options own identity/order/state. */
+export interface CordisXManagerSettingsContentTabItem {
   readonly title: CordisXLocalizedText
   readonly icon: CordisXIconToken
+  readonly route: CordisXRouteReference
+}
+
+/** @deprecated Use CordisXManagerSettingsContentTabItem. The stable surface id remains manager.settings.tabs. */
+export type CordisXManagerSettingsTabItem = CordisXManagerSettingsContentTabItem
+
+/** Manager Settings-adjacent navigation data; route/page metadata owns all display text and icons. */
+export interface CordisXManagerSettingsNavigationItem {
   readonly route: CordisXRouteReference
 }
 
@@ -580,7 +588,8 @@ export interface CordisXSurfaceMap {
   'environment.section.actions': CordisXEnvironmentSectionAction
   'environment.section.rows': CordisXEnvironmentRow
   'environment.row.trailing-actions': CordisXEnvironmentRowAction
-  'manager.settings.tabs': CordisXManagerSettingsTabItem
+  'manager.settings.tabs': CordisXManagerSettingsContentTabItem
+  'manager.settings.navigation-items': CordisXManagerSettingsNavigationItem
 }
 
 export type CordisXSurfaceName = Extract<keyof CordisXSurfaceMap, string>
@@ -615,6 +624,7 @@ export const CORDISX_SURFACE_NAMES = [
   'environment.section.rows',
   'environment.row.trailing-actions',
   'manager.settings.tabs',
+  'manager.settings.navigation-items',
 ] as const satisfies readonly CordisXSurfaceName[]
 
 export const CORDISX_IMPLEMENTED_SURFACE_NAMES = [
@@ -632,16 +642,26 @@ export const CORDISX_IMPLEMENTED_SURFACE_NAMES = [
   'environment.section.rows',
   'environment.row.trailing-actions',
   'manager.settings.tabs',
+  'manager.settings.navigation-items',
 ] as const satisfies readonly CordisXSurfaceName[]
 
-export interface CordisXContributionOptions<Name extends CordisXSurfaceName = CordisXSurfaceName> {
+interface CordisXContributionOptionsBase<Name extends CordisXSurfaceName> {
   readonly name: Name
   readonly id: string
-  readonly group?: string
   readonly order?: number
   readonly when?: CordisXWhen
   readonly disabled?: CordisXDisabledState
 }
+
+export type CordisXManagerSettingsNavigationGroup = 'before-settings' | 'after-settings'
+
+export type CordisXContributionOptions<Name extends CordisXSurfaceName = CordisXSurfaceName> =
+  CordisXContributionOptionsBase<Name>
+  & (Name extends 'manager.settings.navigation-items'
+    ? { readonly group: CordisXManagerSettingsNavigationGroup }
+    : Name extends 'manager.settings.tabs'
+      ? { readonly group?: never }
+      : { readonly group?: string })
 
 export interface CordisXContributionPresentationOptions {
   readonly group?: string
@@ -724,6 +744,7 @@ export interface CordisXOutletMap {
   main: { readonly scope: 'main' }
   'session.content': { readonly scope: 'session' }
   'manager.settings.content': { readonly scope: 'manager-settings' }
+  'manager.content': { readonly scope: 'manager' }
 }
 
 export type CordisXOutletName = Extract<keyof CordisXOutletMap, string>
@@ -844,7 +865,11 @@ export interface CordisXRoutes extends CordisXPageNavigation {
   register<Outlet extends CordisXOutletName>(definition: CordisXRouteDefinition<Outlet>): Disposable<void | Promise<void>>
 }
 
-export type CordisXConfigApplies = 'live' | 'restart'
+/** Canonical configuration-v2 application plane exposed by runtime snapshots. */
+export type CordisXConfigApplies = 'live' | 'plugin-restart' | 'service-restart' | 'app-restart'
+
+/** Closed v1 module spelling accepted only as a compatibility input. */
+export type CordisXConfigAppliesInput = CordisXConfigApplies | 'restart'
 
 export interface CordisXStandardSchemaResult<T = unknown> {
   readonly value?: T
@@ -866,7 +891,7 @@ export interface CordisXStandardSchema<T = unknown> {
 export interface CordisXPluginSettings {
   /** Return the calling plugin's current normalized, immutable config snapshot. */
   get<T = unknown>(): T
-  /** Observe committed live snapshots. Restart mode recreates the owning fiber instead. */
+  /** Observe committed live snapshots. Restart modes never publish a false live update. */
   watch<T = unknown>(listener: (value: T) => void): Disposable<void>
 }
 
@@ -935,7 +960,7 @@ export interface CordisXPluginModule {
   readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly Config?: CordisXStandardSchema
-  readonly configApplies?: CordisXConfigApplies
+  readonly configApplies?: CordisXConfigAppliesInput
   readonly apply?: (ctx: Context, config: unknown) => unknown
   readonly default?: unknown
 }

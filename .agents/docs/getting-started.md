@@ -269,7 +269,7 @@ export function apply(ctx: Context) {
 
 For an editable Manager form, export a Schemastery `Config`. It is also a
 Standard Schema validator, so the same object supplies defaults and runtime
-validation. `configApplies` defaults to `restart`; choose `live` only when the
+validation. `configApplies` defaults to `plugin-restart`; choose `live` only when the
 plugin consumes committed changes through `ctx.settings.watch()`:
 
 ```ts

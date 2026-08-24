@@ -24,7 +24,7 @@ export const Config = Schema.object({
     }),
 })
 export type SlotShowcaseConfig = Schemastery.TypeT<typeof Config>
-export const configApplies = 'restart'
+export const configApplies = 'plugin-restart'
 export const manifest = {
   $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   schemaVersion: 1,
