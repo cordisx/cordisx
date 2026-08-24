@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { JSDOM } from 'jsdom'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { CordisXPluginConsolePageV1 } from '../packages/cli/src/contracts.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
@@ -13,12 +13,27 @@ interface TestRuntime {
   dispose(): Promise<void>
 }
 
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const showcaseEntry = path.join(projectRoot, 'examples/plugins/console-showcase/index.ts')
+const silentEntry = path.join(projectRoot, 'tests/fixtures/silent-console-api-plugin.ts')
+const BUNDLE_SETUP_TIMEOUT_MS = 15_000
+const RUNTIME_INTEGRATION_TIMEOUT_MS = 10_000
+
+async function waitForState(predicate: () => boolean, label: string, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`)
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+}
+
 describe('plugin DevTools Console runtime', () => {
-  it('captures silent Host API calls and owner-scoped native Console without cross-plugin leakage', async () => {
-    const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  let bundle = ''
+  let activeDom: JSDOM | undefined
+  let activeRuntime: TestRuntime | undefined
+
+  beforeAll(async () => {
     const base = await loadConfig(path.join(projectRoot, 'cordisx.config.example.json'))
-    const showcaseEntry = path.join(projectRoot, 'examples/plugins/console-showcase/index.ts')
-    const silentEntry = path.join(projectRoot, 'tests/fixtures/silent-console-api-plugin.ts')
     const config = {
       ...base,
       plugins: [
@@ -31,12 +46,27 @@ describe('plugin DevTools Console runtime', () => {
       identity: { source: pathToFileURL(showcaseEntry).href, id: 'console-showcase' },
       capability: 'models.read', scope: {}, policy: 'deny',
     })
-    const bundle = await buildRendererBundle(config, { permission: { profileId: 'console-smoke', policies: [denial], bridgeToken: 'console-smoke-token' } })
+    bundle = await buildRendererBundle(config, { permission: { profileId: 'console-smoke', policies: [denial], bridgeToken: 'console-smoke-token' } })
     expect(bundle).not.toContain('https://cdn')
+  }, BUNDLE_SETUP_TIMEOUT_MS)
 
+  afterEach(async () => {
+    const runtime = activeRuntime
+    const dom = activeDom
+    activeRuntime = undefined
+    activeDom = undefined
+    try {
+      await runtime?.dispose()
+    } finally {
+      dom?.window.close()
+    }
+  })
+
+  it('captures silent Host API calls and owner-scoped native Console without cross-plugin leakage', async () => {
     const dom = new JSDOM('<html class="electron-dark"><head></head><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>', {
       runScripts: 'dangerously', url: 'https://codex.local/', pretendToBeVisual: true,
     })
+    activeDom = dom
     Object.defineProperty(dom.window, 'matchMedia', { configurable: true, value: () => ({
       matches: false, media: '', onchange: null,
       addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
@@ -52,14 +82,13 @@ describe('plugin DevTools Console runtime', () => {
     Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetParent', { configurable: true, get: () => dom.window.document.body })
     Object.defineProperty(dom.window, '__cordisxPermissionPolicyRequestV1', { configurable: true, value: () => {} })
     dom.window.eval(bundle)
-    for (let attempt = 0; attempt < 40 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
+    await waitForState(() => dom.window.document.documentElement.dataset.cordisxReady === 'true', 'renderer readiness')
     const runtime = (dom.window as unknown as { __cordisxRuntime?: TestRuntime }).__cordisxRuntime
     expect(runtime).toBeDefined()
-    for (let attempt = 0; attempt < 30 && !runtime!.pluginConsole('console-showcase').entries.some(entry => (
+    activeRuntime = runtime
+    await waitForState(() => runtime!.pluginConsole('console-showcase').entries.some(entry => (
       entry.source === 'platform.models.list' && (entry.phase === 'failure' || entry.phase === 'success')
-    )); attempt += 1) await new Promise(resolve => setTimeout(resolve, 10))
+    )), 'terminal Host invocation')
 
     const silent = runtime!.pluginConsole('silent-api')
     expect(silent.entries.some(entry => entry.source === 'settings.get' && entry.phase === 'success')).toBe(true)
@@ -90,10 +119,10 @@ describe('plugin DevTools Console runtime', () => {
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="console-showcase"]')?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.click()
     let consoleFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
-    for (let attempt = 0; attempt < 20 && !consoleFrame?.textContent?.includes('settings.get'); attempt += 1) {
-      await new Promise(resolve => setTimeout(resolve, 10))
+    await waitForState(() => {
       consoleFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
-    }
+      return consoleFrame?.textContent?.includes('settings.get') === true
+    }, 'Luna Console mount')
     expect(consoleFrame?.textContent).toContain('settings.get')
     expect(consoleFrame?.classList.contains('luna-console')).toBe(true)
     expect(consoleFrame?.querySelector('.luna-text-viewer-text, pre')).toBeNull()
@@ -128,7 +157,7 @@ describe('plugin DevTools Console runtime', () => {
     expect(actionButtons.find(button => button.dataset.consoleAction === 'clear')?.getAttribute('aria-description')).toBe('不可撤销')
     expect(actionButtons.find(button => button.dataset.consoleAction === 'copy')?.disabled).toBe(true)
     actionButtons[0]?.focus()
-    await new Promise(resolve => setTimeout(resolve, 680))
+    await waitForState(() => dom.window.document.querySelector('[role="tooltip"]')?.textContent === '暂停采集', 'toolbar tooltip')
     expect(dom.window.document.querySelector('[role="tooltip"]')?.textContent).toBe('暂停采集')
     actionButtons[0]?.blur()
     actionButtons[0]?.click()
@@ -148,7 +177,7 @@ describe('plugin DevTools Console runtime', () => {
     dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="pause"]')?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="follow"]')?.click()
     const keyboardFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
-    for (let attempt = 0; attempt < 20 && keyboardFrame?.querySelector('[data-console-entry]') === null; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10))
+    await waitForState(() => keyboardFrame?.querySelector('[data-console-entry]') !== null, 'keyboard Console remount')
     keyboardFrame?.focus()
     keyboardFrame?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
     const inspector = dom.window.document.querySelector('[data-console-detail]')
@@ -161,7 +190,7 @@ describe('plugin DevTools Console runtime', () => {
     const search = dom.window.document.querySelector<HTMLInputElement>('[data-console-search="console-showcase"]')
     search!.value = 'inspectable error'
     search!.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-    for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-console-entry]') === null; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10))
+    await waitForState(() => dom.window.document.querySelector('[data-console-entry]') !== null, 'search projection')
     expect(dom.window.document.querySelector('[data-console-entry]')?.getAttribute('data-console-source')).toBe('console.info')
     expect(dom.window.document.querySelector('[data-console-source="console.warn"]')).toBeNull()
     const resetSearch = dom.window.document.querySelector<HTMLInputElement>('[data-console-search="console-showcase"]')
@@ -170,7 +199,7 @@ describe('plugin DevTools Console runtime', () => {
     const source = dom.window.document.querySelector<HTMLSelectElement>('select[aria-label="日志来源"]')
     source!.value = 'console.warn'
     source!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
-    for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-console-entry]') === null; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10))
+    await waitForState(() => dom.window.document.querySelector('[data-console-entry]') !== null, 'source projection')
     expect(dom.window.document.querySelector('[data-console-entry]')?.getAttribute('data-console-source')).toBe('console.warn')
     expect(dom.window.document.querySelector('[data-console-source="console.log"]')).toBeNull()
     const resetSource = dom.window.document.querySelector<HTMLSelectElement>('select[aria-label="日志来源"]')
@@ -180,7 +209,7 @@ describe('plugin DevTools Console runtime', () => {
     kind!.value = 'console'
     kind!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
     const scopedFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
-    for (let attempt = 0; attempt < 20 && scopedFrame?.querySelector('[data-console-source="console.log"]') === null; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10))
+    await waitForState(() => scopedFrame?.querySelector('[data-console-source="console.log"]') !== null, 'Console-only projection')
     expect(scopedFrame?.querySelector('[data-console-source="console.log"]')).not.toBeNull()
     expect(scopedFrame?.querySelector('[data-console-source="settings.get"]')).toBeNull()
 
@@ -201,7 +230,7 @@ describe('plugin DevTools Console runtime', () => {
     const modal = dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')
     expect(modal?.dataset.cordisxAppTheme).toBe('dark')
     dom.window.document.documentElement.className = 'electron-light'
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await waitForState(() => modal?.dataset.cordisxAppTheme === 'light', 'Host light theme projection')
     expect(modal?.dataset.cordisxAppTheme).toBe('light')
     expect(scopedFrame?.classList.contains('luna-console-theme-light')).toBe(true)
 
@@ -212,8 +241,5 @@ describe('plugin DevTools Console runtime', () => {
     await runtime!.setPluginBlocked('console-showcase', true)
     await runtime!.setPluginBlocked('console-showcase', false)
     expect(runtime!.pluginConsole('console-showcase').entries.some(entry => entry.phase === 'reload')).toBe(true)
-
-    await runtime!.dispose()
-    dom.window.close()
-  })
+  }, RUNTIME_INTEGRATION_TIMEOUT_MS)
 })
