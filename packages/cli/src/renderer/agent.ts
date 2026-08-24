@@ -31,6 +31,7 @@ import type {
   CordisXPluginIdentity,
 } from '../platform-contracts.js'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
+import { generationFromContext } from './ownership.js'
 import { CordisXAgentEventLedger } from './agent-events.js'
 import { PermissionBroker } from './platform.js'
 import type { PluginConsoleAspect, PluginConsolePendingInvocation } from './plugin-console.js'
@@ -185,8 +186,8 @@ export class CordisXHostAgentRuntime {
     return this.adapter.agentStatus()
   }
 
-  pluginSource(identity: CordisXPluginIdentity): CordisXAgentPluginSource {
-    return freeze({ kind: 'plugin', source: identity.source, id: identity.id, version: null, generation: this.generation })
+  pluginSource(identity: CordisXPluginIdentity, moduleGeneration = this.generation): CordisXAgentPluginSource {
+    return freeze({ kind: 'plugin', source: identity.source, id: identity.id, version: null, generation: moduleGeneration })
   }
 
   send(
@@ -195,12 +196,13 @@ export class CordisXHostAgentRuntime {
     input: CordisXAgentMessageInput,
     target: CordisXAgentTarget,
     wakeup: boolean,
+    moduleGeneration = this.generation,
     consoleTrace?: PluginConsolePendingInvocation,
   ): CordisXAgentDeliveryHandle {
     this.assertLive()
     if (!validId(sessionId)) throw new Error('sessionId must be a non-empty opaque id')
     if (!['next-turn', 'next-step'].includes(target) || typeof wakeup !== 'boolean') throw new Error('Agent delivery target is invalid')
-    const owner = this.pluginSource(identity)
+    const owner = this.pluginSource(identity, moduleGeneration)
     const deliveryId = `cxdelivery:${encodeURIComponent(this.generation)}:${this.nextDelivery++}`
     const message: CordisXUserMessage = freeze({
       id: `cxmsg:${encodeURIComponent(this.generation)}:${this.nextMessage++}`,
@@ -230,12 +232,12 @@ export class CordisXHostAgentRuntime {
     return this.deliveryHandle(identity, record)
   }
 
-  clearPending(identity: CordisXPluginIdentity, sessionId: string): CordisXAgentDeliveryClearResult {
+  clearPending(identity: CordisXPluginIdentity, sessionId: string, moduleGeneration = this.generation): CordisXAgentDeliveryClearResult {
     this.assertLive()
     const cancelled: CordisXAgentDeliverySnapshot[] = []
     const retained: CordisXAgentDeliverySnapshot[] = []
     for (const record of this.deliveries.values()) {
-      if (record.sessionId !== sessionId || !this.sameOwner(record.identity, identity) || record.owner.generation !== this.generation) continue
+      if (record.sessionId !== sessionId || !this.sameOwner(record.identity, identity) || record.owner.generation !== moduleGeneration) continue
       if (this.terminalStage(record.stage)) continue
       const result = this.cancelDelivery(identity, record.deliveryId, 'clear-pending')
       if (result.ok) cancelled.push(result.snapshot)
@@ -244,23 +246,29 @@ export class CordisXHostAgentRuntime {
     return clone({ cancelled, retained })
   }
 
-  releaseOwner(identity: CordisXPluginIdentity, reason: Exclude<CordisXMessageDeliveryCancelReason, 'requested' | 'clear-pending'>): void {
+  releaseOwner(
+    identity: CordisXPluginIdentity,
+    reason: Exclude<CordisXMessageDeliveryCancelReason, 'requested' | 'clear-pending'>,
+    moduleGeneration?: string,
+  ): void {
     for (const record of this.deliveries.values()) {
-      if (!this.sameOwner(record.identity, identity)) continue
+      if (!this.sameOwner(record.identity, identity)
+        || (moduleGeneration !== undefined && record.owner.generation !== moduleGeneration)) continue
       this.invalidateDelivery(record, reason)
     }
     for (const prompt of [...this.prompts]) {
-      if (this.sameOwner(prompt.identity, identity)) this.releasePrompt(prompt, reason)
+      if (this.sameOwner(prompt.identity, identity)
+        && (moduleGeneration === undefined || prompt.source.generation === moduleGeneration)) this.releasePrompt(prompt, reason)
     }
   }
 
-  registerPreStep(identity: CordisXPluginIdentity, handler: CordisXPreStepHandler): Disposable<void> {
+  registerPreStep(identity: CordisXPluginIdentity, handler: CordisXPreStepHandler, moduleGeneration = this.generation): Disposable<void> {
     this.assertLive()
     const record = {
       order: this.nextRegistration++,
       contributionId: `cxcontribution:${encodeURIComponent(this.generation)}:${this.nextContribution++}`,
       identity,
-      source: this.pluginSource(identity),
+      source: this.pluginSource(identity, moduleGeneration),
       handler,
     }
     this.preSteps.push(record)
@@ -349,7 +357,12 @@ export class CordisXHostAgentRuntime {
     return { status: 'continued', messages, prompt }
   }
 
-  registerPrompt(identity: CordisXPluginIdentity, kind: 'section' | 'context', contribution: CordisXPromptContribution): Disposable<void> {
+  registerPrompt(
+    identity: CordisXPluginIdentity,
+    kind: 'section' | 'context',
+    contribution: CordisXPromptContribution,
+    moduleGeneration = this.generation,
+  ): Disposable<void> {
     this.assertLive()
     if (!validId(contribution.sessionId) || !validId(contribution.id) || contribution.content.trim() === '') {
       throw new Error('Prompt contribution requires sessionId, id, and non-empty content')
@@ -357,7 +370,7 @@ export class CordisXHostAgentRuntime {
     const record: PromptRecord = {
       kind,
       identity,
-      source: this.pluginSource(identity),
+      source: this.pluginSource(identity, moduleGeneration),
       contribution: clone(contribution),
       contributionId: `cxcontribution:${encodeURIComponent(this.generation)}:${this.nextContribution++}`,
       active: false,
@@ -905,6 +918,7 @@ export class CordisXAgentService extends Service implements CordisXAgents {
     const console = consoleFor(this)
     const token = console?.tokenFromContext(this.ctx)
     const identity = token === undefined ? caller(this.ctx) : console!.owner(token)
+    const moduleGeneration = generationFromContext(this.ctx) ?? runtimeFor(this).generation
     const runtime = runtimeFor(this)
     const send = (
       message: CordisXAgentMessageInput,
@@ -914,9 +928,9 @@ export class CordisXAgentService extends Service implements CordisXAgents {
       const trace = token === undefined || console === undefined
         ? undefined
         : console.beginPending(token, 'agents.messages.append', { target, wakeup, message }, { sessionId })
-      const handle = runtime.send(identity, sessionId, message, target, wakeup, trace)
+      const handle = runtime.send(identity, sessionId, message, target, wakeup, moduleGeneration, trace)
       this.ctx.effect(
-        () => () => runtime.releaseOwner(identity, 'owner-disposed'),
+        () => () => runtime.releaseOwner(identity, 'owner-disposed', moduleGeneration),
         `agents.delivery(${JSON.stringify(handle.deliveryId)})`,
       )
       return handle
@@ -927,8 +941,8 @@ export class CordisXAgentService extends Service implements CordisXAgents {
       steer: (message: CordisXAgentMessageInput) => send(message, 'next-step', true),
       inject: (message: CordisXAgentMessageInput) => send(message, 'next-step', false),
       clearPending: () => token === undefined || console === undefined
-        ? runtime.clearPending(identity, sessionId)
-        : console.runSync(token, 'agents.clearPending', { sessionId }, () => runtime.clearPending(identity, sessionId)),
+        ? runtime.clearPending(identity, sessionId, moduleGeneration)
+        : console.runSync(token, 'agents.clearPending', { sessionId }, () => runtime.clearPending(identity, sessionId, moduleGeneration)),
     })
   }
 
@@ -937,9 +951,10 @@ export class CordisXAgentService extends Service implements CordisXAgents {
     const console = consoleFor(this)
     const token = console?.tokenFromContext(this.ctx)
     const identity = token === undefined ? caller(this.ctx) : console!.owner(token)
+    const moduleGeneration = generationFromContext(this.ctx) ?? runtimeFor(this).generation
     const scoped = token === undefined || console === undefined ? handler : console.wrapCallback(token, 'agents.preStep', handler)
     const register = (): Disposable<void> => this.ctx.effect(
-      () => runtimeFor(this).registerPreStep(identity, scoped),
+      () => runtimeFor(this).registerPreStep(identity, scoped, moduleGeneration),
       'agents.preStep',
     ) as Disposable<void>
     return token === undefined || console === undefined ? register() : console.runSync(token, 'agents.preStep.register', {}, register)
@@ -966,8 +981,9 @@ export class CordisXSystemPromptService extends Service implements CordisXSystem
     const console = consoleFor(this)
     const token = console?.tokenFromContext(this.ctx)
     const identity = token === undefined ? caller(this.ctx) : console!.owner(token)
+    const moduleGeneration = generationFromContext(this.ctx) ?? runtimeFor(this).generation
     const register = (): Disposable<void> => this.ctx.effect(
-      () => runtimeFor(this).registerPrompt(identity, kind, contribution),
+      () => runtimeFor(this).registerPrompt(identity, kind, contribution, moduleGeneration),
       `systemPrompt.${kind}(${JSON.stringify(contribution.id)})`,
     ) as Disposable<void>
     return token === undefined || console === undefined ? register() : console.runSync(token, `systemPrompt.${kind}.register`, contribution, register)

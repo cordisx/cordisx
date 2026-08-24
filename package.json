@@ -12,6 +12,7 @@
     "check:release": "node scripts/check-release-metadata.mjs",
     "dev": "tsx packages/cli/src/cli.ts",
     "smoke": "node packages/cli/scripts/live-smoke.mjs",
+    "smoke:isolated-app": "node packages/cli/scripts/run-isolated-app-smoke.mjs",
     "test": "vitest run",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

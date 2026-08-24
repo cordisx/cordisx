@@ -1,3 +1,4 @@
+import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import {
   CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
@@ -17,8 +18,58 @@ import {
   type CordisXExtensionPointPolicyRecordV1,
 } from '../packages/cli/src/contracts.js'
 import type { CordisXI18nService } from '../packages/cli/src/renderer/i18n.js'
+import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
+import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
+import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 
 describe('extension point runtime contract', () => {
+  it('keeps candidate source policy private until the shared generation flip', () => {
+    const activation = (revision: number, moduleGeneration: string, sourceDigest: string): CordisXPluginActivationRecordV1 => ({
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1,
+      recordKind: revision === 1 ? 'active' : 'candidate',
+      ...(revision === 1 ? {} : { transactionId: 'update-demo' }),
+      profileId: 'default', revision, lastGoodRevision: 1, runtimeGeneration: 'runtime-1',
+      plugins: [{
+        id: 'demo', version: '1.0.0', digest: `sha256:${sourceDigest.repeat(64)}`,
+        moduleGeneration, enabled: true, dependencies: [],
+      }],
+    })
+    const previous = activation(1, 'demo-1', 'a')
+    const candidate = activation(2, 'demo-2', 'b')
+    const visibility = new GenerationVisibilityCoordinator(previous)
+    const descriptors = new ExtensionPointDescriptorRegistry()
+    descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
+    const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore(), 'runtime-1', visibility)
+    broker.register({ source: 'https://plugins.example/old', id: 'demo' }, { pluginId: 'demo', moduleGeneration: 'demo-1' })
+    let notifications = 0
+    broker.subscribe(() => { notifications += 1 })
+
+    const handle = visibility.begin('update-demo', previous, candidate)
+    const candidateContext = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'demo',
+      [CORDISX_PLUGIN_GENERATION]: 'demo-2',
+      ...visibility.context(handle, 'demo'),
+    })
+    const candidateView = visibility.view(candidateContext)
+    broker.register(
+      { source: 'https://plugins.example/new', id: 'demo' },
+      visibility.effect(candidateContext),
+      candidateView,
+    )
+    expect(broker.decision('demo', 'app', 'outlet').identity?.source).toBe('https://plugins.example/old')
+    expect(broker.decision('demo', 'app', 'outlet', candidateView).identity?.source).toBe('https://plugins.example/new')
+    expect(notifications).toBe(0)
+
+    const publication = visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
+    expect(broker.decision('demo', 'app', 'outlet').identity?.source).toBe('https://plugins.example/new')
+    expect(notifications).toBe(1)
+    visibility.rollback(publication)
+    expect(broker.decision('demo', 'app', 'outlet').identity?.source).toBe('https://plugins.example/old')
+    broker.dispose()
+    descriptors.dispose()
+  })
+
   it('declares the complete v2 catalog and diagnoses cross-family duplicates', () => {
     const registry = new ExtensionPointDescriptorRegistry()
     const remove = registry.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)

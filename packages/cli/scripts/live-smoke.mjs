@@ -45,6 +45,7 @@ const parsed = parseArgs({
     'clear-demo': { type: 'boolean', default: false },
     'plugin-lifecycle': { type: 'boolean', default: false },
     'plugin-console-exercise': { type: 'boolean', default: false },
+    'generation-transaction-exercise': { type: 'boolean', default: false },
     'adapter-commit': { type: 'string' },
     'protocol-commit': { type: 'string' },
     'host-version': { type: 'string' },
@@ -63,6 +64,9 @@ if (parsed.values['ui-catalog'] && parsed.values.report === undefined) {
 }
 if (parsed.values['plugin-console-exercise'] && parsed.values.report === undefined) {
   throw new Error('--plugin-console-exercise requires --report')
+}
+if (parsed.values['generation-transaction-exercise'] && parsed.values['manager-lifecycle-source'] === undefined) {
+  throw new Error('--generation-transaction-exercise requires --manager-lifecycle-source')
 }
 if (parsed.values['open-route'] !== undefined && parsed.values['click-surface'] !== undefined) {
   throw new Error('--open-route and --click-surface are mutually exclusive')
@@ -127,7 +131,10 @@ async function pointerClick(rect) {
 }
 
 async function pressKey(key, code, keyCode) {
-  await send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode })
+  await send('Input.dispatchKeyEvent', {
+    type: 'keyDown', key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode,
+    ...(key.length === 1 ? { text: key } : {}),
+  })
   await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode })
 }
 
@@ -1206,6 +1213,7 @@ async function capture(rect, outputPath, label) {
 }
 
 let managerLifecycleReport
+let generationTransactionReport
 if (parsed.values['manager-lifecycle-source'] !== undefined) {
   const sourceDirectory = parsed.values['manager-lifecycle-source']
   const reportPath = path.resolve(parsed.values.report)
@@ -1271,6 +1279,144 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     installed: await capture(installed.managerRect, artifact('lifecycle-installed'), 'installed lifecycle plugin'),
   }
 
+  if (parsed.values['generation-transaction-exercise']) {
+    generationTransactionReport = await evaluateByValue(`(async () => {
+      const runtime = globalThis.__cordisxRuntime
+      if (runtime === undefined) throw new Error('CordisX runtime is unavailable')
+      const targetId = 'lifecycle-smoke'
+      const snapshot = runtime.snapshot()
+      const target = snapshot.plugins.find(plugin => plugin.id === targetId)
+      if (target?.package === undefined) throw new Error('lifecycle smoke activation package is unavailable')
+      const schema = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/'
+      let previous
+      for (let attempt = 0; attempt < 160; attempt += 1) {
+        const activation = runtime.activePluginGeneration()
+        if (activation.recordKind === 'active' && activation.transactionId === undefined
+          && activation.plugins.some(plugin => plugin.id === targetId)) {
+          previous = activation
+          break
+        }
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      if (previous === undefined) throw new Error('installed activation did not reach committed last-good state')
+      const transactionId = 'live-generation-' + Date.now()
+      const transactionEpoch = transactionId + ':host'
+      const candidateGeneration = target.package.moduleGeneration + ':candidate'
+      const candidateDigest = 'sha256:' + 'e'.repeat(64)
+      const candidate = {
+        ...previous, recordKind: 'candidate', transactionId, revision: previous.revision + 1,
+        lastGoodRevision: previous.revision,
+        plugins: previous.plugins.map(plugin => plugin.id === targetId
+          ? { ...plugin, digest: candidateDigest, moduleGeneration: candidateGeneration }
+          : plugin),
+      }
+      const packageManifest = {
+        $schema: schema + 'plugin-package.v1.schema.json', schemaVersion: 1, id: targetId,
+        version: target.package.version, entry: './module.js', compatibility: { runtimeAbi: 1, protocol: 1 },
+        dependencies: candidate.plugins.find(plugin => plugin.id === targetId).dependencies,
+        runtimeManifest: {
+          $schema: schema + 'plugin-manifest.v1.schema.json', schemaVersion: 1, id: targetId,
+          name: 'Lifecycle Smoke Candidate', capabilities: [],
+        },
+      }
+      const candidateModuleFactory = console => ({
+        name: 'Lifecycle Smoke Candidate', inject: ['commands', 'pages', 'routes', 'slots'],
+        apply(ctx) {
+          globalThis.__cordisxGenerationLiveSmoke = { candidateReady: true, selfCommand: false }
+          console.log('generation-candidate-ready', { transactionId })
+          const label = { key: 'lifecycle-smoke-candidate', fallback: 'Lifecycle smoke candidate' }
+          ctx.commands.register({ id: 'invoke', title: label }, () => {
+            globalThis.__cordisxGenerationLiveSmoke.selfCommand = true
+          })
+          ctx.pages.register({ id: 'overview', title: label, icon: 'host:refresh', chrome: 'body-only' }, () => () => undefined)
+          ctx.routes.register({ id: 'overview', path: '/lifecycle-smoke', outlet: 'main', page: 'overview' })
+          ctx.slots.register({ name: 'sidebar.navigation.items', id: 'open', group: 'utility', order: 95 }, {
+            label, icon: 'host:refresh', route: { id: 'overview' },
+          })
+          void ctx.commands.execute({ id: 'invoke' })
+          ctx.effect(() => () => { globalThis.__cordisxGenerationLiveSmoke.candidateDisposed = true }, 'generation live smoke cleanup')
+        },
+      })
+      const nativeNode = document.querySelector('main') ?? document.body
+      const nativeUrl = location.href
+      // Snapshot localization diagnostics are derived lazily. Reach the
+      // Host-private microtask fixed point before the transaction baseline so
+      // a completed live projection cannot be misattributed to candidate stage.
+      runtime.snapshot()
+      await runtime.settleRegistryProjection()
+      const liveBefore = runtime.snapshot()
+      await runtime.settleRegistryProjection()
+      let notifications = 0
+      const unsubscribe = runtime.subscribe(() => { notifications += 1 })
+      const consoleBefore = runtime.pluginConsole(targetId)
+      const traceStart = runtime.generationNotificationTrace().length
+      const readiness = await runtime.stagePluginMutation({
+        transactionId, transactionEpoch, operation: 'update', previous, candidate, targetId,
+        affectedPluginIds: [targetId],
+        package: { manifest: packageManifest, digest: candidateDigest, identitySource: 'file:///cordisx-live-smoke/candidate/module.js' },
+      }, undefined, candidateModuleFactory)
+      await new Promise(resolve => setTimeout(resolve, 20))
+      const staged = runtime.snapshot()
+      const consoleStaged = runtime.pluginConsole(targetId)
+      const stageNotifications = notifications
+      const publication = await runtime.publishPluginMutation(transactionId)
+      await new Promise(resolve => setTimeout(resolve, 20))
+      const published = runtime.snapshot()
+      const consolePublished = runtime.pluginConsole(targetId)
+      const publishNotifications = notifications
+      const cleanup = await runtime.completePluginMutation(transactionId)
+      const cleanupNotifications = notifications
+      const rollback = await runtime.rollbackPluginMutation(transactionId)
+      await new Promise(resolve => setTimeout(resolve, 20))
+      const restored = runtime.snapshot()
+      const consoleRestored = runtime.pluginConsole(targetId)
+      unsubscribe()
+      const marker = entry => JSON.stringify(entry).includes('generation-candidate-ready')
+      const oldGeneration = target.package.moduleGeneration
+      return {
+        transactionId, transactionEpoch, readiness, publication, cleanup, rollback,
+        visibility: {
+          stageSnapshotUnchanged: JSON.stringify(staged) === JSON.stringify(liveBefore),
+          stageNotifications,
+          stageConsoleHidden: !consoleStaged.entries.some(marker),
+          publishedGeneration: published.plugins.find(plugin => plugin.id === targetId)?.package?.moduleGeneration ?? null,
+          publishedConsoleVisible: consolePublished.entries.some(marker),
+          restoredGeneration: restored.plugins.find(plugin => plugin.id === targetId)?.package?.moduleGeneration ?? null,
+          restoredConsoleHidden: !consoleRestored.entries.some(marker),
+          oldConsolePreserved: consoleBefore.entries.every(entry => consoleRestored.entries.some(item => item.entryId === entry.entryId)),
+          notifications, publishNotifications, cleanupNotifications,
+          notificationTrace: runtime.generationNotificationTrace().slice(traceStart),
+        },
+        readinessView: { ...globalThis.__cordisxGenerationLiveSmoke },
+        continuity: {
+          appRenderer: location.href === 'app://-/index.html' && location.href === nativeUrl,
+          nativeNodeIdentity: (document.querySelector('main') ?? document.body) === nativeNode,
+          runtimeIdentity: globalThis.__cordisxRuntime === runtime,
+        },
+        passed: JSON.stringify(staged) === JSON.stringify(liveBefore)
+          && stageNotifications === 0 && !consoleStaged.entries.some(marker)
+          && published.plugins.find(plugin => plugin.id === targetId)?.package?.moduleGeneration === candidateGeneration
+          && consolePublished.entries.some(marker)
+          && restored.plugins.find(plugin => plugin.id === targetId)?.package?.moduleGeneration === oldGeneration
+          && !consoleRestored.entries.some(marker)
+          && notifications === 2
+          && cleanup.disposedAfter.plugins.some(plugin => plugin.id === targetId && plugin.moduleGeneration === oldGeneration)
+          && rollback.disposedAfter.plugins.some(plugin => plugin.id === targetId && plugin.moduleGeneration === candidateGeneration)
+          && globalThis.__cordisxGenerationLiveSmoke.selfCommand === true
+          && globalThis.__cordisxGenerationLiveSmoke.candidateDisposed === true
+          && location.href === 'app://-/index.html' && (document.querySelector('main') ?? document.body) === nativeNode
+          && globalThis.__cordisxRuntime === runtime,
+      }
+    })()`, true)
+    console.log(`generation-transaction=${JSON.stringify(generationTransactionReport, null, 2)}`)
+    if (generationTransactionReport.passed !== true) throw new Error('generation transaction smoke assertions failed')
+  }
+
+  // The direct generation transaction intentionally exercises the renderer
+  // authority without mutating the durable package journal. End that scenario
+  // here; run the full Manager lifecycle as a separate fresh-profile smoke so
+  // its next Host transaction cannot inherit a renderer-only registry epoch.
+  if (!parsed.values['generation-transaction-exercise']) {
   await pointerClick(installed.primaryRect)
   await new Promise(resolve => setTimeout(resolve, 180))
   const pointerNavigation = await evaluateByValue(`(async () => {
@@ -1328,6 +1474,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     const disableImpact = disableDialog.querySelector('.cxm-lifecycle-impact')?.textContent ?? ''
     disableDialog.querySelector('.cxm-lifecycle-actions button:last-child')?.click()
     await waitFor(() => runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke')?.status === 'configured-disabled', 'disabled plugin')
+    await waitFor(() => document.querySelector('[data-plugin-card="lifecycle-smoke"] [data-plugin-action="enable"]:not(:disabled)'), 'disabled plugin actions')
     const afterDisable = { ...counters, revision: runtime.snapshot().pluginLifecycle?.revision ?? null }
 
     document.querySelector('[data-plugin-card="lifecycle-smoke"] [data-plugin-action="enable"]')?.click()
@@ -1504,8 +1651,12 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     const runtime = globalThis.__cordisxRuntime
     const counters = globalThis.__cordisxLifecycleSmoke
     const beforeRevision = runtime.snapshot().pluginLifecycle?.revision ?? null
+    const expectedDispose = counters.dispose + 1
     document.querySelector('.cxm-lifecycle-overlay .cxm-lifecycle-actions button:last-child')?.click()
-    for (let attempt = 0; attempt < 160 && runtime.snapshot().plugins.some(item => item.id === 'lifecycle-smoke'); attempt += 1) await wait(50)
+    for (let attempt = 0; attempt < 160; attempt += 1) {
+      if (!runtime.snapshot().plugins.some(item => item.id === 'lifecycle-smoke') && counters.dispose >= expectedDispose) break
+      await wait(50)
+    }
     const snapshot = runtime.snapshot()
     return {
       beforeRevision,
@@ -1558,6 +1709,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     screenshots, assertions,
   }
   console.log(`manager-lifecycle=${JSON.stringify(managerLifecycleReport, null, 2)}`)
+  }
 }
 
 let uiCatalogReport
@@ -2601,6 +2753,11 @@ if (parsed.values.generation) {
   console.log(`generation=${JSON.stringify(generationReport, null, 2)}`)
 }
 
+const interactionSafety = await evaluateByValue(`(() => ({
+  pendingPermissionDialogs: document.querySelectorAll('[data-permission-authorization]').length,
+  pendingLifecycleDialogs: document.querySelectorAll('.cxm-lifecycle-overlay').length,
+}))()`)
+
 if (parsed.values.report !== undefined) {
   const reportPath = path.resolve(parsed.values.report)
   const aggregate = {
@@ -2614,6 +2771,7 @@ if (parsed.values.report !== undefined) {
       isolatedRenderer: true,
     },
     baseline: report,
+    interactionSafety,
     ...(managerReport === undefined ? {} : { manager: managerReport }),
     ...(exerciseReport === undefined ? {} : { exercise: exerciseReport }),
     ...(settingsTabsReport === undefined ? {} : { managerSettings: settingsTabsReport }),
@@ -2623,6 +2781,7 @@ if (parsed.values.report !== undefined) {
     ...(pluginConsoleReport === undefined ? {} : { pluginConsole: pluginConsoleReport }),
     ...(authorizationReport === undefined ? {} : { authorization: authorizationReport }),
     ...(managerLifecycleReport === undefined ? {} : { managerLifecycle: managerLifecycleReport }),
+    ...(generationTransactionReport === undefined ? {} : { generationTransaction: generationTransactionReport }),
     ...(uiCatalogReport === undefined ? {} : { uiCatalog: uiCatalogReport }),
     ...(generationReport === undefined ? {} : { generation: generationReport }),
   }
@@ -2644,4 +2803,7 @@ if (configExerciseReport?.result === 'fail') {
 }
 if (managerLifecycleReport?.result === 'fail') {
   throw new Error('manager lifecycle smoke assertions failed; inspect the aggregated report')
+}
+if (interactionSafety.pendingPermissionDialogs !== 0 || interactionSafety.pendingLifecycleDialogs !== 0) {
+  throw new Error('live smoke left an interactive permission or lifecycle dialog open')
 }

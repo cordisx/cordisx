@@ -14,6 +14,12 @@ import type {
   CordisXStandardSchema,
 } from '../contracts.js'
 import { ownerFromContext } from './ownership.js'
+import {
+  generationVisibilityFromContext,
+  type GenerationVisibilityCoordinator,
+  type PluginGenerationEffectIdentity,
+  type PluginGenerationView,
+} from './generation-visibility.js'
 import { assertLocalId } from './validation.js'
 import type { PluginConsoleAspect } from './plugin-console.js'
 
@@ -46,6 +52,8 @@ interface SchemaNode {
 
 interface ConfigRecord {
   readonly identity: CordisXPluginIdentity
+  readonly generation: PluginGenerationEffectIdentity
+  readonly candidateView?: PluginGenerationView
   readonly namespace: string
   readonly schema?: CordisXStandardSchema & SchemaNode
   readonly applies: CordisXConfigApplies
@@ -285,7 +293,12 @@ function hasOwnPath(value: unknown, path: CordisXConfigFieldPath): boolean {
 export class PluginConfigurationRegistry {
   private readonly records = new Map<string, ConfigRecord>()
   private readonly listeners = new Set<() => void>()
+  private readonly disconnectVisibility: (() => void) | undefined
   private disposed = false
+
+  constructor(private readonly visibility?: GenerationVisibilityCoordinator) {
+    this.disconnectVisibility = visibility?.connect({ notify: () => this.notify() })
+  }
 
   register(input: {
     readonly identity: CordisXPluginIdentity
@@ -294,6 +307,8 @@ export class PluginConfigurationRegistry {
     readonly raw: unknown
     readonly revision: number
     readonly writable: boolean
+    readonly moduleGeneration?: string
+    readonly candidateView?: PluginGenerationView
   }): void {
     if (this.disposed) throw new Error('plugin configuration registry is disposed')
     const schema = input.schema as (CordisXStandardSchema & SchemaNode) | undefined
@@ -306,8 +321,20 @@ export class PluginConfigurationRegistry {
     }
     const raw = removePaths(input.raw, secrets)
     const value = validate(schema, raw)
-    this.records.set(input.identity.id, {
+    const generation: PluginGenerationEffectIdentity = Object.freeze({
+      pluginId: input.identity.id,
+      ...(input.moduleGeneration === undefined ? {} : { moduleGeneration: input.moduleGeneration }),
+      ...(input.candidateView?.transactionId === undefined ? {} : {
+        transactionId: input.candidateView.transactionId,
+        transactionEpoch: input.candidateView.transactionEpoch,
+      }),
+    })
+    const physicalId = `${input.identity.id}\u0000${input.moduleGeneration ?? 'host'}`
+    if (this.records.has(physicalId)) throw new Error(`plugin configuration generation is already registered: ${input.identity.id}`)
+    this.records.set(physicalId, {
       identity: input.identity,
+      generation,
+      ...(input.candidateView === undefined ? {} : { candidateView: input.candidateView }),
       namespace: input.identity.id,
       ...(schema === undefined ? {} : { schema }),
       applies: input.applies,
@@ -320,22 +347,25 @@ export class PluginConfigurationRegistry {
     })
   }
 
-  unregister(owner: string): void {
+  unregister(owner: string, moduleGeneration?: string): void {
     if (this.disposed) return
-    const record = this.records.get(owner)
+    const record = moduleGeneration === undefined
+      ? [...this.records.values()].find(item => item.identity.id === owner
+        && (this.visibility?.projected(item.generation) ?? true))
+      : this.records.get(`${owner}\u0000${moduleGeneration}`)
     if (record === undefined) return
     record.watchers.clear()
-    this.records.delete(owner)
-    this.notify()
+    this.records.delete(`${owner}\u0000${record.generation.moduleGeneration ?? 'host'}`)
+    if (this.visibility?.visible(record.generation) !== false) this.notify()
   }
 
-  get(owner: string): unknown {
-    const record = this.require(owner)
+  get(owner: string, view?: PluginGenerationView): unknown {
+    const record = this.require(owner, view)
     return record.candidate?.value ?? record.value
   }
 
-  watch(owner: string, listener: (value: unknown) => void): () => void {
-    const record = this.require(owner)
+  watch(owner: string, listener: (value: unknown) => void, view?: PluginGenerationView): () => void {
+    const record = this.require(owner, view)
     record.watchers.add(listener)
     return () => record.watchers.delete(listener)
   }
@@ -413,19 +443,27 @@ export class PluginConfigurationRegistry {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.disconnectVisibility?.()
     this.records.clear()
     this.listeners.clear()
   }
 
-  private require(owner: string): ConfigRecord {
+  private require(owner: string, view?: PluginGenerationView): ConfigRecord {
     if (this.disposed) throw new Error('plugin configuration registry is disposed')
-    const record = this.records.get(owner)
+    const record = [...this.records.values()].find(item => item.identity.id === owner
+      && (this.visibility?.projected(item.generation, view) ?? true))
     if (record === undefined) throw new Error(`plugin configuration is not registered: ${owner}`)
     return record
   }
 
   private notify(): void {
-    for (const listener of [...this.listeners]) listener()
+    for (const listener of [...this.listeners]) {
+      try {
+        listener()
+      } catch {
+        // Registry publication is authoritative; observer failures are isolated.
+      }
+    }
   }
 }
 
@@ -437,6 +475,8 @@ export class ConfigRevisionConflictError extends Error {
 
 interface RendererRecord {
   readonly owner: string
+  readonly generation: PluginGenerationEffectIdentity
+  readonly candidateView?: PluginGenerationView
   readonly options: CordisXConfigRendererOptions
   readonly mount: CordisXConfigRendererMount
   readonly sequence: number
@@ -447,9 +487,31 @@ export class ConfigRendererRegistry {
   private readonly records: RendererRecord[] = []
   private sequence = 0
   private disposed = false
+  private readonly disconnectVisibility: (() => void) | undefined
 
-  register(owner: string, options: CordisXConfigRendererOptions, mount: CordisXConfigRendererMount): () => void {
+  constructor(private readonly visibility?: GenerationVisibilityCoordinator) {
+    this.disconnectVisibility = visibility?.connect({ notify: () => {
+      for (const record of this.records) {
+        if (visibility.visible(record.generation)) continue
+        for (const mount of record.active) {
+          mount.disposed = true
+          mount.abort.abort()
+          void disposeEffect(mount.cleanup)
+        }
+        record.active.clear()
+      }
+    } })
+  }
+
+  register(ownerOrContext: string | Context, options: CordisXConfigRendererOptions, mount: CordisXConfigRendererMount): () => void {
     if (this.disposed) throw new Error('config renderer registry is disposed')
+    const owner = typeof ownerOrContext === 'string' ? ownerOrContext : ownerFromContext(ownerOrContext)
+    const generation: PluginGenerationEffectIdentity = typeof ownerOrContext === 'string'
+      ? Object.freeze({ pluginId: owner })
+      : this.visibility?.effect(ownerOrContext) ?? Object.freeze({ pluginId: owner })
+    const candidateView = typeof ownerOrContext === 'string' || generation.transactionId === undefined
+      ? undefined
+      : this.visibility?.view(ownerOrContext)
     assertLocalId(owner, 'config renderer owner')
     assertLocalId(options.id, 'config renderer id')
     if (typeof mount !== 'function') throw new Error('config renderer requires a mount function')
@@ -471,9 +533,21 @@ export class ConfigRendererRegistry {
     if ('namespace' in options.selector) assertLocalId(options.selector.namespace, 'config renderer namespace')
     const order = options.order ?? 0
     if (!Number.isInteger(order) || order < -100_000 || order > 100_000) throw new Error('config renderer order is invalid')
-    if (this.records.some(record => record.owner === owner && record.options.id === options.id)) throw new Error(`config renderer ${owner}:${options.id} is already registered`)
+    if (this.records.some(record => record.owner === owner
+      && record.options.id === options.id
+      && record.generation.moduleGeneration === generation.moduleGeneration)) {
+      throw new Error(`config renderer ${owner}:${options.id} is already registered for this generation`)
+    }
     if (this.records.filter(record => record.owner === owner).length >= 100) throw new Error(`config renderer owner ${owner} reached the registration limit`)
-    const record: RendererRecord = { owner, options: immutable({ ...options, order }), mount, sequence: this.sequence++, active: new Set() }
+    const record: RendererRecord = {
+      owner,
+      generation,
+      ...(candidateView === undefined ? {} : { candidateView }),
+      options: immutable({ ...options, order }),
+      mount,
+      sequence: this.sequence++,
+      active: new Set(),
+    }
     this.records.push(record)
     let active = true
     return () => {
@@ -498,7 +572,9 @@ export class ConfigRendererRegistry {
   ): Promise<ConfigRendererMountHandle> {
     if (this.disposed || field.role !== undefined && RESERVED_ROLES.has(field.role)) return { mounted: false, dispose: async () => {} }
     const record = this.records
-      .filter(item => item.owner === owner && rendererMatches(item.options, field))
+      .filter(item => item.owner === owner
+        && (this.visibility?.visible(item.generation) ?? true)
+        && rendererMatches(item.options, field))
       .sort((left, right) => rendererPriority(right.options) - rendererPriority(left.options)
         || (left.options.order ?? 0) - (right.options.order ?? 0)
         || left.sequence - right.sequence)[0]
@@ -535,6 +611,7 @@ export class ConfigRendererRegistry {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.disconnectVisibility?.()
     for (const record of [...this.records]) {
       for (const mount of record.active) {
         mount.disposed = true
@@ -574,18 +651,22 @@ export class CordisXPluginSettingsService extends Service implements CordisXPlug
 
   get<T = unknown>(): T {
     const token = this.console?.tokenFromContext(this.ctx)
-    const read = (): T => this.registry.get(ownerFromContext(this.ctx)) as T
+    const read = (): T => this.registry.get(
+      ownerFromContext(this.ctx),
+      generationVisibilityFromContext(this.ctx)?.view(this.ctx),
+    ) as T
     return token === undefined || this.console === undefined ? read() : this.console.runSync(token, 'settings.get', {}, read)
   }
 
   watch<T = unknown>(listener: (value: T) => void): Disposable<void> {
     const owner = ownerFromContext(this.ctx)
     const token = this.console?.tokenFromContext(this.ctx)
+    const view = generationVisibilityFromContext(this.ctx)?.view(this.ctx)
     const scoped = token === undefined || this.console === undefined
       ? listener
       : this.console.wrapCallback(token, `settings.watch:${owner}`, listener)
     const register = (): Disposable<void> => this.ctx.effect(
-      () => this.registry.watch(owner, scoped as (value: unknown) => void),
+      () => this.registry.watch(owner, scoped as (value: unknown) => void, view),
       `settings.watch(${JSON.stringify(owner)})`,
     )
     return token === undefined || this.console === undefined ? register() : this.console.runSync(token, 'settings.watch', {}, register)
@@ -609,7 +690,7 @@ export class CordisXConfigRendererService extends Service implements CordisXConf
       ? mount
       : this.console.wrapCallback(token, `configRenderer:${owner}:${options.id}`, mount)
     const register = (): Disposable<void> => this.ctx.effect(
-      () => this.registry.register(owner, options, scopedMount),
+      () => this.registry.register(this.ctx, options, scopedMount),
       `configRenderers.register(${JSON.stringify(options.id)})`,
     )
     return token === undefined || this.console === undefined ? register() : this.console.runSync(token, 'configRenderers.register', options, register)

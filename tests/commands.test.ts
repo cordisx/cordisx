@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
 import { CommandRegistry } from '../packages/cli/src/renderer/commands.js'
+import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
+import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
+import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import {
   CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1,
   type CordisXCommandContext,
@@ -12,6 +16,55 @@ import {
 } from '../packages/cli/src/renderer/extension-points.js'
 
 describe('CommandRegistry', () => {
+  it('keeps same-id generations isolated and fences the retiring handler at publish', async () => {
+    const record = (revision: number, moduleGeneration: string): CordisXPluginActivationRecordV1 => ({
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1,
+      recordKind: revision === 1 ? 'active' : 'candidate',
+      ...(revision === 1 ? {} : { transactionId: 'update-demo' }),
+      profileId: 'default',
+      revision,
+      lastGoodRevision: 1,
+      runtimeGeneration: 'runtime-1',
+      plugins: [{
+        id: 'demo', version: '1.0.0', digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`,
+        moduleGeneration, enabled: true, dependencies: [],
+      }],
+    })
+    const previous = record(1, 'demo-1')
+    const candidate = record(2, 'demo-2')
+    const visibility = new GenerationVisibilityCoordinator(previous)
+    const registry = new CommandRegistry(undefined, visibility)
+    const oldContext = new Context().extend({ [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-1' })
+    let oldAborted = false
+    const removeOld = registry.register(oldContext, { id: 'run', title: { key: 'run' } }, ({ signal }) => {
+      signal.addEventListener('abort', () => { oldAborted = true })
+      return new Promise(() => {})
+    })
+    void registry.execute('demo', { id: 'run' })
+
+    const handle = visibility.begin('update-demo', previous, candidate)
+    const candidateContext = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'demo',
+      [CORDISX_PLUGIN_GENERATION]: 'demo-2',
+      ...visibility.context(handle, 'demo'),
+    })
+    let candidateCalls = 0
+    registry.register(candidateContext, { id: 'run', title: { key: 'run' } }, () => { candidateCalls += 1 })
+    expect(registry.snapshot()).toHaveLength(1)
+    await registry.execute(candidateContext, { id: 'run' })
+    expect(candidateCalls).toBe(1)
+
+    const receipt = visibility.confirmReadiness(handle)
+    visibility.publish(visibility.preparePublish(handle, receipt))
+    expect(oldAborted).toBe(true)
+    await registry.execute('demo', { id: 'run' })
+    expect(candidateCalls).toBe(2)
+    removeOld()
+    expect(registry.snapshot()).toHaveLength(1)
+    registry.dispose()
+  })
+
   it('qualifies ownership, enforces public references, tracks loading, and freezes arguments', async () => {
     const registry = new CommandRegistry()
     let release: (() => void) | undefined

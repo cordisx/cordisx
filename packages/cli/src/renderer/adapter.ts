@@ -738,7 +738,8 @@ class StructuredSurfaceRenderer {
     for (const snapshot of snapshots) {
       const rendered = snapshot.visible && snapshot.authorized && snapshot.valid && !snapshot.pending
         && availableSurfaces.has(snapshot.surface)
-      this.slots.registry.markRendered(snapshot.surface, snapshot.qualifiedId, rendered)
+      const renderToken = this.slots.registry.renderToken(snapshot.surface, snapshot.qualifiedId)
+      if (renderToken !== undefined) this.slots.registry.markRendered(snapshot.surface, snapshot.qualifiedId, renderToken, rendered)
     }
     for (const site of this.sites) {
       if (nextSites.has(site)) continue

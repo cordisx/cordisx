@@ -32,6 +32,11 @@ import type { CommandSnapshot } from './commands.js'
 import type { NavigationSnapshot, RouteSnapshot } from './navigation.js'
 import type { SurfaceAvailabilitySnapshot, SurfaceContributionSnapshot } from './surfaces.js'
 import { qualifyOwnedId } from './ownership.js'
+import type {
+  GenerationVisibilityCoordinator,
+  PluginGenerationEffectIdentity,
+  PluginGenerationView,
+} from './generation-visibility.js'
 import { ICON_TOKEN_PATTERN, assertLocalId, assertLocalizedText, immutableSnapshot } from './validation.js'
 
 const POINT_POLICY_STORAGE_KEY = 'cordisx.extensionPointPolicies.v1'
@@ -368,13 +373,13 @@ export interface ExtensionPointAccessDecision {
 }
 
 export interface ExtensionPointAccessResolver {
-  decision(owner: string, pointId: string, expectedKind: CordisXExtensionPointKind): ExtensionPointAccessDecision
+  decision(owner: string, pointId: string, expectedKind: CordisXExtensionPointKind, view?: PluginGenerationView): ExtensionPointAccessDecision
   setSurfaceAvailability(items: readonly SurfaceAvailabilitySnapshot[]): void
-  authorizeSurfaceCommand(owner: string, pointId: string, contributionId: string, commandId: string): ExtensionPointAccessDecision
-  authorizeSurfaceRoute(owner: string, pointId: string, contributionId: string, routeId: string): ExtensionPointAccessDecision
-  authorizeOutletRoute(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision
-  authorizeOutletPage(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision
-  authorizeOutletPageCommand(owner: string, pointId: string, routeId: string, pageId: string, actionId: string, commandId: string): ExtensionPointAccessDecision
+  authorizeSurfaceCommand(owner: string, pointId: string, contributionId: string, commandId: string, view?: PluginGenerationView): ExtensionPointAccessDecision
+  authorizeSurfaceRoute(owner: string, pointId: string, contributionId: string, routeId: string, view?: PluginGenerationView): ExtensionPointAccessDecision
+  authorizeOutletRoute(owner: string, pointId: string, routeId: string, pageId: string, view?: PluginGenerationView): ExtensionPointAccessDecision
+  authorizeOutletPage(owner: string, pointId: string, routeId: string, pageId: string, view?: PluginGenerationView): ExtensionPointAccessDecision
+  authorizeOutletPageCommand(owner: string, pointId: string, routeId: string, pageId: string, actionId: string, commandId: string, view?: PluginGenerationView): ExtensionPointAccessDecision
 }
 
 export interface ExtensionPointAccessDiagnostic {
@@ -553,7 +558,11 @@ export function buildExtensionPointRuntimeSnapshot(input: {
 
 /** Identity-bound cooperative enforcement for CordisX-managed point operations. */
 export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver {
-  private readonly identities = new Map<string, CordisXPluginIdentity>()
+  private readonly identities = new Map<string, {
+    readonly identity: CordisXPluginIdentity
+    readonly generation: PluginGenerationEffectIdentity
+    readonly candidateView?: PluginGenerationView
+  }>()
   private readonly policies = new Map<string, CordisXExtensionPointPolicyRecordV1>()
   private readonly duplicatePolicyKeys = new Set<string>()
   private readonly duplicatePolicyIdentities = new Map<string, CordisXExtensionPointIdentity>()
@@ -565,6 +574,7 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
     private readonly descriptors: ExtensionPointDescriptorRegistry,
     private readonly store: ExtensionPointPolicyStore,
     private readonly generation = 'generation-legacy',
+    private readonly visibility?: GenerationVisibilityCoordinator,
   ) {
     for (const record of store.read()) {
       if (!validStoredPolicy(record)) continue
@@ -577,24 +587,33 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
       }
       this.policies.set(key, immutableSnapshot(record))
     }
+    visibility?.connect({ notify: () => this.changed() })
   }
 
-  register(identity: CordisXPluginIdentity): () => void {
+  register(
+    identity: CordisXPluginIdentity,
+    generation: PluginGenerationEffectIdentity = Object.freeze({ pluginId: identity.id }),
+    candidateView?: PluginGenerationView,
+  ): () => void {
     assertLocalId(identity.id, 'extension point plugin id')
     const source = canonicalExtensionPointSource(identity.source)
     if (source !== identity.source) throw new Error(`plugin ${identity.id} source must use canonical serialization`)
-    const existing = this.identities.get(identity.id)
-    if (existing !== undefined && (existing.source !== identity.source || existing.id !== identity.id)) {
-      throw new Error(`plugin id ${identity.id} is already bound to another source`)
-    }
     const frozen = Object.freeze({ ...identity })
-    this.identities.set(identity.id, frozen)
-    this.changed()
+    const physicalId = `${identity.id}\u0000${generation.moduleGeneration ?? 'host'}`
+    if (this.identities.has(physicalId)) throw new Error(`plugin id ${identity.id} generation is already bound`)
+    const registration = { identity: frozen, generation, ...(candidateView === undefined ? {} : { candidateView }) }
+    this.identities.set(physicalId, registration)
+    if (this.visibility?.visible(generation) !== false) this.changed()
     return () => {
-      if (this.identities.get(identity.id) !== frozen) return
-      this.identities.delete(identity.id)
-      this.changed()
+      if (this.identities.get(physicalId) !== registration) return
+      this.identities.delete(physicalId)
+      if (this.visibility?.visible(generation) !== false) this.changed()
     }
+  }
+
+  private identity(owner: string, view?: PluginGenerationView): CordisXPluginIdentity | undefined {
+    return [...this.identities.values()].find(item => item.identity.id === owner
+      && (this.visibility?.visible(item.generation, view) ?? true))?.identity
   }
 
   pointPolicy(identity: CordisXExtensionPointIdentity): CordisXPointPolicy {
@@ -612,7 +631,7 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
   }
 
   setPolicy(identity: CordisXPluginIdentity, pointId: string, policy: CordisXPointPolicy): void {
-    const bound = this.identities.get(identity.id)
+    const bound = this.identity(identity.id)
     if (bound === undefined || bound.source !== identity.source) throw new Error(`plugin ${identity.id} is not bound to source ${identity.source}`)
     if (this.descriptors.descriptor(pointId) === undefined) throw new Error(`unknown extension point: ${pointId}`)
     if (!['inherit', 'allow', 'deny'].includes(policy)) throw new Error(`unknown extension point policy: ${String(policy)}`)
@@ -631,8 +650,8 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
     this.changed()
   }
 
-  decision(owner: string, pointId: string, expectedKind: CordisXExtensionPointKind): ExtensionPointAccessDecision {
-    const plugin = this.identities.get(owner)
+  decision(owner: string, pointId: string, expectedKind: CordisXExtensionPointKind, view?: PluginGenerationView): ExtensionPointAccessDecision {
+    const plugin = this.identity(owner, view)
     const descriptor = this.descriptors.descriptor(pointId)
     if (plugin === undefined) return { policy: 'inherit', effectivePolicy: 'deny', authorized: false, reason: `plugin ${owner} has no launcher-bound source identity` }
     const identity = { source: plugin.source, pluginId: plugin.id, pointId }
@@ -666,25 +685,25 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
     return { identity, policy, effectivePolicy, authorized: effectivePolicy === 'allow' }
   }
 
-  authorizeSurfaceCommand(owner: string, pointId: string, contributionId: string, commandId: string): ExtensionPointAccessDecision {
-    const decision = this.decision(owner, pointId, 'surface')
+  authorizeSurfaceCommand(owner: string, pointId: string, contributionId: string, commandId: string, view?: PluginGenerationView): ExtensionPointAccessDecision {
+    const decision = this.decision(owner, pointId, 'surface', view)
     return this.recordAccess(decision, {
       operation: 'surface.command.invoke', contributionId, commandId,
     })
   }
 
-  authorizeSurfaceRoute(owner: string, pointId: string, contributionId: string, routeId: string): ExtensionPointAccessDecision {
-    const decision = this.decision(owner, pointId, 'surface')
+  authorizeSurfaceRoute(owner: string, pointId: string, contributionId: string, routeId: string, view?: PluginGenerationView): ExtensionPointAccessDecision {
+    const decision = this.decision(owner, pointId, 'surface', view)
     return this.recordAccess(decision, { operation: 'surface.route.navigate', contributionId, routeId })
   }
 
-  authorizeOutletRoute(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision {
-    const decision = this.decision(owner, pointId, 'outlet')
+  authorizeOutletRoute(owner: string, pointId: string, routeId: string, pageId: string, view?: PluginGenerationView): ExtensionPointAccessDecision {
+    const decision = this.decision(owner, pointId, 'outlet', view)
     return this.recordAccess(decision, { operation: 'outlet.route.navigate', routeId, pageId })
   }
 
-  authorizeOutletPage(owner: string, pointId: string, routeId: string, pageId: string): ExtensionPointAccessDecision {
-    const decision = this.decision(owner, pointId, 'outlet')
+  authorizeOutletPage(owner: string, pointId: string, routeId: string, pageId: string, view?: PluginGenerationView): ExtensionPointAccessDecision {
+    const decision = this.decision(owner, pointId, 'outlet', view)
     return this.recordAccess(decision, { operation: 'outlet.page.mount', routeId, pageId })
   }
 
@@ -695,8 +714,9 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
     pageId: string,
     actionId: string,
     commandId: string,
+    view?: PluginGenerationView,
   ): ExtensionPointAccessDecision {
-    const decision = this.decision(owner, pointId, 'outlet')
+    const decision = this.decision(owner, pointId, 'outlet', view)
     return this.recordAccess(decision, {
       operation: 'outlet.page.command.invoke', routeId, pageId, actionId, commandId,
     })

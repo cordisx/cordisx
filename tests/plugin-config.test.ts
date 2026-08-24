@@ -2,6 +2,7 @@ import { chmod, mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
+import { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -21,6 +22,9 @@ import {
   ConfigRendererRegistry,
   PluginConfigurationRegistry,
 } from '../packages/cli/src/renderer/configuration.js'
+import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
+import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
+import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 
 async function configFixture(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-plugin-config-'))
@@ -110,6 +114,53 @@ describe('plugin config persistence', () => {
 })
 
 describe('plugin config registry', () => {
+  it('keeps candidate configuration private and flips the Manager projection once', () => {
+    const activation = (revision: number, moduleGeneration: string): CordisXPluginActivationRecordV1 => ({
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1,
+      recordKind: revision === 1 ? 'active' : 'candidate',
+      ...(revision === 1 ? {} : { transactionId: 'update-example' }),
+      profileId: 'work', revision, lastGoodRevision: 1, runtimeGeneration: 'runtime-1',
+      plugins: [{
+        id: 'example', version: '1.0.0', digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`,
+        moduleGeneration, enabled: true, dependencies: [],
+      }],
+    })
+    const previous = activation(1, 'example-1')
+    const candidate = activation(2, 'example-2')
+    const visibility = new GenerationVisibilityCoordinator(previous)
+    const registry = new PluginConfigurationRegistry(visibility)
+    registry.register({
+      identity: { id: 'example', source: 'file:///old' }, moduleGeneration: 'example-1',
+      applies: 'restart', raw: { value: 'old' }, revision: 1, writable: true,
+    })
+    let notifications = 0
+    registry.subscribe(() => { notifications += 1 })
+    const handle = visibility.begin('update-example', previous, candidate)
+    const candidateContext = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'example',
+      [CORDISX_PLUGIN_GENERATION]: 'example-2',
+      ...visibility.context(handle, 'example'),
+    })
+    const candidateView = visibility.view(candidateContext)
+    registry.register({
+      identity: { id: 'example', source: 'file:///new' }, moduleGeneration: 'example-2', candidateView,
+      applies: 'restart', raw: { value: 'new' }, revision: 1, writable: true,
+    })
+    expect(registry.get('example')).toEqual({ value: 'old' })
+    expect(registry.get('example', candidateView)).toEqual({ value: 'new' })
+    expect(registry.descriptor('example', 'en').value).toEqual({ value: 'old' })
+    expect(notifications).toBe(0)
+
+    visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
+    expect(registry.get('example')).toEqual({ value: 'new' })
+    expect(registry.descriptor('example', 'en').value).toEqual({ value: 'new' })
+    expect(notifications).toBe(1)
+    registry.unregister('example', 'example-1')
+    expect(registry.get('example')).toEqual({ value: 'new' })
+    registry.dispose()
+  })
+
   it('uses Schemastery defaults and metadata, publishes live commits, and refuses secret paths', () => {
     const registry = new PluginConfigurationRegistry()
     const schema = Schema.object({

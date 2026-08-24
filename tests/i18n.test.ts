@@ -9,7 +9,9 @@ import {
   LocalizationRegistry,
   type CordisXLocaleSource,
 } from '../packages/cli/src/renderer/i18n.js'
-import { CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
+import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
+import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
+import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 
 class MutableLocaleSource implements CordisXLocaleSource {
   private readonly listeners = new Set<() => void>()
@@ -35,6 +37,39 @@ class MutableLocaleSource implements CordisXLocaleSource {
 }
 
 describe('LocalizationRegistry', () => {
+  it('keeps candidate dictionaries private while resolving the candidate self-view', () => {
+    const activation = (revision: number, generation: string): CordisXPluginActivationRecordV1 => ({
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, schemaVersion: 1,
+      recordKind: revision === 1 ? 'active' : 'candidate',
+      ...(revision === 1 ? {} : { transactionId: 'update-demo' }),
+      profileId: 'default', revision, lastGoodRevision: 1, runtimeGeneration: 'runtime-1',
+      plugins: [{ id: 'demo', version: '1.0.0', digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`, moduleGeneration: generation, enabled: true, dependencies: [] }],
+    })
+    const previous = activation(1, 'demo-1')
+    const candidate = activation(2, 'demo-2')
+    const visibility = new GenerationVisibilityCoordinator(previous)
+    const registry = new LocalizationRegistry(new MutableLocaleSource(), visibility)
+    const oldContext = new Context().extend({ [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-1' })
+    registry.define(oldContext, { namespace: 'demo', locale: 'en', default: true, messages: { label: 'Old' } })
+    const version = registry.getSnapshot().version
+
+    const handle = visibility.begin('update-demo', previous, candidate)
+    const candidateContext = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-2', ...visibility.context(handle, 'demo'),
+    })
+    registry.define(candidateContext, { namespace: 'demo', locale: 'en', default: true, messages: { label: 'New' } })
+    expect(registry.getSnapshot().version).toBe(version)
+    expect(registry.resolve('demo', { key: 'label' }).text).toBe('Old')
+    expect(registry.resolve('demo', { key: 'label' }, undefined, visibility.view(candidateContext)).text).toBe('New')
+    expect(registry.resolve('demo', { key: 'candidate-missing' }, undefined, visibility.view(candidateContext)).diagnostic).toBe('missing-key')
+    expect(registry.diagnostics()).toEqual([])
+
+    visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
+    expect(registry.resolve('demo', { key: 'label' }).text).toBe('New')
+    expect(registry.getSnapshot().version).toBe(version + 1)
+    registry.dispose()
+  })
+
   it('keeps snapshot identity stable until the projection version changes', () => {
     const source = new MutableLocaleSource()
     const registry = new LocalizationRegistry(source)

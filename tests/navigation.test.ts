@@ -1,9 +1,12 @@
-import type { Disposable } from '@deepseek-ai/cordis'
+import { Context, type Disposable } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import type { CordisXLocalizationSeat } from '../packages/cli/src/contracts.js'
 import { CommandRegistry } from '../packages/cli/src/renderer/commands.js'
 import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
+import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
+import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
+import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import {
   NavigationRegistry,
   OutletRegistry,
@@ -91,6 +94,42 @@ async function settle(): Promise<void> {
 }
 
 describe('NavigationRegistry', () => {
+  it('allows same-path page/route generations while projecting one coherent view', () => {
+    const activation = (revision: number, generation: string): CordisXPluginActivationRecordV1 => ({
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, schemaVersion: 1,
+      recordKind: revision === 1 ? 'active' : 'candidate',
+      ...(revision === 1 ? {} : { transactionId: 'update-demo' }),
+      profileId: 'default', revision, lastGoodRevision: 1, runtimeGeneration: 'runtime-1',
+      plugins: [{ id: 'demo', version: '1.0.0', digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`, moduleGeneration: generation, enabled: true, dependencies: [] }],
+    })
+    const previous = activation(1, 'demo-1')
+    const candidate = activation(2, 'demo-2')
+    const visibility = new GenerationVisibilityCoordinator(previous)
+    const pages = new PageRegistry(visibility)
+    const outlets = new OutletRegistry()
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    const oldContext = new Context().extend({ [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-1' })
+    pages.register(oldContext, { id: 'settings', title: { key: 'old' } }, () => undefined)
+    navigation.register(oldContext, { id: 'settings', path: '/settings', outlet: 'app', page: 'settings' })
+
+    const handle = visibility.begin('update-demo', previous, candidate)
+    const candidateContext = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-2', ...visibility.context(handle, 'demo'),
+    })
+    pages.register(candidateContext, { id: 'settings', title: { key: 'new' } }, () => undefined)
+    navigation.register(candidateContext, { id: 'settings', path: '/settings', outlet: 'app', page: 'settings' })
+    expect(navigation.snapshot().pages[0]?.metadata.title).toEqual({ key: 'old' })
+    expect(navigation.snapshot(visibility.view(candidateContext)).pages[0]?.metadata.title).toEqual({ key: 'new' })
+    expect(navigation.snapshot(visibility.view(candidateContext)).routes).toHaveLength(1)
+
+    visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
+    expect(navigation.snapshot().pages[0]?.metadata.title).toEqual({ key: 'new' })
+    expect(navigation.snapshot().routes).toHaveLength(1)
+    void navigation.dispose()
+    pages.dispose()
+    outlets.dispose()
+  })
+
   it('moves one mounted page across same-key anchor replacement and disposes on context switch', async () => {
     const dom = new JSDOM('<body><main id="one"></main><main id="two"></main></body>')
     const pages = new PageRegistry()

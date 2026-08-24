@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import {
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
+  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
   type CordisXPermissionAuthorizationDecisionV1,
   type CordisXPermissionAuthorizationPlanV1,
   type CordisXPermissionPolicyRecordV1,
@@ -29,21 +30,45 @@ import {
   stageLocalPluginPackage,
   type StagedPluginPackage,
 } from './plugin-package.js'
+import {
+  PackageLifecycleAuthority,
+  createHostPermissionReviewAuthority,
+  createHostRegistryReceiptAuthority,
+  type CandidateAccess,
+  type PreparedCandidate,
+  type RollbackAccess,
+} from './packages/authority.js'
+import type { PackageCandidatePlan, PackageRuntimeObservation } from './packages/types.js'
+import type { RollbackPlan } from './packages/authority.js'
+import { loadPluginGenerationArtifact } from './plugin-generation-loader.js'
 
 export interface PluginRuntimeMutation {
   readonly transactionId: string
+  readonly transactionEpoch?: string
+  readonly expectedRegistryEpoch?: number
+  readonly afterRegistryEpoch?: number
   readonly operation: 'install' | 'update' | 'enable' | 'disable' | 'uninstall'
   readonly previous: CordisXPluginActivationRecordV1
   readonly candidate: CordisXPluginActivationRecordV1
   readonly targetId: string
   readonly affectedPluginIds: readonly string[]
   readonly package?: StagedPluginPackage
+  /** Host-only renderer artifact compiled from the authority-resolved immutable runtime module. */
+  readonly runtimeArtifactSource?: string
   readonly authorizationDecision?: CordisXPermissionAuthorizationDecisionV1
 }
 
 /** Stable renderer adapter. `stage` is reversible until `commit` acknowledges durable publication. */
 export interface PluginLifecycleRuntime {
-  stage(mutation: PluginRuntimeMutation): Promise<void>
+  prepare?(transactionId: string): RuntimeGenerationFence
+  stage(mutation: PluginRuntimeMutation): Promise<void | RuntimeReadinessObservation>
+  publish?(transactionId: string): Promise<RuntimePublicationObservation>
+  complete?(transactionId: string): Promise<RuntimeCleanupObservation>
+  finalize?(transactionId: string): Promise<void>
+  rollback?(transactionId: string): Promise<RuntimeCleanupObservation>
+  /** Reattach to a renderer transaction that survived a Launcher restart. */
+  recoverRollback?(plan: RollbackPlan): Promise<RuntimeCleanupObservation>
+  adoptRecoveredActivation?(active: CordisXPluginActivationRecordV1, registryEpoch: number): Promise<void>
   commit(transactionId: string): Promise<void>
   abort(transactionId: string): Promise<void>
   reload(input: {
@@ -53,6 +78,28 @@ export interface PluginLifecycleRuntime {
   }): Promise<void>
 }
 
+export interface RuntimeGenerationFence {
+  readonly transactionEpoch: string
+  readonly expectedRegistryEpoch: number
+}
+
+export interface RuntimeReadinessObservation extends RuntimeGenerationFence {
+  readonly transactionId: string
+  readonly afterRegistryEpoch: number
+  readonly observation: CordisXPluginActivationRecordV1
+}
+
+export interface RuntimePublicationObservation {
+  readonly transactionId: string
+  readonly transactionEpoch: string
+  readonly registryEpoch: number
+  readonly active: CordisXPluginActivationRecordV1
+}
+
+export interface RuntimeCleanupObservation extends RuntimePublicationObservation {
+  readonly disposedAfter: CordisXPluginActivationRecordV1
+}
+
 interface CoordinatorOptions {
   readonly homeDir: string
   readonly profileId: string
@@ -60,6 +107,12 @@ interface CoordinatorOptions {
   readonly permissionPolicies: readonly CordisXPermissionPolicyRecordV1[]
   readonly runtime: PluginLifecycleRuntime
   readonly reservedPluginIds?: readonly string[]
+}
+
+interface PendingPermissionReview {
+  readonly candidateId: string
+  readonly plan: CordisXPermissionAuthorizationPlanV1
+  readonly decision: CordisXPermissionAuthorizationDecisionV1
 }
 
 class LifecycleFailure extends Error {
@@ -210,6 +263,22 @@ function validateDecision(
   if (seen.size !== declarations.size) throw new LifecycleFailure('permission-denied', safeError('permission-denied'))
 }
 
+function allowedDecision(plan: CordisXPermissionAuthorizationPlanV1): CordisXPermissionAuthorizationDecisionV1 {
+  return {
+    $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
+    schemaVersion: 1,
+    planId: plan.planId,
+    operation: plan.operation,
+    profileId: plan.profileId,
+    identity: plan.identity,
+    decisions: plan.declarations.map(item => ({
+      capability: item.capability,
+      scope: item.scope,
+      decision: 'allow',
+    })),
+  }
+}
+
 function impactToken(profileId: string, revision: number, operation: string, pluginId: string, affected: readonly string[]): string {
   return createHash('sha256')
     .update(JSON.stringify([profileId, revision, operation, pluginId, affected]))
@@ -223,6 +292,20 @@ function withGenerations(
   return plugins.map(plugin => affected.has(plugin.id)
     ? { ...plugin, moduleGeneration: `${plugin.id}-${randomUUID()}` }
     : plugin)
+}
+
+function runtimeObservation(record: CordisXPluginActivationRecordV1, registryEpoch: number): PackageRuntimeObservation {
+  return {
+    profileActivationRevision: record.revision,
+    registryEpoch,
+    runtimeGeneration: record.runtimeGeneration,
+    plugins: Object.fromEntries(record.plugins.map(plugin => [plugin.id, {
+      version: plugin.version,
+      digest: plugin.digest,
+      moduleGeneration: plugin.moduleGeneration,
+      dependencies: plugin.dependencies,
+    }])),
+  }
 }
 
 function changedTarget(
@@ -244,15 +327,100 @@ function changedTarget(
 export class PluginLifecycleCoordinator {
   readonly store: PluginActivationStore
   private readonly reservedPluginIds: ReadonlySet<string>
+  private readonly pendingPermissionReviews = new Map<string, PendingPermissionReview>()
+  private readonly receiptAuthority = createHostRegistryReceiptAuthority()
+  private readonly authority: Promise<PackageLifecycleAuthority>
+  private preparedRecovery: {
+    readonly completed: readonly string[]
+    readonly rollbacks: readonly { access: RollbackAccess; plan: RollbackPlan }[]
+  } | undefined
 
   constructor(private readonly options: CoordinatorOptions) {
     if (!path.isAbsolute(options.homeDir)) throw new Error('CordisX home directory must be absolute')
     this.store = new PluginActivationStore(options.homeDir, options.profileId, options.runtimeGeneration)
     this.reservedPluginIds = new Set(options.reservedPluginIds ?? [])
+    const permissionAuthority = createHostPermissionReviewAuthority(async input => {
+      const pending = this.pendingPermissionReviews.get(input.transactionId)
+      if (pending === undefined || pending.candidateId !== input.transactionId) {
+        throw new Error('permission review is not bound to this candidate')
+      }
+      const oneShotGrantIds = pending.decision.decisions
+        .filter(item => item.decision === 'allow-once')
+        .map(item => `one-shot:${input.transactionEpoch}:${item.capability}`)
+      return {
+        planId: pending.plan.planId,
+        planRevision: input.permissionPlanRevision,
+        decisionId: `${input.transactionId}:${createHash('sha256').update(JSON.stringify(pending.decision)).digest('hex')}`,
+        decisionFingerprint: createHash('sha256').update(JSON.stringify(pending.decision)).digest('hex'),
+        requiredSatisfied: true,
+        unresolvedRequired: [],
+        deniedRequired: [],
+        oneShotGrantIds,
+      }
+    })
+    this.authority = PackageLifecycleAuthority.open({
+      homeDir: options.homeDir,
+      profileId: options.profileId,
+      runtimeGeneration: options.runtimeGeneration,
+      permissionAuthority,
+    })
+  }
+
+  async prepareRecovery(): Promise<readonly RollbackPlan[]> {
+    if (this.preparedRecovery !== undefined) return this.preparedRecovery.rollbacks.map(item => item.plan)
+    const authority = await this.authority
+    const recovered = await authority.recover()
+    const completed: string[] = []
+    const rollbacks: { access: RollbackAccess; plan: RollbackPlan }[] = []
+    for (const directive of recovered.directives) {
+      if (directive.action === 'discard-staged') {
+        completed.push(directive.transactionId)
+        continue
+      }
+      if (directive.rollbackToken === undefined) {
+        throw new Error('shared registry rollback recovery is unavailable')
+      }
+      const rollbackAccess: RollbackAccess = {
+        ownerId: 'cordisx-launcher',
+        profileId: this.options.profileId,
+        rollbackToken: directive.rollbackToken,
+      }
+      const plan = await authority.resolveRollback(rollbackAccess)
+      rollbacks.push({ access: rollbackAccess, plan })
+    }
+    this.preparedRecovery = { completed, rollbacks }
+    return rollbacks.map(item => item.plan)
   }
 
   async recover(): Promise<readonly string[]> {
-    return this.store.recoverIncompleteCandidates()
+    await this.prepareRecovery()
+    const prepared = this.preparedRecovery!
+    const authority = await this.authority
+    const completed = [...prepared.completed]
+    for (const { access: rollbackAccess, plan } of prepared.rollbacks) {
+      if (this.options.runtime.recoverRollback === undefined) throw new Error('shared registry rollback recovery is unavailable')
+      const restored = await this.options.runtime.recoverRollback(plan)
+      if (restored.transactionId !== plan.transactionId
+        || restored.transactionEpoch !== plan.transactionEpoch
+        || restored.registryEpoch !== plan.rollbackRegistryEpoch
+        || JSON.stringify(restored.active.plugins) !== JSON.stringify(plan.rollbackTarget.plugins)
+        || JSON.stringify(restored.disposedAfter.plugins) !== JSON.stringify(plan.expectedPublished.plugins)) {
+        throw new Error('shared registry recovery observation is stale')
+      }
+      const receipt = this.receiptAuthority.issueRollback({
+        transactionId: plan.transactionId,
+        transactionEpoch: plan.transactionEpoch,
+        candidateFingerprint: plan.candidateFingerprint,
+        registryEpoch: restored.registryEpoch,
+        active: runtimeObservation(restored.active, restored.registryEpoch),
+        disposedAfter: runtimeObservation(restored.disposedAfter, plan.expectedRegistryEpoch),
+      })
+      const active = await authority.completeRollback(rollbackAccess, receipt)
+      await this.options.runtime.adoptRecoveredActivation?.(active, restored.registryEpoch)
+      completed.push(plan.transactionId)
+    }
+    this.preparedRecovery = undefined
+    return completed
   }
 
   private async active(request: CordisXPluginLifecycleRequestV1): Promise<CordisXPluginActivationRecordV1> {
@@ -381,6 +549,25 @@ export class PluginLifecycleCoordinator {
       package: staged,
       authorizationDecision: decision,
     }
+    const formalCommitted = await this.activateWithAuthority({
+      operation,
+      active,
+      candidate,
+      targetId,
+      staged,
+      authorizationPlan: plan,
+      authorizationDecision: decision,
+    })
+    if (formalCommitted !== undefined) {
+      return {
+        ...resultBase(request, formalCommitted, operation),
+        outcome: 'applied',
+        scope: 'plugin-generation',
+        affectedPluginIds: affected,
+        transactionId: candidateId,
+        package: packageSummary(staged),
+      }
+    }
     try {
       await this.options.runtime.stage(mutation)
     } catch {
@@ -409,6 +596,207 @@ export class PluginLifecycleCoordinator {
       affectedPluginIds: affected,
       transactionId: candidateId,
       package: packageSummary(staged),
+    }
+  }
+
+  private formalRuntime(): (PluginLifecycleRuntime & Required<Pick<PluginLifecycleRuntime,
+  'prepare' | 'publish' | 'complete' | 'finalize' | 'rollback'>>) | undefined {
+    const runtime = this.options.runtime
+    return runtime.prepare === undefined || runtime.publish === undefined
+      || runtime.complete === undefined || runtime.finalize === undefined || runtime.rollback === undefined
+      ? undefined
+      : runtime as PluginLifecycleRuntime & Required<Pick<PluginLifecycleRuntime,
+        'prepare' | 'publish' | 'complete' | 'finalize' | 'rollback'>>
+  }
+
+  private async activateWithAuthority(input: {
+    readonly operation: 'install' | 'update' | 'enable' | 'disable' | 'uninstall'
+    readonly active: CordisXPluginActivationRecordV1
+    readonly candidate: CordisXPluginActivationRecordV1
+    readonly targetId: string
+    readonly staged?: StagedPluginPackage
+    readonly authorizationPlan: CordisXPermissionAuthorizationPlanV1
+    readonly authorizationDecision: CordisXPermissionAuthorizationDecisionV1
+  }): Promise<CordisXPluginActivationRecordV1 | undefined> {
+    const runtime = this.formalRuntime()
+    if (runtime === undefined) return undefined
+    const transactionId = input.candidate.transactionId!
+    const fence = runtime.prepare(transactionId)
+    this.pendingPermissionReviews.set(transactionId, {
+      candidateId: transactionId,
+      plan: input.authorizationPlan,
+      decision: input.authorizationDecision,
+    })
+    let prepared: PreparedCandidate | undefined
+    let access: CandidateAccess | undefined
+    let activationRequested = false
+    let published = false
+    try {
+      const authority = await this.authority
+      prepared = await authority.prepare({
+        ownerId: 'cordisx-launcher',
+        operation: input.operation,
+        candidateId: transactionId,
+        transactionEpoch: fence.transactionEpoch,
+        expectedRegistryEpoch: fence.expectedRegistryEpoch,
+        permissionPlanRevision: input.candidate.revision,
+        permissionPlanFingerprint: createHash('sha256').update(JSON.stringify(input.authorizationPlan)).digest('hex'),
+      })
+      access = {
+        ownerId: 'cordisx-launcher',
+        profileId: this.options.profileId,
+        candidateToken: prepared.candidateToken,
+        permissionReviewToken: prepared.permissionReviewToken,
+      }
+      await authority.resolveCandidate(access, 'plan')
+      await authority.resolveImpact({
+        ownerId: access.ownerId,
+        profileId: access.profileId,
+        impactToken: prepared.impactToken,
+      }, 'plan')
+      const stagePlan = await authority.requestActivation(access)
+      activationRequested = true
+      const resolvedStage = await authority.resolveCandidate(access, 'stage')
+      if (resolvedStage.candidateFingerprint !== prepared.candidateFingerprint
+        || JSON.stringify(resolvedStage.affectedPluginIds) !== JSON.stringify(stagePlan.affectedPluginIds)) {
+        throw new Error('Host candidate plan changed across plan and stage boundaries')
+      }
+      await authority.resolveImpact({
+        ownerId: access.ownerId,
+        profileId: access.profileId,
+        impactToken: prepared.impactToken,
+      }, 'stage')
+      let runtimeArtifactSource: string | undefined
+      let stageResolutionFailure: unknown
+      for (const pluginId of resolvedStage.activationOrder) {
+        if (resolvedStage.after.plugins.some(plugin => plugin.id === pluginId)) {
+          try {
+            const runtimeModule = await authority.resolveRuntimeModule(access, 'stage', pluginId)
+            if (pluginId === input.targetId && input.staged !== undefined) {
+              runtimeArtifactSource = await loadPluginGenerationArtifact(runtimeModule)
+            }
+          } catch (error) {
+            stageResolutionFailure = error
+            break
+          }
+        }
+      }
+      if (stageResolutionFailure !== undefined && input.staged !== undefined) {
+        runtimeArtifactSource = 'throw new Error("Host runtime module resolution failed")'
+      }
+      const readiness = await runtime.stage({
+        transactionId,
+        transactionEpoch: resolvedStage.transactionEpoch,
+        expectedRegistryEpoch: resolvedStage.expectedRegistryEpoch,
+        afterRegistryEpoch: resolvedStage.afterRegistryEpoch,
+        operation: input.operation,
+        previous: input.active,
+        candidate: input.candidate,
+        targetId: input.targetId,
+        affectedPluginIds: resolvedStage.affectedPluginIds,
+        ...(input.staged === undefined ? {} : { package: input.staged }),
+        ...(runtimeArtifactSource === undefined ? {} : { runtimeArtifactSource }),
+        authorizationDecision: input.authorizationDecision,
+      })
+      if (readiness === undefined) throw new Error('shared registry readiness observation is unavailable')
+      if (readiness.transactionId !== transactionId
+        || readiness.transactionEpoch !== resolvedStage.transactionEpoch
+        || readiness.expectedRegistryEpoch !== resolvedStage.expectedRegistryEpoch
+        || readiness.afterRegistryEpoch !== resolvedStage.afterRegistryEpoch
+        || JSON.stringify(runtimeObservation(readiness.observation, readiness.afterRegistryEpoch))
+          !== JSON.stringify(runtimeObservation(input.candidate, resolvedStage.afterRegistryEpoch))) {
+        throw new Error('shared registry readiness observation is stale')
+      }
+      if (stageResolutionFailure !== undefined) throw stageResolutionFailure
+      const readinessReceipt = this.receiptAuthority.issueReadiness({
+        transactionId,
+        transactionEpoch: resolvedStage.transactionEpoch,
+        candidateFingerprint: resolvedStage.candidateFingerprint,
+        expectedRegistryEpoch: resolvedStage.expectedRegistryEpoch,
+        afterRegistryEpoch: resolvedStage.afterRegistryEpoch,
+        observation: runtimeObservation(readiness.observation, readiness.afterRegistryEpoch),
+      })
+      await authority.confirmReadiness(access, readinessReceipt)
+      const publishPlan = await authority.resolveCandidate(access, 'publish')
+      await authority.resolveImpact({
+        ownerId: access.ownerId,
+        profileId: access.profileId,
+        impactToken: prepared.impactToken,
+      }, 'publish')
+      const publication = await runtime.publish(transactionId)
+      published = true
+      if (publication.transactionEpoch !== publishPlan.transactionEpoch
+        || publication.registryEpoch !== publishPlan.afterRegistryEpoch
+        || JSON.stringify(publication.active.plugins) !== JSON.stringify(input.candidate.plugins)) {
+        throw new Error('shared registry publication observation is stale')
+      }
+      const committed = await authority.commit(access)
+      const cleanup = await runtime.complete(transactionId)
+      if (cleanup.registryEpoch !== publishPlan.afterRegistryEpoch
+        || JSON.stringify(cleanup.active.plugins) !== JSON.stringify(input.candidate.plugins)
+        || JSON.stringify(cleanup.disposedAfter.plugins) !== JSON.stringify(input.active.plugins)) {
+        throw new Error('retiring generation cleanup observation is stale')
+      }
+      const commitReceipt = this.receiptAuthority.issueCommit({
+        transactionId,
+        transactionEpoch: publishPlan.transactionEpoch,
+        candidateFingerprint: publishPlan.candidateFingerprint,
+        registryEpoch: cleanup.registryEpoch,
+        active: runtimeObservation(cleanup.active, cleanup.registryEpoch),
+        disposedAfter: runtimeObservation(cleanup.disposedAfter, publishPlan.expectedRegistryEpoch),
+      })
+      await authority.completeCommit(access, commitReceipt)
+      await runtime.finalize(transactionId)
+      return committed
+    } catch (error) {
+      if (prepared === undefined || access === undefined) {
+        await runtime.abort(transactionId).catch(() => undefined)
+        await this.store.abortCandidate(transactionId).catch(() => undefined)
+      } else {
+        const authority = await this.authority
+        if (!activationRequested) {
+          await authority.abort(access, 'activation-before-stage-failed').catch(() => undefined)
+          await runtime.abort(transactionId).catch(() => undefined)
+        } else {
+          try {
+            const rollback = await authority.beginRollback(access, 'activation-or-readiness-failed')
+            const rollbackPlan = await authority.resolveCandidate(access, 'rollback')
+            await authority.resolveImpact({
+              ownerId: access.ownerId,
+              profileId: access.profileId,
+              impactToken: prepared.impactToken,
+            }, 'rollback')
+            const restored = await runtime.rollback(transactionId)
+            const rollbackReceipt = this.receiptAuthority.issueRollback({
+              transactionId,
+              transactionEpoch: rollback.transactionEpoch,
+              candidateFingerprint: rollbackPlan.candidateFingerprint,
+              registryEpoch: restored.registryEpoch,
+              active: runtimeObservation(restored.active, restored.registryEpoch),
+              disposedAfter: runtimeObservation(restored.disposedAfter, rollback.expectedRegistryEpoch),
+            })
+            await authority.completeRollback({
+              ownerId: access.ownerId,
+              profileId: access.profileId,
+              rollbackToken: rollback.rollbackToken,
+            }, rollbackReceipt)
+          } catch (rollbackError) {
+            throw new LifecycleFailure(
+              'rollback-failed',
+              `${safeError('rollback-failed')} (${error instanceof Error ? error.message : String(error)}; ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)})`,
+              'rollback-failed',
+            )
+          }
+          throw new LifecycleFailure(
+            published ? 'activation-failed' : 'readiness-failed',
+            safeError(published ? 'activation-failed' : 'readiness-failed'),
+            'rolled-back',
+          )
+        }
+      }
+      throw error
+    } finally {
+      this.pendingPermissionReviews.delete(transactionId)
     }
   }
 
@@ -472,6 +860,8 @@ export class PluginLifecycleCoordinator {
       }
     }
     let staged: StagedPluginPackage | undefined
+    let reviewPlan: CordisXPermissionAuthorizationPlanV1
+    let reviewDecision: CordisXPermissionAuthorizationDecisionV1
     if (operation === 'enable') {
       const target = active.plugins.find(plugin => plugin.id === pluginId)!
       staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => { throw classify(error) })
@@ -489,6 +879,11 @@ export class PluginLifecycleCoordinator {
         }
       }
       validateDecision(plan, authorizationDecision)
+      reviewPlan = plan
+      reviewDecision = authorizationDecision
+    } else {
+      reviewPlan = await this.planFor(active.plugins.find(plugin => plugin.id === pluginId)!, 'install')
+      reviewDecision = allowedDecision(reviewPlan)
     }
     await this.store.writeCandidate(candidate)
     const mutation: PluginRuntimeMutation = {
@@ -500,6 +895,24 @@ export class PluginLifecycleCoordinator {
       affectedPluginIds: affected,
       ...(staged === undefined ? {} : { package: staged }),
       ...(authorizationDecision === undefined ? {} : { authorizationDecision }),
+    }
+    const formalCommitted = await this.activateWithAuthority({
+      operation,
+      active,
+      candidate,
+      targetId: pluginId,
+      ...(staged === undefined ? {} : { staged }),
+      authorizationPlan: reviewPlan,
+      authorizationDecision: reviewDecision,
+    })
+    if (formalCommitted !== undefined) {
+      return {
+        ...resultBase(request, formalCommitted, operation),
+        outcome: 'applied',
+        scope: 'plugin-generation',
+        affectedPluginIds: affected,
+        transactionId: candidate.transactionId!,
+      }
     }
     try {
       await this.options.runtime.stage(mutation)

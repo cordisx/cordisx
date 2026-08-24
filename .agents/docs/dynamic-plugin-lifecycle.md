@@ -14,12 +14,13 @@ activation, upgrade, disablement, reload, and removal. The delivery order is:
 5. local fixtures plus simulated and isolated real-`app://` smoke evidence;
 6. exact merged protocol and Host pins in `cordisxmono`.
 
-The current merged runtime has only two related mechanisms: configuration may
-publish live or recreate the owning plugin fiber, and the manager can
-block/restore a module already present in the one renderer bundle. It does not
-currently install, update, remove, or independently replace plugin code. The
-implementation slices following this document must preserve that distinction
-until their contracts and tests land.
+The merged runtime can snapshot one explicit local directory, build an
+immutable package artifact, and drive a per-plugin generation through the
+launcher/CDP/renderer lifecycle chain. Its current renderer staging still
+mounts candidates into live registries after disposing the previous closure.
+The generation-visibility checkpoint below closes that remaining atomicity
+gap; package-v2 source adapters and durable transaction authority remain
+launcher-owned follow-up work.
 
 The current protocol accepts only a user-explicit source that is already
 local: a directory, an explicit package/archive, or an already-downloaded
@@ -188,6 +189,165 @@ Module top-level code executes inside the current trusted renderer model and
 cannot be rolled back. Package guidance therefore requires top-level code to
 be declarative and side-effect free; effects begin in `apply()` and belong to
 the owning Cordis fiber. This requirement is lifecycle hygiene, not a sandbox.
+
+## Host-private generation visibility transaction
+
+The renderer has one `GenerationVisibilityCoordinator` per stable Host runtime.
+It is the only authority for the active module generation of every plugin and
+for the single in-flight activation epoch. It stores activation identity and
+visibility metadata only. Commands, pages, routes, surfaces, localization,
+configuration, Agent, Platform, and extension-point records remain stored in
+their existing registries; no shadow registry, copied contribution store, or
+public generation API is introduced.
+
+The Host writes an unforgeable candidate seat into the plugin's child Cordis
+`Context`. A plugin cannot submit or override its plugin id, module generation,
+transaction id, or epoch. Every registry derives those fields from the Context
+and records an internal owner key of `(pluginId, moduleGeneration, logicalId)`.
+The existing public owner and qualified-id projections remain unchanged.
+`CORDISX_PLUGIN_GENERATION` is therefore an enforced registry identity, not
+diagnostic metadata.
+
+The coordinator API is Host-private and has these responsibilities:
+
+- `bindActive(record)` installs the full authoritative activation tuple for a
+  newly started runtime;
+- `begin(expected, after)` revalidates profile revision, runtime generation,
+  package id/version/digest, module generation, enabled state, and exact
+  dependency bindings, then recomputes the affected reverse closure from both
+  graphs and issues the candidate seat;
+- `view(context)` returns the authenticated active or candidate generation
+  view used by registration, lookup, dependency resolution, and callbacks;
+- `preparePublish(seat, readinessReceipt)` asks every participating registry to
+  validate the complete closure without changing the active pointer;
+- `publish(barrier)` synchronously replaces the complete active-generation map
+  and increments one visibility version before any observer runs;
+- `rollback(barrier)` synchronously restores the previous complete map;
+- `abort(seat)` rejects and drains hidden candidate effects without notifying
+  live observers; and
+- `completeLastGood(seat)` releases the rollback lease only after retired
+  fibers and effects have been drained and disposed.
+
+Registries consume the coordinator through the same exact private hooks:
+
+- `register(context, logicalId, record)` derives an authenticated
+  `{ owner, moduleGeneration, logicalId }` physical key and marks the owning
+  transaction dirty without publishing it;
+- `read(context?)` selects the candidate transaction view for a candidate
+  fiber and the active view for ordinary Host/Manager consumers;
+- `assertCallable(record, context?)` fences stale callbacks and handles before
+  execution;
+- `prepare(transition)` verifies duplicates, references, mounts, policies, and
+  configuration projections entirely against `candidate + unaffected-active`;
+- `notify(visibilityVersion)` reconciles that already-published version once;
+  unregistering a hidden candidate or retiring record does not notify; and
+- `disposeGeneration(owner, moduleGeneration)` removes only the exact physical
+  generation, so an old disposer cannot remove its replacement.
+
+Candidate code resolves services and dependencies through its candidate view,
+so members of one staged closure can see each other. Ordinary consumers keep
+the active view and cannot see candidate records. Registration and candidate
+cleanup do not notify live subscribers. On publish or rollback, the coordinator
+first performs the one non-throwing map flip, then delivers at most one
+versioned notification to each participating registry. A synchronous listener
+may read any other registry and will see the same new version. Listener errors
+are isolated and asynchronous listeners are not awaited inside the barrier.
+All potentially failing participant checks happen in `preparePublish`; a
+prepare failure leaves the active map and every live projection unchanged.
+Before a Host-side generation probe establishes its baseline, the private
+runtime may await `settleRegistryProjection()`. This is a bounded microtask
+fixed-point barrier for already-completed live localization/diagnostic
+projection; it neither advances the registry epoch nor delays candidate stage,
+and it fails if the projection cannot settle.
+
+After publish, the old records are hidden-retiring but remain mounted under a
+rollback lease. A successful launcher commit-last-good drains and disposes
+them in reverse dependency order. A durable commit failure flips visibility
+back to the old closure, disposes the candidate closure, and returns the
+Host-observed `active` and `disposedAfter` tuples. Cleanup state remains until
+all disposers succeed, so a failed cleanup retries without repeating the
+visibility flip. Calls and handles capture their generation view; once that
+view is no longer active, invocation fails closed as stale even while its
+retiring record still exists.
+
+Process recovery resolves the Host-private `rollback-pending` plan before
+building a replacement renderer. The replacement is composed from the
+authority-selected last-good closure at `rollbackRegistryEpoch`; its new Host
+runtime generation is not substituted into the old transaction receipt. Once
+the isolated `app://` runtime is ready, it verifies that the live package,
+module-generation, enabled-state, and dependency closure matches the rollback
+target and that no published candidate generation survived. The launcher then
+issues the branded rollback receipt with the plan's original transaction tuple,
+completes durable rollback, and adopts only the returned canonical active
+revision. Repeated recovery uses the authority's fresh rollback token and never
+reads or reconstructs journal fields in renderer code.
+
+### Owning files and registry adaptation
+
+| Owning file | Generation transaction change |
+| --- | --- |
+| `renderer/generation-visibility.ts` | coordinator, authenticated seat/view, closure/fence validation, prepare/publish/rollback barrier, versioned notification |
+| `renderer/ownership.ts` | Host-only Context identity accessors; no public plugin input |
+| `renderer/commands.ts` | generation-qualified records, view-filtered lookup/snapshot, callback fence |
+| `renderer/navigation.ts` | generation-qualified page/route records; candidate-local reference validation; active-version stack/settings mount reconciliation |
+| `renderer/surfaces.ts` | generation-qualified contributions; active projection; rendered state bound to an unrepeatable registration token |
+| `renderer/configuration.ts` | generation-fenced config renderers/watchers while retaining one profile/plugin value and revision plane; active form remount on flip |
+| `renderer/i18n.ts` | generation-qualified catalogs/injections; candidate-local winner; one active locale projection version |
+| `renderer/agent.ts` | generation-fenced prompts, subscriptions, pending deliveries, and owner drain |
+| `renderer/platform.ts` | generation-fenced service tickets/calls without changing permission policy identity |
+| `renderer/extension-points.ts` | keep the descriptor catalog Host-owned; make plugin identity/policy decisions and usage generation-aware without changing public access shapes |
+| `renderer/runtime.ts` | candidate/active/retiring fibers, closure readiness receipt, publish and cleanup orchestration |
+| `launcher/cdp.ts` | all-renderer readiness, publish, rollback, and retryable cleanup observation handshake |
+
+Configuration values remain keyed by profile and plugin id and are not copied
+per generation. The generation seam applies to fiber-owned watchers and
+renderer registrations only. Permission decisions likewise remain owned by
+the Permission Broker; generation fencing limits the lifetime of candidate and
+one-shot authority without creating another policy store.
+
+The publish reconcile order is dependency bindings and callable services,
+commands and localization, pages/routes/outlets, surfaces/settings, then the
+single Manager/runtime snapshot. Existing open routes and settings content are
+remounted only after the new page and contribution records are active. A
+reconcile preparation failure occurs before the active-map flip. Reconciliation
+after the flip is non-throwing and uses retained previous mount state for an
+atomic rollback. `knownRegistrations` is generation-qualified and cannot
+project or resurrect a retiring generation.
+
+Implementation priority is:
+
+| Priority | Required closure |
+| --- | --- |
+| P0 | configuration owner-only overwrite, i18n candidate winner, route/page mount identity, surface rendered-token isolation, permission/extension-point identity when package source changes |
+| P1 | shared notification batching and Manager snapshot consistency, generation-qualified inactive diagnostics, active config-renderer remount without watcher churn |
+
+### Generation transaction test matrix
+
+| Evidence | Required assertion |
+| --- | --- |
+| coordinator unit tests | full tuple and dependency fence, Host-recomputed closure, forged/stale seat rejection |
+| two-registry consistency fixture | candidate self-view, ordinary live zero-visibility, same-plugin coexistence, one-version atomic publish, one bounded notification per registry |
+| registry-focused tests | generation-qualified duplicate ids, active projection de-duplication, stale lookup/callback/handle rejection, hidden abort without notification |
+| publish fault tests | registry prepare failure produces zero map/projection change; listener failure cannot split the epoch |
+| command tests | active-only execute/has/snapshot, old disposer isolation, old in-flight abort after flip |
+| navigation tests | same-path coexistence, candidate-local page resolution, active mount/stack preservation on abort, settings tab/content generation agreement |
+| surface/adapter tests | no staged duplicate projection, one flip rebuild, rendered-token isolation, no native flicker |
+| configuration tests | candidate settings self-view, Manager active view, schema/renderer flip, abort with zero watcher churn |
+| localization tests | candidate-local catalog winner, active zero visibility, one locale version/notification, abort without diagnostic churn |
+| extension-point tests | old/new source coexistence, active decision/usage until flip, rollback without authority leakage |
+| runtime integration | staged snapshot/execute/navigate/DOM remain old, old fiber remains mounted, dependency-ordered closure readiness, one publish, rollback flip, commit-last-good retiring disposal, retryable cleanup observation |
+| bundle snapshot tests | every Manager snapshot is entirely old or new and the runtime subscription publishes exactly once |
+| lifecycle regressions | block/restore, permission blocking, config live/restart, unload cleanup of services/pages/routes/commands/surfaces/subscriptions/pending deliveries |
+| isolated real `app://` smoke | candidate readiness and publish/rollback in one Codex window while unrelated fibers, native Codex DOM identity, page state, and data stream remain continuous |
+| isolated process/recovery smoke | fresh profile and CDP port; pre-publish abort, post-publish rollback, process restart from rollback-pending, native Console `method + args[]`, zero pending permission/lifecycle dialogs, zero Crashpad dump delta, closed port, and no process retaining the profile |
+
+The `smoke:isolated-app` runner owns a separate process group, starts the
+isolated window minimized, waits for the actual CordisX runtime rather than
+only a CDP page, and always terminates the smoke, launcher, Electron, and child
+processes in `finally`. It fails the run if the loopback port remains reachable,
+the exact profile has a live Electron process, a Crashpad dump appears, or the
+live report contains an unhandled permission/lifecycle dialog. Visible windows
+are never retained unless a user explicitly runs a non-cleaning visual review.
 
 ## Install and upgrade
 
