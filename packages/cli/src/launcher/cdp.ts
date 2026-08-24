@@ -26,6 +26,15 @@ import {
   parseConfigBindingRequest,
   type ConfigBridgeHandler,
 } from './config-rpc.js'
+import {
+  MAX_PERMISSION_REQUEST_BYTES,
+  MAX_PERMISSION_REQUESTS,
+  PERMISSION_BINDING,
+  PERMISSION_RECEIVER,
+  parsePermissionBindingRequest,
+  persistPermissionPolicies,
+  type PermissionPersistenceContext,
+} from './permission-rpc.js'
 
 const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
 const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
@@ -181,6 +190,9 @@ interface InstalledScript {
   readonly configController?: AbortController
   readonly removeConfigBindingListener?: () => void
   readonly configBindingInstalled: boolean
+  readonly permissionController?: AbortController
+  readonly removePermissionBindingListener?: () => void
+  readonly permissionBindingInstalled: boolean
 }
 
 interface MarketplaceBindingRequest {
@@ -228,12 +240,20 @@ async function sendConfigBindingResponse(session: CdpSession, payload: Record<st
   })
 }
 
+async function sendPermissionBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
+  await session.send('Runtime.evaluate', {
+    expression: `void globalThis.${PERMISSION_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    allowUnsafeEvalBlockedByCSP: true,
+  })
+}
+
 async function install(
   target: CdpTarget,
   source: string,
   provider?: { readonly fleet: ProviderFleet; readonly token: string },
   history?: { readonly host: CodexAgentHistoryHost; readonly token: string },
   config?: ConfigBridgeHandler,
+  permission?: PermissionPersistenceContext,
 ): Promise<InstalledScript> {
   const url = target.webSocketDebuggerUrl
   if (url === undefined) throw new Error(`target ${target.id} has no websocket URL`)
@@ -242,10 +262,12 @@ async function install(
   const providerController = provider === undefined ? undefined : new AbortController()
   const historyController = history === undefined ? undefined : new AbortController()
   const configController = config === undefined ? undefined : new AbortController()
+  const permissionController = permission === undefined ? undefined : new AbortController()
   let removeBindingListener = (): void => {}
   let removeProviderBindingListener = (): void => {}
   let removeHistoryBindingListener = (): void => {}
   let removeConfigBindingListener = (): void => {}
+  let removePermissionBindingListener = (): void => {}
   try {
     await session.send('Runtime.enable')
     await session.send('Page.enable')
@@ -253,6 +275,7 @@ async function install(
     if (provider !== undefined) await session.send('Runtime.addBinding', { name: PROVIDER_BINDING })
     if (history !== undefined) await session.send('Runtime.addBinding', { name: AGENT_HISTORY_BINDING })
     if (config !== undefined) await session.send('Runtime.addBinding', { name: CONFIG_BINDING })
+    if (permission !== undefined) await session.send('Runtime.addBinding', { name: PERMISSION_BINDING })
     let activeMarketplaceRequests = 0
     removeBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
       if (params.name !== MARKETPLACE_BINDING || typeof params.payload !== 'string') return
@@ -376,6 +399,36 @@ async function install(
         })()
       })
     }
+    let activePermissionRequests = 0
+    if (permission !== undefined) {
+      removePermissionBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
+        if (params.name !== PERMISSION_BINDING || typeof params.payload !== 'string') return
+        const payload = params.payload
+        void (async () => {
+          let requestId = 'invalid'
+          try {
+            if (Buffer.byteLength(payload) > MAX_PERMISSION_REQUEST_BYTES) throw new Error('permission request exceeds maximum size')
+            const request = parsePermissionBindingRequest(JSON.parse(payload) as unknown, permission)
+            requestId = request.requestId
+            if (permissionController?.signal.aborted === true) throw new Error('permission persistence bridge is closed')
+            if (activePermissionRequests >= MAX_PERMISSION_REQUESTS) throw new Error('too many concurrent permission requests')
+            activePermissionRequests += 1
+            try {
+              const value = await persistPermissionPolicies(permission, request.records)
+              await sendPermissionBindingResponse(session, { requestId, ok: true, value })
+            } finally {
+              activePermissionRequests -= 1
+            }
+          } catch {
+            await sendPermissionBindingResponse(session, {
+              requestId,
+              ok: false,
+              error: 'Permission policy request was rejected',
+            }).catch(() => undefined)
+          }
+        })()
+      })
+    }
     const added = await session.send('Page.addScriptToEvaluateOnNewDocument', { source })
     const identifier = added.identifier
     if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
@@ -395,16 +448,20 @@ async function install(
       historyBindingInstalled: history !== undefined,
       ...(configController === undefined ? {} : { configController, removeConfigBindingListener }),
       configBindingInstalled: config !== undefined,
+      ...(permissionController === undefined ? {} : { permissionController, removePermissionBindingListener }),
+      permissionBindingInstalled: permission !== undefined,
     }
   } catch (error) {
     marketplaceController.abort()
     providerController?.abort()
     historyController?.abort()
     configController?.abort()
+    permissionController?.abort()
     removeBindingListener()
     removeProviderBindingListener()
     removeHistoryBindingListener()
     removeConfigBindingListener()
+    removePermissionBindingListener()
     session.close()
     throw error
   }
@@ -415,10 +472,12 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.providerController?.abort()
   installed.historyController?.abort()
   installed.configController?.abort()
+  installed.permissionController?.abort()
   installed.removeBindingListener()
   installed.removeProviderBindingListener?.()
   installed.removeHistoryBindingListener?.()
   installed.removeConfigBindingListener?.()
+  installed.removePermissionBindingListener?.()
   try {
     await Promise.allSettled([
       installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }),
@@ -436,6 +495,9 @@ async function uninstall(installed: InstalledScript): Promise<void> {
       ...(installed.configBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: CONFIG_BINDING })]
         : []),
+      ...(installed.permissionBindingInstalled
+        ? [installed.session.send('Runtime.removeBinding', { name: PERMISSION_BINDING })]
+        : []),
     ])
   } finally {
     installed.session.close()
@@ -452,6 +514,7 @@ export interface WatchInjectionOptions {
   readonly agentHistoryHost?: CodexAgentHistoryHost
   readonly agentHistoryBridgeToken?: string
   readonly configBridge?: ConfigBridgeHandler
+  readonly permissionPersistence?: PermissionPersistenceContext
 }
 
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
@@ -480,7 +543,14 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           const history = options.agentHistoryHost === undefined || options.agentHistoryBridgeToken === undefined
             ? undefined
             : { host: options.agentHistoryHost, token: options.agentHistoryBridgeToken }
-          const record = await install(target, options.source, provider, history, options.configBridge)
+          const record = await install(
+            target,
+            options.source,
+            provider,
+            history,
+            options.configBridge,
+            options.permissionPersistence,
+          )
           installed.set(target.id, record)
           options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)
         }

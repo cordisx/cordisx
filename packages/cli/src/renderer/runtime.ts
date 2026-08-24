@@ -3,7 +3,10 @@ import type {
   CordisXBrowserPlugin,
   CordisXCommandReference,
   CordisXManagerSettingsTabItem,
+  CordisXPermissionAuthorizationDecisionV1,
   CordisXPermissionPolicy,
+  CordisXPermissionAuthorizationPlanV1,
+  CordisXPermissionPolicyRecordV1,
   CordisXPointPolicy,
   CordisXPlatformCapability,
   CordisXPluginIdentity,
@@ -59,15 +62,18 @@ import {
   type ConfigCandidate,
   type ConfigMutationOperation,
 } from './configuration.js'
+import { BindingPermissionPolicyStore } from './permission-binding.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 
 interface CordisXRuntimeMetadata {
   readonly version: string
   readonly providers: readonly { readonly id: string; readonly displayName: string }[]
+  readonly profileId: string
+  readonly permissionPolicies?: readonly CordisXPermissionPolicyRecordV1[]
+  readonly permissionBridgeToken?: string
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
-  readonly profileId: string
   readonly configBridgeToken?: string
   readonly generation?: string
 }
@@ -90,6 +96,8 @@ interface CordisXRuntimeHandle extends ManagerModel {
   execute(owner: string, reference: CordisXCommandReference, invocationKey?: string): Promise<unknown>
   navigate(owner: string, reference: CordisXRouteReference): Promise<void>
   setExtensionPointPolicy(source: string, pluginId: string, pointId: string, policy: CordisXPointPolicy): Promise<void>
+  permissionAuthorizationPlan(id: string): CordisXPermissionAuthorizationPlanV1
+  authorizePlugin(id: string, decision: CordisXPermissionAuthorizationDecisionV1): Promise<void>
   dispose(): Promise<void>
 }
 
@@ -174,10 +182,20 @@ async function start(
     bindingPlatformAdapter = await BindingPlatformAdapter.connect(metadata.providerBridgeToken).catch(() => undefined)
   }
   const platformAdapter = bindingPlatformAdapter ?? agentAdapter
-  const broker = new PermissionBroker(new BrowserPermissionPolicyStore(), new BrowserPermissionPrompt())
   const generation = metadata.generation ?? (typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  const permissionStore = metadata.permissionBridgeToken === undefined
+    ? new BrowserPermissionPolicyStore(metadata.profileId)
+    : BindingPermissionPolicyStore.connect(metadata.permissionBridgeToken, metadata.permissionPolicies ?? [])
+  const broker = new PermissionBroker(
+    permissionStore,
+    new BrowserPermissionPrompt(),
+    () => new Date(),
+    30_000,
+    metadata.profileId,
+    generation,
+  )
   const configBridge = metadata.configBridgeToken === undefined
     ? undefined
     : new BrowserConfigBridge(metadata.configBridgeToken, metadata.profileId, generation)
@@ -194,6 +212,9 @@ async function start(
     controller.unregisterPermissions = broker.register(controller.identity, controller.manifest)
     controller.unregisterExtensionPoints = extensionPointBroker.register(controller.identity)
     if (controller.status === 'active' && blockedPlugins.has(controller.item.id)) controller.status = 'blocked'
+  }
+  await broker.settled()
+  for (const controller of controllers) {
     const denied = broker.requiredDenied(controller.identity)
     if (controller.status === 'active' && denied.length > 0) {
       controller.status = 'permission-blocked'
@@ -401,6 +422,7 @@ async function start(
       if (blocked) {
         blockedPlugins.add(id)
         writeBlockedPlugins(blockedPlugins)
+        broker.clearOnce(controller.identity)
         rememberRegistrations(id)
         agentRuntime.releaseOwner(controller.identity, 'plugin-blocked')
         await controller.fiber?.dispose()
@@ -522,7 +544,7 @@ async function start(
       if (disposed) throw new Error('CordisX runtime is disposed')
       const controller = controllers.find(item => item.item.id === id)
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
-      broker.setPolicy(controller.identity, capability, policy)
+      await broker.setPolicy(controller.identity, capability, policy)
       const denied = broker.requiredDenied(controller.identity)
       if (denied.length > 0) {
         rememberRegistrations(id)
@@ -569,6 +591,45 @@ async function start(
       extensionPointBroker.setPolicy(controller.identity, pointId, policy)
       slotService?.invalidatePointPolicies()
       await routeService?.invalidatePointPolicies()
+      notify()
+    })
+    operation = task.catch(() => {})
+    return task
+  }
+
+  const permissionAuthorizationPlan = (id: string): CordisXPermissionAuthorizationPlanV1 => {
+    const controller = controllers.find(item => item.item.id === id)
+    if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+    return broker.authorizationPlan(controller.identity, 'enable')
+  }
+
+  const authorizePlugin = (
+    id: string,
+    decision: CordisXPermissionAuthorizationDecisionV1,
+  ): Promise<void> => {
+    const task = operation.then(async () => {
+      if (disposed) throw new Error('CordisX runtime is disposed')
+      const controller = controllers.find(item => item.item.id === id)
+      if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+      if (!controller.item.enabled || controller.item.module === undefined) {
+        throw new Error(`plugin ${id} is disabled in cordisx.config.json and is not bundled`)
+      }
+      await broker.authorizeActivation(controller.identity, decision, 'enable')
+      blockedPlugins.delete(id)
+      writeBlockedPlugins(blockedPlugins)
+      const denied = broker.requiredDenied(controller.identity)
+      if (denied.length > 0) {
+        rememberRegistrations(id)
+        agentRuntime.releaseOwner(controller.identity, 'permission-blocked')
+        await controller.fiber?.dispose()
+        await routeService?.settled()
+        delete controller.fiber
+        controller.status = 'permission-blocked'
+        controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+        notify()
+        return
+      }
+      if (controller.fiber === undefined) await mountPlugin(controller)
       notify()
     })
     operation = task.catch(() => {})
@@ -626,6 +687,7 @@ async function start(
     historyAdapter.dispose()
     bindingPlatformAdapter?.dispose()
     bindingPlatformAdapter = undefined
+    if (permissionStore instanceof BindingPermissionPolicyStore) permissionStore.dispose()
     for (const remove of disposeExtensionPointCatalogs.splice(0).reverse()) await remove()
     unregisterManagerPointCatalog?.()
     unregisterManagerPointCatalog = undefined
@@ -663,6 +725,8 @@ async function start(
     },
     closeSettingsTabContent: () => routeService?.closeManagerSettings() ?? Promise.resolve(),
     setExtensionPointPolicy,
+    permissionAuthorizationPlan,
+    authorizePlugin,
     snapshot,
     setPluginBlocked,
     updatePluginConfig,

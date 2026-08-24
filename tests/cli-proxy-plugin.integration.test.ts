@@ -91,6 +91,7 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(bundledPlugin?.readme).toContain('Every model is identified by both `providerId` and `modelId`')
     await runtime!.navigate('cli-proxy-api', { id: 'providers.sessions' })
     for (let attempt = 0; attempt < 100 && dom.window.document.querySelectorAll('[data-session]').length < 2; attempt += 1) {
+      dom.window.document.querySelector<HTMLButtonElement>('[data-permission-decision="allow"]')?.click()
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-provider-fleet="true"]')

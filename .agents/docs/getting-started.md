@@ -185,6 +185,11 @@ npm run smoke -- --port <printed-port> --screenshot artifacts/live-smoke.png
 npm run smoke -- --port <printed-port> --manager-screenshot artifacts/manager.png
 npm run smoke -- --port <printed-port> --color-scheme dark \
   --trigger-screenshot artifacts/brand-trigger-dark.png
+npm run smoke -- --port <printed-port> --color-scheme light \
+  --authorization-plugin <plugin-id> --authorization-screenshot artifacts/authorization-light.png
+npm run smoke -- --port <printed-port> --color-scheme dark \
+  --authorization-plugin <plugin-id> --authorization-decline-optional \
+  --authorization-decision allow --authorization-screenshot artifacts/authorization-dark.png
 npm run smoke -- --port <printed-port> \
   --select-thread local:<session-id> --exercise \
   --report artifacts/live-smoke/structured-exercise.json \

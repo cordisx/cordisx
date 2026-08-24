@@ -11,6 +11,8 @@ import {
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import type { CordisXPermissionPolicyRecordV1 } from '../platform-contracts.js'
+import { normalizePermissionPolicyRecord, permissionRecordKey } from '../permissions.js'
 
 export type HomeDataMode = 'shared' | 'isolated'
 
@@ -64,6 +66,7 @@ export interface HomeConfig {
   readonly defaultApp: string
   readonly providers: readonly HomeConfigProvider[]
   readonly plugins: readonly HomeConfigPlugin[]
+  readonly permissions: readonly CordisXPermissionPolicyRecordV1[]
   readonly apps: Readonly<Record<string, HomeConfigApp>>
 }
 
@@ -266,7 +269,7 @@ function parseApp(value: unknown, label: string): HomeConfigApp {
 /** Strictly validate and normalize a version-1 CordisX home configuration. */
 export function parseHomeConfig(value: unknown): HomeConfig {
   const config = record(value, 'config')
-  rejectUnknownKeys(config, ['version', 'defaultApp', 'providers', 'plugins', 'apps'], 'config')
+  rejectUnknownKeys(config, ['version', 'defaultApp', 'providers', 'plugins', 'permissions', 'apps'], 'config')
   if (config.version !== 1) throw new Error('config.version must be 1')
   const defaultApp = portableId(config.defaultApp, 'config.defaultApp')
   if (config.providers !== undefined && !Array.isArray(config.providers)) throw new Error('config.providers must be an array')
@@ -285,6 +288,15 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     seenPlugins.add(plugin.id)
     return plugin
   })
+  if (config.permissions !== undefined && !Array.isArray(config.permissions)) throw new Error('config.permissions must be an array')
+  const seenPermissions = new Set<string>()
+  const permissions = (config.permissions ?? []).map((value, index) => {
+    const policy = normalizePermissionPolicyRecord(value, `config.permissions[${index}]`)
+    const key = permissionRecordKey(policy)
+    if (seenPermissions.has(key)) throw new Error(`duplicate permission policy key at config.permissions[${index}]`)
+    seenPermissions.add(key)
+    return policy
+  })
   const rawApps = record(config.apps, 'config.apps')
   const apps: Record<string, HomeConfigApp> = Object.create(null) as Record<string, HomeConfigApp>
   for (const [appId, rawApp] of Object.entries(rawApps)) {
@@ -292,7 +304,7 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     apps[appId] = parseApp(rawApp, `config.apps.${appId}`)
   }
   if (!Object.hasOwn(apps, defaultApp)) throw new Error(`config.defaultApp references missing app: ${defaultApp}`)
-  return { version: 1, defaultApp, providers, plugins, apps }
+  return { version: 1, defaultApp, providers, plugins, permissions, apps }
 }
 
 /** Return a new deterministic configuration for first launch or non-interactive setup. */
@@ -302,6 +314,7 @@ export function createDefaultHomeConfig(): HomeConfig {
     defaultApp: 'codex',
     providers: [],
     plugins: [],
+    permissions: [],
     apps: {
       codex: {
         defaultProfile: 'default',

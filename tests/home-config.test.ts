@@ -10,6 +10,7 @@ import {
   resolveHomeConfigPath,
   updateHomeConfigAtomic,
 } from '../packages/cli/src/config/home-config.js'
+import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 
 async function fixturePath(): Promise<{ root: string, configPath: string }> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-home-config-'))
@@ -78,6 +79,44 @@ describe('CordisX home configuration', () => {
         { id: 'demo', entry: './other.ts' },
       ],
     })).toThrow('duplicate plugin id: demo')
+    expect(() => parseHomeConfig({
+      ...createDefaultHomeConfig(),
+      permissions: [{
+        ...createPermissionPolicyRecord({
+          profileId: 'default',
+          identity: { source: 'file:///plugins/demo.js', id: 'demo' },
+          capability: 'models.read',
+          scope: {},
+          policy: 'allow',
+        }),
+        policy: 'allow-once',
+      }],
+    })).toThrow('policy is unsupported')
+  })
+
+  it('keeps persistent policies separated by profile, identity, capability, and exact scope', async () => {
+    const { configPath } = await fixturePath()
+    await ensureHomeConfig(configPath)
+    const base = {
+      identity: { source: 'file:///plugins/demo.js', id: 'demo' },
+      capability: 'models.read' as const,
+      policy: 'allow' as const,
+    }
+    const policies = [
+      createPermissionPolicyRecord({ ...base, profileId: 'default', scope: { providers: ['codex'] } }),
+      createPermissionPolicyRecord({ ...base, profileId: 'work', scope: { providers: ['codex'] } }),
+      createPermissionPolicyRecord({ ...base, profileId: 'default', scope: { providers: ['codex', 'zcode'] } }),
+      createPermissionPolicyRecord({
+        ...base,
+        profileId: 'default',
+        identity: { source: 'file:///plugins/other.js', id: 'demo' },
+        scope: { providers: ['codex'] },
+      }),
+    ]
+    await updateHomeConfigAtomic(current => ({ ...current, permissions: policies }), configPath)
+    const readback = await loadHomeConfig(configPath)
+    expect(readback.permissions).toEqual(policies)
+    expect(new Set(readback.permissions.map(item => JSON.stringify(item.key))).size).toBe(4)
   })
 
   it('treats prototype-looking app and profile ids as ordinary own keys', () => {

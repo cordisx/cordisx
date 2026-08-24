@@ -2,13 +2,19 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import {
   CORDISX_PLATFORM_CAPABILITIES,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
+  CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
   type CordisXCapabilityDeclaration,
   type CordisXCapabilityScope,
   type CordisXLocalizedText,
   type CordisXModelDescriptor,
   type CordisXModelPage,
   type CordisXModelsListInput,
+  type CordisXPermissionAuthorizationPlanV1,
+  type CordisXPermissionAuthorizationDecisionV1,
+  type CordisXPermissionDecision,
   type CordisXPermissionPolicy,
+  type CordisXPermissionPolicyRecordV1,
   type CordisXPlatform,
   type CordisXPlatformAdapterStatus,
   type CordisXPlatformCapability,
@@ -32,10 +38,19 @@ import {
   type CordisXTurnStart,
   type CordisXTurnSubmitInput,
 } from '../contracts.js'
+import {
+  createPermissionPolicyRecord,
+  normalizePermissionPolicyRecord,
+  normalizePermissionScope,
+  permissionIdentityKey,
+  permissionRecordKey,
+  permissionScopeFingerprint,
+} from '../permissions.js'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,95}$/
-const POLICY_STORAGE_KEY = 'cordisx.platform.permissionPolicies.v1'
+const LEGACY_POLICY_STORAGE_KEY = 'cordisx.platform.permissionPolicies.v1'
+const POLICY_STORAGE_KEY = 'cordisx.platform.permissionPolicies.v2'
 
 function failure(code: CordisXPlatformDiagnostic['code'], message: string, retryable = false): CordisXPlatformResult<never> {
   return { ok: false, error: { code, message, ...(retryable ? { retryable: true } : {}) } }
@@ -52,68 +67,6 @@ function safeAdapterFailure(): CordisXPlatformResult<never> {
 function object(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
   return value as Record<string, unknown>
-}
-
-function stringList(
-  value: unknown,
-  label: string,
-  maximum: number,
-  validate: (item: string) => boolean = () => true,
-): readonly string[] | undefined {
-  if (value === undefined) return undefined
-  if (!Array.isArray(value) || value.length === 0 || value.length > maximum || value.some(item => {
-    return typeof item !== 'string' || item.trim() === '' || !validate(item.trim())
-  })) {
-    throw new Error(`${label} must be a non-empty string array`)
-  }
-  const normalized = [...new Set(value.map(item => item.trim()))].sort()
-  if (normalized.length !== value.length) throw new Error(`${label} must not contain duplicates`)
-  return Object.freeze(normalized)
-}
-
-function sessionList(value: unknown, label: string): readonly CordisXPlatformSessionRef[] | undefined {
-  if (value === undefined) return undefined
-  if (!Array.isArray(value) || value.length === 0 || value.length > 100) {
-    throw new Error(`${label} must be a non-empty session reference array`)
-  }
-  const seen = new Set<string>()
-  const sessions = value.map((item, index): CordisXPlatformSessionRef => {
-    const ref = object(item, `${label}[${index}]`)
-    const unknown = Object.keys(ref).find(key => !['providerId', 'remoteSessionId'].includes(key))
-    if (unknown !== undefined) throw new Error(`${label}[${index}] contains unknown field ${unknown}`)
-    if (typeof ref.providerId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(ref.providerId)) {
-      throw new Error(`${label}[${index}].providerId is invalid`)
-    }
-    if (typeof ref.remoteSessionId !== 'string' || ref.remoteSessionId.trim() === '' || ref.remoteSessionId.length > 512) {
-      throw new Error(`${label}[${index}].remoteSessionId is invalid`)
-    }
-    const normalized = Object.freeze({ providerId: ref.providerId, remoteSessionId: ref.remoteSessionId })
-    const key = JSON.stringify([normalized.providerId, normalized.remoteSessionId])
-    if (seen.has(key)) throw new Error(`${label} must not contain duplicate session references`)
-    seen.add(key)
-    return normalized
-  })
-  return Object.freeze(sessions.sort((left, right) => {
-    return JSON.stringify([left.providerId, left.remoteSessionId])
-      .localeCompare(JSON.stringify([right.providerId, right.remoteSessionId]))
-  }))
-}
-
-function normalizedScope(value: unknown, label: string): CordisXCapabilityScope {
-  const scope = object(value, label)
-  const unknown = Object.keys(scope).filter(key => !['providers', 'cwdRoots', 'sessions', 'sessionIds'].includes(key))
-  if (unknown.length > 0) throw new Error(`${label} contains unknown field ${unknown[0]}`)
-  const providers = stringList(scope.providers, `${label}.providers`, 32, item => /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(item))
-  const cwdRoots = stringList(scope.cwdRoots, `${label}.cwdRoots`, 32, item => item.length <= 4096)
-  const sessions = sessionList(scope.sessions, `${label}.sessions`)
-  const sessionIds = stringList(scope.sessionIds, `${label}.sessionIds`, 100, item => item.length <= 512)
-  if (cwdRoots?.some(root => !absolutePath(root)) === true) throw new Error(`${label}.cwdRoots must contain absolute paths`)
-  return Object.freeze({
-    ...(providers === undefined ? {} : { providers }),
-    ...(cwdRoots === undefined ? {} : { cwdRoots }),
-    ...(sessions === undefined ? {} : { sessions }),
-    ...(sessionIds === undefined ? {} : { sessionIds }),
-  })
 }
 
 function normalizedReason(value: unknown, label: string): CordisXLocalizedText {
@@ -174,7 +127,7 @@ export function normalizePluginManifest(value: unknown, expectedId: string): Cor
     seen.add(declaration.name)
     if (typeof declaration.required !== 'boolean') throw new Error(`plugin ${expectedId} capability[${index}].required must be boolean`)
     const name = declaration.name as CordisXPlatformCapability
-    const scope = normalizedScope(declaration.scope, `plugin ${expectedId} capability[${index}].scope`)
+    const scope = normalizePermissionScope(declaration.scope, `plugin ${expectedId} capability[${index}].scope`)
     if (name.startsWith('agent.') && scope.sessions !== undefined) {
       throw new Error(`plugin ${expectedId} capability[${index}] cannot use Platform sessions scope for ${name}`)
     }
@@ -198,19 +151,14 @@ export function normalizePluginManifest(value: unknown, expectedId: string): Cor
 }
 
 export function platformIdentityKey(identity: CordisXPluginIdentity): string {
-  return JSON.stringify([identity.source, identity.id])
+  return permissionIdentityKey(identity)
 }
 
 function declarationFingerprint(declaration: CordisXCapabilityDeclaration): string {
-  return JSON.stringify({
-    name: declaration.name,
-    required: declaration.required,
-    reason: declaration.reason,
-    scope: declaration.scope,
-  })
+  return permissionScopeFingerprint(declaration.name, declaration.scope)
 }
 
-interface StoredPolicy {
+export interface LegacyStoredPolicy {
   readonly identityKey: string
   readonly capability: CordisXPlatformCapability
   readonly fingerprint: string
@@ -218,36 +166,73 @@ interface StoredPolicy {
 }
 
 export interface PermissionPolicyStore {
-  read(): readonly StoredPolicy[]
-  write(records: readonly StoredPolicy[]): void
+  read(): readonly CordisXPermissionPolicyRecordV1[]
+  write(records: readonly CordisXPermissionPolicyRecordV1[]): void | Promise<void>
+  legacy?(): readonly LegacyStoredPolicy[]
+  retireLegacy?(record: LegacyStoredPolicy): void | Promise<void>
 }
 
 export class MemoryPermissionPolicyStore implements PermissionPolicyStore {
-  records: readonly StoredPolicy[]
+  records: readonly CordisXPermissionPolicyRecordV1[]
 
-  constructor(records: readonly StoredPolicy[] = []) {
+  constructor(records: readonly CordisXPermissionPolicyRecordV1[] = []) {
     this.records = copy(records)
   }
 
-  read(): readonly StoredPolicy[] {
+  read(): readonly CordisXPermissionPolicyRecordV1[] {
     return copy(this.records)
   }
 
-  write(records: readonly StoredPolicy[]): void {
-    this.records = copy(records)
+  write(records: readonly CordisXPermissionPolicyRecordV1[]): void {
+    const keys = new Set(records.map(permissionRecordKey))
+    this.records = copy([...this.records.filter(item => !keys.has(permissionRecordKey(item))), ...records])
   }
 }
 
 export class BrowserPermissionPolicyStore implements PermissionPolicyStore {
-  read(): readonly StoredPolicy[] {
+  constructor(private readonly profileId = 'default') {}
+
+  read(): readonly CordisXPermissionPolicyRecordV1[] {
     try {
       const value = localStorage.getItem(POLICY_STORAGE_KEY)
       if (value === null) return []
       const records = JSON.parse(value) as unknown
       if (!Array.isArray(records)) return []
-      return records.filter((item): item is StoredPolicy => {
+      return records.flatMap((item) => {
+        try {
+          const record = normalizePermissionPolicyRecord(item)
+          return record.key.profileId === this.profileId ? [record] : []
+        } catch {
+          return []
+        }
+      })
+    } catch {
+      return []
+    }
+  }
+
+  write(nextRecords: readonly CordisXPermissionPolicyRecordV1[]): void {
+    const value = localStorage.getItem(POLICY_STORAGE_KEY)
+    const parsed = value === null ? [] : JSON.parse(value) as unknown
+    const records = Array.isArray(parsed) ? parsed.flatMap((item) => {
+      try { return [normalizePermissionPolicyRecord(item)] } catch { return [] }
+    }) : []
+    const keys = new Set(nextRecords.map(permissionRecordKey))
+    localStorage.setItem(POLICY_STORAGE_KEY, JSON.stringify([
+      ...records.filter(item => !keys.has(permissionRecordKey(item))),
+      ...nextRecords,
+    ]))
+  }
+
+  legacy(): readonly LegacyStoredPolicy[] {
+    try {
+      const value = localStorage.getItem(LEGACY_POLICY_STORAGE_KEY)
+      if (value === null) return []
+      const records = JSON.parse(value) as unknown
+      if (!Array.isArray(records)) return []
+      return records.filter((item): item is LegacyStoredPolicy => {
         if (item === null || typeof item !== 'object') return false
-        const record = item as Partial<StoredPolicy>
+        const record = item as Partial<LegacyStoredPolicy>
         return typeof record.identityKey === 'string'
           && typeof record.capability === 'string'
           && (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(record.capability)
@@ -259,11 +244,14 @@ export class BrowserPermissionPolicyStore implements PermissionPolicyStore {
     }
   }
 
-  write(records: readonly StoredPolicy[]): void {
+  retireLegacy(record: LegacyStoredPolicy): void {
     try {
-      localStorage.setItem(POLICY_STORAGE_KEY, JSON.stringify(records))
+      const records = this.legacy()
+      const retained = records.filter(item => JSON.stringify(item) !== JSON.stringify(record))
+      if (retained.length === 0) localStorage.removeItem(LEGACY_POLICY_STORAGE_KEY)
+      else localStorage.setItem(LEGACY_POLICY_STORAGE_KEY, JSON.stringify(retained))
     } catch {
-      // Renderer-local persistence is best effort; broker enforcement remains active.
+      // A stale legacy record is safe: exact migration is idempotent.
     }
   }
 }
@@ -286,15 +274,88 @@ export interface PermissionPromptRequest {
 }
 
 export interface PermissionPrompt {
-  request(input: PermissionPromptRequest): Promise<'allow' | 'deny'>
+  request(input: PermissionPromptRequest): Promise<Exclude<CordisXPermissionDecision, 'ask'>>
 }
 
 export class BrowserPermissionPrompt implements PermissionPrompt {
-  async request(input: PermissionPromptRequest): Promise<'allow' | 'deny'> {
+  private queue = Promise.resolve()
+
+  constructor(private readonly document: Document | undefined = globalThis.document) {}
+
+  request(input: PermissionPromptRequest): Promise<Exclude<CordisXPermissionDecision, 'ask'>> {
+    const next = this.queue.then(async () => await this.show(input))
+    this.queue = next.then(() => undefined, () => undefined)
+    return next
+  }
+
+  private async show(input: PermissionPromptRequest): Promise<Exclude<CordisXPermissionDecision, 'ask'>> {
+    const document = this.document
+    if (document?.body === undefined) return 'deny'
     const reason = input.declaration.reason.fallback ?? `${input.declaration.reason.namespace ?? input.identity.id}:${input.declaration.reason.key}`
-    const ask = globalThis.confirm
-    if (typeof ask !== 'function') return 'deny'
-    return ask(`${input.identity.id} requests ${input.declaration.name}\n\n${reason}`) ? 'allow' : 'deny'
+    return await new Promise((resolve) => {
+      const overlay = document.createElement('div')
+      overlay.dataset.permissionPrompt = input.declaration.name
+      overlay.setAttribute('role', 'dialog')
+      overlay.setAttribute('aria-modal', 'true')
+      overlay.setAttribute('aria-labelledby', 'cordisx-permission-prompt-title')
+      overlay.setAttribute('aria-describedby', 'cordisx-permission-prompt-description')
+      overlay.innerHTML = `<style>
+        [data-permission-prompt] { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, CanvasText 42%, transparent); color-scheme: light dark; }
+        [data-permission-prompt] .cxp-dialog { width: min(460px, 100%); border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 14px; padding: 20px; background: Canvas; color: CanvasText; box-shadow: 0 20px 64px color-mix(in srgb, CanvasText 28%, transparent); }
+        [data-permission-prompt] h2 { margin: 0; font-size: 18px; }
+        [data-permission-prompt] p { margin: 10px 0 0; line-height: 1.5; }
+        [data-permission-prompt] .cxp-reason { color: color-mix(in srgb, CanvasText 72%, transparent); }
+        [data-permission-prompt] .cxp-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+        [data-permission-prompt] button { border: 1px solid color-mix(in srgb, CanvasText 22%, transparent); border-radius: 9px; padding: 8px 12px; background: color-mix(in srgb, CanvasText 6%, Canvas); color: CanvasText; cursor: pointer; }
+        [data-permission-prompt] button[data-primary="true"] { border-color: #8e959f; background: #c7ccd4; color: #17191c; font-weight: 600; }
+        [data-permission-prompt] button[data-tone="danger"] { color: #d95c5c; }
+        [data-permission-prompt] button:focus-visible { outline: 2px solid #9da5b0; outline-offset: 2px; }
+      </style>`
+      const dialog = document.createElement('div')
+      dialog.className = 'cxp-dialog'
+      const title = document.createElement('h2')
+      title.id = 'cordisx-permission-prompt-title'
+      title.textContent = '权限请求'
+      const description = document.createElement('p')
+      description.id = 'cordisx-permission-prompt-description'
+      description.textContent = `${input.identity.id} 请求 ${input.declaration.name}`
+      const reasonNode = document.createElement('p')
+      reasonNode.className = 'cxp-reason'
+      reasonNode.textContent = reason
+      const actions = document.createElement('div')
+      actions.className = 'cxp-actions'
+      const finish = (decision: Exclude<CordisXPermissionDecision, 'ask'>): void => {
+        overlay.remove()
+        resolve(decision)
+      }
+      const deny = document.createElement('button')
+      deny.type = 'button'
+      deny.dataset.permissionDecision = 'deny'
+      deny.dataset.tone = 'danger'
+      deny.textContent = '拒绝'
+      deny.addEventListener('click', () => finish('deny'), { once: true })
+      const once = document.createElement('button')
+      once.type = 'button'
+      once.dataset.permissionDecision = 'allow-once'
+      once.textContent = '仅此次允许'
+      once.addEventListener('click', () => finish('allow-once'), { once: true })
+      const allow = document.createElement('button')
+      allow.type = 'button'
+      allow.dataset.permissionDecision = 'allow'
+      allow.dataset.primary = 'true'
+      allow.textContent = '始终允许'
+      allow.addEventListener('click', () => finish('allow'), { once: true })
+      overlay.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return
+        event.preventDefault()
+        finish('deny')
+      })
+      actions.append(deny, once, allow)
+      dialog.append(title, description, reasonNode, actions)
+      overlay.append(dialog)
+      document.body.append(overlay)
+      allow.focus()
+    })
   }
 }
 
@@ -381,17 +442,23 @@ function isoNow(now: () => Date): string {
 
 export class PermissionBroker {
   private readonly registrations = new Map<string, Registration>()
-  private readonly policies = new Map<string, StoredPolicy>()
+  private readonly policies = new Map<string, CordisXPermissionPolicyRecordV1>()
   private readonly audit = new Map<string, AuditRecord>()
+  private readonly onceTickets = new Map<string, Set<string>>()
   private readonly listeners = new Set<() => void>()
+  private readonly migrationTasks: Promise<void>[] = []
 
   constructor(
     private readonly store: PermissionPolicyStore,
     private readonly prompt: PermissionPrompt,
     private readonly now: () => Date = () => new Date(),
     private readonly promptTimeoutMs = 30_000,
+    private readonly profileId = 'default',
+    private readonly generation = 'runtime',
   ) {
-    for (const record of store.read()) this.policies.set(this.policyKey(record.identityKey, record.capability, record.fingerprint), record)
+    for (const record of store.read()) {
+      if (record.key.profileId === profileId) this.policies.set(permissionRecordKey(record), record)
+    }
   }
 
   register(identity: CordisXPluginIdentity, manifest: CordisXPluginManifestV1): () => void {
@@ -399,10 +466,12 @@ export class PermissionBroker {
     const declarations = new Map(manifest.capabilities.map(item => [item.name, item]))
     const registration = { identity: Object.freeze({ ...identity }), manifest, declarations }
     this.registrations.set(key, registration)
+    this.migrateLegacy(registration)
     this.changed()
     return () => {
       if (this.registrations.get(key) !== registration) return
       this.registrations.delete(key)
+      this.onceTickets.delete(key)
       for (const auditKey of [...this.audit.keys()]) if (auditKey.startsWith(`${key}\u0000`)) this.audit.delete(auditKey)
       this.changed()
     }
@@ -412,19 +481,144 @@ export class PermissionBroker {
     const registration = this.registrations.get(platformIdentityKey(identity))
     const declaration = registration?.declarations.get(capability)
     if (declaration === undefined) return 'ask'
-    const identityKey = platformIdentityKey(identity)
-    return this.policies.get(this.policyKey(identityKey, capability, declarationFingerprint(declaration)))?.policy ?? 'ask'
+    return this.policies.get(permissionRecordKey(createPermissionPolicyRecord({
+      profileId: this.profileId,
+      identity,
+      capability,
+      scope: declaration.scope,
+      policy: 'ask',
+    })))?.policy ?? 'ask'
   }
 
-  setPolicy(identity: CordisXPluginIdentity, capability: CordisXPlatformCapability, policy: CordisXPermissionPolicy): void {
+  async setPolicy(
+    identity: CordisXPluginIdentity,
+    capability: CordisXPlatformCapability,
+    policy: CordisXPermissionPolicy,
+  ): Promise<void> {
     const identityKey = platformIdentityKey(identity)
     const declaration = this.registrations.get(identityKey)?.declarations.get(capability)
     if (declaration === undefined) throw new Error(`plugin ${identity.id} does not declare ${capability}`)
-    const fingerprint = declarationFingerprint(declaration)
-    const record = { identityKey, capability, fingerprint, policy } satisfies StoredPolicy
-    this.policies.set(this.policyKey(identityKey, capability, fingerprint), record)
-    this.persist()
+    const record = createPermissionPolicyRecord({
+      profileId: this.profileId,
+      identity,
+      capability,
+      scope: declaration.scope,
+      policy,
+    })
+    const key = permissionRecordKey(record)
+    const previous = this.policies.get(key)
+    this.policies.set(key, record)
     this.changed()
+    try {
+      await this.store.write([record])
+    } catch (error) {
+      if (previous === undefined) this.policies.delete(key)
+      else this.policies.set(key, previous)
+      this.changed()
+      throw error
+    }
+    const tickets = this.onceTickets.get(identityKey)
+    tickets?.delete(this.onceKey(declaration))
+    if (tickets?.size === 0) this.onceTickets.delete(identityKey)
+  }
+
+  authorizationPlan(
+    identity: CordisXPluginIdentity,
+    operation: 'install' | 'enable' = 'enable',
+  ): CordisXPermissionAuthorizationPlanV1 {
+    const registration = this.registrations.get(platformIdentityKey(identity))
+    if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
+    return Object.freeze({
+      $schema: CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
+      schemaVersion: 1,
+      planId: `${this.generation}:${identity.id}`,
+      operation,
+      profileId: this.profileId,
+      identity: Object.freeze({ source: registration.identity.source, pluginId: registration.identity.id }),
+      defaultDecision: 'allow',
+      declarations: Object.freeze([...registration.declarations.values()].map(declaration => Object.freeze({
+        capability: declaration.name,
+        required: declaration.required,
+        reason: declaration.reason,
+        scope: declaration.scope,
+        policy: this.policy(identity, declaration.name),
+        decisionRequired: !this.policies.has(permissionRecordKey(createPermissionPolicyRecord({
+          profileId: this.profileId,
+          identity,
+          capability: declaration.name,
+          scope: declaration.scope,
+          policy: 'ask',
+        }))),
+      }))),
+    })
+  }
+
+  async authorizeActivation(
+    identity: CordisXPluginIdentity,
+    authorization: CordisXPermissionAuthorizationDecisionV1,
+    operation: 'install' | 'enable' = 'enable',
+  ): Promise<void> {
+    const registration = this.registrations.get(platformIdentityKey(identity))
+    if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
+    if (authorization === null || typeof authorization !== 'object'
+      || authorization.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1
+      || authorization.schemaVersion !== 1
+      || authorization.planId !== `${this.generation}:${identity.id}`
+      || authorization.operation !== operation
+      || authorization.profileId !== this.profileId
+      || authorization.identity?.source !== identity.source
+      || authorization.identity.pluginId !== identity.id
+      || !Array.isArray(authorization.decisions)) {
+      throw new Error('authorization decision does not match the current plan')
+    }
+    const expected = new Set(registration.declarations.keys())
+    const seen = new Set<CordisXPlatformCapability>()
+    for (const item of authorization.decisions) {
+      if (item === null || typeof item !== 'object'
+        || (item.decision !== 'ask' && item.decision !== 'allow' && item.decision !== 'allow-once' && item.decision !== 'deny')
+        || !expected.has(item.capability) || seen.has(item.capability)
+        || permissionScopeFingerprint(item.capability, normalizePermissionScope(item.scope))
+          !== declarationFingerprint(registration.declarations.get(item.capability)!)) {
+        throw new Error('authorization decision does not match the current manifest')
+      }
+      seen.add(item.capability)
+    }
+    if (seen.size !== expected.size) throw new Error('authorization decision is incomplete')
+    const records: CordisXPermissionPolicyRecordV1[] = []
+    const ticketKeys: string[] = []
+    const persistentTicketKeys: string[] = []
+    for (const item of authorization.decisions) {
+      const declaration = registration.declarations.get(item.capability)!
+      if (item.decision === 'allow-once') {
+        ticketKeys.push(this.onceKey(declaration))
+        continue
+      }
+      records.push(createPermissionPolicyRecord({
+        profileId: this.profileId,
+        identity,
+        capability: item.capability,
+        scope: declaration.scope,
+        policy: item.decision,
+      }))
+      persistentTicketKeys.push(this.onceKey(declaration))
+    }
+    if (records.length > 0) {
+      await this.store.write(records)
+      for (const record of records) this.policies.set(permissionRecordKey(record), record)
+    }
+    const tickets = ticketKeys.length > 0 ? this.ticketSet(identity) : this.onceTickets.get(platformIdentityKey(identity))
+    for (const key of ticketKeys) tickets?.add(key)
+    for (const key of persistentTicketKeys) tickets?.delete(key)
+    if (tickets?.size === 0) this.onceTickets.delete(platformIdentityKey(identity))
+    this.changed()
+  }
+
+  clearOnce(identity: CordisXPluginIdentity): void {
+    if (this.onceTickets.delete(platformIdentityKey(identity))) this.changed()
+  }
+
+  async settled(): Promise<void> {
+    await Promise.all(this.migrationTasks)
   }
 
   async authorize(
@@ -443,12 +637,13 @@ export class PermissionBroker {
       return failure('permission-scope-denied', `Requested parameters are outside the declared ${capability} scope`)
     }
     const policy = this.policy(identity, capability)
-    if (policy === 'deny') {
+    const ticket = this.consumeOnce(identity, declaration)
+    if (policy === 'deny' && !ticket) {
       this.denied(identityKey, capability, requested)
       return failure('permission-denied', `${capability} is denied for plugin ${identity.id}`)
     }
-    if (policy === 'ask') {
-      let decision: 'allow' | 'deny' | 'timeout'
+    if (policy === 'ask' && !ticket) {
+      let decision: Exclude<CordisXPermissionDecision, 'ask'> | 'timeout'
       let timer: ReturnType<typeof setTimeout> | undefined
       try {
         decision = await Promise.race([
@@ -468,6 +663,14 @@ export class PermissionBroker {
         this.denied(identityKey, capability, requested)
         return failure('permission-denied', `${capability} was denied for this call`)
       }
+      if (decision === 'allow') {
+        try {
+          await this.setPolicy(identity, capability, 'allow')
+        } catch {
+          this.denied(identityKey, capability, requested)
+          return failure('adapter-failure', `${capability} permission policy could not be persisted`)
+        }
+      }
     }
     const auditKey = this.auditKey(identityKey, capability)
     const audit = this.audit.get(auditKey) ?? { denialCount: 0 }
@@ -482,7 +685,7 @@ export class PermissionBroker {
     const registration = this.registrations.get(platformIdentityKey(identity))
     if (registration === undefined) return []
     return [...registration.declarations.values()]
-      .filter(item => item.required && this.policy(identity, item.name) === 'deny')
+      .filter(item => item.required && this.policy(identity, item.name) === 'deny' && !this.hasOnce(identity, item))
       .map(item => item.name)
   }
 
@@ -520,6 +723,7 @@ export class PermissionBroker {
   dispose(): void {
     this.registrations.clear()
     this.audit.clear()
+    this.onceTickets.clear()
     this.listeners.clear()
   }
 
@@ -533,20 +737,74 @@ export class PermissionBroker {
     this.changed()
   }
 
-  private persist(): void {
-    this.store.write([...this.policies.values()])
-  }
-
-  private policyKey(identityKey: string, capability: CordisXPlatformCapability, fingerprint: string): string {
-    return `${identityKey}\u0000${capability}\u0000${fingerprint}`
-  }
-
   private auditKey(identityKey: string, capability: CordisXPlatformCapability): string {
     return `${identityKey}\u0000${capability}`
   }
 
   private changed(): void {
     for (const listener of this.listeners) listener()
+  }
+
+  private ticketSet(identity: CordisXPluginIdentity): Set<string> {
+    const identityKey = platformIdentityKey(identity)
+    const tickets = this.onceTickets.get(identityKey) ?? new Set<string>()
+    this.onceTickets.set(identityKey, tickets)
+    return tickets
+  }
+
+  private onceKey(declaration: CordisXCapabilityDeclaration): string {
+    return `${this.generation}\u0000${declarationFingerprint(declaration)}`
+  }
+
+  private consumeOnce(identity: CordisXPluginIdentity, declaration: CordisXCapabilityDeclaration): boolean {
+    const tickets = this.onceTickets.get(platformIdentityKey(identity))
+    const key = this.onceKey(declaration)
+    if (tickets?.has(key) !== true) return false
+    tickets.delete(key)
+    if (tickets.size === 0) this.onceTickets.delete(platformIdentityKey(identity))
+    this.changed()
+    return true
+  }
+
+  private hasOnce(identity: CordisXPluginIdentity, declaration: CordisXCapabilityDeclaration): boolean {
+    return this.onceTickets.get(platformIdentityKey(identity))?.has(this.onceKey(declaration)) === true
+  }
+
+  private migrateLegacy(registration: Registration): void {
+    for (const legacy of this.store.legacy?.() ?? []) {
+      if (legacy.identityKey !== platformIdentityKey(registration.identity)) continue
+      const declaration = registration.declarations.get(legacy.capability)
+      if (declaration === undefined) continue
+      let parsed: unknown
+      try { parsed = JSON.parse(legacy.fingerprint) as unknown } catch { continue }
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) continue
+      const fingerprint = parsed as { name?: unknown; scope?: unknown }
+      if (fingerprint.name !== declaration.name) continue
+      let legacyFingerprint: string
+      try {
+        legacyFingerprint = permissionScopeFingerprint(declaration.name, normalizePermissionScope(fingerprint.scope))
+      } catch {
+        continue
+      }
+      if (legacyFingerprint !== declarationFingerprint(declaration)) continue
+      const record = createPermissionPolicyRecord({
+        profileId: this.profileId,
+        identity: registration.identity,
+        capability: declaration.name,
+        scope: declaration.scope,
+        policy: legacy.policy,
+      })
+      const key = permissionRecordKey(record)
+      if (this.policies.has(key)) continue
+      this.policies.set(key, record)
+      const task = Promise.resolve(this.store.write([record])).then(async () => {
+        await this.store.retireLegacy?.(legacy)
+      }).catch(() => {
+        if (this.policies.get(key) === record) this.policies.delete(key)
+        this.changed()
+      })
+      this.migrationTasks.push(task)
+    }
   }
 }
 
