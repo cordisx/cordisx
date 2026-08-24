@@ -291,20 +291,29 @@ if (parsed.values['plugin-lifecycle']) {
   }
   const beforeClose = await evaluateByValue(`(() => {
     const page = document.querySelector('[data-cordisx-page]')
-    const button = page?.querySelector('button[aria-label="Close"]')
+    const pageClose = page?.querySelector('button[aria-label="Close"]')
+    const root = document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${JSON.stringify(surface)}) + '"]')
+    const surfaceButtons = [...(root?.querySelectorAll('button') ?? [])]
+    const surfaceToggle = ${JSON.stringify(label)} === undefined
+      ? surfaceButtons.find(item => item.getAttribute('aria-pressed') === 'true')
+      : surfaceButtons.find(item => item.getAttribute('aria-label') === ${JSON.stringify(label)} && item.getAttribute('aria-pressed') === 'true')
+    const button = pageClose ?? surfaceToggle
     const rect = button?.getBoundingClientRect()
     return {
       page: page?.getAttribute('data-cordisx-page') ?? null,
+      control: pageClose === button ? 'page-close' : surfaceToggle === button ? 'surface-toggle' : null,
       rect: rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
     }
   })()`)
-  if (beforeClose.rect === null) throw new Error('mounted page close control not found for --plugin-lifecycle')
+  if (beforeClose.rect === null) throw new Error('mounted page close path not found for --plugin-lifecycle')
   await pointerClick(beforeClose.rect)
   await new Promise(resolve => setTimeout(resolve, 160))
   const afterClose = await evaluateByValue(`(() => ({
     page: document.querySelector('[data-cordisx-page]')?.getAttribute('data-cordisx-page') ?? null,
     mounted: globalThis.__cordisxRuntime?.snapshot?.().navigation?.outlets
       ?.find(item => item.id === 'session.content')?.mounted ?? null,
+    pressed: [...(document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${JSON.stringify(surface)}) + '"]')?.querySelectorAll('button') ?? [])]
+      .find(item => ${JSON.stringify(label)} === undefined || item.getAttribute('aria-label') === ${JSON.stringify(label)})?.getAttribute('aria-pressed') ?? null,
   }))()`)
   const reopenTarget = await evaluateByValue(`(() => {
     const root = document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${JSON.stringify(surface)}) + '"]')
@@ -319,7 +328,11 @@ if (parsed.values['plugin-lifecycle']) {
   if (reopenTarget === null) throw new Error('surface entry not found after page close')
   await pointerClick(reopenTarget)
   await new Promise(resolve => setTimeout(resolve, 200))
-  const reopened = await evaluateByValue(`document.querySelector('[data-cordisx-page]')?.getAttribute('data-cordisx-page') ?? null`)
+  const reopened = await evaluateByValue(`(() => ({
+    page: document.querySelector('[data-cordisx-page]')?.getAttribute('data-cordisx-page') ?? null,
+    pressed: [...(document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${JSON.stringify(surface)}) + '"]')?.querySelectorAll('button') ?? [])]
+      .find(item => ${JSON.stringify(label)} === undefined || item.getAttribute('aria-label') === ${JSON.stringify(label)})?.getAttribute('aria-pressed') ?? null,
+  }))()`)
   const blocked = await evaluateByValue(`(async () => {
     await globalThis.__cordisxRuntime.setPluginBlocked(${JSON.stringify(owner)}, true)
     await new Promise(resolve => setTimeout(resolve, 120))
@@ -366,6 +379,8 @@ if (parsed.values['plugin-lifecycle']) {
   const afterRestoreClick = await evaluateByValue(`(() => ({
     page: document.querySelector('[data-cordisx-page]')?.getAttribute('data-cordisx-page') ?? null,
     outlet: document.querySelector('[data-cordisx-page]')?.closest('[data-cordisx-page-outlet]')?.getAttribute('data-cordisx-page-outlet') ?? null,
+    pressed: [...(document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${JSON.stringify(surface)}) + '"]')?.querySelectorAll('button') ?? [])]
+      .find(item => ${JSON.stringify(label)} === undefined || item.getAttribute('aria-label') === ${JSON.stringify(label)})?.getAttribute('aria-pressed') ?? null,
   }))()`)
   pluginLifecycleReport = { beforeClose, afterClose, reopened, blocked, staleInvocation, restored, afterRestoreClick }
   console.log(`plugin-lifecycle=${JSON.stringify(pluginLifecycleReport)}`)
@@ -1501,6 +1516,7 @@ if (parsed.values['ui-catalog']) {
     return {
       viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
       selectedThread: document.querySelector('[data-app-action-sidebar-thread-selected="true"]')?.getAttribute('data-app-action-sidebar-thread-id') ?? null,
+      agentTracePresented: document.querySelector('[data-agent-trace-showcase="true"]') !== null,
       session: {
         root: sessionRoot === null ? null : { className: sessionRoot.className, geometry: sessionRootRect,
           gap: getComputedStyle(sessionRoot).gap, marginInlineEnd: getComputedStyle(sessionRoot).marginInlineEnd,
@@ -1624,6 +1640,13 @@ if (parsed.values['ui-catalog']) {
   const nativeActive = await toolbarSnapshot()
   screenshots['toolbar.native-active'] = await annotateToolbar('native pressed · CordisX idle', 'toolbar-native-active-annotated')
 
+  if (nativeActive.session.native?.geometry !== null && nativeActive.session.native?.geometry !== undefined) {
+    const target = nativeActive.session.native.geometry
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: target.x + target.width / 2, y: target.y + target.height / 2, pointerType: 'mouse' })
+    await new Promise(resolve => setTimeout(resolve, 160))
+  }
+  const nativeActiveHovered = await toolbarSnapshot()
+
   const hoverTarget = nativeActive.session.actions[0]?.geometry
   if (hoverTarget !== null && hoverTarget !== undefined) {
     await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hoverTarget.x + hoverTarget.width / 2, y: hoverTarget.y + hoverTarget.height / 2, pointerType: 'mouse' })
@@ -1655,6 +1678,60 @@ if (parsed.values['ui-catalog']) {
   const routeActive = await toolbarSnapshot()
   screenshots['toolbar.route-active'] = await annotateToolbar('single CordisX route pressed', 'toolbar-route-active-annotated')
 
+  const activeRouteTarget = routeActive.session.actions.find(item => item.pressed === 'true')?.geometry ?? null
+  if (activeRouteTarget !== null) {
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: activeRouteTarget.x + activeRouteTarget.width / 2, y: activeRouteTarget.y + activeRouteTarget.height / 2, pointerType: 'mouse' })
+    await new Promise(resolve => setTimeout(resolve, 160))
+  }
+  const routeHovered = await toolbarSnapshot()
+  screenshots['toolbar.route-active-hover'] = await annotateToolbar('route pressed + hover · siblings idle', 'toolbar-route-active-hover-annotated')
+
+  let routeSessionSwitch = { attempted: false }
+  if (threadTarget !== null && originalThread !== null) {
+    const alternateTarget = await evaluateByValue(`(() => {
+      const row = [...document.querySelectorAll('[data-app-action-sidebar-thread-id]')]
+        .find(element => element.getAttribute('data-app-action-sidebar-thread-id') === ${JSON.stringify(threadTarget.id)})
+      const rect = row?.getBoundingClientRect()
+      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    })()`)
+    if (alternateTarget !== null) {
+      await pointerClick(alternateTarget)
+      await new Promise(resolve => setTimeout(resolve, 1800))
+      const alternate = await toolbarSnapshot()
+      const originalTarget = await evaluateByValue(`(() => {
+        const row = [...document.querySelectorAll('[data-app-action-sidebar-thread-id]')]
+          .find(element => element.getAttribute('data-app-action-sidebar-thread-id') === ${JSON.stringify(originalThread)})
+        const rect = row?.getBoundingClientRect()
+        return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+      })()`)
+      if (originalTarget !== null) {
+        await pointerClick(originalTarget)
+        await new Promise(resolve => setTimeout(resolve, 1800))
+      }
+      const restored = await toolbarSnapshot()
+      routeSessionSwitch = { attempted: true, alternate, restored }
+    }
+  }
+
+  let beforeClose = await toolbarSnapshot()
+  if (!beforeClose.session.actions.some(item => item.pressed === 'true')) {
+    const reopenTarget = beforeClose.session.actions.find(item => item.routeState !== null)?.geometry ?? null
+    if (reopenTarget !== null) {
+      await pointerClick(reopenTarget)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      beforeClose = await toolbarSnapshot()
+    }
+  }
+  const closeTarget = beforeClose.session.actions.find(item => item.pressed === 'true')?.geometry ?? null
+  if (closeTarget !== null) {
+    await pointerClick(closeTarget)
+    await new Promise(resolve => setTimeout(resolve, 500))
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
+    await new Promise(resolve => setTimeout(resolve, 160))
+  }
+  const routeClosed = await toolbarSnapshot()
+  screenshots['toolbar.route-closed'] = await annotateToolbar('route closed · active cleared', 'toolbar-route-closed-annotated')
+
   const originalViewport = routeActive.viewport
   await send('Emulation.setDeviceMetricsOverride', { width: Math.max(1100, originalViewport.width - 180), height: Math.max(760, originalViewport.height - 120), deviceScaleFactor: originalViewport.dpr, mobile: false })
   await new Promise(resolve => setTimeout(resolve, 500))
@@ -1675,9 +1752,31 @@ if (parsed.values['ui-catalog']) {
     && hovered.session.actions.every(item => item.pressed !== 'true')
   const focusPass = focused.session.actions[1]?.focused === true && focused.session.actions[1]?.pressed !== 'true'
     && focused.session.actions[0]?.pressed !== 'true' && focused.session.native?.pressed === 'true'
-  const routePass = routeActive.session.actions.filter(item => item.pressed === 'true' && item.routeState === 'presented').length === 1
+  const routePressed = routeActive.session.actions.filter(item => item.pressed === 'true' && item.routeState === 'presented')
+  const routePass = routePressed.length === 1
+    && routePressed[0]?.owner === 'agent-trace-showcase'
+    && routePressed[0]?.background === nativeActive.session.native?.background
+    && routePressed[0]?.color === nativeActive.session.native?.color
+    && routePressed[0]?.geometry?.width === nativeActive.session.native?.geometry?.width
+    && routePressed[0]?.geometry?.height === nativeActive.session.native?.geometry?.height
     && routeActive.session.actions.filter(item => item.pressed !== 'true').every(item => transparent(item.background))
     && routeActive.session.native?.pressed === 'false'
+    && routeActive.agentTracePresented === true
+  const routeHoverPressed = routeHovered.session.actions.filter(item => item.pressed === 'true' && item.routeState === 'presented')
+  const routeHoverPass = routeHoverPressed.length === 1
+    && routeHoverPressed[0]?.background === nativeActiveHovered.session.native?.background
+    && routeHoverPressed[0]?.background !== routePressed[0]?.background
+    && routeHovered.session.actions.filter(item => item.pressed !== 'true').every(item => transparent(item.background))
+  const routeClosePass = routeClosed.agentTracePresented === false
+    && routeClosed.session.actions.every(item => item.pressed !== 'true' && item.routeState !== 'presented' && transparent(item.background))
+  const routeSessionPass = routeSessionSwitch.attempted === false || (
+    routeSessionSwitch.alternate.selectedThread === threadTarget?.id
+    && routeSessionSwitch.alternate.agentTracePresented === false
+    && routeSessionSwitch.alternate.session.actions.every(item => item.pressed !== 'true' && item.routeState !== 'presented')
+    && routeSessionSwitch.restored.selectedThread === originalThread
+    && routeSessionSwitch.restored.agentTracePresented === false
+    && routeSessionSwitch.restored.session.actions.every(item => item.pressed !== 'true' && item.routeState !== 'presented')
+  )
   const workspacePass = nativeActive.workspace.slot?.inlineWidth === '126px'
     && nativeActive.workspace.alignmentGroup?.hasMsAuto === true && six(nativeActive.workspace.outerGapFromSummary)
   const resizePass = resized.session.actionGaps.every(six) && six(resized.session.nativeGap)
@@ -1687,13 +1786,16 @@ if (parsed.values['ui-catalog']) {
     { id: 'toolbar.state.native-isolated', pass: nativeActivePass, actual: nativeActive.session, expected: 'only native summary pressed' },
     { id: 'toolbar.state.hover-isolated', pass: hoverPass, actual: hovered.session, expected: 'only hovered CordisX action changes background' },
     { id: 'toolbar.state.focus-isolated', pass: focusPass, actual: focused.session, expected: 'focus belongs to one unpressed sibling' },
-    { id: 'toolbar.state.route-isolated', pass: routePass, actual: routeActive.session, expected: 'exactly one presented CordisX route is pressed' },
+    { id: 'toolbar.state.route-isolated', pass: routePass, actual: { route: routeActive.session, nativeReference: nativeActive.session.native }, expected: 'only Agent Trace uses the native-equivalent pressed token and 28px geometry' },
+    { id: 'toolbar.state.route-hover-isolated', pass: routeHoverPass, actual: { route: routeHovered.session, nativeReference: nativeActiveHovered.session.native }, expected: 'only the pressed Agent Trace action uses the native-equivalent pressed-hover token' },
+    { id: 'toolbar.state.route-closed', pass: routeClosePass, actual: routeClosed, expected: 'second real pointer activation closes the page and clears every active projection' },
+    { id: 'toolbar.state.route-session-isolated', pass: routeSessionPass, actual: routeSessionSwitch, expected: 'active route state is cleared on A/B switch and does not return to A' },
     { id: 'toolbar.spacing.session', pass: spacingPass, actual: { actionGaps: nativeActive.session.actionGaps, nativeGap: nativeActive.session.nativeGap }, expected: '6px action and native boundary gaps' },
     { id: 'toolbar.spacing.workspace-contract', pass: workspacePass, actual: nativeActive.workspace, expected: '126px slot, ms-auto, 6px outer group gap' },
     { id: 'toolbar.resize', pass: resizePass, actual: resized, expected: 'state geometry survives renderer resize' },
     { id: 'toolbar.thread-switch-reconcile', pass: threadSwitch.attempted === false || (threadSwitch.restored && threadSwitch.rootConnected && threadSwitch.immediateBefore), actual: threadSwitch, expected: 'real thread switch restores the selected session and valid sibling seat' },
   )
-  const toolbarRegression = { initialNativePressed, inactive, nativeActive, hovered, focused, routeActive, resized, threadSwitch }
+  const toolbarRegression = { initialNativePressed, inactive, nativeActive, nativeActiveHovered, hovered, focused, routeActive, routeHovered, routeClosed, resized, threadSwitch, routeSessionSwitch }
   uiCatalogReport = { ...uiCatalogReport, screenshots, tooltips, toolbarRegression,
     result: uiCatalogReport.assertions.every(item => item.pass) ? 'pass' : 'fail' }
   console.log(`ui-catalog=${JSON.stringify(uiCatalogReport, null, 2)}`)

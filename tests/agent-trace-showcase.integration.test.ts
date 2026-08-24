@@ -183,6 +183,8 @@ describe('Agent Trace Showcase renderer integration', () => {
     const { dom, runtime } = await fixture(sessionId, { sibling: true, nativePressed: true })
     const native = dom.window.document.getElementById('native-session-menu') as HTMLButtonElement
     const seat = dom.window.document.querySelector<HTMLElement>('[data-cordisx-surface-host="session.header.actions"]')!
+    seat.style.setProperty('--cordisx-toolbar-action-pressed-background', 'rgba(26, 28, 31, .05)')
+    seat.style.setProperty('--cordisx-toolbar-action-pressed-hover-background', 'rgba(26, 28, 31, .1)')
     let buttons = [...seat.querySelectorAll<HTMLButtonElement>(':scope > button')]
 
     expect(buttons).toHaveLength(2)
@@ -208,6 +210,11 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(buttons[1]!.getAttribute('aria-pressed')).toBe('false')
     expect(buttons[1]!.dataset.cordisxRouteState).toBe('inactive')
     expect(native.getAttribute('aria-pressed')).toBe('true')
+    expect(buttons.map(button => dom.window.getComputedStyle(button).backgroundColor)).toEqual([
+      'var(--cordisx-toolbar-action-pressed-background)',
+      'rgba(0, 0, 0, 0)',
+    ])
+    expect(seat.style.getPropertyValue('--cordisx-toolbar-action-pressed-background')).toBe('rgba(26, 28, 31, .05)')
 
     buttons[1]!.click()
     await settle(4)
@@ -216,6 +223,10 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(buttons[0]!.dataset.cordisxRouteState).toBe('inactive')
     expect(buttons[1]!.getAttribute('aria-pressed')).toBe('true')
     expect(buttons[1]!.dataset.cordisxRouteState).toBe('presented')
+    expect(buttons.map(button => dom.window.getComputedStyle(button).backgroundColor)).toEqual([
+      'rgba(0, 0, 0, 0)',
+      'var(--cordisx-toolbar-action-pressed-background)',
+    ])
 
     buttons[1]!.focus()
     expect(dom.window.document.activeElement).toBe(buttons[1])
@@ -266,6 +277,11 @@ describe('Agent Trace Showcase renderer integration', () => {
     const styles = dom.window.document.getElementById('cordisx-structured-styles')?.textContent ?? ''
     expect(styles).toContain('--cordisx-toolbar-outer-group-gap: 6px')
     expect(styles).toContain('--cordisx-toolbar-action-gap: 6px')
+    expect(styles).toContain('--cordisx-toolbar-action-pressed-background: color-mix(in oklab,var(--color-text,currentColor) 5%,transparent)')
+    expect(styles).toContain('--cordisx-toolbar-action-pressed-hover-background: color-mix(in oklab,var(--color-text,currentColor) 10%,transparent)')
+    expect(styles).toContain('[aria-pressed="true"][data-cordisx-route-state="presented"]')
+    expect(styles).not.toContain('[data-cordisx-route-state="presented"] ~')
+    expect(styles).not.toContain('--color-background-elevated-secondary,rgba(127,127,127,.08)')
     expect(styles).toContain('.cordisx-session-header-actions')
     expect(styles).toContain('margin-inline-end: var(--cordisx-toolbar-outer-group-gap)')
     expect(runtime.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({
