@@ -755,7 +755,7 @@ class StructuredSurfaceRenderer {
       || Number.parseFloat(this.document.defaultView?.getComputedStyle(slot).minWidth ?? '')
       || 0
     const contributionWidth = roots.reduce((total, root) => total + root.getBoundingClientRect().width, 0)
-    slot.style.width = `${Math.ceil(Math.max(originalWidth, originalMinimum) + contributionWidth + roots.length * 6)}px`
+    slot.style.width = `${Math.ceil(Math.max(originalWidth, originalMinimum) + contributionWidth)}px`
   }
 
   private text(snapshot: SurfaceContributionSnapshot, value: CordisXLocalizedText, path: string, nextSites: Set<string>): string {
