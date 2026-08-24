@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 
@@ -21,7 +22,10 @@ if (separator < 0) throw new Error('separate live-smoke arguments with --')
 const port = Number(value('--port'))
 const profileDir = value('--profile-dir')
 const devConfig = optionalValue('--dev-config')
+const homeConfig = optionalValue('--home-config')
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('--port must be an unprivileged TCP port')
+if (devConfig !== undefined && homeConfig !== undefined) throw new Error('--dev-config and --home-config are mutually exclusive')
+if (homeConfig !== undefined && !path.isAbsolute(homeConfig)) throw new Error('--home-config must be an absolute config path')
 const smokeArgs = process.argv.slice(separator + 1)
 const reportIndex = smokeArgs.indexOf('--report')
 const reportPath = reportIndex >= 0 ? smokeArgs[reportIndex + 1] : undefined
@@ -121,6 +125,11 @@ async function waitForRenderer() {
 }
 
 const crashpadBefore = await crashpadCount()
+const homeRoot = homeConfig === undefined ? undefined : await mkdtemp(path.join(os.tmpdir(), 'cordisx-isolated-home-'))
+if (homeRoot !== undefined) {
+  await mkdir(path.join(homeRoot, '.cordisx'), { recursive: true })
+  await copyFile(homeConfig, path.join(homeRoot, '.cordisx', 'config.json'))
+}
 const invocation = devConfig === undefined
   ? ['codex', 'smoke', '--data', 'isolated']
   : ['dev', '--config', devConfig]
@@ -129,7 +138,7 @@ const launcher = spawn(process.execPath, [
   '--debug-port', String(port), '--profile-dir', profileDir, '--', '--start-minimized',
 ], {
   stdio: ['ignore', 'pipe', 'pipe'],
-  env: process.env,
+  env: homeRoot === undefined ? process.env : { ...process.env, HOME: homeRoot },
   detached: process.platform !== 'win32',
 })
 launcher.stdout.pipe(process.stdout)
@@ -195,9 +204,15 @@ try {
   }
   if (reportPath !== undefined) {
     const resolvedReport = path.resolve(reportPath)
-    const report = JSON.parse(await readFile(resolvedReport, 'utf8'))
-    report.runnerCleanup = cleanup
-    await writeFile(resolvedReport, `${JSON.stringify(report, null, 2)}\n`)
+    const text = await readFile(resolvedReport, 'utf8').catch(error => {
+      if (error?.code === 'ENOENT') return undefined
+      throw error
+    })
+    if (text !== undefined) {
+      const report = JSON.parse(text)
+      report.runnerCleanup = cleanup
+      await writeFile(resolvedReport, `${JSON.stringify(report, null, 2)}\n`)
+    }
   }
   console.log(`[cordisx-smoke-cleanup] ${JSON.stringify(cleanup)}`)
 }

@@ -6,6 +6,23 @@ bridge are implemented against the formally merged
 Manager bridge uses the existing Host TDesign form and a token/profile/generation
 fenced CDP binding; it does not create a global Provider settings category.
 
+For an independent product-mode renderer check, use the normal launcher path
+with a temporary Home Config rather than `dev --config` (which is intentionally
+read-only and has no service-config binding):
+
+```sh
+node packages/cli/scripts/run-isolated-app-smoke.mjs \
+  --port 17426 --profile-dir "$(mktemp -d)" \
+  --home-config "$PWD/cordisx.cli-proxy.example.json" -- \
+  --manager-screenshot "$(mktemp -d)/manager.png" \
+  --manager-tab plugins --manager-plugin cli-proxy-api \
+  --manager-detail-tab config --manager-viewport-width 480 --report "$(mktemp -u).json"
+```
+
+The runner copies that fixture into a new temporary `HOME` and launches
+`codex smoke --data isolated`; it does not read a pre-existing profile. It also
+keeps cleanup evidence from masking a smoke failure when no report was written.
+
 ## Boundary
 
 Launcher service configuration is not renderer `Config`. It is stored under

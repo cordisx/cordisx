@@ -412,5 +412,6 @@ describe('CLIProxy provider plugin renderer', () => {
       .toMatchObject({ revision: 1, value: { providerIds: ['gateway-a'] } })
     await runtime!.dispose()
     expect(dom.window.document.querySelector('[data-cordisx-provider-fleet]')).toBeNull()
+    expect((dom.window as unknown as { __cordisxServiceConfigReceiveV1?: unknown }).__cordisxServiceConfigReceiveV1).toBeUndefined()
   })
 })
