@@ -356,7 +356,26 @@ async function start(
   }
   const generationVisibility = new GenerationVisibilityCoordinator(currentActivation, metadata.initialRegistryEpoch)
   const pluginConsole = new PluginConsoleAspect(generation, 2000, () => Date.now(), generationVisibility)
-  const recordUnknownError = (event: Event): void => pluginConsole.recordUnattributedError(event.type)
+  let pluginErrorOwners = (): readonly {
+    readonly identity: CordisXPluginIdentity
+    readonly principal: PluginPrincipalToken
+    readonly source: string
+  }[] => []
+  const recordUnknownError = (event: Event): void => {
+    const candidate = event as Event & { readonly filename?: unknown; readonly error?: unknown; readonly reason?: unknown }
+    const error = candidate.error ?? candidate.reason
+    let evidence = typeof candidate.filename === 'string' ? candidate.filename : ''
+    try {
+      if (error instanceof Error && typeof error.stack === 'string') evidence += `\n${error.stack}`
+      else if (error !== undefined) evidence += `\n${String(error)}`
+    } catch { /* hostile rejection values do not affect the runtime */ }
+    const matches = pluginErrorOwners().filter(owner => owner.source !== '' && evidence.includes(owner.source))
+    if (matches.length === 1) {
+      pluginConsole.recordBestEffortError(matches[0]!.principal, `window.${event.type}`, error)
+    } else if (matches.length > 1) {
+      pluginConsole.recordUnattributedError(`${event.type}:${matches.map(owner => owner.identity.id).sort().join(',')}`)
+    }
+  }
   window.addEventListener('error', recordUnknownError)
   window.addEventListener('unhandledrejection', recordUnknownError)
   let consoleAffectedPluginIds: readonly string[] = []
@@ -429,6 +448,11 @@ async function start(
   const activeController = (id: string, source?: string): PluginController | undefined => projectedControllers().find(controller => (
     controller.item.id === id && (source === undefined || controller.item.source === source)
   ))
+  pluginErrorOwners = () => activeControllers().map(controller => ({
+    identity: controller.identity,
+    principal: controller.principal,
+    source: controller.item.source,
+  }))
   const requiredBlockReason = (controller: PluginController): string | undefined => {
     const denied = broker.requiredDenied(controller.identity, controller.generationView)
     if (denied.length > 0) return `Required capability denied: ${denied.join(', ')}`

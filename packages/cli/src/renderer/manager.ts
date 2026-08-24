@@ -11,6 +11,7 @@ import {
   type CordisXPluginIdentity,
   type CordisXPluginConsolePageV1,
   type CordisXPluginConsoleEntryV1,
+  type CordisXPluginConsoleValueSummaryV1,
   type CordisXIconToken,
   type CordisXLocalizedText,
   type CordisXRouteReference,
@@ -668,26 +669,50 @@ const MANAGER_STYLES = `
   .cxm-diagnostics[open] summary { color: #d8dce3; }
   .cxm-diagnostics-body { padding: 0 2px 4px; }
   .cxm-runtime-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-  .cxm-console-summary { display: grid; grid-template-columns: repeat(5, minmax(84px, 1fr)); gap: 1px; margin: 12px 0; overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(255,255,255,.08); }
-  .cxm-console-metric { padding: 8px 10px; background: #191b1f; }
-  .cxm-console-metric strong { display: block; color: #eceef2; font: 600 16px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .cxm-console-metric span { color: #818a99; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
-  .cxm-console-controls { display: grid; grid-template-columns: minmax(140px, 1fr) repeat(3, max-content); gap: 7px; align-items: center; margin: 10px 0; }
+  .cxm-console-summary { display: flex; min-width: 0; align-items: stretch; gap: 1px; margin: 10px 0 8px; overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(255,255,255,.08); }
+  .cxm-console-metric { min-width: 72px; padding: 7px 10px; background: #191b1f; }
+  .cxm-console-metric strong { display: inline; color: #eceef2; font: 600 13px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-console-metric span { margin-left: 6px; color: #818a99; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
+  .cxm-console-performance { flex: 1; min-width: 0; background: #191b1f; }
+  .cxm-console-performance summary { padding: 8px 10px; color: #8d96a8; cursor: pointer; font-size: 10px; list-style-position: inside; }
+  .cxm-console-performance-body { padding: 0 10px 8px; color: #aab2c0; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-console-controls { display: grid; grid-template-columns: minmax(150px, 1fr) repeat(3, minmax(90px, max-content)) repeat(4, max-content); gap: 7px; align-items: center; margin: 8px 0; }
   .cxm-console-controls input, .cxm-console-controls select { min-width: 0; height: 30px; border: 1px solid #353a42; border-radius: 6px; padding: 0 8px; background: #15171a; color: #d8dce3; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-controls button { height: 30px; border: 1px solid #353a42; border-radius: 6px; padding: 0 9px; background: #202328; color: #bfc5ce; font-size: 10px; cursor: pointer; }
   .cxm-console-controls button[aria-pressed="true"] { border-color: #8992a1; color: #fff; }
-  .cxm-console-coverage { margin: 8px 0; color: #8d96a8; font-size: 10px; line-height: 1.45; }
-  .cxm-console-frame { position: relative; min-height: 180px; max-height: 420px; overflow: auto; border: 1px solid #30343a; border-radius: 7px; background: #101215; }
-  .cxm-console-luna { min-height: 100%; color: #cad0da; font: 11px/20px ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .cxm-console-luna.luna-text-viewer { border: 0; background: #101215; color: #cad0da; }
-  .cxm-console-luna .luna-text-viewer-text { padding: 6px 8px; font: inherit; }
-  .cxm-console-hit-layer { position: absolute; inset: 6px 0 auto; pointer-events: none; }
-  .cxm-console-hit { position: absolute; left: 0; right: 0; height: 20px; border: 0; border-radius: 0; background: transparent; pointer-events: auto; cursor: default; }
-  .cxm-console-hit:hover, .cxm-console-hit[data-selected="true"] { background: rgba(118, 129, 147, .14); }
-  .cxm-console-detail { margin-top: 10px; border: 1px solid #30343a; border-radius: 7px; background: #141619; }
-  .cxm-console-detail summary { padding: 8px 10px; color: #cdd2db; cursor: pointer; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .cxm-console-detail pre { max-height: 300px; overflow: auto; margin: 0; padding: 10px; border-top: 1px solid #30343a; color: #b9c1ce; font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
-  .cxm-console-empty { padding: 48px 16px; color: #737d8e; text-align: center; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-console-coverage { margin: 7px 0; color: #8d96a8; font-size: 10px; line-height: 1.45; }
+  .cxm-console-info { margin: 7px 0; color: #8d96a8; font-size: 10px; }
+  .cxm-console-info summary { width: max-content; cursor: pointer; }
+  .cxm-console-info p { max-width: 760px; margin: 7px 0 0; line-height: 1.5; }
+  .cxm-console-warning { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 8px; }
+  .cxm-console-warning button { flex: none; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 11px; }
+  .cxm-console-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: start; }
+  .cxm-console-workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr) minmax(220px, 280px); }
+  .cxm-console-body { position: relative; min-width: 0; }
+  .cxm-console-frame { width: 100%; max-height: min(52vh, 520px); overflow: auto; border: 1px solid #30343a; border-radius: 7px; background: #101215; scrollbar-gutter: stable; overscroll-behavior: contain; }
+  .cxm-console-frame.cxm-console-luna { min-height: 0; color: #cad0da; font: 11px/20px ui-monospace, SFMono-Regular, Menlo, monospace; cursor: default; }
+  .cxm-console-frame.cxm-console-luna.luna-text-viewer { border: 1px solid #30343a; background: #101215; color: #cad0da; }
+  .cxm-console-frame.cxm-console-luna .luna-text-viewer-text { max-height: none !important; padding: 6px 8px; font: inherit; }
+  .cxm-console-frame.cxm-console-luna:focus-visible { outline: 2px solid #8e98a9; outline-offset: 2px; }
+  .cxm-console-latest { position: absolute; right: 14px; bottom: 12px; z-index: 1; height: 28px; border: 1px solid #4a515c; border-radius: 14px; padding: 0 10px; background: #252a31; color: #e3e7ee; box-shadow: 0 4px 14px rgba(0,0,0,.35); cursor: pointer; font-size: 10px; }
+  .cxm-console-inspector { min-width: 0; overflow: hidden; border: 1px solid #30343a; border-radius: 7px; background: #141619; }
+  .cxm-console-inspector-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #30343a; color: #cdd2db; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-console-inspector-head button { border: 0; background: transparent; color: #98a1b2; cursor: pointer; }
+  .cxm-console-inspector-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; margin: 0; padding: 10px; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-console-inspector-grid dt { color: #778294; }
+  .cxm-console-inspector-grid dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: #bdc5d2; }
+  .cxm-console-empty { display: grid; min-height: 180px; place-items: center; padding: 20px 16px; color: #737d8e; text-align: center; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-summary { border-color: rgba(18,24,33,.12); background: rgba(18,24,33,.12); }
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-metric,
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-performance { background: #f4f5f7; }
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-metric strong { color: #1d222b; }
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-controls input,
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-controls select { border-color: #c7ccd4; background: #fff; color: #20242c; }
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-controls button { border-color: #c7ccd4; background: #f4f5f7; color: #3d4654; }
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-frame.cxm-console-luna.luna-text-viewer { border-color: #c7ccd4; background: #fff; color: #252b35; }
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-inspector { border-color: #c7ccd4; background: #f8f9fa; }
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-inspector-head { border-color: #d7dbe1; color: #252b35; }
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-inspector-grid dd { color: #354052; }
   .cxm-copy { margin: 0; color: #98a1b2; font-size: 12px; }
   .cxm-notice {
     margin-top: 14px;
@@ -911,6 +936,8 @@ const MANAGER_STYLES = `
     .cxm-card-grid, .cxm-detail-grid, .cxm-plugin-list { grid-template-columns: 1fr; }
     .cxm-usage-header { grid-template-columns: 36px minmax(0, 1fr); }
     .cxm-usage-header .cxm-source-input { grid-column: 2; }
+    .cxm-console-controls { grid-template-columns: minmax(0, 1fr) repeat(2, minmax(90px, max-content)); }
+    .cxm-console-workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr); }
   }
 `
 
@@ -983,6 +1010,88 @@ function createDarkBackgroundBrandMark(document: Document): HTMLImageElement {
   mark.src = CORDISX_MARK_DARK_URI
   mark.alt = ''
   return markDecorative(mark)
+}
+
+interface PluginConsoleFoldedEntry {
+  readonly entry: CordisXPluginConsoleEntryV1
+  readonly count: number
+}
+
+interface PluginConsoleLunaBlock {
+  readonly entry: CordisXPluginConsoleEntryV1
+  readonly text: string
+  readonly startLine: number
+  readonly endLine: number
+}
+
+interface PluginConsoleLunaProjection {
+  readonly text: string
+  readonly blocks: readonly PluginConsoleLunaBlock[]
+}
+
+function consoleSnapshotLines(
+  snapshot: CordisXPluginConsoleValueSummaryV1,
+  label: string,
+  indent = '  ',
+): string[] {
+  if (snapshot.type === 'array') {
+    const lines = [`${indent}${label}: ${snapshot.preview} [`]
+    for (const [index, item] of (snapshot.items ?? []).entries()) {
+      lines.push(...consoleSnapshotLines(item, String(index), `${indent}  `))
+    }
+    if (snapshot.truncated) lines.push(`${indent}  …`)
+    lines.push(`${indent}]`)
+    return lines
+  }
+  if (snapshot.type === 'object') {
+    const lines = [`${indent}${label}: ${snapshot.preview} {`]
+    for (const item of snapshot.entries ?? []) lines.push(...consoleSnapshotLines(item.value, item.key, `${indent}  `))
+    if (snapshot.truncated) lines.push(`${indent}  …`)
+    lines.push(`${indent}}`)
+    return lines
+  }
+  if (snapshot.type === 'error') {
+    const lines = [`${indent}${label}: ${snapshot.preview}`]
+    if (snapshot.stack !== undefined) lines.push(...snapshot.stack.split('\n').slice(1).map(line => `${indent}  ${line.trimStart()}`))
+    return lines
+  }
+  const value = snapshot.type === 'string'
+    ? JSON.stringify(snapshot.value ?? snapshot.preview)
+    : snapshot.type === 'null' || snapshot.type === 'undefined'
+      ? snapshot.preview
+      : snapshot.preview
+  return [`${indent}${label}: ${value}${snapshot.truncated ? ' …' : ''}`]
+}
+
+function consoleEntryLine(entry: CordisXPluginConsoleEntryV1, repeat = 1, grouped = false): string {
+  const time = new Date(entry.time).toLocaleTimeString([], { hour12: false })
+  const terminal = entry.durationMs === undefined ? entry.status : `${entry.status ?? entry.phase} ${entry.durationMs.toFixed(1)}ms`
+  const prefix = grouped ? '├─ ' : ''
+  return `${time} ${entry.method.padEnd(5)} ${prefix}${entry.source}  ${entry.message}${terminal === undefined ? '' : `  · ${terminal}`}${repeat > 1 ? `  repeat ${repeat}` : ''}`
+}
+
+/** Project immutable Host snapshots into the one Luna Log text stream. */
+export function projectPluginConsoleForLuna(entries: readonly PluginConsoleFoldedEntry[]): PluginConsoleLunaProjection {
+  const blocks: PluginConsoleLunaBlock[] = []
+  const seenCorrelations = new Set<string>()
+  let line = 0
+  for (const item of entries) {
+    const grouped = item.entry.correlationId !== undefined && seenCorrelations.has(item.entry.correlationId)
+    if (item.entry.correlationId !== undefined) seenCorrelations.add(item.entry.correlationId)
+    const lines = [consoleEntryLine(item.entry, item.count, grouped)]
+    for (const [index, snapshot] of item.entry.args.entries()) {
+      if (['array', 'object', 'error'].includes(snapshot.type) || snapshot.truncated === true) {
+        lines.push(...consoleSnapshotLines(snapshot, `arg[${index}]`))
+      }
+    }
+    if (item.entry.stack !== undefined && !item.entry.args.some(argument => argument.stack === item.entry.stack)) {
+      lines.push(...item.entry.stack.split('\n').map((stackLine, index) => `${index === 0 ? '  stack:' : '        '}${stackLine}`))
+    }
+    const text = lines.join('\n')
+    blocks.push({ entry: item.entry, text, startLine: line, endLine: line + lines.length })
+    line += lines.length
+  }
+  return { text: blocks.map(block => block.text).join('\n'), blocks }
 }
 
 function capabilityPresentation(capability: CordisXPlatformCapability): CapabilityPresentation {
@@ -1503,12 +1612,13 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   })()
   let consoleQuery = ''
   let consoleMethod = 'all'
-  let consoleCoverage = 'all'
+  let consoleKind = 'all'
   let consoleSource = 'all'
   let consolePaused = false
   let consolePausedPage: CordisXPluginConsolePageV1 | undefined
-  let consoleAutoScroll = true
   let selectedConsoleEntry: string | undefined
+  const consoleScrollStates = new Map<string, { follow: boolean; scrollTop: number }>()
+  const dismissedConsoleWarnings = new Map<string, number>()
   let settingsRoot: HTMLDivElement | undefined
   let settingsPanel: HTMLDivElement | undefined
   let settingsPanelBody: HTMLDivElement | undefined
@@ -1525,6 +1635,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const lifecycleBusy = new Map<string, ManagerPluginStatus>()
   let lifecycleInstallBusy = false
   const configRendererMounts = new Set<ConfigRendererMountHandle>()
+  const lunaLogMounts = new Set<{
+    readonly destroy: () => void
+    readonly setTheme: (theme: 'dark' | 'light') => void
+  }>()
   let breadcrumbCleanup = (): void => {}
   let closePluginActionMenu = (_restoreFocus = false): void => {}
   let pluginActionMenuOpen = false
@@ -1535,6 +1649,17 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const disposeConfigRenderers = (): void => {
     for (const mount of configRendererMounts) void mount.dispose()
     configRendererMounts.clear()
+  }
+
+  const disposeLunaLogs = (): void => {
+    for (const mount of lunaLogMounts) mount.destroy()
+    lunaLogMounts.clear()
+  }
+
+  const syncHostUiTheme = (): void => {
+    const current = resolveHostTheme(document).theme
+    syncAdaptiveBrandMark(document, triggerMark)
+    for (const mount of lunaLogMounts) mount.setTheme(current)
   }
 
   const authorizeAndRestore = async (plugin: ManagerPluginSnapshot): Promise<void> => {
@@ -3100,32 +3225,99 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }
   }
 
-  const consoleLine = (entry: CordisXPluginConsoleEntryV1, repeat = 1): string => {
-    const time = new Date(entry.time).toLocaleTimeString([], { hour12: false })
-    const terminal = entry.durationMs === undefined ? entry.status : `${entry.status ?? entry.phase} ${entry.durationMs.toFixed(1)}ms`
-    return `${time} ${entry.method.padEnd(5)} ${entry.source}  ${entry.message}${terminal === undefined ? '' : `  · ${terminal}`}${repeat > 1 ? `  repeat ${repeat}` : ''}`
-  }
-
   const escapeConsoleText = (value: string): string => value
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
 
-  const mountLunaLog = (container: HTMLElement, log: string): void => {
+  const mountLunaLog = (
+    container: HTMLElement,
+    projection: PluginConsoleLunaProjection,
+    pluginId: string,
+    latest: HTMLButtonElement,
+  ): void => {
+    const state = consoleScrollStates.get(pluginId) ?? { follow: true, scrollTop: 0 }
+    consoleScrollStates.set(pluginId, state)
+    let desiredTheme = resolveHostTheme(document).theme
+    let viewer: { append(log: string): void; destroy(): void; setOption(name: string, value: unknown): void } | undefined
+    let resizeObserver: ResizeObserver | undefined
+    let destroyed = false
+    const isAtBottom = (): boolean => container.scrollHeight - container.clientHeight - container.scrollTop <= 4
+    const syncLatest = (): void => { latest.hidden = state.follow || container.scrollHeight <= container.clientHeight + 4 }
+    const scrollToLatest = (): void => {
+      state.follow = true
+      container.scrollTop = container.scrollHeight
+      state.scrollTop = container.scrollTop
+      syncLatest()
+    }
+    const onScroll = (): void => {
+      state.scrollTop = container.scrollTop
+      state.follow = isAtBottom()
+      syncLatest()
+    }
+    const onClick = (event: MouseEvent): void => {
+      if (event.target instanceof document.defaultView!.Element && event.target.closest('.luna-text-viewer-copy') !== null) return
+      const rect = container.getBoundingClientRect()
+      const line = Math.max(0, Math.floor((event.clientY - rect.top + container.scrollTop - 6) / 20))
+      const block = projection.blocks.find(item => line >= item.startLine && line < item.endLine)
+      if (block === undefined) return
+      state.scrollTop = container.scrollTop
+      selectedConsoleEntry = block.entry.entryId
+      renderContent()
+    }
+    const onLatest = (): void => scrollToLatest()
+    container.tabIndex = 0
+    container.setAttribute('aria-label', 'Luna Log 插件控制台正文')
+    container.addEventListener('scroll', onScroll)
+    container.addEventListener('click', onClick)
+    latest.addEventListener('click', onLatest)
+    const restoreScroll = (): void => {
+      if (destroyed) return
+      if (state.follow) container.scrollTop = container.scrollHeight
+      else container.scrollTop = Math.min(state.scrollTop, Math.max(0, container.scrollHeight - container.clientHeight))
+      state.scrollTop = container.scrollTop
+      syncLatest()
+    }
+    const mount = {
+      destroy: (): void => {
+        if (destroyed) return
+        destroyed = true
+        resizeObserver?.disconnect()
+        container.removeEventListener('scroll', onScroll)
+        container.removeEventListener('click', onClick)
+        latest.removeEventListener('click', onLatest)
+        viewer?.destroy()
+        lunaLogMounts.delete(mount)
+      },
+      setTheme: (theme: 'dark' | 'light'): void => {
+        desiredTheme = theme
+        viewer?.setOption('theme', theme)
+      },
+    }
+    lunaLogMounts.add(mount)
     if (globalThis.document === undefined) {
-      container.textContent = log
+      container.textContent = projection.text
       return
     }
     void import('luna-log/esm/log/index.js').then(module => {
-      if (!container.isConnected) return
+      if (destroyed || !container.isConnected) return
       const Constructor = module.default as unknown as new (
         target: HTMLElement,
-        options?: { log?: string; wrapLongLines?: boolean; maxHeight?: number },
-      ) => { append(log: string): void }
-      const viewer = new Constructor(container, { log: '', wrapLongLines: false, maxHeight: 420 })
-      container.classList.add('luna-text-viewer-theme-dark')
-      viewer.append(escapeConsoleText(log))
-    }).catch(() => { container.textContent = log })
+        options?: { log?: string; wrapLongLines?: boolean; maxHeight?: number; theme?: 'dark' | 'light' },
+      ) => { append(log: string): void; destroy(): void; setOption(name: string, value: unknown): void }
+      viewer = new Constructor(container, { log: '', wrapLongLines: false, maxHeight: Infinity, theme: desiredTheme })
+      viewer.append(escapeConsoleText(projection.text))
+      const ResizeObserverConstructor = document.defaultView?.ResizeObserver
+      if (ResizeObserverConstructor !== undefined) {
+        resizeObserver = new ResizeObserverConstructor(() => { if (state.follow) scrollToLatest(); else syncLatest() })
+        resizeObserver.observe(container)
+      }
+      queueMicrotask(restoreScroll)
+    }).catch(() => {
+      if (destroyed) return
+      container.textContent = projection.text
+      queueMicrotask(restoreScroll)
+    })
   }
 
   const copyConsoleText = async (value: string): Promise<void> => {
@@ -3250,13 +3442,11 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const summary = create(document, 'div', 'cxm-console-summary')
       for (const [label, value] of [
         ['调用', requested.length], ['成功', successes.length], ['失败', failures.length], ['拒绝', denials.length],
-        ['平均耗时', durations.length === 0 ? '—' : `${(durations.reduce((sum, value) => sum + value, 0) / durations.length).toFixed(1)}ms`],
       ]) {
         const metric = create(document, 'div', 'cxm-console-metric')
         metric.append(create(document, 'strong', undefined, String(value)), create(document, 'span', undefined, String(label)))
         summary.append(metric)
       }
-      panel.append(summary)
       const callSources = new Map<string, { calls: number; items: number; bytes: number }>()
       for (const entry of page.entries) {
         if (entry.kind === 'invocation' && entry.phase === 'requested') {
@@ -3271,11 +3461,35 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           callSources.set(entry.source, current)
         }
       }
-      if (callSources.size > 0) panel.append(create(document, 'div', 'cxm-console-coverage', [...callSources]
-        .map(([source, value]) => `${source}: ${value.calls} calls${value.items === 0 ? '' : ` · ${value.items} items`}${value.bytes === 0 ? '' : ` · ${value.bytes} B`}`)
-        .join('   ')))
+      const performance = create(document, 'details', 'cxm-console-performance')
+      performance.append(create(document, 'summary', undefined, `性能与消费 · 平均耗时 ${durations.length === 0 ? '—' : `${(durations.reduce((sum, value) => sum + value, 0) / durations.length).toFixed(1)}ms`}`))
+      performance.append(create(document, 'div', 'cxm-console-performance-body', callSources.size === 0
+        ? '当前没有 Host API 调用计量。'
+        : [...callSources].map(([source, value]) => `${source}: ${value.calls} calls${value.items === 0 ? '' : ` · ${value.items} items`}${value.bytes === 0 ? '' : ` · ${value.bytes} B`}`).join('   ')))
+      summary.append(performance)
+      panel.append(summary)
 
       const sources = [...new Set(page.entries.map(entry => entry.source))].sort()
+      const normalizedQuery = consoleQuery.trim().toLocaleLowerCase()
+      const filtered = page.entries.filter(entry => (
+        (consoleMethod === 'all' || entry.method === consoleMethod)
+        && (consoleKind === 'all'
+          || consoleKind === 'host-api' && (entry.kind === 'invocation' || entry.kind === 'permission')
+          || entry.kind === consoleKind)
+        && (consoleSource === 'all' || entry.source === consoleSource)
+        && (normalizedQuery === '' || `${entry.message} ${entry.source} ${entry.correlationId ?? ''} ${entry.args.map(argument => argument.preview).join(' ')}`.toLocaleLowerCase().includes(normalizedQuery))
+      ))
+      const folded: PluginConsoleFoldedEntry[] = []
+      for (const entry of filtered) {
+        const previous = folded.at(-1)
+        const foldable = entry.kind === 'console' && entry.correlationId === undefined
+          && previous?.entry.kind === 'console' && previous.entry.correlationId === undefined
+          && previous.entry.method === entry.method && previous.entry.source === entry.source
+          && previous.entry.message === entry.message && JSON.stringify(previous.entry.args) === JSON.stringify(entry.args)
+        if (foldable && previous !== undefined) folded[folded.length - 1] = { entry: previous.entry, count: previous.count + 1 }
+        else folded.push({ entry, count: 1 })
+      }
+      const projection = projectPluginConsoleForLuna(folded)
       const controls = create(document, 'div', 'cxm-console-controls')
       const search = create(document, 'input')
       search.type = 'search'
@@ -3298,7 +3512,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       controls.append(
         search,
         select('日志级别', consoleMethod, ['all', 'debug', 'log', 'info', 'warn', 'error'], value => { consoleMethod = value }),
-        select('采集覆盖', consoleCoverage, ['all', 'host-mediated', 'scoped-console', 'best-effort'], value => { consoleCoverage = value }),
+        select('API / 类型', consoleKind, ['all', 'host-api', 'console', 'lifecycle', 'diagnostic'], value => { consoleKind = value }),
         select('日志来源', consoleSource, ['all', ...sources], value => { consoleSource = value }),
       )
       const pause = create(document, 'button', undefined, consolePaused ? '继续' : '暂停')
@@ -3309,10 +3523,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         consolePausedPage = consolePaused ? model.pluginConsole?.(plugin.id) ?? livePage : undefined
         renderContent()
       })
-      const autoScroll = create(document, 'button', undefined, '自动滚动')
+      const scrollState = consoleScrollStates.get(plugin.id) ?? { follow: true, scrollTop: 0 }
+      consoleScrollStates.set(plugin.id, scrollState)
+      const autoScroll = create(document, 'button', undefined, '跟随最新')
       autoScroll.type = 'button'
-      autoScroll.ariaPressed = String(consoleAutoScroll)
-      autoScroll.addEventListener('click', () => { consoleAutoScroll = !consoleAutoScroll; renderContent() })
+      autoScroll.ariaPressed = String(scrollState.follow)
+      autoScroll.addEventListener('click', () => { scrollState.follow = !scrollState.follow; renderContent() })
       const clear = create(document, 'button', undefined, '清空')
       clear.type = 'button'
       clear.addEventListener('click', () => { model.clearPluginConsole?.(plugin.id); selectedConsoleEntry = undefined; consolePausedPage = undefined; renderContent() })
@@ -3320,71 +3536,80 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       copy.type = 'button'
       copy.disabled = selectedConsoleEntry === undefined
       copy.addEventListener('click', () => {
-        const entry = page.entries.find(item => item.entryId === selectedConsoleEntry)
-        if (entry !== undefined) void copyConsoleText(`${consoleLine(entry)}\n${JSON.stringify(entry.args, null, 2)}`).catch(() => undefined)
+        const block = projection.blocks.find(item => item.entry.entryId === selectedConsoleEntry)
+        if (block !== undefined) void copyConsoleText(block.text).catch(() => undefined)
       })
       controls.append(pause, autoScroll, clear, copy)
       panel.append(controls)
-      panel.append(create(document, 'div', 'cxm-console-coverage', '覆盖范围：Host API 自动切面（强保证）与 owner-scoped console（强保证）。共享 renderer 中绕过 Host 的 DOM/网络、保存的 global console 与脱离 Host 注册的异步不可可靠归属；未知记录不计入本插件成功率。'))
-      if ((page.unattributedEntries ?? 0) > 0) {
-        const unknown = create(document, 'div', 'cxm-notice', `共享 renderer 检测到 ${page.unattributedEntries} 类无法唯一归属的 error / unhandledrejection；未猜测归入当前插件。`)
+      const coverageInfo = create(document, 'details', 'cxm-console-info')
+      coverageInfo.append(
+        create(document, 'summary', undefined, '采集范围'),
+        create(document, 'p', undefined, 'Host API 自动切面与 owner-scoped console 可可靠归属。共享 renderer 中绕过 Host 的 DOM/网络、保存的 global console 与脱离 Host 注册的异步不可可靠捕获；未知记录不计入本插件调用统计。'),
+      )
+      panel.append(coverageInfo)
+      const unattributed = page.unattributedEntries ?? 0
+      if (unattributed > 0 && dismissedConsoleWarnings.get(plugin.id) !== unattributed) {
+        const unknown = create(document, 'div', 'cxm-notice cxm-console-warning')
         unknown.dataset.tone = 'warning'
+        unknown.append(create(document, 'span', undefined, `检测到 ${unattributed} 类插件相关但无法唯一归属的 error / unhandledrejection；Host 未猜测归属。`))
+        const dismissWarning = create(document, 'button', undefined, '关闭')
+        dismissWarning.type = 'button'
+        dismissWarning.setAttribute('aria-label', '关闭归属异常提示')
+        dismissWarning.addEventListener('click', () => { dismissedConsoleWarnings.set(plugin.id, unattributed); renderContent() })
+        unknown.append(dismissWarning)
         panel.append(unknown)
       }
 
-      const normalizedQuery = consoleQuery.trim().toLocaleLowerCase()
-      const filtered = page.entries.filter(entry => (
-        (consoleMethod === 'all' || entry.method === consoleMethod)
-        && (consoleCoverage === 'all' || entry.coverage === consoleCoverage)
-        && (consoleSource === 'all' || entry.source === consoleSource)
-        && (normalizedQuery === '' || `${entry.message} ${entry.source} ${entry.correlationId ?? ''}`.toLocaleLowerCase().includes(normalizedQuery))
-      ))
-      const folded: { entry: CordisXPluginConsoleEntryV1; count: number }[] = []
-      for (const entry of filtered) {
-        const previous = folded.at(-1)
-        if (previous !== undefined && previous.entry.method === entry.method && previous.entry.source === entry.source
-          && previous.entry.message === entry.message && previous.entry.status === entry.status) previous.count += 1
-        else folded.push({ entry, count: 1 })
-      }
+      const workspace = create(document, 'div', 'cxm-console-workspace')
+      const body = create(document, 'div', 'cxm-console-body')
       const frame = create(document, 'div', 'cxm-console-frame')
       frame.dataset.pluginConsole = plugin.id
       if (folded.length === 0) {
         frame.append(create(document, 'div', 'cxm-console-empty', page.entries.length === 0 ? '等待插件日志或 CordisX API 调用…' : '没有匹配当前筛选的日志'))
       } else {
-        const luna = create(document, 'div', 'cxm-console-luna')
-        const lines = folded.map(item => consoleLine(item.entry, item.count)).join('\n')
-        mountLunaLog(luna, lines)
-        const hits = create(document, 'div', 'cxm-console-hit-layer')
-        hits.style.height = `${folded.length * 20}px`
-        for (const [index, item] of folded.entries()) {
-          const hit = create(document, 'button', 'cxm-console-hit')
-          hit.type = 'button'
-          hit.style.top = `${index * 20}px`
-          hit.dataset.consoleEntry = item.entry.entryId
-          hit.dataset.selected = String(selectedConsoleEntry === item.entry.entryId)
-          hit.setAttribute('aria-label', consoleLine(item.entry, item.count))
-          hit.addEventListener('click', () => { selectedConsoleEntry = item.entry.entryId; renderContent() })
-          hits.append(hit)
-        }
-        frame.append(luna, hits)
-        if (consoleAutoScroll && !consolePaused) queueMicrotask(() => { frame.scrollTop = frame.scrollHeight })
+        frame.classList.add('cxm-console-luna')
       }
-      panel.append(frame)
+      const latest = create(document, 'button', 'cxm-console-latest', '回到最新')
+      latest.type = 'button'
+      latest.hidden = true
+      body.append(frame, latest)
       const selected = page.entries.find(entry => entry.entryId === selectedConsoleEntry)
       if (selected !== undefined) {
-        const detail = create(document, 'details', 'cxm-console-detail')
-        detail.open = true
-        detail.dataset.consoleDetail = selected.entryId
-        detail.append(
-          create(document, 'summary', undefined, `${selected.source} · ${selected.correlationId ?? 'no correlation'} · ${selected.coverage}`),
-          create(document, 'pre', undefined, JSON.stringify({
-            method: selected.method, args: selected.args, phase: selected.phase, status: selected.status,
-            durationMs: selected.durationMs, request: selected.request, result: selected.result,
-            stack: selected.stack, correlationId: selected.correlationId, trigger: selected.trigger,
-          }, null, 2)),
-        )
-        panel.append(detail)
-      }
+        workspace.dataset.inspector = 'true'
+        const inspector = create(document, 'aside', 'cxm-console-inspector')
+        inspector.dataset.consoleDetail = selected.entryId
+        const inspectorHead = create(document, 'div', 'cxm-console-inspector-head')
+        inspectorHead.append(create(document, 'span', undefined, 'Host metadata'))
+        const closeInspector = create(document, 'button', undefined, '关闭')
+        closeInspector.type = 'button'
+        closeInspector.addEventListener('click', () => { selectedConsoleEntry = undefined; renderContent() })
+        inspectorHead.append(closeInspector)
+        const grid = create(document, 'dl', 'cxm-console-inspector-grid')
+        const metadata: readonly (readonly [string, string | number | undefined])[] = [
+          ['插件', `${selected.plugin.pluginId} · ${selected.plugin.source}`],
+          ['Generation', selected.generation],
+          ['能力 / 来源', selected.source],
+          ['类型', selected.kind],
+          ['采集', selected.coverage],
+          ['Correlation', selected.correlationId],
+          ['阶段', selected.phase],
+          ['状态', selected.status],
+          ['耗时', selected.durationMs === undefined ? undefined : `${selected.durationMs.toFixed(1)}ms`],
+          ['会话', selected.sessionId],
+          ['触发', selected.trigger === undefined ? undefined : `${selected.trigger.kind}${selected.trigger.registrationId === undefined ? '' : ` · ${selected.trigger.registrationId}`}`],
+          ['有效 owner', selected.effectiveOwner === undefined ? undefined : `${selected.effectiveOwner.pluginId} · ${selected.effectiveOwner.source}`],
+          ['请求计量', selected.request === undefined ? undefined : JSON.stringify(selected.request)],
+          ['结果计量', selected.result === undefined ? undefined : JSON.stringify(selected.result)],
+        ]
+        for (const [label, value] of metadata) {
+          if (value === undefined) continue
+          grid.append(create(document, 'dt', undefined, label), create(document, 'dd', undefined, String(value)))
+        }
+        inspector.append(inspectorHead, grid)
+        workspace.append(body, inspector)
+      } else workspace.append(body)
+      panel.append(workspace)
+      if (folded.length > 0) mountLunaLog(frame, projection, plugin.id, latest)
       const lifecycle = create(document, 'details', 'cxm-diagnostics')
       lifecycle.append(create(document, 'summary', undefined, `生命周期 / 诊断 · ${statusLabel(plugin.status)}`))
       const lifecycleBody = create(document, 'div', 'cxm-diagnostics-body')
@@ -4062,6 +4287,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   function renderContent(): void {
     closePluginActionMenu(false)
     tooltips.hide()
+    disposeLunaLogs()
     const snapshot = model.snapshot()
     const normalized = routeState.kind === 'settings' ? routeState : normalizeRoute(snapshot)
     const normalizedRouteChanged = routeKey(normalized) !== routeKey(routeState)
@@ -4097,12 +4323,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const open = (): void => {
     modal.hidden = false
     trigger.setAttribute('aria-expanded', 'true')
+    syncHostUiTheme()
     renderContent()
     close.focus()
   }
   const dismiss = (): void => {
     closePluginActionMenu(false)
     disposeConfigRenderers()
+    disposeLunaLogs()
     settingsMount?.abort()
     if (settingsMount !== undefined || settingsMountId !== undefined) void resetSettings().catch(() => {})
     modal.hidden = true
@@ -4147,7 +4375,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let scheduled = false
   const reconcile = (): void => {
     scheduled = false
-    syncAdaptiveBrandMark(document, triggerMark)
+    syncHostUiTheme()
     const target = resolveManagerTriggerTarget(document)
     if (target === undefined) {
       trigger.remove()
@@ -4168,7 +4396,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (pluginActionMenuOpen) repositionPluginActionMenu()
     schedule()
   })
-  const themeObserver = Observer === undefined ? undefined : new Observer(() => syncAdaptiveBrandMark(document, triggerMark))
+  const themeObserver = Observer === undefined ? undefined : new Observer(syncHostUiTheme)
   if (document.documentElement !== null) observer?.observe(document.documentElement, { childList: true, subtree: true })
   if (document.documentElement !== null) themeObserver?.observe(document.documentElement, {
     attributes: true,
@@ -4186,6 +4414,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   return () => {
     breadcrumbCleanup()
     disposeConfigRenderers()
+    disposeLunaLogs()
     settingsMount?.abort()
     void stopSettingsContent().catch(() => {})
     observer?.disconnect()

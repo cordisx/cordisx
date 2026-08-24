@@ -1242,7 +1242,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     const modal = document.querySelector('[data-cordisx-manager-modal]')
     const trigger = document.querySelector('[data-cordisx-manager-trigger]')
     if (modal?.hidden !== false) {
-      if (trigger !== null) trigger.click()
+      if (trigger !== null && modal?.hidden !== false) trigger.click()
       else if (modal instanceof HTMLElement) modal.hidden = false
     }
     document.querySelector('[data-tab="plugins"]')?.click()
@@ -2464,14 +2464,48 @@ if (parsed.values['plugin-console-exercise']) {
     pause?.click()
     const pausedPanel = document.querySelector('[role="tabpanel"][aria-label="运行状态"]')
     const paused = pause !== undefined && [...(pausedPanel?.querySelectorAll('.cxm-console-controls button') ?? [])].some(item => item.textContent === '继续')
-    pausedPanel?.querySelector('[data-console-entry]')?.click()
+    const initialFrame = pausedPanel?.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
+    await new Promise(resolve => setTimeout(resolve, 80))
+    initialFrame?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientY: initialFrame.getBoundingClientRect().top + 7 }))
     const detailOpened = document.querySelector('[data-console-detail]') !== null
-    const coverage = runtimePanel?.querySelector('select[aria-label="采集覆盖"]')
-    if (coverage instanceof HTMLSelectElement) {
-      coverage.value = 'scoped-console'
-      coverage.dispatchEvent(new Event('change', { bubbles: true }))
+    const inspectorText = document.querySelector('[data-console-detail]')?.textContent ?? ''
+    const kind = document.querySelector('select[aria-label="API / 类型"]')
+    if (kind instanceof HTMLSelectElement) {
+      kind.value = 'console'
+      kind.dispatchEvent(new Event('change', { bubbles: true }))
     }
-    const scopedFiltered = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"] [aria-label*="console."]') !== null
+    await new Promise(resolve => setTimeout(resolve, 80))
+    const lunaFrame = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
+    const lunaText = lunaFrame?.querySelector('.luna-text-viewer-text')
+    const scopedFiltered = lunaText?.textContent?.includes('console.log') === true && lunaText?.textContent?.includes('settings.get') !== true
+    const firstLineAtTop = lunaFrame !== null && lunaText !== null
+      && lunaText.getBoundingClientRect().top - lunaFrame.getBoundingClientRect().top < 16
+    const contentDrivenHeight = lunaFrame !== null && lunaText !== null
+      && lunaFrame.getBoundingClientRect().height <= Math.min(522, lunaText.getBoundingClientRect().height + 14)
+    const lunaOnly = lunaFrame?.classList.contains('luna-log') === true
+      && lunaFrame.querySelector('[data-console-entry], .cxm-console-hit-layer') === null
+    const nativePayloads = lunaText?.textContent?.includes('arg[1]') === true
+      && lunaText?.textContent?.includes('Error: inspectable error') === true
+      && lunaText?.textContent?.includes('Array(3)') === true
+    if (lunaFrame instanceof HTMLElement) {
+      lunaFrame.style.maxHeight = '120px'
+      lunaFrame.scrollTop = 0
+      lunaFrame.dispatchEvent(new Event('scroll'))
+    }
+    const returnLatest = lunaFrame?.parentElement?.querySelector('.cxm-console-latest')
+    const returnLatestVisible = returnLatest instanceof HTMLButtonElement && !returnLatest.hidden
+    returnLatest?.click()
+    const returnedToLatest = lunaFrame instanceof HTMLElement && lunaFrame.scrollTop > 0
+    const managerModal = document.querySelector('[data-cordisx-manager-modal]')
+    const originalThemeClass = document.documentElement.className
+    document.documentElement.classList.remove('electron-dark')
+    document.documentElement.classList.add('electron-light')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    const lightTheme = managerModal?.getAttribute('data-cordisx-app-theme') === 'light'
+      && lunaFrame?.classList.contains('luna-text-viewer-theme-light') === true
+    document.documentElement.className = originalThemeClass
+    await new Promise(resolve => setTimeout(resolve, 20))
+    const darkTheme = managerModal?.getAttribute('data-cordisx-app-theme') === 'dark'
     const resumed = [...document.querySelectorAll('.cxm-console-controls button')].find(item => item.textContent === '继续')
     resumed?.click()
     const clear = [...document.querySelectorAll('.cxm-console-controls button')].find(item => item.textContent === '清空')
@@ -2485,6 +2519,12 @@ if (parsed.values['plugin-console-exercise']) {
     const after = runtime.pluginConsole(owner)
     const automatic = after.entries.filter(entry => entry.coverage === 'host-mediated')
     const terminal = automatic.filter(entry => ['success', 'failure', 'cancel'].includes(entry.phase))
+    const screenshotFrame = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
+    if (screenshotFrame instanceof HTMLElement) {
+      screenshotFrame.scrollTop = 0
+      screenshotFrame.dispatchEvent(new Event('scroll'))
+    }
+    const screenshotPreparedAtTop = screenshotFrame instanceof HTMLElement && screenshotFrame.scrollTop === 0
     return {
       owner,
       before: {
@@ -2500,7 +2540,11 @@ if (parsed.values['plugin-console-exercise']) {
         automaticWithoutConsole: silent.entries.some(entry => entry.source === 'settings.get' && entry.phase === 'success')
           && !silent.entries.some(entry => entry.kind === 'console'),
       },
-      ui: { paused, detailOpened, scopedFiltered, cleared },
+      ui: {
+        paused, detailOpened, inspectorMetadataOnly: !inspectorText.includes('arg['), scopedFiltered, cleared,
+        lunaOnly, nativePayloads, firstLineAtTop, contentDrivenHeight,
+        returnLatestVisible, returnedToLatest, lightTheme, darkTheme, screenshotPreparedAtTop,
+      },
       reload: {
         entries: after.entries.length,
         lifecycle: after.entries.some(entry => entry.phase === 'reload'),

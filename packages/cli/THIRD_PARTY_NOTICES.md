@@ -24,7 +24,9 @@ BSD-3-Clause, BlueOak-1.0.0, and ISC license identifiers for production
 dependencies in this beta. This inventory is evidence for release review, not
 legal advice.
 
-The plugin DevTools Console bundles Luna Log and Luna Text Viewer locally as
-its renderer. CordisX retains the structured `method + args[]` capture model
-and detail inspection; Luna receives only a safe formatted text projection.
-There is no runtime CDN dependency.
+The plugin DevTools Console pins and bundles Luna Log and Luna Text Viewer
+locally as its only log-body renderer. Their upstream project is liriliri/luna;
+both packages are MIT licensed (copyright liriliri contributors). CordisX
+retains the structured `method + args[]` capture model and projects safe
+multiline text into Luna's published `log` / `append(string)` API. The separate
+Host Inspector contains metadata only. There is no runtime CDN dependency.

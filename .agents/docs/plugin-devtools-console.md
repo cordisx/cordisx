@@ -6,7 +6,7 @@ small call summary. Lifecycle and adapter diagnostics remain available as a
 secondary collapsed region.
 
 The implementation conforms to `@cordisx/protocol` main
-`832d319c8dbf1cf3e00db872c8fa290def9efd7b` and its
+`843818755142fcdeb13867a9cea068672855c49e` and its
 `cordisx.plugin-console-entry/v1` / `plugin-console-page/v1` schemas. Console
 entries retain `method + args[]`; the Host creates recursive safe snapshots for
 objects, arrays and Errors. The one-line text projection is not the data model.
@@ -57,10 +57,23 @@ network/tool proxies.
 
 ## Rendering, privacy and lifetime
 
-Luna Log `0.1.0` and Luna Text Viewer `0.2.1` are locally bundled MIT-licensed
-renderers. Luna receives escaped formatted lines only. Host-owned state retains
-the structured snapshots, stack and correlation detail selected by the user.
-There is no CDN dependency and plugins never render their own inspector nodes.
+Luna Log `0.1.0` and Luna Text Viewer `0.2.1` are pinned, locally bundled
+MIT-licensed renderers. Luna Log's published API accepts a string log and
+`append(string)`; it does not expose an object-tree or entry-row API. For that
+reason the Log component is the only Console body DOM: CordisX projects safe
+`args[]` snapshots, format substitution, object/array trees and Error stacks
+into one escaped multiline Luna stream instead of layering custom rows over it.
+The optional Inspector contains Host ownership/correlation/call metadata only
+and never repeats arguments or lets a plugin provide renderer nodes.
+
+The Log scroll element has intrinsic content height and a bounded maximum
+viewport. Only the empty state receives a minimum height. Follow-latest is
+preserved across live rerenders only while the viewer is already at the bottom;
+scrolling upward exposes an explicit return-to-latest action. Luna instances
+and resize observers are destroyed on rerender, route change and Manager
+dispose. Light/dark selection comes only from the shared `HostThemeProjection`
+and its `data-cordisx-app-theme` / `--cx-*` tokens; the Console has no private
+system-theme detector. There is no CDN dependency.
 
 Automatic Host summaries omit prompt/message/content, credentials, secrets,
 tokens, URL/path/CWD values and raw response bodies. Snapshotting does not
