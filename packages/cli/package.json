@@ -58,6 +58,8 @@
     "@material-symbols/svg-400": "0.46.0",
     "esbuild": "^0.25.9",
     "intl-messageformat": "11.2.14",
+    "luna-log": "^0.1.0",
+    "luna-text-viewer": "^0.2.1",
     "tar": "7.5.22",
     "ws": "^8.18.3"
   },
