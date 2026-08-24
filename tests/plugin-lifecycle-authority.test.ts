@@ -9,6 +9,7 @@ import {
   type CandidateAccess,
   type HostPermissionReviewDecision,
   type PackageCandidatePlan,
+  type PackageRollbackToken,
   type PackageRuntimeObservation,
 } from '../packages/cli/src/launcher/packages/index.js'
 import { removeStagedPluginPackage, stageLocalPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
@@ -284,9 +285,77 @@ describe('Host-private package lifecycle authority', () => {
     const current = await setup()
     await current.authority.requestActivation(current.access)
     const reopened = await PackageLifecycleAuthority.open({ ...current.authority.options })
-    const recovery = await reopened.recover()
-    expect(recovery.directives).toMatchObject([{ transactionId: 'transaction-1', action: 'rollback-published' }])
+    const firstRecovery = await reopened.recover()
+    expect(firstRecovery.directives).toMatchObject([{ transactionId: 'transaction-1', action: 'rollback-published' }])
+    const firstToken = firstRecovery.directives[0]?.rollbackToken
+    if (firstToken === undefined) throw new Error('rollback token is required')
+    const secondRecovery = await reopened.recover()
+    const rollbackToken = secondRecovery.directives[0]?.rollbackToken
+    if (rollbackToken === undefined) throw new Error('replacement rollback token is required')
+    await expect(reopened.resolveRollback({
+      ownerId: 'generation-runtime',
+      profileId: 'default',
+      rollbackToken: firstToken,
+    })).rejects.toMatchObject({ code: 'rollback-token-invalid' })
+    await expect(reopened.resolveRollback({
+      ownerId: 'generation-runtime',
+      profileId: 'default',
+      rollbackToken: 'rollback:forged' as PackageRollbackToken,
+    })).rejects.toMatchObject({ code: 'rollback-token-invalid' })
+    await expect(reopened.resolveRollback({
+      ownerId: 'renderer',
+      profileId: 'default',
+      rollbackToken,
+    })).rejects.toMatchObject({ code: 'token-scope-mismatch' })
+    await expect(reopened.resolveRollback({
+      ownerId: 'generation-runtime',
+      profileId: 'other',
+      rollbackToken,
+    })).rejects.toMatchObject({ code: 'token-scope-mismatch' })
+    const rollback = await reopened.resolveRollback({
+      ownerId: 'generation-runtime',
+      profileId: 'default',
+      rollbackToken,
+    })
+    expect(rollback).toMatchObject({
+      transactionId: 'transaction-1',
+      transactionEpoch: 'transaction-epoch-1',
+      candidateFingerprint: current.prepared.candidateFingerprint,
+      expectedRegistryEpoch: 5,
+      rollbackRegistryEpoch: 6,
+    })
+    expect(rollback.expectedPublished.plugins).toHaveLength(1)
+    expect(rollback.rollbackTarget.plugins).toEqual([])
     await expect(reopened.resolveCandidate(current.access, 'stage')).rejects.toMatchObject({ code: 'invalid-boundary' })
+    await expect(reopened.abort(current.access, 'too-early')).rejects.toMatchObject({ code: 'rollback-required' })
+    await expect(reopened.prepare({
+      ownerId: 'generation-runtime',
+      operation: 'install',
+      candidateId: 'transaction-1',
+      transactionEpoch: 'replacement-epoch',
+      expectedRegistryEpoch: 6,
+      permissionPlanRevision: 8,
+      permissionPlanFingerprint: 'c'.repeat(64),
+    })).rejects.toMatchObject({ code: 'rollback-pending' })
     expect(await reopened.collectGarbage(0)).toEqual([])
+
+    const registry = createHostRegistryReceiptAuthority()
+    await reopened.completeRollback({
+      ownerId: 'generation-runtime',
+      profileId: 'default',
+      rollbackToken,
+    }, registry.issueRollback({
+      transactionId: rollback.transactionId,
+      transactionEpoch: rollback.transactionEpoch,
+      candidateFingerprint: rollback.candidateFingerprint,
+      registryEpoch: rollback.rollbackRegistryEpoch,
+      active: runtimeObservation(rollback.rollbackTarget, rollback.rollbackRegistryEpoch),
+      disposedAfter: runtimeObservation(rollback.expectedPublished, rollback.expectedRegistryEpoch),
+    }))
+    await expect(reopened.resolveRollback({
+      ownerId: 'generation-runtime',
+      profileId: 'default',
+      rollbackToken,
+    })).rejects.toMatchObject({ code: 'rollback-token-invalid' })
   })
 })
