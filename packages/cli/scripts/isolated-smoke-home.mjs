@@ -30,7 +30,7 @@ export async function prepareIsolatedSmokeHome(homeConfig) {
 export async function cleanupIsolatedSmokeHome(homeRoot) {
   if (homeRoot === undefined) return { homeRoot: null, homeRootRemoved: true, homeRootExists: false }
   const managedRoot = assertManagedHomeRoot(homeRoot)
-  await rm(managedRoot, { recursive: true, force: true })
+  await rm(managedRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   const exists = await access(managedRoot).then(() => true, error => {
     if (error?.code === 'ENOENT') return false
     throw error

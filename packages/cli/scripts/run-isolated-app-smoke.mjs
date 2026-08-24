@@ -163,7 +163,6 @@ try {
   process.removeListener('SIGTERM', interrupt)
   if (smoke !== undefined && !exited(smoke)) await stop(smoke)
   await stop(launcher)
-  const homeCleanup = await cleanupIsolatedSmokeHome(homeRoot)
   try {
     await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(500) })
     throw new Error(`CDP port ${port} still accepts connections after smoke cleanup`)
@@ -191,6 +190,10 @@ try {
   if (crashpadAfter !== crashpadBefore) {
     throw new Error(`Crashpad pending dump count changed during smoke: ${crashpadBefore} -> ${crashpadAfter}`)
   }
+  // Renderer descendants can keep writing into CODEX_HOME briefly after the
+  // launcher exits. Prove that the profile process tree is gone before
+  // removing its isolated HOME, then tolerate transient filesystem races.
+  const homeCleanup = await cleanupIsolatedSmokeHome(homeRoot)
   const cleanup = {
     port,
     portClosed: true,
