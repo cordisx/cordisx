@@ -965,6 +965,8 @@ const HOST_THEME_OVERLAY_STYLES = `
   .cxm-sidebar { border-color: var(--cx-border); background: var(--cx-surface-raised); }
   .cxm-header, .cxm-about-actions, .cxm-about-action-item + .cxm-about-action-item, .cxm-flat-item + .cxm-flat-item { border-color: var(--cx-border); }
   .cxm-nav-button, .cxm-heading p, .cxm-detail-description, .cxm-permission-reason, .cxm-copy, .cxm-source-state, .cxm-detail-id, .cxm-plugin-description, .cxm-plugin-meta, .cxm-catalog-description, .cxm-catalog-id, .cxm-catalog-status { color: var(--cx-muted); }
+  .cxm-nav-icon { color: currentColor; }
+  .cxm-heading-leading { color: var(--cx-text); }
   .cxm-nav-button:hover, .cxm-nav-button[aria-selected="true"], .cxm-back:hover, .cxm-breadcrumb-action:hover, .cxm-breadcrumb-overflow > summary:hover, .cxm-tab:hover, .cxm-tab[aria-selected="true"], .cxm-about-action:hover .cxm-about-action-title { background: var(--cx-hover); color: var(--cx-text); }
   .cxm-heading-title, .cxm-breadcrumb-current, .cxm-card-value, .cxm-section-title, .cxm-about-name, .cxm-search, .cxm-source-input, .cxm-plugin-name, .cxm-catalog-title { color: var(--cx-text); }
   .cxm-card, .cxm-slot-card, .cxm-source-row, .cxm-field, .cxm-lifecycle-impact { border-color: var(--cx-border); background: var(--cx-hover); }
@@ -1012,6 +1014,12 @@ function syncAdaptiveBrandMark(document: Document, mark: HTMLImageElement): void
   mark.dataset.hostBackground = background
 }
 
+function syncAdaptiveBrandMarks(document: Document): void {
+  for (const mark of document.querySelectorAll<HTMLImageElement>('img[data-brand-rendering="direct-host"]')) {
+    syncAdaptiveBrandMark(document, mark)
+  }
+}
+
 function createAdaptiveBrandMark(document: Document): HTMLImageElement {
   const mark = create(document, 'img', 'cxm-brand-mark')
   mark.dataset.cordisxBrandMark = 'true'
@@ -1020,15 +1028,6 @@ function createAdaptiveBrandMark(document: Document): HTMLImageElement {
   markDecorative(mark)
   syncAdaptiveBrandMark(document, mark)
   return mark
-}
-
-function createDarkBackgroundBrandMark(document: Document): HTMLImageElement {
-  const mark = create(document, 'img', 'cxm-brand-mark')
-  mark.dataset.cordisxBrandMark = 'true'
-  mark.dataset.brandRendering = 'direct-dark'
-  mark.src = CORDISX_MARK_DARK_URI
-  mark.alt = ''
-  return markDecorative(mark)
 }
 
 interface PluginConsoleFoldedEntry {
@@ -1594,7 +1593,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     button.dataset.tab = tab.id
     button.setAttribute('role', 'tab')
     const icon = tab.brand === true
-      ? createDarkBackgroundBrandMark(document)
+      ? createAdaptiveBrandMark(document)
       : createManagerIcon(document, tab.icon ?? 'plugins', 'cxm-nav-icon')
     icon.classList.add('cxm-nav-icon')
     icon.setAttribute('aria-hidden', 'true')
@@ -1683,7 +1682,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const syncHostUiTheme = (): void => {
     const current = resolveHostTheme(document).theme
-    syncAdaptiveBrandMark(document, triggerMark)
+    syncAdaptiveBrandMarks(document)
     for (const mount of lunaLogMounts) mount.setTheme(current)
   }
 
@@ -2304,7 +2303,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       row.append(back)
     } else {
       const icon = options.brand === true
-        ? createDarkBackgroundBrandMark(document)
+        ? createAdaptiveBrandMark(document)
         : createManagerIcon(document, options.icon ?? 'plugins')
       icon.classList.add('cxm-heading-leading', 'cxm-heading-icon')
       icon.setAttribute('aria-hidden', 'true')
@@ -2320,7 +2319,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const renderAbout = (snapshot: ManagerSnapshot): void => {
     setHeading('项目、社区与支持入口', snapshot, { brand: true })
     const identity = create(document, 'div', 'cxm-about-identity')
-    const mark = createDarkBackgroundBrandMark(document)
+    const mark = createAdaptiveBrandMark(document)
     mark.classList.add('cxm-about-mark')
     const identityCopy = create(document, 'div', 'cxm-about-identity-copy')
     identityCopy.append(

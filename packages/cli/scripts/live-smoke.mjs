@@ -26,6 +26,9 @@ const parsed = parseArgs({
     'manager-click-external': { type: 'boolean', default: false },
     'manager-viewport-width': { type: 'string' },
     'manager-breadcrumb-width': { type: 'string' },
+    'manager-theme-cycle': { type: 'boolean', default: false },
+    'manager-light-screenshot': { type: 'string' },
+    'manager-dark-screenshot': { type: 'string' },
     'trigger-screenshot': { type: 'string' },
     'color-scheme': { type: 'string' },
     locale: { type: 'string' },
@@ -81,6 +84,8 @@ if (parsed.values['authorization-plugin'] === undefined && (
   || parsed.values['authorization-decline-optional']
   || parsed.values['authorization-screenshot'] !== undefined
 )) throw new Error('authorization smoke options require --authorization-plugin')
+if ((parsed.values['manager-light-screenshot'] !== undefined || parsed.values['manager-dark-screenshot'] !== undefined)
+  && !parsed.values['manager-theme-cycle']) throw new Error('manager theme screenshots require --manager-theme-cycle')
 if (parsed.values['manager-lifecycle-source'] !== undefined) {
   if (parsed.values.report === undefined) throw new Error('--manager-lifecycle-source requires --report')
   if (!path.isAbsolute(parsed.values['manager-lifecycle-source'])) {
@@ -2854,6 +2859,77 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   }
 }
 
+let managerThemeReport
+if (parsed.values['manager-theme-cycle']) {
+  const inspectManagerTheme = async (theme, reopen) => {
+    const evaluated = await send('Runtime.evaluate', {
+      expression: `(async () => {
+        const root = document.documentElement
+        globalThis.__cordisxRestoreManagerThemeSmoke ??= root.className
+        const trigger = document.querySelector('[data-cordisx-manager-trigger]')
+        const modal = document.querySelector('[data-cordisx-manager-modal]')
+        if (modal === null) return null
+        root.classList.remove('electron-dark', 'electron-light')
+        root.classList.add(${JSON.stringify(theme === 'light' ? 'electron-light' : 'electron-dark')})
+        if (${reopen} && !modal.hidden) document.querySelector('.cxm-close')?.click()
+        if (modal.hidden && trigger !== null) trigger.click()
+        else if (modal.hidden) modal.hidden = false
+        document.querySelector('[data-tab="about"]')?.click()
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        const dialog = modal.querySelector('[role="dialog"]')
+        const marks = [...modal.querySelectorAll('img[data-cordisx-brand-mark][data-brand-rendering="direct-host"]')]
+        const navIcon = document.querySelector('[data-tab="plugins"] .cxm-nav-icon')
+        const headingIcon = document.querySelector('.cxm-heading-leading')
+        return {
+          rect: dialog === null ? null : (() => {
+            const rect = dialog.getBoundingClientRect()
+            return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+          })(),
+          systemTheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+          appTheme: modal.dataset.cordisxAppTheme ?? null,
+          themeSource: modal.dataset.cordisxThemeSource ?? null,
+          modalHidden: modal.hidden,
+          navIconColor: navIcon === null ? null : getComputedStyle(navIcon).color,
+          headingIconColor: headingIcon === null ? null : getComputedStyle(headingIcon).color,
+          marks: marks.map(mark => ({
+            background: mark.dataset.hostBackground ?? null,
+            lightAsset: decodeURIComponent(mark.src).includes('CordisX mark for light backgrounds'),
+            darkAsset: decodeURIComponent(mark.src).includes('CordisX mark for dark backgrounds'),
+            selectable: getComputedStyle(mark).userSelect,
+            draggable: mark.draggable,
+            ariaHidden: mark.getAttribute('aria-hidden'),
+          })),
+        }
+      })()`,
+      awaitPromise: true,
+      returnByValue: true,
+    })
+    if (evaluated.exceptionDetails !== undefined) {
+      throw new Error(evaluated.exceptionDetails.exception?.description ?? evaluated.exceptionDetails.text ?? 'manager theme evaluation failed')
+    }
+    return evaluated.result?.result?.value ?? null
+  }
+
+  const light = await inspectManagerTheme('light', false)
+  if (parsed.values['manager-light-screenshot'] !== undefined) {
+    await capture(light?.rect ?? null, parsed.values['manager-light-screenshot'], 'CordisX Manager light theme')
+  }
+  const darkReopened = await inspectManagerTheme('dark', true)
+  if (parsed.values['manager-dark-screenshot'] !== undefined) {
+    await capture(darkReopened?.rect ?? null, parsed.values['manager-dark-screenshot'], 'CordisX Manager dark theme')
+  }
+  managerThemeReport = { light, darkReopened }
+  console.log(`manager-theme=${JSON.stringify(managerThemeReport)}`)
+  await send('Runtime.evaluate', {
+    expression: `(() => {
+      const root = document.documentElement
+      const previous = globalThis.__cordisxRestoreManagerThemeSmoke
+      if (typeof previous === 'string') root.className = previous
+      delete globalThis.__cordisxRestoreManagerThemeSmoke
+    })()`,
+  })
+}
+
 if (parsed.values['trigger-screenshot'] !== undefined) {
   const evaluatedTrigger = await send('Runtime.evaluate', {
     expression: `(() => {
@@ -2936,6 +3012,7 @@ if (parsed.values.report !== undefined) {
     baseline: report,
     interactionSafety,
     ...(managerReport === undefined ? {} : { manager: managerReport }),
+    ...(managerThemeReport === undefined ? {} : { managerTheme: managerThemeReport }),
     ...(exerciseReport === undefined ? {} : { exercise: exerciseReport }),
     ...(settingsTabsReport === undefined ? {} : { managerSettings: settingsTabsReport }),
     ...(configExerciseReport === undefined ? {} : { pluginConfiguration: configExerciseReport }),

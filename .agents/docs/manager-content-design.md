@@ -261,11 +261,12 @@ decorative container. Other primary pages use their own host-owned semantic
 icons, while secondary pages use the back control.
 
 Brand rendering preserves the official asset rather than approximating it.
-The host-side manager trigger observes the host root's `electron-dark` /
-`electron-light` theme projection and selects the matching official direct SVG.
-The manager dialog has a fixed dark background, so all three About marks use
-the official dark-background SVG directly. Every placement therefore retains
-the same continuous per-segment grey depth shading and never flattens it into a
+The host-side manager trigger and every Manager About mark observe the host
+root's `electron-dark` / `electron-light` theme projection and select the
+matching official direct SVG. Theme changes update every already-mounted mark,
+including an open dialog, and newly rendered/reopened Manager content begins
+with the current Host projection. Every placement therefore retains the same
+continuous per-segment grey depth shading and never flattens it into a
 monochrome mask, recolors it with `currentColor`, redraws its paths, or adds a
 frame or background.
 
@@ -546,9 +547,8 @@ At minimum they prove:
   anchors `关于 CordisX` at the bottom;
 - the modal sidebar begins with navigation and contains no identity block;
   About alone uses the CordisX mark in its navigation item, header seat, and
-  identity row; those three marks directly render the official dark-background
-  asset with its multi-grey depth shading, while the host-side trigger remains
-  the only adaptive `currentColor` mask;
+  identity row; those three marks, like the host-side trigger, directly render
+  the official Host-theme-matched asset with its multi-grey depth shading;
 - the About identity uses the runtime version, its action links have verified
   public destinations and safe external-link attributes, and the old runtime
   metric grid and generic boundary copy are absent;
