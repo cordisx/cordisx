@@ -238,19 +238,35 @@ describe('renderer bundle', () => {
     expect(sessionHeaderAction.getAttribute('aria-label')).toBe('Open main page')
     expect(sessionHeaderAction.dataset.cordisxTooltip).toBe('Open main page')
     const composerAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="composer.submit.before"] button')!
-    expect(composerAction.className).toContain('codex-composer-button')
+    expect(composerAction.className).toContain('cordisx-composer-action')
+    expect(composerAction.className).not.toContain('codex-composer-button')
     expect(composerAction.classList.contains('cordisx-icon-only-control')).toBe(false)
-    expect(dom.window.getComputedStyle(composerAction).width).toBe('24px')
-    expect(dom.window.getComputedStyle(composerAction).height).toBe('24px')
     expect(dom.window.getComputedStyle(composerAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('')
     expect(dom.window.getComputedStyle(composerAction.querySelector('.cordisx-host-icon')!).width).toBe('16px')
     expect(dom.window.getComputedStyle(composerAction.querySelector('svg')!).width).toBe('16px')
     expect(composerAction.getAttribute('aria-label')).toBe('Refresh snapshot')
     expect(composerAction.dataset.cordisxTooltip).toBe('Refresh snapshot')
+    expect(composerAction.textContent).toBe('')
+    expect(composerAction.querySelector('[data-host-icon="host:refresh"] svg')).not.toBeNull()
+    const composerStyle = dom.window.getComputedStyle(composerAction)
+    expect(composerStyle.width).toBe('28px')
+    expect(composerStyle.minWidth).toBe('28px')
+    expect(composerStyle.height).toBe('28px')
+    expect(composerStyle.padding).toBe('0px')
+    expect(composerStyle.borderRadius).toBe('9999px')
+    expect(composerStyle.backgroundColor).toBe('rgba(0, 0, 0, 0)')
+    expect(composerAction.querySelector<HTMLElement>('.cordisx-host-icon')?.getBoundingClientRect).toBeTypeOf('function')
+    expect(structuredStyles).toContain('.cordisx-composer-action:hover:not(:disabled)')
+    expect(structuredStyles).toContain('.cordisx-composer-action:focus-visible')
+    expect(structuredStyles).toContain('.cordisx-composer-action:disabled')
+    expect(structuredStyles).toContain('.cordisx-composer-submit-before > .cordisx-surface-overflow > summary')
+    composerAction.disabled = true
+    expect(dom.window.getComputedStyle(composerAction).opacity).toBe('0.4')
+    composerAction.disabled = false
     const composerSeat = composerAction.closest<HTMLElement>('[data-cordisx-surface-host="composer.submit.before"]')!
     const replacementSubmit = dom.window.document.createElement('button')
     replacementSubmit.id = 'native-stop'
-    replacementSubmit.className = 'codex-composer-button'
+    replacementSubmit.className = 'codex-composer-stop bg-primary-solid'
     replacementSubmit.textContent = 'Stop'
     dom.window.document.getElementById('native-submit')?.replaceWith(replacementSubmit)
     await settle()
@@ -258,6 +274,20 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="composer.submit.before"]')).toBe(composerSeat)
     expect(composerSeat.nextElementSibling?.id).toBe('native-stop')
     expect(replacementSubmit.parentElement?.id).toBe('native-composer-actions')
+    expect(composerSeat.querySelector('button')?.className).toContain('cordisx-composer-action')
+    expect(composerSeat.querySelector('button')?.className).not.toContain('bg-primary-solid')
+    const replacementCluster = dom.window.document.createElement('div')
+    replacementCluster.id = 'native-composer-actions-rerendered'
+    replacementCluster.style.display = 'flex'
+    replacementCluster.innerHTML = '<button id="native-submit-rerendered" class="codex-composer-button bg-primary-solid">Send</button>'
+    dom.window.document.getElementById('native-composer-actions')?.replaceWith(replacementCluster)
+    await settle()
+    await settle()
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="composer.submit.before"]')).toBe(composerSeat)
+    expect(composerSeat.parentElement).toBe(replacementCluster)
+    expect(composerSeat.nextElementSibling?.id).toBe('native-submit-rerendered')
+    expect(composerSeat.querySelector('button')?.className).toContain('cordisx-composer-action')
+    expect(composerSeat.querySelector('button')?.className).not.toContain('bg-primary-solid')
     const sameToolbarAction = toolbarAction
     const nativeTooltip = dom.window.document.createElement('div')
     nativeTooltip.setAttribute('role', 'tooltip')

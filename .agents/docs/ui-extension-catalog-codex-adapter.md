@@ -49,6 +49,30 @@ the generic main layout, localized labels, or geometry-only matching. A zero
 or ambiguous result remains unavailable with the existing semantic-anchor
 diagnostic.
 
+### Composer action visual variant
+
+The verified composer action cluster separates neutral utility controls from
+the high-emphasis native submit/queue/stop control. A CordisX action anchored
+at `submit` with `placement: before` therefore uses a host-owned composer
+utility variant; it must not copy the native submit control's solid background,
+opacity, or send-state classes.
+
+For host `26.818.41509` (build `6962`), the variant follows the adjacent native
+model/language and dictation controls: a 28 by 28 pixel circular hit target, a
+16 pixel centered host-token icon, transparent idle background, tertiary
+foreground, primary-ghost hover/open background, two-pixel focus-visible ring,
+and 40 percent disabled opacity. The native action-cluster gap remains the
+source of spacing between the CordisX seat and the native control. Multiple
+CordisX actions use the same gap inside the seat, with the host-owned direct
+limit and overflow trigger preserving the 28-pixel variant at narrow widths.
+
+The insertion seat remains an immediate sibling before the complete native
+submit/queue/stop control. It does not enter a native tooltip wrapper, proxy a
+native click, or inspect and reproduce the current send-state icon. The Host
+owns the button DOM, style tokens, body-portal tooltip, accessibility name,
+disabled/loading projection, no-drag behavior, overflow, and reattachment when
+Codex React replaces either the terminal native control or its action cluster.
+
 ## Payload families
 
 The catalog uses a small set of shapes instead of one API per visual style:

@@ -426,6 +426,8 @@ interface NativeActionSeat extends NativeSurfaceSeat {
   readonly template: HTMLButtonElement
 }
 
+type NativeActionPattern = 'toolbar' | 'footer' | 'shortcut' | 'composer'
+
 export function partitionDirectActions<Item>(items: readonly Item[], directLimit: number): Readonly<{
   direct: readonly Item[]
   overflow: readonly Item[]
@@ -683,7 +685,7 @@ class StructuredSurfaceRenderer {
         && (item.item as { anchor: string; placement: string }).placement === 'before')
       if (items.length > 0) {
         const root = this.placeRoot(composerSubmitSeat, usedRoots)
-        if (rebuild || root.childElementCount === 0) this.renderActions(root, items, nextSites, 'submit.before', composerSubmitSeat.template, 'shortcut', 2, false)
+        if (rebuild || root.childElementCount === 0) this.renderActions(root, items, nextSites, 'submit.before', composerSubmitSeat.template, 'composer', 2, false)
       }
     }
     if (environment !== undefined) {
@@ -796,16 +798,17 @@ class StructuredSurfaceRenderer {
     action: CordisXStructuredAction,
     path: string,
     nextSites: Set<string>,
-    nativePattern?: 'toolbar' | 'footer' | 'shortcut',
+    nativePattern?: NativeActionPattern,
     nativeTemplate?: HTMLButtonElement,
     afterActivate?: () => void,
     reduceGlyph = true,
   ): HTMLButtonElement {
     const button = this.document.createElement('button')
     button.type = 'button'
+    const nativeClasses = nativePattern === 'composer' ? '' : nativeTemplate?.className ?? ''
     button.className = nativePattern === undefined
       ? 'cordisx-action'
-      : `${nativeTemplate?.className ?? ''} cordisx-action${reduceGlyph ? ' cordisx-icon-only-control' : ''} cordisx-native-icon-action cordisx-${nativePattern}-action`.trim()
+      : `${nativeClasses} cordisx-action${reduceGlyph ? ' cordisx-icon-only-control' : ''} cordisx-native-icon-action cordisx-${nativePattern}-action`.trim()
     button.dataset.cordisxNoDrag = 'true'
     button.style.setProperty('-webkit-app-region', 'no-drag')
     const label = this.text(snapshot, action.label, `${path}.label`, nextSites)
@@ -902,7 +905,7 @@ class StructuredSurfaceRenderer {
     sites: Set<string>,
     path: string,
     template: HTMLButtonElement,
-    preferredPattern?: 'toolbar' | 'footer' | 'shortcut',
+    preferredPattern?: NativeActionPattern,
     directLimit = Number.POSITIVE_INFINITY,
     reduceGlyph = true,
   ): void {
@@ -1048,7 +1051,8 @@ function installStyles(document: Document): () => void {
     .cordisx-sidebar-navigation { display: block; width: 100%; min-width: 0; }
     .cordisx-sidebar-footer-before, .cordisx-sidebar-footer-after { display: flex; flex: 0 0 auto; height: 32px; align-items: center; gap: 4px; min-width: 0; }
     .cordisx-toolbar-before, .cordisx-toolbar-after { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: 4px; min-width: 0; }
-    .cordisx-session-header-actions, .cordisx-composer-submit-before { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: 4px; min-width: 0; }
+    .cordisx-session-header-actions { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: 4px; min-width: 0; }
+    .cordisx-composer-submit-before { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: 8px; min-width: 0; }
     .cordisx-environment { display: block; width: 100%; min-width: 0; padding: 6px; }
     .cordisx-navigation, .cordisx-env-section { display: grid; gap: 1px; }
     .cordisx-nav-row { display: grid; grid-template-columns: minmax(0,1fr) max-content; align-items: center; height: var(--height-token-row,30px); padding: 0 8px; border-radius: var(--radius-lg,10px); -webkit-app-region: no-drag; }
@@ -1063,6 +1067,11 @@ function installStyles(document: Document): () => void {
     .cordisx-action:not(.cordisx-native-icon-action) { display: inline-flex; align-items: center; gap: 6px; min-height: 27px; border: 1px solid transparent; border-radius: var(--radius-lg,10px); background: transparent; color: inherit; cursor: default; padding: 4px 7px; font: inherit; white-space: nowrap; user-select: none; -webkit-user-select: none; -webkit-app-region: no-drag; }
     .cordisx-native-icon-action { flex: 0 0 auto; -webkit-app-region: no-drag; }
     .cordisx-shortcut-action:not([class*="size-"]):not([class*="h-"]) { display: inline-flex; width: 24px; min-width: 24px; height: 24px; min-height: 24px; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: var(--radius-lg,8px); background: transparent; color: var(--color-text-tertiary,rgba(255,255,255,.5)); }
+    .cordisx-composer-action { display: inline-flex; flex: 0 0 auto; width: 28px; min-width: 28px; height: 28px; min-height: 28px; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 9999px; background: transparent; color: var(--color-text-tertiary,currentColor); cursor: default; }
+    .cordisx-composer-action:hover:not(:disabled), .cordisx-composer-action[data-state="open"] { background: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); }
+    .cordisx-composer-action:focus { outline: none; }
+    .cordisx-composer-action:focus-visible { outline: 2px solid var(--color-ring,rgba(131,195,255,.76)); outline-offset: 0; }
+    .cordisx-composer-action:disabled { cursor: default; opacity: .4; }
     .cordisx-host-icon { display: inline-flex; flex: 0 0 auto; width: 20px; height: 20px; align-items: center; justify-content: center; line-height: 0; pointer-events: none; user-select: none; -webkit-user-select: none; }
     .cordisx-host-icon svg { display: block; width: 20px; height: 20px; fill: currentColor; pointer-events: none; }
     .cordisx-nav-primary > .cordisx-host-icon { width: 16px; height: 16px; }
@@ -1070,6 +1079,7 @@ function installStyles(document: Document): () => void {
     .cordisx-icon-only-control { --cordisx-icon-only-glyph-size: 16px; }
     .cordisx-icon-only-control.cordisx-shortcut-action { --cordisx-icon-only-glyph-size: 12px; }
     .cordisx-icon-only-control .cordisx-host-icon svg { width: var(--cordisx-icon-only-glyph-size); height: var(--cordisx-icon-only-glyph-size); }
+    .cordisx-composer-action .cordisx-host-icon, .cordisx-composer-action .cordisx-host-icon svg { width: 16px; height: 16px; }
     .cordisx-native-menu-root { display: contents; }
     .cordisx-native-menu-item { -webkit-app-region: no-drag; }
     .cordisx-native-menu-row { display: flex; width: 100%; align-items: center; gap: 6px; }
@@ -1079,6 +1089,11 @@ function installStyles(document: Document): () => void {
     .cordisx-surface-overflow { position: relative; display: inline-flex; flex: 0 0 auto; -webkit-app-region: no-drag; }
     .cordisx-surface-overflow > summary { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: var(--radius-lg,8px); color: var(--color-text-tertiary,rgba(255,255,255,.5)); cursor: default; list-style: none; -webkit-app-region: no-drag; }
     .cordisx-surface-overflow > summary::-webkit-details-marker { display: none; }
+    .cordisx-composer-submit-before > .cordisx-surface-overflow > summary { width: 28px; height: 28px; border: 1px solid transparent; border-radius: 9999px; background: transparent; color: var(--color-text-tertiary,currentColor); }
+    .cordisx-composer-submit-before > .cordisx-surface-overflow > summary:hover, .cordisx-composer-submit-before > .cordisx-surface-overflow[open] > summary { background: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); }
+    .cordisx-composer-submit-before > .cordisx-surface-overflow > summary:focus { outline: none; }
+    .cordisx-composer-submit-before > .cordisx-surface-overflow > summary:focus-visible { outline: 2px solid var(--color-ring,rgba(131,195,255,.76)); outline-offset: 0; }
+    .cordisx-composer-submit-before > .cordisx-surface-overflow > summary .cordisx-host-icon, .cordisx-composer-submit-before > .cordisx-surface-overflow > summary .cordisx-host-icon svg { width: 16px; height: 16px; }
     .cordisx-surface-overflow-menu { position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; display: grid; min-width: 160px; padding: 4px; border: 1px solid var(--color-border,rgba(255,255,255,.084)); border-radius: var(--radius-lg,10px); background: var(--color-background-elevated-secondary,#242424); box-shadow: 0 8px 28px rgba(0,0,0,.28); }
     .cordisx-surface-overflow:not([open]) > .cordisx-surface-overflow-menu { display: none; }
     .cordisx-env-section { margin-top: 6px; padding: 7px; border-radius: 8px; background: rgba(255,255,255,.04); }

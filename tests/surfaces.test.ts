@@ -14,6 +14,10 @@ describe('SurfaceRegistry', () => {
     const partition = partitionDirectActions(['action-1', 'action-2', 'utility-1', 'utility-2'], 3)
     expect(partition).toEqual({ direct: ['action-1', 'action-2', 'utility-1'], overflow: ['utility-2'] })
     expect(Object.isFrozen(partition)).toBe(true)
+    expect(partitionDirectActions(['composer-1', 'composer-2', 'composer-3'], 2)).toEqual({
+      direct: ['composer-1', 'composer-2'],
+      overflow: ['composer-3'],
+    })
   })
   it('retains immutable data, sorts deterministically, and replaces snapshots through an owned handle', () => {
     const contexts = new HostContextStore()
