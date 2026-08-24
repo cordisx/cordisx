@@ -2,6 +2,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
+import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from '../packages/cli/src/contracts.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
 
@@ -26,8 +27,34 @@ interface RuntimeSnapshot {
   }[]
   readonly commands: readonly { owner: string; qualifiedId: string }[]
   readonly navigation: {
-    readonly routes: readonly { owner: string; qualifiedId: string; valid: boolean }[]
-    readonly pages: readonly { owner: string; qualifiedId: string }[]
+    readonly routes: readonly {
+      owner: string
+      qualifiedId: string
+      valid: boolean
+      definition: {
+        $schema: string
+        schemaVersion: number
+        id: string
+        path: string
+        outlet: string
+        page: string
+        title: { namespace: string; key: string; fallback: string }
+        description: { namespace: string; key: string; fallback: string }
+      }
+    }[]
+    readonly pages: readonly {
+      owner: string
+      qualifiedId: string
+      metadata: {
+        $schema: string
+        schemaVersion: number
+        id: string
+        title: { namespace: string; key: string; fallback: string }
+        description: { namespace: string; key: string; fallback: string }
+        icon?: string
+        chrome?: string
+      }
+    }[]
     readonly outlets: readonly {
       id: string
       available: boolean
@@ -398,10 +425,44 @@ describe('Agent Trace Showcase renderer integration', () => {
     ])
     expect(runtime.snapshot().commands).toEqual([])
     expect(runtime.snapshot().navigation.routes).toEqual([
-      expect.objectContaining({ qualifiedId: 'agent-trace-showcase:session.timeline', valid: true }),
+      expect.objectContaining({
+        qualifiedId: 'agent-trace-showcase:session.timeline',
+        valid: true,
+        definition: {
+          $schema: CORDISX_ROUTE_SCHEMA_V2,
+          schemaVersion: 2,
+          id: 'session.timeline',
+          path: '/sessions/:sessionId/agent-trace',
+          outlet: 'session.content',
+          page: 'session.timeline',
+          title: {
+            namespace: 'agent-trace-showcase', key: 'route.timeline.title', fallback: 'Open Agent Trace',
+          },
+          description: {
+            namespace: 'agent-trace-showcase', key: 'route.timeline.description',
+            fallback: 'Use the conversation header action to open the Agent Trace Timeline for the active session.',
+          },
+        },
+      }),
     ])
     expect(runtime.snapshot().navigation.pages).toEqual([
-      expect.objectContaining({ qualifiedId: 'agent-trace-showcase:session.timeline' }),
+      expect.objectContaining({
+        qualifiedId: 'agent-trace-showcase:session.timeline',
+        metadata: {
+          $schema: CORDISX_PAGE_SCHEMA_V3,
+          schemaVersion: 3,
+          id: 'session.timeline',
+          title: {
+            namespace: 'agent-trace-showcase', key: 'page.timeline.title', fallback: 'Agent Trace Timeline',
+          },
+          description: {
+            namespace: 'agent-trace-showcase', key: 'page.timeline.description',
+            fallback: 'Inspect input, model, tool, delivery, and prompt-contribution events for the active Agent session.',
+          },
+          icon: 'host:history',
+          chrome: 'body-only',
+        },
+      }),
     ])
     expect(runtime.snapshot().registrations.filter(item => item.owner === 'agent-trace-showcase')).toEqual([
       expect.objectContaining({
@@ -476,7 +537,7 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(entryButton.getAttribute('aria-pressed')).toBe('true')
     const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="agent-trace-showcase:session.timeline"]')!
     expect(page.dataset.cordisxPageChromePolicy).toBe('body-only')
-    expect(page.getAttribute('aria-label')).toBe('Agent Trace')
+    expect(page.getAttribute('aria-label')).toBe('Agent Trace 时间线')
     expect(page.querySelector('[data-cordisx-page-chrome]')).toBeNull()
     expect(page.querySelector('[data-cordisx-page-title]')).toBeNull()
     expect(page.querySelector('button[aria-label="Close"]')).toBeNull()

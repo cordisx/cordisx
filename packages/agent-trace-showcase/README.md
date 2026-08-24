@@ -11,6 +11,14 @@ press Escape in the Timeline to close. The Timeline body begins directly below
 the preserved native session header; it does not add a second CordisX title/X
 row.
 
+The plugin publishes separate localized route-v2 and page-v3 metadata. The
+route copy tells users that the conversation header action opens Agent Trace
+for the active session; the page copy explains that the Timeline contains that
+Agent session's input, model, tool, delivery, and prompt-contribution events.
+Canonical route and page ids, the path, the outlet, and the page reference stay
+untranslated machine identity. This metadata gives the Host no Manager DOM or
+free-renderer authority.
+
 ## Timeline
 
 The Timeline groups records by turn and step and projects four lanes:
