@@ -161,6 +161,21 @@ shared by title-bar/header structured controls rather than implemented by an
 Agent Trace selector or plugin listener. Native drag space stays outside the
 seat, and the host verifies the button remains the pointer hit-test target.
 
+Toolbar button state and spacing are also Host-owned. The renderer does not
+copy a native reference button's `className`: Codex may add unconditional
+pressed background/foreground utilities to that node, and copying the class
+would project one native toggle's state onto every CordisX sibling. CordisX
+uses a stable 28-pixel toolbar variant and projects idle, hover, focus-visible,
+open, disabled, and route-toggle pressed states on each generated button. Only
+an exact presented route produces `aria-pressed="true"` and the pressed style.
+The independent `--cordisx-toolbar-action-gap` and
+`--cordisx-toolbar-outer-group-gap` tokens are both verified as six pixels for
+the current host: the first separates actions inside the CordisX seat and the
+second separates the seat from the adjacent native summary toggle. Workspace
+slot sizing continues to add only measured contribution widths to the native
+minimum; it must not add `roots.length * gap`, so the verified two-root slot
+remains 126 pixels and retains the native `ms-auto` alignment.
+
 Route-backed controls may opt into protocol-v3 `toggle` behavior. The host
 binds contextual session parameters, compares the exact owner-qualified route
 and parameters with current outlet state, and projects `aria-pressed`; plugins

@@ -137,22 +137,24 @@ if (colorScheme !== undefined) {
   await new Promise(resolve => setTimeout(resolve, 80))
 }
 if (parsed.values['select-thread'] !== undefined) {
-  const selected = await send('Runtime.evaluate', {
-    expression: `(async () => {
+  const target = await send('Runtime.evaluate', {
+    expression: `(() => {
       document.querySelector('.cxm-close')?.click()
       const id = ${JSON.stringify(parsed.values['select-thread'])}
       const row = [...document.querySelectorAll('[data-app-action-sidebar-thread-id]')]
         .find(element => element.getAttribute('data-app-action-sidebar-thread-id') === id)
-      if (row === undefined) return { clicked: false, id }
-      row.click()
-      await new Promise(resolve => setTimeout(resolve, 1800))
-      return {
-        clicked: true,
-        id,
-        selected: document.querySelector('[data-app-action-sidebar-thread-selected="true"]')?.getAttribute('data-app-action-sidebar-thread-id') ?? null,
-      }
+      const rect = row?.getBoundingClientRect()
+      return rect === undefined ? null : { id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }
     })()`,
-    awaitPromise: true,
+    returnByValue: true,
+  })
+  const value = target.result?.value
+  if (value === null || value === undefined) throw new Error(`thread row not found: ${parsed.values['select-thread']}`)
+  await pointerClick(value)
+  await new Promise(resolve => setTimeout(resolve, 1800))
+  const selected = await send('Runtime.evaluate', {
+    expression: `(() => ({ clicked: true, id: ${JSON.stringify(parsed.values['select-thread'])},
+      selected: document.querySelector('[data-app-action-sidebar-thread-selected="true"]')?.getAttribute('data-app-action-sidebar-thread-id') ?? null }))()`,
     returnByValue: true,
   })
   console.log(`thread=${JSON.stringify(selected.result?.value)}`)
@@ -1089,6 +1091,7 @@ if (parsed.values['ui-catalog']) {
       id: 'composer.toolbar.items', key: 'composer.submit.before', contributionId: 'slot-showcase:submit-before',
     }]
     const rootFor = config => document.querySelector(selectorFor(config.key))
+    const contributionFor = config => rootFor(config)?.querySelector('[data-cordisx-contribution-id="' + CSS.escape(config.contributionId) + '"]') ?? null
     await waitFor(() => pointConfig.every(config => visible(rootFor(config))), 'initial extension seats')
     const nativeFor = root => {
       const anchor = root?.nextSibling
@@ -1124,26 +1127,26 @@ if (parsed.values['ui-catalog']) {
           && item.identity.pluginId === 'slot-showcase' && item.identity.pointId === config.id)?.policy ?? 'inherit'
         try {
           await runtime.setExtensionPointPolicy(plugin.source, 'slot-showcase', config.id, 'deny')
-          const hidden = await waitFor(() => rootFor(config) === null
+          const hidden = await waitFor(() => contributionFor(config) === null
             && runtime.snapshot().registrations.find(item => item.owner === 'slot-showcase' && item.surface === config.id)?.authorized === false, config.id + ' deny')
           const nativeWhileDenied = before?.nativeControl?.isConnected === true
             && before.nativeAnchor?.parentElement === before.nativeParent && visible(before.nativeControl)
           await runtime.setExtensionPointPolicy(plugin.source, 'slot-showcase', config.id, 'allow')
-          const restored = await waitFor(() => visible(rootFor(config)), config.id + ' allow')
+          const restored = await waitFor(() => visible(contributionFor(config)), config.id + ' allow')
           const after = rootFor(config)
           policyTransitions.push({ id: config.id, original, hidden, restored, sameSeat: after === before?.root,
             nativeWhileDenied, sameNative: nativeFor(after).control === before?.nativeControl,
             sameNativeParent: before?.nativeAnchor?.parentElement === before?.nativeParent })
         } finally {
           await runtime.setExtensionPointPolicy(plugin.source, 'slot-showcase', config.id, original)
-          if (original !== 'deny') await waitFor(() => visible(rootFor(config)), config.id + ' policy restore')
+          if (original !== 'deny') await waitFor(() => visible(contributionFor(config)), config.id + ' policy restore')
         }
       }
     }
     let pluginBlock = null
     if (typeof runtime.setPluginBlocked === 'function') {
       await runtime.setPluginBlocked('slot-showcase', true)
-      const blocked = await waitFor(() => pointConfig.every(config => rootFor(config) === null)
+      const blocked = await waitFor(() => pointConfig.every(config => contributionFor(config) === null)
         && runtime.snapshot().plugins.find(item => item.id === 'slot-showcase')?.status === 'blocked', 'plugin block')
       const nativeWhileBlocked = pointConfig.every(config => {
         const before = initial.get(config.id)
@@ -1151,7 +1154,7 @@ if (parsed.values['ui-catalog']) {
           && visible(before.nativeControl)
       })
       await runtime.setPluginBlocked('slot-showcase', false)
-      const restored = await waitFor(() => pointConfig.every(config => visible(rootFor(config)))
+      const restored = await waitFor(() => pointConfig.every(config => visible(contributionFor(config)))
         && runtime.snapshot().plugins.find(item => item.id === 'slot-showcase')?.status === 'active', 'plugin restore')
       const sameNative = pointConfig.every(config => nativeFor(rootFor(config)).control === initial.get(config.id)?.nativeControl)
       pluginBlock = { blocked, nativeWhileBlocked, restored, sameNative }
@@ -1165,7 +1168,7 @@ if (parsed.values['ui-catalog']) {
       const nativeRect = rect(native.control)
       const parentRect = rect(root?.parentElement)
       const style = root === null ? null : getComputedStyle(root)
-      const action = root?.querySelector('button') ?? null
+      const action = contributionFor(config) ?? root?.querySelector('button') ?? null
       const actionStyle = action === null ? null : getComputedStyle(action)
       const point = snapshot.extensionPoints.points.find(item => item.id === config.id)
       const registration = snapshot.registrations.find(item => item.owner === 'slot-showcase' && item.surface === config.id)
@@ -1291,36 +1294,43 @@ if (parsed.values['ui-catalog']) {
     if (point?.captureRect !== null && point?.captureRect !== undefined) screenshots[id] = await capture(point.captureRect, artifact(suffix), id)
   }
   const tooltipEvidence = async (id, key, suffix) => {
-    const trigger = await evaluateByValue(`(() => {
-      const button = document.querySelector('[data-cordisx-surface-host=${JSON.stringify(key)}] button')
-      const rect = button?.getBoundingClientRect()
-      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-    })()`)
-    if (trigger === null) return { pass: false, error: 'trigger unavailable' }
-    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: trigger.x + trigger.width / 2, y: trigger.y + trigger.height / 2, pointerType: 'mouse' })
-    const activation = await evaluateByValue(`(() => {
-      const button = document.querySelector('[data-cordisx-surface-host=${JSON.stringify(key)}] button')
-      if (!(button instanceof HTMLElement)) return { focused: false, pointerDispatched: false }
-      button.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, pointerType: 'mouse' }))
-      button.focus()
-      return { focused: document.activeElement === button, pointerDispatched: true }
-    })()`)
-    await new Promise(resolve => setTimeout(resolve, 2_400))
-    const evidence = await evaluateByValue(`(() => {
-      const button = document.querySelector('[data-cordisx-surface-host=${JSON.stringify(key)}] button')
-      const tooltip = document.querySelector('.cordisx-host-tooltip')
-      if (button === null || tooltip === null) return { pass: false, error: 'tooltip unavailable' }
-      const trigger = button.getBoundingClientRect()
-      const tip = tooltip.getBoundingClientRect()
-      const rect = { x: Math.min(trigger.x, tip.x), y: Math.min(trigger.y, tip.y),
-        width: Math.max(trigger.right, tip.right) - Math.min(trigger.x, tip.x),
-        height: Math.max(trigger.bottom, tip.bottom) - Math.min(trigger.y, tip.y) }
-      const role = tooltip.getAttribute('role') ?? tooltip.role ?? null
-      return { pass: role === 'tooltip' && button.getAttribute('aria-describedby') === tooltip.id && tip.x >= 0 && tip.y >= 0
-        && tip.right <= innerWidth && tip.bottom <= innerHeight, text: tooltip.textContent, side: tooltip.dataset.side,
-        role, describedBy: button.getAttribute('aria-describedby'), tooltipId: tooltip.id, rect }
-    })()`)
-    evidence.activation = activation
+    const activations = []
+    let evidence = { pass: false, error: 'tooltip unavailable' }
+    for (let attempt = 1; attempt <= 3 && !evidence.pass; attempt += 1) {
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 100, pointerType: 'mouse' })
+      await new Promise(resolve => setTimeout(resolve, 80))
+      const trigger = await evaluateByValue(`(() => {
+        const button = document.querySelector('[data-cordisx-surface-host=${JSON.stringify(key)}] button')
+        const rect = button?.getBoundingClientRect()
+        return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+      })()`)
+      if (trigger === null) return { pass: false, error: 'trigger unavailable', activations }
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: trigger.x + trigger.width / 2, y: trigger.y + trigger.height / 2, pointerType: 'mouse' })
+      const activation = await evaluateByValue(`(() => {
+        const button = document.querySelector('[data-cordisx-surface-host=${JSON.stringify(key)}] button')
+        if (!(button instanceof HTMLElement)) return { focused: false, pointerDispatched: false, connected: false }
+        button.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, pointerType: 'mouse' }))
+        button.focus()
+        return { focused: document.activeElement === button, pointerDispatched: true, connected: button.isConnected }
+      })()`)
+      activations.push({ attempt, ...activation })
+      await new Promise(resolve => setTimeout(resolve, 900))
+      evidence = await evaluateByValue(`(() => {
+        const button = document.querySelector('[data-cordisx-surface-host=${JSON.stringify(key)}] button')
+        const tooltip = document.querySelector('.cordisx-host-tooltip')
+        if (button === null || tooltip === null) return { pass: false, error: 'tooltip unavailable' }
+        const trigger = button.getBoundingClientRect()
+        const tip = tooltip.getBoundingClientRect()
+        const rect = { x: Math.min(trigger.x, tip.x), y: Math.min(trigger.y, tip.y),
+          width: Math.max(trigger.right, tip.right) - Math.min(trigger.x, tip.x),
+          height: Math.max(trigger.bottom, tip.bottom) - Math.min(trigger.y, tip.y) }
+        const role = tooltip.getAttribute('role') ?? tooltip.role ?? null
+        return { pass: role === 'tooltip' && button.getAttribute('aria-describedby') === tooltip.id && tip.x >= 0 && tip.y >= 0
+          && tip.right <= innerWidth && tip.bottom <= innerHeight, text: tooltip.textContent, side: tooltip.dataset.side,
+          role, describedBy: button.getAttribute('aria-describedby'), tooltipId: tooltip.id, rect }
+      })()`)
+    }
+    evidence.activations = activations
     if (evidence.rect !== undefined) evidence.screenshot = await capture(evidence.rect, artifact(suffix), `${id} tooltip`)
     await evaluateByValue(`document.querySelector('[data-cordisx-surface-host=${JSON.stringify(key)}] button')?.blur()`)
     await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 100, pointerType: 'mouse' })
@@ -1336,7 +1346,254 @@ if (parsed.values['ui-catalog']) {
   for (const [id, evidence] of Object.entries(tooltips)) {
     uiCatalogReport.assertions.push({ id: `${id}.tooltip`, pass: evidence.pass, actual: evidence, expected: 'described, in viewport, dismissed' })
   }
-  uiCatalogReport = { ...uiCatalogReport, screenshots, tooltips,
+
+  const toolbarSnapshot = () => evaluateByValue(`(() => {
+    const rect = element => {
+      const value = element?.getBoundingClientRect()
+      return value === undefined ? null : { x: value.x, y: value.y, width: value.width, height: value.height, right: value.right, bottom: value.bottom }
+    }
+    const row = element => {
+      if (!(element instanceof HTMLButtonElement)) return null
+      const geometry = rect(element)
+      const style = getComputedStyle(element)
+      const hit = geometry === null ? null : document.elementFromPoint(geometry.x + geometry.width / 2, geometry.y + geometry.height / 2)
+      return {
+        owner: element.dataset.cordisxOwner ?? null,
+        surface: element.dataset.cordisxSurface ?? null,
+        contributionId: element.dataset.cordisxContributionId ?? null,
+        label: element.getAttribute('aria-label'),
+        pressed: element.getAttribute('aria-pressed'),
+        routeState: element.dataset.cordisxRouteState ?? null,
+        state: element.getAttribute('data-state'),
+        disabled: element.disabled,
+        focused: document.activeElement === element,
+        className: element.className,
+        background: style.backgroundColor,
+        color: style.color,
+        outline: style.outline,
+        geometry,
+        hit: hit === null ? null : {
+          tag: hit.tagName,
+          label: hit.getAttribute?.('aria-label') ?? null,
+          contributionId: hit.closest?.('[data-cordisx-contribution-id]')?.dataset.cordisxContributionId ?? null,
+        },
+      }
+    }
+    const sessionRoot = document.querySelector('[data-cordisx-surface-host="session.header.actions"]')
+    const nativeAnchor = sessionRoot?.nextElementSibling ?? null
+    const nativeSummary = nativeAnchor?.matches('button') ? nativeAnchor : nativeAnchor?.querySelector('button') ?? null
+    const sessionActions = [...(sessionRoot?.querySelectorAll(':scope > button') ?? [])].map(row).filter(Boolean)
+    const sessionRootRect = rect(sessionRoot)
+    const nativeSummaryRow = row(nativeSummary)
+    const actionGaps = sessionActions.slice(1).map((item, index) => item.geometry.x - sessionActions[index].geometry.right)
+    const nativeGap = sessionRootRect === null || nativeSummaryRow?.geometry === null ? null : nativeSummaryRow.geometry.x - sessionRootRect.right
+
+    const beforeRoot = document.querySelector('[data-cordisx-surface-host="toolbar.before"]')
+    const afterRoot = document.querySelector('[data-cordisx-surface-host="toolbar.after"]')
+    const workspaceAnchor = beforeRoot?.nextElementSibling ?? null
+    const workspaceNative = workspaceAnchor?.matches('button') ? workspaceAnchor : workspaceAnchor?.querySelector('button') ?? null
+    const beforeRect = rect(beforeRoot)
+    const afterRect = rect(afterRoot)
+    const workspaceNativeRect = rect(workspaceNative)
+    const slot = beforeRoot?.closest('[data-test-id="header-shell-slot"]') ?? null
+    const alignmentGroup = beforeRoot?.parentElement ?? null
+    return {
+      viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
+      selectedThread: document.querySelector('[data-app-action-sidebar-thread-selected="true"]')?.getAttribute('data-app-action-sidebar-thread-id') ?? null,
+      session: {
+        root: sessionRoot === null ? null : { className: sessionRoot.className, geometry: sessionRootRect,
+          gap: getComputedStyle(sessionRoot).gap, marginInlineEnd: getComputedStyle(sessionRoot).marginInlineEnd,
+          background: getComputedStyle(sessionRoot).backgroundColor },
+        actions: sessionActions,
+        native: nativeSummaryRow,
+        actionGaps,
+        nativeGap,
+        relationship: { sameParent: sessionRoot?.parentElement === nativeAnchor?.parentElement, immediateBefore: sessionRoot?.nextElementSibling === nativeAnchor },
+      },
+      workspace: {
+        before: { root: beforeRect, action: row(beforeRoot?.querySelector(':scope > button') ?? null) },
+        native: row(workspaceNative),
+        after: { root: afterRect, action: row(afterRoot?.querySelector(':scope > button') ?? null) },
+        compactGaps: {
+          beforeToNative: beforeRect === null || workspaceNativeRect === null ? null : workspaceNativeRect.x - beforeRect.right,
+          nativeToAfter: workspaceNativeRect === null || afterRect === null ? null : afterRect.x - workspaceNativeRect.right,
+        },
+        outerGapFromSummary: nativeSummaryRow?.geometry === null || beforeRect === null ? null : beforeRect.x - nativeSummaryRow.geometry.right,
+        slot: slot === null ? null : { className: slot.className, inlineWidth: slot.style.width, computedWidth: getComputedStyle(slot).width, geometry: rect(slot) },
+        alignmentGroup: alignmentGroup === null ? null : { className: alignmentGroup.className, hasMsAuto: alignmentGroup.classList.contains('ms-auto'), geometry: rect(alignmentGroup) },
+      },
+    }
+  })()`)
+
+  const annotateToolbar = async (label, suffix) => {
+    const clip = await evaluateByValue(`(() => {
+      document.querySelector('[data-cordisx-toolbar-smoke-annotation]')?.remove()
+      const root = document.querySelector('[data-cordisx-surface-host="session.header.actions"]')
+      const nativeAnchor = root?.nextElementSibling
+      const native = nativeAnchor?.matches('button') ? nativeAnchor : nativeAnchor?.querySelector('button')
+      const buttons = [...(root?.querySelectorAll(':scope > button') ?? []), native].filter(Boolean)
+      if (root === null || !(native instanceof HTMLElement) || buttons.length < 2) return null
+      const rootRect = root.getBoundingClientRect()
+      const nativeRect = native.getBoundingClientRect()
+      const layer = document.createElement('div')
+      layer.dataset.cordisxToolbarSmokeAnnotation = 'true'
+      Object.assign(layer.style, { position: 'fixed', inset: '0', zIndex: '2147483647', pointerEvents: 'none', font: '600 10px/1.2 ui-monospace, monospace', color: '#d51f3f' })
+      const add = (text, left, top, width = null) => {
+        const item = document.createElement('span')
+        item.textContent = text
+        Object.assign(item.style, { position: 'fixed', left: left + 'px', top: top + 'px', padding: '2px 3px', borderRadius: '3px', background: 'rgba(255,255,255,.94)', boxShadow: '0 0 0 1px rgba(213,31,63,.35)' })
+        if (width !== null) item.style.width = width + 'px'
+        layer.append(item)
+      }
+      const all = buttons.map(button => ({ button, rect: button.getBoundingClientRect() }))
+      for (let index = 1; index < all.length; index += 1) {
+        const left = all[index - 1].rect.right
+        const right = all[index].rect.x
+        const line = document.createElement('i')
+        Object.assign(line.style, { position: 'fixed', left: left + 'px', top: '39px', width: Math.max(1, right - left) + 'px', height: '2px', background: '#d51f3f' })
+        layer.append(line)
+        add(Math.round((right - left) * 100) / 100 + 'px', left - 7, 43)
+      }
+      add(${JSON.stringify(label)}, rootRect.x, 64)
+      document.body.append(layer)
+      return { x: Math.max(0, rootRect.x - 18), y: 0, width: nativeRect.right - rootRect.x + 36, height: 84 }
+    })()`)
+    if (clip === null) return null
+    const evidence = await capture(clip, artifact(suffix), label)
+    await evaluateByValue(`document.querySelector('[data-cordisx-toolbar-smoke-annotation]')?.remove()`)
+    return evidence
+  }
+
+  let inactive = await toolbarSnapshot()
+  const initialNativePressed = inactive.session.native?.pressed
+  if (initialNativePressed === 'true') {
+    await pointerClick(inactive.session.native.geometry)
+    await new Promise(resolve => setTimeout(resolve, 500))
+  }
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
+  await new Promise(resolve => setTimeout(resolve, 160))
+  inactive = await toolbarSnapshot()
+  screenshots['toolbar.inactive'] = await annotateToolbar('inactive · independent gaps', 'toolbar-inactive-annotated')
+
+  const originalThread = inactive.selectedThread
+  const threadTarget = await evaluateByValue(`(() => {
+    const selected = ${JSON.stringify(inactive.selectedThread)}
+    const row = [...document.querySelectorAll('[data-app-action-sidebar-thread-id]')]
+      .find(element => element.getClientRects().length > 0 && element.getAttribute('data-app-action-sidebar-thread-id') !== selected)
+    const rect = row?.getBoundingClientRect()
+    return rect === undefined ? null : { id: row.getAttribute('data-app-action-sidebar-thread-id'), x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+  })()`)
+  let threadSwitch = { attempted: false }
+  if (threadTarget !== null && originalThread !== null) {
+    await evaluateByValue(`(() => {
+      globalThis.__cordisxToolbarSmokeIdentity = {
+        root: document.querySelector('[data-cordisx-surface-host="session.header.actions"]'),
+        native: (() => { const root = document.querySelector('[data-cordisx-surface-host="session.header.actions"]'); const anchor = root?.nextElementSibling; return anchor?.matches('button') ? anchor : anchor?.querySelector('button') ?? null })(),
+      }
+      return true
+    })()`)
+    await pointerClick(threadTarget)
+    await new Promise(resolve => setTimeout(resolve, 1800))
+    const originalTarget = await evaluateByValue(`(() => {
+      const row = [...document.querySelectorAll('[data-app-action-sidebar-thread-id]')]
+        .find(element => element.getAttribute('data-app-action-sidebar-thread-id') === ${JSON.stringify(originalThread)})
+      const rect = row?.getBoundingClientRect()
+      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    })()`)
+    if (originalTarget !== null) {
+      await pointerClick(originalTarget)
+      await new Promise(resolve => setTimeout(resolve, 1800))
+    }
+    threadSwitch = await evaluateByValue(`(() => {
+      const root = document.querySelector('[data-cordisx-surface-host="session.header.actions"]')
+      const anchor = root?.nextElementSibling
+      const native = anchor?.matches('button') ? anchor : anchor?.querySelector('button') ?? null
+      return { attempted: true, alternate: ${JSON.stringify(threadTarget.id)}, restored: document.querySelector('[data-app-action-sidebar-thread-selected="true"]')?.getAttribute('data-app-action-sidebar-thread-id') === ${JSON.stringify(originalThread)},
+        rootConnected: root?.isConnected ?? false, immediateBefore: root?.nextElementSibling === anchor,
+        rootIdentityPreserved: root === globalThis.__cordisxToolbarSmokeIdentity?.root,
+        nativeIdentityPreserved: native === globalThis.__cordisxToolbarSmokeIdentity?.native }
+    })()`)
+  }
+
+  inactive = await toolbarSnapshot()
+  await pointerClick(inactive.session.native.geometry)
+  await new Promise(resolve => setTimeout(resolve, 500))
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
+  await new Promise(resolve => setTimeout(resolve, 160))
+  const nativeActive = await toolbarSnapshot()
+  screenshots['toolbar.native-active'] = await annotateToolbar('native pressed · CordisX idle', 'toolbar-native-active-annotated')
+
+  const hoverTarget = nativeActive.session.actions[0]?.geometry
+  if (hoverTarget !== null && hoverTarget !== undefined) {
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hoverTarget.x + hoverTarget.width / 2, y: hoverTarget.y + hoverTarget.height / 2, pointerType: 'mouse' })
+    await new Promise(resolve => setTimeout(resolve, 160))
+  }
+  const hovered = await toolbarSnapshot()
+  screenshots['toolbar.hover'] = await annotateToolbar('hover first · sibling idle', 'toolbar-hover-annotated')
+
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
+  await evaluateByValue(`document.querySelector('[data-cordisx-surface-host="session.header.actions"] > button:nth-of-type(2)')?.focus()`)
+  await new Promise(resolve => setTimeout(resolve, 120))
+  const focused = await toolbarSnapshot()
+  screenshots['toolbar.focus'] = await annotateToolbar('focus second · state isolated', 'toolbar-focus-annotated')
+
+  await evaluateByValue(`document.activeElement?.blur?.()`)
+  const beforeRoute = await toolbarSnapshot()
+  if (beforeRoute.session.native?.pressed === 'true') {
+    await pointerClick(beforeRoute.session.native.geometry)
+    await new Promise(resolve => setTimeout(resolve, 500))
+  }
+  const routeTargetState = await toolbarSnapshot()
+  const routeTarget = routeTargetState.session.actions.find(item => item.routeState !== null)?.geometry ?? null
+  if (routeTarget !== null) {
+    await pointerClick(routeTarget)
+    await new Promise(resolve => setTimeout(resolve, 500))
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
+    await new Promise(resolve => setTimeout(resolve, 160))
+  }
+  const routeActive = await toolbarSnapshot()
+  screenshots['toolbar.route-active'] = await annotateToolbar('single CordisX route pressed', 'toolbar-route-active-annotated')
+
+  const originalViewport = routeActive.viewport
+  await send('Emulation.setDeviceMetricsOverride', { width: Math.max(1100, originalViewport.width - 180), height: Math.max(760, originalViewport.height - 120), deviceScaleFactor: originalViewport.dpr, mobile: false })
+  await new Promise(resolve => setTimeout(resolve, 500))
+  const resized = await toolbarSnapshot()
+  await send('Emulation.clearDeviceMetricsOverride')
+  await new Promise(resolve => setTimeout(resolve, 300))
+
+  const transparent = value => value === 'rgba(0, 0, 0, 0)' || value === 'transparent'
+  const six = value => value !== null && Math.abs(value - 6) <= 0.5
+  const inactivePass = inactive.session.native?.pressed === 'false'
+    && inactive.session.actions.every(item => item.pressed !== 'true' && transparent(item.background))
+  const nativeActivePass = nativeActive.session.native?.pressed === 'true'
+    && nativeActive.session.actions.every(item => item.pressed !== 'true' && transparent(item.background)
+      && !item.className.includes('bg-text/5') && !item.className.includes('codex-toolbar-button'))
+  const spacingPass = nativeActive.session.actionGaps.every(six) && six(nativeActive.session.nativeGap)
+  const hoverPass = hovered.session.actions[0]?.background !== inactive.session.actions[0]?.background
+    && hovered.session.actions.slice(1).every((item, index) => item.background === inactive.session.actions[index + 1]?.background)
+    && hovered.session.actions.every(item => item.pressed !== 'true')
+  const focusPass = focused.session.actions[1]?.focused === true && focused.session.actions[1]?.pressed !== 'true'
+    && focused.session.actions[0]?.pressed !== 'true' && focused.session.native?.pressed === 'true'
+  const routePass = routeActive.session.actions.filter(item => item.pressed === 'true' && item.routeState === 'presented').length === 1
+    && routeActive.session.actions.filter(item => item.pressed !== 'true').every(item => transparent(item.background))
+    && routeActive.session.native?.pressed === 'false'
+  const workspacePass = nativeActive.workspace.slot?.inlineWidth === '126px'
+    && nativeActive.workspace.alignmentGroup?.hasMsAuto === true && six(nativeActive.workspace.outerGapFromSummary)
+  const resizePass = resized.session.actionGaps.every(six) && six(resized.session.nativeGap)
+    && resized.workspace.slot?.inlineWidth === '126px' && resized.session.root?.geometry?.right <= resized.viewport.width
+  uiCatalogReport.assertions.push(
+    { id: 'toolbar.state.inactive', pass: inactivePass, actual: inactive.session, expected: 'all controls inactive and transparent' },
+    { id: 'toolbar.state.native-isolated', pass: nativeActivePass, actual: nativeActive.session, expected: 'only native summary pressed' },
+    { id: 'toolbar.state.hover-isolated', pass: hoverPass, actual: hovered.session, expected: 'only hovered CordisX action changes background' },
+    { id: 'toolbar.state.focus-isolated', pass: focusPass, actual: focused.session, expected: 'focus belongs to one unpressed sibling' },
+    { id: 'toolbar.state.route-isolated', pass: routePass, actual: routeActive.session, expected: 'exactly one presented CordisX route is pressed' },
+    { id: 'toolbar.spacing.session', pass: spacingPass, actual: { actionGaps: nativeActive.session.actionGaps, nativeGap: nativeActive.session.nativeGap }, expected: '6px action and native boundary gaps' },
+    { id: 'toolbar.spacing.workspace-contract', pass: workspacePass, actual: nativeActive.workspace, expected: '126px slot, ms-auto, 6px outer group gap' },
+    { id: 'toolbar.resize', pass: resizePass, actual: resized, expected: 'state geometry survives renderer resize' },
+    { id: 'toolbar.thread-switch-reconcile', pass: threadSwitch.attempted === false || (threadSwitch.restored && threadSwitch.rootConnected && threadSwitch.immediateBefore), actual: threadSwitch, expected: 'real thread switch restores the selected session and valid sibling seat' },
+  )
+  const toolbarRegression = { initialNativePressed, inactive, nativeActive, hovered, focused, routeActive, resized, threadSwitch }
+  uiCatalogReport = { ...uiCatalogReport, screenshots, tooltips, toolbarRegression,
     result: uiCatalogReport.assertions.every(item => item.pass) ? 'pass' : 'fail' }
   console.log(`ui-catalog=${JSON.stringify(uiCatalogReport, null, 2)}`)
 }

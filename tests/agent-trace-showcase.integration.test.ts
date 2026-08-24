@@ -68,7 +68,12 @@ function rect(left: number, top: number, width: number, height: number): DOMRect
   } as DOMRect
 }
 
-async function fixture(sessionId: string, options: { headerAvailable?: boolean; mode?: 'fixture' | 'live' } = {}): Promise<{
+async function fixture(sessionId: string, options: {
+  headerAvailable?: boolean
+  mode?: 'fixture' | 'live'
+  sibling?: boolean
+  nativePressed?: boolean
+} = {}): Promise<{
   dom: JSDOM
   runtime: RuntimeHandle
   nativeConversation: HTMLElement
@@ -81,18 +86,29 @@ async function fixture(sessionId: string, options: { headerAvailable?: boolean; 
     rootDir: projectRoot,
     codex: { debugPort: 9229 },
     providers: [],
-    plugins: [{
-      id: 'agent-trace-showcase',
-      entry: path.join(projectRoot, 'packages/agent-trace-showcase/src/index.ts'),
-      enabled: true,
-      config: options.mode === 'live'
-        ? { mode: 'live' }
-        : { mode: 'fixture', sessionId, permissionPolicy: 'allow' },
-    }],
+    plugins: [
+      {
+        id: 'agent-trace-showcase',
+        entry: path.join(projectRoot, 'packages/agent-trace-showcase/src/index.ts'),
+        enabled: true,
+        config: options.mode === 'live'
+          ? { mode: 'live' }
+          : { mode: 'fixture', sessionId, permissionPolicy: 'allow' },
+      },
+      ...(options.sibling === true ? [{
+        id: 'session-header-sibling-fixture',
+        entry: path.join(projectRoot, 'tests/fixtures/session-header-sibling-plugin.ts'),
+        enabled: true,
+        config: {},
+      }] : []),
+    ],
   }
   const bundle = await buildRendererBundle(config)
   const dom = new JSDOM(`
-    <html lang="zh-CN" class="electron-dark"><head></head><body>
+    <html lang="zh-CN" class="electron-dark"><head><style>
+      .codex-toolbar-button { width: 28px; height: 28px; }
+      .native-summary-pressed { color: rgb(26, 28, 31); background-color: rgba(26, 28, 31, .05); }
+    </style></head><body>
       <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
       <header data-app-shell-application-menu-bar>
         <div data-test-id="header-shell-slot"><button id="native-header-action">Native action</button></div>
@@ -112,7 +128,7 @@ async function fixture(sessionId: string, options: { headerAvailable?: boolean; 
           <div id="native-session-title">Current session</div>
           <div id="native-session-actions" style="display:flex">
             <span id="native-session-tooltip-trigger" data-state="closed" style="display:contents">
-              <button id="native-session-menu" class="codex-toolbar-button" title="切换置顶摘要">Session menu</button>
+              <button id="native-session-menu" class="codex-toolbar-button${options.nativePressed === true ? ' native-summary-pressed' : ''}" aria-pressed="${options.nativePressed === true ? 'true' : 'false'}" title="切换置顶摘要">Session menu</button>
             </span>
           </div>
         </header>
@@ -162,6 +178,106 @@ async function fixture(sessionId: string, options: { headerAvailable?: boolean; 
 }
 
 describe('Agent Trace Showcase renderer integration', () => {
+  it('isolates each structured header action from a pressed native template and its siblings', async () => {
+    const sessionId = 'session-state-isolation'
+    const { dom, runtime } = await fixture(sessionId, { sibling: true, nativePressed: true })
+    const native = dom.window.document.getElementById('native-session-menu') as HTMLButtonElement
+    const seat = dom.window.document.querySelector<HTMLElement>('[data-cordisx-surface-host="session.header.actions"]')!
+    let buttons = [...seat.querySelectorAll<HTMLButtonElement>(':scope > button')]
+
+    expect(buttons).toHaveLength(2)
+    expect(native.getAttribute('aria-pressed')).toBe('true')
+    expect(dom.window.getComputedStyle(native).backgroundColor).toBe('rgba(26, 28, 31, 0.05)')
+    expect(buttons.every(button => !button.classList.contains('native-summary-pressed'))).toBe(true)
+    expect(buttons.map(button => dom.window.getComputedStyle(button).backgroundColor)).toEqual([
+      'rgba(0, 0, 0, 0)',
+      'rgba(0, 0, 0, 0)',
+    ])
+    expect(buttons.map(button => button.dataset.cordisxContributionId)).toEqual([
+      'agent-trace-showcase:open-timeline',
+      'session-header-sibling-fixture:sibling',
+    ])
+    expect(buttons.map(button => button.getAttribute('aria-pressed'))).toEqual(['false', 'false'])
+    expect(buttons.map(button => button.dataset.cordisxRouteState ?? null)).toEqual(['inactive', 'inactive'])
+
+    buttons[0]!.click()
+    await settle(4)
+    buttons = [...seat.querySelectorAll<HTMLButtonElement>(':scope > button')]
+    expect(buttons[0]!.getAttribute('aria-pressed')).toBe('true')
+    expect(buttons[0]!.dataset.cordisxRouteState).toBe('presented')
+    expect(buttons[1]!.getAttribute('aria-pressed')).toBe('false')
+    expect(buttons[1]!.dataset.cordisxRouteState).toBe('inactive')
+    expect(native.getAttribute('aria-pressed')).toBe('true')
+
+    buttons[1]!.click()
+    await settle(4)
+    buttons = [...seat.querySelectorAll<HTMLButtonElement>(':scope > button')]
+    expect(buttons[0]!.getAttribute('aria-pressed')).toBe('false')
+    expect(buttons[0]!.dataset.cordisxRouteState).toBe('inactive')
+    expect(buttons[1]!.getAttribute('aria-pressed')).toBe('true')
+    expect(buttons[1]!.dataset.cordisxRouteState).toBe('presented')
+
+    buttons[1]!.focus()
+    expect(dom.window.document.activeElement).toBe(buttons[1])
+    expect(buttons[0]!.getAttribute('aria-pressed')).toBe('false')
+    expect(buttons[1]!.getAttribute('aria-pressed')).toBe('true')
+
+    buttons[1]!.dataset.state = 'open'
+    buttons[1]!.disabled = true
+    expect(buttons[0]!.dataset.state).toBeUndefined()
+    expect(buttons[0]!.disabled).toBe(false)
+    expect(dom.window.getComputedStyle(buttons[0]!).opacity).toBe('1')
+    expect(dom.window.getComputedStyle(buttons[1]!).opacity).toBe('0.4')
+    delete buttons[1]!.dataset.state
+    buttons[1]!.disabled = false
+
+    buttons[0]!.click()
+    await settle(4)
+    buttons = [...seat.querySelectorAll<HTMLButtonElement>(':scope > button')]
+    expect(buttons[0]!.getAttribute('aria-pressed')).toBe('true')
+    expect(buttons[1]!.getAttribute('aria-pressed')).toBe('false')
+
+    const nativeParent = native.closest<HTMLElement>('#native-session-actions')!
+    const replacementParent = nativeParent.cloneNode(true) as HTMLElement
+    replacementParent.querySelector('[data-cordisx-surface-host]')?.remove()
+    nativeParent.replaceWith(replacementParent)
+    await settle(4)
+    const replacementNative = replacementParent.querySelector<HTMLButtonElement>('#native-session-menu')!
+    expect(replacementNative).not.toBe(native)
+    expect(native.isConnected).toBe(false)
+    expect(replacementNative.getAttribute('aria-pressed')).toBe('true')
+    expect(seat.isConnected).toBe(true)
+    expect(seat.parentElement).toBe(replacementParent)
+    expect(seat.nextElementSibling?.id).toBe('native-session-tooltip-trigger')
+    expect([...seat.querySelectorAll(':scope > button')]).toEqual(buttons)
+    expect(buttons.every(button => !button.classList.contains('native-summary-pressed'))).toBe(true)
+
+    await runtime.setPluginBlocked('session-header-sibling-fixture', true)
+    await settle(4)
+    expect(seat.querySelectorAll(':scope > button')).toHaveLength(1)
+    expect(buttons[0]!.getAttribute('aria-pressed')).toBe('true')
+    expect(replacementNative.isConnected).toBe(true)
+    await runtime.setPluginBlocked('session-header-sibling-fixture', false)
+    await settle(4)
+    expect(seat.querySelectorAll(':scope > button')).toHaveLength(2)
+    expect(seat.querySelector<HTMLButtonElement>('[data-cordisx-contribution-id="agent-trace-showcase:open-timeline"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(seat.querySelector<HTMLButtonElement>('[data-cordisx-contribution-id="session-header-sibling-fixture:sibling"]')?.getAttribute('aria-pressed')).toBe('false')
+
+    const styles = dom.window.document.getElementById('cordisx-structured-styles')?.textContent ?? ''
+    expect(styles).toContain('--cordisx-toolbar-outer-group-gap: 6px')
+    expect(styles).toContain('--cordisx-toolbar-action-gap: 6px')
+    expect(styles).toContain('.cordisx-session-header-actions')
+    expect(styles).toContain('margin-inline-end: var(--cordisx-toolbar-outer-group-gap)')
+    expect(runtime.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({
+      activeRoute: 'agent-trace-showcase:session.timeline',
+      presentation: 'presented',
+    })
+
+    await runtime.dispose()
+    expect(seat.isConnected).toBe(false)
+    expect(replacementNative.isConnected).toBe(true)
+  })
+
   it('mounts a session-scoped fixture page without owning native shell DOM', async () => {
     const sessionId = 'session-a'
     const { dom, runtime, nativeConversation, thread, sessionContent } = await fixture(sessionId)
@@ -193,7 +309,8 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(dom.window.document.getElementById('native-session-tooltip-trigger')?.querySelector('[data-cordisx-surface-host]')).toBeNull()
     expect(dom.window.document.getElementById('native-session-menu')?.parentElement?.id).toBe('native-session-tooltip-trigger')
     expect(entrySeat.dataset.cordisxNoDrag).toBe('true')
-    expect(entryButton.className).toContain('codex-toolbar-button')
+    expect(entryButton.className).not.toContain('codex-toolbar-button')
+    expect(entryButton.className).toContain('cordisx-toolbar-action')
     expect(entryButton.classList.contains('cordisx-icon-only-control')).toBe(true)
     expect(dom.window.getComputedStyle(entryButton).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('16px')
     expect(entryButton.textContent).toBe('')

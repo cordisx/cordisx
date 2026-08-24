@@ -843,11 +843,16 @@ class StructuredSurfaceRenderer {
   ): HTMLButtonElement {
     const button = this.document.createElement('button')
     button.type = 'button'
-    const nativeClasses = nativePattern === 'composer' ? '' : nativeTemplate?.className ?? ''
+    const nativeClasses = nativePattern === 'composer' || nativePattern === 'toolbar'
+      ? ''
+      : nativeTemplate?.className ?? ''
     button.draggable = false
     button.className = nativePattern === undefined
       ? 'cordisx-action'
       : `${nativeClasses} cordisx-action${reduceGlyph ? ' cordisx-icon-only-control' : ''} cordisx-native-icon-action cordisx-${nativePattern}-action`.trim()
+    button.dataset.cordisxOwner = snapshot.owner
+    button.dataset.cordisxSurface = snapshot.surface
+    button.dataset.cordisxContributionId = snapshot.qualifiedId
     button.dataset.cordisxNoDrag = 'true'
     button.style.setProperty('-webkit-app-region', 'no-drag')
     const label = this.text(snapshot, action.label, `${path}.label`, nextSites)
@@ -1108,12 +1113,12 @@ function installStyles(document: Document): () => void {
   style.id = 'cordisx-structured-styles'
   style.textContent = `
     [data-cordisx-no-drag="true"], [data-cordisx-no-drag="true"] * { -webkit-app-region: no-drag !important; }
-    .cordisx-native-seat { box-sizing: border-box; color: inherit; font: inherit; pointer-events: auto; -webkit-app-region: no-drag; }
+    .cordisx-native-seat { --cordisx-toolbar-outer-group-gap: 6px; --cordisx-toolbar-action-gap: 6px; box-sizing: border-box; color: inherit; font: inherit; pointer-events: auto; -webkit-app-region: no-drag; }
     .cordisx-native-seat[hidden] { display: none !important; }
     .cordisx-sidebar-navigation { display: block; width: 100%; min-width: 0; }
     .cordisx-sidebar-footer-before, .cordisx-sidebar-footer-after { display: flex; flex: 0 0 auto; height: 32px; align-items: center; gap: 4px; min-width: 0; }
-    .cordisx-toolbar-before, .cordisx-toolbar-after { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: 4px; min-width: 0; }
-    .cordisx-session-header-actions { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: 4px; min-width: 0; }
+    .cordisx-toolbar-before, .cordisx-toolbar-after { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: var(--cordisx-toolbar-action-gap); min-width: 0; }
+    .cordisx-session-header-actions { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: var(--cordisx-toolbar-action-gap); min-width: 0; margin-inline-end: var(--cordisx-toolbar-outer-group-gap); }
     .cordisx-composer-submit-before { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: 8px; min-width: 0; }
     .cordisx-environment { display: block; width: 100%; min-width: 0; padding: 6px; }
     .cordisx-navigation, .cordisx-env-section { display: grid; gap: 1px; }
@@ -1128,6 +1133,12 @@ function installStyles(document: Document): () => void {
     .cordisx-env-header { justify-content: flex-end; }
     .cordisx-action:not(.cordisx-native-icon-action) { display: inline-flex; align-items: center; gap: 6px; min-height: 27px; border: 1px solid transparent; border-radius: var(--radius-lg,10px); background: transparent; color: inherit; cursor: default; padding: 4px 7px; font: inherit; white-space: nowrap; user-select: none; -webkit-user-select: none; -webkit-app-region: no-drag; }
     .cordisx-native-icon-action { flex: 0 0 auto; -webkit-app-region: no-drag; }
+    .cordisx-native-seat > .cordisx-toolbar-action { display: inline-flex; flex: 0 0 auto; width: 28px; min-width: 28px; height: 28px; min-height: 28px; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: var(--radius-lg,8px); background-color: transparent; color: var(--color-text-tertiary,rgba(127,127,127,.78)); opacity: 1; cursor: default; white-space: nowrap; user-select: none; -webkit-user-select: none; }
+    .cordisx-native-seat > .cordisx-toolbar-action:hover:not(:disabled), .cordisx-native-seat > .cordisx-toolbar-action[data-state="open"] { background-color: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); }
+    .cordisx-native-seat > .cordisx-toolbar-action:focus { outline: none; }
+    .cordisx-native-seat > .cordisx-toolbar-action:focus-visible { outline: 2px solid var(--color-ring,rgba(131,195,255,.76)); outline-offset: 0; }
+    .cordisx-native-seat > .cordisx-toolbar-action:disabled { cursor: default; opacity: .4; }
+    .cordisx-native-seat > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"] { background-color: var(--color-background-elevated-secondary,rgba(127,127,127,.08)); color: var(--color-text,currentColor); }
     .cordisx-shortcut-action:not([class*="size-"]):not([class*="h-"]) { display: inline-flex; width: 24px; min-width: 24px; height: 24px; min-height: 24px; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: var(--radius-lg,8px); background: transparent; color: var(--color-text-tertiary,rgba(255,255,255,.5)); }
     .cordisx-composer-action { display: inline-flex; flex: 0 0 auto; width: 28px; min-width: 28px; height: 28px; min-height: 28px; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 9999px; background: transparent; color: var(--color-text-tertiary,currentColor); cursor: default; }
     .cordisx-composer-action:hover:not(:disabled), .cordisx-composer-action[data-state="open"] { background: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); }

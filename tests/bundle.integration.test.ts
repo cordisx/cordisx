@@ -213,7 +213,8 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('details[data-cordisx-no-drag]')).toBeNull()
     expect(dom.window.document.body.textContent).not.toContain('CX')
     const toolbarAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="toolbar.before"] button')!
-    expect(toolbarAction.className).toContain('codex-toolbar-button')
+    expect(toolbarAction.className).not.toContain('codex-toolbar-button')
+    expect(toolbarAction.className).toContain('cordisx-toolbar-action')
     expect(toolbarAction.className).toContain('cordisx-icon-only-control')
     expect(dom.window.getComputedStyle(toolbarAction).width).toBe(dom.window.getComputedStyle(dom.window.document.getElementById('native-toolbar-primary')!).width)
     expect(dom.window.getComputedStyle(toolbarAction).height).toBe(dom.window.getComputedStyle(dom.window.document.getElementById('native-toolbar-primary')!).height)
@@ -234,7 +235,8 @@ describe('renderer bundle', () => {
     expect(toolbarAction.querySelector('[data-host-icon="host:open"] svg')).not.toBeNull()
     expect(toolbarAction.closest<HTMLElement>('[data-test-id="header-shell-slot"]')?.style.width).toBe('126px')
     const sessionHeaderAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="session.header.actions"] button')!
-    expect(sessionHeaderAction.className).toContain('codex-toolbar-button')
+    expect(sessionHeaderAction.className).not.toContain('codex-toolbar-button')
+    expect(sessionHeaderAction.className).toContain('cordisx-toolbar-action')
     expect(dom.window.getComputedStyle(sessionHeaderAction).width).toBe('28px')
     expect(dom.window.getComputedStyle(sessionHeaderAction).height).toBe('28px')
     expect(dom.window.getComputedStyle(sessionHeaderAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('16px')
