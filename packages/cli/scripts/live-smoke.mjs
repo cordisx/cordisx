@@ -1381,24 +1381,22 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
   const hiddenActions = await inspectPluginCard()
   await send('Input.dispatchMouseEvent', {
     type: 'mouseMoved',
+    pointerType: 'mouse',
     x: installed.primaryRect.x + installed.primaryRect.width / 2,
     y: installed.primaryRect.y + installed.primaryRect.height / 2,
   })
+  await new Promise(resolve => setTimeout(resolve, 720))
+  const hoveredTooltip = await inspectPluginCard()
+  screenshots.tooltip = await capture(installed.managerRect, artifact('lifecycle-tooltip'), 'hovered plugin status tooltip')
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved', pointerType: 'mouse', x: installed.managerRect.x + 12, y: installed.managerRect.y + 12,
+  })
+  await new Promise(resolve => setTimeout(resolve, 80))
+  const tooltipDismissed = await evaluateByValue(`document.querySelector('[role="tooltip"]') === null`)
+  await evaluateByValue(`document.querySelector('[data-plugin-primary="lifecycle-smoke"]')?.focus()`)
   await new Promise(resolve => setTimeout(resolve, 180))
-  const hoveredActions = await inspectPluginCard()
-  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: installed.managerRect.x + 12, y: installed.managerRect.y + 12 })
-  let focusedTooltip
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await evaluateByValue(`document.querySelector('[data-plugin-primary="lifecycle-smoke"]')?.focus()`)
-    await new Promise(resolve => setTimeout(resolve, 720))
-    focusedTooltip = await inspectPluginCard()
-    if (focusedTooltip.focused && focusedTooltip.tooltip !== null) break
-  }
-  screenshots.tooltip = await capture(installed.managerRect, artifact('lifecycle-tooltip'), 'focused plugin status tooltip')
-  if (focusedTooltip?.tooltip !== null) await pressKey('Escape', 'Escape', 27)
-  const tooltipDismissed = await evaluateByValue(`document.querySelector('[role="tooltip"]') === null
-    && document.querySelector('[data-cordisx-manager-modal]')?.hidden === false`)
-  const cardInteraction = { hiddenActions, hoveredActions, focusedTooltip, tooltipDismissed }
+  const focusedActions = await inspectPluginCard()
+  const cardInteraction = { hiddenActions, hoveredTooltip, focusedActions, tooltipDismissed }
 
   if (parsed.values['generation-transaction-exercise']) {
     generationTransactionReport = await evaluateByValue(`(async () => {
@@ -1801,17 +1799,17 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       && installed.plugin.package?.canonicalSource === 'https://github.com/cordisx/cordisx/tree/main/examples/plugins/lifecycle-smoke',
     cardPresentation: cardInteraction.hiddenActions.actionOpacity === '0'
       && cardInteraction.hiddenActions.actionPointerEvents === 'none'
-      && Number(cardInteraction.hoveredActions.actionOpacity) > 0.9
-      && cardInteraction.hoveredActions.actionPointerEvents === 'auto'
-      && cardInteraction.focusedTooltip.actionOpacity === '1'
-      && cardInteraction.hiddenActions.actionWidth > 0 && cardInteraction.focusedTooltip.actionWidth > 0
-      && cardInteraction.hiddenActions.rowWidth === cardInteraction.hoveredActions.rowWidth
-      && cardInteraction.hoveredActions.rowWidth === cardInteraction.focusedTooltip.rowWidth
-      && cardInteraction.hiddenActions.rowHeight === cardInteraction.hoveredActions.rowHeight
-      && cardInteraction.hoveredActions.rowHeight === cardInteraction.focusedTooltip.rowHeight
-      && cardInteraction.focusedTooltip.focused && cardInteraction.focusedTooltip.tooltip === '运行中'
-      && cardInteraction.focusedTooltip.describedBy !== null && cardInteraction.focusedTooltip.badge === 'active'
-      && !cardInteraction.focusedTooltip.persistentStatusText && cardInteraction.tooltipDismissed,
+      && Number(cardInteraction.hoveredTooltip.actionOpacity) > 0.9
+      && cardInteraction.hoveredTooltip.actionPointerEvents === 'auto'
+      && cardInteraction.focusedActions.actionOpacity === '1'
+      && cardInteraction.hiddenActions.actionWidth > 0 && cardInteraction.focusedActions.actionWidth > 0
+      && cardInteraction.hiddenActions.rowWidth === cardInteraction.hoveredTooltip.rowWidth
+      && cardInteraction.hoveredTooltip.rowWidth === cardInteraction.focusedActions.rowWidth
+      && cardInteraction.hiddenActions.rowHeight === cardInteraction.hoveredTooltip.rowHeight
+      && cardInteraction.hoveredTooltip.rowHeight === cardInteraction.focusedActions.rowHeight
+      && cardInteraction.hoveredTooltip.tooltip === '运行中' && cardInteraction.hoveredTooltip.describedBy !== null
+      && cardInteraction.hoveredTooltip.badge === 'active' && cardInteraction.focusedActions.focused
+      && !cardInteraction.hoveredTooltip.persistentStatusText && cardInteraction.tooltipDismissed,
     pointerNavigation: pointerNavigation.detail && pointerNavigation.restored,
     keyboardNavigation: Object.values(keyboardNavigation).every(Boolean),
     owningReloadOnly: exercised.afterReload.apply === exercised.initial.apply + 1
