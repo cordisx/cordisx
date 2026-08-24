@@ -330,6 +330,16 @@ localized descriptors, usage details, and policy enforcement are specified in
 Future host/adapter packages may add `panel.right`, `panel.bottom`, `sidebar`,
 or other outlet ids without changing a closed union in core.
 
+The manager-settings v3 delivery additionally declares
+`manager.settings.content`. It is a host-neutral manager-local body outlet,
+not a Codex adapter region. Compatible routes live below
+`/manager/settings/`, keep `app://` and browser/Codex history unchanged, and
+resolve only to a page owned by the contributing settings tab's owner. Its
+`manager.settings` presentation group is isolated from the overlapping
+`app`/`main`/`session.content` group. The host renders the settings header,
+tablist, and panel; the page callback receives only the panel-body child. See
+[`manager-settings-tabs.md`](manager-settings-tabs.md).
+
 ## Paths and navigation
 
 CordisX keeps its own in-memory route state. Navigation names a route id and

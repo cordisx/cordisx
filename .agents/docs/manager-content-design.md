@@ -66,6 +66,14 @@ future tabbed page. Tab icons and header icons use the same zero-line-height
 grid and optical vertical adjustment; fixing one page with a local padding
 override is forbidden.
 
+The top-level `配置` tablist may merge host built-ins with external structured
+`manager.settings.tabs` contributions. This does not transfer tab rendering to
+plugins: CordisX still owns the complete tablist and panel semantics above.
+External page code mounts only inside the active
+`manager.settings.content` panel-body child. Ordering, fallback, point policy,
+route/page ownership, lifecycle, and protocol versioning are defined in
+[`manager-settings-tabs.md`](manager-settings-tabs.md).
+
 ## Page headers
 
 Every primary page reserves the same fixed-width leading seat immediately to
