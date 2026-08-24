@@ -80,8 +80,30 @@ review under policy X, with the non-guarantee statement. Record labels and
 descriptions retain `LocalizedText` keys and required fallbacks; ordinary feed
 names and descriptions use Marketplace locale fallback independently.
 
+The browse toolbar exposes one Host-owned `仅看已认证` pressed-state filter.
+Each rendered result retains the text tier, separate Official and Certified
+boosts, bounded total, and human-readable explanation in structured Host data
+attributes. The standard plugin card accessible name includes the two active
+dimensions independently. The detail projection links the protected evidence
+reference and states the exact policy/version, reviewed version, digest,
+timestamps, protected-merge trust root, and absence of cryptographic
+attestation. A `ManagerModel.marketplaceEligibility` projection is evaluated
+before search scoring so compatibility, visibility, and policy authority stay
+Host-owned instead of becoming feed-controlled ranking inputs.
+
 The consumer does not change installation or activation authority. If package
 installation is added to this browse-only Manager later, it may include the two
 records as provenance in its review screen, but the existing Package Store,
 generation fence, Permission Broker, sandbox boundary, and lifecycle gates
 remain authoritative.
+
+The real-renderer smoke may project
+`tests/fixtures/marketplace-trust-v3.json` into the existing Marketplace
+receiver by using `--manager-marketplace-fixture`. This isolated test-only
+response seam requires an explicit HTTPS source, fixes request identity only
+during the synchronous test form submission, and lets the ordinary pending
+request fence ignore the launcher's later network response. It does not replace
+the Host binding, add a production trust root, or claim the fixture artifact
+exists. Light and dark screenshots plus the machine report must show both
+independent badge/icon/accessible labels or the two independent detail sections
+and boundary copy.

@@ -27,6 +27,7 @@ const parsed = parseArgs({
     'manager-route': { type: 'string' },
     'manager-marketplace-tab': { type: 'string' },
     'manager-marketplace-source': { type: 'string' },
+    'manager-marketplace-fixture': { type: 'string' },
     'manager-click-external': { type: 'boolean', default: false },
     'manager-viewport-width': { type: 'string' },
     'manager-breadcrumb-width': { type: 'string' },
@@ -66,7 +67,7 @@ const parsed = parseArgs({
 })
 const port = Number(parsed.values.port)
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--locale en|zh-CN] [--screenshot <png>] [--app-screenshot <png>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-permission-capability <name> --manager-settings-tab <tab> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-marketplace-source <https-url> --manager-click-external --manager-viewport-width <pixels> --manager-breadcrumb-width <pixels>] [--manager-lifecycle-source <absolute-directory> --report <json>] [--trigger-screenshot <png>]')
+  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--locale en|zh-CN] [--screenshot <png>] [--app-screenshot <png>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-permission-capability <name> --manager-settings-tab <tab> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-marketplace-source <https-url> --manager-marketplace-fixture <absolute-json> --manager-click-external --manager-viewport-width <pixels> --manager-breadcrumb-width <pixels>] [--manager-lifecycle-source <absolute-directory> --report <json>] [--trigger-screenshot <png>]')
 }
 if (parsed.values['ui-catalog'] && parsed.values.report === undefined) {
   throw new Error('--ui-catalog requires --report so screenshots and machine-readable assertions share one artifact directory')
@@ -2962,6 +2963,17 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       throw new Error('--manager-marketplace-source must be a credential-free HTTPS URL without a fragment')
     }
   }
+  const managerMarketplaceFixturePath = parsed.values['manager-marketplace-fixture']
+  if (managerMarketplaceFixturePath !== undefined && managerMarketplaceSource === undefined) {
+    throw new Error('--manager-marketplace-fixture requires --manager-marketplace-source')
+  }
+  if (managerMarketplaceFixturePath !== undefined && !path.isAbsolute(managerMarketplaceFixturePath)) {
+    throw new Error('--manager-marketplace-fixture must be an absolute JSON path')
+  }
+  const managerMarketplaceFixture = managerMarketplaceFixturePath === undefined
+    ? undefined
+    : await readFile(managerMarketplaceFixturePath, 'utf8')
+  if (managerMarketplaceFixture !== undefined) JSON.parse(managerMarketplaceFixture)
   const managerViewportWidth = parsed.values['manager-viewport-width'] === undefined
     ? undefined
     : Number(parsed.values['manager-viewport-width'])
@@ -2993,6 +3005,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       if (smokeLocale !== undefined) document.documentElement.lang = smokeLocale
       if (smokeTheme !== undefined) document.documentElement.setAttribute('data-theme', smokeTheme)
       await nextPaint()
+      const marketplaceFixtureText = ${JSON.stringify(managerMarketplaceFixture)}
       const trigger = document.querySelector('[data-cordisx-manager-trigger]')
       const modal = document.querySelector('[data-cordisx-manager-modal]')
       const openedBy = trigger === null ? 'host-smoke-fallback' : 'manager-trigger'
@@ -3014,7 +3027,22 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         const form = document.querySelector('[data-host-form="marketplace-source"]')
         if (!(input instanceof HTMLInputElement) || !(form instanceof HTMLFormElement)) throw new Error('marketplace source form is unavailable')
         input.value = marketplaceSource
-        form.requestSubmit()
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        if (marketplaceFixtureText === undefined) form.requestSubmit()
+        else {
+          const fixtureNow = 1_900_000_000_000
+          const originalNow = Date.now
+          Date.now = () => fixtureNow
+          try { form.requestSubmit() } finally { Date.now = originalNow }
+          const requestPrefix = fixtureNow.toString(36)
+          for (let sequence = 1; sequence <= 16; sequence += 1) globalThis.__cordisxMarketplaceReceiveV1?.(JSON.stringify({
+            requestId: requestPrefix + '-' + sequence.toString(36),
+            ok: true,
+            status: 200,
+            url: marketplaceSource,
+            text: marketplaceFixtureText,
+          }))
+        }
         const sourceDeadline = Date.now() + 12_000
         let sourceState
         while (Date.now() < sourceDeadline) {
@@ -3206,6 +3234,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           marketplaceCatalog: document.querySelector('[aria-label="插件商店列表"]') === null ? null : {
             locale: document.documentElement.lang,
             permanentTrustWarning: (document.querySelector('.cxm-content')?.textContent ?? '').includes('商店收录、schema 校验和页面展示都不代表'),
+            certifiedOnly: document.querySelector('[data-marketplace-certified-only]')?.getAttribute('aria-pressed') ?? null,
             rows: [...document.querySelectorAll('[aria-label="插件商店列表"] [data-marketplace-plugin]')].map(row => {
               const primary = row.querySelector('.cxm-plugin-primary')
               const style = primary === null ? null : getComputedStyle(primary)
@@ -3218,9 +3247,28 @@ if (parsed.values['manager-screenshot'] !== undefined) {
                 description: row.querySelector('.cxm-plugin-description')?.textContent?.trim() ?? null,
                 version: row.querySelector('.cxm-plugin-meta-version')?.textContent?.trim() ?? null,
                 source: row.querySelector('.cxm-plugin-meta-source')?.textContent?.trim() ?? null,
+                official: row.getAttribute('data-marketplace-official'),
+                certified: row.getAttribute('data-marketplace-certified'),
+                rankingTier: row.getAttribute('data-marketplace-ranking-tier'),
+                rankingTrustBoost: row.getAttribute('data-marketplace-ranking-trust-boost'),
+                rankingExplanation: row.getAttribute('data-marketplace-ranking-explanation'),
+                badges: [...row.querySelectorAll('[data-trust-dimension]')].map(badge => ({
+                  dimension: badge.getAttribute('data-trust-dimension'),
+                  label: badge.textContent?.trim() ?? null,
+                  ariaLabel: badge.getAttribute('aria-label'),
+                  icon: badge.querySelector('[data-material-icon]')?.getAttribute('data-material-icon') ?? null,
+                })),
                 chevron: row.querySelector('.cxm-chevron') !== null,
               }
             }),
+          },
+          marketplaceTrustDetail: document.querySelector('[data-marketplace-trust-dimension]') === null ? null : {
+            dimensions: [...document.querySelectorAll('[data-marketplace-trust-dimension]')].map(item => ({
+              dimension: item.getAttribute('data-marketplace-trust-dimension'),
+              text: item.textContent?.trim() ?? null,
+              evidence: item.querySelector('a')?.href ?? null,
+            })),
+            boundary: document.querySelector('[data-marketplace-trust-boundary]')?.textContent?.trim() ?? null,
           },
         },
       }

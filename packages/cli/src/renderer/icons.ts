@@ -7,6 +7,7 @@ import chevronLeft from '@material-symbols/svg-400/rounded/chevron_left.svg'
 import close from '@material-symbols/svg-400/rounded/close.svg'
 import description from '@material-symbols/svg-400/rounded/description.svg'
 import diagnosis from '@material-symbols/svg-400/rounded/diagnosis.svg'
+import domainVerification from '@material-symbols/svg-400/rounded/domain_verification.svg'
 import error from '@material-symbols/svg-400/rounded/error.svg'
 import extension from '@material-symbols/svg-400/rounded/extension.svg'
 import folder from '@material-symbols/svg-400/rounded/folder.svg'
@@ -35,6 +36,7 @@ import summarize from '@material-symbols/svg-400/rounded/summarize.svg'
 import tune from '@material-symbols/svg-400/rounded/tune.svg'
 import viewList from '@material-symbols/svg-400/rounded/view_list.svg'
 import warning from '@material-symbols/svg-400/rounded/warning.svg'
+import workspacePremium from '@material-symbols/svg-400/rounded/workspace_premium.svg'
 import deleteForever from '@material-symbols/svg-400/rounded/delete_forever.svg'
 import playCircle from '@material-symbols/svg-400/rounded/play_circle.svg'
 import share from '@material-symbols/svg-400/rounded/share.svg'
@@ -52,6 +54,8 @@ export const MANAGER_ICON_TOKENS = [
   'external-link',
   'launcher',
   'marketplace',
+  'marketplace-certified',
+  'marketplace-official',
   'models-read',
   'outlets',
   'overview',
@@ -93,6 +97,8 @@ const MANAGER_ICON_SOURCES: Readonly<Record<ManagerIconToken, string>> = {
   'external-link': openInNew,
   launcher: rocketLaunch,
   marketplace: storefront,
+  'marketplace-certified': workspacePremium,
+  'marketplace-official': domainVerification,
   'models-read': modelTraining,
   outlets: accountTree,
   overview,

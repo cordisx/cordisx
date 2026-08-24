@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   BrowserMarketplaceModel,
@@ -24,6 +25,7 @@ const CERTIFICATION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-
 const TRUST_SOURCE = 'https://github.com/cordisx/trusted'
 const TRUST_DIGEST = `sha256:${'a'.repeat(64)}`
 const TRUST_EVIDENCE = `https://github.com/cordisx/marketplace/commit/${'b'.repeat(40)}`
+const TRUST_SMOKE_FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/marketplace-trust-v3.json', import.meta.url), 'utf8')) as unknown
 
 function plugin(id: string, name: string, source = `https://github.com/example/${id}`): Record<string, unknown> {
   return {
@@ -242,6 +244,11 @@ describe('marketplace feed', () => {
     const selfDeclared = structuredClone(trustedFeed())
     ;(selfDeclared.plugins as Record<string, unknown>[])[0]!.official = true
     expect(() => parseMarketplaceFeed(selfDeclared)).toThrow('不支持的字段: official')
+    expect(parseMarketplaceFeed(TRUST_SMOKE_FIXTURE, {
+      feedUrl: OFFICIAL_MARKETPLACE_SOURCE,
+      trustedRoots: [OFFICIAL_MARKETPLACE_SOURCE],
+      now: '2026-08-24T13:00:00Z',
+    }).trust?.byPluginIdentity.size).toBe(1)
   })
 })
 

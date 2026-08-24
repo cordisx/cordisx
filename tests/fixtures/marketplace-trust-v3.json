@@ -1,0 +1,122 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v3.schema.json",
+  "schemaVersion": 3,
+  "generatedAt": "2026-08-24T12:31:00Z",
+  "trust": {
+    "authority": "cordisx.marketplace.codeowners/v1",
+    "root": "https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json",
+    "grantModel": "protected-merge-chain-v1",
+    "cryptographicAttestation": "unsupported"
+  },
+  "fallbackLocale": "en",
+  "name": "CordisX Marketplace",
+  "localizations": {
+    "zh-CN": {
+      "name": "CordisX 插件商店"
+    }
+  },
+  "homepage": "https://cordisx.github.io/marketplace/",
+  "plugins": [
+    {
+      "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v3.schema.json",
+      "schemaVersion": 3,
+      "id": "trusted-smoke",
+      "fallbackLocale": "en",
+      "name": "Trusted Smoke Plugin",
+      "description": "Exercises Host-owned Official and Certified projections.",
+      "localizations": {
+        "zh-CN": {
+          "name": "信任标识演示插件",
+          "description": "验证由宿主拥有的官方与已认证双维度展示。"
+        }
+      },
+      "version": "1.2.3",
+      "source": "https://github.com/cordisx/trusted-smoke",
+      "artifact": {
+        "publisherIdentity": "npm:@cordisx",
+        "packageNamespace": "@cordisx",
+        "packageName": "@cordisx/trusted-smoke",
+        "downloadUrl": "https://registry.npmjs.org/@cordisx/trusted-smoke/-/trusted-smoke-1.2.3.tgz",
+        "integrity": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "license": "MIT",
+      "compatibility": {
+        "cordisx": "^0.1.0"
+      },
+      "authors": [
+        {
+          "name": "CordisX Team",
+          "url": "https://cordisx.github.io/"
+        }
+      ],
+      "keywords": [
+        "trust",
+        "marketplace"
+      ]
+    }
+  ],
+  "official": [
+    {
+      "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v1.schema.json",
+      "schemaVersion": 1,
+      "designation": "cordisx-official",
+      "identity": {
+        "pluginId": "trusted-smoke",
+        "canonicalSource": "https://github.com/cordisx/trusted-smoke",
+        "publisherIdentity": "npm:@cordisx",
+        "packageNamespace": "@cordisx",
+        "packageName": "@cordisx/trusted-smoke"
+      },
+      "verificationPolicy": {
+        "id": "cordisx-official-publisher",
+        "version": "1.0.0"
+      },
+      "verifiedAt": "2026-08-20T00:00:00Z",
+      "reviewer": {
+        "authority": "cordisx.marketplace.codeowners/v1",
+        "evidenceRef": "https://github.com/cordisx/marketplace/commit/4e5fc0beea5cd18fe789f8b15278e22f19a6af66"
+      },
+      "status": "active",
+      "label": {
+        "key": "official.label",
+        "fallback": "Official"
+      },
+      "description": {
+        "key": "official.description",
+        "fallback": "Created and maintained by CordisX."
+      }
+    }
+  ],
+  "certifications": [
+    {
+      "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certification.v1.schema.json",
+      "schemaVersion": 1,
+      "level": "cordisx-certified",
+      "identity": {
+        "pluginId": "trusted-smoke",
+        "version": "1.2.3",
+        "canonicalSource": "https://github.com/cordisx/trusted-smoke",
+        "integrity": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "reviewPolicy": {
+        "id": "cordisx-marketplace-review",
+        "version": "1.0.0"
+      },
+      "reviewedAt": "2026-08-20T00:00:00Z",
+      "expiresAt": "2027-08-20T00:00:00Z",
+      "reviewer": {
+        "authority": "cordisx.marketplace.codeowners/v1",
+        "evidenceRef": "https://github.com/cordisx/marketplace/commit/4e5fc0beea5cd18fe789f8b15278e22f19a6af66"
+      },
+      "status": "active",
+      "label": {
+        "key": "certified.label",
+        "fallback": "CordisX Certified"
+      },
+      "description": {
+        "key": "certified.description",
+        "fallback": "Reviewed under policy 1.0.0."
+      }
+    }
+  ]
+}
