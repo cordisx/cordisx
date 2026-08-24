@@ -267,6 +267,17 @@ export interface ManagedSettingsPageMount {
   dispose(): Promise<void>
 }
 
+/** Host-owned standard Manager page mount for a B navigation contribution. */
+export interface ManagedManagerPageMount {
+  readonly owner: string
+  readonly contributionId: string
+  readonly routeId: string
+  readonly pageId: string
+  readonly signal: AbortSignal
+  abort(): void
+  dispose(): Promise<void>
+}
+
 function assertHostIcon(icon: string | undefined, label: string): void {
   if (icon === undefined) return
   if (!ICON_TOKEN_PATTERN.test(icon) || !(CORDISX_HOST_ICON_TOKENS as readonly string[]).includes(icon)) {
@@ -469,6 +480,16 @@ interface ManagedSettingsPageMountRecord extends ManagedSettingsPageMount {
   disposed: boolean
 }
 
+interface ManagedManagerPageMountRecord extends ManagedManagerPageMount {
+  readonly route: RouteRecord
+  readonly page: PageRecord
+  readonly content: HTMLElement
+  readonly effects: Disposable<void>[]
+  readonly abortController: AbortController
+  pageDispose?: Disposable<void>
+  disposed: boolean
+}
+
 interface OutletNavigationState {
   stack: RouteEntry[]
   mount?: MountedPage
@@ -564,6 +585,7 @@ export class NavigationRegistry {
   private metadataProjectionSites = new Map<string, string>()
   private presentationOrder: string[] = []
   private managerSettingsMount: ManagedSettingsPageMountRecord | undefined
+  private managerContentMount: ManagedManagerPageMountRecord | undefined
   private readonly unsubscribePages: () => void
   private readonly unsubscribeOutlets: () => void
   private operation = Promise.resolve()
@@ -863,9 +885,108 @@ export class NavigationRegistry {
     }).then(() => result!)
   }
 
+  mountManagerContent(
+    requestingOwner: string,
+    reference: CordisXRouteReference,
+    contributionId: string,
+    container: HTMLElement,
+  ): Promise<ManagedManagerPageMount> {
+    let result: ManagedManagerPageMount | undefined
+    return this.enqueue(async () => {
+      assertKeys(reference, ['id', 'params'], 'manager content route reference')
+      assertLocalId(reference.id, 'manager content route reference')
+      const record = this.findRecord(requestingOwner, reference.id)
+      if (record === undefined || record.owner !== requestingOwner) throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
+      const resolution = this.managerSettingsNavigationRoute(requestingOwner, reference.id)
+      if (resolution.state !== 'available') throw new Error(resolution.detail ?? `route ${record.qualifiedId} is not available`)
+      const page = this.pages.get(record.owner, record.definition.page, record.candidateView)!
+      const surfaceAccess = this.access?.authorizeSurfaceRoute(requestingOwner, 'manager.settings.navigation-items', contributionId, record.qualifiedId)
+      if (surfaceAccess !== undefined && !surfaceAccess.authorized) throw new Error(surfaceAccess.reason ?? 'manager.settings.navigation-items is denied')
+      const routeAccess = this.access?.authorizeOutletRoute(requestingOwner, 'manager.content', record.qualifiedId, page.qualifiedId)
+      if (routeAccess !== undefined && !routeAccess.authorized) throw new Error(routeAccess.reason ?? 'manager.content is denied')
+      const pageAccess = this.access?.authorizeOutletPage(requestingOwner, 'manager.content', record.qualifiedId, page.qualifiedId)
+      if (pageAccess !== undefined && !pageAccess.authorized) throw new Error(pageAccess.reason ?? 'manager.content is denied')
+      const params = immutableSnapshot(reference.params ?? {})
+      buildPath(record, params)
+      await this.unmountManagerContent()
+
+      const content = container.ownerDocument.createElement('div')
+      content.dataset.cordisxManagerPage = page.qualifiedId
+      content.dataset.cordisxRoute = record.qualifiedId
+      content.dataset.cordisxNoDrag = 'true'
+      content.style.cssText = 'min-width:0;min-height:100%;box-sizing:border-box'
+      content.style.setProperty('-webkit-app-region', 'no-drag')
+      container.append(content)
+      const abortController = new AbortController()
+      const effects: Disposable<void>[] = []
+      const own: LocalizationEffectOwner = (setup) => {
+        const cleanup = setup()
+        let active = true
+        const dispose = (() => {
+          if (!active) return
+          active = false
+          const index = effects.indexOf(dispose)
+          if (index >= 0) effects.splice(index, 1)
+          cleanup()
+        }) as Disposable<void>
+        effects.push(dispose)
+        return dispose
+      }
+      const localization = this.i18n.seatFor(page.owner, page.metadata.localeNamespace ?? page.owner, own)
+      const mount = {} as ManagedManagerPageMountRecord
+      Object.assign(mount, {
+        owner: page.owner,
+        contributionId,
+        routeId: record.qualifiedId,
+        pageId: page.qualifiedId,
+        signal: abortController.signal,
+        route: record,
+        page,
+        content,
+        effects,
+        abortController,
+        disposed: false,
+        abort: () => abortController.abort(),
+        dispose: () => this.disposeManagedManagerMount(mount),
+      })
+      this.managerContentMount = mount
+      try {
+        const pageDispose = page.mount({
+          container: content,
+          document: content.ownerDocument,
+          signal: abortController.signal,
+          routeId: record.qualifiedId,
+          outlet: 'manager.content',
+          params,
+          navigation: {
+            navigate: next => this.navigate(page.owner, next),
+            back: outlet => this.back(page.owner, outlet),
+            close: outlet => this.close(page.owner, outlet),
+          },
+          localeNamespace: localization.namespace,
+          t: localization.t,
+          localization,
+        })
+        if (typeof pageDispose === 'function') mount.pageDispose = pageDispose
+        result = mount
+        this.notify()
+      } catch (error) {
+        await this.disposeManagedManagerMount(mount)
+        throw error
+      }
+    }).then(() => result!)
+  }
+
   closeManagerSettings(): Promise<void> {
     return this.enqueue(async () => {
       await this.unmountManagerSettings()
+      this.notify()
+    })
+  }
+
+  closeManagerContent(): Promise<void> {
+    return this.enqueue(async () => {
+      await this.unmountManagerContent()
       this.notify()
     })
   }
@@ -1013,10 +1134,13 @@ export class NavigationRegistry {
     const outlets = this.outlets.descriptors().map((descriptor): OutletSnapshot => {
       const host = this.outlets.get(descriptor.id)!.controller.getSnapshot()
       const state = this.states.get(descriptor.id)
-      const managerMount = descriptor.id === 'manager.settings.content' ? this.managerSettingsMount : undefined
+      const managerMount = descriptor.id === 'manager.settings.content'
+        ? this.managerSettingsMount
+        : descriptor.id === 'manager.content' ? this.managerContentMount : undefined
       return {
         ...descriptor,
         ...host,
+        ...(managerMount === undefined ? {} : { available: true }),
         mounted: state?.mount !== undefined || managerMount !== undefined,
         presentation: state?.mount === undefined && managerMount === undefined ? 'inactive' : state?.presentation ?? 'presented',
         ...(state?.suspendedBy === undefined ? {} : { suspendedBy: state.suspendedBy }),
@@ -1045,6 +1169,7 @@ export class NavigationRegistry {
     this.unsubscribeOutlets()
     await this.operation.catch(() => {})
     await this.unmountManagerSettings()
+    await this.unmountManagerContent()
     for (const [name] of this.states) await this.closeNow(name)
     this.records.clear()
     this.states.clear()
@@ -1109,6 +1234,7 @@ export class NavigationRegistry {
 
   private async reconcileGeneration(): Promise<void> {
     if (this.managerSettingsMount !== undefined) await this.unmountManagerSettings()
+    if (this.managerContentMount !== undefined) await this.unmountManagerContent()
     for (const [name, state] of this.states) {
       let changed = false
       const replacement: RouteEntry[] = []
@@ -1519,6 +1645,24 @@ export class NavigationRegistry {
         await this.unmountManagerSettings()
       }
     }
+    const managerContent = this.managerContentMount
+    if (managerContent !== undefined) {
+      const current = this.visibleRecords().find(record => record.qualifiedId === managerContent.routeId)
+      const resolution = current === undefined
+        ? { state: 'pending' as const }
+        : this.managerSettingsNavigationRoute(managerContent.owner, current.definition.id)
+      const retentionAccess = this.access?.authorizeOutletPage(
+        managerContent.owner,
+        'manager.content',
+        managerContent.routeId,
+        managerContent.pageId,
+      )
+      if (current === undefined || resolution.state !== 'available'
+        || this.pages.get(managerContent.owner, managerContent.page.metadata.id) === undefined
+        || (retentionAccess !== undefined && !retentionAccess.authorized)) {
+        await this.unmountManagerContent()
+      }
+    }
     for (const [name, state] of this.states) {
       const current = state.stack.at(-1)
       const outlet = this.outlets.get(name)
@@ -1628,6 +1772,34 @@ export class NavigationRegistry {
     const mount = this.managerSettingsMount
     if (mount === undefined) return
     await this.disposeManagedSettingsMount(mount)
+  }
+
+  private async disposeManagedManagerMount(mount: ManagedManagerPageMountRecord): Promise<void> {
+    if (mount.disposed) return
+    mount.disposed = true
+    mount.abortController.abort()
+    let failure: unknown
+    try {
+      await mount.pageDispose?.()
+    } catch (error) {
+      failure = error
+    }
+    for (const dispose of [...mount.effects].reverse()) {
+      try {
+        await dispose()
+      } catch (error) {
+        failure ??= error
+      }
+    }
+    mount.content.remove()
+    if (this.managerContentMount === mount) this.managerContentMount = undefined
+    if (failure !== undefined) throw failure
+  }
+
+  private async unmountManagerContent(): Promise<void> {
+    const mount = this.managerContentMount
+    if (mount === undefined) return
+    await this.disposeManagedManagerMount(mount)
   }
 }
 
@@ -1744,8 +1916,21 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
     return this.registry.mountManagerSettings(owner, reference, contributionId, panelBody)
   }
 
+  mountManagerContentFor(
+    owner: string,
+    reference: CordisXRouteReference,
+    contributionId: string,
+    container: HTMLElement,
+  ): Promise<ManagedManagerPageMount> {
+    return this.registry.mountManagerContent(owner, reference, contributionId, container)
+  }
+
   closeManagerSettings(): Promise<void> {
     return this.registry.closeManagerSettings()
+  }
+
+  closeManagerContent(): Promise<void> {
+    return this.registry.closeManagerContent()
   }
 
   navigateFor(owner: string, reference: CordisXRouteReference): Promise<void> {

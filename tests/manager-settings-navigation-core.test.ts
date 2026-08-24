@@ -146,7 +146,7 @@ describe('Manager Settings navigation core', () => {
     expect(compareManagerSettingsNavigationItems(sorted[0]!, sorted[1]!)).toBeLessThan(0)
   })
 
-  it('resolves the strict Manager route/page contract and rejects invalid or unresolved dependencies', () => {
+  it('resolves the strict Manager route/page contract and rejects invalid or unresolved dependencies', async () => {
     const contexts = new HostContextStore()
     contexts.replace({ enabled: false })
     const pages = new PageRegistry()
@@ -172,11 +172,28 @@ describe('Manager Settings navigation core', () => {
       $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3,
       id: 'ready', title: { key: 'page.title' }, description: { key: 'page.description' },
       icon: 'host:layers', chrome: 'standard',
-    }, () => undefined)
+    }, context => {
+      const body = context.document.createElement('p')
+      body.dataset.demoManagerContent = 'true'
+      body.textContent = 'Host-controlled demo body'
+      context.container.append(body)
+      return () => body.remove()
+    })
     expect(navigation.managerSettingsNavigationRoute('demo', 'ready')).toMatchObject({
       state: 'available',
       resolved: { owner: 'demo', qualifiedId: 'demo:ready', definition: { outlet: 'manager.content' }, page: { qualifiedId: 'demo:ready' } },
     })
+    const managerBody = dom.window.document.createElement('section')
+    dom.window.document.body.append(managerBody)
+    const mount = await navigation.mountManagerContent('demo', { id: 'ready' }, 'demo:entry', managerBody)
+    expect(managerBody.querySelector('[data-demo-manager-content]')?.textContent).toBe('Host-controlled demo body')
+    expect(navigation.snapshot().outlets.find(item => item.id === 'manager.content')).toMatchObject({
+      mounted: true,
+      activeRoute: 'demo:ready',
+    })
+    mount.abort()
+    await mount.dispose()
+    expect(managerBody.querySelector('[data-demo-manager-content]')).toBeNull()
 
     pages.register('demo', {
       $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3,

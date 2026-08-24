@@ -124,15 +124,17 @@ produces no placeholder document or Manager form. This Node service plane is
 separate from renderer plugin Schemastery `Config`/`configApplies`: the built-in
 Channel renderer module exports no Config and contributes only a structured
 `manager.settings.navigation-items` record plus a same-owner
-`manager.content` route and standard page. The current Manager has not yet
-mounted that B outlet, so real-renderer evidence records the valid data plane
-and unavailable outlet without inventing a visible destination. The internal
-Host body renderer consumes a bounded, redacted Channel Manager projection for
+`manager.content` route and standard page. The Host now projects eligible B
+records into its first-level navigation, renders the route-v2 navigation label
+and the page-v3 standard header separately, and mounts a bounded child seat
+only after same-owner, surface/outlet/page permission, generation, and route
+checks. The internal Host body renderer consumes a bounded, redacted Channel
+Manager projection for
 read-only accounts, routes, composite task bindings, and diagnostics; it never
 receives service configuration, `secretRef`, transports, queues, or credential
-values. Manager B DOM integration, live launcher projection, configuration
-writes, credential actions, and a single launcher-to-Manager simulator
-orchestration remain planned. The Channel config adapter consumes the shared
+values. Live launcher projection, configuration writes, credential actions,
+and a single launcher-to-Manager simulator orchestration remain planned. The
+Channel config adapter consumes the shared
 launcher service-configuration foundation: the closed manifest `restart`
 declaration maps to `service-restart`, the schema is
 `standard/renderable=false`, revision/generation/owner fencing and last-good

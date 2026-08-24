@@ -6,7 +6,8 @@ Channels is the CordisX product surface for launcher-owned messaging connections
 
 - **Implemented:** immutable packaged service artifacts are validated, bundled, staged, integrity-checked, authority-projected, and loaded into a generation-bound Node Cordis context.
 - **Verified:** the local simulator covers activation/disposal, and the shared Host service-config API covers `service-restart` CAS, opaque-handle preservation, redaction, and last-good publication without a real credential.
-- **Experimental:** the bounded Host body renderer projects account, route, composite task-binding, and diagnostic data. Its navigation/route/page data plane is verified, but the current Manager has not yet mounted the `manager.content` outlet, so no user-visible Channel page is claimed. It never projects `secretRef` or credential material.
+- **Implemented and verified:** the bounded Host body renderer projects account, route, composite task-binding, and diagnostic data through a Host-owned `manager.content` page. The Host renders the navigation entry, standard header, theme, accessibility, and cleanup; it never projects `secretRef` or credential material.
+- **Experimental:** launcher-to-renderer live projections and cross-plugin delivery are not yet lifecycle-wired.
 - **Unavailable:** real Feishu/Lark and WeCom connections, credential creation, official webhook/long-connection deployment, and launcher-to-renderer live snapshot transport.
 - **Planned:** a Host credential broker, official adapter packages, persistent Channel service configuration writes, and real-account smoke tests.
 

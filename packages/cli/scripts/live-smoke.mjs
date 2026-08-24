@@ -15,6 +15,7 @@ const parsed = parseArgs({
     'manager-detail-tab': { type: 'string' },
     'manager-permission-capability': { type: 'string' },
     'manager-settings-tab': { type: 'string' },
+    'manager-settings-navigation-item': { type: 'string' },
     'manager-settings-exercise': { type: 'boolean', default: false },
     'manager-form-exercise': { type: 'boolean', default: false },
     'manager-open-local-path-form': { type: 'boolean', default: false },
@@ -69,7 +70,7 @@ const parsed = parseArgs({
 })
 const port = Number(parsed.values.port)
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--locale en|zh-CN] [--screenshot <png>] [--app-screenshot <png>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-permission-capability <name> --manager-settings-tab <tab> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-marketplace-source <https-url> --manager-marketplace-fixture <absolute-json> --manager-click-external --manager-viewport-width <pixels> --manager-breadcrumb-width <pixels>] [--manager-lifecycle-source <absolute-directory> --report <json>] [--trigger-screenshot <png>]')
+  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--locale en|zh-CN] [--screenshot <png>] [--app-screenshot <png>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-permission-capability <name> --manager-settings-tab <tab> --manager-settings-navigation-item <qualified-id> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-marketplace-source <https-url> --manager-marketplace-fixture <absolute-json> --manager-click-external --manager-viewport-width <pixels> --manager-breadcrumb-width <pixels>] [--manager-lifecycle-source <absolute-directory> --report <json>] [--trigger-screenshot <png>]')
 }
 if (parsed.values['ui-catalog'] && parsed.values.report === undefined) {
   throw new Error('--ui-catalog requires --report so screenshots and machine-readable assertions share one artifact directory')
@@ -3114,6 +3115,11 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   if (managerSettingsTab !== undefined && !/^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)?$/.test(managerSettingsTab)) {
     throw new Error(`invalid manager settings tab id: ${managerSettingsTab}`)
   }
+  const managerSettingsNavigationItem = parsed.values['manager-settings-navigation-item']
+    ?? (parsed.values['channel-data-plane'] ? 'channel:channels' : undefined)
+  if (managerSettingsNavigationItem !== undefined && !/^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)?$/.test(managerSettingsNavigationItem)) {
+    throw new Error(`invalid manager settings navigation item id: ${managerSettingsNavigationItem}`)
+  }
   const managerExtensionPoint = parsed.values['manager-extension-point']
   const managerExtensionPointTab = parsed.values['manager-extension-point-tab']
   if (managerExtensionPointTab !== undefined && !['usage', 'information', 'diagnostics'].includes(managerExtensionPointTab)) throw new Error(`unknown manager extension point tab: ${managerExtensionPointTab}`)
@@ -3239,6 +3245,11 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       const settingsTab = ${JSON.stringify(managerSettingsTab)}
       if (settingsTab !== undefined) document.querySelector('[data-settings-tab="' + settingsTab + '"]')?.click()
       if (settingsTab !== undefined) await new Promise(resolve => setTimeout(resolve, 250))
+      const settingsNavigationItem = ${JSON.stringify(managerSettingsNavigationItem)}
+      if (settingsNavigationItem !== undefined) {
+        document.querySelector('[data-settings-navigation-item="' + CSS.escape(settingsNavigationItem) + '"]')?.click()
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
       const extensionPointId = ${JSON.stringify(managerExtensionPoint)}
       if (extensionPointId !== undefined) document.querySelector('[data-extension-point-id="' + CSS.escape(extensionPointId) + '"]')?.click()
       const extensionPointTab = ${JSON.stringify(managerExtensionPointTab)}
@@ -3383,6 +3394,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             const page = snapshot.navigation.pages.find(item => item.qualifiedId === 'channel:settings')
             const outlet = snapshot.navigation.outlets.find(item => item.id === 'manager.content')
             return {
+              locale: document.documentElement.lang,
               plugin: plugin === undefined ? null : {
                 status: plugin.status,
                 schemaKind: plugin.configuration.schemaKind,
@@ -3411,7 +3423,13 @@ if (parsed.values['manager-screenshot'] !== undefined) {
               outlet: outlet === undefined ? null : {
                 available: outlet.available,
                 mounted: outlet.mounted,
+                activeRoute: outlet.activeRoute ?? null,
               },
+              navigationItem: document.querySelector('[data-settings-navigation-item="channel:channels"]') === null ? null : {
+                label: document.querySelector('[data-settings-navigation-item="channel:channels"]')?.textContent?.trim() ?? null,
+                icon: document.querySelector('[data-settings-navigation-item="channel:channels"] [data-host-icon]')?.getAttribute('data-host-icon') ?? null,
+              },
+              pageTitle: document.querySelector('.cxm-heading-current-heading')?.textContent?.trim() ?? null,
               mounted: document.querySelector('[data-channel-manager]') !== null,
             }
           })(),
@@ -3621,6 +3639,9 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   managerReport = managerResult?.state ?? null
   if (parsed.values['channel-data-plane']) {
     const channel = managerReport?.channelDataPlane
+    const channelLocale = channel?.locale
+    const channelNavigationTitle = channelLocale === 'zh-CN' ? '渠道配置' : 'Channel settings'
+    const channelPageTitle = channelLocale === 'zh-CN' ? '渠道' : 'Channels'
     if (channel?.plugin?.status !== 'active'
       || channel.plugin.schemaKind !== 'none'
       || channel.plugin.configFields !== 0
@@ -3638,9 +3659,13 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       || channel.page?.chrome !== 'standard'
       || channel.page.icon !== 'host:layers'
       || channel.page.diagnostics !== 0
-      || channel.outlet?.available !== false
-      || channel.outlet.mounted !== false
-      || channel.mounted !== false) {
+      || channel.outlet?.available !== true
+      || channel.outlet.mounted !== true
+      || channel.outlet.activeRoute !== 'channel:settings'
+      || channel.navigationItem?.label !== channelNavigationTitle
+      || channel.navigationItem.icon !== 'host:layers'
+      || channel.pageTitle !== channelPageTitle
+      || channel.mounted !== true) {
       throw new Error(`Channel data-plane smoke assertions failed: ${JSON.stringify(channel)}`)
     }
   }

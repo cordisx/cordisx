@@ -48,7 +48,7 @@ formal remote mains before the productization slice was implemented.
 | Provider Fleet | Launcher-owned provider processes, provider-specific persistence, generation fencing, and a token-bound normalized RPC exist. | implemented and reusable; native Desktop current connection remains unavailable |
 | Agent events and delivery | Agent event v2, delivery snapshots, `followup`, `steer`, `inject`, cancellation-before-claim, and generation/owner fencing exist. | implemented and reusable after an explicit Platform-to-Agent binding is added |
 | Permission Broker | Source-bound required/optional declarations, `ask`/`allow`/`deny`, scope checks, audit, and plugin activation reconciliation exist in the renderer runtime. | implemented foundation; the Channel core has a source/generation-bound broker port, while the production Node policy-store adapter remains planned |
-| Manager navigation and plugin Config | Configuration protocol #19, Host #60, TDesign-aligned Host forms/collections, and Manager navigation core #106 are merged. | Channel B navigation/route/standard-page data plane and bounded Host body renderer implemented; current `manager.content` DOM mount, launcher live projection, and writes remain unavailable |
+| Manager navigation and plugin Config | Configuration protocol #19, Host #60, TDesign-aligned Host forms/collections, and Manager navigation core #106 are merged. | Channel B navigation/route/standard-page data plane and bounded Host `manager.content` mount are implemented and verified; launcher live projection and writes remain unavailable |
 | Agent Trace | Fixture, product package, event/delivery lifecycle, and README are merged. | useful notification evidence; not a Channel transport |
 | Node plugin surface | The host-neutral core and source-bound Node Cordis `channel` service exist. Package service entries are now source-validated, bundled, integrity-bound into the immutable package object, authority-projected, imported, activated, and disposed by generation. | loader path implemented/verified with the simulator; lifecycle-coordinator orchestration and production gateway/broker/store wiring remain planned |
 | Mono pins | Mono was audited read-only against its formal remote main before this slice. | deliberately unchanged by this owning-repo delivery |
@@ -647,14 +647,13 @@ renderer owns all body nodes, styles, state indicators, adaptive searchable
 collections, empty states, diagnostics, theme projection, accessibility, and
 cleanup; the plugin receives no header or navigation DOM.
 
-The data plane is `implemented/verified`: isolated `app://-/index.html` CDP
-evidence proves an active plugin with `schemaKind=none`, valid authorized B
-registration, exact route, standard Host icon/page metadata, and zero metadata
-diagnostics. The same evidence records `manager.content` as unavailable and the
-Channel body as unmounted because the Manager B DOM follow-up has not landed.
-The bounded Host body renderer is verified in integration tests with a safe
-simulator projection, but the user-visible Channel Manager page is `planned`,
-not a connected account manager.
+The data plane and read-only Manager page are `implemented/verified`: isolated
+`app://-/index.html` CDP evidence proves an active plugin with `schemaKind=none`,
+valid authorized B registration, exact route, separate route/page metadata,
+standard Host icon/header, active `manager.content` mount, and a bounded Channel
+body. The Host owns navigation, header, seat, theme, accessibility, and cleanup;
+the Channel renderer contributes no navigation or header DOM. This is still a
+simulator/read-only status page, not a connected account manager.
 
 Launcher-to-renderer live snapshot transport, configuration writes,
 reconnect/dead-letter actions, and credential operations remain `planned` or
@@ -762,8 +761,9 @@ this plan.
 5. **Manager UI/settings (`cordisx`)**: the structured Channel B navigation,
    route/standard-page metadata, Host-owned body renderer, README, permission
    manifest, safe simulator projection, and unavailable default are implemented
-   in this slice. The Manager B DOM mount, writable service configuration/actions,
-   and `session.header.actions` status/open entry remain follow-ups.
+   in this slice. The Manager B DOM mount is implemented and verified; writable
+   service configuration/actions and `session.header.actions` status/open entry
+   remain follow-ups.
 6. **Simulated end-to-end plugin/demo (`cordisx`)**: the packaged-service loader
    and renderer projection/body are each verified locally. A single launcher
    orchestration that drives both from the same persistent simulator service is
@@ -797,7 +797,7 @@ reviewable. A source branch head is never a final gitlink.
 | Secrets/attachments | secret handle only, redacted logs/errors/snapshots/audit, no renderer/config plaintext, size/type/hash/expiry quarantine, unsafe media refusal, and opaque transfer handles. |
 | Simulator phase one | create, continue, completion/failure notification, duplicate inbound event, restart, retry/dead letter, permission denial, approval expiry/deny fixture, binding revision, and generation disposal without a real account. |
 | Adapter conformance | official fixture normalization, direct/group/topic/reply mapping, outbound formatting/limits, token refresh where applicable, platform-specific retry hints, and no unsupported personal-WeChat path. |
-| Manager data plane and DOM | Current: valid authorized B navigation record, exact `manager.content` route, standard Host page metadata/icon, `schemaKind=none`, unavailable outlet, and no fabricated mount in isolated CDP. Before a user-visible claim: CordisX-owned navigation/header/page/collection DOM, no `secretRef`/secret/raw payload, accounts/routes/composite bindings/diagnostics, keyboard/a11y/focus, close/reopen, and cleanup. Writable actions remain planned. |
+| Manager data plane and DOM | Implemented/verified: valid authorized B navigation record, exact `manager.content` route, Host-rendered route label and page header, `schemaKind=none`, controlled mount, redacted account/route/binding/diagnostic collections, close/reopen cleanup, and no `secretRef`/secret/raw payload. Writable actions remain planned. |
 | Session surface | structured Channel status/open/share action only; no arbitrary title DOM/CSS, no native node replacement, correct composite session target, policy hide/restore, and generation cleanup. |
 | Real smoke | exact SDK, CordisX, protocol, adapter, account mode, and app version; authorized account only; one inbound create/continue and one outbound notification; redacted evidence; unavailable features reported honestly. |
 | Release | focused tests, typecheck, build, full `npm run check`, audit, `git diff --check`, isolated real `app://-/index.html` smoke, normal PR/CI, and head-fenced owning merge. Mono and roadmap remain untouched by this slice. |
