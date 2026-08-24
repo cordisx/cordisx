@@ -1,11 +1,11 @@
 import type { Context } from '@deepseek-ai/cordis'
 
-export const SURFACE_CONTRIBUTION_V2_SCHEMA =
-  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/surface-contribution.v2.schema.json'
+export const SURFACE_CONTRIBUTION_V3_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/surface-contribution.v3.schema.json'
 
-export interface SessionHeaderActionContributionV2 {
-  readonly $schema: typeof SURFACE_CONTRIBUTION_V2_SCHEMA
-  readonly schemaVersion: 2
+export interface SessionHeaderActionContributionV3 {
+  readonly $schema: typeof SURFACE_CONTRIBUTION_V3_SCHEMA
+  readonly schemaVersion: 3
   readonly id: 'open-timeline'
   readonly surface: 'session.header.actions'
   readonly group: 'action'
@@ -14,14 +14,15 @@ export interface SessionHeaderActionContributionV2 {
     readonly label: { readonly namespace: 'agent-trace-showcase'; readonly key: 'action.open'; readonly fallback: string }
     readonly ariaLabel: { readonly namespace: 'agent-trace-showcase'; readonly key: 'action.open'; readonly fallback: string }
     readonly icon: 'host:history'
-    readonly command: { readonly id: 'open-timeline' }
+    readonly route: { readonly id: 'session.timeline' }
+    readonly routeBehavior: 'toggle'
   }
 }
 
-/** Exact catalog-v2 data contribution pinned to protocol merge 2ec9ca15234e. */
+/** Exact route-toggle data contribution pinned to protocol merge 8036d7228fdc. */
 export const TRACE_SESSION_HEADER_ACTION = Object.freeze({
-  $schema: SURFACE_CONTRIBUTION_V2_SCHEMA,
-  schemaVersion: 2,
+  $schema: SURFACE_CONTRIBUTION_V3_SCHEMA,
+  schemaVersion: 3,
   id: 'open-timeline',
   surface: 'session.header.actions',
   group: 'action',
@@ -38,18 +39,19 @@ export const TRACE_SESSION_HEADER_ACTION = Object.freeze({
       fallback: 'Open Agent Trace Timeline',
     }),
     icon: 'host:history',
-    command: Object.freeze({ id: 'open-timeline' }),
+    route: Object.freeze({ id: 'session.timeline' }),
+    routeBehavior: 'toggle',
   }),
-} as const satisfies SessionHeaderActionContributionV2)
+} as const satisfies SessionHeaderActionContributionV3)
 
-/** Single seam that registers catalog-v2 data through the public host service. */
+/** Single seam that registers catalog-v3 data through the public host service. */
 export interface SessionHeaderEntryAdapter {
-  register(ctx: Context, contribution: SessionHeaderActionContributionV2): () => void
+  register(ctx: Context, contribution: SessionHeaderActionContributionV3): () => void
 }
 
 /** Host registration contains no Codex selector, DOM node, or renderer logic. */
 export const STRUCTURED_SESSION_HEADER_ENTRY: SessionHeaderEntryAdapter = Object.freeze({
-  register: (ctx: Context, contribution: SessionHeaderActionContributionV2) => ctx.slots.register({
+  register: (ctx: Context, contribution: SessionHeaderActionContributionV3) => ctx.slots.register({
     name: contribution.surface,
     id: contribution.id,
     group: contribution.group,

@@ -39,15 +39,19 @@ Availability is adapter- and host-version-specific. A registered contribution
 to an unavailable or ambiguous point is retained for diagnostics and is never
 visually simulated.
 
-The verified Codex/ChatGPT host `26.818.41509` (build `6962`) no longer emits
-the earlier thread-reference marker for an active local session. The
-`session.content` resolver therefore accepts either that exact legacy seat or
-the exact current main-thread timeline seat, but only when one visible
-candidate contains both the response annotation and composer identity for the
-same selected local session. It does not fall back to the application body,
-the generic main layout, localized labels, or geometry-only matching. A zero
-or ambiguous result remains unavailable with the existing semantic-anchor
-diagnostic.
+The verified Codex/ChatGPT host `26.818.41509` (build `6962`) can emit the
+earlier thread-reference marker around the exact current main-thread timeline
+seat for an active local session. A route-backed action may use the version-3
+host toggle projection; the button's pressed state comes from the exact active
+route and current session parameters, never plugin state. The `session.content` resolver accepts both
+shapes, but resolves them by semantic priority rather than counting the nested
+ancestor and descendant as two independent seats: exactly one current timeline
+seat containing both the response annotation and composer identity for the
+same selected local session wins; the exact legacy seat is considered only
+when no matching current timeline seat exists. It does not fall back to the
+application body, the generic main layout, localized labels, or geometry-only
+matching. Zero or multiple candidates at the selected priority remain
+unavailable with the existing semantic-anchor diagnostic.
 
 ### Composer action visual variant
 
@@ -140,7 +144,7 @@ environment family is not duplicated under generic panel names.
 | CordisX manager | `manager.settings.tabs` | manager settings tab | planned v4 | Host-rendered configuration tabs joined to same-owner manager-local routes/pages; no Codex selector or header callback. |
 | Page | `app` | outlet | implemented | Existing generation-scoped renderer page. |
 | Page | `main` | outlet | implemented | Existing semantic main-region page following sidebar geometry. |
-| Page | `session.content` | outlet | implemented | Existing active-session body page below the session header. |
+| Page | `session.content` | outlet | implemented | Active-session body page below the retained native header; supports host-gated page-v2 `body-only` chrome. |
 | Panel page | `panel.right.content` | outlet | reserved | No declaration until the adapter proves a stable right-panel content region and context key. |
 | Panel page | `panel.bottom.content` | outlet | reserved | No declaration until the adapter proves a stable bottom-panel content region and context key. |
 | CordisX manager page | `manager.settings.content` | outlet | planned v4 | CordisX-owned settings panel body; isolated from primary page presentation and independent of the Codex adapter. |

@@ -83,18 +83,20 @@ describe('renderer bundle', () => {
         <main data-app-shell-main-content-layout="thread-edge-scroll" style="position:relative">
           <header data-testid="app-shell-header-context-menu-surface" style="display:flex">
             <div id="native-session-title">Current session</div>
-            <div id="native-session-actions" style="display:flex"><button id="native-session-menu" class="codex-toolbar-button">Session menu</button></div>
+            <div id="native-session-actions" style="display:flex"><span id="native-session-tooltip-trigger" style="display:contents"><button id="native-session-menu" class="codex-toolbar-button" title="Toggle pinned summary">Session menu</button></span></div>
           </header>
-          <section id="native-session-content" data-pip-anchor-host="codex-main-thread" data-app-action-timeline-scroll style="position:relative">
-            <div id="native-conversation" data-thread-find-target="conversation" data-response-annotation-conversation="${sessionId}">native data</div>
-            <div data-codex-composer-root data-composer-placement="thread">
-              <div data-above-composer-conversation-id="${sessionId}"></div>
-              <div data-composer-footer-responsive style="display:flex">
-                <button id="native-composer-leading">Attach</button>
-                <div id="native-composer-actions" style="display:flex"><button id="native-submit" class="codex-composer-button">Send</button></div>
+          <section id="native-thread" data-codex-thread-reference-drop-target style="position:relative">
+            <div id="native-session-content" data-pip-anchor-host="codex-main-thread" data-app-action-timeline-scroll style="position:relative">
+              <div id="native-conversation" data-thread-find-target="conversation" data-response-annotation-conversation="${sessionId}">native data</div>
+              <div data-codex-composer-root data-composer-placement="thread">
+                <div data-above-composer-conversation-id="${sessionId}"></div>
+                <div data-composer-footer-responsive style="display:flex">
+                  <button id="native-composer-leading">Attach</button>
+                  <div id="native-composer-actions" style="display:flex"><button id="native-submit" class="codex-composer-button">Send</button></div>
+                </div>
               </div>
+              <div id="unmatched-session-content" data-pip-anchor-host="codex-main-thread" data-app-action-timeline-scroll></div>
             </div>
-            <div id="unmatched-session-content" data-pip-anchor-host="codex-main-thread" data-app-action-timeline-scroll></div>
           </section>
         </main>
         <aside data-pip-home-surface="thread-summary-panel" style="position:relative"></aside>
@@ -194,17 +196,18 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="toolbar.before"]')?.nextElementSibling?.id).toBe('native-toolbar-tooltip-trigger')
     expect(dom.window.document.getElementById('native-toolbar-tooltip-trigger')?.nextElementSibling?.getAttribute('data-cordisx-surface-host')).toBe('toolbar.after')
     expect(dom.window.document.getElementById('native-toolbar-tooltip-trigger')?.querySelector('[data-cordisx-surface-host]')).toBeNull()
-    expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"]')?.nextElementSibling?.id).toBe('native-session-menu')
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"]')?.nextElementSibling?.id).toBe('native-session-tooltip-trigger')
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"]')?.parentElement?.id).toBe('native-session-actions')
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="composer.submit.before"]')?.nextElementSibling?.id).toBe('native-submit')
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="composer.submit.before"]')?.parentElement?.id).toBe('native-composer-actions')
-    expect(dom.window.document.getElementById('native-session-menu')?.parentElement?.id).toBe('native-session-actions')
+    expect(dom.window.document.getElementById('native-session-tooltip-trigger')?.querySelector('[data-cordisx-surface-host]')).toBeNull()
+    expect(dom.window.document.getElementById('native-session-menu')?.parentElement?.id).toBe('native-session-tooltip-trigger')
     expect(dom.window.document.getElementById('native-submit')?.parentElement?.id).toBe('native-composer-actions')
     expect(surfaceHosts.every(host => host.dataset.cordisxNoDrag === 'true')).toBe(true)
     expect([...dom.window.document.querySelectorAll<HTMLElement>('.cordisx-action')]
       .every(button => button.dataset.cordisxNoDrag === 'true')).toBe(true)
     const structuredStyles = dom.window.document.getElementById('cordisx-structured-styles')?.textContent ?? ''
-    expect(structuredStyles).toContain('[data-cordisx-no-drag="true"]')
+    expect(structuredStyles).toContain('[data-cordisx-no-drag="true"], [data-cordisx-no-drag="true"] *')
     expect(structuredStyles).toContain('.cordisx-icon-only-control { --cordisx-icon-only-glyph-size: 16px; }')
     expect(structuredStyles).toContain('.cordisx-icon-only-control.cordisx-shortcut-action { --cordisx-icon-only-glyph-size: 12px; }')
     expect(dom.window.document.querySelector('details[data-cordisx-no-drag]')).toBeNull()
@@ -237,6 +240,7 @@ describe('renderer bundle', () => {
     expect(dom.window.getComputedStyle(sessionHeaderAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('16px')
     expect(sessionHeaderAction.getAttribute('aria-label')).toBe('Open main page')
     expect(sessionHeaderAction.dataset.cordisxTooltip).toBe('Open main page')
+    expect(sessionHeaderAction.draggable).toBe(false)
     const composerAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="composer.submit.before"] button')!
     expect(composerAction.className).toContain('cordisx-composer-action')
     expect(composerAction.className).not.toContain('codex-composer-button')
@@ -439,7 +443,7 @@ describe('renderer bundle', () => {
     await runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId } })
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({ activeRoute: 'slot-showcase:session.analytics', mounted: true, contextKey: `session:${sessionId}`, presentation: 'presented' })
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ presentation: 'suspended', suspendedBy: 'session.content' })
-    expect(dom.window.document.querySelector('[data-codex-thread-reference-drop-target]')).toBeNull()
+    expect(dom.window.document.getElementById('native-thread')?.hasAttribute('data-codex-thread-reference-drop-target')).toBe(true)
     expect(dom.window.document.querySelector('[data-cordisx-page-outlet="session.content"]')?.parentElement?.id).toBe('native-session-content')
     await expect(runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId: 'stale' } })).rejects.toThrow(/does not match native session/)
     expect(dom.window.location.href).toBe('https://codex.local/native')

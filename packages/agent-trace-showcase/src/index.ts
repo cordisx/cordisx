@@ -21,7 +21,7 @@ import type { TraceShowcaseStore } from './types.js'
 import { mountTraceShowcase } from './view.js'
 
 export const name = 'agent-trace-showcase'
-export const inject = ['i18n', 'commands', 'pages', 'routes', 'slots', 'agentEvents', 'agents', 'systemPrompt']
+export const inject = ['i18n', 'pages', 'routes', 'slots', 'agentEvents', 'agents', 'systemPrompt']
 
 /** Live authority is optional, user-triggered, brokered, and generation-fenced. */
 export const manifest = {
@@ -131,7 +131,6 @@ export function installAgentTraceShowcase(
     default: true,
     messages: {
       'action.open': 'Open Agent Trace Timeline',
-      'command.open': 'Open the current session Agent Trace Timeline',
       'page.title': 'Agent Trace',
       'permission.agent-events-read': 'Read the public Agent event ledger for the active session Timeline.',
       'permission.messages-append': 'Run explicit followup, steer, inject, and append-only pre-step demonstrations.',
@@ -144,7 +143,6 @@ export function installAgentTraceShowcase(
     locale: 'zh-CN',
     messages: {
       'action.open': '打开 Agent Trace 时间线',
-      'command.open': '打开当前会话的 Agent Trace 时间线',
       'page.title': 'Agent Trace',
       'permission.agent-events-read': '读取当前会话的公开 Agent 事件账本以呈现时间线。',
       'permission.messages-append': '运行明确触发的 followup、steer、inject 与只追加 pre-step 演示。',
@@ -152,29 +150,15 @@ export function installAgentTraceShowcase(
       'permission.prompt-context': '注册带明确插件来源的 system prompt context 演示。',
     },
   })
-  const message = (key: 'action.open' | 'command.open' | 'page.title', fallback: string) => ({
+  const message = (key: 'action.open' | 'page.title', fallback: string) => ({
     namespace: 'agent-trace-showcase', key, fallback,
   } as const)
-
-  ctx.commands.register({
-    id: 'open-timeline',
-    title: message('command.open', 'Open the current session Agent Trace Timeline'),
-    icon: 'host:history',
-  }, async (commandContext) => {
-    const sessionId = commandContext.hostContext?.identity.agent?.sessionKey
-    if (sessionId === undefined) throw new Error('host-issued current Agent session identity is unavailable')
-    if (config.mode === 'fixture' && config.sessionId !== sessionId) {
-      throw new Error(
-        `Agent Trace provider session ${config.sessionId ?? '<unavailable>'} does not match invoked session ${sessionId}`,
-      )
-    }
-    await ctx.routes.navigate({ id: 'session.timeline', params: { sessionId } })
-  })
 
   ctx.pages.register({
     id: 'session.timeline',
     title: message('page.title', 'Agent Trace'),
     icon: 'host:history',
+    chrome: 'body-only',
     localeNamespace: 'agent-trace-showcase',
   }, context => mountSessionTimeline(context, config, ctx.agentEvents, ctx.agents, ctx.systemPrompt))
   ctx.routes.register({
@@ -199,6 +183,6 @@ export type * from './types.js'
 export {
   STRUCTURED_SESSION_HEADER_ENTRY,
   TRACE_SESSION_HEADER_ACTION,
-  type SessionHeaderActionContributionV2,
+  type SessionHeaderActionContributionV3,
   type SessionHeaderEntryAdapter,
 } from './entry.js'

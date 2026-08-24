@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
-  SURFACE_CONTRIBUTION_V2_SCHEMA,
+  SURFACE_CONTRIBUTION_V3_SCHEMA,
   TRACE_SESSION_HEADER_ACTION,
 } from '../src/entry.js'
 import { manifest } from '../src/index.js'
 
 describe('Agent Trace session header contribution', () => {
-  it('matches the fixed catalog-v2 session.header.actions action family', () => {
+  it('matches the fixed catalog-v3 session.header.actions route-toggle family', () => {
     expect(TRACE_SESSION_HEADER_ACTION).toEqual({
-      $schema: SURFACE_CONTRIBUTION_V2_SCHEMA,
-      schemaVersion: 2,
+      $schema: SURFACE_CONTRIBUTION_V3_SCHEMA,
+      schemaVersion: 3,
       id: 'open-timeline',
       surface: 'session.header.actions',
       group: 'action',
@@ -22,7 +22,8 @@ describe('Agent Trace session header contribution', () => {
           namespace: 'agent-trace-showcase', key: 'action.open', fallback: 'Open Agent Trace Timeline',
         },
         icon: 'host:history',
-        command: { id: 'open-timeline' },
+        route: { id: 'session.timeline' },
+        routeBehavior: 'toggle',
       },
     })
     expect(Object.isFrozen(TRACE_SESSION_HEADER_ACTION)).toBe(true)
@@ -38,7 +39,7 @@ describe('Agent Trace session header contribution', () => {
       expect(serialized).not.toContain(forbidden)
     }
     expect(TRACE_SESSION_HEADER_ACTION.item.icon.startsWith('host:')).toBe(true)
-    expect('route' in TRACE_SESSION_HEADER_ACTION.item).toBe(false)
+    expect('command' in TRACE_SESSION_HEADER_ACTION.item).toBe(false)
   })
 
   it('declares only the four optional public capabilities used by live demos', () => {
