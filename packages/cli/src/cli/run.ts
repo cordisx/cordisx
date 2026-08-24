@@ -23,6 +23,19 @@ import { resolveProfileSelection } from './profiles.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
 import { createConfigBridgeHandler, type ConfigBridgeHandler } from '../launcher/config-rpc.js'
+import { HostServiceConfigNarrowApi, type HostSecretState } from '../launcher/service-config.js'
+import { createServiceConfigBridgeHandler, type ServiceConfigBridgeHandler } from '../launcher/service-config-rpc.js'
+import { readServiceConfigState } from '../config/service-config.js'
+import {
+  CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
+  CLI_PROXY_PROVIDER_RUNTIME_CONFIG_INITIAL,
+  CLI_PROXY_PROVIDER_RUNTIME_SERVICE_ID,
+  CLI_PROXY_PROVIDER_STARTUP_CONFIG_CONTRACT,
+  CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL,
+  CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID,
+  parseCliProxyProviderStartupConfig,
+  resolveCliProxyProviderConfigs,
+} from '../plugins/cli-proxy-api/service-config.js'
 import type { CordisXPluginIdentity } from '../platform-contracts.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import { PluginPermissionIdentityRegistry, type PermissionPersistenceContext } from '../launcher/permission-rpc.js'
@@ -107,6 +120,7 @@ interface RendererComposition {
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken: string
   readonly configBridgeToken?: string
+  readonly serviceConfigBridgeToken?: string
   readonly generation: string
   readonly permissionBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
@@ -131,15 +145,20 @@ async function bundle(
     }
   } = {},
 ): Promise<RendererComposition> {
-  const providerBridgeToken = config.providers.some(provider => provider.enabled) ? randomBytes(32).toString('hex') : undefined
+  const providerBridgeToken = (config.providers.some(provider => provider.enabled)
+    || config.plugins.some(plugin => plugin.enabled && plugin.id === 'cli-proxy-api'))
+    ? randomBytes(32).toString('hex')
+    : undefined
   const agentHistoryBridgeToken = randomBytes(32).toString('hex')
   const configBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
+  const serviceConfigBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
   const permissionBridgeToken = options.permission?.persistent === true ? randomBytes(32).toString('hex') : undefined
   const generation = options.generation ?? randomBytes(16).toString('hex')
   const source = await buildRendererBundle(config, {
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
+    ...(serviceConfigBridgeToken === undefined ? {} : { serviceConfigBridgeToken }),
     ...(options.permission === undefined
       ? (options.profileId === undefined ? {} : { profileId: options.profileId })
       : {
@@ -166,6 +185,7 @@ async function bundle(
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
+    ...(serviceConfigBridgeToken === undefined ? {} : { serviceConfigBridgeToken }),
     generation,
     ...(permissionBridgeToken === undefined ? {} : { permissionBridgeToken }),
     ...(options.pluginLifecycle === undefined ? {} : { pluginLifecycleBridgeToken: options.pluginLifecycle.token }),
@@ -195,6 +215,54 @@ function pluginIdentities(config: CordisXConfig): readonly CordisXPluginIdentity
   return config.plugins.map(plugin => ({ source: plugin.source ?? pathToFileURL(plugin.entry).href, id: plugin.id }))
 }
 
+function cliProxyServiceConfigBridge(input: {
+  readonly token: string
+  readonly profileId: string
+  readonly generation: string
+  readonly configPath: string
+  readonly rootDir: string
+  readonly environment: NodeJS.ProcessEnv
+  readonly fleet: ProviderFleet
+}): ServiceConfigBridgeHandler {
+  const secretState = (reference: string | undefined): HostSecretState => {
+    if (reference === undefined || reference === '') return 'missing'
+    const environmentName = /^host-secret:env\/([A-Z_][A-Z0-9_]*)$/u.exec(reference)?.[1]
+    if (environmentName !== undefined) return input.environment[environmentName] === undefined ? 'missing' : 'ready'
+    return 'unavailable'
+  }
+  const startup = new HostServiceConfigNarrowApi({
+    contract: CLI_PROXY_PROVIDER_STARTUP_CONFIG_CONTRACT,
+    profileId: input.profileId, generation: input.generation, ownerToken: input.token,
+    configPath: input.configPath, writable: true, authorize: () => true, secretState,
+  })
+  const runtime = new HostServiceConfigNarrowApi({
+    contract: CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
+    profileId: input.profileId, generation: input.generation, ownerToken: input.token,
+    configPath: input.configPath, writable: true, authorize: () => true, secretState,
+    restartService: async candidate => {
+      const startupState = await readServiceConfigState({
+        profileId: input.profileId,
+        pluginId: 'cli-proxy-api',
+        serviceId: CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID,
+        initialConfig: CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL as unknown as Parameters<typeof readServiceConfigState>[0]['initialConfig'],
+      }, input.configPath)
+      const providers = resolveCliProxyProviderConfigs(
+        CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT.parseStored(candidate) as unknown as typeof CLI_PROXY_PROVIDER_RUNTIME_CONFIG_INITIAL,
+        parseCliProxyProviderStartupConfig(startupState.config as unknown),
+        { rootDir: input.rootDir },
+      )
+      return await input.fleet.reconfigure(providers)
+    },
+  })
+  return createServiceConfigBridgeHandler({
+    token: input.token, profileId: input.profileId, generation: input.generation,
+    services: [
+      { pluginId: 'cli-proxy-api', serviceId: CLI_PROXY_PROVIDER_RUNTIME_SERVICE_ID, api: runtime },
+      { pluginId: 'cli-proxy-api', serviceId: CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID, api: startup },
+    ],
+  })
+}
+
 function recoveredActivation(plan: RollbackPlan, runtimeGeneration: string): CordisXPluginActivationRecordV1 {
   return {
     $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
@@ -219,6 +287,7 @@ async function runInjectedHost(input: {
   readonly agentHistoryHost: CodexAgentHistoryHost
   readonly agentHistoryBridgeToken: string
   readonly configBridge?: ConfigBridgeHandler
+  readonly serviceConfigBridge?: ServiceConfigBridgeHandler
   readonly permissionPersistence?: PermissionPersistenceContext
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
   readonly executable?: string
@@ -244,6 +313,7 @@ async function runInjectedHost(input: {
     agentHistoryHost: input.agentHistoryHost,
     agentHistoryBridgeToken: input.agentHistoryBridgeToken,
     ...(input.configBridge === undefined ? {} : { configBridge: input.configBridge }),
+    ...(input.serviceConfigBridge === undefined ? {} : { serviceConfigBridge: input.serviceConfigBridge }),
     ...(input.permissionPersistence === undefined ? {} : { permissionPersistence: input.permissionPersistence }),
     ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
     onStatus: message => input.stdout(`[cordisx] ${message}`),
@@ -499,6 +569,20 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     identities: pluginIdentities(configuredComposition),
     identityAllowed: (identity: CordisXPluginIdentity) => permissionIdentities.allowed(identity),
   }
+  const providerFleet = rendererComposition.providerBridgeToken === undefined
+    ? undefined
+    : await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } })
+  const serviceConfigBridge = providerFleet === undefined || rendererComposition.serviceConfigBridgeToken === undefined
+    ? undefined
+    : cliProxyServiceConfigBridge({
+        token: rendererComposition.serviceConfigBridgeToken,
+        profileId: selection.profileId,
+        generation: rendererComposition.generation,
+        configPath,
+        rootDir: rootFromConfigPath(configPath),
+        environment: runtime.env ?? process.env,
+        fleet: providerFleet,
+      })
   if (invocation.options.attach) {
     const debugPort = invocation.options.debugPort ?? composition.codex.debugPort
     if (invocation.options.dryRun) {
@@ -510,10 +594,11 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       agentHistoryHost: agentHistoryHost(runtime.env ?? process.env, configPath, `${appId}:${selection.profileId}:attach`),
       agentHistoryBridgeToken: rendererComposition.agentHistoryBridgeToken,
       ...(rendererComposition.providerBridgeToken === undefined ? {} : {
-        providerFleet: await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } }),
+        providerFleet: providerFleet!,
         providerBridgeToken: rendererComposition.providerBridgeToken,
       }),
       ...(configBridge === undefined ? {} : { configBridge }),
+      ...(serviceConfigBridge === undefined ? {} : { serviceConfigBridge }),
       ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
       pluginLifecycle,
       debugPort,
@@ -561,10 +646,11 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     ),
     agentHistoryBridgeToken: rendererComposition.agentHistoryBridgeToken,
     ...(rendererComposition.providerBridgeToken === undefined ? {} : {
-      providerFleet: await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } }),
+      providerFleet: providerFleet!,
       providerBridgeToken: rendererComposition.providerBridgeToken,
     }),
     ...(configBridge === undefined ? {} : { configBridge }),
+    ...(serviceConfigBridge === undefined ? {} : { serviceConfigBridge }),
     ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
     pluginLifecycle,
     executable: plan.executable,

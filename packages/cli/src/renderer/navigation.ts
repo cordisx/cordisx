@@ -32,6 +32,7 @@ import {
 } from './generation-visibility.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
 import { dismissHostTooltips, HostTooltipController } from './tooltips.js'
+import { HostPageControls } from './page-controls.js'
 import type { PluginConsoleAspect } from './plugin-console.js'
 import {
   ICON_TOKEN_PATTERN,
@@ -841,6 +842,8 @@ export class NavigationRegistry {
         return dispose
       }
       const localization = this.i18n.seatFor(page.owner, page.metadata.localeNamespace ?? page.owner, own)
+      const controls = new HostPageControls(content.ownerDocument, content)
+      effects.push(() => controls.dispose())
       const mount = {} as ManagedSettingsPageMountRecord
       Object.assign(mount, {
         owner: page.owner,
@@ -871,6 +874,7 @@ export class NavigationRegistry {
             back: outlet => this.back(page.owner, outlet),
             close: outlet => this.close(page.owner, outlet),
           },
+          controls,
           localeNamespace: localization.namespace,
           t: localization.t,
           localization,
@@ -934,6 +938,8 @@ export class NavigationRegistry {
         return dispose
       }
       const localization = this.i18n.seatFor(page.owner, page.metadata.localeNamespace ?? page.owner, own)
+      const controls = new HostPageControls(content.ownerDocument, content)
+      effects.push(() => controls.dispose())
       const mount = {} as ManagedManagerPageMountRecord
       Object.assign(mount, {
         owner: page.owner,
@@ -964,6 +970,7 @@ export class NavigationRegistry {
             back: outlet => this.back(page.owner, outlet),
             close: outlet => this.close(page.owner, outlet),
           },
+          controls,
           localeNamespace: localization.namespace,
           t: localization.t,
           localization,
@@ -1555,6 +1562,8 @@ export class NavigationRegistry {
       body.dataset.cordisxPageBody = 'true'
       body.style.cssText = 'position:relative;flex:1;min-height:0;overflow:auto'
       content.append(body)
+      const controls = new HostPageControls(content.ownerDocument, content)
+      effects.push(() => controls.dispose())
       const context: CordisXPageMountContext = {
         container: body,
         document: content.ownerDocument,
@@ -1567,6 +1576,7 @@ export class NavigationRegistry {
           back: outletName => this.back(page.owner, outletName),
           close: outletName => this.close(page.owner, outletName),
         },
+        controls,
         localeNamespace: localization.namespace,
         t: localization.t,
         localization,

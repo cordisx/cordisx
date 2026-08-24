@@ -93,20 +93,24 @@ function registryFailure(error: unknown): CordisXPlatformResult<never> {
 
 /** Host-owned multi-provider router. Renderer calls never receive adapters, raw cursors, or child handles. */
 export class ProviderFleet implements CordisXPlatformAdapter {
-  private readonly registry = new ProviderAdapterRegistry<ProviderConnection>()
-  private readonly failures = new Map<string, CordisXPlatformDiagnostic>()
-  private readonly names = new Map<string, string>()
+  private registry = new ProviderAdapterRegistry<ProviderConnection>()
+  private failures = new Map<string, CordisXPlatformDiagnostic>()
+  private names = new Map<string, string>()
   private readonly cursors = new Map<string, FleetCursorState>()
   private readonly now: () => number
+  private readonly startServer: NonNullable<ProviderFleetOptions['startServer']>
+  private readonly appServer: CodexAppServerOptions | undefined
   private closed = false
 
   private constructor(options: ProviderFleetOptions) {
     this.now = options.now ?? Date.now
+    this.startServer = options.startServer ?? startCodexAppServer
+    this.appServer = options.appServer
   }
 
   static async create(configs: readonly CliProxyProviderConfig[], options: ProviderFleetOptions = {}): Promise<ProviderFleet> {
     const fleet = new ProviderFleet(options)
-    const start = options.startServer ?? startCodexAppServer
+    const start = fleet.startServer
     await Promise.all(configs.filter(config => config.enabled).map(async config => {
       fleet.names.set(config.id, config.displayName)
       try {
@@ -250,6 +254,49 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     this.closed = true
     this.cursors.clear()
     await this.registry.dispose()
+  }
+
+  /**
+   * Start a replacement generation before retiring the previous adapters.
+   * The narrow service-config API calls `finalize` only after persistence
+   * commits, or `rollback` when it cannot, so callers never observe a
+   * half-published Provider Fleet.
+   */
+  async reconfigure(configs: readonly CliProxyProviderConfig[]): Promise<{
+    readonly generation: string
+    rollback(): Promise<void>
+    finalize(): Promise<void>
+  }> {
+    if (this.closed) throw new Error('Provider Fleet is closed')
+    const replacement = await ProviderFleet.create(configs, {
+      now: this.now,
+      startServer: this.startServer,
+      ...(this.appServer === undefined ? {} : { appServer: this.appServer }),
+    })
+    const previous = { registry: this.registry, failures: this.failures, names: this.names }
+    this.registry = replacement.registry
+    this.failures = replacement.failures
+    this.names = replacement.names
+    replacement.closed = true
+    const generation = this.registry.snapshots().map(item => item.generation).sort().join(',') || `unavailable:${randomUUID()}`
+    let settled = false
+    return {
+      generation,
+      rollback: async () => {
+        if (settled) return
+        settled = true
+        const current = this.registry
+        this.registry = previous.registry
+        this.failures = previous.failures
+        this.names = previous.names
+        await current.dispose()
+      },
+      finalize: async () => {
+        if (settled) return
+        settled = true
+        await previous.registry.dispose()
+      },
+    }
   }
 
   private providers(requested?: readonly string[]): CordisXPlatformResult<readonly string[]> {

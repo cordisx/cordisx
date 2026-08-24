@@ -167,17 +167,6 @@ function input(document: Document, label: string, type: 'input' | 'textarea' = '
   return node
 }
 
-function select(document: Document, label: string): HTMLSelectElement {
-  const node = document.createElement('select')
-  node.setAttribute('aria-label', label)
-  node.dataset.cordisxNoDrag = 'true'
-  style(node, {
-    width: '100%', minHeight: '34px', padding: '5px 8px', border: '1px solid var(--color-border, rgba(255,255,255,.12))',
-    borderRadius: '8px', background: 'var(--color-background-elevated, #202020)', color: 'inherit', font: 'inherit',
-  })
-  return node
-}
-
 function sessionKey(ref: CordisXPlatformSessionRef): string {
   return JSON.stringify([ref.providerId, ref.remoteSessionId])
 }
@@ -217,8 +206,26 @@ function mountFleet(ctx: Context, context: CordisXPageMountContext<Messages>, co
   style(intro, { margin: '0 0 14px', color: 'var(--color-text-secondary, rgba(255,255,255,.7))' })
   const controls = document.createElement('div')
   style(controls, { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '9px', marginBottom: '10px' })
-  const providerSelect = select(document, context.t('field.provider'))
-  const modelSelect = select(document, context.t('field.model'))
+  let providerValue = ''
+  let modelValue = ''
+  const providerSelect = context.controls.select<string>({
+    id: 'cordisx-provider-filter',
+    label: context.t('field.provider'),
+    options: [{ label: 'All providers', value: '' }],
+    value: providerValue,
+    onChange: value => {
+      providerValue = value ?? ''
+      renderModels()
+      void refreshSessions()
+    },
+  })
+  const modelSelect = context.controls.select<string>({
+    id: 'cordisx-provider-model',
+    label: context.t('field.model'),
+    options: [],
+    value: modelValue,
+    onChange: value => { modelValue = value ?? '' },
+  })
   const cwd = input(document, context.t('field.cwd')) as HTMLInputElement
   cwd.placeholder = context.t('field.cwd')
   cwd.value = config.defaultCwd
@@ -228,7 +235,7 @@ function mountFleet(ctx: Context, context: CordisXPageMountContext<Messages>, co
   initialMessage.placeholder = context.t('field.initial-message')
   const refresh = button(document, context.t('action.refresh'))
   const create = button(document, context.t('action.create'))
-  controls.append(providerSelect, modelSelect, cwd, search, initialMessage, refresh, create)
+  controls.append(providerSelect.root, modelSelect.root, cwd, search, initialMessage, refresh, create)
   const status = document.createElement('div')
   status.setAttribute('role', 'status')
   style(status, { minHeight: '20px', margin: '5px 0', color: 'var(--color-text-secondary, rgba(255,255,255,.7))' })
@@ -247,20 +254,30 @@ function mountFleet(ctx: Context, context: CordisXPageMountContext<Messages>, co
   let operation = 0
   const configuredProviders = configuredProviderIds(config)
 
-  const providerFilter = (): readonly string[] | undefined => providerSelect.value === ''
+  const providerFilter = (): readonly string[] | undefined => providerValue === ''
     ? configuredProviders ?? [...new Set(models.map(item => item.ref.providerId))].sort()
-    : [providerSelect.value]
+    : [providerValue]
 
   const renderModels = (): void => {
-    const currentProvider = providerSelect.value
-    const currentModel = modelSelect.value
+    const currentProvider = providerValue
+    const currentModel = modelValue
     const providerIds = [...new Set(models.map(item => item.ref.providerId))].sort()
-    providerSelect.replaceChildren(new Option('All providers', ''))
-    for (const providerId of providerIds) providerSelect.append(new Option(providerId, providerId))
-    if (providerIds.includes(currentProvider)) providerSelect.value = currentProvider
-    const visible = models.filter(item => providerSelect.value === '' || item.ref.providerId === providerSelect.value)
-    modelSelect.replaceChildren(...visible.map(item => new Option(`[${item.ref.providerId}] ${item.label}`, modelKey(item.ref), item.ref.providerId === providerSelect.value && item.isDefault === true)))
-    if (visible.some(item => modelKey(item.ref) === currentModel)) modelSelect.value = currentModel
+    providerValue = providerIds.includes(currentProvider) ? currentProvider : ''
+    providerSelect.set([
+      { label: 'All providers', value: '' },
+      ...providerIds.map(providerId => ({ label: providerId, value: providerId })),
+    ], providerValue)
+    const visible = models.filter(item => providerValue === '' || item.ref.providerId === providerValue)
+    modelValue = visible.some(item => modelKey(item.ref) === currentModel)
+      ? currentModel
+      : (visible.find(item => item.ref.providerId === providerValue && item.isDefault)?.ref)
+        ? modelKey(visible.find(item => item.ref.providerId === providerValue && item.isDefault)!.ref)
+        : ''
+    modelSelect.set(visible.map(item => ({
+      label: `[${item.ref.providerId}] ${item.label}`,
+      value: modelKey(item.ref),
+      disabled: false,
+    })), modelValue)
     create.disabled = visible.length === 0 || cwd.value.trim() === ''
   }
 
@@ -421,7 +438,7 @@ function mountFleet(ctx: Context, context: CordisXPageMountContext<Messages>, co
   }
 
   const createSession = async (): Promise<void> => {
-    const model = parsedModel(modelSelect.value)
+    const model = parsedModel(modelValue)
     if (model === undefined || cwd.value.trim() === '') return
     const result = await ctx.platform.tasks.create({
       model,
@@ -468,8 +485,7 @@ function mountFleet(ctx: Context, context: CordisXPageMountContext<Messages>, co
     await read(ref)
   }
 
-  providerSelect.addEventListener('change', () => { renderModels(); void refreshSessions() })
-  cwd.addEventListener('input', () => { create.disabled = modelSelect.options.length === 0 || cwd.value.trim() === '' })
+  cwd.addEventListener('input', () => { create.disabled = modelValue === '' || cwd.value.trim() === '' })
   search.addEventListener('keydown', event => { if (event.key === 'Enter') void refreshSessions() })
   refresh.addEventListener('click', () => { void refreshAll() })
   create.addEventListener('click', () => { void createSession() })
@@ -478,6 +494,8 @@ function mountFleet(ctx: Context, context: CordisXPageMountContext<Messages>, co
   void refreshAll()
   return () => {
     operation += 1
+    providerSelect.dispose()
+    modelSelect.dispose()
     root.remove()
   }
 }

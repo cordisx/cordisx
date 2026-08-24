@@ -1,7 +1,8 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { readdir } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
+import { appendRunnerCleanup, cleanupIsolatedSmokeHome, prepareIsolatedSmokeHome } from './isolated-smoke-home.mjs'
 
 function value(name) {
   const index = process.argv.indexOf(name)
@@ -21,7 +22,10 @@ if (separator < 0) throw new Error('separate live-smoke arguments with --')
 const port = Number(value('--port'))
 const profileDir = value('--profile-dir')
 const devConfig = optionalValue('--dev-config')
+const homeConfig = optionalValue('--home-config')
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('--port must be an unprivileged TCP port')
+if (devConfig !== undefined && homeConfig !== undefined) throw new Error('--dev-config and --home-config are mutually exclusive')
+if (homeConfig !== undefined && !path.isAbsolute(homeConfig)) throw new Error('--home-config must be an absolute config path')
 const smokeArgs = process.argv.slice(separator + 1)
 const reportIndex = smokeArgs.indexOf('--report')
 const reportPath = reportIndex >= 0 ? smokeArgs[reportIndex + 1] : undefined
@@ -121,6 +125,7 @@ async function waitForRenderer() {
 }
 
 const crashpadBefore = await crashpadCount()
+const homeRoot = homeConfig === undefined ? undefined : await prepareIsolatedSmokeHome(homeConfig)
 const invocation = devConfig === undefined
   ? ['codex', 'smoke', '--data', 'isolated']
   : ['dev', '--config', devConfig]
@@ -129,7 +134,7 @@ const launcher = spawn(process.execPath, [
   '--debug-port', String(port), '--profile-dir', profileDir, '--', '--start-minimized',
 ], {
   stdio: ['ignore', 'pipe', 'pipe'],
-  env: process.env,
+  env: homeRoot === undefined ? process.env : { ...process.env, HOME: homeRoot },
   detached: process.platform !== 'win32',
 })
 launcher.stdout.pipe(process.stdout)
@@ -158,6 +163,7 @@ try {
   process.removeListener('SIGTERM', interrupt)
   if (smoke !== undefined && !exited(smoke)) await stop(smoke)
   await stop(launcher)
+  const homeCleanup = await cleanupIsolatedSmokeHome(homeRoot)
   try {
     await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(500) })
     throw new Error(`CDP port ${port} still accepts connections after smoke cleanup`)
@@ -192,13 +198,9 @@ try {
     profileProcesses: 0,
     crashpadBefore,
     crashpadAfter,
+    ...homeCleanup,
   }
-  if (reportPath !== undefined) {
-    const resolvedReport = path.resolve(reportPath)
-    const report = JSON.parse(await readFile(resolvedReport, 'utf8'))
-    report.runnerCleanup = cleanup
-    await writeFile(resolvedReport, `${JSON.stringify(report, null, 2)}\n`)
-  }
+  await appendRunnerCleanup(reportPath, cleanup)
   console.log(`[cordisx-smoke-cleanup] ${JSON.stringify(cleanup)}`)
 }
 

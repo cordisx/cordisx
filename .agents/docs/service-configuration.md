@@ -1,9 +1,31 @@
 # Plugin-owned service configuration
 
-Status: Host data/API foundation implemented against the formally merged
-`cordisx-protocol@871f028c57cffaa3080b06f6319baebfb4107438` contracts. Manager
-call-site wiring waits for the formal TDesign/Manager dependency and is not part
-of this foundation slice.
+Status: Host data/API foundation and the CLIProxy Providers plugin-detail
+bridge are implemented against the formally merged
+`cordisx-protocol@871f028c57cffaa3080b06f6319baebfb4107438` contracts. The
+Manager bridge uses the existing Host TDesign form and a token/profile/generation
+fenced CDP binding; it does not create a global Provider settings category.
+
+For an independent product-mode renderer check, use the normal launcher path
+with a temporary Home Config rather than `dev --config` (which is intentionally
+read-only and has no service-config binding):
+
+```sh
+proof_root="$(mktemp -d)"
+node packages/cli/scripts/run-isolated-app-smoke.mjs \
+  --port 17426 --profile-dir "$(mktemp -d)" \
+  --home-config "$PWD/cordisx.cli-proxy.example.json" -- \
+  --manager-screenshot "$proof_root/manager.png" \
+  --manager-tab plugins --manager-plugin cli-proxy-api \
+  --manager-detail-tab config --manager-viewport-width 480 --report "$proof_root/report.json"
+```
+
+The runner copies that fixture into a new temporary `HOME` and launches
+`codex smoke --data isolated`; it does not read a pre-existing profile. It also
+keeps cleanup evidence from masking a smoke failure when no report was written.
+Its `runnerCleanup` report record and `[cordisx-smoke-cleanup]` line require
+`homeRootRemoved=true` and `homeRootExists=false` alongside the port, profile,
+and Crashpad checks.
 
 ## Boundary
 
@@ -88,4 +110,6 @@ state is never written to a CordisX core settings category.
 The final Manager slice must migrate through the narrow API, preserve a
 recoverable last-good value, remove product documentation that instructs users
 to edit top-level providers, and prove the plugin-detail flow in an isolated
-`app://` renderer before legacy write guidance can be removed.
+`app://` renderer before legacy write guidance can be removed. The bridge
+projects only `providers` and configured-secret state; it never sends a secret
+reference value or credential value to the renderer.

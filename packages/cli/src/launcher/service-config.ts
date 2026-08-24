@@ -116,6 +116,8 @@ export interface HostServiceConfigNarrowApiOptions {
   readonly restartService?: (candidate: JsonValue) => Promise<{
     readonly generation: string
     readonly rollback: () => Promise<void>
+    /** Called only after the new candidate has been committed as last-good. */
+    readonly finalize?: () => Promise<void>
   }>
   readonly persistence?: HostServiceConfigPersistence
 }
@@ -325,6 +327,7 @@ export class HostServiceConfigNarrowApi {
         await this.persistence.abort(candidateScope, this.options.configPath).catch(() => undefined)
         throw error
       }
+      await restarted.finalize?.()
       return immutable({
         ...base,
         status: 'applied',
