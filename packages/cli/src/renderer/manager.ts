@@ -717,6 +717,17 @@ const MANAGER_STYLES = `
     border-bottom: 1px solid rgba(255, 255, 255, .08);
   }
   .cxm-settings-group { overflow: clip; border: 1px solid var(--cx-border); border-radius: .8rem; background: color-mix(in srgb, var(--cx-surface-raised) 86%, var(--cx-surface)); box-shadow: 0 1px 2px color-mix(in srgb, var(--cx-shadow) 18%, transparent); }
+  .cxm-plugin-service-config .cxm-service-config-footer {
+    position: static;
+    z-index: auto;
+    min-block-size: 2.75rem;
+    padding: .25rem 0 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
   .cxm-settings-group.cxm-flat-list { border-top-color: var(--cx-border); border-bottom-color: var(--cx-border); }
   .cxm-settings-group .cxm-flat-item { padding: .9rem 1rem; }
   .cxm-flat-item { padding: 14px 2px; }
@@ -3864,7 +3875,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         const section = forms.section(title, description)
         section.root.dataset.serviceConfig = descriptor.identity.serviceId
         section.root.dataset.configApplies = descriptor.configApplies
-        section.root.classList.add('cxm-settings-group')
         const form = forms.form(`${plugin.id}-${descriptor.identity.serviceId}`)
         form.dataset.serviceConfigForm = descriptor.identity.serviceId
         const configuration = descriptor.configuration as unknown as Record<string, CordisXJsonValue>
@@ -3899,7 +3909,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         forms.connect(item, control)
         item.control.append(control.root)
         section.content.append(item.root)
-        const footer = create(document, 'div', 'cxf-actions cxf-form-footer')
+        const footer = create(document, 'div', 'cxf-actions cxm-service-config-footer')
         const status = create(document, 'span', 'cxf-status')
         status.setAttribute('role', 'status')
         if (descriptor.restartRequired) {

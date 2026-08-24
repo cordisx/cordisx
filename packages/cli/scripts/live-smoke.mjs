@@ -3159,6 +3159,7 @@ if (parsed.values['authorization-plugin'] !== undefined) {
 }
 
 let managerReport
+let managerFormExerciseFailure
 let pluginConsoleReport
 if (parsed.values['plugin-console-exercise']) {
   const owner = parsed.values['plugin-owner'] ?? 'console-showcase'
@@ -3581,7 +3582,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             await new Promise(resolve => setTimeout(resolve, 50))
           }
           if (pluginId === 'cli-proxy-api') {
-            const serviceDeadline = Date.now() + 5_000
+            const serviceDeadline = Date.now() + 15_000
             while (document.querySelectorAll('[data-plugin-service-config="cli-proxy-api"] [data-service-config]').length < 2
               && Date.now() < serviceDeadline) {
               await new Promise(resolve => setTimeout(resolve, 50))
@@ -3769,7 +3770,9 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           externalDefaultPrevented,
           hostForms: [...document.querySelectorAll('[data-host-form]')].filter(form => form.getClientRects().length > 0).map(form => {
             const grid = form.querySelector('.cxf-form-grid')
-            const firstControl = form.querySelector('[data-host-form-primitive]:not([aria-disabled="true"]), input:not(:disabled), textarea:not(:disabled)')
+            const firstControl = [...form.querySelectorAll('t-input[id], t-textarea[id], t-select[id], input[id], textarea[id], select[id]')]
+              .find(control => control instanceof HTMLElement && control.getClientRects().length > 0
+                && !control.matches(':disabled,[aria-disabled="true"]'))
             const firstRect = firstControl?.getBoundingClientRect()
             return {
               id: form.getAttribute('data-host-form'),
@@ -3800,13 +3803,23 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           }),
           serviceConfigs: [...document.querySelectorAll('[data-plugin-service-config]')].map(seat => ({
             pluginId: seat.getAttribute('data-plugin-service-config'),
-            services: [...seat.querySelectorAll('[data-service-config]')].map(section => ({
-              id: section.getAttribute('data-service-config'),
-              applies: section.getAttribute('data-config-applies'),
-              form: section.closest('form')?.getAttribute('data-service-config-form') ?? null,
-              fullWidth: section.querySelector('.cxf-item')?.getAttribute('data-full-width') ?? null,
-              nativeSelects: section.querySelectorAll('select').length,
-            })),
+            services: [...seat.querySelectorAll('[data-service-config]')].map(section => {
+              const form = section.closest('form')
+              const footer = form?.querySelector('.cxm-service-config-footer')
+              const sectionRect = section.getBoundingClientRect()
+              const footerRect = footer?.getBoundingClientRect()
+              return {
+                id: section.getAttribute('data-service-config'),
+                applies: section.getAttribute('data-config-applies'),
+                form: form?.getAttribute('data-service-config-form') ?? null,
+                fullWidth: section.querySelector('.cxf-item')?.getAttribute('data-full-width') ?? null,
+                nativeSelects: section.querySelectorAll('select').length,
+                nestedControlChrome: section.classList.contains('cxm-settings-group') && section.querySelector('.cxf-form-grid') !== null,
+                stickyFooter: footer instanceof HTMLElement && getComputedStyle(footer).position === 'sticky',
+                orphanedFooter: footerRect !== undefined && footerRect.bottom > 0 && footerRect.top < innerHeight
+                  && !(sectionRect.bottom > 0 && sectionRect.top < innerHeight),
+              }
+            }),
             message: seat.textContent?.trim() ?? '',
           })),
           breadcrumb: {
@@ -4259,6 +4272,14 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       throw new Error(`Channel Manager flow smoke assertions failed: ${JSON.stringify(channel.managerFlow)}`)
     }
   }
+  if (managerPlugin === 'cli-proxy-api' && managerDetailTab === 'config') {
+    const serviceConfigs = managerReport?.serviceConfigs?.find(config => config.pluginId === 'cli-proxy-api')?.services
+    if (!Array.isArray(serviceConfigs) || serviceConfigs.length !== 2
+      || serviceConfigs.some(config => config.fullWidth !== 'true' || config.nativeSelects !== 0
+        || config.nestedControlChrome !== false || config.stickyFooter !== false || config.orphanedFooter !== false)) {
+      throw new Error(`CLIProxy Provider detail form assertions failed: ${JSON.stringify(serviceConfigs)}`)
+    }
+  }
   if (managerTab === 'about') {
     const aboutState = async () => await evaluateByValue(`(() => {
       const action = document.querySelector('.cxm-about-action')
@@ -4335,28 +4356,56 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   }
   if (parsed.values['manager-form-exercise']) {
     const firstRect = managerReport?.hostForms?.find(form => form.firstControlRect !== null)?.firstControlRect
-    if (firstRect === undefined || firstRect === null) throw new Error('manager form exercise found no visible Host form control')
-    await pointerClick(firstRect)
-    const pointer = await evaluateByValue(`(() => ({
-      primitive: document.activeElement?.getAttribute('data-host-form-primitive') ?? null,
-      id: document.activeElement?.id ?? null,
-    }))()`)
-    await send('Input.dispatchKeyEvent', {
-      type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
-    })
-    await send('Input.dispatchKeyEvent', {
-      type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
-    })
-    const keyboard = await evaluateByValue(`(() => ({
-      primitive: document.activeElement?.getAttribute('data-host-form-primitive') ?? null,
-      id: document.activeElement?.id ?? null,
-      tag: document.activeElement?.tagName.toLowerCase() ?? null,
-    }))()`)
-    managerReport = { ...managerReport, hostFormInteraction: {
-      pointer, keyboard,
-      passed: pointer.id !== null && keyboard.tag !== 'body' && keyboard.id !== pointer.id,
-    } }
-    if (managerReport.hostFormInteraction.passed !== true) throw new Error('manager Host form mouse/keyboard exercise failed')
+    if (firstRect === undefined || firstRect === null) {
+      managerReport = { ...managerReport, hostFormInteraction: { pointer: null, keyboard: null, passed: false } }
+      managerFormExerciseFailure = 'manager form exercise found no visible focusable Host form control'
+    } else {
+      await pointerClick(firstRect)
+      const pointer = await evaluateByValue(`(() => {
+      const focusPath = []
+      let active = document.activeElement
+      while (active instanceof HTMLElement) {
+        focusPath.push({ tag: active.tagName.toLowerCase(), id: active.id || null, role: active.getAttribute('role') })
+        const nested = active.shadowRoot?.activeElement
+        if (!(nested instanceof HTMLElement)) break
+        active = nested
+      }
+      return {
+        primitive: document.activeElement?.getAttribute('data-host-form-primitive') ?? null,
+        id: document.activeElement?.id ?? null,
+        focusPath,
+      }
+      })()`)
+      await send('Input.dispatchKeyEvent', {
+        type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+      })
+      await send('Input.dispatchKeyEvent', {
+        type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+      })
+      const keyboard = await evaluateByValue(`(() => {
+      const focusPath = []
+      let active = document.activeElement
+      while (active instanceof HTMLElement) {
+        focusPath.push({ tag: active.tagName.toLowerCase(), id: active.id || null, role: active.getAttribute('role') })
+        const nested = active.shadowRoot?.activeElement
+        if (!(nested instanceof HTMLElement)) break
+        active = nested
+      }
+      return {
+        primitive: document.activeElement?.getAttribute('data-host-form-primitive') ?? null,
+        id: document.activeElement?.id ?? null,
+        tag: document.activeElement?.tagName.toLowerCase() ?? null,
+        focusPath,
+      }
+      })()`)
+      managerReport = { ...managerReport, hostFormInteraction: {
+        pointer, keyboard,
+        passed: pointer.id !== null && keyboard.tag !== 'body'
+          && (keyboard.id !== pointer.id || JSON.stringify(keyboard.focusPath) !== JSON.stringify(pointer.focusPath)),
+      } }
+      if (managerReport.hostFormInteraction.passed !== true) managerFormExerciseFailure = 'manager Host form mouse/keyboard exercise failed'
+    }
+    console.log(`manager-form-interaction=${JSON.stringify(managerReport.hostFormInteraction)}`)
   }
   console.log(`manager-state=${JSON.stringify(managerReport)}`)
   try {
@@ -4687,3 +4736,4 @@ if (permissionV2Report?.result === 'fail') {
 if (interactionSafety.pendingPermissionDialogs !== 0 || interactionSafety.pendingLifecycleDialogs !== 0) {
   throw new Error('live smoke left an interactive permission or lifecycle dialog open')
 }
+if (managerFormExerciseFailure !== undefined) throw new Error(managerFormExerciseFailure)

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { CdpLifecycleRequestGate, CdpPluginLifecycleRuntime, injectableTargets, type CdpTarget } from '../packages/cli/src/launcher/cdp.js'
+import {
+  CdpLifecycleRequestGate,
+  CdpPluginLifecycleRuntime,
+  injectableTargets,
+  serviceConfigResponseEvaluation,
+  type CdpTarget,
+} from '../packages/cli/src/launcher/cdp.js'
 import type { PluginRuntimeMutation } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authority.js'
@@ -23,6 +29,15 @@ describe('injectableTargets', () => {
       target('first', 'Desktop'),
       target('second', 'Settings'),
     ])).toEqual([])
+  })
+})
+
+describe('service config CDP responses', () => {
+  it('returns to the exact execution context that issued the binding request', () => {
+    const params = serviceConfigResponseEvaluation({ requestId: 'request-1', ok: true, value: [] }, 73)
+    expect(params).toMatchObject({ contextId: 73, allowUnsafeEvalBlockedByCSP: true })
+    expect(params.expression).toContain('__cordisxServiceConfigReceiveV1')
+    expect(serviceConfigResponseEvaluation({ requestId: 'request-2', ok: false })).not.toHaveProperty('contextId')
   })
 })
 

@@ -1,8 +1,8 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { copyFile, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
-import os from 'node:os'
+import { readdir } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
+import { appendRunnerCleanup, cleanupIsolatedSmokeHome, prepareIsolatedSmokeHome } from './isolated-smoke-home.mjs'
 
 function value(name) {
   const index = process.argv.indexOf(name)
@@ -125,11 +125,7 @@ async function waitForRenderer() {
 }
 
 const crashpadBefore = await crashpadCount()
-const homeRoot = homeConfig === undefined ? undefined : await mkdtemp(path.join(os.tmpdir(), 'cordisx-isolated-home-'))
-if (homeRoot !== undefined) {
-  await mkdir(path.join(homeRoot, '.cordisx'), { recursive: true })
-  await copyFile(homeConfig, path.join(homeRoot, '.cordisx', 'config.json'))
-}
+const homeRoot = homeConfig === undefined ? undefined : await prepareIsolatedSmokeHome(homeConfig)
 const invocation = devConfig === undefined
   ? ['codex', 'smoke', '--data', 'isolated']
   : ['dev', '--config', devConfig]
@@ -167,6 +163,7 @@ try {
   process.removeListener('SIGTERM', interrupt)
   if (smoke !== undefined && !exited(smoke)) await stop(smoke)
   await stop(launcher)
+  const homeCleanup = await cleanupIsolatedSmokeHome(homeRoot)
   try {
     await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(500) })
     throw new Error(`CDP port ${port} still accepts connections after smoke cleanup`)
@@ -201,19 +198,9 @@ try {
     profileProcesses: 0,
     crashpadBefore,
     crashpadAfter,
+    ...homeCleanup,
   }
-  if (reportPath !== undefined) {
-    const resolvedReport = path.resolve(reportPath)
-    const text = await readFile(resolvedReport, 'utf8').catch(error => {
-      if (error?.code === 'ENOENT') return undefined
-      throw error
-    })
-    if (text !== undefined) {
-      const report = JSON.parse(text)
-      report.runnerCleanup = cleanup
-      await writeFile(resolvedReport, `${JSON.stringify(report, null, 2)}\n`)
-    }
-  }
+  await appendRunnerCleanup(reportPath, cleanup)
   console.log(`[cordisx-smoke-cleanup] ${JSON.stringify(cleanup)}`)
 }
 

@@ -594,11 +594,23 @@ async function sendConfigBindingResponse(session: CdpSession, payload: Record<st
   })
 }
 
-async function sendServiceConfigBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
-  await session.send('Runtime.evaluate', {
+export function serviceConfigResponseEvaluation(
+  payload: Record<string, unknown>,
+  executionContextId?: number,
+): Record<string, unknown> {
+  return {
     expression: `void globalThis.${SERVICE_CONFIG_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
     allowUnsafeEvalBlockedByCSP: true,
-  })
+    ...(executionContextId === undefined ? {} : { contextId: executionContextId }),
+  }
+}
+
+async function sendServiceConfigBindingResponse(
+  session: CdpSession,
+  payload: Record<string, unknown>,
+  executionContextId?: number,
+): Promise<void> {
+  await session.send('Runtime.evaluate', serviceConfigResponseEvaluation(payload, executionContextId))
 }
 
 async function sendPermissionBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
@@ -798,6 +810,7 @@ async function install(
       removeServiceConfigBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
         if (params.name !== SERVICE_CONFIG_BINDING || typeof params.payload !== 'string') return
         const payload = params.payload
+        const executionContextId = typeof params.executionContextId === 'number' ? params.executionContextId : undefined
         void (async () => {
           let requestId = 'invalid'
           try {
@@ -809,12 +822,16 @@ async function install(
             activeServiceConfigRequests += 1
             try {
               const value = await serviceConfig.handle(request)
-              await sendServiceConfigBindingResponse(session, { requestId, ok: true, value })
+              await sendServiceConfigBindingResponse(session, { requestId, ok: true, value }, executionContextId)
             } finally {
               activeServiceConfigRequests -= 1
             }
           } catch (error) {
-            await sendServiceConfigBindingResponse(session, { requestId, ok: false, ...serviceConfigBridgeError(error) }).catch(() => undefined)
+            await sendServiceConfigBindingResponse(
+              session,
+              { requestId, ok: false, ...serviceConfigBridgeError(error) },
+              executionContextId,
+            ).catch(() => undefined)
           }
         })()
       })

@@ -357,6 +357,10 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(configPanel?.querySelector('[data-service-config="providers-runtime"]')?.getAttribute('data-config-applies')).toBe('service-restart')
     expect(configPanel?.querySelector('[data-service-config="providers-startup"]')?.getAttribute('data-config-applies')).toBe('app-restart')
     expect(configPanel?.querySelectorAll('[data-service-config] select')).toHaveLength(0)
+    expect(configPanel?.querySelectorAll('[data-service-config].cxm-settings-group')).toHaveLength(0)
+    expect(configPanel?.querySelectorAll('[data-service-config] .cxf-form-grid')).toHaveLength(2)
+    expect(configPanel?.querySelectorAll('form[data-service-config-form] .cxf-form-footer')).toHaveLength(0)
+    expect(configPanel?.querySelectorAll('.cxm-service-config-footer')).toHaveLength(2)
     expect(serviceConfigRequests).toEqual(expect.arrayContaining([{ operation: 'list', pluginId: 'cli-proxy-api' }]))
     const serviceForm = configPanel!.querySelector<HTMLFormElement>('form[data-service-config-form="providers-runtime"]')!
     const serviceInput = serviceForm.querySelector<HTMLElement & { value: string; onChange?: (value: string) => void }>('t-textarea')!

@@ -11,17 +11,21 @@ with a temporary Home Config rather than `dev --config` (which is intentionally
 read-only and has no service-config binding):
 
 ```sh
+proof_root="$(mktemp -d)"
 node packages/cli/scripts/run-isolated-app-smoke.mjs \
   --port 17426 --profile-dir "$(mktemp -d)" \
   --home-config "$PWD/cordisx.cli-proxy.example.json" -- \
-  --manager-screenshot "$(mktemp -d)/manager.png" \
+  --manager-screenshot "$proof_root/manager.png" \
   --manager-tab plugins --manager-plugin cli-proxy-api \
-  --manager-detail-tab config --manager-viewport-width 480 --report "$(mktemp -u).json"
+  --manager-detail-tab config --manager-viewport-width 480 --report "$proof_root/report.json"
 ```
 
 The runner copies that fixture into a new temporary `HOME` and launches
 `codex smoke --data isolated`; it does not read a pre-existing profile. It also
 keeps cleanup evidence from masking a smoke failure when no report was written.
+Its `runnerCleanup` report record and `[cordisx-smoke-cleanup]` line require
+`homeRootRemoved=true` and `homeRootExists=false` alongside the port, profile,
+and Crashpad checks.
 
 ## Boundary
 
