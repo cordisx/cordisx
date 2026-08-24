@@ -88,6 +88,7 @@ export function resolveProviderConfigs(
       codexHome,
       enabled: provider.enabled !== false,
       timeoutMs: timeoutMs as number,
+      modelMappings: [],
     })
   })
   return Object.freeze(result)

@@ -203,8 +203,11 @@ export class CliProxyProviderAdapter implements ProviderConnection {
         if (!Array.isArray(response.data)) throw new Error('invalid model page')
         for (const raw of response.data) {
           const model = raw as AppServerModel
-          const modelId = string(model.model) ?? string(model.id)
-          if (modelId === undefined || model.hidden === true) continue
+          const sourceModelId = string(model.model) ?? string(model.id)
+          if (sourceModelId === undefined || model.hidden === true) continue
+          const mapping = this.config.modelMappings?.find(item => item.sourceModelId === sourceModelId)
+          if (mapping?.enabled === false) continue
+          const modelId = mapping?.modelId ?? sourceModelId
           const modalities = Array.isArray(model.inputModalities)
             ? model.inputModalities.filter((item): item is string => typeof item === 'string')
             : []
@@ -213,8 +216,8 @@ export class CliProxyProviderAdapter implements ProviderConnection {
             schemaVersion: 1,
             ref: { providerId: this.providerId, modelId },
             hostId: `cli-proxy-api:${this.providerId}`,
-            label: string(model.displayName) ?? modelId,
-            ...(model.isDefault === true ? { isDefault: true } : {}),
+            label: mapping?.displayName ?? string(model.displayName) ?? modelId,
+            ...(mapping?.isDefault === true || mapping === undefined && model.isDefault === true ? { isDefault: true } : {}),
             ...(modalities.length === 0 ? {} : { features: modalities }),
           })
         }
@@ -264,16 +267,19 @@ export class CliProxyProviderAdapter implements ProviderConnection {
 
   async createSession(input: Parameters<ProviderConnection['createSession']>[0]) {
     if (input.model.providerId !== this.providerId) return failure('invalid-provider', 'Model provider does not match the routed adapter')
+    const mapping = this.config.modelMappings?.find(item => item.modelId === input.model.modelId)
+    if (mapping?.enabled === false) return failure('invalid-request', 'The selected provider model mapping is disabled')
+    const sourceModelId = mapping?.sourceModelId ?? input.model.modelId
     try {
       const response = await this.rpc.request<{ thread?: unknown; model?: unknown }>('thread/start', {
-        model: input.model.modelId,
+        model: sourceModelId,
         modelProvider: this.providerId,
         cwd: input.cwd,
       })
       const thread = response.thread as AppServerThread
       const id = string(thread?.id)
       if (id === undefined) throw new Error('invalid thread start response')
-      await this.modelIndex.set(id, string(response.model) ?? input.model.modelId)
+      await this.modelIndex.set(id, input.model.modelId)
       const summary = await this.summary(thread)
       if (summary === undefined) throw new Error('invalid thread start response')
       return { ok: true as const, value: summary }
@@ -305,7 +311,7 @@ export class CliProxyProviderAdapter implements ProviderConnection {
       const id = string(thread?.id)
       if (id === undefined) throw new Error('invalid thread control response')
       const model = string(response.model)
-      if (model !== undefined) await this.modelIndex.set(id, model)
+      if (model !== undefined) await this.modelIndex.set(id, this.publicModelId(model))
       const summary = await this.summary(thread)
       if (summary === undefined) throw new Error('invalid thread control response')
       return { ok: true as const, value: { action: input.action, session: { ...summary, state: 'active' } } as CordisXTaskControlOutcome }
@@ -365,6 +371,11 @@ export class CliProxyProviderAdapter implements ProviderConnection {
       : ref.remoteSessionId.trim() === ''
         ? failure('invalid-request', 'Session id is invalid')
         : undefined
+  }
+
+  private publicModelId(sourceModelId: string): string {
+    const mapping = this.config.modelMappings?.find(item => item.sourceModelId === sourceModelId)
+    return mapping?.enabled === false ? 'unknown' : mapping?.modelId ?? sourceModelId
   }
 
   private async summary(thread: AppServerThread): Promise<CordisXSessionSummary | undefined> {

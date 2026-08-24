@@ -7,6 +7,8 @@ import { JsonLineRpcClient } from './json-line-rpc.js'
 export interface CodexAppServerOptions {
   readonly environment?: NodeJS.ProcessEnv
   readonly spawnProcess?: typeof spawn
+  /** Resolve a Host-owned keychain/secret reference without exposing its value to the renderer. */
+  readonly resolveSecretReference?: (reference: string) => Promise<string | undefined>
 }
 
 export interface CodexAppServerRpc {
@@ -20,8 +22,12 @@ function tomlString(value: string): string {
 }
 
 /** Build argv without credential values. The gateway remains an external provider, never the native current connection. */
-export function codexAppServerArguments(config: CliProxyProviderConfig): readonly string[] {
-  const provider = `{ ${tomlString(config.id)} = { name = ${tomlString(config.displayName)}, base_url = ${tomlString(config.baseUrl)}, env_key = ${tomlString(config.apiKeyEnv)}, wire_api = "responses" } }`
+export function codexAppServerArguments(
+  config: CliProxyProviderConfig,
+  credentialEnvironmentKey = config.apiKeyEnv,
+): readonly string[] {
+  if (credentialEnvironmentKey === undefined) throw new Error(`provider ${config.id} credential reference is unavailable`)
+  const provider = `{ ${tomlString(config.id)} = { name = ${tomlString(config.displayName)}, base_url = ${tomlString(config.baseUrl)}, env_key = ${tomlString(credentialEnvironmentKey)}, wire_api = "responses" } }`
   return Object.freeze([
     'app-server',
     '--stdio',
@@ -85,13 +91,30 @@ export async function startCodexAppServer(
   options: CodexAppServerOptions = {},
 ): Promise<CodexAppServerRpc> {
   const environment = options.environment ?? process.env
-  if (environment[config.apiKeyEnv]?.trim() === '') throw new Error(`provider ${config.id} credential environment variable is empty`)
-  if (environment[config.apiKeyEnv] === undefined) throw new Error(`provider ${config.id} credential environment variable is not set`)
+  let credentialEnvironmentKey = config.apiKeyEnv
+  let credentialValue = credentialEnvironmentKey === undefined ? undefined : environment[credentialEnvironmentKey]
+  if (config.credentialRef !== undefined) {
+    const environmentMatch = /^host-secret:env\/([A-Z_][A-Z0-9_]{0,127})$/.exec(config.credentialRef)
+    if (environmentMatch !== null) {
+      const environmentKey = environmentMatch[1]!
+      credentialEnvironmentKey = environmentKey
+      credentialValue = environment[environmentKey]
+    } else if (options.resolveSecretReference !== undefined) {
+      credentialEnvironmentKey = 'CORDISX_PROVIDER_CREDENTIAL'
+      credentialValue = await options.resolveSecretReference(config.credentialRef)
+    } else {
+      throw new Error(`provider ${config.id} Host credential reference is unavailable`)
+    }
+  }
+  if (credentialEnvironmentKey === undefined || credentialValue === undefined) {
+    throw new Error(`provider ${config.id} credential is not configured`)
+  }
+  if (credentialValue.trim() === '') throw new Error(`provider ${config.id} credential is empty`)
   await mkdir(config.codexHome, { recursive: true, mode: 0o700 })
   const launch = options.spawnProcess ?? spawn
-  const child = launch(config.codexExecutable, codexAppServerArguments(config), {
+  const child = launch(config.codexExecutable, codexAppServerArguments(config, credentialEnvironmentKey), {
     cwd: config.codexHome,
-    env: { ...environment, CODEX_HOME: config.codexHome },
+    env: { ...environment, [credentialEnvironmentKey]: credentialValue, CODEX_HOME: config.codexHome },
     shell: false,
     stdio: ['pipe', 'pipe', 'pipe'],
   }) as ChildProcessWithoutNullStreams

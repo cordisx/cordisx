@@ -20,11 +20,21 @@ export interface CliProxyProviderConfig {
   readonly kind: 'cli-proxy-api'
   readonly displayName: string
   readonly baseUrl: string
-  readonly apiKeyEnv: string
+  /** Opaque Host-owned credential reference. The value never crosses into renderer configuration. */
+  readonly credentialRef?: string
+  /** Legacy environment-name import retained only until a plugin-owned service config is saved. */
+  readonly apiKeyEnv?: string
   readonly codexExecutable: string
   readonly codexHome: string
   readonly enabled: boolean
   readonly timeoutMs: number
+  readonly modelMappings?: readonly {
+    readonly sourceModelId: string
+    readonly modelId: string
+    readonly displayName?: string
+    readonly enabled: boolean
+    readonly isDefault: boolean
+  }[]
 }
 
 export type ProviderConnectionState = 'idle' | 'starting' | 'ready' | 'draining' | 'unavailable' | 'closed'
