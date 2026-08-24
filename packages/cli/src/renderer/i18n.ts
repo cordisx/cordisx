@@ -12,6 +12,12 @@ import type {
   CordisXMessageDefinition,
 } from '../contracts.js'
 import { ownerFromContext } from './ownership.js'
+import {
+  generationVisibilityFromContext,
+  type GenerationVisibilityCoordinator,
+  type PluginGenerationEffectIdentity,
+  type PluginGenerationView,
+} from './generation-visibility.js'
 import { LOCAL_ID_PATTERN, REFERENCE_PATTERN } from './validation.js'
 
 export interface CordisXLocaleSource {
@@ -24,6 +30,8 @@ export type LocalizationEffectOwner = (setup: () => Disposable<void>) => Disposa
 interface CatalogRecord {
   readonly sequence: number
   readonly owner: string
+  readonly generation: PluginGenerationEffectIdentity
+  readonly candidateView?: PluginGenerationView
   readonly namespace: string
   readonly locale: string
   readonly default: boolean
@@ -206,11 +214,16 @@ export class LocalizationRegistry {
   private disposed = false
   private diagnosticScheduled = false
   private snapshot: CordisXLocalizationSnapshot
+  private readonly disconnectVisibility: (() => void) | undefined
 
-  constructor(private readonly source: CordisXLocaleSource) {
+  constructor(
+    private readonly source: CordisXLocaleSource,
+    private readonly visibility?: GenerationVisibilityCoordinator,
+  ) {
     const initial = source.getSnapshot()
     this.snapshot = Object.freeze({ locale: initial.locale, direction: initial.direction, version: this.version })
     this.disposeSource = source.subscribe(() => this.changed())
+    this.disconnectVisibility = visibility?.connect({ notify: () => this.changed() })
   }
 
   getSnapshot(): CordisXLocalizationSnapshot {
@@ -229,8 +242,15 @@ export class LocalizationRegistry {
     return () => this.diagnosticListeners.delete(listener)
   }
 
-  define(owner: string, catalog: CordisXLocaleCatalog): () => void {
+  define(ownerOrContext: string | Context, catalog: CordisXLocaleCatalog): () => void {
     if (this.disposed) throw new Error('CordisX localization registry is disposed')
+    const owner = typeof ownerOrContext === 'string' ? ownerOrContext : ownerFromContext(ownerOrContext)
+    const generation: PluginGenerationEffectIdentity = typeof ownerOrContext === 'string'
+      ? Object.freeze({ pluginId: owner })
+      : this.visibility?.effect(ownerOrContext) ?? Object.freeze({ pluginId: owner })
+    const candidateView = typeof ownerOrContext === 'string' || generation.transactionId === undefined
+      ? undefined
+      : this.visibility?.view(ownerOrContext)
     assertId(owner, 'localization owner')
     assertId(catalog.namespace, 'locale namespace')
     const namespace = qualifyNamespace(owner, catalog.namespace)
@@ -240,7 +260,7 @@ export class LocalizationRegistry {
     if (catalog.default === true && defaults !== undefined) {
       for (const [otherLocale, stack] of defaults) {
         if (otherLocale === locale) continue
-        if (stack.some(record => record.default)) {
+        if (stack.some(record => record.default && (this.visibility?.visible(record.generation, candidateView) ?? true))) {
           throw new Error(`locale namespace ${namespace} already has a live default dictionary`)
         }
       }
@@ -261,6 +281,8 @@ export class LocalizationRegistry {
     const record: CatalogRecord = {
       sequence: this.nextSequence++,
       owner,
+      generation,
+      ...(candidateView === undefined ? {} : { candidateView }),
       namespace,
       locale,
       default: catalog.default === true,
@@ -271,7 +293,7 @@ export class LocalizationRegistry {
     const stack = localeMap.get(locale) ?? []
     localeMap.set(locale, stack)
     stack.push(record)
-    this.changed()
+    if (this.visibility?.visible(generation) !== false) this.changed()
 
     let active = true
     return () => {
@@ -281,15 +303,18 @@ export class LocalizationRegistry {
       if (index >= 0) stack.splice(index, 1)
       if (stack.length === 0) localeMap.delete(locale)
       if (localeMap.size === 0) this.records.delete(namespace)
-      this.changed()
+      if (this.visibility?.visible(generation) !== false) this.changed()
     }
   }
 
-  hasNamespace(owner: string, namespace: string): boolean {
-    return this.records.has(qualifyNamespace(owner, namespace))
+  hasNamespace(owner: string, namespace: string, view?: PluginGenerationView): boolean {
+    const catalogs = this.records.get(qualifyNamespace(owner, namespace))
+    return catalogs !== undefined && [...catalogs.values()].some(stack => stack.some(record => (
+      this.visibility?.visible(record.generation, view) ?? true
+    )))
   }
 
-  resolve(owner: string, message: CordisXLocalizedText, diagnosticSite?: string): CordisXLocalizedProjection {
+  resolve(owner: string, message: CordisXLocalizedText, diagnosticSite?: string, view?: PluginGenerationView): CordisXLocalizedProjection {
     if (this.disposed) throw new Error('CordisX localization registry is disposed')
     const normalized = normalizeMessage(message)
     const safeMessage = normalized.message
@@ -297,8 +322,13 @@ export class LocalizationRegistry {
     const diagnosticKey = diagnosticSite === undefined
       ? diagnosticIdentity(owner, namespace, safeMessage)
       : `site:${JSON.stringify([owner, diagnosticSite])}`
+    const diagnostic = (projection: CordisXLocalizedProjection): CordisXLocalizedProjection => (
+      view?.transactionId === undefined
+        ? this.recordDiagnostic(diagnosticKey, owner, safeMessage, diagnosticSite, projection)
+        : projection
+    )
     if (!normalized.valid) {
-      return this.recordDiagnostic(diagnosticKey, owner, safeMessage, diagnosticSite, {
+      return diagnostic({
         text: messageFallback(namespace, safeMessage),
         namespace,
         key: safeMessage.key,
@@ -309,7 +339,7 @@ export class LocalizationRegistry {
 
     const localeMap = this.records.get(namespace)
     if (localeMap === undefined) {
-      return this.recordDiagnostic(diagnosticKey, owner, safeMessage, diagnosticSite, {
+      return diagnostic({
         text: messageFallback(namespace, safeMessage),
         namespace,
         key: safeMessage.key,
@@ -320,13 +350,16 @@ export class LocalizationRegistry {
 
     const current = canonicalLocale(this.source.getSnapshot().locale)
     const language = new Intl.Locale(current).language
-    const active = [...localeMap.values()].map(stack => stack.at(-1)).filter((item): item is CatalogRecord => item !== undefined)
+    const active = [...localeMap.values()]
+      .map(stack => [...stack].reverse().find(record => this.visibility?.visible(record.generation, view) ?? true))
+      .filter((item): item is CatalogRecord => item !== undefined)
     const defaultRecord = active.filter(record => record.default).sort((left, right) => right.sequence - left.sequence)[0]
     const candidates = [...new Set([current, language, defaultRecord?.locale].filter((item): item is string => item !== undefined))]
     let record: CatalogRecord | undefined
     let formatter: IntlMessageFormat | undefined
     for (const locale of candidates) {
-      const candidate = localeMap.get(locale)?.at(-1)
+      const candidate = [...(localeMap.get(locale) ?? [])].reverse()
+        .find(item => this.visibility?.visible(item.generation, view) ?? true)
       const candidateFormatter = candidate?.messages.get(safeMessage.key)
       if (candidate !== undefined && candidateFormatter !== undefined) {
         record = candidate
@@ -335,7 +368,7 @@ export class LocalizationRegistry {
       }
     }
     if (record === undefined || formatter === undefined) {
-      return this.recordDiagnostic(diagnosticKey, owner, safeMessage, diagnosticSite, {
+      return diagnostic({
         text: messageFallback(namespace, safeMessage),
         namespace,
         key: safeMessage.key,
@@ -346,10 +379,10 @@ export class LocalizationRegistry {
 
     try {
       const text = String(formatter.format(safeMessage.params ?? {}))
-      if (this.diagnosticRecords.delete(diagnosticKey)) this.scheduleDiagnosticNotification()
+      if (view?.transactionId === undefined && this.diagnosticRecords.delete(diagnosticKey)) this.scheduleDiagnosticNotification()
       return { text, namespace, key: safeMessage.key, locale: record.locale }
     } catch {
-      return this.recordDiagnostic(diagnosticKey, owner, safeMessage, diagnosticSite, {
+      return diagnostic({
         text: messageFallback(namespace, safeMessage),
         namespace,
         key: safeMessage.key,
@@ -374,8 +407,9 @@ export class LocalizationRegistry {
     const result: LocaleCatalogSnapshot[] = []
     for (const [namespace, localeMap] of this.records) {
       for (const [locale, stack] of localeMap) {
-        const winner = stack.at(-1)
-        for (const record of stack) {
+        const visible = stack.filter(record => this.visibility?.visible(record.generation) ?? true)
+        const winner = visible.at(-1)
+        for (const record of visible) {
           result.push({
             owner: record.owner,
             namespace,
@@ -394,6 +428,7 @@ export class LocalizationRegistry {
     if (this.disposed) return
     this.disposed = true
     this.disposeSource()
+    this.disconnectVisibility?.()
     this.records.clear()
     this.diagnosticRecords.clear()
     this.listeners.clear()
@@ -462,7 +497,7 @@ export class CordisXI18nService extends Service implements CordisXI18n {
     super(ctx, 'i18n')
     if (typeof document === 'undefined') throw new Error('CordisX localization requires a browser document')
     this.adapter = new DocumentLocaleAdapter(document)
-    this.registry = new LocalizationRegistry(this.adapter)
+    this.registry = new LocalizationRegistry(this.adapter, generationVisibilityFromContext(ctx))
     ctx.effect(() => () => {
       this.registry.dispose()
       this.adapter.dispose()
@@ -472,8 +507,7 @@ export class CordisXI18nService extends Service implements CordisXI18n {
   define<Messages extends CordisXMessageDefinition<Messages>>(
     catalog: CordisXLocaleCatalog<Messages>,
   ): ReturnType<CordisXI18n['define']> {
-    const owner = ownerFromContext(this.ctx)
-    return this.ctx.effect(() => this.registry.define(owner, catalog), `i18n.define(${JSON.stringify(catalog.namespace)}, ${JSON.stringify(catalog.locale)})`)
+    return this.ctx.effect(() => this.registry.define(this.ctx, catalog), `i18n.define(${JSON.stringify(catalog.namespace)}, ${JSON.stringify(catalog.locale)})`)
   }
 
   inject<Messages extends CordisXMessageDefinition<Messages>>(
@@ -481,20 +515,26 @@ export class CordisXI18nService extends Service implements CordisXI18n {
     setup: (seat: CordisXLocalizationSeat<Messages>) => Effect,
   ): ReturnType<CordisXI18n['inject']> {
     const owner = ownerFromContext(this.ctx)
-    if (!this.registry.hasNamespace(owner, namespace)) {
+    const view = generationVisibilityFromContext(this.ctx)?.view(this.ctx)
+    if (!this.registry.hasNamespace(owner, namespace, view)) {
       throw new Error(`locale namespace ${qualifyNamespace(owner, namespace)} is not declared`)
     }
-    const seat = this.createSeat<Messages>(owner, namespace)
+    const seat = this.createSeat<Messages>(owner, namespace, undefined, view)
     return this.ctx.effect(() => setup(seat), `i18n.inject(${JSON.stringify(namespace)})`)
   }
 
   seat<Messages extends CordisXMessageDefinition<Messages>>(namespace?: string): CordisXLocalizationSeat<Messages> {
     const owner = ownerFromContext(this.ctx)
-    return this.createSeat<Messages>(owner, namespace ?? owner)
+    return this.createSeat<Messages>(owner, namespace ?? owner, undefined, generationVisibilityFromContext(this.ctx)?.view(this.ctx))
   }
 
   resolve(message: CordisXLocalizedText): CordisXLocalizedProjection {
-    return this.registry.resolve(ownerFromContext(this.ctx), message)
+    return this.registry.resolve(
+      ownerFromContext(this.ctx),
+      message,
+      undefined,
+      generationVisibilityFromContext(this.ctx)?.view(this.ctx),
+    )
   }
 
   resolveFor(owner: string, message: CordisXLocalizedText, diagnosticSite?: string): CordisXLocalizedProjection {
@@ -549,6 +589,7 @@ export class CordisXI18nService extends Service implements CordisXI18n {
     owner: string,
     namespace: string,
     effectOwner?: LocalizationEffectOwner,
+    view?: PluginGenerationView,
   ): CordisXLocalizationSeat<Messages> {
     const qualified = qualifyNamespace(owner, namespace)
     const messageNamespace = qualified === owner ? undefined : qualified
@@ -574,7 +615,7 @@ export class CordisXI18nService extends Service implements CordisXI18n {
         ...(messageNamespace === undefined ? {} : { namespace: messageNamespace }),
         key,
         ...(args[0] === undefined ? {} : { params: args[0] }),
-      }).text,
+      }, undefined, view).text,
       message: messageFor,
       getSnapshot: () => this.registry.getSnapshot(),
       subscribe: listener => own(() => this.registry.subscribe(listener)),
@@ -594,13 +635,13 @@ export class CordisXI18nService extends Service implements CordisXI18n {
       }),
       bindText: (node, message) => seat.effect(() => {
         const previous = node.textContent
-        node.textContent = this.registry.resolve(owner, message).text
+        node.textContent = this.registry.resolve(owner, message, undefined, view).text
         return () => { node.textContent = previous }
       }),
       bindAttribute: (element, name, message) => seat.effect(() => {
         const present = element.hasAttribute(name)
         const previous = element.getAttribute(name)
-        element.setAttribute(name, this.registry.resolve(owner, message).text)
+        element.setAttribute(name, this.registry.resolve(owner, message, undefined, view).text)
         return () => {
           if (present) element.setAttribute(name, previous ?? '')
           else element.removeAttribute(name)

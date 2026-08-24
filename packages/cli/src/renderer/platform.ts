@@ -46,6 +46,12 @@ import {
   permissionRecordKey,
   permissionScopeFingerprint,
 } from '../permissions.js'
+import {
+  generationVisibilityFromContext,
+  type GenerationVisibilityCoordinator,
+  type PluginGenerationEffectIdentity,
+  type PluginGenerationView,
+} from './generation-visibility.js'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
 import type {
   PluginConsoleAspect,
@@ -397,6 +403,8 @@ interface Registration {
   readonly identity: CordisXPluginIdentity
   readonly manifest: CordisXPluginManifestV1
   readonly declarations: ReadonlyMap<CordisXPlatformCapability, CordisXCapabilityDeclaration>
+  readonly generation: PluginGenerationEffectIdentity
+  readonly candidateView?: PluginGenerationView
 }
 
 interface AuthorizationGrant {
@@ -467,31 +475,50 @@ export class PermissionBroker {
     private readonly promptTimeoutMs = 30_000,
     private readonly profileId = 'default',
     private readonly generation = 'runtime',
+    private readonly visibility?: GenerationVisibilityCoordinator,
     private readonly consoleObserver?: PluginConsolePermissionObserver,
   ) {
     for (const record of store.read()) {
       if (record.key.profileId === profileId) this.policies.set(permissionRecordKey(record), record)
     }
+    visibility?.connect({ notify: () => this.changed() })
   }
 
-  register(identity: CordisXPluginIdentity, manifest: CordisXPluginManifestV1): () => void {
-    const key = platformIdentityKey(identity)
+  register(
+    identity: CordisXPluginIdentity,
+    manifest: CordisXPluginManifestV1,
+    generation: PluginGenerationEffectIdentity = Object.freeze({ pluginId: identity.id }),
+    candidateView?: PluginGenerationView,
+  ): () => void {
+    const key = `${platformIdentityKey(identity)}\u0000${generation.moduleGeneration ?? 'host'}`
     const declarations = new Map(manifest.capabilities.map(item => [item.name, item]))
-    const registration = { identity: Object.freeze({ ...identity }), manifest, declarations }
+    const registration = {
+      identity: Object.freeze({ ...identity }), manifest, declarations, generation,
+      ...(candidateView === undefined ? {} : { candidateView }),
+    }
+    if (this.registrations.has(key) && this.visibility !== undefined) {
+      throw new Error(`plugin ${identity.id} permission generation is already registered`)
+    }
     this.registrations.set(key, registration)
     this.migrateLegacy(registration)
-    this.changed()
+    if (this.visibility?.visible(generation) !== false) this.changed()
     return () => {
       if (this.registrations.get(key) !== registration) return
       this.registrations.delete(key)
-      this.onceTickets.delete(key)
-      for (const auditKey of [...this.audit.keys()]) if (auditKey.startsWith(`${key}\u0000`)) this.audit.delete(auditKey)
-      this.changed()
+      const identityKey = platformIdentityKey(identity)
+      this.onceTickets.delete(identityKey)
+      for (const auditKey of [...this.audit.keys()]) if (auditKey.startsWith(`${identityKey}\u0000`)) this.audit.delete(auditKey)
+      if (this.visibility?.visible(generation) !== false) this.changed()
     }
   }
 
-  policy(identity: CordisXPluginIdentity, capability: CordisXPlatformCapability): CordisXPermissionPolicy {
-    const registration = this.registrations.get(platformIdentityKey(identity))
+  private registration(identity: CordisXPluginIdentity, view?: PluginGenerationView): Registration | undefined {
+    return [...this.registrations.values()].find(item => platformIdentityKey(item.identity) === platformIdentityKey(identity)
+      && (this.visibility?.visible(item.generation, view) ?? true))
+  }
+
+  policy(identity: CordisXPluginIdentity, capability: CordisXPlatformCapability, view?: PluginGenerationView): CordisXPermissionPolicy {
+    const registration = this.registration(identity, view)
     const declaration = registration?.declarations.get(capability)
     if (declaration === undefined) return 'ask'
     return this.policies.get(permissionRecordKey(createPermissionPolicyRecord({
@@ -509,7 +536,7 @@ export class PermissionBroker {
     policy: CordisXPermissionPolicy,
   ): Promise<void> {
     const identityKey = platformIdentityKey(identity)
-    const declaration = this.registrations.get(identityKey)?.declarations.get(capability)
+    const declaration = this.registration(identity)?.declarations.get(capability)
     if (declaration === undefined) throw new Error(`plugin ${identity.id} does not declare ${capability}`)
     const record = createPermissionPolicyRecord({
       profileId: this.profileId,
@@ -538,8 +565,9 @@ export class PermissionBroker {
   authorizationPlan(
     identity: CordisXPluginIdentity,
     operation: 'install' | 'update' | 'enable' = 'enable',
+    view?: PluginGenerationView,
   ): CordisXPermissionAuthorizationPlanV1 {
-    const registration = this.registrations.get(platformIdentityKey(identity))
+    const registration = this.registration(identity, view)
     if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
     return Object.freeze({
       $schema: CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
@@ -554,7 +582,7 @@ export class PermissionBroker {
         required: declaration.required,
         reason: declaration.reason,
         scope: declaration.scope,
-        policy: this.policy(identity, declaration.name),
+        policy: this.policy(identity, declaration.name, view),
         decisionRequired: !this.policies.has(permissionRecordKey(createPermissionPolicyRecord({
           profileId: this.profileId,
           identity,
@@ -570,8 +598,9 @@ export class PermissionBroker {
     identity: CordisXPluginIdentity,
     authorization: CordisXPermissionAuthorizationDecisionV1,
     operation: 'install' | 'update' | 'enable' = 'enable',
+    view?: PluginGenerationView,
   ): Promise<void> {
-    const registration = this.registrations.get(platformIdentityKey(identity))
+    const registration = this.registration(identity, view)
     if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
     if (authorization === null || typeof authorization !== 'object'
       || authorization.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1
@@ -638,9 +667,10 @@ export class PermissionBroker {
     identity: CordisXPluginIdentity,
     capability: CordisXPlatformCapability,
     requested: RequestedScope,
+    view?: PluginGenerationView,
   ): Promise<CordisXPlatformResult<AuthorizationGrant>> {
     const identityKey = platformIdentityKey(identity)
-    const declaration = this.registrations.get(identityKey)?.declarations.get(capability)
+    const declaration = this.registration(identity, view)?.declarations.get(capability)
     if (declaration === undefined) {
       this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is not declared`)
       this.denied(identityKey, capability, requested)
@@ -651,7 +681,7 @@ export class PermissionBroker {
       this.denied(identityKey, capability, requested)
       return failure('permission-scope-denied', `Requested parameters are outside the declared ${capability} scope`)
     }
-    const policy = this.policy(identity, capability)
+    const policy = this.policy(identity, capability, view)
     const ticket = this.consumeOnce(identity, declaration)
     if (policy === 'deny' && !ticket) {
       this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is denied by policy`)
@@ -702,11 +732,11 @@ export class PermissionBroker {
     return { ok: true, value: { declaration } }
   }
 
-  requiredDenied(identity: CordisXPluginIdentity): readonly CordisXPlatformCapability[] {
-    const registration = this.registrations.get(platformIdentityKey(identity))
+  requiredDenied(identity: CordisXPluginIdentity, view?: PluginGenerationView): readonly CordisXPlatformCapability[] {
+    const registration = this.registration(identity, view)
     if (registration === undefined) return []
     return [...registration.declarations.values()]
-      .filter(item => item.required && this.policy(identity, item.name) === 'deny' && !this.hasOnce(identity, item))
+      .filter(item => item.required && this.policy(identity, item.name, view) === 'deny' && !this.hasOnce(identity, item))
       .map(item => item.name)
   }
 
@@ -715,7 +745,9 @@ export class PermissionBroker {
   }
 
   snapshots(): readonly PlatformPermissionSnapshot[] {
-    return [...this.registrations.values()].flatMap(registration => [...registration.declarations.values()].map(declaration => {
+    return [...this.registrations.values()]
+      .filter(registration => this.visibility?.visible(registration.generation) ?? true)
+      .flatMap(registration => [...registration.declarations.values()].map(declaration => {
       const identityKey = platformIdentityKey(registration.identity)
       const audit = this.audit.get(this.auditKey(identityKey, declaration.name)) ?? { denialCount: 0 }
       const policy = this.policy(registration.identity, declaration.name)
@@ -763,7 +795,13 @@ export class PermissionBroker {
   }
 
   private changed(): void {
-    for (const listener of this.listeners) listener()
+    for (const listener of this.listeners) {
+      try {
+        listener()
+      } catch {
+        // Permission state is authoritative; observer failures are isolated.
+      }
+    }
   }
 
   private ticketSet(identity: CordisXPluginIdentity): Set<string> {
@@ -1084,7 +1122,12 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
   ): Promise<CordisXPlatformResult<AuthorizationGrant>> {
     const identity = token === undefined ? pluginIdentity(this.ctx) : optionsFor(this).console?.owner(token)
     if (identity === undefined) return failure('permission-undeclared', 'Platform calls require a runtime-bound plugin identity')
-    return await optionsFor(this).broker.authorize(identity, capability, requested)
+    return await optionsFor(this).broker.authorize(
+      identity,
+      capability,
+      requested,
+      generationVisibilityFromContext(this.ctx)?.view(this.ctx),
+    )
   }
 
   private async guarded<Value>(operation: () => Promise<CordisXPlatformResult<Value>>): Promise<CordisXPlatformResult<Value>> {

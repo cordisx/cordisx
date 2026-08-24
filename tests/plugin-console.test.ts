@@ -79,6 +79,40 @@ describe('plugin DevTools Console aspect', () => {
     expect(aspect.query(alpha).entries.filter(entry => entry.message === 'after dispose')).toHaveLength(0)
   })
 
+  it('keeps candidate Console hidden, flips one generation projection, and rejects retiring callbacks', () => {
+    let active = 'alpha-old'
+    const callable = new Set(['alpha-old', 'alpha-new'])
+    const aspect = new PluginConsoleAspect('runtime-1', 50, () => 1, {
+      activeModuleGeneration: () => active,
+      callableGeneration: (_pluginId, moduleGeneration) => callable.has(moduleGeneration),
+    })
+    const oldToken = aspect.issue(alpha, 'alpha-old')
+    aspect.lifecycle(oldToken, 'activate', 'old live')
+    const notifications: string[] = []
+    aspect.subscribe(pluginId => notifications.push(pluginId))
+    const candidateToken = aspect.issue(alpha, 'alpha-new')
+    aspect.lifecycle(candidateToken, 'activate', 'candidate readiness')
+
+    expect(aspect.query(alpha)).toMatchObject({ generation: 'alpha-old' })
+    expect(aspect.query(alpha).entries.map(entry => entry.message)).toEqual(['old live'])
+    expect(notifications).toEqual([])
+
+    active = 'alpha-new'
+    callable.delete('alpha-old')
+    aspect.visibilityChanged(['alpha'])
+    expect(aspect.query(alpha)).toMatchObject({ generation: 'alpha-new' })
+    expect(aspect.query(alpha).entries.map(entry => entry.message)).toEqual(['candidate readiness'])
+    expect(notifications).toEqual(['alpha'])
+    expect(() => aspect.runSync(oldToken, 'stale.command', {}, () => undefined)).toThrow(/principal generation is stale/)
+
+    active = 'alpha-old'
+    callable.add('alpha-old')
+    callable.delete('alpha-new')
+    aspect.visibilityChanged(['alpha'])
+    expect(aspect.query(alpha).entries.map(entry => entry.message)).toEqual(['old live'])
+    expect(() => aspect.runSync(candidateToken, 'rolled-back.command', {}, () => undefined)).toThrow(/principal generation is stale/)
+  })
+
   it('omits an ambiguous correlation instead of cross-linking concurrent async work', async () => {
     const aspect = new PluginConsoleAspect('runtime-1')
     const token = aspect.issue(alpha, 'runtime-1:alpha:1')

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
 import { SurfaceRegistry } from '../packages/cli/src/renderer/surfaces.js'
+import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
+import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
+import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import { partitionDirectActions } from '../packages/cli/src/renderer/adapter.js'
 import { HostContextStore } from '../packages/cli/src/renderer/validation.js'
 import {
@@ -10,6 +14,48 @@ import {
 } from '../packages/cli/src/renderer/extension-points.js'
 
 describe('SurfaceRegistry', () => {
+  it('isolates same-id generations and rejects a retiring render token', () => {
+    const activation = (revision: number, generation: string): CordisXPluginActivationRecordV1 => ({
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, schemaVersion: 1,
+      recordKind: revision === 1 ? 'active' : 'candidate',
+      ...(revision === 1 ? {} : { transactionId: 'update-demo' }),
+      profileId: 'default', revision, lastGoodRevision: 1, runtimeGeneration: 'runtime-1',
+      plugins: [{ id: 'demo', version: '1.0.0', digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`, moduleGeneration: generation, enabled: true, dependencies: [] }],
+    })
+    const previous = activation(1, 'demo-1')
+    const candidate = activation(2, 'demo-2')
+    const visibility = new GenerationVisibilityCoordinator(previous)
+    const contexts = new HostContextStore()
+    const registry = new SurfaceRegistry(contexts, visibility)
+    registry.setResolvers({
+      command: (_owner, reference, view) => reference.id === 'open'
+        || (reference.id === 'candidate-only' && view?.moduleGeneration === 'demo-2'),
+      route: () => true,
+    })
+    const oldContext = new Context().extend({ [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-1' })
+    registry.register(oldContext, { name: 'sidebar.footer.before-control', id: 'open' }, { label: { key: 'old' }, command: { id: 'open' } })
+    const oldToken = registry.renderToken('sidebar.footer.before-control', 'demo:open')!
+
+    const handle = visibility.begin('update-demo', previous, candidate)
+    const candidateContext = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-2', ...visibility.context(handle, 'demo'),
+    })
+    registry.register(candidateContext, { name: 'sidebar.footer.before-control', id: 'open' }, { label: { key: 'new' }, command: { id: 'candidate-only' } })
+    expect((registry.snapshot()[0]?.item as { label: { key: string } }).label.key).toBe('old')
+    expect((registry.snapshot(visibility.view(candidateContext))[0]?.item as { label: { key: string } }).label.key).toBe('new')
+    expect(registry.snapshot(visibility.view(candidateContext))[0]).toMatchObject({ valid: true })
+
+    visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
+    const newToken = registry.renderToken('sidebar.footer.before-control', 'demo:open')!
+    expect(newToken).not.toBe(oldToken)
+    registry.markRendered('sidebar.footer.before-control', 'demo:open', oldToken, true)
+    expect(registry.snapshot()[0]?.rendered).toBe(false)
+    registry.markRendered('sidebar.footer.before-control', 'demo:open', newToken, true)
+    expect(registry.snapshot()[0]?.rendered).toBe(true)
+    registry.dispose()
+    contexts.dispose()
+  })
+
   it('partitions deterministic registry order into host-owned direct and overflow actions', () => {
     const partition = partitionDirectActions(['action-1', 'action-2', 'utility-1', 'utility-2'], 3)
     expect(partition).toEqual({ direct: ['action-1', 'action-2', 'utility-1'], overflow: ['utility-2'] })
@@ -122,7 +168,12 @@ describe('SurfaceRegistry', () => {
     registry.register('demo', { name: 'sidebar.footer.before-control', id: 'open' }, {
       label: { key: 'open' }, command: { id: 'open' },
     })
-    registry.markRendered('sidebar.footer.before-control', 'demo:open', true)
+    registry.markRendered(
+      'sidebar.footer.before-control',
+      'demo:open',
+      registry.renderToken('sidebar.footer.before-control', 'demo:open')!,
+      true,
+    )
     expect(registry.snapshot()[0]).toMatchObject({ authorized: true, pointPolicy: 'inherit', rendered: true })
 
     broker.setPolicy(identity, 'sidebar.footer.before-control', 'deny')
@@ -130,7 +181,12 @@ describe('SurfaceRegistry', () => {
     expect(registry.snapshot()[0]).toMatchObject({
       valid: true, visible: true, authorized: false, pointPolicy: 'deny', effectivePointPolicy: 'deny', rendered: true,
     })
-    registry.markRendered('sidebar.footer.before-control', 'demo:open', false)
+    registry.markRendered(
+      'sidebar.footer.before-control',
+      'demo:open',
+      registry.renderToken('sidebar.footer.before-control', 'demo:open')!,
+      false,
+    )
     expect(registry.snapshot()[0]).toMatchObject({ authorized: false, rendered: false })
     expect(registry.snapshot()).toHaveLength(1)
     registry.dispose()

@@ -1,4 +1,5 @@
 import type { CordisXConfigPlugin } from './config.js'
+import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import { PluginActivationStore, topologicalPluginOrder } from './plugin-activation.js'
 import { loadStagedPluginPackage, stagedPluginModulePath } from './plugin-package.js'
 import { PackagePluginConfigStore } from './package-plugin-config.js'
@@ -7,8 +8,15 @@ import { PackagePluginConfigStore } from './package-plugin-config.js'
 export async function loadActivatedPluginComposition(
   store: PluginActivationStore,
 ): Promise<readonly CordisXConfigPlugin[]> {
-  await store.recoverIncompleteCandidates()
   const active = await store.bindRuntimeGeneration()
+  return await loadPluginComposition(store, active)
+}
+
+/** Compose an authority-selected activation tuple without publishing it durable. */
+export async function loadPluginComposition(
+  store: PluginActivationStore,
+  active: CordisXPluginActivationRecordV1,
+): Promise<readonly CordisXConfigPlugin[]> {
   const configs = new PackagePluginConfigStore(store.homeDir, store.profileId, store.runtimeGeneration)
   const byId = new Map(active.plugins.map(item => [item.id, item]))
   const output: CordisXConfigPlugin[] = []

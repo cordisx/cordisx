@@ -17,6 +17,12 @@ import { CordisXI18nService, type LocalizationEffectOwner } from './i18n.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { createHostSurfaceIcon } from './icons.js'
 import { ownerFromContext, qualifyOwnedId } from './ownership.js'
+import {
+  generationVisibilityFromContext,
+  type GenerationVisibilityCoordinator,
+  type PluginGenerationEffectIdentity,
+  type PluginGenerationView,
+} from './generation-visibility.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
 import { dismissHostTooltips, HostTooltipController } from './tooltips.js'
 import type { PluginConsoleAspect } from './plugin-console.js'
@@ -152,6 +158,8 @@ export class OutletRegistry {
 interface PageRecord {
   readonly owner: string
   readonly qualifiedId: string
+  readonly generation: PluginGenerationEffectIdentity
+  readonly candidateView?: PluginGenerationView
   readonly metadata: CordisXPageMetadata
   readonly mount: CordisXPageMount<any>
 }
@@ -230,13 +238,25 @@ export class PageRegistry {
   private readonly records = new Map<string, PageRecord>()
   private readonly listeners = new Set<() => void>()
   private disposed = false
+  private readonly disconnectVisibility: (() => void) | undefined
+
+  constructor(readonly visibility?: GenerationVisibilityCoordinator) {
+    this.disconnectVisibility = visibility?.connect({ notify: () => this.notify() })
+  }
 
   register<Messages extends CordisXMessageDefinition<Messages>>(
-    owner: string,
+    ownerOrContext: string | Context,
     metadata: CordisXPageMetadata,
     mount: CordisXPageMount<Messages>,
   ): () => void {
     if (this.disposed) throw new Error('CordisX page registry is disposed')
+    const owner = typeof ownerOrContext === 'string' ? ownerOrContext : ownerFromContext(ownerOrContext)
+    const generation: PluginGenerationEffectIdentity = typeof ownerOrContext === 'string'
+      ? Object.freeze({ pluginId: owner })
+      : this.visibility?.effect(ownerOrContext) ?? Object.freeze({ pluginId: owner })
+    const candidateView = typeof ownerOrContext === 'string' || generation.transactionId === undefined
+      ? undefined
+      : this.visibility?.view(ownerOrContext)
     assertLocalId(owner, 'page owner')
     assertKeys(metadata, ['id', 'title', 'icon', 'chrome', 'breadcrumbs', 'tabs', 'headerActions', 'localeNamespace'], 'page metadata')
     assertLocalId(metadata.id, 'page id')
@@ -268,26 +288,38 @@ export class PageRegistry {
     }
     if (typeof mount !== 'function') throw new Error(`page ${metadata.id} requires a mount callback`)
     const qualifiedId = qualifyOwnedId(owner, metadata.id)
-    if (this.records.has(qualifiedId)) throw new Error(`page ${qualifiedId} is already registered`)
-    this.records.set(qualifiedId, { owner, qualifiedId, metadata: immutableSnapshot(metadata), mount })
-    this.notify()
+    const physicalId = `${qualifiedId}\u0000${generation.moduleGeneration ?? 'host'}`
+    if (this.records.has(physicalId)) throw new Error(`page ${qualifiedId} is already registered for this generation`)
+    this.records.set(physicalId, {
+      owner,
+      qualifiedId,
+      generation,
+      ...(candidateView === undefined ? {} : { candidateView }),
+      metadata: immutableSnapshot(metadata),
+      mount,
+    })
+    if (this.visibility?.visible(generation) !== false) this.notify()
     let active = true
     return () => {
       if (!active) return
       active = false
-      this.records.delete(qualifiedId)
-      this.notify()
+      this.records.delete(physicalId)
+      if (this.visibility?.visible(generation) !== false) this.notify()
     }
   }
 
-  get(requestingOwner: string, id: string): PageRecord | undefined {
-    const record = this.records.get(qualifyOwnedId(requestingOwner, id))
+  get(requestingOwner: string, id: string, view?: PluginGenerationView): PageRecord | undefined {
+    const qualifiedId = qualifyOwnedId(requestingOwner, id)
+    const record = [...this.records.values()].find(item => item.qualifiedId === qualifiedId
+      && (this.visibility?.visible(item.generation, view) ?? true))
     if (record?.owner !== requestingOwner) return undefined
     return record
   }
 
-  snapshot(): readonly PageSnapshot[] {
-    return [...this.records.values()].map(record => ({
+  snapshot(view?: PluginGenerationView): readonly PageSnapshot[] {
+    return [...this.records.values()]
+      .filter(record => this.visibility?.visible(record.generation, view) ?? true)
+      .map(record => ({
       owner: record.owner,
       id: record.metadata.id,
       qualifiedId: record.qualifiedId,
@@ -303,18 +335,27 @@ export class PageRegistry {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.disconnectVisibility?.()
     this.records.clear()
     this.listeners.clear()
   }
 
   private notify(): void {
-    for (const listener of this.listeners) listener()
+    for (const listener of this.listeners) {
+      try {
+        listener()
+      } catch {
+        // One observer cannot split a published visibility epoch.
+      }
+    }
   }
 }
 
 interface RouteRecord {
   readonly owner: string
   readonly qualifiedId: string
+  readonly generation: PluginGenerationEffectIdentity
+  readonly candidateView?: PluginGenerationView
   readonly definition: CordisXRouteDefinition
   readonly parameters: readonly string[]
 }
@@ -442,6 +483,7 @@ export class NavigationRegistry {
   private readonly unsubscribeOutlets: () => void
   private operation = Promise.resolve()
   private disposed = false
+  private readonly disconnectVisibility: (() => void) | undefined
 
   constructor(
     private readonly pages: PageRegistry,
@@ -453,6 +495,9 @@ export class NavigationRegistry {
   ) {
     this.unsubscribePages = pages.subscribe(() => { void this.enqueue(() => this.reconcileDependencies()) })
     this.unsubscribeOutlets = outlets.subscribe(() => { void this.enqueue(() => this.reconcileDependencies()) })
+    this.disconnectVisibility = pages.visibility?.connect({ notify: () => {
+      void this.enqueue(() => this.reconcileGeneration())
+    } })
   }
 
   setAccessResolver(access: ExtensionPointAccessResolver): void {
@@ -464,8 +509,15 @@ export class NavigationRegistry {
     return this.enqueue(() => this.reconcileDependencies())
   }
 
-  register(owner: string, definition: CordisXRouteDefinition): () => void {
+  register(ownerOrContext: string | Context, definition: CordisXRouteDefinition): () => void {
     if (this.disposed) throw new Error('CordisX route registry is disposed')
+    const owner = typeof ownerOrContext === 'string' ? ownerOrContext : ownerFromContext(ownerOrContext)
+    const generation: PluginGenerationEffectIdentity = typeof ownerOrContext === 'string'
+      ? Object.freeze({ pluginId: owner })
+      : this.pages.visibility?.effect(ownerOrContext) ?? Object.freeze({ pluginId: owner })
+    const candidateView = typeof ownerOrContext === 'string' || generation.transactionId === undefined
+      ? undefined
+      : this.pages.visibility?.view(ownerOrContext)
     assertLocalId(owner, 'route owner')
     assertKeys(definition, ['id', 'path', 'outlet', 'page', 'title', 'when'], 'route definition')
     assertLocalId(definition.id, 'route id')
@@ -475,32 +527,37 @@ export class NavigationRegistry {
     if (definition.title !== undefined) assertLocalizedText(definition.title, 'route title')
     assertWhenExpression(definition.when)
     const qualifiedId = qualifyOwnedId(owner, definition.id)
-    if (this.records.has(qualifiedId)) throw new Error(`route ${qualifiedId} is already registered`)
+    const physicalId = `${qualifiedId}\u0000${generation.moduleGeneration ?? 'host'}`
+    if (this.records.has(physicalId)) throw new Error(`route ${qualifiedId} is already registered for this generation`)
     const record: RouteRecord = {
       owner,
       qualifiedId,
+      generation,
+      ...(candidateView === undefined ? {} : { candidateView }),
       definition: immutableSnapshot(definition),
       parameters: routeParameters(definition.path),
     }
-    this.records.set(qualifiedId, record)
-    this.notify()
+    this.records.set(physicalId, record)
+    if (this.pages.visibility?.visible(generation) !== false) this.notify()
     let active = true
     return () => {
       if (!active) return
       active = false
-      this.records.delete(qualifiedId)
-      void this.enqueue(() => this.reconcileDependencies())
-      this.notify()
+      this.records.delete(physicalId)
+      if (this.pages.visibility?.visible(generation) !== false) {
+        void this.enqueue(() => this.reconcileDependencies())
+        this.notify()
+      }
     }
   }
 
-  has(requestingOwner: string, id: string): boolean {
-    const record = this.records.get(qualifyOwnedId(requestingOwner, id))
+  has(requestingOwner: string, id: string, view?: PluginGenerationView): boolean {
+    const record = this.findRecord(requestingOwner, id, view)
     return record?.owner === requestingOwner && this.routeError(record) === undefined
   }
 
-  managerSettingsRoute(requestingOwner: string, id: string): ManagerSettingsRouteResolution {
-    const record = this.records.get(qualifyOwnedId(requestingOwner, id))
+  managerSettingsRoute(requestingOwner: string, id: string, view?: PluginGenerationView): ManagerSettingsRouteResolution {
+    const record = this.findRecord(requestingOwner, id, view)
     if (record === undefined || record.owner !== requestingOwner) {
       return { state: 'pending', detail: `route ${id} is not registered by plugin ${requestingOwner}` }
     }
@@ -519,7 +576,7 @@ export class NavigationRegistry {
     if (!this.outlets.get('manager.settings.content')!.validatePath(record.definition.path)) {
       return { state: 'invalid', detail: `route path ${record.definition.path} is incompatible with manager.settings.content` }
     }
-    const pathConflict = [...this.records.values()].find(candidate => (
+    const pathConflict = this.visibleRecords(view).find(candidate => (
       candidate.qualifiedId !== record.qualifiedId
       && candidate.definition.outlet === 'manager.settings.content'
       && candidate.definition.path === record.definition.path
@@ -530,7 +587,7 @@ export class NavigationRegistry {
         detail: `route path ${record.definition.path} conflicts with ${pathConflict.qualifiedId}`,
       }
     }
-    const page = this.pages.get(record.owner, record.definition.page)
+    const page = this.pages.get(record.owner, record.definition.page, view ?? record.candidateView)
     if (page === undefined) return { state: 'pending', detail: `page ${record.definition.page} is not registered by plugin ${record.owner}` }
     if (page.metadata.chrome !== 'body-only') {
       return { state: 'invalid', detail: `page ${page.qualifiedId} must use body-only chrome` }
@@ -539,7 +596,7 @@ export class NavigationRegistry {
     const unknownKey = whenContextKeys(record.definition.when).find(key => !Object.hasOwn(values, key))
     if (unknownKey !== undefined) return { state: 'invalid', detail: `when context key ${unknownKey} is not declared by the host adapter` }
     if (!evaluateWhen(record.definition.when, values)) return { state: 'pending', detail: 'route when condition is not satisfied' }
-    const outletAccess = this.access?.decision(record.owner, 'manager.settings.content', 'outlet')
+    const outletAccess = this.access?.decision(record.owner, 'manager.settings.content', 'outlet', view ?? record.candidateView)
     if (outletAccess !== undefined && !outletAccess.authorized) {
       return { state: 'invalid', detail: outletAccess.reason ?? `extension point manager.settings.content is denied for plugin ${record.owner}` }
     }
@@ -556,11 +613,11 @@ export class NavigationRegistry {
     return this.enqueue(async () => {
       assertKeys(reference, ['id', 'params'], 'manager settings route reference')
       assertLocalId(reference.id, 'manager settings route reference')
-      const record = this.records.get(qualifyOwnedId(requestingOwner, reference.id))
+      const record = this.findRecord(requestingOwner, reference.id)
       if (record === undefined || record.owner !== requestingOwner) throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
       const resolution = this.managerSettingsRoute(requestingOwner, reference.id)
       if (resolution.state !== 'available') throw new Error(resolution.detail ?? `route ${record.qualifiedId} is not available`)
-      const page = this.pages.get(record.owner, record.definition.page)!
+      const page = this.pages.get(record.owner, record.definition.page, record.candidateView)!
       const surfaceAccess = this.access?.authorizeSurfaceRoute(requestingOwner, 'manager.settings.tabs', contributionId, record.qualifiedId)
       if (surfaceAccess !== undefined && !surfaceAccess.authorized) throw new Error(surfaceAccess.reason ?? 'manager.settings.tabs is denied')
       const routeAccess = this.access?.authorizeOutletRoute(requestingOwner, 'manager.settings.content', record.qualifiedId, page.qualifiedId)
@@ -665,7 +722,7 @@ export class NavigationRegistry {
   }
 
   routeProjection(requestingOwner: string, reference: CordisXRouteReference): RouteProjection {
-    const record = this.records.get(qualifyOwnedId(requestingOwner, reference.id))
+    const record = this.findRecord(requestingOwner, reference.id)
     if (record === undefined || record.owner !== requestingOwner || this.routeError(record) !== undefined) return { active: false, presented: false }
     const params = reference.params ?? {}
     try {
@@ -697,7 +754,7 @@ export class NavigationRegistry {
         throw new Error(decision.reason ?? `extension point ${pointId} is denied for plugin ${requestingOwner}`)
       }
       if (this.routeProjection(requestingOwner, reference).active) {
-        const record = this.records.get(routeId)
+        const record = this.visibleRecords().find(item => item.qualifiedId === routeId)
         if (record !== undefined) await this.closeNow(record.definition.outlet, true)
         this.notify()
         return
@@ -733,7 +790,7 @@ export class NavigationRegistry {
   }
 
   match(outlet: string, path: string): { readonly routeId: string; readonly params: Readonly<Record<string, string>> } | undefined {
-    const matches = [...this.records.values()]
+    const matches = this.visibleRecords()
       .filter(record => record.definition.outlet === outlet
         && this.routeError(record) === undefined
         && (this.access?.decision(record.owner, outlet, 'outlet').authorized ?? true))
@@ -743,10 +800,10 @@ export class NavigationRegistry {
     return { routeId: matches[0]!.record.qualifiedId, params: matches[0]!.params }
   }
 
-  snapshot(): NavigationSnapshot {
-    const routes = [...this.records.values()].map((record): RouteSnapshot => {
+  snapshot(view?: PluginGenerationView): NavigationSnapshot {
+    const routes = this.visibleRecords(view).map((record): RouteSnapshot => {
       const error = this.routeError(record)
-      const pointAccess = this.access?.decision(record.owner, record.definition.outlet, 'outlet')
+      const pointAccess = this.access?.decision(record.owner, record.definition.outlet, 'outlet', view ?? record.candidateView)
         ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }
       return {
         owner: record.owner,
@@ -777,7 +834,7 @@ export class NavigationRegistry {
         ...(state?.error === undefined ? {} : { error: state.error }),
       }
     })
-    return { routes, pages: this.pages.snapshot(), outlets }
+    return { routes, pages: this.pages.snapshot(view), outlets }
   }
 
   subscribe(listener: () => void): () => void {
@@ -801,6 +858,7 @@ export class NavigationRegistry {
     this.states.clear()
     this.presentationOrder = []
     this.listeners.clear()
+    this.disconnectVisibility?.()
   }
 
   private enqueue(action: () => void | Promise<void>): Promise<void> {
@@ -812,8 +870,43 @@ export class NavigationRegistry {
     return result
   }
 
+  private visibleRecords(view?: PluginGenerationView): RouteRecord[] {
+    return [...this.records.values()].filter(record => this.pages.visibility?.visible(record.generation, view) ?? true)
+  }
+
+  private findRecord(owner: string, id: string, view?: PluginGenerationView): RouteRecord | undefined {
+    const qualifiedId = qualifyOwnedId(owner, id)
+    return this.visibleRecords(view).find(record => record.qualifiedId === qualifiedId && record.owner === owner)
+  }
+
+  private async reconcileGeneration(): Promise<void> {
+    if (this.managerSettingsMount !== undefined) await this.unmountManagerSettings()
+    for (const [name, state] of this.states) {
+      let changed = false
+      const replacement: RouteEntry[] = []
+      for (const entry of state.stack) {
+        const active = this.findRecord(entry.record.owner, entry.record.definition.id)
+        if (active === undefined) continue
+        changed ||= active !== entry.record
+        replacement.push({ ...entry, record: active })
+      }
+      if (replacement.length !== state.stack.length) changed = true
+      if (!changed) continue
+      await this.unmount(state)
+      state.stack = replacement
+      if (replacement.length === 0) {
+        await this.closeNow(name)
+      } else {
+        await this.mountCurrent(name, state)
+      }
+    }
+    await this.reconcilePresentation()
+    this.notify()
+  }
+
   private routeError(record: RouteRecord): string | undefined {
-    const conflict = [...this.records.values()].find(other => other !== record
+    const view = record.candidateView
+    const conflict = this.visibleRecords(view).find(other => other !== record
       && other.definition.outlet === record.definition.outlet
       && other.definition.path === record.definition.path)
     if (conflict !== undefined) return `route path conflicts with ${conflict.qualifiedId}`
@@ -821,7 +914,7 @@ export class NavigationRegistry {
     if (!this.outlets.get(record.definition.outlet)!.validatePath(record.definition.path)) {
       return `route path ${record.definition.path} is incompatible with outlet ${record.definition.outlet}`
     }
-    const page = this.pages.get(record.owner, record.definition.page)
+    const page = this.pages.get(record.owner, record.definition.page, view)
     if (page === undefined) return `page ${record.definition.page} is not registered by plugin ${record.owner}`
     if (record.definition.outlet === 'manager.settings.content' && page.metadata.chrome !== 'body-only') {
       return `page ${page.qualifiedId} must use body-only chrome for manager.settings.content`
@@ -842,7 +935,7 @@ export class NavigationRegistry {
   private async navigateNow(requestingOwner: string, reference: CordisXRouteReference, returnFocus?: HTMLElement): Promise<void> {
     assertKeys(reference, ['id', 'params'], 'route reference')
     assertReference(reference.id, 'route reference')
-    const record = this.records.get(qualifyOwnedId(requestingOwner, reference.id))
+    const record = this.findRecord(requestingOwner, reference.id)
     if (record === undefined || record.owner !== requestingOwner) throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
     const error = this.routeError(record)
     if (error !== undefined) throw new Error(`route ${record.qualifiedId} is invalid: ${error}`)
@@ -851,6 +944,7 @@ export class NavigationRegistry {
       record.definition.outlet,
       record.qualifiedId,
       qualifyOwnedId(record.owner, record.definition.page),
+      record.candidateView,
     )
     if (routeAccess !== undefined && !routeAccess.authorized) {
       throw new Error(routeAccess.reason ?? `extension point ${record.definition.outlet} is denied for plugin ${requestingOwner}`)
@@ -888,7 +982,7 @@ export class NavigationRegistry {
     const entry = state.stack.at(-1)
     if (entry === undefined) return
     const outlet = this.outlets.get(name)
-    const page = this.pages.get(entry.record.owner, entry.record.definition.page)
+    const page = this.pages.get(entry.record.owner, entry.record.definition.page, entry.record.candidateView)
     if (outlet === undefined || page === undefined) return
     const host = outlet.controller.getSnapshot()
     if (!host.available || host.container === undefined || host.contextKey === undefined) return
@@ -897,6 +991,7 @@ export class NavigationRegistry {
       entry.record.definition.outlet,
       entry.record.qualifiedId,
       page.qualifiedId,
+      entry.record.candidateView,
     )
     if (pageAccess !== undefined && !pageAccess.authorized) {
       state.error = pageAccess.reason ?? `extension point ${entry.record.definition.outlet} is denied for plugin ${entry.record.owner}`
@@ -1160,7 +1255,7 @@ export class NavigationRegistry {
   private async reconcileDependencies(): Promise<void> {
     const managed = this.managerSettingsMount
     if (managed !== undefined) {
-      const current = this.records.get(managed.routeId)
+      const current = this.visibleRecords().find(record => record.qualifiedId === managed.routeId)
       const resolution = current === undefined
         ? { state: 'pending' as const }
         : this.managerSettingsRoute(managed.owner, current.definition.id)
@@ -1250,7 +1345,13 @@ export class NavigationRegistry {
   }
 
   private notify(): void {
-    for (const listener of this.listeners) listener()
+    for (const listener of this.listeners) {
+      try {
+        listener()
+      } catch {
+        // One observer cannot split a published visibility epoch.
+      }
+    }
   }
 
   private async disposeManagedSettingsMount(mount: ManagedSettingsPageMountRecord): Promise<void> {
@@ -1283,12 +1384,13 @@ export class NavigationRegistry {
 }
 
 export class CordisXPageService extends Service implements CordisXPages {
-  readonly registry = new PageRegistry()
+  readonly registry: PageRegistry
   private readonly console: PluginConsoleAspect | undefined
 
   constructor(ctx: Context, console?: PluginConsoleAspect) {
     super(ctx, 'pages')
     this.console = console
+    this.registry = new PageRegistry(generationVisibilityFromContext(ctx))
     ctx.effect(() => () => this.registry.dispose(), 'cordisx: page registry')
   }
 
@@ -1306,14 +1408,15 @@ export class CordisXPageService extends Service implements CordisXPages {
           () => mount(context),
         ) as ReturnType<CordisXPageMount<Messages>>
     const register = (): ReturnType<CordisXPages['register']> => this.ctx.effect(
-      () => this.registry.register(owner, metadata, scopedMount),
+      () => this.registry.register(this.ctx, metadata, scopedMount),
       `pages.register(${JSON.stringify(metadata.id)})`,
     )
     return token === undefined || this.console === undefined ? register() : this.console.runSync(token, 'pages.register', metadata, register)
   }
 
   snapshot(): readonly PageSnapshot[] {
-    return this.registry.snapshot()
+    const visibility = generationVisibilityFromContext(this.ctx)
+    return this.registry.snapshot(visibility?.view(this.ctx))
   }
 }
 
@@ -1342,10 +1445,9 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
   }
 
   register(definition: CordisXRouteDefinition): ReturnType<CordisXRoutes['register']> {
-    const owner = ownerFromContext(this.ctx)
     const token = this.console?.tokenFromContext(this.ctx)
     const register = (): ReturnType<CordisXRoutes['register']> => this.ctx.effect(
-      () => this.registry.register(owner, definition),
+      () => this.registry.register(this.ctx, definition),
       `routes.register(${JSON.stringify(definition.id)})`,
     )
     return token === undefined || this.console === undefined ? register() : this.console.runSync(token, 'routes.register', definition, register)
@@ -1369,12 +1471,12 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
     return this.registry.close(ownerFromContext(this.ctx), outlet)
   }
 
-  hasFor(owner: string, id: string): boolean {
-    return this.registry.has(owner, id)
+  hasFor(owner: string, id: string, view?: PluginGenerationView): boolean {
+    return this.registry.has(owner, id, view)
   }
 
-  managerSettingsRouteFor(owner: string, id: string): ManagerSettingsRouteResolution {
-    return this.registry.managerSettingsRoute(owner, id)
+  managerSettingsRouteFor(owner: string, id: string, view?: PluginGenerationView): ManagerSettingsRouteResolution {
+    return this.registry.managerSettingsRoute(owner, id, view)
   }
 
   mountManagerSettingsFor(

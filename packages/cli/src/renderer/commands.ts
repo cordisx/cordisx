@@ -7,6 +7,12 @@ import type {
   CordisXSurfaceInvocationContextV1,
 } from '../contracts.js'
 import { ownerFromContext, qualifyOwnedId } from './ownership.js'
+import {
+  generationVisibilityFromContext,
+  type GenerationVisibilityCoordinator,
+  type PluginGenerationEffectIdentity,
+  type PluginGenerationView,
+} from './generation-visibility.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
 import { ICON_TOKEN_PATTERN, assertLocalId, assertLocalizedText, assertReference, immutableSnapshot } from './validation.js'
@@ -15,6 +21,7 @@ import type { PluginConsoleAspect, PluginPrincipalToken } from './plugin-console
 interface CommandRecord {
   readonly owner: string
   readonly qualifiedId: string
+  readonly generation: PluginGenerationEffectIdentity
   readonly metadata: CordisXCommandMetadata
   readonly handler: CordisXCommandHandler
   readonly principal?: PluginPrincipalToken
@@ -42,15 +49,40 @@ export class CommandRegistry {
   private readonly records = new Map<string, CommandRecord>()
   private readonly listeners = new Set<() => void>()
   private disposed = false
+  private readonly disconnectVisibility: (() => void) | undefined
 
-  constructor(private access?: ExtensionPointAccessResolver, private readonly console?: PluginConsoleAspect) {}
+  constructor(
+    private access?: ExtensionPointAccessResolver,
+    private readonly visibility?: GenerationVisibilityCoordinator,
+    private readonly console?: PluginConsoleAspect,
+  ) {
+    this.disconnectVisibility = visibility?.connect({
+      notify: () => {
+        for (const record of this.records.values()) {
+          if (visibility.visible(record.generation)) continue
+          for (const controller of record.running.values()) controller.abort()
+          record.running.clear()
+        }
+        this.notify()
+      },
+    })
+  }
 
   setAccessResolver(access: ExtensionPointAccessResolver): void {
     this.access = access
   }
 
-  register(owner: string, metadata: CordisXCommandMetadata, handler: CordisXCommandHandler, principal?: PluginPrincipalToken): () => void {
+  register(
+    ownerOrContext: string | Context,
+    metadata: CordisXCommandMetadata,
+    handler: CordisXCommandHandler,
+    principal?: PluginPrincipalToken,
+  ): () => void {
     if (this.disposed) throw new Error('CordisX command registry is disposed')
+    const owner = typeof ownerOrContext === 'string' ? ownerOrContext : ownerFromContext(ownerOrContext)
+    const generation: PluginGenerationEffectIdentity = typeof ownerOrContext === 'string'
+      ? Object.freeze({ pluginId: owner })
+      : this.visibility?.effect(ownerOrContext) ?? Object.freeze({ pluginId: owner })
     assertLocalId(owner, 'command owner')
     assertLocalId(metadata.id, 'command id')
     const unknown = Object.keys(metadata).find(key => !['id', 'title', 'category', 'icon', 'public'].includes(key))
@@ -64,30 +96,32 @@ export class CommandRegistry {
     if (metadata.public !== undefined && typeof metadata.public !== 'boolean') throw new Error('command public must be a boolean')
     if (typeof handler !== 'function') throw new Error(`command ${metadata.id} requires a handler`)
     const qualifiedId = qualifyOwnedId(owner, metadata.id)
-    if (this.records.has(qualifiedId)) throw new Error(`command ${qualifiedId} is already registered`)
+    const physicalId = `${qualifiedId}\u0000${generation.moduleGeneration ?? 'host'}`
+    if (this.records.has(physicalId)) throw new Error(`command ${qualifiedId} is already registered for this generation`)
     const record: CommandRecord = {
       owner,
       qualifiedId,
+      generation,
       metadata: immutableSnapshot(metadata),
       handler,
       ...(principal === undefined ? {} : { principal }),
       running: new Map(),
     }
-    this.records.set(qualifiedId, record)
-    this.notify()
+    this.records.set(physicalId, record)
+    if (this.visibility?.visible(generation) !== false) this.notify()
     let active = true
     return () => {
       if (!active) return
       active = false
       for (const controller of record.running.values()) controller.abort()
       record.running.clear()
-      this.records.delete(qualifiedId)
-      this.notify()
+      this.records.delete(physicalId)
+      if (this.visibility?.visible(generation) !== false) this.notify()
     }
   }
 
   async execute(
-    requestingOwner: string,
+    requestingOwnerOrContext: string | Context,
     reference: CordisXCommandReference,
     invocationKey = 'default',
     origin?: SurfaceCommandOrigin,
@@ -97,14 +131,18 @@ export class CommandRegistry {
     assertReference(reference.id, 'command reference')
     const unknown = Object.keys(reference).find(key => !['id', 'arguments'].includes(key))
     if (unknown !== undefined) throw new Error(`command reference has unknown field ${unknown}`)
+    const requestingOwner = typeof requestingOwnerOrContext === 'string'
+      ? requestingOwnerOrContext
+      : ownerFromContext(requestingOwnerOrContext)
+    const view = typeof requestingOwnerOrContext === 'string' ? undefined : this.visibility?.view(requestingOwnerOrContext)
     const qualifiedId = qualifyOwnedId(requestingOwner, reference.id)
-    const record = this.records.get(qualifiedId)
+    const record = this.visibleRecord(qualifiedId, view)
     if (record === undefined) throw new Error(`command ${qualifiedId} is not registered`)
     if (record.owner !== requestingOwner && record.metadata.public !== true) {
       throw new Error(`command ${qualifiedId} is private to plugin ${record.owner}`)
     }
     if (origin !== undefined) {
-      const decision = this.access?.authorizeSurfaceCommand(requestingOwner, origin.pointId, origin.contributionId, qualifiedId)
+      const decision = this.access?.authorizeSurfaceCommand(requestingOwner, origin.pointId, origin.contributionId, qualifiedId, view)
       if (decision !== undefined && !decision.authorized) {
         throw new Error(decision.reason ?? `extension point ${origin.pointId} is denied for plugin ${requestingOwner}`)
       }
@@ -119,7 +157,7 @@ export class CommandRegistry {
     const abort = new AbortController()
     record.running.set(executionId, abort)
     delete record.lastError
-    this.notify()
+    if (this.visibility?.visible(record.generation) !== false) this.notify()
     const invoke = async (correlationId?: string): Promise<unknown> => {
       const executeHandler = async (): Promise<unknown> => await record.handler({
         owner: record.owner,
@@ -153,18 +191,23 @@ export class CommandRegistry {
       throw error
     } finally {
       record.running.delete(executionId)
-      this.notify()
+      if (this.visibility?.visible(record.generation) !== false) this.notify()
     }
   }
 
-  has(requestingOwner: string, reference: CordisXCommandReference): boolean {
+  has(requestingOwnerOrContext: string | Context, reference: CordisXCommandReference, explicitView?: PluginGenerationView): boolean {
+    const requestingOwner = typeof requestingOwnerOrContext === 'string'
+      ? requestingOwnerOrContext
+      : ownerFromContext(requestingOwnerOrContext)
+    const view = explicitView ?? (typeof requestingOwnerOrContext === 'string' ? undefined : this.visibility?.view(requestingOwnerOrContext))
     const qualifiedId = qualifyOwnedId(requestingOwner, reference.id)
-    const record = this.records.get(qualifiedId)
+    const record = this.visibleRecord(qualifiedId, view)
     return record !== undefined && (record.owner === requestingOwner || record.metadata.public === true)
   }
 
   snapshot(): readonly CommandSnapshot[] {
     return [...this.records.values()]
+      .filter(record => this.visibility?.visible(record.generation) !== false)
       .map(record => ({
         owner: record.owner,
         id: record.metadata.id,
@@ -184,6 +227,7 @@ export class CommandRegistry {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.disconnectVisibility?.()
     for (const record of this.records.values()) {
       for (const controller of record.running.values()) controller.abort()
     }
@@ -192,7 +236,18 @@ export class CommandRegistry {
   }
 
   private notify(): void {
-    for (const listener of this.listeners) listener()
+    for (const listener of this.listeners) {
+      try {
+        listener()
+      } catch {
+        // One observer cannot split a published visibility epoch.
+      }
+    }
+  }
+
+  private visibleRecord(qualifiedId: string, view?: PluginGenerationView): CommandRecord | undefined {
+    return [...this.records.values()].find(record => record.qualifiedId === qualifiedId
+      && (this.visibility?.visible(record.generation, view) ?? true))
   }
 }
 
@@ -205,28 +260,28 @@ export class CordisXCommandService extends Service implements CordisXCommands {
   constructor(ctx: Context, options: CommandRegistry | CordisXCommandServiceOptions = {}) {
     super(ctx, 'commands')
     this.console = options instanceof CommandRegistry ? undefined : options.console
-    this.registry = options instanceof CommandRegistry ? options : options.registry ?? new CommandRegistry(undefined, options.console)
+    this.registry = options instanceof CommandRegistry
+      ? options
+      : options.registry ?? new CommandRegistry(undefined, generationVisibilityFromContext(ctx), options.console)
     ctx.effect(() => () => this.registry.dispose(), 'cordisx: command registry')
   }
 
   register(metadata: CordisXCommandMetadata, handler: CordisXCommandHandler): ReturnType<CordisXCommands['register']> {
-    const owner = ownerFromContext(this.ctx)
     const principal = this.console?.tokenFromContext(this.ctx)
-    return this.ctx.effect(() => this.registry.register(owner, metadata, handler, principal), `commands.register(${JSON.stringify(metadata.id)})`)
+    return this.ctx.effect(() => this.registry.register(this.ctx, metadata, handler, principal), `commands.register(${JSON.stringify(metadata.id)})`)
   }
 
   execute(reference: CordisXCommandReference, invocationKey?: string): Promise<unknown> {
     const principal = this.console?.tokenFromContext(this.ctx)
-    const owner = principal === undefined ? ownerFromContext(this.ctx) : this.console!.owner(principal).id
-    return this.registry.execute(owner, reference, invocationKey, undefined, principal)
+    return this.registry.execute(this.ctx, reference, invocationKey, undefined, principal)
   }
 
   executeFor(owner: string, reference: CordisXCommandReference, invocationKey?: string, origin?: SurfaceCommandOrigin): Promise<unknown> {
     return this.registry.execute(owner, reference, invocationKey, origin)
   }
 
-  hasFor(owner: string, reference: CordisXCommandReference): boolean {
-    return this.registry.has(owner, reference)
+  hasFor(owner: string, reference: CordisXCommandReference, view?: PluginGenerationView): boolean {
+    return this.registry.has(owner, reference, view)
   }
 
   snapshot(): readonly CommandSnapshot[] {

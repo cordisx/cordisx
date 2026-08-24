@@ -26,9 +26,14 @@ import { createConfigBridgeHandler, type ConfigBridgeHandler } from '../launcher
 import type { CordisXPermissionPolicyRecordV1, CordisXPluginIdentity } from '../platform-contracts.js'
 import { PluginPermissionIdentityRegistry, type PermissionPersistenceContext } from '../launcher/permission-rpc.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
-import { loadActivatedPluginComposition } from '../launcher/plugin-composition.js'
+import { loadActivatedPluginComposition, loadPluginComposition } from '../launcher/plugin-composition.js'
 import { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
 import type { PluginLifecycleBridgeHandler } from '../launcher/plugin-lifecycle-rpc.js'
+import {
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+  type CordisXPluginActivationRecordV1,
+} from '../plugin-lifecycle-contracts.js'
+import type { RollbackPlan } from '../launcher/packages/authority.js'
 
 const HELP = `Usage:
   cordisx [app] [profile] [--data shared|isolated] [options] [-- host-arguments...]
@@ -120,7 +125,8 @@ async function bundle(
     readonly generation?: string
     readonly pluginLifecycle?: {
       readonly token: string
-      readonly activation: import('../plugin-lifecycle-contracts.js').CordisXPluginActivationRecordV1
+      readonly activation: CordisXPluginActivationRecordV1
+      readonly registryEpoch?: number
     }
   } = {},
 ): Promise<RendererComposition> {
@@ -147,6 +153,9 @@ async function bundle(
     ...(options.pluginLifecycle === undefined ? {} : {
       pluginLifecycleBridgeToken: options.pluginLifecycle.token,
       pluginActivation: options.pluginLifecycle.activation,
+      ...(options.pluginLifecycle.registryEpoch === undefined
+        ? {}
+        : { initialRegistryEpoch: options.pluginLifecycle.registryEpoch }),
     }),
   })
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
@@ -183,6 +192,19 @@ function agentHistoryHost(
 
 function pluginIdentities(config: CordisXConfig): readonly CordisXPluginIdentity[] {
   return config.plugins.map(plugin => ({ source: plugin.source ?? pathToFileURL(plugin.entry).href, id: plugin.id }))
+}
+
+function recoveredActivation(plan: RollbackPlan, runtimeGeneration: string): CordisXPluginActivationRecordV1 {
+  return {
+    $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+    schemaVersion: 1,
+    recordKind: 'active',
+    profileId: plan.rollbackTarget.profileId,
+    revision: plan.rollbackTarget.revision,
+    lastGoodRevision: plan.rollbackTarget.lastGoodRevision,
+    runtimeGeneration,
+    plugins: plan.rollbackTarget.plugins,
+  }
 }
 
 function printPlan(plan: ResolvedLaunchPlan, stdout: (line: string) => void): void {
@@ -398,20 +420,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   const currentHomeConfig = await loadHomeConfig(configPath)
   const lifecycleGeneration = randomBytes(16).toString('hex')
   const lifecycleStore = new PluginActivationStore(rootFromConfigPath(configPath), selection.profileId, lifecycleGeneration)
-  const activatedPlugins = await loadActivatedPluginComposition(lifecycleStore)
-  const permissionIdentities = new PluginPermissionIdentityRegistry(pluginIdentities({
-    ...configuredComposition,
-    plugins: activatedPlugins,
-  }))
-  const lifecycleRuntime = new CdpPluginLifecycleRuntime(permissionIdentities)
+  const lifecycleRuntime = new CdpPluginLifecycleRuntime()
   const configuredIds = new Set(configuredComposition.plugins.map(plugin => plugin.id))
-  const collision = activatedPlugins.find(plugin => configuredIds.has(plugin.id))
-  if (collision !== undefined) throw new Error(`launcher-configured plugin already owns package id ${collision.id}`)
-  const composition: CordisXConfig = {
-    ...configuredComposition,
-    plugins: [...configuredComposition.plugins, ...activatedPlugins],
-  }
-  const pluginLifecycleBridgeToken = randomBytes(32).toString('hex')
   const pluginLifecycleCoordinator = new PluginLifecycleCoordinator({
     homeDir: rootFromConfigPath(configPath),
     profileId: selection.profileId,
@@ -420,6 +430,27 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     runtime: lifecycleRuntime,
     reservedPluginIds: [...configuredIds],
   })
+  const recoveryPlans = await pluginLifecycleCoordinator.prepareRecovery()
+  if (recoveryPlans.length > 1) throw new Error('multiple shared registry rollback recoveries require separate launcher runs')
+  const recoveryPlan = recoveryPlans[0]
+  const initialActivation = recoveryPlan === undefined
+    ? undefined
+    : recoveredActivation(recoveryPlan, lifecycleGeneration)
+  const activatedPlugins = initialActivation === undefined
+    ? await loadActivatedPluginComposition(lifecycleStore)
+    : await loadPluginComposition(lifecycleStore, initialActivation)
+  const permissionIdentities = new PluginPermissionIdentityRegistry(pluginIdentities({
+    ...configuredComposition,
+    plugins: activatedPlugins,
+  }))
+  lifecycleRuntime.setPermissionIdentities(permissionIdentities)
+  const collision = activatedPlugins.find(plugin => configuredIds.has(plugin.id))
+  if (collision !== undefined) throw new Error(`launcher-configured plugin already owns package id ${collision.id}`)
+  const composition: CordisXConfig = {
+    ...configuredComposition,
+    plugins: [...configuredComposition.plugins, ...activatedPlugins],
+  }
+  const pluginLifecycleBridgeToken = randomBytes(32).toString('hex')
   const pluginLifecycle = {
     handler: {
       token: pluginLifecycleBridgeToken,
@@ -440,7 +471,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     generation: lifecycleGeneration,
     pluginLifecycle: {
       token: pluginLifecycleBridgeToken,
-      activation: await lifecycleStore.loadActive(),
+      activation: initialActivation ?? await lifecycleStore.loadActive(),
+      ...(recoveryPlan === undefined ? {} : { registryEpoch: recoveryPlan.rollbackRegistryEpoch }),
     },
   })
   const configBridge = rendererComposition.configBridgeToken === undefined

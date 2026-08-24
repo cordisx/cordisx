@@ -274,6 +274,11 @@ interface OwnerBuffer {
   dropped: number
 }
 
+export interface PluginConsoleGenerationAuthority {
+  activeModuleGeneration(pluginId: string): string | undefined
+  callableGeneration(pluginId: string, moduleGeneration: string): boolean
+}
+
 interface ExecutionFrame {
   readonly token: PluginPrincipalToken
   readonly correlationId?: string
@@ -292,7 +297,12 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
   private readonly unattributedFingerprints = new Set<string>()
   private disposed = false
 
-  constructor(readonly generation: string, private readonly maxEntriesPerPlugin = 2000, private readonly now: () => number = () => Date.now()) {}
+  constructor(
+    readonly generation: string,
+    private readonly maxEntriesPerPlugin = 2000,
+    private readonly now: () => number = () => Date.now(),
+    private readonly generationAuthority?: PluginConsoleGenerationAuthority,
+  ) {}
 
   issue(identity: CordisXPluginIdentity, pluginGeneration: string): PluginPrincipalToken {
     this.assertLive()
@@ -305,7 +315,7 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
   }
 
   consoleFacade(token: PluginPrincipalToken): CordisXPluginConsoleFacade {
-    this.principals.require(token, this.generation)
+    this.principal(token)
     return Object.freeze({
       debug: (...args: unknown[]) => this.console(token, 'debug', args),
       log: (...args: unknown[]) => this.console(token, 'log', args),
@@ -337,7 +347,7 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     this.principals.revoke(token)
   }
 
-  owner(token: PluginPrincipalToken): CordisXPluginIdentity { return this.principals.require(token, this.generation).identity }
+  owner(token: PluginPrincipalToken): CordisXPluginIdentity { return this.principal(token).identity }
   tokenFromContext(ctx: Context): PluginPrincipalToken | undefined { return this.principals.fromContext(ctx) }
 
   async run<Value>(
@@ -352,7 +362,7 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
       readonly effectiveOwner?: CordisXPluginIdentity
     } = {},
   ): Promise<Value> {
-    const record = this.principals.require(token, this.generation)
+    const record = this.principal(token)
     const correlationId = `cxcall:${encodeURIComponent(this.generation)}:${this.nextCall++}`
     const started = this.now()
     let dispatched = false
@@ -404,7 +414,24 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
   }
 
   runSync<Value>(token: PluginPrincipalToken, source: string, request: unknown, operation: () => Value): Value {
+    const record = this.principal(token)
+    return this.runSyncRecord(record, token, source, request, operation)
+  }
+
+  /** Host-only disposal boundary; a retiring principal may clean up but cannot invoke capabilities. */
+  runCleanupSync<Value>(token: PluginPrincipalToken, source: string, request: unknown, operation: () => Value): Value {
     const record = this.principals.require(token, this.generation)
+    return this.runSyncRecord(record, token, source, request, operation, true)
+  }
+
+  private runSyncRecord<Value>(
+    record: PluginPrincipalRecord,
+    token: PluginPrincipalToken,
+    source: string,
+    request: unknown,
+    operation: () => Value,
+    retiring = false,
+  ): Value {
     const correlationId = `cxcall:${encodeURIComponent(this.generation)}:${this.nextCall++}`
     const started = this.now()
     this.append(record, {
@@ -416,7 +443,9 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
       phase: 'dispatch', status: 'pending', correlationId, trigger: { kind: 'capability' },
     })
     try {
-      const value = this.runInPluginContext(token, { correlationId, trigger: { kind: 'capability' } }, operation)
+      const value = retiring
+        ? operation()
+        : this.runInPluginContext(token, { correlationId, trigger: { kind: 'capability' } }, operation)
       if (value !== null && typeof value === 'object' && typeof (value as PromiseLike<unknown>).then === 'function') {
         throw new Error('CordisX synchronous capability returned a Promise')
       }
@@ -444,7 +473,7 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     request: unknown,
     context: { readonly sessionId?: string; readonly trigger?: CordisXPluginConsoleEntryV1['trigger'] } = {},
   ): PluginConsolePendingInvocation {
-    const record = this.principals.require(token, this.generation)
+    const record = this.principal(token)
     const correlationId = `cxcall:${encodeURIComponent(this.generation)}:${this.nextCall++}`
     const started = this.now()
     let dispatched = false
@@ -495,7 +524,7 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     context: { readonly correlationId?: string; readonly trigger?: CordisXPluginConsoleEntryV1['trigger'] },
     callback: () => Value | Promise<Value>,
   ): Value | Promise<Value> {
-    const record = this.principals.require(token, this.generation)
+    const record = this.principal(token)
     const key = identityKey(record.identity)
     const frame: ExecutionFrame = { token, ...context }
     const frames = this.frames.get(key) ?? []
@@ -524,7 +553,7 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     const frame = this.current(identity)
     if (frame?.correlationId === undefined) return
     let record: PluginPrincipalRecord
-    try { record = this.principals.require(frame.token, this.generation) } catch { return }
+    try { record = this.principal(frame.token) } catch { return }
     this.append(record, {
       coverage: 'host-mediated', kind: 'permission', method: phase === 'deny' ? 'warn' : 'info', source: capability,
       message, phase, status: phase === 'deny' ? 'denied' : 'pending', correlationId: frame.correlationId,
@@ -534,20 +563,24 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
 
   query(identity: CordisXPluginIdentity): CordisXPluginConsolePageV1 {
     const owner = this.owners.get(identityKey(identity))
+    const activeGeneration = this.generationAuthority?.activeModuleGeneration(identity.id)
+    const entries = owner?.entries.filter(entry => activeGeneration === undefined || entry.generation === activeGeneration) ?? []
     return Object.freeze({
       contract: 'cordisx.plugin-console-page/v1', schemaVersion: 1,
       plugin: Object.freeze({ source: identity.source, pluginId: identity.id }),
-      generation: owner?.generation ?? this.generation, generatedAt: this.now(), partialObservability: true,
+      generation: activeGeneration ?? owner?.generation ?? this.generation, generatedAt: this.now(), partialObservability: true,
       ...(owner === undefined || owner.dropped === 0 ? {} : { droppedEntries: owner.dropped }),
       ...(this.unattributed === 0 ? {} : { unattributedEntries: this.unattributed }),
-      entries: Object.freeze([...(owner?.entries ?? [])]),
+      entries: Object.freeze([...entries]),
     })
   }
 
   clear(identity: CordisXPluginIdentity): void {
     const owner = this.owners.get(identityKey(identity))
     if (owner === undefined) return
-    owner.entries.length = 0
+    const activeGeneration = this.generationAuthority?.activeModuleGeneration(identity.id)
+    if (activeGeneration === undefined) owner.entries.length = 0
+    else owner.entries.splice(0, owner.entries.length, ...owner.entries.filter(entry => entry.generation !== activeGeneration))
     owner.dropped = 0
     this.notify(identity.id)
   }
@@ -555,6 +588,10 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
   subscribe(listener: (pluginId: string) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  visibilityChanged(pluginIds: readonly string[]): void {
+    for (const pluginId of new Set(pluginIds)) this.notify(pluginId)
   }
 
   recordUnattributedError(fingerprint = 'unknown'): void {
@@ -575,7 +612,7 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
 
   private console(token: PluginPrincipalToken, method: CordisXPluginConsoleMethod, rawArgs: readonly unknown[]): void {
     let record: PluginPrincipalRecord
-    try { record = this.principals.require(token, this.generation) } catch { return }
+    try { record = this.principal(token) } catch { return }
     const args = rawArgs.map(item => snapshotConsoleValue(item))
     const frame = this.current(record.identity)
     const error = args.find(item => item.type === 'error')
@@ -600,12 +637,22 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
       generation: record.pluginGeneration, args: Object.freeze([...(draft.args ?? [])]), ...draft,
     }) as CordisXPluginConsoleEntryV1)
     while (owner.entries.length > this.maxEntriesPerPlugin) { owner.entries.shift(); owner.dropped += 1 }
-    this.notify(record.identity.id)
+    if (this.generationAuthority?.activeModuleGeneration(record.identity.id) === record.pluginGeneration
+      || this.generationAuthority === undefined) this.notify(record.identity.id)
   }
 
   private current(identity: CordisXPluginIdentity): ExecutionFrame | undefined {
     const frames = this.frames.get(identityKey(identity)) ?? []
     return frames.length === 1 ? frames[0] : undefined
+  }
+
+  private principal(token: PluginPrincipalToken | undefined): PluginPrincipalRecord {
+    const record = this.principals.require(token, this.generation)
+    if (this.generationAuthority !== undefined
+      && !this.generationAuthority.callableGeneration(record.identity.id, record.pluginGeneration)) {
+      throw new Error('CordisX plugin principal generation is stale')
+    }
+    return record
   }
 
   private notify(pluginId: string): void { for (const listener of this.listeners) listener(pluginId) }

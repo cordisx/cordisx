@@ -25,6 +25,12 @@ import {
   type CordisXWhen,
 } from '../contracts.js'
 import { ownerFromContext, qualifyOwnedId } from './ownership.js'
+import {
+  generationVisibilityFromContext,
+  type GenerationVisibilityCoordinator,
+  type PluginGenerationEffectIdentity,
+  type PluginGenerationView,
+} from './generation-visibility.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
 import type { PluginConsoleAspect } from './plugin-console.js'
 import {
@@ -62,6 +68,9 @@ interface SurfaceRecord {
   readonly sequence: number
   readonly owner: string
   readonly qualifiedId: string
+  readonly generation: PluginGenerationEffectIdentity
+  readonly candidateView?: PluginGenerationView
+  readonly renderToken: object
   options: CordisXContributionOptions
   item: unknown
   validationError?: string
@@ -108,9 +117,9 @@ export interface SurfaceAvailabilitySnapshot {
 }
 
 export interface SurfaceResolvers {
-  command(owner: string, reference: CordisXCommandReference): boolean
-  route(owner: string, id: string): boolean
-  managerSettingsRoute?(owner: string, id: string): Readonly<{
+  command(owner: string, reference: CordisXCommandReference, view?: PluginGenerationView): boolean
+  route(owner: string, id: string, view?: PluginGenerationView): boolean
+  managerSettingsRoute?(owner: string, id: string, view?: PluginGenerationView): Readonly<{
     state: 'available' | 'pending' | 'invalid'
     detail?: string
   }>
@@ -304,10 +313,16 @@ export class SurfaceRegistry {
   private readonly availability = new Map<string, SurfaceAvailabilitySnapshot>()
   private nextSequence = 0
   private disposed = false
+  private readonly disconnectVisibility: (() => void) | undefined
   private resolvers: SurfaceResolvers = { command: () => false, route: () => false }
   private access: ExtensionPointAccessResolver | undefined
 
-  constructor(private readonly contexts: HostContextStore) {}
+  constructor(
+    private readonly contexts: HostContextStore,
+    private readonly visibility?: GenerationVisibilityCoordinator,
+  ) {
+    this.disconnectVisibility = visibility?.connect({ notify: () => this.notify() })
+  }
 
   setResolvers(resolvers: SurfaceResolvers): void {
     this.resolvers = resolvers
@@ -367,11 +382,18 @@ export class SurfaceRegistry {
   }
 
   register<Name extends CordisXSurfaceName>(
-    owner: string,
+    ownerOrContext: string | Context,
     options: CordisXContributionOptions<Name>,
     item: CordisXSurfaceMap[Name],
   ): CordisXContributionHandle<CordisXSurfaceMap[Name]> {
     if (this.disposed) throw new Error('CordisX surface registry is disposed')
+    const owner = typeof ownerOrContext === 'string' ? ownerOrContext : ownerFromContext(ownerOrContext)
+    const generation: PluginGenerationEffectIdentity = typeof ownerOrContext === 'string'
+      ? Object.freeze({ pluginId: owner })
+      : this.visibility?.effect(ownerOrContext) ?? Object.freeze({ pluginId: owner })
+    const candidateView = typeof ownerOrContext === 'string' || generation.transactionId === undefined
+      ? undefined
+      : this.visibility?.view(ownerOrContext)
     assertLocalId(owner, 'surface owner')
     assertKeys(options, ['name', 'id', 'group', 'order', 'when', 'disabled'], 'surface contribution options')
     assertLocalId(options.id, 'surface contribution id')
@@ -382,8 +404,8 @@ export class SurfaceRegistry {
       ...(options.disabled === undefined ? {} : { disabled: options.disabled }),
     })
     const qualifiedId = qualifyOwnedId(owner, options.id)
-    const key = `${options.name}\u0000${qualifiedId}`
-    if (this.records.has(key)) throw new Error(`surface contribution ${options.name}/${qualifiedId} is already registered`)
+    const key = `${options.name}\u0000${qualifiedId}\u0000${generation.moduleGeneration ?? 'host'}`
+    if (this.records.has(key)) throw new Error(`surface contribution ${options.name}/${qualifiedId} is already registered for this generation`)
     let snapshot: unknown
     let validationError: string | undefined
     try {
@@ -396,24 +418,28 @@ export class SurfaceRegistry {
       sequence: this.nextSequence++,
       owner,
       qualifiedId,
+      generation,
+      ...(candidateView === undefined ? {} : { candidateView }),
+      renderToken: Object.freeze({}),
       options: immutableSnapshot(options),
       item: snapshot,
       ...(validationError === undefined ? {} : { validationError }),
       rendered: false,
     }
     this.records.set(key, record)
-    this.notify()
+    if (this.visibility?.visible(generation) !== false) this.notify()
     let active = true
     const dispose = (): void => {
       if (!active) return
       active = false
       this.records.delete(key)
-      this.notify()
+      if (this.visibility?.visible(generation) !== false) this.notify()
     }
     const handle = dispose as CordisXContributionHandle<CordisXSurfaceMap[Name]>
     handle.dispose = dispose
     handle.update = (next): void => {
       if (!active) throw new Error(`surface contribution ${qualifiedId} is disposed`)
+      this.visibility?.assertCallable(generation, candidateView)
       try {
         record.item = validateItem(options.name, next)
         delete record.validationError
@@ -421,30 +447,41 @@ export class SurfaceRegistry {
         record.item = undefined
         record.validationError = error instanceof Error ? error.message : String(error)
       }
-      this.notify()
+      if (this.visibility?.visible(generation) !== false) this.notify()
     }
     handle.updateOptions = (next): void => {
       if (!active) throw new Error(`surface contribution ${qualifiedId} is disposed`)
+      this.visibility?.assertCallable(generation, candidateView)
       assertPresentationOptions(options.name, next)
       record.options = immutableSnapshot({ name: options.name, id: options.id, ...next })
-      this.notify()
+      if (this.visibility?.visible(generation) !== false) this.notify()
     }
     return handle
   }
 
-  markRendered(surface: string, qualifiedId: string, rendered: boolean): void {
-    const record = this.records.get(`${surface}\u0000${qualifiedId}`)
+  renderToken(surface: string, qualifiedId: string): object | undefined {
+    return [...this.records.values()].find(record => record.options.name === surface
+      && record.qualifiedId === qualifiedId
+      && (this.visibility?.visible(record.generation) ?? true))?.renderToken
+  }
+
+  markRendered(surface: string, qualifiedId: string, renderToken: object, rendered: boolean): void {
+    const record = [...this.records.values()].find(item => item.options.name === surface
+      && item.qualifiedId === qualifiedId
+      && item.renderToken === renderToken
+      && (this.visibility?.visible(item.generation) ?? true))
     if (record === undefined || record.rendered === rendered) return
     record.rendered = rendered
     this.notify()
   }
 
-  snapshot(): readonly SurfaceContributionSnapshot[] {
+  snapshot(view?: PluginGenerationView): readonly SurfaceContributionSnapshot[] {
     const contexts = this.contexts.getSnapshot()
     const knownKeys = new Set(Object.keys(contexts))
     const sections = new Set<string>()
     const rows = new Set<string>()
-    for (const record of this.records.values()) {
+    const records = [...this.records.values()].filter(record => this.visibility?.visible(record.generation, view) ?? true)
+    for (const record of records) {
       if (record.options.name === 'environment.panel.sections' && record.item !== undefined) {
         sections.add(qualifyOwnedId(record.owner, (record.item as CordisXEnvironmentSection).sectionId))
       }
@@ -452,7 +489,7 @@ export class SurfaceRegistry {
         rows.add(qualifyOwnedId(record.owner, (record.item as CordisXEnvironmentRow).rowId))
       }
     }
-    return [...this.records.values()]
+    return records
       .sort((left, right) => {
         return (left.options.group ?? 'default').localeCompare(right.options.group ?? 'default')
           || (left.options.order ?? 0) - (right.options.order ?? 0)
@@ -463,7 +500,7 @@ export class SurfaceRegistry {
         let error = record.validationError
         let pending = false
         const item = record.item as Record<string, unknown> | undefined
-        const pointAccess = this.access?.decision(record.owner, record.options.name, 'surface')
+        const pointAccess = this.access?.decision(record.owner, record.options.name, 'surface', view ?? record.candidateView)
           ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }
         if (error === undefined && !this.declared.has(record.options.name)) error = `surface ${record.options.name} is not declared by the host`
         const unknownWhen = whenContextKeys(record.options.when).find(key => !knownKeys.has(key))
@@ -471,17 +508,18 @@ export class SurfaceRegistry {
         if (error === undefined && item !== undefined) {
           const command = item.command as CordisXCommandReference | undefined
           const route = item.route as { id: string } | undefined
-          if (command !== undefined && !this.resolvers.command(record.owner, command)) error = `command ${command.id} is not available`
+          const resolutionView = view ?? record.candidateView
+          if (command !== undefined && !this.resolvers.command(record.owner, command, resolutionView)) error = `command ${command.id} is not available`
           else if (command === undefined && route !== undefined && record.options.name === 'manager.settings.tabs') {
-            const resolution = this.resolvers.managerSettingsRoute?.(record.owner, route.id)
-              ?? (this.resolvers.route(record.owner, route.id)
+            const resolution = this.resolvers.managerSettingsRoute?.(record.owner, route.id, resolutionView)
+              ?? (this.resolvers.route(record.owner, route.id, resolutionView)
                 ? { state: 'available' as const }
                 : { state: 'pending' as const, detail: `route ${route.id} is not available` })
             if (resolution.state === 'pending') pending = true
             if (resolution.state === 'invalid') error = resolution.detail ?? `route ${route.id} is incompatible with manager settings`
-          } else if (command === undefined && route !== undefined && !this.resolvers.route(record.owner, route.id)) error = `route ${route.id} is not available`
+          } else if (command === undefined && route !== undefined && !this.resolvers.route(record.owner, route.id, resolutionView)) error = `route ${route.id} is not available`
           const actions = item.actions as readonly { command: CordisXCommandReference }[] | undefined
-          const missingAction = actions?.find(action => !this.resolvers.command(record.owner, action.command))
+          const missingAction = actions?.find(action => !this.resolvers.command(record.owner, action.command, resolutionView))
           if (error === undefined && missingAction !== undefined) error = `command ${missingAction.command.id} is not available`
           const actionWithUnknownWhen = (item.actions as readonly { when?: CordisXWhen }[] | undefined)
             ?.find(action => whenContextKeys(action.when).some(key => !knownKeys.has(key)))
@@ -537,6 +575,7 @@ export class SurfaceRegistry {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.disconnectVisibility?.()
     this.records.clear()
     this.listeners.clear()
     this.declared.clear()
@@ -545,7 +584,13 @@ export class SurfaceRegistry {
   }
 
   private notify(): void {
-    for (const listener of this.listeners) listener()
+    for (const listener of this.listeners) {
+      try {
+        listener()
+      } catch {
+        // One observer cannot split a published visibility epoch.
+      }
+    }
   }
 }
 
@@ -559,7 +604,7 @@ export class CordisXSlotService extends Service implements CordisXSlots {
     const registry = input instanceof SurfaceRegistry ? input : input?.registry
     this.console = input instanceof SurfaceRegistry ? undefined : input?.console
     this.contexts = new HostContextStore()
-    this.registry = registry ?? new SurfaceRegistry(this.contexts)
+    this.registry = registry ?? new SurfaceRegistry(this.contexts, generationVisibilityFromContext(ctx))
     ctx.effect(() => () => {
       this.registry.dispose()
       this.contexts.dispose()
@@ -586,9 +631,8 @@ export class CordisXSlotService extends Service implements CordisXSlots {
     options: CordisXContributionOptions<Name>,
     item: CordisXSurfaceMap[Name],
   ): CordisXContributionHandle<CordisXSurfaceMap[Name]> {
-    const owner = ownerFromContext(this.ctx)
     const token = this.console?.tokenFromContext(this.ctx)
-    const register = (): CordisXContributionHandle<CordisXSurfaceMap[Name]> => this.registry.register(owner, options, item)
+    const register = (): CordisXContributionHandle<CordisXSurfaceMap[Name]> => this.registry.register(this.ctx, options, item)
     const handle = token === undefined || this.console === undefined
       ? register()
       : this.console.runSync(token, 'slots.register', { options, item }, register)
@@ -597,7 +641,7 @@ export class CordisXSlotService extends Service implements CordisXSlots {
       return handle
     }
     const console = this.console
-    const dispose = (() => console.runSync(token, 'slots.dispose', { name: options.name, id: options.id }, handle.dispose)) as CordisXContributionHandle<CordisXSurfaceMap[Name]>
+    const dispose = (() => console.runCleanupSync(token, 'slots.dispose', { name: options.name, id: options.id }, handle.dispose)) as CordisXContributionHandle<CordisXSurfaceMap[Name]>
     dispose.dispose = dispose
     dispose.update = next => console.runSync(token, 'slots.update', { name: options.name, id: options.id, item: next }, () => handle.update(next))
     dispose.updateOptions = next => console.runSync(token, 'slots.updateOptions', { name: options.name, id: options.id, options: next }, () => handle.updateOptions(next))
@@ -606,7 +650,8 @@ export class CordisXSlotService extends Service implements CordisXSlots {
   }
 
   snapshot(): readonly SurfaceContributionSnapshot[] {
-    return this.registry.snapshot()
+    const visibility = generationVisibilityFromContext(this.ctx)
+    return this.registry.snapshot(visibility?.view(this.ctx))
   }
 
   subscribeInternal(listener: () => void): () => void {

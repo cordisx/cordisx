@@ -14,6 +14,7 @@ export interface BuildRendererBundleOptions {
   readonly generation?: string
   readonly pluginLifecycleBridgeToken?: string
   readonly pluginActivation?: CordisXPluginActivationRecordV1
+  readonly initialRegistryEpoch?: number
   readonly permission?: {
     readonly profileId: string
     readonly policies: readonly CordisXPermissionPolicyRecordV1[]
@@ -104,7 +105,7 @@ export async function buildRendererBundle(config: CordisXConfig, options: BuildR
   }).join(',')}]`
   const providers = config.providers.filter(provider => provider.enabled).map(provider => ({ id: provider.id, displayName: provider.displayName }))
   const permission = options.permission ?? { profileId: options.profileId ?? 'development', policies: [] }
-  const metadata = `{ version: ${JSON.stringify(version)}, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(permission.profileId)}, permissionPolicies: ${JSON.stringify(permission.policies)}${options.generation === undefined ? '' : `, generation: ${JSON.stringify(options.generation)}`}${options.providerBridgeToken === undefined ? '' : `, providerBridgeToken: ${JSON.stringify(options.providerBridgeToken)}`}${options.agentHistoryBridgeToken === undefined ? '' : `, agentHistoryBridgeToken: ${JSON.stringify(options.agentHistoryBridgeToken)}`}${options.configBridgeToken === undefined ? '' : `, configBridgeToken: ${JSON.stringify(options.configBridgeToken)}`}${options.pluginLifecycleBridgeToken === undefined ? '' : `, pluginLifecycleBridgeToken: ${JSON.stringify(options.pluginLifecycleBridgeToken)}`}${options.pluginActivation === undefined ? '' : `, pluginActivation: ${JSON.stringify(options.pluginActivation)}`}${permission.bridgeToken === undefined ? '' : `, permissionBridgeToken: ${JSON.stringify(permission.bridgeToken)}`} }`
+  const metadata = `{ version: ${JSON.stringify(version)}, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(permission.profileId)}, permissionPolicies: ${JSON.stringify(permission.policies)}${options.generation === undefined ? '' : `, generation: ${JSON.stringify(options.generation)}`}${options.providerBridgeToken === undefined ? '' : `, providerBridgeToken: ${JSON.stringify(options.providerBridgeToken)}`}${options.agentHistoryBridgeToken === undefined ? '' : `, agentHistoryBridgeToken: ${JSON.stringify(options.agentHistoryBridgeToken)}`}${options.configBridgeToken === undefined ? '' : `, configBridgeToken: ${JSON.stringify(options.configBridgeToken)}`}${options.pluginLifecycleBridgeToken === undefined ? '' : `, pluginLifecycleBridgeToken: ${JSON.stringify(options.pluginLifecycleBridgeToken)}`}${options.pluginActivation === undefined ? '' : `, pluginActivation: ${JSON.stringify(options.pluginActivation)}`}${options.initialRegistryEpoch === undefined ? '' : `, initialRegistryEpoch: ${JSON.stringify(options.initialRegistryEpoch)}`}${permission.bridgeToken === undefined ? '' : `, permissionBridgeToken: ${JSON.stringify(permission.bridgeToken)}`} }`
   const source = `${imports.join('\n')}\nvoid installCordisX(${composition}, ${metadata}).catch(error => console.error('[cordisx] boot failed', error))\n`
 
   const result = await build({

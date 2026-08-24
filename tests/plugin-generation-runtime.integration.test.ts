@@ -54,11 +54,17 @@ function activation(generation: string): CordisXPluginActivationRecordV1 {
 }
 
 interface RuntimeHandle {
-  snapshot(): { plugins: readonly { id: string; status: string }[]; registrations: readonly { owner: string }[]; navigation: { routes: readonly { owner: string }[]; pages: readonly { owner: string }[] } }
-  stagePluginMutation(mutation: unknown, module?: CordisXPluginModule): Promise<void>
+  snapshot(): { plugins: readonly { id: string; status: string; package?: { moduleGeneration: string } }[]; registrations: readonly { owner: string }[]; navigation: { routes: readonly { owner: string }[]; pages: readonly { owner: string }[] } }
+  stagePluginMutation(mutation: unknown, module?: CordisXPluginModule): Promise<unknown>
+  publishPluginMutation(transactionId: string): Promise<unknown>
+  completePluginMutation(transactionId: string): Promise<unknown>
+  rollbackPluginMutation(transactionId: string): Promise<unknown>
   commitPluginMutation(transactionId: string): Promise<void>
   abortPluginMutation(transactionId: string): Promise<void>
   reloadPluginGeneration(pluginId: string, moduleGeneration: string, runtimeGeneration: string): Promise<void>
+  subscribe(listener: () => void): () => void
+  generationNotificationTrace(): readonly { source: string; registryEpoch: number; suppressed: boolean }[]
+  settleRegistryProjection(): Promise<void>
   dispose(): Promise<void>
 }
 
@@ -109,6 +115,12 @@ describe('renderer plugin generation transactions', () => {
     expect(globals.__cordisxGenerationBase).toEqual({ apply: 1, dispose: 0 })
     expect(globals.__cordisxGenerationConsumer).toEqual({ apply: 1, dispose: 0 })
     expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
+    runtime.snapshot()
+    await runtime.settleRegistryProjection()
+    const beforeStage = runtime.snapshot()
+    await runtime.settleRegistryProjection()
+    let notifications = 0
+    const unsubscribe = runtime.subscribe(() => { notifications += 1 })
 
     const nextBase = dom.window.eval(`({ apply(ctx) {
       const state = globalThis.__cordisxGenerationBase
@@ -140,13 +152,37 @@ describe('renderer plugin generation transactions', () => {
       package: { manifest: packageManifest('generation-base'), digest: digest('d'), identitySource: source('generation-base', 'd') },
       authorizationDecision: decision,
     }, nextBase)
+    expect(globals.__cordisxGenerationBase).toEqual({ apply: 2, dispose: 0 })
+    expect(globals.__cordisxGenerationConsumer).toEqual({ apply: 2, dispose: 0 })
+    expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
+    expect(runtime.snapshot()).toEqual(beforeStage)
+    expect(notifications).toBe(0)
+    await runtime.abortPluginMutation('update-base')
     expect(globals.__cordisxGenerationBase).toEqual({ apply: 2, dispose: 1 })
     expect(globals.__cordisxGenerationConsumer).toEqual({ apply: 2, dispose: 1 })
     expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
-    await runtime.abortPluginMutation('update-base')
-    expect(globals.__cordisxGenerationBase).toEqual({ apply: 3, dispose: 2 })
-    expect(globals.__cordisxGenerationConsumer).toEqual({ apply: 3, dispose: 2 })
-    expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
+    expect(runtime.snapshot()).toEqual(beforeStage)
+    expect(notifications).toBe(0)
+
+    const disabledCandidate: CordisXPluginActivationRecordV1 = {
+      ...candidate,
+      transactionId: 'disable-base',
+      plugins: candidate.plugins.map(item => item.id === 'generation-unrelated' ? item : { ...item, enabled: false }),
+    }
+    await runtime.stagePluginMutation({
+      transactionId: 'disable-base', operation: 'disable', previous: active, candidate: disabledCandidate,
+      targetId: 'generation-base', affectedPluginIds: ['generation-base', 'generation-consumer'],
+      authorizationDecision: decision,
+    })
+    await runtime.publishPluginMutation('disable-base')
+    await runtime.completePluginMutation('disable-base')
+    expect(runtime.snapshot().plugins.find(item => item.id === 'generation-base')?.status).toBe('configured-disabled')
+    await runtime.rollbackPluginMutation('disable-base')
+    expect(runtime.snapshot().plugins.map(item => [item.id, item.package?.moduleGeneration, item.status])).toEqual(
+      beforeStage.plugins.map(item => [item.id, item.package?.moduleGeneration, item.status]),
+    )
+    expect(notifications).toBe(2)
+    notifications = 0
 
     const failing = dom.window.eval(`({ apply() { throw new Error('readiness rejected') } })`) as CordisXPluginModule
     await expect(runtime.stagePluginMutation({
@@ -156,15 +192,43 @@ describe('renderer plugin generation transactions', () => {
       package: { manifest: packageManifest('generation-base'), digest: digest('d'), identitySource: source('generation-base', 'd') },
       authorizationDecision: decision,
     }, failing)).rejects.toThrow('readiness rejected')
-    expect(globals.__cordisxGenerationBase.apply).toBe(4)
-    expect(globals.__cordisxGenerationConsumer.apply).toBe(4)
+    await runtime.abortPluginMutation('update-fail')
+    expect(globals.__cordisxGenerationBase.apply).toBe(3)
+    expect(globals.__cordisxGenerationConsumer.apply).toBe(3)
     expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
+    expect(runtime.snapshot().plugins.map(item => [item.id, item.package?.moduleGeneration, item.status])).toEqual(
+      beforeStage.plugins.map(item => [item.id, item.package?.moduleGeneration, item.status]),
+    )
+    expect(notifications).toBe(0)
 
     await expect(runtime.reloadPluginGeneration('generation-base', 'stale', generation)).rejects.toThrow('stale plugin module generation')
     await runtime.reloadPluginGeneration('generation-base', 'generation-base-a', generation)
-    expect(globals.__cordisxGenerationBase.apply).toBe(5)
-    expect(globals.__cordisxGenerationConsumer.apply).toBe(4)
+    expect(globals.__cordisxGenerationBase.apply).toBe(4)
+    expect(globals.__cordisxGenerationConsumer.apply).toBe(3)
     expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
+    notifications = 0
+
+    await runtime.stagePluginMutation({
+      transactionId: 'update-after-cleanup', operation: 'update', previous: active,
+      candidate: { ...candidate, transactionId: 'update-after-cleanup' }, targetId: 'generation-base',
+      affectedPluginIds: ['generation-base', 'generation-consumer'],
+      package: { manifest: packageManifest('generation-base'), digest: digest('d'), identitySource: source('generation-base', 'd') },
+      authorizationDecision: decision,
+    }, nextBase)
+    await runtime.publishPluginMutation('update-after-cleanup')
+    expect(runtime.snapshot().plugins.find(item => item.id === 'generation-base')?.package?.moduleGeneration).toBe('generation-base-b')
+    await runtime.completePluginMutation('update-after-cleanup')
+    await runtime.rollbackPluginMutation('update-after-cleanup')
+    expect(runtime.snapshot().plugins.find(item => item.id === 'generation-base')?.package?.moduleGeneration).toBe('generation-base-a')
+    expect(runtime.snapshot().plugins.find(item => item.id === 'generation-consumer')?.package?.moduleGeneration).toBe('generation-consumer-a')
+    expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
+    expect(notifications).toBe(2)
+    const batchesByEpoch = runtime.generationNotificationTrace()
+      .filter(item => item.source === 'generation-batch' && !item.suppressed)
+      .reduce((result, item) => result.set(item.registryEpoch, (result.get(item.registryEpoch) ?? 0) + 1), new Map<number, number>())
+    expect(batchesByEpoch.size).toBe(4)
+    expect([...batchesByEpoch.values()].every(count => count === 1)).toBe(true)
+    notifications = 0
 
     const uninstallCandidate: CordisXPluginActivationRecordV1 = {
       ...active,
@@ -178,12 +242,15 @@ describe('renderer plugin generation transactions', () => {
       transactionId: 'uninstall-base', operation: 'uninstall', previous: active, candidate: uninstallCandidate,
       targetId: 'generation-base', affectedPluginIds: ['generation-base', 'generation-consumer'],
     })
+    expect(notifications).toBe(0)
     await runtime.commitPluginMutation('uninstall-base')
     expect(runtime.snapshot().plugins.map(item => item.id)).toEqual(['generation-unrelated'])
     expect(runtime.snapshot().registrations.some(item => item.owner === 'generation-base')).toBe(false)
     expect(runtime.snapshot().navigation.routes.some(item => item.owner === 'generation-base')).toBe(false)
     expect(runtime.snapshot().navigation.pages.some(item => item.owner === 'generation-base')).toBe(false)
     expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
+    expect(notifications).toBe(1)
+    unsubscribe()
     await runtime.dispose()
   })
 })

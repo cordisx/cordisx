@@ -15,6 +15,7 @@ import type {
   CordisXPluginPackageManifestV1,
   CordisXPluginLifecycleOperationV1,
   CordisXPluginLifecycleResultV1,
+  CordisXPluginConsoleFacade,
   CordisXLocalizedText,
   CordisXPluginManifestV1,
   CordisXPluginModule,
@@ -82,6 +83,14 @@ import {
   PluginConsoleAspect,
   type PluginPrincipalToken,
 } from './plugin-console.js'
+import {
+  CORDISX_GENERATION_VISIBILITY_COORDINATOR,
+  GenerationVisibilityCoordinator,
+  type PluginGenerationPublication,
+  type PluginGenerationReadinessReceipt,
+  type PluginGenerationTransitionHandle,
+  type PluginGenerationView,
+} from './generation-visibility.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 
@@ -96,6 +105,7 @@ interface CordisXRuntimeMetadata {
   readonly configBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
   readonly pluginActivation?: CordisXPluginActivationRecordV1
+  readonly initialRegistryEpoch?: number
   readonly generation?: string
 }
 
@@ -112,13 +122,8 @@ interface PluginController {
   status: ManagerPluginStatus
   error?: string
   blockedReason?: string
-}
-
-interface PluginControllerSnapshot {
-  readonly item: CordisXBrowserPlugin
-  readonly status: ManagerPluginStatus
-  readonly error?: string
-  readonly blockedReason?: string
+  generationContext?: Record<PropertyKey, unknown>
+  generationView?: PluginGenerationView
 }
 
 function topologicalActivationOrder(
@@ -154,14 +159,23 @@ function committedActivation(candidate: CordisXPluginActivationRecordV1): Cordis
 }
 
 interface RendererGenerationTransaction {
+  readonly handle: PluginGenerationTransitionHandle
+  readonly readiness?: PluginGenerationReadinessReceipt
   readonly affectedPluginIds: readonly string[]
-  readonly previous: readonly PluginControllerSnapshot[]
+  readonly previous: readonly PluginController[]
+  readonly candidates: readonly PluginController[]
   readonly previousActivation: CordisXPluginActivationRecordV1
   readonly candidateActivation: CordisXPluginActivationRecordV1
+  publication?: PluginGenerationPublication
+  failedStage?: boolean
+  disposedAfter: string[]
 }
 
 export interface RendererPluginMutation {
   readonly transactionId: string
+  readonly transactionEpoch?: string
+  readonly expectedRegistryEpoch?: number
+  readonly afterRegistryEpoch?: number
   readonly operation: 'install' | 'update' | 'enable' | 'disable' | 'uninstall'
   readonly previous: CordisXPluginActivationRecordV1
   readonly candidate: CordisXPluginActivationRecordV1
@@ -184,11 +198,39 @@ interface CordisXRuntimeHandle extends ManagerModel {
   setExtensionPointPolicy(source: string, pluginId: string, pointId: string, policy: CordisXPointPolicy): Promise<void>
   permissionAuthorizationPlan(id: string): CordisXPermissionAuthorizationPlanV1
   authorizePlugin(id: string, decision: CordisXPermissionAuthorizationDecisionV1): Promise<void>
-  stagePluginMutation(mutation: RendererPluginMutation, module?: CordisXPluginModule): Promise<void>
+  /** Host-private readback of the registry authority; never used as renderer lifecycle input. */
+  activePluginGeneration(): CordisXPluginActivationRecordV1
+  /** Host-private bounded evidence for cross-registry batch notification assertions. */
+  generationNotificationTrace(): readonly {
+    readonly source: string
+    readonly registryEpoch: number
+    readonly suppressed: boolean
+  }[]
+  /** Host-private barrier used before opening a generation transaction. */
+  settleRegistryProjection(): Promise<void>
+  recoverPluginMutation(input: RendererGenerationCleanupObservation): Promise<RendererGenerationCleanupObservation>
+  adoptRecoveredActivation(active: CordisXPluginActivationRecordV1, registryEpoch: number): Promise<void>
+  stagePluginMutation(
+    mutation: RendererPluginMutation,
+    module?: CordisXPluginModule,
+    moduleFactory?: (console: CordisXPluginConsoleFacade) => CordisXPluginModule,
+  ): Promise<PluginGenerationReadinessReceipt>
+  publishPluginMutation(transactionId: string): Promise<PluginGenerationPublication>
+  completePluginMutation(transactionId: string): Promise<RendererGenerationCleanupObservation>
+  finalizePluginMutation(transactionId: string): Promise<void>
+  rollbackPluginMutation(transactionId: string): Promise<RendererGenerationCleanupObservation>
   commitPluginMutation(transactionId: string): Promise<void>
   abortPluginMutation(transactionId: string): Promise<void>
   reloadPluginGeneration(pluginId: string, moduleGeneration: string, runtimeGeneration: string): Promise<void>
   dispose(): Promise<void>
+}
+
+export interface RendererGenerationCleanupObservation {
+  readonly transactionId: string
+  readonly transactionEpoch: string
+  readonly registryEpoch: number
+  readonly active: CordisXPluginActivationRecordV1
+  readonly disposedAfter: CordisXPluginActivationRecordV1
 }
 
 declare global {
@@ -198,6 +240,8 @@ declare global {
   var __cordisxBoot: Promise<CordisXRuntimeHandle> | undefined
   // eslint-disable-next-line no-var
   var __cordisxPendingPluginModuleV1: CordisXPluginModule | undefined
+  // eslint-disable-next-line no-var
+  var __cordisxPendingPluginModuleFactoryV1: ((console: CordisXPluginConsoleFacade) => CordisXPluginModule) | undefined
 }
 
 function pluginFromModule(module: CordisXPluginModule): Plugin {
@@ -223,7 +267,8 @@ function errorMessage(error: unknown): string {
 function createController(item: CordisXBrowserPlugin, pluginConsole: PluginConsoleAspect): PluginController {
   const identity = Object.freeze({ source: item.source, id: item.id })
   const activation = 1
-  const principal = pluginConsole.issue(identity, `${pluginConsole.generation}:${item.id}:${activation}`)
+  const pluginGeneration = item.package?.moduleGeneration ?? `${pluginConsole.generation}:${item.id}:bundled`
+  const principal = pluginConsole.issue(identity, pluginGeneration)
   try {
     const module = item.moduleFactory?.(pluginConsole.consoleFacade(principal)) ?? item.module
     const boundItem: CordisXBrowserPlugin = module === undefined || module === item.module ? item : { ...item, module }
@@ -276,7 +321,7 @@ async function start(
 ): Promise<CordisXRuntimeHandle> {
   await globalThis.__cordisxRuntime?.dispose()
 
-  const ctx = new Context()
+  let ctx = new Context()
   const blockedPlugins = readBlockedPlugins()
   const agentAdapter = new UnavailableCodexHostAdapter()
   let bindingPlatformAdapter: BindingPlatformAdapter | undefined
@@ -287,22 +332,9 @@ async function start(
   const generation = metadata.generation ?? (typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-  const pluginConsole = new PluginConsoleAspect(generation)
-  const recordUnknownError = (event: Event): void => pluginConsole.recordUnattributedError(event.type)
-  window.addEventListener('error', recordUnknownError)
-  window.addEventListener('unhandledrejection', recordUnknownError)
   const permissionStore = metadata.permissionBridgeToken === undefined
     ? new BrowserPermissionPolicyStore(metadata.profileId)
     : BindingPermissionPolicyStore.connect(metadata.permissionBridgeToken, metadata.permissionPolicies ?? [])
-  const broker = new PermissionBroker(
-    permissionStore,
-    new BrowserPermissionPrompt(),
-    () => new Date(),
-    30_000,
-    metadata.profileId,
-    generation,
-    pluginConsole,
-  )
   const configBridge = metadata.configBridgeToken === undefined
     ? undefined
     : new BrowserConfigBridge(metadata.configBridgeToken, metadata.profileId, generation)
@@ -322,8 +354,32 @@ async function start(
   if (currentActivation.profileId !== metadata.profileId || currentActivation.runtimeGeneration !== generation) {
     throw new Error('plugin activation metadata does not match the renderer scope')
   }
-  const configuration = new PluginConfigurationRegistry()
-  const configRenderers = new ConfigRendererRegistry()
+  const generationVisibility = new GenerationVisibilityCoordinator(currentActivation, metadata.initialRegistryEpoch)
+  const pluginConsole = new PluginConsoleAspect(generation, 2000, () => Date.now(), generationVisibility)
+  const recordUnknownError = (event: Event): void => pluginConsole.recordUnattributedError(event.type)
+  window.addEventListener('error', recordUnknownError)
+  window.addEventListener('unhandledrejection', recordUnknownError)
+  let consoleAffectedPluginIds: readonly string[] = []
+  const disconnectPluginConsoleVisibility = generationVisibility.connect({
+    prepare: transition => { consoleAffectedPluginIds = transition.affectedPluginIds },
+    notify: () => pluginConsole.visibilityChanged(consoleAffectedPluginIds),
+  })
+  const broker = new PermissionBroker(
+    permissionStore,
+    new BrowserPermissionPrompt(),
+    () => new Date(),
+    30_000,
+    metadata.profileId,
+    generation,
+    generationVisibility,
+    pluginConsole,
+  )
+  for (const plugin of plugins) {
+    if (plugin.package === undefined) generationVisibility.bindStable(plugin.id, `${generation}:${plugin.id}:bundled`)
+  }
+  ctx = ctx.extend({ [CORDISX_GENERATION_VISIBILITY_COORDINATOR]: generationVisibility })
+  const configuration = new PluginConfigurationRegistry(generationVisibility)
+  const configRenderers = new ConfigRendererRegistry(generationVisibility)
   const agentRuntime = new CordisXHostAgentRuntime({ adapter: agentAdapter, broker, generation })
   const historyAdapter = metadata.agentHistoryBridgeToken === undefined
     ? new UnavailableAgentHistoryAdapter()
@@ -350,21 +406,60 @@ async function start(
     }),
   ])
   const extensionPointDescriptors = new ExtensionPointDescriptorRegistry()
-  const extensionPointBroker = new ExtensionPointPolicyBroker(extensionPointDescriptors, new BrowserExtensionPointPolicyStore(), generation)
+  const extensionPointBroker = new ExtensionPointPolicyBroker(
+    extensionPointDescriptors,
+    new BrowserExtensionPointPolicyStore(),
+    generation,
+    generationVisibility,
+  )
   const controllers: PluginController[] = plugins.map(item => createController(item, pluginConsole))
+  const moduleGenerationOf = (controller: PluginController): string => (
+    controller.item.package?.moduleGeneration ?? `${generation}:${controller.item.id}:bundled`
+  )
+  const projectedControllers = (): PluginController[] => controllers.filter(controller => (
+    generationVisibility.projected({
+      pluginId: controller.item.id,
+      moduleGeneration: moduleGenerationOf(controller),
+    })
+  ))
+  const activeControllers = (): PluginController[] => projectedControllers().filter(controller => generationVisibility.visible({
+    pluginId: controller.item.id,
+    moduleGeneration: moduleGenerationOf(controller),
+  }))
+  const activeController = (id: string, source?: string): PluginController | undefined => projectedControllers().find(controller => (
+    controller.item.id === id && (source === undefined || controller.item.source === source)
+  ))
   const requiredBlockReason = (controller: PluginController): string | undefined => {
-    const denied = broker.requiredDenied(controller.identity)
+    const denied = broker.requiredDenied(controller.identity, controller.generationView)
     if (denied.length > 0) return `Required capability denied: ${denied.join(', ')}`
     const unavailable = capabilityAvailability.unavailableRequired(controller.manifest.capabilities)
     if (unavailable.length > 0) return `Required capability unavailable: ${unavailable.join(', ')}`
     return undefined
   }
-  const registerController = (controller: PluginController): void => {
-    controller.unregisterPermissions = broker.register(controller.identity, controller.manifest)
-    controller.unregisterExtensionPoints = extensionPointBroker.register(controller.identity)
+  const registerController = (controller: PluginController, registerAuthority = true): void => {
+    if (registerAuthority) {
+      controller.unregisterPermissions = broker.register(controller.identity, controller.manifest, {
+        pluginId: controller.item.id,
+        moduleGeneration: moduleGenerationOf(controller),
+        ...(controller.generationView?.transactionId === undefined ? {} : {
+          transactionId: controller.generationView.transactionId,
+          transactionEpoch: controller.generationView.transactionEpoch,
+        }),
+      }, controller.generationView)
+      controller.unregisterExtensionPoints = extensionPointBroker.register(controller.identity, {
+        pluginId: controller.item.id,
+        moduleGeneration: moduleGenerationOf(controller),
+        ...(controller.generationView?.transactionId === undefined ? {} : {
+          transactionId: controller.generationView.transactionId,
+          transactionEpoch: controller.generationView.transactionEpoch,
+        }),
+      }, controller.generationView)
+    }
     const configSchema = moduleConfigSchema(controller.item.module)
     configuration.register({
       identity: controller.identity,
+      moduleGeneration: moduleGenerationOf(controller),
+      ...(controller.generationView === undefined ? {} : { candidateView: controller.generationView }),
       ...(configSchema === undefined ? {} : { schema: configSchema }),
       applies: moduleConfigApplies(controller.item.module),
       raw: controller.item.config,
@@ -379,7 +474,10 @@ async function start(
     delete controller.unregisterPermissions
     controller.unregisterExtensionPoints?.()
     delete controller.unregisterExtensionPoints
-    configuration.unregister(controller.item.id)
+    configuration.unregister(
+      controller.item.id,
+      moduleGenerationOf(controller),
+    )
   }
   for (const controller of controllers) {
     registerController(controller)
@@ -422,40 +520,87 @@ async function start(
   const disposeExtensionPointCatalogs: (() => void | Promise<void>)[] = []
   const registrySubscriptions: (() => void)[] = []
   const generationTransactions = new Map<string, RendererGenerationTransaction>()
-  let operation = Promise.resolve()
+  let operation: Promise<unknown> = Promise.resolve()
   let disposed = false
+  let notificationsSuppressed = false
+  const generationNotificationTrace: { source: string; registryEpoch: number; suppressed: boolean }[] = []
   let settingsProjectionSites = new Set<string>()
 
-  const notify = (): void => {
+  const traceNotification = (source: string, suppressed: boolean): void => {
+    generationNotificationTrace.push({ source, registryEpoch: generationVisibility.registryEpoch(), suppressed })
+    if (generationNotificationTrace.length > 256) generationNotificationTrace.shift()
+  }
+  const emitListeners = (): void => {
     for (const listener of listeners) listener()
+  }
+  const notifyBatch = (): void => {
+    traceNotification('generation-batch', false)
+    emitListeners()
+  }
+  const notify = (source = 'runtime'): void => {
+    traceNotification(source, notificationsSuppressed)
+    if (notificationsSuppressed) return
+    emitListeners()
+  }
+  const notifyFrom = (source: string): (() => void) => () => notify(source)
+  const drainSuppressedNotifications = async (): Promise<void> => {
+    await Promise.resolve()
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+    await Promise.resolve()
+  }
+  const drainBatchSubscriberMicrotasks = async (): Promise<void> => {
+    let observed = generationNotificationTrace.length
+    let stableTurns = 0
+    for (let turn = 0; turn < 32; turn += 1) {
+      await Promise.resolve()
+      if (generationNotificationTrace.length === observed) {
+        stableTurns += 1
+        if (stableTurns === 2) return
+      } else {
+        observed = generationNotificationTrace.length
+        stableTurns = 0
+      }
+    }
+    throw new Error('generation batch subscribers did not reach a microtask fixed point')
+  }
+
+  const settleRegistryProjection = (): Promise<void> => {
+    const task = operation.then(async () => {
+      if (disposed) throw new Error('CordisX runtime is disposed')
+      await drainBatchSubscriberMicrotasks()
+    })
+    operation = task.catch(() => {})
+    return task
   }
 
   const rememberRegistrations = (pluginId: string): void => {
+    const controller = activeController(pluginId)
+    if (controller === undefined) return
     const registrations = slotService?.snapshot().filter(item => item.owner === pluginId) ?? []
-    if (registrations.length > 0) knownRegistrations.set(pluginId, registrations)
-  }
-
-  const snapshotController = (controller: PluginController): PluginControllerSnapshot => {
-    const descriptor = configuration.descriptor(controller.item.id, i18nService?.getSnapshot().locale ?? 'en')
-    return {
-      item: {
-        ...controller.item,
-        config: descriptor.value,
-        revision: descriptor.revision,
-      },
-      status: controller.status,
-      ...(controller.error === undefined ? {} : { error: controller.error }),
-      ...(controller.blockedReason === undefined ? {} : { blockedReason: controller.blockedReason }),
-    }
+    if (registrations.length > 0) knownRegistrations.set(
+      `${pluginId}\u0000${moduleGenerationOf(controller)}`,
+      registrations,
+    )
   }
 
   const disposeControllerFiber = async (controller: PluginController, reason: 'owner-disposed' | 'generation-replaced'): Promise<void> => {
     rememberRegistrations(controller.item.id)
-    agentRuntime.releaseOwner(controller.identity, reason)
-    await controller.fiber?.dispose()
-    await routeService?.settled()
-    retirePrincipal(controller, `Plugin disposed: ${reason}`)
-    delete controller.fiber
+    agentRuntime.releaseOwner(controller.identity, reason, moduleGenerationOf(controller))
+    let failure: unknown
+    try {
+      await controller.fiber?.dispose()
+    } catch (error) {
+      failure = error
+    }
+    try {
+      await routeService?.settled()
+    } catch (error) {
+      failure ??= error
+    } finally {
+      retirePrincipal(controller, `Plugin disposed: ${reason}`)
+      delete controller.fiber
+    }
+    if (failure !== undefined) throw failure
   }
 
   const renewPrincipal = (controller: PluginController): void => {
@@ -463,7 +608,7 @@ async function start(
     controller.activation += 1
     controller.principal = pluginConsole.issue(
       controller.identity,
-      `${generation}:${controller.item.id}:${controller.activation}`,
+      moduleGenerationOf(controller),
     )
     controller.principalLive = true
     const module = controller.item.moduleFactory?.(pluginConsole.consoleFacade(controller.principal)) ?? controller.item.module
@@ -490,11 +635,15 @@ async function start(
     const pluginContext = ctx.extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
-      [CORDISX_PLUGIN_GENERATION]: controller.item.package?.moduleGeneration ?? `${generation}:${controller.item.id}:bundled`,
+      [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
       [CORDISX_PLUGIN_PRINCIPAL]: controller.principal,
+      ...(controller.generationContext ?? {}),
     })
     pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation started')
-    const fiber = pluginContext.plugin(pluginFromModule(module), configuration.get(controller.item.id))
+    const fiber = pluginContext.plugin(
+      pluginFromModule(module),
+      configuration.get(controller.item.id, generationVisibility.view(pluginContext)),
+    )
     controller.fiber = fiber
     try {
       await fiber
@@ -517,8 +666,12 @@ async function start(
   const snapshot = (): ManagerSnapshot => {
     const liveRegistrations = slotService?.snapshot() ?? []
     const livePluginIds = new Set(liveRegistrations.map(item => item.owner))
+    const activeRegistrationKeys = new Set(activeControllers().map(controller => (
+      `${controller.item.id}\u0000${moduleGenerationOf(controller)}`
+    )))
     const inactiveRegistrations = [...knownRegistrations]
-      .filter(([pluginId]) => !livePluginIds.has(pluginId))
+      .filter(([key, registrations]) => activeRegistrationKeys.has(key)
+        && registrations.every(item => !livePluginIds.has(item.owner)))
       .flatMap(([, registrations]) => registrations.map(item => ({
         ...item,
         visible: false,
@@ -570,7 +723,7 @@ async function start(
     )
     return {
       version: metadata.version,
-      plugins: controllers.map((controller): ManagerPluginSnapshot => ({
+      plugins: projectedControllers().map((controller): ManagerPluginSnapshot => ({
         id: controller.item.id,
         source: controller.item.source,
         name: controller.manifest.name ?? controller.item.module?.name ?? controller.item.id,
@@ -652,7 +805,7 @@ async function start(
         descriptors: extensionPointDescriptors,
         broker: extensionPointBroker,
         i18n: i18nService!,
-        plugins: controllers.map(controller => ({
+        plugins: activeControllers().map(controller => ({
           id: controller.item.id,
           source: controller.item.source,
           name: controller.manifest.name ?? controller.item.module?.name ?? controller.item.id,
@@ -669,7 +822,7 @@ async function start(
   const setPluginBlocked = (id: string, blocked: boolean): Promise<void> => {
     const task = operation.then(async () => {
       if (disposed) throw new Error('CordisX runtime is disposed')
-      const controller = controllers.find(item => item.item.id === id)
+      const controller = activeController(id)
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
       if (!controller.item.enabled || controller.item.module === undefined) {
         throw new Error(`plugin ${id} is disabled in cordisx.config.json and is not bundled`)
@@ -680,7 +833,7 @@ async function start(
         writeBlockedPlugins(blockedPlugins)
         broker.clearOnce(controller.identity)
         rememberRegistrations(id)
-        agentRuntime.releaseOwner(controller.identity, 'plugin-blocked')
+        agentRuntime.releaseOwner(controller.identity, 'plugin-blocked', moduleGenerationOf(controller))
         await controller.fiber?.dispose()
         await routeService?.settled()
         retirePrincipal(controller, 'Plugin blocked')
@@ -725,7 +878,7 @@ async function start(
 
   const applyRestartCandidate = async (controller: PluginController, candidate: ConfigCandidate): Promise<void> => {
     rememberRegistrations(controller.item.id)
-    agentRuntime.releaseOwner(controller.identity, 'owner-disposed')
+    agentRuntime.releaseOwner(controller.identity, 'owner-disposed', moduleGenerationOf(controller))
     await controller.fiber?.dispose()
     await routeService?.settled()
     retirePrincipal(controller, 'Plugin disposed for configuration restart')
@@ -741,7 +894,7 @@ async function start(
   ): Promise<void> => {
     const task = operation.then(async () => {
       if (disposed) throw new Error('CordisX runtime is disposed')
-      const controller = controllers.find(item => item.item.id === id)
+      const controller = activeController(id)
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
       if (configBridge === undefined) throw new Error('plugin configuration writer is unavailable in this launcher mode')
       const descriptor = configuration.descriptor(id, i18nService?.getSnapshot().locale ?? 'en')
@@ -801,13 +954,13 @@ async function start(
   ): Promise<void> => {
     const task = operation.then(async () => {
       if (disposed) throw new Error('CordisX runtime is disposed')
-      const controller = controllers.find(item => item.item.id === id)
+      const controller = activeController(id)
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
       await broker.setPolicy(controller.identity, capability, policy)
       const blockedReason = requiredBlockReason(controller)
       if (blockedReason !== undefined) {
         rememberRegistrations(id)
-        agentRuntime.releaseOwner(controller.identity, 'permission-blocked')
+        agentRuntime.releaseOwner(controller.identity, 'permission-blocked', moduleGenerationOf(controller))
         await controller.fiber?.dispose()
         await routeService?.settled()
         retirePrincipal(controller, 'Plugin disposed after required permission denial')
@@ -846,7 +999,7 @@ async function start(
   ): Promise<void> => {
     const task = operation.then(async () => {
       if (disposed) throw new Error('CordisX runtime is disposed')
-      const controller = controllers.find(item => item.item.id === pluginId && item.item.source === source)
+      const controller = activeController(pluginId, source)
       if (controller === undefined) throw new Error(`unknown CordisX plugin identity: ${source} / ${pluginId}`)
       extensionPointBroker.setPolicy(controller.identity, pointId, policy)
       slotService?.invalidatePointPolicies()
@@ -858,7 +1011,7 @@ async function start(
   }
 
   const permissionAuthorizationPlan = (id: string): CordisXPermissionAuthorizationPlanV1 => {
-    const controller = controllers.find(item => item.item.id === id)
+    const controller = activeController(id)
     if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
     return broker.authorizationPlan(controller.identity, 'enable')
   }
@@ -869,7 +1022,7 @@ async function start(
   ): Promise<void> => {
     const task = operation.then(async () => {
       if (disposed) throw new Error('CordisX runtime is disposed')
-      const controller = controllers.find(item => item.item.id === id)
+      const controller = activeController(id)
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
       if (!controller.item.enabled || controller.item.module === undefined) {
         throw new Error(`plugin ${id} is disabled in cordisx.config.json and is not bundled`)
@@ -880,7 +1033,7 @@ async function start(
       const blockedReason = requiredBlockReason(controller)
       if (blockedReason !== undefined) {
         rememberRegistrations(id)
-        agentRuntime.releaseOwner(controller.identity, 'permission-blocked')
+        agentRuntime.releaseOwner(controller.identity, 'permission-blocked', moduleGenerationOf(controller))
         await controller.fiber?.dispose()
         await routeService?.settled()
         retirePrincipal(controller, 'Plugin disposed after activation authorization denial')
@@ -897,40 +1050,139 @@ async function start(
     return task
   }
 
-  const restorePluginGeneration = async (
-    affectedPluginIds: readonly string[],
-    previous: readonly PluginControllerSnapshot[],
-    previousActivation: CordisXPluginActivationRecordV1,
-  ): Promise<void> => {
-    const affected = new Set(affectedPluginIds)
-    const current = controllers.filter(controller => affected.has(controller.item.id))
-    for (const controller of [...current].reverse()) {
-      await disposeControllerFiber(controller, 'generation-replaced')
-      unregisterController(controller)
+  const candidateController = (
+    handle: PluginGenerationTransitionHandle,
+    mutation: RendererPluginMutation,
+    pluginId: string,
+    module?: CordisXPluginModule,
+    moduleFactory?: (console: CordisXPluginConsoleFacade) => CordisXPluginModule,
+  ): { readonly controller: PluginController; readonly registerAuthority: boolean } => {
+    const activation = mutation.candidate.plugins.find(item => item.id === pluginId)
+    if (activation === undefined) throw new Error(`candidate is missing affected plugin ${pluginId}`)
+    const existing = activeController(pluginId)
+    const replacesTarget = pluginId === mutation.targetId
+      && (mutation.operation === 'install' || mutation.operation === 'update' || mutation.operation === 'enable')
+    if (!replacesTarget && existing === undefined) throw new Error(`affected plugin ${pluginId} is not active`)
+    if (replacesTarget && (mutation.package === undefined || (module === undefined && moduleFactory === undefined))) {
+      throw new Error('candidate package module is unavailable')
     }
-    for (let index = controllers.length - 1; index >= 0; index -= 1) {
-      if (affected.has(controllers[index]!.item.id)) controllers.splice(index, 1)
+    if (replacesTarget && (mutation.package!.manifest.id !== pluginId
+      || mutation.package!.digest !== activation.digest
+      || mutation.package!.manifest.version !== activation.version)) {
+      throw new Error('candidate package does not match the activation tuple')
     }
-    const restored = previous.map(item => {
-      const controller = createController(item.item, pluginConsole)
-      controller.status = item.status
-      if (item.error !== undefined) controller.error = item.error
-      if (item.blockedReason !== undefined) controller.blockedReason = item.blockedReason
-      registerController(controller)
-      controllers.push(controller)
-      return controller
+    const descriptor = existing === undefined
+      ? undefined
+      : configuration.descriptor(pluginId, i18nService?.getSnapshot().locale ?? 'en')
+    const candidateModule = replacesTarget ? module : existing!.item.module
+    const candidateModuleFactory = replacesTarget ? moduleFactory : existing!.item.moduleFactory
+    const candidateManifest = replacesTarget ? mutation.package!.manifest.runtimeManifest : existing!.item.manifest
+    const item: CordisXBrowserPlugin = {
+      id: pluginId,
+      source: replacesTarget ? mutation.package!.identitySource : existing!.item.source,
+      enabled: activation.enabled,
+      ...(candidateModule === undefined ? {} : { module: candidateModule }),
+      ...(candidateModuleFactory === undefined ? {} : { moduleFactory: candidateModuleFactory }),
+      config: descriptor?.value ?? {},
+      revision: descriptor?.revision ?? 0,
+      ...(candidateManifest === undefined ? {} : { manifest: candidateManifest }),
+      package: {
+        version: activation.version,
+        digest: activation.digest,
+        moduleGeneration: activation.moduleGeneration,
+        dependencies: activation.dependencies,
+        ...(activation.canonicalSource === undefined ? {} : { canonicalSource: activation.canonicalSource }),
+      },
+      ...(replacesTarget
+        ? mutation.package!.readme === undefined ? {} : { readme: mutation.package!.readme }
+        : existing!.item.readme === undefined ? {} : { readme: existing!.item.readme }),
+    }
+    const controller = createController(item, pluginConsole)
+    controller.generationContext = generationVisibility.context(handle, pluginId)
+    const candidateContext = ctx.extend({
+      [CORDISX_PLUGIN_ID]: controller.item.id,
+      [CORDISX_PLUGIN_SOURCE]: controller.item.source,
+      [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
+      ...controller.generationContext,
     })
-    await broker.settled()
-    const byId = new Map(restored.map(controller => [controller.item.id, controller]))
-    const order = topologicalActivationOrder(previousActivation, new Set(restored.map(controller => controller.item.id)))
+    controller.generationView = generationVisibility.view(candidateContext)
+    return { controller, registerAuthority: true }
+  }
+
+  const disposeControllers = async (
+    items: readonly PluginController[],
+    activation: CordisXPluginActivationRecordV1,
+    disposedAfter: string[],
+  ): Promise<void> => {
+    const byId = new Map(items.map(controller => [controller.item.id, controller]))
+    const order = topologicalActivationOrder(activation, new Set(byId.keys())).reverse()
+    let failure: unknown
     for (const id of order) {
+      if (disposedAfter.includes(id)) continue
       const controller = byId.get(id)
-      if (controller === undefined || controller.status !== 'active') continue
-      await mountPlugin(controller)
+      if (controller === undefined) continue
+      try {
+        await disposeControllerFiber(controller, 'generation-replaced')
+      } catch (error) {
+        failure ??= error
+      } finally {
+        unregisterController(controller)
+        disposedAfter.push(id)
+      }
+    }
+    if (failure !== undefined) throw failure
+  }
+
+  const orderControllersFor = (activation: CordisXPluginActivationRecordV1): void => {
+    const order = new Map(activation.plugins.map((plugin, index) => [plugin.id, index]))
+    const generation = new Map(activation.plugins.map(plugin => [plugin.id, plugin.moduleGeneration]))
+    controllers.sort((left, right) => {
+      const byPlugin = (order.get(left.item.id) ?? Number.MAX_SAFE_INTEGER)
+        - (order.get(right.item.id) ?? Number.MAX_SAFE_INTEGER)
+      if (byPlugin !== 0) return byPlugin
+      const expected = generation.get(left.item.id)
+      if (moduleGenerationOf(left) === expected) return -1
+      if (moduleGenerationOf(right) === expected) return 1
+      return 0
+    })
+  }
+
+  const restoreControllers = async (
+    items: readonly PluginController[],
+    activation: CordisXPluginActivationRecordV1,
+    disposedAfter: string[],
+    publication?: PluginGenerationPublication,
+  ): Promise<void> => {
+    const byId = new Map(items.map(controller => [controller.item.id, controller]))
+    for (const id of topologicalActivationOrder(activation, new Set(disposedAfter))) {
+      const controller = byId.get(id)
+      if (controller === undefined || !disposedAfter.includes(id)) continue
+      if (publication !== undefined) {
+        controller.generationContext = generationVisibility.retiringContext(publication, id)
+        const rollbackContext = ctx.extend({
+          [CORDISX_PLUGIN_ID]: controller.item.id,
+          [CORDISX_PLUGIN_SOURCE]: controller.item.source,
+          [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
+          ...controller.generationContext,
+        })
+        controller.generationView = generationVisibility.view(rollbackContext)
+      }
+      if (!controllers.includes(controller)) {
+        registerController(controller)
+        controllers.push(controller)
+      }
+      const item = activation.plugins.find(plugin => plugin.id === id)
+      if (item?.enabled === true && !blockedPlugins.has(id)) await mountPlugin(controller)
+      const index = disposedAfter.indexOf(id)
+      if (index >= 0) disposedAfter.splice(index, 1)
     }
   }
 
-  const stagePluginMutation = (mutation: RendererPluginMutation, module?: CordisXPluginModule): Promise<void> => {
+  const stagePluginMutation = (
+    mutation: RendererPluginMutation,
+    module?: CordisXPluginModule,
+    moduleFactory?: (console: CordisXPluginConsoleFacade) => CordisXPluginModule,
+  ): Promise<PluginGenerationReadinessReceipt> => {
     const task = operation.then(async () => {
       if (disposed) throw new Error('CordisX runtime is disposed')
       if (mutation.previous.runtimeGeneration !== generation || mutation.candidate.runtimeGeneration !== generation) {
@@ -941,119 +1193,149 @@ async function start(
         throw new Error('invalid plugin activation revision transition')
       }
       if (generationTransactions.has(mutation.transactionId)) throw new Error('plugin generation transaction already exists')
-      const affected = new Set(mutation.affectedPluginIds)
-      if (affected.size !== mutation.affectedPluginIds.length || !affected.has(mutation.targetId)) {
-        throw new Error('invalid affected plugin set')
+      const handle = generationVisibility.begin(
+        mutation.transactionId,
+        mutation.previous,
+        mutation.candidate,
+        mutation.transactionEpoch,
+      )
+      const supplied = new Set(mutation.affectedPluginIds)
+      if (supplied.size !== handle.affectedPluginIds.length
+        || handle.affectedPluginIds.some(id => !supplied.has(id))
+        || !handle.affectedPluginIds.includes(mutation.targetId)) {
+        generationVisibility.abort(handle)
+        throw new Error('affected plugin set does not match the Host dependency closure')
       }
-      const previousControllers = controllers.filter(controller => affected.has(controller.item.id))
-      const previous = previousControllers.map(snapshotController)
-      const previousOrder = topologicalActivationOrder(mutation.previous, affected)
-      for (const id of [...previousOrder].reverse()) {
-        const controller = controllers.find(item => item.item.id === id)
-        if (controller !== undefined) await disposeControllerFiber(controller, 'generation-replaced')
-      }
+      const affected = new Set(handle.affectedPluginIds)
+      const previous = activeControllers().filter(controller => affected.has(controller.item.id))
+      const candidates: PluginController[] = []
+      notificationsSuppressed = true
       try {
-        if (mutation.operation === 'uninstall') {
-          for (const controller of previousControllers) {
-            unregisterController(controller)
-            knownRegistrations.delete(controller.item.id)
-          }
-          for (let index = controllers.length - 1; index >= 0; index -= 1) {
-            if (affected.has(controllers[index]!.item.id)) controllers.splice(index, 1)
-          }
-        } else {
-          const candidateById = new Map(mutation.candidate.plugins.map(item => [item.id, item]))
-          for (const id of mutation.affectedPluginIds) {
-            const activation = candidateById.get(id)
-            if (activation === undefined) throw new Error(`candidate is missing affected plugin ${id}`)
-            const existing = controllers.find(controller => controller.item.id === id)
-            const replaceTarget = id === mutation.targetId
-              && (mutation.operation === 'install' || mutation.operation === 'update' || mutation.operation === 'enable')
-            if (replaceTarget) {
-              if (mutation.package === undefined || module === undefined) throw new Error('candidate package module is unavailable')
-              if (mutation.package.manifest.id !== id || mutation.package.digest !== activation.digest) {
-                throw new Error('candidate package does not match the activation record')
-              }
-              const descriptor = existing === undefined
-                ? undefined
-                : configuration.descriptor(id, i18nService?.getSnapshot().locale ?? 'en')
-              if (existing !== undefined) {
-                unregisterController(existing)
-              }
-              const replacement = createController({
-                id,
-                source: mutation.package.identitySource,
-                enabled: activation.enabled,
-                module,
-                config: descriptor?.value ?? {},
-                revision: descriptor?.revision ?? 0,
-                manifest: mutation.package.manifest.runtimeManifest,
-                package: {
-                  version: activation.version,
-                  digest: activation.digest,
-                  moduleGeneration: activation.moduleGeneration,
-                  dependencies: activation.dependencies,
-                  ...(activation.canonicalSource === undefined ? {} : { canonicalSource: activation.canonicalSource }),
-                },
-                ...(mutation.package.readme === undefined ? {} : { readme: mutation.package.readme }),
-              }, pluginConsole)
-              registerController(replacement)
-              controllers.push(replacement)
-              if (mutation.authorizationDecision !== undefined) {
-                await broker.authorizeActivation(replacement.identity, mutation.authorizationDecision, mutation.operation)
-              }
-              continue
-            }
-            if (existing === undefined) throw new Error(`affected plugin ${id} is not mounted`)
-            existing.item = {
-              ...existing.item,
-              enabled: activation.enabled,
-              ...(existing.item.package === undefined ? {} : {
-                package: {
-                  ...existing.item.package,
-                  moduleGeneration: activation.moduleGeneration,
-                },
-              }),
-            }
-            existing.status = activation.enabled ? 'active' : 'configured-disabled'
-            delete existing.error
-            delete existing.blockedReason
-          }
-          await broker.settled()
-          const candidateOrder = topologicalActivationOrder(mutation.candidate, affected)
-          for (const id of candidateOrder) {
-            const activation = candidateById.get(id)
-            const controller = controllers.find(item => item.item.id === id)
-            if (activation?.enabled !== true || controller === undefined || controller.item.module === undefined) continue
-            if (blockedPlugins.has(id)) {
-              controller.status = 'blocked'
-              continue
-            }
-            await mountPlugin(controller)
+        for (const id of handle.affectedPluginIds) {
+          if (!mutation.candidate.plugins.some(item => item.id === id)) continue
+          const candidate = candidateController(handle, mutation, id, module, moduleFactory)
+          registerController(candidate.controller, candidate.registerAuthority)
+          controllers.push(candidate.controller)
+          candidates.push(candidate.controller)
+          if (candidate.controller.item.id === mutation.targetId
+            && mutation.authorizationDecision !== undefined
+            && (mutation.operation === 'install' || mutation.operation === 'update' || mutation.operation === 'enable')) {
+            await broker.authorizeActivation(
+              candidate.controller.identity,
+              mutation.authorizationDecision,
+              mutation.operation as 'install' | 'update' | 'enable',
+              candidate.controller.generationView,
+            )
           }
         }
+        await broker.settled()
+        const candidateById = new Map(candidates.map(controller => [controller.item.id, controller]))
+        for (const id of topologicalActivationOrder(mutation.candidate, affected)) {
+          const activation = mutation.candidate.plugins.find(item => item.id === id)
+          const controller = candidateById.get(id)
+          if (activation?.enabled !== true || controller === undefined) continue
+          if (blockedPlugins.has(id)) throw new Error(`candidate plugin ${id} is blocked`)
+          await mountPlugin(controller)
+          if (controller.status !== 'active') throw new Error(`candidate plugin ${id} is not ready: ${controller.blockedReason ?? controller.error ?? controller.status}`)
+        }
+        const readiness = generationVisibility.confirmReadiness(handle)
+        if ((mutation.expectedRegistryEpoch !== undefined && readiness.expectedRegistryEpoch !== mutation.expectedRegistryEpoch)
+          || (mutation.afterRegistryEpoch !== undefined && readiness.afterRegistryEpoch !== mutation.afterRegistryEpoch)) {
+          throw new Error('shared registry epoch does not match the Host activation plan')
+        }
         generationTransactions.set(mutation.transactionId, {
-          affectedPluginIds: mutation.affectedPluginIds,
+          handle,
+          readiness,
+          affectedPluginIds: handle.affectedPluginIds,
           previous,
+          candidates,
           previousActivation: mutation.previous,
           candidateActivation: mutation.candidate,
+          disposedAfter: [],
         })
-        currentActivation = mutation.candidate
-        notify()
+        return readiness
       } catch (error) {
-        await restorePluginGeneration(mutation.affectedPluginIds, previous, mutation.previous)
-        notify()
+        const disposedCandidates: string[] = []
+        await disposeControllers(candidates, mutation.candidate, disposedCandidates).catch(() => undefined)
+        generationTransactions.set(mutation.transactionId, {
+          handle,
+          affectedPluginIds: handle.affectedPluginIds,
+          previous,
+          candidates,
+          previousActivation: mutation.previous,
+          candidateActivation: mutation.candidate,
+          disposedAfter: disposedCandidates,
+          failedStage: true,
+        })
         throw error
+      } finally {
+        notificationsSuppressed = false
       }
     })
     operation = task.catch(() => {})
     return task
   }
 
-  const commitPluginMutation = (transactionId: string): Promise<void> => {
-    const task = operation.then(() => {
+  const publishPluginMutation = (transactionId: string): Promise<PluginGenerationPublication> => {
+    const task = operation.then(async () => {
       const transaction = generationTransactions.get(transactionId)
       if (transaction === undefined) throw new Error('unknown plugin generation transaction')
+      if (transaction.failedStage || transaction.readiness === undefined) throw new Error('plugin generation readiness failed')
+      if (transaction.publication === undefined) {
+        const barrier = generationVisibility.preparePublish(transaction.handle, transaction.readiness)
+        notificationsSuppressed = true
+        try {
+          orderControllersFor(transaction.candidateActivation)
+          transaction.publication = generationVisibility.publish(barrier)
+          currentActivation = transaction.candidateActivation
+          await routeService?.settled()
+          await broker.settled()
+          await drainSuppressedNotifications()
+          notifyBatch()
+          // Let synchronous subscribers enqueue their projection microtasks while
+          // registry-local notifications are still suppressed. Drain the finite
+          // projection/diagnostic microtask cascade without yielding a macrotask.
+          await drainBatchSubscriberMicrotasks()
+        } finally {
+          notificationsSuppressed = false
+        }
+      }
+      return transaction.publication
+    })
+    operation = task.catch(() => {})
+    return task
+  }
+
+  const completePluginMutation = (transactionId: string): Promise<RendererGenerationCleanupObservation> => {
+    const task = operation.then(async () => {
+      const transaction = generationTransactions.get(transactionId)
+      if (transaction?.publication === undefined) throw new Error('plugin generation is not published')
+      notificationsSuppressed = true
+      try {
+        await disposeControllers(transaction.previous, transaction.previousActivation, transaction.disposedAfter)
+        await drainSuppressedNotifications()
+      } finally {
+        notificationsSuppressed = false
+      }
+      return {
+        transactionId,
+        transactionEpoch: transaction.publication.transactionEpoch,
+        registryEpoch: transaction.publication.registryEpoch,
+        active: transaction.candidateActivation,
+        disposedAfter: transaction.previousActivation,
+      }
+    })
+    operation = task.catch(() => {})
+    return task
+  }
+
+  const finalizePluginMutation = (transactionId: string): Promise<void> => {
+    const task = operation.then(() => {
+      const transaction = generationTransactions.get(transactionId)
+      if (transaction?.publication === undefined || transaction.disposedAfter.length !== transaction.previous.length) {
+        throw new Error('plugin generation cleanup is incomplete')
+      }
+      generationVisibility.completeLastGood(transaction.publication)
       currentActivation = committedActivation(transaction.candidateActivation)
       generationTransactions.delete(transactionId)
     })
@@ -1061,24 +1343,134 @@ async function start(
     return task
   }
 
-  const abortPluginMutation = (transactionId: string): Promise<void> => {
+  const commitPluginMutation = async (transactionId: string): Promise<void> => {
+    await publishPluginMutation(transactionId)
+    await completePluginMutation(transactionId)
+    await finalizePluginMutation(transactionId)
+  }
+
+  const rollbackPluginMutation = (transactionId: string): Promise<RendererGenerationCleanupObservation> => {
     const task = operation.then(async () => {
       const transaction = generationTransactions.get(transactionId)
       if (transaction === undefined) throw new Error('unknown plugin generation transaction')
-      await restorePluginGeneration(transaction.affectedPluginIds, transaction.previous, transaction.previousActivation)
-      currentActivation = transaction.previousActivation
+      const disposedCandidates: string[] = []
+      if (transaction.publication === undefined) {
+        notificationsSuppressed = true
+        try {
+          await disposeControllers(transaction.candidates, transaction.candidateActivation, disposedCandidates)
+          await drainSuppressedNotifications()
+          const registryEpoch = transaction.failedStage
+            ? generationVisibility.rollbackFailedStage(transaction.handle)
+            : (generationVisibility.abort(transaction.handle), generationVisibility.registryEpoch())
+          generationTransactions.delete(transactionId)
+          return {
+            transactionId,
+            transactionEpoch: transaction.handle.transactionEpoch,
+            registryEpoch,
+            active: transaction.previousActivation,
+            disposedAfter: transaction.candidateActivation,
+          }
+        } finally {
+          notificationsSuppressed = false
+        }
+      } else {
+        notificationsSuppressed = true
+        try {
+          await restoreControllers(
+            transaction.previous,
+            transaction.previousActivation,
+            transaction.disposedAfter,
+            transaction.publication,
+          )
+          orderControllersFor(transaction.previousActivation)
+          generationVisibility.rollback(transaction.publication)
+          currentActivation = transaction.previousActivation
+          await disposeControllers(transaction.candidates, transaction.candidateActivation, disposedCandidates)
+          await routeService?.settled()
+          await broker.settled()
+          generationVisibility.completeRollback(transaction.publication)
+          await drainSuppressedNotifications()
+          notifyBatch()
+          await drainBatchSubscriberMicrotasks()
+        } finally {
+          notificationsSuppressed = false
+        }
+      }
       generationTransactions.delete(transactionId)
-      notify()
+      return {
+        transactionId,
+        transactionEpoch: transaction.handle.transactionEpoch,
+        registryEpoch: generationVisibility.registryEpoch(),
+        active: transaction.previousActivation,
+        disposedAfter: transaction.candidateActivation,
+      }
     })
     operation = task.catch(() => {})
     return task
+  }
+
+  const recoverPluginMutation = (
+    input: RendererGenerationCleanupObservation,
+  ): Promise<RendererGenerationCleanupObservation> => {
+    const task = operation.then(() => {
+      if (disposed) throw new Error('CordisX runtime is disposed')
+      if (generationTransactions.size !== 0) throw new Error('plugin generation recovery conflicts with a live transaction')
+      if (input.registryEpoch !== generationVisibility.registryEpoch()
+        || input.active.profileId !== currentActivation.profileId
+        || input.active.plugins.length !== currentActivation.plugins.length) {
+        throw new Error('plugin generation recovery scope is stale')
+      }
+      const live = new Map(currentActivation.plugins.map(plugin => [plugin.id, plugin]))
+      for (const plugin of input.active.plugins) {
+        const current = live.get(plugin.id)
+        if (current === undefined
+          || current.version !== plugin.version
+          || current.digest !== plugin.digest
+          || current.moduleGeneration !== plugin.moduleGeneration
+          || current.enabled !== plugin.enabled
+          || JSON.stringify(current.dependencies) !== JSON.stringify(plugin.dependencies)
+          || current.canonicalSource !== plugin.canonicalSource) {
+          throw new Error('plugin generation recovery closure is stale')
+        }
+      }
+      const disposedGenerations = new Map(input.disposedAfter.plugins.map(plugin => [plugin.id, plugin.moduleGeneration]))
+      for (const controller of projectedControllers()) {
+        const candidateGeneration = disposedGenerations.get(controller.item.id)
+        if (candidateGeneration !== undefined
+          && candidateGeneration === moduleGenerationOf(controller)
+          && candidateGeneration !== live.get(controller.item.id)?.moduleGeneration) {
+          throw new Error('published candidate generation survived process recovery')
+        }
+      }
+      return structuredClone(input)
+    })
+    operation = task.catch(() => {})
+    return task
+  }
+
+  const adoptRecoveredActivation = (
+    active: CordisXPluginActivationRecordV1,
+    registryEpoch: number,
+  ): Promise<void> => {
+    const task = operation.then(() => {
+      if (disposed) throw new Error('CordisX runtime is disposed')
+      if (active.runtimeGeneration !== generation) throw new Error('recovered activation runtime generation is stale')
+      generationVisibility.adoptRecoveredActivation(active, registryEpoch)
+      currentActivation = active
+    })
+    operation = task.catch(() => {})
+    return task
+  }
+
+  const abortPluginMutation = async (transactionId: string): Promise<void> => {
+    await rollbackPluginMutation(transactionId)
   }
 
   const reloadPluginGeneration = (pluginId: string, moduleGeneration: string, runtimeGeneration: string): Promise<void> => {
     const task = operation.then(async () => {
       if (disposed) throw new Error('CordisX runtime is disposed')
       if (runtimeGeneration !== generation) throw new Error('stale CordisX runtime generation')
-      const controller = controllers.find(item => item.item.id === pluginId)
+      const controller = activeController(pluginId)
       if (controller === undefined || controller.item.package?.moduleGeneration !== moduleGeneration) {
         throw new Error('stale plugin module generation')
       }
@@ -1114,7 +1506,7 @@ async function start(
     for (const unsubscribe of registrySubscriptions.splice(0)) unsubscribe()
     await operation
     for (const controller of [...controllers].reverse()) {
-      agentRuntime.releaseOwner(controller.identity, 'generation-replaced')
+      agentRuntime.releaseOwner(controller.identity, 'generation-replaced', moduleGenerationOf(controller))
       await controller.fiber?.dispose()
       retirePrincipal(controller, 'Plugin disposed with runtime generation')
       delete controller.fiber
@@ -1166,6 +1558,7 @@ async function start(
     broker.dispose()
     window.removeEventListener('error', recordUnknownError)
     window.removeEventListener('unhandledrejection', recordUnknownError)
+    disconnectPluginConsoleVisibility()
     pluginConsole.dispose()
     extensionPointBroker.dispose()
     extensionPointDescriptors.dispose()
@@ -1176,7 +1569,7 @@ async function start(
 
   const handle: CordisXRuntimeHandle = {
     version: metadata.version,
-    get pluginIds() { return controllers.map(controller => controller.item.id) },
+    get pluginIds() { return projectedControllers().map(controller => controller.item.id) },
     execute: (owner, reference, invocationKey) => {
       if (commandService === undefined) return Promise.reject(new Error('CordisX commands are not ready'))
       return commandService.executeFor(owner, reference, invocationKey)
@@ -1195,12 +1588,12 @@ async function start(
     },
     closeSettingsTabContent: () => routeService?.closeManagerSettings() ?? Promise.resolve(),
     pluginConsole: (id) => {
-      const controller = controllers.find(item => item.item.id === id)
+      const controller = activeController(id)
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
       return pluginConsole.query(controller.identity)
     },
     clearPluginConsole: (id) => {
-      const controller = controllers.find(item => item.item.id === id)
+      const controller = activeController(id)
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
       pluginConsole.clear(controller.identity)
     },
@@ -1208,11 +1601,20 @@ async function start(
     setExtensionPointPolicy,
     permissionAuthorizationPlan,
     authorizePlugin,
+    activePluginGeneration: () => structuredClone(currentActivation),
+    generationNotificationTrace: () => generationNotificationTrace.map(item => ({ ...item })),
+    settleRegistryProjection,
     requestPluginLifecycle: (lifecycleOperation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1> => {
       if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
       return lifecycleBridge.request(currentActivation.revision, lifecycleOperation)
     },
     stagePluginMutation,
+    publishPluginMutation,
+    completePluginMutation,
+    finalizePluginMutation,
+    rollbackPluginMutation,
+    recoverPluginMutation,
+    adoptRecoveredActivation,
     commitPluginMutation,
     abortPluginMutation,
     reloadPluginGeneration,
@@ -1235,14 +1637,14 @@ async function start(
     for (const catalog of CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS) {
       disposeExtensionPointCatalogs.push(i18nService.define(catalog))
     }
-    disposeI18nSubscription = i18nService.subscribeInternal(notify)
-    disposePermissionSubscription = broker.subscribe(notify)
-    disposeExtensionPointSubscription = extensionPointBroker.subscribe(notify)
+    disposeI18nSubscription = i18nService.subscribeInternal(notifyFrom('i18n'))
+    disposePermissionSubscription = broker.subscribe(notifyFrom('permissions'))
+    disposeExtensionPointSubscription = extensionPointBroker.subscribe(notifyFrom('extension-policy'))
     settingsFiber = ctx.plugin(CordisXPluginSettingsService, { registry: configuration, console: pluginConsole })
     await settingsFiber
     configRendererFiber = ctx.plugin(CordisXConfigRendererService, { registry: configRenderers, console: pluginConsole })
     await configRendererFiber
-    registrySubscriptions.push(configuration.subscribe(notify))
+    registrySubscriptions.push(configuration.subscribe(notifyFrom('configuration')))
     platformFiber = ctx.plugin(CordisXPlatformService, { adapter: platformAdapter, broker, console: pluginConsole })
     await platformFiber
     agentEventFiber = ctx.plugin(CordisXAgentEventService, {
@@ -1287,20 +1689,20 @@ async function start(
     await slotFiber
     slotService = ctx.slots as CordisXSlotService
     slotService.setResolvers({
-      command: (owner, reference) => commandService?.hasFor(owner, reference) ?? false,
-      route: (owner, id) => routeService?.hasFor(owner, id) ?? false,
-      managerSettingsRoute: (owner, id) => routeService?.managerSettingsRouteFor(owner, id)
+      command: (owner, reference, view) => commandService?.hasFor(owner, reference, view) ?? false,
+      route: (owner, id, view) => routeService?.hasFor(owner, id, view) ?? false,
+      managerSettingsRoute: (owner, id, view) => routeService?.managerSettingsRouteFor(owner, id, view)
         ?? { state: 'pending', detail: 'CordisX routes are not ready' },
     })
     commandService.setAccessResolver(extensionPointBroker)
     routeService.setAccessResolver(extensionPointBroker)
     slotService.setAccessResolver(extensionPointBroker)
     registrySubscriptions.push(
-      extensionPointDescriptors.subscribe(notify),
-      commandService.subscribeInternal(notify),
-      pageService.registry.subscribe(notify),
-      routeService.subscribeInternal(notify),
-      slotService.subscribeInternal(notify),
+      extensionPointDescriptors.subscribe(notifyFrom('extension-descriptors')),
+      commandService.subscribeInternal(notifyFrom('commands')),
+      pageService.registry.subscribe(notifyFrom('pages')),
+      routeService.subscribeInternal(notifyFrom('routes')),
+      slotService.subscribeInternal(notifyFrom('surfaces')),
     )
     adapterHandle = installCodexAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, {
       generation,

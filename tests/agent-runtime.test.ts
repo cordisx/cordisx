@@ -214,6 +214,36 @@ describe('Agent runtime', () => {
     expect(oldHandle.cancel()).toMatchObject({ ok: false, reason: 'stale-generation' })
   })
 
+  it('releases only the retiring module generation for the same plugin identity', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const adapter: CordisXAgentAdapter = {
+      agentStatus: () => ({
+        hostId: 'fixture', hostName: 'Fixture', mode: 'read-write', adapterId: 'fixture', adapterVersion: '1',
+        experimental: [], diagnostics: [], secondConnectionCreated: false, rawBridgeExposed: false,
+      }),
+      deliver: vi.fn(async (_input, control) => {
+        await gate
+        if (!control.claim()) return { terminal: 'failed', diagnostic: { code: 'interrupted', message: 'retired' } }
+        control.projected()
+        return { terminal: 'forwarded' }
+      }),
+    }
+    const { runtime } = allowedRuntime(adapter)
+    const oldHandle = runtime.send(identity, 'session-1', 'old', 'next-step', false, 'module-old')
+    const newHandle = runtime.send(identity, 'session-1', 'new', 'next-step', false, 'module-new')
+    await vi.waitFor(() => expect(oldHandle.snapshot().stage).toBe('queued'))
+    runtime.releaseOwner(identity, 'generation-replaced', 'module-old')
+    expect(oldHandle.snapshot().valid).toBe(false)
+    expect(newHandle.snapshot().valid).toBe(true)
+    expect(newHandle.snapshot().owner.generation).toBe('module-new')
+    release()
+    await runtime.settled()
+    expect(oldHandle.cancel()).toMatchObject({ ok: false, reason: 'stale-generation' })
+    expect(newHandle.snapshot()).toMatchObject({ stage: 'forwarded', valid: true })
+    await runtime.dispose()
+  })
+
   it('records permission timeout then failure without adapter dispatch', async () => {
     const adapter = new RecordingAdapter()
     const broker = new PermissionBroker(
