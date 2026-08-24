@@ -288,22 +288,27 @@ interface BreadcrumbProjection {
 
 const MANAGER_STYLE_ID = 'cordisx-manager-style'
 const MANAGER_SETTINGS_FALLBACK = 'host:marketplace'
-const PLUGIN_DETAIL_TABS: readonly { readonly id: PluginDetailTab; readonly label: string; readonly icon: LocalTabIcon }[] = [
-  { id: 'readme', label: 'README', icon: 'document' },
-  { id: 'config', label: '配置管理', icon: 'configuration' },
-  { id: 'permissions', label: '权限', icon: 'permissions' },
-  { id: 'runtime', label: '运行状态', icon: 'runtime' },
-  { id: 'extension-points', label: '扩展点位', icon: 'outlets' },
-  { id: 'routes', label: '路由', icon: 'routes' },
+type LocalizedTab<T extends string> = {
+  readonly id: T
+  readonly copyKey: Parameters<typeof managerCopy>[1]
+  readonly icon: LocalTabIcon
+}
+const PLUGIN_DETAIL_TABS: readonly LocalizedTab<PluginDetailTab>[] = [
+  { id: 'readme', copyKey: 'plugin-tab.readme', icon: 'document' },
+  { id: 'config', copyKey: 'plugin-tab.configuration', icon: 'configuration' },
+  { id: 'permissions', copyKey: 'plugin-tab.permissions', icon: 'permissions' },
+  { id: 'runtime', copyKey: 'plugin-tab.runtime', icon: 'runtime' },
+  { id: 'extension-points', copyKey: 'plugin-tab.extension-points', icon: 'outlets' },
+  { id: 'routes', copyKey: 'plugin-tab.routes', icon: 'routes' },
 ]
-const EXTENSION_POINT_DETAIL_TABS: readonly { readonly id: ExtensionPointDetailTab; readonly label: string; readonly icon: LocalTabIcon }[] = [
-  { id: 'usage', label: '使用情况', icon: 'plugins' },
-  { id: 'information', label: '点位信息', icon: 'point-info' },
-  { id: 'diagnostics', label: '诊断', icon: 'diagnostics' },
+const EXTENSION_POINT_DETAIL_TABS: readonly LocalizedTab<ExtensionPointDetailTab>[] = [
+  { id: 'usage', copyKey: 'extension-tab.usage', icon: 'plugins' },
+  { id: 'information', copyKey: 'extension-tab.information', icon: 'point-info' },
+  { id: 'diagnostics', copyKey: 'extension-tab.diagnostics', icon: 'diagnostics' },
 ]
-const MARKETPLACE_DETAIL_TABS: readonly { readonly id: MarketplaceDetailTab; readonly label: string; readonly icon: LocalTabIcon }[] = [
-  { id: 'overview', label: '概览', icon: 'overview' },
-  { id: 'authors-source', label: '作者与来源', icon: 'authors-source' },
+const MARKETPLACE_DETAIL_TABS: readonly LocalizedTab<MarketplaceDetailTab>[] = [
+  { id: 'overview', copyKey: 'marketplace-tab.overview', icon: 'overview' },
+  { id: 'authors-source', copyKey: 'marketplace-tab.authors-source', icon: 'authors-source' },
 ]
 /** Compatibility export only. This Manager has no global Settings product page. */
 export const CORDISX_BUILTIN_MANAGER_SETTINGS_TABS: readonly ManagerSettingsTabSnapshot[] = Object.freeze([])
@@ -1815,7 +1820,8 @@ function createMarketplaceFetcher(view: Window | null): MarketplaceFetcherHandle
 /** Mount the reversible, host-owned CordisX manager UI. */
 export function installCordisXManager(document: Document, model: ManagerModel): () => void {
   const theme = new HostThemeProjection(document)
-  const copy = (key: Parameters<typeof managerCopy>[1]): string => managerCopy(model.snapshot().localization.locale, key)
+  let renderedLocale = model.snapshot().localization.locale
+  const copy = (key: Parameters<typeof managerCopy>[1]): string => managerCopy(renderedLocale, key)
   const ownedPortals = new Map<HTMLElement, () => void>()
   const mountPortal = <Element extends HTMLElement>(portal: Element): (() => void) => {
     const detachTheme = theme.attach(portal)
@@ -1836,10 +1842,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const trigger = create(document, 'button')
   trigger.type = 'button'
   trigger.dataset.cordisxManagerTrigger = 'true'
-  trigger.setAttribute('aria-label', '管理 CordisX 插件')
+  trigger.setAttribute('aria-label', copy('manager.trigger.manage'))
   trigger.setAttribute('aria-haspopup', 'dialog')
   trigger.setAttribute('aria-expanded', 'false')
-  trigger.title = 'CordisX 插件与扩展点'
+  trigger.title = copy('manager.trigger.manage')
   const triggerMark = createAdaptiveBrandMark(document)
   trigger.append(triggerMark)
 
@@ -1851,17 +1857,17 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const dialog = create(document, 'section', 'cxm-dialog')
   dialog.setAttribute('role', 'dialog')
   dialog.setAttribute('aria-modal', 'true')
-  dialog.setAttribute('aria-label', 'CordisX 插件与扩展点管理器')
+  dialog.setAttribute('aria-label', copy('manager.dialog'))
 
   const sidebar = create(document, 'aside', 'cxm-sidebar')
   const nav = create(document, 'nav', 'cxm-nav')
-  nav.setAttribute('aria-label', 'CordisX 管理器页面')
+  nav.setAttribute('aria-label', copy('manager.navigation'))
   const tabs: readonly { id: ManagerTab; icon?: ManagerIconToken; label: string; brand?: boolean }[] = [
-    { id: 'plugins', icon: 'plugins', label: '插件' },
-    { id: 'extension-points', icon: 'contributions', label: '扩展点' },
-    { id: 'routes', icon: 'routes', label: '路由' },
-    { id: 'marketplace', icon: 'marketplace', label: '插件商店' },
-    { id: 'about', label: '关于 CordisX', brand: true },
+    { id: 'plugins', icon: 'plugins', label: copy('manager.nav.plugins') },
+    { id: 'extension-points', icon: 'contributions', label: copy('manager.nav.extension-points') },
+    { id: 'routes', icon: 'routes', label: copy('manager.nav.routes') },
+    { id: 'marketplace', icon: 'marketplace', label: copy('manager.nav.marketplace') },
+    { id: 'about', label: copy('manager.nav.about'), brand: true },
   ]
   let routeState: ManagerRouteState = { kind: 'primary', primary: 'plugins' }
   const navigationHistory: ManagerRouteState[] = []
@@ -1887,7 +1893,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const heading = create(document, 'div', 'cxm-heading')
   const close = create(document, 'button', 'cxm-close')
   close.type = 'button'
-  close.setAttribute('aria-label', '关闭 CordisX 管理器')
+  close.setAttribute('aria-label', copy('manager.close'))
   close.append(createManagerIcon(document, 'close', 'cxm-close-icon'))
   header.append(heading, close)
   const content = create(document, 'div', 'cxm-content')
@@ -1896,6 +1902,38 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   backdrop.append(dialog)
   modal.append(backdrop)
   ;(document.body ?? document.documentElement).append(modal)
+
+  let primaryChromeLocale: string | undefined
+  const syncPrimaryChrome = (locale: string): void => {
+    if (primaryChromeLocale === locale) return
+    primaryChromeLocale = locale
+    const labels: Readonly<Record<ManagerTab, string>> = {
+      plugins: copy('manager.nav.plugins'),
+      'extension-points': copy('manager.nav.extension-points'),
+      routes: copy('manager.nav.routes'),
+      marketplace: copy('manager.nav.marketplace'),
+      settings: copy('manager.nav.plugins'),
+      about: copy('manager.nav.about'),
+    }
+    const setAttribute = (element: Element, name: string, value: string): void => {
+      if (element.getAttribute(name) !== value) element.setAttribute(name, value)
+    }
+    const setText = (element: Element | null, value: string): void => {
+      if (element?.textContent !== value) element?.replaceChildren(value)
+    }
+    setAttribute(trigger, 'aria-label', copy('manager.trigger.manage'))
+    if (trigger.title !== copy('manager.trigger.manage')) trigger.title = copy('manager.trigger.manage')
+    setAttribute(dialog, 'aria-label', copy('manager.dialog'))
+    setAttribute(nav, 'aria-label', copy('manager.navigation'))
+    setAttribute(close, 'aria-label', copy('manager.close'))
+    for (const [id, label] of Object.entries(labels)) {
+      setText(navButtons.get(id)?.querySelector('.cxm-nav-label') ?? null, label)
+    }
+  }
+
+  const localizeTabs = <T extends string>(items: readonly LocalizedTab<T>[]): readonly { readonly id: T; readonly label: string; readonly icon: LocalTabIcon }[] => (
+    items.map(item => ({ id: item.id, label: copy(item.copyKey), icon: item.icon }))
+  )
 
   const marketplaceFetcher = createMarketplaceFetcher(document.defaultView)
   const marketplace: MarketplaceModel = new BrowserMarketplaceModel(
@@ -2441,26 +2479,26 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     sortManagerSettingsNavigationItems(snapshot.settingsNavigationItems ?? [])
   )
 
-  const pluginFacet = (id: PluginDetailTab): typeof PLUGIN_DETAIL_TABS[number] => (
-    PLUGIN_DETAIL_TABS.find(item => item.id === id) ?? PLUGIN_DETAIL_TABS[0]!
+  const pluginFacet = (id: PluginDetailTab): ReturnType<typeof localizeTabs>[number] => (
+    localizeTabs(PLUGIN_DETAIL_TABS).find(item => item.id === id) ?? localizeTabs(PLUGIN_DETAIL_TABS)[0]!
   )
-  const extensionPointFacet = (id: ExtensionPointDetailTab): typeof EXTENSION_POINT_DETAIL_TABS[number] => (
-    EXTENSION_POINT_DETAIL_TABS.find(item => item.id === id) ?? EXTENSION_POINT_DETAIL_TABS[0]!
+  const extensionPointFacet = (id: ExtensionPointDetailTab): ReturnType<typeof localizeTabs>[number] => (
+    localizeTabs(EXTENSION_POINT_DETAIL_TABS).find(item => item.id === id) ?? localizeTabs(EXTENSION_POINT_DETAIL_TABS)[0]!
   )
-  const marketplaceFacet = (id: MarketplaceDetailTab): typeof MARKETPLACE_DETAIL_TABS[number] => (
-    MARKETPLACE_DETAIL_TABS.find(item => item.id === id) ?? MARKETPLACE_DETAIL_TABS[0]!
+  const marketplaceFacet = (id: MarketplaceDetailTab): ReturnType<typeof localizeTabs>[number] => (
+    localizeTabs(MARKETPLACE_DETAIL_TABS).find(item => item.id === id) ?? localizeTabs(MARKETPLACE_DETAIL_TABS)[0]!
   )
 
   const resolvePageRoute = (snapshot: ManagerSnapshot): ManagerPageRoute => {
     const route = routeState
     const primary = activePrimary()
     const primaryLabels: Readonly<Record<ManagerTab, string>> = {
-      plugins: '插件',
-      'extension-points': '扩展点',
-      routes: '路由',
-      marketplace: '插件商店',
-      settings: '配置',
-      about: '关于 CordisX',
+      plugins: copy('manager.nav.plugins'),
+      'extension-points': copy('manager.nav.extension-points'),
+      routes: copy('manager.nav.routes'),
+      marketplace: copy('manager.nav.marketplace'),
+      settings: copy('manager.nav.plugins'),
+      about: copy('manager.nav.about'),
     }
     const root = (id: ManagerTab): ManagerBreadcrumbSegment => ({
       id: `primary:${id}`,
@@ -2995,7 +3033,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return
     }
     const activeFacet = routeState.kind === 'extension-point' ? routeState.facet : 'usage'
-    content.append(createLocalTabs(document, EXTENSION_POINT_DETAIL_TABS, activeFacet, 'data-extension-point-detail-tab', (tab) => {
+    content.append(createLocalTabs(document, localizeTabs(EXTENSION_POINT_DETAIL_TABS), activeFacet, 'data-extension-point-detail-tab', (tab) => {
       void navigateRoute({ kind: 'extension-point', pointId: id, facet: tab as ExtensionPointDetailTab })
     }))
 
@@ -3521,8 +3559,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderPluginList = (snapshot: ManagerSnapshot): void => {
-    setHeading('插件', snapshot, { icon: 'plugins' })
-    const install = managerIconAction('import-plugin', lifecycleInstallBusy ? '检查本地包中…' : '导入本地插件', {
+    setHeading(copy('manager.nav.plugins'), snapshot, { icon: 'plugins' })
+    const install = managerIconAction('import-plugin', lifecycleInstallBusy ? copy('plugins.install-checking') : copy('plugins.install'), {
       className: 'cxm-toolbar-icon-action',
       disabled: lifecycleInstallBusy
         || lifecycleBusy.size > 0
@@ -3541,20 +3579,22 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const managed = packageOperationReason === undefined
       const globallyBusy = lifecycleInstallBusy || lifecycleBusy.size > 0
       const enable = plugin.status === 'configured-disabled'
-      const toggleLabel = enable ? '启用插件' : '禁用插件'
+      const toggleLabel = enable ? copy('plugins.enable') : copy('plugins.disable')
       const toggleDisabled = !managed || globallyBusy || (plugin.status !== 'active' && !enable)
       const sourceReason = sourceUnavailableReason(plugin)
+      const sourceActionReason = sourceReason === undefined ? undefined : copy('status.unavailable')
       const favorite = favorites.has(plugin.id)
       const toggleReason = toggleDisabled
-        ? packageOperationReason ?? (globallyBusy ? '当前有插件操作正在执行' : `插件当前不能${enable ? '启用' : '禁用'}`)
+        ? (!managed ? copy('status.unavailable') : globallyBusy ? '当前有插件操作正在执行' : `插件当前不能${enable ? '启用' : '禁用'}`)
         : undefined
-      const reloadReason = packageOperationReason
-        ?? (globallyBusy ? '当前有插件操作正在执行' : plugin.status === 'active' ? undefined : '插件当前不能重载')
-      const uninstallReason = packageOperationReason ?? (globallyBusy ? '当前有插件操作正在执行' : undefined)
+      const reloadReason = !managed
+        ? copy('status.unavailable')
+        : globallyBusy ? '当前有插件操作正在执行' : plugin.status === 'active' ? undefined : '插件当前不能重载'
+      const uninstallReason = !managed ? copy('status.unavailable') : (globallyBusy ? '当前有插件操作正在执行' : undefined)
       const actions: HostCollectionAction[] = [
         {
           id: enable ? 'enable' : 'disable',
-          label: managed ? toggleLabel : '启动配置插件需由 launcher 配置管理',
+          label: toggleLabel,
           placement: 'direct',
           priority: 1,
           icon: () => createManagerIcon(document, enable ? 'enable-plugin' : 'disable-plugin'),
@@ -3564,7 +3604,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         },
         {
           id: 'favorite',
-          label: favorite ? '取消收藏' : '收藏插件',
+          label: favorite ? copy('plugins.unfavorite') : copy('plugins.favorite'),
           placement: 'direct',
           priority: 2,
           icon: () => createManagerIcon(document, favorite ? 'favorite-active' : 'favorite'),
@@ -3576,7 +3616,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         },
         {
           id: 'reload',
-          label: managed ? '重载插件' : '该插件不属于动态 package generation',
+          label: copy('plugins.reload'),
           placement: 'direct',
           priority: 3,
           icon: () => createManagerIcon(document, 'reload-plugin'),
@@ -3586,11 +3626,11 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         },
         {
           id: 'share',
-          label: sourceReason === undefined ? '分享公开来源' : '分享公开来源（不可用）',
+          label: sourceReason === undefined ? copy('plugins.share') : copy('plugins.share-unavailable'),
           placement: 'overflow',
           icon: () => createManagerIcon(document, 'share-plugin'),
           disabled: sourceReason !== undefined,
-          ...(sourceReason === undefined ? {} : { unavailableReason: sourceReason }),
+          ...(sourceActionReason === undefined ? {} : { unavailableReason: sourceActionReason }),
           onInvoke: () => { void sharePlugin(plugin)
             .catch(error => { operationError = error instanceof Error ? error.message : String(error) })
             .finally(() => {
@@ -3605,16 +3645,16 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         },
         {
           id: 'source',
-          label: sourceReason === undefined ? '打开公开来源' : '打开公开来源（不可用）',
+          label: sourceReason === undefined ? copy('plugins.open-source') : copy('plugins.open-source-unavailable'),
           placement: 'overflow',
           icon: () => createManagerIcon(document, 'authors-source'),
           disabled: sourceReason !== undefined,
-          ...(sourceReason === undefined ? {} : { unavailableReason: sourceReason }),
+          ...(sourceActionReason === undefined ? {} : { unavailableReason: sourceActionReason }),
           onInvoke: () => { openPluginSource(plugin) },
         },
         {
           id: 'diagnostics',
-          label: '查看运行诊断',
+          label: copy('plugins.diagnostics'),
           placement: 'overflow',
           icon: () => createManagerIcon(document, 'diagnostics'),
           onInvoke: () => {
@@ -3624,7 +3664,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         },
         {
           id: 'uninstall',
-          label: managed ? '卸载' : '卸载（不可用）',
+          label: managed ? copy('plugins.uninstall') : copy('plugins.uninstall-unavailable'),
           placement: 'overflow',
           tone: 'danger',
           icon: () => createManagerIcon(document, 'uninstall-plugin'),
@@ -3637,7 +3677,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return {
         id: plugin.id,
         title: plugin.name,
-        description: plugin.description ?? '本地 CordisX 插件',
+        description: plugin.description ?? copy('plugins.local-description'),
         machineId: plugin.id,
         searchText: [plugin.source, ...plugin.inject, ...registrations.flatMap(item => [item.surface, item.id])],
         icon: () => createPluginIcon(document, plugin.name),
@@ -3653,17 +3693,18 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     })
     const view = mountHostCollection(content, {
       id: 'plugins',
-      label: '当前 bundle 插件',
+      label: copy('plugins.collection-label'),
       items,
       search: {
-        label: '搜索 CordisX 插件',
-        placeholder: '搜索插件、扩展点或 contribution id…',
+        label: copy('plugins.search-label'),
+        placeholder: copy('plugins.search-placeholder'),
+        clearLabel: copy('plugins.search-clear'),
         query: pluginQuery,
         onQueryChange: value => { pluginQuery = value },
       },
-      emptyLabel: '当前 bundle 没有插件',
-      noMatchesLabel: '没有匹配的插件',
-      moreLabel: '更多插件操作',
+      emptyLabel: copy('plugins.empty'),
+      noMatchesLabel: copy('plugins.no-matches'),
+      moreLabel: copy('plugins.more-actions'),
     }, root => {
       for (const item of root.querySelectorAll<HTMLElement>('[data-collection-item]')) {
         const pluginId = item.dataset.collectionItem
@@ -4356,7 +4397,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return
     }
     const activeFacet = routeState.kind === 'plugin' ? routeState.facet : 'readme'
-    content.append(createLocalTabs(document, PLUGIN_DETAIL_TABS, activeFacet, 'data-plugin-detail-tab', (tab) => {
+    content.append(createLocalTabs(document, localizeTabs(PLUGIN_DETAIL_TABS), activeFacet, 'data-plugin-detail-tab', (tab) => {
       void navigateRoute({ kind: 'plugin', pluginId: id, facet: tab as PluginDetailTab })
     }))
 
@@ -4909,7 +4950,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderMarketplaceList = (managerSnapshot: ManagerSnapshot): void => {
     const snapshot = marketplace.snapshot()
-    setHeading('发现适用于 CordisX 的插件', managerSnapshot, { icon: 'marketplace' })
+    setHeading(copy('marketplace.heading'), managerSnapshot, { icon: 'marketplace' })
     content.dataset.marketplaceDiscovery = 'true'
     const page = create(document, 'section', 'cxm-marketplace-discovery')
     page.dataset.marketplaceDiscoveryPage = 'true'
@@ -4931,10 +4972,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     certifiedFilter.type = 'button'
     certifiedFilter.dataset.marketplaceCertifiedOnly = 'true'
     certifiedFilter.setAttribute('aria-pressed', String(marketplaceCertifiedOnly))
-    certifiedFilter.setAttribute('aria-label', marketplaceCertifiedOnly ? '显示全部插件' : '仅显示 CordisX 已认证插件')
+    certifiedFilter.setAttribute('aria-label', marketplaceCertifiedOnly ? copy('marketplace.filter-all') : copy('marketplace.filter-certified'))
     certifiedFilter.append(
       createManagerIcon(document, 'marketplace-certified'),
-      create(document, 'span', undefined, '仅看已认证'),
+      create(document, 'span', undefined, copy('marketplace.filter-certified-only')),
     )
     certifiedFilter.addEventListener('click', () => {
       marketplaceCertifiedOnly = !marketplaceCertifiedOnly
@@ -4951,8 +4992,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     results.dataset.marketplaceResultsScroll = 'true'
     const items: HostCollectionItem[] = ranked.map(({ plugin, projection: metadata, ranking }) => {
       const trustLabels = [
-        ...(plugin.official === undefined ? [] : ['官方']),
-        ...(plugin.certification === undefined ? [] : ['已认证']),
+        ...(plugin.official === undefined ? [] : [copy('marketplace.official')]),
+        ...(plugin.certification === undefined ? [] : [copy('marketplace.certified')]),
       ]
       const status: HostCollectionStatus | undefined = trustLabels.length === 0
         ? undefined
@@ -4976,7 +5017,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         ],
         icon: () => createPluginIcon(document, metadata.name),
         ...(status === undefined ? {} : { status }),
-        openLabel: `打开 ${metadata.name} 商店详情`,
+        openLabel: `${copy('marketplace.open')} · ${metadata.name}`,
         onOpen: () => {
           rememberListScroll()
           void navigateRoute({ kind: 'marketplace', identity: plugin.identity, facet: 'overview' })
@@ -4985,11 +5026,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     })
     const view = mountHostCollection(results, {
       id: 'marketplace',
-      label: '插件商店列表',
+      label: copy('marketplace.collection-label'),
       items,
       search: {
-        label: '搜索 CordisX 插件商店',
-        placeholder: '搜索商店插件、作者、关键词或来源…',
+        label: copy('marketplace.search-label'),
+        placeholder: copy('marketplace.search-placeholder'),
+        clearLabel: copy('marketplace.search-clear'),
         query: marketplaceQuery,
         onQueryChange: value => {
           marketplaceQuery = value
@@ -4999,8 +5041,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           replacement?.setSelectionRange(value.length, value.length)
         },
       },
-      emptyLabel: snapshot.sources.length === 0 ? '尚未配置插件商店地址' : '没有可展示的插件',
-      noMatchesLabel: '没有可展示的匹配插件',
+      emptyLabel: snapshot.sources.length === 0 ? copy('marketplace.empty-no-sources') : copy('marketplace.no-plugins'),
+      noMatchesLabel: copy('marketplace.no-matches'),
     }, root => {
       for (const item of root.querySelectorAll<HTMLElement>('[data-collection-item]')) {
         const rankedItem = ranked.find(entry => entry.plugin.identity === item.dataset.collectionItem)
@@ -5034,7 +5076,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }
     const metadata = projectMarketplacePlugin(plugin, managerSnapshot.localization.locale)
     const activeFacet = routeState.kind === 'marketplace' ? routeState.facet : 'overview'
-    content.append(createLocalTabs(document, MARKETPLACE_DETAIL_TABS, activeFacet, 'data-marketplace-detail-tab', (tab) => {
+    content.append(createLocalTabs(document, localizeTabs(MARKETPLACE_DETAIL_TABS), activeFacet, 'data-marketplace-detail-tab', (tab) => {
       void navigateRoute({ kind: 'marketplace', identity: identityValue, facet: tab as MarketplaceDetailTab })
     }))
 
@@ -5070,7 +5112,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           item.append(
             title,
             create(document, 'p', 'cxm-marketplace-trust-copy', `${official.label.fallback}。${official.description.fallback}`),
-            create(document, 'div', 'cxm-marketplace-trust-meta', `验证 policy ${official.verificationPolicy.id}@${official.verificationPolicy.version} · verifiedAt ${official.verifiedAt}\n发布者 ${official.identity.publisherIdentity} · 包 ${official.identity.packageName}\ncanonical source ${official.identity.canonicalSource}`),
             create(document, 'p', 'cxm-marketplace-trust-copy', '“官方”表示由 CordisX 团队创建并持续维护的发布者身份；它不等于该发布物已经通过版本认证。'),
           )
           appendEvidence(item, official.reviewer.evidenceRef)
@@ -5085,8 +5126,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           item.append(
             title,
             create(document, 'p', 'cxm-marketplace-trust-copy', `${certification.label.fallback}。${certification.description.fallback}`),
-            create(document, 'div', 'cxm-marketplace-trust-meta', `由 CordisX 按 policy ${certification.reviewPolicy.id}@${certification.reviewPolicy.version} 审核该版本 v${certification.identity.version} · reviewedAt ${certification.reviewedAt} · expiresAt ${certification.expiresAt}\n发布物 ${certification.identity.integrity}`),
-            create(document, 'p', 'cxm-marketplace-trust-copy', '认证绑定此明确版本和 sha256 发布物；新版本或 digest 变化默认不继承。认证不是绝对安全保证。'),
+            create(document, 'p', 'cxm-marketplace-trust-copy', '认证仅适用于当前版本；新版本需重新审核。认证不等于安全保障。'),
           )
           appendEvidence(item, certification.reviewer.evidenceRef)
           trustList.append(item)
@@ -5094,7 +5134,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         panel.append(trustList)
         const boundary = create(document, 'div', 'cxm-notice', '认证不等于安全保障。')
         boundary.dataset.marketplaceTrustBoundary = 'true'
-        panel.append(boundary, documentationLink('查看信任说明', PRODUCT_DOCUMENTATION.marketplace))
+        panel.append(boundary)
       }
       if (metadata.keywords.length > 0) {
         panel.append(createSectionTitle(document, '关键词'))
@@ -5289,6 +5329,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       search: {
         label: copy('marketplace.source.search-label'),
         placeholder: copy('marketplace.source.search-placeholder'),
+        clearLabel: copy('marketplace.source.search-clear'),
         query: sourceQuery,
         onQueryChange: query => { sourceQuery = query },
         icon: () => createManagerIcon(document, 'search'),
@@ -5845,6 +5886,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     marketplaceCollectionView = undefined
     delete content.dataset.marketplaceDiscovery
     const snapshot = model.snapshot()
+    renderedLocale = snapshot.localization.locale
+    syncPrimaryChrome(renderedLocale)
     const normalized = normalizeRoute(snapshot)
     const normalizedRouteChanged = routeKey(normalized) !== routeKey(routeState)
     const removedActiveManagerContent = routeState.kind === 'manager-content'

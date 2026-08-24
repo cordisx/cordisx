@@ -296,19 +296,19 @@ describe('Manager Marketplace product list', () => {
       expect(trusted.dataset.marketplaceCertified).toBe('true')
       expect(trusted.dataset.marketplaceRankingTrustBoost).toBe('2')
       const trustedStatus = trusted.querySelector<HTMLElement>('.cxc-status')!
-      expect(trustedStatus.getAttribute('aria-label')).toContain('官方、已认证')
+      expect(trustedStatus.getAttribute('aria-label')).toContain('Official、Certified')
       const trustedPrimary = trusted.querySelector<HTMLButtonElement>('.cxc-primary')!
-      expect(trustedPrimary.getAttribute('aria-description')).toContain('官方、已认证')
+      expect(trustedPrimary.getAttribute('aria-description')).toContain('Official、Certified')
       trustedPrimary.focus()
       await new Promise(resolve => setTimeout(resolve, 700))
-      expect(dom.window.document.querySelector('[role="tooltip"]')?.textContent).toBe('官方、已认证')
+      expect(dom.window.document.querySelector('[role="tooltip"]')?.textContent).toBe('Official、Certified')
       expect(dom.window.document.querySelector('[role="tooltip"]')?.textContent).not.toContain('信任加权')
       expect(trustedPrimary.getAttribute('aria-describedby')).toMatch(/^cordisx-host-tooltip-/)
       trustedPrimary.blur()
       const community = dom.window.document.querySelector<HTMLElement>('[data-marketplace-plugin="community-certified"]')!
       expect(community.dataset.marketplaceOfficial).toBe('false')
       expect(community.dataset.marketplaceCertified).toBe('true')
-      expect(community.querySelector('.cxc-status')?.getAttribute('aria-label')).toContain('已认证')
+      expect(community.querySelector('.cxc-status')?.getAttribute('aria-label')).toContain('Certified')
 
       const search = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="marketplace"]')!
       search.value = 'exact-match'
@@ -331,17 +331,16 @@ describe('Manager Marketplace product list', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-plugin="trusted"] .cxc-primary')!.click()
       const officialDetail = dom.window.document.querySelector<HTMLElement>('[data-marketplace-trust-dimension="official"]')!
       const certifiedDetail = dom.window.document.querySelector<HTMLElement>('[data-marketplace-trust-dimension="certified"]')!
-      expect(officialDetail.textContent).toContain('cordisx-official-publisher@1.0.0')
+      expect(officialDetail.textContent).toContain('Created and maintained by CordisX.')
       expect(officialDetail.textContent).toContain('不等于该发布物已经通过版本认证')
-      expect(certifiedDetail.textContent).toContain('cordisx-marketplace-review@1.0.0')
-      expect(certifiedDetail.textContent).toContain(`发布物 ${DIGEST}`)
-      expect(certifiedDetail.textContent).toContain('认证不是绝对安全保证')
+      expect(officialDetail.textContent).not.toMatch(/policy|canonical source/iu)
+      expect(certifiedDetail.textContent).not.toContain(DIGEST)
+      expect(certifiedDetail.textContent).toContain('认证不等于安全保障')
       expect(certifiedDetail.querySelector<HTMLAnchorElement>('a')?.href).toBe(EVIDENCE)
       const boundary = dom.window.document.querySelector<HTMLElement>('[data-marketplace-trust-boundary]')!
       expect(boundary.textContent).toBe('认证不等于安全保障。')
-      const documentation = [...dom.window.document.querySelectorAll<HTMLAnchorElement>('a')]
-        .find(link => link.textContent?.includes('查看信任说明'))
-      expect(documentation?.href).toContain('/.agents/docs/dynamic-plugin-lifecycle.md')
+      expect([...dom.window.document.querySelectorAll<HTMLAnchorElement>('a')]
+        .some(link => /docs|文档/iu.test(link.textContent ?? ''))).toBe(false)
     } finally {
       dispose()
       dom.window.close()

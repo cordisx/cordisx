@@ -18,11 +18,15 @@ function section(source: string, start: string, end: string): string {
 describe('UI copy principles', () => {
   it('keeps configuration out of retired global placeholder pages', async () => {
     const manager = await readFile(managerPath, 'utf8')
+    const primaryNavigation = section(manager, 'const tabs: readonly', 'let routeState')
     expect(manager).toContain('CORDISX_BUILTIN_MANAGER_SETTINGS_TABS: readonly ManagerSettingsTabSnapshot[] = Object.freeze([])')
-    expect(manager).toContain("{ id: 'plugins', icon: 'plugins', label: '插件' }")
+    expect(manager).toContain("{ id: 'plugins', icon: 'plugins', label: copy('manager.nav.plugins') }")
     expect(manager).not.toContain("{ id: 'settings', label: '配置'")
     expect(manager).not.toContain('renderRuntimeSettings')
     expect(manager).not.toContain('renderLauncherSettings')
+    expect(manager).not.toContain('renderDemoSettings')
+    expect(manager).not.toContain('renderProviderSettings')
+    expect(primaryNavigation).not.toMatch(/id: '(?:runtime|launcher|demo|providers?)'/u)
   })
 
   it('keeps the Host catalog complete and locale-first for every governed primary state', () => {
@@ -35,6 +39,8 @@ describe('UI copy principles', () => {
     expect(managerCopy('en', 'marketplace.failed')).toBe('Failed to load')
     expect(managerCopy('zh-CN', 'status.file-not-found')).toBe('文件不存在')
     expect(managerCopy('en', 'status.restart-required')).toBe('Restart required')
+    expect(managerCopy('en', 'manager.trigger.manage')).toBe('Manage CordisX plugins')
+    expect(managerCopy('zh-CN', 'manager.trigger.manage')).toBe('管理 CordisX 插件')
   })
 
   it('keeps diagnostics and documentation as the home for developer terminology', async () => {
@@ -42,12 +48,15 @@ describe('UI copy principles', () => {
       readFile(managerPath, 'utf8'), readFile(tracePath, 'utf8'), readFile(cliProxyPath, 'utf8'), readFile(principlesPath, 'utf8'),
     ])
     const runtime = section(manager, "if (activeFacet === 'runtime')", "if (activeFacet === 'extension-points')")
+    const marketplaceDetail = section(manager, 'const renderMarketplaceDetail', 'const marketplaceSourceState')
 
     expect(runtime).toContain("diagnostics.append(diagnosticsBody)")
     expect(trace).toContain("'Agent events are currently unavailable.'")
     expect(trace).not.toContain('This plugin will not inspect a raw bridge or private adapter store.')
     expect(cliProxy).toContain("'navigation.description': 'Manage provider models and sessions'")
     expect(cliProxy).toContain("'navigation.description': '管理 Provider 模型和会话'")
+    expect(marketplaceDetail).not.toContain('documentationLink(')
+    expect(marketplaceDetail).not.toMatch(/verificationPolicy|reviewPolicy|canonical source|sha256|digest/iu)
     expect(principles).toContain('`fiber`, `generation`, `canonical identity`')
     expect(principles).toContain('`en` and `zh-CN`')
   })

@@ -60,7 +60,7 @@ type CopyKey =
   | 'marketplace.description'
   | 'marketplace.source-label'
   | 'marketplace.add'
-  | 'marketplace.empty'
+  | 'marketplace.no-plugins'
   | 'marketplace.loaded'
   | 'marketplace.loading'
   | 'marketplace.failed'
@@ -72,6 +72,62 @@ type CopyKey =
   | 'marketplace.reload'
   | 'marketplace.invalid-url'
   | 'marketplace.duplicate-source'
+  | 'manager.nav.plugins'
+  | 'manager.nav.extension-points'
+  | 'manager.nav.routes'
+  | 'manager.nav.marketplace'
+  | 'manager.nav.about'
+  | 'manager.trigger.manage'
+  | 'manager.close'
+  | 'manager.dialog'
+  | 'manager.navigation'
+  | 'plugins.install'
+  | 'plugins.install-checking'
+  | 'plugins.enable'
+  | 'plugins.disable'
+  | 'plugins.favorite'
+  | 'plugins.unfavorite'
+  | 'plugins.reload'
+  | 'plugins.share'
+  | 'plugins.share-unavailable'
+  | 'plugins.open-source'
+  | 'plugins.open-source-unavailable'
+  | 'plugins.diagnostics'
+  | 'plugins.uninstall'
+  | 'plugins.uninstall-unavailable'
+  | 'plugins.local-description'
+  | 'plugins.collection-label'
+  | 'plugins.search-label'
+  | 'plugins.search-placeholder'
+  | 'plugins.search-clear'
+  | 'plugins.empty'
+  | 'plugins.no-matches'
+  | 'plugins.more-actions'
+  | 'plugin-tab.readme'
+  | 'plugin-tab.configuration'
+  | 'plugin-tab.permissions'
+  | 'plugin-tab.runtime'
+  | 'plugin-tab.extension-points'
+  | 'plugin-tab.routes'
+  | 'extension-tab.usage'
+  | 'extension-tab.information'
+  | 'extension-tab.diagnostics'
+  | 'marketplace-tab.overview'
+  | 'marketplace-tab.authors-source'
+  | 'marketplace.heading'
+  | 'marketplace.filter-all'
+  | 'marketplace.filter-certified'
+  | 'marketplace.filter-certified-only'
+  | 'marketplace.official'
+  | 'marketplace.certified'
+  | 'marketplace.open'
+  | 'marketplace.collection-label'
+  | 'marketplace.search-label'
+  | 'marketplace.search-placeholder'
+  | 'marketplace.search-clear'
+  | 'marketplace.empty-no-sources'
+  | 'marketplace.empty'
+  | 'marketplace.no-matches'
   | 'marketplace.source-menu-label'
   | 'marketplace.source-menu-description'
   | 'marketplace.source-menu.create'
@@ -102,6 +158,7 @@ type CopyKey =
   | 'marketplace.source.collection-label'
   | 'marketplace.source.search-label'
   | 'marketplace.source.search-placeholder'
+  | 'marketplace.source.search-clear'
   | 'marketplace.source.empty'
   | 'marketplace.source.no-matches'
   | 'marketplace.source.more-actions'
@@ -235,6 +292,62 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'marketplace.reload': { en: 'Reload', 'zh-CN': '重新加载' },
   'marketplace.invalid-url': { en: 'Enter an HTTPS URL', 'zh-CN': '请输入 HTTPS 地址' },
   'marketplace.duplicate-source': { en: 'This marketplace is already configured', 'zh-CN': '这个商店地址已经配置' },
+  'manager.nav.plugins': { en: 'Plugins', 'zh-CN': '插件' },
+  'manager.nav.extension-points': { en: 'Extension points', 'zh-CN': '扩展点' },
+  'manager.nav.routes': { en: 'Routes', 'zh-CN': '路由' },
+  'manager.nav.marketplace': { en: 'Marketplace', 'zh-CN': '插件商店' },
+  'manager.nav.about': { en: 'About CordisX', 'zh-CN': '关于 CordisX' },
+  'manager.trigger.manage': { en: 'Manage CordisX plugins', 'zh-CN': '管理 CordisX 插件' },
+  'manager.close': { en: 'Close CordisX Manager', 'zh-CN': '关闭 CordisX 管理器' },
+  'manager.dialog': { en: 'CordisX Plugin Manager', 'zh-CN': 'CordisX 插件管理器' },
+  'manager.navigation': { en: 'CordisX Manager pages', 'zh-CN': 'CordisX 管理器页面' },
+  'plugins.install': { en: 'Import local plugin', 'zh-CN': '导入本地插件' },
+  'plugins.install-checking': { en: 'Checking local package', 'zh-CN': '检查本地包中' },
+  'plugins.enable': { en: 'Enable plugin', 'zh-CN': '启用插件' },
+  'plugins.disable': { en: 'Disable plugin', 'zh-CN': '禁用插件' },
+  'plugins.favorite': { en: 'Favorite plugin', 'zh-CN': '收藏插件' },
+  'plugins.unfavorite': { en: 'Remove from favorites', 'zh-CN': '取消收藏' },
+  'plugins.reload': { en: 'Reload plugin', 'zh-CN': '重载插件' },
+  'plugins.share': { en: 'Share public source', 'zh-CN': '分享公开来源' },
+  'plugins.share-unavailable': { en: 'Share public source (unavailable)', 'zh-CN': '分享公开来源（不可用）' },
+  'plugins.open-source': { en: 'Open public source', 'zh-CN': '打开公开来源' },
+  'plugins.open-source-unavailable': { en: 'Open public source (unavailable)', 'zh-CN': '打开公开来源（不可用）' },
+  'plugins.diagnostics': { en: 'View diagnostics', 'zh-CN': '查看运行诊断' },
+  'plugins.uninstall': { en: 'Uninstall', 'zh-CN': '卸载' },
+  'plugins.uninstall-unavailable': { en: 'Uninstall (unavailable)', 'zh-CN': '卸载（不可用）' },
+  'plugins.local-description': { en: 'Local CordisX plugin', 'zh-CN': '本地 CordisX 插件' },
+  'plugins.collection-label': { en: 'Current bundle plugins', 'zh-CN': '当前 bundle 插件' },
+  'plugins.search-label': { en: 'Search plugins', 'zh-CN': '搜索 CordisX 插件' },
+  'plugins.search-placeholder': { en: 'Search plugins or extension points', 'zh-CN': '搜索插件或扩展点' },
+  'plugins.search-clear': { en: 'Clear plugin search', 'zh-CN': '清除插件搜索' },
+  'plugins.empty': { en: 'No plugins available', 'zh-CN': '暂无可用插件' },
+  'plugins.no-matches': { en: 'No matching plugins', 'zh-CN': '没有匹配的插件' },
+  'plugins.more-actions': { en: 'More plugin actions', 'zh-CN': '更多插件操作' },
+  'plugin-tab.readme': { en: 'README', 'zh-CN': 'README' },
+  'plugin-tab.configuration': { en: 'Configuration', 'zh-CN': '配置管理' },
+  'plugin-tab.permissions': { en: 'Permissions', 'zh-CN': '权限' },
+  'plugin-tab.runtime': { en: 'Runtime status', 'zh-CN': '运行状态' },
+  'plugin-tab.extension-points': { en: 'Extension points', 'zh-CN': '扩展点位' },
+  'plugin-tab.routes': { en: 'Routes', 'zh-CN': '路由' },
+  'extension-tab.usage': { en: 'Usage', 'zh-CN': '使用情况' },
+  'extension-tab.information': { en: 'Information', 'zh-CN': '点位信息' },
+  'extension-tab.diagnostics': { en: 'Diagnostics', 'zh-CN': '诊断' },
+  'marketplace-tab.overview': { en: 'Overview', 'zh-CN': '概览' },
+  'marketplace-tab.authors-source': { en: 'Authors and source', 'zh-CN': '作者与来源' },
+  'marketplace.heading': { en: 'Discover plugins', 'zh-CN': '发现插件' },
+  'marketplace.filter-all': { en: 'Show all plugins', 'zh-CN': '显示全部插件' },
+  'marketplace.filter-certified': { en: 'Show certified plugins only', 'zh-CN': '仅显示已认证插件' },
+  'marketplace.filter-certified-only': { en: 'Certified only', 'zh-CN': '仅看已认证' },
+  'marketplace.official': { en: 'Official', 'zh-CN': '官方' },
+  'marketplace.certified': { en: 'Certified', 'zh-CN': '已认证' },
+  'marketplace.open': { en: 'Open plugin details', 'zh-CN': '打开插件详情' },
+  'marketplace.collection-label': { en: 'Marketplace plugins', 'zh-CN': '插件商店列表' },
+  'marketplace.search-label': { en: 'Search marketplace plugins', 'zh-CN': '搜索插件商店' },
+  'marketplace.search-placeholder': { en: 'Search plugins, authors, or keywords', 'zh-CN': '搜索插件、作者或关键词' },
+  'marketplace.search-clear': { en: 'Clear marketplace search', 'zh-CN': '清除商店搜索' },
+  'marketplace.empty-no-sources': { en: 'No sources yet', 'zh-CN': '暂无商店来源' },
+  'marketplace.no-plugins': { en: 'No plugins available', 'zh-CN': '暂无可用插件' },
+  'marketplace.no-matches': { en: 'No matching plugins', 'zh-CN': '没有匹配的插件' },
   'marketplace.source-menu-label': { en: 'Manage marketplace sources', 'zh-CN': '管理商店来源' },
   'marketplace.source-menu-description': { en: 'Add, import, or manage sources', 'zh-CN': '添加、导入或管理来源' },
   'marketplace.source-menu.create': { en: 'Add source', 'zh-CN': '新增来源' },
@@ -265,6 +378,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'marketplace.source.collection-label': { en: 'Marketplace sources', 'zh-CN': '插件商店来源' },
   'marketplace.source.search-label': { en: 'Search sources', 'zh-CN': '搜索商店来源' },
   'marketplace.source.search-placeholder': { en: 'Search sources', 'zh-CN': '搜索来源' },
+  'marketplace.source.search-clear': { en: 'Clear source search', 'zh-CN': '清除来源搜索' },
   'marketplace.source.empty': { en: 'No sources yet', 'zh-CN': '暂无商店来源' },
   'marketplace.source.no-matches': { en: 'No matching sources', 'zh-CN': '没有匹配的来源' },
   'marketplace.source.more-actions': { en: 'More source actions', 'zh-CN': '更多来源操作' },
