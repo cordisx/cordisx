@@ -6,7 +6,7 @@
 
 页面 mount 是 trusted-local renderer code，不是进程或安全沙箱；插件访问 Platform/Agent 等服务仍须经过现有权限系统。
 
-插件导出 Schemastery `Config` 与 `configApplies = 'restart'`。`demoValue` 是 1–64 字符的真实用户选项，默认值为 `CordisX`，用于受控设置页面内输入框的初始值；保存后只重建本插件 fiber。页面内对输入框的临时编辑不会绕过 Host 配置 writer。
+插件导出 Schemastery `Config` 与 `configApplies = 'plugin-restart'`。`demoValue` 是 1–64 字符的真实用户选项，默认值为 `CordisX`，用于受控设置页面内输入框的初始值；保存后只重建本插件 fiber。页面内对输入框的临时编辑不会绕过 Host 配置 writer。
 
 从仓库根目录运行：
 

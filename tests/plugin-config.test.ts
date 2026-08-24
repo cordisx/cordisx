@@ -21,6 +21,7 @@ import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import {
   ConfigRendererRegistry,
   PluginConfigurationRegistry,
+  moduleConfigApplies,
 } from '../packages/cli/src/renderer/configuration.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
@@ -114,6 +115,42 @@ describe('plugin config persistence', () => {
 })
 
 describe('plugin config registry', () => {
+  it('normalizes the closed v1 restart spelling and preserves explicit v2 application planes', () => {
+    expect(moduleConfigApplies(undefined)).toBe('plugin-restart')
+    expect(moduleConfigApplies({ configApplies: 'restart' })).toBe('plugin-restart')
+    expect(moduleConfigApplies({ configApplies: 'live' })).toBe('live')
+    expect(moduleConfigApplies({ configApplies: 'plugin-restart' })).toBe('plugin-restart')
+    expect(moduleConfigApplies({ configApplies: 'service-restart' })).toBe('service-restart')
+    expect(moduleConfigApplies({ configApplies: 'app-restart' })).toBe('app-restart')
+    expect(() => moduleConfigApplies({ configApplies: 'future' as never })).toThrow('must be live')
+  })
+
+  it('keeps an app-restart candidate out of the current settings snapshot until process restart', () => {
+    const registry = new PluginConfigurationRegistry()
+    registry.register({
+      identity: { id: 'example', source: 'file:///example.ts' },
+      applies: 'app-restart', raw: { label: 'active' }, revision: 3, writable: true,
+    })
+    const watcher = vi.fn()
+    registry.watch('example', watcher)
+    const first = registry.stage('example', 3, [{ op: 'set', path: ['label'], value: 'next' }])
+    registry.commitForAppRestart('example', 4, first)
+    expect(registry.get('example')).toEqual({ label: 'active' })
+    expect(registry.descriptor('example', 'en')).toMatchObject({
+      applies: 'app-restart', revision: 4, lastGoodRevision: 3, value: { label: 'next' },
+    })
+    expect(watcher).not.toHaveBeenCalled()
+
+    const second = registry.stage('example', 4, [{ op: 'set', path: ['extra'], value: true }])
+    registry.commitForAppRestart('example', 5, second)
+    expect(registry.get('example')).toEqual({ label: 'active' })
+    expect(registry.descriptor('example', 'en')).toMatchObject({
+      revision: 5, lastGoodRevision: 3, value: { label: 'next', extra: true },
+    })
+    expect(watcher).not.toHaveBeenCalled()
+    registry.dispose()
+  })
+
   it('keeps candidate configuration private and flips the Manager projection once', () => {
     const activation = (revision: number, moduleGeneration: string): CordisXPluginActivationRecordV1 => ({
       $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
@@ -132,7 +169,7 @@ describe('plugin config registry', () => {
     const registry = new PluginConfigurationRegistry(visibility)
     registry.register({
       identity: { id: 'example', source: 'file:///old' }, moduleGeneration: 'example-1',
-      applies: 'restart', raw: { value: 'old' }, revision: 1, writable: true,
+      applies: 'plugin-restart', raw: { value: 'old' }, revision: 1, writable: true,
     })
     let notifications = 0
     registry.subscribe(() => { notifications += 1 })
@@ -145,7 +182,7 @@ describe('plugin config registry', () => {
     const candidateView = visibility.view(candidateContext)
     registry.register({
       identity: { id: 'example', source: 'file:///new' }, moduleGeneration: 'example-2', candidateView,
-      applies: 'restart', raw: { value: 'new' }, revision: 1, writable: true,
+      applies: 'plugin-restart', raw: { value: 'new' }, revision: 1, writable: true,
     })
     expect(registry.get('example')).toEqual({ value: 'old' })
     expect(registry.get('example', candidateView)).toEqual({ value: 'new' })
@@ -207,7 +244,7 @@ describe('plugin config registry', () => {
     expect(() => registry.register({
       identity: { id: 'async', source: 'file:///async.ts' },
       schema: { '~standard': { version: 1, vendor: 'test', validate: async value => ({ value }) } },
-      applies: 'restart',
+      applies: 'plugin-restart',
       raw: {},
       revision: 0,
       writable: true,
@@ -219,7 +256,7 @@ describe('plugin config registry', () => {
     expect(() => registry.register({
       identity: { id: 'secret-default', source: 'file:///secret.ts' },
       schema: Schema.object({ apiKey: Schema.string().default('leak').role('secret') }),
-      applies: 'restart',
+      applies: 'plugin-restart',
       raw: {},
       revision: 0,
       writable: true,
@@ -227,7 +264,7 @@ describe('plugin config registry', () => {
     expect(() => registry.register({
       identity: { id: 'lazy', source: 'file:///lazy.ts' },
       schema: Schema.lazy(() => Schema.object({ value: Schema.string() })),
-      applies: 'restart',
+      applies: 'plugin-restart',
       raw: {},
       revision: 0,
       writable: true,

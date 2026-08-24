@@ -865,7 +865,11 @@ export interface CordisXRoutes extends CordisXPageNavigation {
   register<Outlet extends CordisXOutletName>(definition: CordisXRouteDefinition<Outlet>): Disposable<void | Promise<void>>
 }
 
-export type CordisXConfigApplies = 'live' | 'restart'
+/** Canonical configuration-v2 application plane exposed by runtime snapshots. */
+export type CordisXConfigApplies = 'live' | 'plugin-restart' | 'service-restart' | 'app-restart'
+
+/** Closed v1 module spelling accepted only as a compatibility input. */
+export type CordisXConfigAppliesInput = CordisXConfigApplies | 'restart'
 
 export interface CordisXStandardSchemaResult<T = unknown> {
   readonly value?: T
@@ -887,7 +891,7 @@ export interface CordisXStandardSchema<T = unknown> {
 export interface CordisXPluginSettings {
   /** Return the calling plugin's current normalized, immutable config snapshot. */
   get<T = unknown>(): T
-  /** Observe committed live snapshots. Restart mode recreates the owning fiber instead. */
+  /** Observe committed live snapshots. Restart modes never publish a false live update. */
   watch<T = unknown>(listener: (value: T) => void): Disposable<void>
 }
 
@@ -956,7 +960,7 @@ export interface CordisXPluginModule {
   readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly Config?: CordisXStandardSchema
-  readonly configApplies?: CordisXConfigApplies
+  readonly configApplies?: CordisXConfigAppliesInput
   readonly apply?: (ctx: Context, config: unknown) => unknown
   readonly default?: unknown
 }

@@ -524,15 +524,19 @@ async function start(
       }, controller.generationView)
     }
     const configSchema = moduleConfigSchema(controller.item.module)
+    const configApplies = moduleConfigApplies(controller.item.module)
     configuration.register({
       identity: controller.identity,
       moduleGeneration: moduleGenerationOf(controller),
       ...(controller.generationView === undefined ? {} : { candidateView: controller.generationView }),
       ...(configSchema === undefined ? {} : { schema: configSchema }),
-      applies: moduleConfigApplies(controller.item.module),
+      applies: configApplies,
       raw: controller.item.config,
       revision: controller.item.revision,
-      writable: configBridge !== undefined && controller.item.enabled && controller.item.module !== undefined,
+      writable: configBridge !== undefined
+        && controller.item.enabled
+        && controller.item.module !== undefined
+        && configApplies !== 'service-restart',
     })
   }
   const unregisterController = (controller: PluginController): void => {
@@ -980,6 +984,9 @@ async function start(
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
       if (configBridge === undefined) throw new Error('plugin configuration writer is unavailable in this launcher mode')
       const descriptor = configuration.descriptor(id, i18nService?.getSnapshot().locale ?? 'en')
+      if (descriptor.applies === 'service-restart') {
+        throw new Error('service-restart configuration requires an owning launcher service restart handler')
+      }
       const candidate = configuration.stage(id, expectedRevision, operations)
       const staged = await configBridge.stage(controller.identity, expectedRevision, candidate.raw)
       let candidateMounted = false
@@ -988,7 +995,7 @@ async function start(
           && controller.item.module !== undefined
           && !blockedPlugins.has(id)
           && requiredBlockReason(controller) === undefined
-        if (descriptor.applies === 'restart' && mayMount) {
+        if (descriptor.applies === 'plugin-restart' && mayMount) {
           try {
             await applyRestartCandidate(controller, candidate)
             candidateMounted = true
@@ -1007,7 +1014,11 @@ async function start(
           }
         }
         const committed = await configBridge.commit(controller.identity, staged.candidateRevision)
-        configuration.commit(id, committed.revision, candidate)
+        if (descriptor.applies === 'app-restart') {
+          configuration.commitForAppRestart(id, committed.revision, candidate)
+        } else {
+          configuration.commit(id, committed.revision, candidate)
+        }
         notify()
       } catch (error) {
         if (candidateMounted) {

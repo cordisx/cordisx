@@ -104,7 +104,7 @@ export const Config = Schema.object({
     }),
 })
 
-export const configApplies = 'restart'
+export const configApplies = 'plugin-restart'
 
 function configuredProviderIds(config: Config): readonly string[] | undefined {
   const providerIds = [...new Set(config.providerIds)]

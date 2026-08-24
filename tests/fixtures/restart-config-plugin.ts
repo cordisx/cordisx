@@ -7,7 +7,7 @@ export const Config = Schema.object({
     .description('Restart label'),
 })
 
-export const configApplies = 'restart'
+export const configApplies = 'plugin-restart'
 
 interface FixtureState {
   restartApply: string[]

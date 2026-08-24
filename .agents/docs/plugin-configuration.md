@@ -3,7 +3,8 @@
 ## Delivered contract and order
 
 The host implements the configuration-v1 contract merged in
-`cordisx-protocol#19` (`d3b503e`). Delivery order is fixed:
+`cordisx-protocol#19` (`d3b503e`) and the explicit configuration-plane v2
+contract merged in `cordisx-protocol#34` (`20053fb`). Delivery order is fixed:
 
 1. protocol schemas, conformance, and security boundary;
 2. launcher persistence and renderer runtime lifecycle;
@@ -19,8 +20,26 @@ work. A feature branch from another task is not an integration base.
 
 Plugin modules may export `Config`, any synchronous Standard Schema validator.
 CordisX validates it before the first `apply(ctx, config)` and before every
-write. A module may additionally export `configApplies` as `live` or `restart`;
-the default is `restart`.
+write. A module may additionally export `configApplies` as `live`,
+`plugin-restart`, `service-restart`, or `app-restart`; the default is
+`plugin-restart`. The closed v1 spelling `restart` is accepted only as a
+compatibility input and normalizes to `plugin-restart` before any Manager or
+runtime projection.
+
+## Configuration planes
+
+Launcher/startup configuration is frozen for one application process. The
+Codex executable, debug port, selected profile, launch environment, and other
+process-start inputs remain owned by CLI parsing and launcher validation. They
+are not a Manager global-settings document and cannot be mutated in the
+current process. Removing the top-level Settings page removes no parser,
+startup snapshot, or redacted diagnostic. A future editor may only persist an
+explicit app-restart candidate.
+
+Runtime configuration appears in the owning plugin detail beside that
+plugin's permissions. Provider configuration belongs to the CLIProxy plugin;
+there is no global Providers category. Marketplace source management belongs
+to the Plugin Store workflow rather than a general settings form.
 
 Schemastery is the preferred complete implementation. Its Standard Schema
 validator supplies defaults and validation, while its schema nodes supply the
@@ -42,12 +61,17 @@ does not change the configuration-v1 protocol or let plugins select a UI
 library component directly.
 
 `ctx.settings.get()` and `ctx.settings.watch()` expose only the calling
-plugin's current immutable snapshot. A live write commits under the launcher
-revision fence and then publishes one snapshot without calling `apply` again.
-A restart write stages the candidate, recreates only the owning plugin fiber,
-and commits success only after the new fiber is active. Blocked plugins accept
-a validated write without mounting and restore with the latest committed
-value.
+plugin's current immutable snapshot. A `live` write commits under the launcher
+revision fence and publishes one snapshot without calling `apply` again. A
+`plugin-restart` write stages the candidate, recreates only the owning plugin
+fiber, and commits success only after the new fiber is active. An
+`app-restart` write persists the candidate but leaves the current fiber and
+watchers unchanged; Manager reports the new revision separately from the
+current-process `lastGoodRevision`. `service-restart` is writable only when an
+owning launcher service handler is registered; the renderer-only runtime
+reports it read-only instead of substituting a plugin restart. Blocked plugins
+accept a validated live/plugin candidate without mounting and restore with the
+latest committed value.
 
 `ctx.configRenderers.register()` accepts exactly one selector: Schemastery
 role, exact field path, or an owner-bounded namespace. The registration and
@@ -68,12 +92,14 @@ section without rewriting unrelated configuration. Every candidate records
 its expected revision and generation. A mismatch returns conflict and performs
 no validation, runtime change, retry, or overwrite.
 
-The committed `config` and revision are always the durable last-good pair. A
+The committed `config` and revision are the durable next-start pair. A
 candidate is staged separately. Live mode commits it before notification.
-Restart mode mounts it first, commits only after the candidate fiber is active,
-and otherwise removes the candidate and remounts last-good. A failed last-good
-remount leaves the plugin failed and reports rollback failure. A renderer
-generation disposal cancels queued work and rejects late bridge results.
+Plugin-restart mode mounts it first, commits only after the candidate fiber is
+active, and otherwise removes the candidate and remounts last-good.
+App-restart mode commits persistence while retaining the current process value
+and active revision until a complete restart. A failed last-good remount leaves
+the plugin failed and reports rollback failure. A renderer generation disposal
+cancels queued work and rejects late bridge results.
 
 An abrupt launcher/process crash can leave a staged candidate record after its
 owner token is gone. The active `config` and revision still remain last-good and
@@ -100,11 +126,13 @@ does not give an ordinary plugin a host configuration writer.
 
 ## Validation matrix
 
-Required automated coverage includes legacy-to-profile migration, concurrent
-CAS conflict, atomic persistence failure, candidate abort, live publication,
-restart success, restart failure plus last-good recovery, rollback failure,
-secret redaction/refusal, blocked restore, renderer precedence, renderer throw
-fallback, and registration/mount cleanup on block, restart, generation replace,
-and dispose. The release gate also requires the full check/build/audit/diff
-suite and an isolated real `app://` smoke that edits one live and one restart
-field and observes only the owning fiber lifecycle.
+Required automated coverage includes legacy `restart` normalization,
+legacy-to-profile migration, concurrent CAS conflict, atomic persistence
+failure, candidate abort, live publication, plugin-restart success/failure and
+last-good recovery, app-restart staging without current-fiber publication,
+unbound service-restart refusal, rollback failure, secret redaction/refusal,
+blocked restore, renderer precedence, renderer throw fallback, and
+registration/mount cleanup on block, restart, generation replace, and dispose.
+The release gate also requires the full check/build/audit/diff suite and an
+isolated real `app://` smoke that verifies live, plugin-restart, and staged
+app-restart labels without creating a global configuration category.

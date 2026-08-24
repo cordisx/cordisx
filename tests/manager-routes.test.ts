@@ -35,7 +35,7 @@ function snapshot(locale: 'en' | 'zh-CN'): ManagerSnapshot {
     plugins: [{
       id: 'demo', source: 'file:///plugins/demo/index.ts', name: 'Demo', inject: [], config: {}, status: 'active',
       configuration: {
-        namespace: 'demo', schemaKind: 'none', applies: 'restart', writable: false,
+        namespace: 'demo', schemaKind: 'none', applies: 'plugin-restart', writable: false,
         revision: 0, lastGoodRevision: 0, value: {}, fields: [], secrets: [],
       },
     }],

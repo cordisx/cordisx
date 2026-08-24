@@ -203,7 +203,7 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(bundledPlugin?.readme).toContain('Every model is identified by both `providerId` and `modelId`')
     expect(bundledPlugin?.configuration).toMatchObject({
       schemaKind: 'schemastery',
-      applies: 'restart',
+      applies: 'plugin-restart',
       writable: true,
       value: {},
     })

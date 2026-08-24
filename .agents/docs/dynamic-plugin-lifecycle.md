@@ -429,7 +429,7 @@ the package.
 
 Dynamic activation wraps the merged plugin configuration contract; it does not
 replace or flatten it. Agent Trace remains the concrete regression fixture:
-its exported Schemastery `Config` keeps `configApplies = restart`, the
+its exported Schemastery `Config` keeps `configApplies = plugin-restart`, the
 `mode` choices `live`/`historical`/`fixture`, `historyPageSize` default 100 with
 25–500 step 25, and `timelineWindowSize` default 500 with 50–500 step 50. The
 existing package README plus English and Simplified Chinese labels/descriptions

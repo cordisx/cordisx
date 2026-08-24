@@ -10,7 +10,14 @@ interface RuntimeHandle {
     plugins: readonly {
       id: string
       status: string
-      configuration: { revision: number; applies: string; fields: readonly { path: readonly string[]; role?: string }[] }
+      configuration: {
+        revision: number
+        lastGoodRevision: number
+        applies: string
+        writable: boolean
+        value: unknown
+        fields: readonly { path: readonly string[]; role?: string }[]
+      }
     }[]
   }
   updatePluginConfig(id: string, expectedRevision: number, operations: readonly {
@@ -55,6 +62,20 @@ async function boot(): Promise<{
         config: { label: 'good' },
         revision: 0,
       },
+      {
+        id: 'app-restart-config',
+        entry: path.join(root, 'tests/fixtures/app-restart-config-plugin.ts'),
+        enabled: true,
+        config: { label: 'active' },
+        revision: 0,
+      },
+      {
+        id: 'service-restart-config',
+        entry: path.join(root, 'tests/fixtures/service-restart-config-plugin.ts'),
+        enabled: true,
+        config: { endpoint: 'local' },
+        revision: 0,
+      },
     ],
   }
   const token = 'a'.repeat(64)
@@ -69,6 +90,8 @@ async function boot(): Promise<{
   const bridge = new Map<string, BridgeState>([
     ['live-config', { revision: 0, config: { timeout: 30 } }],
     ['restart-config', { revision: 0, config: { label: 'good' } }],
+    ['app-restart-config', { revision: 0, config: { label: 'active' } }],
+    ['service-restart-config', { revision: 0, config: { endpoint: 'local' } }],
   ])
   const failCommit = new Set<string>()
   ;(dom.window as unknown as Record<string, unknown>).__cordisxConfigRequestV1 = (payload: string) => {
@@ -120,6 +143,29 @@ async function boot(): Promise<{
 }
 
 describe('plugin config runtime', () => {
+  it('stages app-restart values without mutating the current fiber and refuses unbound service restarts', async () => {
+    const { dom, runtime, bridge } = await boot()
+    const appState = (dom.window as unknown as {
+      __cordisxAppRestartConfigFixture: { applyValues: string[]; watchedValues: string[] }
+    }).__cordisxAppRestartConfigFixture
+    expect(appState).toEqual({ applyValues: ['active'], watchedValues: [] })
+
+    await runtime.updatePluginConfig('app-restart-config', 0, [{ op: 'set', path: ['label'], value: 'next-launch' }])
+    expect(bridge.get('app-restart-config')).toMatchObject({ revision: 1, config: { label: 'next-launch' } })
+    expect(appState).toEqual({ applyValues: ['active'], watchedValues: [] })
+    expect(runtime.snapshot().plugins.find(plugin => plugin.id === 'app-restart-config')?.configuration).toMatchObject({
+      applies: 'app-restart', revision: 1, lastGoodRevision: 0, value: { label: 'next-launch' }, writable: true,
+    })
+
+    const service = runtime.snapshot().plugins.find(plugin => plugin.id === 'service-restart-config')?.configuration
+    expect(service).toMatchObject({ applies: 'service-restart', revision: 0, lastGoodRevision: 0, writable: false })
+    await expect(runtime.updatePluginConfig('service-restart-config', 0, [
+      { op: 'set', path: ['endpoint'], value: 'remote' },
+    ])).rejects.toThrow('requires an owning launcher service restart handler')
+    expect(bridge.get('service-restart-config')).toMatchObject({ revision: 0, config: { endpoint: 'local' } })
+    await runtime.dispose()
+  })
+
   it('publishes live config without apply and restarts only the owning fiber', async () => {
     const { dom, runtime, bridge } = await boot()
     const global = dom.window as unknown as {

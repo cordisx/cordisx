@@ -20,7 +20,7 @@ function snapshot(status: ManagerPluginStatus = 'active'): ManagerSnapshot {
       id: 'base', source: 'https://plugins.example/base', name: 'Base Plugin', description: 'Keeps local work in sync.', inject: [], config: {}, status,
       ...(status === 'failed' ? { error: 'entry module crashed' } : {}),
       configuration: {
-        namespace: 'base', schemaKind: 'none', applies: 'restart', writable: true,
+        namespace: 'base', schemaKind: 'none', applies: 'plugin-restart', writable: true,
         revision: 0, lastGoodRevision: 0, value: {}, fields: [], secrets: [],
       },
       package: {

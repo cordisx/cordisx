@@ -76,7 +76,7 @@ describe('settings tab demo bundle', () => {
       status: 'active',
       configuration: expect.objectContaining({
         schemaKind: 'schemastery',
-        applies: 'restart',
+        applies: 'plugin-restart',
         fields: [expect.objectContaining({
           path: ['demoValue'], label: 'Demo value', value: 'CordisX', min: 1, max: 64,
         })],

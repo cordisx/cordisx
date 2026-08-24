@@ -5,7 +5,7 @@ import type {} from '../../../packages/cli/src/contracts.js'
 export const name = 'hello-toolbar'
 export const inject = ['i18n', 'commands', 'slots']
 export const Config = Schema.object({})
-export const configApplies = 'restart'
+export const configApplies = 'plugin-restart'
 
 interface Messages {
   action: undefined

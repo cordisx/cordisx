@@ -24,7 +24,7 @@ function descriptor(
   registry.register({
     identity: { id, source: `file:///examples/plugins/${id}/index.ts` },
     schema: schema as unknown as CordisXStandardSchema,
-    applies: 'restart',
+    applies: 'plugin-restart',
     raw,
     revision: 0,
     writable: true,
@@ -34,7 +34,7 @@ function descriptor(
 
 describe('UI demo Config Schemas', () => {
   it('projects the slot showcase session option with defaults, bounds, i18n, and restart application', () => {
-    expect(slotShowcaseConfigApplies).toBe('restart')
+    expect(slotShowcaseConfigApplies).toBe('plugin-restart')
     expect(SlotShowcaseConfig({})).toEqual({ sessionId: '' })
     expect(SlotShowcaseConfig({ sessionId: 'local:01a03050-bce7-7f03-99b0-a2110cac19c5' })).toEqual({
       sessionId: 'local:01a03050-bce7-7f03-99b0-a2110cac19c5',
@@ -44,7 +44,7 @@ describe('UI demo Config Schemas', () => {
 
     const en = descriptor('slot-showcase', SlotShowcaseConfig, {}, 'en')
     const zh = descriptor('slot-showcase', SlotShowcaseConfig, {}, 'zh-CN')
-    expect(en).toMatchObject({ schemaKind: 'schemastery', applies: 'restart' })
+    expect(en).toMatchObject({ schemaKind: 'schemastery', applies: 'plugin-restart' })
     expect(en.fields).toEqual([
       expect.objectContaining({
         path: ['sessionId'],
@@ -61,7 +61,7 @@ describe('UI demo Config Schemas', () => {
   })
 
   it('projects the settings tab demo value with a real default, range, i18n, and restart application', () => {
-    expect(settingsTabDemoConfigApplies).toBe('restart')
+    expect(settingsTabDemoConfigApplies).toBe('plugin-restart')
     expect(SettingsTabDemoConfig({})).toEqual({ demoValue: 'CordisX' })
     expect(SettingsTabDemoConfig({ demoValue: 'Configured demo' })).toEqual({ demoValue: 'Configured demo' })
     expect(() => SettingsTabDemoConfig({ demoValue: '' })).toThrow()
@@ -70,7 +70,7 @@ describe('UI demo Config Schemas', () => {
 
     const en = descriptor('settings-tab-demo', SettingsTabDemoConfig, {}, 'en')
     const zh = descriptor('settings-tab-demo', SettingsTabDemoConfig, {}, 'zh-CN')
-    expect(en).toMatchObject({ schemaKind: 'schemastery', applies: 'restart' })
+    expect(en).toMatchObject({ schemaKind: 'schemastery', applies: 'plugin-restart' })
     expect(en.fields).toEqual([
       expect.objectContaining({
         path: ['demoValue'],
@@ -85,9 +85,9 @@ describe('UI demo Config Schemas', () => {
   })
 
   it('declares hello-toolbar as an explicit zero-field Schemastery configuration', () => {
-    expect(helloToolbarConfigApplies).toBe('restart')
+    expect(helloToolbarConfigApplies).toBe('plugin-restart')
     expect(HelloToolbarConfig({})).toEqual({})
     const snapshot = descriptor('hello-toolbar', HelloToolbarConfig, {}, 'en')
-    expect(snapshot).toMatchObject({ schemaKind: 'schemastery', applies: 'restart', fields: [] })
+    expect(snapshot).toMatchObject({ schemaKind: 'schemastery', applies: 'plugin-restart', fields: [] })
   })
 })

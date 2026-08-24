@@ -194,7 +194,7 @@ describe('renderer bundle', () => {
         description: expect.stringContaining('这是 CordisX 的结构化 UI 端到端演示插件'),
         configuration: expect.objectContaining({
           schemaKind: 'schemastery',
-          applies: 'restart',
+          applies: 'plugin-restart',
           fields: [expect.objectContaining({
             path: ['sessionId'], label: 'Native session ID', value: sessionId, max: 128,
           })],
