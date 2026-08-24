@@ -1,24 +1,28 @@
 # CordisX Channel Runtime
 
 Launcher-side, host-neutral Channel core and local simulator. This package is
-private while the Node service loader, production store, interactive Channel
-Manager page, and real platform adapters are still being delivered.
+private while lifecycle-coordinator service orchestration, production
+policy/gateway/store adapters, credentials, and real platform adapters are
+still being delivered.
 
 ## Status
 
 | Area | Status | Evidence or boundary |
 | --- | --- | --- |
-| Channel identity, sourced input, binding, snapshot, Host config/descriptor, and manifest v3 | implemented | `cordisx-protocol#21` / `e4c3a15` |
+| Channel identity, sourced input, binding, snapshot, Host config/descriptor, and package-v3/manifest-v4 service declaration | implemented | `cordisx-protocol#21` / `e4c3a15`, followed by formal package/manifest revisions |
 | Launcher-only connection/route/retry/rate config parser and redacted Manager descriptor generator | verified | focused configuration compliance tests; `secretRef` never enters the result |
+| Shared Host service-config contract | verified | maps the closed manifest `restart` declaration to `service-restart`, uses `standard/renderable=false`, preserves opaque handles across non-secret CAS updates, and redacts values through the #107 narrow API |
 | Explicit no-config service declaration | verified | `kind=none` returns no descriptor or placeholder form |
 | Host-neutral task gateway, JSON durable store, inbox/outbox, retry, binding, audit, generation fencing, and last-good activation | implemented | this package |
 | Local simulator create/query/open/continue/followup/steer/interrupt/archive/restore | verified | `tests/channel-runtime.integration.test.ts` |
 | Duplicate event, restart recovery, retry/backoff, permission denial, descriptor redaction, and generation disposal | verified | `tests/channel-runtime.integration.test.ts` |
 | Completion/failure/approval/reply outbox delivery handles | implemented; completion/reply verified | automated Agent notification subscription and approval resolution remain planned |
 | Node Cordis `channel` service connection list, sourced-message subscription, and queued send | verified | source-bound service integration test |
+| Immutable launcher service artifact and authority-bound loader | verified | `tests/channel-service-loader.test.ts`; source entry validation, bundle/digest/store readback, exact service authority, activation, and generation disposal |
 | Cross-plugin subscription across launcher restart | experimental | current subscription is explicitly `live-experimental`; durable consumer checkpoints are not implemented |
-| Launcher manifest-v3 module loader, config writer/restart orchestration, and production policy/secret/store adapters | planned | no package entry is loaded and the credential broker is unavailable |
-| Dedicated Channel Manager Settings page and session header projection | planned | a safe descriptor exists, but renderer receives no Channel runtime/config object |
+| Launcher lifecycle-coordinator orchestration, config writer/restart, and production policy/secret/store adapters | planned | the loader exists, but normal launcher startup does not yet activate service entries and the credential broker is unavailable |
+| Channel Manager data plane and body renderer | experimental | built-in `cordisx:channel` B navigation/route/standard-page metadata is verified in isolated CDP and the Host body renderer with a safe simulator projection; current `manager.content` DOM mount and live launcher projection/writes are unavailable |
+| Session header projection | planned | no structured Channel status/open/share contribution is registered yet |
 | Feishu/Lark, WeCom, and WeChat Service Account adapters | planned | no credential, developer app, public webhook, or deployment is claimed |
 | Personal WeChat client automation | unavailable | reverse-engineered clients and unauthorized hooks are excluded |
 
@@ -34,17 +38,18 @@ schemes, and plaintext secret-like fields. It covers connections, route/user/
 group policy, provider/model/profile/workspace selectors, notifications,
 retry/rate/concurrency/backlog, and attachment limits.
 
-`projectChannelServiceConfig()` accepts an exact manifest-v3 declaration. A
+`projectChannelServiceConfig()` accepts an exact Host service configuration declaration. A
 Host-configured service produces
 `cordisx.channel-service-config-descriptor/v1`; every connection loses
 `secretRef` and gains only `secretState`. A `kind=none` service produces no
 descriptor and rejects a supplied placeholder config. This descriptor is for a
-dedicated Host-owned Channel Settings page, not the ordinary renderer plugin
+dedicated Host-owned Channel Manager body, not the ordinary renderer plugin
 form. Renderer-only preferences in a separate module should use Schemastery
 `Config`/`configApplies` from protocol #19 and Host #60.
 
-The parser/projection are implemented and verified. Manifest module loading,
-persistence/revision writes, service-fiber restart, Manager action wiring,
+The parser/projection, shared Host service-config contract, CAS/restart
+conformance, and immutable package service loader are implemented and verified.
+Normal lifecycle-coordinator handler registration, Manager action wiring,
 credential resolution, full retry policy application, and rate-limit
 enforcement remain planned; this package does not claim that validated values
 are already operational.
@@ -145,7 +150,7 @@ external account, secret, public callback, or network.
 Run the isolated suite:
 
 ```sh
-npm test -- --run tests/channel-runtime.integration.test.ts
+npm test -- --run tests/channel-runtime.integration.test.ts tests/channel-service-loader.test.ts tests/channel-plugin.integration.test.ts
 ```
 
 Run the owning repository gate before delivery:

@@ -12,10 +12,12 @@ import {
   loadStagedPluginPackage,
   removeStagedPluginPackage,
   stagedPluginModulePath,
+  stagedPluginServiceModulePath,
 } from '../plugin-package.js'
 import type {
   HostPermissionReviewId,
   HostPermissionReviewToken,
+  HostServiceConfigurationDeclaration,
   PackageActivationTuple,
   PackageCandidatePlan,
   PackageCandidateToken,
@@ -172,6 +174,20 @@ export interface RuntimeModuleAccess {
   readonly packageIdentity: PackageIdentity
   readonly artifactDirectory: string
   readonly runtimeEntry: './module.js'
+}
+
+export interface RuntimeServiceModuleAccess {
+  readonly packageIdentity: PackageIdentity
+  readonly pluginIdentity: {
+    readonly source: string
+    readonly pluginId: string
+    readonly generation: string
+  }
+  readonly serviceId: string
+  readonly serviceKind: 'channel-adapter'
+  readonly configuration: HostServiceConfigurationDeclaration
+  readonly artifactDirectory: string
+  readonly runtimeEntry: `./services/${string}.mjs`
 }
 
 export interface RollbackPlan {
@@ -512,6 +528,37 @@ export class PackageLifecycleAuthority {
       packageIdentity: { pluginId: item.id, version: item.version, integrity: item.digest },
       artifactDirectory: path.dirname(modulePath),
       runtimeEntry: './module.js',
+    }
+  }
+
+  async resolveRuntimeService(
+    access: CandidateAccess,
+    boundary: PackageResolutionBoundary,
+    pluginId: string,
+    serviceId: string,
+  ): Promise<RuntimeServiceModuleAccess> {
+    const plan = await this.resolveCandidate(access, boundary)
+    if (!plan.affectedPluginIds.includes(pluginId)) {
+      throw new PackageLifecycleError('plugin-outside-closure', `${pluginId} is outside the Host closure`)
+    }
+    const item = plan.after.plugins.find(plugin => plugin.id === pluginId)
+    if (item === undefined) throw new PackageLifecycleError('package-removed', `${pluginId} has no candidate artifact`)
+    const staged = await loadStagedPluginPackage(this.options.homeDir, item.digest)
+    const service = staged.serviceModules.find(module => module.declaration.id === serviceId)
+    if (service === undefined) throw new PackageLifecycleError('service-not-found', `${pluginId}:${serviceId} is not a staged service`)
+    const servicePath = stagedPluginServiceModulePath(this.options.homeDir, item.digest, serviceId)
+    return {
+      packageIdentity: { pluginId: item.id, version: item.version, integrity: item.digest },
+      pluginIdentity: {
+        source: staged.identitySource,
+        pluginId: item.id,
+        generation: item.moduleGeneration,
+      },
+      serviceId,
+      serviceKind: 'channel-adapter',
+      configuration: service.declaration.configuration,
+      artifactDirectory: path.dirname(path.dirname(servicePath)),
+      runtimeEntry: `./services/${serviceId}.mjs`,
     }
   }
 

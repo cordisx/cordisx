@@ -43,6 +43,8 @@ const expectedRegistrations = [
   'packages/agent-trace-showcase/src/index.ts|route|session.timeline',
   'packages/cli/scripts/live-smoke.mjs|page|overview',
   'packages/cli/scripts/live-smoke.mjs|route|overview',
+  'packages/cli/src/plugins/channel/index.ts|page|settings',
+  'packages/cli/src/plugins/channel/index.ts|route|settings',
   'packages/cli/src/plugins/cli-proxy-api/index.ts|page|providers.sessions',
   'packages/cli/src/plugins/cli-proxy-api/index.ts|route|providers.sessions',
   'tests/fixtures/generation-base-plugin.ts|page|generation-base',

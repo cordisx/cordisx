@@ -110,16 +110,34 @@ manager/session surfaces; it never owns credentials, webhook/long-connection
 transport, queues, cursors, or retry workers.
 
 The host-neutral core, simulator, and source-bound Node Cordis `channel` service
-are implemented. Manifest-v3 loading and real transports remain planned. The
-launcher-side package now also validates
+are implemented. Plugin-package v3 / plugin-manifest v4 service entries are
+source-validated, bundled for Node, included in the immutable package digest,
+read back from the package store, resolved through the lifecycle authority, and
+activated in a generation/source-bound Channel service context. Normal launcher
+lifecycle orchestration of those service fibers and real transports remain
+planned. The launcher-side package also validates
 `cordisx.channel-service-config/v1` and generates the redacted
 `cordisx.channel-service-config-descriptor/v1`. Connection credential fields are
 restricted to opaque `keychain:` or `host-secret:` references and become only
 readiness state in that descriptor. A service declaring `configuration.kind=none`
 produces no placeholder document or Manager form. This Node service plane is
-separate from renderer plugin Schemastery `Config`/`configApplies`: the future
-Channel page consumes the dedicated descriptor rather than copying transport,
-queue, route, or credential state into ordinary plugin configuration.
+separate from renderer plugin Schemastery `Config`/`configApplies`: the built-in
+Channel renderer module exports no Config and contributes only a structured
+`manager.settings.navigation-items` record plus a same-owner
+`manager.content` route and standard page. The current Manager has not yet
+mounted that B outlet, so real-renderer evidence records the valid data plane
+and unavailable outlet without inventing a visible destination. The internal
+Host body renderer consumes a bounded, redacted Channel Manager projection for
+read-only accounts, routes, composite task bindings, and diagnostics; it never
+receives service configuration, `secretRef`, transports, queues, or credential
+values. Manager B DOM integration, live launcher projection, configuration
+writes, credential actions, and a single launcher-to-Manager simulator
+orchestration remain planned. The Channel config adapter consumes the shared
+launcher service-configuration foundation: the closed manifest `restart`
+declaration maps to `service-restart`, the schema is
+`standard/renderable=false`, revision/generation/owner fencing and last-good
+publication use the shared narrow API, and opaque credential handles are
+preserved only launcher-side across non-secret updates.
 
 Online Chrome DevTools support is opt-in. `--online-devtools` adds `https://chrome-devtools-frontend.appspot.com` to `--remote-allow-origins`; once connected, that origin has full renderer debugging authority for the isolated instance.
 

@@ -98,6 +98,10 @@ import {
   type PluginGenerationTransitionHandle,
   type PluginGenerationView,
 } from './generation-visibility.js'
+import {
+  CordisXChannelManagerService,
+  type ChannelManagerProjectionV1,
+} from './channel-manager.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 
@@ -114,6 +118,7 @@ interface CordisXRuntimeMetadata {
   readonly pluginActivation?: CordisXPluginActivationRecordV1
   readonly initialRegistryEpoch?: number
   readonly generation?: string
+  readonly channelManager?: ChannelManagerProjectionV1
 }
 
 interface PluginController {
@@ -582,6 +587,7 @@ async function start(
   let slotFiber: Fiber | undefined
   let settingsFiber: Fiber | undefined
   let configRendererFiber: Fiber | undefined
+  let channelManagerFiber: Fiber | undefined
   let disposeManager: (() => void) | undefined
   let undeclareManagerOutlet: (() => void) | undefined
   let undeclareManagerContentOutlet: (() => void) | undefined
@@ -1652,6 +1658,8 @@ async function start(
     slotFiber = undefined
     await configRendererFiber?.dispose()
     configRendererFiber = undefined
+    await channelManagerFiber?.dispose()
+    channelManagerFiber = undefined
     await settingsFiber?.dispose()
     settingsFiber = undefined
     await routeFiber?.dispose()
@@ -1783,6 +1791,8 @@ async function start(
     await settingsFiber
     configRendererFiber = ctx.plugin(CordisXConfigRendererService, { registry: configRenderers, console: pluginConsole })
     await configRendererFiber
+    channelManagerFiber = ctx.plugin(CordisXChannelManagerService, metadata.channelManager)
+    await channelManagerFiber
     registrySubscriptions.push(configuration.subscribe(notifyFrom('configuration')))
     platformFiber = ctx.plugin(CordisXPlatformService, { adapter: platformAdapter, broker, console: pluginConsole })
     await platformFiber

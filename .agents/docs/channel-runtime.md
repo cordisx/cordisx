@@ -1,10 +1,11 @@
 # Channel runtime and plugin architecture
 
-Status: approved architecture and delivery contract. This document freezes the
+Status: approved architecture and delivery contract with an implemented local
+productization slice. This document freezes the
 product boundary, identity model, Node/renderer split, security and reliability
 requirements, extension points, dependency order, PR boundaries, and validation
-matrix. It does not by itself claim that a Channel runtime or a real platform
-adapter is implemented.
+matrix. The status tables below distinguish the verified simulator/Host work
+from unavailable real platform adapters.
 
 ## Outcome
 
@@ -38,19 +39,19 @@ that a launcher, renderer, or real platform adapter is available.
 
 ## Audited baseline
 
-The architecture audit was refreshed on 2026-08-24 before this document was
-written.
+The architecture and delivery audit was refreshed on 2026-08-25 against the
+formal remote mains before the productization slice was implemented.
 
 | Area | Current evidence | Status for Channel |
 | --- | --- | --- |
 | Platform identity and operations | `PlatformSessionRef { providerId, remoteSessionId }`; provider-aware model/session list, search, read, create, continue/fork/archive/restore/delete, submit, steer, and interrupt are implemented on `cordisx` main. | implemented and reusable |
 | Provider Fleet | Launcher-owned provider processes, provider-specific persistence, generation fencing, and a token-bound normalized RPC exist. | implemented and reusable; native Desktop current connection remains unavailable |
 | Agent events and delivery | Agent event v2, delivery snapshots, `followup`, `steer`, `inject`, cancellation-before-claim, and generation/owner fencing exist. | implemented and reusable after an explicit Platform-to-Agent binding is added |
-| Permission Broker | Source-bound required/optional declarations, `ask`/`allow`/`deny`, scope checks, audit, and plugin activation reconciliation exist in the renderer runtime. | implemented foundation; Node service authority and policy-store ownership are a gap |
-| Manager Settings Tab and plugin Config | Settings Tab Host #56, configuration protocol #19, Host #60, and the simplified default form #64 are merged. | implemented/reusable; the dedicated Channel page remains planned |
+| Permission Broker | Source-bound required/optional declarations, `ask`/`allow`/`deny`, scope checks, audit, and plugin activation reconciliation exist in the renderer runtime. | implemented foundation; the Channel core has a source/generation-bound broker port, while the production Node policy-store adapter remains planned |
+| Manager navigation and plugin Config | Configuration protocol #19, Host #60, TDesign-aligned Host forms/collections, and Manager navigation core #106 are merged. | Channel B navigation/route/standard-page data plane and bounded Host body renderer implemented; current `manager.content` DOM mount, launcher live projection, and writes remain unavailable |
 | Agent Trace | Fixture, product package, event/delivery lifecycle, and README are merged. | useful notification evidence; not a Channel transport |
-| Node plugin surface | The host-neutral core and source-bound Node Cordis `channel` service are merged, but the launcher still has no manifest service module loader. | core implemented/verified; production service loading unavailable |
-| Mono pins | Audited remote mono main pins host `ace1bb8` and protocol `3a1509b`; this Config compliance slice deliberately advances neither pointer. | verified read-only; use owning main and leave mono unchanged |
+| Node plugin surface | The host-neutral core and source-bound Node Cordis `channel` service exist. Package service entries are now source-validated, bundled, integrity-bound into the immutable package object, authority-projected, imported, activated, and disposed by generation. | loader path implemented/verified with the simulator; lifecycle-coordinator orchestration and production gateway/broker/store wiring remain planned |
+| Mono pins | Mono was audited read-only against its formal remote main before this slice. | deliberately unchanged by this owning-repo delivery |
 
 The current public `turns.submit` input is a plain string. Sending a remote
 message through it would discard Channel provenance. Real Channel ingress is
@@ -407,33 +408,37 @@ conforming public surface.
 
 ## Config Schema compliance audit
 
-This audit was refreshed on 2026-08-24 against plugin configuration protocol
+This audit was refreshed on 2026-08-25 against plugin configuration protocol
 `cordisx-protocol#19`, Host configuration `cordisx#60`, its simplified Manager
-projection `cordisx#64`, and Channel configuration protocol
-`cordisx-protocol#21` (`e4c3a15`).
+projection `cordisx#64`, launcher service configuration Host `cordisx#107`,
+and Channel configuration protocol `cordisx-protocol#21` (`e4c3a15`).
 
 The earlier Channel service declaration carried only `configurationRevision`.
 That was runtime state, not a configuration contract: adapter connections,
 routes, task mappings, retry, and rate options had neither an exact schema nor a
 Manager projection. Manifest v2 is closed and cannot receive a new optional
-field without becoming incompatible with conforming v2 hosts. The protocol gap
-is therefore fixed by manifest v3 rather than an in-place v2 edit.
+field without becoming incompatible with conforming v2 hosts. That gap was
+fixed without changing the closed older document. The current package contract
+is plugin-package v3 plus plugin-manifest v4; it carries the same exact
+Host/no-config service configuration declaration introduced by the Channel
+schema work.
 
 | Configuration axis | Versioned source schema | Manager projection | Current Host status |
 | --- | --- | --- | --- |
-| Node service configuration presence | Every manifest-v3 service declares `configuration.kind=host` with the exact Channel schema and `configApplies=restart`, or `kind=none`. | A `none` service produces no descriptor, empty object, revision, or form. | declaration parser verified; launcher manifest-v3 loader planned |
+| Node service configuration presence | Every manifest-v4 service declares `configuration.kind=host` with the exact Channel schema and closed legacy `configApplies=restart`, or `kind=none`. The Host maps a Channel Node service to the precise `service-restart` plane from #107. | The schema projection is `standard/renderable=false`; a `none` service produces no descriptor, empty object, revision, or form. | declaration parser, Host service-config contract, and immutable launcher service loader verified; normal lifecycle registration remains planned |
 | Adapter connections | Tenant-qualified ref, official adapter kind, enabled state, compatible transport mode, callback alias where required, and optional opaque `secretRef`. | Same non-secret fields plus `secretState`; no reference string. | parser and projection verified; live transports planned |
 | Route/mapping | Route id, connection ref, conversation/user allowlists, group trigger/command prefix, explicit provider/model/profile selector, workspace alias, and notifications. | Same redacted structured values. | schema/parse/projection verified; policy/task-gateway enforcement integration planned |
 | Retry/reliability | Lease, attempt/base/max/age/jitter, account/user/conversation rate, concurrency/backlog, and attachment limits. | Same structured non-secret values. | schema/parse/projection verified; the current core still takes only lease/max-attempt/base-delay constructor options, so complete enforcement is planned |
-| Credential state | Source config accepts only `keychain:` or `host-secret:` references; inline/plaintext fields fail closed. | `missing`, `ready`, or `unavailable` only. | redaction verified; credential broker unavailable |
-| Persistence/application | Exact schema declares `restart`; service config is intended to use candidate, revision CAS, owning-generation restart, and last-good publication. | revision, last-good, generation, writable state. | descriptor verified; launcher writer/restart orchestration planned |
+| Credential state | Source config accepts only `keychain:` or `host-secret:` references; inline/plaintext fields fail closed. | The generic Host descriptor carries only secret field paths/set state; the Channel body projection carries `missing`, `ready`, or `unavailable`; neither carries the reference value. | preservation/redaction verified; credential creation/resolution broker unavailable |
+| Persistence/application | Manifest `restart` is normalized by the Channel Host contract to `service-restart`; the shared #107 API owns revision CAS, generation/owner fencing, restart callback, rollback, and last-good publication. | revision, last-good, generation, `service-restart`, writable state. | contract + shared narrow API verified with an opaque handle; normal launcher handler and Manager writer registration planned |
 
 This configuration does not use a renderer module's `Config` export. A Channel
 transport survives renderer reloads and owns Node queues, cursors, callbacks,
 and credentials, so copying its config into the ordinary plugin form would put
-the lifecycle and secret boundary in the wrong process. The dedicated Channel
-Settings page will consume the redacted service descriptor and invoke narrow
-Host actions. If a package separately has renderer-only product preferences,
+the lifecycle and secret boundary in the wrong process. Its shared Host schema
+projection is explicitly `standard/renderable=false`; the Channel Manager body
+consumes only the redacted service/Manager projection and will invoke narrow
+Host actions after the writer exists. If a package separately has renderer-only product preferences,
 that renderer module should export Schemastery `Config` plus `configApplies` and
 remain an independently identified configuration document.
 
@@ -633,17 +638,27 @@ capability or bypasses the native approval policy.
 
 ## Manager and session UI
 
-Channel management uses the already approved `manager.settings.tabs` and
-`manager.settings.content` mechanism. Its generic Host implementation has
-landed. The Channel package now produces the versioned redacted service config
-descriptor, but the Channel tab/page registration and action wiring have not;
-therefore the descriptor is `implemented/verified` while an interactive Channel
-Manager page remains `planned`. The future package contributes structured tab
-data and a same-owner controlled page mount. CordisX renders the Settings
-header, tabs, icons, selection, keyboard behavior, accessibility, scroll
-ownership, errors, and cleanup.
+Channel management uses the distinct B pair
+`manager.settings.navigation-items` and `manager.content`. The built-in
+`cordisx:channel` renderer bundle contributes one structured navigation record,
+a same-owner `/manager/extensions/channels` route, standard page metadata, and
+a manifest-v4 service declaration. The internal Host Channel Manager body
+renderer owns all body nodes, styles, state indicators, adaptive searchable
+collections, empty states, diagnostics, theme projection, accessibility, and
+cleanup; the plugin receives no header or navigation DOM.
 
-The Channel settings experience contains:
+The data plane is `implemented/verified`: isolated `app://-/index.html` CDP
+evidence proves an active plugin with `schemaKind=none`, valid authorized B
+registration, exact route, standard Host icon/page metadata, and zero metadata
+diagnostics. The same evidence records `manager.content` as unavailable and the
+Channel body as unmounted because the Manager B DOM follow-up has not landed.
+The bounded Host body renderer is verified in integration tests with a safe
+simulator projection, but the user-visible Channel Manager page is `planned`,
+not a connected account manager.
+
+Launcher-to-renderer live snapshot transport, configuration writes,
+reconnect/dead-letter actions, and credential operations remain `planned` or
+`unavailable`. The complete Channel settings experience needs:
 
 1. channels and adapter availability;
 2. accounts and secret-handle readiness;
@@ -656,8 +671,9 @@ The Channel settings experience contains:
 
 The plugin detail README explains setup and official platform constraints.
 `配置管理`, `权限`, `运行状态`, and diagnostics use the existing manager
-hierarchy. No secret value, raw callback body, full user message, or attachment
-path appears in the manager snapshot.
+hierarchy. No `secretRef`, secret value, raw callback body, full user message,
+or attachment path appears in the manager snapshot. The current page has no
+credential input and no generic renderer-to-launcher request bridge.
 
 An active bound session may contribute a structured utility/status action and
 open/share command through the existing `session.header.actions` surface. The
@@ -731,28 +747,31 @@ this plan.
    Channel identities and binding projection, sourced user-input envelope,
    Channel scopes/capabilities, snapshots, compatibility/downgrade behavior,
    source config/redacted descriptor, explicit no-config mode, schemas, vectors,
-   and conformance. Older hosts reject manifest v3.
+   and conformance. Older hosts reject the newer manifest/package versions.
 3. **Node host/core (`cordisx`)**: versioned Host config parser/redacted
-   projection, launcher service registry, Node Cordis
+   projection, immutable launcher service artifact loader/authority, Node Cordis
    `channel` service, source/generation-bound cross-plugin list/subscribe/send,
    shared broker authority, secret handles, durable store, inbox/outbox, task
    gateway, attachment quarantine, simulator adapter, and headless tests.
-   The simulator matrix is mandatory in this PR even though the visible demo is
-   later.
+   The core/simulator and immutable loader are implemented and verified. Formal
+   lifecycle-coordinator orchestration, production policy/gateway/store adapters,
+   credential broker, and full configured restart remain separate follow-ups.
 4. **Platform adapters (`cordisx`)**: independent Feishu/Lark and WeCom package
    PRs based only on official SDK/protocols. They include deterministic mocked
    wire tests and no real credential in fixtures.
-5. **Manager UI/settings (`cordisx`)**: first land the generic Settings Tab host
-   projection if still absent; then add Channel snapshots/actions, structured
-   settings contribution, plugin README/config/permission/runtime/diagnostic
-   surfaces, and `session.header.actions` status/open entry.
-6. **Simulated end-to-end plugin/demo (`cordisx`)**: visible renderer demo over
-   the already verified Node simulator covering real manager and session
-   surfaces without an external account.
+5. **Manager UI/settings (`cordisx`)**: the structured Channel B navigation,
+   route/standard-page metadata, Host-owned body renderer, README, permission
+   manifest, safe simulator projection, and unavailable default are implemented
+   in this slice. The Manager B DOM mount, writable service configuration/actions,
+   and `session.header.actions` status/open entry remain follow-ups.
+6. **Simulated end-to-end plugin/demo (`cordisx`)**: the packaged-service loader
+   and renderer projection/body are each verified locally. A single launcher
+   orchestration that drives both from the same persistent simulator service is
+   still planned and must precede claims of an end-to-end usable plugin.
 7. **Real smoke (`cordisx`)**: opt-in Feishu and WeCom tests only when an
    authorized developer account and credentials are supplied. Public webhook,
    developer registration, app publication, or deployment is never fabricated.
-8. **Mono (`cordisxmono`)**: after every required owning PR is merged and
+8. **Mono (`cordisxmono`)**: only after explicit parent coordination and every required owning PR is merged and
    compatible validation passes, pin exact merged owner commits from a fresh
    mono main. Keep `roadmap update = none` and do not stage unrelated gitlinks.
 
@@ -764,7 +783,7 @@ reviewable. A source branch head is never a final gitlink.
 
 | Layer | Required evidence |
 | --- | --- |
-| Protocol/versioning | Older manifests/hosts reject manifest v3; exact versions, explicit `host`/`none`, closed enums, unknown fields, spoofed source/generation, naked session ids, plain-string Channel input, and secret values fail closed. |
+| Protocol/versioning | Older manifests/hosts reject newer package/manifest versions; exact versions, explicit `host`/`none`, closed enums, unknown fields, spoofed source/generation, naked session ids, plain-string Channel input, and secret values fail closed. |
 | Configuration | Connections, compatible official transport modes, routes/mappings, user/conversation/group policy, provider/model/profile/workspace selectors, notifications, retry/rate/backlog/attachment limits, duplicate/orphan references, revision/last-good, and explicit no-config; `secretRef` is launcher-only and absent from the Manager descriptor/default form. |
 | Identity | Same remote session id across providers, same conversation/user id across accounts/tenants, direct/group/topic/reply semantics, rebind revision/history, and stale binding selection cannot collide. |
 | Creation/query/control | Default and explicit provider/model/profile/workspace; invalid/ambiguous alias; created-plus-initial-turn-failure retention; list/search/read/status/open intent; continue/followup/steer/interrupt/archive/restore. |
@@ -778,10 +797,10 @@ reviewable. A source branch head is never a final gitlink.
 | Secrets/attachments | secret handle only, redacted logs/errors/snapshots/audit, no renderer/config plaintext, size/type/hash/expiry quarantine, unsafe media refusal, and opaque transfer handles. |
 | Simulator phase one | create, continue, completion/failure notification, duplicate inbound event, restart, retry/dead letter, permission denial, approval expiry/deny fixture, binding revision, and generation disposal without a real account. |
 | Adapter conformance | official fixture normalization, direct/group/topic/reply mapping, outbound formatting/limits, token refresh where applicable, platform-specific retry hints, and no unsupported personal-WeChat path. |
-| Manager DOM | CordisX-owned settings header/tab/panel, bounded snapshots, no secret/raw payload, route/binding actions, queue/diagnostics states, keyboard/a11y/focus, block/restore, close/reopen, and cleanup. |
+| Manager data plane and DOM | Current: valid authorized B navigation record, exact `manager.content` route, standard Host page metadata/icon, `schemaKind=none`, unavailable outlet, and no fabricated mount in isolated CDP. Before a user-visible claim: CordisX-owned navigation/header/page/collection DOM, no `secretRef`/secret/raw payload, accounts/routes/composite bindings/diagnostics, keyboard/a11y/focus, close/reopen, and cleanup. Writable actions remain planned. |
 | Session surface | structured Channel status/open/share action only; no arbitrary title DOM/CSS, no native node replacement, correct composite session target, policy hide/restore, and generation cleanup. |
 | Real smoke | exact SDK, CordisX, protocol, adapter, account mode, and app version; authorized account only; one inbound create/continue and one outbound notification; redacted evidence; unavailable features reported honestly. |
-| Release | focused tests, typecheck, build, full `npm run check`, audit, `git diff --check`, normal PR/CI, merged owner SHAs, exact mono gitlinks, no unrelated pointer, and unchanged `roadmap update = none`. |
+| Release | focused tests, typecheck, build, full `npm run check`, audit, `git diff --check`, isolated real `app://-/index.html` smoke, normal PR/CI, and head-fenced owning merge. Mono and roadmap remain untouched by this slice. |
 
 Screenshots complement UI assertions; they do not prove signature verification,
 durability, policy enforcement, or secret isolation. Mock or simulator evidence

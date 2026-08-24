@@ -20,6 +20,7 @@ import {
   type CordisXPluginManifestV1,
 } from '../platform-contracts.js'
 import type { CordisXPluginManifestV4 } from '../permission-contracts.js'
+import type { CordisXPluginServiceDeclarationV4 } from '../permission-contracts.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 } from '../permission-contracts.js'
 import { CapabilityRiskCatalog } from '../capability-risk-catalog.js'
 import { normalizePluginManifestV4 } from '../permission-model-v2.js'
@@ -46,9 +47,15 @@ export interface StagedPluginPackage {
   readonly digest: `sha256:${string}`
   readonly moduleSource: string
   readonly artifactSource: string
+  readonly serviceModules: readonly StagedPluginServiceModule[]
   readonly readme?: string
   /** Stable launcher-issued identity; this is not a real filesystem path. */
   readonly identitySource: string
+}
+
+export interface StagedPluginServiceModule {
+  readonly declaration: CordisXPluginServiceDeclarationV4
+  readonly moduleSource: string
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -254,15 +261,52 @@ async function buildArtifact(root: string, entry: string): Promise<{ readonly mo
   return { moduleSource: moduleOutput.text, artifactSource: artifactOutput.text }
 }
 
-function artifactDigest(manifestText: string, moduleSource: string, artifactSource: string): `sha256:${string}` {
+async function buildServiceArtifact(
+  root: string,
+  declaration: CordisXPluginServiceDeclarationV4,
+): Promise<StagedPluginServiceModule> {
+  const entry = await regularContainedFile(root, declaration.entry, `service ${declaration.id} entry`)
+  const result = await build({
+    entryPoints: [entry],
+    bundle: true,
+    platform: 'node',
+    target: ['node22'],
+    format: 'esm',
+    sourcemap: false,
+    metafile: true,
+    write: false,
+    logLevel: 'silent',
+  })
+  if (result.metafile === undefined) throw new Error(`service ${declaration.id} build produced no dependency metadata`)
+  const inputs = Object.keys(result.metafile.inputs).map(input => input.replaceAll('\\', '/'))
+  if (inputs.some(input => input.includes('node_modules/@deepseek-ai/cordis/'))) {
+    throw new Error(`service ${declaration.id} must not bundle a second @deepseek-ai/cordis runtime`)
+  }
+  const output = result.outputFiles?.[0]
+  if (output === undefined) throw new Error(`service ${declaration.id} build produced no Node artifact`)
+  return Object.freeze({ declaration, moduleSource: output.text })
+}
+
+function artifactDigest(
+  manifestText: string,
+  moduleSource: string,
+  artifactSource: string,
+  serviceModules: readonly StagedPluginServiceModule[] = [],
+): `sha256:${string}` {
   const digest = createHash('sha256')
     .update(manifestText)
     .update('\0')
     .update(moduleSource)
     .update('\0')
     .update(artifactSource)
-    .digest('hex')
-  return `sha256:${digest}`
+  for (const service of [...serviceModules].sort((left, right) => left.declaration.id.localeCompare(right.declaration.id))) {
+    digest.update('\0service\0')
+      .update(JSON.stringify(service.declaration))
+      .update('\0')
+      .update(service.moduleSource)
+  }
+  const value = digest.digest('hex')
+  return `sha256:${value}`
 }
 
 function packageDirectory(homeDir: string, digest: string): string {
@@ -274,6 +318,16 @@ function packageDirectory(homeDir: string, digest: string): string {
 /** Launcher-private ESM entry for initial composition; never include it in renderer snapshots. */
 export function stagedPluginModulePath(homeDir: string, digest: `sha256:${string}`): string {
   return path.join(packageDirectory(homeDir, digest), 'module.js')
+}
+
+/** Host-private Node entry for one manifest-declared service in the immutable package object. */
+export function stagedPluginServiceModulePath(
+  homeDir: string,
+  digest: `sha256:${string}`,
+  serviceId: string,
+): string {
+  if (!PLUGIN_ID.test(serviceId)) throw new Error('plugin service id is invalid')
+  return path.join(packageDirectory(homeDir, digest), 'services', `${serviceId}.mjs`)
 }
 
 async function writeFileSynced(filePath: string, contents: string): Promise<void> {
@@ -294,6 +348,7 @@ async function publishPackage(
   artifactSource: string,
   readme: string | undefined,
   runtimeManifestText?: string,
+  serviceModules: readonly StagedPluginServiceModule[] = [],
 ): Promise<void> {
   const parent = path.join(homeDir, 'packages', 'sha256')
   await mkdir(parent, { recursive: true, mode: 0o700 })
@@ -302,12 +357,15 @@ async function publishPackage(
   try {
     const metadata = await lstat(destination)
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error('existing plugin package target is not a real directory')
-    const [storedManifest, storedModule, storedArtifact] = await Promise.all([
+    const [storedManifest, storedModule, storedArtifact, storedServices] = await Promise.all([
       readFile(path.join(destination, 'manifest.json'), 'utf8'),
       readFile(path.join(destination, 'module.js'), 'utf8'),
       readFile(path.join(destination, 'artifact.js'), 'utf8'),
+      readStoredServiceModules(destination),
     ])
-    if (artifactDigest(storedManifest, storedModule, storedArtifact) !== digest) throw new Error('existing plugin package failed integrity readback')
+    if (artifactDigest(storedManifest, storedModule, storedArtifact, storedServices) !== digest) {
+      throw new Error('existing plugin package failed integrity readback')
+    }
     return
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
@@ -316,12 +374,23 @@ async function publishPackage(
   await mkdir(temporary, { mode: 0o700 })
   let published = false
   try {
+    if (serviceModules.length > 0) await mkdir(path.join(temporary, 'services'), { mode: 0o700 })
     await Promise.all([
       writeFileSynced(path.join(temporary, 'manifest.json'), manifestText),
       writeFileSynced(path.join(temporary, 'module.js'), moduleSource),
       writeFileSynced(path.join(temporary, 'artifact.js'), artifactSource),
       ...(runtimeManifestText === undefined ? [] : [writeFileSynced(path.join(temporary, 'runtime-manifest.json'), runtimeManifestText)]),
       ...(readme === undefined ? [] : [writeFileSynced(path.join(temporary, 'README.md'), readme)]),
+      ...(serviceModules.length === 0 ? [] : [
+        writeFileSynced(
+          path.join(temporary, 'services.json'),
+          `${JSON.stringify(serviceModules.map(service => service.declaration), null, 2)}\n`,
+        ),
+        ...serviceModules.map(service => writeFileSynced(
+          path.join(temporary, 'services', `${service.declaration.id}.mjs`),
+          service.moduleSource,
+        )),
+      ]),
     ])
     await rename(temporary, destination)
     published = true
@@ -332,12 +401,65 @@ async function publishPackage(
         chmod(path.join(destination, 'artifact.js'), 0o444),
         ...(runtimeManifestText === undefined ? [] : [chmod(path.join(destination, 'runtime-manifest.json'), 0o444)]),
         ...(readme === undefined ? [] : [chmod(path.join(destination, 'README.md'), 0o444)]),
+        ...(serviceModules.length === 0 ? [] : [
+          chmod(path.join(destination, 'services.json'), 0o444),
+          ...serviceModules.map(service => chmod(
+            path.join(destination, 'services', `${service.declaration.id}.mjs`),
+            0o444,
+          )),
+          chmod(path.join(destination, 'services'), 0o555),
+        ]),
       ])
       await chmod(destination, 0o555)
     }
   } finally {
     if (!published) await rm(temporary, { recursive: true, force: true })
   }
+}
+
+async function readStoredServiceModules(directory: string): Promise<readonly StagedPluginServiceModule[]> {
+  const declarations = await readFile(path.join(directory, 'services.json'), 'utf8')
+    .then(text => JSON.parse(text) as unknown)
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return []
+      throw error
+    })
+  if (!Array.isArray(declarations)) throw new Error('stored plugin service index is invalid')
+  const seen = new Set<string>()
+  return await Promise.all(declarations.map(async (value, index) => {
+    const declaration = serviceDeclarationFromStored(value, `stored service[${index}]`)
+    if (seen.has(declaration.id)) throw new Error(`duplicate stored service module: ${declaration.id}`)
+    seen.add(declaration.id)
+    const moduleSource = await readFile(path.join(directory, 'services', `${declaration.id}.mjs`), 'utf8')
+    return Object.freeze({ declaration, moduleSource })
+  }))
+}
+
+function serviceDeclarationFromStored(value: unknown, label: string): CordisXPluginServiceDeclarationV4 {
+  const service = object(value, label)
+  exactKeys(service, ['id', 'kind', 'entry', 'configuration'], label)
+  const id = localId(service.id, `${label}.id`)
+  if (service.kind !== 'channel-adapter') throw new Error(`${label}.kind is unsupported`)
+  const entry = string(service.entry, `${label}.entry`, 512)
+  if (!/^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:cjs|mjs|js)$/.test(entry) || entry.includes('..')) {
+    throw new Error(`${label}.entry is invalid`)
+  }
+  const configuration = object(service.configuration, `${label}.configuration`)
+  if (configuration.kind === 'none') {
+    exactKeys(configuration, ['kind'], `${label}.configuration`)
+    return Object.freeze({ id, kind: 'channel-adapter', entry, configuration: Object.freeze({ kind: 'none' }) })
+  }
+  exactKeys(configuration, ['kind', 'schema', 'configApplies'], `${label}.configuration`)
+  const schema = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
+  if (configuration.kind !== 'host' || configuration.schema !== schema || configuration.configApplies !== 'restart') {
+    throw new Error(`${label}.configuration is unsupported`)
+  }
+  return Object.freeze({
+    id,
+    kind: 'channel-adapter',
+    entry,
+    configuration: Object.freeze({ kind: 'host', schema, configApplies: 'restart' }),
+  })
 }
 
 interface StoredSeparatedPackageV2 {
@@ -391,6 +513,9 @@ export async function stageResolvedPluginPackage(
     buildArtifact(root, entry),
     readmePath === undefined ? Promise.resolve(undefined) : readFile(readmePath, 'utf8'),
   ])
+  const serviceModules = runtimeManifest.schemaVersion === 4
+    ? await Promise.all(runtimeManifest.services.map(service => buildServiceArtifact(root, service)))
+    : []
   const runtimeManifestText = `${JSON.stringify(runtimeManifest, null, 2)}\n`
   const storedRuntimeDigest = `sha256:${createHash('sha256').update(runtimeManifestText).digest('hex')}` as const
   const stored: StoredSeparatedPackageV3 = {
@@ -402,8 +527,17 @@ export async function stageResolvedPluginPackage(
     },
   }
   const manifestText = `${JSON.stringify(stored, null, 2)}\n`
-  const digest = artifactDigest(manifestText, built.moduleSource, built.artifactSource)
-  await publishPackage(homeDir, digest, manifestText, built.moduleSource, built.artifactSource, readme, runtimeManifestText)
+  const digest = artifactDigest(manifestText, built.moduleSource, built.artifactSource, serviceModules)
+  await publishPackage(
+    homeDir,
+    digest,
+    manifestText,
+    built.moduleSource,
+    built.artifactSource,
+    readme,
+    runtimeManifestText,
+    serviceModules,
+  )
   return await loadStagedPluginPackage(homeDir, digest)
 }
 
@@ -436,6 +570,7 @@ export async function stageLocalPluginPackage(homeDir: string, sourceDirectory: 
     digest,
     moduleSource: built.moduleSource,
     artifactSource: built.artifactSource,
+    serviceModules: [],
     ...(readme === undefined ? {} : { readme }),
     identitySource: manifest.canonicalSource ?? `file:///cordisx-store/sha256/${hex}/entry.js`,
   }
@@ -444,7 +579,7 @@ export async function stageLocalPluginPackage(homeDir: string, sourceDirectory: 
 /** Read and integrity-check one immutable package without exposing its store path. */
 export async function loadStagedPluginPackage(homeDir: string, digest: `sha256:${string}`): Promise<StagedPluginPackage> {
   const directory = packageDirectory(homeDir, digest)
-  const [manifestText, moduleSource, artifactSource, readme] = await Promise.all([
+  const [manifestText, moduleSource, artifactSource, readme, serviceModules] = await Promise.all([
     readFile(path.join(directory, 'manifest.json'), 'utf8'),
     readFile(path.join(directory, 'module.js'), 'utf8'),
     readFile(path.join(directory, 'artifact.js'), 'utf8'),
@@ -452,8 +587,11 @@ export async function loadStagedPluginPackage(homeDir: string, digest: `sha256:$
       if (error.code === 'ENOENT') return undefined
       throw error
     }),
+    readStoredServiceModules(directory),
   ])
-  if (artifactDigest(manifestText, moduleSource, artifactSource) !== digest) throw new Error('plugin package failed integrity readback')
+  if (artifactDigest(manifestText, moduleSource, artifactSource, serviceModules) !== digest) {
+    throw new Error('plugin package failed integrity readback')
+  }
   const parsed = JSON.parse(manifestText) as unknown
   let manifest: StagedPluginPackage['manifest']
   if (separatedPackage(parsed)) {
@@ -496,6 +634,7 @@ export async function loadStagedPluginPackage(homeDir: string, digest: `sha256:$
     digest,
     moduleSource,
     artifactSource,
+    serviceModules,
     ...(readme === undefined ? {} : { readme }),
     identitySource: manifest.canonicalSource ?? `file:///cordisx-store/sha256/${hex}/entry.js`,
   }

@@ -7,6 +7,22 @@
 export type CordisXProductLocale = 'en' | 'zh-CN'
 
 type CopyKey =
+  | 'channel.title'
+  | 'channel.description'
+  | 'channel.status.available'
+  | 'channel.accounts'
+  | 'channel.accounts.description'
+  | 'channel.accounts.empty'
+  | 'channel.routes'
+  | 'channel.routes.description'
+  | 'channel.routes.empty'
+  | 'channel.bindings'
+  | 'channel.bindings.description'
+  | 'channel.bindings.empty'
+  | 'channel.diagnostics'
+  | 'channel.diagnostics.description'
+  | 'channel.diagnostics.empty'
+  | 'channel.search.empty'
   | 'marketplace.description'
   | 'marketplace.source-label'
   | 'marketplace.add'
@@ -40,6 +56,22 @@ type CopyKey =
   | 'permission.allow-always'
 
 const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, string>>>> = Object.freeze({
+  'channel.title': { en: 'Channels', 'zh-CN': '渠道' },
+  'channel.description': { en: 'Manage launcher-owned connections, routes, and task bindings.', 'zh-CN': '管理由启动器持有的连接、路由与任务绑定。' },
+  'channel.status.available': { en: 'Available', 'zh-CN': '可用' },
+  'channel.accounts': { en: 'Accounts', 'zh-CN': '账号' },
+  'channel.accounts.description': { en: 'Connection state and credential readiness.', 'zh-CN': '查看连接状态与凭据就绪情况。' },
+  'channel.accounts.empty': { en: 'No channel accounts yet.', 'zh-CN': '暂无渠道账号。' },
+  'channel.routes': { en: 'Routes', 'zh-CN': '路由' },
+  'channel.routes.description': { en: 'Map channel messages to CordisX task defaults.', 'zh-CN': '将渠道消息映射到 CordisX 任务默认项。' },
+  'channel.routes.empty': { en: 'No channel routes yet.', 'zh-CN': '暂无渠道路由。' },
+  'channel.bindings': { en: 'Task bindings', 'zh-CN': '任务绑定' },
+  'channel.bindings.description': { en: 'Persistent channel-thread to provider-session identities.', 'zh-CN': '持久化渠道话题与 Provider 会话的组合身份。' },
+  'channel.bindings.empty': { en: 'No task bindings yet.', 'zh-CN': '暂无任务绑定。' },
+  'channel.diagnostics': { en: 'Diagnostics', 'zh-CN': '诊断' },
+  'channel.diagnostics.description': { en: 'Implementation and external dependency status.', 'zh-CN': '查看实现状态与外部依赖。' },
+  'channel.diagnostics.empty': { en: 'No diagnostics.', 'zh-CN': '暂无诊断。' },
+  'channel.search.empty': { en: 'No matching items.', 'zh-CN': '没有匹配项。' },
   'marketplace.description': { en: 'Manage plugin marketplace sources.', 'zh-CN': '管理插件商店来源。' },
   'marketplace.source-label': { en: 'Marketplace JSON URL', 'zh-CN': '插件商店 JSON 地址' },
   'marketplace.add': { en: 'Add marketplace', 'zh-CN': '添加商店' },
