@@ -31,6 +31,8 @@ import {
   normalizeMarketplaceSource,
   projectMarketplacePlugin,
   projectMarketplaceSourceName,
+  searchMarketplaceCatalog,
+  type MarketplaceCatalogEligibility,
   type MarketplaceCatalogPlugin,
   type MarketplaceFetcher,
   type MarketplaceModel,
@@ -65,6 +67,7 @@ import { HostTooltipController } from './tooltips.js'
 import { HostThemeProjection, resolveHostTheme } from './host-theme.js'
 import { HOST_FORM_STYLES, HostFormAdapter, selectHostFormPrimitive, validateHostFormValue } from './host-form.js'
 import { BrowserPermissionAuthorizationDialog } from './permission-authorization-dialog.js'
+import type { MarketplaceRankingExplanation } from './marketplace-ranking.js'
 import lunaTextViewerCss from 'luna-text-viewer/luna-text-viewer.css'
 
 export type ManagerPluginStatus =
@@ -175,6 +178,8 @@ export interface ManagerModel {
     setDraft: (value: unknown) => void,
   ): Promise<ConfigRendererMountHandle>
   setPermissionPolicy(id: string, capability: CordisXPlatformCapability, policy: CordisXPermissionPolicy): Promise<void>
+  /** Optional Host policy projection. Ranking always removes ineligible entries before text/trust scoring. */
+  marketplaceEligibility?(plugin: MarketplaceCatalogPlugin): MarketplaceCatalogEligibility
   permissionAuthorizationPlan?(id: string): CordisXPermissionAuthorizationPlanV1
   authorizePlugin?(id: string, decision: CordisXPermissionAuthorizationDecisionV1): Promise<void>
   permissionAuthorizationPlanV2?(id: string): CordisXPermissionAuthorizationPlanV2 | undefined
@@ -758,6 +763,27 @@ const MANAGER_STYLES = `
   .cxm-toolbar { display: flex; align-items: center; gap: 10px; }
   .cxm-list-search { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 38px; box-sizing: border-box; border: 1px solid rgba(255, 255, 255, .1); border-radius: 9px; background: rgba(255, 255, 255, .045); }
   .cxm-toolbar > .cxm-action { height: 38px; }
+  .cxm-marketplace-filter {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: max-content;
+    height: 38px;
+    box-sizing: border-box;
+    padding: 0 11px;
+    border: 1px solid rgba(255, 255, 255, .1);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, .045);
+    color: #aab2c0;
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+  }
+  .cxm-marketplace-filter:hover { border-color: rgba(199, 204, 212, .38); color: #eef0f4; }
+  .cxm-marketplace-filter[aria-pressed="true"] { border-color: rgba(125, 211, 252, .45); background: rgba(125, 211, 252, .12); color: #dff5ff; }
+  .cxm-marketplace-filter:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
+  .cxm-marketplace-filter .cxm-material-icon { width: 17px; height: 17px; }
   .cxm-list-search-icon { width: 18px; height: 18px; margin-left: 10px; color: #8e98a9; }
   .cxm-list-search .cxm-search { min-width: 0; padding-left: 0; border-width: 0; background: transparent; }
   .cxm-list-search:focus-within { border-color: rgba(199, 204, 212, .65); outline: 2px solid #c7ccd4; outline-offset: 2px; }
@@ -842,6 +868,26 @@ const MANAGER_STYLES = `
   .cxm-plugin-status-badge[data-status="installing"], .cxm-plugin-status-badge[data-status="updating"], .cxm-plugin-status-badge[data-status="enabling"], .cxm-plugin-status-badge[data-status="disabling"], .cxm-plugin-status-badge[data-status="reloading"], .cxm-plugin-status-badge[data-status="uninstalling"], .cxm-plugin-status-badge[data-status="rolling-back"] { background: #60a5fa; }
   .cxm-plugin-body { min-width: 0; flex: 1; }
   .cxm-plugin-name { overflow: hidden; color: #f0f2f6; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .cxm-plugin-name-row { display: flex; min-width: 0; align-items: center; gap: 6px; }
+  .cxm-plugin-name-row > .cxm-plugin-name { min-width: 0; }
+  .cxm-marketplace-trust-badges { display: inline-flex; flex: none; align-items: center; gap: 4px; }
+  .cxm-marketplace-trust-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 5px;
+    border: 1px solid rgba(199, 204, 212, .18);
+    border-radius: 999px;
+    background: rgba(199, 204, 212, .075);
+    color: #bfc6d2;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  .cxm-marketplace-trust-badge[data-trust-dimension="official"] { color: #c9d9ff; }
+  .cxm-marketplace-trust-badge[data-trust-dimension="certified"] { color: #c8f1dc; }
+  .cxm-marketplace-trust-badge .cxm-material-icon { width: 12px; height: 12px; }
   .cxm-plugin-description { display: -webkit-box; margin-top: 4px; overflow: hidden; color: #818b9d; font-size: 10px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .cxm-plugin-meta { display: flex; min-width: 0; align-items: center; gap: 6px; margin-top: 4px; color: #7d8798; font-size: 10px; }
   .cxm-plugin-meta-version { flex: none; }
@@ -892,6 +938,13 @@ const MANAGER_STYLES = `
   .cxm-field { min-width: 0; padding: 10px; border-radius: 9px; background: rgba(255, 255, 255, .035); }
   .cxm-field-label { color: #737e90; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
   .cxm-field-value { margin-top: 5px; overflow-wrap: anywhere; color: #cdd2dc; font-size: 11px; }
+  .cxm-marketplace-trust-list { display: grid; gap: 9px; margin-top: 10px; }
+  .cxm-marketplace-trust-item { padding: 12px 13px; border: 1px solid rgba(199, 204, 212, .16); border-radius: 10px; background: rgba(199, 204, 212, .045); }
+  .cxm-marketplace-trust-title { display: flex; align-items: center; gap: 7px; color: #edf0f4; font-size: 12px; font-weight: 700; }
+  .cxm-marketplace-trust-title .cxm-material-icon { width: 17px; height: 17px; }
+  .cxm-marketplace-trust-copy { margin: 6px 0 0; color: #9da6b6; font-size: 11px; }
+  .cxm-marketplace-trust-meta { margin-top: 7px; color: #7f899a; font: 10px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; }
+  .cxm-marketplace-trust-evidence { display: inline-flex; margin-top: 8px; }
   .cxm-code { max-height: 140px; margin: 6px 0 0; overflow: auto; color: #bac2d2; font: 10px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
   .cxm-config-renderer { min-height: 2rem; }
   .cxm-readme { max-width: 760px; color: #b8c0cf; font-size: 12px; line-height: 1.65; }
@@ -992,17 +1045,18 @@ const HOST_THEME_OVERLAY_STYLES = `
   .cxm-dialog, .cxm-lifecycle-dialog, .cxm-authorization-dialog { border-color: var(--cx-border); background: var(--cx-surface); color: var(--cx-text); box-shadow: 0 24px 80px var(--cx-shadow); }
   .cxm-sidebar { border-color: var(--cx-border); background: var(--cx-surface-raised); }
   .cxm-header, .cxm-about-actions, .cxm-about-action-item + .cxm-about-action-item, .cxm-flat-item + .cxm-flat-item { border-color: var(--cx-border); }
-  .cxm-nav-button, .cxm-heading p, .cxm-detail-description, .cxm-permission-reason, .cxm-copy, .cxm-source-state, .cxm-detail-id, .cxm-plugin-description, .cxm-plugin-meta, .cxm-catalog-description, .cxm-catalog-id, .cxm-catalog-status { color: var(--cx-muted); }
+  .cxm-nav-button, .cxm-heading p, .cxm-detail-description, .cxm-permission-reason, .cxm-copy, .cxm-source-state, .cxm-detail-id, .cxm-plugin-description, .cxm-plugin-meta, .cxm-catalog-description, .cxm-catalog-id, .cxm-catalog-status, .cxm-marketplace-trust-copy, .cxm-marketplace-trust-meta, .cxm-field-label { color: var(--cx-muted); }
   .cxm-nav-icon { color: currentColor; }
   .cxm-heading-leading { color: var(--cx-text); }
   .cxm-nav-button:hover, .cxm-nav-button[aria-selected="true"], .cxm-back:hover, .cxm-breadcrumb-action:hover, .cxm-breadcrumb-overflow > summary:hover, .cxm-tab:hover, .cxm-tab[aria-selected="true"], .cxm-about-action:hover .cxm-about-action-title { background: var(--cx-hover); color: var(--cx-text); }
-  .cxm-heading-title, .cxm-breadcrumb-current, .cxm-card-value, .cxm-section-title, .cxm-about-name, .cxm-search, .cxm-source-input, .cxm-plugin-name, .cxm-catalog-title { color: var(--cx-text); }
-  .cxm-card, .cxm-slot-card, .cxm-source-row, .cxm-field, .cxm-lifecycle-impact { border-color: var(--cx-border); background: var(--cx-hover); }
-  .cxm-search, .cxm-source-input, .cxm-close, .cxm-action, .cxm-mini-action { border-color: var(--cx-border); background: var(--cx-surface-raised); color: var(--cx-text); }
+  .cxm-heading-title, .cxm-breadcrumb-current, .cxm-card-value, .cxm-section-title, .cxm-about-name, .cxm-search, .cxm-source-input, .cxm-plugin-name, .cxm-catalog-title, .cxm-marketplace-trust-title, .cxm-field-value { color: var(--cx-text); }
+  .cxm-card, .cxm-slot-card, .cxm-source-row, .cxm-field, .cxm-lifecycle-impact, .cxm-marketplace-trust-item, .cxm-marketplace-trust-badge { border-color: var(--cx-border); background: var(--cx-hover); }
+  .cxm-search, .cxm-source-input, .cxm-close, .cxm-action, .cxm-mini-action, .cxm-marketplace-filter { border-color: var(--cx-border); background: var(--cx-surface-raised); color: var(--cx-text); }
   .cxm-action:hover:not(:disabled), .cxm-mini-action:hover:not(:disabled), .cxm-plugin-menu-item:hover:not(:disabled), .cxm-plugin-menu-item:focus-visible { border-color: var(--cx-primary); background: var(--cx-hover); color: var(--cx-text); }
   .cxm-plugin-menu-popup, .cxm-breadcrumb-menu { border-color: var(--cx-border); background: var(--cx-surface-raised); box-shadow: 0 12px 32px var(--cx-shadow); }
   .cxm-plugin-menu-item, .cxm-authorization-dialog > p, .cxm-authorization-reason, .cxm-authorization-choice { color: var(--cx-text); }
   .cxm-action[data-tone="danger"], .cxm-plugin-menu-item[data-tone="danger"] { color: var(--cx-danger); }
+  .cxm-notice { border-color: var(--cx-border); background: var(--cx-hover); color: var(--cx-muted); }
   .cxm-catalog-status[data-tone="pending"] { color: var(--cx-primary); }
   .cxm-catalog-status[data-tone="unavailable"], .cxm-catalog-status[data-tone="error"] { color: var(--cx-danger); }
   .cxm-required-badge { background: var(--cx-hover); color: var(--cx-primary); }
@@ -1477,6 +1531,22 @@ function matchesManagerSearch(query: string, fields: readonly string[]): boolean
   return terms.every(term => haystack.includes(term))
 }
 
+function marketplaceTextTierLabel(tier: MarketplaceRankingExplanation['textTier']): string {
+  switch (tier) {
+    case 'exact-identity': return '插件标识精确命中'
+    case 'exact-name': return '插件名称精确命中'
+    case 'primary-prefix': return '插件标识或名称前缀命中'
+    case 'all-primary-terms': return '插件标识或名称完整词项命中'
+    case 'all-catalog-terms': return '目录元数据完整词项命中'
+    case 'partial-catalog': return '目录元数据部分词项命中'
+    case 'browse': return '无关键词浏览'
+  }
+}
+
+function marketplaceRankingDescription(ranking: MarketplaceRankingExplanation): string {
+  return `排序依据：${marketplaceTextTierLabel(ranking.textTier)}；官方身份加权 +${ranking.officialBoost}；认证状态加权 +${ranking.certificationBoost}。信任加权只在同一文本相关性层级内生效。`
+}
+
 function activateManagerListRow(row: HTMLButtonElement, action: () => void): void {
   row.addEventListener('click', event => {
     const selection = row.ownerDocument.defaultView?.getSelection()
@@ -1710,6 +1780,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const forms = new HostFormAdapter(document)
   let pluginQuery = ''
   let marketplaceQuery = ''
+  let marketplaceCertifiedOnly = false
   let extensionPointQuery = ''
   let routeQuery = ''
   const extensionPointUsageQueries = new Map<string, string>()
@@ -4042,38 +4113,90 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     content.append(panel)
   }
 
+  const createMarketplaceTrustBadge = (
+    dimension: 'official' | 'certified',
+    label: string,
+    tooltip: string,
+  ): HTMLSpanElement => {
+    const badge = create(document, 'span', 'cxm-marketplace-trust-badge')
+    badge.dataset.trustDimension = dimension
+    badge.setAttribute('role', 'img')
+    badge.setAttribute('aria-label', tooltip)
+    badge.append(
+      createManagerIcon(document, dimension === 'official' ? 'marketplace-official' : 'marketplace-certified'),
+      create(document, 'span', undefined, label),
+    )
+    tooltips.attach(badge, () => tooltip, 'top')
+    return badge
+  }
+
   const renderMarketplaceList = (managerSnapshot: ManagerSnapshot): void => {
     const snapshot = marketplace.snapshot()
     setHeading('从已配置 JSON feed 浏览插件元数据；当前只读，不提供安装', managerSnapshot, { icon: 'marketplace' })
     const toolbar = create(document, 'div', 'cxm-toolbar')
     const search = createListSearch('marketplace', '搜索 CordisX 插件商店', '搜索商店插件、作者、关键词或来源…', marketplaceQuery, value => { marketplaceQuery = value })
-    const projected = snapshot.plugins.map(plugin => ({
-      plugin,
-      metadata: projectMarketplacePlugin(plugin, managerSnapshot.localization.locale),
-    }))
-    const filtered = projected.filter(item => matchesManagerSearch(marketplaceQuery, item.metadata.searchValues))
-    toolbar.append(search)
+    const certifiedFilter = create(document, 'button', 'cxm-marketplace-filter')
+    certifiedFilter.type = 'button'
+    certifiedFilter.dataset.marketplaceCertifiedOnly = 'true'
+    certifiedFilter.setAttribute('aria-pressed', String(marketplaceCertifiedOnly))
+    certifiedFilter.setAttribute('aria-label', marketplaceCertifiedOnly ? '显示全部插件' : '仅显示 CordisX 已认证插件')
+    certifiedFilter.append(
+      createManagerIcon(document, 'marketplace-certified'),
+      create(document, 'span', undefined, '仅看已认证'),
+    )
+    certifiedFilter.addEventListener('click', () => {
+      marketplaceCertifiedOnly = !marketplaceCertifiedOnly
+      renderContent()
+      content.querySelector<HTMLButtonElement>('[data-marketplace-certified-only]')?.focus()
+    })
+    const ranked = searchMarketplaceCatalog(snapshot.plugins, {
+      query: marketplaceQuery,
+      currentLocale: managerSnapshot.localization.locale,
+      certifiedOnly: marketplaceCertifiedOnly,
+      ...(model.marketplaceEligibility === undefined ? {} : { eligibility: plugin => model.marketplaceEligibility!(plugin) }),
+    })
+    toolbar.append(search, certifiedFilter)
     content.append(toolbar)
 
     const list = create(document, 'div', 'cxm-plugin-list')
     list.setAttribute('role', 'list')
     list.setAttribute('aria-label', '插件商店列表')
-    if (!snapshot.loading && filtered.length === 0) {
+    if (!snapshot.loading && ranked.length === 0) {
       list.append(create(document, 'div', 'cxm-empty', snapshot.sources.length === 0 ? '尚未配置插件商店地址' : '没有可展示的匹配插件'))
     }
-    for (const { plugin, metadata } of filtered) {
+    for (const { plugin, projection: metadata, ranking } of ranked) {
       const row = create(document, 'div', 'cxm-plugin-row')
       row.setAttribute('role', 'listitem')
       row.dataset.marketplacePlugin = plugin.id
+      row.dataset.marketplaceOfficial = String(plugin.official !== undefined)
+      row.dataset.marketplaceCertified = String(plugin.certification !== undefined)
+      row.dataset.marketplaceRankingTier = ranking.textTier
+      row.dataset.marketplaceRankingTrustBoost = String(ranking.boundedTrustBoost)
+      row.dataset.marketplaceRankingExplanation = marketplaceRankingDescription(ranking)
       const primary = create(document, 'button', 'cxm-plugin-primary')
       primary.type = 'button'
-      primary.setAttribute('aria-label', `${metadata.name} · v${plugin.version} · ${metadata.feedName}`)
+      const trustLabels = [
+        ...(plugin.official === undefined ? [] : ['官方']),
+        ...(plugin.certification === undefined ? [] : ['已认证']),
+      ]
+      primary.setAttribute('aria-label', `${metadata.name} · v${plugin.version} · ${metadata.feedName}${trustLabels.length === 0 ? '' : ` · ${trustLabels.join(' · ')}`}`)
       primary.append(createPluginIcon(document, metadata.name))
       const body = create(document, 'span', 'cxm-plugin-body')
-      body.append(
-        create(document, 'span', 'cxm-plugin-name', metadata.name),
-        create(document, 'span', 'cxm-plugin-description', metadata.description),
-      )
+      const nameRow = create(document, 'span', 'cxm-plugin-name-row')
+      nameRow.append(create(document, 'span', 'cxm-plugin-name', metadata.name))
+      const trustBadges = create(document, 'span', 'cxm-marketplace-trust-badges')
+      if (plugin.official !== undefined) trustBadges.append(createMarketplaceTrustBadge(
+        'official',
+        '官方',
+        `官方：${plugin.official.description.fallback} 按 ${plugin.official.verificationPolicy.id} ${plugin.official.verificationPolicy.version} 验证发布身份；不等于该版本已认证。`,
+      ))
+      if (plugin.certification !== undefined) trustBadges.append(createMarketplaceTrustBadge(
+        'certified',
+        '已认证',
+        `已认证：${plugin.certification.description.fallback} 按 ${plugin.certification.reviewPolicy.id} ${plugin.certification.reviewPolicy.version} 审核明确版本；不是绝对安全保证。`,
+      ))
+      if (trustBadges.childElementCount > 0) nameRow.append(trustBadges)
+      body.append(nameRow, create(document, 'span', 'cxm-plugin-description', metadata.description))
       const meta = create(document, 'span', 'cxm-plugin-meta')
       const version = create(document, 'span', 'cxm-plugin-meta-version', `v${plugin.version}`)
       const source = create(document, 'span', 'cxm-plugin-meta-source', metadata.feedName)
@@ -4081,6 +4204,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       meta.append(version, source)
       body.append(meta)
       primary.append(body)
+      if (trustLabels.length > 0) tooltips.attach(primary, () => `${trustLabels.join('、')}。${marketplaceRankingDescription(ranking)}`, 'top')
       activateManagerListRow(primary, () => {
         rememberListScroll()
         void navigateRoute({ kind: 'marketplace', identity: plugin.identity, facet: 'overview' })
@@ -4119,6 +4243,49 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         fields.append(field)
       }
       panel.append(fields)
+      if (plugin.official !== undefined || plugin.certification !== undefined) {
+        panel.append(createSectionTitle(document, 'Marketplace 信任信息'))
+        const trustList = create(document, 'div', 'cxm-marketplace-trust-list')
+        const appendEvidence = (target: HTMLElement, href: string): void => {
+          const evidence = configureExternalLink(create(document, 'a', 'cxm-action cxm-marketplace-trust-evidence'), href)
+          evidence.append(create(document, 'span', undefined, '查看审核证据'), createManagerIcon(document, 'external-link', 'cxm-action-icon'))
+          target.append(evidence)
+        }
+        if (plugin.official !== undefined) {
+          const official = plugin.official
+          const item = create(document, 'section', 'cxm-marketplace-trust-item')
+          item.dataset.marketplaceTrustDimension = 'official'
+          const title = create(document, 'div', 'cxm-marketplace-trust-title')
+          title.append(createManagerIcon(document, 'marketplace-official'), create(document, 'span', undefined, '官方'))
+          item.append(
+            title,
+            create(document, 'p', 'cxm-marketplace-trust-copy', `${official.label.fallback}。${official.description.fallback}`),
+            create(document, 'div', 'cxm-marketplace-trust-meta', `验证 policy ${official.verificationPolicy.id}@${official.verificationPolicy.version} · verifiedAt ${official.verifiedAt}\n发布者 ${official.identity.publisherIdentity} · 包 ${official.identity.packageName}\ncanonical source ${official.identity.canonicalSource}`),
+            create(document, 'p', 'cxm-marketplace-trust-copy', '“官方”表示由 CordisX 团队创建并持续维护的发布者身份；它不等于该发布物已经通过版本认证。'),
+          )
+          appendEvidence(item, official.reviewer.evidenceRef)
+          trustList.append(item)
+        }
+        if (plugin.certification !== undefined) {
+          const certification = plugin.certification
+          const item = create(document, 'section', 'cxm-marketplace-trust-item')
+          item.dataset.marketplaceTrustDimension = 'certified'
+          const title = create(document, 'div', 'cxm-marketplace-trust-title')
+          title.append(createManagerIcon(document, 'marketplace-certified'), create(document, 'span', undefined, '已认证'))
+          item.append(
+            title,
+            create(document, 'p', 'cxm-marketplace-trust-copy', `${certification.label.fallback}。${certification.description.fallback}`),
+            create(document, 'div', 'cxm-marketplace-trust-meta', `由 CordisX 按 policy ${certification.reviewPolicy.id}@${certification.reviewPolicy.version} 审核该版本 v${certification.identity.version} · reviewedAt ${certification.reviewedAt} · expiresAt ${certification.expiresAt}\n发布物 ${certification.identity.integrity}`),
+            create(document, 'p', 'cxm-marketplace-trust-copy', '认证绑定此明确版本和 sha256 发布物；新版本或 digest 变化默认不继承。认证不是绝对安全保证。'),
+          )
+          appendEvidence(item, certification.reviewer.evidenceRef)
+          trustList.append(item)
+        }
+        panel.append(trustList)
+        const boundary = create(document, 'div', 'cxm-notice', 'v1 只信任受保护的 CordisX Marketplace 合入链；当前没有密码学证明。官方身份与认证都不会自动授予权限、绕过安装审核、PermissionBroker、沙箱或 lifecycle gate。')
+        boundary.dataset.marketplaceTrustBoundary = 'true'
+        panel.append(boundary)
+      }
       if (metadata.keywords.length > 0) {
         panel.append(createSectionTitle(document, '关键词'))
         panel.append(create(document, 'p', 'cxm-copy', metadata.keywords.join(' · ')))

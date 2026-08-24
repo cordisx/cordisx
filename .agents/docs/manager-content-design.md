@@ -309,23 +309,34 @@ contributions. `路由` owns routes, pages, and outlet associations. The runtime
 tab does not repeat route or page inventory.
 
 Marketplace detail reuses the same local-tab component, breadcrumb/back seat,
-roving tabindex, focus restoration, and panel semantics. Discovery v1/v2
+roving tabindex, focus restoration, and panel semantics. Discovery v1/v2/v3
 exposes only two honest facets: `概览` for description, version, compatibility,
-license, and keywords; and `作者与来源` for authors, source, optional homepage,
-manifest/icon links, and feed provenance. Version 2 localizes only human-facing
-feed metadata. The Host reprojects name, description, author/publisher display
+license, keywords, and any Host-validated trust provenance; and `作者与来源`
+for authors, source, optional homepage, manifest/icon links, and feed
+provenance. Version 2 introduced localization for human-facing feed metadata;
+version 3 adds immutable artifact identity plus a separate protected trust
+contract. The Host reprojects name, description, author/publisher display
 name, keywords, and feed source display name from its cached structured feed;
 stable id, version, canonical source, artifact URL, and integrity remain raw
 machine values. Current-locale and fallback/English projections are searchable,
 and a locale change never reloads the feed.
 
 Marketplace does not host, build, publish, copy, or execute plugin code. Plugin
-source and package artifacts remain in their owning repositories. Official,
-provenance, and certification records belong to a separate trust-root contract
-and do not enter discovery v2 or list sorting in this UI delivery. The catalog
-does not synthesize README, permission, extension-point, route, runtime,
-install, activation, certification, or official-state facets when their owning
-contracts do not provide them.
+source and package artifacts remain in their owning repositories. `Official`
+publisher identity and exact-artifact `CordisX Certified` review status are two
+independent v3 dimensions accepted only from the configured protected
+Marketplace trust root. They render as separate Host-owned Material indicators
+next to the name, with independent accessible names and tooltips; neither is a
+free-standing card. The toolbar may filter to active Certified records. Search
+first removes Host-projected incompatible, invisible, and policy-blocked
+records, then preserves text-relevance tiers; Official and Certified each add
+at most one point inside the same tier, followed by a stable canonical-identity
+tie break. Detail copy includes the policy version, exact digest for Certified,
+evidence reference, non-guarantee language, and the protected-merge-chain/
+no-cryptographic-attestation boundary. The catalog does not synthesize README,
+permission, extension-point, route, runtime, install, or activation facets when
+their owning contracts do not provide them. Neither trust dimension changes
+PermissionBroker, sandbox, lifecycle, Package Store, or installation review.
 
 Manager-owned interaction accents use a neutral silver-grey palette for
 selected navigation, local tabs, icons, focus rings, hover backgrounds, links,
