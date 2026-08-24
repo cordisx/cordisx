@@ -6,7 +6,9 @@ import {
   type CordisXPlatformAdapterStatus,
   type CordisXPlatformCapability,
   type CordisXPluginIdentity,
+  type CordisXIconToken,
   type CordisXLocalizedText,
+  type CordisXRouteReference,
 } from '../contracts.js'
 import type { LocaleCatalogSnapshot } from './i18n.js'
 import {
@@ -21,8 +23,8 @@ import {
 import { renderSafeMarkdown } from './markdown.js'
 import type { CommandSnapshot } from './commands.js'
 import { resolveManagerTriggerTarget } from './host-probes.js'
-import { createManagerIcon, type ManagerIconToken } from './icons.js'
-import type { NavigationSnapshot } from './navigation.js'
+import { createHostSurfaceIcon, createManagerIcon, type ManagerIconToken } from './icons.js'
+import type { ManagedSettingsPageMount, NavigationSnapshot } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
 import type { ExtensionPointRuntimeSnapshot, ExtensionPointSnapshot } from './extension-points.js'
 import type { RequestedScope } from './platform.js'
@@ -71,6 +73,19 @@ export interface ManagerSnapshot {
   readonly permissions: readonly ManagerPermissionSnapshot[]
   /** Runtime-owned point catalog/policy projection; manager UX consumes it in the following slice. */
   readonly extensionPoints?: ExtensionPointRuntimeSnapshot
+  readonly settingsTabs?: readonly ManagerSettingsTabSnapshot[]
+}
+
+export interface ManagerSettingsTabSnapshot {
+  readonly id: string
+  readonly owner: string
+  readonly title: string
+  readonly icon: CordisXIconToken
+  readonly order: number
+  readonly disabled: boolean
+  readonly disabledReason?: string
+  readonly builtin: boolean
+  readonly route?: CordisXRouteReference
 }
 
 export interface ManagerModel {
@@ -78,12 +93,13 @@ export interface ManagerModel {
   setPluginBlocked(id: string, blocked: boolean): Promise<void>
   setPermissionPolicy(id: string, capability: CordisXPlatformCapability, policy: CordisXPermissionPolicy): Promise<void>
   setExtensionPointPolicy?(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
+  mountSettingsTab?(id: string, panelBody: HTMLElement): Promise<ManagedSettingsPageMount>
+  closeSettingsTabContent?(): Promise<void>
   subscribe(listener: () => void): () => void
 }
 
 type ManagerTab = 'about' | 'extension-points' | 'routes' | 'plugins' | 'marketplace' | 'settings'
 type PluginDetailTab = 'readme' | 'config' | 'permissions' | 'runtime' | 'extension-points' | 'routes'
-type SettingsTab = 'marketplace' | 'runtime' | 'launcher'
 type ExtensionPointDetailTab = 'usage' | 'information' | 'diagnostics'
 type MarketplaceDetailTab = 'overview' | 'authors-source'
 type LocalTabIcon = ManagerIconToken
@@ -98,6 +114,12 @@ type PermissionDetailView = {
 }
 
 const MANAGER_STYLE_ID = 'cordisx-manager-style'
+const MANAGER_SETTINGS_FALLBACK = 'host:marketplace'
+export const CORDISX_BUILTIN_MANAGER_SETTINGS_TABS: readonly ManagerSettingsTabSnapshot[] = Object.freeze([
+  Object.freeze({ id: 'host:marketplace', owner: 'host', title: '插件商店', icon: 'host:open', order: 100, disabled: false, builtin: true }),
+  Object.freeze({ id: 'host:runtime', owner: 'host', title: '运行状态', icon: 'host:analytics', order: 200, disabled: false, builtin: true }),
+  Object.freeze({ id: 'host:launcher', owner: 'host', title: '启动器', icon: 'host:settings', order: 300, disabled: false, builtin: true }),
+])
 const CORDISX_MARK_DARK_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkDark)}`
 const CORDISX_MARK_LIGHT_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkLight)}`
 const ABOUT_ACTIONS = [
@@ -386,6 +408,14 @@ const MANAGER_STYLES = `
     content: '';
   }
   .cxm-tab:first-child[aria-selected="true"]::after { left: 0; }
+  .cxm-settings-root { display: flex; min-width: 0; min-height: 100%; flex-direction: column; }
+  .cxm-settings-root > .cxm-tabs { flex: 0 0 auto; }
+  .cxm-settings-panel { min-width: 0; min-height: 0; flex: 1 1 auto; outline: none; }
+  .cxm-settings-panel-body { min-width: 0; min-height: 100%; overflow: visible; }
+  .cxm-settings-panel[aria-busy="true"] .cxm-settings-panel-body { opacity: .78; }
+  .cxm-settings-tab-icon.cordisx-host-icon { display: inline-flex; width: 26px; height: 26px; align-items: center; justify-content: center; }
+  .cxm-settings-tab-icon.cordisx-host-icon svg { width: 18px; height: 18px; }
+  .cxm-tab:disabled { cursor: default; opacity: .42; }
   .cxm-about-identity { display: flex; align-items: center; gap: 18px; padding: 4px 2px 22px; }
   .cxm-about-identity-copy { min-width: 0; white-space: nowrap; }
   .cxm-about-mark.cxm-brand-mark { width: 54px; height: 54px; }
@@ -1006,7 +1036,15 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let pluginDetailTab: PluginDetailTab = 'readme'
   let extensionPointDetailTab: ExtensionPointDetailTab = 'usage'
   let marketplaceDetailTab: MarketplaceDetailTab = 'overview'
-  let settingsTab: SettingsTab = 'marketplace'
+  let settingsTab = MANAGER_SETTINGS_FALLBACK
+  let settingsRoot: HTMLDivElement | undefined
+  let settingsPanel: HTMLDivElement | undefined
+  let settingsPanelBody: HTMLDivElement | undefined
+  let settingsMount: ManagedSettingsPageMount | undefined
+  let settingsMountId: string | undefined
+  let settingsTransition = 0
+  let settingsTransitioning = false
+  let settingsError: string | undefined
   const listScrollPositions = new Map<ManagerTab, number>()
   let busyPluginId: string | undefined
   let operationError: string | undefined
@@ -1014,6 +1052,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let sourcesBusy = false
 
   const hideForExternalNavigation = (): void => {
+    settingsMount?.abort()
+    void resetSettings().catch(() => {})
     modal.hidden = true
     trigger.setAttribute('aria-expanded', 'false')
   }
@@ -1983,9 +2023,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }
   }
 
-  const renderMarketplaceSettings = (): void => {
+  const renderMarketplaceSettings = (target: HTMLElement): void => {
     const snapshot = marketplace.snapshot()
-    const panel = createTabPanel(document, '插件商店')
+    const panel = create(document, 'div', 'cxm-settings-builtin')
     panel.append(create(document, 'p', 'cxm-copy', '按优先级保存多个 marketplace JSON 地址。feed 地址只记录目录来源；插件唯一性由 canonical source 与小写 id 共同决定。'))
 
     const form = create(document, 'form', 'cxm-source-form')
@@ -2075,11 +2115,11 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     reload.addEventListener('click', () => void marketplace.reload())
     footerActions.append(reset, reload)
     panel.append(footerActions)
-    content.append(panel)
+    target.append(panel)
   }
 
-  const renderRuntimeSettings = (): void => {
-    const panel = createTabPanel(document, '运行状态')
+  const renderRuntimeSettings = (target: HTMLElement): void => {
+    const panel = create(document, 'div', 'cxm-settings-builtin')
     const runtime = model.snapshot()
     const blocked = runtime.plugins.filter(plugin => plugin.status === 'blocked' || plugin.status === 'failed')
     if (blocked.length === 0) {
@@ -2114,35 +2154,208 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const boundary = create(document, 'div', 'cxm-notice', '屏蔽状态保存在当前隔离 Chromium profile，只控制已打包插件的 Cordis fiber；它不是卸载、权限隔离或 package 禁用。')
     boundary.dataset.tone = 'warning'
     panel.append(boundary)
-    content.append(panel)
+    target.append(panel)
   }
 
-  const renderLauncherSettings = (): void => {
-    const panel = createTabPanel(document, '启动器')
+  const renderLauncherSettings = (target: HTMLElement): void => {
+    const panel = create(document, 'div', 'cxm-settings-builtin')
     const launcherNotice = create(document, 'div', 'cxm-notice', '`cordisx.config.json` 仍负责 Codex 可执行文件、插件 composition 和插件配置。修改这些字段需要重新打包并启动新 generation，当前页面只读展示这条边界。')
     launcherNotice.dataset.tone = 'warning'
     panel.append(launcherNotice)
-    content.append(panel)
+    target.append(panel)
   }
 
-  const renderSettings = (): void => {
-    setHeading('配置', '管理 CordisX 设置与当前 profile 状态', { icon: 'settings' })
-    content.append(createLocalTabs(document, [
-      { id: 'marketplace', label: '插件商店', icon: 'marketplace' },
-      { id: 'runtime', label: '运行状态', icon: 'runtime' },
-      { id: 'launcher', label: '启动器', icon: 'launcher' },
-    ], settingsTab, 'data-settings-tab', (tab) => {
-      settingsTab = tab as SettingsTab
+  const settingsTabs = (snapshot: ManagerSnapshot): readonly ManagerSettingsTabSnapshot[] => (
+    snapshot.settingsTabs ?? CORDISX_BUILTIN_MANAGER_SETTINGS_TABS
+  )
+
+  const stopSettingsContent = async (): Promise<void> => {
+    const mount = settingsMount
+    const mountId = settingsMountId
+    settingsMount = undefined
+    settingsMountId = undefined
+    if (mount === undefined && mountId === undefined) return
+    mount?.abort()
+    if (model.closeSettingsTabContent !== undefined) await model.closeSettingsTabContent()
+    else await mount?.dispose()
+  }
+
+  const resetSettings = async (): Promise<void> => {
+    settingsTransition += 1
+    if (settingsMount === undefined && settingsMountId === undefined) {
+      settingsTab = MANAGER_SETTINGS_FALLBACK
+      settingsError = undefined
+      settingsTransitioning = false
+      settingsRoot = undefined
+      settingsPanel = undefined
+      settingsPanelBody = undefined
+      return
+    }
+    settingsTransitioning = true
+    try {
+      await stopSettingsContent()
+    } finally {
+      settingsTab = MANAGER_SETTINGS_FALLBACK
+      settingsError = undefined
+      settingsTransitioning = false
+      settingsRoot = undefined
+      settingsPanel = undefined
+      settingsPanelBody = undefined
+    }
+  }
+
+  const focusSettingsTab = (id: string): void => {
+    const button = [...document.querySelectorAll<HTMLButtonElement>('[data-settings-tab]')]
+      .find(candidate => candidate.dataset.settingsTab === id)
+    button?.focus()
+  }
+
+  const activateSettingsTab = async (id: string, restoreFocus: boolean): Promise<void> => {
+    const tab = settingsTabs(model.snapshot()).find(candidate => candidate.id === id)
+    if (tab === undefined || tab.disabled || settingsTransitioning) return
+    const token = ++settingsTransition
+    settingsTransitioning = true
+    settingsMount?.abort()
+    try {
+      await stopSettingsContent()
+      if (token !== settingsTransition) return
+      settingsTab = id
+      settingsError = undefined
+      settingsTransitioning = false
       renderContent()
-    }))
-    if (settingsTab === 'marketplace') renderMarketplaceSettings()
-    if (settingsTab === 'runtime') renderRuntimeSettings()
-    if (settingsTab === 'launcher') renderLauncherSettings()
+      if (!tab.builtin) {
+        if (model.mountSettingsTab === undefined || settingsPanelBody === undefined) throw new Error('manager settings page mount is unavailable')
+        settingsPanel?.setAttribute('aria-busy', 'true')
+        settingsPanelBody.replaceChildren()
+        settingsMountId = id
+        const mount = await model.mountSettingsTab(id, settingsPanelBody)
+        if (token !== settingsTransition || settingsTab !== id) {
+          mount.abort()
+          await mount.dispose()
+          return
+        }
+        settingsMount = mount
+        settingsMountId = id
+        settingsPanel?.removeAttribute('aria-busy')
+      }
+      if (restoreFocus) focusSettingsTab(id)
+    } catch (error) {
+      if (token !== settingsTransition) return
+      settingsMount?.abort()
+      await stopSettingsContent().catch(() => {})
+      settingsError = error instanceof Error ? error.message : String(error)
+      settingsTab = MANAGER_SETTINGS_FALLBACK
+      settingsTransitioning = false
+      renderContent()
+      if (restoreFocus) focusSettingsTab(MANAGER_SETTINGS_FALLBACK)
+    }
+  }
+
+  const renderSettings = (snapshot: ManagerSnapshot): void => {
+    setHeading('配置', '管理 CordisX 设置与当前 profile 状态', { icon: 'settings' })
+    const items = settingsTabs(snapshot)
+    const active = items.find(item => item.id === settingsTab)
+    if ((active === undefined || active.disabled) && !settingsTransitioning) {
+      settingsTransition += 1
+      settingsTransitioning = true
+      settingsMount?.abort()
+      void stopSettingsContent().catch(error => {
+        settingsError = error instanceof Error ? error.message : String(error)
+      }).finally(() => {
+        settingsTab = MANAGER_SETTINGS_FALLBACK
+        settingsTransitioning = false
+        renderContent()
+      })
+      return
+    }
+
+    if (settingsRoot === undefined || !settingsRoot.isConnected) {
+      settingsRoot = create(document, 'div', 'cxm-settings-root')
+      settingsRoot.dataset.settingsRoot = 'true'
+      const tabs = create(document, 'div', 'cxm-tabs')
+      tabs.dataset.settingsTablist = 'true'
+      const panel = create(document, 'div', 'cxm-settings-panel')
+      panel.id = 'cordisx-manager-settings-panel'
+      panel.setAttribute('role', 'tabpanel')
+      panel.tabIndex = 0
+      const body = create(document, 'div', 'cxm-settings-panel-body')
+      body.dataset.settingsPanelBody = 'true'
+      panel.append(body)
+      settingsRoot.append(tabs, panel)
+      content.append(settingsRoot)
+      settingsPanel = panel
+      settingsPanelBody = body
+    }
+
+    const tablist = settingsRoot.querySelector<HTMLElement>('[data-settings-tablist]')!
+    const focusedTabId = document.activeElement instanceof document.defaultView!.HTMLElement
+      ? document.activeElement.dataset.settingsTab
+      : undefined
+    tablist.setAttribute('role', 'tablist')
+    tablist.setAttribute('aria-label', 'CordisX 配置标签页')
+    tablist.setAttribute('aria-orientation', 'horizontal')
+    tablist.replaceChildren()
+    const enabled = items.filter(item => !item.disabled)
+    for (const item of items) {
+      const button = create(document, 'button', 'cxm-tab')
+      button.type = 'button'
+      button.id = `cordisx-manager-settings-tab-${item.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+      button.dataset.settingsTab = item.id
+      button.dataset.settingsOwner = item.owner
+      button.setAttribute('role', 'tab')
+      button.setAttribute('aria-controls', 'cordisx-manager-settings-panel')
+      button.setAttribute('aria-selected', String(item.id === settingsTab))
+      button.tabIndex = item.id === settingsTab ? 0 : -1
+      button.disabled = item.disabled
+      if (item.disabled) button.setAttribute('aria-disabled', 'true')
+      if (item.disabledReason !== undefined) button.title = item.disabledReason
+      const visibleContent = create(document, 'span', 'cxm-tab-content')
+      const icon = createHostSurfaceIcon(document, item.icon)
+      icon.classList.add('cxm-tab-icon', 'cxm-settings-tab-icon')
+      visibleContent.append(icon, create(document, 'span', undefined, item.title))
+      button.append(visibleContent)
+      button.addEventListener('click', () => { void activateSettingsTab(item.id, true) })
+      button.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          void activateSettingsTab(item.id, true)
+          return
+        }
+        const current = enabled.findIndex(candidate => candidate.id === item.id)
+        let next: ManagerSettingsTabSnapshot | undefined
+        if (event.key === 'ArrowRight') next = enabled[(current + 1) % enabled.length]
+        if (event.key === 'ArrowLeft') next = enabled[(current - 1 + enabled.length) % enabled.length]
+        if (event.key === 'Home') next = enabled[0]
+        if (event.key === 'End') next = enabled.at(-1)
+        if (next === undefined) return
+        event.preventDefault()
+        void activateSettingsTab(next.id, true)
+      })
+      tablist.append(button)
+    }
+    const activeButton = tablist.querySelector<HTMLButtonElement>(`[data-settings-tab="${settingsTab}"]`)
+    if (activeButton !== null) settingsPanel?.setAttribute('aria-labelledby', activeButton.id)
+    if (focusedTabId !== undefined) {
+      tablist.querySelector<HTMLButtonElement>(`[data-settings-tab="${focusedTabId}"]`)?.focus()
+    }
+
+    if (settingsPanelBody === undefined || settingsMountId === settingsTab) return
+    settingsPanelBody.replaceChildren()
+    settingsPanel?.removeAttribute('aria-busy')
+    if (settingsTab === 'host:marketplace') renderMarketplaceSettings(settingsPanelBody)
+    if (settingsTab === 'host:runtime') renderRuntimeSettings(settingsPanelBody)
+    if (settingsTab === 'host:launcher') renderLauncherSettings(settingsPanelBody)
+    if (!settingsTab.startsWith('host:')) {
+      settingsPanel?.setAttribute('aria-busy', 'true')
+      settingsPanelBody.append(create(document, 'div', 'cxm-notice', settingsTransitioning ? '正在切换配置页面…' : '正在加载插件配置页面…'))
+    }
+    if (settingsError !== undefined) settingsPanelBody.append(create(document, 'div', 'cxm-error', `插件配置页面错误：${settingsError}`))
   }
 
   function renderContent(): void {
     const snapshot = model.snapshot()
-    content.replaceChildren()
+    const preserveSettings = activeTab === 'settings' && settingsRoot?.isConnected === true
+    if (!preserveSettings) content.replaceChildren()
     for (const [id, button] of navButtons) button.setAttribute('aria-selected', String(id === activeTab))
     if (permissionDetail !== undefined && secondaryView?.kind === 'plugin' && activeTab === 'plugins') {
       renderPermissionDetail(snapshot, permissionDetail)
@@ -2169,7 +2382,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (activeTab === 'routes') renderRouteList(snapshot)
     if (activeTab === 'plugins') renderPluginList(snapshot)
     if (activeTab === 'marketplace') renderMarketplaceList()
-    if (activeTab === 'settings') renderSettings()
+    if (activeTab === 'settings') renderSettings(snapshot)
   }
 
   const open = (): void => {
@@ -2179,6 +2392,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     close.focus()
   }
   const dismiss = (): void => {
+    settingsMount?.abort()
+    void resetSettings().catch(() => {})
     modal.hidden = true
     trigger.setAttribute('aria-expanded', 'false')
     trigger.focus()
@@ -2198,10 +2413,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   document.addEventListener('keydown', onKeydown)
   for (const [id, button] of navButtons) {
     button.addEventListener('click', () => {
-      activeTab = id
-      secondaryView = undefined
-      permissionDetail = undefined
-      renderContent()
+      const activate = async (): Promise<void> => {
+        if (activeTab === 'settings' && id !== 'settings') await resetSettings()
+        activeTab = id
+        secondaryView = undefined
+        permissionDetail = undefined
+        renderContent()
+      }
+      void activate()
     })
   }
 
@@ -2237,6 +2456,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   void marketplace.reload()
 
   return () => {
+    settingsMount?.abort()
+    void stopSettingsContent().catch(() => {})
     observer?.disconnect()
     themeObserver?.disconnect()
     unsubscribeRuntime()

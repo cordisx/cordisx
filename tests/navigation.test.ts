@@ -13,6 +13,7 @@ import {
 } from '../packages/cli/src/renderer/navigation.js'
 import {
   CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
+  CORDISX_MANAGER_EXTENSION_POINT_CATALOG,
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
   MemoryExtensionPointPolicyStore,
@@ -242,6 +243,123 @@ describe('NavigationRegistry', () => {
     )).rejects.toThrow(/does not match native session one/)
 
     await navigation.dispose()
+    pages.dispose()
+    outlets.dispose()
+    dom.window.close()
+  })
+
+  it('mounts a body-only manager settings page through attributed access checks and aborts before dispose', async () => {
+    const dom = new JSDOM('<body><main id="logical"></main><section id="panel" role="tabpanel"><div id="body"></div></section></body>', {
+      url: 'https://codex.local/native',
+    })
+    const pages = new PageRegistry()
+    const outlets = new OutletRegistry()
+    const controller = new FakeOutlet(dom.window.document.getElementById('logical')!, 'manager:generation')
+    outlets.declare({
+      schemaVersion: 1,
+      id: 'manager.settings.content',
+      authority: 'host-adapter',
+      scope: 'manager-settings',
+      preferredPlacement: 'portal',
+      contextPolicy: 'generation',
+      presentationGroup: 'manager-settings',
+    }, controller, path => path.startsWith('/manager/settings/'))
+    const descriptors = new ExtensionPointDescriptorRegistry()
+    descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
+    descriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
+    const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore(), 'generation-one')
+    const identity = { source: 'file:///plugins/demo/index.ts', id: 'demo' }
+    broker.register(identity)
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    navigation.setAccessResolver(broker)
+    const events: string[] = []
+    pages.register('demo', {
+      id: 'settings', title: { key: 'settings' }, chrome: 'body-only', localeNamespace: 'demo',
+    }, (context) => {
+      events.push('mount')
+      context.signal.addEventListener('abort', () => events.push('abort'), { once: true })
+      context.localization.effect(() => () => { events.push('effect-dispose') })
+      const input = context.document.createElement('input')
+      input.dataset.pluginSettingsInput = 'true'
+      context.container.append(input)
+      return () => { events.push('page-dispose') }
+    })
+    navigation.register('demo', {
+      id: 'settings', path: '/manager/settings/demo', outlet: 'manager.settings.content', page: 'settings',
+    })
+
+    const body = dom.window.document.getElementById('body')!
+    const mount = await navigation.mountManagerSettings('demo', { id: 'settings' }, 'demo:settings', body)
+    expect(mount).toMatchObject({ owner: 'demo', contributionId: 'demo:settings', routeId: 'demo:settings', pageId: 'demo:settings' })
+    expect(body.querySelector('[data-cordisx-settings-page="demo:settings"] [data-plugin-settings-input]')).not.toBeNull()
+    expect(body.querySelector('[data-cordisx-page-chrome]')).toBeNull()
+    expect(body.closest('[role="tabpanel"]')?.getAttribute('role')).toBe('tabpanel')
+    expect(dom.window.location.href).toBe('https://codex.local/native')
+    expect(broker.accessDiagnostics().map(item => item.request.operation)).toEqual([
+      'surface.route.navigate', 'outlet.route.navigate', 'outlet.page.mount',
+    ])
+    expect(broker.accessDiagnostics().every(item => item.request.identity.pluginId === 'demo'
+      && item.request.identity.source === identity.source
+      && item.request.generation === 'generation-one')).toBe(true)
+
+    await navigation.closeManagerSettings()
+    expect(events).toEqual(['mount', 'abort', 'page-dispose', 'effect-dispose'])
+    expect(body.children).toHaveLength(0)
+    expect(navigation.snapshot().outlets.find(item => item.id === 'manager.settings.content')).toMatchObject({ mounted: false })
+
+    await navigation.dispose()
+    broker.dispose()
+    descriptors.dispose()
+    pages.dispose()
+    outlets.dispose()
+    dom.window.close()
+  })
+
+  it('keeps unresolved manager settings dependencies pending and rejects path, page chrome, conflict, and policy denial', async () => {
+    const dom = new JSDOM('<body><main id="logical"></main><div id="panel"></div></body>')
+    const pages = new PageRegistry()
+    const outlets = new OutletRegistry()
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    navigation.register('demo', {
+      id: 'pending', path: '/manager/settings/pending', outlet: 'manager.settings.content', page: 'pending',
+    })
+    expect(navigation.managerSettingsRoute('demo', 'pending')).toMatchObject({ state: 'pending', detail: expect.stringContaining('outlet') })
+
+    const controller = new FakeOutlet(dom.window.document.getElementById('logical')!, 'manager:generation')
+    outlets.declare({
+      schemaVersion: 1, id: 'manager.settings.content', authority: 'host-adapter', scope: 'manager-settings',
+      preferredPlacement: 'portal', contextPolicy: 'generation', presentationGroup: 'manager-settings',
+    }, controller, path => path.startsWith('/manager/settings/'))
+    expect(navigation.managerSettingsRoute('demo', 'pending')).toMatchObject({ state: 'pending', detail: expect.stringContaining('page') })
+    pages.register('demo', { id: 'pending', title: { key: 'pending' } }, () => undefined)
+    expect(navigation.managerSettingsRoute('demo', 'pending')).toMatchObject({ state: 'invalid', detail: expect.stringContaining('body-only') })
+
+    pages.register('demo', { id: 'ready', title: { key: 'ready' }, chrome: 'body-only' }, () => undefined)
+    navigation.register('demo', { id: 'root', path: '/manager/settings', outlet: 'manager.settings.content', page: 'ready' })
+    expect(navigation.managerSettingsRoute('demo', 'root')).toMatchObject({ state: 'invalid', detail: expect.stringContaining('strictly below') })
+    navigation.register('demo', { id: 'first', path: '/manager/settings/shared', outlet: 'manager.settings.content', page: 'ready' })
+    navigation.register('other', { id: 'second', path: '/manager/settings/shared', outlet: 'manager.settings.content', page: 'ready' })
+    expect(navigation.managerSettingsRoute('demo', 'first')).toMatchObject({ state: 'invalid', detail: expect.stringContaining('conflicts') })
+
+    const descriptors = new ExtensionPointDescriptorRegistry()
+    descriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
+    const store = new MemoryExtensionPointPolicyStore()
+    const broker = new ExtensionPointPolicyBroker(descriptors, store)
+    const identity = { source: 'file:///plugins/denied/index.ts', id: 'denied' }
+    broker.register(identity)
+    broker.setPolicy(identity, 'manager.settings.content', 'deny')
+    navigation.setAccessResolver(broker)
+    pages.register('denied', { id: 'settings', title: { key: 'settings' }, chrome: 'body-only' }, () => undefined)
+    navigation.register('denied', {
+      id: 'settings', path: '/manager/settings/denied', outlet: 'manager.settings.content', page: 'settings',
+    })
+    expect(navigation.managerSettingsRoute('denied', 'settings')).toMatchObject({ state: 'invalid', detail: expect.stringContaining('denied') })
+    await expect(navigation.mountManagerSettings('denied', { id: 'settings' }, 'denied:settings', dom.window.document.getElementById('panel')!))
+      .rejects.toThrow(/denied/)
+
+    await navigation.dispose()
+    broker.dispose()
+    descriptors.dispose()
     pages.dispose()
     outlets.dispose()
     dom.window.close()

@@ -5,6 +5,7 @@ import {
   type CordisXCommandReference,
   type CordisXContributionHandle,
   type CordisXContributionOptions,
+  type CordisXContributionPresentationOptions,
   type CordisXDisabledState,
   type CordisXEnvironmentRow,
   type CordisXEnvironmentRowAction,
@@ -12,6 +13,8 @@ import {
   type CordisXEnvironmentSectionAction,
   type CordisXIconToken,
   type CordisXNavigationItem,
+  type CordisXManagerSettingsTabItem,
+  type CordisXLocalizedText,
   type CordisXSlots,
   type CordisXStructuredAction,
   type CordisXSurfaceMap,
@@ -58,7 +61,7 @@ interface SurfaceRecord {
   readonly sequence: number
   readonly owner: string
   readonly qualifiedId: string
-  readonly options: CordisXContributionOptions
+  options: CordisXContributionOptions
   item: unknown
   validationError?: string
   rendered: boolean
@@ -78,6 +81,7 @@ export interface SurfaceContributionSnapshot {
   readonly effectivePointPolicy: 'allow' | 'deny'
   readonly pointPolicyReason?: string
   readonly disabled: boolean
+  readonly disabledReason?: CordisXLocalizedText
   readonly valid: boolean
   readonly pending: boolean
   readonly rendered: boolean
@@ -105,6 +109,10 @@ export interface SurfaceAvailabilitySnapshot {
 export interface SurfaceResolvers {
   command(owner: string, reference: CordisXCommandReference): boolean
   route(owner: string, id: string): boolean
+  managerSettingsRoute?(owner: string, id: string): Readonly<{
+    state: 'available' | 'pending' | 'invalid'
+    detail?: string
+  }>
 }
 
 function assertKeys(value: object, allowed: readonly string[], label: string): void {
@@ -153,6 +161,22 @@ function assertDisabled(disabled: CordisXDisabledState | undefined): void {
   if (typeof disabled.value !== 'boolean') throw new Error('disabled.value must be a boolean')
   assertKeys(disabled, ['value', 'reason'], 'disabled')
   if (disabled.reason !== undefined) assertLocalizedText(disabled.reason, 'disabled reason')
+}
+
+function assertPresentationOptions(
+  surface: CordisXSurfaceName,
+  options: CordisXContributionPresentationOptions,
+): void {
+  assertKeys(options, ['group', 'order', 'when', 'disabled'], 'surface contribution presentation options')
+  if (surface === 'manager.settings.tabs' && options.group !== undefined) {
+    throw new Error('manager.settings.tabs does not accept a contribution group')
+  }
+  if (options.group !== undefined) assertLocalId(options.group, 'surface contribution group')
+  if (options.order !== undefined && (!Number.isInteger(options.order) || options.order < -100000 || options.order > 100000)) {
+    throw new Error('surface contribution order is invalid')
+  }
+  assertWhenExpression(options.when)
+  assertDisabled(options.disabled)
 }
 
 function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
@@ -232,6 +256,15 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
       if (presenter.progress === undefined || !Number.isFinite(presenter.progress.current) || !Number.isFinite(presenter.progress.total)
         || presenter.progress.current < 0 || presenter.progress.total <= 0) throw new Error('progress presenter requires finite current/total values')
     } else if (presenter.progress !== undefined) throw new Error('progress values require a progress presenter')
+  } else if (surface === 'manager.settings.tabs') {
+    const tab = snapshot as CordisXManagerSettingsTabItem
+    assertKeys(snapshot, ['title', 'icon', 'route'], 'manager settings tab')
+    assertLocalizedText(tab.title, 'manager settings tab title')
+    if (tab.icon === undefined) throw new Error('manager settings tab requires a host icon token')
+    assertIcon(tab.icon, 'manager settings tab')
+    if (tab.route === null || typeof tab.route !== 'object') throw new Error('manager settings tab requires a route reference')
+    assertKeys(tab.route, ['id', 'params'], 'manager settings tab route')
+    assertLocalId(tab.route.id, 'manager settings tab route id')
   } else if (surface === 'environment.panel.sections') {
     const section = snapshot as CordisXEnvironmentSection
     assertKeys(snapshot, ['sectionId', 'title', 'description', 'icon'], 'environment section')
@@ -341,9 +374,12 @@ export class SurfaceRegistry {
     assertLocalId(owner, 'surface owner')
     assertKeys(options, ['name', 'id', 'group', 'order', 'when', 'disabled'], 'surface contribution options')
     assertLocalId(options.id, 'surface contribution id')
-    assertLocalId(options.group ?? 'default', 'surface contribution group')
-    assertWhenExpression(options.when)
-    assertDisabled(options.disabled)
+    assertPresentationOptions(options.name, {
+      ...(options.group === undefined ? {} : { group: options.group }),
+      ...(options.order === undefined ? {} : { order: options.order }),
+      ...(options.when === undefined ? {} : { when: options.when }),
+      ...(options.disabled === undefined ? {} : { disabled: options.disabled }),
+    })
     const qualifiedId = qualifyOwnedId(owner, options.id)
     const key = `${options.name}\u0000${qualifiedId}`
     if (this.records.has(key)) throw new Error(`surface contribution ${options.name}/${qualifiedId} is already registered`)
@@ -384,6 +420,12 @@ export class SurfaceRegistry {
         record.item = undefined
         record.validationError = error instanceof Error ? error.message : String(error)
       }
+      this.notify()
+    }
+    handle.updateOptions = (next): void => {
+      if (!active) throw new Error(`surface contribution ${qualifiedId} is disposed`)
+      assertPresentationOptions(options.name, next)
+      record.options = immutableSnapshot({ name: options.name, id: options.id, ...next })
       this.notify()
     }
     return handle
@@ -429,7 +471,14 @@ export class SurfaceRegistry {
           const command = item.command as CordisXCommandReference | undefined
           const route = item.route as { id: string } | undefined
           if (command !== undefined && !this.resolvers.command(record.owner, command)) error = `command ${command.id} is not available`
-          else if (command === undefined && route !== undefined && !this.resolvers.route(record.owner, route.id)) error = `route ${route.id} is not available`
+          else if (command === undefined && route !== undefined && record.options.name === 'manager.settings.tabs') {
+            const resolution = this.resolvers.managerSettingsRoute?.(record.owner, route.id)
+              ?? (this.resolvers.route(record.owner, route.id)
+                ? { state: 'available' as const }
+                : { state: 'pending' as const, detail: `route ${route.id} is not available` })
+            if (resolution.state === 'pending') pending = true
+            if (resolution.state === 'invalid') error = resolution.detail ?? `route ${route.id} is incompatible with manager settings`
+          } else if (command === undefined && route !== undefined && !this.resolvers.route(record.owner, route.id)) error = `route ${route.id} is not available`
           const actions = item.actions as readonly { command: CordisXCommandReference }[] | undefined
           const missingAction = actions?.find(action => !this.resolvers.command(record.owner, action.command))
           if (error === undefined && missingAction !== undefined) error = `command ${missingAction.command.id} is not available`
@@ -468,6 +517,7 @@ export class SurfaceRegistry {
           effectivePointPolicy: pointAccess.effectivePolicy,
           ...(pointAccess.reason === undefined ? {} : { pointPolicyReason: pointAccess.reason }),
           disabled: record.options.disabled?.value ?? false,
+          ...(record.options.disabled?.reason === undefined ? {} : { disabledReason: record.options.disabled.reason }),
           valid: error === undefined,
           pending,
           rendered: record.rendered,

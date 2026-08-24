@@ -138,4 +138,67 @@ describe('SurfaceRegistry', () => {
     descriptors.dispose()
     contexts.dispose()
   })
+
+  it('validates manager settings tabs as structured headers and keeps envelope order as the single source', () => {
+    const contexts = new HostContextStore()
+    contexts.replace({ enabled: true })
+    const registry = new SurfaceRegistry(contexts)
+    registry.setResolvers({
+      command: () => false,
+      route: () => false,
+      managerSettingsRoute: (_owner, id) => id === 'ready'
+        ? { state: 'available' }
+        : { state: 'pending', detail: `route ${id} is pending` },
+    })
+
+    const ready = registry.register('zeta', {
+      name: 'manager.settings.tabs', id: 'ready', order: 120, when: { key: 'enabled', equals: true },
+    }, {
+      title: { key: 'title', fallback: 'Ready' }, icon: 'host:settings', route: { id: 'ready' },
+    })
+    registry.register('alpha', {
+      name: 'manager.settings.tabs', id: 'pending', order: 110,
+      disabled: { value: true, reason: { key: 'disabled', fallback: 'Unavailable' } },
+    }, {
+      title: { key: 'pending', fallback: 'Pending' }, icon: 'host:info', route: { id: 'pending' },
+    })
+
+    expect(registry.snapshot().map(item => item.qualifiedId)).toEqual(['alpha:pending', 'zeta:ready'])
+    expect(registry.snapshot()[0]).toMatchObject({ pending: true, valid: true, disabled: true })
+    expect(registry.snapshot()[0]?.disabledReason).toEqual({ key: 'disabled', fallback: 'Unavailable' })
+    expect(registry.snapshot()[1]).toMatchObject({ order: 120, visible: true, pending: false, valid: true })
+
+    ready.updateOptions({ order: 90, when: { key: 'enabled', equals: false }, disabled: { value: true } })
+    expect(registry.snapshot()[0]).toMatchObject({ qualifiedId: 'zeta:ready', order: 90, visible: false, disabled: true })
+    expect(ready).not.toHaveProperty('order')
+    expect(() => ready.update({
+      title: { key: 'bad' }, icon: 'plugin:settings' as never, route: { id: 'ready' },
+    })).not.toThrow()
+    expect(registry.snapshot().find(item => item.qualifiedId === 'zeta:ready')?.error).toMatch(/host icon token/)
+    expect(() => ready.updateOptions({ group: 'header' })).toThrow(/does not accept a contribution group/)
+    ready.dispose()
+    expect(() => ready.updateOptions({ order: 1 })).toThrow(/disposed/)
+
+    registry.dispose()
+    contexts.dispose()
+  })
+
+  it('rejects manager settings header DOM fields, cross-owner routes, and conflicting identities', () => {
+    const contexts = new HostContextStore()
+    const registry = new SurfaceRegistry(contexts)
+    registry.setResolvers({ command: () => false, route: () => false })
+    registry.register('demo', { name: 'manager.settings.tabs', id: 'settings' }, {
+      title: { key: 'settings' }, icon: 'host:settings', route: { id: 'other:settings' },
+    } as never)
+    registry.register('demo', { name: 'manager.settings.tabs', id: 'dom' }, {
+      title: { key: 'dom' }, icon: 'host:settings', route: { id: 'settings' }, html: '<b>owned</b>',
+    } as never)
+    expect(registry.snapshot().find(item => item.id === 'settings')?.error).toMatch(/invalid manager settings tab route id/)
+    expect(registry.snapshot().find(item => item.id === 'dom')?.error).toMatch(/unknown field html/)
+    expect(() => registry.register('demo', { name: 'manager.settings.tabs', id: 'dom' }, {
+      title: { key: 'again' }, icon: 'host:settings', route: { id: 'settings' },
+    })).toThrow(/already registered/)
+    registry.dispose()
+    contexts.dispose()
+  })
 })

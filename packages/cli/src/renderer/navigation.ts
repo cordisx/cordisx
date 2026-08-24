@@ -162,6 +162,21 @@ export interface PageSnapshot {
   readonly metadata: CordisXPageMetadata
 }
 
+export interface ManagerSettingsRouteResolution {
+  readonly state: 'available' | 'pending' | 'invalid'
+  readonly detail?: string
+}
+
+export interface ManagedSettingsPageMount {
+  readonly owner: string
+  readonly contributionId: string
+  readonly routeId: string
+  readonly pageId: string
+  readonly signal: AbortSignal
+  abort(): void
+  dispose(): Promise<void>
+}
+
 function assertHostIcon(icon: string | undefined, label: string): void {
   if (icon === undefined) return
   if (!ICON_TOKEN_PATTERN.test(icon) || !(CORDISX_HOST_ICON_TOKENS as readonly string[]).includes(icon)) {
@@ -319,6 +334,16 @@ interface MountedPage {
   error?: string
 }
 
+interface ManagedSettingsPageMountRecord extends ManagedSettingsPageMount {
+  readonly route: RouteRecord
+  readonly page: PageRecord
+  readonly content: HTMLElement
+  readonly effects: Disposable<void>[]
+  readonly abortController: AbortController
+  pageDispose?: Disposable<void>
+  disposed: boolean
+}
+
 interface OutletNavigationState {
   stack: RouteEntry[]
   mount?: MountedPage
@@ -411,6 +436,7 @@ export class NavigationRegistry {
   private readonly states = new Map<string, OutletNavigationState>()
   private readonly listeners = new Set<() => void>()
   private presentationOrder: string[] = []
+  private managerSettingsMount: ManagedSettingsPageMountRecord | undefined
   private readonly unsubscribePages: () => void
   private readonly unsubscribeOutlets: () => void
   private operation = Promise.resolve()
@@ -470,6 +496,152 @@ export class NavigationRegistry {
   has(requestingOwner: string, id: string): boolean {
     const record = this.records.get(qualifyOwnedId(requestingOwner, id))
     return record?.owner === requestingOwner && this.routeError(record) === undefined
+  }
+
+  managerSettingsRoute(requestingOwner: string, id: string): ManagerSettingsRouteResolution {
+    const record = this.records.get(qualifyOwnedId(requestingOwner, id))
+    if (record === undefined || record.owner !== requestingOwner) {
+      return { state: 'pending', detail: `route ${id} is not registered by plugin ${requestingOwner}` }
+    }
+    if (record.definition.outlet !== 'manager.settings.content') {
+      return { state: 'invalid', detail: `route ${record.qualifiedId} must target manager.settings.content` }
+    }
+    if (record.definition.path === '/manager/settings' || !record.definition.path.startsWith('/manager/settings/')) {
+      return { state: 'invalid', detail: `route ${record.qualifiedId} must be strictly below /manager/settings/` }
+    }
+    if (record.definition.page.includes(':')) {
+      return { state: 'invalid', detail: `route ${record.qualifiedId} must reference a same-owner local page` }
+    }
+    if (this.outlets.get('manager.settings.content') === undefined) {
+      return { state: 'pending', detail: 'outlet manager.settings.content is not declared by the host' }
+    }
+    if (!this.outlets.get('manager.settings.content')!.validatePath(record.definition.path)) {
+      return { state: 'invalid', detail: `route path ${record.definition.path} is incompatible with manager.settings.content` }
+    }
+    const pathConflict = [...this.records.values()].find(candidate => (
+      candidate.qualifiedId !== record.qualifiedId
+      && candidate.definition.outlet === 'manager.settings.content'
+      && candidate.definition.path === record.definition.path
+    ))
+    if (pathConflict !== undefined) {
+      return {
+        state: 'invalid',
+        detail: `route path ${record.definition.path} conflicts with ${pathConflict.qualifiedId}`,
+      }
+    }
+    const page = this.pages.get(record.owner, record.definition.page)
+    if (page === undefined) return { state: 'pending', detail: `page ${record.definition.page} is not registered by plugin ${record.owner}` }
+    if (page.metadata.chrome !== 'body-only') {
+      return { state: 'invalid', detail: `page ${page.qualifiedId} must use body-only chrome` }
+    }
+    const values = this.contexts.getSnapshot()
+    const unknownKey = whenContextKeys(record.definition.when).find(key => !Object.hasOwn(values, key))
+    if (unknownKey !== undefined) return { state: 'invalid', detail: `when context key ${unknownKey} is not declared by the host adapter` }
+    if (!evaluateWhen(record.definition.when, values)) return { state: 'pending', detail: 'route when condition is not satisfied' }
+    const outletAccess = this.access?.decision(record.owner, 'manager.settings.content', 'outlet')
+    if (outletAccess !== undefined && !outletAccess.authorized) {
+      return { state: 'invalid', detail: outletAccess.reason ?? `extension point manager.settings.content is denied for plugin ${record.owner}` }
+    }
+    return { state: 'available' }
+  }
+
+  mountManagerSettings(
+    requestingOwner: string,
+    reference: CordisXRouteReference,
+    contributionId: string,
+    panelBody: HTMLElement,
+  ): Promise<ManagedSettingsPageMount> {
+    let result: ManagedSettingsPageMount | undefined
+    return this.enqueue(async () => {
+      assertKeys(reference, ['id', 'params'], 'manager settings route reference')
+      assertLocalId(reference.id, 'manager settings route reference')
+      const record = this.records.get(qualifyOwnedId(requestingOwner, reference.id))
+      if (record === undefined || record.owner !== requestingOwner) throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
+      const resolution = this.managerSettingsRoute(requestingOwner, reference.id)
+      if (resolution.state !== 'available') throw new Error(resolution.detail ?? `route ${record.qualifiedId} is not available`)
+      const page = this.pages.get(record.owner, record.definition.page)!
+      const surfaceAccess = this.access?.authorizeSurfaceRoute(requestingOwner, 'manager.settings.tabs', contributionId, record.qualifiedId)
+      if (surfaceAccess !== undefined && !surfaceAccess.authorized) throw new Error(surfaceAccess.reason ?? 'manager.settings.tabs is denied')
+      const routeAccess = this.access?.authorizeOutletRoute(requestingOwner, 'manager.settings.content', record.qualifiedId, page.qualifiedId)
+      if (routeAccess !== undefined && !routeAccess.authorized) throw new Error(routeAccess.reason ?? 'manager.settings.content is denied')
+      const pageAccess = this.access?.authorizeOutletPage(requestingOwner, 'manager.settings.content', record.qualifiedId, page.qualifiedId)
+      if (pageAccess !== undefined && !pageAccess.authorized) throw new Error(pageAccess.reason ?? 'manager.settings.content is denied')
+      const params = immutableSnapshot(reference.params ?? {})
+      buildPath(record, params)
+      await this.unmountManagerSettings()
+
+      const content = panelBody.ownerDocument.createElement('div')
+      content.dataset.cordisxSettingsPage = page.qualifiedId
+      content.dataset.cordisxRoute = record.qualifiedId
+      content.dataset.cordisxNoDrag = 'true'
+      content.style.cssText = 'min-width:0;min-height:100%;box-sizing:border-box'
+      content.style.setProperty('-webkit-app-region', 'no-drag')
+      panelBody.append(content)
+      const abortController = new AbortController()
+      const effects: Disposable<void>[] = []
+      const own: LocalizationEffectOwner = (setup) => {
+        const cleanup = setup()
+        let active = true
+        const dispose = (() => {
+          if (!active) return
+          active = false
+          const index = effects.indexOf(dispose)
+          if (index >= 0) effects.splice(index, 1)
+          cleanup()
+        }) as Disposable<void>
+        effects.push(dispose)
+        return dispose
+      }
+      const localization = this.i18n.seatFor(page.owner, page.metadata.localeNamespace ?? page.owner, own)
+      const mount = {} as ManagedSettingsPageMountRecord
+      Object.assign(mount, {
+        owner: page.owner,
+        contributionId,
+        routeId: record.qualifiedId,
+        pageId: page.qualifiedId,
+        signal: abortController.signal,
+        route: record,
+        page,
+        content,
+        effects,
+        abortController,
+        disposed: false,
+        abort: () => abortController.abort(),
+        dispose: () => this.disposeManagedSettingsMount(mount),
+      })
+      this.managerSettingsMount = mount
+      try {
+        const pageDispose = page.mount({
+          container: content,
+          document: content.ownerDocument,
+          signal: abortController.signal,
+          routeId: record.qualifiedId,
+          outlet: 'manager.settings.content',
+          params,
+          navigation: {
+            navigate: next => this.navigate(page.owner, next),
+            back: outlet => this.back(page.owner, outlet),
+            close: outlet => this.close(page.owner, outlet),
+          },
+          localeNamespace: localization.namespace,
+          t: localization.t,
+          localization,
+        })
+        if (typeof pageDispose === 'function') mount.pageDispose = pageDispose
+        result = mount
+        this.notify()
+      } catch (error) {
+        await this.disposeManagedSettingsMount(mount)
+        throw error
+      }
+    }).then(() => result!)
+  }
+
+  closeManagerSettings(): Promise<void> {
+    return this.enqueue(async () => {
+      await this.unmountManagerSettings()
+      this.notify()
+    })
   }
 
   navigate(requestingOwner: string, reference: CordisXRouteReference): Promise<void> {
@@ -591,13 +763,16 @@ export class NavigationRegistry {
     const outlets = this.outlets.descriptors().map((descriptor): OutletSnapshot => {
       const host = this.outlets.get(descriptor.id)!.controller.getSnapshot()
       const state = this.states.get(descriptor.id)
+      const managerMount = descriptor.id === 'manager.settings.content' ? this.managerSettingsMount : undefined
       return {
         ...descriptor,
         ...host,
-        mounted: state?.mount !== undefined,
-        presentation: state?.mount === undefined ? 'inactive' : state.presentation ?? 'presented',
+        mounted: state?.mount !== undefined || managerMount !== undefined,
+        presentation: state?.mount === undefined && managerMount === undefined ? 'inactive' : state?.presentation ?? 'presented',
         ...(state?.suspendedBy === undefined ? {} : { suspendedBy: state.suspendedBy }),
-        ...(state?.stack.at(-1) === undefined ? {} : { activeRoute: state.stack.at(-1)!.record.qualifiedId }),
+        ...(managerMount !== undefined
+          ? { activeRoute: managerMount.routeId }
+          : state?.stack.at(-1) === undefined ? {} : { activeRoute: state.stack.at(-1)!.record.qualifiedId }),
         ...(state?.error === undefined ? {} : { error: state.error }),
       }
     })
@@ -619,6 +794,7 @@ export class NavigationRegistry {
     this.unsubscribePages()
     this.unsubscribeOutlets()
     await this.operation.catch(() => {})
+    await this.unmountManagerSettings()
     for (const [name] of this.states) await this.closeNow(name)
     this.records.clear()
     this.states.clear()
@@ -646,7 +822,14 @@ export class NavigationRegistry {
     }
     const page = this.pages.get(record.owner, record.definition.page)
     if (page === undefined) return `page ${record.definition.page} is not registered by plugin ${record.owner}`
-    if (page.metadata.chrome === 'body-only' && record.definition.outlet !== 'session.content') {
+    if (record.definition.outlet === 'manager.settings.content' && page.metadata.chrome !== 'body-only') {
+      return `page ${page.qualifiedId} must use body-only chrome for manager.settings.content`
+    }
+    if (
+      page.metadata.chrome === 'body-only'
+      && record.definition.outlet !== 'session.content'
+      && record.definition.outlet !== 'manager.settings.content'
+    ) {
       return `body-only page ${record.definition.page} requires an outlet with persistent external chrome`
     }
     const values = this.contexts.getSnapshot()
@@ -974,6 +1157,24 @@ export class NavigationRegistry {
   }
 
   private async reconcileDependencies(): Promise<void> {
+    const managed = this.managerSettingsMount
+    if (managed !== undefined) {
+      const current = this.records.get(managed.routeId)
+      const resolution = current === undefined
+        ? { state: 'pending' as const }
+        : this.managerSettingsRoute(managed.owner, current.definition.id)
+      const retentionAccess = this.access?.authorizeOutletPage(
+        managed.owner,
+        'manager.settings.content',
+        managed.routeId,
+        managed.pageId,
+      )
+      if (current === undefined || resolution.state !== 'available'
+        || this.pages.get(managed.owner, managed.page.metadata.id) === undefined
+        || (retentionAccess !== undefined && !retentionAccess.authorized)) {
+        await this.unmountManagerSettings()
+      }
+    }
     for (const [name, state] of this.states) {
       const current = state.stack.at(-1)
       const outlet = this.outlets.get(name)
@@ -1050,6 +1251,34 @@ export class NavigationRegistry {
   private notify(): void {
     for (const listener of this.listeners) listener()
   }
+
+  private async disposeManagedSettingsMount(mount: ManagedSettingsPageMountRecord): Promise<void> {
+    if (mount.disposed) return
+    mount.disposed = true
+    mount.abortController.abort()
+    let failure: unknown
+    try {
+      await mount.pageDispose?.()
+    } catch (error) {
+      failure = error
+    }
+    for (const dispose of [...mount.effects].reverse()) {
+      try {
+        await dispose()
+      } catch (error) {
+        failure ??= error
+      }
+    }
+    mount.content.remove()
+    if (this.managerSettingsMount === mount) this.managerSettingsMount = undefined
+    if (failure !== undefined) throw failure
+  }
+
+  private async unmountManagerSettings(): Promise<void> {
+    const mount = this.managerSettingsMount
+    if (mount === undefined) return
+    await this.disposeManagedSettingsMount(mount)
+  }
 }
 
 export class CordisXPageService extends Service implements CordisXPages {
@@ -1118,6 +1347,23 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
 
   hasFor(owner: string, id: string): boolean {
     return this.registry.has(owner, id)
+  }
+
+  managerSettingsRouteFor(owner: string, id: string): ManagerSettingsRouteResolution {
+    return this.registry.managerSettingsRoute(owner, id)
+  }
+
+  mountManagerSettingsFor(
+    owner: string,
+    reference: CordisXRouteReference,
+    contributionId: string,
+    panelBody: HTMLElement,
+  ): Promise<ManagedSettingsPageMount> {
+    return this.registry.mountManagerSettings(owner, reference, contributionId, panelBody)
+  }
+
+  closeManagerSettings(): Promise<void> {
+    return this.registry.closeManagerSettings()
   }
 
   navigateFor(owner: string, reference: CordisXRouteReference): Promise<void> {

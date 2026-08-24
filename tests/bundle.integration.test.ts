@@ -172,10 +172,10 @@ describe('renderer bundle', () => {
     expect(snapshot.navigation.routes).toHaveLength(3)
     expect(snapshot.navigation.routes.every(item => item.valid)).toBe(true)
     expect(snapshot.navigation.pages).toHaveLength(3)
-    expect(snapshot.navigation.outlets).toHaveLength(3)
-    expect(snapshot.extensionPoints.points).toHaveLength(33)
-    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(28)
-    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'outlet')).toHaveLength(5)
+    expect(snapshot.navigation.outlets).toHaveLength(4)
+    expect(snapshot.extensionPoints.points).toHaveLength(35)
+    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(29)
+    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'outlet')).toHaveLength(6)
     expect(snapshot.extensionPoints.descriptorDiagnostics).toEqual([])
     expect(snapshot.localeCatalogs).toHaveLength(4)
     expect(snapshot.localeCatalogs.filter(item => item.owner === 'host')).toEqual([
@@ -910,8 +910,8 @@ describe('renderer bundle', () => {
     const settingsTabs = [...dom.window.document.querySelectorAll<HTMLElement>('[data-settings-tab]')]
     expect(settingsTabs.every(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('aria-hidden') === 'true')).toBe(true)
     expect(settingsTabs.every(tab => tab.querySelector('.cxm-tab-icon svg') !== null)).toBe(true)
-    expect(settingsTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-material-icon'))).toEqual([
-      'marketplace', 'runtime', 'launcher',
+    expect(settingsTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-host-icon'))).toEqual([
+      'host:open', 'host:analytics', 'host:settings',
     ])
     expect(settingsTabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1])
     expect(settingsTabs.map(tab => tab.textContent)).toEqual(['插件商店', '运行状态', '启动器'])
@@ -922,19 +922,24 @@ describe('renderer bundle', () => {
     expect(managerModal?.textContent).not.toMatch(/\d+ 个插件/)
     expect(managerModal?.textContent).not.toContain('启动器配置')
     expect(managerHeadings()).toEqual(['配置'])
-    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="插件商店"]')).not.toBeNull()
-    dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="runtime"]')?.click()
-    expect(dom.window.document.activeElement?.getAttribute('data-settings-tab')).toBe('runtime')
+    const settingsPanel = dom.window.document.querySelector<HTMLElement>('[data-settings-root] [role="tabpanel"]')!
+    const settingsPanelLabel = (): string | undefined => dom.window.document
+      .getElementById(settingsPanel.getAttribute('aria-labelledby') ?? '')?.textContent ?? undefined
+    expect(settingsPanelLabel()).toBe('插件商店')
+    dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="host:runtime"]')?.click()
+    await settle()
+    expect(dom.window.document.activeElement?.getAttribute('data-settings-tab')).toBe('host:runtime')
     expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-settings-tab]')].map(tab => tab.tabIndex)).toEqual([-1, 0, -1])
     expect(managerModal?.textContent).not.toContain('插件运行状态')
     expect(managerModal?.textContent).toContain('当前隔离 Chromium profile')
     expect(managerHeadings()).toEqual(['配置'])
-    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="运行状态"]')).not.toBeNull()
-    dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="runtime"]')?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
-    expect(dom.window.document.activeElement?.getAttribute('data-settings-tab')).toBe('launcher')
+    expect(settingsPanelLabel()).toBe('运行状态')
+    dom.window.document.querySelector<HTMLButtonElement>('[data-settings-tab="host:runtime"]')?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+    await settle()
+    expect(dom.window.document.activeElement?.getAttribute('data-settings-tab')).toBe('host:launcher')
     expect(managerModal?.textContent).not.toContain('启动器配置')
     expect(managerHeadings()).toEqual(['配置'])
-    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="启动器"]')).not.toBeNull()
+    expect(settingsPanelLabel()).toBe('启动器')
 
     await runtime?.dispose()
     expect(dom.window.document.documentElement.dataset.cordisxReady).toBeUndefined()

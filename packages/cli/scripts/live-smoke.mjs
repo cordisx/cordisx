@@ -14,6 +14,7 @@ const parsed = parseArgs({
     'manager-plugin': { type: 'string' },
     'manager-detail-tab': { type: 'string' },
     'manager-settings-tab': { type: 'string' },
+    'manager-settings-exercise': { type: 'boolean', default: false },
     'manager-extension-point': { type: 'string' },
     'manager-extension-point-tab': { type: 'string' },
     'manager-route': { type: 'string' },
@@ -543,6 +544,227 @@ async function evaluateByValue(expression, awaitPromise = false) {
 }
 
 let exerciseReport
+let settingsTabsReport
+if (parsed.values['manager-settings-exercise']) {
+  const owner = parsed.values['plugin-owner'] ?? 'settings-tab-demo'
+  const qualifiedTabId = `${owner}:settings`
+  const initial = await evaluateByValue(`(async () => {
+    const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+    const runtime = globalThis.__cordisxRuntime
+    if (runtime === undefined) throw new Error('CordisX runtime is unavailable')
+    const trigger = document.querySelector('[data-cordisx-manager-trigger]')
+    trigger?.click()
+    document.querySelector('[data-tab="settings"]')?.click()
+    await wait(120)
+    const main = document.querySelector('[data-app-shell-main-content-layout]')
+    const selected = document.querySelector('[data-app-action-sidebar-thread-selected="true"]')
+    globalThis.__cordisxSettingsSmokeNative = { main, selected }
+    const snapshot = runtime.snapshot()
+    const tab = document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]')
+    const panel = document.querySelector('[data-settings-root] [role="tabpanel"]')
+    return {
+      url: location.href,
+      tabs: [...document.querySelectorAll('[data-settings-tab]')].map(element => ({
+        id: element.getAttribute('data-settings-tab'),
+        owner: element.getAttribute('data-settings-owner'),
+        title: element.textContent?.trim() ?? '',
+        role: element.getAttribute('role'),
+        selected: element.getAttribute('aria-selected'),
+        tabIndex: element.tabIndex,
+        icon: element.querySelector('[data-host-icon]')?.getAttribute('data-host-icon') ?? null,
+      })),
+      projection: snapshot.settingsTabs,
+      structuredHeader: tab !== null
+        && tab.querySelector('.cxm-tab-content') !== null
+        && tab.querySelector('[data-host-icon]') !== null
+        && tab.querySelector('section, style') === null,
+      panel: panel === null ? null : {
+        role: panel.getAttribute('role'),
+        labelledBy: panel.getAttribute('aria-labelledby'),
+        controls: tab?.getAttribute('aria-controls') ?? null,
+      },
+      points: ['manager.settings.tabs', 'manager.settings.content'].map(id => {
+        const point = snapshot.extensionPoints.points.find(item => item.id === id)
+        return point === undefined ? null : {
+          id, available: point.available, usingPluginCount: point.usingPluginCount,
+          activePluginCount: point.activePluginCount,
+        }
+      }),
+      native: {
+        mainPresent: main !== null,
+        mainConnected: main?.isConnected ?? false,
+        selectedId: selected?.getAttribute('data-app-action-sidebar-thread-id') ?? null,
+        selectedConnected: selected?.isConnected ?? false,
+      },
+    }
+  })()`, true)
+
+  const tabRect = async () => await evaluateByValue(`(() => {
+    const tab = document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]')
+    const rect = tab?.getBoundingClientRect()
+    return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+  })()`)
+  const firstRect = await tabRect()
+  if (firstRect === null) throw new Error(`manager settings demo tab not found: ${qualifiedTabId}`)
+  await pointerClick(firstRect)
+  await new Promise(resolve => setTimeout(resolve, 250))
+  const mounted = await evaluateByValue(`(() => {
+    const runtime = globalThis.__cordisxRuntime
+    const tab = document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]')
+    const panel = document.querySelector('[data-settings-root] [role="tabpanel"]')
+    const page = panel?.querySelector('[data-cordisx-settings-page="${qualifiedTabId}"]')
+    return {
+      activeTab: tab?.getAttribute('aria-selected') === 'true' ? ${JSON.stringify(qualifiedTabId)} : null,
+      focusedTab: document.activeElement?.getAttribute('data-settings-tab') ?? null,
+      contentMounted: page?.querySelector('[data-settings-demo-content="mounted"]') !== null,
+      bodyOnly: page !== null && page.querySelector('[data-cordisx-page-chrome]') === null,
+      controlledBody: page?.parentElement?.hasAttribute('data-settings-panel-body') ?? false,
+      panelLabel: panel?.getAttribute('aria-labelledby') ?? null,
+      outlet: runtime.snapshot().navigation.outlets.find(item => item.id === 'manager.settings.content'),
+      url: location.href,
+    }
+  })()`)
+
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39 })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39 })
+  await new Promise(resolve => setTimeout(resolve, 220))
+  const keyboard = await evaluateByValue(`(() => ({
+    selected: document.querySelector('[data-settings-tab][aria-selected="true"]')?.getAttribute('data-settings-tab') ?? null,
+    focused: document.activeElement?.getAttribute('data-settings-tab') ?? null,
+    pluginContentPresent: document.querySelector('[data-settings-demo-content]') !== null,
+  }))()`)
+
+  const mountAgain = async () => {
+    const rect = await tabRect()
+    if (rect === null) throw new Error(`manager settings demo tab did not restore: ${qualifiedTabId}`)
+    await pointerClick(rect)
+    await new Promise(resolve => setTimeout(resolve, 220))
+  }
+  await mountAgain()
+  const source = await evaluateByValue(`globalThis.__cordisxRuntime.snapshot().plugins.find(item => item.id === ${JSON.stringify(owner)})?.source ?? null`)
+  if (source === null) throw new Error(`manager settings demo plugin source not found: ${owner}`)
+
+  const denyPoint = async (pointId) => await evaluateByValue(`(async () => {
+    const runtime = globalThis.__cordisxRuntime
+    await runtime.setExtensionPointPolicy(${JSON.stringify(source)}, ${JSON.stringify(owner)}, ${JSON.stringify(pointId)}, 'deny')
+    await new Promise(resolve => setTimeout(resolve, 220))
+    return {
+      tabPresent: document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]') !== null,
+      contentPresent: document.querySelector('[data-settings-demo-content]') !== null,
+      fallbackSelected: document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected') === 'true',
+      outletMounted: runtime.snapshot().navigation.outlets.find(item => item.id === 'manager.settings.content')?.mounted ?? null,
+    }
+  })()`, true)
+  const restorePoint = async (pointId) => await evaluateByValue(`(async () => {
+    const runtime = globalThis.__cordisxRuntime
+    await runtime.setExtensionPointPolicy(${JSON.stringify(source)}, ${JSON.stringify(owner)}, ${JSON.stringify(pointId)}, 'inherit')
+    await new Promise(resolve => setTimeout(resolve, 220))
+    return {
+      tabPresent: document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]') !== null,
+      fallbackSelected: document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected') === 'true',
+    }
+  })()`, true)
+
+  const surfaceDenied = await denyPoint('manager.settings.tabs')
+  const surfaceRestored = await restorePoint('manager.settings.tabs')
+  await mountAgain()
+  const outletDenied = await denyPoint('manager.settings.content')
+  const outletRestored = await restorePoint('manager.settings.content')
+  await mountAgain()
+
+  const blocked = await evaluateByValue(`(async () => {
+    const runtime = globalThis.__cordisxRuntime
+    await runtime.setPluginBlocked(${JSON.stringify(owner)}, true)
+    await new Promise(resolve => setTimeout(resolve, 220))
+    return {
+      status: runtime.snapshot().plugins.find(item => item.id === ${JSON.stringify(owner)})?.status ?? null,
+      tabPresent: document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]') !== null,
+      contentPresent: document.querySelector('[data-settings-demo-content]') !== null,
+      fallbackSelected: document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected') === 'true',
+    }
+  })()`, true)
+  const restored = await evaluateByValue(`(async () => {
+    const runtime = globalThis.__cordisxRuntime
+    await runtime.setPluginBlocked(${JSON.stringify(owner)}, false)
+    await new Promise(resolve => setTimeout(resolve, 260))
+    return {
+      status: runtime.snapshot().plugins.find(item => item.id === ${JSON.stringify(owner)})?.status ?? null,
+      tabPresent: document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]') !== null,
+      fallbackSelected: document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected') === 'true',
+    }
+  })()`, true)
+
+  const locale = await evaluateByValue(`(async () => {
+    const original = document.documentElement.lang
+    const projectedLocale = original.toLowerCase().startsWith('zh') ? 'en' : 'zh-CN'
+    document.documentElement.lang = projectedLocale
+    await new Promise(resolve => setTimeout(resolve, 260))
+    const projected = document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]')?.textContent?.trim() ?? null
+    const runtimeTitle = globalThis.__cordisxRuntime.snapshot().settingsTabs.find(item => item.id === ${JSON.stringify(qualifiedTabId)})?.title ?? null
+    document.documentElement.lang = original
+    await new Promise(resolve => setTimeout(resolve, 260))
+    return {
+      original, projectedLocale, projected, runtimeTitle,
+      expectedProjected: projectedLocale.toLowerCase().startsWith('zh') ? '演示插件' : 'Demo plugin',
+      expectedRestored: original.toLowerCase().startsWith('zh') ? '演示插件' : 'Demo plugin',
+      restored: document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]')?.textContent?.trim() ?? null,
+    }
+  })()`, true)
+  await mountAgain()
+
+  const final = await evaluateByValue(`(() => {
+    const refs = globalThis.__cordisxSettingsSmokeNative
+    const snapshot = globalThis.__cordisxRuntime.snapshot()
+    const accesses = snapshot.extensionPoints.accessDiagnostics
+      .filter(item => item.request.identity.pluginId === ${JSON.stringify(owner)}
+        && ['manager.settings.tabs', 'manager.settings.content'].includes(item.request.identity.pointId))
+    return {
+      url: location.href,
+      contentMounted: document.querySelector('[data-settings-demo-content="mounted"]') !== null,
+      native: {
+        sameMain: refs?.main === document.querySelector('[data-app-shell-main-content-layout]'),
+        mainConnected: refs?.main?.isConnected ?? false,
+        sameSelected: refs?.selected === document.querySelector('[data-app-action-sidebar-thread-selected="true"]'),
+        selectedConnected: refs?.selected?.isConnected ?? false,
+        selectedStable: refs?.selected == null
+          ? document.querySelector('[data-app-action-sidebar-thread-selected="true"]') === null
+          : refs.selected === document.querySelector('[data-app-action-sidebar-thread-selected="true"]') && refs.selected.isConnected,
+      },
+      access: {
+        operations: [...new Set(accesses.map(item => item.request.operation))],
+        generations: [...new Set(accesses.map(item => item.request.generation))],
+        allAttributed: accesses.length >= 3 && accesses.every(item => item.request.identity.source === ${JSON.stringify(source)}),
+      },
+    }
+  })()`)
+  settingsTabsReport = {
+    owner, qualifiedTabId, initial, mounted, keyboard,
+    policy: { surfaceDenied, surfaceRestored, outletDenied, outletRestored },
+    lifecycle: { blocked, restored }, locale, final,
+    passed: initial.url === 'app://-/index.html'
+      && initial.structuredHeader === true
+      && initial.tabs.map(item => item.id).join(',') === ['host:marketplace', qualifiedTabId, 'host:runtime', 'host:launcher'].join(',')
+      && mounted.contentMounted === true && mounted.bodyOnly === true && mounted.controlledBody === true
+      && mounted.url === initial.url && keyboard.selected === 'host:runtime' && keyboard.focused === 'host:runtime'
+      && surfaceDenied.tabPresent === false && surfaceDenied.contentPresent === false && surfaceDenied.fallbackSelected === true
+      && outletDenied.tabPresent === false && outletDenied.contentPresent === false && outletDenied.fallbackSelected === true
+      && surfaceRestored.tabPresent === true && surfaceRestored.fallbackSelected === true
+      && outletRestored.tabPresent === true && outletRestored.fallbackSelected === true
+      && blocked.status === 'blocked' && blocked.tabPresent === false && blocked.contentPresent === false && blocked.fallbackSelected === true
+      && restored.status === 'active' && restored.tabPresent === true && restored.fallbackSelected === true
+      && locale.projected === locale.expectedProjected && locale.runtimeTitle === locale.expectedProjected
+      && locale.restored === locale.expectedRestored
+      && final.url === initial.url && final.contentMounted === true
+      && final.native.sameMain === true && final.native.mainConnected === true
+      && final.native.selectedStable === true
+      && final.access.operations.includes('surface.route.navigate')
+      && final.access.operations.includes('outlet.route.navigate')
+      && final.access.operations.includes('outlet.page.mount')
+      && final.access.allAttributed === true,
+  }
+  console.log(`manager-settings=${JSON.stringify(settingsTabsReport, null, 2)}`)
+}
+
 if (parsed.values.exercise) {
   await evaluateByValue(`(() => {
     document.querySelector('.cxm-close')?.click()
@@ -1148,7 +1370,9 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   const managerDetailTab = parsed.values['manager-detail-tab']
   if (managerDetailTab !== undefined && !['readme', 'config', 'permissions', 'runtime', 'extension-points', 'routes'].includes(managerDetailTab)) throw new Error(`unknown manager detail tab: ${managerDetailTab}`)
   const managerSettingsTab = parsed.values['manager-settings-tab']
-  if (managerSettingsTab !== undefined && !['marketplace', 'runtime', 'launcher'].includes(managerSettingsTab)) throw new Error(`unknown manager settings tab: ${managerSettingsTab}`)
+  if (managerSettingsTab !== undefined && !/^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)?$/.test(managerSettingsTab)) {
+    throw new Error(`invalid manager settings tab id: ${managerSettingsTab}`)
+  }
   const managerExtensionPoint = parsed.values['manager-extension-point']
   const managerExtensionPointTab = parsed.values['manager-extension-point-tab']
   if (managerExtensionPointTab !== undefined && !['usage', 'information', 'diagnostics'].includes(managerExtensionPointTab)) throw new Error(`unknown manager extension point tab: ${managerExtensionPointTab}`)
@@ -1156,7 +1380,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   const managerMarketplaceTab = parsed.values['manager-marketplace-tab']
   if (managerMarketplaceTab !== undefined && !['overview', 'authors-source'].includes(managerMarketplaceTab)) throw new Error(`unknown manager marketplace tab: ${managerMarketplaceTab}`)
   const evaluatedManager = await send('Runtime.evaluate', {
-    expression: `(() => {
+    expression: `(async () => {
       const trigger = document.querySelector('[data-cordisx-manager-trigger]')
       trigger?.click()
       document.querySelector('[data-tab=${JSON.stringify(managerTab)}]')?.click()
@@ -1170,6 +1394,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       if (detailTab !== undefined) document.querySelector('[data-plugin-detail-tab="' + detailTab + '"]')?.click()
       const settingsTab = ${JSON.stringify(managerSettingsTab)}
       if (settingsTab !== undefined) document.querySelector('[data-settings-tab="' + settingsTab + '"]')?.click()
+      if (settingsTab !== undefined) await new Promise(resolve => setTimeout(resolve, 250))
       const extensionPointId = ${JSON.stringify(managerExtensionPoint)}
       if (extensionPointId !== undefined) document.querySelector('[data-extension-point-id="' + CSS.escape(extensionPointId) + '"]')?.click()
       const extensionPointTab = ${JSON.stringify(managerExtensionPointTab)}
@@ -1210,6 +1435,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         },
       }
     })()`,
+    awaitPromise: true,
     returnByValue: true,
   })
   const managerResult = evaluatedManager.result?.value ?? null
@@ -1252,6 +1478,7 @@ if (parsed.values.generation) {
     surfaces: document.querySelectorAll('[data-cordisx-surface-host]').length,
     outlets: document.querySelectorAll('[data-cordisx-page-outlet]').length,
     pages: document.querySelectorAll('[data-cordisx-page]').length,
+    settingsPages: document.querySelectorAll('[data-cordisx-settings-page]').length,
     tooltips: document.querySelectorAll('.cordisx-host-tooltip').length,
     styles: document.querySelectorAll('#cordisx-structured-styles, #cordisx-manager-style').length,
     trigger: document.querySelector('[data-cordisx-manager-trigger]') !== null,
@@ -1264,6 +1491,7 @@ if (parsed.values.generation) {
       surfaces: document.querySelectorAll('[data-cordisx-surface-host]').length,
       outlets: document.querySelectorAll('[data-cordisx-page-outlet]').length,
       pages: document.querySelectorAll('[data-cordisx-page]').length,
+      settingsPages: document.querySelectorAll('[data-cordisx-settings-page]').length,
       tooltips: document.querySelectorAll('.cordisx-host-tooltip').length,
       styles: document.querySelectorAll('#cordisx-structured-styles, #cordisx-manager-style').length,
       trigger: document.querySelector('[data-cordisx-manager-trigger]') !== null,
@@ -1272,6 +1500,7 @@ if (parsed.values.generation) {
   generationReport = { beforeDispose, afterDispose,
     cleaned: afterDispose.ready === false && afterDispose.runtimePresent === false && afterDispose.surfaces === 0
       && afterDispose.outlets === 0 && afterDispose.pages === 0 && afterDispose.tooltips === 0
+      && afterDispose.settingsPages === 0
       && afterDispose.styles === 0 && afterDispose.trigger === false }
   console.log(`generation=${JSON.stringify(generationReport, null, 2)}`)
 }
@@ -1290,6 +1519,7 @@ if (parsed.values.report !== undefined) {
     },
     baseline: report,
     ...(exerciseReport === undefined ? {} : { exercise: exerciseReport }),
+    ...(settingsTabsReport === undefined ? {} : { managerSettings: settingsTabsReport }),
     ...(demoReport === undefined ? {} : { agentTraceDemo: demoReport }),
     ...(pluginLifecycleReport === undefined ? {} : { pluginLifecycle: pluginLifecycleReport }),
     ...(uiCatalogReport === undefined ? {} : { uiCatalog: uiCatalogReport }),
@@ -1304,4 +1534,7 @@ socket.close()
 
 if (uiCatalogReport?.result === 'fail') {
   throw new Error('UI catalog smoke assertions failed; inspect the aggregated report')
+}
+if (settingsTabsReport?.passed === false) {
+  throw new Error('manager settings smoke assertions failed; inspect the aggregated report')
 }

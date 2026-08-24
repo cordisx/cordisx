@@ -9,9 +9,11 @@ import type {
   CordisXExtensionPointStability,
   CordisXHostExtensionPointCatalogV1,
   CordisXHostExtensionPointCatalogV2,
+  CordisXHostExtensionPointCatalogV3,
   CordisXHostExtensionPointAnchorDescriptorV2,
   CordisXHostExtensionPointDescriptor,
   CordisXHostExtensionPointDescriptorV2,
+  CordisXHostExtensionPointDescriptorV3,
   CordisXLocaleCatalog,
   CordisXLocalizedText,
   CordisXLocalizedProjection,
@@ -23,6 +25,7 @@ import {
   CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3,
 } from '../contracts.js'
 import type { CordisXI18nService } from './i18n.js'
 import type { CommandSnapshot } from './commands.js'
@@ -44,7 +47,7 @@ export interface HostExtensionPointAnchorProjection extends CordisXHostExtension
   readonly diagnosticProjection?: CordisXLocalizedProjection
 }
 
-export interface HostExtensionPointProjection extends CordisXHostExtensionPointDescriptorV2 {
+export interface HostExtensionPointProjection extends CordisXHostExtensionPointDescriptorV3 {
   readonly titleProjection: CordisXLocalizedProjection
   readonly descriptionProjection: CordisXLocalizedProjection
   readonly diagnosticProjection?: CordisXLocalizedProjection
@@ -52,7 +55,7 @@ export interface HostExtensionPointProjection extends CordisXHostExtensionPointD
 }
 
 interface DescriptorRegistration {
-  readonly descriptors: readonly CordisXHostExtensionPointDescriptorV2[]
+  readonly descriptors: readonly CordisXHostExtensionPointDescriptorV3[]
   readonly diagnostics: readonly ExtensionPointDescriptorDiagnostic[]
 }
 
@@ -63,7 +66,7 @@ function exactKeys(value: object, allowed: readonly string[], label: string): vo
 
 const PAYLOAD_FAMILIES = new Set<CordisXExtensionPointPayloadFamily>([
   'action', 'menu-item', 'contextual-action', 'tab', 'presenter', 'navigation-item',
-  'environment-section', 'environment-row', 'outlet',
+  'manager-settings-tab', 'environment-section', 'environment-row', 'outlet',
 ])
 const STABILITIES = new Set<CordisXExtensionPointStability>(['stable', 'experimental', 'reserved'])
 const AVAILABILITIES = new Set<CordisXExtensionPointAvailability>(['available', 'pending', 'unavailable'])
@@ -89,12 +92,14 @@ function normalizeAnchor(value: unknown, pointId: string): CordisXHostExtensionP
   return immutableSnapshot(anchor as CordisXHostExtensionPointAnchorDescriptorV2)
 }
 
-function normalizeDescriptor(value: unknown, schemaVersion: 1 | 2): CordisXHostExtensionPointDescriptorV2 {
+function normalizeDescriptor(value: unknown, schemaVersion: 1 | 2 | 3): CordisXHostExtensionPointDescriptorV3 {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('descriptor must be an object')
   exactKeys(value, schemaVersion === 1
     ? ['id', 'kind', 'title', 'description', 'icon']
-    : ['id', 'kind', 'title', 'description', 'icon', 'payloadFamily', 'stability', 'availability', 'diagnostic', 'anchors'], 'descriptor')
-  const descriptor = value as Partial<CordisXHostExtensionPointDescriptorV2>
+    : schemaVersion === 2
+      ? ['id', 'kind', 'title', 'description', 'icon', 'payloadFamily', 'stability', 'availability', 'diagnostic', 'anchors']
+      : ['id', 'kind', 'title', 'description', 'icon', 'payloadFamily', 'stability', 'availability', 'diagnostic', 'anchors', 'pageChrome', 'presentationGroup', 'routePathFamily'], 'descriptor')
+  const descriptor = value as Partial<CordisXHostExtensionPointDescriptorV3>
   if (typeof descriptor.id !== 'string') throw new Error('descriptor id is required')
   assertLocalId(descriptor.id, 'extension point id')
   if (descriptor.kind !== 'surface' && descriptor.kind !== 'outlet') throw new Error(`extension point ${descriptor.id} kind is invalid`)
@@ -132,7 +137,23 @@ function normalizeDescriptor(value: unknown, schemaVersion: 1 | 2): CordisXHostE
   const pointId = descriptor.id
   const anchors = descriptor.anchors?.map(anchor => normalizeAnchor(anchor, pointId))
   if (anchors !== undefined && new Set(anchors.map(anchor => anchor.id)).size !== anchors.length) throw new Error(`extension point ${descriptor.id} has duplicate anchors`)
-  return immutableSnapshot({ ...descriptor, ...(anchors === undefined ? {} : { anchors }) } as CordisXHostExtensionPointDescriptorV2)
+  if (schemaVersion === 3) {
+    if (descriptor.kind === 'outlet') {
+      if (!Array.isArray(descriptor.pageChrome) || descriptor.pageChrome.length === 0 || descriptor.pageChrome.length > 2
+        || descriptor.pageChrome.some(item => item !== 'standard' && item !== 'body-only')
+        || new Set(descriptor.pageChrome).size !== descriptor.pageChrome.length) {
+        throw new Error(`extension point ${descriptor.id} page chrome is invalid`)
+      }
+      if (descriptor.presentationGroup === undefined) throw new Error(`extension point ${descriptor.id} presentation group is required`)
+      assertLocalId(descriptor.presentationGroup, `extension point ${descriptor.id} presentation group`)
+      if (!['app', 'main', 'session', 'manager-settings', 'host-defined'].includes(String(descriptor.routePathFamily))) {
+        throw new Error(`extension point ${descriptor.id} route path family is invalid`)
+      }
+    } else if (descriptor.pageChrome !== undefined || descriptor.presentationGroup !== undefined || descriptor.routePathFamily !== undefined) {
+      throw new Error(`surface extension point ${descriptor.id} cannot declare outlet compatibility fields`)
+    }
+  }
+  return immutableSnapshot({ ...descriptor, ...(anchors === undefined ? {} : { anchors }) } as CordisXHostExtensionPointDescriptorV3)
 }
 
 /** Runtime ledger for host/adapter-owned descriptors. Invalid declarations remain diagnostic-only. */
@@ -142,19 +163,21 @@ export class ExtensionPointDescriptorRegistry {
   private disposed = false
   private projectionI18n: CordisXI18nService | undefined
 
-  registerCatalog(value: CordisXHostExtensionPointCatalogV1 | CordisXHostExtensionPointCatalogV2 | unknown): () => void {
+  registerCatalog(value: CordisXHostExtensionPointCatalogV1 | CordisXHostExtensionPointCatalogV2 | CordisXHostExtensionPointCatalogV3 | unknown): () => void {
     if (this.disposed) throw new Error('CordisX extension point descriptor registry is disposed')
-    const descriptors: CordisXHostExtensionPointDescriptorV2[] = []
+    const descriptors: CordisXHostExtensionPointDescriptorV3[] = []
     const diagnostics: ExtensionPointDescriptorDiagnostic[] = []
     try {
       if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('catalog must be an object')
       exactKeys(value, ['$schema', 'schemaVersion', 'points'], 'extension point catalog')
-      const catalog = value as Partial<CordisXHostExtensionPointCatalogV1 | CordisXHostExtensionPointCatalogV2>
+      const catalog = value as Partial<CordisXHostExtensionPointCatalogV1 | CordisXHostExtensionPointCatalogV2 | CordisXHostExtensionPointCatalogV3>
       const schemaVersion = catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1 && catalog.schemaVersion === 1
         ? 1
         : catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2 && catalog.schemaVersion === 2
           ? 2
-          : undefined
+          : catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3 && catalog.schemaVersion === 3
+            ? 3
+            : undefined
       if (schemaVersion === undefined) {
         throw new Error('extension point catalog schema/version is unsupported')
       }
@@ -203,11 +226,11 @@ export class ExtensionPointDescriptorRegistry {
     }
   }
 
-  descriptors(): readonly CordisXHostExtensionPointDescriptorV2[] {
+  descriptors(): readonly CordisXHostExtensionPointDescriptorV3[] {
     return this.registrations.flatMap(item => item.descriptors).sort((left, right) => left.id.localeCompare(right.id))
   }
 
-  descriptor(id: string): CordisXHostExtensionPointDescriptorV2 | undefined {
+  descriptor(id: string): CordisXHostExtensionPointDescriptorV3 | undefined {
     return this.descriptors().find(item => item.id === id)
   }
 
@@ -489,7 +512,8 @@ export function buildExtensionPointRuntimeSnapshot(input: {
       const commands = input.commands.filter(item => associatedCommandIds.has(item.qualifiedId))
       const pageIds = [...new Set(routes.map(route => qualifyOwnedId(route.owner, route.definition.page)))].sort()
       const active = plugin.status === 'active' && decision.authorized && (descriptor.kind === 'surface'
-        ? registrations.some(item => item.valid && item.visible && item.authorized && !item.pending && item.rendered)
+        ? registrations.some(item => item.valid && item.visible && item.authorized && !item.pending
+          && (descriptor.id === 'manager.settings.tabs' || item.rendered))
         : routes.some(item => item.valid && item.authorized))
       return [{
         identity: Object.freeze({ source: plugin.source, id: plugin.id }),
@@ -825,7 +849,42 @@ export const CORDISX_BUILTIN_EXTENSION_POINT_CATALOG = Object.freeze({
   ]),
 }) satisfies CordisXHostExtensionPointCatalogV2
 
-const EN_MESSAGES = Object.fromEntries(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG.points.flatMap(point => [
+export const CORDISX_MANAGER_EXTENSION_POINT_CATALOG = Object.freeze({
+  $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3,
+  schemaVersion: 3,
+  points: Object.freeze([
+    Object.freeze({
+      id: 'manager.settings.tabs',
+      kind: 'surface',
+      title: Object.freeze({ namespace: DESCRIPTOR_NAMESPACE, key: 'manager.settings.tabs.title', fallback: 'Manager settings tabs' }),
+      description: Object.freeze({ namespace: DESCRIPTOR_NAMESPACE, key: 'manager.settings.tabs.description', fallback: 'Adds a structured, host-rendered tab to CordisX manager settings.' }),
+      icon: 'host:settings',
+      payloadFamily: 'manager-settings-tab',
+      stability: 'stable',
+      availability: 'available',
+    }),
+    Object.freeze({
+      id: 'manager.settings.content',
+      kind: 'outlet',
+      title: Object.freeze({ namespace: DESCRIPTOR_NAMESPACE, key: 'manager.settings.content.title', fallback: 'Manager settings content' }),
+      description: Object.freeze({ namespace: DESCRIPTOR_NAMESPACE, key: 'manager.settings.content.description', fallback: 'Mounts a trusted-local page body beneath CordisX-owned settings tabs.' }),
+      icon: 'host:settings',
+      payloadFamily: 'outlet',
+      stability: 'stable',
+      availability: 'available',
+      pageChrome: Object.freeze(['body-only'] as const),
+      presentationGroup: 'manager.settings',
+      routePathFamily: 'manager-settings',
+    }),
+  ]),
+}) satisfies CordisXHostExtensionPointCatalogV3
+
+const ALL_EXTENSION_POINT_DESCRIPTORS: readonly CordisXHostExtensionPointDescriptorV3[] = [
+  ...CORDISX_BUILTIN_EXTENSION_POINT_CATALOG.points,
+  ...CORDISX_MANAGER_EXTENSION_POINT_CATALOG.points,
+] as const
+
+const EN_MESSAGES = Object.fromEntries(ALL_EXTENSION_POINT_DESCRIPTORS.flatMap(point => [
   [point.title.key, point.title.fallback!],
   [point.description.key, point.description.fallback!],
   ...(point.diagnostic === undefined ? [] : [[point.diagnostic.key, point.diagnostic.fallback!]]),
@@ -866,6 +925,10 @@ const ZH_MESSAGES: Readonly<Record<string, string>> = {
   'outlet.main.description': '在侧边栏右侧区域覆盖 CordisX 页面，并跟随当前主上下文。',
   'outlet.session.content.title': '会话内容页面',
   'outlet.session.content.description': '在当前会话标题下方覆盖 CordisX 页面，同时保留侧边和底部面板。',
+  'manager.settings.tabs.title': '管理器配置标签页',
+  'manager.settings.tabs.description': '向 CordisX 管理器配置页添加由宿主统一渲染的结构化标签。',
+  'manager.settings.content.title': '管理器配置内容',
+  'manager.settings.content.description': '在 CordisX 配置标签下挂载受控的可信本地页面正文。',
   'diagnostic.anchor': '当前未定位到原生宿主点位。',
   'diagnostic.anchor-unverified': '该锚点尚未通过发布验证。',
   'diagnostic.message-identity': '当前无法取得规范消息标识。',

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
+  CORDISX_MANAGER_EXTENSION_POINT_CATALOG,
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
   MemoryExtensionPointPolicyStore,
@@ -12,6 +13,7 @@ import {
   CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3,
   type CordisXExtensionPointPolicyRecordV1,
 } from '../packages/cli/src/contracts.js'
 import type { CordisXI18nService } from '../packages/cli/src/renderer/i18n.js'
@@ -114,6 +116,29 @@ describe('extension point runtime contract', () => {
     expect(registry.descriptor('legacy.surface')).toMatchObject({
       payloadFamily: 'action', stability: 'stable', availability: 'available',
     })
+    expect(registry.diagnostics()).toEqual([])
+    remove()
+    registry.dispose()
+  })
+
+  it('registers the manager-neutral v3 surface and isolated outlet with exact policy metadata', () => {
+    const registry = new ExtensionPointDescriptorRegistry()
+    const remove = registry.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
+    expect(CORDISX_MANAGER_EXTENSION_POINT_CATALOG).toMatchObject({
+      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3,
+      schemaVersion: 3,
+    })
+    expect(registry.descriptors()).toHaveLength(2)
+    expect(registry.descriptor('manager.settings.tabs')).toMatchObject({
+      kind: 'surface', payloadFamily: 'manager-settings-tab', stability: 'stable', availability: 'available',
+    })
+    expect(registry.descriptor('manager.settings.content')).toMatchObject({
+      kind: 'outlet', payloadFamily: 'outlet', routePathFamily: 'manager-settings',
+      presentationGroup: 'manager.settings', pageChrome: ['body-only'],
+      stability: 'stable', availability: 'available',
+    })
+    expect(registry.descriptor('manager.settings.tabs')?.description.fallback).toContain('host-rendered')
+    expect(registry.descriptor('manager.settings.content')?.description.fallback).toContain('trusted-local page body')
     expect(registry.diagnostics()).toEqual([])
     remove()
     registry.dispose()
