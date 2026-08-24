@@ -92,6 +92,8 @@ export interface PackageActivationTuple {
 export interface PackageCandidatePlan {
   readonly transactionId: string
   readonly transactionEpoch: string
+  /** Host-authoritative journal fingerprint used only to bind private receipts. */
+  readonly candidateFingerprint: string
   readonly boundary: PackageResolutionBoundary
   readonly profileActivationRevision: number
   readonly expectedRegistryEpoch: number

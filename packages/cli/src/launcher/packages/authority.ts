@@ -160,6 +160,7 @@ export function createHostRegistryReceiptAuthority(): HostRegistryReceiptAuthori
 
 export interface PreparedCandidate {
   readonly transactionId: string
+  readonly candidateFingerprint: string
   readonly candidateToken: PackageCandidateToken
   readonly impactToken: PackageImpactToken
   readonly permissionReviewId: HostPermissionReviewId
@@ -467,6 +468,7 @@ export class PackageLifecycleAuthority {
     await this.#journal.update(draft => { draft.transactions[input.candidateId] = transaction })
     return {
       transactionId: input.candidateId,
+      candidateFingerprint,
       candidateToken,
       impactToken,
       permissionReviewId,
@@ -724,6 +726,7 @@ export class PackageLifecycleAuthority {
     return deepFreeze({
       transactionId: transaction.transactionId,
       transactionEpoch: transaction.transactionEpoch,
+      candidateFingerprint: transaction.candidateFingerprint,
       boundary,
       profileActivationRevision: transaction.expected.revision,
       expectedRegistryEpoch: transaction.expectedRegistryEpoch,
