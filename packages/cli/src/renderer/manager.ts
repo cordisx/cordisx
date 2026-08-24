@@ -725,7 +725,7 @@ const MANAGER_STYLES = `
   .cxm-console-frame.cxm-console-luna .luna-console-log-content { font-size: 11px; line-height: 16px; }
   .cxm-console-frame.cxm-console-luna .luna-console-header { font-size: 10px; }
   .cxm-console-frame.cxm-console-luna:focus-visible { outline: 2px solid #8e98a9; outline-offset: 2px; }
-  .cxm-console-latest { position: absolute; right: 14px; bottom: 12px; z-index: 1; height: 28px; border: 1px solid #4a515c; border-radius: 14px; padding: 0 10px; background: #252a31; color: #e3e7ee; box-shadow: 0 4px 14px rgba(0,0,0,.35); cursor: pointer; font-size: 10px; }
+  .cxm-console-latest { position: absolute; right: 14px; bottom: 12px; z-index: 1; border: 1px solid #4a515c; background: #252a31; color: #e3e7ee; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
   .cxm-console-inspector { min-width: 0; overflow: hidden; border: 1px solid #30343a; border-radius: 7px; background: #141619; }
   .cxm-console-inspector-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #30343a; color: #cdd2db; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-inspector-head button { border: 0; background: transparent; color: #98a1b2; cursor: pointer; }
@@ -775,6 +775,13 @@ const MANAGER_STYLES = `
   .cxm-toolbar { display: flex; align-items: center; gap: 10px; }
   .cxm-list-search { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 38px; box-sizing: border-box; border: 1px solid rgba(255, 255, 255, .1); border-radius: 9px; background: rgba(255, 255, 255, .045); }
   .cxm-toolbar > .cxm-action { height: 38px; }
+  .cxm-toolbar > .cxm-toolbar-icon-action {
+    width: 38px;
+    height: 38px;
+    border: 1px solid rgba(255, 255, 255, .1);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, .045);
+  }
   .cxm-marketplace-filter {
     display: inline-flex;
     align-items: center;
@@ -1068,6 +1075,7 @@ const MANAGER_STYLES = `
   .cxm-mini-action { padding: 5px 7px; border: 1px solid rgba(255, 255, 255, .09); border-radius: 7px; background: transparent; color: #99a2b2; cursor: pointer; font: 10px/1.2 system-ui, sans-serif; }
   .cxm-mini-action:hover:not(:disabled) { color: #fff; border-color: rgba(199, 204, 212, .4); }
   .cxm-mini-action:disabled { cursor: default; opacity: .35; }
+  .cxm-console-warning .cxm-manager-icon-action, .cxm-console-inspector-head .cxm-manager-icon-action { color: inherit; }
   @media (max-width: 760px) {
     .cxm-backdrop { padding: 10px; }
     .cxm-dialog { grid-template-columns: 168px minmax(0, 1fr); width: calc(100vw - 20px); height: calc(100vh - 20px); }
@@ -1824,6 +1832,27 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   )
   const tooltips = new HostTooltipController(document)
   const forms = new HostFormAdapter(document)
+  const managerIconAction = (
+    icon: ManagerIconToken,
+    label: string,
+    options: {
+      readonly className?: string
+      readonly disabled?: boolean
+      readonly description?: string
+      readonly pressed?: boolean
+    } = {},
+  ): HTMLButtonElement => {
+    const button = create(document, 'button', ['cxm-manager-icon-action', options.className].filter(Boolean).join(' '))
+    button.type = 'button'
+    button.dataset.cordisxNoDrag = 'true'
+    button.setAttribute('aria-label', label)
+    if (options.description !== undefined) button.setAttribute('aria-description', options.description)
+    if (options.pressed !== undefined) button.setAttribute('aria-pressed', String(options.pressed))
+    button.disabled = options.disabled === true
+    button.append(createManagerIcon(document, icon))
+    tooltips.attach(button, () => options.description === undefined ? label : `${label} · ${options.description}`, 'top')
+    return button
+  }
   let pluginQuery = ''
   let marketplaceQuery = ''
   let marketplaceCertifiedOnly = false
@@ -3192,18 +3221,15 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     setHeading('插件', snapshot, { icon: 'plugins' })
     const toolbar = create(document, 'div', 'cxm-toolbar')
     const search = createListSearch('plugins', '搜索 CordisX 插件', '搜索插件、扩展点或 contribution id…', pluginQuery, value => { pluginQuery = value })
-    const install = create(document, 'button', 'cxm-action')
-    install.type = 'button'
+    const install = managerIconAction('import-plugin', lifecycleInstallBusy ? '检查本地包中…' : '导入本地插件', {
+      className: 'cxm-toolbar-icon-action',
+      disabled: lifecycleInstallBusy
+        || lifecycleBusy.size > 0
+        || snapshot.pluginLifecycle?.operationsAvailable !== true
+        || model.requestPluginLifecycle === undefined,
+    })
     install.dataset.installLocalPlugin = 'true'
     install.dataset.importLocalPlugin = 'true'
-    install.append(
-      createManagerIcon(document, 'import-plugin', 'cxm-action-icon'),
-      create(document, 'span', undefined, lifecycleInstallBusy ? '检查本地包中…' : '导入'),
-    )
-    install.disabled = lifecycleInstallBusy
-      || lifecycleBusy.size > 0
-      || snapshot.pluginLifecycle?.operationsAvailable !== true
-      || model.requestPluginLifecycle === undefined
     install.addEventListener('click', () => { void runLocalPackageInstall() })
 
     const favorites = favoritePlugins(snapshot)
@@ -4234,9 +4260,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         const unknown = create(document, 'div', 'cxm-notice cxm-console-warning')
         unknown.dataset.tone = 'warning'
         unknown.append(create(document, 'span', undefined, `检测到 ${unattributed} 条来源冲突的运行时错误，未计入当前插件日志。请重载插件后复现并检查 bundle source map。`))
-        const dismissWarning = create(document, 'button', undefined, '关闭')
-        dismissWarning.type = 'button'
-        dismissWarning.setAttribute('aria-label', '关闭归属异常提示')
+        const dismissWarning = managerIconAction('close', '关闭归属异常提示')
         dismissWarning.addEventListener('click', () => { dismissedConsoleWarnings.set(plugin.id, unattributed); renderContent() })
         unknown.append(dismissWarning)
         panel.append(unknown)
@@ -4251,8 +4275,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       } else {
         frame.classList.add('cxm-console-luna')
       }
-      const latest = create(document, 'button', 'cxm-console-latest', '回到最新')
-      latest.type = 'button'
+      const latest = managerIconAction('console-follow', '回到最新', { className: 'cxm-console-latest' })
       latest.hidden = true
       body.append(frame, latest)
       if (selected !== undefined) {
@@ -4261,8 +4284,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         inspector.dataset.consoleDetail = selected.entryId
         const inspectorHead = create(document, 'div', 'cxm-console-inspector-head')
         inspectorHead.append(create(document, 'span', undefined, 'Host metadata'))
-        const closeInspector = create(document, 'button', undefined, '关闭')
-        closeInspector.type = 'button'
+        const closeInspector = managerIconAction('close', '关闭日志详情')
         closeInspector.addEventListener('click', () => { selectedConsoleEntry = undefined; renderContent() })
         inspectorHead.append(closeInspector)
         const grid = create(document, 'dl', 'cxm-console-inspector-grid')

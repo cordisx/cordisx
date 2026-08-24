@@ -400,6 +400,16 @@ plugin row is the canonical example: it has mutually exclusive navigation and
 action regions, with its complete body as the detail target and an icon-only
 action region at the right.
 
+The Host uses one Manager Material icon-control primitive for clear, familiar
+actions such as importing a local package, pausing or resuming Console capture,
+following the newest Console entry, clearing/copying Console output, and closing
+a transient Console surface. Each control has one fixed hit target, a decorative
+bundled Material glyph, an `aria-label`, a Host tooltip, no-drag semantics, and
+the same hover, keyboard-focus, disabled, and light/dark behavior. Keep a
+visible text label for primary CTAs, ambiguous actions, and destructive or
+permission confirmations; an icon must never hide the information needed to
+understand a record or consequence.
+
 Wide rows reserve one stable right-side action seat so the card never changes
 width. Enable/disable, reload, favorite, and the overflow trigger are visually
 hidden at rest and become visible only while the card is hovered, contains
