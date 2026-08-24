@@ -43,6 +43,17 @@ Cordis Context -- SlotService -- semantic slots -- Codex DOM adapter
 
 The Node launcher owns configuration, plugin entry resolution, browser bundling, Codex process startup, CDP target discovery, injection identifiers, and cleanup. The browser bundle contains one Cordis copy and all enabled plugin modules so plugin contexts and services share one runtime identity.
 
+Dynamic package delivery evolves that composition into one stable Host runtime
+plus independently built immutable plugin module generations. Configuration
+live publication, owning-fiber restart, plugin dependency-closure replacement,
+complete runtime-generation replacement, and app restart are separate apply
+scopes. The package store, activation ledger, candidate/last-good transaction,
+generation fencing, local-only version-1 source boundary, and validation order
+are specified in
+[`dynamic-plugin-lifecycle.md`](dynamic-plugin-lifecycle.md). Until its runtime
+slice lands, the single-bundle behavior in the next sections remains the
+implemented current state.
+
 The launcher binds CDP to `127.0.0.1`, records every `Page.addScriptToEvaluateOnNewDocument` identifier, and removes those identifiers on shutdown before asking the live page to dispose CordisX.
 
 For UI development, the default command launches a second, directly tracked native process with a stable project-scoped Chromium `user-data-dir` and an ephemeral loopback CDP port. `HOME` and `CODEX_HOME` stay shared, so persisted authentication, conversation, project, and model-configuration data may be visible to both processes. That does not share request association, in-flight turns, subscriptions, approvals, current UI context, or live connection state. The App main process, app-server stdio channel, renderer processes, UI storage, and window restoration remain separate and can race as independent clients. Direct spawning is equivalent to macOS `open -n` for instance isolation while retaining the child PID needed for deterministic cleanup. `--system` is the explicit escape hatch to the original profile.
@@ -247,6 +258,12 @@ than package removal: module top-level code is already in the trusted bundle,
 and the manager does not edit `cordisx.config.json`, install packages, enforce
 permissions, or create a security boundary.
 
+The dynamic lifecycle follow-up replaces renderer-local block state with a
+launcher-owned profile activation record for package enable/disable. It keeps
+explicit reload as an owning-fiber operation and uses plugin generations only
+for code, entry, version, or dependency changes. The manager remains a brokered
+projection and never receives filesystem or arbitrary module-loading authority.
+
 The manager has six primary navigation views:
 
 1. searchable installed-plugin inventory and local runtime controls;
@@ -326,9 +343,11 @@ so the public-HTTPS, address, redirect, concurrency, timeout, and size limits
 are damage-reduction boundaries rather than isolation from a malicious bundled
 plugin.
 
-Manifest metadata, dependency graphs, compatibility declarations, persisted
-launcher configuration, package installation/update/removal, capabilities,
-signatures, and marketplace operations remain later delivery stages.
+Manifest metadata, dependency graphs, compatibility declarations, immutable
+local packages, and activation transactions are the next staged delivery in
+[`dynamic-plugin-lifecycle.md`](dynamic-plugin-lifecycle.md). Publisher
+signatures, remote marketplace installation, and untrusted-code isolation
+remain later security stages.
 
 The Platform slice adds versioned capability declarations, an identity-bound
 Permission Broker, and manager permission projections. These controls govern
@@ -351,7 +370,12 @@ renderer model; it is not a substitute for a future isolated plugin realm.
 
 Version 0.1 uses a trusted-code model. A plugin is bundled into the renderer and can read or modify anything the renderer can access. Cordis provides lifecycle and dependency composition; it is not a security sandbox.
 
-Before any public marketplace, CordisX needs a separate plugin execution realm, a capability/grant protocol, install-time source identity, CSP and network policy, and an explicit bridge for host operations. A manifest permission string without enforcement is not security and is intentionally absent from version 0.1.
+Before any public marketplace installation, CordisX still needs a separate
+plugin execution realm, publisher signatures and source identity, CSP and
+network policy, and an explicit bridge for host operations. The current
+Permission Broker controls cooperative Host services but does not sandbox
+trusted renderer code. The local-only dynamic package stage must not describe
+content hashing as publisher verification.
 
 ## Compatibility strategy
 
@@ -370,4 +394,5 @@ The version-0.1 bundle and lifecycle were verified in a simulated renderer DOM. 
 - Whether the long-term distribution unit is an npm package, a signed archive, or a Codex universal plugin plus a CordisX-specific UI entry.
 - Whether isolated UI should use an iframe, a dedicated Electron utility process, or both.
 - Whether a future explicitly declared host-replacement protocol should allow one winner or require an explicit user choice; the structured-contribution slice does not expose replacement slots.
-- How a plugin persists state across bundle rebuilds without receiving direct Codex storage access.
+- A public signed-package source and transparency policy after the local-only
+  package generation boundary is proven.

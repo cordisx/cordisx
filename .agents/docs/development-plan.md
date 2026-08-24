@@ -140,6 +140,23 @@ remain explicitly out of scope.
 
 ## Stage 3 — authority and distribution
 
+### Dynamic local package and generation slice
+
+Status: approved architecture; implementation follows
+[`dynamic-plugin-lifecycle.md`](dynamic-plugin-lifecycle.md).
+
+This slice adds an explicit-local-directory package source, immutable
+content-addressed artifacts, dependency and permission planning, a durable
+profile activation ledger, candidate/last-good recovery, and a stable Host
+runtime able to replace only the target plugin dependency closure. It also
+connects Host-owned manager install, enable/disable, reload, update, uninstall,
+favorite, and safe-share affordances to the real lifecycle broker.
+
+Delivery order is architecture, protocol contracts, launcher/store/generation
+runtime, manager UI and local fixtures, isolated real-renderer smoke, then
+exact merged mono pins. Remote marketplace installation, publisher signing,
+and untrusted-code isolation remain outside this version-1 local package slice.
+
 ### Functional CLI home-config slice
 
 Status: implemented and verified in the functional CLI slice described by

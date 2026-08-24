@@ -139,6 +139,8 @@ The semantic mapping is stable and host-owned:
 | runtime status | `monitor_heart` |
 | outlets | `account_tree` |
 | launcher | `rocket_launch` |
+| enable, disable, reload, and favorite | `play_circle`, `pause_circle`, `refresh`, `star` / `star_outline` |
+| overflow, share, and uninstall | `more_horiz`, `share`, `delete` |
 | read models | `model_training` |
 | list, read, create, and control tasks | `view_list`, `summarize`, `note_add`, `tune` |
 | submit and control turns | `send`, `pause_circle` |
@@ -246,6 +248,26 @@ waiting, and red for failure, denial, or destructive affordances.
 
 ## Flat lists and cards
 
+An installed-plugin row has mutually exclusive navigation and action regions.
+The complete row body is a button-like detail target activated by pointer,
+Enter, or Space; it has no trailing chevron. Its right edge is a Host-rendered
+icon-only action region. Action pointer and keyboard events stop row
+navigation, use native tooltip and focus treatment, remain `no-drag`, and never
+accept plugin-owned DOM.
+
+Wide rows show enable/disable, reload, and favorite in that deterministic
+priority. When width is insufficient, lower-priority controls move into one
+Host-owned overflow menu without squeezing the plugin name or state. Share and
+uninstall always live in that menu. Closing the menu restores focus to its
+trigger, and both menu and tooltips are constrained to the manager viewport.
+Unavailable lifecycle operations are absent or explicitly unavailable; a
+button must never restart the launcher while claiming to reload one plugin.
+
+Favorite is a current-profile manager preference. Share requires a validated
+public canonical HTTPS source and never projects a local source/store path,
+configuration, or secret. Uninstall is destructive and remains behind a
+second Host-owned confirmation containing the reverse-dependency impact.
+
 Ordinary repeated records use a flat list with separators and whitespace. The
 container exposes list semantics and each item has a stable visible label plus
 list-item semantics. A capability declaration is a flat item whose host-owned,
@@ -323,6 +345,15 @@ At minimum they prove:
   empty state rather than raw JSON or schema implementation prose;
 - Host-owned secret/credential unavailable states remain single, redacted, and
   unavailable to custom renderers;
+- installed-plugin rows have no detail chevron, keep navigation and action
+  activation mutually exclusive, support pointer/Enter/Space navigation, and
+  preserve the deterministic enable/reload/favorite overflow priority;
+- overflow restores focus, stays within the manager viewport, keeps uninstall
+  behind dependency-aware confirmation, and exposes share only for a safe
+  public canonical URL;
+- empty/search-filtered lists and active, blocked, failed, installing, updating,
+  enabling, disabling, reloading, rollback, and uninstalling states retain one
+  stable product-facing label without raw lifecycle metadata;
 - plugin and marketplace detail bodies do not repeat the breadcrumb record
   name in manager-owned headings.
 - primary navigation exposes separate `扩展点` and `路由` pages; installed
