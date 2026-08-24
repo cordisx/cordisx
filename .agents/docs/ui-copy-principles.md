@@ -41,9 +41,21 @@ messages when it is emitted through a plugin localization catalog. Keep status
 meaning and available actions equivalent; diagnostic codes and user-provided
 error text may remain unchanged.
 
+Host-owned Manager states and actions are cataloged in
+`packages/cli/src/renderer/ui-copy.ts` before their owner integrates them. Add
+a pair to that catalog before using it in a primary surface. Resolve the
+catalog from the current UI locale; use English only when the locale has no
+Chinese language subtag. Do not use a translated label to replace a machine
+id, URL, diagnostic code, or raw error.
+
 ## Review gate
 
 Before merging UI copy changes, verify representative empty, error,
 unavailable, read-only, and configuration states in both themes and a narrow
 viewport. Tests should reject implementation terms from the affected primary
 surface while allowing them in diagnostics and this documentation.
+
+`tests/ui-copy-principles.test.ts` is the minimum gate for the Host catalog:
+it requires a non-empty `en` and `zh-CN` entry for every governed key and
+checks locale selection. An owner integrating a catalog entry must extend the
+gate with its semantic surface, not add a one-off string assertion.
