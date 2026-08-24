@@ -183,6 +183,13 @@ After live injection, run the read-only probe against the printed port:
 ```bash
 npm run smoke -- --port <printed-port> --screenshot artifacts/live-smoke.png
 npm run smoke -- --port <printed-port> --manager-screenshot artifacts/manager.png
+npm run smoke -- --port <printed-port> --manager-tab plugins \
+  --manager-plugin <plugin-id> --manager-detail-tab config \
+  --manager-form-exercise --manager-viewport-width 520 \
+  --manager-screenshot artifacts/host-form.png --report artifacts/host-form.json
+npm run smoke -- --port <printed-port> --manager-tab plugins \
+  --manager-open-local-path-form --manager-form-exercise \
+  --manager-screenshot artifacts/local-path.png --report artifacts/local-path.json
 npm run smoke -- --port <printed-port> --color-scheme dark \
   --trigger-screenshot artifacts/brand-trigger-dark.png
 npm run smoke -- --port <printed-port> --color-scheme light \
@@ -202,6 +209,16 @@ npm run smoke -- --port <printed-port> --manager-settings-exercise \
   --manager-screenshot artifacts/live-smoke/settings-demo.png \
   --report artifacts/live-smoke/settings-demo.json
 ```
+
+`--manager-form-exercise` records the visible Host form primitive map,
+label/help/error accessibility relationships, responsive grid and overflow
+state, then uses CDP mouse and native Tab input to prove focus movement.
+`--manager-open-local-path-form` opens the launcher-owned local-package form,
+captures it, and cancels it before the interactive-dialog cleanup gate. For a
+developer composition, `smoke:isolated-app` also accepts
+`--dev-config <absolute-or-project-relative-config>` before the `--` separator;
+the normal launcher form and persistence smoke should continue to use a named
+launcher profile rather than developer mode.
 
 `--color-scheme light|dark` emulates the media preference and applies a
 temporary matching color context only to the native row containing the Codex

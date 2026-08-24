@@ -15,6 +15,9 @@ This directory is the public, aggregatable source for CordisX product and archit
   Schema validation boundary, revision-fenced persistence, live/restart
   application, last-good recovery, secrets, and lifecycle-owned field
   renderers.
+- `host-form-system.md` defines the Host-owned TDesign-aligned primitive
+  adapter, official Web Components audit, scoped theme/layout/a11y contract,
+  schema selection, draft/validation states, and current Manager integration.
 - `plugin-devtools-console.md` defines the plugin-scoped DevTools Console,
   issuance-bound Host instrumentation, native variadic arguments, coverage
   guarantees, Luna rendering, privacy and bounded lifetime.

@@ -35,6 +35,12 @@ derives one readable label from the final field-path segment. The raw path stays
 available for mutation identity and diagnostics but is not repeated in the
 normal form.
 
+The concrete Host primitive selection, draft/validation state, responsive
+layout, theme containment, official TDesign package audit, and Manager form
+integration are defined in [`host-form-system.md`](host-form-system.md). This
+does not change the configuration-v1 protocol or let plugins select a UI
+library component directly.
+
 `ctx.settings.get()` and `ctx.settings.watch()` expose only the calling
 plugin's current immutable snapshot. A live write commits under the launcher
 revision fence and then publishes one snapshot without calling `apply` again.

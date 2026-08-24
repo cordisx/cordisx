@@ -16,6 +16,8 @@ const parsed = parseArgs({
     'manager-permission-capability': { type: 'string' },
     'manager-settings-tab': { type: 'string' },
     'manager-settings-exercise': { type: 'boolean', default: false },
+    'manager-form-exercise': { type: 'boolean', default: false },
+    'manager-open-local-path-form': { type: 'boolean', default: false },
     'config-exercise': { type: 'boolean', default: false },
     'manager-lifecycle-source': { type: 'string' },
     'manager-extension-point': { type: 'string' },
@@ -2631,28 +2633,32 @@ if (parsed.values['manager-screenshot'] !== undefined) {
     expression: `(async () => {
       const smokeLocale = ${JSON.stringify(locale)}
       const smokeTheme = ${JSON.stringify(colorScheme)}
+      const nextPaint = () => new Promise(resolve => {
+        const timer = setTimeout(resolve, 120)
+        requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(timer); resolve() }))
+      })
       if (smokeLocale !== undefined) document.documentElement.lang = smokeLocale
       if (smokeTheme !== undefined) document.documentElement.setAttribute('data-theme', smokeTheme)
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      await nextPaint()
       const trigger = document.querySelector('[data-cordisx-manager-trigger]')
       const modal = document.querySelector('[data-cordisx-manager-modal]')
       const openedBy = trigger === null ? 'host-smoke-fallback' : 'manager-trigger'
-      if (trigger !== null) trigger.click()
-      else if (modal instanceof HTMLElement) modal.hidden = false
+      if (modal?.hidden === true && trigger !== null) trigger.click()
+      else if (modal instanceof HTMLElement && modal.hidden) modal.hidden = false
       const marketplaceSource = ${JSON.stringify(managerMarketplaceSource)}
       if (marketplaceSource !== undefined) {
         document.querySelector('[data-tab="settings"]')?.click()
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        await nextPaint()
         document.querySelector('[data-settings-tab="host:marketplace"]')?.click()
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        await nextPaint()
         const existingRows = [...document.querySelectorAll('.cxm-source-list .cxm-source-row')]
-        for (const row of existingRows) row.querySelector('.cxm-source-actions .cxm-mini-action:last-child')?.click()
+        for (const row of existingRows) row.querySelector('.cxm-source-actions button:last-child')?.click()
         const removalDeadline = Date.now() + 5_000
         while (document.querySelector('.cxm-source-list .cxm-source-row') !== null && Date.now() < removalDeadline) {
           await new Promise(resolve => setTimeout(resolve, 50))
         }
-        const input = document.querySelector('.cxm-source-form .cxm-source-input')
-        const form = document.querySelector('.cxm-source-form')
+        const input = document.querySelector('[data-host-form="marketplace-source"] input[type="url"]')
+        const form = document.querySelector('[data-host-form="marketplace-source"]')
         if (!(input instanceof HTMLInputElement) || !(form instanceof HTMLFormElement)) throw new Error('marketplace source form is unavailable')
         input.value = marketplaceSource
         form.requestSubmit()
@@ -2696,6 +2702,12 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       if (routeId !== undefined) document.querySelector('[data-route-id="' + CSS.escape(routeId) + '"]')?.click()
       const marketplaceTab = ${JSON.stringify(managerMarketplaceTab)}
       if (marketplaceTab !== undefined) document.querySelector('[data-marketplace-detail-tab="' + marketplaceTab + '"]')?.click()
+      if (${JSON.stringify(parsed.values['manager-open-local-path-form'])}) {
+        document.querySelector('[data-tab="plugins"]')?.click()
+        await nextPaint()
+        document.querySelector('[data-install-local-plugin]')?.click()
+        await nextPaint()
+      }
       if (smokeLocale !== undefined) document.documentElement.lang = smokeLocale
       if (smokeTheme !== undefined) document.documentElement.setAttribute('data-theme', smokeTheme)
       const breadcrumbWidth = ${JSON.stringify(managerBreadcrumbWidth)}
@@ -2705,12 +2717,13 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         heading.style.width = breadcrumbWidth + 'px'
         window.dispatchEvent(new Event('resize'))
       }
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      await nextPaint()
       if (breadcrumbWidth !== undefined) {
         const overflow = document.querySelector('.cxm-breadcrumb-overflow')
         if (overflow instanceof HTMLDetailsElement) overflow.open = true
       }
-      const dialog = document.querySelector('[data-cordisx-manager-modal] [role="dialog"]')
+      const dialog = document.querySelector('.cxm-lifecycle-dialog')
+        ?? document.querySelector('[data-cordisx-manager-modal] [role="dialog"]')
       const rect = dialog?.getBoundingClientRect()
       const leadingRect = document.querySelector('.cxm-heading-leading')?.getBoundingClientRect()
       const firstTab = document.querySelector('.cxm-tabs .cxm-tab:first-child')
@@ -2748,6 +2761,37 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           },
           triggerExpanded: trigger?.getAttribute('aria-expanded'),
           externalDefaultPrevented,
+          hostForms: [...document.querySelectorAll('[data-host-form]')].filter(form => form.getClientRects().length > 0).map(form => {
+            const grid = form.querySelector('.cxf-form-grid')
+            const firstControl = form.querySelector('input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [role="radiogroup"] input:not(:disabled)')
+            const firstRect = firstControl?.getBoundingClientRect()
+            return {
+              id: form.getAttribute('data-host-form'),
+              state: form.getAttribute('data-state'),
+              direction: getComputedStyle(form).direction,
+              gridColumns: grid === null ? null : getComputedStyle(grid).gridTemplateColumns,
+              horizontalOverflow: form.scrollWidth > form.clientWidth + 1,
+              developerMetadataVisible: ['Schemastery', 'Revision', '实时发布（不重载）'].some(text => (form.closest('[role="tabpanel"]')?.textContent ?? '').includes(text)),
+              items: [...form.querySelectorAll('.cxf-item')].map(item => ({
+                path: item.getAttribute('data-config-path'),
+                primitive: item.getAttribute('data-host-form-primitive'),
+                label: item.querySelector('.cxf-label')?.textContent?.trim() ?? null,
+                help: item.querySelector('.cxf-help')?.textContent?.trim() ?? null,
+                error: item.querySelector('.cxf-error:not([hidden])')?.textContent?.trim() ?? null,
+                invalid: item.getAttribute('data-invalid'),
+                customSeatVisible: item.querySelector('.cxf-custom-seat:not([hidden])') !== null,
+                sensitiveControlCount: item.getAttribute('data-host-form-primitive') === 'sensitive-unavailable'
+                  ? item.querySelectorAll('input,textarea,select').length : null,
+              })),
+              controls: [...form.querySelectorAll('input,select,textarea,[role="radiogroup"]')].map(control => ({
+                primitive: control.getAttribute('data-host-form-primitive'), tag: control.tagName.toLowerCase(),
+                type: control instanceof HTMLInputElement ? control.type : null, id: control.id,
+                required: control.getAttribute('aria-required'), invalid: control.getAttribute('aria-invalid'),
+                describedBy: control.getAttribute('aria-describedby'), disabled: control.matches(':disabled,[aria-disabled="true"]'),
+              })),
+              firstControlRect: firstRect === undefined ? null : { x: firstRect.x, y: firstRect.y, width: firstRect.width, height: firstRect.height },
+            }
+          }),
           breadcrumb: {
             route: breadcrumb?.getAttribute('data-manager-page-route') ?? null,
             ordered: breadcrumbOrdered,
@@ -2839,10 +2883,41 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   }
   const managerResult = evaluatedManager.result?.value ?? null
   managerReport = managerResult?.state ?? null
+  if (parsed.values['manager-form-exercise']) {
+    const firstRect = managerReport?.hostForms?.find(form => form.firstControlRect !== null)?.firstControlRect
+    if (firstRect === undefined || firstRect === null) throw new Error('manager form exercise found no visible Host form control')
+    await pointerClick(firstRect)
+    const pointer = await evaluateByValue(`(() => ({
+      primitive: document.activeElement?.getAttribute('data-host-form-primitive') ?? null,
+      id: document.activeElement?.id ?? null,
+    }))()`)
+    await send('Input.dispatchKeyEvent', {
+      type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+    })
+    await send('Input.dispatchKeyEvent', {
+      type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+    })
+    const keyboard = await evaluateByValue(`(() => ({
+      primitive: document.activeElement?.getAttribute('data-host-form-primitive') ?? null,
+      id: document.activeElement?.id ?? null,
+      tag: document.activeElement?.tagName.toLowerCase() ?? null,
+    }))()`)
+    managerReport = { ...managerReport, hostFormInteraction: {
+      pointer, keyboard,
+      passed: pointer.id !== null && keyboard.tag !== 'body' && keyboard.id !== pointer.id,
+    } }
+    if (managerReport.hostFormInteraction.passed !== true) throw new Error('manager Host form mouse/keyboard exercise failed')
+  }
   console.log(`manager-state=${JSON.stringify(managerReport)}`)
   try {
     await capture(managerResult?.rect ?? null, parsed.values['manager-screenshot'], 'CordisX manager')
   } finally {
+    if (parsed.values['manager-open-local-path-form']) {
+      await send('Runtime.evaluate', {
+        expression: `document.querySelector('.cxm-lifecycle-dialog .cxf-actions button[type="button"]')?.click()`,
+        returnByValue: true,
+      })
+    }
     if (managerBreadcrumbWidth !== undefined) {
       await send('Runtime.evaluate', {
         expression: `(() => {
@@ -2865,17 +2940,24 @@ if (parsed.values['manager-theme-cycle']) {
     const evaluated = await send('Runtime.evaluate', {
       expression: `(async () => {
         const root = document.documentElement
-        globalThis.__cordisxRestoreManagerThemeSmoke ??= root.className
+        globalThis.__cordisxRestoreManagerThemeSmoke ??= {
+          className: root.className,
+          dataTheme: root.getAttribute('data-theme'),
+        }
         const trigger = document.querySelector('[data-cordisx-manager-trigger]')
         const modal = document.querySelector('[data-cordisx-manager-modal]')
         if (modal === null) return null
         root.classList.remove('electron-dark', 'electron-light')
         root.classList.add(${JSON.stringify(theme === 'light' ? 'electron-light' : 'electron-dark')})
+        root.setAttribute('data-theme', ${JSON.stringify(theme)})
         if (${reopen} && !modal.hidden) document.querySelector('.cxm-close')?.click()
         if (modal.hidden && trigger !== null) trigger.click()
         else if (modal.hidden) modal.hidden = false
         document.querySelector('[data-tab="about"]')?.click()
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        await new Promise(resolve => {
+          const timer = setTimeout(resolve, 120)
+          requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(timer); resolve() }))
+        })
         const dialog = modal.querySelector('[role="dialog"]')
         const marks = [...modal.querySelectorAll('img[data-cordisx-brand-mark][data-brand-rendering="direct-host"]')]
         const navIcon = document.querySelector('[data-tab="plugins"] .cxm-nav-icon')
@@ -2907,7 +2989,7 @@ if (parsed.values['manager-theme-cycle']) {
     if (evaluated.exceptionDetails !== undefined) {
       throw new Error(evaluated.exceptionDetails.exception?.description ?? evaluated.exceptionDetails.text ?? 'manager theme evaluation failed')
     }
-    return evaluated.result?.result?.value ?? null
+    return evaluated.result?.value ?? null
   }
 
   const light = await inspectManagerTheme('light', false)
@@ -2924,7 +3006,11 @@ if (parsed.values['manager-theme-cycle']) {
     expression: `(() => {
       const root = document.documentElement
       const previous = globalThis.__cordisxRestoreManagerThemeSmoke
-      if (typeof previous === 'string') root.className = previous
+      if (previous !== null && typeof previous === 'object') {
+        root.className = previous.className
+        if (previous.dataTheme === null) root.removeAttribute('data-theme')
+        else root.setAttribute('data-theme', previous.dataTheme)
+      }
       delete globalThis.__cordisxRestoreManagerThemeSmoke
     })()`,
   })

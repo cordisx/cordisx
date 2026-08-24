@@ -30,3 +30,12 @@ both packages are MIT licensed (copyright liriliri contributors). CordisX
 retains the structured `method + args[]` capture model and projects safe
 multiline text into Luna's published `log` / `append(string)` API. The separate
 Host Inspector contains metadata only. There is no runtime CDN dependency.
+
+## Evaluated but not distributed
+
+`tdesign-web-components@1.2.10` (MIT) was evaluated for the Host-owned form
+system. CordisX does not depend on, copy, bundle, or load that package or its
+assets in this release, so it is intentionally absent from the dependency and
+license-text inventory above. The package-size, dependency, component-coverage,
+style-isolation, and future-adoption gates are recorded in
+`.agents/docs/host-form-system.md`.
