@@ -130,7 +130,7 @@ describe('Manager plugin card actions', () => {
       await settle()
       expect(dom.window.document.querySelector('.cxm-lifecycle-impact')?.textContent).toContain('base、consumer')
       expect(operations).toEqual([{ kind: 'disable', pluginId: 'base', impactToken: '' }])
-      dom.window.document.querySelectorAll<HTMLButtonElement>('.cxm-lifecycle-actions button')[1]!.click()
+      dom.window.document.querySelectorAll<HTMLElement>('.cxm-lifecycle-actions t-button')[1]!.click()
       await settle()
       expect(operations.at(-1)).toEqual({ kind: 'disable', pluginId: 'base', impactToken: 'impact-disable' })
       expect(dom.window.document.querySelector('[data-manager-page-route="primary:plugins"]')).not.toBeNull()
@@ -192,7 +192,7 @@ describe('Manager plugin card actions', () => {
     try {
       dom.window.document.querySelector<HTMLButtonElement>('[data-import-local-plugin]')!.click()
       const form = dom.window.document.querySelector<HTMLFormElement>('[data-host-form="local-package-directory"]')!
-      const input = form.querySelector<HTMLInputElement>('[data-host-form-primitive="path-input"]')!
+      const input = form.querySelector<HTMLElement & { value: string; onChange?: (value: string) => void }>('[data-host-form-primitive="path-input"]')!
       expect(form.classList.contains('cxf-scope')).toBe(true)
       expect(form.querySelector('.cxf-label')?.textContent).toBe('本地插件包绝对路径')
       expect(input.getAttribute('aria-describedby')).toContain('cxm-local-package-directory-help')
@@ -202,8 +202,8 @@ describe('Manager plugin card actions', () => {
       expect(dom.window.document.querySelector('.cxm-lifecycle-dialog')?.textContent).toContain('选择本地插件目录以导入。')
       expect(dom.window.document.querySelector('.cxm-lifecycle-dialog')?.textContent).toContain('查看导入说明')
       input.value = '/tmp/local-plugin'
-      input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-      form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click()
+      input.onChange?.(input.value)
+      form.querySelector<HTMLElement>('t-button[type="submit"]')!.click()
       for (let attempt = 0; attempt < 20 && operations.length < 2; attempt += 1) await settle()
       expect(operations[0]).toEqual({ kind: 'inspect-local', sourceDirectory: '/tmp/local-plugin' })
       expect(operations[1]).toMatchObject({ kind: 'install', candidateId: 'candidate-local' })

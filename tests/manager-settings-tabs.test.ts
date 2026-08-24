@@ -117,8 +117,8 @@ describe('CordisX manager settings tabs', () => {
       const marketplaceForm = panel.querySelector<HTMLFormElement>('[data-host-form="marketplace-source"]')!
       expect(marketplaceForm.classList.contains('cxf-scope')).toBe(true)
       expect(marketplaceForm.querySelector('.cxf-label')?.textContent).toBe('插件商店 JSON 地址')
-      expect(marketplaceForm.querySelector<HTMLInputElement>('[data-host-form-primitive="input"]')?.type).toBe('url')
-      expect(marketplaceForm.querySelector<HTMLButtonElement>('button[type="submit"]')?.textContent).toBe('添加商店')
+      expect(marketplaceForm.querySelector<HTMLElement>('[data-host-form-primitive="input"]')?.tagName).toBe('T-INPUT')
+      expect(marketplaceForm.querySelector<HTMLElement>('t-button[type="submit"]')?.textContent).toBe('添加商店')
 
       tabs().find(tab => tab.dataset.settingsTab === 'settings-demo:settings')!.click()
       await settle()

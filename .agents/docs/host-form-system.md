@@ -8,7 +8,8 @@ or change the version-1 plugin-configuration protocol.
 ## Outcome
 
 CordisX presents configuration and launcher-owned inputs through one
-Host-owned form system with TDesign desktop interaction and visual language.
+Host-owned form system backed by the official TDesign Web Components
+implementation and its desktop interaction and visual language.
 Plugins continue to provide Schemastery/Standard Schema data, defaults,
 localized labels and descriptions, roles, and `configApplies`; the Host alone
 chooses a field primitive and owns its DOM, CSS, accessibility, validation,
@@ -31,39 +32,44 @@ The official `tdesign-web-components@1.2.10` release was evaluated on
 | License | MIT. |
 | Browser target | Compatible with the Chromium generation used by CordisX. |
 | Published tarball | 26,094,586 bytes compressed; 123,318,174 bytes unpacked; 3,888 files. |
-| Runtime graph | 19 direct dependencies, including unrelated Markdown, Mermaid, patching, and copy utilities. |
+| Full install graph | About 233 packages / 481 MiB in the audited clean install, including unrelated Markdown and Mermaid paths; the registry audit currently reports three high and one moderate advisory in paths unused by form controls. |
 | Form coverage | Input, Textarea, InputNumber, Select, Checkbox, Switch, Radio, Slider, DatePicker, Button, Alert, Tooltip, and Loading exist; Form, FormItem, Empty, and TimePicker do not. |
-| Tree shaking | Per-component JavaScript entries exist, but the published package remains the installed dependency and declares all `esm`, `lib`, and `cjs` paths as side effects. |
-| Style isolation | Per-component `lib/*` entries call Omi `globalCSS`, adding unscoped `.t-*` rules to the renderer document. The current Manager is not a Shadow-root application. |
-| Theme | TDesign variables can be overridden, but popup ownership and the global style injection cannot currently be fenced to a CordisX root. |
+| Component entries | `lib/<component>/index.js` is bundleable by the current esbuild path. The `esm` entries import raw Less and are not usable directly. |
+| Measured subset | Eleven imported components (Input, Textarea, InputNumber, Select/Option, Checkbox, Switch, Radio, Slider, Button, Alert, Loading) produce 511,735 bundled JavaScript bytes after removing embedded CSS source maps and 40,342 bytes of scoped base CSS. |
+| Style isolation | The official controls render component CSS inside Omi open Shadow roots. CordisX does not load the package-wide global stylesheet into the document; it mechanically extracts only variable blocks below `.cxf-scope` and popup rules into a CordisX-owned Shadow portal. |
+| Theme | Host `--cx-*` semantic tokens override the official `--td-*` variables. The popup Shadow host uses `:host-context([data-cordisx-app-theme="dark"])`, so App theme—not system preference—also owns dropdowns. |
+| Accessibility gap | The audited Select does not provide the complete combobox/listbox keyboard and ARIA contract by itself. The Host adapter supplies roles, active option, focus return, Escape/outside-close behavior, typeahead, Home/End, disabled/read-only, and validation relationships without exposing these mechanics to plugins. |
 
-The package is therefore not shipped in this slice. Adding it would materially
-expand every CLI install, add unrelated production dependencies, still leave
-several required primitives Host-authored, and fail the requirement to prove
-that Codex native DOM is unaffected by global component CSS. CordisX does not
-substitute another library and does not add React or another application root.
+CordisX distributes a reproducible, controlled subset of the official
+`tdesign-web-components@1.2.10` implementation instead of adding the full npm
+package to production dependencies. `scripts/build-tdesign-vendor.mjs` packs
+the exact npm tarball, verifies SHA-256
+`e1929f06eda5c3d2ee194da0d6bc9f81e187184fe1054627afeabad2ae71db0e`,
+imports only the eleven components above, bundles them, removes embedded CSS
+source maps, and emits the pinned renderer module. The only source-level patch
+removes Omi's legacy assignment to `window.HTMLElement`; modern Chromium keeps
+its native constructor. The generated module records version and tarball hash.
 
-The minimum compatible path is a thin Host adapter whose DOM remains native,
-whose API and density follow the TDesign desktop form model, and whose tokens
-are scoped below a CordisX form root. A future official Web Components release
-may replace individual adapter internals only after it provides a complete
-bounded form set, an audited dependency graph, and a style/popup isolation seam.
-That replacement must not change plugin schemas or the Host form registry.
-
-Because no TDesign code or asset is distributed, it is deliberately absent
-from `THIRD_PARTY_NOTICES.md`. If a later slice starts distributing it, that PR
-must add the exact version, license, copyright notice, package allowlist, and
-installed-tarball audit together.
+The resulting bundled runtime contains only TDesign plus the code actually
+reached from Omi 7.7.13, reactive-signal 2.0.1, weakmap-polyfill 2.0.4, clsx
+2.1.1, tailwind-merge 2.6.1, lodash-es 4.18.1, omi-transition 0.1.11, and
+@popperjs/core 2.11.8. They are MIT licensed and are recorded in
+`THIRD_PARTY_NOTICES.md` and `third_party/tdesign-web-components-subset-MIT.txt`.
+There is no React/Vue root, package CDN, runtime package resolution, or second
+schema registry.
 
 ## Primitive registry
 
 `HostFormAdapter` is the only field/control factory. Its initial primitive
 vocabulary is Form, FormItem, Input, Textarea, NumberInput, Select, Option,
-Checkbox, Switch, Radio, Slider, Date, Time, explicit path input, Button,
+Checkbox, Switch, Radio, Slider, explicit path input, Button,
 Alert, Tooltip, Loading, and Empty.
 
-Form and FormItem are semantic Host containers, not plugin-visible contracts.
-Alert, Loading, and Empty are bounded form states. Tooltip uses the existing
+Form and FormItem are semantic Host containers because the official package
+does not ship those components; they are not plugin-visible contracts.
+Alert and Loading are official TDesign controls. The audited package has no
+Empty component, so Empty is an honest Host semantic state rather than a
+component imitation. Tooltip uses the existing
 Host body-portal controller and theme projection rather than creating a second
 popover service.
 
@@ -77,7 +83,7 @@ Default schema selection is deterministic:
 | string | Input |
 | string with `textarea` / `multiline` role | Textarea |
 | string with `path`, `file`, or `directory` role | Path input |
-| string with `date` / `time` role | native Date / Time input behind the adapter |
+| string with `date`, `time`, or `color` role | unavailable with `unsupported-schema-role`; no native input fallback |
 | JSON object/array or unknown serializable field | bounded JSON Textarea fallback plus a stable diagnostic |
 | reserved sensitive role | Host credential-unavailable Alert; no value/control/renderer seat |
 
@@ -165,12 +171,18 @@ App theme before system preference and updates attached Manager, Dialog,
 Tooltip, and menu portals on live theme changes. The form adapter consumes only
 its `--cx-*` semantic tokens.
 
-Each form root introduces a private `.cxf-scope` mapping for the TDesign-aligned
-token vocabulary. No `:root`, `html`, `body`, universal selector, Codex class,
-or unqualified native element rule is allowed. All selectors begin with a
-CordisX-owned class or data attribute. A portal created for a form control must
-be mounted through the Manager portal owner so theme projection and generation
-cleanup apply before content disposal.
+Each form root introduces a private `.cxf-scope` mapping for official TDesign
+tokens. The same semantic mappings are forwarded onto every official custom
+element host because its visible chrome lives in a component Shadow root; this
+keeps closed controls, popup options, hover/active/selected/disabled/error, and
+live theme changes on one token contract. No TDesign global stylesheet, `:root`, `html`, `body`, universal
+selector, or Codex selector is inserted into the document. Official component
+styles remain in their component Shadow roots. Select popups attach only to a
+CordisX Shadow portal below the Manager/Dialog owner, so theme projection and
+generation cleanup apply before content disposal. Every Select exposes an
+idempotent Host `dispose()` seam; a lifecycle observer also releases document
+and window listeners, its listbox, and itself after connected removal or after
+a one-frame grace period when a speculative control is never connected.
 
 Focus uses the Host focus token and remains visible under
 `forced-colors: active`. Light/dark values follow the App theme even when the
@@ -179,13 +191,22 @@ no form root retains observers or portal nodes after generation disposal.
 
 ## Current integration boundary
 
-This slice migrates the existing product form surfaces that are present in the
-formal Host main:
+The production Host renderer has a static regression gate that rejects native
+`select` creation. Every Host-owned choice control present in formal main uses
+the same official TDesign Select/Option adapter:
 
 - Schemastery plugin configuration, including custom renderer seats;
 - explicit-local plugin package path intake;
 - Marketplace source URL entry and source operations;
 - permission/point-policy selectors and authorization choices.
+- Plugin Console source/type/level selectors.
+
+Agent Trace and CLIProxy plugin pages still contain plugin-owned native
+selectors inside their own trusted page renderers. They are not Host-owned
+Manager controls, do not receive TDesign or portal authority, and are not used
+as evidence for this migration. A custom renderer may also render its bounded
+seat with its existing public authority; the Host-owned label/help/error/save
+frame around that seat never treats arbitrary plugin DOM as a TDesign control.
 
 CLIProxy configuration is already Schemastery and therefore enters through the
 same default form. Agent Trace and Settings Tab demonstrations exercise the
@@ -198,9 +219,13 @@ required future entry point and no placeholder writer is invented.
 Automated coverage must include primitive selection for every supported field,
 unknown-role/JSON fallback, localized labels/help, RTL, required/disabled/
 read-only semantics, native keyboard order, field/form errors, dirty/reset/
-save/saved, CAS conflict draft retention, live/restart status, secret refusal,
+save/saved, CAS conflict draft retention, live/plugin/service/app-restart
+status, secret refusal,
 custom renderer fallback and cleanup, dynamic light/dark projection, portal
 theme ownership, narrow/wide layout markers, and large-font-safe CSS.
+Host-owned validation, apply status, switch, sensitive/unsupported, select
+fallback, and JSON feedback are projected from the live `en`/`zh-CN` product
+copy provider rather than field/plugin prose.
 
 The full repository gates remain `npm run check`, `npm run build`, npm audit,
 package allowlist, installed-tarball checks, and `git diff --check`. An isolated
@@ -211,12 +236,18 @@ report complement the automated assertions; JSDOM is not product acceptance.
 
 ## Explicitly not implemented
 
-- No official TDesign runtime or CSS is bundled in this slice.
+- No full `tdesign-web-components` npm dependency or global TDesign stylesheet
+  is installed; only the verified official component subset is bundled.
 - No React root, Vue root, second Host form registry, or plugin-facing TDesign
   object is introduced.
+- This form PR does not implement configuration application-plane contracts,
+  mutation wiring, or restart orchestration. Its presentation helper can label
+  live/plugin/service/app restart descriptors once their owning backend lands.
 - Async Standard Schema, a credential broker, Provider/Channel mutation
-  writers, Date/Time roles not declared by current schemas, and hostile-code
-  isolation remain future protocol/owner work.
+  writers, Date/Time/Color roles not declared by current schemas, an official
+  Empty component absent from TDesign Web Components 1.2.10, and hostile-code
+  isolation remain future owner work. Date/Time/Color receive an explicit
+  unsupported diagnostic and never fall back to a native input.
 - A JSON fallback is an honest bounded editor for a known serializable field;
   it is not inference of arbitrary Standard Schema UI and is never offered for
   `schemaKind=standard`.

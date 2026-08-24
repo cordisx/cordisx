@@ -281,17 +281,21 @@ describe('plugin config runtime', () => {
     expect(timeoutField?.querySelector('.cxf-help')?.textContent).toBe('Live timeout')
     expect(secretField?.querySelector('.cxf-label')?.textContent).toBe('Api Key')
     expect(secretField?.querySelectorAll('.cxf-alert')).toHaveLength(1)
-    expect(configPanel?.textContent).not.toContain('Host 保留了')
+    expect(secretField?.textContent).toContain('Managed by Host credentials')
     const state = (dom.window as unknown as {
       __cordisxConfigFixture: { rendererMount: number; rendererDispose: number; rendererAbort: number }
     }).__cordisxConfigFixture
     const range = dom.window.document.querySelector<HTMLInputElement>('input[type="range"]')
-    const save = configPanel?.querySelector<HTMLButtonElement>('button[type="submit"]')
+    let save = configPanel?.querySelector<HTMLElement & { disabled: boolean }>('t-button[type="submit"]')
     expect(range).not.toBeNull()
-    expect(save?.disabled).toBe(true)
+    expect(save).toBeNull()
     range!.value = '45'
     range!.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    save = configPanel?.querySelector<HTMLElement & { disabled: boolean }>('t-button[type="submit"]')
     expect(save?.disabled).toBe(false)
+    expect(configPanel?.querySelector('.cxf-status')?.textContent)
+      .toBe('Unsaved changes · Applies immediately after saving')
+    expect(configPanel?.querySelector('.cxf-status')?.textContent).not.toMatch(/[\u3400-\u9fff]/u)
     expect(state.rendererMount).toBe(state.rendererDispose + 1)
     expect(state.rendererAbort).toBe(state.rendererDispose)
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.click()
@@ -325,15 +329,15 @@ describe('plugin config runtime', () => {
     expect(dom.window.document.querySelector('[data-plugin-config-form="live-config"]')?.getAttribute('data-state')).toBe('dirty')
 
     bridge.get('live-config')!.revision = 1
-    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-config-form="live-config"] button[type="submit"]')!.click()
+    dom.window.document.querySelector<HTMLElement>('[data-plugin-config-form="live-config"] t-button[type="submit"]')!.click()
     for (let attempt = 0; attempt < 30 && dom.window.document.querySelector('[data-plugin-config-form="live-config"][data-state="conflict"]') === null; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 0))
     }
     const conflicted = dom.window.document.querySelector<HTMLElement>('[data-plugin-config-form="live-config"]')!
     expect(conflicted.dataset.state).toBe('conflict')
     expect(dom.window.document.querySelector<HTMLInputElement>('input[type="range"]')?.value).toBe('45')
-    expect(dom.window.document.querySelector('.cxf-alert[data-tone="error"]')?.textContent).toContain('草稿仍保留')
-    expect(conflicted.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(false)
+    expect(dom.window.document.querySelector('.cxf-alert[data-tone="error"]')?.textContent).toContain('Your draft is retained')
+    expect(conflicted.querySelector<HTMLElement & { disabled: boolean }>('t-button[type="submit"]')?.disabled).toBe(false)
     await runtime.dispose()
   })
 })

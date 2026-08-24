@@ -7,6 +7,13 @@ import {
 } from '../permission-authorization-view-model.js'
 import type { CordisXPermissionCapabilityV2, CordisXPermissionDecisionV2 } from '../permission-contracts.js'
 import { HOST_FORM_STYLES, HostFormAdapter } from './host-form.js'
+import {
+  createTDesignElement,
+  setTDesignProps,
+  setTDesignText,
+  type TDesignButtonElement,
+  type TDesignElement,
+} from './tdesign-form.js'
 import { createHostSurfaceIcon } from './icons.js'
 import { HostThemeProjection } from './host-theme.js'
 
@@ -40,7 +47,7 @@ interface MountedItem {
     readonly deniedBehavior: HTMLElement
   }
   readonly authorizationLabel: HTMLElement
-  readonly options: ReadonlyMap<CordisXPermissionDecisionV2, { readonly input: HTMLInputElement; readonly label: HTMLElement }>
+  readonly options: ReadonlyMap<CordisXPermissionDecisionV2, { readonly input: TDesignElement; readonly label: HTMLElement }>
   readonly denialImpact: HTMLElement
   readonly technicalSummary: HTMLElement
   readonly capabilityLabel: HTMLElement
@@ -95,8 +102,8 @@ const STYLE = `${HOST_FORM_STYLES}
   .cxp-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
   .cxp-option { display: flex; gap: 8px; align-items: center; min-width: 0; border: 1px solid var(--cx-border); border-radius: 10px; padding: 9px 10px; background: var(--cx-surface-raised); cursor: pointer; }
   .cxp-option:hover { background: var(--cx-hover); }
-  .cxp-option:has(input:checked) { border-color: var(--cx-primary); }
-  .cxp-option input { width: 16px; height: 16px; flex: 0 0 auto; margin: 0; accent-color: var(--cx-primary); }
+  .cxp-option:has(t-radio[aria-checked="true"]) { border-color: var(--cx-primary); }
+  .cxp-option t-radio { flex: 0 0 auto; margin: 0; }
   .cxp-option span { overflow-wrap: anywhere; font-size: 13px; }
   .cxp-denial { margin: 8px 0 0; color: var(--cx-danger); font-size: 12px; line-height: 1.4; }
   .cxp-technical { margin-top: 12px; color: var(--cx-muted); font-size: 12px; }
@@ -110,8 +117,8 @@ const STYLE = `${HOST_FORM_STYLES}
   .cxp-button:active { background: var(--cx-pressed); }
   .cxp-button[data-primary="true"] { border-color: var(--cx-primary); background: var(--cx-primary); color: var(--cx-primary-text); font-weight: 600; }
   .cxp-button:disabled { opacity: var(--cx-disabled); cursor: not-allowed; }
-  .cxp-button, .cxp-option, .cxp-option input, .cxp-technical summary { -webkit-app-region: no-drag; }
-  .cxp-button:focus-visible, .cxp-option input:focus-visible, .cxp-technical summary:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: 2px; }
+  .cxp-button, .cxp-option, .cxp-option t-radio, .cxp-technical summary { -webkit-app-region: no-drag; }
+  .cxp-button:focus-visible, .cxp-option t-radio:focus-visible, .cxp-technical summary:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: 2px; }
   @media (max-width: 560px) { .cxp-overlay { padding: 10px; } .cxp-dialog { max-height: calc(100vh - 20px); } .cxp-options { grid-template-columns: 1fr; } .cxp-actions { flex-wrap: wrap; } }
 `
 
@@ -181,8 +188,8 @@ export class BrowserPermissionAuthorizationDialog {
         ? this.document.activeElement as HTMLElement
         : undefined
       const initial = viewModel.project(request.project())
-      const forms = new HostFormAdapter(this.document)
       const overlay = element(this.document, 'div', 'cxp-overlay cxf-scope')
+      const forms = new HostFormAdapter(this.document, overlay, () => this.document.documentElement.lang || 'zh-CN')
       overlay.dataset.permissionAuthorization = viewModel.plan.planId
       noDrag(overlay)
       const detachTheme = this.theme.attach(overlay)
@@ -279,7 +286,7 @@ export class BrowserPermissionAuthorizationDialog {
         })
       })
       this.document.body.append(overlay)
-      const selected = dialog.querySelector<HTMLInputElement>('input[type="radio"]:checked')
+      const selected = dialog.querySelector<HTMLElement>('t-radio[aria-checked="true"]')
       ;(selected ?? confirm).focus()
     })
   }
@@ -319,21 +326,37 @@ export class BrowserPermissionAuthorizationDialog {
     const decisions = element(this.document, 'fieldset', 'cxp-decisions')
     const authorizationLabel = element(this.document, 'legend', undefined, projected.authorizationLabel)
     const optionsRoot = element(this.document, 'div', 'cxp-options cxf-radio-group')
-    const options = new Map<CordisXPermissionDecisionV2, { input: HTMLInputElement; label: HTMLElement }>()
+    const options = new Map<CordisXPermissionDecisionV2, { input: TDesignElement; label: HTMLElement }>()
     for (const option of projected.authorizationOptions) {
-      const optionLabel = element(this.document, 'label', 'cxp-option cxf-choice')
-      const input = element(this.document, 'input')
-      input.type = 'radio'
-      input.dataset.hostFormPrimitive = 'radio'
-      input.name = `cxp-${viewModel.plan.planId}-${projected.capability}`
-      input.value = option.value
-      input.checked = option.selected
+      const optionLabel = element(this.document, 'div', 'cxp-option cxf-choice')
+      const input = createTDesignElement(this.document, 't-radio', 'radio')
+      input.tabIndex = option.selected ? 0 : -1
       input.dataset.permissionDecision = option.value
+      input.setAttribute('role', 'radio')
+      input.setAttribute('aria-checked', String(option.selected))
       const label = element(this.document, 'span', undefined, option.label)
-      input.addEventListener('change', () => {
-        if (!input.checked) return
+      const choose = (): void => {
         viewModel.select(projected.capability, option.value)
+        for (const [value, mounted] of options) {
+          const checked = value === option.value
+          mounted.input.checked = checked
+          mounted.input.tabIndex = checked ? 0 : -1
+          mounted.input.setAttribute('aria-checked', String(checked))
+          mounted.input.update?.()
+        }
         denialImpact.hidden = !option.value.startsWith('deny')
+      }
+      setTDesignProps(input, {
+        name: `cxp-${viewModel.plan.planId}-${projected.capability}`,
+        value: option.value,
+        checked: option.selected,
+        onChange: (checked: boolean) => { if (checked) choose() },
+      })
+      input.addEventListener('click', choose)
+      optionLabel.addEventListener('click', event => {
+        if (event.target === input) return
+        choose()
+        input.focus()
       })
       optionLabel.append(input, label)
       options.set(option.value, { input, label })
@@ -428,9 +451,9 @@ export class BrowserPermissionAuthorizationDialog {
       readonly trustLabel: HTMLElement
       readonly trustValue: HTMLElement
       readonly mounted: ReadonlyMap<CordisXPermissionCapabilityV2, MountedItem>
-      readonly manage: HTMLButtonElement
-      readonly cancel: HTMLButtonElement
-      readonly confirm: HTMLButtonElement
+      readonly manage: TDesignButtonElement
+      readonly cancel: TDesignButtonElement
+      readonly confirm: TDesignButtonElement
     },
   ): void {
     if (previous.items.length !== next.items.length) throw new Error('locale projection changed the permission plan shape')
@@ -440,9 +463,9 @@ export class BrowserPermissionAuthorizationDialog {
     text(mounted.sourceValue, next.plugin.source)
     text(mounted.trustLabel, next.plugin.trustLabel)
     text(mounted.trustValue, next.plugin.trust)
-    text(mounted.manage, next.actions.manage)
-    text(mounted.cancel, next.actions.cancel)
-    text(mounted.confirm, next.actions.confirm)
+    setTDesignText(mounted.manage, next.actions.manage)
+    setTDesignText(mounted.cancel, next.actions.cancel)
+    setTDesignText(mounted.confirm, next.actions.confirm)
     for (const projected of next.items) {
       const item = mounted.mounted.get(projected.capability)
       if (item === undefined) throw new Error('locale projection changed the permission plan identity')
@@ -475,6 +498,9 @@ export class BrowserPermissionAuthorizationDialog {
         if (mountedOption === undefined) throw new Error('locale projection changed allowed permission decisions')
         text(mountedOption.label, option.label)
         mountedOption.input.checked = option.selected
+        mountedOption.input.tabIndex = option.selected ? 0 : -1
+        mountedOption.input.setAttribute('aria-checked', String(option.selected))
+        mountedOption.input.update?.()
       }
       text(item.denialImpact, projected.denialImpact)
       item.denialImpact.hidden = !projected.authorizationOptions.find(option => option.selected)?.value.startsWith('deny')

@@ -298,11 +298,14 @@ Channel forms share the scoped primitive, theme, validation, and state model in
 schema data and bounded custom field content only; they never receive a UI
 library instance, form root, selector, CSS, or portal authority.
 
-The official TDesign Web Components package is not bundled because its current
-package and global-style boundary cannot satisfy the Host installation and
-Codex DOM isolation gates. The adapter retains TDesign desktop form semantics
-without a second framework runtime or a second schema registry. This is an
-implementation boundary, not a new plugin contract.
+The Host bundles a reproducible subset of the official
+`tdesign-web-components@1.2.10` Web Components implementation. It imports only
+the supported controls, keeps component CSS in their open Shadow roots, scopes
+base tokens to `.cxf-scope`, and attaches dropdowns to a CordisX-owned Shadow
+portal. The full npm graph and global stylesheet are not installed. A thin
+Host adapter supplies the missing accessibility/theme seams without a React
+root or second schema registry. This is an implementation boundary, not a new
+plugin contract.
 
 ### Built-in manager plane
 

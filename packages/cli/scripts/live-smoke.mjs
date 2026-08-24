@@ -18,6 +18,7 @@ const parsed = parseArgs({
     'manager-settings-exercise': { type: 'boolean', default: false },
     'manager-form-exercise': { type: 'boolean', default: false },
     'manager-open-local-path-form': { type: 'boolean', default: false },
+    'manager-open-select': { type: 'boolean', default: false },
     'config-exercise': { type: 'boolean', default: false },
     'manager-lifecycle-source': { type: 'string' },
     'permission-v2-source': { type: 'string' },
@@ -167,13 +168,45 @@ async function pressKey(key, code, keyCode) {
 await send('Runtime.enable')
 await send('Page.enable')
 const locale = parsed.values.locale
+let localeProjection
 if (locale !== undefined) {
   if (!['en', 'zh-CN'].includes(locale)) throw new Error(`unknown smoke locale: ${locale}`)
   await send('Runtime.evaluate', {
-    expression: `document.documentElement.lang = ${JSON.stringify(locale)}`,
+    // DocumentLocaleAdapter is the production Host locale source. Keep its
+    // document attribute projected while Codex initializes, then wait for the
+    // runtime snapshot rather than injecting a test-only locale registry.
+    expression: `(() => {
+      globalThis.__cordisxRestoreSmokeLocale?.()
+      const root = document.documentElement
+      const previousLang = root.getAttribute('lang')
+      const enforce = () => {
+        if (root.lang !== ${JSON.stringify(locale)}) root.lang = ${JSON.stringify(locale)}
+      }
+      const observer = new MutationObserver(enforce)
+      observer.observe(root, { attributes: true, attributeFilter: ['lang'] })
+      globalThis.__cordisxRestoreSmokeLocale = () => {
+        observer.disconnect()
+        if (previousLang === null) root.removeAttribute('lang')
+        else root.setAttribute('lang', previousLang)
+        delete globalThis.__cordisxRestoreSmokeLocale
+      }
+      enforce()
+    })()`,
     returnByValue: true,
   })
-  await new Promise(resolve => setTimeout(resolve, 120))
+  const deadline = Date.now() + 2_000
+  while (Date.now() < deadline) {
+    localeProjection = await evaluateByValue(`(() => ({
+      documentLocale: document.documentElement.lang,
+      snapshotLocale: globalThis.__cordisxRuntime?.snapshot?.().localization?.locale ?? null,
+      direction: globalThis.__cordisxRuntime?.snapshot?.().localization?.direction ?? null,
+    }))()`)
+    if (localeProjection.documentLocale === locale && localeProjection.snapshotLocale === locale) break
+    await new Promise(resolve => setTimeout(resolve, 40))
+  }
+  if (localeProjection?.documentLocale !== locale || localeProjection.snapshotLocale !== locale) {
+    throw new Error(`Host locale projection did not settle: ${JSON.stringify(localeProjection)}`)
+  }
 }
 const colorScheme = parsed.values['color-scheme']
 if (colorScheme !== undefined) {
@@ -1312,7 +1345,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     const runtime = globalThis.__cordisxRuntime
     if (runtime === undefined) throw new Error('CordisX runtime is unavailable')
     document.querySelector('[data-permission-authorization] [data-authorization-decision="cancel"]')?.click()
-    document.querySelector('[data-host-form="local-package-directory"] .cxf-actions button[type="button"]')?.click()
+    document.querySelector('[data-host-form="local-package-directory"] .cxf-actions t-button:first-child')?.click()
     const modal = document.querySelector('[data-cordisx-manager-modal]')
     const trigger = document.querySelector('[data-cordisx-manager-trigger]')
     if (modal?.hidden !== false) {
@@ -1329,7 +1362,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       if (!(uninstall instanceof HTMLButtonElement) || uninstall.disabled) throw new Error('existing package uninstall is unavailable')
       uninstall.click()
       const confirmation = await waitFor(() => document.querySelector('.cxm-lifecycle-overlay'), 'existing package uninstall confirmation')
-      confirmation.querySelector('.cxm-lifecycle-actions button:last-child')?.click()
+      confirmation.querySelector('.cxm-lifecycle-actions t-button:last-child')?.click()
       await waitFor(() => !runtime.snapshot().plugins.some(item => item.id === 'lifecycle-smoke'), 'existing package cleanup')
       preImportCleanup = true
     }
@@ -1340,7 +1373,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     input.value = ${JSON.stringify(sourceDirectory)}
     input.dispatchEvent(new Event('input', { bubbles: true }))
     const submit = document.querySelector('[data-import-local-submit]')
-    if (!(submit instanceof HTMLButtonElement)) throw new Error('local import submit action is unavailable')
+    if (!(submit instanceof HTMLElement)) throw new Error('local import submit action is unavailable')
     submit.click()
     await waitFor(() => document.querySelector('[data-import-local-path]') === null, 'local import dialog close')
     const authorization = await waitFor(() => {
@@ -1659,7 +1692,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     document.querySelector('[data-plugin-card="lifecycle-smoke"] [data-plugin-action="disable"]')?.click()
     const disableDialog = await waitFor(() => document.querySelector('.cxm-lifecycle-overlay'), 'disable impact confirmation')
     const disableImpact = disableDialog.querySelector('.cxm-lifecycle-impact')?.textContent ?? ''
-    disableDialog.querySelector('.cxm-lifecycle-actions button:last-child')?.click()
+    disableDialog.querySelector('.cxm-lifecycle-actions t-button:last-child')?.click()
     await waitFor(() => runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke')?.status === 'configured-disabled', 'disabled plugin')
     await waitFor(() => document.querySelector('[data-plugin-card="lifecycle-smoke"] [data-plugin-action="enable"]:not(:disabled)'), 'disabled plugin actions')
     const afterDisable = { ...counters, revision: runtime.snapshot().pluginLifecycle?.revision ?? null }
@@ -1839,7 +1872,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     const counters = globalThis.__cordisxLifecycleSmoke
     const beforeRevision = runtime.snapshot().pluginLifecycle?.revision ?? null
     const expectedDispose = counters.dispose + 1
-    document.querySelector('.cxm-lifecycle-overlay .cxm-lifecycle-actions button:last-child')?.click()
+    document.querySelector('.cxm-lifecycle-overlay .cxm-lifecycle-actions t-button:last-child')?.click()
     for (let attempt = 0; attempt < 160; attempt += 1) {
       if (!runtime.snapshot().plugins.some(item => item.id === 'lifecycle-smoke') && counters.dispose >= expectedDispose) break
       await wait(50)
@@ -1946,7 +1979,7 @@ if (parsed.values['permission-v2-source'] !== undefined) {
     input.value = ${JSON.stringify(sourceDirectory)}
     input.dispatchEvent(new Event('input', { bubbles: true }))
     const submit = document.querySelector('[data-import-local-submit]')
-    if (!(submit instanceof HTMLButtonElement)) throw new Error('local import submit action is unavailable')
+    if (!(submit instanceof HTMLElement)) throw new Error('local import submit action is unavailable')
     submit.click()
     const dialog = await waitFor(() => {
       const authorization = document.querySelector('.cxp-overlay[data-permission-authorization]')
@@ -2958,11 +2991,8 @@ if (parsed.values['plugin-console-exercise']) {
     initialFrame?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientY: initialFrame.getBoundingClientRect().top + 7 }))
     const detailOpened = document.querySelector('[data-console-detail]') !== null
     const inspectorText = document.querySelector('[data-console-detail]')?.textContent ?? ''
-    const kind = document.querySelector('select[aria-label="API / 类型"]')
-    if (kind instanceof HTMLSelectElement) {
-      kind.value = 'console'
-      kind.dispatchEvent(new Event('change', { bubbles: true }))
-    }
+    const kind = document.querySelector('t-select[aria-label="API / 类型"]')
+    kind?.setSelectedValue?.('console', true)
     let lunaFrame
     for (let attempt = 0; attempt < 40; attempt += 1) {
       lunaFrame = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
@@ -3157,11 +3187,11 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         while (document.querySelector('.cxm-source-list .cxm-source-row') !== null && Date.now() < removalDeadline) {
           await new Promise(resolve => setTimeout(resolve, 50))
         }
-        const input = document.querySelector('[data-host-form="marketplace-source"] input[type="url"]')
+        const input = document.querySelector('[data-host-form="marketplace-source"] t-input[data-host-form-primitive="input"]')
         const form = document.querySelector('[data-host-form="marketplace-source"]')
-        if (!(input instanceof HTMLInputElement) || !(form instanceof HTMLFormElement)) throw new Error('marketplace source form is unavailable')
+        if (!(input instanceof HTMLElement) || !(form instanceof HTMLFormElement)) throw new Error('marketplace source form is unavailable')
         input.value = marketplaceSource
-        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.onChange?.(marketplaceSource)
         if (marketplaceFixtureText === undefined) form.requestSubmit()
         else {
           const fixtureNow = 1_900_000_000_000
@@ -3240,6 +3270,15 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         if (expandable != null) expandable.click()
         await nextPaint()
       }
+      if (${JSON.stringify(parsed.values['manager-open-select'])}) {
+        const select = [...document.querySelectorAll('t-select[data-host-form-primitive="select"]')]
+          .find(item => item.getClientRects().length > 0)
+        if (!(select instanceof HTMLElement)) throw new Error('visible TDesign Select is unavailable')
+        select.focus()
+        select.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+        await nextPaint()
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
       if (breadcrumbWidth !== undefined) {
         const overflow = document.querySelector('.cxm-breadcrumb-overflow')
         if (overflow instanceof HTMLDetailsElement) overflow.open = true
@@ -3285,7 +3324,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           externalDefaultPrevented,
           hostForms: [...document.querySelectorAll('[data-host-form]')].filter(form => form.getClientRects().length > 0).map(form => {
             const grid = form.querySelector('.cxf-form-grid')
-            const firstControl = form.querySelector('input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [role="radiogroup"] input:not(:disabled)')
+            const firstControl = form.querySelector('[data-host-form-primitive]:not([aria-disabled="true"]), input:not(:disabled), textarea:not(:disabled)')
             const firstRect = firstControl?.getBoundingClientRect()
             return {
               id: form.getAttribute('data-host-form'),
@@ -3303,9 +3342,9 @@ if (parsed.values['manager-screenshot'] !== undefined) {
                 invalid: item.getAttribute('data-invalid'),
                 customSeatVisible: item.querySelector('.cxf-custom-seat:not([hidden])') !== null,
                 sensitiveControlCount: item.getAttribute('data-host-form-primitive') === 'sensitive-unavailable'
-                  ? item.querySelectorAll('input,textarea,select').length : null,
+                  ? item.querySelectorAll('input,textarea,select,t-input,t-textarea,t-select').length : null,
               })),
-              controls: [...form.querySelectorAll('input,select,textarea,[role="radiogroup"]')].map(control => ({
+              controls: [...form.querySelectorAll('[data-host-form-primitive],input,textarea')].filter((control, index, all) => all.indexOf(control) === index).map(control => ({
                 primitive: control.getAttribute('data-host-form-primitive'), tag: control.tagName.toLowerCase(),
                 type: control instanceof HTMLInputElement ? control.type : null, id: control.id,
                 required: control.getAttribute('aria-required'), invalid: control.getAttribute('aria-invalid'),
@@ -3385,7 +3424,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           permissions: [...document.querySelectorAll('[data-permission-item]')].map(item => ({
             capability: item.getAttribute('data-permission-item'),
             availability: item.querySelector('[data-permission-availability]')?.getAttribute('data-availability-state') ?? null,
-            policyEditable: item.querySelector('select[data-permission-capability]') instanceof HTMLSelectElement,
+            policyEditable: item.querySelector('t-select[data-permission-capability][data-tdesign-version="1.2.10"]') !== null,
             nestedList: item.querySelector('[role="listitem"]') !== null,
           })),
           permissionDetail: document.querySelector('[data-permission-detail]') === null ? null : {
@@ -3394,8 +3433,68 @@ if (parsed.values['manager-screenshot'] !== undefined) {
               id: item.getAttribute('data-permission-provider'),
               text: item.textContent?.trim() ?? '',
             })),
-            policyEditable: document.querySelector('[data-permission-detail] select[data-permission-capability]') instanceof HTMLSelectElement,
+            policyEditable: document.querySelector('[data-permission-detail] t-select[data-permission-capability][data-tdesign-version="1.2.10"]') !== null,
             headings: [...document.querySelectorAll('[data-permission-detail] h1, [data-permission-detail] h2, [data-permission-detail] h3')].map(item => item.textContent?.trim() ?? ''),
+          },
+          tdesign: {
+            version: document.querySelector('[data-tdesign-version]')?.getAttribute('data-tdesign-version') ?? null,
+            hostOwnedControlCount: document.querySelectorAll('[data-host-form-primitive][data-tdesign-version="1.2.10"]').length,
+            selectCount: document.querySelectorAll('t-select[data-host-form-primitive="select"]').length,
+            nativeHostSelectCount: document.querySelectorAll('[data-cordisx-manager-modal] select').length,
+            groupCardCount: document.querySelectorAll('.cxf-form-grid, .cxm-settings-group').length,
+            portalCount: document.querySelectorAll('[data-cxf-tdesign-portal-host]').length,
+            popupVisible: [...document.querySelectorAll('[data-cxf-tdesign-portal-host]')].some(host => host.shadowRoot?.querySelector('.cxf-tdesign-listbox:not([hidden])') !== null),
+            popupOptionCount: [...document.querySelectorAll('[data-cxf-tdesign-portal-host]')].reduce((count, host) => count + (host.shadowRoot?.querySelector('.cxf-tdesign-listbox:not([hidden])')?.querySelectorAll('t-option').length ?? 0), 0),
+            popupTheme: (() => {
+              const listbox = [...document.querySelectorAll('[data-cxf-tdesign-portal-host]')]
+                .map(host => host.shadowRoot?.querySelector('.cxf-tdesign-listbox:not([hidden])'))
+                .find(item => item instanceof HTMLElement)
+              if (!(listbox instanceof HTMLElement)) return null
+              const style = getComputedStyle(listbox)
+              const rect = listbox.getBoundingClientRect()
+              const activeOption = listbox.querySelector('t-option[data-active="true"]')
+              const activeSurface = activeOption?.shadowRoot?.querySelector('.t-select-option, [part], div') ?? activeOption
+              const activeStyle = activeSurface instanceof Element ? getComputedStyle(activeSurface) : null
+              const optionStyle = activeOption instanceof Element ? getComputedStyle(activeOption) : null
+              return { background: style.backgroundColor, color: style.color, placement: listbox.dataset.placement ?? null,
+                rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+                activeOption: activeOption === null ? null : {
+                  selected: activeOption.getAttribute('aria-selected'),
+                  background: activeStyle?.backgroundColor ?? null,
+                  color: activeStyle?.color ?? null,
+                  selectedToken: optionStyle?.getPropertyValue('--td-bg-color-container-select').trim() ?? null,
+                  activeToken: optionStyle?.getPropertyValue('--td-bg-color-container-active').trim() ?? null,
+                  hoverToken: optionStyle?.getPropertyValue('--td-bg-color-container-hover').trim() ?? null,
+                  disabledToken: optionStyle?.getPropertyValue('--td-bg-color-component-disabled').trim() ?? null,
+                } }
+            })(),
+            activeElement: document.activeElement?.tagName.toLowerCase() ?? null,
+            selectState: (() => {
+              const select = [...document.querySelectorAll('t-select[data-host-form-primitive="select"]')]
+                .find(item => item.getClientRects().length > 0 && item.getAttribute('aria-expanded') === 'true')
+                ?? [...document.querySelectorAll('t-select[data-host-form-primitive="select"]')].find(item => item.getClientRects().length > 0)
+              if (select === undefined) return null
+              const tokens = getComputedStyle(select)
+              const shadowSurfaces = select.shadowRoot === null ? [] : [...select.shadowRoot.querySelectorAll('*')]
+                .map(item => ({
+                  tag: item.tagName.toLowerCase(), className: item.className,
+                  background: getComputedStyle(item).backgroundColor, color: getComputedStyle(item).color,
+                }))
+                .filter(item => item.background !== 'rgba(0, 0, 0, 0)' && item.background !== 'transparent')
+                .slice(0, 8)
+              return {
+                tabIndex: select.tabIndex,
+                ariaExpanded: select.getAttribute('aria-expanded'),
+                adapterExpanded: select.getAttribute('data-popup-visible'),
+                officialPopupVisible: select.popupVisible ?? null,
+                shadowText: select.shadowRoot?.textContent?.trim().slice(0, 120) ?? null,
+                containerToken: tokens.getPropertyValue('--td-bg-color-container').trim(),
+                specialToken: tokens.getPropertyValue('--td-bg-color-specialcomponent').trim(),
+                selectedToken: tokens.getPropertyValue('--td-bg-color-container-select').trim(),
+                colorScheme: tokens.colorScheme,
+                shadowSurfaces,
+              }
+            })(),
           },
           extensionPointCatalog: document.querySelector('[aria-label="扩展点列表"]') === null ? null : {
             locale: document.documentElement.lang,
@@ -3650,7 +3749,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   } finally {
     if (parsed.values['manager-open-local-path-form']) {
       await send('Runtime.evaluate', {
-        expression: `document.querySelector('.cxm-lifecycle-dialog .cxf-actions button[type="button"]')?.click()`,
+        expression: `document.querySelector('.cxm-lifecycle-dialog .cxf-actions t-button:first-child')?.click()`,
         returnByValue: true,
       })
     }
@@ -3666,7 +3765,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         returnByValue: true,
       })
     }
-    if (managerViewportWidth !== undefined) await send('Emulation.clearDeviceMetricsOverride')
+    if (managerViewportWidth !== undefined && !parsed.values['manager-theme-cycle']) await send('Emulation.clearDeviceMetricsOverride')
   }
 }
 
@@ -3676,6 +3775,7 @@ if (parsed.values['manager-theme-cycle']) {
     const evaluated = await send('Runtime.evaluate', {
       expression: `(async () => {
         const root = document.documentElement
+        if (${JSON.stringify(theme === 'light')}) globalThis.__cordisxRestoreSmokeTheme?.()
         globalThis.__cordisxRestoreManagerThemeSmoke ??= {
           className: root.className,
           dataTheme: root.getAttribute('data-theme'),
@@ -3689,15 +3789,54 @@ if (parsed.values['manager-theme-cycle']) {
         if (${reopen} && !modal.hidden) document.querySelector('.cxm-close')?.click()
         if (modal.hidden && trigger !== null) trigger.click()
         else if (modal.hidden) modal.hidden = false
-        document.querySelector('[data-tab="about"]')?.click()
+        if (!${JSON.stringify(parsed.values['manager-open-select'])}) document.querySelector('[data-tab="about"]')?.click()
         await new Promise(resolve => {
           const timer = setTimeout(resolve, 120)
           requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(timer); resolve() }))
         })
+        const projectionDeadline = Date.now() + 2_000
+        while (modal.dataset.cordisxAppTheme !== ${JSON.stringify(theme)} && Date.now() < projectionDeadline) {
+          await new Promise(resolve => setTimeout(resolve, 25))
+        }
+        if (modal.dataset.cordisxAppTheme !== ${JSON.stringify(theme)}) {
+          throw new Error('Host theme projection did not reach ${theme}')
+        }
+        if (${JSON.stringify(parsed.values['manager-open-select'])}) {
+          // Closing the Manager deliberately clears its detail route. Reopen
+          // the same structured Host route before checking the portaled
+          // control, rather than treating a stale DOM node as evidence.
+          const pluginId = ${JSON.stringify(parsed.values['manager-plugin'])}
+          const detailTab = ${JSON.stringify(parsed.values['manager-detail-tab'])}
+          const permissionCapability = ${JSON.stringify(parsed.values['manager-permission-capability'])}
+          if (pluginId !== undefined) {
+            document.querySelector('[data-tab="plugins"]')?.click()
+            await new Promise(resolve => requestAnimationFrame(resolve))
+            const row = [...document.querySelectorAll('[data-plugin-id], [data-marketplace-plugin]')]
+              .find(item => item.getAttribute('data-plugin-id') === pluginId || item.getAttribute('data-marketplace-plugin') === pluginId)
+            ;(row?.matches('button') === true ? row : row?.querySelector('.cxm-plugin-primary'))?.click()
+            await new Promise(resolve => requestAnimationFrame(resolve))
+            if (detailTab !== undefined) document.querySelector('[data-plugin-detail-tab="' + detailTab + '"]')?.click()
+            if (permissionCapability !== undefined) document.querySelector('[data-permission-open="' + CSS.escape(permissionCapability) + '"]')?.click()
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+          }
+          const select = [...document.querySelectorAll('t-select[data-host-form-primitive="select"]')]
+            .find(item => item.getClientRects().length > 0)
+          if (!(select instanceof HTMLElement)) throw new Error('visible TDesign Select is unavailable after theme projection')
+          if (select.getAttribute('aria-expanded') !== 'true') {
+            select.focus()
+            select.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+          }
+        }
         const dialog = modal.querySelector('[role="dialog"]')
         const marks = [...modal.querySelectorAll('img[data-cordisx-brand-mark][data-brand-rendering="direct-host"]')]
         const navIcon = document.querySelector('[data-tab="plugins"] .cxm-nav-icon')
         const headingIcon = document.querySelector('.cxm-heading-leading')
+        const popup = [...document.querySelectorAll('[data-cxf-tdesign-portal-host]')]
+          .map(host => host.shadowRoot?.querySelector('.cxf-tdesign-listbox:not([hidden])'))
+          .find(item => item instanceof HTMLElement)
+        const visibleSelect = [...document.querySelectorAll('t-select[data-host-form-primitive="select"]')]
+          .find(item => item.getClientRects().length > 0)
         return {
           rect: dialog === null ? null : (() => {
             const rect = dialog.getBoundingClientRect()
@@ -3709,6 +3848,43 @@ if (parsed.values['manager-theme-cycle']) {
           modalHidden: modal.hidden,
           navIconColor: navIcon === null ? null : getComputedStyle(navIcon).color,
           headingIconColor: headingIcon === null ? null : getComputedStyle(headingIcon).color,
+          selectControl: visibleSelect instanceof HTMLElement ? (() => {
+            const tokens = getComputedStyle(visibleSelect)
+            const shadowSurfaces = visibleSelect.shadowRoot === null ? [] : [...visibleSelect.shadowRoot.querySelectorAll('*')]
+              .map(item => ({
+                tag: item.tagName.toLowerCase(), className: item.className,
+                background: getComputedStyle(item).backgroundColor, color: getComputedStyle(item).color,
+              }))
+              .filter(item => item.background !== 'rgba(0, 0, 0, 0)' && item.background !== 'transparent')
+              .slice(0, 8)
+            return {
+              containerToken: tokens.getPropertyValue('--td-bg-color-container').trim(),
+              specialToken: tokens.getPropertyValue('--td-bg-color-specialcomponent').trim(),
+              selectedToken: tokens.getPropertyValue('--td-bg-color-container-select').trim(),
+              colorScheme: tokens.colorScheme,
+              shadowSurfaces,
+            }
+          })() : null,
+          selectPopup: popup instanceof HTMLElement ? {
+            background: getComputedStyle(popup).backgroundColor,
+            color: getComputedStyle(popup).color,
+            optionCount: popup.querySelectorAll('t-option[data-tdesign-version="1.2.10"]').length,
+            activeOption: (() => {
+              const option = popup.querySelector('t-option[data-active="true"]')
+              const surface = option?.shadowRoot?.querySelector('.t-select-option, [part], div') ?? option
+              const style = surface instanceof Element ? getComputedStyle(surface) : null
+              const tokens = option instanceof Element ? getComputedStyle(option) : null
+              return option === null ? null : {
+                selected: option.getAttribute('aria-selected'),
+                background: style?.backgroundColor ?? null,
+                color: style?.color ?? null,
+                selectedToken: tokens?.getPropertyValue('--td-bg-color-container-select').trim() ?? null,
+                activeToken: tokens?.getPropertyValue('--td-bg-color-container-active').trim() ?? null,
+                hoverToken: tokens?.getPropertyValue('--td-bg-color-container-hover').trim() ?? null,
+                disabledToken: tokens?.getPropertyValue('--td-bg-color-component-disabled').trim() ?? null,
+              }
+            })(),
+          } : null,
           marks: marks.map(mark => ({
             background: mark.dataset.hostBackground ?? null,
             lightAsset: decodeURIComponent(mark.src).includes('CordisX mark for light backgrounds'),
@@ -3750,6 +3926,7 @@ if (parsed.values['manager-theme-cycle']) {
       delete globalThis.__cordisxRestoreManagerThemeSmoke
     })()`,
   })
+  if (parsed.values['manager-viewport-width'] !== undefined) await send('Emulation.clearDeviceMetricsOverride')
 }
 
 if (parsed.values['trigger-screenshot'] !== undefined) {
@@ -3832,6 +4009,7 @@ if (parsed.values.report !== undefined) {
       isolatedRenderer: true,
     },
     baseline: report,
+    ...(localeProjection === undefined ? {} : { localeProjection }),
     interactionSafety,
     ...(managerReport === undefined ? {} : { manager: managerReport }),
     ...(managerThemeReport === undefined ? {} : { managerTheme: managerThemeReport }),
@@ -3851,6 +4029,12 @@ if (parsed.values.report !== undefined) {
   await mkdir(path.dirname(reportPath), { recursive: true })
   await writeFile(reportPath, `${JSON.stringify(aggregate, null, 2)}\n`)
   console.log(`report=${reportPath}`)
+}
+
+if (locale !== undefined) {
+  await send('Runtime.evaluate', {
+    expression: 'globalThis.__cordisxRestoreSmokeLocale?.()',
+  })
 }
 
 socket.close()

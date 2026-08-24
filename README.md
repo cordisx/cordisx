@@ -157,7 +157,8 @@ Available in the current source tree:
   localization;
 - a built-in manager for plugins, extension points, routes, discovery, and
   local configuration;
-- a scoped, Host-owned form system with TDesign-aligned desktop interaction,
+- a scoped, Host-owned form system backed by a verified official TDesign Web
+  Components subset, with macOS-style grouped settings information architecture,
   validation, responsive layout, accessibility, and live App-theme projection;
 - registry-verified `beta` packages for the CLI and plugin scaffolder;
 - a plugin project scaffolder with generated-project validation; and

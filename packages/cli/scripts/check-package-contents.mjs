@@ -30,6 +30,7 @@ for (const required of [
   'README.md',
   'THIRD_PARTY_NOTICES.md',
   'third_party/material-symbols-APACHE-2.0.txt',
+  'third_party/tdesign-web-components-subset-MIT.txt',
   'dist/src/cli.js',
   'dist/src/contracts.js',
   'dist/src/contracts.d.ts',
