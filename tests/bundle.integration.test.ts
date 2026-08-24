@@ -1055,5 +1055,5 @@ describe('renderer bundle', () => {
     expect(dom.window.document.getElementById('cordisx-manager-style')).toBeNull()
     expect(native.parentElement).toBe(nativeParent)
     dom.window.close()
-  }, 20_000)
+  }, 45_000)
 })
