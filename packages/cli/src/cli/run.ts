@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
+import os from 'node:os'
 import type { ChildProcess } from 'node:child_process'
 import { resolveHostAdapter } from '../adapters/registry.js'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
@@ -20,6 +21,7 @@ import {
 import { parseCordisXCli, type CordisXDevInvocation, type CordisXLauncherOptions } from './parse.js'
 import { resolveProfileSelection } from './profiles.js'
 import { ProviderFleet } from '../providers/fleet.js'
+import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
 
 const HELP = `Usage:
   cordisx [app] [profile] [--data shared|isolated] [options] [-- host-arguments...]
@@ -90,14 +92,38 @@ function developmentPluginConfig(pluginPath: string, cwd: string): CordisXConfig
 interface RendererComposition {
   readonly source: string
   readonly providerBridgeToken?: string
+  readonly agentHistoryBridgeToken: string
 }
 
 async function bundle(config: CordisXConfig, stdout: (line: string) => void): Promise<RendererComposition> {
   const providerBridgeToken = config.providers.some(provider => provider.enabled) ? randomBytes(32).toString('hex') : undefined
-  const source = await buildRendererBundle(config, providerBridgeToken === undefined ? {} : { providerBridgeToken })
+  const agentHistoryBridgeToken = randomBytes(32).toString('hex')
+  const source = await buildRendererBundle(config, {
+    ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
+    agentHistoryBridgeToken,
+  })
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
   stdout(`[cordisx] bundle ready: ${source.length} bytes, plugins: ${enabled.join(', ') || '(none)'}`)
-  return { source, ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }) }
+  return { source, ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }), agentHistoryBridgeToken }
+}
+
+function codexHome(environment: Readonly<Record<string, string>> | NodeJS.ProcessEnv): string {
+  const explicit = environment.CODEX_HOME
+  if (typeof explicit === 'string' && explicit.length > 0) return path.resolve(explicit)
+  const home = typeof environment.HOME === 'string' && environment.HOME.length > 0 ? environment.HOME : os.homedir()
+  return path.join(home, '.codex')
+}
+
+function agentHistoryHost(
+  environment: Readonly<Record<string, string>> | NodeJS.ProcessEnv,
+  configPath: string,
+  profileName: string,
+): CodexAgentHistoryHost {
+  return new CodexAgentHistoryHost({
+    codexHome: codexHome(environment),
+    cacheDir: path.join(path.dirname(configPath), 'cache', 'agent-history'),
+    profileName,
+  })
 }
 
 function printPlan(plan: ResolvedLaunchPlan, stdout: (line: string) => void): void {
@@ -108,6 +134,8 @@ async function runInjectedHost(input: {
   readonly source: string
   readonly providerFleet?: ProviderFleet
   readonly providerBridgeToken?: string
+  readonly agentHistoryHost: CodexAgentHistoryHost
+  readonly agentHistoryBridgeToken: string
   readonly executable?: string
   readonly debugPort: number
   readonly hostArgs: readonly string[]
@@ -128,6 +156,8 @@ async function runInjectedHost(input: {
       providerFleet: input.providerFleet,
       providerBridgeToken: input.providerBridgeToken,
     }),
+    agentHistoryHost: input.agentHistoryHost,
+    agentHistoryBridgeToken: input.agentHistoryBridgeToken,
     onStatus: message => input.stdout(`[cordisx] ${message}`),
   })
   let launched: ChildProcess | undefined
@@ -156,6 +186,7 @@ async function runInjectedHost(input: {
     const cleanup = await Promise.allSettled([
       watcher,
       ...(input.providerFleet === undefined ? [] : [input.providerFleet.close()]),
+      Promise.resolve(input.agentHistoryHost.dispose()),
       ...(launched === undefined ? [] : [terminateIsolatedCodex(launched)]),
     ])
     process.removeListener('SIGINT', stop)
@@ -205,6 +236,8 @@ async function runDevelopment(
     : await prepareIsolatedCodexProfile(config.rootDir, invocation.options.profileDir)
   await runInjectedHost({
     source: composition.source,
+    agentHistoryHost: agentHistoryHost(environment, resolveHomeConfigPath({ env: environment }), `development:${config.rootDir}`),
+    agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
     ...(composition.providerBridgeToken === undefined ? {} : {
       providerFleet: await ProviderFleet.create(config.providers, { appServer: { environment } }),
       providerBridgeToken: composition.providerBridgeToken,
@@ -303,6 +336,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     }
     await runInjectedHost({
       source: rendererComposition.source,
+      agentHistoryHost: agentHistoryHost(runtime.env ?? process.env, configPath, `${appId}:${selection.profileId}:attach`),
+      agentHistoryBridgeToken: rendererComposition.agentHistoryBridgeToken,
       ...(rendererComposition.providerBridgeToken === undefined ? {} : {
         providerFleet: await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } }),
         providerBridgeToken: rendererComposition.providerBridgeToken,
@@ -345,6 +380,12 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     : undefined
   await runInjectedHost({
     source: rendererComposition.source,
+    agentHistoryHost: agentHistoryHost(
+      { ...(runtime.env ?? process.env), ...plan.environment },
+      configPath,
+      `${appId}:${selection.profileId}:${selection.dataMode}`,
+    ),
+    agentHistoryBridgeToken: rendererComposition.agentHistoryBridgeToken,
     ...(rendererComposition.providerBridgeToken === undefined ? {} : {
       providerFleet: await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } }),
       providerBridgeToken: rendererComposition.providerBridgeToken,

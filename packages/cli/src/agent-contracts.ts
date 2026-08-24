@@ -5,6 +5,8 @@ export const CORDISX_AGENT_EVENT_CONTRACT = 'cordisx.agent-events/v2' as const
 export const CORDISX_AGENT_EVENT_SCHEMA_VERSION = 2 as const
 export const CORDISX_AGENT_DELIVERY_CONTRACT = 'cordisx.agent-delivery/v1' as const
 export const CORDISX_AGENT_DELIVERY_SCHEMA_VERSION = 1 as const
+export const CORDISX_AGENT_HISTORY_CONTRACT = 'cordisx.agent-history/v1' as const
+export const CORDISX_AGENT_HISTORY_SCHEMA_VERSION = 1 as const
 
 export type CordisXAgentEventType =
   | 'session.lifecycle'
@@ -233,6 +235,94 @@ export interface CordisXAgentEvents {
   subscribe(input: CordisXAgentEventSubscription, listener: (range: CordisXAgentEventRange) => void): Disposable<void>
 }
 
+export type CordisXAgentHistoryPayloadPolicy = 'referenced' | 'summarized' | 'inline'
+export type CordisXAgentHistoryCoverageState = 'complete' | 'partial' | 'indexing' | 'unavailable'
+
+export interface CordisXAgentHistorySource {
+  readonly kind: 'historical'
+  readonly adapterId: string
+  readonly adapterVersion: string
+  readonly hostId: string
+  readonly profileId: string
+}
+
+export interface CordisXAgentHistoryCoverage {
+  readonly state: CordisXAgentHistoryCoverageState
+  readonly earliestTime?: number
+  readonly latestTime?: number
+  readonly compacted: boolean
+  readonly corruptLines: number
+  readonly oversizedLines: number
+  readonly redactedFields: number
+  readonly tailAvailable: boolean
+}
+
+export type CordisXAgentHistoryDiagnosticCode =
+  | 'history-unavailable'
+  | 'history-indexing'
+  | 'history-corrupt-line'
+  | 'history-oversized-line'
+  | 'history-source-changed'
+  | 'history-content-redacted'
+  | 'history-resource-limit'
+
+export interface CordisXAgentHistoryDiagnostic {
+  readonly code: CordisXAgentHistoryDiagnosticCode
+  readonly severity: 'info' | 'warning' | 'error'
+  readonly count: number
+}
+
+export interface CordisXAgentHistoryPage {
+  readonly contract: typeof CORDISX_AGENT_HISTORY_CONTRACT
+  readonly schemaVersion: typeof CORDISX_AGENT_HISTORY_SCHEMA_VERSION
+  readonly sessionId: string
+  readonly snapshotId: string
+  readonly limit: number
+  readonly requestedPayloadPolicy: CordisXAgentHistoryPayloadPolicy
+  readonly effectivePayloadPolicy: CordisXAgentHistoryPayloadPolicy
+  readonly source: CordisXAgentHistorySource
+  readonly coverage: CordisXAgentHistoryCoverage
+  readonly fromSeq?: number
+  readonly toSeq?: number
+  readonly nextCursor?: string
+  readonly tailCursor?: string
+  readonly events: readonly CordisXAgentEvent[]
+  readonly diagnostics?: readonly CordisXAgentHistoryDiagnostic[]
+}
+
+export interface CordisXAgentHistoryQuery {
+  readonly sessionId: string
+  readonly cursor?: string
+  readonly limit?: number
+  readonly payloadPolicy?: CordisXAgentHistoryPayloadPolicy
+}
+
+export interface CordisXAgentHistoryTailQuery {
+  readonly sessionId: string
+  readonly tailCursor: string
+  readonly limit?: number
+  readonly payloadPolicy?: CordisXAgentHistoryPayloadPolicy
+}
+
+export interface CordisXAgentHistoryStatus {
+  readonly hostId: string
+  readonly hostName: string
+  readonly mode: 'available' | 'unavailable'
+  readonly adapterId: string
+  readonly adapterVersion: string
+  readonly profileId: string
+  readonly defaultPayloadPolicy: 'referenced'
+  readonly diagnostics: readonly CordisXAgentHistoryDiagnostic[]
+  readonly filesystemExposed: false
+  readonly rawBridgeExposed: false
+}
+
+export interface CordisXAgentHistory {
+  status(): CordisXAgentHistoryStatus
+  query(input: CordisXAgentHistoryQuery): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>>
+  tail(input: CordisXAgentHistoryTailQuery): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>>
+}
+
 export type CordisXAgentMessageInput = string | readonly CordisXAgentContentBlock[]
 
 export interface CordisXAgentDeliverySnapshot {
@@ -323,6 +413,8 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Permission-brokered, read-only adapter-neutral Agent event ledger. */
     agentEvents: CordisXAgentEvents
+    /** Permission-brokered, privacy-bounded durable Agent history. */
+    agentHistory: CordisXAgentHistory
     /** DSH-aligned Agent messaging and pre-step composition. */
     agents: CordisXAgents
     /** Brokered system-prompt sections and dynamic context. */

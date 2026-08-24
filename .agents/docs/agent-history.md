@@ -35,9 +35,12 @@ launcher AgentHistoryService
 The launcher/Node plane owns all source access. The renderer service owns the
 public call shape, caller identity, permission check, cancellation, generation
 fence, and result validation. The plugin receives immutable serializable pages
-only. The private binding follows the existing randomized CDP binding pattern;
-it is not published on `electronBridge`, `window`, plugin context, manager
-snapshot, or diagnostics.
+only. The private binding follows the existing token-bound CDP binding pattern.
+It is not published on `electronBridge`, plugin context, manager snapshot, or
+diagnostics. Current plugins remain trusted renderer code and can inspect host
+globals; therefore the binding accepts only this exact history RPC and never a
+path or general filesystem operation. Capability enforcement is cooperative,
+not renderer-process isolation.
 
 The Host profile binding resolves one configured Codex data root. Requests name
 only an Agent `sessionId`. Resolution checks the canonical rollout filename,
@@ -78,9 +81,11 @@ diagnostics, logging, and binding serialization.
 ## Snapshot, paging, tail, and dedupe
 
 Source lookup is exact and on demand. The Host never scans every JSONL body at
-startup. For a selected file it builds a metadata-only sparse index containing
+startup. For a selected file it builds an in-memory sparse index containing
 record boundaries, projected event counts, time bounds, native identity keys,
-and source fingerprints. Cache files contain no content and use mode `0600`.
+and source fingerprints. The only persistent cache material in this slice is
+a 32-byte HMAC key with mode `0600`; projected events and offsets are rebuilt
+after restart, and the importer persists no content body.
 Each call has line-size, bytes-read, event-count, and elapsed-time limits.
 
 A snapshot binds source identity, size/mtime, immutable prefix fingerprint,
@@ -149,4 +154,3 @@ second app-server, or renderer filesystem fallback is created.
 | Lifecycle | A/B switch, allow/ask/deny/timeout, block/restore, generation/fiber dispose |
 | Consumer | one store seam, historical/live/fixture origin, overlap dedupe, stable ordering, coverage UI |
 | Real renderer | selected old session metadata-safe projection, current app route/header/DOM/URL preservation, report/screenshots |
-

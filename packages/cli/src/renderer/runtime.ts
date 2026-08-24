@@ -46,6 +46,8 @@ import {
   buildExtensionPointRuntimeSnapshot,
 } from './extension-points.js'
 import { BindingPlatformAdapter } from './provider-binding.js'
+import { BindingAgentHistoryAdapter, UnavailableAgentHistoryAdapter } from './agent-history-binding.js'
+import { CordisXAgentHistoryService } from './agent-history.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 
@@ -53,6 +55,7 @@ interface CordisXRuntimeMetadata {
   readonly version: string
   readonly providers: readonly { readonly id: string; readonly displayName: string }[]
   readonly providerBridgeToken?: string
+  readonly agentHistoryBridgeToken?: string
 }
 
 interface PluginController {
@@ -162,6 +165,9 @@ async function start(
     ? globalThis.crypto.randomUUID()
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`
   const agentRuntime = new CordisXHostAgentRuntime({ adapter: agentAdapter, broker, generation })
+  const historyAdapter = metadata.agentHistoryBridgeToken === undefined
+    ? new UnavailableAgentHistoryAdapter()
+    : await BindingAgentHistoryAdapter.connect(metadata.agentHistoryBridgeToken).catch(() => new UnavailableAgentHistoryAdapter())
   const extensionPointDescriptors = new ExtensionPointDescriptorRegistry()
   const extensionPointBroker = new ExtensionPointPolicyBroker(extensionPointDescriptors, new BrowserExtensionPointPolicyStore(), generation)
   const controllers: PluginController[] = plugins.map(createController)
@@ -185,6 +191,7 @@ async function start(
   let i18nFiber: Fiber | undefined
   let platformFiber: Fiber | undefined
   let agentEventFiber: Fiber | undefined
+  let agentHistoryFiber: Fiber | undefined
   let agentFiber: Fiber | undefined
   let systemPromptFiber: Fiber | undefined
   let commandFiber: Fiber | undefined
@@ -498,7 +505,10 @@ async function start(
     agentFiber = undefined
     await agentEventFiber?.dispose()
     agentEventFiber = undefined
+    await agentHistoryFiber?.dispose()
+    agentHistoryFiber = undefined
     await agentRuntime.dispose()
+    historyAdapter.dispose()
     bindingPlatformAdapter?.dispose()
     bindingPlatformAdapter = undefined
     for (const remove of disposeExtensionPointCatalogs.splice(0).reverse()) await remove()
@@ -563,6 +573,8 @@ async function start(
       status: () => agentRuntime.status(),
     })
     await agentEventFiber
+    agentHistoryFiber = ctx.plugin(CordisXAgentHistoryService, { adapter: historyAdapter, broker, generation })
+    await agentHistoryFiber
     agentFiber = ctx.plugin(CordisXAgentService, agentRuntime)
     await agentFiber
     systemPromptFiber = ctx.plugin(CordisXSystemPromptService, agentRuntime)
