@@ -4,11 +4,22 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
+import { Config } from '../packages/cli/src/plugins/cli-proxy-api/index.js'
 
 interface RuntimeHandle {
   navigate(owner: string, reference: { id: string }): Promise<void>
   snapshot(): {
-    plugins: readonly { id: string; readme?: string }[]
+    plugins: readonly {
+      id: string
+      readme?: string
+      configuration: {
+        schemaKind: string
+        applies: string
+        writable: boolean
+        value: unknown
+        fields: readonly { path: readonly string[]; label?: string; description?: string; role?: string }[]
+      }
+    }[]
     platform: { mode: string; diagnostics: readonly { code: string }[] }
     permissions: readonly { capability: string; lastRequested?: unknown }[]
   }
@@ -26,11 +37,39 @@ function session(providerId: string) {
 }
 
 describe('CLIProxy provider plugin renderer', () => {
+  it('exports a renderer-only Schemastery Config with safe defaults and validation', () => {
+    expect(Config({})).toEqual({ providerIds: [], defaultCwd: '' })
+    expect(Config({ providerIds: ['gateway-a', 'gateway-a', 'region.eu_1'], defaultCwd: '/workspace' })).toEqual({
+      providerIds: ['gateway-a', 'gateway-a', 'region.eu_1'],
+      defaultCwd: '/workspace',
+    })
+    expect(() => Config({ providerIds: ['Gateway-A'], defaultCwd: '' })).toThrow(/match regexp/i)
+    expect(() => Config({ providerIds: [null], defaultCwd: '' } as never)).toThrow(/required value/i)
+    expect(() => Config({ providerIds: Array.from({ length: 65 }, (_, index) => `gateway-${index}`), defaultCwd: '' })).toThrow(/length/i)
+    expect(() => Config({ providerIds: [], defaultCwd: `bad\0path` })).toThrow(/match regexp/i)
+    expect(Config.meta).not.toHaveProperty('role')
+    expect(Config.dict?.providerIds?.meta.role).toBeUndefined()
+    expect(Config.dict?.defaultCwd?.meta.role).toBeUndefined()
+    expect(Object.keys(Config.dict ?? {})).toEqual(['providerIds', 'defaultCwd'])
+    expect(Config.dict?.providerIds?.meta.extra?.label).toEqual({ 'zh-CN': 'Provider 过滤范围', en: 'Provider filter' })
+    expect(Config.dict?.providerIds?.meta.description).toMatchObject({
+      'zh-CN': expect.stringContaining('launcher 配置并启用'),
+      en: expect.stringContaining('launcher-configured, enabled Provider IDs'),
+    })
+    expect(Config.dict?.defaultCwd?.meta.extra?.label).toEqual({ 'zh-CN': '默认工作目录', en: 'Default working directory' })
+  })
+
   it('uses the existing main outlet and keeps provider identity in models and colliding session rows', async () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const config = await loadConfig(path.join(root, 'cordisx.cli-proxy.example.json'))
     const token = 'integration-provider-token'
-    const bundle = await buildRendererBundle(config, { providerBridgeToken: token })
+    const configToken = 'c'.repeat(64)
+    const bundle = await buildRendererBundle(config, {
+      providerBridgeToken: token,
+      configBridgeToken: configToken,
+      profileId: 'default',
+      generation: 'cli-proxy-config-test',
+    })
     const dom = new JSDOM(`
       <html lang="en" class="electron-dark"><head></head><body>
         <header data-app-shell-application-menu-bar><div data-test-id="header-shell-slot"><div><div><button>Native</button></div></div></div></header>
@@ -42,6 +81,43 @@ describe('CLIProxy provider plugin renderer', () => {
     Object.defineProperty(dom.window.navigator, 'platform', { value: 'MacIntel', configurable: true })
     Object.defineProperty(dom.window, 'confirm', { value: () => true })
     const requests: { operation: string; input: Record<string, unknown> }[] = []
+    const configRequests: { operation: string; config?: unknown }[] = []
+    let configCandidate: { revision: number; config: unknown } | undefined
+    let configRevision = 0
+    Object.defineProperty(dom.window, '__cordisxConfigRequestV1', {
+      configurable: true,
+      value: (payload: string) => {
+        const request = JSON.parse(payload) as {
+          requestId: string
+          token: string
+          operation: 'stage' | 'commit' | 'abort'
+          identity: { pluginId: string }
+          expectedRevision?: number
+          candidateRevision?: number
+          config?: unknown
+        }
+        expect(request.token).toBe(configToken)
+        expect(request.identity.pluginId).toBe('cli-proxy-api')
+        configRequests.push({ operation: request.operation, ...(request.config === undefined ? {} : { config: request.config }) })
+        let value: unknown
+        if (request.operation === 'stage') {
+          expect(request.expectedRevision).toBe(configRevision)
+          configCandidate = { revision: configRevision + 1, config: request.config }
+          value = { candidateRevision: configCandidate.revision }
+        } else if (request.operation === 'commit') {
+          expect(request.candidateRevision).toBe(configCandidate?.revision)
+          configRevision = configCandidate!.revision
+          configCandidate = undefined
+          value = { revision: configRevision }
+        } else {
+          configCandidate = undefined
+        }
+        queueMicrotask(() => {
+          const receiver = (dom.window as unknown as { __cordisxConfigReceiveV1?: (response: string) => void }).__cordisxConfigReceiveV1
+          receiver?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
+        })
+      },
+    })
     Object.defineProperty(dom.window, '__cordisxProviderRequestV1', {
       configurable: true,
       value: (payload: string) => {
@@ -89,6 +165,16 @@ describe('CLIProxy provider plugin renderer', () => {
     const bundledPlugin = runtime?.snapshot().plugins.find(plugin => plugin.id === 'cli-proxy-api')
     expect(bundledPlugin?.readme).toContain('# CLIProxy Providers')
     expect(bundledPlugin?.readme).toContain('Every model is identified by both `providerId` and `modelId`')
+    expect(bundledPlugin?.configuration).toMatchObject({
+      schemaKind: 'schemastery',
+      applies: 'restart',
+      writable: true,
+      value: {},
+    })
+    expect(bundledPlugin?.configuration.fields.map(field => field.path)).toEqual([
+      ['providerIds'],
+      ['defaultCwd'],
+    ])
     await runtime!.navigate('cli-proxy-api', { id: 'providers.sessions' })
     for (let attempt = 0; attempt < 100 && dom.window.document.querySelectorAll('[data-session]').length < 2; attempt += 1) {
       dom.window.document.querySelector<HTMLButtonElement>('[data-permission-decision="allow"]')?.click()
@@ -116,6 +202,50 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(readmePanel?.textContent).toContain('Configure providers')
     expect(readmePanel?.textContent).toContain('External providers and the native connection')
     expect(readmePanel?.textContent).not.toContain('该插件没有随当前 bundle 提供 README.md')
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
+    const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="配置管理"]')
+    const providerField = configPanel?.querySelector<HTMLElement>('[data-config-path="providerIds"]')
+    const cwdField = configPanel?.querySelector<HTMLElement>('[data-config-path="defaultCwd"]')
+    expect(providerField?.querySelector('.cxm-config-label')?.textContent).toBe('Provider filter')
+    expect(providerField?.querySelector('.cxm-config-help')?.textContent)
+      .toBe('Show only these launcher-configured, enabled Provider IDs; leave empty for all, with at most 64 IDs. Connections and credentials cannot be added here.')
+    expect(cwdField?.querySelector('.cxm-config-label')?.textContent).toBe('Default working directory')
+    expect(providerField?.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('[]')
+    expect(cwdField?.querySelector<HTMLInputElement>('input')?.value).toBe('')
+    expect(configPanel?.textContent).not.toContain('renderer 不会直接写配置文件')
+    expect(configPanel?.querySelector('[data-config-path="baseUrl"]')).toBeNull()
+    expect(configPanel?.querySelector('[data-config-path="apiKey"]')).toBeNull()
+    expect(configPanel?.querySelector('[data-config-path="codexExecutable"]')).toBeNull()
+    const providerInput = providerField!.querySelector<HTMLTextAreaElement>('textarea')!
+    const submit = configPanel!.querySelector<HTMLButtonElement>('button[type="submit"]')!
+    expect(submit.disabled).toBe(true)
+    providerInput.value = '["Gateway-A"]'
+    providerInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    expect(submit.disabled).toBe(false)
+    configPanel!.querySelector<HTMLFormElement>('form')!
+      .dispatchEvent(new dom.window.SubmitEvent('submit', { bubbles: true, cancelable: true }))
+    for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[role="alert"]') === null; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0))
+    }
+    expect(dom.window.document.querySelector('[role="alert"]')?.textContent).toContain('expect string to match regexp')
+    expect(configRequests).toEqual([])
+
+    const validPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="配置管理"]')!
+    const validInput = validPanel.querySelector<HTMLTextAreaElement>('[data-config-path="providerIds"] textarea')!
+    validInput.value = '["gateway-a"]'
+    validInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    validPanel.querySelector<HTMLFormElement>('form')!
+      .dispatchEvent(new dom.window.SubmitEvent('submit', { bubbles: true, cancelable: true }))
+    for (let attempt = 0; attempt < 100 && configRevision < 1; attempt += 1) {
+      dom.window.document.querySelector<HTMLButtonElement>('[data-permission-decision="allow"]')?.click()
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(configRequests).toEqual([
+      { operation: 'stage', config: { providerIds: ['gateway-a'] } },
+      { operation: 'commit' },
+    ])
+    expect(runtime!.snapshot().plugins.find(plugin => plugin.id === 'cli-proxy-api')?.configuration)
+      .toMatchObject({ revision: 1, value: { providerIds: ['gateway-a'] } })
     await runtime!.dispose()
     expect(dom.window.document.querySelector('[data-cordisx-provider-fleet]')).toBeNull()
   })

@@ -1,4 +1,5 @@
 import type { Context, Disposable } from '@deepseek-ai/cordis'
+import Schema from '@deepseek-ai/schemastery'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   type CordisXLocalizedText,
@@ -74,9 +75,33 @@ interface Messages {
   'permission.turns.control': undefined
 }
 
-interface Config {
-  readonly providerIds?: readonly string[]
-  readonly defaultCwd?: string
+export interface Config {
+  readonly providerIds: readonly string[]
+  readonly defaultCwd: string
+}
+
+export const Config = Schema.object({
+  providerIds: Schema.array(
+    Schema.string().required().pattern(/^[a-z0-9][a-z0-9._-]{0,95}$/),
+  ).default([]).max(64)
+    .extra('extra', { label: { 'zh-CN': 'Provider 过滤范围', en: 'Provider filter' } })
+    .extra('description', {
+      'zh-CN': '仅显示已由 launcher 配置并启用的这些 Provider ID；留空表示全部，最多 64 个。此处不能添加连接或凭据。',
+      en: 'Show only these launcher-configured, enabled Provider IDs; leave empty for all, with at most 64 IDs. Connections and credentials cannot be added here.',
+    }),
+  defaultCwd: Schema.string().default('').max(4096).pattern(/^[^\u0000]*$/)
+    .extra('extra', { label: { 'zh-CN': '默认工作目录', en: 'Default working directory' } })
+    .extra('description', {
+      'zh-CN': '预填新会话的工作目录；留空时在 Provider 页面逐次选择，最长 4096 个字符且不能包含 NUL。',
+      en: 'Prefill the working directory for new sessions; leave empty to choose it on the Provider page. Maximum 4096 characters; NUL is rejected.',
+    }),
+})
+
+export const configApplies = 'restart'
+
+function configuredProviderIds(config: Config): readonly string[] | undefined {
+  const providerIds = [...new Set(config.providerIds)]
+  return providerIds.length === 0 ? undefined : providerIds
 }
 
 function message<Key extends keyof Messages>(
@@ -169,7 +194,7 @@ function mountFleet(ctx: Context, context: CordisXPageMountContext<Messages>, co
   const modelSelect = select(document, context.t('field.model'))
   const cwd = input(document, context.t('field.cwd')) as HTMLInputElement
   cwd.placeholder = context.t('field.cwd')
-  cwd.value = config.defaultCwd ?? ''
+  cwd.value = config.defaultCwd
   const search = input(document, context.t('field.search')) as HTMLInputElement
   search.placeholder = context.t('field.search')
   const initialMessage = input(document, context.t('field.initial-message')) as HTMLInputElement
@@ -193,9 +218,10 @@ function mountFleet(ctx: Context, context: CordisXPageMountContext<Messages>, co
   let nextCursor: string | undefined
   let selected: CordisXSessionProjection | CordisXSessionSummary | undefined
   let operation = 0
+  const configuredProviders = configuredProviderIds(config)
 
   const providerFilter = (): readonly string[] | undefined => providerSelect.value === ''
-    ? config.providerIds ?? [...new Set(models.map(item => item.ref.providerId))].sort()
+    ? configuredProviders ?? [...new Set(models.map(item => item.ref.providerId))].sort()
     : [providerSelect.value]
 
   const renderModels = (): void => {
@@ -317,7 +343,7 @@ function mountFleet(ctx: Context, context: CordisXPageMountContext<Messages>, co
   const refreshAll = async (): Promise<void> => {
     const generation = ++operation
     status.textContent = context.t('state.loading')
-    const modelPage = await ctx.platform.models.list(config.providerIds === undefined ? {} : { providerIds: config.providerIds })
+    const modelPage = await ctx.platform.models.list(configuredProviders === undefined ? {} : { providerIds: configuredProviders })
     if (generation !== operation) return
     if (!modelPage.ok) return showError(modelPage.error)
     models = modelPage.value.models
@@ -429,7 +455,7 @@ function mountFleet(ctx: Context, context: CordisXPageMountContext<Messages>, co
   }
 }
 
-export function apply(ctx: Context, config: Config = {}): void {
+export function apply(ctx: Context, config: Config = Config({})): void {
   ctx.i18n.define<Messages>({
     namespace: 'cli-proxy-api', locale: 'en', default: true, messages: {
       'navigation.title': 'Providers', 'navigation.description': 'Models and sessions across external CLIProxyAPI providers',

@@ -44,7 +44,14 @@ Run `cordisx config` to locate the active CordisX configuration. The default loc
 }
 ```
 
-Set the environment variable named by `apiKeyEnv` before launching CordisX. Keep secrets out of `config.json`. Use HTTPS for remote endpoints; loopback HTTP is supported for a provider running on the same machine. `providerIds` is an optional plugin allowlist; omit it to show every enabled provider. `defaultCwd` is also optional.
+Set the environment variable named by `apiKeyEnv` before launching CordisX. Keep secrets out of `config.json`. Use HTTPS for remote endpoints; loopback HTTP is supported for a provider running on the same machine.
+
+The Manager **Configuration** tab exposes only this plugin's renderer behavior:
+
+- `providerIds` defaults to `[]`. It filters the page to Provider IDs that the launcher has already configured and enabled; an empty list shows every enabled Provider. The list accepts at most 64 IDs, each using the same lower-case `[a-z0-9][a-z0-9._-]{0,95}` format as the launcher.
+- `defaultCwd` defaults to `""`. It prefills the new-session working directory; an empty value lets you choose a directory on the Provider page. The value is limited to 4096 characters and cannot contain NUL.
+
+Invalid values are rejected in the Manager before the launcher writer is called. Valid settings use the Host's profile- and generation-bound configuration RPC and take effect after the plugin restarts. Adding or removing Provider connections, changing endpoints, selecting a process, and editing credentials are unavailable in this Manager form. Those settings remain in the launcher-owned top-level `providers` configuration, and the plugin never writes the CordisX home configuration directly.
 
 Provider IDs are persistent identity, not display labels. Keep each `id` unique and stable after creating conversations.
 
