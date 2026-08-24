@@ -655,6 +655,27 @@ body. The Host owns navigation, header, seat, theme, accessibility, and cleanup;
 the Channel renderer contributes no navigation or header DOM. This is still a
 simulator/read-only status page, not a connected account manager.
 
+The current Manager information architecture is Host-owned and
+`implemented/verified`: a fixed Channel list header has a fixed search field
+and a primary **New channel** action; only the card list scrolls. A card opens a
+detail destination with **Configuration**, **Logs**, and **Connections &
+sessions** tabs. Configuration uses read-only, full-width Host form chrome;
+logs never synthesize strings and reserve the native `console.*` argument-array
+and structured-event shapes for when a real transport publishes them. A create
+flow may save an explicitly local, Manager-session-only candidate with no
+secret, credential reference, callback, or external write, then returns to the
+list. It is displayed as unavailable and is not a configured or connected
+account.
+
+The Host has a read-only record of Feishu temporary test application
+`cli_aaba90fcc4389cb3`: it is an enabled known test target, not a verified
+connection. No app secret was read. No event/callback is configured; credential
+reference, official adapter, and launcher transport are unavailable. The UI
+must keep that distinction visible in **Connections & sessions**. It does not
+require or create a separate test enterprise; any future account/organization
+verification remains an action-time, user-authorized real-adapter step with
+per-requirement audit and readback.
+
 Launcher-to-renderer live snapshot transport, configuration writes,
 reconnect/dead-letter actions, and credential operations remain `planned` or
 `unavailable`. The complete Channel settings experience needs:
@@ -797,7 +818,7 @@ reviewable. A source branch head is never a final gitlink.
 | Secrets/attachments | secret handle only, redacted logs/errors/snapshots/audit, no renderer/config plaintext, size/type/hash/expiry quarantine, unsafe media refusal, and opaque transfer handles. |
 | Simulator phase one | create, continue, completion/failure notification, duplicate inbound event, restart, retry/dead letter, permission denial, approval expiry/deny fixture, binding revision, and generation disposal without a real account. |
 | Adapter conformance | official fixture normalization, direct/group/topic/reply mapping, outbound formatting/limits, token refresh where applicable, platform-specific retry hints, and no unsupported personal-WeChat path. |
-| Manager data plane and DOM | Implemented/verified: valid authorized B navigation record, exact `manager.content` route, Host-rendered route label and page header, `schemaKind=none`, controlled mount, redacted account/route/binding/diagnostic collections, close/reopen cleanup, and no `secretRef`/secret/raw payload. Writable actions remain planned. |
+| Manager data plane and DOM | Implemented/verified: valid authorized B navigation record, exact `manager.content` route, Host-rendered route label/page header, fixed searchable Channel cards, card detail tabs, Host form read-only configuration, unavailable log/session states, local candidate-only create flow, controlled mount, close/reopen cleanup, and no `secretRef`/secret/raw payload. Writable actions remain planned. |
 | Session surface | structured Channel status/open/share action only; no arbitrary title DOM/CSS, no native node replacement, correct composite session target, policy hide/restore, and generation cleanup. |
 | Real smoke | exact SDK, CordisX, protocol, adapter, account mode, and app version; authorized account only; one inbound create/continue and one outbound notification; redacted evidence; unavailable features reported honestly. |
 | Release | focused tests, typecheck, build, full `npm run check`, audit, `git diff --check`, isolated real `app://-/index.html` smoke, normal PR/CI, and head-fenced owning merge. Mono and roadmap remain untouched by this slice. |

@@ -1,6 +1,7 @@
 import { Service, type Context, type Disposable } from '@deepseek-ai/cordis'
-import type { CordisXPageMountContext } from '../contracts.js'
+import type { CordisXConfigFieldSnapshot, CordisXPageMountContext } from '../contracts.js'
 import { createHostCollection, HOST_COLLECTION_STYLES, type HostCollectionItem } from './host-collection.js'
+import { HOST_FORM_STYLES, HostFormAdapter } from './host-form.js'
 import { HostThemeProjection } from './host-theme.js'
 import { createHostSurfaceIcon } from './icons.js'
 import { managerCopy } from './ui-copy.js'
@@ -118,22 +119,40 @@ function projectionFor(service: object): ChannelManagerProjectionV1 {
 }
 
 const CHANNEL_MANAGER_STYLES = String.raw`
-  .cxc-channel-manager { display: grid; gap: 18px; min-width: 0; color: var(--cx-text); }
-  .cxc-channel-intro { display: grid; gap: 4px; }
-  .cxc-channel-intro h2, .cxc-channel-section h3 { margin: 0; color: var(--cx-text); }
-  .cxc-channel-intro h2 { font-size: 16px; }
-  .cxc-channel-intro p, .cxc-channel-section p { margin: 0; color: var(--cx-muted); font-size: 11px; line-height: 1.5; }
-  .cxc-channel-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid var(--cx-border); border-radius: 10px; background: var(--cx-surface-raised); }
-  .cxc-channel-state { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 650; }
-  .cxc-channel-state::before { width: 8px; height: 8px; border-radius: 50%; background: var(--cx-muted); content: ''; }
-  .cxc-channel-state[data-status="verified"]::before, .cxc-channel-state[data-status="implemented"]::before { background: var(--cx-success, #4ade80); }
-  .cxc-channel-state[data-status="experimental"]::before { background: var(--cx-warning, #fbbf24); }
-  .cxc-channel-state[data-status="unavailable"]::before { background: var(--cx-danger, #fb7185); }
-  .cxc-channel-meta { color: var(--cx-muted); font: 10px/1.35 ui-monospace, monospace; }
+  .cxc-channel-manager { min-width: 0; color: var(--cx-text); }
+  .cxc-channel-list-page { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 14px; height: clamp(20rem, 62vh, 38rem); min-height: 0; }
+  .cxc-channel-list-head, .cxc-channel-detail-head { display: grid; gap: 4px; }
+  .cxc-channel-list-head h2, .cxc-channel-detail-head h2, .cxc-channel-section h3 { margin: 0; color: var(--cx-text); }
+  .cxc-channel-list-head h2, .cxc-channel-detail-head h2 { font-size: 16px; }
+  .cxc-channel-list-head p, .cxc-channel-detail-head p, .cxc-channel-section p { margin: 0; color: var(--cx-muted); font-size: 11px; line-height: 1.5; }
+  .cxc-channel-list-collection { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr); min-height: 0; column-gap: 8px; }
+  .cxc-channel-list-collection > .cxc-search { grid-column: 1; grid-row: 1; }
+  .cxc-channel-list-collection > .cxc-list { grid-column: 1 / -1; grid-row: 2; }
+  .cxc-channel-list-collection .cxc-list { min-height: 0; max-height: none; overflow: auto; padding-right: 3px; align-content: start; scrollbar-gutter: stable; }
+  .cxc-channel-create { grid-column: 2; grid-row: 1; white-space: nowrap; }
+  .cxc-channel-detail { display: grid; gap: 16px; min-width: 0; }
+  .cxc-channel-detail-title-row { display: flex; align-items: flex-start; gap: 9px; min-width: 0; }
+  .cxc-channel-back { display: grid; place-items: center; width: 28px; height: 28px; flex: none; margin-top: -3px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--cx-muted); cursor: pointer; }
+  .cxc-channel-back:hover, .cxc-channel-back:focus-visible { background: var(--cx-hover); color: var(--cx-text); outline: none; }
+  .cxc-channel-back:focus-visible { box-shadow: 0 0 0 2px var(--cx-focus); }
+  .cxc-channel-tabs { display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--cx-border); }
+  .cxc-channel-tab { flex: none; padding: 8px 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--cx-muted); cursor: pointer; font: inherit; font-size: 12px; font-weight: 620; }
+  .cxc-channel-tab[aria-selected="true"] { border-bottom-color: var(--cx-primary); color: var(--cx-text); }
+  .cxc-channel-tab:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: -2px; }
+  .cxc-channel-panel { min-width: 0; }
+  .cxc-channel-config-form { inline-size: 100%; margin-inline: 0; }
+  .cxc-channel-log-empty { display: grid; gap: 8px; max-width: 44rem; }
+  .cxc-channel-create-actions { display: flex; justify-content: flex-end; }
   .cxc-channel-section { display: grid; gap: 7px; min-width: 0; }
   .cxc-channel-section-head { display: grid; gap: 2px; }
   .cxc-channel-section h3 { font-size: 12px; }
   .cxc-channel-manager .cordisx-host-icon, .cxc-channel-manager .cordisx-host-icon svg { width: 22px; height: 22px; }
+  .cxc-channel-back .cordisx-host-icon, .cxc-channel-back .cordisx-host-icon svg { width: 18px; height: 18px; }
+  @media (max-width: 520px) {
+    .cxc-channel-list-page { height: clamp(18rem, 60vh, 34rem); }
+    .cxc-channel-list-collection .cxc-list { grid-template-columns: minmax(0, 1fr); }
+    .cxc-channel-create { padding-inline: .55rem; }
+  }
 `
 
 function compositeRef(ref: ChannelManagerConnectionProjection['ref']): string {
@@ -341,30 +360,79 @@ function section(document: Document, title: string, description: string): { read
   return { root, body }
 }
 
-function accountItems(document: Document, projection: ChannelManagerProjectionV1): readonly HostCollectionItem[] {
+interface ChannelRecord {
+  readonly id: string
+  readonly connection: ChannelManagerConnectionProjection
+  readonly account?: ChannelManagerAccountProjection
+  readonly candidate?: true
+}
+
+type ChannelDetailTab = 'configuration' | 'logs' | 'sessions'
+
+function channelRecords(projection: ChannelManagerProjectionV1): readonly ChannelRecord[] {
   const configured = new Map(projection.connections.map(item => [compositeRef(item.ref), item]))
   const live = new Map(projection.accounts.map(item => [compositeRef(item.ref), item]))
   return [...new Set([...configured.keys(), ...live.keys()])].sort().map(id => {
     const account = live.get(id)
     const connection = account ?? configured.get(id)!
-    const state = account?.connectionState ?? (connection.enabled ? 'unavailable' : 'disabled')
-    const description = `${connection.adapterKind} · ${connection.transportMode} · credential ${connection.secretState}`
-    return {
-      id,
-      title: connection.ref.accountId,
-      description,
-      machineId: id,
-      searchText: [connection.ref.adapterId, connection.ref.tenantId, state],
-      icon: () => createHostSurfaceIcon(document, state === 'ready' ? 'host:success' : 'host:layers'),
-      status: {
-        label: state,
-        tone: statusTone(state),
-        detail: account === undefined
-          ? `${state}; no launcher runtime snapshot`
-          : `${state}; generation ${account.generation}; inbound ${account.inbound.pending}; outbound ${account.outbound.pending}`,
-      },
-    }
+    return { id, connection, ...(account === undefined ? {} : { account }) }
   })
+}
+
+function candidateRecord(id: string, name: string, platform: string): ChannelRecord {
+  return {
+    id,
+    candidate: true,
+    connection: {
+      ref: { adapterId: platform, accountId: name, tenantId: 'local-candidate' },
+      adapterKind: platform, enabled: false, transportMode: 'not-configured', secretState: 'missing',
+    },
+  }
+}
+
+function channelState(record: ChannelRecord): ChannelManagerAccountProjection['connectionState'] {
+  return record.account?.connectionState ?? (record.connection.enabled ? 'unavailable' : 'disabled')
+}
+
+function channelHealth(record: ChannelRecord): string {
+  const state = channelState(record)
+  if (record.account === undefined) return `${state}; no launcher runtime snapshot`
+  return `${state}; inbound ${record.account.inbound.pending}; outbound ${record.account.outbound.pending}`
+}
+
+function accountItems(
+  document: Document,
+  projection: ChannelManagerProjectionV1,
+  onOpen?: (record: ChannelRecord) => void,
+): readonly HostCollectionItem[] {
+  return channelRecords(projection).map(record => channelItem(document, record, onOpen))
+}
+
+function channelItem(
+  document: Document,
+  record: ChannelRecord,
+  onOpen?: (record: ChannelRecord) => void,
+): HostCollectionItem {
+  const { id, connection, account } = record
+  const state = account?.connectionState ?? (connection.enabled ? 'unavailable' : 'disabled')
+  const description = record.candidate === true
+    ? 'Local candidate · adapter unavailable · no credentials'
+    : `${connection.adapterKind} · ${state} · ${channelHealth(record)}`
+  return {
+    id,
+    title: connection.ref.accountId,
+    description,
+    machineId: id,
+    searchText: [connection.ref.adapterId, connection.ref.tenantId, connection.adapterKind, connection.transportMode, state],
+    icon: () => createHostSurfaceIcon(document, state === 'ready' ? 'host:success' : 'host:layers'),
+    status: {
+      label: state,
+      tone: statusTone(state),
+      detail: record.candidate === true ? 'Local candidate; no external configuration was written.'
+        : account === undefined ? channelHealth(record) : `${channelHealth(record)}; generation ${account.generation}`,
+    },
+    ...(onOpen === undefined ? {} : { openLabel: 'Open channel details', onOpen: () => onOpen(record) }),
+  }
 }
 
 function routeItems(document: Document, projection: ChannelManagerProjectionV1): readonly HostCollectionItem[] {
@@ -409,6 +477,26 @@ function diagnosticItems(document: Document, projection: ChannelManagerProjectio
   }))
 }
 
+function readonlyField(
+  forms: HostFormAdapter,
+  sectionRoot: HTMLElement,
+  id: string,
+  label: string,
+  value: string | boolean,
+  help?: string,
+): void {
+  const item = forms.item({ id, label, ...(help === undefined ? {} : { help }), fullWidth: true })
+  const field: CordisXConfigFieldSnapshot = {
+    namespace: 'channel-manager', path: [id], type: typeof value === 'boolean' ? 'boolean' : 'string',
+    ...(typeof value === 'boolean' ? { role: 'switch' } : {}),
+    value, disabled: true, required: false,
+  }
+  const control = forms.control(field, id, () => undefined)
+  forms.connect(item, control)
+  item.control.append(control.root)
+  sectionRoot.append(item.root)
+}
+
 export interface CordisXChannelManager {
   snapshot(): ChannelManagerProjectionV1
   mount(context: CordisXPageMountContext): Disposable<void>
@@ -437,78 +525,279 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     const detachTheme = theme.attach(root)
     const style = document.createElement('style')
     style.dataset.channelManagerStyles = 'true'
-    style.textContent = `${HOST_COLLECTION_STYLES}\n${CHANNEL_MANAGER_STYLES}`
+    style.textContent = `${HOST_COLLECTION_STYLES}\n${HOST_FORM_STYLES}\n${CHANNEL_MANAGER_STYLES}`
+    const content = document.createElement('div')
+    content.dataset.channelManagerContent = 'true'
+    const forms = new HostFormAdapter(document, root, () => locale)
+    let selectedId: string | undefined
+    let activeTab: ChannelDetailTab = 'configuration'
+    let listQuery = ''
+    let creating = false
+    let candidateSequence = 0
+    const candidates: ChannelRecord[] = []
+    let candidateName = ''
+    let candidatePlatform = 'feishu'
+    let disposeCurrent = (): void => {}
 
-    const intro = document.createElement('header')
-    intro.className = 'cxc-channel-intro'
-    const title = document.createElement('h2')
-    title.textContent = managerCopy(locale, 'channel.title')
-    const description = document.createElement('p')
-    description.textContent = managerCopy(locale, 'channel.description')
-    intro.append(title, description)
+    const records = (): readonly ChannelRecord[] => [...channelRecords(projection), ...candidates]
 
-    const summary = document.createElement('div')
-    summary.className = 'cxc-channel-summary'
-    summary.setAttribute('role', 'status')
-    const state = document.createElement('span')
-    state.className = 'cxc-channel-state'
-    state.dataset.status = projection.status
-    state.textContent = managerCopy(locale, projection.status === 'unavailable' ? 'status.unavailable' : 'channel.status.available')
-    const meta = document.createElement('code')
-    meta.className = 'cxc-channel-meta'
-    meta.textContent = `service config · service restart · r${projection.service.revision} / last-good ${projection.service.lastGoodRevision}`
-    summary.append(state, meta)
+    const renderList = (): void => {
+      disposeCurrent()
+      const page = document.createElement('section')
+      page.className = 'cxc-channel-list-page'
+      page.dataset.channelPage = 'list'
+      const head = document.createElement('header')
+      head.className = 'cxc-channel-list-head'
+      const title = document.createElement('h2')
+      title.textContent = managerCopy(locale, 'channel.title')
+      const description = document.createElement('p')
+      description.textContent = managerCopy(locale, 'channel.description')
+      head.append(title, description)
+      const collection = createHostCollection(document, {
+        id: 'channel-list',
+        label: managerCopy(locale, 'channel.accounts'),
+        items: [...accountItems(document, projection), ...candidates.map(record => channelItem(document, record))].map(item => ({
+          ...item,
+          onOpen: () => {
+            selectedId = item.id
+            activeTab = 'configuration'
+            render()
+          },
+          openLabel: managerCopy(locale, 'channel.open'),
+        })),
+        search: {
+          label: managerCopy(locale, 'channel.search.label'), placeholder: managerCopy(locale, 'channel.search.placeholder'),
+          clearLabel: managerCopy(locale, 'channel.search.clear'), query: listQuery,
+          icon: () => createHostSurfaceIcon(document, 'host:info'),
+          onQueryChange: query => { listQuery = query },
+        },
+        emptyLabel: managerCopy(locale, 'channel.accounts.empty'),
+        noMatchesLabel: managerCopy(locale, 'channel.search.empty'),
+      })
+      collection.element.classList.add('cxc-channel-list-collection')
+      const create = forms.button(managerCopy(locale, 'channel.create'), { type: 'button', variant: 'primary' })
+      create.classList.add('cxc-channel-create')
+      create.dataset.channelCreate = 'true'
+      create.addEventListener('click', () => { creating = true; render() })
+      collection.element.append(create)
+      page.append(head, collection.element)
+      content.replaceChildren(page)
+      disposeCurrent = collection.dispose
+    }
 
-    const accounts = section(document, managerCopy(locale, 'channel.accounts'), managerCopy(locale, 'channel.accounts.description'))
-    const accountCollection = createHostCollection(document, {
-      id: 'channel-accounts',
-      label: managerCopy(locale, 'channel.accounts'),
-      items: accountItems(document, projection),
-      emptyLabel: managerCopy(locale, 'channel.accounts.empty'),
-      noMatchesLabel: managerCopy(locale, 'channel.search.empty'),
-    })
-    accounts.body.append(accountCollection.element)
+    const renderCreate = (): void => {
+      disposeCurrent()
+      const page = document.createElement('section')
+      page.className = 'cxc-channel-detail'
+      page.dataset.channelPage = 'create'
+      const head = document.createElement('header')
+      head.className = 'cxc-channel-detail-head'
+      const titleRow = document.createElement('div')
+      titleRow.className = 'cxc-channel-detail-title-row'
+      const back = document.createElement('button')
+      back.className = 'cxc-channel-back'
+      back.type = 'button'
+      back.dataset.channelCreateBack = 'true'
+      back.setAttribute('aria-label', managerCopy(locale, 'channel.back'))
+      back.append(createHostSurfaceIcon(document, 'host:back'))
+      back.addEventListener('click', () => { creating = false; render() })
+      const titleCopy = document.createElement('div')
+      const title = document.createElement('h2')
+      title.textContent = managerCopy(locale, 'channel.create')
+      const description = document.createElement('p')
+      description.textContent = managerCopy(locale, 'channel.create.description')
+      titleCopy.append(title, description)
+      titleRow.append(back, titleCopy)
+      head.append(titleRow)
+      const form = forms.form('channel-create')
+      form.classList.add('cxc-channel-config-form')
+      form.dataset.channelCreateForm = 'true'
+      const configuration = forms.section(managerCopy(locale, 'channel.configuration'), managerCopy(locale, 'channel.create.local-only'))
+      const nameItem = forms.item({ id: 'channel-create-name', label: managerCopy(locale, 'channel.create.name'), required: true, fullWidth: true })
+      const nameControl = forms.control({
+        namespace: 'channel-manager', path: ['candidate', 'name'], type: 'string', value: candidateName,
+        disabled: false, required: true,
+      }, 'channel-create-name', value => {
+        candidateName = typeof value === 'string' ? value : ''
+        nameItem.setError(candidateName.trim() === '' ? managerCopy(locale, 'form.required') : undefined)
+      })
+      forms.connect(nameItem, nameControl)
+      nameItem.control.append(nameControl.root)
+      const platformItem = forms.item({ id: 'channel-create-platform', label: managerCopy(locale, 'channel.create.platform'), fullWidth: true })
+      const platformControl = forms.control({
+        namespace: 'channel-manager', path: ['candidate', 'platform'], type: 'string', value: candidatePlatform, disabled: false, required: true,
+        choices: [
+          { label: 'Feishu / Lark', value: 'feishu' },
+          { label: 'WeCom', value: 'wecom' },
+        ],
+      }, 'channel-create-platform', value => { candidatePlatform = typeof value === 'string' ? value : 'feishu' })
+      forms.connect(platformItem, platformControl)
+      platformItem.control.append(platformControl.root)
+      configuration.content.append(nameItem.root, platformItem.root)
+      const notice = forms.alert(managerCopy(locale, 'channel.create.unavailable'), 'warning')
+      const actions = document.createElement('div')
+      actions.className = 'cxc-channel-create-actions'
+      const submit = forms.button(managerCopy(locale, 'channel.create.save'), { type: 'submit', variant: 'primary' })
+      submit.dataset.channelCreateSubmit = 'true'
+      actions.append(submit)
+      form.append(configuration.root, notice, actions)
+      form.addEventListener('submit', event => {
+        event.preventDefault()
+        const name = candidateName.trim()
+        if (name === '') { nameItem.setError(managerCopy(locale, 'form.required')); return }
+        candidateSequence += 1
+        const id = `candidate/${candidatePlatform}/${candidateSequence}`
+        candidates.push(candidateRecord(id, name, candidatePlatform))
+        selectedId = undefined
+        candidateName = ''
+        listQuery = ''
+        creating = false
+        render()
+      })
+      page.append(head, form)
+      content.replaceChildren(page)
+      disposeCurrent = (): void => {}
+    }
 
-    const routes = section(document, managerCopy(locale, 'channel.routes'), managerCopy(locale, 'channel.routes.description'))
-    const routeCollection = createHostCollection(document, {
-      id: 'channel-routes',
-      label: managerCopy(locale, 'channel.routes'),
-      items: routeItems(document, projection),
-      emptyLabel: managerCopy(locale, 'channel.routes.empty'),
-      noMatchesLabel: managerCopy(locale, 'channel.search.empty'),
-    })
-    routes.body.append(routeCollection.element)
+    const renderConfiguration = (record: ChannelRecord, panel: HTMLElement): void => {
+      const form = forms.form('channel-configuration')
+      form.classList.add('cxc-channel-config-form')
+      form.dataset.channelConfiguration = record.id
+      const config = forms.section(managerCopy(locale, 'channel.configuration'), managerCopy(locale, 'channel.configuration.description'))
+      const state = channelState(record)
+      readonlyField(forms, config.content, `channel-platform-${record.id}`, managerCopy(locale, 'channel.field.platform'), record.connection.adapterKind)
+      readonlyField(forms, config.content, `channel-transport-${record.id}`, managerCopy(locale, 'channel.field.transport'), record.connection.transportMode)
+      readonlyField(forms, config.content, `channel-enabled-${record.id}`, managerCopy(locale, 'channel.field.enabled'), record.connection.enabled)
+      readonlyField(forms, config.content, `channel-state-${record.id}`, managerCopy(locale, 'channel.field.status'), state)
+      readonlyField(forms, config.content, `channel-credential-${record.id}`, managerCopy(locale, 'channel.field.credentials'), record.connection.secretState, managerCopy(locale, 'channel.credentials.help'))
+      form.append(config.root, forms.note(managerCopy(locale, 'channel.configuration.unavailable')))
+      panel.append(form)
+    }
 
-    const bindings = section(document, managerCopy(locale, 'channel.bindings'), managerCopy(locale, 'channel.bindings.description'))
-    const bindingCollection = createHostCollection(document, {
-      id: 'channel-bindings',
-      label: managerCopy(locale, 'channel.bindings'),
-      items: bindingItems(document, projection),
-      emptyLabel: managerCopy(locale, 'channel.bindings.empty'),
-      noMatchesLabel: managerCopy(locale, 'channel.search.empty'),
-    })
-    bindings.body.append(bindingCollection.element)
+    const renderLogs = (panel: HTMLElement): (() => void) => {
+      const empty = document.createElement('section')
+      empty.className = 'cxc-channel-log-empty'
+      empty.dataset.channelLogs = 'unavailable'
+      empty.append(forms.alert(managerCopy(locale, 'channel.logs.unavailable'), 'warning'))
+      empty.append(forms.note(managerCopy(locale, 'channel.logs.native-semantics')))
+      const diagnostics = section(document, managerCopy(locale, 'channel.diagnostics'), managerCopy(locale, 'channel.diagnostics.description'))
+      const collection = createHostCollection(document, {
+        id: 'channel-diagnostics', label: managerCopy(locale, 'channel.diagnostics'), items: diagnosticItems(document, projection),
+        search: { enabled: false, reason: 'Diagnostics are a fixed, small Host status catalog.' },
+        emptyLabel: managerCopy(locale, 'channel.diagnostics.empty'),
+      })
+      diagnostics.body.append(collection.element)
+      empty.append(diagnostics.root)
+      panel.append(empty)
+      return collection.dispose
+    }
 
-    const diagnostics = section(document, managerCopy(locale, 'channel.diagnostics'), managerCopy(locale, 'channel.diagnostics.description'))
-    const diagnosticCollection = createHostCollection(document, {
-      id: 'channel-diagnostics',
-      label: managerCopy(locale, 'channel.diagnostics'),
-      items: diagnosticItems(document, projection),
-      search: { enabled: false, reason: 'Diagnostics are a fixed, small Host status catalog.' },
-      emptyLabel: managerCopy(locale, 'channel.diagnostics.empty'),
-    })
-    diagnostics.body.append(diagnosticCollection.element)
+    const renderSessions = (record: ChannelRecord, panel: HTMLElement): (() => void) => {
+      const matchingRoutes = projection.routes.filter(route => compositeRef(route.connection) === record.id)
+      const matchingBindings = projection.bindings.filter(binding => compositeRef(binding.channel) === record.id)
+      const routes = section(document, managerCopy(locale, 'channel.routes'), managerCopy(locale, 'channel.routes.description'))
+      const routeCollection = createHostCollection(document, {
+        id: 'channel-routes', label: managerCopy(locale, 'channel.routes'), items: routeItems(document, { ...projection, routes: matchingRoutes }),
+        search: { enabled: false, reason: 'This detail view only presents the selected channel.' }, emptyLabel: managerCopy(locale, 'channel.routes.empty'),
+      })
+      routes.body.append(routeCollection.element)
+      const bindings = section(document, managerCopy(locale, 'channel.bindings'), managerCopy(locale, 'channel.bindings.description'))
+      const bindingCollection = createHostCollection(document, {
+        id: 'channel-bindings', label: managerCopy(locale, 'channel.bindings'), items: bindingItems(document, { ...projection, bindings: matchingBindings }),
+        search: { enabled: false, reason: 'This detail view only presents the selected channel.' }, emptyLabel: managerCopy(locale, 'channel.bindings.empty'),
+      })
+      bindings.body.append(bindingCollection.element)
+      const unavailable = forms.alert(managerCopy(locale, 'channel.sessions.unavailable'), 'warning')
+      unavailable.dataset.channelSessionActions = 'unavailable'
+      const readiness = forms.section(managerCopy(locale, 'channel.real-readiness'), managerCopy(locale, 'channel.real-readiness.description'))
+      readiness.root.dataset.channelRealReadiness = 'unavailable'
+      for (const [id, label, value] of [
+        ['app', managerCopy(locale, 'channel.field.platform'), managerCopy(locale, 'channel.real-readiness.app')],
+        ['events', managerCopy(locale, 'channel.real-readiness.events-label'), managerCopy(locale, 'channel.real-readiness.events')],
+        ['credentials', managerCopy(locale, 'channel.field.credentials'), managerCopy(locale, 'channel.real-readiness.credentials')],
+        ['adapter', managerCopy(locale, 'channel.real-readiness.adapter-label'), managerCopy(locale, 'channel.real-readiness.adapter')],
+      ] as const) readonlyField(forms, readiness.content, `channel-readiness-${id}-${record.id}`, label, value)
+      panel.append(unavailable, readiness.root, routes.root, bindings.root)
+      return () => { bindingCollection.dispose(); routeCollection.dispose() }
+    }
 
-    root.append(style, intro, summary, accounts.root, routes.root, bindings.root, diagnostics.root)
+    const renderDetail = (record: ChannelRecord): void => {
+      disposeCurrent()
+      const page = document.createElement('section')
+      page.className = 'cxc-channel-detail'
+      page.dataset.channelPage = 'detail'
+      page.dataset.channelDetail = record.id
+      const head = document.createElement('header')
+      head.className = 'cxc-channel-detail-head'
+      const titleRow = document.createElement('div')
+      titleRow.className = 'cxc-channel-detail-title-row'
+      const back = document.createElement('button')
+      back.className = 'cxc-channel-back'
+      back.type = 'button'
+      back.dataset.channelBack = 'true'
+      back.setAttribute('aria-label', managerCopy(locale, 'channel.back'))
+      back.append(createHostSurfaceIcon(document, 'host:back'))
+      back.addEventListener('click', () => { selectedId = undefined; render() })
+      const titleCopy = document.createElement('div')
+      const title = document.createElement('h2')
+      title.textContent = record.connection.ref.accountId
+      const description = document.createElement('p')
+      description.textContent = `${record.connection.adapterKind} · ${channelHealth(record)}`
+      titleCopy.append(title, description)
+      titleRow.append(back, titleCopy)
+      head.append(titleRow)
+      const tabs = document.createElement('div')
+      tabs.className = 'cxc-channel-tabs'
+      tabs.setAttribute('role', 'tablist')
+      const panel = document.createElement('div')
+      panel.className = 'cxc-channel-panel'
+      panel.setAttribute('role', 'tabpanel')
+      panel.dataset.channelDetailPanel = activeTab
+      const tabEntries: readonly { readonly id: ChannelDetailTab; readonly label: string }[] = [
+        { id: 'configuration', label: managerCopy(locale, 'channel.configuration') },
+        { id: 'logs', label: managerCopy(locale, 'channel.logs') },
+        { id: 'sessions', label: managerCopy(locale, 'channel.sessions') },
+      ]
+      for (const entry of tabEntries) {
+        const tab = document.createElement('button')
+        tab.type = 'button'
+        tab.className = 'cxc-channel-tab'
+        tab.dataset.channelDetailTab = entry.id
+        tab.id = `channel-tab-${entry.id}`
+        tab.setAttribute('role', 'tab')
+        tab.setAttribute('aria-controls', `channel-panel-${entry.id}`)
+        tab.setAttribute('aria-selected', String(entry.id === activeTab))
+        tab.tabIndex = entry.id === activeTab ? 0 : -1
+        tab.textContent = entry.label
+        tab.addEventListener('click', () => { activeTab = entry.id; render() })
+        tabs.append(tab)
+      }
+      panel.id = `channel-panel-${activeTab}`
+      panel.setAttribute('aria-labelledby', `channel-tab-${activeTab}`)
+      let disposePanel = (): void => {}
+      if (activeTab === 'configuration') renderConfiguration(record, panel)
+      else if (activeTab === 'logs') disposePanel = renderLogs(panel)
+      else disposePanel = renderSessions(record, panel)
+      page.append(head, tabs, panel)
+      content.replaceChildren(page)
+      disposeCurrent = disposePanel
+    }
+
+    const render = (): void => {
+      const selected = selectedId === undefined ? undefined : records().find(record => record.id === selectedId)
+      if (creating) renderCreate()
+      else if (selected === undefined) renderList()
+      else renderDetail(selected)
+    }
+
+    render()
+    root.append(style, content)
     context.container.append(root)
     const abort = () => root.dataset.channelManagerAborted = 'true'
     context.signal.addEventListener('abort', abort, { once: true })
     return () => {
       context.signal.removeEventListener('abort', abort)
-      diagnosticCollection.dispose()
-      bindingCollection.dispose()
-      routeCollection.dispose()
-      accountCollection.dispose()
+      disposeCurrent()
       detachTheme()
       theme.dispose()
       root.remove()

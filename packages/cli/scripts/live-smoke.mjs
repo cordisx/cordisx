@@ -35,6 +35,7 @@ const parsed = parseArgs({
     'manager-breadcrumb-width': { type: 'string' },
     'manager-theme-cycle': { type: 'boolean', default: false },
     'channel-data-plane': { type: 'boolean', default: false },
+    'channel-manager-exercise': { type: 'boolean', default: false },
     'manager-light-screenshot': { type: 'string' },
     'manager-dark-screenshot': { type: 'string' },
     'trigger-screenshot': { type: 'string' },
@@ -77,6 +78,9 @@ if (parsed.values['ui-catalog'] && parsed.values.report === undefined) {
 }
 if (parsed.values['channel-data-plane'] && parsed.values.report === undefined) {
   throw new Error('--channel-data-plane requires --report')
+}
+if (parsed.values['channel-manager-exercise'] && (!parsed.values['channel-data-plane'] || parsed.values['manager-screenshot'] === undefined)) {
+  throw new Error('--channel-manager-exercise requires --channel-data-plane and --manager-screenshot')
 }
 if (parsed.values['plugin-console-exercise'] && parsed.values.report === undefined) {
   throw new Error('--plugin-console-exercise requires --report')
@@ -3329,6 +3333,50 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         document.querySelector('[data-settings-navigation-item="' + CSS.escape(settingsNavigationItem) + '"]')?.click()
         await new Promise(resolve => setTimeout(resolve, 250))
       }
+      let channelManagerFlow = null
+      if (${JSON.stringify(parsed.values['channel-manager-exercise'])}) {
+        const list = document.querySelector('[data-channel-page="list"]')
+        const create = document.querySelector('[data-channel-create="true"]')
+        if (!(list instanceof HTMLElement) || !(create instanceof HTMLElement)) throw new Error('Channel list or create action is unavailable')
+        create.click()
+        await nextPaint()
+        const form = document.querySelector('[data-channel-create-form="true"]')
+        const name = document.querySelector('#channel-create-name')
+        if (!(form instanceof HTMLFormElement) || !(name instanceof HTMLElement)) throw new Error('Channel candidate form is unavailable')
+        name.onChange?.('Smoke candidate')
+        form.requestSubmit()
+        await nextPaint()
+        const search = document.querySelector('[data-collection-search="channel-list"]')
+        if (!(search instanceof HTMLInputElement)) throw new Error('Channel search is unavailable')
+        search.value = 'Smoke candidate'
+        search.dispatchEvent(new Event('input', { bubbles: true }))
+        await nextPaint()
+        const card = document.querySelector('[data-host-collection="channel-list"] [data-collection-item="candidate/feishu/1"] .cxc-primary')
+        if (!(card instanceof HTMLElement) || card.hidden) throw new Error('Channel candidate card was not found after search')
+        card.click()
+        await nextPaint()
+        const configuration = document.querySelector('[data-host-form="channel-configuration"]')
+        const tabs = [...document.querySelectorAll('[data-channel-detail-tab]')]
+        document.querySelector('[data-channel-detail-tab="logs"]')?.click()
+        await nextPaint()
+        const logsUnavailable = document.querySelector('[data-channel-logs="unavailable"]') !== null
+        document.querySelector('[data-channel-detail-tab="sessions"]')?.click()
+        await nextPaint()
+        const sessionsUnavailable = document.querySelector('[data-channel-session-actions="unavailable"]') !== null
+        const readiness = document.querySelector('[data-channel-real-readiness="unavailable"]')
+        channelManagerFlow = {
+          list: list !== null,
+          create: create !== null,
+          searched: search.value === 'Smoke candidate',
+          card: card !== null,
+          configuration: configuration !== null,
+          tabs: tabs.map(tab => tab.getAttribute('data-channel-detail-tab')),
+          logsUnavailable,
+          sessionsUnavailable,
+          readiness: readiness !== null,
+          secretRendered: /secretRef|keychain:|host-secret:/iu.test(document.querySelector('[data-channel-manager]')?.outerHTML ?? ''),
+        }
+      }
       const extensionPointId = ${JSON.stringify(managerExtensionPoint)}
       if (extensionPointId !== undefined) document.querySelector('[data-extension-point-id="' + CSS.escape(extensionPointId) + '"]')?.click()
       const extensionPointTab = ${JSON.stringify(managerExtensionPointTab)}
@@ -3510,6 +3558,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
               },
               pageTitle: document.querySelector('.cxm-heading-current-heading')?.textContent?.trim() ?? null,
               mounted: document.querySelector('[data-channel-manager]') !== null,
+              managerFlow: channelManagerFlow,
             }
           })(),
           tabGeometry: leadingRect === undefined || tabIconRect === undefined || tabLabelRect === undefined || titleRect === undefined ? null : {
@@ -3746,6 +3795,18 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       || channel.pageTitle !== channelPageTitle
       || channel.mounted !== true) {
       throw new Error(`Channel data-plane smoke assertions failed: ${JSON.stringify(channel)}`)
+    }
+    if (parsed.values['channel-manager-exercise'] && (channel.managerFlow?.list !== true
+      || channel.managerFlow.create !== true
+      || channel.managerFlow.searched !== true
+      || channel.managerFlow.card !== true
+      || channel.managerFlow.configuration !== true
+      || channel.managerFlow.tabs?.join(',') !== 'configuration,logs,sessions'
+      || channel.managerFlow.logsUnavailable !== true
+      || channel.managerFlow.sessionsUnavailable !== true
+      || channel.managerFlow.readiness !== true
+      || channel.managerFlow.secretRendered !== false)) {
+      throw new Error(`Channel Manager flow smoke assertions failed: ${JSON.stringify(channel.managerFlow)}`)
     }
   }
   if (managerTab === 'about') {
