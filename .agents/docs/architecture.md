@@ -172,7 +172,7 @@ The catalog distinguishes implemented, experimental, and reserved points;
 protocol reservation is never evidence that the current Codex adapter can
 project a point.
 
-The planned manager-settings v4 delivery exposes a separate host-neutral pair:
+The implemented manager-settings A delivery exposes a host-neutral pair:
 `manager.settings.tabs` accepts structured tab records and
 `manager.settings.content` accepts same-owner routes/pages for controlled body
 mounts. These are manager extension points, not Codex adapter surfaces; they
@@ -181,6 +181,16 @@ accessible panel, while the trusted-local plugin receives only the panel-body
 child. The single merge/order model, stable built-in fallback, lifecycle,
 versioning, PR order, and validation contract are specified in
 [`manager-settings-tabs.md`](manager-settings-tabs.md).
+
+Catalog v4 adds the distinct B pair
+`manager.settings.navigation-items` / `manager.content`. B inserts a
+Host-rendered first-level row near Settings and opens a standard Manager page;
+its item contains only a same-owner route. Route v2 supplies navigation title
+and description, while page v3 supplies the required Host icon and standard
+header title/description/actions. A's stable id and body-only outlet remain
+unchanged. The merge model, routing, lifecycle, file-overlap audit, delivery
+order, and validation matrix are normative in
+[`manager-settings-navigation.md`](manager-settings-navigation.md).
 
 Native menu contributions use the same boundary: CordisX inserts host-rendered
 rows into the opened Codex Help or account menu and never adds an independent
@@ -303,7 +313,7 @@ explicit reload as an owning-fiber operation and uses plugin generations only
 for code, entry, version, or dependency changes. The manager remains a brokered
 projection and never receives filesystem or arbitrary module-loading authority.
 
-The manager has six primary navigation views:
+The manager has six non-spoofable Host primary navigation views:
 
 1. searchable installed-plugin inventory and local runtime controls;
 2. semantic extension points with attributed plugin use and enforced policy;
@@ -311,6 +321,11 @@ The manager has six primary navigation views:
 4. marketplace discovery from validated feeds;
 5. profile and launcher configuration; and
 6. product identity, version, and verified external support links on About.
+
+Eligible `manager.settings.navigation-items` records may join only immediately
+before or after Host Settings. They are independent plugin pages rather than a
+seventh fixed Host view. Host core order and bottom-anchored About cannot be
+overridden.
 
 Manager-owned content follows one semantic context at a time: a title,
 breadcrumb, or selected tab is not restated by body headings or redundant
@@ -347,8 +362,7 @@ Marketplace discovery adds two manager views without adding execution
 authority: a searchable catalog assembled from validated feeds with a
 two-tab `概览` / `作者与来源` detail, and a general
 CordisX settings view whose first editable section owns the ordered list of
-marketplace JSON URLs and profile-local block state. The settings page will use
-one
+marketplace JSON URLs and profile-local block state. The settings page uses one
 host projection containing stable built-in tabs and eligible external
 `manager.settings.tabs` contributions. The built-ins remain `插件商店` for feed
 URLs, `运行状态` for profile-local activation state, and `启动器` for the
@@ -363,8 +377,9 @@ homepage, manifest/icon, and feed provenance, but cannot install or activate
 code in this stage. External navigation first hides the manager modal and then
 uses the browser's uncancelled `_blank` navigation with `noopener noreferrer`.
 
-The primary manager navigation keeps `插件`, `扩展点`, `路由`, `插件商店`, and
-`配置` as separate top-level contexts, with About anchored last. Searchable
+The primary manager navigation keeps Host `插件`, `扩展点`, `路由`, `插件商店`,
+and `配置` as separate top-level contexts, with eligible B entries grouped
+immediately before/after `配置` and About anchored last. Searchable
 browse pages omit aggregate result and usage counts. The content viewport is
 the single vertical scroll owner and restores query/scroll state after a
 detail back action.

@@ -34,6 +34,10 @@ an ordered ancestor chain. Breadcrumb DOM is projected only from that chain.
 Plugins may contribute localized settings-tab data and a same-owner route/page
 reference through the existing structured contracts, but they never receive a
 breadcrumb container, create breadcrumb nodes, or concatenate a display path.
+Plugins may also contribute a first-level Settings-adjacent route through
+`manager.settings.navigation-items`; route-v2/page-v3 metadata is projected
+into the same Host-owned history, breadcrumb, and standard header model. The B
+item itself contains no display metadata or DOM.
 
 The semantic path includes every page context needed to return to the current
 leaf:
@@ -79,8 +83,9 @@ ancestor removal is not an overflow strategy.
 Route validity is reconciled against every new Manager snapshot:
 
 - plugin block or restore keeps built-in plugin detail routes inspectable, but
-  an active external settings page falls back to `配置 / 插件商店` and cannot
-  steal activation when restored;
+  an active A/content-tab page falls back to `配置 / 插件商店`, while an active
+  B/first-level plugin destination falls back to Host `配置`; neither steals
+  activation when restored;
 - owner disposal or generation replacement aborts active external content
   before disposal and replaces a missing leaf or record with its nearest
   surviving ancestor without adding a history entry;
@@ -91,7 +96,9 @@ Route validity is reconciled against every new Manager snapshot:
 - closing the dialog records no navigation entry. Host-owned routes and list
   state remain available for reopening, while the existing settings-content
   lifecycle still aborts external content and resets that surface to the
-  built-in marketplace fallback before it can mount again.
+  built-in marketplace fallback before it can mount again. B also aborts and
+  disposes on close, but may retain its structured selected route and remount
+  it on reopen only while every current eligibility gate still passes.
 
 Queries, filters, and list scroll offsets belong to their primary browse page,
 not to a breadcrumb label or DOM node. Re-render, locale changes, leaf
@@ -193,6 +200,13 @@ External page code mounts only inside the active
 route/page ownership, lifecycle, and protocol versioning are defined in
 [`manager-settings-tabs.md`](manager-settings-tabs.md).
 
+These are A/content tabs. A B/navigation item is a sibling in the left primary
+navigation and opens a complete standard page in `manager.content`; it never
+appears in this tablist. Its route-v2 title/description label the navigation
+destination, and its page-v3 title/description/required Host icon label the
+standard header. See
+[`manager-settings-navigation.md`](manager-settings-navigation.md).
+
 ## Page headers
 
 Every primary page reserves the same fixed-width leading seat immediately to
@@ -267,6 +281,12 @@ is the first item, followed by separate `扩展点`, `路由`, `插件商店`, a
 `关于 CordisX` (`about`) is the only item anchored to the bottom of the
 navigation. Extension points mean host-declared surfaces and outlets. Routes
 and pages are associated resources and therefore have their own primary page.
+
+External B rows do not redefine those Host ids. `before-settings` rows follow
+Marketplace and precede Settings; `after-settings` rows follow Settings and
+precede bottom-anchored About. Each group sorts by order, owner, then qualified
+id. Their row glyph and standard page-header glyph share the required page-v3
+Host icon as one source of truth.
 
 The sidebar begins directly with primary navigation. It does not contain a
 separate `CORDISX` eyebrow, manager title, version, or logo block. Product
@@ -620,8 +640,9 @@ At minimum they prove:
 - every manager-owned external link preserves uncancelled default navigation,
   carries safe target/rel attributes, and synchronously hides the modal without
   forcing focus back to the manager trigger;
-- primary navigation begins with `插件`, keeps `配置` in the main group, and
-  anchors `关于 CordisX` at the bottom;
+- primary navigation begins with Host `插件`, keeps `配置` in the main group,
+  projects B entries only in their before/after Settings group, and anchors
+  `关于 CordisX` at the bottom;
 - the modal sidebar begins with navigation and contains no identity block;
   About alone uses the CordisX mark in its navigation item, header seat, and
   identity row; those three marks, like the host-side trigger, directly render
@@ -684,3 +705,8 @@ structured overflow menu, query restoration, external settings close and
 block fallback, locale reprojection, generation cleanup, and unchanged native
 node identity/data flow. After normal CI and squash merge, one separate mono PR
 from the latest mono `main` updates only the exact merged `cordisx` gitlink.
+
+The B extension delivery is a separate protocol-backed change governed by
+[`manager-settings-navigation.md`](manager-settings-navigation.md). It must
+preserve this Manager productization and the Host form system, and it does not
+update mono.

@@ -13,7 +13,12 @@ This directory is the public, aggregatable source for CordisX product and archit
   implementation detail.
 - `manager-settings-tabs.md` freezes the host-neutral extensible settings-tab
   surface/content outlet, single ordering model, controlled page-body mount,
-  lifecycle, protocol/host/mono PR order, and validation matrix.
+  lifecycle, historical delivery, current v5 compatibility, and validation
+  matrix.
+- `manager-settings-navigation.md` separates those Settings content tabs from
+  plugin-owned first-level Manager destinations, and freezes the v5/catalog-v4
+  route-v2/page-v3 projection, standard `manager.content` shell, ordering,
+  lifecycle, overlap audit, delivery boundary, and real-renderer matrix.
 - `plugin-configuration.md` defines Schemastery-first forms, the Standard
   Schema validation boundary, revision-fenced persistence, live/restart
   application, last-good recovery, secrets, and lifecycle-owned field

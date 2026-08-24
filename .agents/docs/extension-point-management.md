@@ -1,10 +1,10 @@
 # Extension-point catalog and policy
 
-Status: approved CordisX product and architecture contract. The structured
-surface/outlet registries, localized host catalog, identity-bound point-policy
-broker, surface command-origin checks, and outlet navigation/mount enforcement
-are implemented in the runtime slice. This manager delivery adds the searchable
-catalog and point-detail experience described below.
+Status: implemented CordisX product and architecture contract. The structured
+surface/outlet registries, localized searchable catalog and detail experience,
+identity-bound point-policy broker, surface origin checks, and outlet
+navigation/mount enforcement are implemented. Catalog v4's B pair remains the
+Host delivery described below.
 
 Normative, plugin-visible schemas belong in `cordisx-protocol`. This document
 owns the CordisX host model, manager projection, enforcement boundary, and
@@ -33,6 +33,14 @@ They are independent of the Codex adapter: the manager owns the tab/header DOM
 and panel, and a same-owner page mounts only in the panel-body child. Their
 single ordering/fallback model and lifecycle are specified in
 [`manager-settings-tabs.md`](manager-settings-tabs.md).
+
+Catalog v4 keeps that A pair and adds the distinct B pair
+`manager.settings.navigation-items` (surface) and `manager.content` (outlet).
+B contributes a route-only first-level Manager destination; route v2 supplies
+navigation text and same-owner page v3 supplies the standard header text,
+required Host icon, actions, and controlled body. A and B must appear as four
+separate rows and use cases in the Manager catalog. See
+[`manager-settings-navigation.md`](manager-settings-navigation.md).
 
 The distinction is stable even when adapters add new points. The catalog count
 is the number of currently declared surface and outlet descriptors, not the
@@ -92,11 +100,14 @@ change.
 
 The table records the original eleven-surface/three-outlet baseline. The
 current runtime aggregates the complete public catalog: 28 structured surfaces
-and five page outlets, plus the Manager surface/outlet pair in catalog v5. The
-authoritative current values live in the owning catalog
-constants and protocol fixtures; an exact-set regression requires all 35 ids
-and every referenced message to pass both required locale dictionaries. The
-shared namespace is `cordisx.manager.extension-points`.
+and five page outlets, plus the A Manager surface/outlet pair in catalog v5.
+The formal baseline therefore contains 35 ids. The B Host delivery adds its
+surface/outlet pair through catalog v5's existing payload and route-family
+vocabulary, producing 37 ids without renaming either A point. The authoritative
+current values live in the owning catalog constants and protocol fixtures; an
+exact-set regression requires every id and every referenced message to pass
+both required locale dictionaries. The shared namespace is
+`cordisx.manager.extension-points`.
 
 | Kind | Stable id | Title message (`key`; fallback) | Description message (`key`; fallback) | Icon |
 | --- | --- | --- | --- | --- |
@@ -114,6 +125,10 @@ shared namespace is `cordisx.manager.extension-points`.
 | outlet | `app` | `outlet.app.title`; Application page | `outlet.app.description`; Opens a CordisX page over the renderer application region without replacing native content. | `host:open` |
 | outlet | `main` | `outlet.main.title`; Main workspace page | `outlet.main.description`; Opens a CordisX page over the region to the right of the sidebar and follows the current main context. | `host:layers` |
 | outlet | `session.content` | `outlet.session.content.title`; Session content page | `outlet.session.content.description`; Opens a CordisX page below the active session header while preserving side and bottom panels. | `host:history` |
+| surface | `manager.settings.tabs` | `manager.settings.tabs.title`; Manager settings content tabs | `manager.settings.tabs.description`; Switches Host-rendered content inside Manager Settings. | `host:settings` |
+| outlet | `manager.settings.content` | `manager.settings.content.title`; Manager settings content | `manager.settings.content.description`; Mounts a trusted-local body inside the active Settings content tab. | `host:settings` |
+| surface | `manager.settings.navigation-items` | `manager.settings.navigation-items.title`; Manager settings navigation items | `manager.settings.navigation-items.description`; Adds a Host-rendered first-level plugin destination near Settings. | `host:layers` |
+| outlet | `manager.content` | `manager.content.title`; Manager content | `manager.content.description`; Mounts a trusted-local body beneath a standard Host-owned Manager page shell. | `host:layers` |
 
 The catalog owns point identity only. Plugin-provided contribution labels,
 command titles, route titles, and page content keep their own owner-qualified
@@ -293,37 +308,34 @@ boundary.
 
 ## Delivery order and PR boundaries
 
-After this owning architecture PR, delivery remains stacked and independently
-reviewable:
+After this owning architecture update, the B delivery remains stacked and
+independently reviewable:
 
-1. **Protocol:** `cordisx-protocol` owns the versioned host descriptor schema,
-   `LocalizedText` fields, point-policy values and identity, origin metadata,
-   validation rules, and conformance vectors.
-2. **Runtime:** `cordisx` owns descriptor and policy ledgers, adapter
-   declarations, locale reprojection, surface command-origin enforcement,
-   outlet route/page enforcement, reconciliation, and snapshots. It does not
-   include manager layout.
-3. **Manager:** a following `cordisx` PR owns the searchable scrolling catalog,
-   second-level tabs, policy controls, diagnostics projection, accessibility,
-   and regression tests against the runtime snapshot.
-4. **Live smoke:** the compatible runtime and manager are exercised in an
-   isolated real `app://` renderer, without modifying the installed app.
-5. **Mono:** after owning repositories are pushed, CI is green, and the
-   compatible set is verified, one separate CordisXMono PR pins exact gitlinks.
+1. **Architecture:** the Host documents freeze A/B ownership, catalog product
+   copy, route/page metadata, overlap boundaries, and validation before code.
+2. **Protocol:** formal merge `f350899` owns surface v5/catalog v4, route-v2/
+   page-v3 reuse, origin, lifecycle, and conformance; Host consumes only that
+   merge.
+3. **Host/Manager/demo:** one `cordisx` PR from latest formal main appends B
+   descriptors, usage, policy enforcement, standard page projection,
+   diagnostics and bilingual demo without replacing the existing catalog or A.
+4. **Live smoke:** the compatible Host is exercised in an isolated real
+   `app://` renderer, without modifying the installed app.
+5. **Mono:** out of scope; this delivery does not update a gitlink.
 
-Do not combine the protocol and host histories, update the mono pointer before
-owning commits are reachable, or describe a manager-only selector as enforced
-policy.
+Do not combine the protocol and host histories, consume a Protocol or Host
+source head, update mono in this delivery, or describe a manager-only selector
+as enforced policy.
 
 ## Validation matrix
 
 | Layer | Required evidence |
 | --- | --- |
 | Protocol | Schema acceptance/rejection for both kinds; all descriptor text retained as message references; unique ids; host icons; tuple identity; `inherit`/`allow`/`deny`; origin and outlet enforcement vectors; compatible default allow. |
-| Runtime | Exact set of 35 descriptors (28+5 UI catalog plus 1+1 Manager pair); required `en`/`zh-CN` coverage and locale/dictionary reprojection; missing-locale and invalid declaration diagnostics; retained usage attribution; source identity non-spoofing; surface render plus command-origin denial; outlet navigation plus active-page disposal; plugin block, capability policy, context, and generation orthogonality. |
+| Runtime | Existing exact set of 35 remains compatible; catalog-v4 Host target is 37 after adding B without renaming A. Required `en`/`zh-CN` coverage and locale/dictionary reprojection; missing-locale and invalid declaration diagnostics; retained A/B usage attribution; source identity non-spoofing; surface route-origin denial; outlet navigation plus active-page disposal; plugin block, capability policy, context, and generation orthogonality. |
 | Manager | Search every declared field without aggregate/result counts; normal/pending/unavailable/error at wide and narrow widths; no type/normal-state tags or orphan status row; both empty states; one content scroll owner; list/detail/back query and scroll restoration; live locale reprojection; selectable stable id; `Usage`/`Point information`/`Diagnostics` tabs; policy controls keyed by source/plugin/point; keyboard, focus, tab, list, and accessible-name semantics. |
-| Live renderer | Scroll to the final point; filter by localized title, stable id, and plugin; open each point kind; change allow/deny and observe surface disappearance/restore plus outlet close/reopen rejection; keep native React nodes visible, connected, and updating; capture screenshots and a machine-readable report. |
-| Mono | Exact pushed protocol and runtime/manager revisions, clean registered submodules, public modules initialized, private roadmap still `update = none`, and no unrelated pointer changes. |
+| Live renderer | Scroll to the final point; filter all four A/B points by localized title, stable id, and plugin; open each point kind; change allow/deny and observe A tab/B row disappearance/restore plus outlet cleanup/fallback; keep native React nodes visible, connected, and updating; capture screenshots and a machine-readable report. |
+| Mono | No update in this delivery. |
 
 Screenshots are product evidence, not a substitute for assertions. A passing
 manager rendering test is not proof of runtime enforcement, and a denied
