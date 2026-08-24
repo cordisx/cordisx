@@ -68,8 +68,9 @@ dependencies, permission plan revision, and the shared registry epoch.
 Generation Runtime uses the same resolver at four boundaries:
 
 - `resolveCandidate(access, 'plan'|'stage'|'publish'|'rollback')` returns a
-  frozen expected/current/after/last-good tuple and expected/after registry
-  epochs;
+  frozen Host-authoritative `candidateFingerprint`, expected/current/after/
+  last-good tuple, and expected/after registry epochs; the fingerprint is the
+  same value returned by `prepare()` and binds private registry receipts;
 - `resolveImpact()` returns only the Host-recomputed closure and ordering;
 - `resolveRuntimeModule()` returns package identity plus Launcher-only
   `artifactDirectory` and `./module.js`; no runtime manifest or scope reaches

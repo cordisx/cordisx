@@ -126,27 +126,18 @@ async function ready(setupResult: Awaited<ReturnType<typeof setup>>) {
   const { authority, prepared, access } = setupResult
   const registry = createHostRegistryReceiptAuthority()
   const plan = await authority.requestActivation(access)
+  expect((await authority.resolveCandidate(access, 'publish')).candidateFingerprint)
+    .toBe(prepared.candidateFingerprint)
   const receipt = registry.issueReadiness({
     transactionId: plan.transactionId,
     transactionEpoch: plan.transactionEpoch,
-    candidateFingerprint: prepared.plan.transactionId.length > 0
-      ? (await authority.resolveCandidate(access, 'publish')).after.plugins.length > 0
-        ? (await readCandidateFingerprint(setupResult))
-        : ''
-      : '',
+    candidateFingerprint: plan.candidateFingerprint,
     expectedRegistryEpoch: plan.expectedRegistryEpoch,
     afterRegistryEpoch: plan.afterRegistryEpoch,
     observation: runtimeObservation(plan.after, plan.afterRegistryEpoch),
   })
   await authority.confirmReadiness(access, receipt)
   return { registry, plan }
-}
-
-async function readCandidateFingerprint(input: Awaited<ReturnType<typeof setup>>): Promise<string> {
-  const journal = JSON.parse(await readFile(path.join(input.homeDir, 'state/profiles/default/package-authority/journal.v1.json'), 'utf8')) as {
-    transactions: Record<string, { candidateFingerprint: string }>
-  }
-  return journal.transactions['transaction-1']!.candidateFingerprint
 }
 
 describe('Host-private package lifecycle authority', () => {
@@ -157,6 +148,11 @@ describe('Host-private package lifecycle authority', () => {
       version: '1.0.0',
       moduleGeneration: 'candidate-generation-1',
     })
+    expect(current.prepared.candidateFingerprint).toBe(current.prepared.plan.candidateFingerprint)
+    for (const boundary of ['plan', 'stage'] as const) {
+      expect((await current.authority.resolveCandidate(current.access, boundary)).candidateFingerprint)
+        .toBe(current.prepared.candidateFingerprint)
+    }
     expect(await current.authority.resolveImpact({
       ownerId: 'generation-runtime',
       profileId: 'default',
@@ -187,7 +183,7 @@ describe('Host-private package lifecycle authority', () => {
   it('accepts only Host-issued readiness receipts and commits through the #73 activation store', async () => {
     const current = await setup()
     const plan = await current.authority.requestActivation(current.access)
-    const fingerprint = await readCandidateFingerprint(current)
+    const fingerprint = plan.candidateFingerprint
     await expect(current.authority.confirmReadiness(current.access, {
       transactionId: plan.transactionId,
       transactionEpoch: plan.transactionEpoch,
@@ -238,6 +234,8 @@ describe('Host-private package lifecycle authority', () => {
     const { registry, plan } = await ready(current)
     await current.authority.commit(current.access)
     const rollback = await current.authority.beginRollback(current.access, 'post-publish-handshake-failed')
+    expect((await current.authority.resolveCandidate(current.access, 'rollback')).candidateFingerprint)
+      .toBe(current.prepared.candidateFingerprint)
     await expect(current.authority.abort(current.access, 'too-early')).rejects.toMatchObject({ code: 'rollback-required' })
     await expect(current.authority.prepare({
       ownerId: 'generation-runtime',
