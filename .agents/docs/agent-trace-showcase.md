@@ -123,6 +123,13 @@ Showcase consumes the merged protocol shape and the fixed stacked host API:
 - `/sessions/:sessionId/agent-trace` targets `session.content` and is rejected
   when its parameter is not the active native session.
 
+The package-root `packages/agent-trace-showcase/README.md` is the canonical
+product description. The package build copies that exact file to
+`dist/README.md`, beside the compiled plugin entry files consumed by the
+launcher. The launcher captures the adjacent README in the bundle and the
+manager renders that captured value; neither layer synthesizes Agent Trace
+product copy or maintains a second README source.
+
 This consumer branch does not add `session.header.actions` to the catalog,
 protocol, or Codex adapter and does not use `workspace.toolbar.items` as a
 temporary parallel entry. In fixture mode, the explicit configuration pins
@@ -288,6 +295,8 @@ Package and component coverage:
 
 - manifest id, explicit development-only activation, and `plugins: []`
   default preservation;
+- byte-identical package/build README projection, launcher bundle capture, and
+  manager README-tab rendering from the compiled plugin entry;
 - structured session-header contribution conformance, host icon, tooltip/a11y,
   `no-drag`, and no plugin DOM in native shell;
 - route/current-session validation, page back/close, and unchanged app URL;
