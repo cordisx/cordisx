@@ -18,6 +18,14 @@ import {
   MAX_AGENT_HISTORY_REQUESTS,
   parseAgentHistoryBindingRequest,
 } from './agent-history-rpc.js'
+import {
+  CONFIG_BINDING,
+  CONFIG_RECEIVER,
+  MAX_CONFIG_REQUEST_BYTES,
+  configBridgeError,
+  parseConfigBindingRequest,
+  type ConfigBridgeHandler,
+} from './config-rpc.js'
 
 const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
 const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
@@ -170,6 +178,9 @@ interface InstalledScript {
   readonly historyController?: AbortController
   readonly removeHistoryBindingListener?: () => void
   readonly historyBindingInstalled: boolean
+  readonly configController?: AbortController
+  readonly removeConfigBindingListener?: () => void
+  readonly configBindingInstalled: boolean
 }
 
 interface MarketplaceBindingRequest {
@@ -210,11 +221,19 @@ async function sendAgentHistoryBindingResponse(session: CdpSession, payload: Rec
   })
 }
 
+async function sendConfigBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
+  await session.send('Runtime.evaluate', {
+    expression: `void globalThis.${CONFIG_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    allowUnsafeEvalBlockedByCSP: true,
+  })
+}
+
 async function install(
   target: CdpTarget,
   source: string,
   provider?: { readonly fleet: ProviderFleet; readonly token: string },
   history?: { readonly host: CodexAgentHistoryHost; readonly token: string },
+  config?: ConfigBridgeHandler,
 ): Promise<InstalledScript> {
   const url = target.webSocketDebuggerUrl
   if (url === undefined) throw new Error(`target ${target.id} has no websocket URL`)
@@ -222,15 +241,18 @@ async function install(
   const marketplaceController = new AbortController()
   const providerController = provider === undefined ? undefined : new AbortController()
   const historyController = history === undefined ? undefined : new AbortController()
+  const configController = config === undefined ? undefined : new AbortController()
   let removeBindingListener = (): void => {}
   let removeProviderBindingListener = (): void => {}
   let removeHistoryBindingListener = (): void => {}
+  let removeConfigBindingListener = (): void => {}
   try {
     await session.send('Runtime.enable')
     await session.send('Page.enable')
     await session.send('Runtime.addBinding', { name: MARKETPLACE_BINDING })
     if (provider !== undefined) await session.send('Runtime.addBinding', { name: PROVIDER_BINDING })
     if (history !== undefined) await session.send('Runtime.addBinding', { name: AGENT_HISTORY_BINDING })
+    if (config !== undefined) await session.send('Runtime.addBinding', { name: CONFIG_BINDING })
     let activeMarketplaceRequests = 0
     removeBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
       if (params.name !== MARKETPLACE_BINDING || typeof params.payload !== 'string') return
@@ -323,6 +345,37 @@ async function install(
         })()
       })
     }
+    let activeConfigRequests = 0
+    if (config !== undefined) {
+      removeConfigBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
+        if (params.name !== CONFIG_BINDING || typeof params.payload !== 'string') return
+        const payload = params.payload
+        void (async () => {
+          let requestId = 'invalid'
+          try {
+            if (Buffer.byteLength(payload) > MAX_CONFIG_REQUEST_BYTES) throw new Error('config request exceeds maximum size')
+            const request = parseConfigBindingRequest(JSON.parse(payload) as unknown, config.token, config.profileId, config.generation)
+            requestId = request.requestId
+            if (configController?.signal.aborted === true) throw new Error('config request bridge is closed')
+            if (activeConfigRequests >= 1) throw new Error('another config request is already active')
+            activeConfigRequests += 1
+            let value: unknown
+            try {
+              value = await config.handle(request)
+            } finally {
+              activeConfigRequests -= 1
+            }
+            await sendConfigBindingResponse(session, { requestId, ok: true, value })
+          } catch (error) {
+            await sendConfigBindingResponse(session, {
+              requestId,
+              ok: false,
+              ...configBridgeError(error),
+            }).catch(() => undefined)
+          }
+        })()
+      })
+    }
     const added = await session.send('Page.addScriptToEvaluateOnNewDocument', { source })
     const identifier = added.identifier
     if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
@@ -340,14 +393,18 @@ async function install(
       providerBindingInstalled: provider !== undefined,
       ...(historyController === undefined ? {} : { historyController, removeHistoryBindingListener }),
       historyBindingInstalled: history !== undefined,
+      ...(configController === undefined ? {} : { configController, removeConfigBindingListener }),
+      configBindingInstalled: config !== undefined,
     }
   } catch (error) {
     marketplaceController.abort()
     providerController?.abort()
     historyController?.abort()
+    configController?.abort()
     removeBindingListener()
     removeProviderBindingListener()
     removeHistoryBindingListener()
+    removeConfigBindingListener()
     session.close()
     throw error
   }
@@ -357,9 +414,11 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.marketplaceController.abort()
   installed.providerController?.abort()
   installed.historyController?.abort()
+  installed.configController?.abort()
   installed.removeBindingListener()
   installed.removeProviderBindingListener?.()
   installed.removeHistoryBindingListener?.()
+  installed.removeConfigBindingListener?.()
   try {
     await Promise.allSettled([
       installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }),
@@ -373,6 +432,9 @@ async function uninstall(installed: InstalledScript): Promise<void> {
         : []),
       ...(installed.historyBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: AGENT_HISTORY_BINDING })]
+        : []),
+      ...(installed.configBindingInstalled
+        ? [installed.session.send('Runtime.removeBinding', { name: CONFIG_BINDING })]
         : []),
     ])
   } finally {
@@ -389,6 +451,7 @@ export interface WatchInjectionOptions {
   readonly providerBridgeToken?: string
   readonly agentHistoryHost?: CodexAgentHistoryHost
   readonly agentHistoryBridgeToken?: string
+  readonly configBridge?: ConfigBridgeHandler
 }
 
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
@@ -417,7 +480,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           const history = options.agentHistoryHost === undefined || options.agentHistoryBridgeToken === undefined
             ? undefined
             : { host: options.agentHistoryHost, token: options.agentHistoryBridgeToken }
-          const record = await install(target, options.source, provider, history)
+          const record = await install(target, options.source, provider, history, options.configBridge)
           installed.set(target.id, record)
           options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)
         }

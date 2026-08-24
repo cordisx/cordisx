@@ -245,6 +245,46 @@ export function apply(ctx: Context) {
 }
 ```
 
+For an editable Manager form, export a Schemastery `Config`. It is also a
+Standard Schema validator, so the same object supplies defaults and runtime
+validation. `configApplies` defaults to `restart`; choose `live` only when the
+plugin consumes committed changes through `ctx.settings.watch()`:
+
+```ts
+import Schema from '@deepseek-ai/schemastery'
+import type { Context } from '@deepseek-ai/cordis'
+import type {} from 'cordisx/contracts'
+
+export const Config = Schema.object({
+  timeout: Schema.number().default(30).min(1).max(120)
+    .role('duration').description('Request timeout'),
+})
+export const configApplies = 'live'
+export const inject = ['settings', 'configRenderers']
+
+export function apply(ctx: Context, config: { timeout: number }) {
+  useTimeout(config.timeout)
+  ctx.settings.watch<{ timeout: number }>(next => useTimeout(next.timeout))
+  ctx.configRenderers.register({
+    id: 'duration', selector: { role: 'duration' }, order: 10,
+  }, (container, field) => {
+    const input = container.ownerDocument.createElement('input')
+    input.type = 'range'
+    input.value = String(field.value)
+    input.addEventListener('input', () => field.setDraft(Number(input.value)))
+    container.append(input)
+    return () => input.remove()
+  })
+}
+```
+
+The Host still owns the field label, help/error projection, save/reset state,
+focus, and accessibility. Renderer registration and mounts are fiber effects.
+Selectors may use one role, exact field path, or owner namespace. Sensitive
+roles such as `secret` and `credential` are Host-reserved and cannot be passed
+to a custom renderer; the current beta intentionally leaves them unavailable
+until a launcher credential broker exists.
+
 Shell slots accept structured contribution data only. The initial surfaces
 cover sidebar footer controls/menu, sidebar navigation, workspace toolbar, and
 the environment information panel. Complex DOM belongs only in a registered

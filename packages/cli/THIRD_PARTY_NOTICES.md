@@ -6,6 +6,7 @@ licenses remain with their respective copyright holders:
 | Package | Version used by this beta | Registry license |
 | --- | --- | --- |
 | `@deepseek-ai/cordis` | `4.0.1` | MIT |
+| `@deepseek-ai/schemastery` | `3.18.1` | MIT |
 | `@material-symbols/svg-400` | `0.46.0` | Apache-2.0 |
 | `esbuild` | `^0.25.9` | MIT |
 | `intl-messageformat` | `11.2.14` | BSD-3-Clause |

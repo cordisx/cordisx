@@ -28,6 +28,12 @@ import type { ManagedSettingsPageMount, NavigationSnapshot } from './navigation.
 import type { SurfaceContributionSnapshot } from './surfaces.js'
 import type { ExtensionPointRuntimeSnapshot, ExtensionPointSnapshot } from './extension-points.js'
 import type { RequestedScope } from './platform.js'
+import type {
+  ConfigMutationOperation,
+  ConfigRendererMountHandle,
+  ManagerPluginConfigSnapshot,
+} from './configuration.js'
+import type { CordisXConfigFieldSnapshot, CordisXJsonValue } from '../contracts.js'
 import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
 import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 
@@ -39,6 +45,7 @@ export interface ManagerPluginSnapshot {
   readonly name: string
   readonly inject: readonly string[]
   readonly config: unknown
+  readonly configuration: ManagerPluginConfigSnapshot
   readonly readme?: string
   readonly status: ManagerPluginStatus
   readonly error?: string
@@ -91,6 +98,13 @@ export interface ManagerSettingsTabSnapshot {
 export interface ManagerModel {
   snapshot(): ManagerSnapshot
   setPluginBlocked(id: string, blocked: boolean): Promise<void>
+  updatePluginConfig?(id: string, expectedRevision: number, operations: readonly ConfigMutationOperation[]): Promise<void>
+  mountConfigRenderer?(
+    pluginId: string,
+    field: CordisXConfigFieldSnapshot,
+    container: HTMLElement,
+    setDraft: (value: unknown) => void,
+  ): Promise<ConfigRendererMountHandle>
   setPermissionPolicy(id: string, capability: CordisXPlatformCapability, policy: CordisXPermissionPolicy): Promise<void>
   setExtensionPointPolicy?(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
   mountSettingsTab?(id: string, panelBody: HTMLElement): Promise<ManagedSettingsPageMount>
@@ -594,6 +608,16 @@ const MANAGER_STYLES = `
   .cxm-field-label { color: #737e90; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
   .cxm-field-value { margin-top: 5px; overflow-wrap: anywhere; color: #cdd2dc; font-size: 11px; }
   .cxm-code { max-height: 140px; margin: 6px 0 0; overflow: auto; color: #bac2d2; font: 10px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
+  .cxm-config-form { display: grid; gap: 12px; margin-top: 10px; }
+  .cxm-config-field { display: grid; gap: 6px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.07); }
+  .cxm-config-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #eef0f4; font-weight: 600; }
+  .cxm-config-path { color: #9299a7; font: 10px/1.3 ui-monospace, monospace; }
+  .cxm-config-help { margin: 0; color: #aab0bc; font-size: 11px; }
+  .cxm-config-control { box-sizing: border-box; width: 100%; min-height: 34px; border: 1px solid rgba(255,255,255,.13); border-radius: 8px; padding: 7px 9px; background: rgba(8,10,14,.52); color: inherit; font: inherit; }
+  textarea.cxm-config-control { min-height: 92px; resize: vertical; font-family: ui-monospace, monospace; font-size: 11px; }
+  .cxm-config-checkbox { width: 18px; height: 18px; accent-color: #aeb7c7; }
+  .cxm-config-renderer { min-height: 34px; }
+  .cxm-config-error { color: #ffaaa4; font-size: 11px; }
   .cxm-readme { max-width: 760px; color: #b8c0cf; font-size: 12px; line-height: 1.65; }
   .cxm-readme h1, .cxm-readme h2, .cxm-readme h3, .cxm-readme h4 { color: #f5f6f8; line-height: 1.3; }
   .cxm-readme h1 { margin: 2px 0 14px; font-size: 22px; }
@@ -1050,6 +1074,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let operationError: string | undefined
   let sourceOperationError: string | undefined
   let sourcesBusy = false
+  const configRendererMounts = new Set<ConfigRendererMountHandle>()
+
+  const disposeConfigRenderers = (): void => {
+    for (const mount of configRendererMounts) void mount.dispose()
+    configRendererMounts.clear()
+  }
 
   const hideForExternalNavigation = (): void => {
     settingsMount?.abort()
@@ -1595,6 +1625,199 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     content.append(detail)
   }
 
+  const fieldLabel = (field: CordisXConfigFieldSnapshot): string => {
+    const value = String(field.path[field.path.length - 1] ?? 'value')
+    return value.replaceAll(/[._-]+/g, ' ').replace(/^./, character => character.toUpperCase())
+  }
+
+  const renderDefaultConfigControl = (
+    field: CordisXConfigFieldSnapshot,
+    id: string,
+    onDraft: (value: unknown) => void,
+  ): HTMLElement => {
+    if (field.choices !== undefined) {
+      const select = create(document, 'select', 'cxm-config-control')
+      select.id = id
+      select.disabled = field.disabled
+      for (const choice of field.choices) {
+        const option = create(document, 'option', undefined, choice.label)
+        option.value = JSON.stringify(choice.value)
+        option.selected = Object.is(choice.value, field.value)
+        select.append(option)
+      }
+      select.addEventListener('change', () => onDraft(JSON.parse(select.value) as unknown))
+      return select
+    }
+    if (field.type === 'boolean') {
+      const input = create(document, 'input', 'cxm-config-checkbox')
+      input.id = id
+      input.type = 'checkbox'
+      input.checked = field.value === true
+      input.disabled = field.disabled
+      input.addEventListener('change', () => onDraft(input.checked))
+      return input
+    }
+    if (field.type === 'number' || field.type === 'natural') {
+      const input = create(document, 'input', 'cxm-config-control')
+      input.id = id
+      input.type = 'number'
+      input.value = typeof field.value === 'number' ? String(field.value) : ''
+      input.disabled = field.disabled
+      input.required = field.required
+      if (field.min !== undefined) input.min = String(field.min)
+      if (field.max !== undefined) input.max = String(field.max)
+      if (field.step !== undefined) input.step = String(field.step)
+      input.addEventListener('input', () => onDraft(input.value === '' ? undefined : Number(input.value)))
+      return input
+    }
+    if (field.type === 'string') {
+      const input = create(document, 'input', 'cxm-config-control')
+      input.id = id
+      input.type = field.role === 'color' ? 'color' : 'text'
+      input.value = typeof field.value === 'string' ? field.value : ''
+      input.disabled = field.disabled
+      input.required = field.required
+      input.addEventListener('input', () => onDraft(input.value))
+      return input
+    }
+    const textarea = create(document, 'textarea', 'cxm-config-control')
+    textarea.id = id
+    textarea.disabled = field.disabled
+    textarea.value = formatConfig(field.value)
+    textarea.addEventListener('input', () => {
+      try {
+        onDraft(JSON.parse(textarea.value) as unknown)
+        textarea.removeAttribute('aria-invalid')
+      } catch {
+        textarea.setAttribute('aria-invalid', 'true')
+      }
+    })
+    return textarea
+  }
+
+  const renderPluginConfiguration = (plugin: ManagerPluginSnapshot, panel: HTMLElement): void => {
+    const descriptor = plugin.configuration
+    const summary = create(document, 'div', 'cxm-detail-grid')
+    for (const [label, value] of [
+      ['Schema', descriptor.schemaKind === 'schemastery' ? 'Schemastery' : descriptor.schemaKind === 'standard' ? 'Standard Schema' : '未声明'],
+      ['应用方式', descriptor.applies === 'live' ? '实时发布（不重载）' : '重建当前插件 fiber'],
+      ['Revision', String(descriptor.revision)],
+    ]) {
+      const item = create(document, 'div', 'cxm-field')
+      item.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
+      summary.append(item)
+    }
+    panel.append(summary)
+
+    if (descriptor.schemaKind !== 'schemastery') {
+      panel.append(create(document, 'pre', 'cxm-code', formatConfig(descriptor.value)))
+      panel.append(create(document, 'div', 'cxm-notice', descriptor.schemaKind === 'standard'
+        ? '该插件仅声明 Standard Schema 验证器；Host 不推断字段 UI，因此当前以验证边界和只读 JSON 展示。'
+        : '该插件没有声明 Config Schema；当前配置只读展示。'))
+      return
+    }
+    if (descriptor.fields.length === 0) {
+      panel.append(create(document, 'div', 'cxm-empty', '该 Schemastery Schema 没有可渲染字段。'))
+      return
+    }
+
+    const form = create(document, 'form', 'cxm-config-form')
+    form.dataset.pluginConfigForm = plugin.id
+    const dirty = new Map<string, ConfigMutationOperation>()
+    for (const [index, field] of descriptor.fields.entries()) {
+      const pathKey = JSON.stringify(field.path)
+      const wrapper = create(document, 'div', 'cxm-config-field')
+      wrapper.dataset.configPath = field.path.join('.')
+      const controlId = `cxm-config-${plugin.id}-${index}`
+      const label = create(document, 'label', 'cxm-config-label')
+      label.htmlFor = controlId
+      label.append(create(document, 'span', undefined, fieldLabel(field)), create(document, 'code', 'cxm-config-path', field.path.join('.')))
+      wrapper.append(label)
+      if (field.description !== undefined) wrapper.append(create(document, 'p', 'cxm-config-help', field.description))
+
+      if (field.role !== undefined && ['secret', 'credential', 'credential-ref', 'permission', 'capability'].includes(field.role)) {
+        const boundary = create(document, 'div', 'cxm-notice', '敏感字段由 Host credential 边界保留；当前版本尚未提供 credential broker，因此不会显示、写入或交给自定义 renderer。')
+        boundary.dataset.tone = 'warning'
+        wrapper.append(boundary)
+        form.append(wrapper)
+        continue
+      }
+
+      const setDraft = (value: unknown): void => {
+        dirty.set(pathKey, value === undefined
+          ? { op: 'unset', path: field.path }
+          : { op: 'set', path: field.path, value: value as CordisXJsonValue })
+      }
+      const defaultHolder = create(document, 'div')
+      defaultHolder.append(renderDefaultConfigControl(field, controlId, setDraft))
+      wrapper.append(defaultHolder)
+      if (model.mountConfigRenderer !== undefined && !field.disabled) {
+        const custom = create(document, 'div', 'cxm-config-renderer')
+        custom.hidden = true
+        wrapper.append(custom)
+        void model.mountConfigRenderer(plugin.id, field, custom, setDraft).then(mount => {
+          if (!wrapper.isConnected) {
+            void mount.dispose()
+            return
+          }
+          configRendererMounts.add(mount)
+          if (mount.mounted) {
+            custom.hidden = false
+            defaultHolder.hidden = true
+            const focusable = custom.querySelector<HTMLElement>('input,select,textarea,button,[tabindex]')
+            if (focusable !== null && focusable.id === '') focusable.id = controlId
+          }
+        }).catch(() => undefined)
+      }
+      const reset = create(document, 'button', 'cxm-mini-action', '恢复默认值')
+      reset.type = 'button'
+      reset.disabled = !descriptor.writable || busyPluginId !== undefined
+      reset.addEventListener('click', async () => {
+        if (model.updatePluginConfig === undefined) return
+        busyPluginId = plugin.id
+        operationError = undefined
+        renderContent()
+        try {
+          await model.updatePluginConfig(plugin.id, descriptor.revision, [{ op: 'unset', path: field.path }])
+        } catch (error) {
+          operationError = error instanceof Error ? error.message : String(error)
+        } finally {
+          busyPluginId = undefined
+          renderContent()
+        }
+      })
+      wrapper.append(reset)
+      form.append(wrapper)
+    }
+    const submit = create(document, 'button', 'cxm-action', busyPluginId === plugin.id ? '保存中…' : '保存配置')
+    submit.type = 'submit'
+    submit.disabled = !descriptor.writable || busyPluginId !== undefined
+    form.append(submit)
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault()
+      if (model.updatePluginConfig === undefined || dirty.size === 0) return
+      busyPluginId = plugin.id
+      operationError = undefined
+      submit.disabled = true
+      try {
+        await model.updatePluginConfig(plugin.id, descriptor.revision, [...dirty.values()])
+      } catch (error) {
+        operationError = error instanceof Error ? error.message : String(error)
+      } finally {
+        busyPluginId = undefined
+        renderContent()
+      }
+    })
+    panel.append(form)
+    if (!descriptor.writable) panel.append(create(document, 'div', 'cxm-notice', '当前 launcher 模式没有 profile/generation 绑定的配置 writer；renderer 不会直接写配置文件。'))
+    if (descriptor.secrets.length > 0) panel.append(create(document, 'div', 'cxm-notice', `Host 保留了 ${descriptor.secrets.length} 个敏感字段；credential broker 尚未实现。`))
+    if (operationError !== undefined) {
+      const error = create(document, 'div', 'cxm-config-error', operationError)
+      error.setAttribute('role', 'alert')
+      panel.append(error)
+    }
+  }
+
   const renderPluginDetail = (snapshot: ManagerSnapshot, id: string): void => {
     const plugin = snapshot.plugins.find(item => item.id === id)
     setHeading(plugin?.name ?? id, '当前 bundle 中的本地插件详情', {
@@ -1637,8 +1860,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
     if (pluginDetailTab === 'config') {
       const panel = createTabPanel(document, '配置管理')
-      panel.append(create(document, 'pre', 'cxm-code', formatConfig(plugin.config)))
-      panel.append(create(document, 'div', 'cxm-notice', '当前配置来自本次 launcher composition，只读展示；可跨 generation 安全写入前不会在 renderer 内直接修改配置文件。'))
+      renderPluginConfiguration(plugin, panel)
       content.append(panel)
       return
     }
@@ -2355,7 +2577,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   function renderContent(): void {
     const snapshot = model.snapshot()
     const preserveSettings = activeTab === 'settings' && settingsRoot?.isConnected === true
-    if (!preserveSettings) content.replaceChildren()
+    if (!preserveSettings) {
+      disposeConfigRenderers()
+      content.replaceChildren()
+    }
     for (const [id, button] of navButtons) button.setAttribute('aria-selected', String(id === activeTab))
     if (permissionDetail !== undefined && secondaryView?.kind === 'plugin' && activeTab === 'plugins') {
       renderPermissionDetail(snapshot, permissionDetail)
@@ -2392,6 +2617,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     close.focus()
   }
   const dismiss = (): void => {
+    disposeConfigRenderers()
     settingsMount?.abort()
     void resetSettings().catch(() => {})
     modal.hidden = true
@@ -2456,6 +2682,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   void marketplace.reload()
 
   return () => {
+    disposeConfigRenderers()
     settingsMount?.abort()
     void stopSettingsContent().catch(() => {})
     observer?.disconnect()

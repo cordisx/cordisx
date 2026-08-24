@@ -15,6 +15,7 @@ const parsed = parseArgs({
     'manager-detail-tab': { type: 'string' },
     'manager-settings-tab': { type: 'string' },
     'manager-settings-exercise': { type: 'boolean', default: false },
+    'config-exercise': { type: 'boolean', default: false },
     'manager-extension-point': { type: 'string' },
     'manager-extension-point-tab': { type: 'string' },
     'manager-route': { type: 'string' },
@@ -547,6 +548,7 @@ async function evaluateByValue(expression, awaitPromise = false) {
 
 let exerciseReport
 let settingsTabsReport
+let configExerciseReport
 if (parsed.values['manager-settings-exercise']) {
   const owner = parsed.values['plugin-owner'] ?? 'settings-tab-demo'
   const qualifiedTabId = `${owner}:settings`
@@ -765,6 +767,96 @@ if (parsed.values['manager-settings-exercise']) {
       && final.access.allAttributed === true,
   }
   console.log(`manager-settings=${JSON.stringify(settingsTabsReport, null, 2)}`)
+}
+
+if (parsed.values['config-exercise']) {
+  configExerciseReport = await evaluateByValue(`(async () => {
+    const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+    const waitFor = async (predicate, label) => {
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        const value = predicate()
+        if (value) return value
+        await wait(50)
+      }
+      throw new Error('timed out waiting for ' + label)
+    }
+    const runtime = globalThis.__cordisxRuntime
+    if (runtime === undefined) throw new Error('CordisX runtime is unavailable')
+    const openPluginConfig = async owner => {
+      document.querySelector('[data-cordisx-manager-trigger]')?.click()
+      document.querySelector('[data-tab="plugins"]')?.click()
+      await waitFor(() => document.querySelector('[data-plugin-id="' + owner + '"]'), owner + ' manager row')
+      document.querySelector('[data-plugin-id="' + owner + '"]')?.click()
+      await waitFor(() => document.querySelector('[data-plugin-detail-tab="config"]'), owner + ' detail tabs')
+      document.querySelector('[data-plugin-detail-tab="config"]')?.click()
+      return waitFor(() => document.querySelector('[data-plugin-config-form="' + owner + '"]'), owner + ' config form')
+    }
+    const edit = async (owner, path, value, selector) => {
+      const before = runtime.snapshot().plugins.find(plugin => plugin.id === owner)
+      const form = await openPluginConfig(owner)
+      const field = form.querySelector('[data-config-path="' + path + '"]')
+      const control = await waitFor(() => field?.querySelector(selector), owner + ' ' + path + ' control')
+      const label = field?.querySelector('label')
+      const labelOwnsControl = label?.htmlFor !== '' && label?.htmlFor === control.id
+      control.value = String(value)
+      control.dispatchEvent(new Event('input', { bubbles: true }))
+      form.requestSubmit()
+      const after = await waitFor(() => {
+        const plugin = runtime.snapshot().plugins.find(item => item.id === owner)
+        return plugin?.configuration.revision === (before?.configuration.revision ?? -1) + 1 ? plugin : undefined
+      }, owner + ' revision commit')
+      return {
+        beforeRevision: before?.configuration.revision ?? null,
+        afterRevision: after.configuration.revision,
+        applies: after.configuration.applies,
+        labelOwnsControl,
+        controlType: control.type,
+        panelRole: form.closest('[role="tabpanel"]')?.getAttribute('role') ?? null,
+      }
+    }
+    const liveState = globalThis.__cordisxConfigFixture
+    const restartState = globalThis.__cordisxRestartConfigFixture
+    if (liveState === undefined || restartState === undefined) throw new Error('config smoke fixture state is unavailable')
+    const before = {
+      liveApply: liveState.liveApply,
+      liveDispose: liveState.liveDispose,
+      restartApply: [...restartState.restartApply],
+      restartDispose: restartState.restartDispose,
+    }
+    const live = await edit('live-config', 'timeout', 47, 'input[type="range"]')
+    document.querySelector('.cxm-back')?.click()
+    const restart = await edit('restart-config', 'label', 'smoke-restart', 'input[type="text"]')
+    const after = {
+      liveApply: liveState.liveApply,
+      liveDispose: liveState.liveDispose,
+      liveValues: [...liveState.liveValues],
+      restartApply: [...restartState.restartApply],
+      restartDispose: restartState.restartDispose,
+    }
+    const assertions = {
+      appRenderer: location.href === 'app://-/index.html',
+      structuredForms: live.panelRole === 'tabpanel' && restart.panelRole === 'tabpanel',
+      accessibleLabels: live.labelOwnsControl && restart.labelOwnsControl,
+      customRenderer: live.controlType === 'range',
+      liveWithoutReload: after.liveApply === before.liveApply && after.liveDispose === before.liveDispose
+        && after.liveValues.at(-1) === 47,
+      owningRestartOnly: after.restartApply.length === before.restartApply.length + 1
+        && after.restartApply.at(-1) === 'smoke-restart' && after.restartDispose === before.restartDispose + 1
+        && after.liveApply === before.liveApply,
+      revisionsCommitted: live.afterRevision === live.beforeRevision + 1
+        && restart.afterRevision === restart.beforeRevision + 1,
+    }
+    return {
+      result: Object.values(assertions).every(Boolean) ? 'pass' : 'fail',
+      url: location.href,
+      live,
+      restart,
+      before,
+      after,
+      assertions,
+    }
+  })()`, true)
+  console.log(`configExercise=${JSON.stringify(configExerciseReport, null, 2)}`)
 }
 
 if (parsed.values.exercise) {
@@ -1777,6 +1869,7 @@ if (parsed.values.report !== undefined) {
     baseline: report,
     ...(exerciseReport === undefined ? {} : { exercise: exerciseReport }),
     ...(settingsTabsReport === undefined ? {} : { managerSettings: settingsTabsReport }),
+    ...(configExerciseReport === undefined ? {} : { pluginConfiguration: configExerciseReport }),
     ...(demoReport === undefined ? {} : { agentTraceDemo: demoReport }),
     ...(pluginLifecycleReport === undefined ? {} : { pluginLifecycle: pluginLifecycleReport }),
     ...(uiCatalogReport === undefined ? {} : { uiCatalog: uiCatalogReport }),
@@ -1794,4 +1887,7 @@ if (uiCatalogReport?.result === 'fail') {
 }
 if (settingsTabsReport?.passed === false) {
   throw new Error('manager settings smoke assertions failed; inspect the aggregated report')
+}
+if (configExerciseReport?.result === 'fail') {
+  throw new Error('plugin configuration smoke assertions failed; inspect the aggregated report')
 }

@@ -54,6 +54,7 @@
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/schemastery": "^3.18.1",
     "@material-symbols/svg-400": "0.46.0",
     "esbuild": "^0.25.9",
     "intl-messageformat": "11.2.14",

@@ -19,6 +19,22 @@ export interface HomeConfigPlugin {
   readonly entry: string
   readonly enabled?: boolean
   readonly config?: JsonValue
+  /** Profile-scoped config created lazily from the legacy `config` fallback. */
+  readonly profiles?: Readonly<Record<string, HomeConfigPluginProfile>>
+}
+
+export interface HomeConfigPluginCandidate {
+  readonly revision: number
+  readonly config: JsonValue
+  readonly ownerToken: string
+  readonly generation: string
+  readonly createdAt: string
+}
+
+export interface HomeConfigPluginProfile {
+  readonly revision: number
+  readonly config: JsonValue
+  readonly candidate?: HomeConfigPluginCandidate
 }
 
 export interface HomeConfigProvider {
@@ -131,7 +147,7 @@ function jsonValue(value: unknown, label: string, seen = new Set<object>()): Jso
 function parsePlugin(value: unknown, index: number): HomeConfigPlugin {
   const label = `config.plugins[${index}]`
   const plugin = record(value, label)
-  rejectUnknownKeys(plugin, ['id', 'entry', 'enabled', 'config'], label)
+  rejectUnknownKeys(plugin, ['id', 'entry', 'enabled', 'config', 'profiles'], label)
   const id = nonEmptyString(plugin.id, `${label}.id`)
   if (!PLUGIN_ID.test(id)) throw new Error(`${label}.id is invalid: ${id}`)
   if (id === 'host' || id.startsWith('cordisx.')) throw new Error(`${label}.id is reserved: ${id}`)
@@ -139,11 +155,58 @@ function parsePlugin(value: unknown, index: number): HomeConfigPlugin {
   if (plugin.enabled !== undefined && typeof plugin.enabled !== 'boolean') {
     throw new Error(`${label}.enabled must be a boolean`)
   }
+  let profiles: Record<string, HomeConfigPluginProfile> | undefined
+  if (plugin.profiles !== undefined) {
+    const source = record(plugin.profiles, `${label}.profiles`)
+    profiles = Object.create(null) as Record<string, HomeConfigPluginProfile>
+    for (const [profileId, rawProfile] of Object.entries(source)) {
+      portableId(profileId, `${label}.profiles profile id`)
+      profiles[profileId] = parsePluginProfile(rawProfile, `${label}.profiles.${profileId}`)
+    }
+  }
   return {
     id,
     entry,
     ...(plugin.enabled === undefined ? {} : { enabled: plugin.enabled }),
     ...(plugin.config === undefined ? {} : { config: jsonValue(plugin.config, `${label}.config`) }),
+    ...(profiles === undefined ? {} : { profiles }),
+  }
+}
+
+function parsePluginProfile(value: unknown, label: string): HomeConfigPluginProfile {
+  const profile = record(value, label)
+  rejectUnknownKeys(profile, ['revision', 'config', 'candidate'], label)
+  if (!Number.isInteger(profile.revision) || (profile.revision as number) < 0) {
+    throw new Error(`${label}.revision must be a non-negative integer`)
+  }
+  if (profile.config === undefined) throw new Error(`${label}.config is required`)
+  const revision = profile.revision as number
+  let candidate: HomeConfigPluginCandidate | undefined
+  if (profile.candidate !== undefined) {
+    const raw = record(profile.candidate, `${label}.candidate`)
+    rejectUnknownKeys(raw, ['revision', 'config', 'ownerToken', 'generation', 'createdAt'], `${label}.candidate`)
+    if (raw.revision !== revision + 1) throw new Error(`${label}.candidate.revision must equal revision + 1`)
+    if (typeof raw.ownerToken !== 'string' || !/^[a-f0-9]{64}$/.test(raw.ownerToken)) {
+      throw new Error(`${label}.candidate.ownerToken must be a 64-character lowercase hex token`)
+    }
+    if (typeof raw.generation !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(raw.generation)) {
+      throw new Error(`${label}.candidate.generation is invalid`)
+    }
+    if (typeof raw.createdAt !== 'string' || Number.isNaN(Date.parse(raw.createdAt))) {
+      throw new Error(`${label}.candidate.createdAt must be an ISO timestamp`)
+    }
+    candidate = {
+      revision: raw.revision,
+      config: jsonValue(raw.config, `${label}.candidate.config`),
+      ownerToken: raw.ownerToken,
+      generation: raw.generation,
+      createdAt: raw.createdAt,
+    }
+  }
+  return {
+    revision,
+    config: jsonValue(profile.config, `${label}.config`),
+    ...(candidate === undefined ? {} : { candidate }),
   }
 }
 

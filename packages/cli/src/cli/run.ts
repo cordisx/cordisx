@@ -22,6 +22,7 @@ import { parseCordisXCli, type CordisXDevInvocation, type CordisXLauncherOptions
 import { resolveProfileSelection } from './profiles.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
+import { createConfigBridgeHandler, type ConfigBridgeHandler } from '../launcher/config-rpc.js'
 
 const HELP = `Usage:
   cordisx [app] [profile] [--data shared|isolated] [options] [-- host-arguments...]
@@ -85,7 +86,7 @@ function developmentPluginConfig(pluginPath: string, cwd: string): CordisXConfig
     rootDir: cwd,
     codex: { debugPort: 9229 },
     providers: [],
-    plugins: [{ id: pluginId(entry), entry, enabled: true, config: {} }],
+    plugins: [{ id: pluginId(entry), entry, enabled: true, config: {}, revision: 0 }],
   }
 }
 
@@ -93,18 +94,35 @@ interface RendererComposition {
   readonly source: string
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken: string
+  readonly configBridgeToken?: string
+  readonly generation: string
 }
 
-async function bundle(config: CordisXConfig, stdout: (line: string) => void): Promise<RendererComposition> {
+async function bundle(
+  config: CordisXConfig,
+  stdout: (line: string) => void,
+  options: { readonly profileId?: string; readonly writable?: boolean } = {},
+): Promise<RendererComposition> {
   const providerBridgeToken = config.providers.some(provider => provider.enabled) ? randomBytes(32).toString('hex') : undefined
   const agentHistoryBridgeToken = randomBytes(32).toString('hex')
+  const configBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
+  const generation = randomBytes(16).toString('hex')
   const source = await buildRendererBundle(config, {
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
+    ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
+    ...(options.profileId === undefined ? {} : { profileId: options.profileId }),
+    generation,
   })
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
   stdout(`[cordisx] bundle ready: ${source.length} bytes, plugins: ${enabled.join(', ') || '(none)'}`)
-  return { source, ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }), agentHistoryBridgeToken }
+  return {
+    source,
+    ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
+    agentHistoryBridgeToken,
+    ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
+    generation,
+  }
 }
 
 function codexHome(environment: Readonly<Record<string, string>> | NodeJS.ProcessEnv): string {
@@ -136,6 +154,7 @@ async function runInjectedHost(input: {
   readonly providerBridgeToken?: string
   readonly agentHistoryHost: CodexAgentHistoryHost
   readonly agentHistoryBridgeToken: string
+  readonly configBridge?: ConfigBridgeHandler
   readonly executable?: string
   readonly debugPort: number
   readonly hostArgs: readonly string[]
@@ -158,6 +177,7 @@ async function runInjectedHost(input: {
     }),
     agentHistoryHost: input.agentHistoryHost,
     agentHistoryBridgeToken: input.agentHistoryBridgeToken,
+    ...(input.configBridge === undefined ? {} : { configBridge: input.configBridge }),
     onStatus: message => input.stdout(`[cordisx] ${message}`),
   })
   let launched: ChildProcess | undefined
@@ -326,8 +346,17 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     return
   }
 
-  const composition = await loadConfig(configPath)
-  const rendererComposition = await bundle(composition, stdout)
+  const composition = await loadConfig(configPath, { profileId: selection.profileId })
+  const rendererComposition = await bundle(composition, stdout, { profileId: selection.profileId, writable: true })
+  const configBridge = rendererComposition.configBridgeToken === undefined
+    ? undefined
+    : createConfigBridgeHandler({
+        token: rendererComposition.configBridgeToken,
+        profileId: selection.profileId,
+        generation: rendererComposition.generation,
+        configPath,
+        composition,
+      })
   if (invocation.options.attach) {
     const debugPort = invocation.options.debugPort ?? composition.codex.debugPort
     if (invocation.options.dryRun) {
@@ -342,6 +371,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         providerFleet: await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } }),
         providerBridgeToken: rendererComposition.providerBridgeToken,
       }),
+      ...(configBridge === undefined ? {} : { configBridge }),
       debugPort,
       hostArgs: invocation.hostArgs,
       launcher: invocation.options,
@@ -390,6 +420,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       providerFleet: await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } }),
       providerBridgeToken: rendererComposition.providerBridgeToken,
     }),
+    ...(configBridge === undefined ? {} : { configBridge }),
     executable: plan.executable,
     debugPort,
     hostArgs: invocation.hostArgs,
