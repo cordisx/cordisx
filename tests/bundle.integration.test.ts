@@ -679,7 +679,7 @@ describe('renderer bundle', () => {
     expect(overflow.getAttribute('aria-expanded')).toBe('true')
     expect(overflowMenu?.getAttribute('role')).toBe('menu')
     expect([...overflowMenu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []].map(item => [item.dataset.pluginMenuAction, item.disabled])).toEqual([
-      ['reload', true], ['favorite', false], ['share', true], ['uninstall', true],
+      ['reload', true], ['favorite', false], ['share', true], ['source', true], ['diagnostics', false], ['uninstall', true],
     ])
     overflowMenu?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(dom.window.document.querySelector('body > .cxm-plugin-menu-popup')).toBeNull()

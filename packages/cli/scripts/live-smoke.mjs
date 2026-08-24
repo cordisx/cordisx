@@ -1367,6 +1367,11 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
         && popupRect.right <= innerWidth && popupRect.bottom <= innerHeight,
       firstItemFocused: popup.contains(document.activeElement),
       shareText: popup.querySelector('[data-plugin-menu-action="share"]')?.textContent?.trim() ?? null,
+      icons: [...popup.querySelectorAll('[role="menuitem"]')].map(item => ({
+        action: item.getAttribute('data-plugin-menu-action'),
+        icon: item.querySelector('[data-material-icon]')?.getAttribute('data-material-icon') ?? null,
+      })),
+      triggerRect: rect(replacementTrigger),
     }
     return {
       initial, afterReload, disableImpact, afterDisable, afterEnable,
@@ -1377,6 +1382,95 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
   })()`, true)
   if (exercised.menuRect === null) throw new Error('lifecycle action menu is not visible')
   screenshots.menu = await capture(exercised.menuRect, artifact('lifecycle-menu'), 'lifecycle action menu')
+
+  if (exercised.menu.triggerRect === null) throw new Error('lifecycle action menu trigger is not visible')
+  // Close/reopen with a trusted pointer, then validate keyboard, external-dismiss,
+  // diagnostic execution, and block/restore cleanup against the real renderer.
+  await pointerClick(exercised.menu.triggerRect)
+  const menuToggle = await evaluateByValue(`(() => ({
+    closed: document.querySelector('body > .cxm-plugin-menu-popup') === null,
+    triggerFocused: document.activeElement?.matches?.('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger') ?? false,
+  }))()`)
+  await pointerClick(exercised.menu.triggerRect)
+  await pressKey('ArrowDown', 'ArrowDown', 40)
+  await pressKey('End', 'End', 35)
+  const menuKeyboard = await evaluateByValue(`(() => {
+    const popup = document.querySelector('body > .cxm-plugin-menu-popup')
+    return {
+      open: popup !== null,
+      focusedMenuItem: popup?.contains(document.activeElement) ?? false,
+      activeAction: document.activeElement?.getAttribute?.('data-plugin-menu-action') ?? null,
+    }
+  })()`)
+  await pressKey('Escape', 'Escape', 27)
+  const menuEscape = await evaluateByValue(`(() => ({
+    closed: document.querySelector('body > .cxm-plugin-menu-popup') === null,
+    triggerFocused: document.activeElement?.matches?.('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger') ?? false,
+  }))()`)
+
+  await pointerClick(exercised.menu.triggerRect)
+  const diagnosticTarget = await evaluateByValue(`(() => {
+    const button = document.querySelector('body > .cxm-plugin-menu-popup [data-plugin-menu-action="diagnostics"]')
+    const rect = button?.getBoundingClientRect()
+    return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+  })()`)
+  if (diagnosticTarget === null || diagnosticTarget.width <= 0 || diagnosticTarget.height <= 0) {
+    throw new Error('diagnostic menu action is not visible')
+  }
+  await pointerClick(diagnosticTarget)
+  const diagnosticExecution = await evaluateByValue(`(async () => {
+    const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (document.querySelector('[data-manager-page-route="plugin:lifecycle-smoke:runtime"]') !== null) break
+      await wait(25)
+    }
+    return {
+      runtimeRoute: document.querySelector('[data-manager-page-route="plugin:lifecycle-smoke:runtime"]') !== null,
+      popupClosed: document.querySelector('body > .cxm-plugin-menu-popup') === null,
+    }
+  })()`, true)
+  await evaluateByValue(`document.querySelector('.cxm-back')?.click()`)
+  await new Promise(resolve => setTimeout(resolve, 120))
+
+  const outsideTarget = await evaluateByValue(`(() => {
+    const trigger = document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger')
+    const rect = trigger?.getBoundingClientRect()
+    return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+  })()`)
+  if (outsideTarget === null) throw new Error('lifecycle action menu trigger disappeared')
+  await pointerClick(outsideTarget)
+  const outsideDismissTarget = await evaluateByValue(`(() => {
+    const target = document.querySelector('.cxm-heading')
+    const rect = target?.getBoundingClientRect()
+    return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+  })()`)
+  if (outsideDismissTarget === null || outsideDismissTarget.width <= 0 || outsideDismissTarget.height <= 0) {
+    throw new Error('manager outside-dismiss target is not visible')
+  }
+  await pointerClick(outsideDismissTarget)
+  const outsideDismiss = await evaluateByValue(`document.querySelector('body > .cxm-plugin-menu-popup') === null`)
+
+  await pointerClick(outsideTarget)
+  const blockRestore = await evaluateByValue(`(async () => {
+    const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+    const runtime = globalThis.__cordisxRuntime
+    await runtime.setPluginBlocked('lifecycle-smoke', true)
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (document.querySelector('body > .cxm-plugin-menu-popup') === null) break
+      await wait(25)
+    }
+    const closedOnBlock = document.querySelector('body > .cxm-plugin-menu-popup') === null
+    await runtime.setPluginBlocked('lifecycle-smoke', false)
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke')?.status === 'active') break
+      await wait(25)
+    }
+    return {
+      closedOnBlock,
+      restored: runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke')?.status === 'active',
+      counters: { ...globalThis.__cordisxLifecycleSmoke },
+    }
+  })()`, true)
 
   const uninstallPlan = await evaluateByValue(`(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
@@ -1443,14 +1537,24 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       && JSON.parse(exercised.favoriteStored ?? '[]').includes('lifecycle-smoke'),
     menu: exercised.menu.portaled && exercised.menu.bounded && exercised.menu.firstItemFocused
       && exercised.menu.actions.some(item => item.action === 'share' && item.disabled === false)
-      && exercised.menu.actions.some(item => item.action === 'uninstall' && item.disabled === false),
+      && exercised.menu.actions.some(item => item.action === 'uninstall' && item.disabled === false)
+      && exercised.menu.icons.some(item => item.action === 'share' && item.icon === 'share-plugin')
+      && exercised.menu.icons.some(item => item.action === 'source' && item.icon === 'authors-source')
+      && exercised.menu.icons.some(item => item.action === 'diagnostics' && item.icon === 'diagnostics'),
+    menuInteraction: menuToggle.closed && menuToggle.triggerFocused
+      && menuKeyboard.open && menuKeyboard.focusedMenuItem && menuKeyboard.activeAction !== null
+      && menuEscape.closed && menuEscape.triggerFocused
+      && diagnosticExecution.runtimeRoute && diagnosticExecution.popupClosed
+      && outsideDismiss && blockRestore.closedOnBlock && blockRestore.restored,
     uninstallImpact: uninstallPlan.text.includes('lifecycle-smoke') && uninstallPlan.text.includes('确认卸载'),
     uninstallCleanup: removed.removed && removed.registrationsRemoved && removed.routesRemoved && removed.pagesRemoved
-      && removed.counters.dispose === exercised.afterEnable.dispose + 1,
+      && removed.counters.dispose === blockRestore.counters.dispose + 1,
   }
   managerLifecycleReport = {
     result: Object.values(assertions).every(Boolean) ? 'pass' : 'fail',
-    installed, pointerNavigation, keyboardNavigation, exercised, uninstallPlan: { text: uninstallPlan.text }, removed,
+    installed, pointerNavigation, keyboardNavigation, exercised,
+    menuInteraction: { menuToggle, menuKeyboard, menuEscape, diagnosticExecution, outsideDismiss, blockRestore },
+    uninstallPlan: { text: uninstallPlan.text }, removed,
     screenshots, assertions,
   }
   console.log(`manager-lifecycle=${JSON.stringify(managerLifecycleReport, null, 2)}`)

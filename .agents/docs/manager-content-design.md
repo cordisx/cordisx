@@ -362,6 +362,26 @@ Favorite is a current-profile manager preference. Share requires a validated
 public canonical HTTPS source and never projects a local source/store path,
 configuration, or secret. Uninstall is destructive and remains behind a
 second Host-owned confirmation containing the reverse-dependency impact.
+
+The overflow popup is a Host-owned `menu` portal with Host-created Material
+Symbol icons and `menuitem` controls. Its visible items include sharing and
+opening the validated public canonical source, runtime diagnostics, and
+uninstall; responsive reload/favorite entries join it only when their direct
+controls no longer fit. Disabled menu items retain `aria-disabled`, an exact
+unavailability reason, and no listener that claims execution. In particular,
+missing Package Store generation metadata, a missing lifecycle bridge, and a
+missing/non-HTTPS canonical source are distinct availability states, not a
+generic inert menu.
+
+The menu is mutually exclusive with card navigation: trigger/item pointer and
+keyboard events do not bubble into the row body. A second trigger activation,
+outside pointer/click, Escape, executing an item, route/card switch, manager
+close, runtime snapshot reconciliation, generation disposal, or a removed
+anchor closes and removes the portal. Arrow keys, Home, End, Enter, and Space
+operate enabled visible items; resize and scroll reposition the menu while an
+intact anchor remains, otherwise they close it safely. Focus returns to the
+trigger when that trigger survives the close; destructive confirmation then
+owns focus normally.
 The lifecycle broker is the sole source for product operation state: install
 and upgrade render `source snapshot/candidate → plan → permission review →
 generation-fenced activation → readiness → commit last-good`; an unresolved or

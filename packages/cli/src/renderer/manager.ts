@@ -1490,6 +1490,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const configRendererMounts = new Set<ConfigRendererMountHandle>()
   let breadcrumbCleanup = (): void => {}
   let closePluginActionMenu = (_restoreFocus = false): void => {}
+  let pluginActionMenuOpen = false
+  let pluginActionMenuContainsEvent = (_event: Event): boolean => false
+  let repositionPluginActionMenu = (): void => {}
   let pendingPluginMenuFocus: string | undefined
 
   const disposeConfigRenderers = (): void => {
@@ -1513,6 +1516,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const hideForExternalNavigation = (): void => {
+    closePluginActionMenu(false)
     settingsMount?.abort()
     if (settingsMount !== undefined || settingsMountId !== undefined) void resetSettings().catch(() => {})
     modal.hidden = true
@@ -1759,7 +1763,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const sharePlugin = async (plugin: ManagerPluginSnapshot): Promise<void> => {
-    const url = plugin.package?.canonicalSource
+    const url = publicCanonicalSource(plugin)
     if (url === undefined) return
     const navigator = document.defaultView?.navigator as Navigator & {
       share?: (data: ShareData) => Promise<void>
@@ -1774,6 +1778,39 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return
     }
     document.defaultView?.prompt('复制插件公开来源地址', url)
+  }
+
+  const publicCanonicalSource = (plugin: ManagerPluginSnapshot): string | undefined => {
+    const source = plugin.package?.canonicalSource
+    if (source === undefined) return undefined
+    try {
+      const url = new URL(source)
+      return url.protocol === 'https:' ? url.href : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  const packageOperationUnavailableReason = (
+    snapshot: ManagerSnapshot,
+    plugin: ManagerPluginSnapshot,
+  ): string | undefined => {
+    if (plugin.package === undefined) return '此插件未由 Package Store generation 管理'
+    if (snapshot.pluginLifecycle?.operationsAvailable !== true) return '当前 launcher 未提供插件生命周期服务'
+    if (model.requestPluginLifecycle === undefined) return '当前 renderer 未连接插件生命周期服务'
+    return undefined
+  }
+
+  const sourceUnavailableReason = (plugin: ManagerPluginSnapshot): string | undefined => {
+    if (plugin.package?.canonicalSource === undefined) return 'Package Store 未提供公开 canonical HTTPS 来源'
+    if (publicCanonicalSource(plugin) === undefined) return 'Package Store 的 canonical 来源不是公开 HTTPS 地址'
+    return undefined
+  }
+
+  const openPluginSource = (plugin: ManagerPluginSnapshot): void => {
+    const url = publicCanonicalSource(plugin)
+    if (url === undefined) return
+    document.defaultView?.open(url, '_blank', 'noopener,noreferrer')
   }
 
   const activePrimary = (route: ManagerRouteState = routeState): ManagerTab => {
@@ -2444,9 +2481,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       actions.setAttribute('role', 'group')
       actions.setAttribute('aria-label', `${plugin.name}的快速操作`)
       actions.dataset.cordisxNoDrag = 'true'
-      const managed = plugin.package !== undefined
-        && snapshot.pluginLifecycle?.operationsAvailable === true
-        && model.requestPluginLifecycle !== undefined
+      actions.addEventListener('click', event => event.stopPropagation())
+      actions.addEventListener('keydown', event => event.stopPropagation())
+      const packageOperationReason = packageOperationUnavailableReason(snapshot, plugin)
+      const managed = packageOperationReason === undefined
       const globallyBusy = lifecycleInstallBusy || lifecycleBusy.size > 0
       const attachActionTooltip = (button: HTMLElement, label: string): void => {
         tooltips.attach(button, () => label, 'top')
@@ -2467,7 +2505,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         button.setAttribute('aria-label', label)
         button.disabled = disabled
         button.append(createManagerIcon(document, icon))
-        button.addEventListener('click', invoke)
+        button.addEventListener('click', event => {
+          event.stopPropagation()
+          invoke()
+        })
         attachActionTooltip(button, label)
         return button
       }
@@ -2506,23 +2547,34 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       menuTrigger.setAttribute('aria-label', `更多 ${plugin.name} 操作`)
       menuTrigger.setAttribute('aria-haspopup', 'menu')
       menuTrigger.setAttribute('aria-expanded', 'false')
+      menuTrigger.setAttribute('aria-controls', `cordisx-plugin-menu-${plugin.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`)
       menuTrigger.append(createManagerIcon(document, 'more'))
       attachActionTooltip(menuTrigger, '更多操作')
       const popup = create(document, 'div', 'cxm-plugin-menu-popup')
+      popup.id = menuTrigger.getAttribute('aria-controls')!
       popup.setAttribute('role', 'menu')
+      popup.setAttribute('aria-label', `${plugin.name} 的更多操作`)
       popup.hidden = true
       const closeMenu = (restoreFocus = false): void => {
+        pluginActionMenuOpen = false
+        pluginActionMenuContainsEvent = () => false
+        repositionPluginActionMenu = () => {}
         popup.hidden = true
         popup.remove()
         menuTrigger.setAttribute('aria-expanded', 'false')
         if (closePluginActionMenu === closeMenu) closePluginActionMenu = () => {}
-        if (restoreFocus && menuTrigger.isConnected) menuTrigger.focus()
+        if (restoreFocus) queueMicrotask(() => {
+          pendingPluginMenuFocus = plugin.id
+          if (menuTrigger.isConnected) menuTrigger.focus()
+        })
       }
-      const openMenu = (): void => {
-        closePluginActionMenu(false)
-        tooltips.hide()
-        popup.hidden = false
-        document.body.append(popup)
+      const visibleEnabledMenuItems = (): HTMLButtonElement[] => [...popup.querySelectorAll<HTMLButtonElement>('.cxm-plugin-menu-item')]
+        .filter(item => !item.disabled && item.hidden === false && item.style.display !== 'none')
+      const positionMenu = (): void => {
+        if (!popup.isConnected || !menuTrigger.isConnected || !row.isConnected) {
+          closeMenu(false)
+          return
+        }
         const cardWidth = row.getBoundingClientRect().width
         for (const item of popup.querySelectorAll<HTMLElement>('.cxm-plugin-menu-responsive')) {
           const priority = Number(item.dataset.actionPriority)
@@ -2545,11 +2597,29 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           : Math.max(edge, triggerRect.top - popupRect.height - 6)
         popup.style.left = `${Math.round(left)}px`
         popup.style.top = `${Math.round(top)}px`
+      }
+      const openMenu = (): void => {
+        closePluginActionMenu(false)
+        tooltips.hide()
+        popup.hidden = false
+        document.body.append(popup)
+        positionMenu()
         menuTrigger.setAttribute('aria-expanded', 'true')
         closePluginActionMenu = closeMenu
-        popup.querySelector<HTMLButtonElement>('.cxm-plugin-menu-item:not(:disabled)')?.focus()
+        pluginActionMenuOpen = true
+        pluginActionMenuContainsEvent = event => {
+          const path = event.composedPath()
+          if (path.some(item => item === popup || item === menuTrigger)) return true
+          const Node = document.defaultView?.Node
+          const target = event.target
+          return Node !== undefined && target instanceof Node && (popup.contains(target) || menuTrigger.contains(target))
+        }
+        repositionPluginActionMenu = positionMenu
+        visibleEnabledMenuItems()[0]?.focus()
       }
-      menuTrigger.addEventListener('click', () => {
+      menuTrigger.addEventListener('click', event => {
+        event.preventDefault()
+        event.stopPropagation()
         if (menuTrigger.getAttribute('aria-expanded') === 'true') closeMenu(true)
         else openMenu()
       })
@@ -2559,7 +2629,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         label: string,
         disabled: boolean,
         invoke: () => void,
-        options: { readonly danger?: boolean; readonly priority?: 2 | 3 } = {},
+        options: { readonly danger?: boolean; readonly priority?: 2 | 3; readonly disabledReason?: string } = {},
       ): HTMLButtonElement => {
         const button = create(document, 'button', 'cxm-plugin-menu-item')
         button.type = 'button'
@@ -2567,39 +2637,102 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         button.dataset.cordisxNoDrag = 'true'
         button.setAttribute('role', 'menuitem')
         button.disabled = disabled
+        if (disabled) {
+          const disabledReason = options.disabledReason ?? '当前操作不可用'
+          button.setAttribute('aria-disabled', 'true')
+          button.setAttribute('aria-description', disabledReason)
+          button.title = disabledReason
+        }
         if (options.danger === true) button.dataset.tone = 'danger'
         if (options.priority !== undefined) {
           button.classList.add('cxm-plugin-menu-responsive')
           button.dataset.actionPriority = String(options.priority)
         }
         button.append(createManagerIcon(document, icon), create(document, 'span', undefined, label))
-        button.addEventListener('click', () => {
+        button.addEventListener('click', event => {
+          event.preventDefault()
+          event.stopPropagation()
+          if (button.disabled) return
           closeMenu(true)
           invoke()
         })
         return button
       }
+      popup.addEventListener('keydown', event => {
+        const items = visibleEnabledMenuItems()
+        const target = event.target instanceof document.defaultView!.HTMLButtonElement
+          ? event.target
+          : undefined
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          closeMenu(true)
+          return
+        }
+        if (items.length === 0) return
+        const current = target === undefined ? -1 : items.indexOf(target)
+        let next: HTMLButtonElement | undefined
+        if (event.key === 'ArrowDown') next = items[(current + 1 + items.length) % items.length]
+        if (event.key === 'ArrowUp') next = items[(current - 1 + items.length) % items.length]
+        if (event.key === 'Home') next = items[0]
+        if (event.key === 'End') next = items.at(-1)
+        if (next !== undefined) {
+          event.preventDefault()
+          event.stopPropagation()
+          next.focus()
+          return
+        }
+        if ((event.key === 'Enter' || event.key === ' ') && target !== undefined && !target.disabled) {
+          event.preventDefault()
+          event.stopPropagation()
+          target.click()
+        }
+      })
+      const sourceReason = sourceUnavailableReason(plugin)
+      const disabledReasonOption = (reason: string | undefined): { readonly disabledReason?: string } => (
+        reason === undefined ? {} : { disabledReason: reason }
+      )
       popup.append(
         menuItem('reload', 'reload-plugin', '重载', !managed || globallyBusy || plugin.status !== 'active', () => {
           void runPluginLifecycle(snapshot, plugin, 'reload', true)
-        }, { priority: 3 }),
+        }, {
+          priority: 3,
+          ...disabledReasonOption(packageOperationReason ?? (globallyBusy ? '当前有插件操作正在执行' : '插件当前不能重载')),
+        }),
         menuItem('favorite', favorite ? 'favorite-active' : 'favorite', favorite ? '取消收藏' : '收藏', false, () => {
           pendingPluginMenuFocus = plugin.id
           setFavorite(snapshot, plugin.id, !favorite)
           renderContent()
         }, { priority: 2 }),
         menuItem(
-          'share', 'share-plugin', plugin.package?.canonicalSource === undefined ? '分享（无公开来源）' : '分享',
-          plugin.package?.canonicalSource === undefined,
+          'share', 'share-plugin', sourceReason === undefined ? '分享公开来源' : '分享公开来源（不可用）',
+          sourceReason !== undefined,
           () => { void sharePlugin(plugin).catch(error => {
             operationError = error instanceof Error ? error.message : String(error)
             pendingPluginMenuFocus = plugin.id
             renderContent()
           }) },
+          disabledReasonOption(sourceReason),
+        ),
+        menuItem(
+          'source', 'authors-source', sourceReason === undefined ? '打开公开来源' : '打开公开来源（不可用）',
+          sourceReason !== undefined,
+          () => { openPluginSource(plugin) },
+          disabledReasonOption(sourceReason),
+        ),
+        menuItem(
+          'diagnostics', 'diagnostics', '查看运行诊断', false,
+          () => {
+            rememberListScroll()
+            void navigateRoute({ kind: 'plugin', pluginId: plugin.id, facet: 'runtime' })
+          },
         ),
         menuItem(
           'uninstall', 'uninstall-plugin', managed ? '卸载' : '卸载（不可用）', !managed || globallyBusy,
-          () => { void runPluginLifecycle(snapshot, plugin, 'uninstall', true) }, { danger: true },
+          () => { void runPluginLifecycle(snapshot, plugin, 'uninstall', true) }, {
+            danger: true,
+            ...disabledReasonOption(packageOperationReason ?? (globallyBusy ? '当前有插件操作正在执行' : undefined)),
+          },
         ),
       )
       menu.append(menuTrigger)
@@ -3928,6 +4061,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     close.focus()
   }
   const dismiss = (): void => {
+    closePluginActionMenu(false)
     disposeConfigRenderers()
     settingsMount?.abort()
     if (settingsMount !== undefined || settingsMountId !== undefined) void resetSettings().catch(() => {})
@@ -3937,8 +4071,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
   const onKeydown = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || modal.hidden) return
-    const menuTrigger = content.querySelector<HTMLElement>('.cxm-plugin-menu-trigger[aria-expanded="true"]')
-    if (menuTrigger !== null) {
+    if (pluginActionMenuOpen) {
       event.preventDefault()
       closePluginActionMenu(true)
       return
@@ -3951,12 +4084,15 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const target = event.target instanceof document.defaultView!.Element ? event.target : undefined
     if (target?.closest('a[href]') !== null && target !== undefined) hideForExternalNavigation()
   })
-  const closeMenuOutside = (event: PointerEvent): void => {
-    const target = event.target instanceof document.defaultView!.Element ? event.target : undefined
-    if (target?.closest('.cxm-plugin-menu-popup, .cxm-plugin-menu-trigger') !== null && target !== undefined) return
-    closePluginActionMenu(false)
+  const closeMenuOutside = (event: Event): void => {
+    if (!pluginActionMenuOpen || pluginActionMenuContainsEvent(event)) return
+    closePluginActionMenu(true)
   }
-  document.addEventListener('pointerdown', closeMenuOutside)
+  const repositionMenu = (): void => repositionPluginActionMenu()
+  document.addEventListener('pointerdown', closeMenuOutside, true)
+  document.addEventListener('click', closeMenuOutside, true)
+  document.defaultView?.addEventListener('resize', repositionMenu)
+  document.defaultView?.addEventListener('scroll', repositionMenu, true)
   backdrop.addEventListener('click', (event) => {
     if (event.target === backdrop) dismiss()
   })
@@ -3988,7 +4124,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     queueMicrotask(reconcile)
   }
   const Observer = document.defaultView?.MutationObserver
-  const observer = Observer === undefined ? undefined : new Observer(schedule)
+  const observer = Observer === undefined ? undefined : new Observer(() => {
+    if (pluginActionMenuOpen) repositionPluginActionMenu()
+    schedule()
+  })
   const themeObserver = Observer === undefined ? undefined : new Observer(() => syncAdaptiveBrandMark(document, triggerMark))
   if (document.documentElement !== null) observer?.observe(document.documentElement, { childList: true, subtree: true })
   if (document.documentElement !== null) themeObserver?.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
@@ -4015,7 +4154,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     tooltips.dispose()
     marketplaceFetcher.dispose()
     document.removeEventListener('keydown', onKeydown)
-    document.removeEventListener('pointerdown', closeMenuOutside)
+    document.removeEventListener('pointerdown', closeMenuOutside, true)
+    document.removeEventListener('click', closeMenuOutside, true)
+    document.defaultView?.removeEventListener('resize', repositionMenu)
+    document.defaultView?.removeEventListener('scroll', repositionMenu, true)
     closePluginActionMenu(false)
     trigger.removeEventListener('click', open)
     trigger.remove()
