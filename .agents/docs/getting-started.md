@@ -262,7 +262,9 @@ import type {} from 'cordisx/contracts'
 
 export const Config = Schema.object({
   timeout: Schema.number().default(30).min(1).max(120)
-    .role('duration').description('Request timeout'),
+    .role('duration')
+    .extra('extra', { label: { 'zh-CN': '请求超时', en: 'Request timeout' } })
+    .description('Maximum wait time in seconds.'),
 })
 export const configApplies = 'live'
 export const inject = ['settings', 'configRenderers']

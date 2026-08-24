@@ -694,6 +694,7 @@ export interface CordisXConfigFieldSnapshot {
   readonly path: CordisXConfigFieldPath
   readonly type: string
   readonly role?: string
+  readonly label?: string
   readonly description?: string
   readonly value: unknown
   readonly disabled: boolean

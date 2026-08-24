@@ -615,13 +615,13 @@ const MANAGER_STYLES = `
   .cxm-code { max-height: 140px; margin: 6px 0 0; overflow: auto; color: #bac2d2; font: 10px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
   .cxm-config-form { display: grid; gap: 12px; margin-top: 10px; }
   .cxm-config-field { display: grid; gap: 6px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.07); }
-  .cxm-config-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #eef0f4; font-weight: 600; }
-  .cxm-config-path { color: #9299a7; font: 10px/1.3 ui-monospace, monospace; }
+  .cxm-config-label { color: #eef0f4; font-weight: 600; }
   .cxm-config-help { margin: 0; color: #aab0bc; font-size: 11px; }
   .cxm-config-control { box-sizing: border-box; width: 100%; min-height: 34px; border: 1px solid rgba(255,255,255,.13); border-radius: 8px; padding: 7px 9px; background: rgba(8,10,14,.52); color: inherit; font: inherit; }
   textarea.cxm-config-control { min-height: 92px; resize: vertical; font-family: ui-monospace, monospace; font-size: 11px; }
   .cxm-config-checkbox { width: 18px; height: 18px; accent-color: #aeb7c7; }
   .cxm-config-renderer { min-height: 34px; }
+  .cxm-config-field-actions, .cxm-config-actions { display: flex; justify-content: flex-end; }
   .cxm-config-error { color: #ffaaa4; font-size: 11px; }
   .cxm-readme { max-width: 760px; color: #b8c0cf; font-size: 12px; line-height: 1.65; }
   .cxm-readme h1, .cxm-readme h2, .cxm-readme h3, .cxm-readme h4 { color: #f5f6f8; line-height: 1.3; }
@@ -1766,8 +1766,13 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const fieldLabel = (field: CordisXConfigFieldSnapshot): string => {
+    const productLabel = field.label?.trim()
+    if (productLabel !== undefined && productLabel !== '') return productLabel
     const value = String(field.path[field.path.length - 1] ?? 'value')
-    return value.replaceAll(/[._-]+/g, ' ').replace(/^./, character => character.toUpperCase())
+    return value
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replaceAll(/[._-]+/g, ' ')
+      .replace(/^./, character => character.toUpperCase())
   }
 
   const renderDefaultConfigControl = (
@@ -1837,45 +1842,38 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderPluginConfiguration = (plugin: ManagerPluginSnapshot, panel: HTMLElement): void => {
     const descriptor = plugin.configuration
-    const summary = create(document, 'div', 'cxm-detail-grid')
-    for (const [label, value] of [
-      ['Schema', descriptor.schemaKind === 'schemastery' ? 'Schemastery' : descriptor.schemaKind === 'standard' ? 'Standard Schema' : '未声明'],
-      ['应用方式', descriptor.applies === 'live' ? '实时发布（不重载）' : '重建当前插件 fiber'],
-      ['Revision', String(descriptor.revision)],
-    ]) {
-      const item = create(document, 'div', 'cxm-field')
-      item.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
-      summary.append(item)
-    }
-    panel.append(summary)
-
-    if (descriptor.schemaKind !== 'schemastery') {
-      panel.append(create(document, 'pre', 'cxm-code', formatConfig(descriptor.value)))
-      panel.append(create(document, 'div', 'cxm-notice', descriptor.schemaKind === 'standard'
-        ? '该插件仅声明 Standard Schema 验证器；Host 不推断字段 UI，因此当前以验证边界和只读 JSON 展示。'
-        : '该插件没有声明 Config Schema；当前配置只读展示。'))
+    if (descriptor === undefined) {
+      panel.append(create(document, 'div', 'cxm-empty', '此插件未提供可编辑设置。'))
       return
     }
-    if (descriptor.fields.length === 0) {
-      panel.append(create(document, 'div', 'cxm-empty', '该 Schemastery Schema 没有可渲染字段。'))
+    if (descriptor.schemaKind !== 'schemastery') {
+      panel.append(create(document, 'div', 'cxm-empty', '此插件未提供可编辑设置。'))
+      return
+    }
+    const sensitiveRoles = ['secret', 'credential', 'credential-ref', 'permission', 'capability']
+    const visibleFields = descriptor.fields.filter(field => !field.disabled || sensitiveRoles.includes(field.role ?? ''))
+    const editableFields = visibleFields.filter(field => !field.disabled && !sensitiveRoles.includes(field.role ?? ''))
+    if (visibleFields.length === 0) {
+      panel.append(create(document, 'div', 'cxm-empty', '此插件没有可编辑设置。'))
       return
     }
 
     const form = create(document, 'form', 'cxm-config-form')
     form.dataset.pluginConfigForm = plugin.id
     const dirty = new Map<string, ConfigMutationOperation>()
-    for (const [index, field] of descriptor.fields.entries()) {
+    let submit: HTMLButtonElement | undefined
+    for (const [index, field] of visibleFields.entries()) {
       const pathKey = JSON.stringify(field.path)
       const wrapper = create(document, 'div', 'cxm-config-field')
       wrapper.dataset.configPath = field.path.join('.')
       const controlId = `cxm-config-${plugin.id}-${index}`
-      const label = create(document, 'label', 'cxm-config-label')
-      label.htmlFor = controlId
-      label.append(create(document, 'span', undefined, fieldLabel(field)), create(document, 'code', 'cxm-config-path', field.path.join('.')))
+      const label = create(document, 'label', 'cxm-config-label', fieldLabel(field))
+      const sensitive = field.role !== undefined && sensitiveRoles.includes(field.role)
+      if (!sensitive) label.htmlFor = controlId
       wrapper.append(label)
       if (field.description !== undefined) wrapper.append(create(document, 'p', 'cxm-config-help', field.description))
 
-      if (field.role !== undefined && ['secret', 'credential', 'credential-ref', 'permission', 'capability'].includes(field.role)) {
+      if (sensitive) {
         const boundary = create(document, 'div', 'cxm-notice', '敏感字段由 Host credential 边界保留；当前版本尚未提供 credential broker，因此不会显示、写入或交给自定义 renderer。')
         boundary.dataset.tone = 'warning'
         wrapper.append(boundary)
@@ -1887,6 +1885,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         dirty.set(pathKey, value === undefined
           ? { op: 'unset', path: field.path }
           : { op: 'set', path: field.path, value: value as CordisXJsonValue })
+        if (submit !== undefined) submit.disabled = !descriptor.writable || busyPluginId !== undefined || dirty.size === 0
       }
       const defaultHolder = create(document, 'div')
       defaultHolder.append(renderDefaultConfigControl(field, controlId, setDraft))
@@ -1926,31 +1925,36 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           renderContent()
         }
       })
-      wrapper.append(reset)
+      const fieldActions = create(document, 'div', 'cxm-config-field-actions')
+      fieldActions.append(reset)
+      wrapper.append(fieldActions)
       form.append(wrapper)
     }
-    const submit = create(document, 'button', 'cxm-action', busyPluginId === plugin.id ? '保存中…' : '保存配置')
-    submit.type = 'submit'
-    submit.disabled = !descriptor.writable || busyPluginId !== undefined
-    form.append(submit)
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault()
-      if (model.updatePluginConfig === undefined || dirty.size === 0) return
-      busyPluginId = plugin.id
-      operationError = undefined
+    if (editableFields.length > 0) {
+      submit = create(document, 'button', 'cxm-action', busyPluginId === plugin.id ? '保存中…' : '保存配置')
+      submit.type = 'submit'
       submit.disabled = true
-      try {
-        await model.updatePluginConfig(plugin.id, descriptor.revision, [...dirty.values()])
-      } catch (error) {
-        operationError = error instanceof Error ? error.message : String(error)
-      } finally {
-        busyPluginId = undefined
-        renderContent()
-      }
-    })
+      const actions = create(document, 'div', 'cxm-config-actions')
+      actions.append(submit)
+      form.append(actions)
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        if (model.updatePluginConfig === undefined || dirty.size === 0) return
+        busyPluginId = plugin.id
+        operationError = undefined
+        submit!.disabled = true
+        try {
+          await model.updatePluginConfig(plugin.id, descriptor.revision, [...dirty.values()])
+        } catch (error) {
+          operationError = error instanceof Error ? error.message : String(error)
+        } finally {
+          busyPluginId = undefined
+          renderContent()
+        }
+      })
+    }
     panel.append(form)
     if (!descriptor.writable) panel.append(create(document, 'div', 'cxm-notice', '当前 launcher 模式没有 profile/generation 绑定的配置 writer；renderer 不会直接写配置文件。'))
-    if (descriptor.secrets.length > 0) panel.append(create(document, 'div', 'cxm-notice', `Host 保留了 ${descriptor.secrets.length} 个敏感字段；credential broker 尚未实现。`))
     if (operationError !== undefined) {
       const error = create(document, 'div', 'cxm-config-error', operationError)
       error.setAttribute('role', 'alert')
@@ -2142,6 +2146,20 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       diagnostics.dataset.runtimeDiagnostics = 'platform'
       diagnostics.append(create(document, 'summary', undefined, '诊断'))
       const diagnosticsBody = create(document, 'div', 'cxm-diagnostics-body')
+      if (plugin.configuration !== undefined) {
+        const configSchema = plugin.configuration.schemaKind === 'schemastery'
+          ? 'Schemastery'
+          : plugin.configuration.schemaKind === 'standard' ? 'Standard Schema' : '未声明'
+        const configApplies = plugin.configuration.applies === 'live' ? 'live' : 'restart'
+        const configDiagnostics = create(
+          document,
+          'div',
+          'cxm-copy',
+          `配置：${configSchema} · ${configApplies} · revision ${plugin.configuration.revision} · last-good ${plugin.configuration.lastGoodRevision} · writer ${plugin.configuration.writable ? 'available' : 'unavailable'}`,
+        )
+        configDiagnostics.dataset.configDiagnostics = plugin.id
+        diagnosticsBody.append(configDiagnostics)
+      }
       diagnosticsBody.append(create(
         document,
         'div',

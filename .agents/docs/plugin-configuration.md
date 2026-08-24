@@ -25,8 +25,15 @@ the default is `restart`.
 Schemastery is the preferred complete implementation. Its Standard Schema
 validator supplies defaults and validation, while its schema nodes supply the
 field structure, constraints, descriptions, localized text, roles, and other
-form metadata. An arbitrary Standard Schema remains validation-only and gets a
-bounded JSON editor rather than an inferred field form.
+form metadata. An arbitrary Standard Schema remains validation-only; the Host
+does not infer an editable field form or expose raw JSON in the default Manager
+panel.
+
+The default form reads an optional product label from Schemastery
+`meta.extra.label` (a string or locale dictionary). When it is absent, the Host
+derives one readable label from the final field-path segment. The raw path stays
+available for mutation identity and diagnostics but is not repeated in the
+normal form.
 
 `ctx.settings.get()` and `ctx.settings.watch()` expose only the calling
 plugin's current immutable snapshot. A live write commits under the launcher

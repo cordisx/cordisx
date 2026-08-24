@@ -2,7 +2,9 @@ import Schema from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
 
 export const Config = Schema.object({
-  timeout: Schema.number().default(30).min(1).max(120).role('duration').description('Live timeout'),
+  timeout: Schema.number().default(30).min(1).max(120).role('duration')
+    .extra('extra', { label: { 'zh-CN': '请求超时', en: 'Request timeout' } })
+    .description('Live timeout'),
   apiKey: Schema.string().role('secret').description('Host credential'),
 })
 
