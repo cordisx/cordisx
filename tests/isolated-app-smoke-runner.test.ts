@@ -48,9 +48,12 @@ describe('isolated app smoke runner', () => {
 
   it('keeps the product-mode invocation explicit', async () => {
     const source = await readFile(path.join(root, 'packages/cli/scripts/run-isolated-app-smoke.mjs'), 'utf8')
+    const homeHelperSource = await readFile(path.join(root, 'packages/cli/scripts/isolated-smoke-home.mjs'), 'utf8')
     expect(source).toContain("const homeConfig = optionalValue('--home-config')")
     expect(source).toContain("'--dev-config and --home-config are mutually exclusive'")
     expect(source).toContain('prepareIsolatedSmokeHome(homeConfig)')
     expect(source).toContain('cleanupIsolatedSmokeHome(homeRoot)')
+    expect(source.indexOf('cleanupIsolatedSmokeHome(homeRoot)')).toBeGreaterThan(source.lastIndexOf('profileProcesses()'))
+    expect(homeHelperSource).toContain('maxRetries: 20, retryDelay: 100')
   })
 })
