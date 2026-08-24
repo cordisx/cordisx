@@ -41,7 +41,10 @@ export class HostTooltipController {
       if (this.activeTarget === target) this.hide()
     }
     const escape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') hide()
+      if (event.key !== 'Escape' || this.activeTarget !== target) return
+      event.preventDefault()
+      event.stopPropagation()
+      hide()
     }
     target.addEventListener('pointerenter', schedule)
     target.addEventListener('pointerleave', hide)

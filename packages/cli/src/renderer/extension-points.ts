@@ -468,15 +468,22 @@ type ExtensionPointAccessFields =
 export interface ExtensionPointPluginUsageSnapshot {
   readonly identity: CordisXPluginIdentity
   readonly name: string
+  readonly description?: string
   readonly status: string
   readonly policy: CordisXPointPolicy
   readonly effectivePolicy: CordisXEffectivePointPolicy
   readonly authorized: boolean
   readonly active: boolean
-  readonly registrations: readonly SurfaceContributionSnapshot[]
+  readonly registrations: readonly ExtensionPointContributionSnapshot[]
   readonly commands: readonly CommandSnapshot[]
   readonly routes: readonly RouteSnapshot[]
   readonly pageIds: readonly string[]
+}
+
+export interface ExtensionPointContributionSnapshot extends SurfaceContributionSnapshot {
+  /** Current-locale product text projected by the Host; identity remains the raw id below it. */
+  readonly titleText: string
+  readonly descriptionText?: string
 }
 
 export interface ExtensionPointSnapshot extends HostExtensionPointProjection {
@@ -510,7 +517,43 @@ interface ExtensionPointSnapshotPlugin {
   readonly id: string
   readonly source: string
   readonly name: string
+  readonly description?: string
   readonly status: string
+}
+
+function localizedContributionField(
+  registration: SurfaceContributionSnapshot,
+  keys: readonly string[],
+): CordisXLocalizedText | undefined {
+  if (registration.item === null || typeof registration.item !== 'object' || Array.isArray(registration.item)) return undefined
+  const item = registration.item as Readonly<Record<string, unknown>>
+  for (const key of keys) {
+    const value = item[key]
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) continue
+    const message = value as Partial<CordisXLocalizedText>
+    if (typeof message.key === 'string') return message as CordisXLocalizedText
+  }
+  return undefined
+}
+
+function projectContribution(
+  registration: SurfaceContributionSnapshot,
+  i18n: CordisXI18nService,
+): ExtensionPointContributionSnapshot {
+  const title = localizedContributionField(registration, ['label', 'title', 'text'])
+  const description = localizedContributionField(registration, ['description', 'detail'])
+  const locale = i18n.getSnapshot().locale.toLocaleLowerCase()
+  const titleText = title === undefined
+    ? locale.startsWith('zh') ? '未提供显示名称' : 'Display name unavailable'
+    : i18n.resolveFor(registration.owner, title, `extension-point:contribution:${registration.qualifiedId}:title`).text
+  const descriptionText = description === undefined
+    ? undefined
+    : i18n.resolveFor(registration.owner, description, `extension-point:contribution:${registration.qualifiedId}:description`).text
+  return {
+    ...registration,
+    titleText,
+    ...(descriptionText === undefined ? {} : { descriptionText }),
+  }
 }
 
 function commandIds(registration: SurfaceContributionSnapshot): readonly string[] {
@@ -585,7 +628,9 @@ export function buildExtensionPointRuntimeSnapshot(input: {
     })
     const pluginUsages = input.plugins.flatMap((plugin): ExtensionPointPluginUsageSnapshot[] => {
       const registrations = descriptor.kind === 'surface'
-        ? input.registrations.filter(item => item.owner === plugin.id && item.surface === descriptor.id)
+        ? input.registrations
+          .filter(item => item.owner === plugin.id && item.surface === descriptor.id)
+          .map(item => projectContribution(item, input.i18n))
         : []
       const routes = descriptor.kind === 'outlet'
         ? input.navigation.routes.filter(item => item.owner === plugin.id && item.definition.outlet === descriptor.id)
@@ -602,6 +647,7 @@ export function buildExtensionPointRuntimeSnapshot(input: {
       return [{
         identity: Object.freeze({ source: plugin.source, id: plugin.id }),
         name: plugin.name,
+        ...(plugin.description === undefined ? {} : { description: plugin.description }),
         status: plugin.status,
         policy: decision.policy,
         effectivePolicy: decision.effectivePolicy,

@@ -6,13 +6,19 @@ import {
   type CordisXPluginLifecycleOperationV1,
   type CordisXPluginLifecycleResultV1,
 } from '../packages/cli/src/contracts.js'
-import { installCordisXManager, type ManagerModel, type ManagerSnapshot } from '../packages/cli/src/renderer/manager.js'
+import {
+  installCordisXManager,
+  type ManagerModel,
+  type ManagerPluginStatus,
+  type ManagerSnapshot,
+} from '../packages/cli/src/renderer/manager.js'
 
-function snapshot(status: 'active' | 'configured-disabled' = 'active'): ManagerSnapshot {
+function snapshot(status: ManagerPluginStatus = 'active'): ManagerSnapshot {
   return {
     version: 'test',
     plugins: [{
-      id: 'base', source: 'https://plugins.example/base', name: 'Base Plugin', inject: [], config: {}, status,
+      id: 'base', source: 'https://plugins.example/base', name: 'Base Plugin', description: 'Keeps local work in sync.', inject: [], config: {}, status,
+      ...(status === 'failed' ? { error: 'entry module crashed' } : {}),
       configuration: {
         namespace: 'base', schemaKind: 'none', applies: 'restart', writable: true,
         revision: 0, lastGoodRevision: 0, value: {}, fields: [], secrets: [],
@@ -93,6 +99,20 @@ describe('Manager plugin card actions', () => {
       expect(card.querySelectorAll(':scope > button')).toHaveLength(1)
       expect(card.querySelectorAll('[data-plugin-action]')).toHaveLength(3)
       expect(primary.getAttribute('aria-label')).toContain('打开 Base Plugin 详情')
+      expect(primary.getAttribute('aria-description')).toBe('运行中')
+      expect(primary.querySelector('.cxm-plugin-description')?.textContent).toBe('Keeps local work in sync.')
+      expect(primary.querySelector('.cxm-plugin-meta')?.textContent).toBe('base')
+      expect(primary.querySelector('.cxm-plugin-status-badge')?.getAttribute('data-status')).toBe('active')
+      expect(primary.textContent).not.toContain('运行中')
+      const importButton = dom.window.document.querySelector<HTMLButtonElement>('[data-import-local-plugin]')!
+      expect(importButton.textContent).toBe('导入')
+      expect(importButton.querySelector('[data-material-icon="import-plugin"]')).not.toBeNull()
+      const managerStyles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
+      expect(managerStyles).toContain('.cxm-toolbar > .cxm-action { height: 38px; }')
+      expect(managerStyles).toContain('min-height: 38px')
+      expect(managerStyles).toContain('opacity: 0; pointer-events: none')
+      expect(managerStyles).toContain('.cxm-plugin-row:focus-within .cxm-plugin-actions')
+      expect([...card.querySelectorAll<HTMLButtonElement>('.cxm-plugin-actions button')].every(button => button.tabIndex === 0)).toBe(true)
 
       card.querySelector<HTMLButtonElement>('[data-plugin-action="favorite"]')!.click()
       expect(dom.window.localStorage.getItem('cordisx.manager.favoritePlugins.v1:work')).toBe('["base"]')
@@ -109,14 +129,17 @@ describe('Manager plugin card actions', () => {
 
       const menu = dom.window.document.querySelector<HTMLElement>('[data-plugin-menu="base"]')!
       const trigger = menu.querySelector<HTMLElement>('.cxm-plugin-menu-trigger')!
+      const currentCard = trigger.closest<HTMLElement>('[data-plugin-card="base"]')!
       trigger.click()
       expect(trigger.getAttribute('aria-expanded')).toBe('true')
+      expect(currentCard.dataset.actionMenuOpen).toBe('true')
       expect(dom.window.document.querySelector<HTMLElement>('body > .cxm-plugin-menu-popup')?.dataset.cordisxAppTheme).toBe('light')
       expect(menu.querySelector('.cxm-plugin-menu-popup')).toBeNull()
       expect([...dom.window.document.querySelectorAll<HTMLElement>('body > .cxm-plugin-menu-popup .cxm-plugin-menu-responsive')]
         .map(item => item.style.display)).toEqual(['flex', 'flex'])
       dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-menu-action="share"]')!.click()
       await settle()
+      expect(currentCard.hasAttribute('data-action-menu-open')).toBe(false)
       expect(dom.window.document.activeElement).toBe(trigger)
 
       trigger.click()
@@ -159,18 +182,42 @@ describe('Manager plugin card actions', () => {
     }
     const dispose = installCordisXManager(dom.window.document, model)
     try {
-      dom.window.document.querySelector<HTMLButtonElement>('[data-install-local-plugin]')!.click()
+      dom.window.document.querySelector<HTMLButtonElement>('[data-import-local-plugin]')!.click()
       const form = dom.window.document.querySelector<HTMLFormElement>('[data-host-form="local-package-directory"]')!
       const input = form.querySelector<HTMLInputElement>('[data-host-form-primitive="path-input"]')!
       expect(form.classList.contains('cxf-scope')).toBe(true)
       expect(form.querySelector('.cxf-label')?.textContent).toBe('本地插件包绝对路径')
       expect(input.getAttribute('aria-describedby')).toContain('cxm-local-package-directory-help')
+      expect(input.hasAttribute('data-import-local-path')).toBe(true)
+      expect(dom.window.document.querySelector('[data-import-local-submit]')?.textContent).toBe('检查并导入')
+      expect(dom.window.document.querySelector('.cxm-lifecycle-dialog h2')?.textContent).toBe('导入本地插件')
+      expect(dom.window.document.querySelector('.cxm-lifecycle-dialog')?.textContent).toContain('Package Store')
       input.value = '/tmp/local-plugin'
       input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click()
       for (let attempt = 0; attempt < 20 && operations.length < 2; attempt += 1) await settle()
       expect(operations[0]).toEqual({ kind: 'inspect-local', sourceDirectory: '/tmp/local-plugin' })
       expect(operations[1]).toMatchObject({ kind: 'install', candidateId: 'candidate-local' })
+    } finally {
+      dispose()
+      dom.window.close()
+    }
+  })
+
+  it('keeps lifecycle copy out of the card and exposes an exact failed-state tooltip description', () => {
+    const dom = new JSDOM('<!doctype html><html class="electron-dark"><head></head><body></body></html>', { url: 'https://codex.local/' })
+    const model: ManagerModel = {
+      snapshot: () => snapshot('failed'),
+      setPluginBlocked: async () => {}, setPermissionPolicy: async () => {}, subscribe: () => () => {},
+      requestPluginLifecycle: async operation => result(operation.kind, 'applied'),
+    }
+    const dispose = installCordisXManager(dom.window.document, model)
+    try {
+      const primary = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-primary="base"]')!
+      expect(primary.getAttribute('aria-description')).toBe('启动失败：entry module crashed')
+      expect(primary.querySelector('.cxm-plugin-status-badge')?.getAttribute('data-status')).toBe('failed')
+      expect(primary.textContent).not.toContain('启动失败')
+      expect(primary.textContent).not.toContain('entry module crashed')
     } finally {
       dispose()
       dom.window.close()

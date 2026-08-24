@@ -11,6 +11,7 @@ interface RuntimeSnapshot {
     source: string
     status: string
     readme?: string
+    description?: string
     configuration: {
       schemaKind: string
       applies: string
@@ -180,6 +181,7 @@ describe('renderer bundle', () => {
         id: 'slot-showcase',
         status: 'active',
         readme: expect.stringContaining('# Slot Showcase'),
+        description: expect.stringContaining('这是 CordisX 的结构化 UI 端到端演示插件'),
         configuration: expect.objectContaining({
           schemaKind: 'schemastery',
           applies: 'restart',
@@ -625,8 +627,10 @@ describe('renderer bundle', () => {
     expect(managerStyles).toContain('.cxm-main { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }')
     expect(managerStyles).toContain('flex: 1 1 0%')
     expect(managerStyles).toContain('overflow-y: auto')
-    expect(managerStyles).toContain('.cxm-tab:first-child { padding-left: 0; }')
-    expect(managerStyles).toContain('grid-template-columns: 26px max-content')
+    expect(managerStyles).toContain('border-radius: 9px;')
+    expect(managerStyles).toContain('grid-template-columns: 18px max-content')
+    expect(managerStyles).toContain('.cxm-tab[aria-selected="true"] { background: rgba(199, 204, 212, .14);')
+    expect(managerStyles).not.toContain('.cxm-tab[aria-selected="true"]::after')
     expect(managerStyles).toContain('.cxm-heading p { grid-column: 1 / -1; margin: 3px 0 0;')
     expect(managerStyles).toContain('.cxm-heading-leading {')
     expect(managerStyles).toContain('min-height: 26px')
@@ -638,7 +642,7 @@ describe('renderer bundle', () => {
     expect(managerStyles).toContain('.cxm-back:hover { background: rgba(199, 204, 212, .14);')
     expect(managerStyles).toContain('.cxm-back:focus-visible { outline: 2px solid #c7ccd4;')
     expect(managerStyles).toContain('.cxm-breadcrumb-menu')
-    expect(managerStyles).toContain('background: #c7ccd4')
+    expect(managerStyles).toContain('background: #4ade80')
     expect(managerStyles).not.toMatch(/#8b5cf6|#a78bfa|#ddd6fe|#b9a6ff|#c4b5fd|139, 92, 246|167, 139, 250/)
     expect(managerStyles).toContain('background: #4ade80')
     expect(managerStyles).toContain('background: #fbbf24')
@@ -646,15 +650,26 @@ describe('renderer bundle', () => {
     expect(managerStyles).not.toContain('.cxm-result-count')
     expect(managerStyles).not.toContain('.cxm-feed-summary')
     expect(managerStyles).toContain('.cxm-about-identity-copy { min-width: 0; white-space: nowrap; }')
+    const pluginCard = managerModal?.querySelector<HTMLElement>('[data-plugin-card="slot-showcase"]')
+    expect(pluginCard?.querySelector('.cxm-plugin-description')?.textContent).toContain('这是 CordisX 的结构化 UI 端到端演示插件')
+    expect(pluginCard?.querySelector('.cxm-plugin-meta')?.textContent).toBe('slot-showcase')
+    expect(pluginCard?.querySelector('.cxm-plugin-status-badge')?.getAttribute('data-status')).toBe('active')
+    expect(pluginCard?.querySelector('[data-plugin-primary]')?.getAttribute('aria-description')).toBe('运行中')
+    expect(pluginCard?.textContent).not.toContain('运行中')
+    expect(managerModal?.querySelector('[data-import-local-plugin]')?.textContent).toBe('导入')
+    expect(managerStyles).toContain('.cxm-plugin-row:hover .cxm-plugin-actions')
+    expect(managerStyles).toContain('.cxm-plugin-row:focus-within .cxm-plugin-actions')
+    expect(managerStyles).toContain('.cxm-plugin-row[data-action-menu-open="true"] .cxm-plugin-actions')
     const expectLocalTabLeadingSeat = (selector: string): void => {
       const firstTab = dom.window.document.querySelector<HTMLElement>(`${selector}:first-child`)
       const icon = firstTab?.querySelector<HTMLElement>('.cxm-tab-icon')
       const visibleContent = firstTab?.querySelector<HTMLElement>('.cxm-tab-content')
       expect(firstTab).not.toBeNull()
-      expect(dom.window.getComputedStyle(firstTab!).paddingLeft).toBe('0px')
-      expect(dom.window.getComputedStyle(icon!).width).toBe('26px')
-      expect(dom.window.getComputedStyle(icon!).height).toBe('26px')
-      expect(dom.window.getComputedStyle(visibleContent!).gridTemplateColumns).toBe('26px max-content')
+      expect(dom.window.getComputedStyle(firstTab!).paddingLeft).toBe('9px')
+      expect(dom.window.getComputedStyle(firstTab!).borderRadius).toBe('9px')
+      expect(dom.window.getComputedStyle(icon!).width).toBe('18px')
+      expect(dom.window.getComputedStyle(icon!).height).toBe('18px')
+      expect(dom.window.getComputedStyle(visibleContent!).gridTemplateColumns).toBe('18px max-content')
     }
     const managerHeadings = (): string[] => [...dom.window.document.querySelectorAll<HTMLElement>('.cxm-heading h2, .cxm-section-title')]
       .map(element => element.textContent?.trim() ?? '')
@@ -782,6 +797,12 @@ describe('renderer bundle', () => {
     expect(pointTabs.map(tab => tab.textContent)).toEqual(['使用情况', '点位信息', '诊断'])
     expect(pointTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-material-icon'))).toEqual(['plugins', 'point-info', 'diagnostics'])
     expectLocalTabLeadingSeat('[data-extension-point-detail-tab]')
+    expect(dom.window.document.querySelector('[data-list-search^="extension-point-usage-"]')).not.toBeNull()
+    const navigationContribution = dom.window.document.querySelector<HTMLElement>('[data-contribution-id="main-page"]')
+    expect(navigationContribution?.querySelector('.cxm-resource-title')?.textContent).toBe('结构化 UI 演示')
+    expect(navigationContribution?.querySelector('.cxm-resource-description')?.textContent).toContain('主行为仅路由，右侧操作独立执行')
+    expect(navigationContribution?.querySelector('.cxm-resource-id')?.textContent).toBe('main-page')
+    expect(navigationContribution?.querySelector('.cxm-slot-card, .cxm-kind-badge, .cxm-chevron')).toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('[data-extension-point-detail-tab="information"]')?.click()
     expect(breadcrumbLabels()).toEqual(['扩展点', '侧边栏导航', '点位信息'])
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
@@ -957,12 +978,14 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('.cordisx-nav-row')).not.toBeNull()
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="extension-points"]')?.click()
+    expect(dom.window.document.querySelector('[data-list-search="plugin-extension-points-slot-showcase"]')).not.toBeNull()
     expect(managerModal?.textContent).toContain('workspace.toolbar.items')
     expect(managerModal?.textContent).toContain('工作区工具栏')
     expect(managerModal?.textContent).not.toContain('/main/analytics')
     expect(managerHeadings()).toEqual(['扩展点位'])
     expect(breadcrumbLabels()).toEqual(['插件', 'Slot Showcase', '扩展点位'])
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="routes"]')?.click()
+    expect(dom.window.document.querySelector('[data-list-search="plugin-routes-slot-showcase"]')).not.toBeNull()
     expect(managerModal?.textContent).toContain('/main/showcase')
     expect(managerModal?.textContent).toContain('slot-showcase:main.analytics')
     expect(breadcrumbLabels()).toEqual(['插件', 'Slot Showcase', '路由'])
