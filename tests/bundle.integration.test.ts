@@ -61,7 +61,10 @@ describe('renderer bundle', () => {
     const bundle = await buildRendererBundle(config)
     const sessionId = '01a02d54-8adf-7043-944c-0bc9bb41bfd9'
     const dom = new JSDOM(`
-      <html lang="en" dir="ltr" class="electron-dark"><head></head><body>
+      <html lang="en" dir="ltr" class="electron-dark"><head><style>
+        .codex-toolbar-button { width: 28px; height: 28px; }
+        .codex-footer-button, .codex-composer-button { width: 32px; height: 32px; }
+      </style></head><body>
         <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
         <header data-app-shell-application-menu-bar style="position:relative">
           <div data-test-id="header-shell-slot"><div><div><button>left native</button></div></div></div>
@@ -191,21 +194,47 @@ describe('renderer bundle', () => {
     expect(surfaceHosts.every(host => host.dataset.cordisxNoDrag === 'true')).toBe(true)
     expect([...dom.window.document.querySelectorAll<HTMLElement>('.cordisx-action')]
       .every(button => button.dataset.cordisxNoDrag === 'true')).toBe(true)
-    expect(dom.window.document.getElementById('cordisx-structured-styles')?.textContent).toContain('[data-cordisx-no-drag="true"]')
+    const structuredStyles = dom.window.document.getElementById('cordisx-structured-styles')?.textContent ?? ''
+    expect(structuredStyles).toContain('[data-cordisx-no-drag="true"]')
+    expect(structuredStyles).toContain('.cordisx-icon-only-control { --cordisx-icon-only-glyph-size: 16px; }')
+    expect(structuredStyles).toContain('.cordisx-icon-only-control.cordisx-shortcut-action { --cordisx-icon-only-glyph-size: 12px; }')
     expect(dom.window.document.querySelector('details[data-cordisx-no-drag]')).toBeNull()
     expect(dom.window.document.body.textContent).not.toContain('CX')
     const toolbarAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="toolbar.before"] button')!
     expect(toolbarAction.className).toContain('codex-toolbar-button')
+    expect(toolbarAction.className).toContain('cordisx-icon-only-control')
+    expect(dom.window.getComputedStyle(toolbarAction).width).toBe(dom.window.getComputedStyle(dom.window.document.getElementById('native-toolbar-primary')!).width)
+    expect(dom.window.getComputedStyle(toolbarAction).height).toBe(dom.window.getComputedStyle(dom.window.document.getElementById('native-toolbar-primary')!).height)
+    expect(dom.window.getComputedStyle(toolbarAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('16px')
+    const toolbarIcon = toolbarAction.querySelector<HTMLElement>('.cordisx-host-icon')!
+    const toolbarGlyph = toolbarIcon.querySelector<SVGElement>('svg')!
+    const toolbarIconStyle = dom.window.getComputedStyle(toolbarIcon)
+    expect(toolbarIconStyle.display).toBe('inline-flex')
+    expect(toolbarIconStyle.alignItems).toBe('center')
+    expect(toolbarIconStyle.justifyContent).toBe('center')
+    expect(toolbarIconStyle.width).toBe('20px')
+    expect(toolbarIconStyle.height).toBe('20px')
+    expect(dom.window.getComputedStyle(toolbarGlyph).width).toBe('var(--cordisx-icon-only-glyph-size)')
+    expect(dom.window.getComputedStyle(toolbarGlyph).height).toBe('var(--cordisx-icon-only-glyph-size)')
     expect(toolbarAction.textContent).toBe('')
     expect(toolbarAction.getAttribute('aria-label')).toBe('Open main page')
     expect(toolbarAction.dataset.cordisxTooltip).toBe('Open main page')
     expect(toolbarAction.querySelector('[data-host-icon="host:open"] svg')).not.toBeNull()
     const sessionHeaderAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="session.header.actions"] button')!
     expect(sessionHeaderAction.className).toContain('codex-toolbar-button')
+    expect(dom.window.getComputedStyle(sessionHeaderAction).width).toBe('28px')
+    expect(dom.window.getComputedStyle(sessionHeaderAction).height).toBe('28px')
+    expect(dom.window.getComputedStyle(sessionHeaderAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('16px')
     expect(sessionHeaderAction.getAttribute('aria-label')).toBe('Open main page')
     expect(sessionHeaderAction.dataset.cordisxTooltip).toBe('Open main page')
     const composerAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="composer.submit.before"] button')!
     expect(composerAction.className).toContain('codex-composer-button')
+    expect(composerAction.classList.contains('cordisx-icon-only-control')).toBe(false)
+    expect(dom.window.getComputedStyle(composerAction).width).toBe('24px')
+    expect(dom.window.getComputedStyle(composerAction).height).toBe('24px')
+    expect(dom.window.getComputedStyle(composerAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('')
+    expect(dom.window.getComputedStyle(composerAction.querySelector('.cordisx-host-icon')!).width).toBe('16px')
+    expect(dom.window.getComputedStyle(composerAction.querySelector('svg')!).width).toBe('16px')
     expect(composerAction.getAttribute('aria-label')).toBe('Refresh snapshot')
     expect(composerAction.dataset.cordisxTooltip).toBe('Refresh snapshot')
     const composerSeat = composerAction.closest<HTMLElement>('[data-cordisx-surface-host="composer.submit.before"]')!
@@ -228,6 +257,11 @@ describe('renderer bundle', () => {
     nativeTooltip.remove()
 
     const help = dom.window.document.getElementById('native-help')!
+    const footerAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="sidebar.footer.before"] button')!
+    expect(footerAction.className).toContain('codex-footer-button')
+    expect(dom.window.getComputedStyle(footerAction).width).toBe(dom.window.getComputedStyle(help).width)
+    expect(dom.window.getComputedStyle(footerAction).height).toBe(dom.window.getComputedStyle(help).height)
+    expect(dom.window.getComputedStyle(footerAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('16px')
     help.setAttribute('aria-expanded', 'true')
     const helpMenu = dom.window.document.createElement('div')
     helpMenu.setAttribute('role', 'menu')
@@ -240,6 +274,8 @@ describe('renderer bundle', () => {
     expect(helpInsertion).not.toBeNull()
     expect(helpInsertion.previousElementSibling?.getAttribute('role')).toBe('separator')
     expect(helpInsertion.querySelector('[role="menuitem"]')?.className).toContain('codex-menu-item')
+    expect(helpInsertion.querySelector('.cordisx-icon-only-control')).toBeNull()
+    expect(dom.window.getComputedStyle(helpInsertion.querySelector('.cordisx-host-icon')!).width).toBe('20px')
     expect(helpInsertion.textContent).toBe('Refresh snapshot')
 
     help.setAttribute('aria-expanded', 'false')
@@ -267,6 +303,14 @@ describe('renderer bundle', () => {
     expect(navigationSeat.parentElement).toBe(replacementNavigation)
 
     const trailing = dom.window.document.querySelector<HTMLButtonElement>('.cordisx-nav-actions button')!
+    expect(trailing.className).toContain('cordisx-icon-only-control')
+    expect(dom.window.getComputedStyle(trailing).width).toBe('24px')
+    expect(dom.window.getComputedStyle(trailing).height).toBe('24px')
+    expect(dom.window.getComputedStyle(trailing).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('12px')
+    expect(dom.window.getComputedStyle(trailing.querySelector('.cordisx-host-icon')!).width).toBe('16px')
+    const environmentAction = dom.window.document.querySelector<HTMLButtonElement>('.cordisx-env-header button')!
+    expect(environmentAction.className).toContain('cordisx-icon-only-control')
+    expect(dom.window.getComputedStyle(environmentAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('12px')
     trailing.click()
     await settle()
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')?.activeRoute).toBeUndefined()
@@ -433,6 +477,10 @@ describe('renderer bundle', () => {
 
     const managerTrigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')
     expect(managerTrigger?.getAttribute('aria-label')).toBe('管理 CordisX 插件')
+    expect(managerTrigger?.classList.contains('cordisx-icon-only-control')).toBe(false)
+    expect(dom.window.getComputedStyle(managerTrigger!).display).toBe('inline-flex')
+    expect(dom.window.getComputedStyle(managerTrigger!).alignItems).toBe('center')
+    expect(dom.window.getComputedStyle(managerTrigger!).justifyContent).toBe('center')
     expect(managerTrigger?.querySelector('svg')).toBeNull()
     const triggerMark = managerTrigger?.querySelector<HTMLImageElement>('[data-brand-rendering="direct-host"]')
     expect(triggerMark?.dataset.hostBackground).toBe('dark')

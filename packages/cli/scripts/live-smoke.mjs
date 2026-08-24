@@ -971,6 +971,43 @@ if (parsed.values['ui-catalog']) {
         },
       }
     })
+    const iconControls = [...document.querySelectorAll('[data-cordisx-surface-host] .cordisx-native-icon-action')]
+      .filter(visible)
+      .map(action => {
+        const root = action.closest('[data-cordisx-surface-host]')
+        const wrapper = action.querySelector('.cordisx-host-icon')
+        const glyph = wrapper?.querySelector('svg') ?? null
+        const actionRect = rect(action)
+        const wrapperRect = rect(wrapper)
+        const glyphRect = rect(glyph)
+        const actionStyle = getComputedStyle(action)
+        const reduced = action.classList.contains('cordisx-icon-only-control')
+        const compact = action.classList.contains('cordisx-shortcut-action')
+        const expectedGlyphSize = reduced ? (compact ? 12 : 16) : null
+        const centered = wrapperRect !== null && glyphRect !== null
+          && Math.abs((wrapperRect.x + wrapperRect.width / 2) - (glyphRect.x + glyphRect.width / 2)) <= 0.5
+          && Math.abs((wrapperRect.y + wrapperRect.height / 2) - (glyphRect.y + glyphRect.height / 2)) <= 0.5
+        return {
+          surface: root?.dataset.cordisxSurfaceHost ?? null,
+          label: action.getAttribute('aria-label'),
+          reduced,
+          compact,
+          expectedGlyphSize,
+          token: actionStyle.getPropertyValue('--cordisx-icon-only-glyph-size').trim(),
+          geometry: { action: actionRect, wrapper: wrapperRect, glyph: glyphRect, centered },
+        }
+      })
+    const managerTrigger = document.querySelector('[data-cordisx-manager-trigger]')
+    const managerMark = managerTrigger?.querySelector('[data-cordisx-brand-mark]') ?? null
+    const managerActionRect = rect(managerTrigger)
+    const managerGlyphRect = rect(managerMark)
+    const managerBrand = {
+      reduced: managerTrigger?.classList.contains('cordisx-icon-only-control') ?? false,
+      geometry: { action: managerActionRect, glyph: managerGlyphRect,
+        centered: managerActionRect !== null && managerGlyphRect !== null
+          && Math.abs((managerActionRect.x + managerActionRect.width / 2) - (managerGlyphRect.x + managerGlyphRect.width / 2)) <= 0.5
+          && Math.abs((managerActionRect.y + managerActionRect.height / 2) - (managerGlyphRect.y + managerGlyphRect.height / 2)) <= 0.5 },
+    }
     const assertions = []
     const assert = (id, pass, actual, expected) => assertions.push({ id, pass: Boolean(pass), actual, expected })
     for (const point of points) {
@@ -992,6 +1029,24 @@ if (parsed.values['ui-catalog']) {
     assert('native.no-attribute-mutations', mutation.nativeAttributeChanges === 0, mutation, 'no native style/hidden/aria-hidden mutations')
     assert('plugin.block-restore', pluginBlock?.blocked === true && pluginBlock.nativeWhileBlocked === true
       && pluginBlock.restored === true && pluginBlock.sameNative === true, pluginBlock, 'plugin block/restore without changing native controls')
+    for (const control of iconControls.filter(item => item.reduced)) {
+      const expectedToken = control.expectedGlyphSize + 'px'
+      assert('icon.' + control.surface + '.' + control.label + '.glyph-size', control.token === expectedToken
+        && control.geometry.glyph?.width === control.expectedGlyphSize && control.geometry.glyph?.height === control.expectedGlyphSize,
+      control, 'host token and rendered glyph are exactly ' + expectedToken)
+      assert('icon.' + control.surface + '.' + control.label + '.hit-area', (control.geometry.action?.width ?? 0) >= 24
+        && (control.geometry.action?.height ?? 0) >= 24, control.geometry.action, 'button hit area remains at least 24x24')
+      assert('icon.' + control.surface + '.' + control.label + '.centered', control.geometry.centered,
+        control.geometry, 'glyph is horizontally and vertically centered in its unchanged wrapper')
+    }
+    const composerControl = iconControls.find(item => item.surface === 'composer.submit.before')
+    assert('composer.toolbar.items.appearance-preserved', composerControl?.reduced === false && composerControl?.token === ''
+      && composerControl.geometry.glyph?.width === 16 && composerControl.geometry.glyph?.height === 16,
+    composerControl, 'composer keeps its existing 16px glyph and does not opt into the shell reduction')
+    assert('manager.brand-trigger.size-preserved', managerBrand.reduced === false && managerBrand.geometry.action?.width === 32
+      && managerBrand.geometry.action?.height === 32 && managerBrand.geometry.glyph?.width === 20 && managerBrand.geometry.glyph?.height === 20
+      && managerBrand.geometry.centered,
+    managerBrand, 'brand trigger remains a 20px mark in its 32px button')
     const titlebar = [...document.querySelectorAll('header[data-app-shell-application-menu-bar]')].find(visible)
     const titlebarRect = rect(titlebar)
     const safeLeft = titlebarRect === null ? null : Math.max(12, Math.ceil(Math.min(...[...titlebar.querySelectorAll('button')]
@@ -1001,7 +1056,7 @@ if (parsed.values['ui-catalog']) {
       { safeLeft, rootX: sessionPoint?.geometry.root?.x ?? null }, 'root starts after titlebar safe inset')
     return { result: assertions.every(item => item.pass) ? 'pass' : 'fail', sessionId: snapshot.extensionPoints === undefined ? null
       : document.querySelector('[data-app-action-sidebar-thread-selected="true"]')?.getAttribute('data-app-action-sidebar-thread-id')?.replace(/^local:/, '') ?? null,
-      points, policyTransitions, pluginBlock, nativeMutation: mutation, safeInsets: { titlebar: titlebarRect, safeLeft }, assertions }
+      points, iconControls, managerBrand, policyTransitions, pluginBlock, nativeMutation: mutation, safeInsets: { titlebar: titlebarRect, safeLeft }, assertions }
   })()`, true)
 
   const reportPath = path.resolve(parsed.values.report)
