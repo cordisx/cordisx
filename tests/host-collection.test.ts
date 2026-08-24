@@ -120,16 +120,24 @@ describe('Host collection primitive', () => {
     }
   })
 
-  it('keeps low-frequency actions in a Host-owned keyboard menu and restores trigger focus', () => {
+  it('owns portaled menu navigation, skips disabled items, restores focus, and cleans up', async () => {
     const dom = new JSDOM('<!doctype html><html><body></body></html>')
     const shared = vi.fn()
     const removed = vi.fn()
+    const managerDismiss = vi.fn()
+    const onManagerKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.key !== 'Escape') return
+      managerDismiss()
+    }
+    dom.window.document.addEventListener('keydown', onManagerKeyDown)
     const view = createHostCollection(dom.window.document, {
       id: 'plugins', label: '插件列表', moreIcon: icon(dom.window.document, 'more'),
       items: [{
         id: 'alpha', title: 'Alpha', icon: icon(dom.window.document, 'A'), onOpen: vi.fn(),
         actions: [
           { id: 'share', label: '分享', placement: 'overflow', icon: icon(dom.window.document, 'share'), onInvoke: shared },
+          { id: 'move-up', label: '上移', placement: 'overflow', disabled: true, unavailableReason: '已经置顶', icon: icon(dom.window.document, 'up') },
+          { id: 'diagnostics', label: '诊断', placement: 'overflow', icon: icon(dom.window.document, 'info'), onInvoke: vi.fn() },
           { id: 'remove', label: '卸载', placement: 'overflow', tone: 'danger', icon: icon(dom.window.document, 'delete'), onInvoke: removed },
         ],
       }],
@@ -140,25 +148,54 @@ describe('Host collection primitive', () => {
       trigger.click()
       const popup = dom.window.document.querySelector<HTMLElement>('body > .cxc-menu-popup')!
       expect(trigger.getAttribute('aria-expanded')).toBe('true')
+      expect(trigger.getAttribute('aria-controls')).toBe(popup.id)
       expect(popup.getAttribute('role')).toBe('menu')
-      expect([...popup.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(['share分享', 'delete卸载'])
+      expect([...popup.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(['share分享', 'up上移', 'info诊断', 'delete卸载'])
       expect(view.element.querySelector('.cxc-card')?.getAttribute('data-action-menu-open')).toBe('true')
+      expect(dom.window.document.activeElement?.getAttribute('data-collection-action')).toBe('share')
 
-      dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }))
-      expect(dom.window.document.activeElement?.textContent).toBe('delete卸载')
-      dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      const press = (key: string): void => {
+        dom.window.document.activeElement?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+      }
+      press('ArrowDown')
+      expect(dom.window.document.activeElement?.getAttribute('data-collection-action')).toBe('diagnostics')
+      press('ArrowUp')
+      expect(dom.window.document.activeElement?.getAttribute('data-collection-action')).toBe('share')
+      press('ArrowUp')
+      expect(dom.window.document.activeElement?.getAttribute('data-collection-action')).toBe('remove')
+      press('Home')
+      expect(dom.window.document.activeElement?.getAttribute('data-collection-action')).toBe('share')
+      press('End')
+      expect(dom.window.document.activeElement?.getAttribute('data-collection-action')).toBe('remove')
+      const disabled = popup.querySelector<HTMLButtonElement>('[data-collection-action="move-up"]')!
+      expect(disabled.disabled).toBe(true)
+      expect(disabled.getAttribute('aria-disabled')).toBe('true')
+      expect(disabled.getAttribute('aria-description')).toBe('已经置顶')
+      expect(disabled.title).toBe('已经置顶')
+
+      press('Escape')
+      await Promise.resolve()
       expect(dom.window.document.querySelector('.cxc-menu-popup')).toBeNull()
       expect(dom.window.document.activeElement).toBe(trigger)
       expect(trigger.getAttribute('aria-expanded')).toBe('false')
+      expect(managerDismiss).not.toHaveBeenCalled()
 
       trigger.click()
       dom.window.document.querySelector<HTMLButtonElement>('[data-collection-action="share"]')!.click()
+      await Promise.resolve()
       expect(shared).toHaveBeenCalledTimes(1)
       expect(dom.window.document.querySelector('.cxc-menu-popup')).toBeNull()
       expect(dom.window.document.activeElement).toBe(trigger)
+
+      trigger.click()
+      view.dispose()
+      expect(dom.window.document.querySelector('.cxc-menu-popup')).toBeNull()
+      dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      expect(managerDismiss).toHaveBeenCalledTimes(1)
     } finally {
       view.dispose()
       expect(dom.window.document.querySelector('.cxc-menu-popup')).toBeNull()
+      dom.window.document.removeEventListener('keydown', onManagerKeyDown)
       dom.window.close()
     }
   })

@@ -265,6 +265,14 @@ export function createHostCollection(document: Document, options: HostCollection
   const rendered: RenderedItem[] = []
   let activeMenu: { popup: HTMLElement, trigger: HTMLButtonElement, card: HTMLElement, detachTheme?: () => void } | undefined
 
+  const restoreTriggerFocus = (trigger: HTMLButtonElement): void => {
+    if (!trigger.isConnected) return
+    trigger.focus({ preventScroll: true })
+    document.defaultView?.queueMicrotask(() => {
+      if (activeMenu === undefined && trigger.isConnected) trigger.focus({ preventScroll: true })
+    })
+  }
+
   const closeMenu = (restoreFocus: boolean): void => {
     if (activeMenu === undefined) return
     const { popup, trigger, card, detachTheme } = activeMenu
@@ -274,7 +282,7 @@ export function createHostCollection(document: Document, options: HostCollection
     card.removeAttribute('data-action-menu-open')
     trigger.setAttribute('aria-expanded', 'false')
     options.tooltips?.hide?.()
-    if (restoreFocus && trigger.isConnected) trigger.focus()
+    if (restoreFocus) restoreTriggerFocus(trigger)
   }
 
   const positionMenu = (): void => {
@@ -308,6 +316,8 @@ export function createHostCollection(document: Document, options: HostCollection
     closeMenu(false)
     const popup = document.createElement('div')
     popup.className = 'cxc-menu-popup'
+    const controls = trigger.getAttribute('aria-controls')
+    if (controls !== null) popup.id = controls
     popup.setAttribute('role', 'menu')
     popup.setAttribute('aria-label', options.moreLabel ?? '更多操作')
     popup.addEventListener('pointerdown', stopActionEvent)
@@ -321,6 +331,13 @@ export function createHostCollection(document: Document, options: HostCollection
       button.setAttribute('role', 'menuitem')
       button.disabled = action.disabled === true
       button.setAttribute('aria-label', action.unavailableReason === undefined ? action.label : `${action.label}：${action.unavailableReason}`)
+      if (button.disabled) {
+        button.setAttribute('aria-disabled', 'true')
+        if (action.unavailableReason !== undefined) {
+          button.setAttribute('aria-description', action.unavailableReason)
+          button.title = action.unavailableReason
+        }
+      }
       appendIcon(button, action.icon)
       button.append(document.createTextNode(action.label))
       if (!button.disabled && action.onInvoke !== undefined) {
@@ -331,6 +348,7 @@ export function createHostCollection(document: Document, options: HostCollection
       }
       popup.append(button)
     }
+    popup.addEventListener('keydown', onMenuKeyDown)
     document.body.append(popup)
     const detachTheme = options.attachPortalTheme?.(popup)
     activeMenu = { popup, trigger, card, ...(detachTheme === undefined ? {} : { detachTheme }) }
@@ -346,8 +364,10 @@ export function createHostCollection(document: Document, options: HostCollection
     if (target instanceof document.defaultView!.Node && (activeMenu.popup.contains(target) || activeMenu.trigger.contains(target))) return
     closeMenu(false)
   }
-  const onDocumentKeyDown = (event: KeyboardEvent): void => {
+  function onMenuKeyDown(event: KeyboardEvent): void {
     if (activeMenu === undefined) return
+    const target = event.target
+    if (!(target instanceof document.defaultView!.Node) || !activeMenu.popup.contains(target)) return
     if (event.key === 'Escape') {
       event.preventDefault()
       event.stopPropagation()
@@ -374,11 +394,9 @@ export function createHostCollection(document: Document, options: HostCollection
   }
   const onViewportChange = (): void => positionMenu()
   document.addEventListener('pointerdown', onDocumentPointerDown, true)
-  document.addEventListener('keydown', onDocumentKeyDown, true)
   document.defaultView?.addEventListener('resize', onViewportChange)
   document.addEventListener('scroll', onViewportChange, true)
   cleanups.push(() => document.removeEventListener('pointerdown', onDocumentPointerDown, true))
-  cleanups.push(() => document.removeEventListener('keydown', onDocumentKeyDown, true))
   cleanups.push(() => document.defaultView?.removeEventListener('resize', onViewportChange))
   cleanups.push(() => document.removeEventListener('scroll', onViewportChange, true))
 
@@ -467,6 +485,7 @@ export function createHostCollection(document: Document, options: HostCollection
         trigger.setAttribute('aria-label', options.moreLabel ?? '更多操作')
         trigger.setAttribute('aria-haspopup', 'menu')
         trigger.setAttribute('aria-expanded', 'false')
+        trigger.setAttribute('aria-controls', `cxc-menu-${options.id}-${item.id}`.replace(/[^a-zA-Z0-9_-]/g, '-'))
         if (options.moreIcon !== undefined) appendIcon(trigger, options.moreIcon)
         trigger.addEventListener('click', () => openMenu(trigger, card, overflow))
         if (options.tooltips !== undefined) cleanups.push(options.tooltips.attach(trigger, () => options.moreLabel ?? '更多操作', 'top'))
