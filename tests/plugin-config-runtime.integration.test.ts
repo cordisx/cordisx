@@ -269,7 +269,7 @@ describe('plugin config runtime', () => {
       && dom.window.document.querySelector('input[type="range"][data-host-form-primitive="custom"]') === null; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 0))
     }
-    const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="配置管理"]')
+    const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="Configuration"]')
     const timeoutField = configPanel?.querySelector<HTMLElement>('[data-config-path="timeout"]')
     const secretField = configPanel?.querySelector<HTMLElement>('[data-config-path="apiKey"]')
     expect(configPanel?.textContent).not.toContain('Schemastery')

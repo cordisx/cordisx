@@ -13,7 +13,7 @@ import {
   type ManagerSnapshot,
 } from '../packages/cli/src/renderer/manager.js'
 
-function snapshot(status: ManagerPluginStatus = 'active'): ManagerSnapshot {
+function snapshot(status: ManagerPluginStatus = 'active', locale = 'en'): ManagerSnapshot {
   return {
     version: 'test',
     plugins: [{
@@ -29,7 +29,7 @@ function snapshot(status: ManagerPluginStatus = 'active'): ManagerSnapshot {
       },
     }],
     registrations: [], commands: [], navigation: { routes: [], pages: [], outlets: [] },
-    localization: { locale: 'en', direction: 'ltr', version: 0 }, localeCatalogs: [], localizationDiagnostics: [],
+    localization: { locale, direction: 'ltr', version: 0 }, localeCatalogs: [], localizationDiagnostics: [],
     platform: {
       hostId: 'codex-desktop', hostName: 'Codex Desktop', mode: 'unavailable', supportedCapabilities: [],
       diagnostics: [], secondConnectionCreated: false, rawBridgeExposed: false,
@@ -59,6 +59,31 @@ async function settle(): Promise<void> {
 }
 
 describe('Manager plugin card actions', () => {
+  it('localizes the primary plugin-card action and detail heading in en and zh-CN', async () => {
+    for (const [locale, expectedOpen, expectedHeading] of [
+      ['en', 'Open plugin details · Base Plugin', 'Plugin details'],
+      ['zh-CN', '打开插件详情 · Base Plugin', '插件详情'],
+    ] as const) {
+      const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
+      const state = snapshot('active', locale)
+      const model: ManagerModel = {
+        snapshot: () => state,
+        setPluginBlocked: async () => {}, setPermissionPolicy: async () => {}, subscribe: () => () => {},
+      }
+      const dispose = installCordisXManager(dom.window.document, model)
+      try {
+        const primary = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="base"]')!
+        expect(primary.getAttribute('aria-label')).toBe(expectedOpen)
+        primary.click()
+        await settle()
+        expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain(expectedHeading)
+      } finally {
+        dispose()
+        dom.window.close()
+      }
+    }
+  })
+
   it('separates card navigation from Host-owned actions, persists profile favorites, and confirms dependency impact', async () => {
     const dom = new JSDOM('<!doctype html><html class="electron-dark"><head></head><body></body></html>', { url: 'https://codex.local/' })
     let state = snapshot()
@@ -98,7 +123,7 @@ describe('Manager plugin card actions', () => {
       expect(card.querySelector('.cxm-chevron')).toBeNull()
       expect(card.querySelectorAll('.cxc-primary')).toHaveLength(1)
       expect(card.querySelectorAll('[data-plugin-action]')).toHaveLength(3)
-      expect(primary.getAttribute('aria-label')).toContain('打开 Base Plugin 详情')
+      expect(primary.getAttribute('aria-label')).toBe('Open plugin details · Base Plugin')
       expect(primary.getAttribute('aria-description')).toBe('运行中')
       expect(primary.querySelector('.cxc-description')?.textContent).toBe('Keeps local work in sync.')
       expect(primary.querySelector('.cxc-machine-id')?.textContent).toBe('base')

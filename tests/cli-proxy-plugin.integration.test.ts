@@ -337,7 +337,7 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(readmePanel?.textContent).toContain('External providers and the native connection')
     expect(readmePanel?.textContent).not.toContain('该插件没有随当前 bundle 提供 README.md')
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
-    const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="配置管理"]')
+    const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="Configuration"]')
     const providerField = configPanel?.querySelector<HTMLElement>('[data-config-path="providerIds"]')
     const cwdField = configPanel?.querySelector<HTMLElement>('[data-config-path="defaultCwd"]')
     expect(providerField?.querySelector('.cxf-label')?.textContent).toBe('Provider filter')
@@ -398,7 +398,7 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(dom.window.document.querySelector('[role="alert"]')?.textContent).toContain('expect string to match regexp')
     expect(configRequests).toEqual([])
 
-    const validPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="配置管理"]')!
+    const validPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="Configuration"]')!
     const validInput = validPanel.querySelector<HTMLElement & { value: string; onChange?: (value: string) => void }>('[data-config-path="providerIds"] t-textarea')!
     validInput.value = '["gateway-a"]'
     validInput.onChange?.(validInput.value)

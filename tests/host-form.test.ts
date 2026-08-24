@@ -153,6 +153,8 @@ describe('Host form DOM and accessibility', () => {
       .toContain('Managed by Host credentials')
     expect(adapter.control(field({ role: 'date' }), 'date', () => undefined).root.textContent)
       .toContain('cannot be edited safely')
+    expect((adapter.control(field(), 'text', () => undefined).root as HTMLElement & { placeholder?: string }).placeholder)
+      .toBe('Enter a value')
     const onDraft = vi.fn()
     const json = adapter.control(field({ type: 'object', value: {} }), 'json', onDraft).root as HTMLElement & { onChange?: (value: string) => void }
     json.onChange?.('{')
@@ -160,6 +162,8 @@ describe('Host form DOM and accessibility', () => {
     locale = 'zh-CN'
     expect(adapter.control(field({ role: 'secret' }), 'secret-zh', () => undefined).root.textContent)
       .toContain('Host 凭据边界')
+    expect((adapter.control(field(), 'text-zh', () => undefined).root as HTMLElement & { placeholder?: string }).placeholder)
+      .toBe('请输入')
   })
 
   it('connects help and errors to the keyboard target and labels native radio groups', () => {

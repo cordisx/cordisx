@@ -160,7 +160,7 @@ describe('Manager route and page catalog', () => {
       clearSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       state = snapshot('en')
       for (const listener of listeners) listener()
-      const enPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="路由"]')!
+      const enPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="Routes"]')!
       expect(enPanel.querySelector('[data-route-product-row="demo:analytics"] .cxc-title')?.textContent).toBe('Open workspace analytics')
       expect(enPanel.querySelector('[data-page-product-row="demo:analytics"] .cxc-description')?.textContent)
         .toBe('Shows structured analytics for the current workspace.')

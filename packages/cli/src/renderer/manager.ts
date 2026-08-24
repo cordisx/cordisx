@@ -2814,7 +2814,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const setHeading = (
-    copy: string,
+    headingCopy: string,
     snapshot: ManagerSnapshot,
     options: { readonly icon?: ManagerIconToken | CordisXIconToken; readonly brand?: boolean } = {},
   ): void => {
@@ -2825,7 +2825,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (pageRoute.segments.length > 1) {
       const back = create(document, 'button', 'cxm-heading-leading cxm-back')
       back.type = 'button'
-      back.setAttribute('aria-label', '返回')
+      back.setAttribute('aria-label', copy('manager.back'))
       back.append(createManagerIcon(document, 'back', 'cxm-back-icon'))
       back.addEventListener('click', () => { void navigateBack() })
       if (options.icon === undefined) row.append(back)
@@ -2852,7 +2852,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const current = pageRoute.segments.at(-1)?.label ?? ''
     title.append(create(document, 'h2', 'cxm-heading-current-heading', current), renderBreadcrumbs(pageRoute))
     row.append(title)
-    heading.append(row, create(document, 'p', undefined, copy))
+    heading.append(row, create(document, 'p', undefined, headingCopy))
   }
 
   const renderAbout = (snapshot: ManagerSnapshot): void => {
@@ -2960,7 +2960,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderExtensionPointList = (snapshot: ManagerSnapshot): void => {
-    setHeading('扩展点位', snapshot, { icon: 'contributions' })
+    setHeading(copy('extension.heading'), snapshot, { icon: 'contributions' })
     const points = snapshot.extensionPoints?.points ?? []
     const catalogText = snapshot.extensionPoints?.catalogText
     const items: HostCollectionItem[] = points.map(point => {
@@ -3004,16 +3004,16 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     })
     mountHostCollection(content, {
       id: 'extension-points',
-      label: '扩展点列表',
+      label: copy('extension.collection-label'),
       items,
       search: {
-        label: '搜索 CordisX 扩展点',
-        placeholder: '搜索名称、介绍、点位 id 或插件…',
+        label: copy('extension.search-label'),
+        placeholder: copy('extension.search-placeholder'),
         query: extensionPointQuery,
         onQueryChange: value => { extensionPointQuery = value },
       },
-      emptyLabel: '当前宿主没有声明扩展点；请查看运行诊断。',
-      noMatchesLabel: '没有匹配的扩展点',
+      emptyLabel: copy('extension.empty'),
+      noMatchesLabel: copy('extension.no-matches'),
     }, root => {
       for (const open of root.querySelectorAll<HTMLButtonElement>('[data-collection-open]')) {
         const point = points.find(item => item.id === open.dataset.collectionOpen)
@@ -3380,7 +3380,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       searchText: routeSearchValues(route),
       icon: () => createManagerIcon(document, 'routes'),
       ...(status === undefined ? {} : { status }),
-      openLabel: `打开 ${title} 路由详情`,
+      openLabel: `${copy('routes.open-route')} · ${title}`,
       onOpen,
     }
   }
@@ -3404,7 +3404,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       searchText: pageSearchValues(page, routes),
       icon: () => createManagerIcon(document, 'document'),
       ...(status === undefined ? {} : { status }),
-      openLabel: `打开 ${title} 页面详情`,
+      openLabel: `${copy('routes.open-page')} · ${title}`,
       onOpen,
     }
   }
@@ -3429,7 +3429,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   }
 
   const renderRouteList = (snapshot: ManagerSnapshot): void => {
-    setHeading('路由', snapshot, { icon: 'routes' })
+    setHeading(copy('routes.heading'), snapshot, { icon: 'routes' })
     const items: HostCollectionItem[] = [
       ...snapshot.navigation.routes.map(route => routeCollectionItem(snapshot, route, () => {
         rememberListScroll()
@@ -3447,16 +3447,16 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     ]
     mountHostCollection(content, {
       id: 'routes',
-      label: '路由和页面列表',
+      label: copy('routes.collection-label'),
       items,
       search: {
-        label: '搜索 CordisX 路由和页面',
-        placeholder: '搜索标题、说明、位置、页面或插件…',
+        label: copy('routes.search-label'),
+        placeholder: copy('routes.search-placeholder'),
         query: routeQuery,
         onQueryChange: value => { routeQuery = value },
       },
-      emptyLabel: '当前没有路由或页面',
-      noMatchesLabel: '没有匹配的路由或页面',
+      emptyLabel: copy('routes.empty'),
+      noMatchesLabel: copy('routes.no-matches'),
     }, root => {
       for (const open of root.querySelectorAll<HTMLButtonElement>('[data-collection-open]')) {
         const id = open.dataset.collectionOpen
@@ -3573,6 +3573,11 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
     const favorites = favoritePlugins(snapshot)
     const plugins = [...snapshot.plugins].sort((left, right) => Number(favorites.has(right.id)) - Number(favorites.has(left.id)))
+    const demoDescriptionKeys: Readonly<Partial<Record<string, Parameters<typeof managerCopy>[1]>>> = {
+      'slot-showcase': 'plugins.demo.slot-showcase-description',
+      'hello-toolbar': 'plugins.demo.hello-toolbar-description',
+      'form-schema-gallery': 'plugins.demo.form-schema-gallery-description',
+    }
     const items: HostCollectionItem[] = plugins.map(plugin => {
       const status = lifecycleBusy.get(plugin.id) ?? plugin.status
       const packageOperationReason = packageOperationUnavailableReason(snapshot, plugin)
@@ -3585,12 +3590,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const sourceActionReason = sourceReason === undefined ? undefined : copy('status.unavailable')
       const favorite = favorites.has(plugin.id)
       const toggleReason = toggleDisabled
-        ? (!managed ? copy('status.unavailable') : globallyBusy ? '当前有插件操作正在执行' : `插件当前不能${enable ? '启用' : '禁用'}`)
+        ? (!managed ? copy('status.unavailable') : globallyBusy ? copy('plugins.operation-busy') : copy(enable ? 'plugins.enable-unavailable' : 'plugins.disable-unavailable'))
         : undefined
       const reloadReason = !managed
         ? copy('status.unavailable')
-        : globallyBusy ? '当前有插件操作正在执行' : plugin.status === 'active' ? undefined : '插件当前不能重载'
-      const uninstallReason = !managed ? copy('status.unavailable') : (globallyBusy ? '当前有插件操作正在执行' : undefined)
+        : globallyBusy ? copy('plugins.operation-busy') : plugin.status === 'active' ? undefined : copy('plugins.reload-unavailable')
+      const uninstallReason = !managed ? copy('status.unavailable') : (globallyBusy ? copy('plugins.operation-busy') : undefined)
       const actions: HostCollectionAction[] = [
         {
           id: enable ? 'enable' : 'disable',
@@ -3674,16 +3679,17 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         },
       ]
       const registrations = snapshot.registrations.filter(item => item.owner === plugin.id)
+      const demoDescriptionKey = demoDescriptionKeys[plugin.id]
       return {
         id: plugin.id,
         title: plugin.name,
-        description: plugin.description ?? copy('plugins.local-description'),
+        description: demoDescriptionKey === undefined ? plugin.description ?? copy('plugins.local-description') : copy(demoDescriptionKey),
         machineId: plugin.id,
         searchText: [plugin.source, ...plugin.inject, ...registrations.flatMap(item => [item.surface, item.id])],
         icon: () => createPluginIcon(document, plugin.name),
         status: pluginCollectionStatus(plugin, status),
         actions,
-        openLabel: `打开 ${plugin.name} 详情`,
+        openLabel: `${copy('plugins.open')} · ${plugin.name}`,
         onOpen: () => {
           rememberListScroll()
           operationError = undefined
@@ -4391,7 +4397,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderPluginDetail = (snapshot: ManagerSnapshot, id: string): void => {
     const plugin = snapshot.plugins.find(item => item.id === id)
-    setHeading('插件详情', snapshot)
+    setHeading(copy('plugins.heading'), snapshot)
     if (plugin === undefined) {
       content.append(create(document, 'div', 'cxm-empty', '插件已不在当前 bundle 中'))
       return
@@ -4402,7 +4408,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }))
 
     if (activeFacet === 'readme') {
-      const panel = createTabPanel(document, 'README')
+      const panel = createTabPanel(document, copy('plugin-tab.readme'))
       if (plugin.readme?.trim() === '') {
         panel.append(create(document, 'div', 'cxm-empty', '该插件没有随当前 bundle 提供 README.md'))
       } else if (plugin.readme === undefined) {
@@ -4415,14 +4421,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }
 
     if (activeFacet === 'config') {
-      const panel = createTabPanel(document, '配置管理')
+      const panel = createTabPanel(document, copy('plugin-tab.configuration'))
       renderPluginConfiguration(plugin, panel)
       content.append(panel)
       return
     }
 
     if (activeFacet === 'permissions') {
-      const panel = createTabPanel(document, '权限')
+      const panel = createTabPanel(document, copy('plugin-tab.permissions'))
       const permissions = snapshot.permissions.filter(item => item.identity.source === plugin.source && item.identity.id === plugin.id)
       if (permissions.length === 0) {
         panel.append(create(document, 'div', 'cxm-empty', '该插件没有申请任何权限。'))
@@ -4480,7 +4486,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const pluginRoutes = snapshot.navigation.routes.filter(item => item.owner === plugin.id)
     const pluginPages = snapshot.navigation.pages.filter(item => item.owner === plugin.id)
     if (activeFacet === 'runtime') {
-      const panel = createTabPanel(document, '运行状态')
+      const panel = createTabPanel(document, copy('plugin-tab.runtime'))
       const livePage = model.pluginConsole?.(plugin.id) ?? {
         contract: 'cordisx.plugin-console-page/v1', schemaVersion: 1,
         plugin: { source: plugin.source, pluginId: plugin.id }, generation: 'manager-unavailable',
@@ -4495,7 +4501,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const durations = page.entries.filter(entry => entry.kind === 'invocation' && entry.durationMs !== undefined).map(entry => entry.durationMs!)
       const summary = create(document, 'div', 'cxm-console-summary')
       for (const [label, value] of [
-        ['调用', requested.length], ['成功', successes.length], ['失败', failures.length], ['拒绝', denials.length],
+        [copy('console.requests'), requested.length], [copy('console.successes'), successes.length], [copy('console.failures'), failures.length], [copy('console.denied'), denials.length],
       ]) {
         const metric = create(document, 'div', 'cxm-console-metric')
         metric.append(create(document, 'strong', undefined, String(value)), create(document, 'span', undefined, String(label)))
@@ -4516,9 +4522,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         }
       }
       const performance = create(document, 'details', 'cxm-console-performance')
-      performance.append(create(document, 'summary', undefined, `性能与消费 · 平均耗时 ${durations.length === 0 ? '—' : `${(durations.reduce((sum, value) => sum + value, 0) / durations.length).toFixed(1)}ms`}`))
+      performance.append(create(document, 'summary', undefined, `${copy('console.performance')} ${durations.length === 0 ? '—' : `${(durations.reduce((sum, value) => sum + value, 0) / durations.length).toFixed(1)}ms`}`))
       performance.append(create(document, 'div', 'cxm-console-performance-body', callSources.size === 0
-        ? '当前没有 Host API 调用计量。'
+        ? copy('console.no-host-api-metrics')
         : [...callSources].map(([source, value]) => `${source}: ${value.calls} calls${value.items === 0 ? '' : ` · ${value.items} items`}${value.bytes === 0 ? '' : ` · ${value.bytes} B`}`).join('   ')))
       summary.append(performance)
       panel.append(summary)
@@ -4537,13 +4543,13 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const controls = create(document, 'div', 'cxm-console-controls')
       const search = create(document, 'input')
       search.type = 'search'
-      search.placeholder = '搜索消息、来源或 correlation id'
+      search.placeholder = copy('console.search-placeholder')
       search.value = consoleQuery
       search.dataset.consoleSearch = plugin.id
       search.addEventListener('input', () => { consoleQuery = search.value; renderContent() })
       const select = (label: string, value: string, values: readonly string[], change: (value: string) => void): TDesignSelectElement<string> => forms.select(
         label,
-        values.map(item => ({ value: item, label: item === 'all' ? '全部' : item })),
+        values.map(item => ({ value: item, label: item === 'all' ? copy('console.all') : item })),
         value,
         next => {
           if (next === undefined) return
@@ -4553,15 +4559,15 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       )
       controls.append(
         search,
-        select('日志级别', consoleMethod, ['all', 'debug', 'log', 'info', 'warn', 'error'], value => { consoleMethod = value }),
-        select('API / 类型', consoleKind, ['all', 'host-api', 'console', 'lifecycle', 'diagnostic'], value => { consoleKind = value }),
-        select('日志来源', consoleSource, ['all', ...sources], value => { consoleSource = value }),
+        select(copy('console.level'), consoleMethod, ['all', 'debug', 'log', 'info', 'warn', 'error'], value => { consoleMethod = value }),
+        select(copy('console.kind'), consoleKind, ['all', 'host-api', 'console', 'lifecycle', 'diagnostic'], value => { consoleKind = value }),
+        select(copy('console.source'), consoleSource, ['all', ...sources], value => { consoleSource = value }),
       )
       const scrollState = consoleScrollStates.get(plugin.id) ?? { follow: true, scrollTop: 0 }
       consoleScrollStates.set(plugin.id, scrollState)
       const actionToolbar = create(document, 'div', 'cxm-console-action-toolbar')
       actionToolbar.setAttribute('role', 'toolbar')
-      actionToolbar.setAttribute('aria-label', 'Console 显示控制')
+      actionToolbar.setAttribute('aria-label', copy('console.toolbar'))
       const iconAction = (
         action: string,
         icon: ManagerIconToken,
@@ -4588,20 +4594,20 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         tooltips.attach(button, () => options.description === undefined ? label : `${label} · ${options.description}`, 'top', 80)
         return button
       }
-      const pauseLabel = consolePaused ? '继续采集' : '暂停采集'
+      const pauseLabel = consolePaused ? copy('console.resume') : copy('console.pause')
       const pause = iconAction('pause', consolePaused ? 'console-resume' : 'console-pause', pauseLabel, { pressed: consolePaused }, () => {
         consolePaused = !consolePaused
         consolePausedPage = consolePaused ? model.pluginConsole?.(plugin.id) ?? livePage : undefined
         renderContent()
       })
-      const followLabel = scrollState.follow ? '停止跟随' : '跟随最新'
+      const followLabel = scrollState.follow ? copy('console.stop-following') : copy('console.follow')
       const autoScroll = iconAction('follow', 'console-follow', followLabel, { pressed: scrollState.follow }, () => {
         scrollState.follow = !scrollState.follow
         renderContent()
       })
-      const clear = iconAction('clear', 'console-clear', '清空日志', {
+      const clear = iconAction('clear', 'console-clear', copy('console.clear'), {
         disabled: page.entries.length === 0,
-        description: '不可撤销',
+        description: copy('console.irreversible'),
       }, () => {
         model.clearPluginConsole?.(plugin.id)
         selectedConsoleEntry = undefined
@@ -4609,18 +4615,18 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         renderContent()
       })
       const selected = page.entries.find(entry => entry.entryId === selectedConsoleEntry)
-      const copy = iconAction('copy', 'console-copy', '复制所选', { disabled: selected === undefined }, () => {
+      const copyButton = iconAction('copy', 'console-copy', copy('console.copy'), { disabled: selected === undefined }, () => {
         if (selected !== undefined) void copyConsoleText(pluginConsoleEntryCopyText(selected)).catch(() => undefined)
       })
-      actionToolbar.append(pause, autoScroll, clear, copy)
+      actionToolbar.append(pause, autoScroll, clear, copyButton)
       controls.append(actionToolbar)
       panel.append(controls)
       const unattributed = page.unattributedEntries ?? 0
       if (unattributed > 0 && dismissedConsoleWarnings.get(plugin.id) !== unattributed) {
         const unknown = create(document, 'div', 'cxm-notice cxm-console-warning')
         unknown.dataset.tone = 'warning'
-        unknown.append(create(document, 'span', undefined, `检测到 ${unattributed} 条来源冲突的运行时错误，未计入当前插件日志。请重载插件后复现并检查 bundle source map。`))
-        const dismissWarning = managerIconAction('close', '关闭归属异常提示')
+        unknown.append(create(document, 'span', undefined, copy('console.ownership-warning').replace('{count}', String(unattributed))))
+        const dismissWarning = managerIconAction('close', copy('console.dismiss-ownership-warning'))
         dismissWarning.addEventListener('click', () => { dismissedConsoleWarnings.set(plugin.id, unattributed); renderContent() })
         unknown.append(dismissWarning)
         panel.append(unknown)
@@ -4631,11 +4637,11 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const frame = create(document, 'div', 'cxm-console-frame')
       frame.dataset.pluginConsole = plugin.id
       if (projections.length === 0) {
-        frame.append(create(document, 'div', 'cxm-console-empty', page.entries.length === 0 ? '等待插件日志或 CordisX API 调用…' : '没有匹配当前筛选的日志'))
+        frame.append(create(document, 'div', 'cxm-console-empty', page.entries.length === 0 ? copy('console.empty') : copy('console.no-matches')))
       } else {
         frame.classList.add('cxm-console-luna')
       }
-      const latest = managerIconAction('console-follow', '回到最新', { className: 'cxm-console-latest' })
+      const latest = managerIconAction('console-follow', copy('console.back-to-latest'), { className: 'cxm-console-latest' })
       latest.hidden = true
       body.append(frame, latest)
       if (selected !== undefined) {
@@ -4643,26 +4649,26 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         const inspector = create(document, 'aside', 'cxm-console-inspector')
         inspector.dataset.consoleDetail = selected.entryId
         const inspectorHead = create(document, 'div', 'cxm-console-inspector-head')
-        inspectorHead.append(create(document, 'span', undefined, 'Host metadata'))
-        const closeInspector = managerIconAction('close', '关闭日志详情')
+        inspectorHead.append(create(document, 'span', undefined, copy('console.entry-details')))
+        const closeInspector = managerIconAction('close', copy('console.close-details'))
         closeInspector.addEventListener('click', () => { selectedConsoleEntry = undefined; renderContent() })
         inspectorHead.append(closeInspector)
         const grid = create(document, 'dl', 'cxm-console-inspector-grid')
         const metadata: readonly (readonly [string, string | number | undefined])[] = [
-          ['插件', `${selected.plugin.pluginId} · ${selected.plugin.source}`],
-          ['Generation', selected.generation],
-          ['能力 / 来源', selected.source],
-          ['类型', selected.kind],
-          ['采集', selected.coverage],
-          ['Correlation', selected.correlationId],
-          ['阶段', selected.phase],
-          ['状态', selected.status],
-          ['耗时', selected.durationMs === undefined ? undefined : `${selected.durationMs.toFixed(1)}ms`],
-          ['会话', selected.sessionId],
-          ['触发', selected.trigger === undefined ? undefined : `${selected.trigger.kind}${selected.trigger.registrationId === undefined ? '' : ` · ${selected.trigger.registrationId}`}`],
-          ['有效 owner', selected.effectiveOwner === undefined ? undefined : `${selected.effectiveOwner.pluginId} · ${selected.effectiveOwner.source}`],
-          ['请求计量', selected.request === undefined ? undefined : JSON.stringify(selected.request)],
-          ['结果计量', selected.result === undefined ? undefined : JSON.stringify(selected.result)],
+          [copy('console.field.plugin'), `${selected.plugin.pluginId} · ${selected.plugin.source}`],
+          [copy('console.field.generation'), selected.generation],
+          [copy('console.field.source'), selected.source],
+          [copy('console.field.kind'), selected.kind],
+          [copy('console.field.coverage'), selected.coverage],
+          [copy('console.field.correlation'), selected.correlationId],
+          [copy('console.field.phase'), selected.phase],
+          [copy('console.field.status'), selected.status],
+          [copy('console.field.duration'), selected.durationMs === undefined ? undefined : `${selected.durationMs.toFixed(1)}ms`],
+          [copy('console.field.session'), selected.sessionId],
+          [copy('console.field.trigger'), selected.trigger === undefined ? undefined : `${selected.trigger.kind}${selected.trigger.registrationId === undefined ? '' : ` · ${selected.trigger.registrationId}`}`],
+          [copy('console.field.owner'), selected.effectiveOwner === undefined ? undefined : `${selected.effectiveOwner.pluginId} · ${selected.effectiveOwner.source}`],
+          [copy('console.field.request-metrics'), selected.request === undefined ? undefined : JSON.stringify(selected.request)],
+          [copy('console.field.result-metrics'), selected.result === undefined ? undefined : JSON.stringify(selected.result)],
         ]
         for (const [label, value] of metadata) {
           if (value === undefined) continue
@@ -4748,7 +4754,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }
 
     if (activeFacet === 'extension-points') {
-      const panel = createTabPanel(document, '扩展点位')
+      const panel = createTabPanel(document, copy('plugin-tab.extension-points'))
       const points = (snapshot.extensionPoints?.points ?? []).filter(point => point.plugins.some(usage => (
         usage.identity.source === plugin.source && usage.identity.id === plugin.id
       )))
@@ -4793,7 +4799,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return
     }
 
-    const panel = createTabPanel(document, '路由')
+    const panel = createTabPanel(document, copy('plugin-tab.routes'))
     const query = pluginRouteQueries.get(plugin.id) ?? ''
     const routesForPage = (page: NavigationPageSnapshot): readonly RouteSnapshot[] => pluginRoutes.filter(route => (
       qualifiedNavigationId(route.owner, route.definition.page) === page.qualifiedId
@@ -5069,7 +5075,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderMarketplaceDetail = (managerSnapshot: ManagerSnapshot, identityValue: string): void => {
     const plugin = marketplace.snapshot().plugins.find(item => item.identity === identityValue)
-    setHeading('插件详情', managerSnapshot)
+    setHeading(copy('plugins.heading'), managerSnapshot)
     if (plugin === undefined) {
       content.append(create(document, 'div', 'cxm-empty', '该插件已不在当前聚合结果中'))
       return
@@ -5081,7 +5087,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }))
 
     if (activeFacet === 'overview') {
-      const panel = createTabPanel(document, '概览')
+      const panel = createTabPanel(document, copy('marketplace-tab.overview'))
       panel.append(create(document, 'p', 'cxm-detail-description', metadata.description))
       const fields = create(document, 'div', 'cxm-detail-grid')
       for (const [label, value] of [
@@ -5144,7 +5150,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return
     }
 
-    const panel = createTabPanel(document, '作者与来源')
+    const panel = createTabPanel(document, copy('marketplace-tab.authors-source'))
     const links = create(document, 'div', 'cxm-link-list')
     links.setAttribute('role', 'list')
     const appendLink = (label: string, value: string, href: string): void => {
