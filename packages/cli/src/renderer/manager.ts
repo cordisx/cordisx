@@ -68,7 +68,10 @@ import { HostThemeProjection, resolveHostTheme } from './host-theme.js'
 import { HOST_FORM_STYLES, HostFormAdapter, selectHostFormPrimitive, validateHostFormValue } from './host-form.js'
 import { BrowserPermissionAuthorizationDialog } from './permission-authorization-dialog.js'
 import type { MarketplaceRankingExplanation } from './marketplace-ranking.js'
-import lunaTextViewerCss from 'luna-text-viewer/luna-text-viewer.css'
+import lunaConsoleCss from 'luna-console/luna-console.css'
+import lunaDataGridCss from 'luna-data-grid/luna-data-grid.css'
+import lunaDomViewerCss from 'luna-dom-viewer/luna-dom-viewer.css'
+import lunaObjectViewerCss from 'luna-object-viewer/luna-object-viewer.css'
 
 export type ManagerPluginStatus =
   | 'active' | 'blocked' | 'permission-blocked' | 'configured-disabled' | 'failed'
@@ -701,23 +704,19 @@ const MANAGER_STYLES = `
   .cxm-console-performance { flex: 1; min-width: 0; background: #191b1f; }
   .cxm-console-performance summary { padding: 8px 10px; color: #8d96a8; cursor: pointer; font-size: 10px; list-style-position: inside; }
   .cxm-console-performance-body { padding: 0 10px 8px; color: #aab2c0; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .cxm-console-controls { display: grid; grid-template-columns: minmax(150px, 1fr) repeat(3, minmax(90px, max-content)) repeat(4, max-content); gap: 7px; align-items: center; margin: 8px 0; }
+  .cxm-console-controls { display: grid; grid-template-columns: minmax(150px, 1fr) repeat(3, minmax(90px, max-content)) max-content; gap: 7px; align-items: center; margin: 8px 0; }
   .cxm-console-controls input, .cxm-console-controls select { min-width: 0; height: 30px; border: 1px solid #353a42; border-radius: 6px; padding: 0 8px; background: #15171a; color: #d8dce3; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .cxm-console-controls button { height: 30px; border: 1px solid #353a42; border-radius: 6px; padding: 0 9px; background: #202328; color: #bfc5ce; font-size: 10px; cursor: pointer; }
-  .cxm-console-controls button[aria-pressed="true"] { border-color: #8992a1; color: #fff; }
-  .cxm-console-coverage { margin: 7px 0; color: #8d96a8; font-size: 10px; line-height: 1.45; }
-  .cxm-console-info { margin: 7px 0; color: #8d96a8; font-size: 10px; }
-  .cxm-console-info summary { width: max-content; cursor: pointer; }
-  .cxm-console-info p { max-width: 760px; margin: 7px 0 0; line-height: 1.5; }
+  .cxm-console-action-toolbar { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; white-space: nowrap; }
   .cxm-console-warning { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 8px; }
   .cxm-console-warning button { flex: none; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 11px; }
   .cxm-console-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: start; }
   .cxm-console-workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr) minmax(220px, 280px); }
   .cxm-console-body { position: relative; min-width: 0; }
-  .cxm-console-frame { width: 100%; max-height: min(52vh, 520px); overflow: auto; border: 1px solid #30343a; border-radius: 7px; background: #101215; scrollbar-gutter: stable; overscroll-behavior: contain; }
-  .cxm-console-frame.cxm-console-luna { min-height: 0; color: #cad0da; font: 11px/20px ui-monospace, SFMono-Regular, Menlo, monospace; cursor: default; }
-  .cxm-console-frame.cxm-console-luna.luna-text-viewer { border: 1px solid #30343a; background: #101215; color: #cad0da; }
-  .cxm-console-frame.cxm-console-luna .luna-text-viewer-text { max-height: none !important; padding: 6px 8px; font: inherit; }
+  .cxm-console-frame { width: 100%; max-height: min(52vh, 520px); overflow: auto; box-sizing: border-box; border: 1px solid #30343a; border-radius: 7px; background: #101215; scrollbar-gutter: stable; overscroll-behavior: contain; }
+  .cxm-console-frame.cxm-console-luna { height: var(--cxm-console-content-height, 80px); min-height: 28px; color: #cad0da; cursor: default; }
+  .cxm-console-frame.cxm-console-luna.luna-console { border: 1px solid #30343a; background: #101215; }
+  .cxm-console-frame.cxm-console-luna .luna-console-log-content { font-size: 11px; line-height: 16px; }
+  .cxm-console-frame.cxm-console-luna .luna-console-header { font-size: 10px; }
   .cxm-console-frame.cxm-console-luna:focus-visible { outline: 2px solid #8e98a9; outline-offset: 2px; }
   .cxm-console-latest { position: absolute; right: 14px; bottom: 12px; z-index: 1; height: 28px; border: 1px solid #4a515c; border-radius: 14px; padding: 0 10px; background: #252a31; color: #e3e7ee; box-shadow: 0 4px 14px rgba(0,0,0,.35); cursor: pointer; font-size: 10px; }
   .cxm-console-inspector { min-width: 0; overflow: hidden; border: 1px solid #30343a; border-radius: 7px; background: #141619; }
@@ -733,8 +732,7 @@ const MANAGER_STYLES = `
   [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-metric strong { color: #1d222b; }
   [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-controls input,
   [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-controls select { border-color: #c7ccd4; background: #fff; color: #20242c; }
-  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-controls button { border-color: #c7ccd4; background: #f4f5f7; color: #3d4654; }
-  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-frame.cxm-console-luna.luna-text-viewer { border-color: #c7ccd4; background: #fff; color: #252b35; }
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-frame.cxm-console-luna.luna-console { border-color: #c7ccd4; background: #fff; color: #252b35; }
   [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-inspector { border-color: #c7ccd4; background: #f8f9fa; }
   [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-inspector-head { border-color: #d7dbe1; color: #252b35; }
   [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-inspector-grid dd { color: #354052; }
@@ -830,11 +828,12 @@ const MANAGER_STYLES = `
   .cxm-plugin-row:hover .cxm-plugin-actions,
   .cxm-plugin-row:focus-within .cxm-plugin-actions,
   .cxm-plugin-row[data-action-menu-open="true"] .cxm-plugin-actions { opacity: 1; pointer-events: auto; }
-  .cxm-plugin-icon-action, .cxm-plugin-menu-trigger { display: inline-grid; place-items: center; width: 30px; height: 30px; flex: none; box-sizing: border-box; border: 0; border-radius: 8px; background: transparent; color: #aeb5c3; cursor: pointer; }
-  .cxm-plugin-icon-action:hover:not(:disabled), .cxm-plugin-menu-trigger:hover { background: rgba(199, 204, 212, .12); color: #eef0f4; }
-  .cxm-plugin-icon-action:focus-visible, .cxm-plugin-menu-trigger:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 1px; }
-  .cxm-plugin-icon-action:disabled { cursor: default; opacity: .34; }
-  .cxm-plugin-icon-action .cxm-material-icon, .cxm-plugin-menu-trigger .cxm-material-icon { width: 17px; height: 17px; }
+  .cxm-manager-icon-action, .cxm-plugin-icon-action, .cxm-plugin-menu-trigger { display: inline-grid; place-items: center; width: 30px; height: 30px; flex: none; box-sizing: border-box; border: 0; border-radius: 8px; background: transparent; color: #aeb5c3; cursor: pointer; }
+  .cxm-manager-icon-action:hover:not(:disabled), .cxm-plugin-icon-action:hover:not(:disabled), .cxm-plugin-menu-trigger:hover { background: var(--cx-hover, rgba(199, 204, 212, .12)); color: var(--cx-text, #eef0f4); }
+  .cxm-manager-icon-action:focus-visible, .cxm-plugin-icon-action:focus-visible, .cxm-plugin-menu-trigger:focus-visible { outline: 2px solid var(--cx-focus, #c7ccd4); outline-offset: 1px; }
+  .cxm-manager-icon-action:disabled, .cxm-plugin-icon-action:disabled { cursor: default; opacity: var(--cx-disabled, .34); }
+  .cxm-manager-icon-action[aria-pressed="true"] { background: var(--cx-pressed, rgba(199, 204, 212, .2)); color: var(--cx-text, #eef0f4); }
+  .cxm-manager-icon-action .cxm-material-icon, .cxm-plugin-icon-action .cxm-material-icon, .cxm-plugin-menu-trigger .cxm-material-icon { width: 17px; height: 17px; }
   .cxm-plugin-menu { position: relative; }
   .cxm-plugin-menu-popup { position: fixed; z-index: 2147483646; top: 0; left: 0; width: max-content; min-width: 160px; max-width: min(240px, calc(100vw - 32px)); padding: 5px; border: 1px solid rgba(255,255,255,.13); border-radius: 10px; background: #20242d; box-shadow: 0 14px 44px rgba(0,0,0,.45); }
   .cxm-plugin-menu-item { display: flex; align-items: center; gap: 9px; width: 100%; border: 0; border-radius: 7px; padding: 8px 9px; background: transparent; color: #d9dde5; cursor: pointer; text-align: left; font: inherit; }
@@ -1039,10 +1038,16 @@ const MANAGER_STYLES = `
     .cxm-resource-row { grid-template-columns: minmax(0, 1fr); }
     .cxm-resource-id { grid-column: 1; grid-row: auto; }
     .cxm-console-controls { grid-template-columns: minmax(0, 1fr) repeat(2, minmax(90px, max-content)); }
+    .cxm-console-action-toolbar { grid-column: 1 / -1; }
     .cxm-console-workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr); }
     .cxm-catalog-row { gap: 8px; padding: 12px 2px; }
     .cxm-catalog-icon { width: 24px; height: 24px; }
     .cxm-catalog-status { max-width: 34%; }
+  }
+  @media (max-width: 520px) {
+    .cxm-console-controls { grid-template-columns: minmax(0, 1fr) minmax(72px, 1fr); }
+    .cxm-console-controls > input { grid-column: 1 / -1; }
+    .cxm-console-action-toolbar { grid-column: 1 / -1; justify-content: flex-start; }
   }
 `
 
@@ -1118,86 +1123,72 @@ function createAdaptiveBrandMark(document: Document): HTMLImageElement {
   return mark
 }
 
-interface PluginConsoleFoldedEntry {
+export interface PluginConsoleLunaEntryProjection {
   readonly entry: CordisXPluginConsoleEntryV1
-  readonly count: number
-}
-
-interface PluginConsoleLunaBlock {
-  readonly entry: CordisXPluginConsoleEntryV1
-  readonly text: string
-  readonly startLine: number
-  readonly endLine: number
-}
-
-interface PluginConsoleLunaProjection {
-  readonly text: string
-  readonly blocks: readonly PluginConsoleLunaBlock[]
-}
-
-function consoleSnapshotLines(
-  snapshot: CordisXPluginConsoleValueSummaryV1,
-  label: string,
-  indent = '  ',
-): string[] {
-  if (snapshot.type === 'array') {
-    const lines = [`${indent}${label}: ${snapshot.preview} [`]
-    for (const [index, item] of (snapshot.items ?? []).entries()) {
-      lines.push(...consoleSnapshotLines(item, String(index), `${indent}  `))
-    }
-    if (snapshot.truncated) lines.push(`${indent}  …`)
-    lines.push(`${indent}]`)
-    return lines
+  readonly type: CordisXPluginConsoleEntryV1['method']
+  readonly args: readonly unknown[]
+  readonly header: {
+    readonly time: string
+    readonly from: string
   }
-  if (snapshot.type === 'object') {
-    const lines = [`${indent}${label}: ${snapshot.preview} {`]
-    for (const item of snapshot.entries ?? []) lines.push(...consoleSnapshotLines(item.value, item.key, `${indent}  `))
-    if (snapshot.truncated) lines.push(`${indent}  …`)
-    lines.push(`${indent}}`)
-    return lines
+}
+
+/** Rehydrate only the immutable Host snapshot, never the original plugin value or getter. */
+export function projectPluginConsoleValueForLuna(snapshot: CordisXPluginConsoleValueSummaryV1): unknown {
+  if (snapshot.type === 'undefined') return undefined
+  if (snapshot.type === 'null') return null
+  if (snapshot.type === 'boolean' || snapshot.type === 'number' || snapshot.type === 'string') return snapshot.value
+  if (snapshot.type === 'bigint') {
+    try { return BigInt(String(snapshot.value ?? snapshot.preview).replace(/n$/u, '')) } catch { return snapshot.preview }
   }
   if (snapshot.type === 'error') {
-    const lines = [`${indent}${label}: ${snapshot.preview}`]
-    if (snapshot.stack !== undefined) lines.push(...snapshot.stack.split('\n').slice(1).map(line => `${indent}  ${line.trimStart()}`))
-    return lines
+    const name = snapshot.name ?? 'Error'
+    const prefix = `${name}: `
+    const message = snapshot.preview.startsWith(prefix) ? snapshot.preview.slice(prefix.length) : snapshot.preview
+    const error = new Error(message)
+    error.name = name
+    if (snapshot.stack !== undefined) Object.defineProperty(error, 'stack', { configurable: true, value: snapshot.stack })
+    return error
   }
-  const value = snapshot.type === 'string'
-    ? JSON.stringify(snapshot.value ?? snapshot.preview)
-    : snapshot.type === 'null' || snapshot.type === 'undefined'
-      ? snapshot.preview
-      : snapshot.preview
-  return [`${indent}${label}: ${value}${snapshot.truncated ? ' …' : ''}`]
+  if (snapshot.type === 'array') {
+    const value = (snapshot.items ?? []).map(projectPluginConsoleValueForLuna)
+    if (snapshot.truncated === true) Object.defineProperty(value, '[[Truncated]]', { enumerable: true, value: true })
+    return value
+  }
+  if (snapshot.type === 'object') {
+    const value: Record<string, unknown> = {}
+    for (const item of snapshot.entries ?? []) {
+      Object.defineProperty(value, item.key, {
+        configurable: true, enumerable: true, writable: false,
+        value: projectPluginConsoleValueForLuna(item.value),
+      })
+    }
+    if (snapshot.truncated === true) Object.defineProperty(value, '[[Truncated]]', { enumerable: true, value: true })
+    return value
+  }
+  return snapshot.preview
 }
 
-function consoleEntryLine(entry: CordisXPluginConsoleEntryV1, repeat = 1, grouped = false): string {
-  const time = new Date(entry.time).toLocaleTimeString([], { hour12: false })
-  const terminal = entry.durationMs === undefined ? entry.status : `${entry.status ?? entry.phase} ${entry.durationMs.toFixed(1)}ms`
-  const prefix = grouped ? '├─ ' : ''
-  return `${time} ${entry.method.padEnd(5)} ${prefix}${entry.source}  ${entry.message}${terminal === undefined ? '' : `  · ${terminal}`}${repeat > 1 ? `  repeat ${repeat}` : ''}`
+function lunaConsoleTime(timestamp: number): string {
+  const date = new Date(timestamp)
+  const parts = [date.getHours(), date.getMinutes(), date.getSeconds()].map(value => String(value).padStart(2, '0'))
+  return `${parts.join(':')}.${String(date.getMilliseconds()).padStart(3, '0')}`
 }
 
-/** Project immutable Host snapshots into the one Luna Log text stream. */
-export function projectPluginConsoleForLuna(entries: readonly PluginConsoleFoldedEntry[]): PluginConsoleLunaProjection {
-  const blocks: PluginConsoleLunaBlock[] = []
-  const seenCorrelations = new Set<string>()
-  let line = 0
-  for (const item of entries) {
-    const grouped = item.entry.correlationId !== undefined && seenCorrelations.has(item.entry.correlationId)
-    if (item.entry.correlationId !== undefined) seenCorrelations.add(item.entry.correlationId)
-    const lines = [consoleEntryLine(item.entry, item.count, grouped)]
-    for (const [index, snapshot] of item.entry.args.entries()) {
-      if (['array', 'object', 'error'].includes(snapshot.type) || snapshot.truncated === true) {
-        lines.push(...consoleSnapshotLines(snapshot, `arg[${index}]`))
-      }
-    }
-    if (item.entry.stack !== undefined && !item.entry.args.some(argument => argument.stack === item.entry.stack)) {
-      lines.push(...item.entry.stack.split('\n').map((stackLine, index) => `${index === 0 ? '  stack:' : '        '}${stackLine}`))
-    }
-    const text = lines.join('\n')
-    blocks.push({ entry: item.entry, text, startLine: line, endLine: line + lines.length })
-    line += lines.length
+/** Keep each Host entry independent and preserve native Console argument-array semantics. */
+export function projectPluginConsoleEntryForLuna(entry: CordisXPluginConsoleEntryV1): PluginConsoleLunaEntryProjection {
+  const values = entry.args.map(projectPluginConsoleValueForLuna)
+  return {
+    entry,
+    type: entry.method,
+    args: entry.kind === 'console' ? (values.length === 0 ? [entry.message] : values) : [entry.message, ...values],
+    header: { time: lunaConsoleTime(entry.time), from: entry.source },
   }
-  return { text: blocks.map(block => block.text).join('\n'), blocks }
+}
+
+function pluginConsoleEntryCopyText(entry: CordisXPluginConsoleEntryV1): string {
+  const args = entry.args.map(argument => argument.preview).join(' ')
+  return `${lunaConsoleTime(entry.time)} ${entry.method} ${entry.source} ${entry.kind === 'console' ? args || entry.message : `${entry.message}${args === '' ? '' : ` ${args}`}`}`
 }
 
 function capabilityPresentation(capability: CordisXPlatformCapability): CapabilityPresentation {
@@ -1709,7 +1700,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   document.getElementById(MANAGER_STYLE_ID)?.remove()
   const style = create(document, 'style')
   style.id = MANAGER_STYLE_ID
-  style.textContent = `${lunaTextViewerCss}\n${MANAGER_STYLES}\n${HOST_THEME_OVERLAY_STYLES}`
+  style.textContent = `${lunaObjectViewerCss}\n${lunaDataGridCss}\n${lunaDomViewerCss}\n${lunaConsoleCss}\n${MANAGER_STYLES}\n${HOST_THEME_OVERLAY_STYLES}`
   ;(document.head ?? document.documentElement).append(style)
 
   const trigger = create(document, 'button')
@@ -1832,7 +1823,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const lifecycleBusy = new Map<string, ManagerPluginStatus>()
   let lifecycleInstallBusy = false
   const configRendererMounts = new Set<ConfigRendererMountHandle>()
-  const lunaLogMounts = new Set<{
+  const lunaConsoleMounts = new Set<{
     readonly destroy: () => void
     readonly setTheme: (theme: 'dark' | 'light') => void
   }>()
@@ -1848,15 +1839,15 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     configRendererMounts.clear()
   }
 
-  const disposeLunaLogs = (): void => {
-    for (const mount of lunaLogMounts) mount.destroy()
-    lunaLogMounts.clear()
+  const disposeLunaConsoles = (): void => {
+    for (const mount of lunaConsoleMounts) mount.destroy()
+    lunaConsoleMounts.clear()
   }
 
   const syncHostUiTheme = (): void => {
     const current = resolveHostTheme(document).theme
     syncAdaptiveBrandMarks(document)
-    for (const mount of lunaLogMounts) mount.setTheme(current)
+    for (const mount of lunaConsoleMounts) mount.setTheme(current)
   }
 
   const authorizeAndRestore = async (plugin: ManagerPluginSnapshot): Promise<void> => {
@@ -3579,25 +3570,43 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     if (draft.message !== undefined) panel.append(forms.alert(draft.message, draft.state === 'saved' ? 'info' : 'error'))
   }
 
-  const escapeConsoleText = (value: string): string => value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-
-  const mountLunaLog = (
+  const mountLunaConsole = (
     container: HTMLElement,
-    projection: PluginConsoleLunaProjection,
+    projections: readonly PluginConsoleLunaEntryProjection[],
     pluginId: string,
     latest: HTMLButtonElement,
   ): void => {
     const state = consoleScrollStates.get(pluginId) ?? { follow: true, scrollTop: 0 }
     consoleScrollStates.set(pluginId, state)
     let desiredTheme = resolveHostTheme(document).theme
-    let viewer: { append(log: string): void; destroy(): void; setOption(name: string, value: unknown): void } | undefined
+    interface LunaLogRecord {
+      readonly container: HTMLElement
+      copy(): void
+      select(): void
+    }
+    interface LunaConsoleViewer {
+      destroy(): void
+      setOption(name: string, value: unknown): void
+      on(name: string, listener: (record: LunaLogRecord) => void): void
+      insert(options: {
+        readonly type: CordisXPluginConsoleEntryV1['method']
+        readonly args: readonly unknown[]
+        readonly header: { readonly time: string; readonly from: string }
+      }): void
+    }
+    let viewer: LunaConsoleViewer | undefined
     let resizeObserver: ResizeObserver | undefined
     let destroyed = false
+    const entriesByRecord = new WeakMap<LunaLogRecord, CordisXPluginConsoleEntryV1>()
+    let pendingEntry: CordisXPluginConsoleEntryV1 | undefined
     const isAtBottom = (): boolean => container.scrollHeight - container.clientHeight - container.scrollTop <= 4
     const syncLatest = (): void => { latest.hidden = state.follow || container.scrollHeight <= container.clientHeight + 4 }
+    const syncContentHeight = (): void => {
+      const space = container.querySelector<HTMLElement>('.luna-console-logs-space')
+      const measured = Number.parseFloat(space?.style.height ?? '') || space?.scrollHeight || container.scrollHeight
+      const viewportLimit = Math.min(520, Math.max(80, (document.defaultView?.innerHeight ?? 800) * .52))
+      container.style.setProperty('--cxm-console-content-height', `${Math.max(28, Math.min(viewportLimit, measured + 2))}px`)
+    }
     const scrollToLatest = (): void => {
       state.follow = true
       container.scrollTop = container.scrollHeight
@@ -3609,21 +3618,38 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       state.follow = isAtBottom()
       syncLatest()
     }
-    const onClick = (event: MouseEvent): void => {
-      if (event.target instanceof document.defaultView!.Element && event.target.closest('.luna-text-viewer-copy') !== null) return
-      const rect = container.getBoundingClientRect()
-      const line = Math.max(0, Math.floor((event.clientY - rect.top + container.scrollTop - 6) / 20))
-      const block = projection.blocks.find(item => line >= item.startLine && line < item.endLine)
-      if (block === undefined) return
+    const focusReplacement = (): void => queueMicrotask(() => {
+      ;[...document.querySelectorAll<HTMLElement>('[data-plugin-console]')]
+        .find(item => item.dataset.pluginConsole === pluginId)?.focus()
+    })
+    const selectRelative = (offset: number): void => {
+      if (projections.length === 0) return
+      const current = projections.findIndex(item => item.entry.entryId === selectedConsoleEntry)
+      const next = Math.max(0, Math.min(projections.length - 1, (current < 0 ? (offset > 0 ? -1 : projections.length) : current) + offset))
+      selectedConsoleEntry = projections[next]?.entry.entryId
       state.scrollTop = container.scrollTop
-      selectedConsoleEntry = block.entry.entryId
       renderContent()
+      focusReplacement()
+    }
+    const onKeydown = (event: KeyboardEvent): void => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        selectRelative(event.key === 'ArrowDown' ? 1 : -1)
+        return
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'c' && selectedConsoleEntry !== undefined) {
+        const selected = projections.find(item => item.entry.entryId === selectedConsoleEntry)?.entry
+        if (selected !== undefined) {
+          event.preventDefault()
+          void copyConsoleText(pluginConsoleEntryCopyText(selected)).catch(() => undefined)
+        }
+      }
     }
     const onLatest = (): void => scrollToLatest()
     container.tabIndex = 0
-    container.setAttribute('aria-label', 'Luna Log 插件控制台正文')
+    container.setAttribute('aria-label', 'Luna Console 插件控制台正文；使用上下方向键选择记录')
     container.addEventListener('scroll', onScroll)
-    container.addEventListener('click', onClick)
+    container.addEventListener('keydown', onKeydown)
     latest.addEventListener('click', onLatest)
     const restoreScroll = (): void => {
       if (destroyed) return
@@ -3638,39 +3664,70 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         destroyed = true
         resizeObserver?.disconnect()
         container.removeEventListener('scroll', onScroll)
-        container.removeEventListener('click', onClick)
+        container.removeEventListener('keydown', onKeydown)
         latest.removeEventListener('click', onLatest)
         viewer?.destroy()
-        lunaLogMounts.delete(mount)
+        lunaConsoleMounts.delete(mount)
       },
       setTheme: (theme: 'dark' | 'light'): void => {
         desiredTheme = theme
         viewer?.setOption('theme', theme)
       },
     }
-    lunaLogMounts.add(mount)
-    if (globalThis.document === undefined) {
-      container.textContent = projection.text
-      return
-    }
-    void import('luna-log/esm/log/index.js').then(module => {
+    lunaConsoleMounts.add(mount)
+    void import('luna-console').then(module => {
       if (destroyed || !container.isConnected) return
       const Constructor = module.default as unknown as new (
         target: HTMLElement,
-        options?: { log?: string; wrapLongLines?: boolean; maxHeight?: number; theme?: 'dark' | 'light' },
-      ) => { append(log: string): void; destroy(): void; setOption(name: string, value: unknown): void }
-      viewer = new Constructor(container, { log: '', wrapLongLines: false, maxHeight: Infinity, theme: desiredTheme })
-      viewer.append(escapeConsoleText(projection.text))
+        options?: {
+          readonly asyncRender?: boolean
+          readonly showHeader?: boolean
+          readonly accessGetter?: boolean
+          readonly unenumerable?: boolean
+          readonly lazyEvaluation?: boolean
+          readonly maxNum?: number
+          readonly theme?: 'dark' | 'light'
+        },
+      ) => LunaConsoleViewer
+      viewer = new Constructor(container, {
+        asyncRender: false, showHeader: true, accessGetter: false, unenumerable: true,
+        lazyEvaluation: false, maxNum: 2000, theme: desiredTheme,
+      })
+      viewer.on('insert', (record) => {
+        if (pendingEntry === undefined) return
+        entriesByRecord.set(record, pendingEntry)
+        record.container.dataset.consoleEntry = pendingEntry.entryId
+        record.container.dataset.consoleMethod = pendingEntry.method
+        record.container.dataset.consoleSource = pendingEntry.source
+      })
+      viewer.on('select', (record) => {
+        const entry = entriesByRecord.get(record)
+        if (entry === undefined || selectedConsoleEntry === entry.entryId) return
+        selectedConsoleEntry = entry.entryId
+        state.scrollTop = container.scrollTop
+        renderContent()
+      })
+      for (const projection of projections) {
+        pendingEntry = projection.entry
+        viewer.insert({ type: projection.type, args: projection.args, header: projection.header })
+      }
+      pendingEntry = undefined
       const ResizeObserverConstructor = document.defaultView?.ResizeObserver
       if (ResizeObserverConstructor !== undefined) {
-        resizeObserver = new ResizeObserverConstructor(() => { if (state.follow) scrollToLatest(); else syncLatest() })
-        resizeObserver.observe(container)
+        resizeObserver = new ResizeObserverConstructor(() => {
+          syncContentHeight()
+          if (state.follow) scrollToLatest()
+          else syncLatest()
+        })
+        const space = container.querySelector<HTMLElement>('.luna-console-logs-space')
+        if (space !== null) resizeObserver.observe(space)
       }
-      queueMicrotask(restoreScroll)
-    }).catch(() => {
+      queueMicrotask(() => { syncContentHeight(); restoreScroll() })
+    }).catch((error: unknown) => {
       if (destroyed) return
-      container.textContent = projection.text
-      queueMicrotask(restoreScroll)
+      container.classList.remove('cxm-console-luna')
+      const reason = error instanceof Error ? error.message : 'unknown renderer error'
+      container.replaceChildren(create(document, 'div', 'cxm-console-empty', `Luna Console 正文组件加载失败：${reason}`))
     })
   }
 
@@ -3832,17 +3889,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         && (consoleSource === 'all' || entry.source === consoleSource)
         && (normalizedQuery === '' || `${entry.message} ${entry.source} ${entry.correlationId ?? ''} ${entry.args.map(argument => argument.preview).join(' ')}`.toLocaleLowerCase().includes(normalizedQuery))
       ))
-      const folded: PluginConsoleFoldedEntry[] = []
-      for (const entry of filtered) {
-        const previous = folded.at(-1)
-        const foldable = entry.kind === 'console' && entry.correlationId === undefined
-          && previous?.entry.kind === 'console' && previous.entry.correlationId === undefined
-          && previous.entry.method === entry.method && previous.entry.source === entry.source
-          && previous.entry.message === entry.message && JSON.stringify(previous.entry.args) === JSON.stringify(entry.args)
-        if (foldable && previous !== undefined) folded[folded.length - 1] = { entry: previous.entry, count: previous.count + 1 }
-        else folded.push({ entry, count: 1 })
-      }
-      const projection = projectPluginConsoleForLuna(folded)
+      const projections = filtered.map(projectPluginConsoleEntryForLuna)
       const controls = create(document, 'div', 'cxm-console-controls')
       const search = create(document, 'input')
       search.type = 'search'
@@ -3868,43 +3915,69 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         select('API / 类型', consoleKind, ['all', 'host-api', 'console', 'lifecycle', 'diagnostic'], value => { consoleKind = value }),
         select('日志来源', consoleSource, ['all', ...sources], value => { consoleSource = value }),
       )
-      const pause = create(document, 'button', undefined, consolePaused ? '继续' : '暂停')
-      pause.type = 'button'
-      pause.ariaPressed = String(consolePaused)
-      pause.addEventListener('click', () => {
+      const scrollState = consoleScrollStates.get(plugin.id) ?? { follow: true, scrollTop: 0 }
+      consoleScrollStates.set(plugin.id, scrollState)
+      const actionToolbar = create(document, 'div', 'cxm-console-action-toolbar')
+      actionToolbar.setAttribute('role', 'toolbar')
+      actionToolbar.setAttribute('aria-label', 'Console 显示控制')
+      const iconAction = (
+        action: string,
+        icon: ManagerIconToken,
+        label: string,
+        options: { readonly pressed?: boolean; readonly disabled?: boolean; readonly description?: string } = {},
+        invoke: () => void,
+      ): HTMLButtonElement => {
+        const button = create(document, 'button', 'cxm-manager-icon-action')
+        button.type = 'button'
+        button.dataset.consoleAction = action
+        button.dataset.cordisxNoDrag = 'true'
+        button.setAttribute('aria-label', label)
+        if (options.pressed !== undefined) button.setAttribute('aria-pressed', String(options.pressed))
+        if (options.description !== undefined) button.setAttribute('aria-description', options.description)
+        button.disabled = options.disabled === true
+        button.append(createManagerIcon(document, icon))
+        button.addEventListener('click', invoke)
+        button.addEventListener('keydown', event => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          event.stopPropagation()
+          button.click()
+        })
+        tooltips.attach(button, () => options.description === undefined ? label : `${label} · ${options.description}`, 'top', 80)
+        return button
+      }
+      const pauseLabel = consolePaused ? '继续采集' : '暂停采集'
+      const pause = iconAction('pause', consolePaused ? 'console-resume' : 'console-pause', pauseLabel, { pressed: consolePaused }, () => {
         consolePaused = !consolePaused
         consolePausedPage = consolePaused ? model.pluginConsole?.(plugin.id) ?? livePage : undefined
         renderContent()
       })
-      const scrollState = consoleScrollStates.get(plugin.id) ?? { follow: true, scrollTop: 0 }
-      consoleScrollStates.set(plugin.id, scrollState)
-      const autoScroll = create(document, 'button', undefined, '跟随最新')
-      autoScroll.type = 'button'
-      autoScroll.ariaPressed = String(scrollState.follow)
-      autoScroll.addEventListener('click', () => { scrollState.follow = !scrollState.follow; renderContent() })
-      const clear = create(document, 'button', undefined, '清空')
-      clear.type = 'button'
-      clear.addEventListener('click', () => { model.clearPluginConsole?.(plugin.id); selectedConsoleEntry = undefined; consolePausedPage = undefined; renderContent() })
-      const copy = create(document, 'button', undefined, '复制所选')
-      copy.type = 'button'
-      copy.disabled = selectedConsoleEntry === undefined
-      copy.addEventListener('click', () => {
-        const block = projection.blocks.find(item => item.entry.entryId === selectedConsoleEntry)
-        if (block !== undefined) void copyConsoleText(block.text).catch(() => undefined)
+      const followLabel = scrollState.follow ? '停止跟随' : '跟随最新'
+      const autoScroll = iconAction('follow', 'console-follow', followLabel, { pressed: scrollState.follow }, () => {
+        scrollState.follow = !scrollState.follow
+        renderContent()
       })
-      controls.append(pause, autoScroll, clear, copy)
+      const clear = iconAction('clear', 'console-clear', '清空日志', {
+        disabled: page.entries.length === 0,
+        description: '不可撤销',
+      }, () => {
+        model.clearPluginConsole?.(plugin.id)
+        selectedConsoleEntry = undefined
+        consolePausedPage = undefined
+        renderContent()
+      })
+      const selected = page.entries.find(entry => entry.entryId === selectedConsoleEntry)
+      const copy = iconAction('copy', 'console-copy', '复制所选', { disabled: selected === undefined }, () => {
+        if (selected !== undefined) void copyConsoleText(pluginConsoleEntryCopyText(selected)).catch(() => undefined)
+      })
+      actionToolbar.append(pause, autoScroll, clear, copy)
+      controls.append(actionToolbar)
       panel.append(controls)
-      const coverageInfo = create(document, 'details', 'cxm-console-info')
-      coverageInfo.append(
-        create(document, 'summary', undefined, '采集范围'),
-        create(document, 'p', undefined, 'Host API 自动切面与 owner-scoped console 可可靠归属。共享 renderer 中绕过 Host 的 DOM/网络、保存的 global console 与脱离 Host 注册的异步不可可靠捕获；未知记录不计入本插件调用统计。'),
-      )
-      panel.append(coverageInfo)
       const unattributed = page.unattributedEntries ?? 0
       if (unattributed > 0 && dismissedConsoleWarnings.get(plugin.id) !== unattributed) {
         const unknown = create(document, 'div', 'cxm-notice cxm-console-warning')
         unknown.dataset.tone = 'warning'
-        unknown.append(create(document, 'span', undefined, `检测到 ${unattributed} 类插件相关但无法唯一归属的 error / unhandledrejection；Host 未猜测归属。`))
+        unknown.append(create(document, 'span', undefined, `检测到 ${unattributed} 条来源冲突的运行时错误，未计入当前插件日志。请重载插件后复现并检查 bundle source map。`))
         const dismissWarning = create(document, 'button', undefined, '关闭')
         dismissWarning.type = 'button'
         dismissWarning.setAttribute('aria-label', '关闭归属异常提示')
@@ -3917,7 +3990,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const body = create(document, 'div', 'cxm-console-body')
       const frame = create(document, 'div', 'cxm-console-frame')
       frame.dataset.pluginConsole = plugin.id
-      if (folded.length === 0) {
+      if (projections.length === 0) {
         frame.append(create(document, 'div', 'cxm-console-empty', page.entries.length === 0 ? '等待插件日志或 CordisX API 调用…' : '没有匹配当前筛选的日志'))
       } else {
         frame.classList.add('cxm-console-luna')
@@ -3926,7 +3999,6 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       latest.type = 'button'
       latest.hidden = true
       body.append(frame, latest)
-      const selected = page.entries.find(entry => entry.entryId === selectedConsoleEntry)
       if (selected !== undefined) {
         workspace.dataset.inspector = 'true'
         const inspector = create(document, 'aside', 'cxm-console-inspector')
@@ -3962,7 +4034,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         workspace.append(body, inspector)
       } else workspace.append(body)
       panel.append(workspace)
-      if (folded.length > 0) mountLunaLog(frame, projection, plugin.id, latest)
+      if (projections.length > 0) mountLunaConsole(frame, projections, plugin.id, latest)
       const lifecycle = create(document, 'details', 'cxm-diagnostics')
       lifecycle.append(create(document, 'summary', undefined, `生命周期 / 诊断 · ${statusLabel(plugin.status)}`))
       const lifecycleBody = create(document, 'div', 'cxm-diagnostics-body')
@@ -4759,7 +4831,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   function renderContent(): void {
     closePluginActionMenu(false)
     tooltips.hide()
-    disposeLunaLogs()
+    disposeLunaConsoles()
     const snapshot = model.snapshot()
     const normalized = routeState.kind === 'settings' ? routeState : normalizeRoute(snapshot)
     const normalizedRouteChanged = routeKey(normalized) !== routeKey(routeState)
@@ -4802,7 +4874,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const dismiss = (): void => {
     closePluginActionMenu(false)
     disposeConfigRenderers()
-    disposeLunaLogs()
+    disposeLunaConsoles()
     settingsMount?.abort()
     if (settingsMount !== undefined || settingsMountId !== undefined) void resetSettings().catch(() => {})
     modal.hidden = true
@@ -4886,7 +4958,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   return () => {
     breadcrumbCleanup()
     disposeConfigRenderers()
-    disposeLunaLogs()
+    disposeLunaConsoles()
     settingsMount?.abort()
     void stopSettingsContent().catch(() => {})
     observer?.disconnect()

@@ -31,11 +31,12 @@ export class HostTooltipController {
     target: HTMLElement,
     label: () => string | undefined,
     preferredPlacement: HostTooltipPlacement,
+    delayMs = 650,
   ): () => void {
     const schedule = (): void => {
       this.hide()
       this.activeTarget = target
-      this.timer = setTimeout(() => this.show(target, label, preferredPlacement), 650)
+      this.timer = setTimeout(() => this.show(target, label, preferredPlacement), delayMs)
     }
     const hide = (): void => {
       if (this.activeTarget === target) this.hide()

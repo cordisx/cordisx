@@ -5,6 +5,8 @@ import check from '@material-symbols/svg-400/rounded/check.svg'
 import checkCircle from '@material-symbols/svg-400/rounded/check_circle.svg'
 import chevronLeft from '@material-symbols/svg-400/rounded/chevron_left.svg'
 import close from '@material-symbols/svg-400/rounded/close.svg'
+import contentCopy from '@material-symbols/svg-400/rounded/content_copy.svg'
+import deleteIcon from '@material-symbols/svg-400/rounded/delete.svg'
 import description from '@material-symbols/svg-400/rounded/description.svg'
 import diagnosis from '@material-symbols/svg-400/rounded/diagnosis.svg'
 import domainVerification from '@material-symbols/svg-400/rounded/domain_verification.svg'
@@ -22,6 +24,7 @@ import monitorHeart from '@material-symbols/svg-400/rounded/monitor_heart.svg'
 import noteAdd from '@material-symbols/svg-400/rounded/note_add.svg'
 import openInNew from '@material-symbols/svg-400/rounded/open_in_new.svg'
 import overview from '@material-symbols/svg-400/rounded/overview.svg'
+import pause from '@material-symbols/svg-400/rounded/pause.svg'
 import pauseCircle from '@material-symbols/svg-400/rounded/pause_circle.svg'
 import person from '@material-symbols/svg-400/rounded/person.svg'
 import rocketLaunch from '@material-symbols/svg-400/rounded/rocket_launch.svg'
@@ -38,16 +41,23 @@ import viewList from '@material-symbols/svg-400/rounded/view_list.svg'
 import warning from '@material-symbols/svg-400/rounded/warning.svg'
 import workspacePremium from '@material-symbols/svg-400/rounded/workspace_premium.svg'
 import deleteForever from '@material-symbols/svg-400/rounded/delete_forever.svg'
+import playArrow from '@material-symbols/svg-400/rounded/play_arrow.svg'
 import playCircle from '@material-symbols/svg-400/rounded/play_circle.svg'
 import share from '@material-symbols/svg-400/rounded/share.svg'
 import starFilled from '@material-symbols/svg-400/rounded/star-fill.svg'
 import starOutline from '@material-symbols/svg-400/rounded/star.svg'
+import verticalAlignBottom from '@material-symbols/svg-400/rounded/vertical_align_bottom.svg'
 
 export const MANAGER_ICON_TOKENS = [
   'back',
   'capability-fallback',
   'close',
   'configuration',
+  'console-clear',
+  'console-copy',
+  'console-follow',
+  'console-pause',
+  'console-resume',
   'contributions',
   'diagnostics',
   'document',
@@ -91,6 +101,11 @@ const MANAGER_ICON_SOURCES: Readonly<Record<ManagerIconToken, string>> = {
   'capability-fallback': help,
   close,
   configuration: tune,
+  'console-clear': deleteIcon,
+  'console-copy': contentCopy,
+  'console-follow': verticalAlignBottom,
+  'console-pause': pause,
+  'console-resume': playArrow,
   contributions: hub,
   diagnostics: diagnosis,
   document: description,

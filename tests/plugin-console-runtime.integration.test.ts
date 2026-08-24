@@ -37,7 +37,19 @@ describe('plugin DevTools Console runtime', () => {
     const dom = new JSDOM('<html class="electron-dark"><head></head><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>', {
       runScripts: 'dangerously', url: 'https://codex.local/', pretendToBeVisual: true,
     })
+    Object.defineProperty(dom.window, 'matchMedia', { configurable: true, value: () => ({
+      matches: false, media: '', onchange: null,
+      addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
+    }) })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: function () {
+      const height = (this as HTMLElement).classList.contains('luna-console') ? 240 : 24
+      return { x: 0, y: 0, top: 0, left: 0, right: 800, bottom: height, width: 800, height, toJSON: () => ({}) }
+    } })
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetHeight', { configurable: true, get: function () {
+      return (this as HTMLElement).classList.contains('luna-console') ? 240 : 24
+    } })
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetParent', { configurable: true, get: () => dom.window.document.body })
     Object.defineProperty(dom.window, '__cordisxPermissionPolicyRequestV1', { configurable: true, value: () => {} })
     dom.window.eval(bundle)
     for (let attempt = 0; attempt < 40 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
@@ -82,29 +94,81 @@ describe('plugin DevTools Console runtime', () => {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     expect(consoleFrame?.textContent).toContain('settings.get')
-    expect(consoleFrame?.classList.contains('luna-log')).toBe(true)
-    expect(consoleFrame?.querySelector('.luna-text-viewer-text')?.textContent).toContain('arg[1]')
-    expect(consoleFrame?.querySelector('.luna-text-viewer-text')?.textContent).toContain('Error: inspectable error')
-    expect(consoleFrame?.querySelector('[data-console-entry], .cxm-console-hit-layer')).toBeNull()
-    consoleFrame?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, clientY: 7 }))
+    expect(consoleFrame?.classList.contains('luna-console')).toBe(true)
+    expect(consoleFrame?.querySelector('.luna-text-viewer-text, pre')).toBeNull()
+    const lunaEntries = [...(consoleFrame?.querySelectorAll<HTMLElement>('[data-console-entry]') ?? [])]
+    expect(lunaEntries.length).toBeGreaterThan(10)
+    expect(lunaEntries).toHaveLength(runtime!.pluginConsole('console-showcase').entries.length)
+    expect(lunaEntries.some(item => item.dataset.consoleMethod === 'debug')).toBe(true)
+    expect(lunaEntries.some(item => item.dataset.consoleMethod === 'warn')).toBe(true)
+    expect(lunaEntries.some(item => item.dataset.consoleMethod === 'error')).toBe(true)
+    expect(consoleFrame?.querySelector('.luna-console-log-content')?.textContent).toBeTruthy()
+    const mixed = lunaEntries.find(item => item.textContent?.includes('object and array'))
+    expect(mixed?.querySelectorAll('.luna-console-preview')).toHaveLength(2)
+    mixed?.querySelector<HTMLElement>('.luna-console-preview')?.click()
+    expect(mixed?.querySelector('.luna-object-viewer')).not.toBeNull()
+    const errorPayload = lunaEntries.find(item => item.dataset.consoleSource === 'console.info')
+    expect(errorPayload).toBeDefined()
+    errorPayload?.querySelector<HTMLElement>('.luna-console-preview')?.click()
+    expect(errorPayload?.querySelector('.luna-object-viewer')?.textContent).toContain('inspectable error')
+    expect(errorPayload?.querySelector('.luna-object-viewer')?.textContent).toContain('stack')
+    const circularPayload = lunaEntries.find(item => item.dataset.consoleSource === 'console.warn')
+    circularPayload?.querySelector<HTMLElement>('.luna-console-preview')?.click()
+    circularPayload?.querySelector<HTMLElement>('.luna-object-viewer-collapsed')?.click()
+    expect(circularPayload?.querySelector('.luna-object-viewer')?.textContent).toContain('[Circular]')
+    const controls = dom.window.document.querySelector('.cxm-console-controls')
+    expect(controls?.textContent).not.toContain('采集范围')
+    expect(controls?.parentElement?.textContent).not.toContain('Host API 自动切面')
+    const toolbar = controls?.querySelector('[role="toolbar"][aria-label="Console 显示控制"]')
+    const actionButtons = [...(toolbar?.querySelectorAll<HTMLButtonElement>('[data-console-action]') ?? [])]
+    expect(actionButtons.map(button => button.dataset.consoleAction)).toEqual(['pause', 'follow', 'clear', 'copy'])
+    expect(actionButtons.every(button => button.textContent === '')).toBe(true)
+    expect(actionButtons.map(button => button.getAttribute('aria-label'))).toEqual(['暂停采集', '停止跟随', '清空日志', '复制所选'])
+    expect(actionButtons.find(button => button.dataset.consoleAction === 'clear')?.getAttribute('aria-description')).toBe('不可撤销')
+    expect(actionButtons.find(button => button.dataset.consoleAction === 'copy')?.disabled).toBe(true)
+    actionButtons[0]?.focus()
+    await new Promise(resolve => setTimeout(resolve, 680))
+    expect(dom.window.document.querySelector('[role="tooltip"]')?.textContent).toBe('暂停采集')
+    actionButtons[0]?.blur()
+    actionButtons[0]?.click()
+    expect(dom.window.document.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe('true')
+    dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="pause"]')?.dispatchEvent(
+      new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+    )
+    expect(dom.window.document.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed')).toBe('false')
+    dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="pause"]')?.dispatchEvent(
+      new dom.window.KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }),
+    )
+    expect(dom.window.document.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed')).toBe('true')
+    dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="follow"]')?.click()
+    expect(dom.window.document.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe('false')
+    dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="pause"]')?.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="follow"]')?.click()
+    const keyboardFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
+    for (let attempt = 0; attempt < 20 && keyboardFrame?.querySelector('[data-console-entry]') === null; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10))
+    keyboardFrame?.focus()
+    keyboardFrame?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
     const inspector = dom.window.document.querySelector('[data-console-detail]')
     expect(inspector?.textContent).toContain('host-mediated')
     expect(inspector?.textContent).not.toContain('arg[')
+    expect(dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="copy"]')?.disabled).toBe(false)
     const search = dom.window.document.querySelector<HTMLInputElement>('[data-console-search="console-showcase"]')
     search!.value = 'inspectable error'
     search!.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 10))
-    expect(dom.window.document.querySelector('[data-plugin-console="console-showcase"]')?.textContent).toContain('console.info')
-    expect(dom.window.document.querySelector('[data-plugin-console="console-showcase"]')?.textContent).not.toContain('console.warn')
+    for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-console-entry]') === null; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10))
+    expect(dom.window.document.querySelector('[data-console-entry]')?.getAttribute('data-console-source')).toBe('console.info')
+    expect(dom.window.document.querySelector('[data-console-source="console.warn"]')).toBeNull()
     const resetSearch = dom.window.document.querySelector<HTMLInputElement>('[data-console-search="console-showcase"]')
     resetSearch!.value = ''
     resetSearch!.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     const source = dom.window.document.querySelector<HTMLSelectElement>('select[aria-label="日志来源"]')
     source!.value = 'console.warn'
     source!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 10))
-    expect(dom.window.document.querySelector('[data-plugin-console="console-showcase"]')?.textContent).toContain('console.warn')
-    expect(dom.window.document.querySelector('[data-plugin-console="console-showcase"]')?.textContent).not.toContain('console.log')
+    for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-console-entry]') === null; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10))
+    expect(dom.window.document.querySelector('[data-console-entry]')?.getAttribute('data-console-source')).toBe('console.warn')
+    expect(dom.window.document.querySelector('[data-console-source="console.log"]')).toBeNull()
     const resetSource = dom.window.document.querySelector<HTMLSelectElement>('select[aria-label="日志来源"]')
     resetSource!.value = 'all'
     resetSource!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
@@ -112,9 +176,9 @@ describe('plugin DevTools Console runtime', () => {
     kind!.value = 'console'
     kind!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
     const scopedFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
-    for (let attempt = 0; attempt < 20 && !scopedFrame?.classList.contains('luna-log'); attempt += 1) await new Promise(resolve => setTimeout(resolve, 10))
-    expect(scopedFrame?.textContent).toContain('console.log')
-    expect(scopedFrame?.textContent).not.toContain('settings.get')
+    for (let attempt = 0; attempt < 20 && scopedFrame?.querySelector('[data-console-source="console.log"]') === null; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10))
+    expect(scopedFrame?.querySelector('[data-console-source="console.log"]')).not.toBeNull()
+    expect(scopedFrame?.querySelector('[data-console-source="settings.get"]')).toBeNull()
 
     Object.defineProperties(scopedFrame!, {
       scrollHeight: { configurable: true, value: 800 },
@@ -132,9 +196,9 @@ describe('plugin DevTools Console runtime', () => {
     dom.window.document.documentElement.className = 'electron-light'
     await new Promise(resolve => setTimeout(resolve, 10))
     expect(modal?.dataset.cordisxAppTheme).toBe('light')
-    expect(scopedFrame?.classList.contains('luna-text-viewer-theme-light')).toBe(true)
+    expect(scopedFrame?.classList.contains('luna-console-theme-light')).toBe(true)
 
-    const clear = [...dom.window.document.querySelectorAll<HTMLButtonElement>('.cxm-console-controls button')].find(button => button.textContent === '清空')
+    const clear = dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="clear"]')
     clear?.click()
     expect(runtime!.pluginConsole('console-showcase').entries).toEqual([])
     expect(dom.window.document.querySelector('[data-plugin-console="console-showcase"] .cxm-console-empty')?.textContent).toContain('等待插件日志')
