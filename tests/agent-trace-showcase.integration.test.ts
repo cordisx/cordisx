@@ -47,6 +47,7 @@ interface RuntimeSnapshot {
     readonly capability: string
     readonly policy: 'allow' | 'ask' | 'deny'
     readonly lastRequested?: { readonly agentSessionId?: string }
+    readonly availability: { readonly status: string; readonly providers: readonly { readonly providerId: string }[] }
   }[]
   readonly extensionPoints: {
     readonly accessDiagnostics: readonly {
@@ -563,6 +564,12 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(restoredEntry.getAttribute('aria-pressed')).toBe('false')
     expect(runtime.snapshot().platform).toMatchObject({
       mode: 'unavailable', secondConnectionCreated: false, rawBridgeExposed: false,
+    })
+    expect(runtime.snapshot().permissions.find(item => item.capability === 'agent.events.read')).toMatchObject({
+      availability: { status: 'supported', providers: [{ providerId: 'host-agent-events' }] },
+    })
+    expect(runtime.snapshot().permissions.find(item => item.capability === 'agent.history.read')).toMatchObject({
+      availability: { status: 'unavailable', providers: [{ providerId: 'host-agent-history' }] },
     })
 
     const selected = dom.window.document.getElementById('selected-thread')!

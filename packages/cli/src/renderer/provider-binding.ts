@@ -17,6 +17,7 @@ import type {
   CordisXTurnSubmitInput,
 } from '../contracts.js'
 import type { CordisXPlatformAdapter } from './platform.js'
+import type { CordisXExternalProviderAvailabilityStatus } from '../capability-availability-contracts.js'
 
 const PROVIDER_BINDING = '__cordisxProviderRequestV1'
 const PROVIDER_RECEIVER = '__cordisxProviderReceiveV1'
@@ -60,6 +61,7 @@ export class BindingPlatformAdapter implements CordisXPlatformAdapter {
     private readonly token: string,
     private readonly binding: ProviderBinding,
     private readonly adapterStatus: CordisXPlatformAdapterStatus,
+    private readonly externalProviders: readonly CordisXExternalProviderAvailabilityStatus[],
   ) {
     globalThis[PROVIDER_RECEIVER] = this.receive
   }
@@ -75,10 +77,13 @@ export class BindingPlatformAdapter implements CordisXPlatformAdapter {
       diagnostics: [{ code: 'adapter-unavailable', message: 'External provider status has not been read' }],
       secondConnectionCreated: false,
       rawBridgeExposed: false,
-    })
+    }, [])
     try {
       const status = await temporary.request<CordisXPlatformAdapterStatus>('status', {})
-      return new BindingPlatformAdapter(token, binding, clone(status))
+      const providers = await temporary.request<readonly CordisXExternalProviderAvailabilityStatus[]>('availability', {})
+        .then(value => Array.isArray(value) ? value : [])
+        .catch(() => [])
+      return new BindingPlatformAdapter(token, binding, clone(status), clone(providers))
     } finally {
       temporary.dispose()
     }
@@ -86,6 +91,10 @@ export class BindingPlatformAdapter implements CordisXPlatformAdapter {
 
   status(): CordisXPlatformAdapterStatus {
     return clone(this.adapterStatus)
+  }
+
+  capabilityProviderStatuses(): readonly CordisXExternalProviderAvailabilityStatus[] {
+    return clone(this.externalProviders)
   }
 
   async listModels(input: CordisXModelsListInput): Promise<CordisXPlatformResult<CordisXModelPage>> {

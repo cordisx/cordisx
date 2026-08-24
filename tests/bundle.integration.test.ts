@@ -25,7 +25,7 @@ interface RuntimeSnapshot {
     outlets: readonly { id: string; available: boolean; error?: string; contextKey?: string; activeRoute?: string; mounted: boolean; presentation: 'inactive' | 'presented' | 'suspended'; suspendedBy?: string }[]
   }
   localization: { locale: string; direction: string; version: number }
-  localeCatalogs: readonly { owner: string; locale: string }[]
+  localeCatalogs: readonly { owner: string; namespace: string; locale: string }[]
   localizationDiagnostics: readonly unknown[]
   platform: { mode: string; secondConnectionCreated: boolean; rawBridgeExposed: boolean; diagnostics: readonly { code: string }[] }
   permissions: readonly { capability: string; policy: string; reasonText: string; required: boolean }[]
@@ -201,11 +201,12 @@ describe('renderer bundle', () => {
     expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(29)
     expect(snapshot.extensionPoints.points.filter(item => item.kind === 'outlet')).toHaveLength(6)
     expect(snapshot.extensionPoints.descriptorDiagnostics).toEqual([])
-    expect(snapshot.localeCatalogs).toHaveLength(4)
-    expect(snapshot.localeCatalogs.filter(item => item.owner === 'host')).toEqual([
-      expect.objectContaining({ locale: 'en' }),
-      expect.objectContaining({ locale: 'zh-CN' }),
-    ])
+    expect(snapshot.localeCatalogs).toHaveLength(6)
+    expect(snapshot.localeCatalogs.filter(item => item.owner === 'host')).toHaveLength(4)
+    expect(snapshot.localeCatalogs.filter(item => item.owner === 'host')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ namespace: 'host:cordisx.manager.capability-availability', locale: 'en' }),
+      expect.objectContaining({ namespace: 'host:cordisx.manager.capability-availability', locale: 'zh-CN' }),
+    ]))
     expect(snapshot.localizationDiagnostics).toEqual([])
     const surfaceHosts = [...dom.window.document.querySelectorAll<HTMLElement>('[data-cordisx-surface-host]')]
     expect(new Set(surfaceHosts.map(host => host.dataset.cordisxSurfaceHost))).toEqual(new Set([
@@ -858,13 +859,14 @@ describe('renderer bundle', () => {
     expect(permissionsPanel?.textContent).not.toContain('models.read')
     expect(permissionsPanel?.textContent).toContain('读取可用模型')
     expect(managerModal?.textContent).toContain('显示当前宿主连接实际可用的模型')
-    expect(permissionsPanel?.textContent).toContain('暂不可用')
+    expect(permissionsPanel?.textContent).toContain('不可用')
     expect(permissionsPanel?.textContent).not.toContain('current-connection-client-unavailable')
     expect(permissionsPanel?.textContent).not.toContain('trusted renderer code 不是安全沙箱')
     expect(permissionsPanel?.textContent).not.toContain('二次连接')
     expect(permissionsPanel?.textContent).not.toContain('原始 bridge 暴露')
     expect(permissionsPanel?.textContent).not.toContain('不是安全沙箱')
-    expect(permissionsPanel?.querySelector('[data-permission-capability="models.read"]')).toBeNull()
+    expect(permissionsPanel?.querySelector('[data-permission-availability="models.read"]')?.getAttribute('data-availability-state')).toBe('unavailable')
+    expect(permissionsPanel?.querySelector('[data-permission-capability="models.read"]')).not.toBeNull()
     dom.window.document.documentElement.lang = 'zh-CN'
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(managerModal?.textContent).toContain('显示当前宿主连接实际可用的模型')
@@ -876,6 +878,7 @@ describe('renderer bundle', () => {
     expect(dom.window.history.length).toBe(1)
     expect(dom.window.location.href).toBe('https://codex.local/native')
     expect(dom.window.document.querySelector('[data-permission-detail="models.read"]')?.textContent).toContain('models.read')
+    expect(dom.window.document.querySelector('[data-permission-provider="desktop-current-connection"]')).not.toBeNull()
     const permissionPolicy = dom.window.document.querySelector<HTMLSelectElement>('[data-permission-capability="models.read"]')
     expect([...permissionPolicy!.options].map(option => option.textContent)).toEqual(['每次询问', '始终允许', '始终拒绝'])
     permissionPolicy!.value = 'deny'

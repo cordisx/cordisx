@@ -15,6 +15,7 @@ import type {
   CordisXPluginPackageManifestV1,
   CordisXPluginLifecycleOperationV1,
   CordisXPluginLifecycleResultV1,
+  CordisXLocalizedText,
   CordisXPluginManifestV1,
   CordisXPluginModule,
   CordisXRouteReference,
@@ -69,6 +70,13 @@ import {
 } from './configuration.js'
 import { BindingPermissionPolicyStore } from './permission-binding.js'
 import { BrowserPluginLifecycleBridge } from './plugin-lifecycle-binding.js'
+import {
+  CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS,
+  CapabilityAvailabilityRegistry,
+  externalProviderCapabilityProviders,
+  hostLocalCapabilityProviders,
+  platformAdapterCapabilityProvider,
+} from './capability-availability.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 
@@ -297,9 +305,37 @@ async function start(
   const historyAdapter = metadata.agentHistoryBridgeToken === undefined
     ? new UnavailableAgentHistoryAdapter()
     : await BindingAgentHistoryAdapter.connect(metadata.agentHistoryBridgeToken).catch(() => new UnavailableAgentHistoryAdapter())
+  const boundProviderStatuses = bindingPlatformAdapter?.capabilityProviderStatuses() ?? []
+  const externalProviderStatuses = boundProviderStatuses.length > 0
+    ? boundProviderStatuses
+    : metadata.providers.map(provider => ({
+      providerId: provider.id,
+      displayName: provider.displayName,
+      state: 'unavailable' as const,
+    }))
+  const capabilityAvailability = new CapabilityAvailabilityRegistry([
+    platformAdapterCapabilityProvider(agentAdapter.status(), {
+      providerId: 'desktop-current-connection',
+      kind: 'current-connection',
+    }),
+    ...externalProviderCapabilityProviders(externalProviderStatuses),
+    ...hostLocalCapabilityProviders({
+      agentStatus: agentRuntime.status(),
+      historyStatus: historyAdapter.status(),
+      configurationWritable: configBridge !== undefined,
+      packageLifecycleAvailable: lifecycleBridge !== undefined,
+    }),
+  ])
   const extensionPointDescriptors = new ExtensionPointDescriptorRegistry()
   const extensionPointBroker = new ExtensionPointPolicyBroker(extensionPointDescriptors, new BrowserExtensionPointPolicyStore(), generation)
   const controllers: PluginController[] = plugins.map(createController)
+  const requiredBlockReason = (controller: PluginController): string | undefined => {
+    const denied = broker.requiredDenied(controller.identity)
+    if (denied.length > 0) return `Required capability denied: ${denied.join(', ')}`
+    const unavailable = capabilityAvailability.unavailableRequired(controller.manifest.capabilities)
+    if (unavailable.length > 0) return `Required capability unavailable: ${unavailable.join(', ')}`
+    return undefined
+  }
   const registerController = (controller: PluginController): void => {
     controller.unregisterPermissions = broker.register(controller.identity, controller.manifest)
     controller.unregisterExtensionPoints = extensionPointBroker.register(controller.identity)
@@ -328,10 +364,10 @@ async function start(
   }
   await broker.settled()
   for (const controller of controllers) {
-    const denied = broker.requiredDenied(controller.identity)
-    if (controller.status === 'active' && denied.length > 0) {
+    const blockedReason = requiredBlockReason(controller)
+    if (controller.status === 'active' && blockedReason !== undefined) {
       controller.status = 'permission-blocked'
-      controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+      controller.blockedReason = blockedReason
     }
   }
   const listeners = new Set<() => void>()
@@ -401,10 +437,10 @@ async function start(
   const mountPlugin = async (controller: PluginController): Promise<void> => {
     const module = controller.item.module
     if (module === undefined) throw new Error(`plugin ${controller.item.id} is not bundled because it is disabled in configuration`)
-    const denied = broker.requiredDenied(controller.identity)
-    if (denied.length > 0) {
+    const blockedReason = requiredBlockReason(controller)
+    if (blockedReason !== undefined) {
       controller.status = 'permission-blocked'
-      controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+      controller.blockedReason = blockedReason
       return
     }
     const pluginContext = ctx.extend({
@@ -478,6 +514,11 @@ async function start(
       || (left.owner < right.owner ? -1 : left.owner > right.owner ? 1 : 0)
       || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
     ))
+    const hostText = (value: CordisXLocalizedText, site: string): string => (
+      i18nService?.resolveFor('host', value, site).text
+      ?? value.fallback
+      ?? `[[host:${value.key}]]`
+    )
     return {
       version: metadata.version,
       plugins: controllers.map((controller): ManagerPluginSnapshot => ({
@@ -509,31 +550,54 @@ async function start(
       localeCatalogs: i18nService?.catalogs() ?? [],
       localizationDiagnostics: i18nService?.diagnostics() ?? [],
       platform: platformAdapter.status(),
+      capabilityProviders: capabilityAvailability.providerSnapshot().map(provider => ({
+        providerId: provider.providerId,
+        providerNameText: hostText(provider.providerName, `capability-provider:${provider.providerId}:name`),
+        kind: provider.kind,
+        family: provider.family,
+        status: provider.status,
+        reasonText: hostText(provider.reason, `capability-provider:${provider.providerId}:reason`),
+        ...(provider.generation === undefined ? {} : { generation: provider.generation }),
+      })),
       pluginLifecycle: {
         revision: currentActivation.revision,
         runtimeGeneration: generation,
         operationsAvailable: lifecycleBridge !== undefined,
       },
-      permissions: broker.snapshots().map((permission: PlatformPermissionSnapshot) => ({
-        identity: permission.identity,
-        capability: permission.capability,
-        required: permission.required,
-        reason: permission.reason,
-        reasonText: i18nService?.resolveFor(
-          permission.identity.id,
-          permission.reason,
-          `permission:${permission.identity.source}:${permission.identity.id}:${permission.capability}`,
-        ).text
-          ?? permission.reason.fallback
-          ?? `[[${permission.identity.id}:${permission.reason.key}]]`,
-        scope: permission.scope,
-        policy: permission.policy,
-        ...(permission.lastRequested === undefined ? {} : { lastRequested: permission.lastRequested }),
-        ...(permission.lastUsedAt === undefined ? {} : { lastUsedAt: permission.lastUsedAt }),
-        ...(permission.lastDeniedAt === undefined ? {} : { lastDeniedAt: permission.lastDeniedAt }),
-        denialCount: permission.denialCount,
-        ...(permission.blockedReason === undefined ? {} : { blockedReason: permission.blockedReason }),
-      })),
+      permissions: broker.snapshots().map((permission: PlatformPermissionSnapshot) => {
+        const availability = capabilityAvailability.resolve(permission.capability, permission.scope)
+        const site = `permission:${permission.identity.source}:${permission.identity.id}:${permission.capability}`
+        return {
+          identity: permission.identity,
+          capability: permission.capability,
+          required: permission.required,
+          reason: permission.reason,
+          reasonText: i18nService?.resolveFor(permission.identity.id, permission.reason, site).text
+            ?? permission.reason.fallback
+            ?? `[[${permission.identity.id}:${permission.reason.key}]]`,
+          scope: permission.scope,
+          policy: permission.policy,
+          ...(permission.lastRequested === undefined ? {} : { lastRequested: permission.lastRequested }),
+          ...(permission.lastUsedAt === undefined ? {} : { lastUsedAt: permission.lastUsedAt }),
+          ...(permission.lastDeniedAt === undefined ? {} : { lastDeniedAt: permission.lastDeniedAt }),
+          denialCount: permission.denialCount,
+          ...(permission.blockedReason === undefined ? {} : { blockedReason: permission.blockedReason }),
+          availability: {
+            status: availability.status,
+            reasonText: hostText(availability.reason, `${site}:availability`),
+            providers: availability.providers.map(provider => ({
+              providerId: provider.providerId,
+              providerNameText: hostText(provider.providerName, `${site}:provider:${provider.providerId}:name`),
+              kind: provider.kind,
+              family: provider.family,
+              status: provider.status,
+              reasonText: hostText(provider.reason, `${site}:provider:${provider.providerId}:reason`),
+              ...(provider.generation === undefined ? {} : { generation: provider.generation }),
+              scope: provider.scope,
+            })),
+          },
+        }
+      }),
       extensionPoints: buildExtensionPointRuntimeSnapshot({
         descriptors: extensionPointDescriptors,
         broker: extensionPointBroker,
@@ -579,10 +643,10 @@ async function start(
       if (controller.status === 'active') return
       blockedPlugins.delete(id)
       writeBlockedPlugins(blockedPlugins)
-      const denied = broker.requiredDenied(controller.identity)
-      if (denied.length > 0) {
+      const blockedReason = requiredBlockReason(controller)
+      if (blockedReason !== undefined) {
         controller.status = 'permission-blocked'
-        controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+        controller.blockedReason = blockedReason
         notify()
         return
       }
@@ -635,7 +699,7 @@ async function start(
         const mayMount = controller.item.enabled
           && controller.item.module !== undefined
           && !blockedPlugins.has(id)
-          && broker.requiredDenied(controller.identity).length === 0
+          && requiredBlockReason(controller) === undefined
         if (descriptor.applies === 'restart' && mayMount) {
           try {
             await applyRestartCandidate(controller, candidate)
@@ -687,15 +751,15 @@ async function start(
       const controller = controllers.find(item => item.item.id === id)
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
       await broker.setPolicy(controller.identity, capability, policy)
-      const denied = broker.requiredDenied(controller.identity)
-      if (denied.length > 0) {
+      const blockedReason = requiredBlockReason(controller)
+      if (blockedReason !== undefined) {
         rememberRegistrations(id)
         agentRuntime.releaseOwner(controller.identity, 'permission-blocked')
         await controller.fiber?.dispose()
         await routeService?.settled()
         delete controller.fiber
         controller.status = 'permission-blocked'
-        controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+        controller.blockedReason = blockedReason
         notify()
         return
       }
@@ -759,15 +823,15 @@ async function start(
       await broker.authorizeActivation(controller.identity, decision, 'enable')
       blockedPlugins.delete(id)
       writeBlockedPlugins(blockedPlugins)
-      const denied = broker.requiredDenied(controller.identity)
-      if (denied.length > 0) {
+      const blockedReason = requiredBlockReason(controller)
+      if (blockedReason !== undefined) {
         rememberRegistrations(id)
         agentRuntime.releaseOwner(controller.identity, 'permission-blocked')
         await controller.fiber?.dispose()
         await routeService?.settled()
         delete controller.fiber
         controller.status = 'permission-blocked'
-        controller.blockedReason = `Required capability denied: ${denied.join(', ')}`
+        controller.blockedReason = blockedReason
         notify()
         return
       }
@@ -1096,6 +1160,9 @@ async function start(
     await i18nFiber
     i18nService = ctx.i18n as CordisXI18nService
     for (const catalog of CORDISX_EXTENSION_POINT_LOCALE_CATALOGS) {
+      disposeExtensionPointCatalogs.push(i18nService.define(catalog))
+    }
+    for (const catalog of CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS) {
       disposeExtensionPointCatalogs.push(i18nService.define(catalog))
     }
     disposeI18nSubscription = i18nService.subscribeInternal(notify)

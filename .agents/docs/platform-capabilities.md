@@ -36,16 +36,13 @@ launcher-owned (source, plugin id) + module manifest
 plugin fiber ctx.platform        manager permission tab
              |
              v
-      PlatformService validation
-             |
-             v
- host-owned PlatformAdapter boundary
-       |                         |
-       v                         v
- unavailable default     controlled read-only projection
-                                 |
-                                 v
-                     future current-connection adapter
+      PlatformService validation             capability availability registry
+             |                                / provider / scope / reason \
+             v                               v                             v
+ host-owned PlatformAdapter boundary   manager projection        activation reconciliation
+       |                 |                    ^
+       v                 v                    |
+ current connection   Provider Fleet    Host-local Agent ledger/history/config
 ```
 
 The launcher derives `source` from the canonical local entry URL. A module may
@@ -62,6 +59,48 @@ are current declaration metadata rather than authority-key material. The broker
 records in-memory audit timestamps and denial counts. Policy storage and prompt
 UI are host-owned, while current trusted renderer execution means neither is a
 tamper-proof security boundary.
+
+## Capability availability authority
+
+Permission policy and runtime availability are independent axes. The Broker is
+authoritative for `ask` / `deny` / `allow`, exact identity, declaration scope,
+and audit. It is not authoritative for whether a route currently exists. A
+Host-owned capability availability registry instead aggregates reports from
+the service, provider, or adapter that owns each route. A report names the
+provider, provider kind, capability, `supported` / `unavailable` / `degraded`
+state, localized reason, and the provider scope it can route.
+
+`CordisXPlatformAdapterStatus.supportedCapabilities` describes only that one
+adapter. It must never be interpreted as the global Host capability catalog.
+The current implementation has these distinct authorities:
+
+| Provider boundary | Owned route | Availability authority |
+| --- | --- | --- |
+| Desktop current connection | native model/task/turn and Agent delivery routes | the private current-connection Platform/Agent adapter; the product default remains unavailable |
+| External Provider Fleet | model/task/turn routes for configured provider ids | each active or failed Fleet provider generation, scoped by its canonical provider id |
+| Host-local Agent event ledger | `agent.events.read` | the live ledger service; native feed diagnostics do not erase local ledger support |
+| Host Agent history | `agent.history.read` | the launcher history binding and its adapter status |
+| Host configuration | validated configuration descriptors and mutation bridge | the configuration registry/bridge; this is not a Platform-v1 permission name |
+| Host console | plugin DevTools Console contracts | its owning Host service; protocol presence alone does not claim runtime support |
+| Host package lifecycle | inspect/stage/activate/rollback contracts | the launcher generation/lifecycle bridge introduced by the dynamic delivery runtime; protocol presence alone does not claim runtime support |
+
+The last three remain separate service planes. They are represented as distinct
+provider families for runtime diagnostics, but the Host does not invent
+Platform manifest capabilities for contracts that do not define one.
+Package-family availability therefore reuses the existing lifecycle bridge and
+activation registry; the Platform layer does not create a parallel package
+registry.
+
+Resolution is declaration-specific. Provider ids in `scope.providers` and
+Platform session references are matched against routable provider scopes. If
+at least one allowed route can serve an otherwise provider-open declaration,
+the capability is supported. If an explicit multi-provider scope is only
+partly routable, or an owning provider reports reduced coverage, it is
+degraded. If no route can satisfy the declaration, it is unavailable. Agent
+`sessionIds` are evaluated only against Agent providers and never against a
+same-named Platform provider. Provider reports and results are immutable and
+computed independently for each bound plugin declaration, so one plugin's
+scope cannot change another plugin's projection.
 
 ## Authorization duration, persistence, and migration
 
@@ -97,10 +136,13 @@ identity replacement, or generation disposal.
 ## Activation and manager behavior
 
 At startup the broker registers every bundled manifest. A required declaration
-with current policy `deny` prevents that plugin fiber from mounting and yields
-`permission-blocked` plus an explicit reason. `ask` is unresolved authority,
-not automatic denial or grant; the host prompts at call time. Optional denial
-does not stop the fiber.
+with current policy `deny`, or with no capability provider that can satisfy its
+declared scope, prevents that plugin fiber from mounting and yields
+`permission-blocked` plus an explicit owning reason. A degraded route remains
+mountable because at least one provider can satisfy it; calls outside the live
+subset still fail through normal parameter/provider validation. `ask` is
+unresolved authority, not automatic denial or grant; the host prompts at call
+time. Optional denial or unavailability does not stop the fiber.
 
 Installing or enabling uses one normalized authorization plan containing all
 required and optional manifest declarations. The Host renders a single flat
@@ -133,24 +175,26 @@ The installed-plugin detail page adds a `权限` tab. Its model retains:
 The permission tab follows the shared hierarchy and de-duplication rules in
 [`manager-content-design.md`](manager-content-design.md). Its first projection
 is deliberately smaller than the retained model: a flat row shows a host-owned
-localized capability name and icon, resolved reason, required badge, and a
-localized policy selector only when `adapter.status().supportedCapabilities`
-contains the declaration. An unsupported declaration shows `暂不可用`; support
-and policy remain orthogonal.
+localized capability name and icon, resolved reason, required badge, compact
+availability state, and an always-editable localized policy selector.
+Unavailable or degraded status never replaces or disables the selector;
+support and policy remain orthogonal.
 
 Selecting a row opens a third-level permission detail. That page owns the raw
-capability id, non-empty scope, required/optional state, host support state,
-policy selector, and current-run audit. The selector remains available there
-for an unsupported declaration so changing `required + deny` to `ask` or
-`allow` can reconcile and remount the plugin. The list does not expose raw
-scope, usage, blocked reason, adapter diagnostics, connection/bridge facts, or
-the security statement. Those engineering facts appear once under the plugin
-`运行状态` tab's collapsed `诊断` disclosure.
+capability id, non-empty declaration scope, required/optional state, structured
+availability, provider routes and their scopes/reasons, policy selector, and
+current-run audit. The list does not repeat raw provider diagnostics,
+connection/bridge facts, blocked reason, or the security statement. The
+current-connection diagnostic and provider-family diagnostics appear once
+under the plugin `运行状态` tab's collapsed `诊断` disclosure.
 
-Policy changes reconcile the plugin fiber: changing a required capability to
-`deny` disposes it; moving every denied required declaration to `ask` or
-`allow` permits a fresh mount. Denying an optional declaration never stops the
-plugin. Locale changes reproject permission reasons through the existing
+Policy and provider changes reconcile the plugin fiber: changing a required
+capability to `deny` or losing every satisfying route disposes it; restoring a
+satisfying route and moving every denied required declaration to `ask` or
+`allow` permits a fresh mount. Denying or losing an optional declaration never
+stops the plugin. A new runtime generation rebuilds provider reports rather
+than retaining availability from the previous generation. Locale changes
+reproject declaration and availability reasons through the existing
 LocalizationKernel subscription.
 
 Runtime and activation prompts follow the same hierarchy rules. The review
@@ -174,7 +218,9 @@ delete or archive.
 
 `UnavailablePlatformAdapter` is the default for the injected renderer and
 reports `current-connection-client-unavailable`, `secondConnectionCreated:
-false`, and `rawBridgeExposed: false`.
+false`, and `rawBridgeExposed: false`. Those facts describe only the Desktop
+current-connection provider. They do not remove Host-local Agent ledger/history
+or external Fleet routes from the availability registry.
 
 `ProjectionPlatformAdapter` consumes an immutable, host-produced snapshot. It
 can support model, task-catalog, and task-content reads without exposing the
@@ -205,13 +251,16 @@ rollback are outside this task.
    LocalizedText/MessageRef are merged dependencies.
 2. `cordisx/cordisx#3` LocalizationKernel is the real projection dependency;
    Platform does not create a second localization service.
-3. The protocol PR owns authorization-key/duration/install-or-enable semantics,
-   policy and authorization-plan schemas, vectors, and conformance. It does not
-   modify Agent event or Agent Trace contracts.
+3. The existing protocol owns authorization-key/duration/install-or-enable
+   semantics. This availability repair changes only the private Host provider
+   registry and Manager projection; it does not add a plugin-visible schema or
+   modify Agent event, Agent Trace, Console, configuration, or lifecycle
+   contracts.
 4. The host PR owns TypeScript contracts, profile-scoped Home configuration,
    bounded persistence RPC, Broker duration behavior, enable/restore batch UI,
-   runtime prompt, manager projection/UI, tests, and live smoke. It depends on
-   the merged protocol PR but does not import a checkout at runtime.
+   runtime prompt, capability provider aggregation, activation reconciliation,
+   manager projection/UI, tests, and live smoke. It depends on merged Protocol
+   `main` but does not import a checkout at runtime.
 5. A future private current-connection adapter is a separate experimental PR
    blocked on a stable auditable host seat.
 6. CordisXMono updates the two pushed gitlinks only after compatible validation.
@@ -221,12 +270,18 @@ complete Marketplace implementation.
 
 ## Validation boundary
 
-Automated coverage must include provider/model validation; allow/ask/deny;
+Automated coverage must include Desktop unavailable with Host-local Agent
+events/history available; Desktop unavailable with an external Fleet route;
+truly unsupported and degraded capabilities; explicit scope served by only a
+subset of providers; policy editing while unavailable; identity/scope
+separation between plugins; required block/restore and generation rebuild;
+provider/model validation; allow/ask/deny;
 required/optional activation; scope denial; identity non-spoofing; declaration
 upgrade reset; two-phase create success and retained-task partial failure;
 read-only projection and write refusal; unavailable diagnostics; manager data
-and locale reprojection; supported/unsupported list controls, localized policy
-labels, third-level permission navigation and recovery, collapsed runtime
+and locale reprojection; always-editable policy controls, localized
+availability reasons, third-level provider/scope navigation and recovery,
+collapsed runtime
 diagnostics, conformance with the shared manager content hierarchy plus the
 Platform-specific fact placement above; generation cleanup; and
 absence of a raw bridge or second app-server in the Platform surface.
@@ -234,10 +289,13 @@ absence of a raw bridge or second app-server in the Platform surface.
 Repository validation is `npm run check`, `npm audit --audit-level=high`, and
 `git diff --check` in each owning repository. Live validation builds and
 injects the real renderer bundle, opens the manager permission list and its
-third-level detail, then confirms the adapter-unavailable facts are confined
-to the collapsed runtime diagnostic disclosure while the existing UI still
-mounts/disposes. It cannot claim real model/task writes until the private
-current-connection adapter exists.
+third-level detail, then confirms Agent Trace Agent ledger/history permissions
+are not erased by Desktop unavailability, CLIProxy permissions follow Fleet
+provider state and scope, truly current-connection-only capabilities remain
+unavailable, and the current-connection diagnostic is confined to the
+collapsed runtime diagnostic disclosure while the existing UI still
+mounts/disposes. It cannot claim real native model/task writes until the
+private current-connection adapter exists.
 
 Authorization-specific validation additionally covers exact profile/source/id/
 capability/scope separation; capability/scope upgrade re-prompt; fail-closed

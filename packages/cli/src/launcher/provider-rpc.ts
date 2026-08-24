@@ -7,6 +7,7 @@ export const MAX_PROVIDER_REQUESTS = 8
 
 export type ProviderRpcOperation =
   | 'status'
+  | 'availability'
   | 'models.list'
   | 'tasks.list'
   | 'tasks.read'
@@ -23,7 +24,7 @@ export interface ProviderBindingRequest {
 }
 
 const OPERATIONS: readonly ProviderRpcOperation[] = [
-  'status', 'models.list', 'tasks.list', 'tasks.read', 'tasks.create', 'tasks.control', 'turns.submit', 'turns.control',
+  'status', 'availability', 'models.list', 'tasks.list', 'tasks.read', 'tasks.create', 'tasks.control', 'turns.submit', 'turns.control',
 ]
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -64,7 +65,7 @@ function modelRef(value: unknown): void {
 }
 
 function validateInput(operation: ProviderRpcOperation, value: unknown): void {
-  if (operation === 'status') {
+  if (operation === 'status' || operation === 'availability') {
     exact(value, [], 'input')
     return
   }
@@ -130,6 +131,7 @@ export function parseProviderBindingRequest(value: unknown, expectedToken: strin
 export async function handleProviderBindingRequest(fleet: ProviderFleet, request: ProviderBindingRequest): Promise<unknown> {
   switch (request.operation) {
     case 'status': return fleet.status()
+    case 'availability': return fleet.providerStatuses()
     case 'models.list': return await fleet.listModels(request.input as Parameters<ProviderFleet['listModels']>[0])
     case 'tasks.list': return await fleet.listTasks(request.input as Parameters<ProviderFleet['listTasks']>[0])
     case 'tasks.read': return await fleet.readTask(request.input as Parameters<ProviderFleet['readTask']>[0])

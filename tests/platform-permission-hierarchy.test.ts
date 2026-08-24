@@ -28,6 +28,11 @@ function permission(
     scope: {},
     policy: 'ask',
     denialCount: 0,
+    availability: {
+      status: 'unavailable',
+      reasonText: '没有宿主提供方可路由声明范围',
+      providers: [],
+    },
     ...overrides,
   }
 }
@@ -68,6 +73,19 @@ function snapshot(supportedCapabilities: ManagerSnapshot['platform']['supportedC
         lastDeniedAt: '2026-08-23T00:00:00.000Z',
         denialCount: 1,
         blockedReason: 'Required capability denied: tasks.create',
+        availability: {
+          status: 'unavailable',
+          reasonText: '没有宿主提供方可路由声明范围',
+          providers: [{
+            providerId: 'external:openai',
+            providerNameText: 'OpenAI Fleet',
+            kind: 'external-provider',
+            family: 'platform',
+            status: 'unavailable',
+            reasonText: 'OpenAI Fleet 当前不可用',
+            scope: { providers: ['openai'] },
+          }],
+        },
       }),
       permission('tasks.control'),
       permission('turns.submit'),
@@ -109,6 +127,29 @@ describe('Platform permission presentation hierarchy', () => {
       visible: [0, 1, 2, 3],
       overflow: [],
     })
+  })
+
+  it('uses distinct Host-owned labels for Agent capability rows and breadcrumbs', () => {
+    const state = {
+      ...snapshot(),
+      permissions: [
+        permission('agent.events.read'),
+        permission('agent.history.read'),
+        permission('agent.messages.append'),
+      ],
+    }
+    const { dom, dispose } = install(state)
+    try {
+      const content = openPluginTab(dom.window.document, 'demo', 'permissions')
+      expect([...content.querySelectorAll('[data-permission-item]')].map(item => item.getAttribute('aria-label'))).toEqual([
+        '读取 Agent 事件', '读取 Agent 历史', '追加 Agent 消息',
+      ])
+      dom.window.document.querySelector<HTMLButtonElement>('[data-permission-open="agent.events.read"]')?.click()
+      expect(dom.window.document.querySelector('[data-breadcrumb-current]')?.textContent).toBe('读取 Agent 事件')
+    } finally {
+      dispose()
+      dom.window.close()
+    }
   })
 
   it('reviews required and optional declarations once with persistent allow as the primary action', async () => {
@@ -193,7 +234,7 @@ describe('Platform permission presentation hierarchy', () => {
     dom.window.close()
   })
 
-  it('renders a concise flat list with host-owned names, icons, support state, and no engineering details', () => {
+  it('renders a concise flat list with host-owned names, icons, availability, and editable policy', () => {
     const { dom, dispose } = install(snapshot())
     try {
       const content = openPluginTab(dom.window.document, 'demo', 'permissions')
@@ -209,8 +250,8 @@ describe('Platform permission presentation hierarchy', () => {
       ])
       expect(content.querySelector('[data-permission-item="tasks.create"] .cxm-required-badge')?.textContent).toBe('必需')
       expect(content.querySelector('[data-permission-item="models.read"] .cxm-required-badge')).toBeNull()
-      expect(content.querySelectorAll('[data-permission-unavailable]')).toHaveLength(7)
-      expect(content.querySelector('[data-permission-capability]')).toBeNull()
+      expect(content.querySelectorAll('[data-permission-availability][data-availability-state="unavailable"]')).toHaveLength(7)
+      expect(content.querySelectorAll('[data-permission-capability]')).toHaveLength(7)
       expect(content.querySelector('.cxm-slot-card')).toBeNull()
       expect(content.querySelector('h3')).toBeNull()
 
@@ -225,7 +266,7 @@ describe('Platform permission presentation hierarchy', () => {
     }
   })
 
-  it('shows all three localized policies only for capabilities supported by the current host', async () => {
+  it('keeps all three localized policies editable independently from runtime availability', async () => {
     const state = snapshot(['models.read', 'tasks.create'])
     const { dom, dispose, policies } = install(state)
     try {
@@ -237,7 +278,7 @@ describe('Platform permission presentation hierarchy', () => {
       expect([...models!.options].map(option => [option.value, option.textContent])).toEqual([
         ['ask', '每次询问'], ['allow', '始终允许'], ['deny', '始终拒绝'],
       ])
-      expect(content.querySelector('[data-permission-capability="tasks.catalog.read"]')).toBeNull()
+      expect(content.querySelector('[data-permission-capability="tasks.catalog.read"]')).not.toBeNull()
       models!.value = 'allow'
       models!.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
       await new Promise(resolve => setTimeout(resolve, 0))
@@ -262,9 +303,14 @@ describe('Platform permission presentation hierarchy', () => {
       expect(breadcrumb.at(-1)?.matches('span[aria-current="page"]')).toBe(true)
       expect(detail?.textContent).toContain('申请使用对应的宿主功能')
       expect(detail?.textContent).toContain('必需权限')
-      expect(detail?.textContent).toContain('当前宿主暂不支持')
+      expect(detail?.textContent).toContain('不可用')
       expect(detail?.textContent).toContain('tasks.create')
       expect(detail?.textContent).toContain('openai')
+      expect(detail?.textContent).toContain('OpenAI Fleet')
+      expect(detail?.textContent).toContain('OpenAI Fleet 当前不可用')
+      expect(detail?.querySelectorAll('[role="listitem"][data-permission-provider]')).toHaveLength(1)
+      const headings = [...(detail?.querySelectorAll('h1, h2, h3') ?? [])].map(item => item.textContent)
+      expect(new Set(headings).size).toBe(headings.length)
       expect(detail?.textContent).toContain('本次运行审计')
       expect(detail?.textContent).toContain('最近拒绝：2026-08-23T00:00:00.000Z')
       expect(detail?.textContent).not.toContain('current-connection-client-unavailable')
