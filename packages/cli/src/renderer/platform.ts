@@ -53,6 +53,7 @@ import type {
   PluginConsolePermissionObserver,
   PluginPrincipalToken,
 } from './plugin-console.js'
+import { HostThemeProjection } from './host-theme.js'
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const LEGACY_POLICY_STORAGE_KEY = 'cordisx.platform.permissionPolicies.v1'
@@ -285,8 +286,11 @@ export interface PermissionPrompt {
 
 export class BrowserPermissionPrompt implements PermissionPrompt {
   private queue = Promise.resolve()
+  private readonly theme: HostThemeProjection
 
-  constructor(private readonly document: Document | undefined = globalThis.document) {}
+  constructor(private readonly document: Document | undefined = globalThis.document) {
+    this.theme = new HostThemeProjection(document ?? globalThis.document)
+  }
 
   request(input: PermissionPromptRequest): Promise<Exclude<CordisXPermissionDecision, 'ask'>> {
     const next = this.queue.then(async () => await this.show(input))
@@ -300,22 +304,23 @@ export class BrowserPermissionPrompt implements PermissionPrompt {
     const reason = input.declaration.reason.fallback ?? `${input.declaration.reason.namespace ?? input.identity.id}:${input.declaration.reason.key}`
     return await new Promise((resolve) => {
       const overlay = document.createElement('div')
+      const detachTheme = this.theme.attach(overlay)
       overlay.dataset.permissionPrompt = input.declaration.name
       overlay.setAttribute('role', 'dialog')
       overlay.setAttribute('aria-modal', 'true')
       overlay.setAttribute('aria-labelledby', 'cordisx-permission-prompt-title')
       overlay.setAttribute('aria-describedby', 'cordisx-permission-prompt-description')
       overlay.innerHTML = `<style>
-        [data-permission-prompt] { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, CanvasText 42%, transparent); color-scheme: light dark; }
-        [data-permission-prompt] .cxp-dialog { width: min(460px, 100%); border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 14px; padding: 20px; background: Canvas; color: CanvasText; box-shadow: 0 20px 64px color-mix(in srgb, CanvasText 28%, transparent); }
+        [data-permission-prompt] { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 24px; background: var(--cx-backdrop); }
+        [data-permission-prompt] .cxp-dialog { width: min(460px, 100%); border: 1px solid var(--cx-border); border-radius: 14px; padding: 20px; background: var(--cx-surface-raised); color: var(--cx-text); box-shadow: 0 20px 64px var(--cx-shadow); }
         [data-permission-prompt] h2 { margin: 0; font-size: 18px; }
         [data-permission-prompt] p { margin: 10px 0 0; line-height: 1.5; }
-        [data-permission-prompt] .cxp-reason { color: color-mix(in srgb, CanvasText 72%, transparent); }
+        [data-permission-prompt] .cxp-reason { color: var(--cx-muted); }
         [data-permission-prompt] .cxp-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
-        [data-permission-prompt] button { border: 1px solid color-mix(in srgb, CanvasText 22%, transparent); border-radius: 9px; padding: 8px 12px; background: color-mix(in srgb, CanvasText 6%, Canvas); color: CanvasText; cursor: pointer; }
-        [data-permission-prompt] button[data-primary="true"] { border-color: #8e959f; background: #c7ccd4; color: #17191c; font-weight: 600; }
-        [data-permission-prompt] button[data-tone="danger"] { color: #d95c5c; }
-        [data-permission-prompt] button:focus-visible { outline: 2px solid #9da5b0; outline-offset: 2px; }
+        [data-permission-prompt] button { border: 1px solid var(--cx-border); border-radius: 9px; padding: 8px 12px; background: var(--cx-hover); color: var(--cx-text); cursor: pointer; }
+        [data-permission-prompt] button[data-primary="true"] { border-color: var(--cx-primary); background: var(--cx-primary); color: var(--cx-primary-text); font-weight: 600; }
+        [data-permission-prompt] button[data-tone="danger"] { color: var(--cx-danger); }
+        [data-permission-prompt] button:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: 2px; }
       </style>`
       const dialog = document.createElement('div')
       dialog.className = 'cxp-dialog'
@@ -331,6 +336,7 @@ export class BrowserPermissionPrompt implements PermissionPrompt {
       const actions = document.createElement('div')
       actions.className = 'cxp-actions'
       const finish = (decision: Exclude<CordisXPermissionDecision, 'ask'>): void => {
+        detachTheme()
         overlay.remove()
         resolve(decision)
       }

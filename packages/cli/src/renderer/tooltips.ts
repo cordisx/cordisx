@@ -1,3 +1,5 @@
+import { HostThemeProjection } from './host-theme.js'
+
 export type HostTooltipPlacement = 'top' | 'bottom'
 
 const NATIVE_TOOLTIP_CLASS = [
@@ -18,8 +20,10 @@ export class HostTooltipController {
   private activeTarget: HTMLElement | undefined
   private activeTooltip: HTMLElement | undefined
   private timer: ReturnType<typeof setTimeout> | undefined
+  private readonly theme: HostThemeProjection
 
   constructor(private readonly document: Document) {
+    this.theme = new HostThemeProjection(document)
     document.addEventListener(DISMISS_EVENT, this.dismiss)
   }
 
@@ -83,6 +87,7 @@ export class HostTooltipController {
     const text = label()?.trim()
     if (text === undefined || text === '') return
     const tooltip = this.document.createElement('div')
+    const detachTheme = this.theme.attach(tooltip)
     tooltip.id = `cordisx-host-tooltip-${++tooltipSequence}`
     tooltip.role = 'tooltip'
     tooltip.className = NATIVE_TOOLTIP_CLASS
@@ -90,7 +95,8 @@ export class HostTooltipController {
     tooltip.textContent = text
     Object.assign(tooltip.style, {
       position: 'fixed', left: '0', top: '0', maxWidth: 'min(20rem, calc(100vw - 16px))',
-      pointerEvents: 'none', zIndex: '2147483600',
+      pointerEvents: 'none', zIndex: '2147483600', background: 'var(--cx-surface-raised)', color: 'var(--cx-text)',
+      border: '1px solid var(--cx-border)', boxShadow: '0 8px 28px var(--cx-shadow)',
     })
     this.document.body.append(tooltip)
     const triggerRect = target.getBoundingClientRect()
@@ -117,5 +123,7 @@ export class HostTooltipController {
     tooltip.style.top = `${Math.round(Math.max(edge, top) * 2) / 2}px`
     target.setAttribute('aria-describedby', tooltip.id)
     this.activeTooltip = tooltip
+    const remove = tooltip.remove.bind(tooltip)
+    tooltip.remove = () => { detachTheme(); remove() }
   }
 }

@@ -15,7 +15,7 @@ const request = {
 
 describe('host-owned permission prompt', () => {
   it('makes persistent allow primary while keeping allow-once non-persistent and the hierarchy flat', async () => {
-    const dom = new JSDOM('<!doctype html><html><body></body></html>', { pretendToBeVisual: true })
+    const dom = new JSDOM('<!doctype html><html class="electron-dark"><body></body></html>', { pretendToBeVisual: true })
     const prompt = new BrowserPermissionPrompt(dom.window.document)
     const pending = prompt.request(request)
     await Promise.resolve()
@@ -28,8 +28,12 @@ describe('host-owned permission prompt', () => {
     const primary = dialog?.querySelector<HTMLButtonElement>('[data-permission-decision="allow"]')
     expect(primary?.dataset.primary).toBe('true')
     expect(dom.window.document.activeElement).toBe(primary)
-    expect(dialog?.querySelector('style')?.textContent).toContain('color-scheme: light dark')
-    expect(dialog?.querySelector('style')?.textContent).toContain('background: Canvas')
+    expect(dialog?.dataset.cordisxAppTheme).toBe('dark')
+    expect(dialog?.querySelector('style')?.textContent).toContain('var(--cx-surface-raised)')
+    expect(dialog?.querySelector('style')?.textContent).not.toContain('Canvas')
+    dom.window.document.documentElement.className = 'electron-light'
+    await Promise.resolve()
+    expect(dialog?.dataset.cordisxAppTheme).toBe('light')
     dialog?.querySelector<HTMLButtonElement>('[data-permission-decision="allow-once"]')?.click()
     await expect(pending).resolves.toBe('allow-once')
     expect(dom.window.document.querySelector('[data-permission-prompt]')).toBeNull()

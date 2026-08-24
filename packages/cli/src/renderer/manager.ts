@@ -49,6 +49,7 @@ import type {
 import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
 import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 import { HostTooltipController } from './tooltips.js'
+import { HostThemeProjection, resolveHostTheme } from './host-theme.js'
 import lunaTextViewerCss from 'luna-text-viewer/luna-text-viewer.css'
 
 export type ManagerPluginStatus =
@@ -913,6 +914,29 @@ const MANAGER_STYLES = `
   }
 `
 
+const HOST_THEME_OVERLAY_STYLES = `
+  [data-cordisx-manager-modal], .cxm-plugin-menu-popup, .cxm-lifecycle-overlay, .cxm-authorization-overlay { color: var(--cx-text); }
+  .cxm-backdrop, .cxm-lifecycle-overlay, .cxm-authorization-overlay { background: var(--cx-backdrop); }
+  .cxm-dialog, .cxm-lifecycle-dialog, .cxm-authorization-dialog { border-color: var(--cx-border); background: var(--cx-surface); color: var(--cx-text); box-shadow: 0 24px 80px var(--cx-shadow); }
+  .cxm-sidebar { border-color: var(--cx-border); background: var(--cx-surface-raised); }
+  .cxm-header, .cxm-about-actions, .cxm-about-action-item + .cxm-about-action-item, .cxm-flat-item + .cxm-flat-item { border-color: var(--cx-border); }
+  .cxm-nav-button, .cxm-heading p, .cxm-detail-description, .cxm-permission-reason, .cxm-copy, .cxm-source-state, .cxm-detail-id { color: var(--cx-muted); }
+  .cxm-nav-button:hover, .cxm-nav-button[aria-selected="true"], .cxm-back:hover, .cxm-breadcrumb-action:hover, .cxm-breadcrumb-overflow > summary:hover, .cxm-tab:hover, .cxm-tab[aria-selected="true"], .cxm-about-action:hover .cxm-about-action-title { background: var(--cx-hover); color: var(--cx-text); }
+  .cxm-heading-title, .cxm-breadcrumb-current, .cxm-card-value, .cxm-section-title, .cxm-about-name, .cxm-search, .cxm-source-input { color: var(--cx-text); }
+  .cxm-card, .cxm-slot-card, .cxm-source-row, .cxm-field, .cxm-lifecycle-impact { border-color: var(--cx-border); background: var(--cx-hover); }
+  .cxm-search, .cxm-source-input, .cxm-close, .cxm-action, .cxm-mini-action { border-color: var(--cx-border); background: var(--cx-surface-raised); color: var(--cx-text); }
+  .cxm-action:hover:not(:disabled), .cxm-mini-action:hover:not(:disabled), .cxm-plugin-menu-item:hover:not(:disabled), .cxm-plugin-menu-item:focus-visible { border-color: var(--cx-primary); background: var(--cx-hover); color: var(--cx-text); }
+  .cxm-plugin-menu-popup, .cxm-breadcrumb-menu { border-color: var(--cx-border); background: var(--cx-surface-raised); box-shadow: 0 12px 32px var(--cx-shadow); }
+  .cxm-plugin-menu-item, .cxm-authorization-dialog > p, .cxm-authorization-reason, .cxm-authorization-choice { color: var(--cx-text); }
+  .cxm-action[data-tone="danger"], .cxm-plugin-menu-item[data-tone="danger"] { color: var(--cx-danger); }
+  .cxm-required-badge { background: var(--cx-hover); color: var(--cx-primary); }
+  .cxm-tab[aria-selected="true"]::after { background: var(--cx-primary); }
+  .cxm-nav-button:focus-visible, .cxm-close:focus-visible, .cxm-tab:focus-visible, .cxm-plugin-row:focus-visible, .cxm-action:focus-visible, .cxm-mini-action:focus-visible, .cxm-search:focus-visible, .cxm-source-input:focus-visible, .cxm-authorization-actions button:focus-visible { outline-color: var(--cx-focus); }
+  .cxm-authorization-item, .cxm-authorization-actions button { border-color: var(--cx-border); }
+  .cxm-authorization-actions button { background: var(--cx-surface-raised); color: var(--cx-text); }
+  .cxm-authorization-actions button[data-primary="true"] { border-color: var(--cx-primary); background: var(--cx-primary); color: var(--cx-primary-text); }
+`
+
 function create<K extends keyof HTMLElementTagNameMap>(
   document: Document,
   tag: K,
@@ -932,10 +956,7 @@ function markDecorative<T extends HTMLElement>(element: T): T {
 }
 
 function hostBrandBackground(document: Document): 'dark' | 'light' {
-  const root = document.documentElement
-  if (root.classList.contains('electron-light')) return 'light'
-  if (root.classList.contains('electron-dark')) return 'dark'
-  return document.defaultView?.getComputedStyle(root).colorScheme.includes('light') === true ? 'light' : 'dark'
+  return resolveHostTheme(document).theme
 }
 
 function syncAdaptiveBrandMark(document: Document, mark: HTMLImageElement): void {
@@ -1034,6 +1055,8 @@ export async function requestPluginAuthorization(
   if (plan.declarations.length === 0) return decisionEnvelope('allow', () => true)
   return await new Promise((resolve) => {
     const overlay = create(document, 'div', 'cxm-authorization-overlay')
+    const theme = new HostThemeProjection(document)
+    const detachTheme = theme.attach(overlay)
     overlay.dataset.permissionAuthorization = plugin.id
     overlay.setAttribute('role', 'dialog')
     overlay.setAttribute('aria-modal', 'true')
@@ -1041,23 +1064,23 @@ export async function requestPluginAuthorization(
     overlay.setAttribute('aria-labelledby', titleId)
     const style = document.createElement('style')
     style.textContent = `
-      .cxm-authorization-overlay { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / 55%); }
-      .cxm-authorization-dialog { width: min(600px, 100%); max-height: min(720px, calc(100vh - 48px)); overflow: auto; border: 1px solid #3b4048; border-radius: 14px; padding: 20px; background: #202226; color: #edf0f4; box-shadow: 0 24px 80px rgb(0 0 0 / 45%); }
+      .cxm-authorization-overlay { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 24px; background: var(--cx-backdrop); }
+      .cxm-authorization-dialog { width: min(600px, 100%); max-height: min(720px, calc(100vh - 48px)); overflow: auto; border: 1px solid var(--cx-border); border-radius: 14px; padding: 20px; background: var(--cx-surface); color: var(--cx-text); box-shadow: 0 24px 80px var(--cx-shadow); }
       .cxm-authorization-dialog h2 { margin: 0; font-size: 18px; }
-      .cxm-authorization-dialog > p { margin: 9px 0 16px; color: #bfc5ce; line-height: 1.5; }
+      .cxm-authorization-dialog > p { margin: 9px 0 16px; color: var(--cx-muted); line-height: 1.5; }
       .cxm-authorization-list { display: grid; }
-      .cxm-authorization-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 14px; padding: 12px 0; border-top: 1px solid #343840; }
+      .cxm-authorization-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 14px; padding: 12px 0; border-top: 1px solid var(--cx-border); }
       .cxm-authorization-item:first-child { border-top: 0; }
       .cxm-authorization-name { font-weight: 600; }
-      .cxm-authorization-reason { color: #aeb4be; line-height: 1.45; }
-      .cxm-authorization-choice { grid-column: 2; grid-row: 1 / span 2; align-self: center; display: flex; align-items: center; gap: 9px; color: #c9ced6; cursor: pointer; }
-      .cxm-authorization-choice input { width: 17px; height: 17px; accent-color: #c7ccd4; }
+      .cxm-authorization-reason { color: var(--cx-muted); line-height: 1.45; }
+      .cxm-authorization-choice { grid-column: 2; grid-row: 1 / span 2; align-self: center; display: flex; align-items: center; gap: 9px; color: var(--cx-text); cursor: pointer; }
+      .cxm-authorization-choice input { width: 17px; height: 17px; accent-color: var(--cx-primary); }
       .cxm-authorization-choice input:disabled { cursor: not-allowed; }
       .cxm-authorization-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 18px; }
-      .cxm-authorization-actions button { border: 1px solid #494f59; border-radius: 9px; padding: 8px 12px; background: #2a2d32; color: #edf0f4; cursor: pointer; }
-      .cxm-authorization-actions button[data-primary="true"] { border-color: #aeb4bd; background: #c7ccd4; color: #17191c; font-weight: 600; }
-      .cxm-authorization-actions button[data-tone="danger"] { color: #ff9292; }
-      .cxm-authorization-actions button:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
+      .cxm-authorization-actions button { border: 1px solid var(--cx-border); border-radius: 9px; padding: 8px 12px; background: var(--cx-surface-raised); color: var(--cx-text); cursor: pointer; }
+      .cxm-authorization-actions button[data-primary="true"] { border-color: var(--cx-primary); background: var(--cx-primary); color: var(--cx-primary-text); font-weight: 600; }
+      .cxm-authorization-actions button[data-tone="danger"] { color: var(--cx-danger); }
+      .cxm-authorization-actions button:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: 2px; }
     `
     const dialog = create(document, 'div', 'cxm-authorization-dialog')
     const operationLabel = plan.operation === 'install' ? '安装' : plan.operation === 'update' ? '更新' : '启用'
@@ -1092,6 +1115,7 @@ export async function requestPluginAuthorization(
     dialog.append(list)
     const actions = create(document, 'div', 'cxm-authorization-actions')
     const finish = (decision: CordisXPermissionAuthorizationDecisionV1['decisions'][number]['decision'] | undefined): void => {
+      detachTheme()
       overlay.remove()
       resolve(decision === undefined ? undefined : decisionEnvelope(
         decision,
@@ -1377,10 +1401,22 @@ function createMarketplaceFetcher(view: Window | null): MarketplaceFetcherHandle
 
 /** Mount the reversible, host-owned CordisX manager UI. */
 export function installCordisXManager(document: Document, model: ManagerModel): () => void {
+  const theme = new HostThemeProjection(document)
+  const ownedPortals = new Map<HTMLElement, () => void>()
+  const mountPortal = <Element extends HTMLElement>(portal: Element): (() => void) => {
+    const detachTheme = theme.attach(portal)
+    ownedPortals.set(portal, detachTheme)
+    ;(document.body ?? document.documentElement).append(portal)
+    return () => {
+      ownedPortals.delete(portal)
+      detachTheme()
+      portal.remove()
+    }
+  }
   document.getElementById(MANAGER_STYLE_ID)?.remove()
   const style = create(document, 'style')
   style.id = MANAGER_STYLE_ID
-  style.textContent = `${lunaTextViewerCss}\n${MANAGER_STYLES}`
+  style.textContent = `${lunaTextViewerCss}\n${MANAGER_STYLES}\n${HOST_THEME_OVERLAY_STYLES}`
   ;(document.head ?? document.documentElement).append(style)
 
   const trigger = create(document, 'button')
@@ -1394,6 +1430,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   trigger.append(triggerMark)
 
   const modal = create(document, 'div')
+  const detachModalTheme = theme.attach(modal)
   modal.dataset.cordisxManagerModal = 'true'
   modal.hidden = true
   const backdrop = create(document, 'div', 'cxm-backdrop')
@@ -1561,6 +1598,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     danger = false,
   ): Promise<boolean> => new Promise(resolve => {
     const overlay = create(document, 'div', 'cxm-lifecycle-overlay')
+    let unmountOverlay = (): void => {}
     overlay.setAttribute('role', 'dialog')
     overlay.setAttribute('aria-modal', 'true')
     const panel = create(document, 'div', 'cxm-lifecycle-dialog')
@@ -1571,7 +1609,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     }
     const actions = create(document, 'div', 'cxm-lifecycle-actions')
     const finish = (confirmed: boolean): void => {
-      overlay.remove()
+      unmountOverlay()
       resolve(confirmed)
     }
     const cancel = create(document, 'button', 'cxm-action', '取消')
@@ -1590,12 +1628,13 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     actions.append(cancel, confirm)
     panel.append(actions)
     overlay.append(panel)
-    document.body.append(overlay)
+    unmountOverlay = mountPortal(overlay)
     cancel.focus()
   })
 
   const requestLocalPackageDirectory = (): Promise<string | undefined> => new Promise(resolve => {
     const overlay = create(document, 'div', 'cxm-lifecycle-overlay')
+    let unmountOverlay = (): void => {}
     overlay.setAttribute('role', 'dialog')
     overlay.setAttribute('aria-modal', 'true')
     const panel = create(document, 'div', 'cxm-lifecycle-dialog')
@@ -1610,7 +1649,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     panel.append(input)
     const actions = create(document, 'div', 'cxm-lifecycle-actions')
     const finish = (value?: string): void => {
-      overlay.remove()
+      unmountOverlay()
       resolve(value)
     }
     const cancel = create(document, 'button', 'cxm-action', '取消')
@@ -1639,7 +1678,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     actions.append(cancel, inspect)
     panel.append(actions)
     overlay.append(panel)
-    document.body.append(overlay)
+    unmountOverlay = mountPortal(overlay)
     input.focus()
   })
 
@@ -2555,12 +2594,13 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       popup.setAttribute('role', 'menu')
       popup.setAttribute('aria-label', `${plugin.name} 的更多操作`)
       popup.hidden = true
+      let unmountPopup = (): void => {}
       const closeMenu = (restoreFocus = false): void => {
         pluginActionMenuOpen = false
         pluginActionMenuContainsEvent = () => false
         repositionPluginActionMenu = () => {}
         popup.hidden = true
-        popup.remove()
+        unmountPopup()
         menuTrigger.setAttribute('aria-expanded', 'false')
         if (closePluginActionMenu === closeMenu) closePluginActionMenu = () => {}
         if (restoreFocus) queueMicrotask(() => {
@@ -2602,7 +2642,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         closePluginActionMenu(false)
         tooltips.hide()
         popup.hidden = false
-        document.body.append(popup)
+        unmountPopup = mountPortal(popup)
         positionMenu()
         menuTrigger.setAttribute('aria-expanded', 'true')
         closePluginActionMenu = closeMenu
@@ -4130,7 +4170,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   })
   const themeObserver = Observer === undefined ? undefined : new Observer(() => syncAdaptiveBrandMark(document, triggerMark))
   if (document.documentElement !== null) observer?.observe(document.documentElement, { childList: true, subtree: true })
-  if (document.documentElement !== null) themeObserver?.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+  if (document.documentElement !== null) themeObserver?.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class', 'style', 'data-theme', 'data-color-theme', 'data-color-scheme'],
+  })
   reconcile()
   renderContent()
   const unsubscribeRuntime = model.subscribe(renderContent)
@@ -4161,7 +4204,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     closePluginActionMenu(false)
     trigger.removeEventListener('click', open)
     trigger.remove()
+    for (const [portal, detachTheme] of ownedPortals) {
+      detachTheme()
+      portal.remove()
+    }
+    ownedPortals.clear()
+    detachModalTheme()
     modal.remove()
     style.remove()
+    theme.dispose()
   }
 }

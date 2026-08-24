@@ -153,7 +153,7 @@ describe('Platform permission presentation hierarchy', () => {
   })
 
   it('reviews required and optional declarations once with persistent allow as the primary action', async () => {
-    const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
+    const dom = new JSDOM('<!doctype html><html class="electron-dark"><head></head><body></body></html>', { url: 'https://codex.local/' })
     const permissions = [
       permission('models.read', { required: true, reasonText: '读取当前账号模型' }),
       permission('turns.submit', { reasonText: '提交后续消息', policy: 'deny' }),
@@ -176,6 +176,10 @@ describe('Platform permission presentation hierarchy', () => {
       })),
     }, permissions)
     const dialog = dom.window.document.querySelector<HTMLElement>('[data-permission-authorization="demo"]')
+    expect(dialog?.dataset.cordisxAppTheme).toBe('dark')
+    dom.window.document.documentElement.className = 'electron-light'
+    await Promise.resolve()
+    expect(dialog?.dataset.cordisxAppTheme).toBe('light')
     expect(dialog?.querySelectorAll('h2')).toHaveLength(1)
     expect(dialog?.textContent?.match(/启用授权/g)).toHaveLength(1)
     expect(dialog?.querySelectorAll('[role="listitem"]')).toHaveLength(2)
