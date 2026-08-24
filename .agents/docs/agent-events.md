@@ -173,6 +173,7 @@ through the private host composition path, not copied into audit data.
 The shared manifest supports these Agent capabilities:
 
 - `agent.events.read`
+- `agent.history.read`
 - `agent.messages.append`
 - `agent.steps.reject`
 - `agent.messages.transform`

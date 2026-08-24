@@ -13,6 +13,7 @@ export const CORDISX_PLATFORM_CAPABILITIES = [
   'turns.submit',
   'turns.control',
   'agent.events.read',
+  'agent.history.read',
   'agent.messages.append',
   'agent.steps.reject',
   'agent.messages.transform',
