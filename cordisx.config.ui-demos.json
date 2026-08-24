@@ -17,6 +17,14 @@
       "entry": "./examples/plugins/hello-toolbar/index.ts",
       "enabled": true,
       "config": {}
+    },
+    {
+      "id": "form-schema-gallery",
+      "entry": "./examples/plugins/form-schema-gallery/index.ts",
+      "enabled": true,
+      "config": {
+        "workspaceName": "Northstar workspace"
+      }
     }
   ]
 }

@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { readdir } from 'node:fs/promises'
+import { readFile, readdir, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import process from 'node:process'
 
 function value(name) {
@@ -22,6 +23,8 @@ const profileDir = value('--profile-dir')
 const devConfig = optionalValue('--dev-config')
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('--port must be an unprivileged TCP port')
 const smokeArgs = process.argv.slice(separator + 1)
+const reportIndex = smokeArgs.indexOf('--report')
+const reportPath = reportIndex >= 0 ? smokeArgs[reportIndex + 1] : undefined
 
 function exited(child) {
   return child.exitCode !== null || child.signalCode !== null
@@ -182,14 +185,21 @@ try {
   if (crashpadAfter !== crashpadBefore) {
     throw new Error(`Crashpad pending dump count changed during smoke: ${crashpadBefore} -> ${crashpadAfter}`)
   }
-  console.log(`[cordisx-smoke-cleanup] ${JSON.stringify({
+  const cleanup = {
     port,
     portClosed: true,
     profileDir,
     profileProcesses: 0,
     crashpadBefore,
     crashpadAfter,
-  })}`)
+  }
+  if (reportPath !== undefined) {
+    const resolvedReport = path.resolve(reportPath)
+    const report = JSON.parse(await readFile(resolvedReport, 'utf8'))
+    report.runnerCleanup = cleanup
+    await writeFile(resolvedReport, `${JSON.stringify(report, null, 2)}\n`)
+  }
+  console.log(`[cordisx-smoke-cleanup] ${JSON.stringify(cleanup)}`)
 }
 
 process.exitCode = result

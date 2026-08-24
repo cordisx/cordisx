@@ -96,8 +96,8 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${String.raw`
     color-scheme: light;
     font: inherit;
   }
-  .cxf-scope[data-cordisx-app-theme="dark"] { color-scheme: dark; }
-  .cxf-form { display: grid; gap: 1.35rem; inline-size: min(100%, 58rem); min-inline-size: 0; margin-inline: auto; padding-block: .25rem 1rem; }
+  .cxf-scope[data-cordisx-app-theme="dark"], [data-cordisx-app-theme="dark"] .cxf-scope { color-scheme: dark; }
+  .cxf-form { display: grid; gap: 1.35rem; inline-size: 100%; min-inline-size: 0; margin: 0; padding-block: .25rem 1rem; }
   .cxf-section { display: grid; gap: .55rem; min-inline-size: 0; }
   .cxf-section-heading { padding-inline: .25rem; }
   .cxf-section-title { margin: 0; color: var(--cx-text); font-size: .96rem; line-height: 1.35; font-weight: 650; }
@@ -184,6 +184,10 @@ function jsonLike(field: CordisXConfigFieldSnapshot): boolean {
 
 export function selectHostFormPrimitive(field: CordisXConfigFieldSnapshot): HostFormPrimitive {
   if (sensitive(field)) return 'sensitive-unavailable'
+  // The public config snapshot describes only scalar choices. Do not infer a
+  // multi-select from an array value: that would let a plugin smuggle an
+  // unbounded option model into a Host control.
+  if (field.role === 'multi-select') return 'unsupported'
   if (field.choices !== undefined) return field.role === 'radio' ? 'radio' : 'select'
   if (field.type === 'boolean') return field.role === 'switch' ? 'switch' : 'checkbox'
   if (field.type === 'number' || field.type === 'natural') return field.role === 'slider' ? 'slider' : 'number-input'
@@ -199,7 +203,7 @@ export function selectHostFormPrimitive(field: CordisXConfigFieldSnapshot): Host
 
 export function hostFormDiagnostic(field: CordisXConfigFieldSnapshot): HostFormDiagnostic | undefined {
   const primitive = selectHostFormPrimitive(field)
-  if (primitive === 'unsupported' && ['date', 'time', 'color'].includes(field.role ?? '')) return {
+  if (primitive === 'unsupported' && ['date', 'time', 'color', 'multi-select'].includes(field.role ?? '')) return {
     code: 'unsupported-schema-role', fieldPath: field.path,
     detail: `unsupported schema role ${field.role}; no native control fallback is permitted`,
   }
@@ -388,40 +392,50 @@ export class HostFormAdapter {
       group.className = 'cxf-radio-group'
       group.setAttribute('role', 'radiogroup')
       setCommonControlState(group, field, id)
-      for (const [index, choice] of field.choices!.entries()) {
-        const radio = createTDesignElement(this.document, 't-radio', 'radio')
-        radio.id = `${id}-${index}`
-        radio.tabIndex = Object.is(choice.value, field.value) ? 0 : -1
-        setTDesignProps(radio, {
-          name: id,
-          value: String(index),
-          checked: Object.is(choice.value, field.value),
-          disabled: field.disabled,
-          label: choice.label,
-          onChange: (checked: boolean) => { if (checked) onDraft(choice.value) },
-        })
-        group.append(radio)
-      }
-      const focusTarget = group.querySelector<HTMLElement>('t-radio')
-      return { root: group, ...(focusTarget === null ? {} : { focusTarget }), primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
+      // The official individual t-radio/t-checkbox elements look up their
+      // group injection unconditionally. Use the official group components
+      // rather than synthetic wrappers so a standalone Host field remains
+      // safe in an Omi document without an enclosing TDesign form provider.
+      const radios = createTDesignElement(this.document, 't-radio-group', 'radio')
+      radios.id = id
+      radios.tabIndex = field.disabled ? -1 : 0
+      setTDesignProps(radios, {
+        value: field.value,
+        options: field.choices!.map(choice => ({ label: choice.label, value: choice.value, disabled: field.disabled })),
+        disabled: field.disabled,
+        onChange: (value: CordisXJsonScalar | undefined) => onDraft(value),
+      })
+      group.append(radios)
+      return { root: group, focusTarget: radios, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
     }
-    if (primitive === 'checkbox' || primitive === 'switch') {
-      const control = createTDesignElement(this.document, primitive === 'switch' ? 't-switch' : 't-checkbox', primitive)
+    if (primitive === 'checkbox') {
+      const control = createTDesignElement(this.document, 't-checkbox-group', primitive)
       setCommonControlState(control, field, id)
       control.tabIndex = field.disabled ? -1 : 0
-      control.setAttribute('role', primitive === 'switch' ? 'switch' : 'checkbox')
+      control.setAttribute('role', 'checkbox')
       control.setAttribute('aria-checked', String(field.value === true))
-      setTDesignProps(control, primitive === 'switch' ? {
+      setTDesignProps(control, {
+        value: field.value === true ? [true] : [],
+        options: [{ label: '', value: true, disabled: field.disabled }],
+        disabled: field.disabled,
+        onChange: (value: readonly boolean[]) => {
+          const checked = value.includes(true)
+          control.setAttribute('aria-checked', String(checked))
+          onDraft(checked)
+        },
+      })
+      return { root: control, focusTarget: control, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
+    }
+    if (primitive === 'switch') {
+      const control = createTDesignElement(this.document, 't-switch', primitive)
+      setCommonControlState(control, field, id)
+      control.tabIndex = field.disabled ? -1 : 0
+      control.setAttribute('role', 'switch')
+      control.setAttribute('aria-checked', String(field.value === true))
+      setTDesignProps(control, {
         value: field.value === true,
         disabled: field.disabled,
         label: [managerCopy(this.locale(), 'form.switch-on'), managerCopy(this.locale(), 'form.switch-off')],
-        onChange: (value: boolean) => {
-          control.setAttribute('aria-checked', String(value))
-          onDraft(value)
-        },
-      } : {
-        checked: field.value === true,
-        disabled: field.disabled,
         onChange: (value: boolean) => {
           control.setAttribute('aria-checked', String(value))
           onDraft(value)

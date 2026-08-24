@@ -132,8 +132,14 @@ await new Promise((resolve, reject) => {
 
 let nextId = 1
 const pending = new Map()
+const runtimeExceptions = []
 socket.on('message', (data) => {
   const message = JSON.parse(data.toString())
+  if (message.method === 'Runtime.exceptionThrown') {
+    const detail = message.params?.exceptionDetails
+    runtimeExceptions.push(detail?.exception?.description ?? detail?.text ?? 'unknown renderer exception')
+    return
+  }
   if (message.id === undefined) return
   const callback = pending.get(message.id)
   if (callback === undefined) return
@@ -171,6 +177,7 @@ async function pressKey(key, code, keyCode) {
 }
 
 await send('Runtime.enable')
+await send('Log.enable')
 await send('Page.enable')
 const locale = parsed.values.locale
 let localeProjection
@@ -3320,9 +3327,22 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           .find(element => element.getAttribute('data-plugin-id') === pluginId || element.getAttribute('data-marketplace-plugin') === pluginId)
         const primary = row?.matches('button') === true ? row : row?.querySelector('.cxm-plugin-primary')
         primary?.click()
+        const detailDeadline = Date.now() + 5_000
+        while (document.querySelector('[data-plugin-detail-tab]') === null && Date.now() < detailDeadline) {
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+        if (document.querySelector('[data-plugin-detail-tab]') === null) throw new Error('plugin detail tabs did not mount for ' + pluginId)
       }
       const detailTab = ${JSON.stringify(managerDetailTab)}
-      if (detailTab !== undefined) document.querySelector('[data-plugin-detail-tab="' + detailTab + '"]')?.click()
+      if (detailTab !== undefined) {
+        document.querySelector('[data-plugin-detail-tab="' + detailTab + '"]')?.click()
+        if (detailTab === 'config' && pluginId !== undefined) {
+          const formDeadline = Date.now() + 5_000
+          while (document.querySelector('[data-plugin-config-form="' + CSS.escape(pluginId) + '"]') === null && Date.now() < formDeadline) {
+            await new Promise(resolve => setTimeout(resolve, 50))
+          }
+        }
+      }
       const permissionCapability = ${JSON.stringify(managerPermissionCapability)}
       if (permissionCapability !== undefined) document.querySelector('[data-permission-open="' + CSS.escape(permissionCapability) + '"]')?.click()
       const settingsTab = ${JSON.stringify(managerSettingsTab)}
@@ -3954,7 +3974,19 @@ if (parsed.values['manager-theme-cycle']) {
         if (${reopen} && !modal.hidden) document.querySelector('.cxm-close')?.click()
         if (modal.hidden && trigger !== null) trigger.click()
         else if (modal.hidden) modal.hidden = false
-        if (!${JSON.stringify(parsed.values['manager-open-select'])}) document.querySelector('[data-tab="about"]')?.click()
+        const themePluginId = ${JSON.stringify(parsed.values['manager-plugin'])}
+        const themeDetailTab = ${JSON.stringify(parsed.values['manager-detail-tab'])}
+        if (themePluginId === undefined) {
+          if (!${JSON.stringify(parsed.values['manager-open-select'])}) document.querySelector('[data-tab="about"]')?.click()
+        } else {
+          document.querySelector('[data-tab="plugins"]')?.click()
+          await new Promise(resolve => requestAnimationFrame(resolve))
+          const row = [...document.querySelectorAll('[data-plugin-id], [data-marketplace-plugin]')]
+            .find(item => item.getAttribute('data-plugin-id') === themePluginId || item.getAttribute('data-marketplace-plugin') === themePluginId)
+          ;(row?.matches('button') === true ? row : row?.querySelector('.cxm-plugin-primary'))?.click()
+          await new Promise(resolve => requestAnimationFrame(resolve))
+          if (themeDetailTab !== undefined) document.querySelector('[data-plugin-detail-tab="' + themeDetailTab + '"]')?.click()
+        }
         await new Promise(resolve => {
           const timer = setTimeout(resolve, 120)
           requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(timer); resolve() }))
@@ -4174,6 +4206,7 @@ if (parsed.values.report !== undefined) {
       isolatedRenderer: true,
     },
     baseline: report,
+    ...(runtimeExceptions.length === 0 ? {} : { runtimeExceptions }),
     ...(localeProjection === undefined ? {} : { localeProjection }),
     interactionSafety,
     ...(managerReport === undefined ? {} : { manager: managerReport }),

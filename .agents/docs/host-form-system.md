@@ -78,6 +78,7 @@ Default schema selection is deterministic:
 | Schema field | Host primitive |
 | --- | --- |
 | finite scalar choices | Select; Radio only for explicit `radio` role |
+| array choices / `multi-select` | unsupported diagnostic until the public descriptor defines bounded array-choice metadata; never infer it from a JSON array |
 | boolean | Checkbox; Switch only for explicit `switch` role |
 | number / natural | NumberInput; Slider only for explicit `slider` role |
 | string | Input |
