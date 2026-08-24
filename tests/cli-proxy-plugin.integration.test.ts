@@ -2,6 +2,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
+import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from '../packages/cli/src/contracts.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { Config } from '../packages/cli/src/plugins/cli-proxy-api/index.js'
@@ -20,6 +21,30 @@ interface RuntimeHandle {
         fields: readonly { path: readonly string[]; label?: string; description?: string; role?: string }[]
       }
     }[]
+    navigation: {
+      routes: readonly {
+        qualifiedId: string
+        definition: {
+          $schema?: string
+          schemaVersion?: number
+          id: string
+          path: string
+          outlet: string
+          page: string
+        }
+        productMetadata: { title?: string; description?: string; diagnostics: readonly unknown[] }
+      }[]
+      pages: readonly {
+        qualifiedId: string
+        metadata: {
+          $schema?: string
+          schemaVersion?: number
+          id: string
+          icon?: string
+        }
+        productMetadata: { title?: string; description?: string; diagnostics: readonly unknown[] }
+      }[]
+    }
     platform: { mode: string; diagnostics: readonly { code: string }[] }
     permissions: readonly {
       capability: string
@@ -173,6 +198,8 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(runtime?.snapshot().platform.diagnostics).toContainEqual(expect.objectContaining({ code: 'current-connection-client-unavailable' }))
     const bundledPlugin = runtime?.snapshot().plugins.find(plugin => plugin.id === 'cli-proxy-api')
     expect(bundledPlugin?.readme).toContain('# CLIProxy Providers')
+    expect(bundledPlugin?.readme).toContain('Use the **Providers** navigation entry')
+    expect(bundledPlugin?.readme).toContain('stable machine identifiers and are never translated')
     expect(bundledPlugin?.readme).toContain('Every model is identified by both `providerId` and `modelId`')
     expect(bundledPlugin?.configuration).toMatchObject({
       schemaKind: 'schemastery',
@@ -184,6 +211,54 @@ describe('CLIProxy provider plugin renderer', () => {
       ['providerIds'],
       ['defaultCwd'],
     ])
+    const providerRoute = runtime!.snapshot().navigation.routes.find(item => item.qualifiedId === 'cli-proxy-api:providers.sessions')
+    expect(providerRoute).toMatchObject({
+      definition: {
+        $schema: CORDISX_ROUTE_SCHEMA_V2,
+        schemaVersion: 2,
+        id: 'providers.sessions',
+        path: '/main/providers/sessions',
+        outlet: 'main',
+        page: 'providers.sessions',
+      },
+      productMetadata: {
+        title: 'Open Provider sessions',
+        description: 'Enter the external Provider sessions fleet from CordisX navigation or the Manager route catalog.',
+        diagnostics: [],
+      },
+    })
+    const providerPage = runtime!.snapshot().navigation.pages.find(item => item.qualifiedId === 'cli-proxy-api:providers.sessions')
+    expect(providerPage).toMatchObject({
+      metadata: {
+        $schema: CORDISX_PAGE_SCHEMA_V3,
+        schemaVersion: 3,
+        id: 'providers.sessions',
+        icon: 'host:layers',
+      },
+      productMetadata: {
+        title: 'Provider sessions',
+        description: 'Create, search, resume, and manage sessions for configured Providers in the main workspace.',
+        diagnostics: [],
+      },
+    })
+    expect(providerRoute?.productMetadata.description).not.toBe(providerPage?.productMetadata.description)
+
+    dom.window.document.documentElement.lang = 'zh-CN'
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(runtime!.snapshot().navigation.routes.find(item => item.qualifiedId === 'cli-proxy-api:providers.sessions')?.productMetadata).toEqual({
+      title: '打开 Provider 会话',
+      description: '从 CordisX 导航或 Manager 路由目录进入外部 Provider 会话 Fleet。',
+      diagnostics: [],
+    })
+    expect(runtime!.snapshot().navigation.pages.find(item => item.qualifiedId === 'cli-proxy-api:providers.sessions')?.productMetadata).toEqual({
+      title: 'Provider 会话',
+      description: '在主工作区为已配置的 Provider 创建、搜索、续聊和管理会话。',
+      diagnostics: [],
+    })
+    dom.window.document.documentElement.lang = 'en'
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise(resolve => setTimeout(resolve, 0))
     await runtime!.navigate('cli-proxy-api', { id: 'providers.sessions' })
     for (let attempt = 0; attempt < 100 && dom.window.document.querySelectorAll('[data-session]').length < 2; attempt += 1) {
       dom.window.document.querySelector<HTMLButtonElement>('[data-permission-decision="allow"]')?.click()

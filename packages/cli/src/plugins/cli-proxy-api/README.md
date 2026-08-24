@@ -2,6 +2,12 @@
 
 CLIProxy Providers lets one CordisX app work with models and conversations from multiple explicitly configured CLIProxyAPI-compatible providers. It adds a dedicated provider page for choosing models, creating conversations, searching provider history, continuing work, and managing conversation lifecycle without replacing Codex Desktop's native conversations.
 
+## Open the Provider sessions fleet
+
+Use the **Providers** navigation entry, or select the Provider sessions route from the Manager route catalog, to enter the external Provider sessions fleet. The route metadata explains how to reach this destination; the page metadata separately describes the model and conversation management available in the main workspace context.
+
+The canonical route id `providers.sessions`, path `/main/providers/sessions`, `main` outlet, and page id `providers.sessions` are stable machine identifiers and are never translated. Only their user-facing title and description follow the active CordisX locale.
+
 ## Configure providers
 
 Run `cordisx config` to locate the active CordisX configuration. The default location is `~/.cordisx/config.json`. Add each external provider to the top-level `providers` list and enable the built-in plugin with `cordisx:cli-proxy-api`:
