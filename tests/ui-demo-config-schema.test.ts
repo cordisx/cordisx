@@ -14,6 +14,10 @@ import {
   Config as SlotShowcaseConfig,
   configApplies as slotShowcaseConfigApplies,
 } from '../examples/plugins/slot-showcase/index.js'
+import {
+  Config as FormSchemaGalleryConfig,
+  configApplies as formSchemaGalleryConfigApplies,
+} from '../examples/plugins/form-schema-gallery/index.js'
 import type { CordisXStandardSchema } from '../packages/cli/src/contracts.js'
 import { PluginConfigurationRegistry } from '../packages/cli/src/renderer/configuration.js'
 
@@ -100,5 +104,60 @@ describe('UI demo Config Schemas', () => {
     expect(HelloToolbarConfig({})).toEqual({})
     const snapshot = descriptor('hello-toolbar', HelloToolbarConfig, {}, 'en')
     expect(snapshot).toMatchObject({ schemaKind: 'schemastery', applies: 'plugin-restart', fields: [] })
+  })
+
+  it('loads the form schema gallery only from ui-demos and projects the bounded Host primitives in English and Chinese', () => {
+    expect(formSchemaGalleryConfigApplies).toBe('plugin-restart')
+    const defaults = FormSchemaGalleryConfig({ workspaceName: 'Northstar workspace' })
+    expect(defaults).toMatchObject({
+      workspaceName: 'Northstar workspace',
+      backgroundSync: true,
+      releaseTrack: 'stable',
+      approvalMode: 'manual',
+      audienceTags: ['design', 'research'],
+      notificationRules: [{ destination: 'Daily summary', enabled: true }],
+      appearance: { density: 'comfortable', showActivity: true },
+      referenceCode: 'DEMO-NORTHSTAR-01',
+    })
+    expect(() => FormSchemaGalleryConfig({ ...defaults, workspaceName: ' ' })).toThrow()
+    expect(() => FormSchemaGalleryConfig({ ...defaults, maxParallelJobs: 17 })).toThrow()
+    expect(() => FormSchemaGalleryConfig({ ...defaults, reviewThreshold: 0.45 })).toThrow()
+    expect(() => FormSchemaGalleryConfig({ ...defaults, audienceTags: [] })).toThrow()
+
+    const en = descriptor('form-schema-gallery', FormSchemaGalleryConfig, { workspaceName: 'Northstar workspace' }, 'en')
+    const zh = descriptor('form-schema-gallery', FormSchemaGalleryConfig, { workspaceName: 'Northstar workspace' }, 'zh-CN')
+    expect(en).toMatchObject({ schemaKind: 'schemastery', applies: 'plugin-restart', writable: true })
+    const enField = (path: string) => en.fields.find(field => field.path.join('.') === path)
+    expect(enField('workspaceName')).toMatchObject({ label: 'Workspace name', required: true, min: 3, max: 48 })
+    expect(enField('welcomeNote')).toMatchObject({ label: 'Welcome note', role: 'multiline', type: 'string' })
+    expect(enField('handoffNote')).toMatchObject({ label: 'Handoff note', role: 'multiline', value: undefined })
+    expect(enField('documentationUrl')).toMatchObject({ label: 'Documentation URL', role: 'url' })
+    expect(enField('exportDirectory')).toMatchObject({ label: 'Export folder', role: 'directory' })
+    expect(enField('maxParallelJobs')).toMatchObject({ label: 'Parallel tasks', type: 'number', min: 1, max: 16, step: 1 })
+    expect(enField('reviewThreshold')).toMatchObject({ label: 'Review threshold', min: 0.5, max: 1, step: 0.05 })
+    expect(enField('showMemberAvatars')).toMatchObject({ label: 'Show member avatars', type: 'boolean' })
+    expect(enField('backgroundSync')).toMatchObject({ label: 'Background sync', role: 'switch' })
+    expect(enField('releaseTrack')).toMatchObject({ label: 'Release track', choices: [{ label: 'stable', value: 'stable' }, { label: 'preview', value: 'preview' }, { label: 'early-access', value: 'early-access' }] })
+    expect(enField('approvalMode')).toMatchObject({ label: 'Approval mode', role: 'radio' })
+    expect(enField('preferredReviewDate')).toMatchObject({ label: 'Preferred review date', role: 'date' })
+    expect(enField('dailyQuietTime')).toMatchObject({ label: 'Daily quiet time', role: 'time' })
+    expect(enField('accentColor')).toMatchObject({ label: 'Accent color', role: 'color' })
+    expect(enField('audienceTags')).toMatchObject({ label: 'Audience tags', type: 'array', role: 'multi-select', min: 1, max: 5 })
+    expect(enField('notificationRules')).toMatchObject({ label: 'Notification rules', type: 'array', min: 1, max: 4 })
+    expect(enField('appearance.density')).toMatchObject({ label: 'Display density' })
+    expect(enField('appearance.showActivity')).toMatchObject({ label: 'Show recent activity' })
+    expect(enField('referenceCode')).toMatchObject({ label: 'Reference code', disabled: true })
+    expect(zh.fields.find(field => field.path.join('.') === 'workspaceName')).toMatchObject({ label: '工作区名称' })
+    expect(zh.fields.find(field => field.path.join('.') === 'notificationRules')).toMatchObject({ label: '通知规则' })
+  })
+
+  it('enables the gallery only through the opt-in ui-demos developer configuration', async () => {
+    const config = JSON.parse(await readFile(new URL('../cordisx.config.ui-demos.json', import.meta.url), 'utf8')) as {
+      plugins: readonly { id: string; entry: string; enabled: boolean }[]
+    }
+    const gallery = config.plugins.filter(plugin => plugin.id === 'form-schema-gallery')
+    expect(gallery).toEqual([expect.objectContaining({
+      entry: './examples/plugins/form-schema-gallery/index.ts', enabled: true,
+    })])
   })
 })

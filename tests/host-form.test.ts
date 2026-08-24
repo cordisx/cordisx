@@ -31,6 +31,7 @@ describe('Host form primitive registry', () => {
     expect(selectHostFormPrimitive(field({ role: 'date' }))).toBe('unsupported')
     expect(selectHostFormPrimitive(field({ role: 'time' }))).toBe('unsupported')
     expect(selectHostFormPrimitive(field({ role: 'color' }))).toBe('unsupported')
+    expect(selectHostFormPrimitive(field({ type: 'array', role: 'multi-select', value: ['design'] }))).toBe('unsupported')
     expect(selectHostFormPrimitive(field({ role: 'directory' }))).toBe('path-input')
     expect(selectHostFormPrimitive(field({ type: 'object', value: { enabled: true } }))).toBe('json-textarea')
     expect(selectHostFormPrimitive(field({ role: 'secret', disabled: true }))).toBe('sensitive-unavailable')
@@ -47,6 +48,10 @@ describe('Host form primitive registry', () => {
     expect(hostFormDiagnostic(field({ role: 'date' }))).toEqual({
       code: 'unsupported-schema-role', fieldPath: ['value'],
       detail: 'unsupported schema role date; no native control fallback is permitted',
+    })
+    expect(hostFormDiagnostic(field({ type: 'array', role: 'multi-select', value: ['design'] }))).toEqual({
+      code: 'unsupported-schema-role', fieldPath: ['value'],
+      detail: 'unsupported schema role multi-select; no native control fallback is permitted',
     })
   })
 
@@ -117,14 +122,19 @@ describe('Host form DOM and accessibility', () => {
     const dom = new JSDOM('<!doctype html><body></body>')
     const adapter = new HostFormAdapter(dom.window.document)
     const switchControl = adapter.control(field({ type: 'boolean', role: 'switch', value: true }), 'enabled', () => undefined)
+    const checkbox = adapter.control(field({ type: 'boolean', value: true }), 'avatars', () => undefined)
     const radio = adapter.control(field({ role: 'radio', value: 'safe', choices: [
       { label: 'Safe', value: 'safe' }, { label: 'Fast', value: 'fast' },
     ] }), 'mode', () => undefined)
     const secret = adapter.control(field({ role: 'credential', value: undefined, disabled: true }), 'credential', () => undefined)
     expect(switchControl.root.tagName).toBe('T-SWITCH')
     expect(switchControl.root.getAttribute('role')).toBe('switch')
+    expect(checkbox.root.tagName).toBe('T-CHECKBOX-GROUP')
+    expect(checkbox.root.dataset.tdesignComponent).toBe('checkbox-group')
+    expect(checkbox.root.getAttribute('role')).toBe('checkbox')
     expect(radio.root.getAttribute('role')).toBe('radiogroup')
-    expect(radio.root.querySelectorAll('t-radio[data-tdesign-component="radio"]')).toHaveLength(2)
+    expect(radio.focusTarget?.tagName).toBe('T-RADIO-GROUP')
+    expect(radio.focusTarget?.dataset.tdesignComponent).toBe('radio-group')
     expect(secret.root.getAttribute('role')).toBe('status')
     expect(secret.root.querySelector('input,textarea,select')).toBeNull()
     expect(secret.root.textContent).not.toContain('undefined')
@@ -175,13 +185,13 @@ describe('Host form DOM and accessibility', () => {
     expect(HOST_FORM_STYLES).toContain('--td-bg-color-container-hover: var(--cx-hover)')
     expect(HOST_FORM_STYLES).toContain('--td-bg-color-container-select: var(--cx-pressed)')
     expect(HOST_FORM_STYLES).toContain('--td-bg-color-component-disabled:')
-    expect(HOST_FORM_STYLES).toContain('.cxf-scope[data-cordisx-app-theme="dark"] { color-scheme: dark; }')
+    expect(HOST_FORM_STYLES).toContain('[data-cordisx-app-theme="dark"] .cxf-scope { color-scheme: dark; }')
     expect(HOST_FORM_STYLES).toContain('.cxf-tdesign-control { display: inline-block;')
     expect(HOST_FORM_STYLES).not.toMatch(/t-select\.cxf-tdesign-control:focus-visible/u)
     expect(HOST_FORM_STYLES).toContain('.cxf-tdesign-control:focus-visible { outline: 2px solid Highlight;')
     expect(HOST_FORM_STYLES).toContain('.cxf-scope:dir(rtl)')
     expect(HOST_FORM_STYLES).toContain('@media (forced-colors: active)')
-    expect(HOST_FORM_STYLES).toContain('inline-size: min(100%, 58rem)')
+    expect(HOST_FORM_STYLES).toContain('inline-size: 100%; min-inline-size: 0; margin: 0;')
     expect(HOST_FORM_STYLES).toContain('.cxf-form-grid')
     expect(HOST_FORM_STYLES).toContain('@media (max-width: 760px)')
     expect(HOST_FORM_STYLES).not.toMatch(/(^|[\s,{])(:root|html|body|\*)\s*[{,]/u)

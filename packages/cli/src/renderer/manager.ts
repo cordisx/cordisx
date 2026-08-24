@@ -3771,7 +3771,11 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       return
     }
     const sensitiveRoles = ['secret', 'credential', 'credential-ref', 'permission', 'capability']
-    const visibleFields = descriptor.fields.filter(field => !field.disabled || sensitiveRoles.includes(field.role ?? ''))
+    // A schema can deliberately expose a stable, read-only reference alongside
+    // editable settings. Keep that product-facing value in the Host form so it
+    // retains its label, help, a11y relationship, and disabled TDesign chrome;
+    // only actions and custom renderer mounting remain edit-only below.
+    const visibleFields = descriptor.fields
     const editableFields = descriptor.writable ? visibleFields.filter(field => !field.disabled
       && !sensitiveRoles.includes(field.role ?? '') && selectHostFormPrimitive(field) !== 'unsupported') : []
     if (visibleFields.length === 0) {

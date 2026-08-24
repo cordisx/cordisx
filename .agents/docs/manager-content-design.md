@@ -157,11 +157,12 @@ beside the affected operation.
 
 Field labels use developer-supplied product text when available and otherwise
 fall back to a readable projection of the final field-path segment. The raw
-path/key is never shown beside that label in the default form. Fields that are
-neither editable nor a Host-owned sensitive boundary are omitted. Secret and
-credential roles remain visible only as a single Host-owned unavailable state:
-their value and path do not enter a normal control, custom renderer, or repeated
-summary notice.
+path/key is never shown beside that label in the default form. A schema may
+show a stable, product-facing disabled value in the same Host-owned field row;
+it has no save/reset action or custom renderer seat. Secret and credential
+roles remain visible only as a single Host-owned unavailable state: their value
+and path do not enter a normal control, custom renderer, or repeated summary
+notice.
 
 ## Tabs and panels
 
