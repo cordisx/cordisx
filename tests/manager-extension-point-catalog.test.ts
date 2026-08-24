@@ -125,52 +125,52 @@ describe('Manager extension point catalog', () => {
 
       const available = list.querySelector<HTMLButtonElement>('[data-extension-point-id="composer.toolbar.items"]')!
       expect(available.dataset.extensionPointState).toBe('supported')
-      expect(available.querySelector('.cxm-catalog-status')).toBeNull()
-      expect(available.querySelector('.cxm-catalog-title')?.textContent).toBe('输入区工具栏')
-      expect(available.querySelector('.cxm-catalog-description')?.textContent).toContain('语义输入区锚点')
+      expect(available.querySelector('.cxc-status')).toBeNull()
+      expect(available.querySelector('.cxc-title')?.textContent).toBe('输入区工具栏')
+      expect(available.querySelector('.cxc-description')?.textContent).toContain('语义输入区锚点')
       expect(available.querySelector('code')?.textContent).toBe('composer.toolbar.items')
       expect(available.querySelector('[data-host-icon]')?.getAttribute('aria-hidden')).toBe('true')
 
       const contextAbsent = list.querySelector<HTMLButtonElement>('[data-extension-point-id="session.header.actions"]')!
       expect(contextAbsent.dataset.extensionPointState).toBe('supported')
-      expect(contextAbsent.querySelector('.cxm-catalog-status')).toBeNull()
+      expect(contextAbsent.querySelector('.cxc-status')).toBeNull()
       expect(contextAbsent.children).toHaveLength(2)
 
       const pending = list.querySelector<HTMLButtonElement>('[data-extension-point-id="composer.command-menu.items"]')!
       expect(pending.dataset.extensionPointState).toBe('pending')
-      expect(pending.querySelector('.cxm-catalog-status')?.textContent).toBe('待定位')
+      expect(pending.querySelector('.cxc-status')?.getAttribute('aria-label')).toBe('待定位')
 
       const unavailable = list.querySelector<HTMLButtonElement>('[data-extension-point-id="panel.right.content"]')!
       expect(unavailable.dataset.extensionPointState).toBe('unavailable')
-      expect(unavailable.querySelector('.cxm-catalog-status')?.textContent).toBe('不可用')
+      expect(unavailable.querySelector('.cxc-status')?.getAttribute('aria-label')).toBe('不可用')
 
       const error = list.querySelector<HTMLButtonElement>('[data-extension-point-id="workspace.toolbar.items"]')!
       expect(error.dataset.extensionPointState).toBe('error')
-      expect(error.querySelector('.cxm-catalog-status')?.textContent).toBe('需要处理')
+      expect(error.querySelector('.cxc-status')?.getAttribute('aria-label')).toBe('需要处理')
 
       const styles = [...dom.window.document.querySelectorAll('style')].map(item => item.textContent ?? '').join('\n')
-      expect(styles).toContain('.cxm-catalog-row {\n    display: flex;')
-      expect(styles).toContain('.cxm-catalog-status { display: inline-flex;')
+      expect(styles).toContain('.cxc-list {')
+      expect(styles).toContain('.cxc-status {')
       expect(styles).toContain('user-select: text')
-      expect(styles).not.toContain('.cxm-catalog-row {\n    display: grid;')
+      expect(styles).toContain('repeat(auto-fill, minmax(min(100%, 220px), 360px))')
 
-      pending.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+      pending.click()
       expect(dom.window.document.querySelector('[data-extension-point-detail-tab="diagnostics"]')?.getAttribute('aria-selected')).toBe('true')
       dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')!.click()
 
-      const search = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="extension-points"] input')!
+      const search = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="extension-points"]')!
       search.value = '输入区工具栏'
       search.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-      expect(dom.window.document.querySelectorAll('[data-extension-point-id]')).toHaveLength(1)
+      expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-extension-point-id]')].filter(item => !item.closest<HTMLElement>('[data-collection-item]')?.hidden)).toHaveLength(1)
       expect(dom.window.document.querySelector('[data-extension-point-id="composer.toolbar.items"]')).not.toBeNull()
 
       state = managerSnapshot('en')
       for (const listener of listeners) listener()
-      expect(dom.window.document.querySelectorAll('[data-extension-point-id]')).toHaveLength(0)
-      const reprojectedSearch = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="extension-points"] input')!
+      expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-extension-point-id]')].filter(item => !item.closest<HTMLElement>('[data-collection-item]')?.hidden)).toHaveLength(0)
+      const reprojectedSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="extension-points"]')!
       reprojectedSearch.value = 'Composer toolbar'
       reprojectedSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-      expect(dom.window.document.querySelector('[data-extension-point-id="composer.toolbar.items"] .cxm-catalog-title')?.textContent).toBe('Composer toolbar')
+      expect(dom.window.document.querySelector('[data-extension-point-id="composer.toolbar.items"] .cxc-title')?.textContent).toBe('Composer toolbar')
     } finally {
       dispose()
       dom.window.close()

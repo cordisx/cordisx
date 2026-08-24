@@ -52,8 +52,21 @@ describe('settings navigation demo bundle', () => {
       owner: 'settings-tab-demo', qualifiedId: 'settings-tab-demo:navigation', surface: 'manager.settings.navigation-items',
       valid: true, visible: true, authorized: true, pending: false,
     })])
-    expect(initial.navigation.routes).toEqual([expect.objectContaining({ qualifiedId: 'settings-tab-demo:navigation', productMetadata: expect.objectContaining({ title: 'Demo plugin settings', description: 'Open the Demo plugin settings destination in the Manager navigation.' }) })])
-    expect(initial.navigation.pages).toEqual([expect.objectContaining({ qualifiedId: 'settings-tab-demo:navigation', metadata: expect.objectContaining({ chrome: 'standard' }), productMetadata: expect.objectContaining({ title: 'Demo plugin settings' }) })])
+    expect(initial.navigation.routes).toEqual([expect.objectContaining({
+      qualifiedId: 'settings-tab-demo:navigation',
+      productMetadata: expect.objectContaining({
+        title: 'Demo plugin settings',
+        description: 'Open the demo plugin settings and edit its example value.',
+      }),
+    })])
+    expect(initial.navigation.pages).toEqual([expect.objectContaining({
+      qualifiedId: 'settings-tab-demo:navigation',
+      metadata: expect.objectContaining({ chrome: 'standard' }),
+      productMetadata: expect.objectContaining({
+        title: 'Demo plugin settings',
+        description: 'Edit the example value for this demo plugin.',
+      }),
+    })])
 
     await waitFor(() => dom.window.document.querySelector('[data-cordisx-manager-trigger]') !== null)
     const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!
@@ -105,6 +118,11 @@ describe('settings navigation demo bundle', () => {
     await waitFor(() => item()?.textContent?.includes('演示插件设置') === true)
     expect(runtime.snapshot().settingsNavigationItems[0]?.title).toBe('演示插件设置')
     expect(runtime.snapshot().navigation.routes[0]?.productMetadata.title).toBe('演示插件设置')
+    expect(runtime.snapshot().navigation.routes[0]?.productMetadata.description).toBe('打开“演示插件设置”并编辑示例值。')
+    expect(runtime.snapshot().navigation.pages[0]?.productMetadata).toEqual(expect.objectContaining({
+      title: '演示插件设置',
+      description: '编辑此演示插件的示例值。',
+    }))
 
     item()!.click()
     await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content]') !== null)

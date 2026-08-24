@@ -1623,9 +1623,9 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     let preImportCleanup = false
     const current = runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke')
     if (current?.package?.version === ${JSON.stringify(sourceManifest.version)}) {
-      document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger')?.click()
-      const popup = await waitFor(() => document.querySelector('body > .cxm-plugin-menu-popup'), 'existing package menu')
-      const uninstall = popup.querySelector('[data-plugin-menu-action="uninstall"]')
+      document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxc-menu-trigger')?.click()
+      const popup = await waitFor(() => document.querySelector('body > .cxc-menu-popup'), 'existing package menu')
+      const uninstall = popup.querySelector('[data-collection-action="uninstall"]')
       if (!(uninstall instanceof HTMLButtonElement) || uninstall.disabled) throw new Error('existing package uninstall is unavailable')
       uninstall.click()
       const confirmation = await waitFor(() => document.querySelector('.cxm-lifecycle-overlay'), 'existing package uninstall confirmation')
@@ -1638,6 +1638,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     install.click()
     const input = await waitFor(() => document.querySelector('.cxm-lifecycle-dialog [data-import-local-path]'), 'local package input')
     input.value = ${JSON.stringify(sourceDirectory)}
+    input.onChange?.(${JSON.stringify(sourceDirectory)})
     input.dispatchEvent(new Event('input', { bubbles: true }))
     const submit = document.querySelector('[data-import-local-submit]')
     if (!(submit instanceof HTMLElement)) throw new Error('local import submit action is unavailable')
@@ -1692,7 +1693,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
   const inspectPluginCard = async () => await evaluateByValue(`(() => {
     const row = document.querySelector('[data-plugin-card="lifecycle-smoke"]')
     const primary = row?.querySelector('[data-plugin-primary="lifecycle-smoke"]')
-    const actions = row?.querySelector('.cxm-plugin-actions')
+    const actions = row?.querySelector('.cxc-actions')
     const rowRect = row?.getBoundingClientRect()
     const primaryRect = primary?.getBoundingClientRect()
     const actionRect = actions?.getBoundingClientRect()
@@ -1708,7 +1709,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       focused: document.activeElement === primary,
       tooltip: tooltip?.textContent?.trim() ?? null,
       describedBy: primary?.getAttribute('aria-describedby') ?? null,
-      badge: primary?.querySelector('.cxm-plugin-status-badge')?.getAttribute('data-status') ?? null,
+      badge: primary?.querySelector('.cxc-status')?.getAttribute('data-tone') ?? null,
       persistentStatusText: (primary?.textContent ?? '').includes('运行中'),
     }
   })()`)
@@ -1977,16 +1978,14 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     await waitFor(() => document.querySelector('[data-plugin-card="lifecycle-smoke"] [data-plugin-action="reload"]:not(:disabled)'), 'enabled plugin actions')
     const afterEnable = { ...counters, revision: runtime.snapshot().pluginLifecycle?.revision ?? null }
 
-    const menuTrigger = document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger')
-    menuTrigger?.click()
-    let popup = await waitFor(() => document.querySelector('body > .cxm-plugin-menu-popup'), 'plugin action menu')
-    popup.querySelector('[data-plugin-menu-action="favorite"]')?.click()
-    await waitFor(() => document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger'), 'favorite rerender')
+    document.querySelector('[data-plugin-card="lifecycle-smoke"] [data-plugin-action="favorite"]')?.click()
+    await waitFor(() => document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxc-menu-trigger'), 'favorite rerender')
     const routeAfterFavorite = document.querySelector('[data-manager-page-route="primary:plugins"]') !== null
-    const replacementTrigger = document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger')
-    const favoriteFocusRestored = document.activeElement === replacementTrigger
-    replacementTrigger?.click()
-    popup = await waitFor(() => document.querySelector('body > .cxm-plugin-menu-popup'), 'reopened plugin action menu')
+    const replacementTrigger = document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxc-menu-trigger')
+    const favoriteFocusRestored = document.activeElement?.matches?.('[data-plugin-card="lifecycle-smoke"] [data-plugin-action="favorite"]') ?? false
+    const menuTrigger = replacementTrigger
+    menuTrigger?.click()
+    const popup = await waitFor(() => document.querySelector('body > .cxc-menu-popup'), 'plugin action menu')
     const modal = document.querySelector('[data-cordisx-manager-modal]')
     const modalWasHidden = modal?.hidden === true
     if (modal instanceof HTMLElement) modal.hidden = false
@@ -1995,14 +1994,14 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     const menu = {
       portaled: popup.parentElement === document.body,
       actions: [...popup.querySelectorAll('[role="menuitem"]')].map(item => ({
-        action: item.getAttribute('data-plugin-menu-action'), disabled: item.disabled,
+        action: item.getAttribute('data-collection-action'), disabled: item.disabled,
       })),
       bounded: popupRect !== null && popupRect.x >= 0 && popupRect.y >= 0
         && popupRect.right <= innerWidth && popupRect.bottom <= innerHeight,
       firstItemFocused: popup.contains(document.activeElement),
-      shareText: popup.querySelector('[data-plugin-menu-action="share"]')?.textContent?.trim() ?? null,
+      shareText: popup.querySelector('[data-collection-action="share"]')?.textContent?.trim() ?? null,
       icons: [...popup.querySelectorAll('[role="menuitem"]')].map(item => ({
-        action: item.getAttribute('data-plugin-menu-action'),
+        action: item.getAttribute('data-collection-action'),
         icon: item.querySelector('[data-material-icon]')?.getAttribute('data-material-icon') ?? null,
       })),
       triggerRect: rect(replacementTrigger),
@@ -2022,29 +2021,29 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
   // diagnostic execution, and block/restore cleanup against the real renderer.
   await pointerClick(exercised.menu.triggerRect)
   const menuToggle = await evaluateByValue(`(() => ({
-    closed: document.querySelector('body > .cxm-plugin-menu-popup') === null,
-    triggerFocused: document.activeElement?.matches?.('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger') ?? false,
+    closed: document.querySelector('body > .cxc-menu-popup') === null,
+    triggerFocused: document.activeElement?.matches?.('[data-plugin-menu="lifecycle-smoke"] .cxc-menu-trigger') ?? false,
   }))()`)
   await pointerClick(exercised.menu.triggerRect)
   await pressKey('ArrowDown', 'ArrowDown', 40)
   await pressKey('End', 'End', 35)
   const menuKeyboard = await evaluateByValue(`(() => {
-    const popup = document.querySelector('body > .cxm-plugin-menu-popup')
+    const popup = document.querySelector('body > .cxc-menu-popup')
     return {
       open: popup !== null,
       focusedMenuItem: popup?.contains(document.activeElement) ?? false,
-      activeAction: document.activeElement?.getAttribute?.('data-plugin-menu-action') ?? null,
+      activeAction: document.activeElement?.getAttribute?.('data-collection-action') ?? null,
     }
   })()`)
   await pressKey('Escape', 'Escape', 27)
   const menuEscape = await evaluateByValue(`(() => ({
-    closed: document.querySelector('body > .cxm-plugin-menu-popup') === null,
-    triggerFocused: document.activeElement?.matches?.('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger') ?? false,
+    closed: document.querySelector('body > .cxc-menu-popup') === null,
+    triggerFocused: document.activeElement?.matches?.('[data-plugin-menu="lifecycle-smoke"] .cxc-menu-trigger') ?? false,
   }))()`)
 
   await pointerClick(exercised.menu.triggerRect)
   const diagnosticTarget = await evaluateByValue(`(() => {
-    const button = document.querySelector('body > .cxm-plugin-menu-popup [data-plugin-menu-action="diagnostics"]')
+    const button = document.querySelector('body > .cxc-menu-popup [data-collection-action="diagnostics"]')
     const rect = button?.getBoundingClientRect()
     return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
   })()`)
@@ -2060,14 +2059,14 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     }
     return {
       runtimeRoute: document.querySelector('[data-manager-page-route="plugin:lifecycle-smoke:runtime"]') !== null,
-      popupClosed: document.querySelector('body > .cxm-plugin-menu-popup') === null,
+      popupClosed: document.querySelector('body > .cxc-menu-popup') === null,
     }
   })()`, true)
   await evaluateByValue(`document.querySelector('.cxm-back')?.click()`)
   await new Promise(resolve => setTimeout(resolve, 120))
 
   const outsideTarget = await evaluateByValue(`(() => {
-    const trigger = document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger')
+    const trigger = document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxc-menu-trigger')
     const rect = trigger?.getBoundingClientRect()
     return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
   })()`)
@@ -2082,7 +2081,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     throw new Error('manager outside-dismiss target is not visible')
   }
   await pointerClick(outsideDismissTarget)
-  const outsideDismiss = await evaluateByValue(`document.querySelector('body > .cxm-plugin-menu-popup') === null`)
+  const outsideDismiss = await evaluateByValue(`document.querySelector('body > .cxc-menu-popup') === null`)
 
   await pointerClick(outsideTarget)
   const blockRestore = await evaluateByValue(`(async () => {
@@ -2090,10 +2089,10 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     const runtime = globalThis.__cordisxRuntime
     await runtime.setPluginBlocked('lifecycle-smoke', true)
     for (let attempt = 0; attempt < 80; attempt += 1) {
-      if (document.querySelector('body > .cxm-plugin-menu-popup') === null) break
+      if (document.querySelector('body > .cxc-menu-popup') === null) break
       await wait(25)
     }
-    const closedOnBlock = document.querySelector('body > .cxm-plugin-menu-popup') === null
+    const closedOnBlock = document.querySelector('body > .cxc-menu-popup') === null
     await runtime.setPluginBlocked('lifecycle-smoke', false)
     for (let attempt = 0; attempt < 80; attempt += 1) {
       if (runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke')?.status === 'active') break
@@ -2108,15 +2107,15 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
 
   const uninstallPlan = await evaluateByValue(`(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
-    let popup = document.querySelector('body > .cxm-plugin-menu-popup')
+    let popup = document.querySelector('body > .cxc-menu-popup')
     if (popup === null) {
-      document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger')?.click()
+      document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxc-menu-trigger')?.click()
       for (let attempt = 0; attempt < 80 && popup === null; attempt += 1) {
-        popup = document.querySelector('body > .cxm-plugin-menu-popup')
+        popup = document.querySelector('body > .cxc-menu-popup')
         if (popup === null) await wait(25)
       }
     }
-    const uninstall = popup?.querySelector('[data-plugin-menu-action="uninstall"]')
+    const uninstall = popup?.querySelector('[data-collection-action="uninstall"]')
     if (!(uninstall instanceof HTMLButtonElement) || uninstall.disabled) throw new Error('uninstall menu action is unavailable')
     uninstall.click()
     let dialog
@@ -2176,7 +2175,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       && cardInteraction.hiddenActions.rowHeight === cardInteraction.hoveredTooltip.rowHeight
       && cardInteraction.hoveredTooltip.rowHeight === cardInteraction.focusedActions.rowHeight
       && cardInteraction.hoveredTooltip.tooltip === '运行中' && cardInteraction.hoveredTooltip.describedBy !== null
-      && cardInteraction.hoveredTooltip.badge === 'active' && cardInteraction.focusedActions.focused
+      && cardInteraction.hoveredTooltip.badge === 'success' && cardInteraction.focusedActions.focused
       && !cardInteraction.hoveredTooltip.persistentStatusText && cardInteraction.tooltipDismissed,
     pointerNavigation: pointerNavigation.detail && pointerNavigation.restored,
     keyboardNavigation: Object.values(keyboardNavigation).every(Boolean),
@@ -3480,6 +3479,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       if (modal?.hidden === true && trigger !== null) trigger.click()
       else if (modal instanceof HTMLElement && modal.hidden) modal.hidden = false
       const marketplaceSource = ${JSON.stringify(managerMarketplaceSource)}
+      let marketplaceSourceConfigured = false
       if (marketplaceSource !== undefined) {
         document.querySelector('[data-tab="marketplace"]')?.click()
         const sourceMenu = await waitForElement('[data-marketplace-source-menu]')
@@ -3552,13 +3552,14 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           await new Promise(resolve => setTimeout(resolve, 50))
         }
         if (sourceState !== 'loaded') throw new Error('marketplace smoke source failed to load: ' + sourceState)
+        marketplaceSourceConfigured = true
         document.querySelector('[data-breadcrumb-target="primary:marketplace"]')?.click()
         await nextPaint()
       }
       document.querySelector('[data-tab=${JSON.stringify(managerTab)}]')?.click()
       if (${JSON.stringify(managerTab)} === 'marketplace') {
         const deadline = Date.now() + 12_000
-        while (document.querySelector('[aria-label="插件商店列表"] [data-marketplace-plugin], [aria-label="插件商店列表"] .cxm-empty') === null && Date.now() < deadline) {
+        while (document.querySelector('[aria-label="插件商店列表"] [data-marketplace-plugin], [aria-label="插件商店列表"] .cxc-empty') === null && Date.now() < deadline) {
           await new Promise(resolve => setTimeout(resolve, 50))
         }
       }
@@ -3566,7 +3567,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       if (pluginId !== undefined) {
         const row = [...document.querySelectorAll('[data-plugin-id], [data-marketplace-plugin]')]
           .find(element => element.getAttribute('data-plugin-id') === pluginId || element.getAttribute('data-marketplace-plugin') === pluginId)
-        const primary = row?.matches('button') === true ? row : row?.querySelector('.cxm-plugin-primary')
+        const primary = row?.matches('button') === true ? row : row?.querySelector('.cxc-primary')
         primary?.click()
         const detailDeadline = Date.now() + 5_000
         while (document.querySelector('[data-plugin-detail-tab]') === null && Date.now() < detailDeadline) {
@@ -3686,13 +3687,13 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           menuTrigger?.click()
         }
         await nextPaint()
-        const openedPopup = document.querySelector('.cxc-menu-popup')
+        const openedPopup = document.querySelector('[data-manager-action-menu], .cxc-menu-popup')
         const initialFocus = document.activeElement
         initialFocus?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
         const arrowMoved = openedPopup?.contains(document.activeElement) === true && document.activeElement !== initialFocus
         document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
         await nextPaint()
-        const closed = document.querySelector('.cxc-menu-popup') === null
+        const closed = document.querySelector('[data-manager-action-menu], .cxc-menu-popup') === null
         const focusRestored = document.activeElement === menuTrigger
         menuTrigger?.click()
         await nextPaint()
@@ -3700,7 +3701,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           arrowMoved,
           closed,
           focusRestored,
-          reopened: document.querySelector('.cxc-menu-popup') !== null,
+          reopened: document.querySelector('[data-manager-action-menu], .cxc-menu-popup') !== null,
         }
       }
       if (${JSON.stringify(parsed.values['manager-open-local-path-form'])}) {
@@ -3927,12 +3928,12 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             const managerContent = document.querySelector('.cxm-content')
             const discovery = document.querySelector('[data-marketplace-discovery-page]')
             const tools = discovery?.querySelector('.cxm-marketplace-discovery-tools')
-            const search = tools?.querySelector('[data-list-search="marketplace"]')
+            const search = tools?.querySelector('[data-collection-search="marketplace"]')
             const filters = tools?.querySelector('.cxm-marketplace-filter-row')
             const results = discovery?.querySelector('[data-marketplace-results-scroll]')
             const sourcePage = document.querySelector('[data-marketplace-source-page]')
             const sourceForm = sourcePage?.querySelector('[data-host-form^="marketplace-source-"]')
-            const popup = document.querySelector('.cxc-menu-popup')
+            const popup = document.querySelector('[data-manager-action-menu], .cxc-menu-popup')
             const box = element => {
               const rect = element?.getBoundingClientRect()
               return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
@@ -4065,18 +4066,82 @@ if (parsed.values['manager-screenshot'] !== undefined) {
               }
             })(),
           },
+          hostCollections: [...document.querySelectorAll('[data-host-collection]')].map(collection => {
+            const list = collection.querySelector('.cxc-list')
+            const cards = [...collection.querySelectorAll('.cxc-card')]
+            const action = collection.querySelector('.cxc-action:not(:disabled), .cxc-menu-trigger:not(:disabled)')
+            const actionStyle = action === null ? null : getComputedStyle(action.closest('.cxc-actions'))
+            const actionsRestOpacity = actionStyle?.opacity ?? null
+            const listStyle = list === null ? null : getComputedStyle(list)
+            const cardRects = cards.map(card => card.getBoundingClientRect())
+            const rowTops = [...new Set(cardRects.filter(rect => rect.width > 0).map(rect => Math.round(rect.top)))]
+            const firstRowTop = rowTops[0]
+            let actionsFocusOpacity = null
+            let actionsFocusWithin = null
+            let actionsFocusPointerEvents = null
+            if (action instanceof HTMLElement) {
+              const previous = document.activeElement
+              const actionLayer = action.closest('.cxc-actions')
+              const previousTransition = actionLayer instanceof HTMLElement ? actionLayer.style.transition : ''
+              if (actionLayer instanceof HTMLElement) actionLayer.style.transition = 'none'
+              action.focus()
+              const focusedStyle = getComputedStyle(actionLayer)
+              actionsFocusOpacity = focusedStyle.opacity
+              actionsFocusPointerEvents = focusedStyle.pointerEvents
+              actionsFocusWithin = action.closest('.cxc-card')?.matches(':focus-within') ?? false
+              if (previous instanceof HTMLElement) previous.focus()
+              else action.blur()
+              if (actionLayer instanceof HTMLElement) actionLayer.style.transition = previousTransition
+            }
+            return {
+              id: collection.getAttribute('data-host-collection'),
+              search: collection.querySelector('.cxc-search-input') !== null,
+              chevrons: collection.querySelectorAll('.cxm-chevron').length,
+              itemCount: collection.querySelectorAll('[data-collection-item]').length,
+              visibleColumns: firstRowTop === undefined ? 0 : cardRects.filter(rect => Math.round(rect.top) === firstRowTop).length,
+              cardWidths: [...new Set(cardRects.filter(rect => rect.width > 0).map(rect => Math.round(rect.width)))],
+              gridTemplateColumns: listStyle?.gridTemplateColumns ?? null,
+              actionsPosition: actionStyle?.position ?? null,
+              actionsRestOpacity,
+              actionsFocusOpacity,
+              actionsFocusWithin,
+              actionsFocusPointerEvents,
+              primaryButtons: collection.querySelectorAll('.cxc-primary[data-collection-open]').length,
+              items: cards.map(card => ({
+                title: card.querySelector('.cxc-title')?.textContent?.trim() ?? null,
+                description: card.querySelector('.cxc-description')?.textContent?.trim() ?? null,
+                machineId: card.querySelector('.cxc-machine-id')?.textContent?.trim() ?? null,
+              })),
+              primaryDeveloperInternals: [
+                'ctx.',
+                'outlet',
+                'session.content',
+                'manager.settings.',
+                'body-only',
+                'Host chrome',
+                'schemaVersion',
+                'verificationPolicy',
+              ].filter(token => {
+                const primaryText = [
+                  collection.textContent ?? '',
+                  ...[...collection.querySelectorAll('input')].map(input => input.getAttribute('placeholder') ?? ''),
+                ].join(' ')
+                return primaryText.includes(token)
+              }),
+            }
+          }),
           extensionPointCatalog: document.querySelector('[aria-label="扩展点列表"]') === null ? null : {
             locale: document.documentElement.lang,
             rows: [...document.querySelectorAll('[aria-label="扩展点列表"] [data-extension-point-id]')].map(row => {
               const rect = row.getBoundingClientRect()
-              const status = row.querySelector('.cxm-catalog-status')
+              const status = row.querySelector('.cxc-status')
               const statusRect = status?.getBoundingClientRect()
               return {
                 id: row.getAttribute('data-extension-point-id'),
                 state: row.getAttribute('data-extension-point-state'),
-                title: row.querySelector('.cxm-catalog-title')?.textContent?.trim() ?? null,
-                description: row.querySelector('.cxm-catalog-description')?.textContent?.trim() ?? null,
-                stableId: row.querySelector('.cxm-catalog-id')?.textContent?.trim() ?? null,
+                title: row.querySelector('.cxc-title')?.textContent?.trim() ?? null,
+                description: row.querySelector('.cxc-description')?.textContent?.trim() ?? null,
+                stableId: row.querySelector('.cxc-machine-id')?.textContent?.trim() ?? null,
                 hostIcon: row.querySelector('[data-host-icon]')?.getAttribute('data-host-icon') ?? null,
                 status: status?.textContent?.trim() ?? null,
                 typeOrNormalTag: [...row.querySelectorAll('.cxm-kind-badge')].map(item => item.textContent?.trim() ?? ''),
@@ -4085,25 +4150,20 @@ if (parsed.values['manager-screenshot'] !== undefined) {
               }
             }),
           },
-          routePageCatalog: document.querySelector('.cxm-route-section') === null ? null : (() => {
+          routePageCatalog: document.querySelector('[data-host-collection="routes"], [data-host-collection^="plugin-routes-"]') === null ? null : (() => {
             const panel = document.querySelector('.cxm-content')
-            const rows = [...document.querySelectorAll('.cxm-route-group-item')].map(item => {
-              const row = item.querySelector('.cxm-route-card')
+            const collection = document.querySelector('[data-host-collection="routes"], [data-host-collection^="plugin-routes-"]')
+            const rows = [...(collection?.querySelectorAll('[data-route-product-row], [data-page-product-row]') ?? [])].map(row => {
               const rect = row?.getBoundingClientRect()
-              const machine = [...(row?.querySelectorAll('.cxm-route-machine-item') ?? [])].map(field => ({
-                label: field.querySelector('dt')?.textContent?.trim() ?? null,
-                value: field.querySelector('dd')?.textContent?.trim() ?? null,
-              }))
               return {
                 kind: row?.hasAttribute('data-route-product-row') === true ? 'route' : 'page',
                 id: row?.getAttribute('data-route-product-row') ?? row?.getAttribute('data-page-product-row'),
-                title: row?.querySelector('.cxm-route-card-title')?.textContent?.trim() ?? null,
-                description: row?.querySelector('.cxm-route-card-description')?.textContent?.trim() ?? null,
+                title: row?.querySelector('.cxc-title')?.textContent?.trim() ?? null,
+                description: row?.querySelector('.cxc-description')?.textContent?.trim() ?? null,
                 ariaLabel: row?.getAttribute('aria-label') ?? null,
                 hostIcon: row?.querySelector('[data-material-icon]')?.getAttribute('data-material-icon') ?? null,
-                machine,
-                metadataDiagnostic: row?.querySelector('[data-metadata-diagnostic]')?.textContent?.trim() ?? null,
-                status: row?.querySelector('[data-route-state]')?.textContent?.trim() ?? null,
+                machineId: row?.querySelector('.cxc-machine-id')?.textContent?.trim() ?? null,
+                status: row?.querySelector('.cxc-status')?.getAttribute('aria-label') ?? null,
                 chevron: row?.querySelector('.cxm-chevron') !== null,
                 tags: row?.querySelectorAll('.cxm-kind-badge,.cxm-badge,.cxm-status').length ?? 0,
                 horizontalOverflow: row instanceof HTMLElement ? row.scrollWidth > row.clientWidth + 1 : null,
@@ -4116,13 +4176,8 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             return {
               locale: document.documentElement.lang,
               pageRoute: document.querySelector('[data-manager-page-route]')?.getAttribute('data-manager-page-route') ?? null,
-              sections: [...document.querySelectorAll('.cxm-route-section')].map(section => ({
-                heading: section.querySelector('.cxm-route-section-heading')?.textContent?.trim() ?? null,
-                description: section.querySelector('.cxm-route-section-copy')?.textContent?.trim() ?? null,
-                ariaLabelledBy: section.getAttribute('aria-labelledby'),
-                listRole: section.querySelector('.cxm-route-group')?.getAttribute('role') ?? null,
-                rowCount: section.querySelectorAll('.cxm-route-group-item').length,
-              })),
+              listRole: collection?.querySelector('.cxc-list')?.getAttribute('role') ?? null,
+              rowCount: rows.length,
               rows,
               fallbackPlaceholderVisible: (panel?.textContent ?? '').includes('受控页面 mount'),
               contentHorizontalOverflow: panel instanceof HTMLElement ? panel.scrollWidth > panel.clientWidth + 1 : null,
@@ -4138,19 +4193,48 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           marketplaceCatalog: document.querySelector('[aria-label="插件商店列表"]') === null ? null : {
             locale: document.documentElement.lang,
             permanentTrustWarning: (document.querySelector('.cxm-content')?.textContent ?? '').includes('商店收录、schema 校验和页面展示都不代表'),
+            sourceConfigured: marketplaceSourceConfigured,
             certifiedOnly: document.querySelector('[data-marketplace-certified-only]')?.getAttribute('aria-pressed') ?? null,
+            fixedChrome: (() => {
+              const content = document.querySelector('.cxm-content')
+              const discovery = document.querySelector('[data-marketplace-discovery-page]')
+              const tools = discovery?.querySelector('.cxm-marketplace-discovery-tools')
+              const toolbar = tools?.querySelector('.cxm-toolbar')
+              const search = toolbar?.querySelector('.cxc-search')
+              const filters = tools?.querySelector('.cxm-marketplace-filter-row')
+              const results = discovery?.querySelector('[data-marketplace-results-scroll]')
+              const list = results?.querySelector('.cxc-list')
+              const sourceMenu = toolbar?.querySelector('[data-marketplace-source-menu]')
+              return {
+                discoveryMode: content?.getAttribute('data-marketplace-discovery') ?? null,
+                contentOverflowY: content === null ? null : getComputedStyle(content).overflowY,
+                resultsOverflowY: results === null || results === undefined ? null : getComputedStyle(results).overflowY,
+                listOverflowY: list === null || list === undefined ? null : getComputedStyle(list).overflowY,
+                searchBeforeSourceMenu: search !== null && search !== undefined && sourceMenu !== null && sourceMenu !== undefined
+                  ? Boolean(search.compareDocumentPosition(sourceMenu) & Node.DOCUMENT_POSITION_FOLLOWING)
+                  : false,
+                filtersBelowSearch: search !== null && search !== undefined && filters !== null && filters !== undefined
+                  ? filters.getBoundingClientRect().top >= search.getBoundingClientRect().bottom - 1
+                  : false,
+                documentationButtons: [...(discovery?.querySelectorAll('a,button') ?? [])]
+                  .filter(item => item.textContent?.includes('文档')).length,
+                sourceManagementRight: sourceMenu !== null && sourceMenu !== undefined,
+              }
+            })(),
+            primaryDeveloperInternals: [...document.querySelectorAll('[aria-label="插件商店列表"] .cxc-card')]
+              .flatMap(card => ['schemaVersion', 'integrity', 'ranking', 'outlet', 'mount', 'verificationPolicy']
+                .filter(token => (card.textContent ?? '').includes(token))),
             rows: [...document.querySelectorAll('[aria-label="插件商店列表"] [data-marketplace-plugin]')].map(row => {
-              const primary = row.querySelector('.cxm-plugin-primary')
+              const primary = row.querySelector('.cxc-primary')
               const style = primary === null ? null : getComputedStyle(primary)
               return {
                 id: row.getAttribute('data-marketplace-plugin'),
                 role: row.getAttribute('role'),
                 primaryButton: primary?.matches('button') ?? false,
                 padding: style === null ? null : [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft],
-                name: row.querySelector('.cxm-plugin-name')?.textContent?.trim() ?? null,
-                description: row.querySelector('.cxm-plugin-description')?.textContent?.trim() ?? null,
-                version: row.querySelector('.cxm-plugin-meta-version')?.textContent?.trim() ?? null,
-                source: row.querySelector('.cxm-plugin-meta-source')?.textContent?.trim() ?? null,
+                name: row.querySelector('.cxc-title')?.textContent?.trim() ?? null,
+                description: row.querySelector('.cxc-description')?.textContent?.trim() ?? null,
+                machineId: row.querySelector('.cxc-machine-id')?.textContent?.trim() ?? null,
                 official: row.getAttribute('data-marketplace-official'),
                 certified: row.getAttribute('data-marketplace-certified'),
                 rankingTier: row.getAttribute('data-marketplace-ranking-tier'),
@@ -4501,7 +4585,7 @@ if (parsed.values['manager-theme-cycle']) {
             await new Promise(resolve => requestAnimationFrame(resolve))
             const row = [...document.querySelectorAll('[data-plugin-id], [data-marketplace-plugin]')]
               .find(item => item.getAttribute('data-plugin-id') === pluginId || item.getAttribute('data-marketplace-plugin') === pluginId)
-            ;(row?.matches('button') === true ? row : row?.querySelector('.cxm-plugin-primary'))?.click()
+            ;(row?.matches('button') === true ? row : row?.querySelector('.cxc-primary'))?.click()
             await new Promise(resolve => requestAnimationFrame(resolve))
             if (detailTab !== undefined) document.querySelector('[data-plugin-detail-tab="' + detailTab + '"]')?.click()
             if (permissionCapability !== undefined) document.querySelector('[data-permission-open="' + CSS.escape(permissionCapability) + '"]')?.click()

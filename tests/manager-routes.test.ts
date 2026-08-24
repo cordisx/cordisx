@@ -82,7 +82,7 @@ function snapshot(locale: 'en' | 'zh-CN'): ManagerSnapshot {
 }
 
 describe('Manager route and page catalog', () => {
-  it('groups route/page product metadata, searches the live locale, and diagnoses legacy omissions', () => {
+  it('projects compact route/page cards, searches the live locale, and diagnoses legacy omissions', () => {
     const dom = new JSDOM('<!doctype html><html class="electron-dark"><head></head><body></body></html>', { url: 'https://codex.local/' })
     let state = snapshot('zh-CN')
     const listeners = new Set<() => void>()
@@ -97,20 +97,24 @@ describe('Manager route and page catalog', () => {
       dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')!.hidden = false
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="routes"]')!.click()
       const catalog = dom.window.document.querySelector<HTMLElement>('.cxm-content')!
-      expect([...catalog.querySelectorAll('.cxm-route-section-heading')].map(item => item.textContent)).toEqual(['路由', '页面'])
+      const visibleCount = (selector: string): number => [...dom.window.document.querySelectorAll<HTMLElement>(selector)]
+        .filter(item => !item.closest<HTMLElement>('[data-collection-item]')?.hidden).length
+      expect(catalog.querySelector('[data-host-collection="routes"]')).not.toBeNull()
       expect(catalog.querySelectorAll('[data-route-product-row]')).toHaveLength(2)
       expect(catalog.querySelectorAll('[data-page-product-row]')).toHaveLength(2)
-      const catalogSearch = catalog.querySelector<HTMLInputElement>('[data-list-search="routes"] .cxm-search')!
+      const catalogSearch = catalog.querySelector<HTMLInputElement>('[data-collection-search="routes"]')!
+      expect(catalogSearch.placeholder).toBe('搜索标题、说明、位置、页面或插件…')
+      expect(catalogSearch.placeholder).not.toContain('outlet')
       catalogSearch.value = 'Shows structured analytics'
       catalogSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-      expect(dom.window.document.querySelectorAll('[data-route-product-row]')).toHaveLength(0)
-      expect(dom.window.document.querySelectorAll('[data-page-product-row]')).toHaveLength(0)
-      const localeSearch = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="routes"] .cxm-search')!
+      expect(visibleCount('[data-route-product-row]')).toBe(0)
+      expect(visibleCount('[data-page-product-row]')).toBe(0)
+      const localeSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="routes"]')!
       localeSearch.value = '展示当前工作区'
       localeSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-      expect(dom.window.document.querySelectorAll('[data-route-product-row]')).toHaveLength(0)
-      expect(dom.window.document.querySelectorAll('[data-page-product-row]')).toHaveLength(1)
-      const resetCatalog = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="routes"] .cxm-search')!
+      expect(visibleCount('[data-route-product-row]')).toBe(0)
+      expect(visibleCount('[data-page-product-row]')).toBe(1)
+      const resetCatalog = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="routes"]')!
       resetCatalog.value = ''
       resetCatalog.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
 
@@ -119,53 +123,52 @@ describe('Manager route and page catalog', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="routes"]')!.click()
 
       const panel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="路由"]')!
-      expect([...panel.querySelectorAll('.cxm-route-section-heading')].map(item => item.textContent)).toEqual(['路由', '页面'])
+      expect(panel.querySelector('[data-host-collection="plugin-routes-demo"]')).not.toBeNull()
       expect(panel.querySelectorAll('[data-route-product-row]')).toHaveLength(2)
       expect(panel.querySelectorAll('[data-page-product-row]')).toHaveLength(2)
-      expect(panel.querySelector('[data-route-product-row="demo:analytics"] .cxm-route-card-title')?.textContent).toBe('打开工作区分析')
-      expect(panel.querySelector('[data-route-product-row="demo:analytics"] .cxm-route-card-description')?.textContent)
+      expect(panel.querySelector('[data-route-product-row="demo:analytics"] .cxc-title')?.textContent).toBe('打开工作区分析')
+      expect(panel.querySelector('[data-route-product-row="demo:analytics"] .cxc-description')?.textContent)
         .toContain('从插件导航进入')
-      expect(panel.querySelector('[data-page-product-row="demo:analytics"] .cxm-route-card-description')?.textContent)
+      expect(panel.querySelector('[data-page-product-row="demo:analytics"] .cxc-description')?.textContent)
         .toBe('展示当前工作区的结构化分析内容。')
-      expect(panel.textContent).toContain('/main/analytics/:workspaceId')
-      expect(panel.textContent).toContain(':workspaceId')
-      expect(panel.textContent).toContain('body-only')
+      expect(panel.textContent).not.toContain('/main/analytics/:workspaceId')
+      expect(panel.textContent).not.toContain('body-only')
       expect(panel.querySelector('.cxm-kind-badge')).toBeNull()
       expect(panel.querySelector('.cxm-chevron')).toBeNull()
       expect(panel.textContent).not.toContain('受控页面 mount')
-      expect(panel.querySelector('[data-route-product-row="demo:legacy"] .cxm-route-card-title')?.textContent).toBe('demo:legacy')
-      expect(panel.querySelector('[data-route-product-row="demo:legacy"] .cxm-route-card-description')?.textContent).toBe('未提供说明')
-      expect(panel.querySelector('[data-route-product-row="demo:legacy"] [data-metadata-diagnostic="title,description"]')?.textContent)
-        .toContain('贡献作者应补充本地化标题、说明 metadata')
-      expect(panel.querySelector('[data-page-product-row="demo:legacy"] [data-metadata-diagnostic="description"]')?.textContent)
-        .toContain('贡献作者应补充本地化说明 metadata')
-      expect(panel.querySelectorAll('[role="list"]')).toHaveLength(2)
+      expect(panel.querySelector('[data-route-product-row="demo:legacy"] .cxc-title')?.textContent).toBe('demo:legacy')
+      expect(panel.querySelector('[data-route-product-row="demo:legacy"] .cxc-description')?.textContent).toBe('未提供说明')
+      expect(panel.querySelector('[data-route-product-row="demo:legacy"] .cxc-status')?.getAttribute('aria-label')).toBe('内容信息待补充')
+      expect(panel.querySelector('[data-page-product-row="demo:legacy"] .cxc-status')?.getAttribute('aria-label')).toBe('内容信息待补充')
+      expect(panel.querySelectorAll('[role="list"]')).toHaveLength(1)
       expect([...panel.querySelectorAll('[role="listitem"]')].every(item => item.closest('[role="list"]') !== null)).toBe(true)
 
-      const search = panel.querySelector<HTMLInputElement>('[data-list-search="plugin-routes-demo"] .cxm-search')!
+      const search = panel.querySelector<HTMLInputElement>('[data-collection-search="plugin-routes-demo"]')!
+      expect(search.placeholder).toBe('搜索标题、说明、位置、页面或 id…')
+      expect(search.placeholder).not.toContain('outlet')
       search.value = '主区域查看工作区'
       search.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-      expect(dom.window.document.querySelectorAll('[data-route-product-row]')).toHaveLength(1)
-      expect(dom.window.document.querySelectorAll('[data-page-product-row]')).toHaveLength(0)
-      const projectedSearch = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="plugin-routes-demo"] .cxm-search')!
+      expect(visibleCount('[data-route-product-row]')).toBe(1)
+      expect(visibleCount('[data-page-product-row]')).toBe(0)
+      const projectedSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="plugin-routes-demo"]')!
       projectedSearch.value = '找不到的页面'
       projectedSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-      expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="路由"] .cxm-empty')?.textContent).toBe('没有匹配的路由或页面')
+      expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="路由"] .cxc-empty')?.textContent).toBe('没有匹配的路由或页面')
 
-      const clearSearch = dom.window.document.querySelector<HTMLInputElement>('[data-list-search="plugin-routes-demo"] .cxm-search')!
+      const clearSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="plugin-routes-demo"]')!
       clearSearch.value = ''
       clearSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       state = snapshot('en')
       for (const listener of listeners) listener()
       const enPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="路由"]')!
-      expect(enPanel.querySelector('[data-route-product-row="demo:analytics"] .cxm-route-card-title')?.textContent).toBe('Open workspace analytics')
-      expect(enPanel.querySelector('[data-page-product-row="demo:analytics"] .cxm-route-card-description')?.textContent)
+      expect(enPanel.querySelector('[data-route-product-row="demo:analytics"] .cxc-title')?.textContent).toBe('Open workspace analytics')
+      expect(enPanel.querySelector('[data-page-product-row="demo:analytics"] .cxc-description')?.textContent)
         .toBe('Shows structured analytics for the current workspace.')
-      expect(enPanel.querySelector('[data-route-product-row="demo:legacy"] .cxm-route-card-description')?.textContent).toBe('No description provided')
+      expect(enPanel.querySelector('[data-route-product-row="demo:legacy"] .cxc-description')?.textContent).toBe('No description provided')
 
       const styles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
-      expect(styles).toContain('.cxm-route-group { overflow: hidden; border: 1px solid var(--cx-border); border-radius: 12px;')
-      expect(styles).toContain('.cxm-route-machine { display: grid; grid-template-columns: minmax(0, 1fr);')
+      expect(styles).toContain('repeat(auto-fill, minmax(min(100%, 220px), 360px))')
+      expect(styles).toContain('.cxc-machine-id')
     } finally {
       dispose()
       dom.window.close()
