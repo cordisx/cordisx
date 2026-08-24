@@ -1385,8 +1385,11 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     x: installed.primaryRect.x + installed.primaryRect.width / 2,
     y: installed.primaryRect.y + installed.primaryRect.height / 2,
   })
-  await new Promise(resolve => setTimeout(resolve, 720))
-  const hoveredTooltip = await inspectPluginCard()
+  let hoveredTooltip = await inspectPluginCard()
+  for (let attempt = 0; attempt < 40 && hoveredTooltip.tooltip === null; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 50))
+    hoveredTooltip = await inspectPluginCard()
+  }
   screenshots.tooltip = await capture(installed.managerRect, artifact('lifecycle-tooltip'), 'hovered plugin status tooltip')
   await send('Input.dispatchMouseEvent', {
     type: 'mouseMoved', pointerType: 'mouse', x: installed.managerRect.x + 12, y: installed.managerRect.y + 12,
