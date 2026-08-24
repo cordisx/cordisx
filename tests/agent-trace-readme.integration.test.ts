@@ -130,7 +130,8 @@ describe('Agent Trace built README projection', () => {
     }
     expect(packageManifest.scripts?.build).toContain('node scripts/copy-readme.mjs')
     expect(builtReadme).toBe(canonicalReadme)
-    expect(builtReadme).toContain('## Fixture and live modes')
+    expect(builtReadme).toContain('## Fixture, live, and historical modes')
+    expect(builtReadme).toContain('agent.history.read')
     expect(builtReadme).toContain('current-connection-client-unavailable')
   })
 
@@ -152,7 +153,8 @@ describe('Agent Trace built README projection', () => {
 
     const panel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="README"]')
     expect(panel?.querySelector('.cxm-readme h1')?.textContent).toBe('CordisX Agent Trace Showcase')
-    expect(panel?.textContent).toContain('Fixture and live modes')
+    expect(panel?.textContent).toContain('Fixture, live, and historical modes')
+    expect(panel?.textContent).toContain('agent.history.read')
     expect(panel?.textContent).toContain('Explicit Agent demonstrations')
     expect(panel?.textContent).toContain('current-connection-client-unavailable')
     expect(panel?.textContent).not.toContain('该插件没有随当前 bundle 提供 README.md')

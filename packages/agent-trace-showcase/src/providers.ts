@@ -37,6 +37,7 @@ const FIXTURE_STATUS: TraceAdapterStatus = Object.freeze({
     'system-prompt-section', 'system-prompt-context',
   ] satisfies TraceDemoKind[]),
   payloadPolicy: 'inline',
+  origins: Object.freeze(['fixture'] as const),
 })
 
 const PLUGIN_SOURCE = Object.freeze({
@@ -49,7 +50,7 @@ const USER_SOURCE = Object.freeze({ kind: 'user' as const, id: 'user', label: 'U
 const MODEL_SOURCE = Object.freeze({ kind: 'model' as const, id: 'gpt-5.6', label: 'GPT-5.6' })
 const TOOL_SOURCE = Object.freeze({ kind: 'tool' as const, id: 'exec_command', label: 'exec_command' })
 
-type FixtureEventInput = Omit<TraceEvent, 'sessionId' | 'modelConsumption' | 'type'> & {
+type FixtureEventInput = Omit<TraceEvent, 'sessionId' | 'origin' | 'modelConsumption' | 'type'> & {
   readonly modelConsumption?: TraceEvent['modelConsumption']
 }
 
@@ -69,6 +70,7 @@ function fixtureEvent(sessionId: string, input: FixtureEventInput): TraceEvent {
     ...input,
     type: contractTypeForSemantic(input.semanticType),
     sessionId,
+    origin: 'fixture',
     modelConsumption: input.modelConsumption ?? 'not-applicable',
   })
 }
@@ -481,6 +483,7 @@ export class UnavailableTraceShowcaseStore implements TraceShowcaseStore {
       'Public Agent protocol is pinned, but the compatible host provider is unavailable.',
       'No raw bridge, private adapter store, DOM session selector, or second app-server fallback is used.',
     ]),
+    origins: Object.freeze([]),
   })
 
   constructor(private readonly sessionId?: string) {}

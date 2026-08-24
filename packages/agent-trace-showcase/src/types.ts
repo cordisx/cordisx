@@ -1,5 +1,6 @@
 export type TraceLane = 'input' | 'model' | 'tools' | 'injection'
 export type TraceTruth = 'observed' | 'cordisx' | 'inferred'
+export type TraceOrigin = 'live' | 'historical' | 'fixture'
 export type TraceContractEventType =
   | 'session.lifecycle'
   | 'turn.lifecycle'
@@ -64,7 +65,11 @@ export interface TraceEvent {
   readonly id: string
   readonly sessionId: string
   readonly seq: number
+  /** Original provider sequence when a merged Timeline assigns a display sequence. */
+  readonly sourceSeq?: number
   readonly recordedAt: string
+  /** Acquisition channel, distinct from the event contract's truth/provenance. */
+  readonly origin: TraceOrigin
   readonly turnId?: string
   readonly turnNumber?: number
   readonly stepId?: string
@@ -99,6 +104,15 @@ export interface TraceAdapterStatus {
   readonly diagnostics: readonly string[]
   readonly supportedOperations: readonly TraceDemoKind[]
   readonly payloadPolicy: 'inline' | 'summarized' | 'referenced'
+  readonly origins: readonly TraceOrigin[]
+  readonly historyCoverage?: {
+    readonly state: 'complete' | 'partial' | 'indexing' | 'unavailable'
+    readonly compacted: boolean
+    readonly corruptLines: number
+    readonly oversizedLines: number
+    readonly redactedFields: number
+    readonly tailAvailable: boolean
+  }
 }
 
 export interface TraceLoadedRange {

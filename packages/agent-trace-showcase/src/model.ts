@@ -1,4 +1,4 @@
-import type { TraceEvent, TraceLane, TracePhase, TraceTruth } from './types.js'
+import type { TraceEvent, TraceLane, TraceOrigin, TracePhase, TraceTruth } from './types.js'
 
 export type TraceOrder = 'sequence' | 'time'
 
@@ -6,6 +6,7 @@ export interface TraceFilters {
   readonly search: string
   readonly lane: TraceLane | 'all'
   readonly truth: TraceTruth | 'all'
+  readonly origin: TraceOrigin | 'all'
   readonly source: string | 'all'
   readonly type: string | 'all'
   readonly phase: TracePhase | 'all'
@@ -32,12 +33,12 @@ export interface TraceOverviewSpan {
 }
 
 export const EMPTY_FILTERS: TraceFilters = Object.freeze({
-  search: '', lane: 'all', truth: 'all', source: 'all', type: 'all', phase: 'all',
+  search: '', lane: 'all', truth: 'all', origin: 'all', source: 'all', type: 'all', phase: 'all',
 })
 
 function searchable(event: TraceEvent): string {
   return [
-    event.id, event.type, event.semanticType, event.summary, event.truth, event.phase,
+    event.id, event.type, event.semanticType, event.summary, event.truth, event.origin, event.phase,
     event.source.id, event.source.label, event.plugin?.id, event.plugin?.source,
     event.permission?.capability, JSON.stringify(event.payload ?? {}),
   ].filter(Boolean).join('\n').toLocaleLowerCase()
@@ -48,6 +49,7 @@ export function filterTraceEvents(events: readonly TraceEvent[], filters: TraceF
   return events.filter(event => (
     (filters.lane === 'all' || event.lane === filters.lane)
     && (filters.truth === 'all' || event.truth === filters.truth)
+    && (filters.origin === 'all' || event.origin === filters.origin)
     && (filters.source === 'all' || event.source.id === filters.source || event.plugin?.source === filters.source)
     && (filters.type === 'all' || event.type === filters.type)
     && (filters.phase === 'all' || event.phase === filters.phase)

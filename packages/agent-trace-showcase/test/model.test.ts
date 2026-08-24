@@ -12,7 +12,7 @@ describe('Agent Trace Timeline model', () => {
     const store = new FixtureTraceShowcaseStore({ sessionId: 'session-a' })
     const events = store.getSnapshot().events
     expect(filterTraceEvents(events, {
-      search: 'Steer requested', lane: 'injection', truth: 'cordisx', source: 'agent-trace-showcase',
+      search: 'Steer requested', lane: 'injection', truth: 'cordisx', origin: 'fixture', source: 'agent-trace-showcase',
       type: 'message.delivery', phase: 'requested',
     })).toEqual([
       expect.objectContaining({
@@ -20,7 +20,7 @@ describe('Agent Trace Timeline model', () => {
       }),
     ])
     expect(filterTraceEvents(events, {
-      search: 'no-match', lane: 'all', truth: 'all', source: 'all', type: 'all', phase: 'all',
+      search: 'no-match', lane: 'all', truth: 'all', origin: 'all', source: 'all', type: 'all', phase: 'all',
     })).toEqual([])
     store.dispose()
   })
