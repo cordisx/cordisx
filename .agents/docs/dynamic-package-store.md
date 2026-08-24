@@ -33,11 +33,13 @@ exact dependencies, compatibility schemas, canonical public source, runtime
 manifest digest, and package/runtime id equality.
 
 The resolved candidate is projected into the existing `StagedPluginPackage`
-store. Its durable envelope contains the package metadata and runtime-manifest
-digest; the runtime document remains a separate immutable file whose digest is
-rechecked on every load. The current renderer generation ABI consumes runtime
-manifest v1. Validators may inspect v2/v3 Host manifests at the edge, but they
-are not projected into the renderer loader.
+store. Its private v3 durable envelope preserves the source runtime-manifest
+digest as provenance and separately records the digest of the normalized bytes
+persisted as the immutable runtime object. Entry validation checks the source
+digest; store readback checks the normalized-object digest. The two identities
+are never substituted for each other. The current renderer generation ABI
+consumes runtime manifest v1. Validators may inspect v2/v3 Host manifests at the
+edge, but they are not projected into the renderer loader.
 
 Runtime manifest parsing rejects connection, transport, mapping, limits,
 credential, `secretRef`, `secretState`, process-lifetime, and data-directory

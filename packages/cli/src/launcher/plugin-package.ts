@@ -339,15 +339,30 @@ interface StoredSeparatedPackageV2 {
   readonly package: ResolvedPackageCandidate['packageManifest']
 }
 
-function separatedPackage(value: unknown): value is StoredSeparatedPackageV2 {
+interface StoredSeparatedPackageV3 {
+  readonly contract: 'cordisx.launcher-staged-package/v3'
+  readonly package: ResolvedPackageCandidate['packageManifest']
+  readonly runtimeObject: {
+    /** Digest declared by the source package for the original runtime document bytes. */
+    readonly sourceDigest: `sha256:${string}`
+    /** Digest of the normalized bytes persisted in this immutable store object. */
+    readonly storedDigest: `sha256:${string}`
+  }
+}
+
+type StoredSeparatedPackage = StoredSeparatedPackageV2 | StoredSeparatedPackageV3
+
+function separatedPackage(value: unknown): value is StoredSeparatedPackage {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
-  return (value as { contract?: unknown }).contract === 'cordisx.launcher-staged-package/v2'
+  const contract = (value as { contract?: unknown }).contract
+  return contract === 'cordisx.launcher-staged-package/v2'
+    || contract === 'cordisx.launcher-staged-package/v3'
 }
 
 /**
  * Build and publish a package-v2 candidate resolved by the Host-only source
- * adapter. The durable package envelope stores only the runtime manifest digest;
- * the immutable runtime document remains a separate readback-verified object.
+ * adapter. The durable package envelope preserves the source runtime digest and
+ * separately binds the normalized bytes persisted as an immutable store object.
  */
 export async function stageResolvedPluginPackage(
   homeDir: string,
@@ -368,12 +383,17 @@ export async function stageResolvedPluginPackage(
     buildArtifact(root, entry),
     readmePath === undefined ? Promise.resolve(undefined) : readFile(readmePath, 'utf8'),
   ])
-  const stored: StoredSeparatedPackageV2 = {
-    contract: 'cordisx.launcher-staged-package/v2',
+  const runtimeManifestText = `${JSON.stringify(runtimeManifest, null, 2)}\n`
+  const storedRuntimeDigest = `sha256:${createHash('sha256').update(runtimeManifestText).digest('hex')}` as const
+  const stored: StoredSeparatedPackageV3 = {
+    contract: 'cordisx.launcher-staged-package/v3',
     package: resolved.packageManifest,
+    runtimeObject: {
+      sourceDigest: resolved.packageManifest.runtimeManifest.digest,
+      storedDigest: storedRuntimeDigest,
+    },
   }
   const manifestText = `${JSON.stringify(stored, null, 2)}\n`
-  const runtimeManifestText = `${JSON.stringify(runtimeManifest, null, 2)}\n`
   const digest = artifactDigest(manifestText, built.moduleSource, built.artifactSource)
   await publishPackage(homeDir, digest, manifestText, built.moduleSource, built.artifactSource, readme, runtimeManifestText)
   return await loadStagedPluginPackage(homeDir, digest)
@@ -431,7 +451,14 @@ export async function loadStagedPluginPackage(homeDir: string, digest: `sha256:$
   if (separatedPackage(parsed)) {
     const runtimeBytes = await readFile(path.join(directory, 'runtime-manifest.json'))
     const actualRuntimeDigest = `sha256:${createHash('sha256').update(runtimeBytes).digest('hex')}`
-    if (actualRuntimeDigest !== parsed.package.runtimeManifest.digest) throw new Error('runtime manifest failed integrity readback')
+    const expectedRuntimeDigest = parsed.contract === 'cordisx.launcher-staged-package/v3'
+      ? parsed.runtimeObject.storedDigest
+      : parsed.package.runtimeManifest.digest
+    if (parsed.contract === 'cordisx.launcher-staged-package/v3'
+      && parsed.runtimeObject.sourceDigest !== parsed.package.runtimeManifest.digest) {
+      throw new Error('runtime manifest source provenance failed integrity readback')
+    }
+    if (actualRuntimeDigest !== expectedRuntimeDigest) throw new Error('runtime manifest failed integrity readback')
     const runtime = runtimeManifestV1(JSON.parse(runtimeBytes.toString('utf8')) as unknown, parsed.package.pluginId)
     manifest = {
       $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
