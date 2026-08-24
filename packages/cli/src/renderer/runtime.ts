@@ -260,6 +260,31 @@ function pluginInject(module: CordisXPluginModule | undefined): readonly string[
   return Object.keys(module.inject)
 }
 
+function pluginReadmeSummary(readme: string | undefined): string | undefined {
+  if (readme === undefined) return undefined
+  const paragraphs = readme.replace(/\r\n?/g, '\n').split(/\n\s*\n/)
+  for (const paragraph of paragraphs) {
+    const lines = paragraph.split('\n').map(line => line.trim()).filter(Boolean)
+    if (lines.length === 0
+      || lines.every(line => line.startsWith('#') || line.startsWith('![') || line.startsWith('<') || line.startsWith('```'))
+      || lines[0]?.startsWith('---') === true) continue
+    const text = lines.join(' ')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/[`*_~>#]/g, '')
+      .replace(/^[-+]\s+/, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (text.length > 0) return text.length > 220 ? `${text.slice(0, 217).trimEnd()}…` : text
+  }
+  return undefined
+}
+
+function pluginDescriptionFields(readme: string | undefined): { readonly description?: string } {
+  const description = pluginReadmeSummary(readme)
+  return description === undefined ? {} : { description }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -549,6 +574,7 @@ async function start(
   let notificationsSuppressed = false
   const generationNotificationTrace: { source: string; registryEpoch: number; suppressed: boolean }[] = []
   let settingsProjectionSites = new Set<string>()
+  let extensionContributionProjectionSites = new Map<string, string>()
 
   const traceNotification = (source: string, suppressed: boolean): void => {
     generationNotificationTrace.push({ source, registryEpoch: generationVisibility.registryEpoch(), suppressed })
@@ -702,6 +728,16 @@ async function start(
         rendered: false,
         error: item.error ?? 'owning plugin is inactive',
       })))
+    const allRegistrations = [...liveRegistrations, ...inactiveRegistrations]
+    const nextContributionSites = new Map<string, string>()
+    for (const registration of allRegistrations) {
+      nextContributionSites.set(`extension-point:contribution:${registration.qualifiedId}:title`, registration.owner)
+      nextContributionSites.set(`extension-point:contribution:${registration.qualifiedId}:description`, registration.owner)
+    }
+    for (const [site, owner] of extensionContributionProjectionSites) {
+      if (!nextContributionSites.has(site)) i18nService?.clearDiagnosticSite(owner, site)
+    }
+    extensionContributionProjectionSites = nextContributionSites
     const navigation = routeService?.snapshot() ?? { routes: [], pages: pageService?.snapshot() ?? [], outlets: [] }
     const nextSettingsSites = new Set<string>()
     const externalSettingsTabs = liveRegistrations
@@ -751,6 +787,7 @@ async function start(
         id: controller.item.id,
         source: controller.item.source,
         name: controller.manifest.name ?? controller.item.module?.name ?? controller.item.id,
+        ...pluginDescriptionFields(controller.item.readme),
         inject: pluginInject(controller.item.module),
         config: configuration.descriptor(controller.item.id, i18nService?.getSnapshot().locale ?? 'en').value,
         configuration: configuration.descriptor(controller.item.id, i18nService?.getSnapshot().locale ?? 'en'),
@@ -768,7 +805,7 @@ async function start(
         ...(controller.error === undefined ? {} : { error: controller.error }),
         ...(controller.blockedReason === undefined ? {} : { blockedReason: controller.blockedReason }),
       })),
-      registrations: [...liveRegistrations, ...inactiveRegistrations],
+      registrations: allRegistrations,
       commands: commandService?.snapshot() ?? [],
       navigation,
       settingsTabs,
@@ -833,9 +870,10 @@ async function start(
           id: controller.item.id,
           source: controller.item.source,
           name: controller.manifest.name ?? controller.item.module?.name ?? controller.item.id,
+          ...pluginDescriptionFields(controller.item.readme),
           status: controller.status,
         })),
-        registrations: [...liveRegistrations, ...inactiveRegistrations],
+        registrations: allRegistrations,
         commands: commandService?.snapshot() ?? [],
         navigation,
         surfaceAvailability: slotService?.registry.availabilitySnapshot() ?? [],
@@ -1587,6 +1625,7 @@ async function start(
     extensionPointBroker.dispose()
     extensionPointDescriptors.dispose()
     settingsProjectionSites.clear()
+    extensionContributionProjectionSites.clear()
     if (globalThis.__cordisxRuntime === handle) globalThis.__cordisxRuntime = undefined
     document.documentElement.removeAttribute('data-cordisx-ready')
   }

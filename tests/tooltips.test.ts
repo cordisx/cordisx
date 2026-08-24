@@ -45,6 +45,14 @@ describe('HostTooltipController', () => {
     await Promise.resolve()
     expect(tooltip.dataset.cordisxAppTheme).toBe('light')
 
+    let escapedToDocument = false
+    dom.window.document.addEventListener('keydown', () => { escapedToDocument = true })
+    const escape = new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    action.dispatchEvent(escape)
+    expect(escape.defaultPrevented).toBe(true)
+    expect(escapedToDocument).toBe(false)
+    expect(dom.window.document.querySelector('[role="tooltip"]')).toBeNull()
+
     dismissHostTooltips(dom.window.document)
     expect(dom.window.document.querySelector('[role="tooltip"]')).toBeNull()
     controller.dispose()

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import WebSocket from 'ws'
@@ -1242,6 +1242,20 @@ let managerLifecycleReport
 let generationTransactionReport
 if (parsed.values['manager-lifecycle-source'] !== undefined) {
   const sourceDirectory = parsed.values['manager-lifecycle-source']
+  const sourceManifest = JSON.parse(await readFile(path.join(sourceDirectory, 'cordisx.plugin.json'), 'utf8'))
+  if (typeof sourceManifest.version !== 'string') throw new Error('manager lifecycle source has no package version')
+  const lifecycleViewportWidth = parsed.values['manager-viewport-width'] === undefined
+    ? 1280
+    : Number(parsed.values['manager-viewport-width'])
+  if (!Number.isInteger(lifecycleViewportWidth) || lifecycleViewportWidth < 400 || lifecycleViewportWidth > 3840) {
+    throw new Error('--manager-viewport-width must be an integer between 400 and 3840')
+  }
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: lifecycleViewportWidth,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+  })
   const reportPath = path.resolve(parsed.values.report)
   const extension = path.extname(reportPath)
   const stem = path.basename(reportPath, extension)
@@ -1272,26 +1286,62 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       else if (modal instanceof HTMLElement) modal.hidden = false
     }
     document.querySelector('[data-tab="plugins"]')?.click()
-    const install = await waitFor(() => document.querySelector('[data-install-local-plugin]:not(:disabled)'), 'local install action')
+    let preImportCleanup = false
+    const current = runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke')
+    if (current?.package?.version === ${JSON.stringify(sourceManifest.version)}) {
+      document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxm-plugin-menu-trigger')?.click()
+      const popup = await waitFor(() => document.querySelector('body > .cxm-plugin-menu-popup'), 'existing package menu')
+      const uninstall = popup.querySelector('[data-plugin-menu-action="uninstall"]')
+      if (!(uninstall instanceof HTMLButtonElement) || uninstall.disabled) throw new Error('existing package uninstall is unavailable')
+      uninstall.click()
+      const confirmation = await waitFor(() => document.querySelector('.cxm-lifecycle-overlay'), 'existing package uninstall confirmation')
+      confirmation.querySelector('.cxm-lifecycle-actions button:last-child')?.click()
+      await waitFor(() => !runtime.snapshot().plugins.some(item => item.id === 'lifecycle-smoke'), 'existing package cleanup')
+      preImportCleanup = true
+    }
+    const revisionBefore = runtime.snapshot().pluginLifecycle?.revision ?? null
+    const install = await waitFor(() => document.querySelector('[data-import-local-plugin]:not(:disabled)'), 'local import action')
     install.click()
-    const input = await waitFor(() => document.querySelector('.cxm-lifecycle-dialog input[aria-label="本地插件包绝对路径"]'), 'local package input')
+    const input = await waitFor(() => document.querySelector('.cxm-lifecycle-dialog [data-import-local-path]'), 'local package input')
     input.value = ${JSON.stringify(sourceDirectory)}
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    document.querySelector('.cxm-lifecycle-dialog .cxm-lifecycle-actions button:last-child')?.click()
-    const authorization = await waitFor(() => document.querySelector('[data-permission-authorization="lifecycle-smoke"]'), 'install authorization')
-    const authorizationState = {
-      title: authorization.querySelector('h2')?.textContent ?? null,
-      optional: authorization.querySelector('[data-authorization-choice="models.read"]')?.disabled === false,
-      primaryFocused: document.activeElement === authorization.querySelector('[data-authorization-decision="allow"]'),
+    const submit = document.querySelector('[data-import-local-submit]')
+    if (!(submit instanceof HTMLButtonElement)) throw new Error('local import submit action is unavailable')
+    submit.click()
+    await waitFor(() => document.querySelector('[data-import-local-path]') === null, 'local import dialog close')
+    const authorization = await waitFor(() => {
+      const prompt = document.querySelector('[data-permission-authorization="lifecycle-smoke"]')
+      if (prompt !== null) return { prompt, appliedWithoutPrompt: false }
+      const error = [...document.querySelectorAll('.cxm-content .cxm-error')]
+        .map(item => item.textContent?.trim()).find(Boolean)
+      if (error) return { prompt: null, appliedWithoutPrompt: false, error }
+      const revision = runtime.snapshot().pluginLifecycle?.revision ?? null
+      return revision !== revisionBefore ? { prompt: null, appliedWithoutPrompt: true } : null
+    }, 'local import authorization or applied revision')
+    if (authorization.error) throw new Error('local import failed: ' + authorization.error)
+    const authorizationState = authorization.prompt === null ? {
+      mode: 'not-required', title: null, optional: null, primaryFocused: null,
+    } : {
+      mode: 'prompted',
+      title: authorization.prompt.querySelector('h2')?.textContent ?? null,
+      optional: authorization.prompt.querySelector('[data-authorization-choice="models.read"]')?.disabled === false,
+      primaryFocused: document.activeElement === authorization.prompt.querySelector('[data-authorization-decision="allow"]'),
     }
-    authorization.querySelector('[data-authorization-decision="allow"]')?.click()
-    await waitFor(() => document.querySelector('[data-plugin-card="lifecycle-smoke"]'), 'installed plugin row')
-    const plugin = await waitFor(() => runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke' && item.status === 'active'), 'active installed plugin')
-    await wait(150)
+    authorization.prompt?.querySelector('[data-authorization-decision="allow"]')?.click()
+    await waitFor(() => document.querySelector('[data-plugin-card="lifecycle-smoke"]'), 'imported plugin row')
+    const plugin = await waitFor(() => {
+      const snapshot = runtime.snapshot()
+      const item = snapshot.plugins.find(candidate => candidate.id === 'lifecycle-smoke' && candidate.status === 'active')
+      return item !== undefined && (snapshot.pluginLifecycle?.revision ?? null) !== revisionBefore ? item : null
+    }, 'active imported plugin')
+    await runtime.settleRegistryProjection()
+    await wait(180)
     const currentRow = await waitFor(() => document.querySelector('[data-plugin-card="lifecycle-smoke"]'), 'current installed plugin row')
     return {
       appRenderer: location.href === 'app://-/index.html',
       authorization: authorizationState,
+      preImportCleanup,
+      revisionBefore,
       revision: runtime.snapshot().pluginLifecycle?.revision ?? null,
       plugin: { id: plugin.id, status: plugin.status, source: plugin.source, package: plugin.package },
       localSourceProjected: JSON.stringify(runtime.snapshot()).includes(${JSON.stringify(sourceDirectory)}),
@@ -1304,6 +1354,52 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
   const screenshots = {
     installed: await capture(installed.managerRect, artifact('lifecycle-installed'), 'installed lifecycle plugin'),
   }
+
+  const inspectPluginCard = async () => await evaluateByValue(`(() => {
+    const row = document.querySelector('[data-plugin-card="lifecycle-smoke"]')
+    const primary = row?.querySelector('[data-plugin-primary="lifecycle-smoke"]')
+    const actions = row?.querySelector('.cxm-plugin-actions')
+    const rowRect = row?.getBoundingClientRect()
+    const primaryRect = primary?.getBoundingClientRect()
+    const actionRect = actions?.getBoundingClientRect()
+    const style = actions === null || actions === undefined ? null : getComputedStyle(actions)
+    const tooltip = document.querySelector('[role="tooltip"]')
+    return {
+      actionOpacity: style?.opacity ?? null,
+      actionPointerEvents: style?.pointerEvents ?? null,
+      actionWidth: actionRect?.width ?? null,
+      rowWidth: rowRect?.width ?? null,
+      rowHeight: rowRect?.height ?? null,
+      primaryWidth: primaryRect?.width ?? null,
+      focused: document.activeElement === primary,
+      tooltip: tooltip?.textContent?.trim() ?? null,
+      describedBy: primary?.getAttribute('aria-describedby') ?? null,
+      badge: primary?.querySelector('.cxm-plugin-status-badge')?.getAttribute('data-status') ?? null,
+      persistentStatusText: (primary?.textContent ?? '').includes('运行中'),
+    }
+  })()`)
+  const hiddenActions = await inspectPluginCard()
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    pointerType: 'mouse',
+    x: installed.primaryRect.x + installed.primaryRect.width / 2,
+    y: installed.primaryRect.y + installed.primaryRect.height / 2,
+  })
+  let hoveredTooltip = await inspectPluginCard()
+  for (let attempt = 0; attempt < 40 && hoveredTooltip.tooltip === null; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 50))
+    hoveredTooltip = await inspectPluginCard()
+  }
+  screenshots.tooltip = await capture(installed.managerRect, artifact('lifecycle-tooltip'), 'hovered plugin status tooltip')
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved', pointerType: 'mouse', x: installed.managerRect.x + 12, y: installed.managerRect.y + 12,
+  })
+  await new Promise(resolve => setTimeout(resolve, 80))
+  const tooltipDismissed = await evaluateByValue(`document.querySelector('[role="tooltip"]') === null`)
+  await evaluateByValue(`document.querySelector('[data-plugin-primary="lifecycle-smoke"]')?.focus()`)
+  await new Promise(resolve => setTimeout(resolve, 180))
+  const focusedActions = await inspectPluginCard()
+  const cardInteraction = { hiddenActions, hoveredTooltip, focusedActions, tooltipDismissed }
 
   if (parsed.values['generation-transaction-exercise']) {
     generationTransactionReport = await evaluateByValue(`(async () => {
@@ -1698,10 +1794,25 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
 
   const assertions = {
     appRenderer: installed.appRenderer && removed.appRenderer,
-    authorization: installed.authorization.title === '安装授权' && installed.authorization.optional
-      && installed.authorization.primaryFocused,
+    authorization: installed.authorization.mode === 'not-required'
+      || (/^(安装|更新)授权$/.test(installed.authorization.title ?? '') && installed.authorization.optional
+        && installed.authorization.primaryFocused),
     installedWithoutLocalPath: installed.plugin.status === 'active' && installed.localSourceProjected === false
+      && installed.revision !== installed.revisionBefore
       && installed.plugin.package?.canonicalSource === 'https://github.com/cordisx/cordisx/tree/main/examples/plugins/lifecycle-smoke',
+    cardPresentation: cardInteraction.hiddenActions.actionOpacity === '0'
+      && cardInteraction.hiddenActions.actionPointerEvents === 'none'
+      && Number(cardInteraction.hoveredTooltip.actionOpacity) > 0.9
+      && cardInteraction.hoveredTooltip.actionPointerEvents === 'auto'
+      && cardInteraction.focusedActions.actionOpacity === '1'
+      && cardInteraction.hiddenActions.actionWidth > 0 && cardInteraction.focusedActions.actionWidth > 0
+      && cardInteraction.hiddenActions.rowWidth === cardInteraction.hoveredTooltip.rowWidth
+      && cardInteraction.hoveredTooltip.rowWidth === cardInteraction.focusedActions.rowWidth
+      && cardInteraction.hiddenActions.rowHeight === cardInteraction.hoveredTooltip.rowHeight
+      && cardInteraction.hoveredTooltip.rowHeight === cardInteraction.focusedActions.rowHeight
+      && cardInteraction.hoveredTooltip.tooltip === '运行中' && cardInteraction.hoveredTooltip.describedBy !== null
+      && cardInteraction.hoveredTooltip.badge === 'active' && cardInteraction.focusedActions.focused
+      && !cardInteraction.hoveredTooltip.persistentStatusText && cardInteraction.tooltipDismissed,
     pointerNavigation: pointerNavigation.detail && pointerNavigation.restored,
     keyboardNavigation: Object.values(keyboardNavigation).every(Boolean),
     owningReloadOnly: exercised.afterReload.apply === exercised.initial.apply + 1
@@ -1729,7 +1840,7 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
   }
   managerLifecycleReport = {
     result: Object.values(assertions).every(Boolean) ? 'pass' : 'fail',
-    installed, pointerNavigation, keyboardNavigation, exercised,
+    installed, cardInteraction, pointerNavigation, keyboardNavigation, exercised,
     menuInteraction: { menuToggle, menuKeyboard, menuEscape, diagnosticExecution, outsideDismiss, blockRestore },
     uninstallPlan: { text: uninstallPlan.text }, removed,
     screenshots, assertions,

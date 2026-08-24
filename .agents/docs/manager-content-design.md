@@ -359,8 +359,11 @@ plugin row is the canonical example: it has mutually exclusive navigation and
 action regions, with its complete body as the detail target and an icon-only
 action region at the right.
 
-Wide rows show enable/disable, reload, and favorite in that deterministic
-priority. When width is insufficient, lower-priority controls move into one
+Wide rows reserve one stable right-side action seat so the card never changes
+width. Enable/disable, reload, favorite, and the overflow trigger are visually
+hidden at rest and become visible only while the card is hovered, contains
+keyboard focus, or owns an open menu; opacity hiding preserves their tab stops.
+They use that deterministic priority. When width is insufficient, lower-priority controls move into one
 Host-owned overflow menu without squeezing the plugin name or state. Share and
 uninstall always live in that menu. Closing the menu restores focus to its
 trigger, and both menu and tooltips are constrained to the manager viewport.
@@ -400,11 +403,34 @@ generation-fenced activation → readiness → commit last-good`; an unresolved 
 denied required permission never activates. Reload renders the formal
 five-level ladder, while uninstall reports the actual `drain → dispose → lease
 → GC` outcome after confirmation rather than an optimistic completion.
-The current v1 install action accepts one explicit absolute local package
+The current v1 `导入` action accepts one user-entered absolute local package
 directory and states that remote download, signing, and sandboxing are not
-available. It never lets a renderer write activation/config files or load an
+available. It never presents a browser directory picker as a native absolute
+path chooser, lets a renderer write activation/config files, or loads an
 arbitrary path directly; the launcher performs inspect/stage, authorization,
-readiness, and atomic activation.
+readiness, and atomic activation. The list toolbar keeps the Host search field
+and import button at the same control height.
+
+Installed-plugin status is a Host-owned badge on the icon's lower-right corner,
+not persistent status copy mixed with the plugin id. Hovering or focusing the
+whole-card detail target opens the Host tooltip with the exact lifecycle label
+and, for failed or blocked states, the actual bounded failure reason. The text
+stack is name, product introduction, then the stable machine id.
+
+Every shared Manager local tab row, including installed-plugin details,
+extension-point details, Marketplace details, built-in settings, and contributed
+settings, uses the same rounded-button family as primary navigation. Selection
+is a background highlight; there is no underline. Icon geometry, label gap,
+roving tabindex, and focus treatment are shared across every call site.
+
+Extension-point usage is a compact left-aligned list. Each plugin row shows its
+product name, introduction, and necessary id once; source and status strings do
+not repeat in the primary copy. Structured contributions form a separator-based
+sublist with current-locale name, optional description plus actual state, and
+the unmodified contribution id. Routes use the same pattern. There are no tag
+chips, placeholder cards, decorative chevrons, or empty grid columns. Both the
+usage list and plugin-specific extension-point/route lists use the common Host
+search component and keep query state per record.
 
 ### Search is part of the list pattern
 

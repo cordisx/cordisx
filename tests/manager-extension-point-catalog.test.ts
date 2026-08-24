@@ -13,30 +13,49 @@ import {
 import type { CordisXI18nService } from '../packages/cli/src/renderer/i18n.js'
 import { installCordisXManager, type ManagerModel, type ManagerSnapshot } from '../packages/cli/src/renderer/manager.js'
 
-function extensionPoints(locale: 'en' | 'zh-CN'): ExtensionPointRuntimeSnapshot {
+function extensionPoints(locale: 'en' | 'zh-CN', withUsage = false): ExtensionPointRuntimeSnapshot {
   const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
   descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
   descriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
   const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
   const i18n = {
+    getSnapshot: () => ({ locale, direction: 'ltr', version: 1 }),
     resolveFor: (owner: string, message: { namespace?: string; key: string; fallback?: string }) => {
       const namespace = message.namespace ?? owner
       const catalog = CORDISX_EXTENSION_POINT_LOCALE_CATALOGS.find(item => (
         item.namespace === namespace && item.locale === locale
       ))
-      const text = (catalog?.messages as Readonly<Record<string, string | undefined>> | undefined)?.[message.key]
+      const contributionText = message.key === 'action.label'
+        ? locale === 'zh-CN' ? '提交前刷新' : 'Refresh before submit'
+        : message.key === 'action.description'
+          ? locale === 'zh-CN' ? '在提交前刷新当前数据。' : 'Refresh current data before submit.'
+          : undefined
+      const text = contributionText
+        ?? (catalog?.messages as Readonly<Record<string, string | undefined>> | undefined)?.[message.key]
         ?? message.fallback
         ?? '[[' + namespace + ':' + message.key + ']]'
       return { text, namespace, key: message.key, locale }
     },
     clearDiagnosticSite: () => {},
   } as unknown as CordisXI18nService
+  const source = 'https://plugins.example/showcase'
+  const unregister = withUsage ? broker.register({ source, id: 'showcase' }) : () => {}
   const built = buildExtensionPointRuntimeSnapshot({
     descriptors,
     broker,
     i18n,
-    plugins: [],
-    registrations: [],
+    plugins: withUsage ? [{ id: 'showcase', source, name: 'Showcase', description: '演示提交前刷新操作。', status: 'active' }] : [],
+    registrations: withUsage ? [{
+      owner: 'showcase', id: 'submit-before', qualifiedId: 'showcase:submit-before',
+      surface: 'composer.toolbar.items', group: 'default', order: 0,
+      item: {
+        label: { namespace: 'showcase:messages', key: 'action.label', fallback: 'Refresh before submit' },
+        description: { namespace: 'showcase:messages', key: 'action.description', fallback: 'Refresh current data before submit.' },
+        anchor: 'submit', placement: 'before', command: { id: 'refresh' },
+      },
+      visible: true, authorized: true, pointPolicy: 'inherit', effectivePointPolicy: 'allow',
+      disabled: false, valid: true, pending: false, rendered: true,
+    }] : [],
     commands: [],
     navigation: {
       routes: [],
@@ -54,6 +73,7 @@ function extensionPoints(locale: 'en' | 'zh-CN'): ExtensionPointRuntimeSnapshot 
       { surface: 'composer.toolbar.items', state: 'available' },
     ],
   })
+  unregister()
   broker.dispose()
   descriptors.dispose()
   return {
@@ -146,6 +166,48 @@ describe('Manager extension point catalog', () => {
       reprojectedSearch.value = 'Composer toolbar'
       reprojectedSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       expect(dom.window.document.querySelector('[data-extension-point-id="composer.toolbar.items"] .cxm-catalog-title')?.textContent).toBe('Composer toolbar')
+    } finally {
+      dispose()
+      dom.window.close()
+    }
+  })
+
+  it('renders localized contribution names in a compact searchable sublist without placeholder cards', () => {
+    const dom = new JSDOM('<!doctype html><html class="electron-dark"><head></head><body></body></html>', { url: 'https://codex.local/' })
+    const state = { ...managerSnapshot('zh-CN'), extensionPoints: extensionPoints('zh-CN', true) }
+    const model: ManagerModel = {
+      snapshot: () => state,
+      setPluginBlocked: async () => {}, setPermissionPolicy: async () => {}, subscribe: () => () => {},
+      setExtensionPointPolicy: async () => {},
+    }
+    const dispose = installCordisXManager(dom.window.document, model)
+    try {
+      dom.window.document.querySelector<HTMLButtonElement>('[data-tab="extension-points"]')!.click()
+      dom.window.document.querySelector<HTMLButtonElement>('[data-extension-point-id="composer.toolbar.items"]')!.click()
+      const panel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="使用情况"]')!
+      expect(panel.querySelector('[data-list-search^="extension-point-usage-"]')).not.toBeNull()
+      expect(panel.querySelector('.cxm-usage-item .cxm-plugin-name')?.textContent).toBe('Showcase')
+      expect(panel.querySelector('.cxm-plugin-description')?.textContent).toBe('演示提交前刷新操作。')
+      expect(panel.querySelector('.cxm-usage-item .cxm-catalog-id')?.textContent).toBe('showcase')
+      const contribution = panel.querySelector<HTMLElement>('[data-contribution-id="submit-before"]')!
+      expect(contribution.querySelector('.cxm-resource-title')?.textContent).toBe('提交前刷新')
+      expect(contribution.querySelector('.cxm-resource-description')?.textContent).toBe('在提交前刷新当前数据。 · 已渲染')
+      expect(contribution.querySelector('.cxm-resource-id')?.textContent).toBe('submit-before')
+      expect(contribution.querySelector('.cxm-slot-card, .cxm-kind-badge, .cxm-chevron')).toBeNull()
+      const styles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
+      expect(styles).toContain('.cxm-usage-item { padding: 12px 2px; }')
+      expect(styles).toContain('.cxm-resource-row + .cxm-resource-row { border-top:')
+      expect(styles).toContain('.cxm-resource-id { grid-column: 2; grid-row: 1 / span 2;')
+
+      const search = panel.querySelector<HTMLInputElement>('.cxm-search')!
+      search.value = '刷新'
+      search.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+      expect(dom.window.document.querySelector('[data-contribution-id="submit-before"]')).not.toBeNull()
+      const replacement = dom.window.document.querySelector<HTMLInputElement>('[data-list-search^="extension-point-usage-"] .cxm-search')!
+      replacement.value = 'missing'
+      replacement.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+      expect(dom.window.document.querySelector('[data-contribution-id]')).toBeNull()
+      expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="使用情况"]')?.textContent).toContain('没有匹配的插件或贡献')
     } finally {
       dispose()
       dom.window.close()

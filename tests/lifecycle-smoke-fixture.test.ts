@@ -43,4 +43,16 @@ describe('lifecycle smoke local package', () => {
     expect(staged.artifactSource).not.toContain('@deepseek-ai/cordis')
     expect((await loadStagedPluginPackage(home, staged.digest)).readme).toContain('owning-fiber reload')
   })
+
+  it('provides an immutable newer candidate for real Manager import smoke', async () => {
+    const root = await mkdtemp(path.join(process.cwd(), '.lifecycle-smoke-update-test-'))
+    temporary.add(root)
+    const home = path.join(root, 'home')
+    const source = path.resolve('tests/fixtures/lifecycle-smoke-update')
+    const staged = await stageLocalPluginPackage(home, source)
+
+    expect(staged.manifest).toMatchObject({ id: 'lifecycle-smoke', version: '1.0.1' })
+    expect(staged.identitySource).toBe('https://github.com/cordisx/cordisx/tree/main/examples/plugins/lifecycle-smoke')
+    expect(staged.moduleSource).not.toContain(source)
+  })
 })
