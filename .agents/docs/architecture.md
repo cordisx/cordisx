@@ -55,6 +55,13 @@ closure publication order are specified in
 slice lands, the single-bundle behavior in the next sections remains the
 implemented current state.
 
+The launcher implementation of that boundary is specified separately in
+[`dynamic-package-store.md`](dynamic-package-store.md): it maps source-v1 and
+package-v2 intake plus a Host-private journal/token/permission/rollback layer
+onto the single package and activation stores implemented by the generation
+runtime slice. It does not create another store/registry, switch renderer
+generations, or render Manager UI.
+
 The launcher binds CDP to `127.0.0.1`, records every `Page.addScriptToEvaluateOnNewDocument` identifier, and removes those identifiers on shutdown before asking the live page to dispose CordisX.
 
 For UI development, the default command launches a second, directly tracked native process with a stable project-scoped Chromium `user-data-dir` and an ephemeral loopback CDP port. `HOME` and `CODEX_HOME` stay shared, so persisted authentication, conversation, project, and model-configuration data may be visible to both processes. That does not share request association, in-flight turns, subscriptions, approvals, current UI context, or live connection state. The App main process, app-server stdio channel, renderer processes, UI storage, and window restoration remain separate and can race as independent clients. Direct spawning is equivalent to macOS `open -n` for instance isolation while retaining the child PID needed for deterministic cleanup. `--system` is the explicit escape hatch to the original profile.
