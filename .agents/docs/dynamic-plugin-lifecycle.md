@@ -21,11 +21,13 @@ currently install, update, remove, or independently replace plugin code. The
 implementation slices following this document must preserve that distinction
 until their contracts and tests land.
 
-Version 1 dynamically installs only an explicit local package directory. A
-configured marketplace remains discovery metadata and does not become an
-installation authority. Remote download, publisher signing, transparency,
-malware isolation, and an untrusted-code sandbox are later security stages.
-The local package still executes as trusted renderer code after activation.
+The current protocol accepts only a user-explicit source that is already
+local: a directory, an explicit package/archive, or an already-downloaded
+tarball. A configured marketplace remains discovery metadata and does not
+become an installation authority. `downloadedFrom` is attribution only;
+remote installation, publisher signing, transparency, malware isolation, and
+an untrusted-code sandbox are later security stages. The local package still
+executes as trusted renderer code after activation.
 
 ## Stable Host and minimum replacement scope
 
@@ -35,7 +37,7 @@ generation. A plugin module generation may use Host services but must not
 bundle another Cordis runtime. The launcher rejects artifacts that would
 introduce a second runtime identity.
 
-The owner of a requested change selects exactly one scope:
+The lifecycle planner selects the minimum safe scope for a requested change:
 
 | Change | Apply scope | Observable effect |
 | --- | --- | --- |
@@ -45,28 +47,53 @@ The owner of a requested change selects exactly one scope:
 | CordisX Host implementation or shared renderer ABI changes | `runtime-generation` | replace the complete CordisX renderer generation without restarting the Codex window |
 | executable, Chromium profile, process environment, or startup arguments change | `app-restart` | explicitly require a new host process; never present it as plugin reload |
 
-A package operation cannot escalate its own scope. In particular, the manager
-does not edit the launcher file and restart the complete launcher for a plugin
-upgrade. A runtime ABI mismatch fails staging and reports that a compatible
-CordisX runtime is required; it does not silently apply an app restart.
+A package operation cannot silently escalate its own scope. A Host may return
+a fresh plan that explicitly requires `runtime-generation` or `app-restart`,
+but cannot apply it under a previously accepted one-plugin plan. In particular,
+the manager does not edit the launcher file and restart the complete launcher
+while claiming a plugin hot reload. A runtime ABI mismatch fails staging and
+reports that a compatible CordisX runtime is required; it does not silently
+apply an app restart.
 
 ## Package source and immutable store
 
-An install request contains a user-selected absolute local directory only as
-input to the launcher broker. The renderer cannot read that directory, choose
-an entry outside it, submit JavaScript text, or receive a staged filesystem
-path. The launcher resolves the real directory, rejects symlinks and special
-files that escape the package boundary, and reads a single
-`cordisx.plugin.json` package manifest.
+An `inspect-source` request contains one validated
+`plugin-package-source.v1`: `local-directory`, `local-package`, or
+`downloaded-tarball`. Every source location is a canonical local `file:` URL.
+The renderer cannot read it, choose an entry outside it, submit JavaScript
+text, or receive a staged filesystem path. `downloadedFrom` is a canonical
+public HTTPS attribution and grants no install, package, signature, or
+permission authority.
 
-The package manifest declares:
+The launcher snapshots a directory or verifies the exact package/tarball bytes
+before parsing. It rejects path traversal, normalized-path collisions,
+escaping links, special files, concurrent directory changes, and bounded
+size/count/depth violations. A supplied expected SHA-256 digest is checked
+before manifest inspection or code execution.
+
+The frozen `plugin-package.v1` embedded-runtime-manifest shape remains readable
+only for compatibility. New candidates use `plugin-package.v2`, which declares:
 
 - stable plugin id and semantic package version;
 - a package-relative browser entry and optional adjacent README;
-- exact runtime ABI and protocol compatibility versions;
+- exact runtime ABI and required protocol schema ids;
 - explicit plugin dependencies by id and accepted package version;
-- the runtime manifest used for capability authorization; and
+- a separate package-relative runtime-manifest path, exact v1/v2/v3 schema id,
+  and SHA-256 digest; and
 - an optional canonical public HTTPS source URL used only for sharing.
+
+The referenced runtime manifest remains the authority for capabilities,
+scopes, reasons, and services, and its id must equal the package id. Package
+inspection must not copy, widen, drop, or reinterpret those declarations.
+Manifest-v3 launcher service configuration remains separate from renderer
+`Config`: credentials, transport, queues, data directories, and process
+lifetime state cannot travel through a renderer plugin value. Its Node Channel
+service configuration kind remains exactly `host` or `none`: `host` keeps
+connection, transport, mapping, and limits Host-only, while `none` creates no
+empty configuration document. Launcher `secretRef` accepts only `keychain:` or
+`host-secret:` references; the renderer descriptor exposes redacted
+`secretState` and never the reference. Ordinary renderer plugins continue to
+use Schemastery `Config` on the separate renderer plane.
 
 The source tree is validated and bundled before it enters the store. The
 launcher computes a SHA-256 digest over the normalized manifest and built
@@ -76,9 +103,10 @@ paths are retained only in launcher-private operation audit; manager snapshots
 receive the digest and an optional public canonical source, never the source
 directory.
 
-Version 1 integrity means reproducible local content hashing and readback, not
-publisher authenticity. The manager must call it `integrity`, not `signature`
-or `verified publisher`.
+The package distribution state is exactly `explicit-local-v1` with
+`signature: unsupported`. Integrity means reproducible local content hashing
+and readback, not publisher authenticity. The manager must call it `integrity`,
+not `signature` or `verified publisher`.
 
 ## Dependency graph
 
@@ -102,8 +130,14 @@ deleting package files first is forbidden.
 
 Every mutation is profile-scoped and serialized by an activation revision.
 The renderer submits the expected revision and current renderer/runtime
-generation. The launcher rejects a stale revision or generation before doing
-work. The transaction has these durable phases:
+generation. Public results retain product-safe package summaries and affected
+plugin ids. The opaque `candidateId` and `impactToken` resolve inside the Host
+to one immutable plan containing the complete affected closure and every
+member's exact expected/current/after tuple: plugin id, version, SHA-256 digest,
+module generation, enabled state, dependency bindings, activation revision,
+and runtime generation. The launcher compares the complete plan—not only the
+requested plugin—against the current active record and rejects any stale tuple
+before invoking plugin code. The transaction has these durable phases:
 
 1. `requested`: validate the operation shape, source boundary, and current
    activation revision;
@@ -111,12 +145,13 @@ work. The transaction has these durable phases:
    integrity inputs, and permission authorization plan;
 3. `staged`: publish the immutable package artifact and a candidate activation
    record without changing the active record;
-4. `loading`: evaluate the candidate module in the stable Host and build the
-   affected plugin-generation closure;
-5. `ready`: all required permissions are granted and every candidate fiber has
-   completed startup;
-6. `committed`: atomically replace the profile activation record and increment
-   its revision;
+4. `loading`: evaluate the candidate closure against transaction-owned staged
+   registries and staged dependency bindings, never the live registries;
+5. `ready`: all required permissions are granted and Host-observed entry,
+   fiber, service, registry, and dependency checks have completed;
+6. `committed`: atomically publish the complete staged registry/dependency
+   closure together with its package identities and runtime/module generations,
+   replace the profile activation record once, and increment its revision;
 7. `rolled-back` or `failed`: restore the complete last-good module/fiber
    closure and keep the prior activation record.
 
@@ -128,6 +163,20 @@ may leave a candidate journal or an unreferenced immutable artifact, but not a
 partially rewritten active record. On startup the launcher marks incomplete
 candidates aborted, loads the last committed activation, and schedules
 unreferenced artifacts for delayed garbage collection.
+
+Commands, pages, routes, surfaces, outlets, services, configuration
+renderers/watchers, Agent, Channel, Platform, and every other candidate effect
+remain transaction-owned and invisible to live consumers through readiness.
+The old last-good closure is the only live projection until the single atomic
+publication. Consumers must never observe a new command with an old page, a new
+service with old dependency bindings, or a new module generation with the old
+package digest.
+
+After publication, the launcher commits that exact tuple as last-good before
+disposing retired fibers. A candidate crash between publication and the
+last-good commit fences the candidate and restores the complete previous
+last-good closure. Failure before publication discards every staged effect and
+leaves live registries, activation revision, and last-good unchanged.
 
 The stable runtime exposes a launcher-authenticated candidate seat, not a
 public plugin API. It fences every handle, service call, contribution, route,
@@ -145,7 +194,7 @@ the owning Cordis fiber. This requirement is lifecycle hygiene, not a sandbox.
 The launcher-owned install chain is:
 
 ```text
-explicit local directory
+explicit local directory / package / downloaded tarball
   -> package/manifest/schema/compatibility validation
   -> integrity digest and dependency candidate
   -> permission authorization plan
@@ -161,6 +210,14 @@ Permission Broker owns that decision and audit. Denying an optional capability
 does not fail readiness. Denying a required capability leaves the artifact
 staged but inactive and leaves last-good active state unchanged.
 
+The permission plan is built from the complete separate runtime manifest.
+Persistent `allow`/`deny` continues to use the exact formal authorization key.
+`allow-once` is non-durable, bound by the Host-private plan to the candidate
+package/module generation, and cleared by abort, disable, replacement, or
+generation disposal. A declaration that the current plan/broker cannot express
+or enforce blocks activation rather than being dropped; optional declarations
+degrade only without fallback authority.
+
 Upgrade is the same transaction with an existing active id. A failed build,
 manifest check, dependency check, permission decision, candidate startup, or
 activation readback leaves the old digest and generation active. An update
@@ -168,27 +225,50 @@ never mutates the old immutable package.
 
 ## Disable, reload, enable, and uninstall
 
-Disable first fences the target closure against new calls, then disposes its
-fibers and publishes the disabled activation state. Enable builds a permission
-plan, loads the existing active digest, performs readiness, and publishes the
-new enabled state. Explicit reload keeps the digest and module generation and
-only recreates the target fiber.
+Disable first fences the target closure against new calls, drains bounded
+in-flight work, aborts at the Host deadline, then disposes its fibers and
+publishes the disabled activation state. Enable builds a permission plan,
+loads the existing active digest, performs readiness, and publishes the new
+enabled state. Explicit reload keeps the digest and module generation and only
+recreates the target fiber.
 
 Uninstall uses this order:
 
 1. compute and present the reverse-dependency impact;
 2. fence the affected generations and reject new invocations;
-3. dispose owning fibers, services, pages, routes, commands, surfaces,
+3. drain bounded in-flight work, then dispose owning fibers, services, pages,
+   routes, commands, surfaces,
    renderer seats, subscriptions, configuration watchers, and permission
    one-shot grants in reverse dependency order;
 4. wait for registry and route cleanup and reject stale handles;
 5. atomically remove the affected activation records;
-6. retain package artifacts until no active or last-good record references
+6. retain package artifacts until no active, candidate, last-good, rollback,
+   dependent, operation, or bounded diagnostic/in-flight lease references
    them, then remove them through delayed garbage collection.
 
-Any failure before activation publication remounts last-good and keeps the
-old active record. A failure to restore last-good is reported as a distinct
-`rollback-failed` state and never reported as successful uninstall.
+Any failure before activation publication discards staged effects and keeps
+the old live/last-good closure unchanged. A failure to restore last-good after
+a publication is reported as a distinct `rollback-failed` state and never
+reported as successful uninstall. Logical uninstall may succeed while physical
+collection remains deferred; cleanup failure is retryable and never reactivates
+the package.
+
+## Existing configuration compatibility
+
+Dynamic activation wraps the merged plugin configuration contract; it does not
+replace or flatten it. Agent Trace remains the concrete regression fixture:
+its exported Schemastery `Config` keeps `configApplies = restart`, the
+`mode` choices `live`/`historical`/`fixture`, `historyPageSize` default 100 with
+25–500 step 25, and `timelineWindowSize` default 500 with 50–500 step 50. The
+existing package README plus English and Simplified Chinese labels/descriptions
+remain package-owned product metadata across install, update, disable, enable,
+and rollback.
+
+Those renderer settings must not gain session/provider/profile identity,
+local/store paths, permission policy, payload-redaction policy, credentials,
+secret references, transport, or process-lifetime state. These remain
+Host/launcher-owned and are never synthesized into the Config value, Manager
+form, lifecycle result, or last-good package metadata.
 
 ## Manager contract
 
@@ -231,14 +311,28 @@ Contract and runtime tests must prove:
 - one plugin code upgrade changes only its generation and dependent closure;
 - unrelated plugin fibers, state, contributions, and service handles survive;
 - graph order, missing dependency, incompatible version, and cycle handling;
+- directory/package/downloaded-tarball capture, digest mismatch, archive path
+  escape/collision limits, and rejection of remote/Marketplace/signature trust;
+- package-v2 and runtime-manifest v1/v2/v3 separation, exact schema/digest
+  binding, and launcher service configuration remaining outside renderer
+  `Config`;
 - install validation, build failure, readiness failure, permission denial, and
   activation readback failure preserve last-good;
+- candidate commands/pages/routes/surfaces/services and other effects remain
+  absent from live registries until readiness and publish as one complete
+  affected closure;
+- candidate/impact tokens fence every expected/current/after package digest,
+  module generation, dependency binding, activation revision, and runtime
+  generation while public results remain product-safe;
 - interruption recovery ignores incomplete candidates;
 - stale runtime/module generation requests and stale handles are rejected;
 - uninstall fences new calls and cleans services, pages, routes, commands,
   surfaces, subscriptions, renderer seats, and one-shot grants;
 - package artifacts referenced by active or last-good records are not garbage
   collected;
+- Agent Trace keeps restart-applied Schemastery `mode`, `historyPageSize`, and
+  `timelineWindowSize`, README and bilingual copy, while identity/path/
+  permission/redaction/secret fields remain Host-owned;
 - row pointer and keyboard navigation do not fire from action buttons;
 - responsive overflow ordering, menu focus return, bounded tooltip/menu,
   destructive confirmation, favorite persistence, and safe share projection;

@@ -48,8 +48,9 @@ plus independently built immutable plugin module generations. Configuration
 live publication, owning-fiber restart, plugin dependency-closure replacement,
 complete runtime-generation replacement, and app restart are separate apply
 scopes. The package store, activation ledger, candidate/last-good transaction,
-generation fencing, local-only version-1 source boundary, and validation order
-are specified in
+generation fencing, explicit-local directory/package/downloaded-tarball source
+boundary, separate package/runtime manifests, staged registries, and atomic
+closure publication order are specified in
 [`dynamic-plugin-lifecycle.md`](dynamic-plugin-lifecycle.md). Until its runtime
 slice lands, the single-bundle behavior in the next sections remains the
 implemented current state.
