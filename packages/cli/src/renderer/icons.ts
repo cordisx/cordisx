@@ -30,6 +30,7 @@ import refresh from '@material-symbols/svg-400/rounded/refresh.svg'
 import send from '@material-symbols/svg-400/rounded/send.svg'
 import settings from '@material-symbols/svg-400/rounded/settings.svg'
 import shield from '@material-symbols/svg-400/rounded/shield.svg'
+import star from '@material-symbols/svg-400/rounded/star.svg'
 import storefront from '@material-symbols/svg-400/rounded/storefront.svg'
 import summarize from '@material-symbols/svg-400/rounded/summarize.svg'
 import tune from '@material-symbols/svg-400/rounded/tune.svg'
@@ -45,9 +46,11 @@ export const MANAGER_ICON_TOKENS = [
   'diagnostics',
   'document',
   'external-link',
+  'favorite',
   'launcher',
   'marketplace',
   'models-read',
+  'more',
   'outlets',
   'overview',
   'permissions',
@@ -77,9 +80,11 @@ const MANAGER_ICON_SOURCES: Readonly<Record<ManagerIconToken, string>> = {
   diagnostics: diagnosis,
   document: description,
   'external-link': openInNew,
+  favorite: star,
   launcher: rocketLaunch,
   marketplace: storefront,
   'models-read': modelTraining,
+  more: moreHoriz,
   outlets: accountTree,
   overview,
   permissions: shield,

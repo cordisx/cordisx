@@ -219,6 +219,7 @@ The semantic mapping is stable and host-owned:
 | list, read, create, and control tasks | `view_list`, `summarize`, `note_add`, `tune` |
 | submit and control turns | `send`, `pause_circle` |
 | back, detail, close, and external link | `chevron_left`, `chevron_right`, `close`, `open_in_new` |
+| plugin favorite and overflow | `star`, `more_horiz` |
 | unknown capability fallback | `help` |
 
 All of these symbols are decorative beside a visible label or an
@@ -336,11 +337,23 @@ uninstall always live in that menu. Closing the menu restores focus to its
 trigger, and both menu and tooltips are constrained to the manager viewport.
 Unavailable lifecycle operations are absent or explicitly unavailable; a
 button must never restart the launcher while claiming to reload one plugin.
+Before the C/D Package Store and generation lifecycle runtime merges, the only
+related live action is a profile-local block/restore of an already bundled
+fiber. Its label and tooltip must not imply package install, launcher-config
+mutation, generation replacement, or uninstall. Reload, Package Store actions,
+and a configured-disabled plugin's enable control stay unavailable until the
+formal broker reports the matching operation.
 
 Favorite is a current-profile manager preference. Share requires a validated
 public canonical HTTPS source and never projects a local source/store path,
 configuration, or secret. Uninstall is destructive and remains behind a
 second Host-owned confirmation containing the reverse-dependency impact.
+The lifecycle broker is the sole source for product operation state: install
+and upgrade render `source snapshot/candidate → plan → permission review →
+generation-fenced activation → readiness → commit last-good`; an unresolved or
+denied required permission never activates. Reload renders the formal
+five-level ladder, while uninstall reports the actual `drain → dispose → lease
+→ GC` outcome after confirmation rather than an optimistic completion.
 
 Ordinary repeated records use a flat list with separators and whitespace. The
 container exposes list semantics and each item has a stable visible label plus
