@@ -77,6 +77,27 @@ owns the button DOM, style tokens, body-portal tooltip, accessibility name,
 disabled/loading projection, no-drag behavior, overflow, and reattachment when
 Codex React replaces either the terminal native control or its action cluster.
 
+### Toolbar action state and spacing
+
+The titlebar variants use Host-owned state rules rather than cloning an
+adjacent native button's classes. A native `aria-pressed` toggle may acquire
+unconditional active background and foreground utilities; those classes are
+never copied into CordisX actions. Every generated button carries its bound
+owner, surface, and qualified contribution identity, while only an exact
+Host-projected route toggle may carry `aria-pressed="true"` and
+`data-cordisx-route-state="presented"`. Idle siblings remain transparent;
+hover, focus-visible, open, and disabled presentation is evaluated on the
+individual generated button.
+
+For the current host, independent actions inside a CordisX titlebar seat use
+the six-pixel `--cordisx-toolbar-action-gap`. The seat uses a separate
+six-pixel `--cordisx-toolbar-outer-group-gap` before the adjacent native
+pinned-summary toggle. These values do not change the workspace toolbar's
+outer group contract: its native six-pixel group gap and `ms-auto` layout stay
+intact, and the two 28-pixel CordisX roots still extend the 70-pixel native
+slot to exactly 126 pixels. Slot reconciliation adds measured root widths only
+and never reintroduces a per-root gap surcharge.
+
 ## Payload families
 
 The catalog uses a small set of shapes instead of one API per visual style:
@@ -255,7 +276,7 @@ and a separate presentation registry; it cannot be smuggled through a surface.
 | Protocol | Accept every catalog id and payload family; reject free DOM, selector/HTML/SVG/CSS, arbitrary icons, invalid anchor/placement, spoofed context, unknown schema versions, and invalid status transitions; preserve Agent identity vocabulary. |
 | Registry/runtime | Ownership and source binding, deterministic group/order, direct/overflow partition, native-menu-only projection, command/route resolution, point policy at render and invoke, frozen dynamic context, plugin-argument non-spoofing, `when`/disabled, update-after-dispose, locale reprojection, owner unload, block/restore, and renderer-generation cleanup. |
 | Adapter fixtures | Unique/pending/ambiguous anchors; native anchor replacement; sidebar collapse/resize; composer idle, busy, disabled, and send state; session switch; right/bottom panel absence and presence; no fallback overlay. |
-| Real renderer | Isolated `app://` report and screenshots prove `session.header.actions` and `composer.toolbar.items` at `submit`/`before` are real sibling layout insertion, not overlay; native nodes retain identity, parent, visibility, and subscription; tooltip, `no-drag`, titlebar safe inset, policy hide/restore, plugin block/restore, and generation disposal pass. |
+| Real renderer | Isolated `app://` report and screenshots prove `session.header.actions` and `composer.toolbar.items` at `submit`/`before` are real sibling layout insertion, not overlay; native nodes retain identity, parent, visibility, and subscription; per-button idle/pressed/hover/focus state, exact action/outer gaps, the 126-pixel workspace slot, tooltip, `no-drag`, titlebar safe inset, policy hide/restore, plugin block/restore, and generation disposal pass. |
 | Release | Focused tests, typecheck/build/full check, clean diff, pushed commits, normal PR checks and merges, compatible mono gitlinks only, and unchanged roadmap update policy. |
 
 The smoke report records the Codex application version, adapter revision,
