@@ -1,12 +1,16 @@
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import {
+  CORDISX_PAGE_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+  CORDISX_ROUTE_SCHEMA_V2,
   type CordisXAgentHistory,
   type CordisXAgentEvents,
   type CordisXAgents,
+  type CordisXPageMetadataV3,
   type CordisXPageMountContext,
   type CordisXPluginManifestV1,
+  type CordisXRouteDefinitionV2,
   type CordisXSystemPrompt,
 } from 'cordisx/contracts'
 import {
@@ -25,6 +29,37 @@ import { mountTraceShowcase } from './view.js'
 
 export const name = 'agent-trace-showcase'
 export const inject = ['i18n', 'pages', 'routes', 'slots', 'agentEvents', 'agentHistory', 'agents', 'systemPrompt']
+
+function metadataText(key: string, fallback: string) {
+  return Object.freeze({ namespace: 'agent-trace-showcase', key, fallback } as const)
+}
+
+export const TRACE_SESSION_PAGE_METADATA = Object.freeze({
+  $schema: CORDISX_PAGE_SCHEMA_V3,
+  schemaVersion: 3,
+  id: 'session.timeline',
+  title: metadataText('page.timeline.title', 'Agent Trace Timeline'),
+  description: metadataText(
+    'page.timeline.description',
+    'Inspect input, model, tool, delivery, and prompt-contribution events for the active Agent session.',
+  ),
+  icon: 'host:history',
+  chrome: 'body-only',
+} satisfies CordisXPageMetadataV3)
+
+export const TRACE_SESSION_ROUTE_DEFINITION = Object.freeze({
+  $schema: CORDISX_ROUTE_SCHEMA_V2,
+  schemaVersion: 2,
+  id: 'session.timeline',
+  path: '/sessions/:sessionId/agent-trace',
+  outlet: 'session.content',
+  page: 'session.timeline',
+  title: metadataText('route.timeline.title', 'Open Agent Trace'),
+  description: metadataText(
+    'route.timeline.description',
+    'Use the conversation header action to open the Agent Trace Timeline for the active session.',
+  ),
+} satisfies CordisXRouteDefinitionV2<'session.content'>)
 
 export interface Config {
   readonly mode: 'live' | 'historical' | 'fixture'
@@ -166,7 +201,10 @@ export function installAgentTraceShowcase(
     default: true,
     messages: {
       'action.open': 'Open Agent Trace Timeline',
-      'page.title': 'Agent Trace',
+      'route.timeline.title': 'Open Agent Trace',
+      'route.timeline.description': 'Use the conversation header action to open the Agent Trace Timeline for the active session.',
+      'page.timeline.title': 'Agent Trace Timeline',
+      'page.timeline.description': 'Inspect input, model, tool, delivery, and prompt-contribution events for the active Agent session.',
       'permission.agent-events-read': 'Read the public Agent event ledger for the active session Timeline.',
       'permission.agent-history-read': 'Read the Host-redacted historical projection for the active Agent session.',
       'permission.messages-append': 'Run explicit followup, steer, inject, and append-only pre-step demonstrations.',
@@ -179,7 +217,10 @@ export function installAgentTraceShowcase(
     locale: 'zh-CN',
     messages: {
       'action.open': '打开 Agent Trace 时间线',
-      'page.title': 'Agent Trace',
+      'route.timeline.title': '打开 Agent Trace',
+      'route.timeline.description': '使用会话标题栏入口打开当前会话的 Agent Trace 时间线。',
+      'page.timeline.title': 'Agent Trace 时间线',
+      'page.timeline.description': '查看当前 Agent 会话中的输入、模型、工具、投递与提示词贡献事件。',
       'permission.agent-events-read': '读取当前会话的公开 Agent 事件账本以呈现时间线。',
       'permission.agent-history-read': '读取 Host 脱敏后的当前 Agent 会话历史投影。',
       'permission.messages-append': '运行明确触发的 followup、steer、inject 与只追加 pre-step 演示。',
@@ -187,24 +228,12 @@ export function installAgentTraceShowcase(
       'permission.prompt-context': '注册带明确插件来源的 system prompt context 演示。',
     },
   })
-  const message = (key: 'action.open' | 'page.title', fallback: string) => ({
-    namespace: 'agent-trace-showcase', key, fallback,
-  } as const)
 
-  ctx.pages.register({
-    id: 'session.timeline',
-    title: message('page.title', 'Agent Trace'),
-    icon: 'host:history',
-    chrome: 'body-only',
-    localeNamespace: 'agent-trace-showcase',
-  }, context => mountSessionTimeline(context, config, ctx.agentEvents, ctx.agents, ctx.systemPrompt, ctx.agentHistory))
-  ctx.routes.register({
-    id: 'session.timeline',
-    path: '/sessions/:sessionId/agent-trace',
-    outlet: 'session.content',
-    page: 'session.timeline',
-    title: message('page.title', 'Agent Trace'),
-  })
+  ctx.pages.register(
+    TRACE_SESSION_PAGE_METADATA,
+    context => mountSessionTimeline(context, config, ctx.agentEvents, ctx.agents, ctx.systemPrompt, ctx.agentHistory),
+  )
+  ctx.routes.register(TRACE_SESSION_ROUTE_DEFINITION)
 
   ctx.effect(
     () => entry.register(ctx, TRACE_SESSION_HEADER_ACTION),
