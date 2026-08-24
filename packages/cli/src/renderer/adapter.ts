@@ -491,6 +491,12 @@ function resolveComposerSubmitSeat(document: Document, sessionId: string | undef
   }
 }
 
+function nativeToolbarCornerRadius(template: HTMLButtonElement): string {
+  const style = template.ownerDocument.defaultView?.getComputedStyle(template)
+  const radius = (style?.borderTopLeftRadius || style?.borderRadius || '').trim()
+  return radius === '' ? '8px' : radius
+}
+
 class StructuredSurfaceRenderer {
   private readonly roots = new Map<string, HTMLElement>()
   private readonly sites = new Set<string>()
@@ -669,6 +675,7 @@ class StructuredSurfaceRenderer {
         const root = this.placeRoot({
           key: 'toolbar.before', parent, before: toolbarAnchor, className: 'cordisx-toolbar-before',
         }, usedRoots)
+        this.configureToolbarIconControlVariant(root, toolbarControl)
         if (rebuild || root.childElementCount === 0) this.renderActions(root, beforeItems, nextSites, 'before', toolbarControl)
       }
       const afterItems = active.filter(item => item.surface === 'workspace.toolbar.items' && (item.item as { placement: string }).placement === 'after')
@@ -676,6 +683,7 @@ class StructuredSurfaceRenderer {
         const root = this.placeRoot({
           key: 'toolbar.after', parent, before: nextNativeSibling(toolbarAnchor), className: 'cordisx-toolbar-after',
         }, usedRoots)
+        this.configureToolbarIconControlVariant(root, toolbarControl)
         if (rebuild || root.childElementCount === 0) this.renderActions(root, afterItems, nextSites, 'after', toolbarControl)
       }
       const menuItems = active.filter(item => item.surface === 'workspace.toolbar.items' && (item.item as { placement: string }).placement === 'menu')
@@ -690,6 +698,7 @@ class StructuredSurfaceRenderer {
       const items = active.filter(item => item.surface === 'session.header.actions')
       if (items.length > 0) {
         const root = this.placeRoot(sessionHeaderSeat, usedRoots)
+        this.configureToolbarIconControlVariant(root, sessionHeaderSeat.template)
         if (rebuild || root.childElementCount === 0) this.renderActions(root, items, nextSites, 'header', sessionHeaderSeat.template, 'toolbar', 3)
       }
     }
@@ -782,6 +791,11 @@ class StructuredSurfaceRenderer {
     slot.style.width = `${Math.ceil(Math.max(originalWidth, originalMinimum) + contributionWidth)}px`
   }
 
+  private configureToolbarIconControlVariant(root: HTMLElement, template: HTMLButtonElement): void {
+    root.dataset.cordisxIconControlVariant = 'toolbar'
+    root.style.setProperty('--cordisx-toolbar-action-corner-radius', nativeToolbarCornerRadius(template))
+  }
+
   private text(snapshot: SurfaceContributionSnapshot, value: CordisXLocalizedText, path: string, nextSites: Set<string>): string {
     const site = `surface:${snapshot.surface}:${snapshot.qualifiedId}:${path}`
     nextSites.add(`${snapshot.owner}\u0000${site}`)
@@ -850,6 +864,7 @@ class StructuredSurfaceRenderer {
     button.className = nativePattern === undefined
       ? 'cordisx-action'
       : `${nativeClasses} cordisx-action${reduceGlyph ? ' cordisx-icon-only-control' : ''} cordisx-native-icon-action cordisx-${nativePattern}-action`.trim()
+    if (nativePattern !== undefined) button.dataset.cordisxIconControlVariant = nativePattern
     button.dataset.cordisxOwner = snapshot.owner
     button.dataset.cordisxSurface = snapshot.surface
     button.dataset.cordisxContributionId = snapshot.qualifiedId
@@ -1113,12 +1128,12 @@ function installStyles(document: Document): () => void {
   style.id = 'cordisx-structured-styles'
   style.textContent = `
     [data-cordisx-no-drag="true"], [data-cordisx-no-drag="true"] * { -webkit-app-region: no-drag !important; }
-    .cordisx-native-seat { --cordisx-toolbar-outer-group-gap: 6px; --cordisx-toolbar-action-gap: 6px; --cordisx-toolbar-action-pressed-background: color-mix(in oklab,var(--color-text,currentColor) 5%,transparent); --cordisx-toolbar-action-pressed-hover-background: color-mix(in oklab,var(--color-text,currentColor) 10%,transparent); --cordisx-toolbar-action-pressed-foreground: var(--color-text,currentColor); box-sizing: border-box; color: inherit; font: inherit; pointer-events: auto; -webkit-app-region: no-drag; }
+    .cordisx-native-seat { box-sizing: border-box; color: inherit; font: inherit; pointer-events: auto; -webkit-app-region: no-drag; }
     .cordisx-native-seat[hidden] { display: none !important; }
     .cordisx-sidebar-navigation { display: block; width: 100%; min-width: 0; }
     .cordisx-sidebar-footer-before, .cordisx-sidebar-footer-after { display: flex; flex: 0 0 auto; height: 32px; align-items: center; gap: 4px; min-width: 0; }
-    .cordisx-toolbar-before, .cordisx-toolbar-after { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: var(--cordisx-toolbar-action-gap); min-width: 0; }
-    .cordisx-session-header-actions { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: var(--cordisx-toolbar-action-gap); min-width: 0; margin-inline-end: var(--cordisx-toolbar-outer-group-gap); }
+    .cordisx-toolbar-before, .cordisx-toolbar-after, .cordisx-session-header-actions { --cordisx-toolbar-action-target-size: 28px; --cordisx-toolbar-action-corner-radius: 8px; --cordisx-toolbar-action-idle-background: transparent; --cordisx-toolbar-action-hover-background: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); --cordisx-toolbar-action-focus-ring: var(--color-ring,rgba(131,195,255,.76)); --cordisx-toolbar-action-disabled-opacity: .4; --cordisx-toolbar-action-pressed-background: color-mix(in oklab,var(--color-text,currentColor) 5%,transparent); --cordisx-toolbar-action-pressed-hover-background: color-mix(in oklab,var(--color-text,currentColor) 10%,transparent); --cordisx-toolbar-action-pressed-foreground: var(--color-text,currentColor); --cordisx-toolbar-action-gap: 6px; display: flex; flex: 0 0 auto; height: var(--cordisx-toolbar-action-target-size); align-items: center; gap: var(--cordisx-toolbar-action-gap); min-width: 0; }
+    .cordisx-session-header-actions { --cordisx-toolbar-outer-group-gap: 6px; margin-inline-end: var(--cordisx-toolbar-outer-group-gap); }
     .cordisx-composer-submit-before { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: 8px; min-width: 0; }
     .cordisx-environment { display: block; width: 100%; min-width: 0; padding: 6px; }
     .cordisx-navigation, .cordisx-env-section { display: grid; gap: 1px; }
@@ -1133,13 +1148,13 @@ function installStyles(document: Document): () => void {
     .cordisx-env-header { justify-content: flex-end; }
     .cordisx-action:not(.cordisx-native-icon-action) { display: inline-flex; align-items: center; gap: 6px; min-height: 27px; border: 1px solid transparent; border-radius: var(--radius-lg,10px); background: transparent; color: inherit; cursor: default; padding: 4px 7px; font: inherit; white-space: nowrap; user-select: none; -webkit-user-select: none; -webkit-app-region: no-drag; }
     .cordisx-native-icon-action { flex: 0 0 auto; -webkit-app-region: no-drag; }
-    .cordisx-native-seat > .cordisx-toolbar-action { display: inline-flex; flex: 0 0 auto; width: 28px; min-width: 28px; height: 28px; min-height: 28px; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: var(--radius-lg,8px); background-color: transparent; color: var(--color-text-tertiary,rgba(127,127,127,.78)); opacity: 1; cursor: default; white-space: nowrap; user-select: none; -webkit-user-select: none; }
-    .cordisx-native-seat > .cordisx-toolbar-action:hover:not(:disabled), .cordisx-native-seat > .cordisx-toolbar-action[data-state="open"] { background-color: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); }
-    .cordisx-native-seat > .cordisx-toolbar-action:focus { outline: none; }
-    .cordisx-native-seat > .cordisx-toolbar-action:focus-visible { outline: 2px solid var(--color-ring,rgba(131,195,255,.76)); outline-offset: 0; }
-    .cordisx-native-seat > .cordisx-toolbar-action:disabled { cursor: default; opacity: .4; }
-    .cordisx-native-seat > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"] { background-color: var(--cordisx-toolbar-action-pressed-background); color: var(--cordisx-toolbar-action-pressed-foreground); }
-    .cordisx-native-seat > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"]:hover:not(:disabled), .cordisx-native-seat > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"][data-state="open"] { background-color: var(--cordisx-toolbar-action-pressed-hover-background); }
+    .cordisx-toolbar-before > .cordisx-toolbar-action, .cordisx-toolbar-after > .cordisx-toolbar-action, .cordisx-session-header-actions > .cordisx-toolbar-action { display: inline-flex; flex: 0 0 auto; width: var(--cordisx-toolbar-action-target-size); min-width: var(--cordisx-toolbar-action-target-size); height: var(--cordisx-toolbar-action-target-size); min-height: var(--cordisx-toolbar-action-target-size); align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: var(--cordisx-toolbar-action-corner-radius); background-color: var(--cordisx-toolbar-action-idle-background); color: var(--color-text-tertiary,rgba(127,127,127,.78)); opacity: 1; cursor: default; white-space: nowrap; user-select: none; -webkit-user-select: none; }
+    .cordisx-toolbar-before > .cordisx-toolbar-action:hover:not(:disabled), .cordisx-toolbar-after > .cordisx-toolbar-action:hover:not(:disabled), .cordisx-session-header-actions > .cordisx-toolbar-action:hover:not(:disabled), .cordisx-toolbar-before > .cordisx-toolbar-action[data-state="open"], .cordisx-toolbar-after > .cordisx-toolbar-action[data-state="open"], .cordisx-session-header-actions > .cordisx-toolbar-action[data-state="open"] { background-color: var(--cordisx-toolbar-action-hover-background); }
+    .cordisx-toolbar-before > .cordisx-toolbar-action:focus, .cordisx-toolbar-after > .cordisx-toolbar-action:focus, .cordisx-session-header-actions > .cordisx-toolbar-action:focus { outline: none; }
+    .cordisx-toolbar-before > .cordisx-toolbar-action:focus-visible, .cordisx-toolbar-after > .cordisx-toolbar-action:focus-visible, .cordisx-session-header-actions > .cordisx-toolbar-action:focus-visible { box-shadow: 0 0 0 2px var(--cordisx-toolbar-action-focus-ring); }
+    .cordisx-toolbar-before > .cordisx-toolbar-action:disabled, .cordisx-toolbar-after > .cordisx-toolbar-action:disabled, .cordisx-session-header-actions > .cordisx-toolbar-action:disabled { cursor: default; opacity: var(--cordisx-toolbar-action-disabled-opacity); }
+    .cordisx-toolbar-before > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"], .cordisx-toolbar-after > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"], .cordisx-session-header-actions > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"] { background-color: var(--cordisx-toolbar-action-pressed-background); color: var(--cordisx-toolbar-action-pressed-foreground); }
+    .cordisx-toolbar-before > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"]:hover:not(:disabled), .cordisx-toolbar-after > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"]:hover:not(:disabled), .cordisx-session-header-actions > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"]:hover:not(:disabled), .cordisx-toolbar-before > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"][data-state="open"], .cordisx-toolbar-after > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"][data-state="open"], .cordisx-session-header-actions > .cordisx-toolbar-action[aria-pressed="true"][data-cordisx-route-state="presented"][data-state="open"] { background-color: var(--cordisx-toolbar-action-pressed-hover-background); }
     .cordisx-shortcut-action:not([class*="size-"]):not([class*="h-"]) { display: inline-flex; width: 24px; min-width: 24px; height: 24px; min-height: 24px; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: var(--radius-lg,8px); background: transparent; color: var(--color-text-tertiary,rgba(255,255,255,.5)); }
     .cordisx-composer-action { display: inline-flex; flex: 0 0 auto; width: 28px; min-width: 28px; height: 28px; min-height: 28px; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 9999px; background: transparent; color: var(--color-text-tertiary,currentColor); cursor: default; }
     .cordisx-composer-action:hover:not(:disabled), .cordisx-composer-action[data-state="open"] { background: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); }
@@ -1163,6 +1178,10 @@ function installStyles(document: Document): () => void {
     .cordisx-surface-overflow { position: relative; display: inline-flex; flex: 0 0 auto; -webkit-app-region: no-drag; }
     .cordisx-surface-overflow > summary { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: var(--radius-lg,8px); color: var(--color-text-tertiary,rgba(255,255,255,.5)); cursor: default; list-style: none; -webkit-app-region: no-drag; }
     .cordisx-surface-overflow > summary::-webkit-details-marker { display: none; }
+    .cordisx-toolbar-before > .cordisx-surface-overflow > summary, .cordisx-toolbar-after > .cordisx-surface-overflow > summary, .cordisx-session-header-actions > .cordisx-surface-overflow > summary { width: var(--cordisx-toolbar-action-target-size); min-width: var(--cordisx-toolbar-action-target-size); height: var(--cordisx-toolbar-action-target-size); min-height: var(--cordisx-toolbar-action-target-size); padding: 0; border: 1px solid transparent; border-radius: var(--cordisx-toolbar-action-corner-radius); background-color: var(--cordisx-toolbar-action-idle-background); color: var(--color-text-tertiary,rgba(127,127,127,.78)); }
+    .cordisx-toolbar-before > .cordisx-surface-overflow > summary:hover, .cordisx-toolbar-after > .cordisx-surface-overflow > summary:hover, .cordisx-session-header-actions > .cordisx-surface-overflow > summary:hover, .cordisx-toolbar-before > .cordisx-surface-overflow[open] > summary, .cordisx-toolbar-after > .cordisx-surface-overflow[open] > summary, .cordisx-session-header-actions > .cordisx-surface-overflow[open] > summary { background-color: var(--cordisx-toolbar-action-hover-background); }
+    .cordisx-toolbar-before > .cordisx-surface-overflow > summary:focus, .cordisx-toolbar-after > .cordisx-surface-overflow > summary:focus, .cordisx-session-header-actions > .cordisx-surface-overflow > summary:focus { outline: none; }
+    .cordisx-toolbar-before > .cordisx-surface-overflow > summary:focus-visible, .cordisx-toolbar-after > .cordisx-surface-overflow > summary:focus-visible, .cordisx-session-header-actions > .cordisx-surface-overflow > summary:focus-visible { box-shadow: 0 0 0 2px var(--cordisx-toolbar-action-focus-ring); }
     .cordisx-composer-submit-before > .cordisx-surface-overflow > summary { width: 28px; height: 28px; border: 1px solid transparent; border-radius: 9999px; background: transparent; color: var(--color-text-tertiary,currentColor); }
     .cordisx-composer-submit-before > .cordisx-surface-overflow > summary:hover, .cordisx-composer-submit-before > .cordisx-surface-overflow[open] > summary { background: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); }
     .cordisx-composer-submit-before > .cordisx-surface-overflow > summary:focus { outline: none; }

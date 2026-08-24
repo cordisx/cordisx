@@ -83,6 +83,7 @@ async function fixture(sessionId: string, options: {
   headerAvailable?: boolean
   mode?: 'fixture' | 'live' | 'historical'
   sibling?: boolean
+  overflow?: boolean
   nativePressed?: boolean
 } = {}): Promise<{
   dom: JSDOM
@@ -110,12 +111,18 @@ async function fixture(sessionId: string, options: {
         enabled: true,
         config: {},
       }] : []),
+      ...(options.overflow === true ? [{
+        id: 'session-header-overflow-fixture',
+        entry: path.join(projectRoot, 'tests/fixtures/session-header-overflow-plugin.ts'),
+        enabled: true,
+        config: {},
+      }] : []),
     ],
   }
   const bundle = await buildRendererBundle(config)
   const dom = new JSDOM(`
     <html lang="zh-CN" class="electron-dark"><head><style>
-      .codex-toolbar-button { width: 28px; height: 28px; }
+      .codex-toolbar-button { width: 28px; height: 28px; border-radius: 6px; }
       .native-summary-pressed { color: rgb(26, 28, 31); background-color: rgba(26, 28, 31, .05); }
     </style></head><body>
       <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
@@ -187,6 +194,39 @@ async function fixture(sessionId: string, options: {
 }
 
 describe('Agent Trace Showcase renderer integration', () => {
+  it('uses host-owned toolbar tokens for direct and overflow controls without changing the composer variant', async () => {
+    const { dom, runtime } = await fixture('session-toolbar-variants', { overflow: true })
+    const seat = dom.window.document.querySelector<HTMLElement>('[data-cordisx-surface-host="session.header.actions"]')!
+    const direct = [...seat.querySelectorAll<HTMLButtonElement>(':scope > button')]
+    const overflow = seat.querySelector<HTMLDetailsElement>(':scope > details.cordisx-surface-overflow')!
+    const summary = overflow.querySelector<HTMLElement>('summary')!
+    const native = dom.window.document.getElementById('native-session-menu')!
+    const styles = dom.window.document.getElementById('cordisx-structured-styles')?.textContent ?? ''
+
+    expect(direct).toHaveLength(3)
+    expect(direct.every(button => button.dataset.cordisxIconControlVariant === 'toolbar')).toBe(true)
+    expect(dom.window.getComputedStyle(seat).getPropertyValue('--cordisx-toolbar-action-target-size')).toBe('28px')
+    expect(dom.window.getComputedStyle(seat).getPropertyValue('--cordisx-toolbar-action-corner-radius')).toBe('6px')
+    expect(dom.window.getComputedStyle(seat).getPropertyValue('--cordisx-toolbar-action-disabled-opacity')).toBe('.4')
+    expect(dom.window.getComputedStyle(native).borderRadius).toBe('6px')
+    expect(summary.getAttribute('aria-label')).toBe('More actions')
+    expect(styles).toContain('--cordisx-toolbar-action-hover-background')
+    expect(styles).toContain('--cordisx-toolbar-action-pressed-background')
+    expect(styles).toContain('--cordisx-toolbar-action-focus-ring')
+    expect(styles).toContain('--cordisx-toolbar-action-disabled-opacity')
+    expect(styles).toContain('.cordisx-session-header-actions > .cordisx-surface-overflow > summary')
+    expect(styles).toContain('.cordisx-session-header-actions > .cordisx-surface-overflow[open] > summary')
+    expect(styles).not.toContain('codex-toolbar-button')
+
+    overflow.open = true
+    expect(overflow.open).toBe(true)
+    expect(direct.every(button => button.getAttribute('aria-pressed') !== 'true')).toBe(true)
+    direct[1]!.disabled = true
+    expect(direct[1]!.disabled).toBe(true)
+
+    await runtime.dispose()
+  })
+
   it('renders the exported restart schema through the actual Manager form', async () => {
     const { dom, runtime } = await fixture('session-config-form', { mode: 'historical' })
     const descriptor = runtime.snapshot().plugins.find(plugin => plugin.id === 'agent-trace-showcase')?.configuration
@@ -245,8 +285,8 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(dom.window.getComputedStyle(native).backgroundColor).toBe('rgba(26, 28, 31, 0.05)')
     expect(buttons.every(button => !button.classList.contains('native-summary-pressed'))).toBe(true)
     expect(buttons.map(button => dom.window.getComputedStyle(button).backgroundColor)).toEqual([
-      'rgba(0, 0, 0, 0)',
-      'rgba(0, 0, 0, 0)',
+      'var(--cordisx-toolbar-action-idle-background)',
+      'var(--cordisx-toolbar-action-idle-background)',
     ])
     expect(buttons.map(button => button.dataset.cordisxContributionId)).toEqual([
       'agent-trace-showcase:open-timeline',
@@ -265,7 +305,7 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(native.getAttribute('aria-pressed')).toBe('true')
     expect(buttons.map(button => dom.window.getComputedStyle(button).backgroundColor)).toEqual([
       'var(--cordisx-toolbar-action-pressed-background)',
-      'rgba(0, 0, 0, 0)',
+      'var(--cordisx-toolbar-action-idle-background)',
     ])
     expect(seat.style.getPropertyValue('--cordisx-toolbar-action-pressed-background')).toBe('rgba(26, 28, 31, .05)')
 
@@ -277,7 +317,7 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(buttons[1]!.getAttribute('aria-pressed')).toBe('true')
     expect(buttons[1]!.dataset.cordisxRouteState).toBe('presented')
     expect(buttons.map(button => dom.window.getComputedStyle(button).backgroundColor)).toEqual([
-      'rgba(0, 0, 0, 0)',
+      'var(--cordisx-toolbar-action-idle-background)',
       'var(--cordisx-toolbar-action-pressed-background)',
     ])
 
@@ -291,7 +331,7 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(buttons[0]!.dataset.state).toBeUndefined()
     expect(buttons[0]!.disabled).toBe(false)
     expect(dom.window.getComputedStyle(buttons[0]!).opacity).toBe('1')
-    expect(dom.window.getComputedStyle(buttons[1]!).opacity).toBe('0.4')
+    expect(buttons[1]!.disabled).toBe(true)
     delete buttons[1]!.dataset.state
     buttons[1]!.disabled = false
 
@@ -380,6 +420,7 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(entrySeat.dataset.cordisxNoDrag).toBe('true')
     expect(entryButton.className).not.toContain('codex-toolbar-button')
     expect(entryButton.className).toContain('cordisx-toolbar-action')
+    expect(entryButton.dataset.cordisxIconControlVariant).toBe('toolbar')
     expect(entryButton.classList.contains('cordisx-icon-only-control')).toBe(true)
     expect(dom.window.getComputedStyle(entryButton).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('16px')
     expect(entryButton.textContent).toBe('')
