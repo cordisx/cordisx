@@ -1,4 +1,9 @@
 import {
+  rankMarketplacePlugins,
+  type MarketplaceRankingExplanation,
+  type MarketplaceSearchCandidate,
+} from './marketplace-ranking.js'
+import {
   evaluateMarketplaceTrust,
   type MarketplaceCertificationRecord,
   type MarketplaceOfficialRecord,
@@ -85,6 +90,26 @@ export interface MarketplacePluginProjection {
   readonly feedName: string
   /** Current projection, fallback/English metadata, and canonical machine terms. */
   readonly searchValues: readonly string[]
+}
+
+export interface MarketplaceCatalogEligibility {
+  readonly compatible?: boolean
+  readonly visible?: boolean
+  readonly policyBlocked?: boolean
+}
+
+export interface MarketplaceCatalogSearchOptions {
+  readonly query: string
+  readonly currentLocale: string
+  readonly certifiedOnly?: boolean
+  readonly officialOnly?: boolean
+  readonly eligibility?: (plugin: MarketplaceCatalogPlugin) => MarketplaceCatalogEligibility
+}
+
+export interface MarketplaceCatalogSearchResult {
+  readonly plugin: MarketplaceCatalogPlugin
+  readonly projection: MarketplacePluginProjection
+  readonly ranking: MarketplaceRankingExplanation
 }
 
 export interface MarketplaceSourceSnapshot {
@@ -336,6 +361,45 @@ export function projectMarketplaceSourceName(source: MarketplaceSourceSnapshot, 
     currentLocale,
     source.fallbackLocale ?? 'en',
   )
+}
+
+interface MarketplaceCatalogRankingCandidate extends MarketplaceSearchCandidate {
+  readonly catalogPlugin: MarketplaceCatalogPlugin
+  readonly projection: MarketplacePluginProjection
+}
+
+/** Locale-aware catalog projection coupled to the stable eligibility/text/trust ranking contract. */
+export function searchMarketplaceCatalog(
+  plugins: readonly MarketplaceCatalogPlugin[],
+  options: MarketplaceCatalogSearchOptions,
+): MarketplaceCatalogSearchResult[] {
+  const candidates = plugins.map((plugin): MarketplaceCatalogRankingCandidate => {
+    const projection = projectMarketplacePlugin(plugin, options.currentLocale)
+    const eligibility = options.eligibility?.(plugin) ?? {}
+    return {
+      catalogPlugin: plugin,
+      projection,
+      identity: plugin.identity,
+      id: plugin.id,
+      name: projection.name,
+      description: projection.description,
+      source: plugin.source,
+      authors: [...projection.authors.map(author => author.name), ...projection.searchValues],
+      keywords: projection.keywords,
+      official: plugin.official !== undefined,
+      certified: plugin.certification !== undefined,
+      ...eligibility,
+    }
+  })
+  return rankMarketplacePlugins(candidates, {
+    query: options.query,
+    ...(options.certifiedOnly === undefined ? {} : { certifiedOnly: options.certifiedOnly }),
+    ...(options.officialOnly === undefined ? {} : { officialOnly: options.officialOnly }),
+  }).map(result => ({
+    plugin: result.plugin.catalogPlugin,
+    projection: result.plugin.projection,
+    ranking: result.ranking,
+  }))
 }
 
 function optionalHttpsUrl(value: unknown, label: string): string | undefined {

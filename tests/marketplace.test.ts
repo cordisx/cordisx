@@ -8,6 +8,7 @@ import {
   normalizeMarketplaceSource,
   parseMarketplaceFeed,
   projectMarketplacePlugin,
+  searchMarketplaceCatalog,
   type MarketplaceFetcher,
   type MarketplaceStorage,
 } from '../packages/cli/src/renderer/marketplace.js'
@@ -343,5 +344,44 @@ describe('BrowserMarketplaceModel', () => {
     }))
     expect(model.snapshot().plugins[0]?.certification).toBeUndefined()
     model.dispose()
+  })
+
+  it('couples locale projection to certified filtering and explainable stable ranking', () => {
+    const parsed = parseMarketplaceFeed(trustedFeed(), {
+      feedUrl: OFFICIAL_MARKETPLACE_SOURCE,
+      trustedRoots: [OFFICIAL_MARKETPLACE_SOURCE],
+      now: '2026-08-24T13:00:00Z',
+    })
+    const base = parsed.plugins[0]!
+    const plugin = {
+      ...base,
+      identity: marketplacePluginIdentity(base.source, base.id),
+      feedUrl: OFFICIAL_MARKETPLACE_SOURCE,
+      feedName: parsed.name,
+      feedFallbackLocale: parsed.fallbackLocale,
+      feedLocalizations: parsed.localizations,
+      feedHomepage: parsed.homepage,
+      ...parsed.trust?.byPluginIdentity.get(`${TRUST_SOURCE}\u0000trusted`),
+    }
+    const hidden = { ...plugin, identity: `${plugin.identity}-hidden`, id: 'hidden' }
+
+    const result = searchMarketplaceCatalog([hidden, plugin], {
+      query: '受信插件',
+      currentLocale: 'zh-CN',
+      certifiedOnly: true,
+      eligibility: candidate => ({ visible: candidate.id !== 'hidden' }),
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toEqual(expect.objectContaining({
+      plugin: expect.objectContaining({ id: 'trusted' }),
+      projection: expect.objectContaining({ name: '受信插件' }),
+      ranking: expect.objectContaining({
+        textTier: 'exact-name',
+        officialBoost: 1,
+        certificationBoost: 1,
+        boundedTrustBoost: 2,
+      }),
+    }))
   })
 })
