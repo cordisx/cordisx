@@ -1,0 +1,34 @@
+{
+  "name": "@cordisx/channel-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Launcher-side host-neutral CordisX Channel runtime core and simulator",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./simulator": {
+      "types": "./dist/simulator.d.ts",
+      "default": "./dist/simulator.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "license": "AGPL-3.0-or-later",
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.1",
+    "typescript": "^5.9.2"
+  }
+}

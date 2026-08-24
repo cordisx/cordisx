@@ -267,6 +267,54 @@ handle, app-server JSON-RPC client, or secret value export.
 The facade is a lifecycle adapter, not a parallel agent runtime. Task methods
 delegate to the lower-level CordisX Platform/Agent implementation.
 
+### Node Cordis service and cross-plugin effects
+
+The launcher owns a Node-side Cordis root context and provides one high-level
+`channel` service. A manifest-declared `channel-adapter` service contributes a
+connection through a generation-owned Cordis effect; another Node plugin may
+inject `channel` to list available connections, subscribe to normalized
+messages, or enqueue a send. The raw adapter connection is never a service
+value visible to consumers.
+
+```ts
+export const inject = ['channel']
+
+export async function apply(ctx: Context) {
+  const dispose = await ctx.channel.messages.subscribe(filter, event => {
+    // event.input is still sourced role=user content
+  })
+  ctx.effect(() => dispose)
+
+  await ctx.channel.messages.send({ target, kind: 'reply', text })
+}
+```
+
+The launcher creates every plugin child context with canonical package source,
+plugin id, and generation metadata. The `channel` service resolves that caller
+context on every method, just as the existing Platform service resolves its
+runtime-bound plugin identity. A plugin cannot pass a caller id or reuse a
+facade after its generation is disposed.
+
+Connection discovery requires `channel.accounts.read`, normalized-message
+subscription requires `channel.events.subscribe`, and sends require
+`channel.messages.send`. Each call also checks the structured Channel scope.
+Adapter-side `channel.events.receive` remains a distinct authority to accept
+and persist platform ingress; it does not automatically grant another plugin
+message content.
+
+Subscriptions attach only after the core has durably accepted and attributed
+the input. Consumer handlers receive no raw callback body, transport client,
+secret, cursor, filesystem path, or task-gateway handle. Handler failure is
+isolated from platform acknowledgement and from other consumers. Durable
+consumer checkpoints and at-least-once replay are required before a subscription
+is described as reliable across restart; an in-process notification-only watch
+must be labeled `experimental` and cannot claim durable delivery.
+
+Adapter registration, subscriptions, connection watches, and other resources
+return Cordis disposers and are tied to the owning fiber. Replacement fences
+the old generation before publishing the new connection, and fiber disposal
+removes its consumers/contributions without stopping unrelated adapters.
+
 ### Process lifetime
 
 Version 1 runs as a launcher-owned companion or service fiber. It may keep a
@@ -444,8 +492,10 @@ Permission Broker model; they do not create a second grant store.
 
 | Capability | First use | Requirement |
 | --- | --- | --- |
+| `channel.accounts.read` | list/watch brokered connection metadata | required for a consumer plugin; does not reveal config or secrets |
 | `channel.accounts.connect` | start webhook/long-connection account | required for a live adapter; `ask` may keep the service pending |
 | `channel.events.receive` | persist and normalize inbound events | required, scoped to accounts/tenants/conversations |
+| `channel.events.subscribe` | consume sourced normalized messages from another plugin | required for consumer subscriptions; no raw platform payload |
 | `channel.messages.send` | notifications, replies, updates | required for bidirectional adapters; optional for receive-only simulation |
 | `channel.bindings.read` | inspect existing endpoint/task binding | required for continue/query |
 | `channel.bindings.write` | create/rebind/archive binding | required for create/continue/bind operations |
@@ -592,6 +642,12 @@ CordisX Platform identity. The CordisX facade retains complete provider/session
 references, Cordis fiber/generation ownership, Platform/Agent permission
 enforcement, durable inbox/outbox, and secret handles.
 
+The same facade is a normal Node Cordis service: adapter packages contribute
+lifecycle-owned connections, while other source-bound plugins consume
+brokered list/subscribe/send operations. This preserves useful plugin
+composition without exposing a raw transport or creating a second permission
+system.
+
 OneWorks permits channel-specific prompt composition in its own runtime.
 CordisX does not carry that behavior across for remote payloads: Channel input
 is sourced user content only. Any host-authored local route policy is a separate
@@ -633,9 +689,10 @@ this plan.
    Channel identities and binding projection, sourced user-input envelope,
    Channel scopes/capabilities, snapshots, compatibility/downgrade behavior,
    schemas, vectors, and conformance. Older hosts reject the service entry.
-3. **Node host/core (`cordisx`)**: launcher service registry, source/generation
-   binding, shared broker authority, secret handles, durable store, inbox/outbox,
-   task gateway, attachment quarantine, simulator adapter, and headless tests.
+3. **Node host/core (`cordisx`)**: launcher service registry, Node Cordis
+   `channel` service, source/generation-bound cross-plugin list/subscribe/send,
+   shared broker authority, secret handles, durable store, inbox/outbox, task
+   gateway, attachment quarantine, simulator adapter, and headless tests.
    The simulator matrix is mandatory in this PR even though the visible demo is
    later.
 4. **Platform adapters (`cordisx`)**: independent Feishu/Lark and WeCom package
@@ -667,7 +724,7 @@ reviewable. A source branch head is never a final gitlink.
 | Identity | Same remote session id across providers, same conversation/user id across accounts/tenants, direct/group/topic/reply semantics, rebind revision/history, and stale binding selection cannot collide. |
 | Creation/query/control | Default and explicit provider/model/profile/workspace; invalid/ambiguous alias; created-plus-initial-turn-failure retention; list/search/read/status/open intent; continue/followup/steer/interrupt/archive/restore. |
 | Sourced input | Every remote message is `role=user` with immutable Channel provenance; adapters cannot request system/developer/trusted roles, mutate prior messages, or submit an unattributed batch. |
-| Permissions | required/optional activation, `ask`/`allow`/`deny`, timeout, account/tenant/conversation/user/provider/workspace/session scope, policy change, and no self-approval from the channel. |
+| Permissions | required/optional activation, `ask`/`allow`/`deny`, timeout, account/tenant/conversation/user/provider/workspace/session scope, adapter receive versus consumer subscribe separation, source-bound cross-plugin list/send, policy change, and no self-approval from the channel. |
 | Webhook security | exact raw-body verification, encryption/decryption where official, time window, constant-time comparison, replay key, invalid signature, stale timestamp, duplicate id, malformed payload, and fast durable acknowledgement. |
 | Long connection | authenticated subscribe, single-connection rule where applicable, heartbeat, reconnect/backoff, duplicate event, cursor/checkpoint, handler timeout, platform rate limit, clean stop, and no renderer-owned socket. |
 | Durable inbox | duplicate before/after completion, crash before claim, crash after claim, lease expiry, restart recovery, retry/backoff, terminal/dead letter, and operation-id reconciliation. |
