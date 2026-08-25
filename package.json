@@ -14,7 +14,7 @@
     "dev:ui": "npm run dev:ui --workspace=cordisx --",
     "smoke": "node packages/cli/scripts/live-smoke.mjs",
     "smoke:isolated-app": "node packages/cli/scripts/run-isolated-app-smoke.mjs",
-    "test": "vitest run",
+    "test": "npm run build --workspace=@cordisx/schemastery-ui && vitest run",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "engines": {

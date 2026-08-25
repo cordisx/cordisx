@@ -26,14 +26,16 @@ arbitrary rendering callback.
 | Requirement | State | Evidence / boundary |
 | --- | --- | --- |
 | Closed semantic field/group/action icon contract | formally merged in `cordisx-protocol` | Protocol PR #41, formal `699691c`; Host validates and renders only closed `host:*` tokens. |
+| Form Presenter Catalog v1 | formally merged in `cordisx-protocol`; Host implementation in progress | Protocol PR #43, formal `17dda260`; only closed `version/kind/options` tokens select a registered Host presenter. |
+| `@cordisx/schemastery-ui` core | implemented | Workspace package supplies descriptor normalization, closed resolver, copy-free validation codes, and parent-transaction draft semantics. Manager and the UI Playground reach it through the same TDesign Host adapter; formal Host merge remains pending. |
 | Slider rail, thumb, and editable value | verified | Official TDesign Slider and InputNumber share one unframed control seat; narrow real-app report scrolls `reviewThreshold` into view. |
 | One visible Select chrome | verified | Every Host-owned `t-select` is audited. The extension-point policy layout seat deliberately has no border, radius, padding, or background; official TDesign alone owns visible chrome, focus, and portal. |
-| TDesign change-event boundary | verified | The Host unwraps the official `CustomEvent.detail.value` once before every input, textarea, number, slider, checkbox, switch, radio, select, multi-select, and TagInput draft callback. A draft can never stringify an event; the production gallery keyboard/save/reopen flow validates the actual Shadow input. |
+| TDesign change-event boundary | implemented; browser persistence pending | The Host unwraps the official `CustomEvent.detail.value` once before every input, textarea, number, slider, checkbox, switch, radio, select, multi-select, and TagInput draft callback. Focused Host tests prevent event stringification. The minimized isolated Electron CDP target currently does not deliver text to a focused Shadow input, so its keyboard/save/reopen assertion is not presented as passing browser evidence. |
 | Action icons, contrast, and sticky position | verified | The Host action contract provides closed semantic icons, icon-only with `aria-label`/tooltip title, and icon-plus-label density. Per-field actions are compact menu triggers; undo/save remain labeled. The action/status bar sticks above the field list, not over its bottom rows; real dark app evidence verifies default/primary contrast. |
 | Per-field default, rollback, and path actions | verified | One compact Host-owned icon button sits in each editable field header. Its isolated portal menu uses only closed Host tokens (`host:reset` for default/revert, `host:files` for copy) and distinguishes **Use default value** (`unset` mutation), **Revert field change** (drop only that draft operation), and **Copy configuration path**. Default/rollback availability is honest, copy reports a short status, and keyboard, outside-click, Escape, focus return, and disposal stay Host-owned. |
-| Date / Time / Color editing | verified | Date uses official DatePicker. The official package lacks TimePicker and ColorPicker, so Time is an official Select/portal adapter and Color is an official palette Select plus editable HEX Input; neither falls back to native inputs. |
+| Date / Time / Color editing | implemented; isolated rendering verified | Date uses the official DatePicker. The official package lacks TimePicker and ColorPicker, so Time uses an official Select/portal adapter and Color combines a TDesign HEX Input with a Host-owned native color well; neither is a large unavailable placeholder. |
 | Multi-select and bounded primitive arrays | verified | Official multiple Select/Option and TagInput respectively; complex arrays retain the pre-existing bounded JSON editor. |
-| Gallery coverage | verified | `form-schema-gallery` is available only through `cordisx.config.ui-demos.json` and its plugin-detail Configuration route, never a global Demo tab. |
+| Gallery coverage | implemented; isolated rendering verified | `form-schema-gallery` is available only through `cordisx.config.ui-demos.json` and its plugin-detail Configuration route, never a global Demo tab. |
 | Host TDesign form delivery | implemented | Focused tests, full gate, audit, and isolated `app://` artifacts are required again after every formal-main rebase; formal merge remains the last ledger step. |
 
 ## Official TDesign package audit
@@ -61,9 +63,11 @@ package to production dependencies. `scripts/build-tdesign-vendor.mjs` packs
 the exact npm tarball, verifies SHA-256
 `e1929f06eda5c3d2ee194da0d6bc9f81e187184fe1054627afeabad2ae71db0e`,
 imports only the thirteen components above, bundles them, removes embedded CSS
-source maps, and emits the pinned renderer module. The only source-level patch
-removes Omi's legacy assignment to `window.HTMLElement`; modern Chromium keeps
-its native constructor. The generated module records version and tarball hash.
+source maps, and emits the pinned renderer module. Its two compatibility
+repairs remove Omi's legacy assignment to `window.HTMLElement` (modern
+Chromium keeps its native constructor) and bind the few bundle-elided
+`Component.h` references to the registered official Omi base class. The
+generated module records version and tarball hash.
 
 The resulting bundled runtime contains only TDesign plus the code actually
 reached from Omi 7.7.13, reactive-signal 2.0.1, weakmap-polyfill 2.0.4, clsx
@@ -88,6 +92,23 @@ component imitation. Tooltip uses the existing
 Host body-portal controller and theme projection rather than creating a second
 popover service.
 
+### Form Presenter Catalog v1
+
+The catalog is the sole extension point for presentation. A resolver first
+checks a field's closed protocol `presenter` (`version: 1`, catalog `kind`, and
+bounded options), verifies the schema shape, then selects one Host primitive.
+Unsupported/incompatible tokens fall back to the compatible base primitive and
+record `unsupported-presenter`; no token can carry a component, CSS, DOM, SVG,
+selector, callback, or popup target. The same resolver is used by the Manager
+and every Host array editor.
+
+| Schema shape | registered v1 presentation kinds | Host fallback |
+| --- | --- | --- |
+| finite scalar choice | `choice.select`, `choice.radio`, `choice.segmented` | Select (legacy `role=radio` remains classic Radio) |
+| bounded number | `number.input`, `number.stepper`, `number.slider` | NumberInput (legacy `role=slider` remains Slider) |
+| bounded scalar array | `array.scalar-tags`, `array.scalar-rows` | TagInput or multi-select when choices exist |
+| bounded object array | `array.object-auto`, `array.object-dialog`, `array.object-page` | compact Host collection with a diagnostic if no renderer-safe item schema exists |
+
 Default schema selection is deterministic:
 
 | Schema field | Host primitive |
@@ -95,7 +116,8 @@ Default schema selection is deterministic:
 | finite scalar choices | Select; Radio only for explicit `radio` role |
 | bounded array of finite scalar choices / `multi-select` | official TDesign Select/Option in multiple mode, with Host-owned listbox portal and keyboard policy |
 | bounded primitive array with `max <= 64` | official TDesign TagInput; Host normalizes the declared scalar item type |
-| complex object array, unbounded primitive array, or unknown array element | existing bounded JSON Textarea editor until a dedicated structured editor is declared; it is real read/write support, not an unavailable placeholder |
+| bounded object array | compact Host rows with Host-owned add/edit/delete/duplicate actions and a recursive item editor sharing the parent draft transaction |
+| unbounded primitive array or unknown array element | compact unavailable diagnostic; never falsely claims a JSON textarea is a structured editor |
 | boolean | Checkbox; Switch only for explicit `switch` role |
 | number / natural | NumberInput; Slider only for explicit `slider` role |
 | string | Input |
@@ -103,7 +125,7 @@ Default schema selection is deterministic:
 | string with `path`, `file`, or `directory` role | Path input |
 | string with `date` role | official TDesign DatePicker |
 | string with `time` role | Host TimePicker adapter made from official TDesign Select/Option + Host portal; the pinned official package has no TimePicker |
-| string with `color` role | Host ColorPicker adapter: official TDesign palette Select plus editable HEX Input and a noninteractive preview; the pinned official package has no ColorPicker |
+| string with `color` role | Host ColorPicker adapter: official TDesign HEX Input plus a Host-owned native color well; the pinned official package has no ColorPicker |
 | JSON object or unknown serializable field | bounded JSON Textarea fallback plus a stable diagnostic |
 | reserved sensitive role | Host credential-unavailable Alert; no value/control/renderer seat |
 

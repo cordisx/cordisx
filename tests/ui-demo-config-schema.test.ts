@@ -140,6 +140,7 @@ describe('UI demo Config Schemas', () => {
       approvalMode: 'manual',
       audienceTags: ['design', 'research'],
       quickLabels: ['weekly', 'planning'],
+      reminderChannels: [true],
       notificationRules: [{ destination: 'Daily summary', enabled: true }],
       appearance: { density: 'comfortable', showActivity: true },
       referenceCode: 'DEMO-NORTHSTAR-01',
@@ -164,7 +165,12 @@ describe('UI demo Config Schemas', () => {
     expect(enField('backgroundSync')).toMatchObject({ label: 'Background sync', role: 'switch' })
     expect(enField('releaseTrack')).toMatchObject({ label: 'Release track', choices: [{ label: 'stable', value: 'stable' }, { label: 'preview', value: 'preview' }, { label: 'early-access', value: 'early-access' }] })
     expect(enField('approvalMode')).toMatchObject({ label: 'Approval mode', role: 'radio' })
+    expect(enField('approvalMode')).toMatchObject({ presenter: { version: 1, kind: 'choice.radio' } })
+    expect(enField('reviewMode')).toMatchObject({ label: 'Review mode', role: 'radio', presenter: { version: 1, kind: 'choice.segmented' } })
+    expect(enField('maxParallelJobs')).toMatchObject({ presenter: { version: 1, kind: 'number.stepper' } })
+    expect(enField('reviewThreshold')).toMatchObject({ presenter: { version: 1, kind: 'number.slider' } })
     expect(enField('preferredReviewDate')).toMatchObject({ label: 'Preferred review date', role: 'date', icon: 'host:calendar', group: { id: 'schedule', title: 'Schedule' } })
+    expect(enField('nextSyncAt')).toMatchObject({ label: 'Next sync time', role: 'datetime', icon: 'host:calendar' })
     expect(enField('dailyQuietTime')).toMatchObject({ label: 'Daily quiet time', role: 'time', icon: 'host:clock' })
     expect(enField('accentColor')).toMatchObject({ label: 'Accent color', role: 'color', icon: 'host:palette' })
     expect(enField('audienceTags')).toMatchObject({
@@ -175,7 +181,10 @@ describe('UI demo Config Schemas', () => {
       ],
     })
     expect(enField('quickLabels')).toMatchObject({ label: 'Quick labels', type: 'array', arrayItemType: 'string', max: 6 })
+    expect(enField('reminderChannels')).toMatchObject({ label: 'Reminder channels', type: 'array', arrayItemType: 'boolean', presenter: { version: 1, kind: 'array.scalar-rows' } })
     expect(enField('notificationRules')).toMatchObject({ label: 'Notification rules', type: 'array', min: 1, max: 4 })
+    expect(enField('notificationRules')).toMatchObject({ presenter: { version: 1, kind: 'array.object-dialog' }, arrayItemSchema: { type: 'object' } })
+    expect(enField('escalationRules')).toMatchObject({ presenter: { version: 1, kind: 'array.object-page' }, arrayItemSchema: { type: 'object' } })
     expect(enField('appearance.density')).toMatchObject({ label: 'Display density' })
     expect(enField('appearance.showActivity')).toMatchObject({ label: 'Show recent activity' })
     expect(enField('referenceCode')).toMatchObject({ label: 'Reference code', disabled: true })

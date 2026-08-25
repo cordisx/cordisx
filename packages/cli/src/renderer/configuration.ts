@@ -1,8 +1,11 @@
 import { Context, Service, type Disposable } from '@deepseek-ai/cordis'
+import { normalizeFormPresentation } from '@cordisx/schemastery-ui'
 import type {
   CordisXConfigApplies,
   CordisXConfigAppliesInput,
   CordisXConfigFormActionIcons,
+  CordisXConfigFormPresenter,
+  CordisXConfigFormSchemaNode,
   CordisXConfigFormGroupSnapshot,
   CordisXConfigFormIcon,
   CordisXConfigFieldController,
@@ -50,6 +53,15 @@ interface SchemaNode {
           readonly icon?: string
         }
         readonly actions?: { readonly save?: string; readonly reset?: string }
+        readonly presenter?: {
+          readonly version?: number
+          readonly kind?: string
+          readonly options?: {
+            readonly density?: string
+            readonly maxInlineItems?: number
+            readonly allowReorder?: boolean
+          }
+        }
       }
     }
     readonly description?: string | Readonly<Record<string, string>>
@@ -263,6 +275,17 @@ function choices(schema: SchemaNode): readonly { readonly label: string; readonl
   return result
 }
 
+function arrayChoices(schema: SchemaNode | undefined, locale: string): readonly { readonly label: string; readonly value: CordisXJsonScalar }[] | undefined {
+  const literalChoices = schema === undefined ? undefined : choices(schema)
+  if (literalChoices !== undefined) return literalChoices
+  if (schema?.type !== 'boolean') return undefined
+  const zh = locale.toLowerCase().startsWith('zh')
+  return [
+    { label: zh ? '开启' : 'Enabled', value: true },
+    { label: zh ? '关闭' : 'Disabled', value: false },
+  ]
+}
+
 const FORM_ICONS = new Set<CordisXConfigFormIcon>([
   'host:calendar', 'host:clock', 'host:palette', 'host:tags', 'host:folder',
   'host:key', 'host:settings', 'host:info', 'host:files', 'host:save', 'host:reset',
@@ -298,6 +321,42 @@ function actionIcons(schema: SchemaNode | undefined): CordisXConfigFormActionIco
   }
 }
 
+function formPresenter(schema: SchemaNode): CordisXConfigFormPresenter | undefined {
+  const normalized = normalizeFormPresentation(schema.meta?.extra?.cordisxForm?.presenter)
+  return normalized as CordisXConfigFormPresenter | undefined
+}
+
+function formSchemaNode(schema: SchemaNode, locale: string): CordisXConfigFormSchemaNode {
+  const role = schema.meta?.role
+  const label = localizedText(schema.meta?.extra?.label, locale)
+  const description = localizedText(schema.meta?.description, locale)
+  const fieldChoices = choices(schema)
+  const nestedArrayChoices = schema.type === 'array' ? arrayChoices(schema.inner, locale) : undefined
+  const nodeChoices = fieldChoices ?? nestedArrayChoices
+  const arrayItemType = schema.type === 'array' && ['string', 'number', 'natural', 'boolean'].includes(schema.inner?.type ?? '')
+    ? schema.inner?.type as 'string' | 'number' | 'natural' | 'boolean' : undefined
+  const nested = schema.type === 'object' && schema.dict !== undefined
+    ? Object.entries(schema.dict).map(([key, child]) => ({ key, schema: formSchemaNode(child, locale) })) : undefined
+  const item = schema.type === 'array' && schema.inner !== undefined ? formSchemaNode(schema.inner, locale) : undefined
+  const presenter = formPresenter(schema)
+  return {
+    type: schema.type ?? 'unknown',
+    ...(role === undefined ? {} : { role }),
+    ...(label === undefined ? {} : { label }),
+    ...(description === undefined ? {} : { description }),
+    disabled: schema.meta?.disabled === true,
+    required: schema.meta?.required === true,
+    ...(schema.meta?.min === undefined ? {} : { min: schema.meta.min }),
+    ...(schema.meta?.max === undefined ? {} : { max: schema.meta.max }),
+    ...(schema.meta?.step === undefined ? {} : { step: schema.meta.step }),
+    ...(nodeChoices === undefined ? {} : { choices: nodeChoices }),
+    ...(arrayItemType === undefined ? {} : { arrayItemType }),
+    ...(presenter === undefined ? {} : { presenter }),
+    ...(nested === undefined ? {} : { fields: nested }),
+    ...(item === undefined ? {} : { item }),
+  }
+}
+
 function fields(
   schema: SchemaNode | undefined,
   raw: unknown,
@@ -316,13 +375,15 @@ function fields(
   const label = localizedText(schema.meta?.extra?.label, locale)
   const description = localizedText(schema.meta?.description, locale)
   const fieldChoices = choices(schema)
-  const arrayChoices = schema.type === 'array' && schema.inner !== undefined ? choices(schema.inner) : undefined
-  const fieldOptions = fieldChoices ?? arrayChoices
-  const arrayItemType = schema.type === 'array' && ['string', 'number', 'natural'].includes(schema.inner?.type ?? '')
-    ? schema.inner?.type as 'string' | 'number' | 'natural'
+  const nestedArrayChoices = schema.type === 'array' ? arrayChoices(schema.inner, locale) : undefined
+  const fieldOptions = fieldChoices ?? nestedArrayChoices
+  const arrayItemType = schema.type === 'array' && ['string', 'number', 'natural', 'boolean'].includes(schema.inner?.type ?? '')
+    ? schema.inner?.type as 'string' | 'number' | 'natural' | 'boolean'
     : undefined
   const icon = formIcon(schema.meta?.extra?.cordisxForm?.icon)
   const group = formGroup(schema, locale)
+  const presenter = formPresenter(schema)
+  const arrayItemSchema = schema.type === 'array' && schema.inner?.type === 'object' ? formSchemaNode(schema.inner, locale) : undefined
   const hasDefault = Object.hasOwn(schema.meta ?? {}, 'default')
   const defaultValue = hasDefault && !sensitive ? immutable(ownValue(resolved, path)) : undefined
   return [{
@@ -342,6 +403,8 @@ function fields(
     ...(schema.meta?.step === undefined ? {} : { step: schema.meta.step }),
     ...(fieldOptions === undefined ? {} : { choices: fieldOptions }),
     ...(arrayItemType === undefined ? {} : { arrayItemType }),
+    ...(presenter === undefined ? {} : { presenter }),
+    ...(arrayItemSchema === undefined ? {} : { arrayItemSchema }),
     ...(icon === undefined ? {} : { icon }),
     ...(group === undefined ? {} : { group }),
   }]

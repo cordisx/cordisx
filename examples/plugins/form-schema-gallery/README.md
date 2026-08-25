@@ -11,13 +11,16 @@ Launch it with:
 npm run dev -- dev --config cordisx.config.ui-demos.json
 ```
 
-The schema intentionally covers Host-supported text, multiline text, URL and
-directory roles, required and empty optional values, number input, slider,
-checkbox, switch, scalar Select, Radio, JSON array fallback, nested fields,
-localized labels/help, validation bounds, and a disabled descriptor. The
-current public descriptor does **not** define bounded array choices, so the
-`Audience tags` multi-select request is deliberately an unsupported-role
-diagnostic rather than a JSON field misrepresented as a multi-select. Date,
-time, and color use the same no-native-fallback policy. The plugin uses only
-privacy-safe example values and declares `plugin-restart`; it does not claim a
-secret, credential, external connection, or custom renderer.
+The schema exercises the closed Host-owned Presenter Catalog: input,
+multiline text, URL and directory input, required and untouched optional
+values, number stepper and slider, checkbox and switch, Select, classic Radio
+and segmented Radio, bounded multi-select, scalar TagInput, date, time, and
+color. It also includes compact object-array rows with shared-draft dialog and
+page-mode requests, localized labels/help, validation bounds, semantic icons,
+and a disabled descriptor.
+
+The gallery never contributes a global Demo destination or plugin-owned form
+DOM. It uses only privacy-safe test data and declares `plugin-restart`; it
+does not claim a secret, credential, external connection, or custom renderer.
+Unsupported schema shapes remain Host diagnostics rather than simulated
+editors. See the Host renderer contract for the current honest boundary.

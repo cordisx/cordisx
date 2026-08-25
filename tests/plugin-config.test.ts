@@ -246,7 +246,7 @@ describe('plugin config registry', () => {
     const schema = Schema.object({
       reviewDate: Schema.string().default('2026-09-01').role('date').extra('extra', {
         label: { en: 'Review date' },
-        cordisxForm: { icon: 'host:calendar', group: { id: 'schedule', title: { en: 'Schedule' }, icon: 'host:clock' } },
+        cordisxForm: { icon: 'host:calendar', presenter: { version: 1, kind: 'choice.segmented', options: { density: 'compact' } }, group: { id: 'schedule', title: { en: 'Schedule' }, icon: 'host:clock' } },
       }),
       audiences: Schema.array(Schema.union([Schema.const('design'), Schema.const('research')]))
         .default(['design']).min(1).max(2).role('multi-select'),
@@ -264,6 +264,7 @@ describe('plugin config registry', () => {
     expect(descriptor.actionIcons).toEqual({ save: 'host:save', reset: 'host:reset' })
     expect(descriptor.fields.find(field => field.path[0] === 'reviewDate')).toMatchObject({
       icon: 'host:calendar', group: { id: 'schedule', title: 'Schedule', icon: 'host:clock' },
+      presenter: { version: 1, kind: 'choice.segmented', options: { density: 'compact' } },
       hasDefault: true, defaultValue: '2026-09-01',
     })
     expect(descriptor.fields.find(field => field.path[0] === 'audiences')).toMatchObject({

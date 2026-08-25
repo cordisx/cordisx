@@ -144,6 +144,12 @@ try {
   })
   await writeFile(configPath, `${JSON.stringify(initialConfig, null, 2)}\n`, 'utf8')
   const installedCordisXRoot = path.join(runnerDirectory, 'node_modules', 'cordisx')
+  const installedSchemasteryUiRoot = path.join(installedCordisXRoot, 'node_modules', '@cordisx', 'schemastery-ui')
+  await access(path.join(installedSchemasteryUiRoot, 'dist', 'index.js'))
+  const installedSchemasteryUiManifest = JSON.parse(await readFile(path.join(installedSchemasteryUiRoot, 'package.json'), 'utf8'))
+  if (installedSchemasteryUiManifest.name !== '@cordisx/schemastery-ui' || installedSchemasteryUiManifest.version !== '0.1.0-beta.0') {
+    throw new Error('installed cordisx tarball is missing the pinned @cordisx/schemastery-ui runtime')
+  }
   const [{ loadConfig }, { buildRendererBundle }] = await Promise.all([
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/config.js')).href),
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/bundle.js')).href),

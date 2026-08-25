@@ -4960,6 +4960,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       return { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, inViewport: rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.bottom <= innerHeight }
     })()`, true)
     if (target?.inViewport !== true) throw new Error('gallery workspace input is unavailable for real Web Component exercise')
+    await send('Page.bringToFront')
     await pointerClick(target.rect)
     const focused = await evaluateByValue(`(() => {
       const input = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-config-path="workspaceName"] t-input')?.shadowRoot?.querySelector('input')

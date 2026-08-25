@@ -4302,7 +4302,7 @@ export function installCordisXManager(
         ...(field.description === undefined ? {} : { help: field.description }),
         required: field.required,
         ...(field.icon === undefined ? {} : { icon: field.icon }),
-        fullWidth: sensitive || ['textarea', 'json-textarea', 'path-input', 'unsupported'].includes(primitive),
+        fullWidth: sensitive || ['textarea', 'json-textarea', 'path-input', 'tag-input', 'multi-select', 'object-array', 'unsupported'].includes(primitive),
       })
       item.root.dataset.configPath = field.path.join('.')
       item.root.dataset.hostFormPrimitive = primitive
@@ -4464,7 +4464,7 @@ export function installCordisXManager(
           draft!.state = /conflict|revision/iu.test(message) ? 'conflict' : 'error'
           draft!.message = draft!.state === 'conflict'
             ? managerCopy(locale, 'form.conflict-retained')
-            : message
+            : managerCopy(model.snapshot().localization.locale, 'form.configuration-save-failed')
         } finally {
           busyPluginId = undefined
           renderContent()

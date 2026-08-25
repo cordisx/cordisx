@@ -223,6 +223,20 @@ export function createTDesignPortal(document: Document, parent?: HTMLElement): H
     .cxf-field-menu-item:focus-visible { box-shadow: 0 0 0 2px var(--cx-focus); }
     .cxf-field-menu-item:disabled { color: var(--td-text-color-disabled, var(--cx-muted)); cursor: default; }
     .cxf-field-menu-status { padding: .25rem .5rem; color: var(--td-text-color-secondary, var(--cx-muted)); font-size: .78rem; }
+    .cxf-array-editor-dialog {
+      position: fixed; inset: max(1rem, 10vh) max(1rem, calc((100vw - 42rem) / 2)) auto;
+      display: grid; gap: .85rem; max-block-size: min(80vh, calc(100vh - 2rem)); overflow: auto;
+      padding: 1rem; border: 1px solid var(--cx-border); border-radius: .8rem;
+      background: var(--td-bg-color-container, var(--cx-surface)); color: var(--td-text-color-primary, var(--cx-text));
+      box-shadow: var(--td-shadow-3, 0 14px 44px var(--cx-shadow)); outline: none;
+    }
+    .cxf-array-editor-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+    .cxf-array-editor-dialog-fields { display: grid; gap: .8rem; }
+    .cxf-array-editor-dialog-field { display: grid; gap: .3rem; min-inline-size: 0; }
+    .cxf-array-editor-dialog-field > label { color: var(--td-text-color-primary, var(--cx-text)); font-weight: 600; }
+    .cxf-array-editor-dialog-field > .cxf-tdesign-control,
+    .cxf-array-editor-dialog-field > .cxf-color-control,
+    .cxf-array-editor-dialog-field > .cxf-slider-control { inline-size: 100%; min-inline-size: 0; }
   `
   const container = document.createElement('div')
   container.className = 'cxf-tdesign-portal'

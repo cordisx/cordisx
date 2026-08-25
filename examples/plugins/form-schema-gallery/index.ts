@@ -40,11 +40,11 @@ const fields = {
     .description('Choose where privacy-safe exports are prepared on this device.')
     .i18n(description('Choose where privacy-safe exports are prepared on this device.', '选择在此设备上准备隐私安全导出的位置。')),
   maxParallelJobs: Schema.natural().default(4).min(1).max(16).step(1)
-    .extra('extra', label('Parallel tasks', '并行任务数', group('performance', 'Performance', '性能', 'host:settings')))
+    .extra('extra', label('Parallel tasks', '并行任务数', { presenter: { version: 1, kind: 'number.stepper', options: { density: 'compact' } }, ...group('performance', 'Performance', '性能', 'host:settings') }))
     .description('Limit background work so the workspace stays responsive.')
     .i18n(description('Limit background work so the workspace stays responsive.', '限制后台任务数量，让工作区保持流畅。')),
   reviewThreshold: Schema.number().default(0.75).min(0.5).max(1).step(0.05).role('slider')
-    .extra('extra', label('Review threshold', '审核阈值', group('performance', 'Performance', '性能', 'host:settings')))
+    .extra('extra', label('Review threshold', '审核阈值', { presenter: { version: 1, kind: 'number.slider', options: { density: 'compact' } }, ...group('performance', 'Performance', '性能', 'host:settings') }))
     .description('Items at or above this confidence level can be queued for review.')
     .i18n(description('Items at or above this confidence level can be queued for review.', '达到此置信度的项目可进入审核队列。')),
   showMemberAvatars: Schema.boolean().default(true)
@@ -56,17 +56,25 @@ const fields = {
     .description('Keep this local preview current while CordisX is open.')
     .i18n(description('Keep this local preview current while CordisX is open.', 'CordisX 打开期间保持本地预览更新。')),
   releaseTrack: Schema.union([Schema.const('stable'), Schema.const('preview'), Schema.const('early-access')]).default('stable')
-    .extra('extra', label('Release track', '发布通道', group('workspace', 'Workspace', '工作区', 'host:settings')))
+    .extra('extra', label('Release track', '发布通道', { presenter: { version: 1, kind: 'choice.select' }, ...group('workspace', 'Workspace', '工作区', 'host:settings') }))
     .description('Choose the update stream for this workspace.')
     .i18n(description('Choose the update stream for this workspace.', '选择此工作区使用的更新通道。')),
   approvalMode: Schema.union([Schema.const('manual'), Schema.const('team-lead'), Schema.const('automatic')]).default('manual').role('radio')
-    .extra('extra', label('Approval mode', '审批方式', group('collaboration', 'Collaboration', '协作', 'host:tags')))
+    .extra('extra', label('Approval mode', '审批方式', { presenter: { version: 1, kind: 'choice.radio', options: { density: 'compact' } }, ...group('collaboration', 'Collaboration', '协作', 'host:tags') }))
     .description('Select how new shared requests are approved.')
     .i18n(description('Select how new shared requests are approved.', '选择新共享请求的审批方式。')),
+  reviewMode: Schema.union([Schema.const('guided'), Schema.const('focused'), Schema.const('automatic')]).default('guided').role('radio')
+    .extra('extra', label('Review mode', '审核模式', { presenter: { version: 1, kind: 'choice.segmented', options: { density: 'compact' } }, ...group('collaboration', 'Collaboration', '协作', 'host:tags') }))
+    .description('Choose the same finite enum through the compact segmented presenter.')
+    .i18n(description('Choose the same finite enum through the compact segmented presenter.', '使用紧凑分段展示器选择同一类有限枚举。')),
   preferredReviewDate: Schema.string().default('2026-09-01').role('date')
     .extra('extra', label('Preferred review date', '首选审核日期', { icon: 'host:calendar', ...group('schedule', 'Schedule', '日程', 'host:clock') }))
     .description('Choose the next review date.')
     .i18n(description('Choose the next review date.', '选择下一次审核日期。')),
+  nextSyncAt: Schema.string().default('2026-09-01 09:30:00').role('datetime')
+    .extra('extra', label('Next sync time', '下次同步时间', { icon: 'host:calendar', ...group('schedule', 'Schedule', '日程', 'host:clock') }))
+    .description('Choose the next local sync date and time.')
+    .i18n(description('Choose the next local sync date and time.', '选择下一次本地同步的日期和时间。')),
   dailyQuietTime: Schema.string().default('18:30').role('time')
     .extra('extra', label('Daily quiet time', '每日免打扰时间', { icon: 'host:clock', ...group('schedule', 'Schedule', '日程', 'host:clock') }))
     .description('Choose when notifications pause each day.')
@@ -81,16 +89,27 @@ const fields = {
     .description('Choose the audiences that can receive this workspace update.')
     .i18n(description('Choose the audiences that can receive this workspace update.', '选择可接收此工作区更新的受众。')),
   quickLabels: Schema.array(Schema.string().min(1).max(24)).default(['weekly', 'planning']).min(0).max(6)
-    .extra('extra', label('Quick labels', '快捷标签', { icon: 'host:tags', ...group('collaboration', 'Collaboration', '协作', 'host:tags') }))
+    .extra('extra', label('Quick labels', '快捷标签', { icon: 'host:tags', presenter: { version: 1, kind: 'array.scalar-tags', options: { maxInlineItems: 6 } }, ...group('collaboration', 'Collaboration', '协作', 'host:tags') }))
     .description('Add short labels to organize this workspace.')
     .i18n(description('Add short labels to organize this workspace.', '添加简短标签来整理此工作区。')),
+  reminderChannels: Schema.array(Schema.boolean()).default([true]).min(1).max(2)
+    .extra('extra', label('Reminder channels', '提醒渠道', { icon: 'host:tags', presenter: { version: 1, kind: 'array.scalar-rows', options: { maxInlineItems: 2 } }, ...group('collaboration', 'Collaboration', '协作', 'host:tags') }))
+    .description('Choose the bounded on/off delivery channels for this workspace.')
+    .i18n(description('Choose the bounded on/off delivery channels for this workspace.', '选择此工作区可用的有限开关投递渠道。')),
   notificationRules: Schema.array(Schema.object({
     destination: Schema.string().min(3).max(80),
     enabled: Schema.boolean().default(true),
   })).default([{ destination: 'Daily summary', enabled: true }]).min(1).max(4)
-    .extra('extra', label('Notification rules', '通知规则', group('delivery', 'Delivery', '投递', 'host:info')))
-    .description('Repeatable delivery rules use the bounded JSON editor.')
-    .i18n(description('Repeatable delivery rules use the bounded JSON editor.', '可重复的投递规则使用有界 JSON 编辑器。')),
+    .extra('extra', label('Notification rules', '通知规则', { presenter: { version: 1, kind: 'array.object-dialog', options: { allowReorder: true } }, ...group('delivery', 'Delivery', '投递', 'host:info') }))
+    .description('Repeatable delivery rules open in the shared Host editor dialog.')
+    .i18n(description('Repeatable delivery rules open in the shared Host editor dialog.', '可重复的投递规则在共享 Host 编辑对话框中打开。')),
+  escalationRules: Schema.array(Schema.object({
+    owner: Schema.string().min(3).max(48),
+    enabled: Schema.boolean().default(true),
+  })).default([{ owner: 'Operations owner', enabled: true }]).min(1).max(4)
+    .extra('extra', label('Escalation rules', '升级规则', { presenter: { version: 1, kind: 'array.object-page', options: { allowReorder: true } }, ...group('delivery', 'Delivery', '投递', 'host:info') }))
+    .description('Escalation rules use the shared Host draft transaction.')
+    .i18n(description('Escalation rules use the shared Host draft transaction.', '升级规则使用同一个 Host 草稿事务。')),
   appearance: Schema.object({
     density: Schema.union([Schema.const('comfortable'), Schema.const('compact')]).default('comfortable')
       .extra('extra', label('Display density', '显示密度', group('appearance', 'Appearance', '外观', 'host:palette')))

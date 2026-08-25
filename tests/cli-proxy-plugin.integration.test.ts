@@ -394,7 +394,8 @@ describe('CLIProxy provider plugin renderer', () => {
     for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[role="alert"]') === null; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 0))
     }
-    expect(dom.window.document.querySelector('[role="alert"]')?.textContent).toContain('expect string to match regexp')
+    expect(dom.window.document.querySelector('[role="alert"]')?.textContent)
+      .toBe('Could not save configuration. Try again after checking the current settings.')
     expect(configRequests).toEqual([])
 
     const validPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="Configuration"]')!

@@ -1,4 +1,5 @@
 import type { CordisXConfigFieldSnapshot, CordisXConfigFormIcon, CordisXJsonScalar } from '../contracts.js'
+import { resolveFormPresenter, type FormDescriptor } from '@cordisx/schemastery-ui'
 import {
   createTDesignButton,
   createTDesignElement,
@@ -22,10 +23,18 @@ export type HostFormPrimitive =
   | 'input' | 'textarea' | 'number-input' | 'select' | 'checkbox' | 'switch'
   | 'radio' | 'slider' | 'path-input' | 'json-textarea'
   | 'date-picker' | 'time-picker' | 'color-picker' | 'multi-select' | 'tag-input'
-  | 'sensitive-unavailable' | 'unsupported'
+  | 'object-array' | 'sensitive-unavailable' | 'unsupported'
+
+/**
+ * Host layout policy is deliberately derived from the resolved primitive, not
+ * from a plugin's field name or page-specific CSS. Full controls consume the
+ * control column; intrinsic controls keep their natural working width and are
+ * aligned to its trailing edge.
+ */
+export type HostFormControlLayout = 'fill' | 'compact'
 
 export interface HostFormDiagnostic {
-  readonly code: 'unsupported-schema-role' | 'unsupported-schema-field'
+  readonly code: 'unsupported-schema-role' | 'unsupported-schema-field' | 'unsupported-presenter'
   readonly fieldPath: readonly string[]
   readonly detail: string
 }
@@ -35,6 +44,7 @@ export interface HostFormControl {
   readonly focusTarget?: HTMLElement
   readonly primitive: HostFormPrimitive
   readonly diagnostic?: HostFormDiagnostic
+  dispose?(): void
 }
 
 export interface HostFormItem {
@@ -73,7 +83,7 @@ export function hostConfigApplyMessage(mode: HostConfigApplyMode, phase: HostCon
 const SENSITIVE_ROLES = new Set(['secret', 'credential', 'credential-ref', 'permission', 'capability'])
 const KNOWN_ROLES = new Set([
   'checkbox', 'switch', 'radio', 'slider', 'textarea', 'multiline', 'path', 'file', 'directory',
-  'duration', 'url', 'date', 'time', 'color', 'multi-select',
+  'duration', 'url', 'date', 'datetime', 'time', 'color', 'multi-select', 'code', 'json',
 ])
 
 export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${String.raw`
@@ -132,6 +142,9 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${String.raw`
   .cxf-label { color: var(--td-text-color-primary); font-weight: 600; overflow-wrap: anywhere; }
   .cxf-required { color: var(--td-error-color); font-weight: 700; }
   .cxf-control-seat { grid-area: control; min-inline-size: 0; justify-self: stretch; }
+  .cxf-item[data-control-layout="compact"] .cxf-control-seat { inline-size: auto; max-inline-size: 100%; justify-self: end; }
+  .cxf-item[data-control-layout="compact"] .cxf-tdesign-control { inline-size: auto; }
+  .cxf-item[data-control-layout="compact"] t-input-number.cxf-tdesign-control { inline-size: 7.25rem; }
   .cxf-control {
     box-sizing: border-box; inline-size: 100%; min-block-size: var(--td-comp-size-m); margin: 0;
     border: 1px solid var(--td-border-level-2-color); border-radius: var(--td-radius-default);
@@ -155,14 +168,30 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${String.raw`
   .cxf-switch:checked::after { transform: translateX(1rem); }
   .cxf-scope:dir(rtl) .cxf-switch:checked::after { transform: translateX(-1rem); }
   .cxf-radio-group { display: flex; flex-wrap: wrap; gap: .5rem 1rem; padding-block: .25rem; }
+  .cxf-item[data-control-layout="compact"] .cxf-radio-group { inline-size: fit-content; max-inline-size: 100%; justify-content: flex-end; }
+  .cxf-item[data-control-layout="compact"] .cxf-radio-group > t-radio-group { inline-size: fit-content; max-inline-size: 100%; }
   .cxf-choice { display: inline-flex; align-items: center; gap: .4rem; min-block-size: 2rem; }
   .cxf-choice input { margin: 0; accent-color: var(--td-brand-color); }
   .cxf-slider-control { display: grid; grid-template-columns: minmax(0, 1fr) minmax(5.25rem, 6.5rem); gap: .65rem; align-items: center; inline-size: 100%; }
+  .cxf-item[data-control-layout="compact"] .cxf-slider-control { inline-size: min(100%, 23rem); }
   .cxf-slider-control > t-slider { display: block; min-inline-size: 0; --td-component-stroke: var(--cx-border); --td-brand-color: var(--cx-primary); }
   .cxf-slider-control > t-input-number { min-inline-size: 0; }
+  .cxf-array-editor { display: grid; gap: .5rem; inline-size: 100%; }
+  .cxf-array-editor-toolbar, .cxf-array-row, .cxf-array-row-actions { display: flex; align-items: center; gap: .45rem; }
+  .cxf-array-editor-toolbar { justify-content: flex-end; }
+  .cxf-array-row { justify-content: space-between; min-block-size: 2.25rem; padding: .45rem .6rem; border: 1px solid var(--td-border-level-2-color); border-radius: var(--td-radius-default); background: var(--td-bg-color-specialcomponent); }
+  .cxf-array-row-summary { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--td-text-color-secondary); }
+  .cxf-array-editor-dialog { position: fixed; inset: 10vh max(1rem, calc((100vw - 42rem) / 2)) auto; z-index: 1; display: grid; gap: .85rem; max-block-size: 80vh; overflow: auto; padding: 1rem; border: 1px solid var(--cx-border); border-radius: .8rem; background: var(--cx-surface); color: var(--cx-text); box-shadow: var(--td-shadow-3); }
+  .cxf-array-editor-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+  .cxf-array-editor-dialog-fields { display: grid; gap: .8rem; }
+  .cxf-array-editor-dialog-field { display: grid; gap: .3rem; }
   .cxf-color-control { display: grid; grid-template-columns: minmax(0, 1fr) 2.25rem; gap: .5rem; align-items: center; inline-size: 100%; }
-  .cxf-color-swatch { inline-size: 2.25rem; block-size: 2rem; border: 1px solid var(--td-border-level-2-color); border-radius: var(--td-radius-default); background: var(--cxf-color, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cx-surface) 45%, transparent); cursor: pointer; }
-  .cxf-color-swatch:focus-visible { outline: 2px solid var(--td-brand-color-focus); outline-offset: 2px; }
+  .cxf-datetime-control { display: grid; grid-template-columns: minmax(0, 1fr) minmax(8rem, 10rem); gap: .5rem; align-items: center; inline-size: 100%; }
+  .cxf-color-picker { appearance: none; inline-size: 2.25rem; block-size: 2rem; margin: 0; border: 1px solid var(--td-border-level-2-color); border-radius: var(--td-radius-default); padding: .2rem; background: var(--td-bg-color-specialcomponent); cursor: pointer; }
+  .cxf-color-picker::-webkit-color-swatch-wrapper { padding: 0; }
+  .cxf-color-picker::-webkit-color-swatch { border: 0; border-radius: calc(var(--td-radius-default) - .15rem); }
+  .cxf-color-picker:focus-visible { outline: 2px solid var(--td-brand-color-focus); outline-offset: 2px; }
+  .cxf-color-picker:disabled { cursor: not-allowed; opacity: var(--cx-disabled); }
   .cxf-time-select { max-inline-size: 12rem; }
   .cxf-help, .cxf-error { margin: 0; overflow-wrap: anywhere; font-size: .78rem; line-height: 1.45; }
   .cxf-help { grid-area: help; }
@@ -188,7 +217,7 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${String.raw`
   .cxf-empty { padding: 1.25rem; text-align: center; color: var(--td-text-color-secondary); }
   .cxf-note { margin: 0; padding-inline: .25rem; color: var(--cx-muted); font-size: .78rem; line-height: 1.5; }
   .cxf-loading { display: inline-flex; align-items: center; gap: .5rem; color: var(--td-text-color-secondary); }
-  @media (max-width: 760px) { .cxf-item { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; gap: .35rem; } .cxf-form { inline-size: 100%; } .cxf-slider-control { grid-template-columns: minmax(0, 1fr) 5.25rem; } }
+  @media (max-width: 760px) { .cxf-item { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; gap: .35rem; } .cxf-form { inline-size: 100%; } .cxf-slider-control { grid-template-columns: minmax(0, 1fr) 5.25rem; } .cxf-datetime-control { grid-template-columns: minmax(0, 1fr); } .cxf-item[data-control-layout="compact"] .cxf-slider-control { inline-size: min(100%, 23rem); } }
   @media (forced-colors: active) { .cxf-control:focus-visible, .cxf-button:focus-visible, .cxf-choice input:focus-visible, .cxf-tdesign-control:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; } }
   @media (prefers-reduced-motion: reduce) { .cxf-scope .cxf-control, .cxf-scope .cxf-button, .cxf-scope .cxf-switch::after { transition: none; } }
 `}`
@@ -204,14 +233,12 @@ function jsonLike(field: CordisXConfigFieldSnapshot): boolean {
 
 export function selectHostFormPrimitive(field: CordisXConfigFieldSnapshot): HostFormPrimitive {
   if (sensitive(field)) return 'sensitive-unavailable'
+  const presented = hostPresenterPrimitive(field)
+  if (presented !== undefined) return presented
   if (field.type === 'array') {
     if (field.choices !== undefined && field.role === 'multi-select') return 'multi-select'
     if (field.arrayItemType !== undefined && field.max !== undefined && field.max <= 64) return 'tag-input'
-    // A complex array retains the existing bounded JSON editor until a
-    // dedicated structured editor is declared. This is real read/write
-    // support, not an unavailable placeholder; it keeps existing service
-    // configuration edits available while bounded primitive arrays receive
-    // their native TDesign affordance above.
+    if (field.arrayItemSchema !== undefined) return 'object-array'
     if (jsonLike(field)) return 'json-textarea'
     return 'unsupported'
   }
@@ -219,10 +246,10 @@ export function selectHostFormPrimitive(field: CordisXConfigFieldSnapshot): Host
   if (field.type === 'boolean') return field.role === 'switch' ? 'switch' : 'checkbox'
   if (field.type === 'number' || field.type === 'natural') return field.role === 'slider' ? 'slider' : 'number-input'
   if (field.type === 'string') {
-    if (field.role === 'date') return 'date-picker'
+    if (field.role === 'date' || field.role === 'datetime') return 'date-picker'
     if (field.role === 'time') return 'time-picker'
     if (field.role === 'color') return 'color-picker'
-    if (field.role === 'textarea' || field.role === 'multiline') return 'textarea'
+    if (field.role === 'textarea' || field.role === 'multiline' || field.role === 'code' || field.role === 'json') return 'textarea'
     if (field.role === 'path' || field.role === 'file' || field.role === 'directory') return 'path-input'
     return 'input'
   }
@@ -230,8 +257,56 @@ export function selectHostFormPrimitive(field: CordisXConfigFieldSnapshot): Host
   return 'unsupported'
 }
 
+function presenterDescriptor(field: CordisXConfigFieldSnapshot): FormDescriptor {
+  return {
+    path: field.path,
+    type: field.type as FormDescriptor['type'],
+    ...(field.role === undefined ? {} : { role: field.role }),
+    ...(field.choices === undefined ? {} : { choices: field.choices }),
+    ...(field.arrayItemType === undefined ? {} : { itemType: field.arrayItemType }),
+    ...(field.arrayItemSchema === undefined ? {} : { item: { path: [...field.path, '*'], type: 'object' } }),
+    ...(field.presenter === undefined ? {} : { presentation: field.presenter }),
+  }
+}
+
+/**
+ * The only configurable renderer choice is a closed, versioned protocol token.
+ * Unsupported or incompatible entries deliberately fall through to the
+ * schema-derived Host primitive; no plugin receives a rendering escape hatch.
+ */
+export function hostPresenterPrimitive(field: CordisXConfigFieldSnapshot): HostFormPrimitive | undefined {
+  if (field.presenter === undefined) return undefined
+  const resolution = resolveFormPresenter(presenterDescriptor(field))
+  return resolution.diagnostic === undefined ? resolution.primitive as HostFormPrimitive : undefined
+}
+
+/**
+ * The catalog-level layout classification intentionally has no labels, paths,
+ * groups, or page knowledge. New compact presenter kinds extend this set once
+ * in the Host adapter rather than adding a field-specific Manager override.
+ */
+function hostFormControlLayoutForPrimitive(primitive: HostFormPrimitive): HostFormControlLayout {
+  switch (primitive) {
+    case 'number-input':
+    case 'slider':
+    case 'checkbox':
+    case 'switch':
+    case 'radio':
+      return 'compact'
+    default:
+      return 'fill'
+  }
+}
+
+export function hostFormControlLayout(field: CordisXConfigFieldSnapshot): HostFormControlLayout {
+  return hostFormControlLayoutForPrimitive(selectHostFormPrimitive(field))
+}
+
 export function hostFormDiagnostic(field: CordisXConfigFieldSnapshot): HostFormDiagnostic | undefined {
   const primitive = selectHostFormPrimitive(field)
+  if (field.presenter !== undefined && hostPresenterPrimitive(field) === undefined) return {
+    code: 'unsupported-presenter', fieldPath: field.path, detail: `incompatible Host form presenter: ${field.presenter.kind}`,
+  }
   if (primitive === 'unsupported') return {
     code: 'unsupported-schema-field', fieldPath: field.path, detail: `unsupported Schemastery field type: ${field.type}`,
   }
@@ -252,6 +327,7 @@ export function validateHostFormValue(field: CordisXConfigFieldSnapshot, value: 
     if (field.choices !== undefined && value.some(item => !field.choices!.some(choice => Object.is(choice.value, item)))) return managerCopy(locale, 'form.choice-invalid')
   }
   if (field.role === 'date' && (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/u.test(value))) return productLocale(locale) === 'zh-CN' ? '请输入有效日期' : 'Enter a valid date'
+  if (field.role === 'datetime' && (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2} [0-2]\d:[0-5]\d:[0-5]\d$/u.test(value))) return productLocale(locale) === 'zh-CN' ? '请输入有效日期和时间' : 'Enter a valid date and time'
   if (field.role === 'time' && (typeof value !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(value))) return productLocale(locale) === 'zh-CN' ? '请输入有效时间' : 'Enter a valid time'
   if (field.role === 'color' && (typeof value !== 'string' || !/^#[\da-fA-F]{6}$/u.test(value))) return productLocale(locale) === 'zh-CN' ? '请输入有效 HEX 颜色' : 'Enter a valid HEX color'
   if (field.type === 'number' || field.type === 'natural') {
@@ -548,12 +624,103 @@ export class HostFormAdapter {
   }
 
   connect(item: HostFormItem, control: HostFormControl): void {
+    item.root.dataset.controlLayout = hostFormControlLayoutForPrimitive(control.primitive)
     const describedBy = [item.help?.id, item.error.id].filter(Boolean).join(' ')
     const target = control.primitive === 'radio' ? control.root : control.focusTarget ?? control.root
     target.setAttribute('aria-describedby', describedBy)
     if (control.primitive === 'radio') {
       item.label.removeAttribute('for')
       control.root.setAttribute('aria-labelledby', item.label.id)
+    }
+  }
+
+  private objectArrayControl(field: CordisXConfigFieldSnapshot, id: string, onDraft: (value: unknown, issue?: string) => void): HostFormControl {
+    const root = this.document.createElement('div')
+    root.className = 'cxf-array-editor'
+    root.dataset.hostFormPrimitive = 'object-array'
+    root.dataset.presenter = field.presenter?.kind ?? 'array.object-auto'
+    const values = Array.isArray(field.value) ? field.value.filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object' && !Array.isArray(item)) : []
+    const ids = values.map(() => `cxf-array-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`)
+    const limit = field.max ?? 64
+    const schema = field.arrayItemSchema
+    const canReorder = field.presenter?.options?.allowReorder !== false
+    let connectedOnce = root.isConnected
+    let dismissActiveDialog: (() => void) | undefined
+    const observer = this.document.defaultView === null ? undefined : new this.document.defaultView.MutationObserver(() => {
+      if (root.isConnected) { connectedOnce = true; return }
+      if (connectedOnce) { dismissActiveDialog?.(); observer?.disconnect() }
+    })
+    observer?.observe(this.document.documentElement, { childList: true, subtree: true })
+    const emit = (next: readonly Record<string, unknown>[]): void => onDraft(next, validateHostFormValue(field, next, this.locale()))
+    const summary = (value: Record<string, unknown>): string => schema?.fields?.map(({ key, schema }) => `${schema.label ?? key}: ${String(value[key] ?? '')}`).join(' · ') || managerCopy(this.locale(), 'form.array-item')
+    const render = (): void => {
+      root.replaceChildren()
+      const toolbar = this.document.createElement('div')
+      toolbar.className = 'cxf-array-editor-toolbar'
+      const add = this.button(managerCopy(this.locale(), 'form.add-item'), { icon: 'host:save' })
+      add.disabled = field.disabled || values.length >= limit
+      add.addEventListener('click', () => {
+        const item = Object.fromEntries((schema?.fields ?? []).map(({ key, schema }) => [key, schema.type === 'boolean' ? false : schema.type === 'number' || schema.type === 'natural' ? schema.min ?? 0 : '']))
+        values.push(item); ids.push(`cxf-array-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`); emit(values); render(); open(values.length - 1)
+      })
+      toolbar.append(add); root.append(toolbar)
+      values.forEach((value, index) => {
+        const row = this.document.createElement('div'); row.className = 'cxf-array-row'; row.dataset.hostArrayItemId = ids[index]!
+        const text = this.document.createElement('span'); text.className = 'cxf-array-row-summary'; text.textContent = summary(value)
+        const actions = this.document.createElement('div'); actions.className = 'cxf-array-row-actions'
+        const edit = this.button(managerCopy(this.locale(), 'form.edit-item'), { icon: 'host:settings' }); edit.disabled = field.disabled; edit.addEventListener('click', () => open(index))
+        const duplicate = this.button(managerCopy(this.locale(), 'form.duplicate-item'), { icon: 'host:files' }); duplicate.disabled = field.disabled || values.length >= limit; duplicate.addEventListener('click', () => { values.splice(index + 1, 0, structuredClone(value)); ids.splice(index + 1, 0, `cxf-array-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`); emit(values); render() })
+        const moveUp = this.button(managerCopy(this.locale(), 'form.move-item-up')); moveUp.disabled = field.disabled || !canReorder || index === 0; moveUp.addEventListener('click', () => { [values[index - 1], values[index]] = [values[index]!, values[index - 1]!]; [ids[index - 1], ids[index]] = [ids[index]!, ids[index - 1]!]; emit(values); render() })
+        const moveDown = this.button(managerCopy(this.locale(), 'form.move-item-down')); moveDown.disabled = field.disabled || !canReorder || index === values.length - 1; moveDown.addEventListener('click', () => { [values[index + 1], values[index]] = [values[index]!, values[index + 1]!]; [ids[index + 1], ids[index]] = [ids[index]!, ids[index + 1]!]; emit(values); render() })
+        const remove = this.button(managerCopy(this.locale(), 'form.delete-item'), { tone: 'danger', icon: 'host:reset' }); remove.disabled = field.disabled || values.length <= (field.min ?? 0); remove.addEventListener('click', () => { values.splice(index, 1); ids.splice(index, 1); emit(values); render() })
+        actions.append(edit, duplicate, moveUp, moveDown, remove); row.append(text, actions); root.append(row)
+      })
+    }
+    const open = (index: number): void => {
+      dismissActiveDialog?.()
+      const host = tdesignPortalContainer(this.portalHost)
+      const rowId = ids[index]!
+      const restore = root.querySelector<HTMLElement>(`[data-host-array-item-id="${rowId}"] button`)
+      const dialog = this.document.createElement('section'); dialog.className = 'cxf-array-editor-dialog'; dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.tabIndex = -1
+      const head = this.document.createElement('div'); head.className = 'cxf-array-editor-dialog-head'
+      const title = this.document.createElement('strong'); title.id = `${id}-${rowId}-title`; title.textContent = field.label ?? managerCopy(this.locale(), 'form.edit-item'); dialog.setAttribute('aria-labelledby', title.id)
+      const close = this.button(managerCopy(this.locale(), 'form.close'), { density: 'icon', icon: 'host:reset' }); close.setAttribute('aria-label', managerCopy(this.locale(), 'form.close'))
+      let dismissed = false
+      const dismiss = () => {
+        if (dismissed) return
+        dismissed = true
+        this.document.removeEventListener('pointerdown', onPointerDown, true)
+        dialog.removeEventListener('keydown', onKey)
+        dialog.remove()
+        if (dismissActiveDialog === dismiss) dismissActiveDialog = undefined
+        restore?.focus()
+      }
+      close.addEventListener('click', dismiss); head.append(title, close); dialog.append(head)
+      const fields = this.document.createElement('div'); fields.className = 'cxf-array-editor-dialog-fields'; dialog.append(fields)
+      for (const child of schema?.fields ?? []) {
+        const slot = this.document.createElement('div'); slot.className = 'cxf-array-editor-dialog-field'
+        const label = this.document.createElement('label'); label.textContent = child.schema.label ?? child.key
+        const childField: CordisXConfigFieldSnapshot = { namespace: field.namespace, path: [...field.path, rowId, child.key], type: child.schema.type, ...(child.schema.role === undefined ? {} : { role: child.schema.role }), ...(child.schema.choices === undefined ? {} : { choices: child.schema.choices }), ...(child.schema.presenter === undefined ? {} : { presenter: child.schema.presenter }), ...(child.schema.item === undefined ? {} : { arrayItemSchema: child.schema.item }), value: values[index]![child.key], disabled: field.disabled || child.schema.disabled, required: child.schema.required, ...(child.schema.min === undefined ? {} : { min: child.schema.min }), ...(child.schema.max === undefined ? {} : { max: child.schema.max }), ...(child.schema.step === undefined ? {} : { step: child.schema.step }), ...(child.schema.arrayItemType === undefined ? {} : { arrayItemType: child.schema.arrayItemType }) }
+        const control = this.control(childField, `${id}-${rowId}-${child.key}`, next => { values[index] = { ...values[index], [child.key]: next }; emit(values); render() })
+        label.htmlFor = `${id}-${rowId}-${child.key}`; slot.append(label, control.root); fields.append(slot)
+      }
+      const focusable = (): HTMLElement[] => [...dialog.querySelectorAll<HTMLElement>('button, [tabindex]:not([tabindex="-1"])')].filter(element => !element.hasAttribute('disabled') && element.getAttribute('aria-disabled') !== 'true')
+      const onKey = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') { event.preventDefault(); dismiss(); return }
+        if (event.key !== 'Tab') return
+        const items = focusable(); if (items.length === 0) return
+        const active = this.document.activeElement
+        const current = items.indexOf(active as HTMLElement)
+        if (event.shiftKey && (current <= 0 || active === dialog)) { event.preventDefault(); items.at(-1)?.focus() }
+        else if (!event.shiftKey && current === items.length - 1) { event.preventDefault(); items[0]?.focus() }
+      }
+      const onPointerDown = (event: Event) => { if (!event.composedPath().includes(dialog)) dismiss() }
+      dialog.addEventListener('keydown', onKey); this.document.addEventListener('pointerdown', onPointerDown, true); host.append(dialog); dismissActiveDialog = dismiss; close.focus()
+    }
+    render()
+    return {
+      root, focusTarget: root, primitive: 'object-array',
+      dispose: () => { dismissActiveDialog?.(); observer?.disconnect() },
     }
   }
 
@@ -602,7 +769,39 @@ export class HostFormAdapter {
       const date = createTDesignElement(this.document, 't-date-picker', primitive)
       date.tabIndex = field.disabled ? -1 : 0
       setCommonControlState(date, field, id)
+      const dateTime = field.role === 'datetime'
       const initial = typeof field.value === 'string' ? field.value : undefined
+      if (dateTime) {
+        const root = this.document.createElement('div')
+        root.className = 'cxf-datetime-control'
+        root.dataset.hostFormComposite = 'datetime'
+        const dateValue = initial?.slice(0, 10)
+        const initialTime = /^\d{4}-\d{2}-\d{2} ([0-2]\d:[0-5]\d)(?::[0-5]\d)?$/u.exec(initial ?? '')?.[1] ?? '00:00'
+        const options: TDesignSelectOption<string>[] = []
+        for (let hour = 0; hour < 24; hour += 1) for (let minute = 0; minute < 60; minute += 15) {
+          const value = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+          options.push({ label: value, value })
+        }
+        let selectedDate = dateValue ?? ''
+        let selectedTime = initialTime
+        const emit = () => onDraft(selectedDate === '' ? '' : `${selectedDate} ${selectedTime}:00`, validateHostFormValue(field, selectedDate === '' ? '' : `${selectedDate} ${selectedTime}:00`, this.locale()))
+        setTDesignProps(date, {
+          value: dateValue, defaultValue: dateValue,
+          placeholder: productLocale(this.locale()) === 'zh-CN' ? '选择日期' : 'Select date',
+          format: 'YYYY-MM-DD', disabled: field.disabled,
+          popupProps: { attach: () => this.portalHost },
+          onChange: (value: string | undefined) => { selectedDate = value ?? ''; emit() },
+        })
+        const time = createTDesignSelect(this.document, this.portalHost, options, {
+          id: `${id}-time`, label: field.label ?? field.path.at(-1) ?? 'Time',
+          placeholder: productLocale(this.locale()) === 'zh-CN' ? '选择时间' : 'Select time', value: selectedTime,
+          disabled: field.disabled, clearable: false,
+          onChange: value => { selectedTime = value ?? selectedTime; emit() },
+        })
+        time.classList.add('cxf-time-select')
+        root.append(date, time)
+        return { root, focusTarget: date, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
+      }
       setTDesignProps(date, {
         value: initial,
         defaultValue: initial,
@@ -636,46 +835,36 @@ export class HostFormAdapter {
     if (primitive === 'color-picker') {
       const root = this.document.createElement('div')
       root.className = 'cxf-color-control'
-      // This is a semantic pair (palette + editable HEX value), not an
-      // additional field chrome. Keep the primitive marker on the editable
-      // TDesign input so validation and ARIA feedback target it.
+      // This is a semantic pair (a Host-owned platform color picker and an
+      // editable TDesign HEX input), not a second field shell. The browser
+      // picker is only the platform color well; the value, validation, draft
+      // and all Host state continue to flow through the one TDesign input.
       root.dataset.hostFormComposite = primitive
-      const palette: readonly TDesignSelectOption<string>[] = [
-        { label: '#3B82F6', value: '#3B82F6' }, { label: '#10B981', value: '#10B981' },
-        { label: '#F59E0B', value: '#F59E0B' }, { label: '#EF4444', value: '#EF4444' },
-        { label: '#8B5CF6', value: '#8B5CF6' }, { label: '#64748B', value: '#64748B' },
-      ]
       const current = typeof field.value === 'string' ? field.value.toUpperCase() : ''
-      const picker = createTDesignSelect(this.document, this.portalHost, palette, {
-        id: `${id}-palette`, label: field.label ?? field.path.at(-1) ?? 'Color',
-        placeholder: productLocale(this.locale()) === 'zh-CN' ? '选择颜色' : 'Choose color',
-        value: palette.some(option => option.value === current) ? current : undefined,
-        disabled: field.disabled,
-        clearable: false,
-        onChange: value => {
-          const next = value ?? ''
-          hex.setAttribute('value', next)
-          setTDesignProps(hex, { value: next, defaultValue: next })
-          preview.style.setProperty('--cxf-color', next)
-          onDraft(next, validateHostFormValue(field, next, this.locale()))
-        },
-      })
       const hex = createTDesignElement(this.document, 't-input', primitive)
       hex.id = id
       hex.tabIndex = field.disabled ? -1 : 0
+      const picker = this.document.createElement('input')
+      picker.className = 'cxf-color-picker'
+      picker.type = 'color'
+      picker.value = /^#[\dA-F]{6}$/u.test(current) ? current : '#000000'
+      picker.disabled = field.disabled
+      picker.setAttribute('aria-label', productLocale(this.locale()) === 'zh-CN' ? '选择颜色' : 'Choose color')
+      picker.addEventListener('input', () => {
+        const next = picker.value.toUpperCase()
+        hex.setAttribute('value', next)
+        setTDesignProps(hex, { value: next, defaultValue: next })
+        onDraft(next, validateHostFormValue(field, next, this.locale()))
+      })
       setTDesignProps(hex, {
         value: current, defaultValue: current, disabled: field.disabled, placeholder: '#RRGGBB',
         onChange: (next: string) => {
           const normalized = next.trim().toUpperCase()
-          preview.style.setProperty('--cxf-color', /^#[\dA-F]{6}$/u.test(normalized) ? normalized : 'transparent')
+          if (/^#[\dA-F]{6}$/u.test(normalized)) picker.value = normalized
           onDraft(normalized, validateHostFormValue(field, normalized, this.locale()))
         },
       })
-      const preview = this.document.createElement('span')
-      preview.className = 'cxf-color-swatch'
-      preview.setAttribute('aria-hidden', 'true')
-      preview.style.setProperty('--cxf-color', /^#[\dA-F]{6}$/u.test(current) ? current : 'transparent')
-      root.append(picker, hex, preview)
+      root.append(hex, picker)
       return { root, focusTarget: hex, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
     }
     if (primitive === 'select') {
@@ -693,6 +882,8 @@ export class HostFormAdapter {
     if (primitive === 'radio') {
       const group = this.document.createElement('div')
       group.className = 'cxf-radio-group'
+      const segmented = field.presenter?.kind === 'choice.segmented'
+      group.dataset.enumPresentation = segmented ? 'segmented' : 'radio'
       group.setAttribute('role', 'radiogroup')
       setCommonControlState(group, field, id)
       // The official individual t-radio/t-checkbox elements look up their
@@ -706,6 +897,7 @@ export class HostFormAdapter {
         value: field.value,
         options: field.choices!.map(choice => ({ label: choice.label, value: choice.value, disabled: field.disabled })),
         disabled: field.disabled,
+        variant: segmented ? 'primary-filled' : 'outline',
         onChange: (value: CordisXJsonScalar | undefined) => onDraft(value),
       })
       group.append(radios)
@@ -790,6 +982,7 @@ export class HostFormAdapter {
       root.append(slider, numeric)
       return { root, focusTarget: slider, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
     }
+    if (primitive === 'object-array') return this.objectArrayControl(field, id, onDraft)
     const tag = primitive === 'textarea' || primitive === 'json-textarea' ? 't-textarea'
       : primitive === 'number-input' ? 't-input-number'
         : 't-input'
