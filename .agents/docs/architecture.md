@@ -486,6 +486,46 @@ local packages, and activation transactions are the next staged delivery in
 signatures, remote marketplace installation, and untrusted-code isolation
 remain later security stages.
 
+### PublisherGrant authorization seam
+
+`launcher/publisher-grants.ts` is a launcher-only seam for the normative
+`publisher-grant.v1` protocol. It verifies a Host-registered Ed25519 issuer
+key, requires a Host device-key provider (OS secure storage/hardware protected
+where available), builds nonce-bound proof-of-possession activation requests,
+and uses a persisted non-decreasing registry-attested clock for expiry and
+offline grace. It deliberately has no renderer binding and no local-file key
+fallback.
+
+The required activation registry has not been deployed or assigned an owning
+service repository. Therefore omitting the registry returns `unavailable` and
+cannot activate a grant: this prevents a local wrapper from falsely claiming
+that another machine cannot redeem the same grant. When deployed, its durable
+record is limited to issuer/grant -> plugin/device-key-hash/status plus required
+environment/idempotency fields; it never receives payment, order, price,
+currency, refund, tax, invoice, chargeback, settlement, or KYC data. The Host
+can gate CordisX installation/update/activation/feature projection only; it
+does not claim to stop source from executing outside CordisX.
+
+### PublisherGrant authorization seam
+
+`launcher/publisher-grants.ts` is a launcher-only seam for the normative
+`publisher-grant.v1` protocol. It verifies a Host-registered Ed25519 issuer
+key, requires a Host device-key provider (OS secure storage/hardware protected
+where available), builds nonce-bound proof-of-possession activation requests,
+and uses a persisted non-decreasing registry-attested clock for expiry and
+offline grace. It deliberately has no renderer binding and no local-file key
+fallback.
+
+The required activation registry has not been deployed or assigned an owning
+service repository. Therefore omitting the registry returns `unavailable` and
+cannot activate a grant: this prevents a local wrapper from falsely claiming
+that another machine cannot redeem the same grant. When deployed, its durable
+record is limited to issuer/grant -> plugin/device-key-hash/status plus required
+environment/idempotency fields; it never receives payment, order, price,
+currency, refund, tax, invoice, chargeback, settlement, or KYC data. The Host
+can gate CordisX installation/update/activation/feature projection only; it
+does not claim to stop source from executing outside CordisX.
+
 The Platform slice adds versioned capability declarations, an identity-bound
 Permission Broker, and manager permission projections. These controls govern
 cooperative `ctx.platform` calls only; package installation, signatures,
