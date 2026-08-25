@@ -10,7 +10,7 @@ import { build } from 'esbuild'
 const execFileAsync = promisify(execFile)
 const version = '1.2.10'
 const tarballSha256 = 'e1929f06eda5c3d2ee194da0d6bc9f81e187184fe1054627afeabad2ae71db0e'
-const components = ['input', 'textarea', 'input-number', 'select', 'checkbox', 'switch', 'radio', 'slider', 'button', 'alert', 'loading']
+const components = ['input', 'textarea', 'input-number', 'select', 'date-picker', 'tag-input', 'checkbox', 'switch', 'radio', 'slider', 'button', 'alert', 'loading']
 const root = fileURLToPath(new URL('..', import.meta.url))
 const output = path.join(root, 'src/renderer/vendor/tdesign-web-components-1.2.10.ts')
 const work = await mkdtemp(path.join(tmpdir(), 'cordisx-tdesign-vendor-'))
@@ -45,8 +45,19 @@ try {
   if (mutationMarkerIndex < 0 || mutationStart < 0 || mutationEnd < 0) {
     throw new Error('Pinned Omi HTMLElement compatibility patch no longer matches upstream')
   }
-  const script = `${upstreamScript.slice(0, mutationStart)}(()=>{})();/* CordisX: preserve the native HTMLElement constructor. */${upstreamScript.slice(mutationEnd + 5)}`
+  let script = `${upstreamScript.slice(0, mutationStart)}(()=>{})();/* CordisX: preserve the native HTMLElement constructor. */${upstreamScript.slice(mutationEnd + 5)}`
     .replace(/[ \t]+$/gmu, '')
+  // A few code paths in the official 1.2.10 ESM subset retain `Component.h`
+  // after bundling although the imported Omi binding has been elided. Bind only
+  // those calls to the already registered official t-input base class instead
+  // of exposing a generic global `Component` (which could collide with the
+  // embedding application). The helper is installed after every component tag
+  // has been registered, before any element is connected or rendered.
+  const unboundComponentReferences = [...script.matchAll(/\bComponent\.h\(/gu)].length
+  if (unboundComponentReferences > 0) {
+    script = script.replaceAll('Component.h(', 'globalThis.__cordisxTDesignOmiComponent.h(')
+    script += ';globalThis.__cordisxTDesignOmiComponent=customElements.get("t-input");if(typeof globalThis.__cordisxTDesignOmiComponent?.h!=="function")throw new Error("TDesign Omi component bridge was not installed")'
+  }
   const css = await readFile(path.join(work, 'node_modules/tdesign-web-components/lib/style/index.css'), 'utf8')
   const tokenBlocks = [...css.matchAll(/:root(?:\[theme-mode="(?:light|dark)"\])?(?:\s*,\s*:root(?:\[theme-mode="(?:light|dark)"\])?)?\s*\{[^}]*\}/g)]
     .map(match => match[0]

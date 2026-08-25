@@ -1204,6 +1204,10 @@ const MANAGER_STYLES = `
   .cxm-usage-item { padding: 12px 2px; }
   .cxm-usage-item + .cxm-usage-item { border-top: 1px solid rgba(255, 255, 255, .08); }
   .cxm-usage-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 190px); align-items: center; gap: 12px; }
+  /* The policy adapter is already an official TDesign Select. This layout
+     seat must not borrow the native input chrome or it becomes a second
+     visible border/background around the Web Component. */
+  .cxm-usage-policy-select { inline-size: 100%; min-inline-size: 0; }
   .cxm-usage-identity { display: flex; min-width: 0; align-items: center; gap: 10px; }
   .cxm-usage-identity .cxm-plugin-icon { width: 32px; height: 32px; }
   .cxm-usage-resources { margin: 9px 0 0 42px; border-top: 1px solid rgba(255, 255, 255, .065); }
@@ -1232,7 +1236,7 @@ const MANAGER_STYLES = `
     .cxm-dialog { grid-template-columns: 168px minmax(0, 1fr); width: calc(100vw - 20px); height: calc(100vh - 20px); }
     .cxm-card-grid, .cxm-detail-grid { grid-template-columns: 1fr; }
     .cxm-usage-header { grid-template-columns: minmax(0, 1fr); }
-    .cxm-usage-header .cxm-source-input { width: 100%; }
+    .cxm-usage-header .cxm-usage-policy-select { width: 100%; }
     .cxm-usage-resources { margin-left: 42px; }
     .cxm-resource-row { grid-template-columns: minmax(0, 1fr); }
     .cxm-resource-id { grid-column: 1; grid-row: auto; }
@@ -2180,6 +2184,7 @@ export function installCordisXManager(
   const lifecycleBusy = new Map<string, ManagerPluginStatus>()
   let lifecycleInstallBusy = false
   const configRendererMounts = new Set<ConfigRendererMountHandle>()
+  const configFieldActionMenus = new Set<{ dispose(): void }>()
   const lunaConsoleMounts = new Set<{
     readonly destroy: () => void
     readonly setTheme: (theme: 'dark' | 'light') => void
@@ -2195,6 +2200,11 @@ export function installCordisXManager(
   const disposeConfigRenderers = (): void => {
     for (const mount of configRendererMounts) void mount.dispose()
     configRendererMounts.clear()
+  }
+
+  const disposeConfigFieldActionMenus = (): void => {
+    for (const menu of configFieldActionMenus) menu.dispose()
+    configFieldActionMenus.clear()
   }
 
   const disposeLunaConsoles = (): void => {
@@ -3306,7 +3316,7 @@ export function installCordisXManager(
           },
           { disabled: model.setExtensionPointPolicy === undefined },
         )
-        policy.classList.add('cxm-source-input')
+        policy.classList.add('cxm-usage-policy-select')
         headerRow.append(identity, policy)
         item.append(headerRow)
         const resources = create(document, 'div', 'cxm-usage-resources')
@@ -4257,12 +4267,31 @@ export function installCordisXManager(
     const form = forms.form(plugin.id)
     form.dataset.pluginConfigForm = plugin.id
     form.dataset.state = draft.state
-    const section = forms.section(managerCopy(locale, 'form.section-general'))
-    const grid = section.content
-    form.append(section.root)
+    let generalGrid: HTMLElement | undefined
+    const groupGrids = new Map<string, HTMLElement>()
+    const gridFor = (field: CordisXConfigFieldSnapshot): HTMLElement => {
+      if (field.group !== undefined) {
+        const existing = groupGrids.get(field.group.id)
+        if (existing !== undefined) return existing
+        const section = forms.section(
+          field.group.title ?? managerCopy(locale, 'form.section-general'),
+          field.group.description,
+          field.group.icon,
+        )
+        groupGrids.set(field.group.id, section.content)
+        form.append(section.root)
+        return section.content
+      }
+      if (generalGrid !== undefined) return generalGrid
+      const section = forms.section(managerCopy(locale, 'form.section-general'))
+      generalGrid = section.content
+      form.append(section.root)
+      return generalGrid
+    }
     let submit: TDesignButtonElement | undefined
     let actions: HTMLElement | undefined
     for (const [index, field] of visibleFields.entries()) {
+      const grid = gridFor(field)
       const pathKey = JSON.stringify(field.path)
       const controlId = `cxm-config-${plugin.id}-${index}`
       const sensitive = field.role !== undefined && sensitiveRoles.includes(field.role)
@@ -4272,7 +4301,8 @@ export function installCordisXManager(
         label: fieldLabel(field),
         ...(field.description === undefined ? {} : { help: field.description }),
         required: field.required,
-        fullWidth: sensitive || ['textarea', 'json-textarea', 'path-input', 'unsupported'].includes(primitive),
+        ...(field.icon === undefined ? {} : { icon: field.icon }),
+        fullWidth: sensitive || ['textarea', 'json-textarea', 'path-input', 'tag-input', 'multi-select', 'object-array', 'unsupported'].includes(primitive),
       })
       item.root.dataset.configPath = field.path.join('.')
       item.root.dataset.hostFormPrimitive = primitive
@@ -4285,7 +4315,6 @@ export function installCordisXManager(
         continue
       }
 
-      let fieldReset: TDesignButtonElement | undefined
       const setDraft = (value: unknown, issue?: string): void => {
         draft!.values.set(pathKey, value)
         draft!.operations.set(pathKey, value === undefined
@@ -4305,8 +4334,7 @@ export function installCordisXManager(
           status.dataset.state = 'dirty'
           status.textContent = hostConfigApplyMessage(descriptor.applies, 'dirty', locale)
         }
-        fieldReset?.removeAttribute('hidden')
-        if (actions !== undefined && !actions.isConnected) form.append(actions)
+        if (actions !== undefined && !actions.isConnected) form.insertBefore(actions, form.firstChild)
         if (submit !== undefined) setTDesignDisabled(submit, !descriptor.writable || busyPluginId !== undefined
           || draft!.operations.size === 0 || draft!.issues.size > 0)
       }
@@ -4345,22 +4373,43 @@ export function installCordisXManager(
         }).catch(() => undefined)
       }
       if (descriptor.writable) {
-        fieldReset = forms.button(managerCopy(locale, 'form.restore-default'))
-        fieldReset.hidden = !draft.operations.has(pathKey)
-        setTDesignDisabled(fieldReset, busyPluginId !== undefined)
-        fieldReset.setAttribute('aria-label', productLocale(locale) === 'zh-CN'
-          ? `恢复${fieldLabel(field)}默认值` : `Restore default for ${fieldLabel(field)}`)
-        fieldReset.addEventListener('click', () => {
-          draft!.values.delete(pathKey)
-          draft!.issues.delete(pathKey)
-          draft!.operations.set(pathKey, { op: 'unset', path: field.path })
-          draft!.state = 'dirty'
-          delete draft!.message
-          renderContent()
+        const fieldMenu = forms.fieldActionMenu({
+          label: fieldLabel(field),
+          canUseDefault: () => field.hasDefault === true,
+          hasFieldDraft: () => draft!.operations.has(pathKey),
+          useDefault: () => {
+            if (field.hasDefault !== true) return
+            const defaultValue = field.defaultValue
+            draft!.values.set(pathKey, defaultValue)
+            draft!.operations.set(pathKey, { op: 'unset', path: field.path })
+            const issue = validateHostFormValue(field, defaultValue, model.snapshot().localization.locale)
+            if (issue === undefined) draft!.issues.delete(pathKey)
+            else draft!.issues.set(pathKey, issue)
+            draft!.state = 'dirty'
+            delete draft!.message
+            renderContent()
+          },
+          rollback: () => {
+            draft!.values.delete(pathKey)
+            draft!.operations.delete(pathKey)
+            draft!.issues.delete(pathKey)
+            draft!.state = draft!.operations.size === 0 ? 'pristine' : 'dirty'
+            delete draft!.message
+            renderContent()
+          },
+          copyPath: async () => {
+            const clipboard = document.defaultView?.navigator.clipboard
+            if (typeof clipboard?.writeText !== 'function') return false
+            try {
+              await clipboard.writeText(field.path.join('.'))
+              return true
+            } catch {
+              return false
+            }
+          },
         })
-        const fieldActions = create(document, 'div', 'cxf-actions cxf-field-actions')
-        fieldActions.append(fieldReset)
-        item.control.append(fieldActions)
+        item.labelRow.prepend(fieldMenu.trigger)
+        configFieldActionMenus.add(fieldMenu)
       }
       grid.append(item.root)
     }
@@ -4372,7 +4421,10 @@ export function installCordisXManager(
       status.textContent = draft.state === 'saving' ? hostConfigApplyMessage(descriptor.applies, 'saving', locale)
         : draft.state === 'saved' ? hostConfigApplyMessage(descriptor.applies, 'saved', locale)
           : draft.operations.size > 0 ? hostConfigApplyMessage(descriptor.applies, 'dirty', locale) : ''
-      const resetDraft = forms.button(managerCopy(locale, 'form.undo-changes'))
+      const resetDraft = forms.button(managerCopy(locale, 'form.undo-changes'), {
+        action: 'undo',
+        ...(descriptor.actionIcons?.reset === undefined ? {} : { icon: descriptor.actionIcons.reset }),
+      })
       setTDesignDisabled(resetDraft, draft.operations.size === 0 || busyPluginId !== undefined)
       resetDraft.addEventListener('click', () => {
         draft!.values.clear()
@@ -4382,10 +4434,13 @@ export function installCordisXManager(
         delete draft!.message
         renderContent()
       })
-      submit = forms.button(busyPluginId === plugin.id ? managerCopy(locale, 'form.saving') : managerCopy(locale, 'form.save-configuration'), { type: 'submit', variant: 'primary' })
+      submit = forms.button(busyPluginId === plugin.id ? managerCopy(locale, 'form.saving') : managerCopy(locale, 'form.save-configuration'), {
+        type: 'submit', variant: 'primary', action: 'save',
+        ...(descriptor.actionIcons?.save === undefined ? {} : { icon: descriptor.actionIcons.save }),
+      })
       setTDesignDisabled(submit, !descriptor.writable || busyPluginId !== undefined || draft.operations.size === 0 || draft.issues.size > 0)
       actions.append(status, resetDraft, submit)
-      if (draft.operations.size > 0 || ['saving', 'saved', 'conflict', 'error'].includes(draft.state)) form.append(actions)
+      if (draft.operations.size > 0 || ['saving', 'saved', 'conflict', 'error'].includes(draft.state)) form.insertBefore(actions, form.firstChild)
       form.addEventListener('submit', async (event) => {
         event.preventDefault()
         if (model.updatePluginConfig === undefined || draft!.operations.size === 0 || draft!.issues.size > 0) return
@@ -4409,7 +4464,7 @@ export function installCordisXManager(
           draft!.state = /conflict|revision/iu.test(message) ? 'conflict' : 'error'
           draft!.message = draft!.state === 'conflict'
             ? managerCopy(locale, 'form.conflict-retained')
-            : message
+            : managerCopy(model.snapshot().localization.locale, 'form.configuration-save-failed')
         } finally {
           busyPluginId = undefined
           renderContent()
@@ -6338,6 +6393,7 @@ export function installCordisXManager(
 
   function renderContent(): void {
     tooltips.hide()
+    disposeConfigFieldActionMenus()
     disposeLunaConsoles()
     marketplaceCollectionView?.dispose()
     marketplaceCollectionView = undefined
@@ -6398,6 +6454,7 @@ export function installCordisXManager(
   const dismiss = (): void => {
     disposeHostCollections()
     disposeConfigRenderers()
+    disposeConfigFieldActionMenus()
     disposeLunaConsoles()
     marketplaceCollectionView?.dispose()
     marketplaceCollectionView = undefined
@@ -6500,6 +6557,7 @@ export function installCordisXManager(
     breadcrumbCleanup()
     disposeHostCollections()
     disposeConfigRenderers()
+    disposeConfigFieldActionMenus()
     disposeLunaConsoles()
     marketplaceCollectionView?.dispose()
     marketplaceCollectionView = undefined

@@ -344,7 +344,7 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(providerField?.querySelector('.cxf-help')?.textContent)
       .toBe('Choose the providers to show; leave empty for all.')
     expect(cwdField?.querySelector('.cxf-label')?.textContent).toBe('Default working directory')
-    expect(providerField?.querySelector<HTMLElement & { value?: unknown }>('t-textarea')?.value).toBe('[]')
+    expect(providerField?.querySelector<HTMLElement>('t-tag-input')?.dataset.tagValues).toBe('[]')
     expect(cwdField?.querySelector<HTMLElement & { value?: unknown }>('t-input')?.value).toBe('')
     expect(configPanel?.textContent).not.toContain('renderer 不会直接写配置文件')
     expect(configPanel?.querySelector('[data-config-path="baseUrl"]')).toBeNull()
@@ -384,10 +384,9 @@ describe('CLIProxy provider plugin renderer', () => {
         })],
       },
     })
-    const providerInput = providerField!.querySelector<HTMLElement & { value: string; onChange?: (value: string) => void }>('t-textarea')!
+    const providerInput = providerField!.querySelector<HTMLElement & { onChange?: (value: readonly string[]) => void }>('t-tag-input')!
     expect(configPanel!.querySelector('form[data-plugin-config-form] t-button[type="submit"]')).toBeNull()
-    providerInput.value = '["Gateway-A"]'
-    providerInput.onChange?.(providerInput.value)
+    providerInput.onChange?.(['Gateway-A'])
     const submit = configPanel!.querySelector<HTMLElement & { disabled: boolean }>('t-button[type="submit"]')!
     expect(submit.disabled).toBe(false)
     configPanel!.querySelector<HTMLFormElement>('form')!
@@ -395,13 +394,13 @@ describe('CLIProxy provider plugin renderer', () => {
     for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[role="alert"]') === null; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 0))
     }
-    expect(dom.window.document.querySelector('[role="alert"]')?.textContent).toContain('expect string to match regexp')
+    expect(dom.window.document.querySelector('[role="alert"]')?.textContent)
+      .toBe('Could not save configuration. Try again after checking the current settings.')
     expect(configRequests).toEqual([])
 
     const validPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="Configuration"]')!
-    const validInput = validPanel.querySelector<HTMLElement & { value: string; onChange?: (value: string) => void }>('[data-config-path="providerIds"] t-textarea')!
-    validInput.value = '["gateway-a"]'
-    validInput.onChange?.(validInput.value)
+    const validInput = validPanel.querySelector<HTMLElement & { onChange?: (value: readonly string[]) => void }>('[data-config-path="providerIds"] t-tag-input')!
+    validInput.onChange?.(['gateway-a'])
     validPanel.querySelector<HTMLFormElement>('form')!
       .dispatchEvent(new dom.window.SubmitEvent('submit', { bubbles: true, cancelable: true }))
     for (let attempt = 0; attempt < 100 && configRevision < 1; attempt += 1) {

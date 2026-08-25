@@ -970,6 +970,59 @@ export interface CordisXPluginSettings {
 
 export type CordisXConfigFieldPath = readonly string[]
 
+/** Closed semantic icon vocabulary for Host-owned configuration presentation. */
+export type CordisXConfigFormIcon =
+  | 'host:calendar' | 'host:clock' | 'host:palette' | 'host:tags'
+  | 'host:folder' | 'host:key' | 'host:settings' | 'host:info'
+  | 'host:files' | 'host:save' | 'host:reset'
+
+export interface CordisXConfigFormGroupSnapshot {
+  readonly id: string
+  readonly title?: string
+  readonly description?: string
+  readonly icon?: CordisXConfigFormIcon
+}
+
+export interface CordisXConfigFormActionIcons {
+  readonly save?: CordisXConfigFormIcon
+  readonly reset?: CordisXConfigFormIcon
+}
+
+/** Closed v1 Host Form Presenter Catalog tokens from plugin-config-common.v1. */
+export type CordisXConfigFormPresenterKind =
+  | 'choice.select' | 'choice.radio' | 'choice.segmented'
+  | 'number.input' | 'number.stepper' | 'number.slider'
+  | 'array.scalar-tags' | 'array.scalar-rows'
+  | 'array.object-auto' | 'array.object-dialog' | 'array.object-page'
+
+export interface CordisXConfigFormPresenter {
+  readonly version: 1
+  readonly kind: CordisXConfigFormPresenterKind
+  readonly options?: {
+    readonly density?: 'compact' | 'regular'
+    readonly maxInlineItems?: number
+    readonly allowReorder?: boolean
+  }
+}
+
+/** Renderer-safe recursive item schema for Host-owned object-array editing. */
+export interface CordisXConfigFormSchemaNode {
+  readonly type: string
+  readonly role?: string
+  readonly label?: string
+  readonly description?: string
+  readonly disabled: boolean
+  readonly required: boolean
+  readonly min?: number
+  readonly max?: number
+  readonly step?: number
+  readonly choices?: readonly { readonly label: string; readonly value: CordisXJsonScalar }[]
+  readonly arrayItemType?: 'string' | 'number' | 'natural' | 'boolean'
+  readonly presenter?: CordisXConfigFormPresenter
+  readonly fields?: readonly { readonly key: string; readonly schema: CordisXConfigFormSchemaNode }[]
+  readonly item?: CordisXConfigFormSchemaNode
+}
+
 export type CordisXConfigRendererSelector =
   | { readonly role: string }
   | { readonly path: CordisXConfigFieldPath }
@@ -989,12 +1042,30 @@ export interface CordisXConfigFieldSnapshot {
   readonly label?: string
   readonly description?: string
   readonly value: unknown
+  /** Whether the leaf schema declares an explicit default value. */
+  readonly hasDefault?: boolean
+  /**
+   * Resolved leaf default for Host-owned draft projection. Never projected for
+   * sensitive roles.
+   */
+  readonly defaultValue?: unknown
   readonly disabled: boolean
   readonly required: boolean
   readonly min?: number
   readonly max?: number
   readonly step?: number
   readonly choices?: readonly { readonly label: string; readonly value: CordisXJsonScalar }[]
+  /** Scalar element type for a bounded primitive array. */
+  readonly arrayItemType?: 'string' | 'number' | 'natural' | 'boolean'
+  /** Closed Host-owned presenter request; no renderer authority is conveyed. */
+  readonly presenter?: CordisXConfigFormPresenter
+  /** Recursive, renderer-safe item schema for a bounded object array. */
+  readonly arrayItemSchema?: CordisXConfigFormSchemaNode
+  /** Host-derived default item used by a bounded Add operation when available. */
+  readonly arrayItemDefault?: CordisXJsonValue
+  /** Host-validated semantic icon. No URL, SVG, CSS, or DOM is accepted. */
+  readonly icon?: CordisXConfigFormIcon
+  readonly group?: CordisXConfigFormGroupSnapshot
 }
 
 export interface CordisXConfigFieldController extends CordisXConfigFieldSnapshot {

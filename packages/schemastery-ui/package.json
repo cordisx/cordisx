@@ -1,0 +1,30 @@
+{
+  "name": "@cordisx/schemastery-ui",
+  "version": "0.1.0-beta.0",
+  "description": "Host-owned, framework-neutral Schemastery form presenter catalog for CordisX",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "npm run typecheck && npm run check:package",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check:package": "node scripts/check-package-contents.mjs"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "license": "AGPL-3.0-or-later"
+}

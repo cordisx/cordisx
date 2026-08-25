@@ -7,10 +7,13 @@ import {
   HOST_FORM_STYLES,
   HostFormAdapter,
   hostConfigApplyMessage,
+  hostFormControlLayout,
   hostFormDiagnostic,
+  hostPresenterPrimitive,
   selectHostFormPrimitive,
   validateHostFormValue,
 } from '../packages/cli/src/renderer/host-form.js'
+import { unwrapTDesignChangeValue } from '../packages/cli/src/renderer/tdesign-form.js'
 
 function field(overrides: Partial<CordisXConfigFieldSnapshot> = {}): CordisXConfigFieldSnapshot {
   return {
@@ -28,10 +31,13 @@ describe('Host form primitive registry', () => {
     expect(selectHostFormPrimitive(field({ type: 'boolean', value: false }))).toBe('checkbox')
     expect(selectHostFormPrimitive(field({ type: 'boolean', role: 'switch', value: false }))).toBe('switch')
     expect(selectHostFormPrimitive(field({ type: 'number', role: 'slider', value: 5 }))).toBe('slider')
-    expect(selectHostFormPrimitive(field({ role: 'date' }))).toBe('unsupported')
-    expect(selectHostFormPrimitive(field({ role: 'time' }))).toBe('unsupported')
-    expect(selectHostFormPrimitive(field({ role: 'color' }))).toBe('unsupported')
-    expect(selectHostFormPrimitive(field({ type: 'array', role: 'multi-select', value: ['design'] }))).toBe('unsupported')
+    expect(selectHostFormPrimitive(field({ role: 'date' }))).toBe('date-picker')
+    expect(selectHostFormPrimitive(field({ role: 'datetime' }))).toBe('date-picker')
+    expect(selectHostFormPrimitive(field({ role: 'time' }))).toBe('time-picker')
+    expect(selectHostFormPrimitive(field({ role: 'color' }))).toBe('color-picker')
+    expect(selectHostFormPrimitive(field({ type: 'array', role: 'multi-select', value: ['design'], choices: [{ label: 'Design', value: 'design' }] }))).toBe('multi-select')
+    expect(selectHostFormPrimitive(field({ type: 'array', value: ['design'], arrayItemType: 'string', max: 5 }))).toBe('tag-input')
+    expect(selectHostFormPrimitive(field({ type: 'array', value: [true], arrayItemType: 'boolean', choices: [{ label: 'Enabled', value: true }], presenter: { version: 1, kind: 'array.scalar-rows' } }))).toBe('multi-select')
     expect(selectHostFormPrimitive(field({ role: 'directory' }))).toBe('path-input')
     expect(selectHostFormPrimitive(field({ type: 'object', value: { enabled: true } }))).toBe('json-textarea')
     expect(selectHostFormPrimitive(field({ role: 'secret', disabled: true }))).toBe('sensitive-unavailable')
@@ -45,14 +51,62 @@ describe('Host form primitive registry', () => {
     expect(hostFormDiagnostic(field({ type: 'lazy', value: undefined }))).toEqual({
       code: 'unsupported-schema-field', fieldPath: ['value'], detail: 'unsupported Schemastery field type: lazy',
     })
-    expect(hostFormDiagnostic(field({ role: 'date' }))).toEqual({
-      code: 'unsupported-schema-role', fieldPath: ['value'],
-      detail: 'unsupported schema role date; no native control fallback is permitted',
+    expect(hostFormDiagnostic(field({ type: 'array', role: 'multi-select', value: ['design'] }))).toBeUndefined()
+  })
+
+  it('classifies compact controls once and keeps full controls in the full control column', () => {
+    expect(hostFormControlLayout(field())).toBe('fill')
+    expect(hostFormControlLayout(field({ role: 'textarea' }))).toBe('fill')
+    expect(hostFormControlLayout(field({ role: 'directory' }))).toBe('fill')
+    expect(hostFormControlLayout(field({ choices: [{ label: 'Safe', value: 'safe' }] }))).toBe('fill')
+    expect(hostFormControlLayout(field({ type: 'number', value: 1 }))).toBe('compact')
+    expect(hostFormControlLayout(field({ type: 'number', role: 'slider', value: 1 }))).toBe('compact')
+    expect(hostFormControlLayout(field({ type: 'boolean', value: false }))).toBe('compact')
+    expect(hostFormControlLayout(field({ type: 'boolean', role: 'switch', value: false }))).toBe('compact')
+    expect(hostFormControlLayout(field({ role: 'radio', choices: [{ label: 'Safe', value: 'safe' }] }))).toBe('compact')
+
+    const dom = new JSDOM('<!doctype html><body></body>')
+    const adapter = new HostFormAdapter(dom.window.document)
+    const compactItem = adapter.item({ id: 'compact', label: 'Parallel tasks' })
+    adapter.connect(compactItem, adapter.control(field({ type: 'number', value: 2 }), 'compact', () => undefined))
+    const fillItem = adapter.item({ id: 'fill', label: 'Workspace name' })
+    adapter.connect(fillItem, adapter.control(field(), 'fill', () => undefined))
+    expect(compactItem.root.dataset.controlLayout).toBe('compact')
+    expect(fillItem.root.dataset.controlLayout).toBe('fill')
+    expect(HOST_FORM_STYLES).toContain('.cxf-item[data-control-layout="compact"] .cxf-control-seat')
+    expect(HOST_FORM_STYLES).toContain('justify-self: end')
+    expect(HOST_FORM_STYLES).toContain('.cxf-item[data-control-layout="compact"] .cxf-slider-control')
+  })
+
+  it('resolves only closed presenter tokens and keeps segmented and object arrays Host-owned', () => {
+    const choices = [{ label: 'Manual', value: 'manual' }, { label: 'Automatic', value: 'automatic' }] as const
+    const segmented = field({ value: 'manual', choices, presenter: { version: 1, kind: 'choice.segmented' } })
+    expect(hostPresenterPrimitive(segmented)).toBe('radio')
+    const incompatible = field({ type: 'string', presenter: { version: 1, kind: 'number.slider' } })
+    expect(hostPresenterPrimitive(incompatible)).toBeUndefined()
+    expect(hostFormDiagnostic(incompatible)).toMatchObject({ code: 'unsupported-presenter' })
+
+    const dom = new JSDOM('<!doctype html><body></body>')
+    const adapter = new HostFormAdapter(dom.window.document)
+    const control = adapter.control(segmented, 'approval', () => undefined)
+    expect(control.root.dataset.enumPresentation).toBe('segmented')
+    expect((control.focusTarget as HTMLElement & { variant?: string }).variant).toBe('primary-filled')
+
+    const objectArray = field({
+      type: 'array', value: [{ name: 'Daily summary', enabled: true }], min: 1, max: 3,
+      presenter: { version: 1, kind: 'array.object-dialog' },
+      arrayItemSchema: { type: 'object', disabled: false, required: false, fields: [
+        { key: 'name', schema: { type: 'string', disabled: false, required: true, label: 'Name' } },
+        { key: 'enabled', schema: { type: 'boolean', disabled: false, required: false, label: 'Enabled' } },
+      ] },
     })
-    expect(hostFormDiagnostic(field({ type: 'array', role: 'multi-select', value: ['design'] }))).toEqual({
-      code: 'unsupported-schema-role', fieldPath: ['value'],
-      detail: 'unsupported schema role multi-select; no native control fallback is permitted',
-    })
+    const drafts = vi.fn()
+    const array = adapter.control(objectArray, 'rules', drafts)
+    expect(array.primitive).toBe('object-array')
+    expect(array.root.querySelectorAll('[data-host-array-item-id]')).toHaveLength(1)
+    ;(array.root.querySelector('t-button') as HTMLElement).click()
+    expect(array.root.querySelectorAll('[data-host-array-item-id]')).toHaveLength(2)
+    expect(drafts).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ name: 'Daily summary' })]), undefined)
   })
 
   it('validates required, finite numeric, natural, range, and choice constraints', () => {
@@ -63,6 +117,43 @@ describe('Host form primitive registry', () => {
     expect(validateHostFormValue(field({ type: 'number', value: 2, max: 3 }), 4)).toBe('不能大于 3')
     expect(validateHostFormValue(field({ type: 'number', value: 2, min: 1, step: 2 }), 2)).toBe('请按 2 的步长输入')
     expect(validateHostFormValue(field({ choices: [{ label: 'Safe', value: 'safe' }] }), 'fast')).toBe('请选择列表中的有效值')
+    expect(validateHostFormValue(field({ role: 'datetime' }), 'bad')).toBe('请输入有效日期和时间')
+  })
+
+  it('keeps object-array identity, reorder, dialog keyboard dismissal, and parent draft ownership in the Host', async () => {
+    const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true, url: 'https://forms.example.test/' })
+    const adapter = new HostFormAdapter(dom.window.document, undefined, () => 'en')
+    const drafts = vi.fn()
+    const control = adapter.control(field({
+      type: 'array', value: [{ title: 'First' }, { title: 'Second' }], min: 1, max: 4,
+      presenter: { version: 1, kind: 'array.object-dialog', options: { allowReorder: true } },
+      arrayItemSchema: { type: 'object', disabled: false, required: false, fields: [
+        { key: 'title', schema: { type: 'string', disabled: false, required: true, label: 'Title' } },
+      ] },
+    }), 'rules', drafts)
+    dom.window.document.body.append(control.root)
+    await Promise.resolve()
+    const initialIds = [...control.root.querySelectorAll<HTMLElement>('[data-host-array-item-id]')].map(row => row.dataset.hostArrayItemId)
+    const actions = control.root.querySelectorAll<HTMLElement>('t-button')
+    // Add, edit, duplicate, up, down, delete per each row. Move the second row up.
+    actions[8]!.click()
+    const reordered = [...control.root.querySelectorAll<HTMLElement>('[data-host-array-item-id]')].map(row => row.dataset.hostArrayItemId)
+    expect(reordered[0]).toBe(initialIds[1])
+    expect(reordered[1]).toBe(initialIds[0])
+    const edit = control.root.querySelectorAll<HTMLElement>('t-button')[1]!
+    edit.click()
+    const portal = dom.window.document.querySelector<HTMLElement>('[data-cxf-tdesign-portal-host]')!
+    const dialog = portal.shadowRoot?.querySelector<HTMLElement>('[role="dialog"]')
+    expect(dialog?.getAttribute('aria-modal')).toBe('true')
+    expect(dialog?.querySelector('t-input')).not.toBeNull()
+    dialog?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(portal.shadowRoot?.querySelector('[role="dialog"]')).toBeNull()
+    edit.click()
+    expect(portal.shadowRoot?.querySelector('[role="dialog"]')).not.toBeNull()
+    control.root.remove()
+    await new Promise(resolve => dom.window.setTimeout(resolve, 0))
+    expect(portal.shadowRoot?.querySelector('[role="dialog"]')).toBeNull()
+    expect(drafts).toHaveBeenCalled()
   })
 
   it('projects every generic apply mode only when a draft or save needs it', () => {
@@ -86,10 +177,52 @@ describe('Host form primitive registry', () => {
     expect(validateHostFormValue(field({ type: 'number', value: 2, max: 3 }), 4, 'en')).toBe('Must be at most 3')
     expect(validateHostFormValue(field({ type: 'number', value: 2, min: 1, step: 2 }), 2, 'en')).toBe('Use increments of 2')
     expect(validateHostFormValue(field({ choices: [{ label: 'Safe', value: 'safe' }] }), 'fast', 'en')).toBe('Choose a value from the list')
+    expect(validateHostFormValue(field({ role: 'datetime' }), 'bad', 'en')).toBe('Enter a valid date and time')
   })
 })
 
 describe('Host form DOM and accessibility', () => {
+  it('unwraps official CustomEvent change values before they enter Host drafts', () => {
+    const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true })
+    const adapter = new HostFormAdapter(dom.window.document)
+    const onDraft = vi.fn()
+    const event = (value: unknown) => new dom.window.CustomEvent('change', { detail: { value } })
+    expect(unwrapTDesignChangeValue<string>(event('Northstar'))).toBe('Northstar')
+    expect(unwrapTDesignChangeValue<number>(event(42))).toBe(42)
+
+    const input = adapter.control(field({ value: '' }), 'input', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
+    input.onChange?.(event('Northstar'))
+    expect(onDraft).toHaveBeenLastCalledWith('Northstar', undefined)
+
+    const textarea = adapter.control(field({ role: 'textarea', value: '' }), 'textarea', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
+    textarea.onChange?.(event('Multiline value'))
+    expect(onDraft).toHaveBeenLastCalledWith('Multiline value', undefined)
+
+    const number = adapter.control(field({ type: 'number', value: 1 }), 'number', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
+    number.onChange?.(event(9))
+    expect(onDraft).toHaveBeenLastCalledWith(9, undefined)
+
+    const slider = adapter.control(field({ type: 'number', role: 'slider', value: 2, min: 0, max: 10 }), 'slider', onDraft)
+    ;(slider.focusTarget as HTMLElement & { onChange?: (value: unknown) => void }).onChange?.(event(7))
+    expect(onDraft).toHaveBeenLastCalledWith(7, undefined)
+
+    const checkbox = adapter.control(field({ type: 'boolean', value: false }), 'checkbox', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
+    checkbox.onChange?.(event([true]))
+    expect(onDraft).toHaveBeenLastCalledWith(true)
+
+    const toggle = adapter.control(field({ type: 'boolean', role: 'switch', value: false }), 'toggle', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
+    toggle.onChange?.(event('true'))
+    expect(onDraft).toHaveBeenLastCalledWith(true)
+
+    const radio = adapter.control(field({ role: 'radio', value: 'safe', choices: [{ label: 'Safe', value: 'safe' }, { label: 'Fast', value: 'fast' }] }), 'radio', onDraft)
+    ;(radio.focusTarget as HTMLElement & { onChange?: (value: unknown) => void }).onChange?.(event('fast'))
+    expect(onDraft).toHaveBeenLastCalledWith('fast')
+
+    const select = adapter.control(field({ value: 'safe', choices: [{ label: 'Safe', value: 'safe' }, { label: 'Fast', value: 'fast' }] }), 'select', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
+    select.onChange?.(event('fast'))
+    expect(onDraft).toHaveBeenLastCalledWith('fast', undefined)
+  })
+
   it('projects labels, help, errors, required state, TDesign controls, and draft events', () => {
     const dom = new JSDOM('<!doctype html><html lang="zh-CN" dir="rtl"><body></body></html>', { pretendToBeVisual: true })
     const adapter = new HostFormAdapter(dom.window.document)
@@ -102,11 +235,16 @@ describe('Host form DOM and accessibility', () => {
     form.append(item.root)
     dom.window.document.body.append(form)
 
-    const range = control.root as HTMLElement & { value?: number; onChange?: (value: number) => void }
+    const range = control.focusTarget as HTMLElement & { value?: number; onChange?: (value: number) => void }
     expect(form.classList.contains('cxf-scope')).toBe(true)
     expect(item.label.htmlFor).toBe('duration')
     expect(item.root.querySelector('.cxf-required')?.getAttribute('aria-hidden')).toBe('true')
+    expect(control.root.tagName).toBe('DIV')
+    expect(control.root.className).toBe('cxf-slider-control')
     expect(range.tagName).toBe('T-SLIDER')
+    const numeric = control.root.querySelector<HTMLElement>('t-input-number')
+    expect(numeric).not.toBeNull()
+    expect(numeric?.getAttribute('placeholder')).toBe('请输入')
     expect(range.dataset.tdesignVersion).toBe('1.2.10')
     expect(range.getAttribute('role')).toBe('slider')
     expect(range.getAttribute('aria-required')).toBe('true')
@@ -153,11 +291,11 @@ describe('Host form DOM and accessibility', () => {
     expect((switchControl.root as HTMLElement & { label?: string[] }).label).toEqual(['On', 'Off'])
     expect(adapter.control(field({ role: 'secret' }), 'secret', () => undefined).root.textContent)
       .toContain('Managed by Host credentials')
-    expect(adapter.control(field({ role: 'date' }), 'date', () => undefined).root.textContent)
-      .toContain('cannot be edited safely')
+    expect(adapter.control(field({ role: 'date' }), 'date', () => undefined).root.tagName).toBe('T-DATE-PICKER')
     const text = adapter.control(field(), 'text', () => undefined).root as HTMLElement & { placeholder?: string }
     const textarea = adapter.control(field({ role: 'textarea' }), 'textarea', () => undefined).root as HTMLElement & { placeholder?: string }
     const number = adapter.control(field({ type: 'number', value: undefined }), 'number', () => undefined).root as HTMLElement & { placeholder?: string }
+    const slider = adapter.control(field({ type: 'number', role: 'slider', value: 4, min: 0, max: 10 }), 'slider', () => undefined).root
     const select = adapter.control(field({ choices: [{ label: 'Safe', value: 'safe' }] }), 'select', () => undefined).root as HTMLElement & { placeholder?: string }
     expect(text.placeholder).toBe('Enter a value')
     expect(text.getAttribute('placeholder')).toBe('Enter a value')
@@ -165,6 +303,7 @@ describe('Host form DOM and accessibility', () => {
     expect(textarea.getAttribute('placeholder')).toBe('Enter a value')
     expect(number.placeholder).toBe('Enter a value')
     expect(number.getAttribute('placeholder')).toBe('Enter a value')
+    expect(slider.querySelector('t-input-number')?.getAttribute('placeholder')).toBe('Enter a value')
     expect(select.placeholder).toBe('Choose')
     expect(select.getAttribute('placeholder')).toBe('Choose')
     const onDraft = vi.fn()
@@ -211,6 +350,8 @@ describe('Host form DOM and accessibility', () => {
     expect(HOST_FORM_STYLES).toContain('--td-bg-color-container-hover: var(--cx-hover)')
     expect(HOST_FORM_STYLES).toContain('--td-bg-color-container-select: var(--cx-pressed)')
     expect(HOST_FORM_STYLES).toContain('--td-bg-color-component-disabled:')
+    expect(HOST_FORM_STYLES).toContain('--td-text-color-anti: var(--cx-primary-text)')
+    expect(HOST_FORM_STYLES).toContain('--td-brand-color-disabled:')
     expect(HOST_FORM_STYLES).toContain('[data-cordisx-app-theme="dark"] .cxf-scope { color-scheme: dark; }')
     expect(HOST_FORM_STYLES).toContain('.cxf-tdesign-control { display: inline-block;')
     expect(HOST_FORM_STYLES).not.toMatch(/t-select\.cxf-tdesign-control:focus-visible/u)
@@ -220,9 +361,79 @@ describe('Host form DOM and accessibility', () => {
     expect(HOST_FORM_STYLES).toContain('inline-size: 100%; min-inline-size: 0; margin: 0;')
     expect(HOST_FORM_STYLES).toContain('.cxf-form-grid')
     expect(HOST_FORM_STYLES).toContain('@media (max-width: 760px)')
-    expect(HOST_FORM_STYLES).toContain('.cxf-button {\n    display: inline-block; min-block-size: 0; border: 0; padding: 0; background: transparent;')
+    expect(HOST_FORM_STYLES).toContain('.cxf-button { display: inline-block; min-block-size: 0;')
+    expect(HOST_FORM_STYLES).toContain('.cxf-button[data-density="icon"] { inline-size: 2rem; block-size: 2rem; }')
+    expect(HOST_FORM_STYLES).toContain('.cxf-form-footer { position: sticky; inset-block-start: 0;')
+    expect(HOST_FORM_STYLES).not.toContain('inset-block-end: -.25rem')
     expect(HOST_FORM_STYLES).not.toContain('.cxf-button {\n    display: inline-flex;')
     expect(HOST_FORM_STYLES).not.toMatch(/(^|[\s,{])(:root|html|body|\*)\s*[{,]/u)
+  })
+
+  it('projects semantic Host action icons into official TDesign icon slots with accessible compact actions', () => {
+    const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true })
+    const adapter = new HostFormAdapter(dom.window.document)
+    const restore = adapter.button('Restore default', { action: 'restore-default', density: 'icon' })
+    const undo = adapter.button('Undo changes', { action: 'undo' })
+    const save = adapter.button('Save configuration', { action: 'save', variant: 'primary' })
+
+    expect(restore.getAttribute('aria-label')).toBe('Restore default')
+    expect(restore.getAttribute('title')).toBe('Restore default')
+    expect(restore.getAttribute('theme')).toBe('default')
+    expect(restore.getAttribute('variant')).toBe('outline')
+    expect(restore.getAttribute('shape')).toBe('square')
+    expect(restore.dataset.hostFormAction).toBe('restore-default')
+    expect(restore.dataset.hostFormActionIcon).toBe('host:reset')
+    expect(restore.textContent).toBe('')
+    expect(restore.querySelector('[data-host-icon="host:reset"]')?.getAttribute('slot')).toBe('icon')
+    expect(undo.dataset.hostFormActionIcon).toBe('host:reset')
+    expect(undo.querySelector('[data-host-icon="host:reset"]')?.getAttribute('slot')).toBe('icon')
+    expect(save.dataset.hostFormActionIcon).toBe('host:save')
+    expect(save.querySelector('[data-host-icon="host:save"]')?.getAttribute('slot')).toBe('icon')
+    expect(save as unknown as { theme?: string; variant?: string; content?: string }).toMatchObject({ theme: 'primary', variant: 'base', content: 'Save configuration' })
+    expect(restore as unknown as { shape?: string; size?: string; content?: string }).toMatchObject({ shape: 'square', size: 'small', content: '' })
+  })
+
+  it('uses one Host-owned portalled field-action menu for default, field rollback, and path copy', async () => {
+    const dom = new JSDOM('<!doctype html><html lang="en"><body></body></html>', { pretendToBeVisual: true })
+    const adapter = new HostFormAdapter(dom.window.document, undefined, () => 'en')
+    let hasDraft = true
+    const useDefault = vi.fn()
+    const rollback = vi.fn()
+    const copyPath = vi.fn(async () => true)
+    const menu = adapter.fieldActionMenu({
+      label: 'Workspace name', canUseDefault: () => true, hasFieldDraft: () => hasDraft,
+      useDefault, rollback, copyPath,
+    })
+    dom.window.document.body.append(menu.trigger)
+    expect(menu.trigger.textContent).toBe('')
+    expect(menu.trigger.getAttribute('aria-label')).toBe('Field actions')
+    menu.trigger.click()
+    const portal = dom.window.document.querySelector<HTMLElement>('[data-cxf-tdesign-portal-host]')!
+    const popup = portal.shadowRoot?.querySelector<HTMLElement>('[role="menu"]')!
+    const entries = [...popup.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+    expect(popup.hidden).toBe(false)
+    expect(entries.map(entry => entry.textContent)).toEqual(['Use default value', 'Revert field change', 'Copy configuration path'])
+    expect(entries.map(entry => entry.querySelector('[data-host-icon]')?.getAttribute('data-host-icon'))).toEqual(['host:reset', 'host:reset', 'host:files'])
+    entries[0]!.click()
+    expect(useDefault).toHaveBeenCalledOnce()
+    expect(popup.hidden).toBe(true)
+
+    menu.trigger.click()
+    entries[1]!.click()
+    expect(rollback).toHaveBeenCalledOnce()
+    hasDraft = false
+    menu.trigger.click()
+    expect(entries[1]!.disabled).toBe(true)
+    entries[2]!.focus()
+    entries[2]!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true, cancelable: true }))
+    await Promise.resolve()
+    expect(copyPath).toHaveBeenCalledOnce()
+    expect(popup.querySelector('[role="status"]')?.textContent).toBe('Path copied')
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(popup.hidden).toBe(true)
+    expect(dom.window.document.activeElement).toBe(menu.trigger)
+    menu.dispose()
+    expect(portal.shadowRoot?.querySelector('[role="menu"]')).toBeNull()
   })
 
   it('uses the official TDesign Loading component and an honest Host empty state', () => {
@@ -279,6 +490,48 @@ describe('Host form DOM and accessibility', () => {
     expect(select.getAttribute('aria-expanded')).toBe('false')
   })
 
+  it('renders editable date/time/color, bounded multi-select, and finite tags through Host-owned TDesign controls', () => {
+    const dom = new JSDOM('<!doctype html><html lang="en"><body></body></html>', { pretendToBeVisual: true })
+    const adapter = new HostFormAdapter(dom.window.document, undefined, () => 'en')
+    const onDraft = vi.fn()
+    const date = adapter.control(field({ role: 'date', value: '2026-09-01' }), 'date', onDraft)
+    const dateTime = adapter.control(field({ role: 'datetime', value: '2026-09-01 09:30:00' }), 'date-time', onDraft)
+    const time = adapter.control(field({ role: 'time', value: '18:30' }), 'time', onDraft)
+    const color = adapter.control(field({ role: 'color', value: '#3B82F6' }), 'color', onDraft)
+    const multi = adapter.control(field({ type: 'array', role: 'multi-select', value: ['design'], min: 1, max: 3, choices: [
+      { label: 'Design', value: 'design' }, { label: 'Research', value: 'research' },
+    ] }), 'audiences', onDraft)
+    const tags = adapter.control(field({ type: 'array', value: ['weekly'], arrayItemType: 'string', max: 4 }), 'tags', onDraft)
+    dom.window.document.body.append(date.root, dateTime.root, time.root, color.root, multi.root, tags.root)
+    expect(date.root.tagName).toBe('T-DATE-PICKER')
+    expect(dateTime.root.className).toBe('cxf-datetime-control')
+    expect(dateTime.root.querySelectorAll('t-date-picker, t-select')).toHaveLength(2)
+    expect(time.root.tagName).toBe('T-SELECT')
+    expect(color.root.querySelectorAll('t-input')).toHaveLength(1)
+    expect(color.root.querySelector<HTMLInputElement>('input[type="color"]')?.value).toBe('#3b82f6')
+    expect(color.root.getAttribute('data-host-form-primitive')).toBeNull()
+    expect(color.root.querySelector('t-input')?.getAttribute('data-host-form-primitive')).toBe('color-picker')
+    expect(multi.root.tagName).toBe('T-SELECT')
+    expect(multi.root.dataset.hostFormPrimitive).toBe('multi-select')
+    expect(tags.root.tagName).toBe('T-TAG-INPUT')
+    const multiElement = multi.root as HTMLElement & { selectedValues: readonly string[] }
+    multiElement.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+    expect(multiElement.getAttribute('aria-expanded')).toBe('true')
+    multiElement.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    expect(multiElement.selectedValues).toEqual(['design', 'research'])
+    expect(onDraft).toHaveBeenLastCalledWith(['design', 'research'], undefined)
+    const dateTimeTime = dateTime.root.querySelector('t-select') as HTMLElement & { onChange?: (value: string) => void }
+    dateTimeTime.onChange?.('10:00')
+    expect(onDraft).toHaveBeenLastCalledWith('2026-09-01 10:00:00', undefined)
+    const colorInput = color.focusTarget as HTMLElement & { onChange?: (value: string) => void }
+    colorInput.onChange?.('#ef4444')
+    expect(onDraft).toHaveBeenLastCalledWith('#EF4444', undefined)
+    const colorPicker = color.root.querySelector<HTMLInputElement>('input[type="color"]')!
+    colorPicker.value = '#10b981'
+    colorPicker.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    expect(onDraft).toHaveBeenLastCalledWith('#10B981', undefined)
+  })
+
   it('cleans abandoned, removed, and explicitly disposed select portals before remount', async () => {
     const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true })
     const adapter = new HostFormAdapter(dom.window.document)
@@ -300,6 +553,13 @@ describe('Host form DOM and accessibility', () => {
     dom.window.document.body.append(remounted)
     expect(portal.shadowRoot?.querySelectorAll('[role="listbox"]')).toHaveLength(1)
     remounted.dispose()
+    expect(portal.shadowRoot?.querySelectorAll('[role="listbox"]')).toHaveLength(0)
+
+    const multi = adapter.control(field({ type: 'array', role: 'multi-select', choices: [{ label: 'Safe', value: 'safe' }] }), 'multi', () => undefined)
+      .root as HTMLElement & { dispose(): void }
+    dom.window.document.body.append(multi)
+    expect(portal.shadowRoot?.querySelectorAll('[role="listbox"]')).toHaveLength(1)
+    multi.dispose()
     expect(portal.shadowRoot?.querySelectorAll('[role="listbox"]')).toHaveLength(0)
   })
 

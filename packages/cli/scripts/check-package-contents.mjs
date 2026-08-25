@@ -19,8 +19,9 @@ const allowedRoots = [
   'THIRD_PARTY_NOTICES.md',
   'package.json',
 ]
+const bundledSchemasteryUi = 'node_modules/@cordisx/schemastery-ui/'
 const leaked = files.filter(file => (
-  !allowedRoots.includes(file) && !file.startsWith('dist/') && !file.startsWith('third_party/')
+  !allowedRoots.includes(file) && !file.startsWith('dist/') && !file.startsWith('third_party/') && !file.startsWith(bundledSchemasteryUi)
 ))
 if (leaked.length > 0) throw new Error(`cordisx package leaked non-allowlisted files: ${leaked.join(', ')}`)
 
@@ -39,6 +40,11 @@ for (const required of [
   'dist/src/plugins/channel/service.mjs',
   'dist/assets/brand/cordisx-mark-light.svg',
   'dist/assets/brand/cordisx-mark-dark.svg',
+  'node_modules/@cordisx/schemastery-ui/package.json',
+  'node_modules/@cordisx/schemastery-ui/LICENSE',
+  'node_modules/@cordisx/schemastery-ui/CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md',
+  'node_modules/@cordisx/schemastery-ui/dist/index.js',
+  'node_modules/@cordisx/schemastery-ui/dist/index.d.ts',
 ]) {
   if (!files.includes(required)) throw new Error(`cordisx package is missing ${required}`)
 }

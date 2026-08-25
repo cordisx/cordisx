@@ -1,6 +1,7 @@
 import accountTree from '@material-symbols/svg-400/rounded/account_tree.svg'
 import analytics from '@material-symbols/svg-400/rounded/analytics.svg'
 import arrowBack from '@material-symbols/svg-400/rounded/arrow_back.svg'
+import calendarMonth from '@material-symbols/svg-400/rounded/calendar_month.svg'
 import check from '@material-symbols/svg-400/rounded/check.svg'
 import checkCircle from '@material-symbols/svg-400/rounded/check_circle.svg'
 import chevronLeft from '@material-symbols/svg-400/rounded/chevron_left.svg'
@@ -18,6 +19,7 @@ import history from '@material-symbols/svg-400/rounded/history.svg'
 import hub from '@material-symbols/svg-400/rounded/hub.svg'
 import info from '@material-symbols/svg-400/rounded/info.svg'
 import layers from '@material-symbols/svg-400/rounded/layers.svg'
+import key from '@material-symbols/svg-400/rounded/key.svg'
 import modelTraining from '@material-symbols/svg-400/rounded/model_training.svg'
 import moreHoriz from '@material-symbols/svg-400/rounded/more_horiz.svg'
 import monitorHeart from '@material-symbols/svg-400/rounded/monitor_heart.svg'
@@ -26,15 +28,20 @@ import openInNew from '@material-symbols/svg-400/rounded/open_in_new.svg'
 import overview from '@material-symbols/svg-400/rounded/overview.svg'
 import pause from '@material-symbols/svg-400/rounded/pause.svg'
 import pauseCircle from '@material-symbols/svg-400/rounded/pause_circle.svg'
+import palette from '@material-symbols/svg-400/rounded/palette.svg'
 import person from '@material-symbols/svg-400/rounded/person.svg'
 import rocketLaunch from '@material-symbols/svg-400/rounded/rocket_launch.svg'
 import route from '@material-symbols/svg-400/rounded/route.svg'
 import refresh from '@material-symbols/svg-400/rounded/refresh.svg'
+import restartAlt from '@material-symbols/svg-400/rounded/restart_alt.svg'
+import save from '@material-symbols/svg-400/rounded/save.svg'
+import schedule from '@material-symbols/svg-400/rounded/schedule.svg'
 import search from '@material-symbols/svg-400/rounded/search.svg'
 import send from '@material-symbols/svg-400/rounded/send.svg'
 import settings from '@material-symbols/svg-400/rounded/settings.svg'
 import shield from '@material-symbols/svg-400/rounded/shield.svg'
 import storefront from '@material-symbols/svg-400/rounded/storefront.svg'
+import sell from '@material-symbols/svg-400/rounded/sell.svg'
 import summarize from '@material-symbols/svg-400/rounded/summarize.svg'
 import tune from '@material-symbols/svg-400/rounded/tune.svg'
 import viewList from '@material-symbols/svg-400/rounded/view_list.svg'
@@ -186,19 +193,27 @@ export function createManagerIcon(
 const HOST_SURFACE_ICON_SOURCES: Readonly<Record<string, string>> = {
   'host:analytics': analytics,
   'host:back': arrowBack,
+  'host:calendar': calendarMonth,
   'host:close': close,
   'host:error': error,
   'host:files': folder,
+  'host:folder': folder,
   'host:history': history,
   'host:info': info,
   'host:layers': layers,
+  'host:key': key,
   'host:more': moreHoriz,
   'host:open': openInNew,
+  'host:palette': palette,
   'host:refresh': refresh,
+  'host:reset': restartAlt,
   'host:review': check,
   'host:settings': settings,
+  'host:save': save,
+  'host:clock': schedule,
   'host:success': checkCircle,
   'host:warning': warning,
+  'host:tags': sell,
 }
 
 /** Render a protocol host icon with the same bundled Material geometry as manager chrome. */
