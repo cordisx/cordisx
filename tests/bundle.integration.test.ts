@@ -664,6 +664,7 @@ describe('renderer bundle', () => {
     expect(managerStyles).toContain('flex: 1 1 0%')
     expect(managerStyles).toContain('overflow-y: auto')
     expect(managerStyles).toContain('border-radius: 9px;')
+    expect(managerStyles).toContain('.cxm-nav-button[aria-current="page"]')
     expect(managerStyles).toContain('grid-template-columns: 18px max-content')
     expect(managerStyles).toContain('.cxm-tab[aria-selected="true"] { background: rgba(199, 204, 212, .14);')
     expect(managerStyles).not.toContain('.cxm-tab[aria-selected="true"]::after')

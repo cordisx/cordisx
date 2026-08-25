@@ -1180,7 +1180,7 @@ const HOST_THEME_OVERLAY_STYLES = `
   .cxm-nav-button, .cxm-heading p, .cxm-detail-description, .cxm-permission-reason, .cxm-copy, .cxm-source-state, .cxm-detail-id, .cxm-plugin-description, .cxm-plugin-meta, .cxm-catalog-description, .cxm-catalog-id, .cxm-catalog-status, .cxm-marketplace-trust-copy, .cxm-marketplace-trust-meta, .cxm-field-label { color: var(--cx-muted); }
   .cxm-nav-icon { color: currentColor; }
   .cxm-heading-leading { color: var(--cx-text); }
-  .cxm-nav-button:hover, .cxm-nav-button[aria-selected="true"], .cxm-back:hover, .cxm-breadcrumb-action:hover, .cxm-breadcrumb-overflow > summary:hover, .cxm-tab:hover, .cxm-tab[aria-selected="true"], .cxm-about-action:hover, .cxm-about-action:focus-visible { background: var(--cx-hover); color: var(--cx-text); }
+  .cxm-nav-button:hover, .cxm-nav-button[aria-current="page"], .cxm-nav-button[aria-selected="true"], .cxm-back:hover, .cxm-breadcrumb-action:hover, .cxm-breadcrumb-overflow > summary:hover, .cxm-tab:hover, .cxm-tab[aria-selected="true"], .cxm-about-action:hover, .cxm-about-action:focus-visible { background: var(--cx-hover); color: var(--cx-text); }
   .cxm-about-action-title, .cxm-about-action-copy { background: transparent; }
   .cxm-about-action-title { color: var(--cx-text); }
   .cxm-about-action-copy, .cxm-about-action-arrow { color: var(--cx-muted); }
