@@ -1935,7 +1935,16 @@ function createMarketplaceFetcher(view: Window | null): MarketplaceFetcherHandle
 }
 
 /** Mount the reversible, host-owned CordisX manager UI. */
-export function installCordisXManager(document: Document, model: ManagerModel): () => void {
+export interface ManagerInstallOptions {
+  /** A host-owned trigger seat. Playground supplies this instead of probing Codex DOM. */
+  readonly triggerTarget?: () => HTMLElement | undefined
+}
+
+export function installCordisXManager(
+  document: Document,
+  model: ManagerModel,
+  options: ManagerInstallOptions = {},
+): () => void {
   const theme = new HostThemeProjection(document)
   let renderedLocale = model.snapshot().localization.locale
   const copy = (key: Parameters<typeof managerCopy>[1]): string => managerCopy(renderedLocale, key)
@@ -6453,7 +6462,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const reconcile = (): void => {
     scheduled = false
     syncHostUiTheme()
-    const target = resolveManagerTriggerTarget(document)
+    const target = options.triggerTarget?.() ?? resolveManagerTriggerTarget(document)
     if (target === undefined) {
       trigger.remove()
       currentTarget = undefined

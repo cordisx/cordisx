@@ -1299,3 +1299,51 @@ export function installCodexAdapter(
     },
   }
 }
+
+/**
+ * Explicit local-development seats.  Unlike the Codex adapter this path never
+ * queries Codex DOM, selectors, sessions, or native controls.  It deliberately
+ * exposes only Host-owned page seats; structured shell contributions remain
+ * inspectable in Manager when a Playground has not declared a corresponding
+ * simulated seat.
+ */
+export function installPlaygroundAdapter(
+  document: Document,
+  _slots: CordisXSlotService,
+  _commands: CordisXCommandService,
+  routes: CordisXRouteService,
+  _i18n: CordisXI18nService,
+  extensionPoints: ExtensionPointDescriptorRegistry,
+): CodexAdapterHandle {
+  const unregisterExtensionPoints = extensionPoints.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
+  const seat = (name: string): HTMLElement | undefined => document.querySelector<HTMLElement>(`[data-cordisx-playground-seat="${name}"]`) ?? undefined
+  const controllers = [
+    ['app', 'fixed', () => seat('app')],
+    ['main', 'portal', () => seat('main')],
+    ['session.content', 'absolute', () => seat('session.content')],
+  ] as const
+  const declared = controllers.map(([id, placement, resolve]) => {
+    const controller = new DomOutletController(document, id, placement, () => {
+      const anchor = resolve()
+      return anchor === undefined ? undefined : { anchor, contextKey: `playground:${id}` }
+    })
+    const path = id === 'app'
+      ? (value: string) => value !== '/main' && !value.startsWith('/main/') && value !== '/sessions' && !value.startsWith('/sessions/')
+      : id === 'main'
+        ? (value: string) => value.startsWith('/main/') && value.length > '/main/'.length
+        : (value: string) => value.startsWith('/sessions/:sessionId/') && value.length > '/sessions/:sessionId/'.length
+    return { controller, dispose: routes.outlets.declare({
+      schemaVersion: 1, id, authority: 'host-adapter', scope: 'playground', preferredPlacement: placement,
+      contextPolicy: 'generation', presentationGroup: 'primary',
+    }, controller, path) }
+  })
+  return {
+    dispose() {
+      for (const item of declared.reverse()) {
+        item.dispose()
+        item.controller.dispose()
+      }
+      unregisterExtensionPoints()
+    },
+  }
+}

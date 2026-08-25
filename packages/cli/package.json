@@ -25,6 +25,7 @@
     "check": "npm run typecheck",
     "check:package": "node scripts/check-package-contents.mjs",
     "dev": "tsx src/cli.ts",
+    "dev:ui": "tsx src/playground/cli.ts",
     "prepack": "npm run build",
     "smoke": "node scripts/live-smoke.mjs",
     "typecheck": "npm run build --workspace=@cordisx/channel-runtime && tsc -p tsconfig.json --noEmit"
