@@ -954,6 +954,28 @@ if (parsed.values['manager-settings-navigation-exercise']) {
   const qualifiedId = `${owner}:navigation`
   const source = await evaluateByValue(`globalThis.__cordisxRuntime?.snapshot?.().plugins?.find(item => item.id === ${JSON.stringify(owner)})?.source ?? null`)
   if (source === null) throw new Error(`settings navigation demo plugin source not found: ${owner}`)
+  const ready = await evaluateByValue(`(async () => {
+    const waitFor = async predicate => {
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        if (predicate()) return true
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      return false
+    }
+    const trigger = document.querySelector('[data-cordisx-manager-trigger]')
+    const modal = document.querySelector('[data-cordisx-manager-modal]')
+    if (trigger instanceof HTMLElement) trigger.click()
+    else if (modal instanceof HTMLElement && modal.hidden) modal.hidden = false
+    return await waitFor(() => document.querySelector('[data-settings-navigation-item="${qualifiedId}"]') !== null)
+  })()`, true)
+  const rowRect = await evaluateByValue(`(() => {
+    const row = document.querySelector('[data-settings-navigation-item="${qualifiedId}"]')
+    if (!(row instanceof HTMLElement)) return null
+    const rect = row.getBoundingClientRect()
+    return rect.width > 0 && rect.height > 0 ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null
+  })()`, true)
+  if (rowRect === null) throw new Error(`settings navigation item is not interactable: ${qualifiedId}`)
+  await pointerClick(rowRect)
   const initial = await evaluateByValue(`(async () => {
     const waitFor = async predicate => {
       for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -962,14 +984,10 @@ if (parsed.values['manager-settings-navigation-exercise']) {
       }
       return false
     }
-    document.querySelector('[data-cordisx-manager-trigger]')?.click()
-    const ready = await waitFor(() => document.querySelector('[data-settings-navigation-item="${qualifiedId}"]') !== null)
-    const row = document.querySelector('[data-settings-navigation-item="${qualifiedId}"]')
-    row?.click()
     const mounted = await waitFor(() => document.querySelector('[data-settings-navigation-demo-content="mounted"]') !== null)
     const runtime = globalThis.__cordisxRuntime.snapshot()
     return {
-      ready, mounted,
+      ready: ${JSON.stringify(ready)}, mounted,
       rows: [...document.querySelectorAll('[data-settings-navigation-item]')].map(row => ({ id: row.getAttribute('data-settings-navigation-item'), icon: row.querySelector('[data-host-icon]')?.getAttribute('data-host-icon') ?? null, disabled: row.disabled })),
       settingsTabs: runtime.settingsTabs,
       legacySettings: document.querySelector('[data-tab="settings"],[data-settings-tab]') !== null,
@@ -978,7 +996,6 @@ if (parsed.values['manager-settings-navigation-exercise']) {
       outlet: runtime.navigation.outlets.find(item => item.id === 'manager.content') ?? null,
     }
   })()`, true)
-  await evaluateByValue(`document.querySelector('[data-settings-navigation-item="${qualifiedId}"]')?.focus()`)
   await pressKey('ArrowUp', 'ArrowUp', 38)
   const keyboardUp = await evaluateByValue(`document.activeElement?.getAttribute('data-manager-navigation-id') ?? null`)
   await pressKey('ArrowDown', 'ArrowDown', 40)
