@@ -81,6 +81,8 @@ export interface ChannelStoreState {
   inbox: Record<string, StoredInboxRecord>
   outbox: Record<string, StoredOutboxRecord>
   bindings: ChannelSessionBinding[]
+  /** Launcher-private durable cursors keyed by the complete Platform session. */
+  lifecycleCursors: Record<string, number>
   audit: StoredAuditRecord[]
 }
 
@@ -93,6 +95,7 @@ function initialState(): ChannelStoreState {
     inbox: {},
     outbox: {},
     bindings: [],
+    lifecycleCursors: {},
     audit: [],
   }
 }
@@ -111,6 +114,7 @@ function isState(value: unknown): value is ChannelStoreState {
     && state.inbox !== null && typeof state.inbox === 'object'
     && state.outbox !== null && typeof state.outbox === 'object'
     && Array.isArray(state.bindings)
+    && (state.lifecycleCursors === undefined || state.lifecycleCursors !== null && typeof state.lifecycleCursors === 'object' && !Array.isArray(state.lifecycleCursors))
     && Array.isArray(state.audit)
 }
 
@@ -144,7 +148,7 @@ export class JsonChannelStore {
     try {
       const parsed: unknown = JSON.parse(await readFile(store.#file, 'utf8'))
       if (!isState(parsed)) throw new Error('Channel store has an unsupported contract or malformed root')
-      store.#state = parsed
+      store.#state = { ...parsed, lifecycleCursors: parsed.lifecycleCursors ?? {} }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       await store.#persist(store.#state)

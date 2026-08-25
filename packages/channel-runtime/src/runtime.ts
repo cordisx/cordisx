@@ -427,6 +427,7 @@ export class ChannelRuntime {
   readonly #maxAttempts: number
   readonly #leaseMs: number
   readonly #retryBaseMs: number
+  readonly #taskContext: NonNullable<ChannelRuntimeOptions['taskContext']>
   readonly #connections = new Map<string, ActiveConnection>()
   readonly #subscriptions = new Map<string, {
     readonly caller: ChannelPluginIdentity
@@ -443,9 +444,12 @@ export class ChannelRuntime {
     this.#maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS
     this.#leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS
     this.#retryBaseMs = options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS
+    this.#taskContext = options.taskContext ?? { serviceGeneration: 'channel-runtime', configurationRevision: 1 }
     if (this.#maxAttempts < 1) throw new RangeError('maxAttempts must be at least 1')
     if (this.#leaseMs < 1) throw new RangeError('leaseMs must be positive')
     if (this.#retryBaseMs < 1) throw new RangeError('retryBaseMs must be positive')
+    if (this.#taskContext.serviceGeneration.length < 1 || !Number.isInteger(this.#taskContext.configurationRevision)
+      || this.#taskContext.configurationRevision < 1) throw new RangeError('Channel task context is invalid')
   }
 
   static async open(options: ChannelRuntimeOptions): Promise<ChannelRuntime> {
@@ -936,6 +940,8 @@ export class ChannelRuntime {
         operationId: claimed.operationId,
         routeId: claimed.envelope.routeId,
         input: claimed.envelope.input,
+        serviceGeneration: this.#taskContext.serviceGeneration,
+        configurationRevision: this.#taskContext.configurationRevision,
         ...(binding === undefined ? {} : { binding }),
       })
       await this.#finalizeApplied(recordId, generation, result)
@@ -985,6 +991,8 @@ export class ChannelRuntime {
       let bindingRevision: number | undefined
       let targetSession = result.session
       if (current.envelope.operation.kind === 'create') {
+        const dispatch = result.dispatch
+        if (dispatch?.status === 'rejected') throw new ChannelIntegrityError('Task creation was rejected by the Host gateway')
         if (result.session === undefined) throw new ChannelIntegrityError('Task creation did not return a complete Platform session reference')
         const actor = current.envelope.input.source.event.actor
         if (actor === undefined) throw new ChannelIntegrityError('Task creation requires an attributed Channel actor')
@@ -1021,6 +1029,27 @@ export class ChannelRuntime {
         }
         state.bindings.push(binding)
         bindingRevision = revision
+        if (dispatch?.lifecycle !== undefined) {
+          state.lifecycleCursors[sessionKey(dispatch.lifecycle.session)] = dispatch.lifecycle.afterSequence
+        }
+        if (dispatch?.status === 'created-initial-turn-failed' && dispatch.failure !== undefined) {
+          const deliveryId = `delivery:${digest(['channel.initial-turn-failed', current.operationId])}`
+          if (state.outbox[deliveryId] === undefined) {
+            state.outbox[deliveryId] = {
+              deliveryId,
+              accountKey: current.accountKey,
+              generation,
+              caller: current.caller,
+              target: sanitizedThread(current.envelope.input.source.event),
+              kind: 'failure',
+              text: `The task was created, but its initial turn could not start (${dispatch.failure.code}).`,
+              createdAt: now,
+              status: 'queued',
+              attempts: 0,
+              updatedAt: now,
+            }
+          }
+        }
       } else if (current.envelope.operation.kind === 'archive'
         || current.envelope.operation.kind === 'restore'
         || current.envelope.operation.kind === 'continue') {
@@ -1033,6 +1062,9 @@ export class ChannelRuntime {
           targetSession = binding.session
           return { ...binding, state: desired, updatedAt: now }
         })
+      }
+      if (result.dispatch?.lifecycle !== undefined) {
+        state.lifecycleCursors[sessionKey(result.dispatch.lifecycle.session)] = result.dispatch.lifecycle.afterSequence
       }
       state.inbox[recordId] = {
         ...current,

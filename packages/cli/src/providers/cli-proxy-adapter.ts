@@ -15,7 +15,7 @@ import type {
   CordisXTurnStart,
 } from '../contracts.js'
 import type { CodexAppServerRpc } from './codex-app-server.js'
-import type { CliProxyProviderConfig, ProviderConnection, ProviderConnectionStatus } from './contracts.js'
+import type { CliProxyProviderConfig, ProviderConnection, ProviderConnectionStatus, ProviderLifecycleSignal } from './contracts.js'
 import { JsonLineRpcError } from './json-line-rpc.js'
 
 interface AppServerModel {
@@ -170,6 +170,8 @@ export class CliProxyProviderAdapter implements ProviderConnection {
   readonly generation: string
   private readonly modelIndex: SessionModelIndex
   private state: ProviderConnectionStatus['state'] = 'ready'
+  private readonly lifecycleListeners = new Set<(event: ProviderLifecycleSignal) => void>()
+  private readonly unsubscribeNotifications: (() => void) | undefined
 
   constructor(
     private readonly config: CliProxyProviderConfig,
@@ -178,6 +180,7 @@ export class CliProxyProviderAdapter implements ProviderConnection {
     this.providerId = config.id
     this.generation = rpc.generation
     this.modelIndex = new SessionModelIndex(config.codexHome)
+    this.unsubscribeNotifications = rpc.subscribeNotifications?.((method, params) => this.receiveNotification(method, params))
   }
 
   status(): ProviderConnectionStatus {
@@ -361,8 +364,44 @@ export class CliProxyProviderAdapter implements ProviderConnection {
   async close(): Promise<void> {
     if (this.state === 'closed') return
     this.state = 'draining'
+    this.unsubscribeNotifications?.()
+    this.lifecycleListeners.clear()
     await this.rpc.close()
     this.state = 'closed'
+  }
+
+  subscribeLifecycle(listener: (event: ProviderLifecycleSignal) => void): () => void {
+    this.lifecycleListeners.add(listener)
+    return () => this.lifecycleListeners.delete(listener)
+  }
+
+  /** Normalize known id-less App Server notifications inside the provider adapter. */
+  private receiveNotification(method: string, params: unknown): void {
+    const kind = method === 'turn/started' ? 'turn.started'
+      : method === 'turn/completed' ? 'turn.completed'
+        : method === 'turn/failed' ? 'turn.failed'
+          : method === 'approval/requested' ? 'approval.required'
+            : method === 'approval/resolved' ? 'approval.resolved'
+              : undefined
+    if (kind === undefined) return
+    const value = object(params)
+    const threadId = string(value?.threadId) ?? string(object(value?.thread)?.id)
+    const turnId = string(value?.turnId) ?? string(object(value?.turn)?.id)
+    if (threadId === undefined || turnId === undefined) return
+    const outputText = typeof value?.text === 'string' && value.text.trim() !== '' ? value.text : undefined
+    const failureCode = string(object(value?.error)?.code) ?? string(value?.errorCode)
+    const approvalId = string(value?.approvalId) ?? string(object(value?.approval)?.id)
+    const approvalKind = object(value?.approval)?.kind
+    const outcome = object(value?.approval)?.outcome
+    const event: ProviderLifecycleSignal = {
+      session: { providerId: this.providerId, remoteSessionId: threadId }, turnId, type: kind,
+      ...(kind === 'turn.completed' && outputText !== undefined ? { output: [{ type: 'text' as const, text: outputText }] } : {}),
+      ...(kind === 'turn.failed' ? { failure: { code: failureCode ?? 'TURN_FAILED', retryable: false } } : {}),
+      ...(kind === 'approval.required' && approvalId !== undefined ? { approval: { approvalId, kind: approvalKind === 'file-change' || approvalKind === 'external-action' || approvalKind === 'other' ? approvalKind : 'command', state: 'pending' as const } } : {}),
+      ...(kind === 'approval.resolved' && approvalId !== undefined ? { approval: { approvalId, kind: approvalKind === 'file-change' || approvalKind === 'external-action' || approvalKind === 'other' ? approvalKind : 'command', state: 'resolved' as const, outcome: outcome === 'denied' || outcome === 'expired' || outcome === 'cancelled' ? outcome : 'approved' as const } } : {}),
+    }
+    if ((kind === 'turn.completed' && event.output === undefined) || (kind.startsWith('approval.') && event.approval === undefined)) return
+    for (const listener of this.lifecycleListeners) listener(event)
   }
 
   private checkRef(ref: CordisXPlatformSessionRef): CordisXPlatformResult<never> | undefined {

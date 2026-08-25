@@ -15,6 +15,14 @@ import {
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
 import { createChannelManagerApi, type ChannelManagerApi, type ChannelManagerActionStatus } from './channel-manager-api.js'
 import { feishuDefinitionsForConfig } from './feishu-adapter.js'
+import {
+  DenyChannelTaskPermissionBroker,
+  LauncherChannelTaskGateway,
+  StaticChannelWorkspaceResolver,
+  type ChannelTaskPermissionBroker,
+  type ChannelWorkspaceRegistration,
+} from './channel-task-gateway.js'
+import type { ProviderFleet } from '../providers/fleet.js'
 
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
@@ -117,13 +125,6 @@ export function projectLocalChannelManager(input: {
   }
 }
 
-function localGateway() {
-  return {
-    /** The simulator owns transport only; it must not manufacture a Codex task. */
-    execute: async () => ({ data: { status: 'unavailable' as const } }),
-  }
-}
-
 function localPermissions() {
   return {
     // Only the built-in simulator is granted its local registration seat.
@@ -145,6 +146,12 @@ export function createLocalChannelService(input: {
   readonly source: string
   /** Effective launcher environment; never project it or any resolved secret. */
   readonly environment?: NodeJS.ProcessEnv
+  /** Existing launcher-owned provider connection. No second app-server is created here. */
+  readonly fleet?: ProviderFleet
+  readonly profileId?: string
+  /** Host registry entries, never renderer configuration. */
+  readonly workspaces?: readonly ChannelWorkspaceRegistration[]
+  readonly taskPermissions?: ChannelTaskPermissionBroker
 }): LocalChannelService {
   const artifactDirectory = input.artifactDirectory
   let active: ActiveRuntime | undefined
@@ -157,9 +164,21 @@ export function createLocalChannelService(input: {
     const generation = `channel-local-${Date.now()}-${sequence}-${randomBytes(4).toString('hex')}`
     await mkdir(input.dataDir, { recursive: true })
     const runtime = await ChannelRuntime.open({
-      gateway: localGateway(),
+      gateway: input.fleet === undefined
+        ? { execute: async (_operation, context) => ({ dispatch: {
+          contract: 'cordisx.platform-task-dispatch-result/v1' as const, schemaVersion: 1 as const,
+          operationId: context.operationId, operation: context.binding === undefined ? 'create' as const : 'followup' as const,
+          status: 'rejected' as const, failure: { code: 'CHANNEL_GATEWAY_UNAVAILABLE', retryable: false }, observedAt: new Date().toISOString(),
+        } }) }
+        : new LauncherChannelTaskGateway({
+          fleet: input.fleet,
+          profileId: input.profileId ?? 'default',
+          workspaces: new StaticChannelWorkspaceResolver({ [input.profileId ?? 'default']: input.workspaces ?? [] }),
+          permissions: input.taskPermissions ?? new DenyChannelTaskPermissionBroker(),
+        }),
       permissions: localPermissions(),
       storePath: path.join(input.dataDir, `${generation}.json`),
+      taskContext: { serviceGeneration: generation, configurationRevision: sequence },
     })
     const host = new LauncherChannelServiceHost(runtime)
     try {

@@ -109,6 +109,22 @@ renderer plugin receives only a brokered snapshot/action API and controlled
 manager/session surfaces; it never owns credentials, webhook/long-connection
 transport, queues, cursors, or retry workers.
 
+The formal `channel-task-gateway/v1` prerequisite is implemented only in the
+launcher-private plane. A named Host workspace registration resolves one alias
+to a real, authorized directory; a Node-safe projection of the existing
+durable Permission Broker policy ledger evaluates the complete
+provider/model/workspace request before a short-lived single-use grant is
+atomically consumed. The Provider Fleet then dispatches create or
+follow-up on its already-owned connection and records a separate sanitized,
+per-session lifecycle ledger. Id-less provider notifications are normalized
+before persistence; raw frames, absolute paths, grants, callback handles, and
+provider configuration never enter CDP, a renderer projection, or Manager.
+`created-initial-turn-failed` preserves the created Channel binding and queues
+one idempotent failure delivery. This does not enable any Feishu fixed-create
+consumer or claim a Desktop current connection: Channel routes still fail
+closed without a persisted permission decision, an enabled provider, and an
+explicit workspace registration.
+
 The host-neutral core, simulator, and source-bound Node Cordis `channel` service
 are implemented. Plugin-package v3 / plugin-manifest v4 service entries are
 source-validated, bundled for Node, included in the immutable package digest,
