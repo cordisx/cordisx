@@ -13,11 +13,12 @@ npx cordisx@beta codex
 ```
 
 `setup` creates `~/.cordisx/config.json` with `plugins: []`. The default profile
-shares the existing host account and conversations. Use a named isolated
-profile when separate host data is wanted:
+starts an independent Host window and persistent CordisX-scoped Chromium
+profile while sharing the existing account and conversations. Use
+`host-isolated` only when a separate Host root is wanted:
 
 ```bash
-npx cordisx@beta codex work --data isolated
+npx cordisx@beta codex work --data host-isolated
 ```
 
 CordisX starts a separate process and does not modify the installed Codex

@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm } from 'node:fs/promises'
+import { access, chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
@@ -11,6 +11,7 @@ import {
   codexLaunchArgs,
   defaultIsolatedProfileDir,
   findFreeLoopbackPort,
+  launchCodex,
   prepareIsolatedCodexProfile,
   projectProfileKey,
   resolveCodexExecutable,
@@ -23,7 +24,7 @@ describe('isolated Codex process support', () => {
     const profileDir = path.join(directory, 'codex-app-profile')
     try {
       const profile = await prepareIsolatedCodexProfile('/project/example', profileDir)
-      expect(profile).toEqual({ userDataDir: profileDir })
+      expect(profile).toEqual({ userDataDir: profileDir, cleanupOwned: false })
       await expect(access(profile.userDataDir)).resolves.toBeUndefined()
     } finally {
       await rm(directory, { recursive: true })
@@ -38,7 +39,7 @@ describe('isolated Codex process support', () => {
   })
 
   it('puts enforced isolation and loopback arguments after user arguments', async () => {
-    const profile = { userDataDir: '/safe/profile' }
+    const profile = { userDataDir: '/safe/profile', cleanupOwned: true }
     const args = codexLaunchArgs(43123, ['--remote-debugging-port=1', '--user-data-dir=/unsafe'], profile, true)
     expect(args.slice(-4)).toEqual([
       '--user-data-dir=/safe/profile',
@@ -101,6 +102,56 @@ describe('isolated Codex process support', () => {
       expect(sibling.signalCode).toBeNull()
     } finally {
       if (sibling.exitCode === null && sibling.signalCode === null) sibling.kill('SIGTERM')
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('cleans the full launcher-owned Host process group', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-launch-group-test-'))
+    const executable = path.join(directory, 'fake-host')
+    const descendantPidPath = path.join(directory, 'descendant.pid')
+    const profile = { userDataDir: path.join(directory, 'profile'), cleanupOwned: true }
+    let launched: ReturnType<typeof launchCodex> | undefined
+    let descendantPid: number | undefined
+    try {
+      await writeFile(executable, `#!/usr/bin/env node
+const { spawn } = require('node:child_process')
+const { writeFileSync } = require('node:fs')
+if (process.argv.includes('--descendant')) setInterval(() => {}, 1000)
+else {
+const child = spawn(process.argv[1], ['--descendant', '--database=${profile.userDataDir}/Crashpad'], { stdio: 'ignore', detached: true })
+writeFileSync(${JSON.stringify(descendantPidPath)}, String(child.pid))
+setInterval(() => {}, 1000)
+}
+`)
+      await chmod(executable, 0o755)
+      launched = launchCodex(executable, 43123, [], profile)
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        descendantPid = Number(await readFile(descendantPidPath, 'utf8').catch(() => '0'))
+        if (Number.isInteger(descendantPid) && descendantPid > 0) break
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      expect(descendantPid).toBeGreaterThan(0)
+      await terminateIsolatedCodex(launched, profile)
+      for (let attempt = 0; attempt < 50 && descendantPid !== undefined; attempt += 1) {
+        try {
+          process.kill(descendantPid, 0)
+          await new Promise(resolve => setTimeout(resolve, 20))
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ESRCH') break
+          throw error
+        }
+      }
+      expect(() => process.kill(descendantPid!, 0)).toThrow(/ESRCH/)
+    } finally {
+      if (launched !== undefined && launched.exitCode === null && launched.signalCode === null) {
+        await terminateIsolatedCodex(launched, profile).catch(() => undefined)
+      }
+      if (descendantPid !== undefined) {
+        try { process.kill(descendantPid, 'SIGKILL') } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+        }
+      }
+      await rm(directory, { recursive: true, force: true })
     }
   })
 })

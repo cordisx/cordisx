@@ -127,7 +127,7 @@ async function waitForRenderer() {
 const crashpadBefore = await crashpadCount()
 const homeRoot = homeConfig === undefined ? undefined : await prepareIsolatedSmokeHome(homeConfig)
 const invocation = devConfig === undefined
-  ? ['codex', 'smoke', '--data', 'isolated']
+  ? ['codex', 'smoke', '--data', 'host-isolated']
   : ['dev', '--config', devConfig]
 const launcher = spawn(process.execPath, [
   '--import', 'tsx', 'packages/cli/src/cli.ts', ...invocation,

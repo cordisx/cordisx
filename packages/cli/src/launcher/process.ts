@@ -2,12 +2,14 @@ import { constants } from 'node:fs'
 import { access, mkdir, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:net'
 
 export interface IsolatedCodexProfile {
   readonly userDataDir: string
+  /** True only for a directory CordisX allocated and can safely sweep on exit. */
+  readonly cleanupOwned: boolean
 }
 
 export const ONLINE_DEVTOOLS_ORIGIN = 'https://chrome-devtools-frontend.appspot.com'
@@ -121,7 +123,7 @@ export async function prepareIsolatedCodexProfile(
 ): Promise<IsolatedCodexProfile> {
   const userDataDir = path.resolve(explicitProfileDir ?? defaultIsolatedProfileDir(projectRoot))
   await mkdir(userDataDir, { recursive: true })
-  return { userDataDir }
+  return { userDataDir, cleanupOwned: explicitProfileDir === undefined }
 }
 
 export function codexLaunchArgs(
@@ -155,6 +157,9 @@ export function launchCodex(
   return spawn(executable, codexLaunchArgs(debugPort, extraArgs, profile, allowOnlineDevTools), {
     stdio: profile === undefined ? 'inherit' : 'ignore',
     env: environment === undefined ? process.env : { ...process.env, ...environment },
+    // A launcher owns exactly one process group, so cleanup can stop the Host
+    // tree (including Chromium helpers) without touching an ordinary Host.
+    detached: process.platform !== 'win32',
   })
 }
 
@@ -178,13 +183,75 @@ async function waitForExit(child: ChildProcess, milliseconds: number): Promise<b
 }
 
 /** Stop only the exact process returned by launchCodex. */
-export async function terminateIsolatedCodex(child: ChildProcess): Promise<void> {
+export async function terminateIsolatedCodex(child: ChildProcess, profile?: IsolatedCodexProfile): Promise<void> {
   if (child.pid === undefined) return
-  if (exited(child)) return
-  child.kill('SIGTERM')
-  if (await waitForExit(child, 5_000)) return
-  child.kill('SIGKILL')
-  if (!await waitForExit(child, 2_000)) {
+  if (!exited(child)) {
+    signalLaunchedHost(child, 'SIGTERM')
+    if (!await waitForExit(child, 5_000)) {
+      signalLaunchedHost(child, 'SIGKILL')
+    }
+  }
+  if (!exited(child) && !await waitForExit(child, 2_000)) {
     throw new Error(`failed to stop launched host process${child.pid === undefined ? '' : ` ${child.pid}`}`)
   }
+  if (profile?.cleanupOwned === true) await terminateProfileProcesses(profile.userDataDir)
+}
+
+/** Signal only the detached process group created by launchCodex. */
+function signalLaunchedHost(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (child.pid === undefined) return
+  if (process.platform !== 'win32') {
+    try {
+      process.kill(-child.pid, signal)
+      return
+    } catch (error) {
+      // Unit callers may pass a process not created by launchCodex; retain the
+      // exact-child fallback without ever broadening the target.
+      if (!(error instanceof Error) || !('code' in error) || (error.code !== 'ESRCH' && error.code !== 'EPERM')) throw error
+    }
+  }
+  child.kill(signal)
+}
+
+function profileProcessIds(userDataDir: string): readonly number[] {
+  if (process.platform === 'win32') return []
+  // Browser Crashpad helpers use `--database=<profile>/Crashpad` rather than
+  // `--user-data-dir`, so match the exact managed profile path in either form.
+  const profilePath = userDataDir
+  return execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
+    .split('\n')
+    .flatMap(line => {
+      const match = /^\s*(\d+)\s+(.*)$/u.exec(line)
+      if (match === null) return []
+      const [, rawPid = '', command = ''] = match
+      return !command.includes(profilePath) ? [] : [Number(rawPid)]
+    })
+    .filter(pid => Number.isInteger(pid) && pid > 0 && pid !== process.pid)
+}
+
+/**
+ * Chromium helpers such as Crashpad may deliberately leave the Electron
+ * process group. They are still fenced by the exact profile path selected by
+ * this launcher, so stop only those helpers after the primary Host has exited.
+ */
+async function terminateProfileProcesses(userDataDir: string): Promise<void> {
+  const stop = (signal: NodeJS.Signals): void => {
+    for (const pid of profileProcessIds(userDataDir)) {
+      try { process.kill(pid, signal) } catch (error) {
+        if (!(error instanceof Error) || !('code' in error) || error.code !== 'ESRCH') throw error
+      }
+    }
+  }
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (profileProcessIds(userDataDir).length === 0) return
+    stop('SIGTERM')
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  stop('SIGKILL')
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (profileProcessIds(userDataDir).length === 0) return
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  const remaining = profileProcessIds(userDataDir)
+  if (remaining.length > 0) throw new Error(`failed to stop launched Host profile processes: ${remaining.join(', ')}`)
 }

@@ -24,7 +24,7 @@ describe('parseCordisXCli', () => {
       'codex',
       'work',
       '--data',
-      'isolated',
+      'host-isolated',
       '--profile-dir=/profiles/work',
       '--executable',
       '/Applications/ChatGPT.app',
@@ -36,7 +36,7 @@ describe('parseCordisXCli', () => {
       action: 'launch',
       app: 'codex',
       profile: 'work',
-      dataMode: 'isolated',
+      dataMode: 'host-isolated',
       options: {
         attach: false,
         system: false,
@@ -99,7 +99,7 @@ describe('parseCordisXCli', () => {
     })
     expect(() => parseCordisXCli(['dev', './plugin.ts', '--config', './cordisx.config.json']))
       .toThrow('cordisx dev accepts either a plugin path or --config, not both')
-    expect(() => parseCordisXCli(['dev', '--data', 'isolated']))
+    expect(() => parseCordisXCli(['dev', '--data', 'host-isolated']))
       .toThrow('--data is not valid with cordisx dev')
   })
 
@@ -156,7 +156,7 @@ describe('parseCordisXCli', () => {
       expect.objectContaining({ code: 'missing-option-value', message: '--data requires a value' }),
     )
     expect(() => parseCordisXCli(['--data', 'private'])).toThrowError(
-      '--data must be either "shared" or "isolated"',
+      '--data must be either "shared" or "host-isolated"',
     )
     expect(() => parseCordisXCli(['--debug-port', '80'])).toThrowError(
       '--debug-port must be an integer between 1024 and 65535',
@@ -183,7 +183,7 @@ describe('parseCordisXCli', () => {
       '--online-devtools is only valid with an independent Chromium profile',
     )
     expect(() => parseCordisXCli(['codex', '--isolated'])).toThrowError(
-      '--isolated is only valid with cordisx dev; use --data isolated for a host-data profile',
+      '--isolated is only valid with cordisx dev; use --data host-isolated for a separate Host root',
     )
     expect(parseCordisXCli(['dev', '--isolated', '--dry-run'])).toMatchObject({
       action: 'dev', options: { isolated: true },

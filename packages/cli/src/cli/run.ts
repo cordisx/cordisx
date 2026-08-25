@@ -61,7 +61,7 @@ import {
 import type { RollbackPlan } from '../launcher/packages/authority.js'
 
 const HELP = `Usage:
-  cordisx [app] [profile] [--data shared|isolated] [options] [-- host-arguments...]
+  cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-arguments...]
   cordisx setup
   cordisx config
   cordisx doctor
@@ -69,8 +69,8 @@ const HELP = `Usage:
 
 Options:
   --attach                 Attach to an existing loopback CDP endpoint
-  --system                 Use the host's system Chromium profile
-  --profile-dir <path>     Override the independent Chromium profile directory
+  --system                 Use the host's system Chromium profile (escape hatch)
+  --profile-dir <path>     Override this launch profile's independent Chromium directory
   --executable <path>      Override the host executable
   --debug-port <port>      Override the loopback CDP port
   --online-devtools        Allow the official online DevTools frontend
@@ -302,27 +302,17 @@ function printPlan(
   stdout(JSON.stringify({ status, plan }, null, 2))
 }
 
-const SHARED_HOST_CDP_NOT_READY = '当前 Host 已运行且未启用 CordisX 调试；正常退出 Host 后重跑同一 shared 命令'
-
-/**
- * A normal Electron singleton hand-off exits its new child with status 0. That
- * is not success unless the CDP watcher has actually installed a renderer.
- */
+/** A launch is usable only after the CDP watcher has installed a renderer. */
 export async function waitForHostExitAfterReadiness(input: {
   readonly childExit: Promise<void>
   readonly ready: Promise<void>
   readonly signal: AbortSignal
-  readonly sharedHostProfile: boolean
 }): Promise<void> {
   let ready = false
   void input.ready.then(() => { ready = true })
   await Promise.race([
     input.childExit.then(() => {
-      if (!ready) {
-        throw new Error(input.sharedHostProfile
-          ? SHARED_HOST_CDP_NOT_READY
-          : 'Host exited before CordisX CDP became ready')
-      }
+      if (!ready) throw new Error('Host exited before CordisX CDP became ready')
     }),
     waitForAbort(input.signal),
   ])
@@ -346,7 +336,6 @@ async function runInjectedHost(input: {
   readonly launcher: CordisXLauncherOptions
   readonly profile?: IsolatedCodexProfile
   readonly environment?: Readonly<Record<string, string>>
-  readonly sharedHostProfile?: boolean
   readonly stdout: (line: string) => void
 }): Promise<void> {
   const controller = new AbortController()
@@ -401,7 +390,6 @@ async function runInjectedHost(input: {
       childExit: waitForExit(launched),
       ready: rendererReady,
       signal: controller.signal,
-      sharedHostProfile: input.sharedHostProfile === true,
     })
   } catch (error) {
     primaryError = error
@@ -412,7 +400,7 @@ async function runInjectedHost(input: {
       watcher,
       ...(input.providerFleet === undefined ? [] : [input.providerFleet.close()]),
       Promise.resolve(input.agentHistoryHost.dispose()),
-      ...(launched === undefined ? [] : [terminateIsolatedCodex(launched)]),
+      ...(launched === undefined ? [] : [terminateIsolatedCodex(launched, input.profile)]),
     ])
     process.removeListener('SIGINT', stop)
     process.removeListener('SIGTERM', stop)
@@ -519,8 +507,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     const app = ownValue(config.apps, appId)
     if (app === undefined) throw new Error(`host app is not configured: ${appId}`)
     const profileId = invocation.profile ?? app.defaultProfile
-    const mode = invocation.dataMode ?? ownValue(app.profiles, profileId)?.dataMode ?? 'isolated'
-    if (mode === 'isolated') throw new Error('--system cannot enforce an isolated host-data profile')
+    const mode = invocation.dataMode ?? ownValue(app.profiles, profileId)?.dataMode ?? 'shared'
+    if (mode === 'host-isolated') throw new Error('--system cannot enforce a host-isolated profile')
   }
   const selection = await resolveProfileSelection({
     config,
@@ -533,10 +521,6 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       ? { dataMode: invocation.dataMode }
       : {}),
   })
-
-  if (invocation.action === 'launch' && selection.dataMode === 'shared' && invocation.options.profileDir !== undefined) {
-    throw new Error('--profile-dir requires --data isolated; shared reuses the current Host profile')
-  }
 
   if (invocation.action === 'doctor') {
     try {
@@ -801,8 +785,13 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   if (invocation.options.debugPort !== undefined) await assertLoopbackPortAvailable(debugPort)
   await adapter.prepareLaunch(plan)
   stdout(`[cordisx] loopback CDP port: ${debugPort}`)
-  const profile = plan.chromiumProfile.mode === 'independent'
-    ? { userDataDir: plan.chromiumProfile.path }
+  const chromiumProfile = plan.chromiumProfile
+  const profile = chromiumProfile.mode === 'independent'
+    ? {
+        userDataDir: chromiumProfile.path,
+        cleanupOwned: plan.isolatedDataRoots.some(root => root.name === 'Chromium profile'
+          && root.path === chromiumProfile.path && root.managed),
+      }
     : undefined
   try {
     await runInjectedHost({
@@ -829,7 +818,6 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     launcher: invocation.options,
     ...(profile === undefined ? {} : { profile }),
     ...(Object.keys(plan.environment).length === 0 ? {} : { environment: plan.environment }),
-    sharedHostProfile: selection.dataMode === 'shared',
       stdout,
     })
   } finally {

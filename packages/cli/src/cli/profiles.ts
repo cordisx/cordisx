@@ -55,7 +55,7 @@ export async function resolveProfileSelection(
 
   const profile: HomeConfigProfile = {
     displayName: displayName(profileId),
-    dataMode: input.dataMode ?? 'isolated',
+    dataMode: input.dataMode ?? 'shared',
   }
   const config = await updateHomeConfigAtomic((current) => {
     const currentApp = ownValue(current.apps, appId)

@@ -17,7 +17,7 @@ remain in `architecture.md`; normative plugin schemas remain in
 The stable grammar is:
 
 ```text
-cordisx [app] [profile] [--data shared|isolated] [options] [-- host-arguments...]
+cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-arguments...]
 cordisx setup
 cordisx config
 cordisx doctor
@@ -30,7 +30,7 @@ Examples:
 npx cordisx
 npx cordisx codex
 npx cordisx codex work
-npx cordisx codex work --data isolated
+npx cordisx codex work --data host-isolated
 npx cordisx claude-code personal
 npx cordisx setup
 ```
@@ -43,7 +43,7 @@ back to Codex.
 
 `profile` is a reusable CordisX launch profile within an app. If the named
 profile exists, the CLI reuses it. If it does not exist, the CLI creates and
-persists an isolated-data profile before launch. Profile ids use the portable
+persists a shared-Host profile before launch. Profile ids use the portable
 grammar `[a-z0-9][a-z0-9._-]{0,63}`; a separate display name may be localized
 or contain arbitrary user-facing text.
 
@@ -74,7 +74,7 @@ The initial schema is conceptually:
         },
         "work": {
           "displayName": "Work",
-          "dataMode": "isolated"
+          "dataMode": "host-isolated"
         }
       }
     }
@@ -115,15 +115,18 @@ Resolution precedence is CLI option, named profile, app default, global
 default, then adapter default. Every resolved launch plan is inspectable through
 `cordisx doctor` without starting the host.
 
-## Shared and isolated data
+## Independent CordisX launches and explicit Host-root isolation
 
-`dataMode` is a host-neutral choice with two values:
+`dataMode` has two values with deliberately different scopes:
 
-- `shared` uses the host's existing Chromium profile, account, conversations,
-  projects, models, and host configuration while CordisX retains its own
-  `CORDISX_HOME` UI/runtime state;
-- `isolated` gives the named profile independent host data roots as well as
-  independent CordisX state, so it can sign in and evolve separately.
+- `shared` is the default independent CordisX launch. It starts a separate
+  Host process with a persistent, profile-scoped Chromium `--user-data-dir`
+  under `CORDISX_HOME`, while explicitly sharing `HOME` and `CODEX_HOME` for
+  the existing account, conversations, projects, and model configuration.
+  It never reads, copies, or changes browser cookies.
+- `host-isolated` is an advanced explicit opt-in with separate Host data roots
+  as well as a separate Chromium profile. It may require a separate sign-in;
+  it is not what “independent CordisX configuration” means.
 
 The adapter translates this intent into host-specific environment variables,
 directories, and launch arguments. The CLI must not know that one host uses
@@ -131,12 +134,19 @@ directories, and launch arguments. The CLI must not know that one host uses
 roots it shares or isolates in the doctor output and tests; a mode is
 unavailable until that adapter can enforce it completely.
 
-CordisX never modifies an installed host application. A shared launch reuses
-the normal Host profile rather than creating an isolated renderer profile;
-`--profile-dir` is therefore isolated-only. Isolation is a filesystem/profile
-contract, not a security identity boundary:
+CordisX never modifies an installed host application. A shared launch has its
+own persistent Chromium profile, so it can run beside the normal Host without
+Electron singleton hand-off or a cold restart. `--system` is the explicit
+escape hatch to the normal Host Chromium profile; `--profile-dir` changes only
+the independent Chromium directory and does not alter `HOME` or `CODEX_HOME`.
+Host-root isolation is a filesystem/profile contract, not a security identity
+boundary:
 platform keychains, device identity, and other operating-system services may
 still be shared unless a future adapter can project them explicitly.
+
+Version-1 configurations containing `"dataMode": "isolated"` remain accepted
+as a non-destructive alias for `host-isolated`. CordisX does not rewrite that
+file merely by reading it; later profile writes use the explicit spelling.
 
 ## Product monorepo
 
@@ -344,8 +354,8 @@ Automated validation covers:
 - invalid JSON, unsupported versions, migration failure, atomic replacement,
   and restrictive file permissions;
 - default-app and profile precedence;
-- creation and reuse of a missing named isolated profile;
-- explicit shared/isolated choice and adapter launch-plan projection;
+- creation and reuse of a missing shared-Host profile;
+- explicit shared/host-isolated choice and adapter launch-plan projection;
 - unknown, unavailable, and launch-incapable adapter diagnostics;
 - separation of CordisX arguments from arguments after `--`;
 - workspace install, typecheck, unit/integration tests, and clean build;
@@ -355,8 +365,9 @@ Automated validation covers:
 - generated plugin install, typecheck, test, pack, and manifest validation;
 - release tag/version agreement, provenance, and registry maintainer readback.
 
-Live validation covers one shared-data Codex launch, one newly created isolated
-Codex profile reused on a second launch, manager visibility, shutdown cleanup,
-and proof that the user's ordinary host process and data were not modified.
+Live validation covers an independent shared-Host Codex launch alongside the
+ordinary Host, a `host-isolated` opt-in profile, manager visibility, shutdown
+cleanup, and proof that the user's account data and ordinary host process were
+not modified.
 Claude Code or any other host requires its own adapter fixtures and live smoke
 before its command example is described as implemented.

@@ -78,12 +78,13 @@ npx cordisx@beta codex
 ```
 
 `setup` 会创建 `~/.cordisx/config.json`，默认内容包含 `providers: []` 和 `plugins: []`。默认
-profile 共享已有 Codex 账号、会话、项目和模型；如果宿主数据也需要隔离，请
-使用一个具名隔离 profile：
+profile 会启动独立 Codex 窗口和持久 Chromium profile，同时通过 `HOME` 与
+`CODEX_HOME` 沿用已有账号、会话、项目和模型；只有宿主数据本身也要隔离时，才使用
+`host-isolated`：
 
 ```bash
 npx cordisx@beta codex default --data shared
-npx cordisx@beta codex work --data isolated
+npx cordisx@beta codex work --data host-isolated
 ```
 
 如需全局命令，请安装同一个明确通道：
