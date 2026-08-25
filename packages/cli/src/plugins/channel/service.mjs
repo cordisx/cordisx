@@ -35,8 +35,9 @@ function simulatorDefinition(connection) {
 }
 
 /**
- * Local-only adapter fixture. Official Feishu/Lark/WeCom transports deliberately
- * fail closed until a separate credential broker and official adapter package exist.
+ * The immutable service artifact owns the simulator only. Official Feishu/Lark
+ * definitions are constructed by the launcher-private adapter loader so the
+ * Node module never receives a credential value or a secret resolver.
  */
 export async function apply(ctx, input) {
   const config = validateConfig(input)
@@ -44,9 +45,8 @@ export async function apply(ctx, input) {
   for (const connection of config.connections) {
     if (!connection.enabled) continue
     if (!routeConnections.has(tenantKey(connection.ref))) continue
-    if (connection.adapterKind !== 'simulator' || connection.transport?.mode !== 'simulator') {
-      throw new Error(`Channel adapter ${connection.adapterKind} is unavailable in the built-in local service`)
+    if (connection.adapterKind === 'simulator' && connection.transport?.mode === 'simulator') {
+      await ctx.channel.adapters.register(simulatorDefinition(connection))
     }
-    await ctx.channel.adapters.register(simulatorDefinition(connection))
   }
 }

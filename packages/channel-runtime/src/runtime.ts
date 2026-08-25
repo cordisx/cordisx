@@ -115,6 +115,16 @@ function errorCode(error: unknown): string {
   return normalizedErrorCode(error instanceof Error ? error.name : 'CHANNEL_ERROR')
 }
 
+function secretStateForStartFailure(
+  descriptor: ChannelAdapterDescriptor,
+  error: unknown,
+): ChannelAdapterDescriptor['secretState'] {
+  if (!(error instanceof Error)) return descriptor.secretState
+  if (error.name === 'CHANNEL_SECRET_MISSING') return 'missing'
+  if (error.name === 'CHANNEL_SECRET_UNAVAILABLE' || error.name === 'CHANNEL_SECRET_REF_INVALID') return 'unavailable'
+  return descriptor.secretState
+}
+
 function accountKey(ref: ChannelTenantRef): string {
   return canonical([ref.adapterId, ref.accountId, ref.tenantId])
 }
@@ -469,6 +479,8 @@ export class ChannelRuntime {
         generation,
         ref: descriptor.ref,
         receive: envelope => this.#receiveAt(descriptor.ref, generation, caller, envelope),
+        drainInbound: async limit => await this.#drainInboundAt(descriptor.ref, generation, limit),
+        drainOutbound: async limit => await this.#drainOutboundAt(descriptor.ref, generation, limit),
       })
     } catch (error) {
       const now = this.#now()
@@ -477,13 +489,14 @@ export class ChannelRuntime {
         state.adapters[key] = current === undefined
           ? {
             ...descriptor,
+            secretState: secretStateForStartFailure(descriptor, error),
             owner: caller,
             generation: 1,
             lastGoodRevision: 0,
             connectionState: 'unavailable',
             lastErrorCode: errorCode(error),
           }
-          : { ...current, lastErrorCode: errorCode(error) }
+          : { ...current, secretState: secretStateForStartFailure(current, error), lastErrorCode: errorCode(error) }
         appendAudit(state, auditRecord({
           caller,
           recordedAt: now,
