@@ -79,6 +79,16 @@ function ensureInstalled(document: Document): void {
 
 export function setTDesignProps(element: TDesignElement, props: Readonly<Record<string, unknown>>): void {
   for (const [name, value] of Object.entries(props)) element[name] = value
+  // Omi custom elements read their initial props from attributes when they are
+  // connected. Host form controls are configured before insertion, so a
+  // property-only placeholder would otherwise be replaced by TDesign's own
+  // default locale (currently Chinese) at first connection. Keep this
+  // user-facing, scalar value in the declarative initial-prop channel as well.
+  if (Object.hasOwn(props, 'placeholder')) {
+    const placeholder = props.placeholder
+    if (typeof placeholder === 'string') element.setAttribute('placeholder', placeholder)
+    else element.removeAttribute('placeholder')
+  }
   if (element.props !== undefined) Object.assign(element.props, props)
   element.update?.()
 }
@@ -163,6 +173,7 @@ export function createTDesignSelect<Value>(
   config: {
     readonly id?: string
     readonly label: string
+    readonly placeholder?: string
     readonly value?: Value
     readonly disabled?: boolean
     readonly readonly?: boolean
@@ -269,6 +280,7 @@ export function createTDesignSelect<Value>(
     setTDesignProps(element, {
       options: options.map(option => ({ label: option.label, value: option.value, disabled: option.disabled === true })),
       value: selected,
+      placeholder: config.placeholder,
       disabled: config.disabled === true,
       clearable: config.clearable === true,
       // TDesign owns the control and every option. The Host owns popup policy and

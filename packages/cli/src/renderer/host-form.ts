@@ -300,6 +300,7 @@ export class HostFormAdapter {
   ): TDesignSelectElement<Value> {
     return createTDesignSelect(this.document, this.portalHost, options, {
       label,
+      placeholder: managerCopy(this.locale(), 'form.select-placeholder'),
       onChange,
       ...(value === undefined ? {} : { value }),
       ...config,
@@ -380,6 +381,7 @@ export class HostFormAdapter {
       const select = createTDesignSelect<CordisXJsonScalar>(this.document, this.portalHost, field.choices!, {
         id,
         label: field.label ?? field.path.at(-1) ?? managerCopy(this.locale(), 'form.select-placeholder'),
+        placeholder: managerCopy(this.locale(), 'form.select-placeholder'),
         value: field.value as CordisXJsonScalar,
         disabled: field.disabled,
         onChange: value => onDraft(value, validateHostFormValue(field, value, this.locale())),
@@ -473,6 +475,7 @@ export class HostFormAdapter {
       setTDesignProps(input, {
         value: typeof field.value === 'number' ? field.value : undefined,
         defaultValue: typeof field.value === 'number' ? field.value : undefined,
+        placeholder: managerCopy(this.locale(), 'form.text-placeholder'),
         min: field.min,
         max: field.max,
         step: field.step,

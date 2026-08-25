@@ -153,8 +153,18 @@ describe('Host form DOM and accessibility', () => {
       .toContain('Managed by Host credentials')
     expect(adapter.control(field({ role: 'date' }), 'date', () => undefined).root.textContent)
       .toContain('cannot be edited safely')
-    expect((adapter.control(field(), 'text', () => undefined).root as HTMLElement & { placeholder?: string }).placeholder)
-      .toBe('Enter a value')
+    const text = adapter.control(field(), 'text', () => undefined).root as HTMLElement & { placeholder?: string }
+    const textarea = adapter.control(field({ role: 'textarea' }), 'textarea', () => undefined).root as HTMLElement & { placeholder?: string }
+    const number = adapter.control(field({ type: 'number', value: undefined }), 'number', () => undefined).root as HTMLElement & { placeholder?: string }
+    const select = adapter.control(field({ choices: [{ label: 'Safe', value: 'safe' }] }), 'select', () => undefined).root as HTMLElement & { placeholder?: string }
+    expect(text.placeholder).toBe('Enter a value')
+    expect(text.getAttribute('placeholder')).toBe('Enter a value')
+    expect(textarea.placeholder).toBe('Enter a value')
+    expect(textarea.getAttribute('placeholder')).toBe('Enter a value')
+    expect(number.placeholder).toBe('Enter a value')
+    expect(number.getAttribute('placeholder')).toBe('Enter a value')
+    expect(select.placeholder).toBe('Choose')
+    expect(select.getAttribute('placeholder')).toBe('Choose')
     const onDraft = vi.fn()
     const json = adapter.control(field({ type: 'object', value: {} }), 'json', onDraft).root as HTMLElement & { onChange?: (value: string) => void }
     json.onChange?.('{')
@@ -162,8 +172,18 @@ describe('Host form DOM and accessibility', () => {
     locale = 'zh-CN'
     expect(adapter.control(field({ role: 'secret' }), 'secret-zh', () => undefined).root.textContent)
       .toContain('Host 凭据边界')
-    expect((adapter.control(field(), 'text-zh', () => undefined).root as HTMLElement & { placeholder?: string }).placeholder)
-      .toBe('请输入')
+    const textZh = adapter.control(field(), 'text-zh', () => undefined).root as HTMLElement & { placeholder?: string }
+    const textareaZh = adapter.control(field({ role: 'textarea' }), 'textarea-zh', () => undefined).root as HTMLElement & { placeholder?: string }
+    const numberZh = adapter.control(field({ type: 'number', value: undefined }), 'number-zh', () => undefined).root as HTMLElement & { placeholder?: string }
+    const selectZh = adapter.control(field({ choices: [{ label: '安全', value: 'safe' }] }), 'select-zh', () => undefined).root as HTMLElement & { placeholder?: string }
+    expect(textZh.placeholder).toBe('请输入')
+    expect(textZh.getAttribute('placeholder')).toBe('请输入')
+    expect(textareaZh.placeholder).toBe('请输入')
+    expect(textareaZh.getAttribute('placeholder')).toBe('请输入')
+    expect(numberZh.placeholder).toBe('请输入')
+    expect(numberZh.getAttribute('placeholder')).toBe('请输入')
+    expect(selectZh.placeholder).toBe('选择')
+    expect(selectZh.getAttribute('placeholder')).toBe('选择')
   })
 
   it('connects help and errors to the keyboard target and labels native radio groups', () => {
