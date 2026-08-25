@@ -57,10 +57,11 @@ is accepted only for loopback development. Each provider gets a private
 page. The native Codex Desktop current connection remains a separate, honestly
 reported connection plane.
 
-The default profile shares the existing host account, conversations, projects,
-models, and host configuration while keeping the CordisX process, Chromium
-profile, CDP endpoint, UI storage, and lifecycle separate. An explicit named
-isolated profile gets its own host data roots and is reused on later launches:
+The default profile uses the existing signed-in Codex/ChatGPT Host profile,
+account, conversations, projects, models, and host configuration. CordisX
+still keeps its own `CORDISX_HOME` configuration and state. An explicit named
+isolated profile gets its own host data roots and Chromium profile and is
+reused on later launches:
 
 ```bash
 npx cordisx@beta codex default --data shared
@@ -119,8 +120,9 @@ launch never reads a project-local `cordisx.config.json`.
 
 ## Launch modes
 
-The default command starts a separately tracked Codex instance with an
-independent Chromium profile and an automatically selected loopback CDP port:
+The default shared command starts the existing Host profile with an
+automatically selected loopback CDP port. It does not create a Chromium data
+directory under `CORDISX_HOME`:
 
 ```bash
 npm run dev
@@ -129,10 +131,10 @@ npm run dev -- codex work
 npm run dev -- codex work --data isolated
 ```
 
-The named profile is persisted in the home configuration. `default` initially
-shares the host's `HOME` and `CODEX_HOME`; an unknown explicit profile such as
-`work` is created as isolated and reused on later launches. Its host and
-Chromium roots are stored under:
+The named profile is persisted in the home configuration. `default` uses the
+Host's normal Chromium data, `HOME`, and `CODEX_HOME`; an unknown explicit
+profile such as `work` is created as isolated and reused on later launches.
+Only its host and Chromium roots are stored under:
 
 ```text
 ~/.cordisx/apps/codex/profiles/<profile>/
@@ -144,7 +146,8 @@ Other supported modes are:
 # Attach to a host that was already started with --remote-debugging-port=9229.
 npm run dev -- codex --attach
 
-# Use the system Chromium profile. Exit the ordinary instance first.
+# `shared` already uses the system Chromium profile. This is explicit only
+# when the selected profile is also shared.
 npm run dev -- codex --system
 
 # Override the application executable when automatic discovery is insufficient.
@@ -152,17 +155,17 @@ npm run dev -- codex --executable /Applications/Codex.app/Contents/MacOS/Codex
 npm run dev -- codex --executable /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
 ```
 
-`--profile-dir <path>` overrides the selected Chromium profile path. The old
+`--profile-dir <path>` overrides an **isolated** profile's Chromium path; it is
+rejected for `shared` so a login-less experience cannot silently turn into a
+fresh Host profile. The old
 `--isolated` flag remains accepted only by `cordisx dev`; ordinary launch uses
 the unambiguous `--data isolated` profile contract.
 
-Every normal launch has separate Codex/Electron processes, Chromium data, CDP
-port, UI storage, window restoration, and AppServer stdio lifecycle. A
-`shared` profile also shares `HOME` and `CODEX_HOME`, so the account,
-conversations, projects, and model configuration remain available. An
-`isolated` profile instead projects private `HOME` and `CODEX_HOME` roots.
-Shutdown removes the tracked injection and stops only the process started by
-this launcher.
+A `shared` profile uses the existing Host Chromium data plus `HOME` and
+`CODEX_HOME`, so the account, conversations, projects, and model configuration
+remain available without a new login. An `isolated` profile instead projects
+private host and Chromium roots. Both use a loopback CDP port; shutdown removes
+the tracked injection and stops only the process started by this launcher.
 
 Project-local composition is an explicit developer mode only:
 
@@ -180,6 +183,9 @@ the already signed-in Codex account:
 ```bash
 CORDISX_HOME="$PWD/config/ui-demos" npm run dev -- codex ui-demo --data shared
 ```
+
+On first use, CordisX tightens that exact user-owned `CORDISX_HOME` directory
+to `0700`; it never recurses into the checkout or changes the Host profile.
 
 Automated smoke instead copies the same template into a disposable private
 CordisX Home and removes only that runner-created Home:

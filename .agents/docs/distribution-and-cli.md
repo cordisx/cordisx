@@ -119,8 +119,9 @@ default, then adapter default. Every resolved launch plan is inspectable through
 
 `dataMode` is a host-neutral choice with two values:
 
-- `shared` integrates the host's existing account, conversations, projects,
-  models, and host configuration while CordisX retains its own UI/runtime state;
+- `shared` uses the host's existing Chromium profile, account, conversations,
+  projects, models, and host configuration while CordisX retains its own
+  `CORDISX_HOME` UI/runtime state;
 - `isolated` gives the named profile independent host data roots as well as
   independent CordisX state, so it can sign in and evolve separately.
 
@@ -130,9 +131,10 @@ directories, and launch arguments. The CLI must not know that one host uses
 roots it shares or isolates in the doctor output and tests; a mode is
 unavailable until that adapter can enforce it completely.
 
-CordisX never modifies an installed host application. Shared data does not mean
-shared renderer processes, debugging endpoints, UI storage, or window state.
-Isolation is a filesystem/profile contract, not a security identity boundary:
+CordisX never modifies an installed host application. A shared launch reuses
+the normal Host profile rather than creating an isolated renderer profile;
+`--profile-dir` is therefore isolated-only. Isolation is a filesystem/profile
+contract, not a security identity boundary:
 platform keychains, device identity, and other operating-system services may
 still be shared unless a future adapter can project them explicitly.
 

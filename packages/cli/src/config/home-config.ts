@@ -511,7 +511,13 @@ export async function loadHomeConfig(options?: string | HomeConfigPathOptions): 
   return readValidated(resolveHomeConfigPath(normalized))
 }
 
-async function ensurePrivateDirectory(directory: string, allowTightenExisting: boolean): Promise<void> {
+interface PrivateDirectoryPolicy {
+  readonly allowTightenExisting: boolean
+  /** Explicit CORDISX_HOME must be owned before CordisX changes its mode. */
+  readonly requireCurrentUserOwnership: boolean
+}
+
+async function ensurePrivateDirectory(directory: string, policy: PrivateDirectoryPolicy): Promise<void> {
   let created: string | undefined
   try {
     created = await mkdir(directory, { recursive: true, mode: 0o700 })
@@ -527,7 +533,13 @@ async function ensurePrivateDirectory(directory: string, allowTightenExisting: b
     return
   }
   if (process.platform !== 'win32' && (metadata.mode & 0o077) !== 0) {
-    if (allowTightenExisting) {
+    if (policy.allowTightenExisting) {
+      if (policy.requireCurrentUserOwnership) {
+        const uid = process.getuid?.()
+        if (uid === undefined || metadata.uid !== uid) {
+          throw new Error(`CordisX home must be owned by the current user before CordisX can make it private: ${directory}`)
+        }
+      }
       await chmod(directory, 0o700)
       return
     }
@@ -535,11 +547,16 @@ async function ensurePrivateDirectory(directory: string, allowTightenExisting: b
   }
 }
 
-function mayTightenCanonicalHome(options: HomeConfigWriteOptions): boolean {
-  if (options.configPath !== undefined) return false
+function privateDirectoryPolicy(options: HomeConfigWriteOptions): PrivateDirectoryPolicy {
+  if (options.configPath !== undefined) {
+    return { allowTightenExisting: false, requireCurrentUserOwnership: false }
+  }
   const env = options.env ?? process.env
   const override = env.CORDISX_HOME?.trim()
-  return override === undefined || override === ''
+  if (override === undefined || override === '') {
+    return { allowTightenExisting: true, requireCurrentUserOwnership: false }
+  }
+  return { allowTightenExisting: true, requireCurrentUserOwnership: true }
 }
 
 function positiveDuration(value: number | undefined, fallback: number, label: string): number {
@@ -646,7 +663,7 @@ async function publishAtomic(configPath: string, config: HomeConfig): Promise<vo
 export async function ensureHomeConfig(options?: string | HomeConfigWriteOptions): Promise<HomeConfig> {
   const normalized = normalizeOptions(options)
   const configPath = resolveHomeConfigPath(normalized)
-  await ensurePrivateDirectory(path.dirname(configPath), mayTightenCanonicalHome(normalized))
+  await ensurePrivateDirectory(path.dirname(configPath), privateDirectoryPolicy(normalized))
   const lock = await acquireLock(configPath, normalized)
   try {
     try {
@@ -675,7 +692,7 @@ export async function updateHomeConfigAtomic(
 ): Promise<HomeConfig> {
   const normalized = normalizeOptions(options)
   const configPath = resolveHomeConfigPath(normalized)
-  await ensurePrivateDirectory(path.dirname(configPath), mayTightenCanonicalHome(normalized))
+  await ensurePrivateDirectory(path.dirname(configPath), privateDirectoryPolicy(normalized))
   const lock = await acquireLock(configPath, normalized)
   try {
     let current: HomeConfig

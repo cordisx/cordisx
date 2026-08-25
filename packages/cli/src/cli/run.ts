@@ -475,6 +475,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       : {}),
   })
 
+  if (invocation.action === 'launch' && selection.dataMode === 'shared' && invocation.options.profileDir !== undefined) {
+    throw new Error('--profile-dir requires --data isolated; shared reuses the current Host profile')
+  }
+
   if (invocation.action === 'doctor') {
     try {
       const plan = await adapter.resolveLaunchPlan({
