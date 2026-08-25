@@ -221,12 +221,17 @@ describe('Manager Settings navigation core', () => {
       parentRoute: { id: 'ready' }, header: { title: { kind: 'record', recordIdParam: 'accountId', fallback: { key: 'account.fallback', fallback: 'Account' } } },
       tabs: [{ id: 'configuration', route: configuration }, { id: 'logs', route: logs }],
     })
+    navigation.managerContent.register('demo', {
+      $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1, schemaVersion: 1, id: 'account-logs', route: logs,
+      parentRoute: { id: 'ready' }, header: { title: { kind: 'record', recordIdParam: 'accountId', fallback: { key: 'account.fallback', fallback: 'Account' } } },
+      tabs: [{ id: 'configuration', route: configuration }],
+    })
     const presentation = navigation.managerContentPresentation('demo', configuration)
     expect(presentation).toMatchObject({ title: 'Ada', description: 'Configuration body', parent: { id: 'ready' } })
     expect(presentation?.tabs).toEqual([
-      expect.objectContaining({ id: 'configuration', label: 'Configuration', active: true }),
-      expect.objectContaining({ id: 'logs', label: 'Logs', active: false }),
+      expect.objectContaining({ id: 'configuration', label: 'Configuration', icon: 'host:layers', active: true }),
     ])
+    expect(navigation.managerContentPresentation('demo', logs)).toBeUndefined()
 
     pages.register('demo', {
       $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3,

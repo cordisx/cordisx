@@ -561,7 +561,7 @@ const MANAGER_STYLES = `
     padding: 0 22px;
     border-bottom: 1px solid rgba(255, 255, 255, .08);
   }
-  .cxm-heading { position: relative; display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; column-gap: 9px; min-width: 0; flex: 1 1 auto; }
+  .cxm-heading { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: start; column-gap: 9px; min-width: 0; flex: 1 1 auto; }
   .cxm-heading[data-heading-actions="true"] { padding-right: 36px; }
   .cxm-heading-menu { position: absolute; z-index: 8; top: -2px; right: 0; }
   .cxm-heading-menu > .cxm-manager-icon-action { color: var(--cx-muted); }
@@ -587,7 +587,6 @@ const MANAGER_STYLES = `
     color: #d8dce3;
     align-self: start;
   }
-  .cxm-heading-leading-stack { display: flex; width: 56px; gap: 4px; }
   .cxm-heading-icon svg { width: 18px; height: 18px; transform: translateY(-.5px); }
   .cxm-back {
     padding: 0;
@@ -683,6 +682,8 @@ const MANAGER_STYLES = `
   .cxm-marketplace-source-readonly { overflow-wrap: anywhere; color: var(--cx-muted); font: 11px/1.5 ui-monospace, monospace; user-select: text; }
   .cxm-tabs {
     display: flex;
+    width: 100%;
+    min-width: 0;
     flex-wrap: wrap;
     gap: 5px;
     margin: -4px -8px 16px;
@@ -692,6 +693,9 @@ const MANAGER_STYLES = `
   .cxm-tab {
     display: inline-flex;
     align-items: center;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
     flex: none;
     padding: 7px 9px;
     border: 0;
@@ -701,7 +705,8 @@ const MANAGER_STYLES = `
     cursor: pointer;
     font: 11px/1.2 system-ui, sans-serif;
   }
-  .cxm-tab-content { display: inline-grid; grid-template-columns: 18px max-content; align-items: center; gap: 7px; }
+  .cxm-tab-content { display: inline-grid; min-width: 0; max-width: 100%; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 7px; }
+  .cxm-tab-content > span:last-child { min-width: 0; overflow-wrap: anywhere; }
   .cxm-tab-icon { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; color: currentColor; }
   .cxm-tab-icon svg { width: 17px; height: 17px; transform: translateY(-.5px); }
   .cxm-tab:hover { background: rgba(199, 204, 212, .08); color: #eef0f3; }
@@ -713,6 +718,7 @@ const MANAGER_STYLES = `
   .cxm-settings-panel[aria-busy="true"] .cxm-settings-panel-body { opacity: .78; }
   .cxm-settings-tab-icon.cordisx-host-icon { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; }
   .cxm-settings-tab-icon.cordisx-host-icon svg { width: 17px; height: 17px; }
+  .cxm-manager-content-root { min-width: 0; max-width: 100%; }
   .cxm-tab:disabled { cursor: default; opacity: .42; }
   .cxm-about-identity { display: flex; align-items: center; gap: 18px; padding: 4px 2px 22px; }
   .cxm-about-identity-copy { min-width: 0; white-space: nowrap; }
@@ -2950,16 +2956,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       back.setAttribute('aria-label', copy('manager.back'))
       back.append(createManagerIcon(document, 'back', 'cxm-back-icon'))
       back.addEventListener('click', () => { void navigateBack() })
-      if (options.icon === undefined) row.append(back)
-      else {
-        const leading = create(document, 'div', 'cxm-heading-leading cxm-heading-leading-stack')
-        const icon = String(options.icon).startsWith('host:')
-          ? createHostSurfaceIcon(document, options.icon as CordisXIconToken)
-          : createManagerIcon(document, options.icon as ManagerIconToken)
-        icon.setAttribute('aria-hidden', 'true')
-        leading.append(back, icon)
-        row.append(leading)
-      }
+      // History owns the one stable leading seat. Do not place a decorative
+      // icon next to Back: it shifts the title and creates duplicate chrome.
+      row.append(back)
     } else {
       const icon = options.brand === true
         ? createAdaptiveBrandMark(document)
@@ -5927,12 +5926,45 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     navButtons.get(`manager-content:${id}`)?.focus()
   }
 
-  const managerContentKey = (id: string, reference: CordisXRouteReference): string => `${id}:${reference.id}:${JSON.stringify(reference.params ?? {})}`
+  const focusManagerContentTab = (id: string): void => {
+    content.querySelectorAll<HTMLButtonElement>('[data-manager-content-tab]').forEach(button => {
+      if (button.dataset.managerContentTab === id) button.focus()
+    })
+  }
+
+  type ManagerContentFocusRestore =
+    | { readonly kind: 'navigation' }
+    | { readonly kind: 'tab'; readonly id: string }
+    | undefined
+
+  const managerContentReferenceKey = (reference: CordisXRouteReference): string => (
+    `${reference.id}\u0000${JSON.stringify(Object.entries(reference.params ?? {}).sort(([left], [right]) => left.localeCompare(right)))}`
+  )
+
+  const managerContentKey = (id: string, reference: CordisXRouteReference): string => `${id}\u0000${managerContentReferenceKey(reference)}`
+
+  // Encode each local-id code point independently. Concatenated punctuation
+  // cannot alias: e.g. "a.b" and "a-b" deliberately produce different IDs.
+  const managerContentDomIdPart = (value: string): string => [...value]
+    .map(character => character.codePointAt(0)!.toString(16))
+    .join('-')
+
+  const managerContentPanelId = (id: string): string => `cordisx-manager-content-panel-${managerContentDomIdPart(id)}`
+
+  const managerContentTabId = (id: string, tabId: string): string => (
+    `cordisx-manager-content-tab-${managerContentDomIdPart(id)}-${managerContentDomIdPart(tabId)}`
+  )
+
+  const managerContentFocusRestore = (id: string, reference: CordisXRouteReference): ManagerContentFocusRestore => {
+    const tabs = model.managerContentPresentation?.(id, reference)?.tabs ?? []
+    const active = tabs.filter(tab => managerContentReferenceKey(tab.route) === managerContentReferenceKey(reference))
+    return active.length === 1 ? { kind: 'tab', id: active[0]!.id } : { kind: 'navigation' }
+  }
 
   const activateManagerContent = async (
     id: string,
     reference: CordisXRouteReference | undefined,
-    restoreFocus: boolean,
+    restoreFocus: ManagerContentFocusRestore,
     recordHistory = true,
   ): Promise<void> => {
     const item = settingsNavigationItems(model.snapshot()).find(candidate => candidate.id === id)
@@ -5943,7 +5975,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const nextRoute: ManagerRouteState = { kind: 'manager-content', id, reference: resolvedReference }
     const mountKey = managerContentKey(id, resolvedReference)
     if (routeKey(previousRoute) === routeKey(nextRoute) && managerContentMountId === mountKey) {
-      if (restoreFocus) focusManagerContentNavigation(id)
+      if (restoreFocus?.kind === 'navigation') focusManagerContentNavigation(id)
+      if (restoreFocus?.kind === 'tab') focusManagerContentTab(restoreFocus.id)
       return
     }
     if (recordHistory && routeKey(previousRoute) !== routeKey(nextRoute)) navigationHistory.push(previousRoute)
@@ -5965,12 +5998,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       managerContentRoot.replaceChildren(loading)
       managerContentMountId = mountKey
       const mount = await model.mountManagerContent(id, resolvedReference, managerContentRoot, {
-        navigate: next => activateManagerContent(id, next, false),
+        navigate: next => activateManagerContent(id, next, undefined),
         back: async () => {
           const active = routeState
           if (active.kind !== 'manager-content') return
           const presentation = model.managerContentPresentation?.(active.id, active.reference)
-          if (presentation?.parent !== undefined) await activateManagerContent(active.id, presentation.parent, true)
+          if (presentation?.parent !== undefined) await activateManagerContent(active.id, presentation.parent, { kind: 'navigation' })
           else await navigateBack()
         },
       })
@@ -5984,7 +6017,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       managerContentMountId = mountKey
       loading.remove()
       managerContentRoot.removeAttribute('aria-busy')
-      if (restoreFocus) focusManagerContentNavigation(id)
+      if (restoreFocus?.kind === 'navigation') focusManagerContentNavigation(id)
+      if (restoreFocus?.kind === 'tab') focusManagerContentTab(restoreFocus.id)
     } catch (error) {
       if (token !== managerContentTransition) return
       managerContentMount?.abort()
@@ -5993,7 +6027,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       routeState = { kind: 'primary', primary: 'plugins' }
       managerContentTransitioning = false
       renderContent()
-      if (restoreFocus) navButtons.get('plugins')?.focus()
+      if (restoreFocus !== undefined) navButtons.get('plugins')?.focus()
     }
   }
 
@@ -6006,30 +6040,78 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       icon: item.icon,
       tabs: [],
     }
-    setHeading(projection.description, snapshot, { icon: (projection.icon as CordisXIconToken | undefined) ?? item.icon })
+    // The current exact route is the only authority for selection. An invalid
+    // projection is rendered as an untabbed page instead of emitting a broken
+    // tablist with no active tab or an orphaned aria-labelledby reference.
+    const activeTabs = projection.tabs.filter(tab => (
+      managerContentReferenceKey(tab.route) === managerContentReferenceKey(reference)
+    ))
+    const activeTab = activeTabs.length === 1 ? activeTabs[0] : undefined
+    const tabs = activeTab === undefined
+      ? []
+      : projection.tabs.map(tab => ({ ...tab, active: tab === activeTab }))
+    setHeading(projection.description, snapshot, { icon: projection.icon ?? item.icon })
     if (managerContentRoot === undefined || !managerContentRoot.isConnected) {
       managerContentRoot = create(document, 'div', 'cxm-manager-content-root')
       managerContentRoot.dataset.managerContentRoot = 'true'
       content.append(managerContentRoot)
     }
+    const focusedTabId = document.activeElement instanceof document.defaultView!.HTMLElement
+      ? document.activeElement.dataset.managerContentTab
+      : undefined
     content.querySelector<HTMLElement>('[data-manager-content-tabs]')?.remove()
-    if (projection.tabs.length > 0) {
-      const tabs = create(document, 'div', 'cxm-tabs')
-      tabs.dataset.managerContentTabs = 'true'
-      tabs.setAttribute('role', 'tablist')
-      tabs.setAttribute('aria-label', projection.title)
-      for (const tab of projection.tabs) {
+    if (tabs.length > 0 && activeTab !== undefined) {
+      const tablist = create(document, 'div', 'cxm-tabs')
+      tablist.dataset.managerContentTabs = 'true'
+      tablist.setAttribute('role', 'tablist')
+      tablist.setAttribute('aria-label', projection.title)
+      tablist.setAttribute('aria-orientation', 'horizontal')
+      const panelId = managerContentPanelId(id)
+      managerContentRoot.id = panelId
+      managerContentRoot.setAttribute('role', 'tabpanel')
+      managerContentRoot.tabIndex = 0
+      for (const tab of tabs) {
         const button = create(document, 'button', 'cxm-tab')
         button.type = 'button'
+        button.id = managerContentTabId(id, tab.id)
         button.dataset.managerContentTab = tab.id
         button.setAttribute('role', 'tab')
+        button.setAttribute('aria-controls', panelId)
         button.setAttribute('aria-selected', String(tab.active))
         button.tabIndex = tab.active ? 0 : -1
-        button.textContent = tab.label
-        button.addEventListener('click', () => { void activateManagerContent(id, tab.route, true) })
-        tabs.append(button)
+        const visibleContent = create(document, 'span', 'cxm-tab-content')
+        const icon = createHostSurfaceIcon(document, tab.icon)
+        icon.classList.add('cxm-tab-icon')
+        visibleContent.append(icon, create(document, 'span', undefined, tab.label))
+        button.append(visibleContent)
+        const activate = (): void => { void activateManagerContent(id, tab.route, { kind: 'tab', id: tab.id }) }
+        button.addEventListener('click', activate)
+        button.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            activate()
+            return
+          }
+          const current = tabs.findIndex(candidate => candidate.id === tab.id)
+          let next: (typeof tabs)[number] | undefined
+          if (event.key === 'ArrowRight') next = tabs[(current + 1) % tabs.length]
+          if (event.key === 'ArrowLeft') next = tabs[(current - 1 + tabs.length) % tabs.length]
+          if (event.key === 'Home') next = tabs[0]
+          if (event.key === 'End') next = tabs.at(-1)
+          if (next === undefined) return
+          event.preventDefault()
+          void activateManagerContent(id, next.route, { kind: 'tab', id: next.id })
+        })
+        tablist.append(button)
       }
-      content.insertBefore(tabs, managerContentRoot)
+      managerContentRoot.setAttribute('aria-labelledby', managerContentTabId(id, activeTab.id))
+      content.insertBefore(tablist, managerContentRoot)
+      if (focusedTabId !== undefined) focusManagerContentTab(focusedTabId)
+    } else {
+      managerContentRoot.removeAttribute('role')
+      managerContentRoot.removeAttribute('aria-labelledby')
+      managerContentRoot.removeAttribute('tabindex')
+      managerContentRoot.removeAttribute('id')
     }
     const mountKey = managerContentKey(id, reference)
     managerContentRoot.dataset.managerContentId = id
@@ -6040,7 +6122,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         queueMicrotask(() => {
           if (routeState.kind !== 'manager-content' || routeState.id !== id
             || managerContentKey(id, routeState.reference) !== mountKey || managerContentMountId === mountKey || managerContentTransitioning) return
-          void activateManagerContent(id, reference, false, false)
+          void activateManagerContent(id, reference, undefined, false)
         })
       }
     }
@@ -6074,12 +6156,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       icon.setAttribute('aria-hidden', 'true')
       button.append(icon, create(document, 'span', 'cxm-nav-label', item.title))
       button.addEventListener('click', () => {
-        if (!item.disabled) void activateManagerContent(item.id, item.route, true)
+        if (!item.disabled) void activateManagerContent(item.id, item.route, { kind: 'navigation' })
       })
       button.addEventListener('keydown', event => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
-          if (!item.disabled) void activateManagerContent(item.id, item.route, true)
+          if (!item.disabled) void activateManagerContent(item.id, item.route, { kind: 'navigation' })
           return
         }
         if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
@@ -6112,16 +6194,25 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       await activateSettingsTab(next.tabId, restoreFocus, recordHistory)
       return
     }
+    if (next.kind === 'manager-content') {
+      await activateManagerContent(
+        next.id,
+        next.reference,
+        restoreFocus ? managerContentFocusRestore(next.id, next.reference) : undefined,
+        recordHistory,
+      )
+      return
+    }
     const previous = routeState
     if (recordHistory) navigationHistory.push(previous)
     if (activePrimary(previous) === 'settings') await disposeSettingsForRouteChange()
-    if (previous.kind === 'manager-content' && (next.kind !== 'manager-content' || next.id !== previous.id
-      || managerContentKey(previous.id, previous.reference) !== managerContentKey(next.id, next.reference))) {
+    if (previous.kind === 'manager-content') {
       await resetManagerContent()
     }
     routeState = next
     renderContent()
     if (next.kind === 'primary') restoreListScroll()
+    if (restoreFocus && next.kind === 'primary') navButtons.get(next.primary)?.focus()
   }
 
   const navigateBack = async (): Promise<void> => {
@@ -6140,6 +6231,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       ))?.target
     }
     if (target !== undefined) await navigateRoute(target, { recordHistory: false, restoreFocus: true })
+    else navButtons.get(activePrimary())?.focus()
   }
 
   function renderContent(): void {
