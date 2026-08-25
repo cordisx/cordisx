@@ -123,7 +123,7 @@ const CORDIS_ORIGINAL = Symbol.for('cordis.original')
 interface ChannelManagerState {
   readonly projection: ChannelManagerProjectionV1
   readonly serviceConfig?: ChannelManagerServiceConfigApi
-  readonly captureCredential?: ChannelManagerServiceInput['captureCredential']
+  readonly createCredentialedConnection?: ChannelManagerServiceInput['createCredentialedConnection']
   readonly localConnections: ChannelManagerConnectionProjection[]
   readonly listeners: Set<() => void>
 }
@@ -552,15 +552,12 @@ export interface ChannelManagerServiceConfigApi {
 export interface ChannelManagerServiceInput {
   readonly projection?: ChannelManagerProjectionV1
   readonly serviceConfig?: ChannelManagerServiceConfigApi
-  /**
-   * A Host-private capture seam. The typed request is the only permitted path
-   * for a newly typed credential; its return value is an opaque reference and
-   * neither value is admitted to the renderer projection or service config.
-   */
-  readonly captureCredential?: (input: {
+  /** Host captures a transient credential and performs the entire private config write. */
+  readonly createCredentialedConnection?: (input: {
     readonly account: ChannelManagerConnectionProjection['ref']
     readonly secret: string
-  }) => Promise<{ readonly secretRef: string }>
+    readonly mutation: HostServiceConfigMutation
+  }) => Promise<HostServiceConfigMutationResult>
 }
 
 /** Host-owned Channel settings renderer. Plugins can request the seat but never receive its DOM internals. */
@@ -573,7 +570,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     projections.set(this, Object.freeze({
       projection: normalizeProjection(wrapped.projection ?? EMPTY_PROJECTION),
       ...(wrapped.serviceConfig === undefined ? {} : { serviceConfig: wrapped.serviceConfig }),
-      ...(wrapped.captureCredential === undefined ? {} : { captureCredential: wrapped.captureCredential }),
+      ...(wrapped.createCredentialedConnection === undefined ? {} : { createCredentialedConnection: wrapped.createCredentialedConnection }),
       localConnections: [],
       listeners: new Set<() => void>(),
     }))
@@ -755,14 +752,12 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         submit.disabled = true
         status.textContent = managerCopy(locale, 'form.saving')
         void (async () => {
-          const capture = state.captureCredential
-          const captured = candidatePlatform === 'feishu'
-            ? (candidateSecret === '' || capture === undefined ? undefined : await capture({ account: record.connection.ref, secret: candidateSecret }))
-            : undefined
+          const credentialedConnection = state.createCredentialedConnection
+          const createFeishu = candidatePlatform === 'feishu'
           candidateSecret = ''
           credential.value = ''
-          if (candidatePlatform === 'feishu' && captured === undefined) throw new Error('Host credential capture is unavailable')
-          return await serviceConfig.list().then(descriptors => {
+          if (createFeishu && (candidateSecret === '' || credentialedConnection === undefined)) throw new Error('Host credential capture is unavailable')
+          return await serviceConfig.list().then(async descriptors => {
           const descriptor = descriptors.find(item => item.identity.pluginId === 'channel' && item.identity.serviceId === 'runtime')
           const raw = descriptor?.configuration
           if (descriptor === undefined || raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Channel service configuration is unavailable')
@@ -773,7 +768,6 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
           configuration.connections = [...(configuration.connections ?? []), {
             ref: record.connection.ref, adapterKind: candidatePlatform, enabled: candidatePlatform === 'simulator',
             transport: { mode: candidateTransport },
-            ...(captured === undefined ? {} : { secretRef: captured.secretRef }),
           }]
           configuration.routes = [...(configuration.routes ?? []), {
             id: routeId, connection: record.connection.ref, enabled: true,
@@ -785,11 +779,14 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
             },
             notifications: candidateNotifications ? ['completion', 'failure', 'approval-required'] : [],
           }]
-          return serviceConfig.mutate({
+          const mutation: HostServiceConfigMutation = {
             contract: 'cordisx.service-config-mutation/v1', schemaVersion: 1,
             identity: descriptor.identity, scope: descriptor.scope, expectedRevision: descriptor.revision,
             configuration: configuration as HostServiceConfigMutation['configuration'],
-          })
+          }
+          return createFeishu
+            ? await credentialedConnection!({ account: record.connection.ref, secret: candidateSecret, mutation })
+            : await serviceConfig.mutate(mutation)
           })
         })().then(result => {
           if (!form.isConnected) return
