@@ -43,7 +43,7 @@ import {
 } from './manager.js'
 import { CordisXCommandService } from './commands.js'
 import { CordisXI18nService } from './i18n.js'
-import { CordisXPageService, CordisXRouteService } from './navigation.js'
+import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
 import {
   BrowserPermissionPolicyStore,
   BrowserPermissionPrompt,
@@ -592,6 +592,7 @@ async function start(
   let commandFiber: Fiber | undefined
   let pageFiber: Fiber | undefined
   let routeFiber: Fiber | undefined
+  let managerContentFiber: Fiber | undefined
   let slotFiber: Fiber | undefined
   let settingsFiber: Fiber | undefined
   let configRendererFiber: Fiber | undefined
@@ -1725,6 +1726,8 @@ async function start(
     channelManagerFiber = undefined
     await settingsFiber?.dispose()
     settingsFiber = undefined
+    await managerContentFiber?.dispose()
+    managerContentFiber = undefined
     await routeFiber?.dispose()
     routeFiber = undefined
     await pageFiber?.dispose()
@@ -1788,14 +1791,24 @@ async function start(
       return routeService.mountManagerSettingsFor(registration.owner, item.route, registration.qualifiedId, panelBody)
     },
     closeSettingsTabContent: () => routeService?.closeManagerSettings() ?? Promise.resolve(),
-    mountManagerContent: (id, container) => {
+    managerContentPresentation: (id, reference) => {
+      if (routeService === undefined || slotService === undefined) return undefined
+      const registration = slotService.snapshot().find(item => item.surface === 'manager.settings.navigation-items'
+        && item.qualifiedId === id && item.valid && item.visible && item.authorized && !item.pending && !item.disabled)
+      if (registration === undefined) return undefined
+      return routeService.managerContentPresentationFor(registration.owner, reference)
+    },
+    mountManagerContent: (id, reference, container, navigation) => {
       if (routeService === undefined || slotService === undefined) return Promise.reject(new Error('CordisX manager content is not ready'))
       const registration = slotService.snapshot().find(item => item.surface === 'manager.settings.navigation-items'
         && item.qualifiedId === id && item.valid && item.visible && item.authorized && !item.pending && !item.disabled
         && (item.group === 'before-settings' || item.group === 'after-settings'))
       if (registration === undefined) return Promise.reject(new Error(`manager content item ${id} is not activatable`))
-      const item = registration.item as CordisXManagerSettingsNavigationItem
-      return routeService.mountManagerContentFor(registration.owner, item.route, registration.qualifiedId, container)
+      return routeService.mountManagerContentFor(registration.owner, reference, registration.qualifiedId, container, {
+        navigate: (next: CordisXRouteReference) => navigation.navigate(next),
+        back: () => navigation.back(),
+        close: () => navigation.back(),
+      })
     },
     closeManagerContent: () => routeService?.closeManagerContent() ?? Promise.resolve(),
     pluginConsole: (id) => {
@@ -1910,6 +1923,8 @@ async function start(
     routeFiber = ctx.plugin(CordisXRouteService, pluginConsole)
     await routeFiber
     routeService = ctx.routes as CordisXRouteService
+    managerContentFiber = ctx.plugin(CordisXManagerContentNavigationService)
+    await managerContentFiber
     unregisterManagerPointCatalog = extensionPointDescriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
     const managerOutletController = {
       getSnapshot: () => ({ available: false, contextKey: generation, placement: 'absolute' as const }),

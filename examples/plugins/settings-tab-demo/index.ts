@@ -4,6 +4,7 @@ import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
+  CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
   type CordisXLocalizedText,
   type CordisXMessageParams,
   type CordisXPageMountContext,
@@ -11,7 +12,7 @@ import {
 } from '../../../packages/cli/src/contracts.js'
 
 export const name = 'settings-tab-demo'
-export const inject = ['i18n', 'slots', 'pages', 'routes']
+export const inject = ['i18n', 'slots', 'pages', 'routes', 'managerContent']
 export const Config = Schema.object({
   demoValue: Schema.string().default('CordisX').min(1).max(64).pattern(/\S/u)
     .extra('extra', { label: { en: 'Demo value', 'zh-CN': '演示值' } })
@@ -117,6 +118,10 @@ export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})):
   ctx.routes.register({
     $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2, id: 'navigation', path: '/manager/extensions/settings-tab-demo',
     outlet: 'manager.content', page: 'navigation', title: message('route.title'), description: message('route.description'),
+  })
+  ctx.managerContent.register({
+    $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1, schemaVersion: 1,
+    id: 'root', route: { id: 'navigation' }, header: { title: { kind: 'route' } },
   })
   ctx.slots.register({
     name: 'manager.settings.navigation-items', id: 'navigation', group: 'after-settings', order: 160,

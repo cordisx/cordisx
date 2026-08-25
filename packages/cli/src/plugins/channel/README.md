@@ -5,22 +5,20 @@ Channels is the CordisX product surface for launcher-owned messaging connections
 ## Current status
 
 - **Implemented:** immutable packaged service artifacts are validated, bundled, staged, integrity-checked, authority-projected, and loaded into a generation-bound Node Cordis context.
-- **Verified:** the local simulator covers activation/disposal, and the shared Host service-config API covers `service-restart` CAS, opaque-handle preservation, redaction, and last-good publication without a real credential.
+- **Verified:** the local simulator covers activation/disposal; the official Feishu/Lark WebSocket adapter and the shared Host service-config API are covered by automated tests for `service-restart` CAS, opaque-handle preservation, redaction, and last-good publication.
 - **Implemented and verified:** the bounded Host body renderer provides a fixed searchable Channel card list, a Host-owned candidate-only create flow, and Configuration / Logs / Connections & sessions details through `manager.content`. The Host renders navigation, forms, theme, accessibility, and cleanup; it never projects `secretRef` or credential material.
-- **Experimental:** launcher-to-renderer live projections and cross-plugin delivery are not yet lifecycle-wired.
-- **Unavailable:** real Feishu/Lark and WeCom connections, credential creation, official webhook/long-connection deployment, and launcher-to-renderer live snapshot transport.
-- **Planned:** a Host credential broker, official adapter packages, persistent Channel service configuration writes, and real-account smoke tests.
+- **Experimental:** the renderer receives only the launch-time Channel projection. It is not a continuous transport or live connection feed.
+- **Not yet verified:** a real Feishu/Lark account connection and message smoke. Automated adapter verification is not evidence of a user-account session.
+- **Unavailable:** credential creation broker and WeCom adapter support.
+- **Planned:** real-account smoke evidence and lifecycle-wired live renderer projections.
 
 The renderer module has no user configuration fields. Connection, mapping, retry, rate-limit, and attachment policy belong to the launcher service's versioned Host configuration declaration. Its closed manifest `restart` value maps to the Host's precise `service-restart` plane; the shared schema projection is `standard/renderable=false`, so CordisX does not put it in the ordinary renderer plugin form. A service with no configuration must declare `configuration.kind: "none"`; CordisX does not create placeholder fields.
 
 Credentials are opaque Host handles. They must not appear in plugin configuration, renderer state, logs, Manager snapshots, or this README's examples.
 
-`cli_aaba90fcc4389cb3` is a known enabled temporary Feishu test application,
-not a verified Channel connection. Its secret is neither requested nor read;
-no callback/event subscription or external configuration is created. The
-Manager labels its credential, adapter, and transport state unavailable until a
-separate, authorized real-adapter delivery provides Host-held credentials and
-readback-backed connection evidence.
+The Manager never claims a connection from an application identifier alone.
+Credentials remain Host-held; a real account or message result is shown only
+after a separately verified connection path, never inferred from configuration.
 
 ## Plugin-to-plugin messaging facade
 
@@ -43,4 +41,9 @@ Delivery is at least once with durable inbox/outbox records, event-id idempotenc
 
 ## Real platform boundary
 
-The built-in service only accepts the local simulator transport. Enabling any real adapter kind fails closed. Feishu/Lark and WeCom support must use official platform APIs and Host-held credentials. Personal WeChat client reverse engineering, unofficial hooks, fabricated subscriptions, and renderer-owned web servers are out of scope.
+The built-in service supports the local simulator and the official Feishu/Lark
+WebSocket adapter. The adapter uses official platform APIs and Host-held
+credentials, but a real account/message smoke has not yet been verified.
+WeCom remains unavailable. Personal WeChat client reverse engineering,
+unofficial hooks, fabricated subscriptions, and renderer-owned web servers are
+out of scope.
