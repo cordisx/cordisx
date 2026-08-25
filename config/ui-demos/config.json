@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "defaultApp": "codex",
+  "providers": [],
+  "plugins": [
+    {
+      "id": "slot-showcase",
+      "entry": "../../examples/plugins/slot-showcase/index.ts",
+      "enabled": true,
+      "config": { "sessionId": "" },
+      "profiles": {
+        "ui-demo": { "revision": 0, "config": { "sessionId": "" } }
+      }
+    },
+    {
+      "id": "hello-toolbar",
+      "entry": "../../examples/plugins/hello-toolbar/index.ts",
+      "enabled": true,
+      "config": {},
+      "profiles": {
+        "ui-demo": { "revision": 0, "config": {} }
+      }
+    },
+    {
+      "id": "settings-tab-demo",
+      "entry": "../../examples/plugins/settings-tab-demo/index.ts",
+      "enabled": true,
+      "config": { "demoValue": "CordisX" },
+      "profiles": {
+        "ui-demo": { "revision": 0, "config": { "demoValue": "CordisX" } }
+      }
+    },
+    {
+      "id": "form-schema-gallery",
+      "entry": "../../examples/plugins/form-schema-gallery/index.ts",
+      "enabled": true,
+      "config": { "workspaceName": "Northstar workspace" },
+      "profiles": {
+        "ui-demo": {
+          "revision": 0,
+          "config": {
+            "workspaceName": "Northstar workspace"
+          }
+        }
+      }
+    },
+    {
+      "id": "channel",
+      "entry": "cordisx:channel",
+      "enabled": true,
+      "config": {},
+      "profiles": {
+        "ui-demo": { "revision": 0, "config": {} }
+      }
+    },
+    {
+      "id": "cli-proxy-api",
+      "entry": "cordisx:cli-proxy-api",
+      "enabled": true,
+      "config": {},
+      "profiles": {
+        "ui-demo": { "revision": 0, "config": {} }
+      }
+    }
+  ],
+  "permissions": [],
+  "apps": {
+    "codex": {
+      "defaultProfile": "ui-demo",
+      "profiles": {
+        "ui-demo": {
+          "displayName": "CordisX UI Demo",
+          "dataMode": "shared"
+        }
+      }
+    }
+  }
+}

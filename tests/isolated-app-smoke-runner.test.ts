@@ -46,6 +46,28 @@ describe('isolated app smoke runner', () => {
     }
   })
 
+  it('materializes relative plugin entries before moving a Home template', async () => {
+    const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-isolated-smoke-test-'))
+    try {
+      const homeConfig = path.join(fixtureRoot, 'ui-demo.json')
+      await writeFile(homeConfig, JSON.stringify({
+        plugins: [
+          { id: 'local', entry: './plugins/local.ts' },
+          { id: 'builtin', entry: 'cordisx:channel' },
+        ],
+      }))
+      const homeRoot = await homeHelper.prepareIsolatedSmokeHome(homeConfig)
+      const copied = JSON.parse(await readFile(path.join(homeRoot, '.cordisx', 'config.json'), 'utf8'))
+      expect(copied.plugins).toEqual([
+        { id: 'local', entry: path.join(fixtureRoot, 'plugins/local.ts') },
+        { id: 'builtin', entry: 'cordisx:channel' },
+      ])
+      await homeHelper.cleanupIsolatedSmokeHome(homeRoot)
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true })
+    }
+  })
+
   it('keeps the product-mode invocation explicit', async () => {
     const source = await readFile(path.join(root, 'packages/cli/scripts/run-isolated-app-smoke.mjs'), 'utf8')
     const homeHelperSource = await readFile(path.join(root, 'packages/cli/scripts/isolated-smoke-home.mjs'), 'utf8')

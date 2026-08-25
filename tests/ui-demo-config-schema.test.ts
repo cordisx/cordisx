@@ -19,6 +19,7 @@ import {
   configApplies as formSchemaGalleryConfigApplies,
 } from '../examples/plugins/form-schema-gallery/index.js'
 import type { CordisXStandardSchema } from '../packages/cli/src/contracts.js'
+import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { PluginConfigurationRegistry } from '../packages/cli/src/renderer/configuration.js'
 
 function descriptor(
@@ -40,6 +41,29 @@ function descriptor(
 }
 
 describe('UI demo Config Schemas', () => {
+  it('ships an independent writable Home configuration for real UI edits', async () => {
+    const home = JSON.parse(await readFile(new URL('../config/ui-demos/config.json', import.meta.url), 'utf8')) as {
+      defaultApp: string
+      providers: unknown[]
+      plugins: { id: string; profiles?: Record<string, { revision: number; config: unknown }> }[]
+      apps: { codex: { defaultProfile: string; profiles: Record<string, { dataMode: string }> } }
+    }
+    expect(home.defaultApp).toBe('codex')
+    expect(home.providers).toEqual([])
+    expect(home.apps.codex.defaultProfile).toBe('ui-demo')
+    expect(home.apps.codex.profiles['ui-demo']?.dataMode).toBe('shared')
+    expect(home.plugins.map(plugin => plugin.id)).toEqual([
+      'slot-showcase', 'hello-toolbar', 'settings-tab-demo', 'form-schema-gallery', 'channel', 'cli-proxy-api',
+    ])
+    expect(home.plugins.every(plugin => plugin.profiles?.['ui-demo']?.revision === 0)).toBe(true)
+    const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const loaded = await loadConfig(path.join(projectRoot, 'config/ui-demos/config.json'), { profileId: 'ui-demo' })
+    expect(loaded.plugins.map(plugin => [plugin.id, plugin.revision])).toEqual([
+      ['slot-showcase', 0], ['hello-toolbar', 0], ['settings-tab-demo', 0],
+      ['form-schema-gallery', 0], ['channel', 0], ['cli-proxy-api', 0],
+    ])
+  })
+
   it('keeps the comprehensive ui-demos bundle free of first-level Settings navigation demos', async () => {
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const config = JSON.parse(await readFile(path.join(projectRoot, 'cordisx.config.ui-demos.json'), 'utf8')) as {

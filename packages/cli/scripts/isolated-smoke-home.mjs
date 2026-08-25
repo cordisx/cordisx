@@ -18,7 +18,20 @@ export async function prepareIsolatedSmokeHome(homeConfig) {
   const homeRoot = await mkdtemp(path.join(os.tmpdir(), TEMP_HOME_PREFIX))
   try {
     await mkdir(path.join(homeRoot, '.cordisx'), { recursive: true })
-    await copyFile(homeConfig, path.join(homeRoot, '.cordisx', 'config.json'))
+    const destination = path.join(homeRoot, '.cordisx', 'config.json')
+    const sourceText = await readFile(homeConfig, 'utf8')
+    const source = JSON.parse(sourceText)
+    let changed = false
+    if (Array.isArray(source?.plugins)) {
+      source.plugins = source.plugins.map(plugin => {
+        if (plugin === null || typeof plugin !== 'object' || typeof plugin.entry !== 'string'
+          || path.isAbsolute(plugin.entry) || plugin.entry.startsWith('cordisx:')) return plugin
+        changed = true
+        return { ...plugin, entry: path.resolve(path.dirname(homeConfig), plugin.entry) }
+      })
+    }
+    if (changed) await writeFile(destination, `${JSON.stringify(source, null, 2)}\n`)
+    else await copyFile(homeConfig, destination)
     return homeRoot
   } catch (error) {
     await rm(homeRoot, { recursive: true, force: true }).catch(() => undefined)
