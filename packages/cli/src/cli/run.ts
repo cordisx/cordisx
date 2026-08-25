@@ -27,6 +27,7 @@ import { HostServiceConfigNarrowApi, type HostSecretState } from '../launcher/se
 import { createServiceConfigBridgeHandler, type ServiceConfigBridgeHandler } from '../launcher/service-config-rpc.js'
 import { createChannelCredentialBridgeHandler, type ChannelCredentialBridgeHandler } from '../launcher/channel-credential-rpc.js'
 import { createChannelActionsBridgeHandler, type ChannelActionsBridgeHandler } from '../launcher/channel-actions-rpc.js'
+import { PermissionBrokerChannelTaskAuthorizer } from '../launcher/channel-task-gateway.js'
 import { LauncherSecretStore } from '../launcher/secret-store.js'
 import { readServiceConfigState } from '../config/service-config.js'
 import {
@@ -599,6 +600,20 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   const channelActionsBridgeToken = channelPlugin === undefined ? undefined : randomBytes(32).toString('hex')
   let channelService: LocalChannelService | undefined
   let channelManager: ChannelManagerBundleProjection | undefined
+  // One launcher-owned fleet serves both renderer Platform calls and the
+  // Node-only Channel gateway. It is never recreated by the Channel service.
+  const channelGatewayFleet = channelPlugin === undefined
+    ? undefined
+    : await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } })
+  const channelTaskPermissions = channelPlugin === undefined
+    ? undefined
+    : new PermissionBrokerChannelTaskAuthorizer({
+      profileId: selection.profileId,
+      source: channelPlugin.source ?? pathToFileURL(channelPlugin.entry).href,
+      providers: composition.providers.filter(provider => provider.enabled).map(provider => provider.id),
+      cwdRoots: [composition.rootDir],
+      policies: currentHomeConfig.permissions,
+    })
   if (channelPlugin !== undefined) {
     const state = await readServiceConfigState({
       profileId: selection.profileId,
@@ -611,6 +626,13 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       dataDir: path.join(rootFromConfigPath(configPath), 'cache', 'channel-runtime'),
       source: channelPlugin.source ?? pathToFileURL(channelPlugin.entry).href,
       environment: runtime.env ?? process.env,
+      ...(channelGatewayFleet === undefined ? {} : { fleet: channelGatewayFleet }),
+      profileId: selection.profileId,
+      // This is an explicit launcher registration, not process.cwd fallback;
+      // later profile workspace configuration can add aliases without changing
+      // the Channel protocol or renderer projection.
+      workspaces: [{ alias: 'cordisx', root: composition.rootDir, cwd: composition.rootDir }],
+      ...(channelTaskPermissions === undefined ? {} : { taskPermissions: channelTaskPermissions }),
     })
     await channelService.start(state.config)
     channelManager = projectLocalChannelManager({
@@ -671,8 +693,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     identityAllowed: (identity: CordisXPluginIdentity) => permissionIdentities.allowed(identity),
   }
   const providerFleet = rendererComposition.providerBridgeToken === undefined
-    ? undefined
-    : await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } })
+    ? channelGatewayFleet
+    : channelGatewayFleet ?? await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } })
   const serviceConfigToken = rendererComposition.serviceConfigBridgeToken
   const services: Array<{ readonly pluginId: string; readonly serviceId: string; readonly api: HostServiceConfigNarrowApi }> = []
   let channelConfigApi: HostServiceConfigNarrowApi | undefined
@@ -722,6 +744,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     if (invocation.options.dryRun) {
       stdout(JSON.stringify({ status: 'ready', mode: 'attach', appId, debugPort }, null, 2))
       await channelService?.dispose()
+      await channelGatewayFleet?.close()
       return
     }
     try {
@@ -746,6 +769,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       })
     } finally {
       await channelService?.dispose()
+      await channelGatewayFleet?.close()
     }
     return
   }
@@ -769,6 +793,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   if (invocation.options.dryRun) {
     stdout(`[cordisx] loopback CDP port: ${invocation.options.debugPort ?? 'automatic'}`)
     await channelService?.dispose()
+    await channelGatewayFleet?.close()
     return
   }
 
@@ -809,5 +834,6 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     })
   } finally {
     await channelService?.dispose()
+    await channelGatewayFleet?.close()
   }
 }

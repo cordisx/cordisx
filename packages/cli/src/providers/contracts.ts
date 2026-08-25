@@ -65,5 +65,16 @@ export interface ProviderConnection {
   controlSession(input: CordisXTaskControlInput): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>>
   submitTurn(input: { readonly session: CordisXPlatformSessionRef; readonly message: string }): Promise<CordisXPlatformResult<CordisXTurnStart>>
   controlTurn(input: CordisXTurnControlInput): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>>
+  /** Node-only normalized signal source; raw App Server frames never cross this seam. */
+  subscribeLifecycle?(listener: (event: ProviderLifecycleSignal) => void): () => void
   close(): Promise<void>
+}
+
+export interface ProviderLifecycleSignal {
+  readonly session: CordisXPlatformSessionRef
+  readonly turnId: string
+  readonly type: 'turn.started' | 'turn.completed' | 'turn.failed' | 'approval.required' | 'approval.resolved'
+  readonly output?: readonly { readonly type: 'text'; readonly text: string }[]
+  readonly failure?: { readonly code: string; readonly retryable: boolean }
+  readonly approval?: { readonly approvalId: string; readonly kind: 'command' | 'file-change' | 'external-action' | 'other'; readonly state: 'pending' | 'resolved'; readonly outcome?: 'approved' | 'denied' | 'expired' | 'cancelled' }
 }

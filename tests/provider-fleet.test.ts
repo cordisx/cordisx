@@ -92,4 +92,34 @@ describe('Provider Fleet', () => {
     expect(mismatch).toEqual(expect.objectContaining({ ok: false, error: expect.objectContaining({ code: 'invalid-request' }) }))
     await fleet.close()
   })
+
+  it('normalizes id-less provider lifecycle notifications into replayable launcher events without retaining raw frames', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-fleet-'))
+    let notify: ((method: string, params: unknown) => void) | undefined
+    const fleet = await ProviderFleet.create([config(root, 'alpha')], {
+      startServer: async provider => {
+        const base = server(provider.id, [])
+        return {
+        ...base,
+        async request<Result>(method: string, params: unknown): Promise<Result> {
+          if (method === 'turn/start') return { turn: { id: 'turn-1' } } as Result
+          return await base.request<Result>(method, params)
+        },
+        subscribeNotifications(listener) { notify = listener; return () => { notify = undefined } },
+        }
+      },
+    })
+    const dispatched = await fleet.dispatchCreate({
+      operationId: 'channel-op-1', model: { providerId: 'alpha', modelId: 'shared-model' }, cwd: '/workspace', message: 'hello',
+    })
+    if (dispatched.session === undefined || dispatched.turn === undefined || notify === undefined) throw new Error('dispatch did not create a lifecycle target')
+    notify('turn/completed', { threadId: dispatched.session.remoteSessionId, turnId: dispatched.turn.turnId, text: 'Done.', rawEvent: { secret: 'never retained' } })
+    const events = fleet.readLifecycle(dispatched.session, 0)
+    expect(events).toMatchObject({ nextAfterSequence: 2, events: [
+      { type: 'turn.started', operationId: 'channel-op-1' },
+      { type: 'turn.completed', output: [{ type: 'text', text: 'Done.' }] },
+    ] })
+    expect(JSON.stringify(events)).not.toContain('rawEvent')
+    await fleet.close()
+  })
 })

@@ -33,6 +33,7 @@ export interface JsonLineRpcClientOptions {
   readonly timeoutMs: number
   readonly maxLineBytes?: number
   readonly onProtocolError?: (error: Error) => void
+  readonly onNotification?: (method: string, params: unknown) => void
 }
 
 function object(value: unknown): Record<string, unknown> | undefined {
@@ -160,7 +161,10 @@ export class JsonLineRpcClient {
       void this.write({ id: message.id, error: { code: -32601, message: 'Method not found' } }).catch(() => undefined)
       return
     }
-    if (typeof message.id !== 'number') return
+    if (typeof message.id !== 'number') {
+      if (typeof message.method === 'string') this.options.onNotification?.(message.method, message.params)
+      return
+    }
     const pending = this.pending.get(message.id)
     if (pending === undefined) return
     this.pending.delete(message.id)

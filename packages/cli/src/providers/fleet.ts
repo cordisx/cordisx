@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { ChannelTaskDispatchResult } from '@cordisx/channel-runtime'
 import type {
   CordisXModelDescriptor,
   CordisXModelPage,
@@ -25,7 +26,7 @@ import type { CordisXExternalProviderAvailabilityStatus } from '../capability-av
 import { ProviderAdapterRegistry, ProviderRegistryError } from '../renderer/provider-registry.js'
 import { startCodexAppServer, type CodexAppServerOptions, type CodexAppServerRpc } from './codex-app-server.js'
 import { CliProxyProviderAdapter } from './cli-proxy-adapter.js'
-import type { CliProxyProviderConfig, ProviderConnection } from './contracts.js'
+import type { CliProxyProviderConfig, ProviderConnection, ProviderLifecycleSignal } from './contracts.js'
 
 const FLEET_CAPABILITIES: readonly CordisXPlatformCapability[] = Object.freeze([
   'models.read', 'tasks.catalog.read', 'tasks.content.read', 'tasks.create', 'tasks.control', 'turns.submit', 'turns.control',
@@ -100,6 +101,10 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   private readonly now: () => number
   private readonly startServer: NonNullable<ProviderFleetOptions['startServer']>
   private readonly appServer: CodexAppServerOptions | undefined
+  private readonly lifecycle = new Map<string, ChannelTaskLifecycleEvent[]>()
+  private readonly lifecycleListeners = new Set<(event: ChannelTaskLifecycleEvent) => void>()
+  private readonly operationResults = new Map<string, ChannelTaskDispatchResult>()
+  private readonly lifecycleDisposers = new Map<string, () => void>()
   private closed = false
 
   private constructor(options: ProviderFleetOptions) {
@@ -122,6 +127,8 @@ export class ProviderFleet implements CordisXPlatformAdapter {
           adapter,
           dispose: async () => await adapter.close(),
         })
+        const disposeLifecycle = adapter.subscribeLifecycle?.(event => fleet.observeLifecycle(adapter.generation, event))
+        if (disposeLifecycle !== undefined) fleet.lifecycleDisposers.set(config.id, disposeLifecycle)
       } catch {
         fleet.failures.set(config.id, {
           code: 'adapter-unavailable',
@@ -245,6 +252,48 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     return await this.withSession(input.session, async adapter => await adapter.submitTurn(input))
   }
 
+  /** Launcher-private Channel create primitive; no renderer bridge uses this path. */
+  async dispatchCreate(input: {
+    readonly operationId: string
+    readonly model: { readonly providerId: string; readonly modelId: string }
+    readonly cwd: string
+    readonly message: string
+  }): Promise<ChannelTaskDispatchResult> {
+    const prior = this.operationResults.get(input.operationId)
+    if (prior !== undefined) return structuredClone(prior)
+    const observedAt = new Date(this.now()).toISOString()
+    const created = await this.createTask({ model: input.model, cwd: input.cwd })
+    if (!created.ok) return this.remember({ contract: 'cordisx.platform-task-dispatch-result/v1', schemaVersion: 1, operationId: input.operationId, operation: 'create', status: 'rejected', failure: { code: 'TASK_CREATE_REJECTED', retryable: created.error.retryable === true }, observedAt })
+    const session = created.value.ref
+    const cursor = this.cursor(session)
+    const turn = await this.submitTurn({ session, message: input.message })
+    if (!turn.ok) return this.remember({ contract: 'cordisx.platform-task-dispatch-result/v1', schemaVersion: 1, operationId: input.operationId, operation: 'create', status: 'created-initial-turn-failed', session, lifecycle: { session, afterSequence: cursor }, failure: { code: 'TURN_START_FAILED', retryable: turn.error.retryable === true }, observedAt: new Date(this.now()).toISOString() })
+    this.appendLifecycle({ providerGeneration: this.generationFor(session.providerId), session, turnId: turn.value.turnId, operationId: input.operationId, type: 'turn.started', provenance: 'observed', observedAt: new Date(this.now()).toISOString() })
+    return this.remember({ contract: 'cordisx.platform-task-dispatch-result/v1', schemaVersion: 1, operationId: input.operationId, operation: 'create', status: 'accepted', session, turn: { session, turnId: turn.value.turnId }, lifecycle: { session, afterSequence: cursor }, observedAt: new Date(this.now()).toISOString() })
+  }
+
+  /** Launcher-private Channel follow-up primitive against a complete bound session. */
+  async dispatchFollowup(input: { readonly operationId: string; readonly session: CordisXTaskReadInput['session']; readonly message: string }): Promise<ChannelTaskDispatchResult> {
+    const prior = this.operationResults.get(input.operationId)
+    if (prior !== undefined) return structuredClone(prior)
+    const observedAt = new Date(this.now()).toISOString()
+    const cursor = this.cursor(input.session)
+    const turn = await this.submitTurn({ session: input.session, message: input.message })
+    if (!turn.ok) return this.remember({ contract: 'cordisx.platform-task-dispatch-result/v1', schemaVersion: 1, operationId: input.operationId, operation: 'followup', status: 'rejected', failure: { code: 'TURN_START_REJECTED', retryable: turn.error.retryable === true }, observedAt })
+    this.appendLifecycle({ providerGeneration: this.generationFor(input.session.providerId), session: input.session, turnId: turn.value.turnId, operationId: input.operationId, type: 'turn.started', provenance: 'observed', observedAt: new Date(this.now()).toISOString() })
+    return this.remember({ contract: 'cordisx.platform-task-dispatch-result/v1', schemaVersion: 1, operationId: input.operationId, operation: 'followup', status: 'accepted', session: input.session, turn: { session: input.session, turnId: turn.value.turnId }, lifecycle: { session: input.session, afterSequence: cursor }, observedAt: new Date(this.now()).toISOString() })
+  }
+
+  readLifecycle(session: CordisXTaskReadInput['session'], afterSequence = 0): ChannelTaskLifecycleRange {
+    const events = (this.lifecycle.get(lifecycleKey(session)) ?? []).filter(event => event.sequence > afterSequence)
+    return { contract: 'cordisx.platform-task-lifecycle-range/v1', schemaVersion: 1, session, afterSequence, nextAfterSequence: events.at(-1)?.sequence ?? afterSequence, events: structuredClone(events) }
+  }
+
+  subscribeLifecycle(listener: (event: ChannelTaskLifecycleEvent) => void): () => void {
+    this.lifecycleListeners.add(listener)
+    return () => this.lifecycleListeners.delete(listener)
+  }
+
   async controlTurn(input: CordisXTurnControlInput): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>> {
     return await this.withSession(input.session, async adapter => await adapter.controlTurn(input))
   }
@@ -253,6 +302,9 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     if (this.closed) return
     this.closed = true
     this.cursors.clear()
+    for (const dispose of this.lifecycleDisposers.values()) dispose()
+    this.lifecycleDisposers.clear()
+    this.lifecycleListeners.clear()
     await this.registry.dispose()
   }
 
@@ -363,4 +415,62 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     const now = this.now()
     for (const [token, state] of this.cursors) if (state.expiresAt <= now) this.cursors.delete(token)
   }
+
+  private remember(result: ChannelTaskDispatchResult): ChannelTaskDispatchResult {
+    this.operationResults.set(result.operationId, structuredClone(result))
+    return result
+  }
+
+  private generationFor(providerId: string): string {
+    return this.registry.snapshots().find(item => item.providerId === providerId && item.state === 'active')?.generation ?? 'retired'
+  }
+
+  private cursor(session: CordisXTaskReadInput['session']): number {
+    return (this.lifecycle.get(lifecycleKey(session)) ?? []).at(-1)?.sequence ?? 0
+  }
+
+  private observeLifecycle(generation: string, event: ProviderLifecycleSignal): void {
+    if (this.generationFor(event.session.providerId) !== generation) return
+    this.appendLifecycle({ providerGeneration: generation, session: event.session, turnId: event.turnId, type: event.type, provenance: 'observed', observedAt: new Date(this.now()).toISOString(), ...(event.output === undefined ? {} : { output: event.output }), ...(event.failure === undefined ? {} : { failure: event.failure }), ...(event.approval === undefined ? {} : { approval: event.approval }) })
+  }
+
+  private appendLifecycle(input: Omit<ChannelTaskLifecycleEvent, 'contract' | 'schemaVersion' | 'eventId' | 'sequence'>): void {
+    const key = lifecycleKey(input.session)
+    const current = this.lifecycle.get(key) ?? []
+    if (current.some(event => event.turnId === input.turnId && event.type === input.type && (input.type !== 'turn.completed' && input.type !== 'turn.failed' || event.type === input.type))) return
+    if ((input.type === 'turn.completed' || input.type === 'turn.failed') && current.some(event => event.turnId === input.turnId && (event.type === 'turn.completed' || event.type === 'turn.failed'))) return
+    const event: ChannelTaskLifecycleEvent = { contract: 'cordisx.platform-task-lifecycle-event/v1', schemaVersion: 1, eventId: `lifecycle:${randomUUID()}`, sequence: current.length + 1, ...input }
+    this.lifecycle.set(key, [...current, event])
+    for (const listener of this.lifecycleListeners) listener(structuredClone(event))
+  }
+}
+
+export interface ChannelTaskLifecycleEvent {
+  readonly contract: 'cordisx.platform-task-lifecycle-event/v1'
+  readonly schemaVersion: 1
+  readonly eventId: string
+  readonly sequence: number
+  readonly providerGeneration: string
+  readonly session: CordisXTaskReadInput['session']
+  readonly turnId: string
+  readonly operationId?: string
+  readonly type: ProviderLifecycleSignal['type']
+  readonly provenance: 'observed' | 'snapshot-reconciled'
+  readonly output?: readonly { readonly type: 'text'; readonly text: string }[]
+  readonly failure?: { readonly code: string; readonly retryable: boolean }
+  readonly approval?: ProviderLifecycleSignal['approval']
+  readonly observedAt: string
+}
+
+export interface ChannelTaskLifecycleRange {
+  readonly contract: 'cordisx.platform-task-lifecycle-range/v1'
+  readonly schemaVersion: 1
+  readonly session: CordisXTaskReadInput['session']
+  readonly afterSequence: number
+  readonly nextAfterSequence: number
+  readonly events: readonly ChannelTaskLifecycleEvent[]
+}
+
+function lifecycleKey(session: CordisXTaskReadInput['session']): string {
+  return `${session.providerId}\u0000${session.remoteSessionId}`
 }

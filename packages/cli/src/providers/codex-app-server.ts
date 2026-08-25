@@ -14,6 +14,7 @@ export interface CodexAppServerOptions {
 export interface CodexAppServerRpc {
   readonly generation: string
   request<Result>(method: string, params: unknown, signal?: AbortSignal): Promise<Result>
+  subscribeNotifications?(listener: (method: string, params: unknown) => void): () => void
   close(): Promise<void>
 }
 
@@ -41,6 +42,7 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
   readonly generation = randomUUID()
   private closed = false
   private readonly rpc: JsonLineRpcClient
+  private readonly notifications = new Set<(method: string, params: unknown) => void>()
 
   constructor(private readonly child: ChildProcessWithoutNullStreams, timeoutMs: number) {
     child.stderr.resume()
@@ -48,6 +50,9 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
       input: child.stdout,
       output: child.stdin,
       timeoutMs,
+      onNotification: (method, params) => {
+        for (const listener of this.notifications) listener(method, params)
+      },
     })
     child.once('error', error => this.rpc.close(`Codex app-server process failed: ${error.message}`))
     child.once('exit', (code, signal) => {
@@ -57,6 +62,11 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
 
   request<Result>(method: string, params: unknown, signal?: AbortSignal): Promise<Result> {
     return this.rpc.request<Result>(method, params, signal)
+  }
+
+  subscribeNotifications(listener: (method: string, params: unknown) => void): () => void {
+    this.notifications.add(listener)
+    return () => this.notifications.delete(listener)
   }
 
   async initialize(): Promise<void> {
@@ -71,6 +81,7 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
     if (this.closed) return
     this.closed = true
     this.rpc.close()
+    this.notifications.clear()
     if (this.child.exitCode !== null || this.child.signalCode !== null) return
     const exited = new Promise<void>(resolve => this.child.once('exit', () => resolve()))
     this.child.kill('SIGTERM')

@@ -123,12 +123,41 @@ export interface ChannelTaskContext {
   readonly operationId: string
   readonly routeId: string
   readonly input: ChannelUserInput
+  /** Host-private service fence; never project a grant or resolved workspace. */
+  readonly serviceGeneration: string
+  readonly configurationRevision: number
   readonly binding?: ChannelSessionBinding
+}
+
+export interface ChannelTaskDispatchFailure {
+  readonly code: string
+  readonly retryable: boolean
+}
+
+export interface ChannelTaskLifecycleCursor {
+  readonly session: PlatformSessionRef
+  readonly afterSequence: number
+}
+
+/** A sanitized copy of the launcher-private protocol dispatch result. */
+export interface ChannelTaskDispatchResult {
+  readonly contract: 'cordisx.platform-task-dispatch-result/v1'
+  readonly schemaVersion: 1
+  readonly operationId: string
+  readonly operation: 'create' | 'followup'
+  readonly status: 'accepted' | 'created-initial-turn-failed' | 'rejected'
+  readonly session?: PlatformSessionRef
+  readonly turn?: { readonly session: PlatformSessionRef; readonly turnId: string }
+  readonly lifecycle?: ChannelTaskLifecycleCursor
+  readonly failure?: ChannelTaskDispatchFailure
+  readonly observedAt: string
 }
 
 export interface ChannelTaskResult {
   readonly session?: PlatformSessionRef
   readonly data?: Readonly<Record<string, JsonValue>>
+  /** Present only for the Host gateway create/follow-up primitive. */
+  readonly dispatch?: ChannelTaskDispatchResult
 }
 
 export interface ChannelTaskGateway {
@@ -344,4 +373,9 @@ export interface ChannelRuntimeOptions {
   readonly maxAttempts?: number
   readonly leaseMs?: number
   readonly retryBaseMs?: number
+  /** Immutable launcher context bound into every Channel task gateway call. */
+  readonly taskContext?: {
+    readonly serviceGeneration: string
+    readonly configurationRevision: number
+  }
 }
