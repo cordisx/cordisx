@@ -44,6 +44,22 @@ Report those states separately as **implemented**, **verified**,
 **experimental**, **blocked**, and **planned**. A local checkpoint, a feature
 head, or a passing focused test is not a formal merge.
 
+## Reconstruct a requirement ledger, not only a commit ledger
+
+Before resuming implementation, rewrite the user-visible requirements as one
+bounded ledger. Mark every item `unimplemented`, `implemented`, `verified`, or
+`formally merged`, and attach the evidence that justifies the state. Include
+late feedback and screenshot annotations; a newer PR does not erase an older
+unresolved requirement.
+
+The ledger is closed by observable behavior, not by activity. A passing unit
+test, a clean checkpoint, a PR, or one corrected screenshot may advance an
+item, but none of them closes adjacent items automatically. When an owner turn
+repeatedly returns an incomplete status without new durable evidence, stop the
+turn, preserve its worktree, split the next action into a smaller bounded
+checkpoint, and assign an active owner. Never let an `in progress` label stand
+in for actual tool or file progress.
+
 ## Build a restart handoff that prevents duplicate work
 
 Each resumed task receives one concise handoff containing:
