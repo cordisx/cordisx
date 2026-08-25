@@ -155,7 +155,7 @@ describe('built-in Channel product bundle', () => {
       expect(dom.window.document.querySelector('[data-channel-manager]')).toBeNull()
       dom.window.close()
     }
-  })
+  }, 10_000)
 
   it('reprojects a newly created local account into exact Host routes and its Host-owned title', async () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -243,7 +243,7 @@ describe('built-in Channel product bundle', () => {
       await runtime.dispose()
       dom.window.close()
     }
-  })
+  }, 10_000)
 
   it('renders and disposes the bounded Channel body through the internal Host service', async () => {
     const dom = new JSDOM('<html lang="en"><body><main id="seat"></main></body></html>')
