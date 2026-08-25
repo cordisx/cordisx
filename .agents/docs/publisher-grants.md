@@ -8,16 +8,19 @@ not a claim that paid-package installation or a payment flow is live.
 
 | Surface | Owner | Current state |
 | --- | --- | --- |
-| Statement/commerce schema and vectors | `cordisx-protocol` | formally merged at `cf78bd5` |
-| Signature verification, device proof, trusted time, lifecycle gate | `cordisx` launcher | this delivery |
-| UI copy and external link rendering | Host Manager after a Marketplace v4 consumer | planned |
-| Issuer key registration | publisher/Host configuration | required before a production import |
+| Statement/commerce schema and vectors | `cordisx-protocol` | formally merged at `8391922` |
+| Signature verification, device proof, trusted time, lifecycle gate | `cordisx` launcher | formally merged at `be523daf` |
+| Marketplace v4 parsing and Manager authorization controls | `cordisx` Host | this delivery candidate |
+| Issuer key registration | `config.publisherGrantIssuers` in Host-private home configuration | this delivery candidate |
 | Optional activation registry | dedicated service owner | planned enhancement |
 | Payment, checkout, webhook, refunds, tax, invoices, KYC | publisher | intentionally out of scope |
 
-The launcher passes only a Host-resolved package identity/version to the gate.
-It does not expose key material, grant JSON, registry credentials, or a raw
-bridge to the renderer. A grant controls CordisX lifecycle and feature
+The Manager can request only a public device challenge, import a statement, or
+read a scoped authorization projection through a narrow launcher binding. It
+does not expose key material, registry credentials, or a raw bridge to the
+renderer. Issuer keys are explicit base64url SPKI registrations in the private
+home configuration, keyed by `(environment, issuer id, key id)`; Marketplace
+metadata never registers a signer. A grant controls CordisX lifecycle and feature
 projection only; it cannot stop copied code running outside CordisX.
 
 ## State machine
@@ -33,10 +36,10 @@ registry absent/unreachable -> direct mode remains usable
 registry says another device -> rejected
 ```
 
-`revoke` and `transfer` are verified statement types but are not executable in
-the seam until registry operations are supplied by the owning service. A
-transfer always needs a publisher statement; a user cannot make a new device
-by copying local state. Reinstall/key loss is a new device. Separate
+`revoke` imports locally and applies to the matching stored grant. `renew`
+replaces that publisher declaration. `transfer` is intentionally not executed
+locally: the publisher must issue a new direct-bound grant for the new device.
+A user cannot make a new device by copying local state. Reinstall/key loss is a new device. Separate
 `CORDISX_HOME` values share an authorization only if the eventual Host key
 provider returns the same device key.
 

@@ -47,6 +47,13 @@ import {
   type ConfigBridgeHandler,
 } from './config-rpc.js'
 import {
+  MAX_PUBLISHER_GRANT_REQUEST_BYTES,
+  PUBLISHER_GRANT_BINDING,
+  PUBLISHER_GRANT_RECEIVER,
+  parsePublisherGrantBindingRequest,
+  type PublisherGrantBridgeHandler,
+} from './publisher-grant-rpc.js'
+import {
   MAX_SERVICE_CONFIG_REQUEST_BYTES,
   SERVICE_CONFIG_BINDING,
   SERVICE_CONFIG_RECEIVER,
@@ -564,6 +571,9 @@ interface InstalledScript {
   readonly removeLifecycleBindingListener?: () => void
   readonly lifecycleBindingInstalled: boolean
   readonly unregisterLifecycleSession?: () => void
+  readonly publisherGrantController?: AbortController
+  readonly removePublisherGrantBindingListener?: () => void
+  readonly publisherGrantBindingInstalled: boolean
 }
 
 interface MarketplaceBindingRequest {
@@ -607,6 +617,12 @@ async function sendAgentHistoryBindingResponse(session: CdpSession, payload: Rec
 async function sendConfigBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
   await session.send('Runtime.evaluate', {
     expression: `void globalThis.${CONFIG_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    allowUnsafeEvalBlockedByCSP: true,
+  })
+}
+async function sendPublisherGrantBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
+  await session.send('Runtime.evaluate', {
+    expression: `void globalThis.${PUBLISHER_GRANT_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
     allowUnsafeEvalBlockedByCSP: true,
   })
 }
@@ -688,6 +704,7 @@ async function install(
   actions?: ChannelActionsBridgeHandler,
   permission?: PermissionPersistenceContext,
   lifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime },
+  publisherGrant?: PublisherGrantBridgeHandler,
 ): Promise<InstalledScript> {
   const url = target.webSocketDebuggerUrl
   if (url === undefined) throw new Error(`target ${target.id} has no websocket URL`)
@@ -701,6 +718,7 @@ async function install(
   const actionsController = actions === undefined ? undefined : new AbortController()
   const permissionController = permission === undefined ? undefined : new AbortController()
   const lifecycleController = lifecycle === undefined ? undefined : new AbortController()
+  const publisherGrantController = publisherGrant === undefined ? undefined : new AbortController()
   let removeBindingListener = (): void => {}
   let removeProviderBindingListener = (): void => {}
   let removeHistoryBindingListener = (): void => {}
@@ -711,6 +729,7 @@ async function install(
   let removePermissionBindingListener = (): void => {}
   let removeLifecycleBindingListener = (): void => {}
   let unregisterLifecycleSession = (): void => {}
+  let removePublisherGrantBindingListener = (): void => {}
   try {
     await session.send('Runtime.enable')
     await session.send('Page.enable')
@@ -723,6 +742,7 @@ async function install(
     if (actions !== undefined) await session.send('Runtime.addBinding', { name: CHANNEL_ACTIONS_BINDING })
     if (permission !== undefined) await session.send('Runtime.addBinding', { name: PERMISSION_BINDING })
     if (lifecycle !== undefined) await session.send('Runtime.addBinding', { name: PLUGIN_LIFECYCLE_BINDING })
+    if (publisherGrant !== undefined) await session.send('Runtime.addBinding', { name: PUBLISHER_GRANT_BINDING })
     let activeMarketplaceRequests = 0
     removeBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
       if (params.name !== MARKETPLACE_BINDING || typeof params.payload !== 'string') return
@@ -971,6 +991,25 @@ async function install(
         })()
       })
     }
+    if (publisherGrant !== undefined) {
+      removePublisherGrantBindingListener = session.onEvent('Runtime.bindingCalled', params => {
+        if (params.name !== PUBLISHER_GRANT_BINDING || typeof params.payload !== 'string') return
+        const payload = params.payload
+        void (async () => {
+          let requestId = 'invalid'
+          try {
+            if (Buffer.byteLength(payload) > MAX_PUBLISHER_GRANT_REQUEST_BYTES) throw new Error('PublisherGrant request exceeds maximum size')
+            const request = parsePublisherGrantBindingRequest(JSON.parse(payload) as unknown)
+            requestId = request.requestId
+            if (publisherGrantController?.signal.aborted === true) throw new Error('PublisherGrant bridge is closed')
+            const value = await publisherGrant.handle(request)
+            await sendPublisherGrantBindingResponse(session, { requestId, ok: true, value })
+          } catch {
+            await sendPublisherGrantBindingResponse(session, { requestId, ok: false, error: 'PublisherGrant request was rejected' }).catch(() => undefined)
+          }
+        })()
+      })
+    }
     if (lifecycle !== undefined) {
       unregisterLifecycleSession = lifecycle.runtime.register(session)
     }
@@ -1011,6 +1050,8 @@ async function install(
       permissionBindingInstalled: permission !== undefined,
       ...(lifecycleController === undefined ? {} : { lifecycleController, removeLifecycleBindingListener, unregisterLifecycleSession }),
       lifecycleBindingInstalled: lifecycle !== undefined,
+      ...(publisherGrantController === undefined ? {} : { publisherGrantController, removePublisherGrantBindingListener }),
+      publisherGrantBindingInstalled: publisherGrant !== undefined,
     }
   } catch (error) {
     marketplaceController.abort()
@@ -1022,6 +1063,7 @@ async function install(
     actionsController?.abort()
     permissionController?.abort()
     lifecycleController?.abort()
+    publisherGrantController?.abort()
     removeBindingListener()
     removeProviderBindingListener()
     removeHistoryBindingListener()
@@ -1032,6 +1074,7 @@ async function install(
     removePermissionBindingListener()
     removeLifecycleBindingListener()
     unregisterLifecycleSession()
+    removePublisherGrantBindingListener()
     session.close()
     throw error
   }
@@ -1047,6 +1090,7 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.actionsController?.abort()
   installed.permissionController?.abort()
   installed.lifecycleController?.abort()
+  installed.publisherGrantController?.abort()
   installed.removeBindingListener()
   installed.removeProviderBindingListener?.()
   installed.removeHistoryBindingListener?.()
@@ -1057,6 +1101,7 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.removePermissionBindingListener?.()
   installed.removeLifecycleBindingListener?.()
   installed.unregisterLifecycleSession?.()
+  installed.removePublisherGrantBindingListener?.()
   try {
     await Promise.allSettled([
       installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }),
@@ -1089,6 +1134,9 @@ async function uninstall(installed: InstalledScript): Promise<void> {
       ...(installed.lifecycleBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: PLUGIN_LIFECYCLE_BINDING })]
         : []),
+      ...(installed.publisherGrantBindingInstalled
+        ? [installed.session.send('Runtime.removeBinding', { name: PUBLISHER_GRANT_BINDING })]
+        : []),
     ])
   } finally {
     installed.session.close()
@@ -1112,6 +1160,7 @@ export interface WatchInjectionOptions {
   readonly channelActionsBridge?: ChannelActionsBridgeHandler
   readonly permissionPersistence?: PermissionPersistenceContext
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
+  readonly publisherGrant?: PublisherGrantBridgeHandler
 }
 
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
@@ -1151,6 +1200,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             options.channelActionsBridge,
             options.permissionPersistence,
             options.pluginLifecycle,
+            options.publisherGrant,
           )
           installed.set(target.id, record)
           options.onReady?.()

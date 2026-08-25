@@ -1108,6 +1108,7 @@ const MANAGER_STYLES = `
   .cxm-marketplace-trust-copy { margin: 6px 0 0; color: #9da6b6; font-size: 11px; }
   .cxm-marketplace-trust-meta { margin-top: 7px; color: #7f899a; font: 10px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; }
   .cxm-marketplace-trust-evidence { display: inline-flex; margin-top: 8px; }
+  .cxm-manager-inline-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .cxm-code { max-height: 140px; margin: 6px 0 0; overflow: auto; color: #bac2d2; font: 10px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
   .cxm-config-renderer { min-height: 2rem; }
   .cxm-readme { inline-size: 100%; max-inline-size: 96rem; box-sizing: border-box; color: var(--cx-text); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
@@ -1860,6 +1861,49 @@ interface MarketplaceFetcherHandle {
   dispose(): void
 }
 
+interface PublisherGrantBridgeWindow extends Window {
+  __cordisxPublisherGrantRequestV1?: (payload: string) => void
+  __cordisxPublisherGrantReceiveV1?: (payload: string) => void
+}
+interface PublisherGrantClient { request(operation: 'challenge' | 'import' | 'status', value?: unknown): Promise<unknown>; dispose(): void }
+function createPublisherGrantClient(view: Window | null): PublisherGrantClient {
+  if (view === null || typeof (view as PublisherGrantBridgeWindow).__cordisxPublisherGrantRequestV1 !== 'function') {
+    return { async request() { throw new Error('PublisherGrant launcher bridge is unavailable') }, dispose() {} }
+  }
+  const bridge = view as PublisherGrantBridgeWindow
+  const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; timer: number }>()
+  const receiver = (payloadText: string): void => {
+    try {
+      const payload = JSON.parse(payloadText) as { requestId?: unknown; ok?: unknown; value?: unknown; error?: unknown }
+      if (typeof payload.requestId !== 'string') return
+      const request = pending.get(payload.requestId)
+      if (request === undefined) return
+      view.clearTimeout(request.timer); pending.delete(payload.requestId)
+      if (payload.ok === true) request.resolve(payload.value)
+      else request.reject(new Error(typeof payload.error === 'string' ? payload.error : 'PublisherGrant request failed'))
+    } catch { /* keep pending request timeout authoritative */ }
+  }
+  bridge.__cordisxPublisherGrantReceiveV1 = receiver
+  let sequence = 0
+  return {
+    async request(operation, value) {
+      return await new Promise((resolve, reject) => {
+        const requestId = `grant-${Date.now().toString(36)}-${(++sequence).toString(36)}`
+        const timer = view.setTimeout(() => { pending.delete(requestId); reject(new Error('PublisherGrant launcher bridge timed out')) }, 12_000)
+        pending.set(requestId, { resolve, reject, timer })
+        try {
+          bridge.__cordisxPublisherGrantRequestV1?.(JSON.stringify({ version: 1, requestId, operation, ...(operation === 'import' ? { statement: value } : operation === 'status' ? { target: value } : {}) }))
+        } catch (error) { view.clearTimeout(timer); pending.delete(requestId); reject(error instanceof Error ? error : new Error(String(error))) }
+      })
+    },
+    dispose() {
+      if (bridge.__cordisxPublisherGrantReceiveV1 === receiver) delete bridge.__cordisxPublisherGrantReceiveV1
+      for (const request of pending.values()) { view.clearTimeout(request.timer); request.reject(new Error('CordisX manager disposed')) }
+      pending.clear()
+    },
+  }
+}
+
 let marketplaceRequestSequence = 0
 
 function createMarketplaceFetcher(view: Window | null): MarketplaceFetcherHandle {
@@ -2066,6 +2110,8 @@ export function installCordisXManager(
   )
 
   const marketplaceFetcher = createMarketplaceFetcher(document.defaultView)
+  const publisherGrantClient = createPublisherGrantClient(document.defaultView)
+  const publisherGrantStatuses = new Map<string, string>()
   const marketplace: MarketplaceModel = new BrowserMarketplaceModel(
     safeStorage(document.defaultView),
     marketplaceFetcher.fetcher,
@@ -5303,6 +5349,18 @@ export function installCordisXManager(
     },
   ]
 
+  const refreshPublisherGrantStatus = async (plugin: MarketplaceCatalogPlugin): Promise<void> => {
+    if (plugin.commerce === undefined || publisherGrantStatuses.get(plugin.identity) === 'loading') return
+    publisherGrantStatuses.set(plugin.identity, 'loading')
+    try {
+      const value = await publisherGrantClient.request('status', { pluginId: plugin.id, version: plugin.version }) as { status?: unknown }
+      const status = typeof value?.status === 'string' ? value.status : 'unavailable'
+      if (publisherGrantStatuses.get(plugin.identity) !== status) { publisherGrantStatuses.set(plugin.identity, status); renderContent() }
+    } catch {
+      if (publisherGrantStatuses.get(plugin.identity) !== 'unavailable') { publisherGrantStatuses.set(plugin.identity, 'unavailable'); renderContent() }
+    }
+  }
+
   const renderMarketplaceList = (managerSnapshot: ManagerSnapshot): void => {
     const snapshot = marketplace.snapshot()
     setHeading(copy('marketplace.heading'), managerSnapshot, { icon: 'marketplace' })
@@ -5509,6 +5567,55 @@ export function installCordisXManager(
       if (metadata.keywords.length > 0) {
         panel.append(createSectionTitle(document, '关键词'))
         panel.append(create(document, 'p', 'cxm-copy', metadata.keywords.join(' · ')))
+      }
+      if (plugin.commerce !== undefined) {
+        void refreshPublisherGrantStatus(plugin)
+        panel.append(createSectionTitle(document, '开发者授权'))
+        const commerce = create(document, 'section', 'cxm-marketplace-trust-item')
+        commerce.dataset.publisherGrant = plugin.id
+        const current = publisherGrantStatuses.get(plugin.identity)
+        const label = current === 'authorized' ? '已授权' : current === 'refresh-due' ? '即将到期' : current === 'grace' ? '离线宽限期' : current === 'expired' ? '已过期' : current === 'device-mismatch' ? '设备不匹配' : current === 'revoked' ? '已撤销' : current === 'invalid-signature' ? '签名无效' : current === 'loading' ? '正在检查授权…' : '未授权'
+        commerce.append(create(document, 'p', 'cxm-marketplace-trust-copy', `授权状态：${label}`))
+        commerce.append(create(document, 'p', 'cxm-marketplace-trust-copy', 'CordisX 只验证开发者签名的授权声明。付款、退款和售后由开发者负责。'))
+        const actions = create(document, 'div', 'cxm-manager-inline-actions')
+        const purchase = create(document, 'button', 'cxm-action')
+        purchase.type = 'button'; purchase.dataset.publisherGrantPurchase = plugin.id
+        purchase.append(create(document, 'span', undefined, '前往开发者购买'), createManagerIcon(document, 'external-link', 'cxm-action-icon'))
+        purchase.addEventListener('click', () => { void (async () => {
+          try {
+            const challenge = await publisherGrantClient.request('challenge')
+            const href = new URL(plugin.commerce!.purchaseUrl)
+            href.searchParams.set('cordisxDeviceChallenge', btoa(unescape(encodeURIComponent(JSON.stringify(challenge))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')))
+            document.defaultView?.open(href.href, '_blank', 'noopener,noreferrer')
+          } catch { publisherGrantStatuses.set(plugin.identity, 'unavailable'); renderContent() }
+        })() })
+        const copyChallenge = create(document, 'button', 'cxm-action')
+        copyChallenge.type = 'button'; copyChallenge.dataset.publisherGrantChallenge = plugin.id
+        copyChallenge.append(create(document, 'span', undefined, '复制设备挑战'))
+        copyChallenge.addEventListener('click', () => { void (async () => {
+          try { const challenge = await publisherGrantClient.request('challenge'); await document.defaultView?.navigator.clipboard?.writeText(JSON.stringify(challenge)); copyChallenge.replaceChildren('已复制') } catch { copyChallenge.replaceChildren('设备密钥不可用') }
+        })() })
+        const importGrant = create(document, 'button', 'cxm-action')
+        importGrant.type = 'button'; importGrant.dataset.publisherGrantImport = plugin.id; importGrant.append(create(document, 'span', undefined, '导入授权声明'))
+        importGrant.addEventListener('click', () => {
+          const input = create(document, 'input') as HTMLInputElement; input.type = 'file'; input.accept = 'application/json,.json'; input.hidden = true
+          input.addEventListener('change', () => { void (async () => {
+            const file = input.files?.[0]; if (file === undefined) return
+            try { const result = await publisherGrantClient.request('import', JSON.parse(await file.text())) as { status?: unknown }; publisherGrantStatuses.set(plugin.identity, typeof result?.status === 'string' ? result.status : 'unavailable') } catch { publisherGrantStatuses.set(plugin.identity, 'invalid-signature') }
+            input.remove(); renderContent()
+          })() }, { once: true })
+          document.body?.append(input); input.click()
+        })
+        const importClipboard = create(document, 'button', 'cxm-action')
+        importClipboard.type = 'button'; importClipboard.dataset.publisherGrantClipboard = plugin.id; importClipboard.append(create(document, 'span', undefined, '从剪贴板导入'))
+        importClipboard.addEventListener('click', () => { void (async () => {
+          try { const text = await document.defaultView?.navigator.clipboard?.readText(); const result = await publisherGrantClient.request('import', JSON.parse(text ?? '')) as { status?: unknown }; publisherGrantStatuses.set(plugin.identity, typeof result?.status === 'string' ? result.status : 'unavailable') } catch { publisherGrantStatuses.set(plugin.identity, 'invalid-signature') }
+          renderContent()
+        })() })
+        actions.append(purchase, copyChallenge, importGrant, importClipboard)
+        if (plugin.commerce.manageUrl !== undefined) { const manage = configureExternalLink(create(document, 'a', 'cxm-action'), plugin.commerce.manageUrl); manage.append('管理授权'); actions.append(manage) }
+        if (plugin.commerce.recoveryUrl !== undefined) { const recover = configureExternalLink(create(document, 'a', 'cxm-action'), plugin.commerce.recoveryUrl); recover.append('恢复授权'); actions.append(recover) }
+        commerce.append(actions); panel.append(commerce)
       }
       content.append(panel)
       return
@@ -6571,6 +6678,7 @@ export function installCordisXManager(
     marketplace.dispose()
     tooltips.dispose()
     marketplaceFetcher.dispose()
+    publisherGrantClient.dispose()
     document.removeEventListener('keydown', onKeydown)
     document.removeEventListener('pointerdown', closeMenuOutside, true)
     document.removeEventListener('click', closeMenuOutside, true)

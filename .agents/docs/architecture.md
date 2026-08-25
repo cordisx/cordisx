@@ -496,8 +496,11 @@ The default `direct-device-bound` path accepts a publisher grant only when its
 public-key digest matches that machine identity; no CordisX registry is needed.
 It persists a non-decreasing accepted-statement time for expiry/offline grace.
 An optional registry-enhanced request may add first-claim semantics but cannot
-block the direct path when absent. It deliberately has no raw renderer bridge
-and no local-file private-key fallback.
+block the direct path when absent. Marketplace v4 may expose external purchase,
+manage, and recovery URLs; the Host adds the device challenge only at navigation
+time. A narrow launcher binding offers the Manager challenge, scoped status,
+and statement import but no private key, payment data, registry credential, or
+raw bridge. There is no local-file private-key fallback.
 
 The Host gates CordisX package/feature projection only; it does not claim to
 stop source or a modified Host outside CordisX. It never receives payment,
