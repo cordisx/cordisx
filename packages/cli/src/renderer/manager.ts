@@ -601,6 +601,7 @@ const MANAGER_STYLES = `
   .cxm-breadcrumbs { min-width: 0; width: 100%; }
   .cxm-breadcrumb-list { display: flex; min-width: 0; margin: 0; padding: 0; align-items: center; list-style: none; white-space: nowrap; }
   .cxm-breadcrumb-item { display: inline-flex; min-width: 0; flex: 0 0 auto; align-items: center; }
+  .cxm-breadcrumb-item:last-child { flex: 1 1 auto; }
   .cxm-breadcrumb-separator { padding: 0 6px; color: #656e7e; font-weight: 400; }
   .cxm-breadcrumb-action {
     min-width: 0;
@@ -682,10 +683,11 @@ const MANAGER_STYLES = `
   .cxm-marketplace-source-readonly { overflow-wrap: anywhere; color: var(--cx-muted); font: 11px/1.5 ui-monospace, monospace; user-select: text; }
   .cxm-tabs {
     display: flex;
+    flex-wrap: wrap;
     gap: 5px;
     margin: -4px -8px 16px;
     padding: 0;
-    overflow-x: auto;
+    overflow: visible;
   }
   .cxm-tab {
     display: inline-flex;

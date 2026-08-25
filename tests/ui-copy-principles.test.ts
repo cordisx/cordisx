@@ -119,4 +119,14 @@ describe('UI copy principles', () => {
     expect(runtime).toContain("copy('runtime.status-details-in-logs')")
     expect(runtime).not.toContain("'cxm-error', plugin.error")
   })
+
+  it('keeps shared tabs complete when their content area becomes narrow', async () => {
+    const manager = await readFile(managerPath, 'utf8')
+    const tabs = section(manager, '  .cxm-tabs {', '  .cxm-tab {')
+
+    expect(tabs).toContain('flex-wrap: wrap;')
+    expect(tabs).toContain('overflow: visible;')
+    expect(tabs).not.toContain('overflow-x: auto;')
+    expect(manager).toContain('.cxm-breadcrumb-item:last-child { flex: 1 1 auto; }')
+  })
 })
