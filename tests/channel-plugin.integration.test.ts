@@ -155,7 +155,10 @@ describe('built-in Channel product bundle', () => {
     search.value = 'simulator'
     search.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     card.click()
-    expect(page.querySelector('[data-channel-page="detail"][data-channel-detail="simulator/local/test"]')).not.toBeNull()
+    const detail = page.querySelector('[data-channel-page="detail"][data-channel-detail="simulator/local/test"]')!
+    expect(detail).not.toBeNull()
+    expect(detail.querySelector('.cxc-channel-detail-tools [data-channel-back="true"]')).not.toBeNull()
+    expect(detail.querySelector('h2')).toBeNull()
     expect(page.querySelector('[data-channel-configuration="simulator/local/test"]')).not.toBeNull()
     expect(page.querySelector('[data-channel-configuration-unavailable="true"]')?.textContent).toContain('No configurable items yet.')
     page.querySelector<HTMLButtonElement>('[data-channel-detail-tab="logs"]')!.click()
