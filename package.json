@@ -11,6 +11,7 @@
     "check:package": "npm run check:package --workspaces --if-present",
     "check:release": "node scripts/check-release-metadata.mjs",
     "dev": "tsx packages/cli/src/cli.ts",
+    "dev:ui": "npm run dev:ui --workspace=cordisx --",
     "smoke": "node packages/cli/scripts/live-smoke.mjs",
     "smoke:isolated-app": "node packages/cli/scripts/run-isolated-app-smoke.mjs",
     "test": "vitest run",

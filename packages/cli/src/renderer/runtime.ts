@@ -28,7 +28,7 @@ import type {
   CordisXPermissionAuthorizationDecisionV2,
   CordisXPermissionAuthorizationPlanV2,
 } from '../permission-contracts.js'
-import { installCodexAdapter, type CodexAdapterHandle } from './adapter.js'
+import { installCodexAdapter, installPlaygroundAdapter, type CodexAdapterHandle } from './adapter.js'
 import { UnavailableCodexHostAdapter } from '../adapters/codex-agent.js'
 import { CordisXAgentService, CordisXHostAgentRuntime, CordisXSystemPromptService } from './agent.js'
 import { CordisXAgentEventService } from './agent-events.js'
@@ -128,6 +128,8 @@ interface CordisXRuntimeMetadata {
   readonly initialRegistryEpoch?: number
   readonly generation?: string
   readonly channelManager?: ChannelManagerProjectionV1
+  /** Development-only host with explicit semantic seats and no Codex DOM probes. */
+  readonly hostKind?: 'codex' | 'playground'
 }
 
 interface PluginController {
@@ -1995,15 +1997,19 @@ async function start(
       routeService.subscribeInternal(notifyFrom('routes')),
       slotService.subscribeInternal(notifyFrom('surfaces')),
     )
-    adapterHandle = installCodexAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, {
-      generation,
-      adapterVersion: metadata.version,
-    })
+    adapterHandle = metadata.hostKind === 'playground'
+      ? installPlaygroundAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors)
+      : installCodexAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, {
+          generation,
+          adapterVersion: metadata.version,
+        })
     for (const controller of controllers) {
       if (controller.status !== 'active') continue
       await mountPlugin(controller)
     }
-    disposeManager = installCordisXManager(document, handle)
+    disposeManager = installCordisXManager(document, handle, metadata.hostKind === 'playground'
+      ? { triggerTarget: () => document.querySelector<HTMLElement>('[data-cordisx-playground-manager-trigger]') ?? undefined }
+      : {})
   } catch (error) {
     await dispose()
     throw error
