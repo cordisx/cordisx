@@ -1,5 +1,5 @@
 export type CordisXCliAction = 'help' | 'launch' | 'setup' | 'config' | 'doctor' | 'dev'
-export type CordisXDataMode = 'shared' | 'isolated'
+export type CordisXDataMode = 'shared' | 'host-isolated'
 
 export type CordisXCliParseErrorCode =
   | 'unknown-option'
@@ -119,13 +119,16 @@ function parseValue(option: string, name: ValueOptionName, raw: string): string 
     throw new CordisXCliParseError('missing-option-value', `${option} requires a value`)
   }
   if (name === 'dataMode') {
-    if (raw !== 'shared' && raw !== 'isolated') {
+    if (raw !== 'shared' && raw !== 'host-isolated' && raw !== 'isolated') {
       throw new CordisXCliParseError(
         'invalid-option-value',
-        `${option} must be either "shared" or "isolated"`,
+        `${option} must be either "shared" or "host-isolated"`,
       )
     }
-    return raw
+    // v1 used `isolated` for a fully private Host root. Keep it as a
+    // lossless compatibility alias without calling ordinary CordisX profile
+    // isolation a separate login.
+    return raw === 'isolated' ? 'host-isolated' : raw
   }
   if (name === 'debugPort') {
     const port = Number(raw)
@@ -359,7 +362,7 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
   if (options.isolated) {
     throw new CordisXCliParseError(
       'unsupported-option',
-      '--isolated is only valid with cordisx dev; use --data isolated for a host-data profile',
+      '--isolated is only valid with cordisx dev; use --data host-isolated for a separate Host root',
     )
   }
   if (positionals.length > 2) {

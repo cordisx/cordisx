@@ -50,7 +50,7 @@ describe('CordisX home configuration', () => {
           defaultProfile: 'work',
           profiles: {
             default: { displayName: 'Default', dataMode: 'shared' as const },
-            work: { displayName: 'Work', dataMode: 'isolated' as const },
+            work: { displayName: 'Work', dataMode: 'host-isolated' as const },
           },
         },
       },
@@ -61,6 +61,28 @@ describe('CordisX home configuration', () => {
     expect(loaded.apps.codex?.defaultProfile).toBe('work')
     expect(await readFile(configPath, 'utf8')).toBe(original)
     expect((await stat(configPath)).mode & 0o777).toBe(0o600)
+  })
+
+  it('reads the legacy isolated host-root spelling without rewriting the user configuration', async () => {
+    const { configPath } = await fixturePath()
+    await ensureHomeConfig(configPath)
+    const legacy = {
+      ...createDefaultHomeConfig(),
+      apps: {
+        codex: {
+          defaultProfile: 'legacy',
+          profiles: {
+            default: { displayName: 'Default', dataMode: 'shared' },
+            legacy: { displayName: 'Legacy', dataMode: 'isolated' },
+          },
+        },
+      },
+    }
+    const original = `${JSON.stringify(legacy)}\n`
+    await writeFile(configPath, original, { mode: 0o600 })
+    const loaded = await ensureHomeConfig(configPath)
+    expect(loaded.apps.codex?.profiles.legacy?.dataMode).toBe('host-isolated')
+    expect(await readFile(configPath, 'utf8')).toBe(original)
   })
 
   it('strictly rejects unsupported, unknown, and inconsistent fields', () => {
@@ -139,7 +161,7 @@ describe('CordisX home configuration', () => {
       apps: {
         codex: {
           defaultProfile: 'constructor',
-          profiles: JSON.parse('{"constructor":{"displayName":"Constructor","dataMode":"isolated"}}'),
+          profiles: JSON.parse('{"constructor":{"displayName":"Constructor","dataMode":"host-isolated"}}'),
         },
       },
     })
@@ -245,7 +267,7 @@ describe('CordisX home configuration', () => {
             ...codex,
             profiles: {
               ...codex.profiles,
-              [profileId]: { displayName: profileId, dataMode: 'isolated' },
+              [profileId]: { displayName: profileId, dataMode: 'host-isolated' },
             },
           },
         },

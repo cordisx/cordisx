@@ -19,7 +19,7 @@ async function fixture(): Promise<{ root: string; executable: string }> {
 }
 
 describe('Codex adapter launch plan', () => {
-  it('uses the existing signed-in Host profile for shared data', async () => {
+  it('uses a persistent independent Chromium profile while sharing Host roots', async () => {
     const { root, executable } = await fixture()
     const plan = await codexAdapter.resolveLaunchPlan({
       cordisxHomeDir: root,
@@ -30,10 +30,15 @@ describe('Codex adapter launch plan', () => {
 
     expect(plan.environment).toEqual({})
     expect(plan.sharedDataRoots.map(item => item.name)).toEqual(['HOME', 'CODEX_HOME'])
-    expect(plan.chromiumProfile).toEqual({ mode: 'system' })
-    expect(plan.isolatedDataRoots).toEqual([])
+    expect(plan.chromiumProfile).toEqual({
+      mode: 'independent',
+      path: path.join(root, 'apps', 'codex', 'profiles', 'default', 'chromium'),
+    })
+    expect(plan.isolatedDataRoots).toEqual([
+      { name: 'Chromium profile', path: path.join(root, 'apps', 'codex', 'profiles', 'default', 'chromium'), managed: true },
+    ])
     await codexAdapter.prepareLaunch(plan)
-    await expect(access(path.join(root, 'apps', 'codex', 'profiles', 'default'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(path.join(root, 'apps', 'codex', 'profiles', 'default', 'chromium'))).resolves.toBeUndefined()
   })
 
   it('projects stable isolated host roots without mutating process.env', async () => {
@@ -42,7 +47,7 @@ describe('Codex adapter launch plan', () => {
     const plan = await codexAdapter.resolveLaunchPlan({
       cordisxHomeDir: root,
       profileId: 'work',
-      dataMode: 'isolated',
+      dataMode: 'host-isolated',
       executable,
     })
 
@@ -77,17 +82,18 @@ describe('Codex adapter launch plan', () => {
     })
   })
 
-  it('rejects a private Chromium directory for a shared Host profile', async () => {
+  it('allows an explicit independent Chromium directory for shared Host roots', async () => {
     const { root, executable } = await fixture()
     const explicit = path.join(root, 'user-owned-profile')
     await import('node:fs/promises').then(async fs => await fs.mkdir(explicit, { mode: 0o755 }))
-    await expect(codexAdapter.resolveLaunchPlan({
+    const plan = await codexAdapter.resolveLaunchPlan({
       cordisxHomeDir: root,
       profileId: 'work',
       dataMode: 'shared',
       executable,
       chromiumProfileDir: explicit,
-    })).rejects.toThrow('--profile-dir requires an isolated host-data profile')
+    })
+    await codexAdapter.prepareLaunch(plan)
     expect((await stat(explicit)).mode & 0o777).toBe(0o755)
   })
 })

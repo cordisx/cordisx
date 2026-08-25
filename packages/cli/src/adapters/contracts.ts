@@ -1,4 +1,5 @@
-export type DataMode = 'shared' | 'isolated'
+/** Normal CordisX launches share Host roots; host-isolated is an explicit opt-in. */
+export type DataMode = 'shared' | 'host-isolated'
 
 export interface DataRootProjection {
   readonly name: string

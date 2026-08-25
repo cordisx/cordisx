@@ -175,8 +175,8 @@ try {
     process.execPath,
   ], { cwd: runnerDirectory, env: cliEnvironment })
   const persistedConfig = JSON.parse(await readFile(configPath, 'utf8'))
-  if (persistedConfig.apps?.codex?.profiles?.work?.dataMode !== 'isolated') {
-    throw new Error('installed cordisx dry-run must persist a new work profile as isolated')
+  if (persistedConfig.apps?.codex?.profiles?.work?.dataMode !== 'shared') {
+    throw new Error('installed cordisx dry-run must persist a new work profile as shared')
   }
   await expectMissing(profileRoot, 'named profile data directory')
 

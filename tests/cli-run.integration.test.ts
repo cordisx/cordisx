@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { runCordisXCli } from '../packages/cli/src/cli/run.js'
 
 describe('functional CordisX CLI', () => {
-  it('shares setup with first launch, ignores cwd composition, and reuses an isolated profile', async () => {
+  it('shares setup with first launch, ignores cwd composition, and reuses an independent shared profile', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))
     const project = path.join(root, 'project')
     const home = path.join(root, 'home')
@@ -31,7 +31,7 @@ describe('functional CordisX CLI', () => {
       apps: { codex: { profiles: { work: { dataMode: string } } } }
     }
     expect(persisted.plugins).toEqual([])
-    expect(persisted.apps.codex.profiles.work.dataMode).toBe('isolated')
+    expect(persisted.apps.codex.profiles.work.dataMode).toBe('shared')
     expect(output.filter(line => line.includes('created codex/work'))).toHaveLength(1)
     expect(output.some(line => line.includes('plugins: (none)'))).toBe(true)
     await expect(access(path.join(home, 'apps', 'codex', 'profiles', 'work', 'chromium'))).rejects.toMatchObject({ code: 'ENOENT' })
@@ -51,8 +51,8 @@ describe('functional CordisX CLI', () => {
     const runtime = { env: { CORDISX_HOME: home }, stdout: () => undefined }
     await expect(runCordisXCli(['codex', 'work', '--attach', '--dry-run'], runtime))
       .rejects.toThrow('--attach cannot select a named profile')
-    await expect(runCordisXCli(['codex', 'work', '--system', '--dry-run'], runtime))
-      .rejects.toThrow('--system cannot enforce an isolated host-data profile')
+    await expect(runCordisXCli(['codex', 'work', '--data', 'host-isolated', '--system', '--dry-run'], runtime))
+      .rejects.toThrow('--system cannot enforce a host-isolated profile')
     const config = await readFile(path.join(home, 'config.json'), 'utf8')
     expect(config).not.toContain('work')
   })
@@ -69,7 +69,7 @@ describe('functional CordisX CLI', () => {
     await expect(access(path.join(home, 'apps', 'codex', 'profiles', 'default'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('keeps a shared UI-demo launch on the existing Host profile', async () => {
+  it('keeps a shared UI-demo launch in its own persistent Chromium profile', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))
     const home = path.join(root, 'ui-demos')
     const output: string[] = []
@@ -77,22 +77,22 @@ describe('functional CordisX CLI', () => {
       env: { CORDISX_HOME: home },
       stdout: line => { output.push(line) },
     })
-    expect(output.join('\n')).toContain('"chromiumProfile": {\n      "mode": "system"')
-    await expect(access(path.join(home, 'apps', 'codex', 'profiles', 'ui-demo'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(output.join('\n')).toContain('"chromiumProfile": {\n      "mode": "independent"')
+    await expect(access(path.join(home, 'apps', 'codex', 'profiles', 'ui-demo', 'chromium'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('does not let a shared profile silently open a new Chromium directory', async () => {
+  it('accepts a shared profile Chromium override without changing Host roots', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))
-    await expect(runCordisXCli([
+    const output: string[] = []
+    await runCordisXCli([
       'codex', '--data', 'shared', '--profile-dir', path.join(root, 'private-profile'), '--dry-run', '--executable', process.execPath,
-    ], { env: { CORDISX_HOME: path.join(root, 'home') }, stdout: () => undefined })).rejects.toThrow(
-      '--profile-dir requires --data isolated; shared reuses the current Host profile',
-    )
+    ], { env: { CORDISX_HOME: path.join(root, 'home') }, stdout: line => { output.push(line) } })
+    expect(output.join('\n')).toContain(path.join(root, 'private-profile'))
   })
 
-  it('fails instead of claiming readiness when an already-running shared Host exits the singleton hand-off', async () => {
+  it('fails instead of claiming readiness when the launched Host exits before injection', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))
-    const executable = path.join(root, 'singleton-handoff')
+    const executable = path.join(root, 'exits-before-injection')
     await writeFile(executable, '#!/usr/bin/env node\nprocess.exit(0)\n')
     await chmod(executable, 0o755)
     const output: string[] = []
@@ -101,7 +101,7 @@ describe('functional CordisX CLI', () => {
     ], {
       env: { CORDISX_HOME: path.join(root, 'home') },
       stdout: line => { output.push(line) },
-    })).rejects.toThrow('当前 Host 已运行且未启用 CordisX 调试；正常退出 Host 后重跑同一 shared 命令')
+    })).rejects.toThrow('Host exited before CordisX CDP became ready')
     expect(output.join('\n')).toContain('"status": "launching"')
     expect(output.join('\n')).not.toContain('CDP renderer ready')
   })

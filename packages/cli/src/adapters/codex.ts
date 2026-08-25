@@ -48,9 +48,8 @@ export const codexAdapter: HostAdapter = {
       : path.resolve(process.env.CODEX_HOME)
 
     if (input.dataMode === 'shared') {
-      if (input.chromiumProfileDir !== undefined) {
-        throw new Error('--profile-dir requires an isolated host-data profile')
-      }
+      const root = profileRoot(input.cordisxHomeDir, input.profileId)
+      const chromiumProfileDir = path.resolve(input.chromiumProfileDir ?? path.join(root, 'chromium'))
       return {
         version: 1,
         appId: this.id,
@@ -58,16 +57,18 @@ export const codexAdapter: HostAdapter = {
         profileId: input.profileId,
         dataMode: input.dataMode,
         executable,
-        // `shared` is the interactive profile: it must preserve the current
-        // signed-in Codex/ChatGPT state rather than silently opening a fresh
-        // Chromium data directory under CORDISX_HOME.
-        chromiumProfile: { mode: 'system' },
+        // A CordisX launch always owns a separate Electron/Chromium instance.
+        // Its persistent profile is CORDISX_HOME-scoped, while HOME and
+        // CODEX_HOME intentionally remain the user's Host roots.
+        chromiumProfile: { mode: 'independent', path: chromiumProfileDir },
         environment: {},
         sharedDataRoots: [
           { name: 'HOME', path: ordinaryHome, managed: false },
           { name: 'CODEX_HOME', path: ordinaryCodexHome, managed: false },
         ],
-        isolatedDataRoots: [],
+        isolatedDataRoots: [
+          { name: 'Chromium profile', path: chromiumProfileDir, managed: input.chromiumProfileDir === undefined },
+        ],
       }
     }
 

@@ -64,7 +64,25 @@ generations, or render Manager UI.
 
 The launcher binds CDP to `127.0.0.1`, records every `Page.addScriptToEvaluateOnNewDocument` identifier, and removes those identifiers on shutdown before asking the live page to dispose CordisX.
 
-For interactive UI development, a `shared` launch uses the current signed-in Codex/ChatGPT Chromium profile with an ephemeral loopback CDP port. `CORDISX_HOME` remains independently scoped for CordisX configuration and state; it is not a Chromium profile root. When explicitly set to a concrete user-owned directory, the launcher may tighten that directory only to `0700` before using it; it never recurses or changes `HOME`, `CODEX_HOME`, or the Host profile. This keeps the existing account, conversations, projects, and model configuration available without presenting a second login environment. A named `isolated` profile instead receives private host roots and a stable project-scoped Chromium `user-data-dir`. Neither mode shares request association, in-flight turns, subscriptions, approvals, current UI context, or a live connection state. `--profile-dir` is isolated-only, preventing a shared invocation from accidentally producing a fresh browser identity.
+For interactive UI development, the normal `shared` launch creates a separate
+Codex/ChatGPT process with an ephemeral loopback CDP port and a persistent,
+CordisX-profile-scoped Chromium `user-data-dir`. Its launch environment is
+empty, so the inherited `HOME` and `CODEX_HOME` intentionally retain the
+existing account, conversations, projects, and model configuration without
+reading, copying, or changing browser cookies. `CORDISX_HOME` independently
+scopes CordisX configuration and state; when explicitly set to a concrete
+user-owned directory, the launcher may tighten that directory only to `0700`
+before using it and never recurses into Host roots. `--profile-dir` only
+changes the independent Chromium directory. `--system` is the explicit escape
+hatch to the normal Host Chromium profile. The advanced `host-isolated` mode
+projects private Host roots and a private Chromium profile; legacy v1
+`dataMode: "isolated"` is a non-destructive alias for it, never a synonym for
+independent CordisX configuration. Neither mode shares request association,
+in-flight turns, subscriptions, approvals, current UI context, or a live
+connection state. The launcher starts its Host in a private process group and,
+on shutdown, removes CDP injections then terminates only that group plus
+helpers fenced by its exact CordisX-managed user-data directory; an explicitly
+user-supplied `--profile-dir` never grants a broad helper-cleanup target.
 
 The second process is a UI development host, not a transparent platform bridge.
 CordisX must not start another app-server to impersonate or replace the original

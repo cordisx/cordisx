@@ -21,7 +21,7 @@ node packages/cli/scripts/run-isolated-app-smoke.mjs \
 ```
 
 The runner copies that fixture into a new temporary `HOME` and launches
-`codex smoke --data isolated`; it does not read a pre-existing profile. It also
+`codex smoke --data host-isolated`; it does not read a pre-existing profile. It also
 keeps cleanup evidence from masking a smoke failure when no report was written.
 Its `runnerCleanup` report record and `[cordisx-smoke-cleanup]` line require
 `homeRootRemoved=true` and `homeRootExists=false` alongside the port, profile,

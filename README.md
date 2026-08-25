@@ -86,13 +86,14 @@ npx cordisx@beta codex
 ```
 
 `setup` creates `~/.cordisx/config.json` with `providers: []` and `plugins: []`. The default profile
-uses the existing signed-in Codex/ChatGPT Host profile, account, conversations,
-projects, and models; use an isolated named profile when its host data should
-also be separate:
+starts an independent Codex window with a persistent CordisX-scoped Chromium
+profile while sharing the existing account, conversations, projects, and
+models through `HOME` and `CODEX_HOME`. Use `host-isolated` only when Host data
+itself must also be separate:
 
 ```bash
 npx cordisx@beta codex default --data shared
-npx cordisx@beta codex work --data isolated
+npx cordisx@beta codex work --data host-isolated
 ```
 
 For a global command, install the same explicit channel with

@@ -17,7 +17,7 @@ import {
   type CordisXPersistedPermissionPolicyRecord,
 } from '../permission-persistence.js'
 
-export type HomeDataMode = 'shared' | 'isolated'
+export type HomeDataMode = 'shared' | 'host-isolated'
 
 export interface HomeConfigPlugin {
   readonly id: string
@@ -360,10 +360,12 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
   const profile = record(value, label)
   rejectUnknownKeys(profile, ['displayName', 'dataMode'], label)
   const displayName = nonEmptyString(profile.displayName, `${label}.displayName`)
-  if (profile.dataMode !== 'shared' && profile.dataMode !== 'isolated') {
-    throw new Error(`${label}.dataMode must be shared or isolated`)
+  if (profile.dataMode !== 'shared' && profile.dataMode !== 'host-isolated' && profile.dataMode !== 'isolated') {
+    throw new Error(`${label}.dataMode must be shared or host-isolated`)
   }
-  return { displayName, dataMode: profile.dataMode }
+  // `isolated` was the v1 spelling for an opt-in private Host root. Reading it
+  // does not rewrite the file; later writes use the explicit current spelling.
+  return { displayName, dataMode: profile.dataMode === 'isolated' ? 'host-isolated' : profile.dataMode }
 }
 
 function parseApp(value: unknown, label: string): HomeConfigApp {

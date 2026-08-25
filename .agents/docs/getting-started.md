@@ -60,12 +60,12 @@ reported connection plane.
 The default profile uses the existing signed-in Codex/ChatGPT Host profile,
 account, conversations, projects, models, and host configuration. CordisX
 still keeps its own `CORDISX_HOME` configuration and state. An explicit named
-isolated profile gets its own host data roots and Chromium profile and is
-reused on later launches:
+separate Host root is needed only for an explicit `host-isolated` profile;
+ordinary CordisX configuration remains independent through `CORDISX_HOME`:
 
 ```bash
 npx cordisx@beta codex default --data shared
-npx cordisx@beta codex work --data isolated
+npx cordisx@beta codex work --data host-isolated
 ```
 
 ## Create a plugin
@@ -120,21 +120,23 @@ launch never reads a project-local `cordisx.config.json`.
 
 ## Launch modes
 
-The default shared command starts the existing Host profile with an
-automatically selected loopback CDP port. It does not create a Chromium data
-directory under `CORDISX_HOME`:
+The default shared command starts an independent Host process with an
+automatically selected loopback CDP port and a persistent Chromium directory
+under `CORDISX_HOME`. It explicitly retains `HOME` and `CODEX_HOME`, so the
+existing account, conversations, projects, and models remain available without
+copying or reading cookies:
 
 ```bash
 npm run dev
 npm run dev -- codex
 npm run dev -- codex work
-npm run dev -- codex work --data isolated
+npm run dev -- codex work --data host-isolated
 ```
 
-The named profile is persisted in the home configuration. `default` uses the
-Host's normal Chromium data, `HOME`, and `CODEX_HOME`; an unknown explicit
-profile such as `work` is created as isolated and reused on later launches.
-Only its host and Chromium roots are stored under:
+The named profile is persisted in the CordisX home configuration. `default`
+and an unknown explicit profile such as `work` use independent, persistent
+Chromium directories while sharing `HOME` and `CODEX_HOME`. The per-profile
+CordisX state and Chromium directory are stored under:
 
 ```text
 ~/.cordisx/apps/codex/profiles/<profile>/
@@ -146,8 +148,8 @@ Other supported modes are:
 # Attach to a host that was already started with --remote-debugging-port=9229.
 npm run dev -- codex --attach
 
-# `shared` already uses the system Chromium profile. This is explicit only
-# when the selected profile is also shared.
+# Explicitly use the normal Host Chromium profile. This escape hatch is not
+# required for normal shared launches.
 npm run dev -- codex --system
 
 # Override the application executable when automatic discovery is insufficient.
@@ -155,21 +157,19 @@ npm run dev -- codex --executable /Applications/Codex.app/Contents/MacOS/Codex
 npm run dev -- codex --executable /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
 ```
 
-`--profile-dir <path>` overrides an **isolated** profile's Chromium path; it is
-rejected for `shared` so a login-less experience cannot silently turn into a
-fresh Host profile. The old
-`--isolated` flag remains accepted only by `cordisx dev`; ordinary launch uses
-the unambiguous `--data isolated` profile contract.
+`--profile-dir <path>` overrides the selected profile's independent Chromium
+path without changing `HOME` or `CODEX_HOME`. `--system` is the only mode that
+uses the normal Host Chromium profile. The old `--isolated` flag remains
+accepted only by `cordisx dev`; ordinary launch uses the explicit
+`--data host-isolated` contract when a separate Host root is truly required.
 
-A `shared` profile uses the existing Host Chromium data plus `HOME` and
-`CODEX_HOME`, so the account, conversations, projects, and model configuration
-remain available without a new login. An `isolated` profile instead projects
-private host and Chromium roots. Both use a loopback CDP port; shutdown removes
-the tracked injection and stops only the process started by this launcher.
-If the normal Host is already running and has not been started with CordisX
-debugging, Electron can hand the launch to that process and exit before CDP is
-ready. CordisX reports `当前 Host 已运行且未启用 CordisX 调试；正常退出 Host 后重跑同一 shared 命令`
-instead of claiming the Manager was injected.
+A `shared` profile uses an independent Chromium profile plus the user's `HOME`
+and `CODEX_HOME`, so the account, conversations, projects, and model
+configuration remain available without a new login. A `host-isolated` profile
+instead projects private Host and Chromium roots. Both use a loopback CDP port;
+shutdown removes the tracked injection and stops only the exact process started
+by this launcher. A launch that exits before injection reports the generic CDP
+readiness failure; it is never reported as ready.
 
 Project-local composition is an explicit developer mode only:
 

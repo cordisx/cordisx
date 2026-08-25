@@ -12,10 +12,10 @@ describe('named CLI profile resolution', () => {
     const selection = await resolveProfileSelection({
       config: createDefaultHomeConfig(),
       configPath,
-      dataMode: 'isolated',
+      dataMode: 'host-isolated',
     })
     expect(selection).toMatchObject({
-      appId: 'codex', profileId: 'default', dataMode: 'isolated', created: false,
+      appId: 'codex', profileId: 'default', dataMode: 'host-isolated', created: false,
     })
   })
 
@@ -25,12 +25,12 @@ describe('named CLI profile resolution', () => {
     const first = await resolveProfileSelection({
       config: createDefaultHomeConfig(), configPath, appId: 'codex', profileId: 'work',
     })
-    expect(first).toMatchObject({ profileId: 'work', dataMode: 'isolated', created: true })
+    expect(first).toMatchObject({ profileId: 'work', dataMode: 'shared', created: true })
     const persisted = await loadHomeConfig(configPath)
-    expect(persisted.apps.codex?.profiles.work).toEqual({ displayName: 'Work', dataMode: 'isolated' })
+    expect(persisted.apps.codex?.profiles.work).toEqual({ displayName: 'Work', dataMode: 'shared' })
     const second = await resolveProfileSelection({
       config: persisted, configPath, appId: 'codex', profileId: 'work',
     })
-    expect(second).toMatchObject({ profileId: 'work', dataMode: 'isolated', created: false })
+    expect(second).toMatchObject({ profileId: 'work', dataMode: 'shared', created: false })
   })
 })

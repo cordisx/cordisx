@@ -13,10 +13,10 @@ describe('Host launch readiness', () => {
     const ready = deferred()
     const controller = new AbortController()
     const waiting = waitForHostExitAfterReadiness({
-      childExit: exit.promise, ready: ready.promise, signal: controller.signal, sharedHostProfile: true,
+      childExit: exit.promise, ready: ready.promise, signal: controller.signal,
     })
     exit.resolve()
-    await expect(waiting).rejects.toThrow('当前 Host 已运行且未启用 CordisX 调试；正常退出 Host 后重跑同一 shared 命令')
+    await expect(waiting).rejects.toThrow('Host exited before CordisX CDP became ready')
   })
 
   it('allows a normal exit after the renderer is ready', async () => {
@@ -24,7 +24,7 @@ describe('Host launch readiness', () => {
     const ready = deferred()
     const controller = new AbortController()
     const waiting = waitForHostExitAfterReadiness({
-      childExit: exit.promise, ready: ready.promise, signal: controller.signal, sharedHostProfile: true,
+      childExit: exit.promise, ready: ready.promise, signal: controller.signal,
     })
     ready.resolve()
     await Promise.resolve()
