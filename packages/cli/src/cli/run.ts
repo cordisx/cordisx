@@ -287,8 +287,38 @@ function recoveredActivation(plan: RollbackPlan, runtimeGeneration: string): Cor
   }
 }
 
-function printPlan(plan: ResolvedLaunchPlan, stdout: (line: string) => void): void {
-  stdout(JSON.stringify({ status: 'ready', plan }, null, 2))
+function printPlan(
+  plan: ResolvedLaunchPlan,
+  stdout: (line: string) => void,
+  status: 'ready' | 'launching' = 'ready',
+): void {
+  stdout(JSON.stringify({ status, plan }, null, 2))
+}
+
+const SHARED_HOST_CDP_NOT_READY = '当前 Host 已运行且未启用 CordisX 调试；正常退出 Host 后重跑同一 shared 命令'
+
+/**
+ * A normal Electron singleton hand-off exits its new child with status 0. That
+ * is not success unless the CDP watcher has actually installed a renderer.
+ */
+export async function waitForHostExitAfterReadiness(input: {
+  readonly childExit: Promise<void>
+  readonly ready: Promise<void>
+  readonly signal: AbortSignal
+  readonly sharedHostProfile: boolean
+}): Promise<void> {
+  let ready = false
+  void input.ready.then(() => { ready = true })
+  await Promise.race([
+    input.childExit.then(() => {
+      if (!ready) {
+        throw new Error(input.sharedHostProfile
+          ? SHARED_HOST_CDP_NOT_READY
+          : 'Host exited before CordisX CDP became ready')
+      }
+    }),
+    waitForAbort(input.signal),
+  ])
 }
 
 async function runInjectedHost(input: {
@@ -309,12 +339,16 @@ async function runInjectedHost(input: {
   readonly launcher: CordisXLauncherOptions
   readonly profile?: IsolatedCodexProfile
   readonly environment?: Readonly<Record<string, string>>
+  readonly sharedHostProfile?: boolean
   readonly stdout: (line: string) => void
 }): Promise<void> {
   const controller = new AbortController()
   const stop = (): void => controller.abort()
   process.once('SIGINT', stop)
   process.once('SIGTERM', stop)
+  let markReady!: () => void
+  const rendererReady = new Promise<void>(resolve => { markReady = resolve })
+  let reportedReady = false
   const watcher = watchAndInject({
     port: input.debugPort,
     source: input.source,
@@ -331,6 +365,12 @@ async function runInjectedHost(input: {
     ...(input.channelActionsBridge === undefined ? {} : { channelActionsBridge: input.channelActionsBridge }),
     ...(input.permissionPersistence === undefined ? {} : { permissionPersistence: input.permissionPersistence }),
     ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
+    onReady: () => {
+      if (reportedReady) return
+      reportedReady = true
+      markReady()
+      input.stdout('[cordisx] CDP renderer ready')
+    },
     onStatus: message => input.stdout(`[cordisx] ${message}`),
   })
   let launched: ChildProcess | undefined
@@ -350,7 +390,12 @@ async function runInjectedHost(input: {
       input.launcher.onlineDevtools,
       input.environment,
     )
-    await Promise.race([waitForExit(launched), waitForAbort(controller.signal)])
+    await waitForHostExitAfterReadiness({
+      childExit: waitForExit(launched),
+      ready: rendererReady,
+      signal: controller.signal,
+      sharedHostProfile: input.sharedHostProfile === true,
+    })
   } catch (error) {
     primaryError = error
     throw error
@@ -714,7 +759,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       }
     : resolvedPlan
   if (selection.created) stdout(`[cordisx] created ${appId}/${selection.profileId} (${selection.profile.dataMode})`)
-  printPlan(plan, stdout)
+  printPlan(plan, stdout, invocation.options.dryRun ? 'ready' : 'launching')
   if (invocation.options.dryRun) {
     stdout(`[cordisx] loopback CDP port: ${invocation.options.debugPort ?? 'automatic'}`)
     await channelService?.dispose()
@@ -753,6 +798,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     launcher: invocation.options,
     ...(profile === undefined ? {} : { profile }),
     ...(Object.keys(plan.environment).length === 0 ? {} : { environment: plan.environment }),
+    sharedHostProfile: selection.dataMode === 'shared',
       stdout,
     })
   } finally {

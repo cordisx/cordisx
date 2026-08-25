@@ -1100,6 +1100,8 @@ export interface WatchInjectionOptions {
   readonly source: string
   readonly signal: AbortSignal
   readonly onStatus?: (message: string) => void
+  /** Called after the first renderer accepts the CordisX bootstrap. */
+  readonly onReady?: () => void
   readonly providerFleet?: ProviderFleet
   readonly providerBridgeToken?: string
   readonly agentHistoryHost?: CodexAgentHistoryHost
@@ -1151,6 +1153,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             options.pluginLifecycle,
           )
           installed.set(target.id, record)
+          options.onReady?.()
           options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)
         }
       } catch (error) {
