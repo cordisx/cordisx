@@ -12,10 +12,11 @@ Use short, direct status copy:
 - `加载失败` / `Failed to load`
 - `当前不可用` / `Currently unavailable`
 
-For configuration, lifecycle, Marketplace, and permission context, use an
-actionable link such as `查看配置文档` / `View configuration docs` or
-`查看错误详情` / `View error details`. Never present a bare URL or an ambiguous
-`了解更多` / `Learn more` action.
+Documentation is secondary context, never the primary action on a product
+page. A user must be able to complete the available product flow without a
+`查看文档` / `View docs` button. Keep error details behind a diagnostic affordance
+when they are needed; never present a bare URL or an ambiguous `了解更多` /
+`Learn more` action.
 
 Marketplace discovery keeps documentation out of its primary actions. Source
 management shows concise states such as `已停用` / `Disabled` and `更新失败` /
@@ -53,6 +54,28 @@ a pair to that catalog before using it in a primary surface. Resolve the
 catalog from the current UI locale; use English only when the locale has no
 Chinese language subtag. Do not use a translated label to replace a machine
 id, URL, diagnostic code, or raw error.
+
+## Interaction and layout system
+
+- Host owns page chrome, layout, responsive behavior, theme tokens, focus, and
+  native-looking controls. Plugins provide structured data and actions only.
+- A heading and its introduction are rendered once. Do not repeat them in the
+  first content section or use an empty page as an implicit description.
+- Prefer an icon button with an accessible name and tooltip for a familiar,
+  compact action. Text labels remain for names, state, and an action whose
+  meaning would otherwise be ambiguous. Icon buttons use the Host rounded-square
+  geometry; do not introduce a circular variant for the same control family.
+- A configurable account is a compact account card: avatar when available (or
+  an initial fallback), a platform badge at its lower edge, and connection
+  state at the card edge. An empty capability is hidden rather than represented
+  by a fake configuration page.
+- Normal state comes before detail. Raw events, implementation vocabulary,
+  machine identifiers, and dependency failures are only shown in Logs &
+  diagnostics or an explicit expandable detail.
+- Theme, narrow-width, focus, keyboard, and overflow behavior are component and
+  page-template guarantees covered during implementation. Final acceptance
+  checks the real user journey; it must not be the first place basic layout
+  defects are found.
 
 ## Review gate
 

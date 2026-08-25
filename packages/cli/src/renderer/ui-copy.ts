@@ -29,6 +29,7 @@ type CopyKey =
   | 'channel.open'
   | 'channel.back'
   | 'channel.create'
+  | 'channel.create.icon-label'
   | 'channel.create.description'
   | 'channel.create.local-only'
   | 'channel.create.name'
@@ -110,6 +111,7 @@ type CopyKey =
   | 'runtime.active-contributions'
   | 'runtime.commands'
   | 'runtime.processing'
+  | 'runtime.healthy'
   | 'runtime.configured-disabled'
   | 'runtime.reauthorize'
   | 'runtime.restore-plugin'
@@ -155,6 +157,7 @@ type CopyKey =
   | 'console.clear'
   | 'console.irreversible'
   | 'console.copy'
+  | 'console.export'
   | 'console.ownership-warning'
   | 'console.dismiss-ownership-warning'
   | 'console.empty'
@@ -202,6 +205,7 @@ type CopyKey =
   | 'plugin-tab.configuration'
   | 'plugin-tab.permissions'
   | 'plugin-tab.runtime'
+  | 'plugin-tab.logs'
   | 'plugin-tab.extension-points'
   | 'plugin-tab.routes'
   | 'extension-tab.usage'
@@ -359,6 +363,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'channel.open': { en: 'Open channel details', 'zh-CN': '打开频道详情' },
   'channel.back': { en: 'Back to channels', 'zh-CN': '返回频道列表' },
   'channel.create': { en: 'New channel', 'zh-CN': '新建频道' },
+  'channel.create.icon-label': { en: 'Create channel configuration', 'zh-CN': '创建频道配置' },
   'channel.create.description': { en: 'Create a safe local candidate before any external connection is available.', 'zh-CN': '在外部连接可用前创建安全的本地候选频道。' },
   'channel.create.local-only': { en: 'This candidate stays in this Manager session. It contains no credential and makes no external change.', 'zh-CN': '候选频道仅保留在本次管理器会话，不含凭据且不会产生外部变更。' },
   'channel.create.name': { en: 'Channel name', 'zh-CN': '频道名称' },
@@ -367,12 +372,12 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'channel.create.save': { en: 'Save local candidate', 'zh-CN': '保存本地候选频道' },
   'channel.configuration': { en: 'Configuration', 'zh-CN': '配置' },
   'channel.configuration.description': { en: 'Host-rendered, read-only connection information.', 'zh-CN': '由宿主渲染的只读连接信息。' },
-  'channel.configuration.unavailable': { en: 'Editing requires a launcher-owned service and credential reference. Neither is available yet.', 'zh-CN': '编辑需要启动器持有的服务和凭据引用；当前均不可用。' },
+  'channel.configuration.unavailable': { en: 'No configurable items yet.', 'zh-CN': '暂无可配置项。' },
   'channel.logs': { en: 'Logs', 'zh-CN': '日志' },
-  'channel.logs.unavailable': { en: 'No channel logs are available yet.', 'zh-CN': '当前没有可用的频道日志。' },
+  'channel.logs.unavailable': { en: 'No logs yet.', 'zh-CN': '暂无日志。' },
   'channel.logs.native-semantics': { en: 'When available, logs preserve native console argument arrays and structured event records. This page does not synthesize log entries.', 'zh-CN': '日志可用后将保留原生 console 参数数组和结构化事件记录；当前页面不会伪造日志。' },
   'channel.sessions': { en: 'Connections & sessions', 'zh-CN': '连接与会话管理' },
-  'channel.sessions.unavailable': { en: 'Connection and session actions are currently unavailable.', 'zh-CN': '连接与会话操作当前不可用。' },
+  'channel.sessions.unavailable': { en: 'No connected sessions yet.', 'zh-CN': '暂无连接或会话。' },
   'channel.field.platform': { en: 'Platform', 'zh-CN': '平台' },
   'channel.field.transport': { en: 'Transport', 'zh-CN': '传输方式' },
   'channel.field.enabled': { en: 'Enabled', 'zh-CN': '已启用' },
@@ -440,6 +445,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'runtime.active-contributions': { en: 'Active contributions', 'zh-CN': '活跃贡献' },
   'runtime.commands': { en: 'Commands', 'zh-CN': '命令' },
   'runtime.processing': { en: 'Working…', 'zh-CN': '处理中…' },
+  'runtime.healthy': { en: 'Healthy', 'zh-CN': '运行正常' },
   'runtime.configured-disabled': { en: 'Disabled by configuration', 'zh-CN': '配置中已禁用' },
   'runtime.reauthorize': { en: 'Reauthorize', 'zh-CN': '重新授权' },
   'runtime.restore-plugin': { en: 'Restore plugin', 'zh-CN': '恢复插件' },
@@ -485,6 +491,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'console.clear': { en: 'Clear logs', 'zh-CN': '清空日志' },
   'console.irreversible': { en: 'Cannot be undone', 'zh-CN': '不可撤销' },
   'console.copy': { en: 'Copy selected', 'zh-CN': '复制所选' },
+  'console.export': { en: 'Export plugin logs', 'zh-CN': '导出插件日志' },
   'console.ownership-warning': { en: 'Detected {count} runtime errors with conflicting sources. Reload the plugin, then try again.', 'zh-CN': '检测到 {count} 条来源冲突的运行时错误。请重载插件后复现。' },
   'console.dismiss-ownership-warning': { en: 'Dismiss attribution warning', 'zh-CN': '关闭归属异常提示' },
   'console.empty': { en: 'Waiting for plugin logs or CordisX API calls…', 'zh-CN': '等待插件日志或 CordisX API 调用…' },
@@ -532,6 +539,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'plugin-tab.configuration': { en: 'Configuration', 'zh-CN': '配置管理' },
   'plugin-tab.permissions': { en: 'Permissions', 'zh-CN': '权限' },
   'plugin-tab.runtime': { en: 'Runtime status', 'zh-CN': '运行状态' },
+  'plugin-tab.logs': { en: 'Logs & diagnostics', 'zh-CN': '日志与诊断' },
   'plugin-tab.extension-points': { en: 'Extension points', 'zh-CN': '扩展点位' },
   'plugin-tab.routes': { en: 'Routes', 'zh-CN': '路由' },
   'extension-tab.usage': { en: 'Usage', 'zh-CN': '使用情况' },

@@ -251,7 +251,7 @@ export interface ManagerModel {
 }
 
 type ManagerTab = 'about' | 'extension-points' | 'routes' | 'plugins' | 'marketplace' | 'settings'
-type PluginDetailTab = 'readme' | 'config' | 'permissions' | 'runtime' | 'extension-points' | 'routes'
+type PluginDetailTab = 'readme' | 'config' | 'permissions' | 'runtime' | 'logs' | 'extension-points' | 'routes'
 type ExtensionPointDetailTab = 'usage' | 'information' | 'diagnostics'
 type MarketplaceDetailTab = 'overview' | 'authors-source'
 type MarketplaceSourcePage = 'index' | 'create' | 'edit'
@@ -298,6 +298,7 @@ const PLUGIN_DETAIL_TABS: readonly LocalizedTab<PluginDetailTab>[] = [
   { id: 'config', copyKey: 'plugin-tab.configuration', icon: 'configuration' },
   { id: 'permissions', copyKey: 'plugin-tab.permissions', icon: 'permissions' },
   { id: 'runtime', copyKey: 'plugin-tab.runtime', icon: 'runtime' },
+  { id: 'logs', copyKey: 'plugin-tab.logs', icon: 'diagnostics' },
   { id: 'extension-points', copyKey: 'plugin-tab.extension-points', icon: 'outlets' },
   { id: 'routes', copyKey: 'plugin-tab.routes', icon: 'routes' },
 ]
@@ -731,7 +732,7 @@ const MANAGER_STYLES = `
   .cxm-card-value { margin-top: 6px; color: #fff; font-size: 20px; font-weight: 700; }
   .cxm-section-title { margin: 22px 0 8px; color: #f2f4f8; font-size: 13px; font-weight: 700; }
   .cxm-tab-panel { min-width: 0; }
-  .cxm-tab-panel:has(.cxf-form), .cxm-permission-detail { inline-size: min(100%, 58rem); margin-inline: auto; }
+  .cxm-tab-panel:has(.cxf-form), .cxm-permission-detail { inline-size: 100%; max-inline-size: none; margin-inline: 0; }
   .cxm-tab-panel > .cxm-section-title:first-child { margin-top: 0; }
   .cxm-flat-list {
     margin-top: 8px;
@@ -797,6 +798,14 @@ const MANAGER_STYLES = `
   .cxm-diagnostics-body { padding: 0 2px 4px; }
   .cxm-runtime-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .cxm-console-summary { display: flex; min-width: 0; align-items: stretch; gap: 1px; margin: 10px 0 8px; overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(255,255,255,.08); }
+  .cxm-runtime-status { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--cx-border); border-radius: 12px; background: var(--cx-surface-raised); }
+  .cxm-runtime-status-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; background: var(--cx-hover); color: var(--cx-primary); }
+  .cxm-runtime-status-icon .cxm-material-icon { width: 19px; height: 19px; }
+  .cxm-runtime-status-copy { min-width: 0; }
+  .cxm-runtime-status-label { display: block; color: var(--cx-text); font-size: 13px; font-weight: 680; }
+  .cxm-runtime-status-meta { display: block; margin-top: 3px; overflow: hidden; color: var(--cx-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .cxm-runtime-status-facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .cxm-runtime-status-fact { min-width: 0; padding: 8px 10px; border-radius: 8px; background: var(--cx-surface-raised); color: var(--cx-muted); font-size: 11px; }
   .cxm-console-metric { min-width: 72px; padding: 7px 10px; background: #191b1f; }
   .cxm-console-metric strong { display: inline; color: #eceef2; font: 600 13px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-metric span { margin-left: 6px; color: #818a99; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
@@ -1027,19 +1036,19 @@ const MANAGER_STYLES = `
   .cxm-marketplace-trust-evidence { display: inline-flex; margin-top: 8px; }
   .cxm-code { max-height: 140px; margin: 6px 0 0; overflow: auto; color: #bac2d2; font: 10px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
   .cxm-config-renderer { min-height: 2rem; }
-  .cxm-readme { max-width: 760px; color: #b8c0cf; font-size: 12px; line-height: 1.65; }
-  .cxm-readme h1, .cxm-readme h2, .cxm-readme h3, .cxm-readme h4 { color: #f5f6f8; line-height: 1.3; }
-  .cxm-readme h1 { margin: 2px 0 14px; font-size: 22px; }
-  .cxm-readme h2 { margin: 24px 0 10px; font-size: 16px; }
-  .cxm-readme h3, .cxm-readme h4 { margin: 18px 0 8px; font-size: 13px; }
-  .cxm-readme p { margin: 0 0 12px; }
-  .cxm-readme ul { margin: 0 0 14px; padding-left: 21px; }
-  .cxm-readme li { margin: 4px 0; }
-  .cxm-readme a { color: #d8dce3; text-decoration: none; }
+  .cxm-readme { inline-size: 100%; max-inline-size: none; color: var(--cx-text); font-size: 13px; line-height: 1.62; }
+  .cxm-readme h1, .cxm-readme h2, .cxm-readme h3, .cxm-readme h4 { color: var(--cx-text); line-height: 1.3; }
+  .cxm-readme h1 { margin: 0 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--cx-border); font-size: 24px; }
+  .cxm-readme h2 { margin: 28px 0 12px; padding-bottom: 7px; border-bottom: 1px solid var(--cx-border); font-size: 18px; }
+  .cxm-readme h3, .cxm-readme h4 { margin: 22px 0 8px; font-size: 14px; }
+  .cxm-readme p { margin: 0 0 14px; color: var(--cx-text); }
+  .cxm-readme ul { margin: 0 0 16px; padding-left: 24px; }
+  .cxm-readme li { margin: 5px 0; }
+  .cxm-readme a { color: var(--cx-primary); text-decoration: none; }
   .cxm-readme a:hover { text-decoration: underline; }
-  .cxm-readme code { padding: 1px 4px; border-radius: 4px; background: rgba(255, 255, 255, .065); color: #d8dce3; font: 10px/1.5 ui-monospace, monospace; }
-  .cxm-readme pre { margin: 12px 0 16px; overflow: auto; padding: 12px 14px; border: 1px solid rgba(255, 255, 255, .08); border-radius: 10px; background: #0d1017; }
-  .cxm-readme pre code { padding: 0; background: transparent; color: #c5ccda; white-space: pre; }
+  .cxm-readme code { padding: 2px 5px; border-radius: 4px; background: var(--cx-hover); color: var(--cx-text); font: 11px/1.5 ui-monospace, monospace; }
+  .cxm-readme pre { margin: 14px 0 18px; overflow: auto; padding: 14px 16px; border: 1px solid var(--cx-border); border-radius: 8px; background: color-mix(in srgb, var(--cx-surface-raised) 82%, #000); }
+  .cxm-readme pre code { padding: 0; background: transparent; color: inherit; white-space: pre; }
   .cxm-error { margin-top: 12px; color: #fda4af; font-size: 11px; }
   .cxm-catalog-list { margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, .08); border-bottom: 1px solid rgba(255, 255, 255, .08); }
   .cxm-catalog-row {
@@ -3670,7 +3679,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           icon: () => createManagerIcon(document, 'diagnostics'),
           onInvoke: () => {
             rememberListScroll()
-            void navigateRoute({ kind: 'plugin', pluginId: plugin.id, facet: 'runtime' })
+            void navigateRoute({ kind: 'plugin', pluginId: plugin.id, facet: 'logs' })
           },
         },
         {
@@ -3684,6 +3693,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           onInvoke: () => { void runPluginLifecycle(snapshot, plugin, 'uninstall', true) },
         },
       ]
+      const visibleActions = actions.filter(action => action.placement === 'direct' || action.disabled !== true)
       const registrations = snapshot.registrations.filter(item => item.owner === plugin.id)
       const demoDescriptionKey = demoDescriptionKeys[plugin.id]
       return {
@@ -3694,7 +3704,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         searchText: [plugin.source, ...plugin.inject, ...registrations.flatMap(item => [item.surface, item.id])],
         icon: () => createPluginIcon(document, plugin.name),
         status: pluginCollectionStatus(plugin, status, snapshot.localization.locale),
-        actions,
+        actions: visibleActions,
         openLabel: `${copy('plugins.open')} · ${plugin.name}`,
         onOpen: () => {
           rememberListScroll()
@@ -4401,6 +4411,23 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     textarea.remove()
   }
 
+  const exportPluginConsole = (pluginId: string, page: CordisXPluginConsolePageV1): void => {
+    const view = document.defaultView
+    if (view === null || typeof view.Blob !== 'function' || typeof view.URL.createObjectURL !== 'function') return
+    const payload = JSON.stringify({
+      exportedAt: new Date().toISOString(), plugin: page.plugin, generation: page.generation, entries: page.entries,
+    }, undefined, 2)
+    const url = view.URL.createObjectURL(new view.Blob([payload], { type: 'application/json' }))
+    const link = create(document, 'a')
+    link.href = url
+    link.download = `${pluginId}-logs.json`
+    link.hidden = true
+    document.body.append(link)
+    link.click()
+    link.remove()
+    view.setTimeout(() => view.URL.revokeObjectURL(url), 0)
+  }
+
   const renderPluginDetail = (snapshot: ManagerSnapshot, id: string): void => {
     const plugin = snapshot.plugins.find(item => item.id === id)
     setHeading(copy('plugins.heading'), snapshot)
@@ -4493,6 +4520,44 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const pluginPages = snapshot.navigation.pages.filter(item => item.owner === plugin.id)
     if (activeFacet === 'runtime') {
       const panel = createTabPanel(document, copy('plugin-tab.runtime'))
+      const blocked = plugin.status === 'blocked' || plugin.status === 'failed'
+      const permissionBlocked = plugin.status === 'permission-blocked'
+      const restorable = blocked || permissionBlocked
+      const status = create(document, 'section', 'cxm-runtime-status')
+      status.dataset.pluginRuntimeStatus = plugin.id
+      const icon = create(document, 'span', 'cxm-runtime-status-icon')
+      icon.append(createManagerIcon(document, plugin.status === 'active' ? 'runtime' : 'diagnostics'))
+      const statusCopy = create(document, 'span', 'cxm-runtime-status-copy')
+      statusCopy.append(
+        create(document, 'span', 'cxm-runtime-status-label', statusLabel(plugin.status, snapshot.localization.locale)),
+        create(document, 'span', 'cxm-runtime-status-meta', plugin.error ?? plugin.blockedReason ?? copy('runtime.healthy')),
+      )
+      status.append(icon, statusCopy)
+      if (plugin.status !== 'configured-disabled') {
+        const action = managerIconAction(restorable ? 'enable-plugin' : 'disable-plugin', restorable ? copy('runtime.reauthorize') : copy('runtime.block-plugin'), { disabled: busyPluginId !== undefined })
+        action.dataset.pluginRuntimeAction = plugin.id
+        action.addEventListener('click', async () => {
+          busyPluginId = plugin.id
+          renderContent()
+          try { if (restorable) await authorizeAndRestore(plugin); else await model.setPluginBlocked(plugin.id, true) }
+          catch (error) { operationError = error instanceof Error ? error.message : String(error) }
+          finally { busyPluginId = undefined; renderContent() }
+        })
+        status.append(action)
+      }
+      const facts = create(document, 'div', 'cxm-runtime-status-facts')
+      for (const [label, value] of [
+        [copy('runtime.active-contributions'), pluginRegistrations.filter(item => item.visible && item.valid).length],
+        [copy('runtime.commands'), pluginCommands.length],
+        [copy('console.requests'), (model.pluginConsole?.(plugin.id)?.entries ?? []).filter(item => item.kind === 'invocation' && item.phase === 'requested').length],
+      ] as const) facts.append(create(document, 'span', 'cxm-runtime-status-fact', `${label} ${value}`))
+      panel.append(status, facts)
+      if (operationError !== undefined) panel.append(create(document, 'div', 'cxm-error', operationError))
+      content.append(panel)
+      return
+    }
+    if (activeFacet === 'logs') {
+      const panel = createTabPanel(document, copy('plugin-tab.logs'))
       const livePage = model.pluginConsole?.(plugin.id) ?? {
         contract: 'cordisx.plugin-console-page/v1', schemaVersion: 1,
         plugin: { source: plugin.source, pluginId: plugin.id }, generation: 'manager-unavailable',
@@ -4624,7 +4689,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const copyButton = iconAction('copy', 'console-copy', copy('console.copy'), { disabled: selected === undefined }, () => {
         if (selected !== undefined) void copyConsoleText(pluginConsoleEntryCopyText(selected)).catch(() => undefined)
       })
-      actionToolbar.append(pause, autoScroll, clear, copyButton)
+      const exportButton = iconAction('export', 'console-export', copy('console.export'), { disabled: page.entries.length === 0 }, () => {
+        exportPluginConsole(plugin.id, page)
+      })
+      actionToolbar.append(pause, autoScroll, clear, copyButton, exportButton)
       controls.append(actionToolbar)
       panel.append(controls)
       const unattributed = page.unattributedEntries ?? 0
@@ -4751,7 +4819,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       for (const diagnostic of adapter.diagnostics) diagnosticsBody.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
       const securityBoundary = create(document, 'div', 'cxm-notice', copy('runtime.permission-boundary'))
       securityBoundary.dataset.tone = 'warning'
-      diagnosticsBody.append(securityBoundary, documentationLink(copy('runtime.permission-documentation'), PRODUCT_DOCUMENTATION.permissions))
+      diagnosticsBody.append(securityBoundary)
       diagnostics.append(diagnosticsBody)
       lifecycleBody.append(diagnostics)
       lifecycle.append(lifecycleBody)

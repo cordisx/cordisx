@@ -34,7 +34,11 @@ export interface HostCollectionItem {
   readonly machineId?: string
   readonly searchText?: readonly string[]
   readonly icon: () => Node
+  /** A product avatar can replace the generic icon while retaining a compact type badge. */
+  readonly avatar?: { readonly label: string; readonly badge?: () => Node }
   readonly status?: HostCollectionStatus
+  /** Status normally belongs to an icon; account cards may place it at the card edge. */
+  readonly statusPosition?: 'icon' | 'card'
   readonly actions?: readonly HostCollectionAction[]
   readonly openLabel?: string
   readonly onOpen?: () => void
@@ -165,6 +169,10 @@ export const HOST_COLLECTION_STYLES = String.raw`
   .cxc-status[data-tone="warning"] { background: var(--cx-warning, #fbbf24); }
   .cxc-status[data-tone="danger"] { background: var(--cx-danger, #fb7185); }
   .cxc-status[data-tone="progress"] { background: var(--cx-progress, #60a5fa); }
+  .cxc-avatar { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--cx-hover); color: var(--cx-text); font-size: 12px; font-weight: 700; }
+  .cxc-avatar-badge { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; width: 16px; height: 16px; box-sizing: border-box; border: 2px solid var(--cx-surface-raised); border-radius: 50%; background: var(--cx-surface); color: var(--cx-muted); }
+  .cxc-avatar-badge > * { width: 10px; height: 10px; }
+  .cxc-card > .cxc-status[data-position="card"] { top: 10px; right: 10px; bottom: auto; z-index: 1; }
   .cxc-copy { min-width: 0; flex: 1 1 auto; }
   .cxc-title { display: block; overflow: hidden; color: var(--cx-text); font-size: 12px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
   .cxc-description { display: -webkit-box; margin-top: 3px; overflow: hidden; color: var(--cx-muted); font-size: 11px; line-height: 1.42; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
@@ -420,14 +428,31 @@ export function createHostCollection(document: Document, options: HostCollection
 
     const icon = document.createElement('span')
     icon.className = 'cxc-icon-seat'
-    appendIcon(icon, item.icon)
+    if (item.avatar === undefined) appendIcon(icon, item.icon)
+    else {
+      const avatar = document.createElement('span')
+      avatar.className = 'cxc-avatar'
+      avatar.setAttribute('role', 'img')
+      avatar.setAttribute('aria-label', item.avatar.label)
+      avatar.textContent = item.avatar.label.slice(0, 1).toLocaleUpperCase()
+      icon.append(avatar)
+      if (item.avatar.badge !== undefined) {
+        const badge = document.createElement('span')
+        badge.className = 'cxc-avatar-badge'
+        appendIcon(badge, item.avatar.badge)
+        icon.append(badge)
+      }
+    }
     if (item.status !== undefined) {
       const status = document.createElement('span')
       status.className = 'cxc-status'
       status.dataset.tone = item.status.tone
       status.setAttribute('role', 'img')
       status.setAttribute('aria-label', item.status.detail ?? item.status.label)
-      icon.append(status)
+      if (item.statusPosition === 'card') {
+        status.dataset.position = 'card'
+        card.append(status)
+      } else icon.append(status)
     }
 
     const copy = document.createElement('span')
