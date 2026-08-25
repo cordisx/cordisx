@@ -219,7 +219,9 @@ describe('plugin config registry', () => {
     expect(descriptor.schemaKind).toBe('schemastery')
     expect(descriptor.fields.find(field => field.path.join('.') === 'timeout')?.label).toBe('Request timeout')
     expect(descriptor.value).toEqual({})
-    expect(descriptor.fields.find(field => field.path.join('.') === 'timeout')).toMatchObject({ value: 30, min: 1, max: 120 })
+    expect(descriptor.fields.find(field => field.path.join('.') === 'timeout')).toMatchObject({
+      value: 30, defaultValue: 30, hasDefault: true, min: 1, max: 120,
+    })
     expect(descriptor.fields.find(field => field.path.join('.') === 'apiKey')).toMatchObject({ value: undefined, disabled: true })
     expect(descriptor.secrets).toEqual([{ path: ['apiKey'], set: false }])
 
@@ -237,6 +239,43 @@ describe('plugin config registry', () => {
       .toThrow('secret-path')
     expect(() => registry.stage('example', 3, [{ op: 'set', path: ['timeout'], value: Number.NaN }]))
       .toThrow('non-finite')
+  })
+
+  it('projects only closed Host form groups, icons, bounded choices, and action hints', () => {
+    const registry = new PluginConfigurationRegistry()
+    const schema = Schema.object({
+      reviewDate: Schema.string().default('2026-09-01').role('date').extra('extra', {
+        label: { en: 'Review date' },
+        cordisxForm: { icon: 'host:calendar', group: { id: 'schedule', title: { en: 'Schedule' }, icon: 'host:clock' } },
+      }),
+      audiences: Schema.array(Schema.union([Schema.const('design'), Schema.const('research')]))
+        .default(['design']).min(1).max(2).role('multi-select'),
+      tags: Schema.array(Schema.string().min(1).max(20)).default(['weekly']).max(4),
+      ignored: Schema.string().extra('extra', { cordisxForm: { icon: 'host:remote-svg' } }),
+      nested: Schema.object({
+        leaf: Schema.string().default('value').extra('extra', { label: { en: 'Nested leaf' } }),
+      }).extra('extra', { cordisxForm: { group: { id: 'not-inherited', title: { en: 'Not inherited' } } } }),
+    }).extra('extra', { cordisxForm: { actions: { save: 'host:save', reset: 'host:reset' } } })
+    registry.register({
+      identity: { id: 'presentation', source: 'file:///presentation.ts' }, schema,
+      applies: 'live', raw: {}, revision: 1, writable: true,
+    })
+    const descriptor = registry.descriptor('presentation', 'en')
+    expect(descriptor.actionIcons).toEqual({ save: 'host:save', reset: 'host:reset' })
+    expect(descriptor.fields.find(field => field.path[0] === 'reviewDate')).toMatchObject({
+      icon: 'host:calendar', group: { id: 'schedule', title: 'Schedule', icon: 'host:clock' },
+      hasDefault: true, defaultValue: '2026-09-01',
+    })
+    expect(descriptor.fields.find(field => field.path[0] === 'audiences')).toMatchObject({
+      choices: [{ label: 'design', value: 'design' }, { label: 'research', value: 'research' }], min: 1, max: 2,
+    })
+    expect(descriptor.fields.find(field => field.path[0] === 'tags')).toMatchObject({ arrayItemType: 'string', max: 4 })
+    expect(descriptor.fields.find(field => field.path[0] === 'ignored')?.icon).toBeUndefined()
+    // Object recursion only determines a configuration path. It never guesses
+    // a visual card from the object node: a leaf must carry explicit, closed
+    // Host group metadata to join a section.
+    expect(descriptor.fields.find(field => field.path.join('.') === 'nested.leaf')?.group).toBeUndefined()
+    registry.dispose()
   })
 
   it('rejects asynchronous Standard Schema validators', () => {

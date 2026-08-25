@@ -970,6 +970,24 @@ export interface CordisXPluginSettings {
 
 export type CordisXConfigFieldPath = readonly string[]
 
+/** Closed semantic icon vocabulary for Host-owned configuration presentation. */
+export type CordisXConfigFormIcon =
+  | 'host:calendar' | 'host:clock' | 'host:palette' | 'host:tags'
+  | 'host:folder' | 'host:key' | 'host:settings' | 'host:info'
+  | 'host:files' | 'host:save' | 'host:reset'
+
+export interface CordisXConfigFormGroupSnapshot {
+  readonly id: string
+  readonly title?: string
+  readonly description?: string
+  readonly icon?: CordisXConfigFormIcon
+}
+
+export interface CordisXConfigFormActionIcons {
+  readonly save?: CordisXConfigFormIcon
+  readonly reset?: CordisXConfigFormIcon
+}
+
 export type CordisXConfigRendererSelector =
   | { readonly role: string }
   | { readonly path: CordisXConfigFieldPath }
@@ -989,12 +1007,24 @@ export interface CordisXConfigFieldSnapshot {
   readonly label?: string
   readonly description?: string
   readonly value: unknown
+  /** Whether the leaf schema declares an explicit default value. */
+  readonly hasDefault?: boolean
+  /**
+   * Resolved leaf default for Host-owned draft projection. Never projected for
+   * sensitive roles.
+   */
+  readonly defaultValue?: unknown
   readonly disabled: boolean
   readonly required: boolean
   readonly min?: number
   readonly max?: number
   readonly step?: number
   readonly choices?: readonly { readonly label: string; readonly value: CordisXJsonScalar }[]
+  /** Scalar element type for a bounded primitive array. */
+  readonly arrayItemType?: 'string' | 'number' | 'natural'
+  /** Host-validated semantic icon. No URL, SVG, CSS, or DOM is accepted. */
+  readonly icon?: CordisXConfigFormIcon
+  readonly group?: CordisXConfigFormGroupSnapshot
 }
 
 export interface CordisXConfigFieldController extends CordisXConfigFieldSnapshot {

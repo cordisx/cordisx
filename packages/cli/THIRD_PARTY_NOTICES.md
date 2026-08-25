@@ -34,8 +34,9 @@ packages inside the renderer rather than installing their full npm graphs:
 
 The TDesign subset is generated from npm tarball SHA-256
 `e1929f06eda5c3d2ee194da0d6bc9f81e187184fe1054627afeabad2ae71db0e`.
-Only Input, Textarea, InputNumber, Select/Option, Checkbox, Switch, Radio,
-Slider, Button, Alert, and Loading are imported. Embedded CSS source maps and Omi's
+Only Input, Textarea, InputNumber, Select/Option, DatePicker, TagInput,
+Checkbox, Switch, Radio, Slider, Button, Alert, and Loading are imported.
+Embedded CSS source maps and Omi's
 legacy replacement of the native `HTMLElement` constructor are removed; no
 component behavior is reimplemented or represented as a different library.
 The retained notices and MIT terms are at

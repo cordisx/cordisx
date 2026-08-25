@@ -23,6 +23,14 @@ export interface TDesignButtonElement extends TDesignElement {
   type: 'button' | 'submit'
 }
 
+export interface TDesignButtonOptions {
+  readonly type?: 'button' | 'submit'
+  readonly variant?: 'default' | 'primary'
+  readonly tone?: 'default' | 'danger'
+  /** Compact actions retain an accessible label but render only their icon. */
+  readonly density?: 'icon' | 'icon-label'
+}
+
 export interface TDesignSelectOption<Value> {
   readonly label: string
   readonly value: Value
@@ -36,6 +44,18 @@ export interface TDesignSelectElement<Value> extends TDesignElement {
   dispose(): void
 }
 
+export interface TDesignMultiSelectElement<Value> extends TDesignElement {
+  readonly selectedValues: readonly Value[]
+  setSelectedValues(value: readonly Value[], notify?: boolean): void
+  setBusy(busy: boolean): void
+  dispose(): void
+}
+
+export interface TDesignTagInputElement<Value> extends TDesignElement {
+  readonly values: readonly Value[]
+  setValues(value: readonly Value[], notify?: boolean): void
+}
+
 function canInstall(document: Document): boolean {
   const view = document.defaultView
   return view !== null
@@ -46,14 +66,46 @@ function canInstall(document: Document): boolean {
 
 let installed = false
 
+/**
+ * TDesign Web Components invoke `onChange` with their browser CustomEvent,
+ * while a few test doubles and keyboard helpers invoke it with the value
+ * directly. Keep that library-specific wire shape at one Host boundary so a
+ * Config draft can never stringify an event to "[object CustomEvent]".
+ */
+export function unwrapTDesignChangeValue<Value>(payload: unknown): Value | undefined {
+  if (payload !== null && typeof payload === 'object') {
+    const detail = (payload as { readonly detail?: unknown }).detail
+    if (detail !== null && typeof detail === 'object' && Object.hasOwn(detail, 'value')) {
+      return (detail as { readonly value?: Value }).value
+    }
+    if (detail !== undefined) return detail as Value
+    if (Object.hasOwn(payload, 'value')) return (payload as { readonly value?: Value }).value
+  }
+  return payload as Value | undefined
+}
+
+function normalizeTDesignProps(props: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  const change = props.onChange
+  if (typeof change !== 'function') return props
+  return {
+    ...props,
+    onChange: (payload: unknown, ...rest: readonly unknown[]) => (change as (value: unknown, ...args: readonly unknown[]) => unknown)(unwrapTDesignChangeValue(payload), ...rest),
+  }
+}
+
 const HOST_TDESIGN_TOKENS = Object.freeze({
   '--td-brand-color': 'var(--cx-primary)',
-  '--td-brand-color-hover': 'var(--cx-text)',
+  '--td-brand-color-hover': 'color-mix(in srgb, var(--cx-primary) 88%, var(--cx-text))',
+  '--td-brand-color-active': 'color-mix(in srgb, var(--cx-primary) 78%, var(--cx-text))',
+  '--td-brand-color-disabled': 'color-mix(in srgb, var(--cx-primary) 45%, var(--cx-surface))',
+  '--td-brand-color-light': 'color-mix(in srgb, var(--cx-primary) 12%, var(--cx-surface))',
+  '--td-brand-color-light-hover': 'color-mix(in srgb, var(--cx-primary) 20%, var(--cx-surface))',
   '--td-brand-color-focus': 'color-mix(in srgb, var(--cx-focus) 26%, transparent)',
   '--td-text-color-primary': 'var(--cx-text)',
   '--td-text-color-secondary': 'var(--cx-muted)',
   '--td-text-color-placeholder': 'color-mix(in srgb, var(--cx-muted) 78%, transparent)',
-  '--td-text-color-disabled': 'color-mix(in srgb, var(--cx-muted) 65%, transparent)',
+  '--td-text-color-disabled': 'color-mix(in srgb, var(--cx-text) 68%, var(--cx-surface))',
+  '--td-text-color-anti': 'var(--cx-primary-text)',
   '--td-bg-color-container': 'var(--cx-surface)',
   '--td-bg-color-container-hover': 'var(--cx-hover)',
   '--td-bg-color-container-active': 'var(--cx-pressed)',
@@ -79,7 +131,8 @@ function ensureInstalled(document: Document): void {
 }
 
 export function setTDesignProps(element: TDesignElement, props: Readonly<Record<string, unknown>>): void {
-  for (const [name, value] of Object.entries(props)) element[name] = value
+  const normalizedProps = normalizeTDesignProps(props)
+  for (const [name, value] of Object.entries(normalizedProps)) element[name] = value
   // Omi custom elements read their initial props from attributes when they
   // connect. Host controls are configured before insertion, so a property-only
   // scalar may be replaced by the component default during its first render.
@@ -88,20 +141,20 @@ export function setTDesignProps(element: TDesignElement, props: Readonly<Record<
   // which turns true into the literal string "true" and makes a switch appear
   // off. Placeholder is the sole user-facing scalar that must also be an
   // attribute for the component's first locale-sensitive paint.
-  if (Object.hasOwn(props, 'placeholder')) {
-    const placeholder = props.placeholder
+  if (Object.hasOwn(normalizedProps, 'placeholder')) {
+    const placeholder = normalizedProps.placeholder
     if (typeof placeholder === 'string') element.setAttribute('placeholder', placeholder)
     else element.removeAttribute('placeholder')
   }
-  if (element.props !== undefined) Object.assign(element.props, props)
+  if (element.props !== undefined) Object.assign(element.props, normalizedProps)
   element.update?.()
   const restoreTypedProps = () => {
     if (!element.isConnected) return
     if (typeof element.updateProps === 'function') {
-      element.updateProps(props)
+      element.updateProps(normalizedProps)
       return
     }
-    if (element.props !== undefined) Object.assign(element.props, props)
+    if (element.props !== undefined) Object.assign(element.props, normalizedProps)
     element.update?.()
   }
   queueMicrotask(restoreTypedProps)
@@ -154,6 +207,22 @@ export function createTDesignPortal(document: Document, parent?: HTMLElement): H
     .cxf-tdesign-listbox t-option[data-active="true"] { outline: 2px solid var(--cx-focus); outline-offset: -2px; border-radius: .35rem; }
     .t-popup { z-index: 2147483001; }
     .t-popup__content { max-inline-size: min(28rem, calc(100vw - 1.5rem)); color: var(--cx-text); }
+    .cxf-field-menu {
+      position: fixed; display: grid; min-inline-size: 13rem; max-inline-size: min(18rem, calc(100vw - 1rem));
+      padding: .25rem; border: 1px solid var(--cx-border); border-radius: .65rem;
+      background: var(--td-bg-color-container, var(--cx-surface-raised)); color: var(--td-text-color-primary, var(--cx-text));
+      box-shadow: var(--td-shadow-2, 0 10px 32px var(--cx-shadow)); outline: none;
+    }
+    .cxf-field-menu[hidden] { display: none; }
+    .cxf-field-menu-item {
+      display: grid; grid-template-columns: 1rem minmax(0, 1fr); gap: .5rem; align-items: center; min-block-size: 2rem;
+      border: 0; border-radius: .42rem; padding: .4rem .5rem; background: transparent; color: inherit; font: inherit;
+      text-align: start; cursor: pointer;
+    }
+    .cxf-field-menu-item:hover:not(:disabled), .cxf-field-menu-item:focus-visible { background: var(--td-bg-color-container-hover, var(--cx-hover)); outline: none; }
+    .cxf-field-menu-item:focus-visible { box-shadow: 0 0 0 2px var(--cx-focus); }
+    .cxf-field-menu-item:disabled { color: var(--td-text-color-disabled, var(--cx-muted)); cursor: default; }
+    .cxf-field-menu-status { padding: .25rem .5rem; color: var(--td-text-color-secondary, var(--cx-muted)); font-size: .78rem; }
   `
   const container = document.createElement('div')
   container.className = 'cxf-tdesign-portal'
@@ -163,7 +232,7 @@ export function createTDesignPortal(document: Document, parent?: HTMLElement): H
   return host
 }
 
-function portalContainer(host: HTMLElement): HTMLElement {
+export function tdesignPortalContainer(host: HTMLElement): HTMLElement {
   return host.shadowRoot!.querySelector<HTMLElement>('[data-cxf-tdesign-portal]')!
 }
 
@@ -206,7 +275,7 @@ export function createTDesignSelect<Value>(
   let typeahead = ''
   let typeaheadTimer: number | undefined
   const listboxId = `${config.id ?? `cxf-select-${Math.random().toString(36).slice(2)}`}-listbox`
-  const portal = portalContainer(portalHost)
+  const portal = tdesignPortalContainer(portalHost)
   const listbox = document.createElement('div')
   listbox.className = 'cxf-tdesign-listbox'
   listbox.id = listboxId
@@ -306,7 +375,7 @@ export function createTDesignSelect<Value>(
       // app-theme projection, edge avoidance, focus restoration and generation cleanup.
       popupVisible: false,
       popupProps: {
-        attach: () => portalContainer(portalHost),
+        attach: () => tdesignPortalContainer(portalHost),
         placement: 'bottom-left',
         destroyOnClose: true,
       },
@@ -475,24 +544,286 @@ export function createTDesignSelect<Value>(
   return element
 }
 
+/**
+ * Host-owned multi-select policy around the official TDesign Select and Option
+ * elements. TDesign owns the visible input/tag chrome; the Host owns its
+ * portal, focus restoration, generation cleanup, and accessible listbox.
+ */
+export function createTDesignMultiSelect<Value>(
+  document: Document,
+  portalHost: HTMLElement,
+  options: readonly TDesignSelectOption<Value>[],
+  config: {
+    readonly id?: string
+    readonly label: string
+    readonly placeholder?: string
+    readonly value?: readonly Value[]
+    readonly disabled?: boolean
+    readonly readonly?: boolean
+    readonly clearable?: boolean
+    readonly onChange: (value: readonly Value[]) => void
+  },
+): TDesignMultiSelectElement<Value> {
+  const element = createTDesignElement(document, 't-select', 'multi-select') as TDesignMultiSelectElement<Value>
+  let selected = [...(config.value ?? [])]
+  let expanded = false
+  let active = Math.max(0, options.findIndex(option => selected.some(value => Object.is(value, option.value))))
+  let typeahead = ''
+  let typeaheadTimer: number | undefined
+  const listboxId = `${config.id ?? `cxf-multi-select-${Math.random().toString(36).slice(2)}`}-listbox`
+  const portal = tdesignPortalContainer(portalHost)
+  const listbox = document.createElement('div')
+  listbox.className = 'cxf-tdesign-listbox'
+  listbox.id = listboxId
+  listbox.hidden = true
+  listbox.setAttribute('role', 'listbox')
+  listbox.setAttribute('aria-label', config.label)
+  listbox.setAttribute('aria-multiselectable', 'true')
+  listbox.dataset.tdesignSelectPopup = 'true'
+  portal.append(listbox)
+  element.id = config.id ?? ''
+  element.setAttribute('role', 'combobox')
+  element.setAttribute('aria-label', config.label)
+  element.setAttribute('aria-haspopup', 'listbox')
+  element.setAttribute('aria-controls', listboxId)
+  element.tabIndex = config.disabled || config.readonly ? -1 : 0
+
+  const selectedAt = (index: number): boolean => selected.some(value => Object.is(value, options[index]?.value))
+  const enabledAt = (index: number): boolean => options[index] !== undefined && options[index]?.disabled !== true
+  const seek = (start: number, direction: 1 | -1): number => {
+    for (let offset = 0; offset < options.length; offset += 1) {
+      const index = (start + direction * offset + options.length) % options.length
+      if (enabledAt(index)) return index
+    }
+    return active
+  }
+  const positionListbox = (): void => {
+    if (!expanded || !element.isConnected) return
+    const rect = element.getBoundingClientRect()
+    const view = document.defaultView
+    if (view === null || rect.width === 0 || rect.height === 0) return
+    const gutter = 8
+    const below = view.innerHeight - rect.bottom - gutter
+    const above = rect.top - gutter
+    const openAbove = below < Math.min(240, listbox.scrollHeight) && above > below
+    const width = Math.min(Math.max(rect.width, 176), view.innerWidth - gutter * 2)
+    listbox.style.inlineSize = `${width}px`
+    listbox.style.maxBlockSize = `${Math.max(96, Math.min(288, (openAbove ? above : below) - gutter))}px`
+    listbox.style.insetInlineStart = `${Math.min(Math.max(gutter, rect.left), Math.max(gutter, view.innerWidth - width - gutter))}px`
+    listbox.style.insetBlockStart = openAbove
+      ? `${Math.max(gutter, rect.top - Math.min(listbox.scrollHeight, Math.max(96, above - gutter)) - 4)}px`
+      : `${Math.min(view.innerHeight - gutter, rect.bottom + 4)}px`
+    listbox.dataset.placement = openAbove ? 'top' : 'bottom'
+  }
+  const patchAccessibility = (): void => {
+    element.setAttribute('aria-expanded', String(expanded))
+    element.setAttribute('aria-disabled', String(config.disabled === true))
+    if (config.readonly) element.setAttribute('aria-readonly', 'true')
+    for (const input of element.shadowRoot === null ? [] : deepElements(element.shadowRoot, 'input')) {
+      input.setAttribute('aria-hidden', 'true')
+      input.tabIndex = -1
+    }
+    const rendered = [...listbox.querySelectorAll<HTMLElement>('t-option')]
+    rendered.forEach((option, index) => {
+      option.id = `${listboxId}-option-${index}`
+      option.setAttribute('role', 'option')
+      option.setAttribute('aria-selected', String(selectedAt(index)))
+      option.setAttribute('aria-disabled', String(options[index]?.disabled === true))
+    })
+    if (expanded && rendered[active] !== undefined) element.setAttribute('aria-activedescendant', rendered[active]!.id)
+    else element.removeAttribute('aria-activedescendant')
+  }
+  const update = (): void => {
+    setTDesignProps(element, {
+      options: options.map(option => ({ label: option.label, value: option.value, disabled: option.disabled === true })),
+      value: selected,
+      multiple: true,
+      placeholder: config.placeholder,
+      disabled: config.disabled === true,
+      clearable: config.clearable === true,
+      popupVisible: false,
+      popupProps: { attach: () => tdesignPortalContainer(portalHost), placement: 'bottom-left', destroyOnClose: true },
+      onChange: (next: readonly Value[]) => {
+        selected = [...next]
+        config.onChange(selected)
+        update()
+      },
+      onClear: () => { selected = []; config.onChange(selected); update() },
+      onPopupVisibleChange: (visible: boolean) => {
+        if (!config.readonly && !config.disabled && visible) { expanded = true; update() }
+      },
+    })
+    element.dataset.selectedValues = JSON.stringify(selected)
+    element.dataset.popupVisible = String(expanded)
+    listbox.hidden = !expanded
+    ;[...listbox.querySelectorAll<TDesignElement>('t-option')].forEach((option, index) => {
+      const isSelected = selectedAt(index)
+      option.dataset.active = String(index === active)
+      option.setAttribute('aria-selected', String(isSelected))
+      setTDesignProps(option, { selected: isSelected, multiple: true })
+    })
+    if (expanded) document.defaultView?.requestAnimationFrame(() => {
+      positionListbox()
+      listbox.querySelector<HTMLElement>('t-option[data-active="true"]')?.scrollIntoView?.({ block: 'nearest' })
+    })
+    scheduleAccessibilityPatch(document, patchAccessibility)
+  }
+  const choose = (index: number): void => {
+    if (!enabledAt(index)) return
+    const value = options[index]!.value
+    selected = selectedAt(index) ? selected.filter(item => !Object.is(item, value)) : [...selected, value]
+    active = index
+    config.onChange(selected)
+    update()
+  }
+  options.forEach((option, index) => {
+    const rendered = createTDesignElement(document, 't-option', 'option')
+    rendered.id = `${listboxId}-option-${index}`
+    rendered.setAttribute('role', 'option')
+    rendered.tabIndex = -1
+    rendered.textContent = option.label
+    setTDesignProps(rendered, { label: option.label, content: option.label, value: String(index), disabled: option.disabled === true, selected: selectedAt(index), multiple: true })
+    rendered.addEventListener('click', event => { event.preventDefault(); choose(index) })
+    listbox.append(rendered)
+  })
+  let disposed = false
+  let observer: MutationObserver | undefined
+  const dispose = (): void => {
+    if (disposed) return
+    disposed = true
+    document.removeEventListener('pointerdown', closeFromOutside, true)
+    document.defaultView?.removeEventListener('resize', positionListbox)
+    document.defaultView?.removeEventListener('scroll', positionListbox, true)
+    if (typeaheadTimer !== undefined) document.defaultView?.clearTimeout(typeaheadTimer)
+    observer?.disconnect()
+    listbox.remove()
+  }
+  const closeFromOutside = (event: Event): void => {
+    if (!element.isConnected) { dispose(); return }
+    if (!expanded) return
+    const path = event.composedPath()
+    if (path.includes(element) || path.includes(listbox)) return
+    expanded = false
+    update()
+  }
+  document.addEventListener('pointerdown', closeFromOutside, true)
+  document.defaultView?.addEventListener('resize', positionListbox)
+  document.defaultView?.addEventListener('scroll', positionListbox, true)
+  let connectedOnce = false
+  observer = document.defaultView === null ? undefined : new document.defaultView.MutationObserver(() => {
+    if (element.isConnected) { connectedOnce = true; return }
+    if (connectedOnce) dispose()
+  })
+  observer?.observe(document.documentElement, { childList: true, subtree: true })
+  const abandon = (): void => { if (!element.isConnected && !connectedOnce) dispose() }
+  if (typeof document.defaultView?.requestAnimationFrame === 'function') document.defaultView.requestAnimationFrame(abandon)
+  else document.defaultView?.setTimeout(abandon, 0)
+  element.addEventListener('keydown', event => {
+    if (config.disabled || config.readonly) return
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault(); expanded = true
+      active = seek(active + (event.key === 'ArrowDown' ? 1 : -1), event.key === 'ArrowDown' ? 1 : -1); update(); return
+    }
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault(); expanded = true
+      active = seek(event.key === 'Home' ? 0 : options.length - 1, event.key === 'Home' ? 1 : -1); update(); return
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault(); if (!expanded) { expanded = true; update() } else choose(active); return
+    }
+    if (event.key === 'Escape' && expanded) { event.preventDefault(); expanded = false; update(); element.focus(); return }
+    if ((event.key === 'Backspace' || event.key === 'Delete') && config.clearable && selected.length > 0) {
+      event.preventDefault(); selected = []; config.onChange(selected); update(); return
+    }
+    if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      typeahead += event.key.toLocaleLowerCase()
+      if (typeaheadTimer !== undefined) document.defaultView?.clearTimeout(typeaheadTimer)
+      typeaheadTimer = document.defaultView?.setTimeout(() => { typeahead = '' }, 650)
+      const match = options.findIndex(option => !option.disabled && option.label.toLocaleLowerCase().startsWith(typeahead))
+      if (match >= 0) { event.preventDefault(); expanded = true; active = match; update() }
+    }
+  })
+  Object.defineProperty(element, 'selectedValues', { get: () => selected })
+  element.setSelectedValues = (value: readonly Value[], notify = false): void => { selected = [...value]; if (notify) config.onChange(selected); update() }
+  element.setBusy = (busy: boolean): void => { setTDesignProps(element, { disabled: busy || config.disabled === true, loading: busy }); element.setAttribute('aria-busy', String(busy)) }
+  element.dispose = dispose
+  update()
+  return element
+}
+
+/** Official TDesign TagInput for finite primitive arrays; no ad-hoc chip DOM. */
+export function createTDesignTagInput<Value extends string | number>(
+  document: Document,
+  config: {
+    readonly id?: string
+    readonly label: string
+    readonly placeholder?: string
+    readonly value?: readonly Value[]
+    readonly max?: number
+    readonly disabled?: boolean
+    readonly readonly?: boolean
+    readonly onChange: (value: readonly Value[]) => void
+  },
+): TDesignTagInputElement<Value> {
+  const element = createTDesignElement(document, 't-tag-input', 'tag-input') as TDesignTagInputElement<Value>
+  let values = [...(config.value ?? [])]
+  element.id = config.id ?? ''
+  element.setAttribute('role', 'group')
+  element.setAttribute('aria-label', config.label)
+  element.tabIndex = config.disabled || config.readonly ? -1 : 0
+  const update = (): void => {
+    setTDesignProps(element, {
+      value: values,
+      defaultValue: values,
+      max: config.max,
+      placeholder: config.placeholder,
+      disabled: config.disabled === true,
+      readonly: config.readonly === true,
+      onChange: (next: readonly Value[]) => {
+        values = config.max === undefined ? [...next] : [...next].slice(0, config.max)
+        config.onChange(values)
+        update()
+      },
+    })
+    element.dataset.tagValues = JSON.stringify(values)
+  }
+  Object.defineProperty(element, 'values', { get: () => values })
+  element.setValues = (value: readonly Value[], notify = false): void => { values = [...value]; if (notify) config.onChange(values); update() }
+  update()
+  return element
+}
+
 export function createTDesignButton(
   document: Document,
   label: string,
-  options: { readonly type?: 'button' | 'submit'; readonly variant?: 'default' | 'primary'; readonly tone?: 'default' | 'danger' } = {},
+  options: TDesignButtonOptions = {},
 ): TDesignButtonElement {
   const element = createTDesignElement(document, 't-button', 'button') as TDesignButtonElement
   element.type = options.type ?? 'button'
   element.setAttribute('type', element.type)
   element.disabled = false
   element.tabIndex = 0
-  element.textContent = label
-  setTDesignProps(element, {
-    content: label,
+  const iconOnly = options.density === 'icon'
+  element.textContent = iconOnly ? '' : label
+  element.setAttribute('aria-label', label)
+  element.setAttribute('title', label)
+  const buttonProps = {
+    content: iconOnly ? '' : label,
     theme: options.tone === 'danger' ? 'danger' : options.variant === 'primary' ? 'primary' : 'default',
     variant: options.variant === 'primary' ? 'base' : 'outline',
-    size: 'medium',
+    size: iconOnly ? 'small' : 'medium',
+    shape: iconOnly ? 'square' : 'rectangle',
     type: element.type,
-  })
+  }
+  // TDesign's Omi component normalizes its initial button props from
+  // attributes. Unlike input values these are finite string enums, so reflect
+  // them before connection as well as through the typed Host adapter. Without
+  // this, an icon action can fall back to the library's primary/base default
+  // and render a bright, padded rectangle in dark mode.
+  for (const [name, value] of Object.entries(buttonProps)) {
+    if (name !== 'content') element.setAttribute(name, String(value))
+  }
+  setTDesignProps(element, buttonProps)
   if (element.type === 'submit') element.addEventListener('click', event => {
     event.preventDefault()
     element.closest('form')?.requestSubmit()

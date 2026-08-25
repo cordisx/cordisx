@@ -19,6 +19,8 @@ const parsed = parseArgs({
     'manager-settings-navigation-item': { type: 'string' },
     'manager-settings-navigation-exercise': { type: 'boolean', default: false },
     'manager-form-exercise': { type: 'boolean', default: false },
+    'manager-form-value-exercise': { type: 'boolean', default: false },
+    'manager-config-scroll-path': { type: 'string' },
     'manager-open-local-path-form': { type: 'boolean', default: false },
     'manager-open-select': { type: 'boolean', default: false },
     'config-exercise': { type: 'boolean', default: false },
@@ -3578,6 +3580,13 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   const managerPlugin = parsed.values['manager-plugin']
   const managerDetailTab = parsed.values['manager-detail-tab']
   if (managerDetailTab !== undefined && !['readme', 'config', 'permissions', 'runtime', 'logs', 'extension-points', 'routes'].includes(managerDetailTab)) throw new Error(`unknown manager detail tab: ${managerDetailTab}`)
+  const managerConfigScrollPath = parsed.values['manager-config-scroll-path']
+  if (managerConfigScrollPath !== undefined && !/^[a-zA-Z0-9_.-]+$/.test(managerConfigScrollPath)) {
+    throw new Error('--manager-config-scroll-path must be a dot-separated Host config path')
+  }
+  if (managerConfigScrollPath !== undefined && managerDetailTab !== 'config') {
+    throw new Error('--manager-config-scroll-path requires --manager-detail-tab config')
+  }
   const managerPermissionCapability = parsed.values['manager-permission-capability']
   if (managerPermissionCapability !== undefined && managerDetailTab !== 'permissions') throw new Error('--manager-permission-capability requires --manager-detail-tab permissions')
   const managerSettingsTab = parsed.values['manager-settings-tab']
@@ -4083,13 +4092,33 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         await nextPaint()
       }
       if (${JSON.stringify(parsed.values['manager-open-select'])}) {
-        const select = [...document.querySelectorAll('t-select[data-host-form-primitive="select"]')]
+        const select = [...document.querySelectorAll('t-select[data-tdesign-component="select"]')]
           .find(item => item.getClientRects().length > 0)
         if (!(select instanceof HTMLElement)) throw new Error('visible TDesign Select is unavailable')
         select.focus()
         select.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
         await nextPaint()
         await new Promise(resolve => setTimeout(resolve, 500))
+      }
+      const configScrollPath = ${JSON.stringify(managerConfigScrollPath)}
+      let configScroll = null
+      if (configScrollPath !== undefined) {
+        const item = document.querySelector('[data-config-path="' + CSS.escape(configScrollPath) + '"]')
+        if (!(item instanceof HTMLElement)) throw new Error('Host config field is unavailable: ' + configScrollPath)
+        item.scrollIntoView({ block: 'center', inline: 'nearest' })
+        await nextPaint()
+        const itemRect = item.getBoundingClientRect()
+        const primitive = item.getAttribute('data-host-form-primitive')
+        const control = item.querySelector('[data-host-form-primitive], [data-host-form-composite]')
+        const controlRect = control?.getBoundingClientRect()
+        configScroll = {
+          path: configScrollPath,
+          primitive,
+          inViewport: itemRect.top >= 0 && itemRect.bottom <= innerHeight,
+          controlInViewport: controlRect !== undefined && controlRect !== null
+            && controlRect.top >= 0 && controlRect.bottom <= innerHeight,
+          rect: { x: itemRect.x, y: itemRect.y, width: itemRect.width, height: itemRect.height },
+        }
       }
       if (breadcrumbWidth !== undefined) {
         const overflow = document.querySelector('.cxm-breadcrumb-overflow')
@@ -4278,6 +4307,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             headingTitleX: titleRect.x,
             firstTabLabelX: tabLabelRect.x,
           },
+          configScroll,
           permissions: [...document.querySelectorAll('[data-permission-item]')].map(item => ({
             capability: item.getAttribute('data-permission-item'),
             availability: item.querySelector('[data-permission-availability]')?.getAttribute('data-availability-state') ?? null,
@@ -4378,7 +4408,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           tdesign: {
             version: document.querySelector('[data-tdesign-version]')?.getAttribute('data-tdesign-version') ?? null,
             hostOwnedControlCount: document.querySelectorAll('[data-host-form-primitive][data-tdesign-version="1.2.10"]').length,
-            selectCount: document.querySelectorAll('t-select[data-host-form-primitive="select"]').length,
+            selectCount: document.querySelectorAll('t-select[data-tdesign-component="select"]').length,
             nativeHostSelectCount: document.querySelectorAll('[data-cordisx-manager-modal] select').length,
             groupCardCount: document.querySelectorAll('.cxf-form-grid, .cxm-settings-group').length,
             portalCount: document.querySelectorAll('[data-cxf-tdesign-portal-host]').length,
@@ -4409,9 +4439,9 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             })(),
             activeElement: document.activeElement?.tagName.toLowerCase() ?? null,
             selectState: (() => {
-              const select = [...document.querySelectorAll('t-select[data-host-form-primitive="select"]')]
+              const select = [...document.querySelectorAll('t-select[data-tdesign-component="select"]')]
                 .find(item => item.getClientRects().length > 0 && item.getAttribute('aria-expanded') === 'true')
-                ?? [...document.querySelectorAll('t-select[data-host-form-primitive="select"]')].find(item => item.getClientRects().length > 0)
+                ?? [...document.querySelectorAll('t-select[data-tdesign-component="select"]')].find(item => item.getClientRects().length > 0)
               if (select === undefined) return null
               const tokens = getComputedStyle(select)
               const shadowSurfaces = select.shadowRoot === null ? [] : [...select.shadowRoot.querySelectorAll('*')]
@@ -4917,6 +4947,86 @@ if (parsed.values['manager-screenshot'] !== undefined) {
     }
     console.log(`manager-form-interaction=${JSON.stringify(managerReport.hostFormInteraction)}`)
   }
+  if (parsed.values['manager-form-value-exercise']) {
+    const galleryId = 'form-schema-gallery'
+    const expected = 'CordisX smoke workspace'
+    const target = await evaluateByValue(`(async () => {
+      const field = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-config-path="workspaceName"]')
+      const control = field?.querySelector('t-input[data-host-form-primitive="input"]')
+      if (!(field instanceof HTMLElement) || !(control instanceof HTMLElement)) return null
+      control.scrollIntoView({ block: 'center', inline: 'nearest' })
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const rect = control.getBoundingClientRect()
+      return { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, inViewport: rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.bottom <= innerHeight }
+    })()`, true)
+    if (target?.inViewport !== true) throw new Error('gallery workspace input is unavailable for real Web Component exercise')
+    await pointerClick(target.rect)
+    const focused = await evaluateByValue(`(() => {
+      const input = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-config-path="workspaceName"] t-input')?.shadowRoot?.querySelector('input')
+      if (!(input instanceof HTMLInputElement)) return null
+      input.focus()
+      input.select()
+      return { active: document.activeElement?.tagName.toLowerCase() ?? null, selected: input.selectionStart === 0 && input.selectionEnd === input.value.length }
+    })()`, true)
+    if (focused?.active !== 't-input' || focused.selected !== true) throw new Error('official TDesign shadow input did not accept keyboard focus')
+    // This is a trusted CDP text delivery to the actual focused Shadow input;
+    // do not paper over a delivery failure with a synthetic event or callback.
+    await send('Input.insertText', { text: expected })
+    const draft = await evaluateByValue(`(async () => {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const form = document.querySelector('[data-plugin-config-form="${galleryId}"]')
+      const control = form?.querySelector('[data-config-path="workspaceName"] t-input')
+      const shadowInput = control?.shadowRoot?.querySelector('input')
+      return { state: form?.getAttribute('data-state') ?? null, value: control?.value ?? null, shadowValue: shadowInput?.value ?? null }
+    })()`, true)
+    if (draft?.state !== 'dirty' || draft.shadowValue !== expected || String(draft.value).includes('[object CustomEvent]')) {
+      throw new Error('official TDesign input did not deliver its typed value to the Host draft: ' + JSON.stringify({ draft }))
+    }
+    const saveTarget = await evaluateByValue(`(() => {
+      const save = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-host-form-action="save"]')
+      const rect = save?.getBoundingClientRect()
+      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    })()`, true)
+    if (saveTarget === null || saveTarget.width <= 0 || saveTarget.height <= 0) throw new Error('gallery save action did not appear in the sticky form action bar')
+    await pointerClick(saveTarget)
+    const saved = await evaluateByValue(`(async () => {
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const plugin = globalThis.__cordisxRuntime?.snapshot().plugins.find(item => item.id === '${galleryId}')
+        const field = plugin?.configuration?.fields?.find(item => item.path?.join('.') === 'workspaceName')
+        if (field?.value === '${expected}') return { value: field.value, revision: plugin.configuration.revision }
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      return null
+    })()`, true)
+    if (saved === null) throw new Error('gallery typed value did not persist through the isolated Host configuration writer')
+    const reopened = await evaluateByValue(`(async () => {
+      document.querySelector('.cxm-close')?.click()
+      document.querySelector('[data-cordisx-manager-trigger]')?.click()
+      document.querySelector('[data-tab="plugins"]')?.click()
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        const row = document.querySelector('[data-plugin-id="${galleryId}"]')
+        if (row instanceof HTMLElement) { row.click(); break }
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        const tab = document.querySelector('[data-plugin-detail-tab="config"]')
+        if (tab instanceof HTMLElement) { tab.click(); break }
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        const control = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-config-path="workspaceName"] t-input')
+        if (control instanceof HTMLElement) {
+          const shadowValue = control.shadowRoot?.querySelector('input')?.value ?? null
+          if (shadowValue === '${expected}' && String(control.value).includes('[object CustomEvent]') === false) return { value: control.value, shadowValue }
+        }
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      return null
+    })()`, true)
+    if (reopened === null) throw new Error('gallery saved value did not survive Manager reopen')
+    managerReport = { ...managerReport, hostFormValueInteraction: { target, draft, saved, reopened, passed: true } }
+    console.log(`manager-form-value-interaction=${JSON.stringify(managerReport.hostFormValueInteraction)}`)
+  }
   console.log(`manager-state=${JSON.stringify(managerReport)}`)
   try {
     await capture(managerResult?.rect ?? null, parsed.values['manager-screenshot'], 'CordisX manager')
@@ -5005,7 +5115,7 @@ if (parsed.values['manager-theme-cycle']) {
             if (permissionCapability !== undefined) document.querySelector('[data-permission-open="' + CSS.escape(permissionCapability) + '"]')?.click()
             await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
           }
-          const select = [...document.querySelectorAll('t-select[data-host-form-primitive="select"]')]
+          const select = [...document.querySelectorAll('t-select[data-tdesign-component="select"]')]
             .find(item => item.getClientRects().length > 0)
           if (!(select instanceof HTMLElement)) throw new Error('visible TDesign Select is unavailable after theme projection')
           if (select.getAttribute('aria-expanded') !== 'true') {
@@ -5021,7 +5131,7 @@ if (parsed.values['manager-theme-cycle']) {
         const popup = [...document.querySelectorAll('[data-cxf-tdesign-portal-host]')]
           .map(host => host.shadowRoot?.querySelector('.cxf-tdesign-listbox:not([hidden])'))
           .find(item => item instanceof HTMLElement)
-        const visibleSelect = [...document.querySelectorAll('t-select[data-host-form-primitive="select"]')]
+        const visibleSelect = [...document.querySelectorAll('t-select[data-tdesign-component="select"]')]
           .find(item => item.getClientRects().length > 0)
         return {
           rect: dialog === null ? null : (() => {

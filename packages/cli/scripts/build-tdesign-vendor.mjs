@@ -10,7 +10,7 @@ import { build } from 'esbuild'
 const execFileAsync = promisify(execFile)
 const version = '1.2.10'
 const tarballSha256 = 'e1929f06eda5c3d2ee194da0d6bc9f81e187184fe1054627afeabad2ae71db0e'
-const components = ['input', 'textarea', 'input-number', 'select', 'checkbox', 'switch', 'radio', 'slider', 'button', 'alert', 'loading']
+const components = ['input', 'textarea', 'input-number', 'select', 'date-picker', 'tag-input', 'checkbox', 'switch', 'radio', 'slider', 'button', 'alert', 'loading']
 const root = fileURLToPath(new URL('..', import.meta.url))
 const output = path.join(root, 'src/renderer/vendor/tdesign-web-components-1.2.10.ts')
 const work = await mkdtemp(path.join(tmpdir(), 'cordisx-tdesign-vendor-'))

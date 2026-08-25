@@ -1,21 +1,27 @@
-import type { CordisXConfigFieldSnapshot, CordisXJsonScalar } from '../contracts.js'
+import type { CordisXConfigFieldSnapshot, CordisXConfigFormIcon, CordisXJsonScalar } from '../contracts.js'
 import {
   createTDesignButton,
   createTDesignElement,
+  createTDesignMultiSelect,
   createTDesignPortal,
   createTDesignSelect,
+  createTDesignTagInput,
   setTDesignProps,
+  tdesignPortalContainer,
   TDESIGN_SCOPED_TOKEN_CSS,
   type TDesignButtonElement,
   type TDesignElement,
+  type TDesignMultiSelectElement,
   type TDesignSelectElement,
   type TDesignSelectOption,
 } from './tdesign-form.js'
+import { createHostSurfaceIcon } from './icons.js'
 import { managerCopy, productLocale } from './ui-copy.js'
 
 export type HostFormPrimitive =
   | 'input' | 'textarea' | 'number-input' | 'select' | 'checkbox' | 'switch'
   | 'radio' | 'slider' | 'path-input' | 'json-textarea'
+  | 'date-picker' | 'time-picker' | 'color-picker' | 'multi-select' | 'tag-input'
   | 'sensitive-unavailable' | 'unsupported'
 
 export interface HostFormDiagnostic {
@@ -34,10 +40,16 @@ export interface HostFormControl {
 export interface HostFormItem {
   readonly root: HTMLDivElement
   readonly control: HTMLDivElement
+  readonly labelRow: HTMLDivElement
   readonly label: HTMLLabelElement
   readonly help?: HTMLParagraphElement
   readonly error: HTMLParagraphElement
   setError(message?: string): void
+}
+
+export interface HostFormFieldActionMenu {
+  readonly trigger: TDesignButtonElement
+  dispose(): void
 }
 
 export type HostConfigApplyMode = 'live' | 'restart' | 'plugin-restart' | 'service-restart' | 'app-restart'
@@ -61,18 +73,23 @@ export function hostConfigApplyMessage(mode: HostConfigApplyMode, phase: HostCon
 const SENSITIVE_ROLES = new Set(['secret', 'credential', 'credential-ref', 'permission', 'capability'])
 const KNOWN_ROLES = new Set([
   'checkbox', 'switch', 'radio', 'slider', 'textarea', 'multiline', 'path', 'file', 'directory',
-  'duration', 'url',
+  'duration', 'url', 'date', 'time', 'color', 'multi-select',
 ])
 
 export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${String.raw`
   .cxf-scope {
     --td-brand-color: var(--cx-primary);
-    --td-brand-color-hover: var(--cx-text);
+    --td-brand-color-hover: color-mix(in srgb, var(--cx-primary) 88%, var(--cx-text));
+    --td-brand-color-active: color-mix(in srgb, var(--cx-primary) 78%, var(--cx-text));
+    --td-brand-color-disabled: color-mix(in srgb, var(--cx-primary) 45%, var(--cx-surface));
+    --td-brand-color-light: color-mix(in srgb, var(--cx-primary) 12%, var(--cx-surface));
+    --td-brand-color-light-hover: color-mix(in srgb, var(--cx-primary) 20%, var(--cx-surface));
     --td-brand-color-focus: color-mix(in srgb, var(--cx-focus) 26%, transparent);
     --td-text-color-primary: var(--cx-text);
     --td-text-color-secondary: var(--cx-muted);
     --td-text-color-placeholder: color-mix(in srgb, var(--cx-muted) 78%, transparent);
-    --td-text-color-disabled: color-mix(in srgb, var(--cx-muted) 65%, transparent);
+    --td-text-color-disabled: color-mix(in srgb, var(--cx-text) 68%, var(--cx-surface));
+    --td-text-color-anti: var(--cx-primary-text);
     --td-bg-color-container: var(--cx-surface);
     --td-bg-color-container-hover: var(--cx-hover);
     --td-bg-color-container-active: var(--cx-pressed);
@@ -103,12 +120,15 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${String.raw`
   .cxf-section-title { margin: 0; color: var(--cx-text); font-size: .96rem; line-height: 1.35; font-weight: 650; }
   .cxf-section-description { margin: .2rem 0 0; color: var(--cx-muted); font-size: .78rem; line-height: 1.5; overflow-wrap: anywhere; }
   .cxf-tdesign-control { display: inline-block; box-sizing: border-box; min-inline-size: 0; max-inline-size: 100%; color: var(--cx-text); font: inherit; outline: none; }
-  t-input.cxf-tdesign-control, t-textarea.cxf-tdesign-control, t-input-number.cxf-tdesign-control, t-select.cxf-tdesign-control { inline-size: 100%; }
+  t-input.cxf-tdesign-control, t-textarea.cxf-tdesign-control, t-input-number.cxf-tdesign-control, t-select.cxf-tdesign-control, t-date-picker.cxf-tdesign-control, t-tag-input.cxf-tdesign-control { inline-size: 100%; }
   .cxf-form-grid { display: grid; overflow: clip; border: 1px solid var(--cx-border); border-radius: .8rem; background: color-mix(in srgb, var(--cx-surface-raised) 86%, var(--cx-surface)); box-shadow: 0 1px 2px color-mix(in srgb, var(--cx-shadow) 18%, transparent); }
   .cxf-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(13rem, min(44%, 25rem)); grid-template-areas: "label control" "help control" "error error"; align-items: center; gap: .25rem 1.25rem; min-inline-size: 0; padding: .9rem 1rem; }
   .cxf-item + .cxf-item { border-top: 1px solid var(--cx-border); }
   .cxf-item[data-full-width="true"] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; }
   .cxf-label-row { grid-area: label; display: flex; align-items: baseline; gap: .35rem; min-inline-size: 0; }
+  .cxf-field-menu-trigger { flex: 0 0 auto; }
+  .cxf-form-icon { flex: 0 0 auto; inline-size: 1rem; block-size: 1rem; color: var(--td-text-color-secondary); }
+  .cxf-section-title > .cordisx-host-icon { margin-inline-end: .4rem; vertical-align: -.14em; color: var(--td-text-color-secondary); }
   .cxf-label { color: var(--td-text-color-primary); font-weight: 600; overflow-wrap: anywhere; }
   .cxf-required { color: var(--td-error-color); font-weight: 700; }
   .cxf-control-seat { grid-area: control; min-inline-size: 0; justify-self: stretch; }
@@ -137,7 +157,13 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${String.raw`
   .cxf-radio-group { display: flex; flex-wrap: wrap; gap: .5rem 1rem; padding-block: .25rem; }
   .cxf-choice { display: inline-flex; align-items: center; gap: .4rem; min-block-size: 2rem; }
   .cxf-choice input { margin: 0; accent-color: var(--td-brand-color); }
-  .cxf-range { padding-inline: 0; accent-color: var(--td-brand-color); }
+  .cxf-slider-control { display: grid; grid-template-columns: minmax(0, 1fr) minmax(5.25rem, 6.5rem); gap: .65rem; align-items: center; inline-size: 100%; }
+  .cxf-slider-control > t-slider { display: block; min-inline-size: 0; --td-component-stroke: var(--cx-border); --td-brand-color: var(--cx-primary); }
+  .cxf-slider-control > t-input-number { min-inline-size: 0; }
+  .cxf-color-control { display: grid; grid-template-columns: minmax(0, 1fr) 2.25rem; gap: .5rem; align-items: center; inline-size: 100%; }
+  .cxf-color-swatch { inline-size: 2.25rem; block-size: 2rem; border: 1px solid var(--td-border-level-2-color); border-radius: var(--td-radius-default); background: var(--cxf-color, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cx-surface) 45%, transparent); cursor: pointer; }
+  .cxf-color-swatch:focus-visible { outline: 2px solid var(--td-brand-color-focus); outline-offset: 2px; }
+  .cxf-time-select { max-inline-size: 12rem; }
   .cxf-help, .cxf-error { margin: 0; overflow-wrap: anywhere; font-size: .78rem; line-height: 1.45; }
   .cxf-help { grid-area: help; }
   .cxf-error { grid-area: error; }
@@ -147,17 +173,13 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${String.raw`
   .cxf-item[data-invalid="true"] .cxf-control { border-color: var(--td-error-color); }
   .cxf-custom-seat { min-block-size: 2rem; }
   .cxf-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: .5rem; }
-  .cxf-form-footer { position: sticky; inset-block-end: -.25rem; z-index: 2; min-block-size: 2.75rem; padding: .6rem .75rem; border: 1px solid var(--cx-border); border-radius: .75rem; background: color-mix(in srgb, var(--cx-surface) 94%, transparent); box-shadow: 0 -8px 20px color-mix(in srgb, var(--cx-shadow) 10%, transparent); backdrop-filter: blur(14px); }
-  .cxf-field-actions { margin-block-start: .5rem; }
+  .cxf-form-footer { position: sticky; inset-block-start: 0; z-index: 3; min-block-size: 2.75rem; margin-block: 0 .85rem; padding: .6rem .75rem; border: 1px solid var(--cx-border); border-radius: .75rem; background: color-mix(in srgb, var(--cx-surface) 94%, transparent); box-shadow: 0 8px 20px color-mix(in srgb, var(--cx-shadow) 10%, transparent); backdrop-filter: blur(14px); }
   .cxf-status { margin-inline-end: auto; color: var(--td-text-color-secondary); font-size: .82em; }
   .cxf-status[data-state="dirty"] { color: var(--td-brand-color); }
   .cxf-status[data-state="saved"] { color: var(--td-success-color); }
-  .cxf-button {
-    display: inline-block; min-block-size: 0; border: 0; padding: 0; background: transparent;
-    color: inherit; font: inherit; line-height: 1; cursor: pointer;
-  }
-  .cxf-button:hover:not(:disabled) { background: transparent; }
-  .cxf-button[data-variant="primary"] { background: transparent; color: inherit; }
+  .cxf-button { display: inline-block; min-block-size: 0; min-inline-size: 0; margin: 0; color: var(--td-text-color-primary); font: inherit; line-height: 1; cursor: pointer; }
+  .cxf-button[data-density="icon"] { inline-size: 2rem; block-size: 2rem; }
+  .cxf-button .cxf-form-icon { inline-size: 1rem; block-size: 1rem; }
   .cxf-button[data-tone="danger"] { color: var(--td-error-color); }
   .cxf-button[aria-disabled="true"], .cxf-button:disabled { cursor: default; opacity: var(--cx-disabled); }
   .cxf-alert { border: 1px solid var(--td-border-level-2-color); border-radius: var(--td-radius-default); padding: .625rem .75rem; background: var(--td-bg-color-specialcomponent); color: var(--td-text-color-secondary); overflow-wrap: anywhere; }
@@ -166,7 +188,7 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${String.raw`
   .cxf-empty { padding: 1.25rem; text-align: center; color: var(--td-text-color-secondary); }
   .cxf-note { margin: 0; padding-inline: .25rem; color: var(--cx-muted); font-size: .78rem; line-height: 1.5; }
   .cxf-loading { display: inline-flex; align-items: center; gap: .5rem; color: var(--td-text-color-secondary); }
-  @media (max-width: 760px) { .cxf-item { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; gap: .35rem; } .cxf-form { inline-size: 100%; } }
+  @media (max-width: 760px) { .cxf-item { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; gap: .35rem; } .cxf-form { inline-size: 100%; } .cxf-slider-control { grid-template-columns: minmax(0, 1fr) 5.25rem; } }
   @media (forced-colors: active) { .cxf-control:focus-visible, .cxf-button:focus-visible, .cxf-choice input:focus-visible, .cxf-tdesign-control:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; } }
   @media (prefers-reduced-motion: reduce) { .cxf-scope .cxf-control, .cxf-scope .cxf-button, .cxf-scope .cxf-switch::after { transition: none; } }
 `}`
@@ -182,15 +204,24 @@ function jsonLike(field: CordisXConfigFieldSnapshot): boolean {
 
 export function selectHostFormPrimitive(field: CordisXConfigFieldSnapshot): HostFormPrimitive {
   if (sensitive(field)) return 'sensitive-unavailable'
-  // The public config snapshot describes only scalar choices. Do not infer a
-  // multi-select from an array value: that would let a plugin smuggle an
-  // unbounded option model into a Host control.
-  if (field.role === 'multi-select') return 'unsupported'
+  if (field.type === 'array') {
+    if (field.choices !== undefined && field.role === 'multi-select') return 'multi-select'
+    if (field.arrayItemType !== undefined && field.max !== undefined && field.max <= 64) return 'tag-input'
+    // A complex array retains the existing bounded JSON editor until a
+    // dedicated structured editor is declared. This is real read/write
+    // support, not an unavailable placeholder; it keeps existing service
+    // configuration edits available while bounded primitive arrays receive
+    // their native TDesign affordance above.
+    if (jsonLike(field)) return 'json-textarea'
+    return 'unsupported'
+  }
   if (field.choices !== undefined) return field.role === 'radio' ? 'radio' : 'select'
   if (field.type === 'boolean') return field.role === 'switch' ? 'switch' : 'checkbox'
   if (field.type === 'number' || field.type === 'natural') return field.role === 'slider' ? 'slider' : 'number-input'
   if (field.type === 'string') {
-    if (field.role === 'date' || field.role === 'time' || field.role === 'color') return 'unsupported'
+    if (field.role === 'date') return 'date-picker'
+    if (field.role === 'time') return 'time-picker'
+    if (field.role === 'color') return 'color-picker'
     if (field.role === 'textarea' || field.role === 'multiline') return 'textarea'
     if (field.role === 'path' || field.role === 'file' || field.role === 'directory') return 'path-input'
     return 'input'
@@ -201,10 +232,6 @@ export function selectHostFormPrimitive(field: CordisXConfigFieldSnapshot): Host
 
 export function hostFormDiagnostic(field: CordisXConfigFieldSnapshot): HostFormDiagnostic | undefined {
   const primitive = selectHostFormPrimitive(field)
-  if (primitive === 'unsupported' && ['date', 'time', 'color', 'multi-select'].includes(field.role ?? '')) return {
-    code: 'unsupported-schema-role', fieldPath: field.path,
-    detail: `unsupported schema role ${field.role}; no native control fallback is permitted`,
-  }
   if (primitive === 'unsupported') return {
     code: 'unsupported-schema-field', fieldPath: field.path, detail: `unsupported Schemastery field type: ${field.type}`,
   }
@@ -215,9 +242,18 @@ export function hostFormDiagnostic(field: CordisXConfigFieldSnapshot): HostFormD
 }
 
 export function validateHostFormValue(field: CordisXConfigFieldSnapshot, value: unknown, locale = 'zh-CN'): string | undefined {
-  if (field.required && (value === undefined || value === null || value === '')) return managerCopy(locale, 'form.required')
+  if (field.required && (value === undefined || value === null || value === '' || Array.isArray(value) && value.length === 0)) return managerCopy(locale, 'form.required')
   if (value === undefined || value === null || value === '') return undefined
-  if (field.choices !== undefined && !field.choices.some(choice => Object.is(choice.value, value))) return managerCopy(locale, 'form.choice-invalid')
+  if (field.choices !== undefined && !Array.isArray(value) && !field.choices.some(choice => Object.is(choice.value, value))) return managerCopy(locale, 'form.choice-invalid')
+  if (field.type === 'array') {
+    if (!Array.isArray(value)) return managerCopy(locale, 'form.choice-invalid')
+    if (field.min !== undefined && value.length < field.min) return productLocale(locale) === 'zh-CN' ? `至少选择 ${field.min} 项` : `Choose at least ${field.min}`
+    if (field.max !== undefined && value.length > field.max) return productLocale(locale) === 'zh-CN' ? `最多选择 ${field.max} 项` : `Choose at most ${field.max}`
+    if (field.choices !== undefined && value.some(item => !field.choices!.some(choice => Object.is(choice.value, item)))) return managerCopy(locale, 'form.choice-invalid')
+  }
+  if (field.role === 'date' && (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/u.test(value))) return productLocale(locale) === 'zh-CN' ? '请输入有效日期' : 'Enter a valid date'
+  if (field.role === 'time' && (typeof value !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(value))) return productLocale(locale) === 'zh-CN' ? '请输入有效时间' : 'Enter a valid time'
+  if (field.role === 'color' && (typeof value !== 'string' || !/^#[\da-fA-F]{6}$/u.test(value))) return productLocale(locale) === 'zh-CN' ? '请输入有效 HEX 颜色' : 'Enter a valid HEX color'
   if (field.type === 'number' || field.type === 'natural') {
     if (typeof value !== 'number' || !Number.isFinite(value)) return managerCopy(locale, 'form.number-invalid')
     if (field.type === 'natural' && (!Number.isInteger(value) || value < 0)) return managerCopy(locale, 'form.natural-invalid')
@@ -268,14 +304,19 @@ export class HostFormAdapter {
     return grid
   }
 
-  section(title: string, description?: string): { readonly root: HTMLElement; readonly content: HTMLElement } {
+  section(title: string, description?: string, icon?: CordisXConfigFormIcon): { readonly root: HTMLElement; readonly content: HTMLElement } {
     const root = this.document.createElement('section')
     root.className = 'cxf-section'
     const heading = this.document.createElement('div')
     heading.className = 'cxf-section-heading'
     const titleNode = this.document.createElement('h3')
     titleNode.className = 'cxf-section-title'
-    titleNode.textContent = title
+    if (icon !== undefined) {
+      const glyph = createHostSurfaceIcon(this.document, icon)
+      glyph.classList.add('cxf-form-icon')
+      titleNode.append(glyph)
+    }
+    titleNode.append(this.document.createTextNode(title))
     heading.append(titleNode)
     if (description !== undefined) {
       const copy = this.document.createElement('p')
@@ -305,7 +346,7 @@ export class HostFormAdapter {
     })
   }
 
-  item(options: { readonly id: string; readonly label: string; readonly help?: string; readonly required?: boolean; readonly fullWidth?: boolean }): HostFormItem {
+  item(options: { readonly id: string; readonly label: string; readonly help?: string; readonly required?: boolean; readonly fullWidth?: boolean; readonly icon?: CordisXConfigFormIcon }): HostFormItem {
     const root = this.document.createElement('div')
     root.className = 'cxf-item'
     root.dataset.fullWidth = String(options.fullWidth === true)
@@ -315,7 +356,12 @@ export class HostFormAdapter {
     label.className = 'cxf-label'
     label.id = `${options.id}-label`
     label.htmlFor = options.id
-    label.textContent = options.label
+    if (options.icon !== undefined) {
+      const glyph = createHostSurfaceIcon(this.document, options.icon)
+      glyph.classList.add('cxf-form-icon')
+      label.append(glyph)
+    }
+    label.append(this.document.createTextNode(options.label))
     labelRow.append(label)
     if (options.required) {
       const required = this.document.createElement('span')
@@ -341,7 +387,7 @@ export class HostFormAdapter {
     if (help !== undefined) root.append(help)
     root.append(error)
     return {
-      root, control, label, ...(help === undefined ? {} : { help }), error,
+      root, control, labelRow, label, ...(help === undefined ? {} : { help }), error,
       setError: (message?: string): void => {
         error.textContent = message ?? ''
         error.hidden = message === undefined || message === ''
@@ -351,6 +397,152 @@ export class HostFormAdapter {
           if (error.hidden) target.removeAttribute('aria-invalid')
           else target.setAttribute('aria-invalid', 'true')
         }
+      },
+    }
+  }
+
+  /**
+   * A Host-owned, portalled per-field menu. Plugins supply neither its DOM nor
+   * its actions: callers only provide structured callbacks and availability.
+   */
+  fieldActionMenu(options: {
+    readonly label: string
+    readonly canUseDefault: () => boolean
+    readonly hasFieldDraft: () => boolean
+    readonly useDefault: () => void
+    readonly rollback: () => void
+    readonly copyPath: () => Promise<boolean>
+  }): HostFormFieldActionMenu {
+    const locale = this.locale()
+    const trigger = this.button(managerCopy(locale, 'form.field-actions'), { icon: 'host:settings', density: 'icon' })
+    trigger.classList.add('cxf-field-menu-trigger')
+    trigger.dataset.hostFormAction = 'field-actions'
+    trigger.setAttribute('aria-haspopup', 'menu')
+    trigger.setAttribute('aria-expanded', 'false')
+    const menu = this.document.createElement('div')
+    menu.className = 'cxf-field-menu'
+    menu.hidden = true
+    menu.setAttribute('role', 'menu')
+    menu.setAttribute('aria-label', options.label)
+    const menuId = `cxf-field-menu-${Math.random().toString(36).slice(2)}`
+    menu.id = menuId
+    trigger.setAttribute('aria-controls', menuId)
+    const status = this.document.createElement('div')
+    status.className = 'cxf-field-menu-status'
+    status.hidden = true
+    status.setAttribute('role', 'status')
+    const item = (label: string, icon: CordisXConfigFormIcon, disabled: boolean, handler: () => void | Promise<void>): HTMLButtonElement => {
+      const button = this.document.createElement('button')
+      button.className = 'cxf-field-menu-item'
+      button.type = 'button'
+      button.setAttribute('role', 'menuitem')
+      button.disabled = disabled
+      const glyph = createHostSurfaceIcon(this.document, icon)
+      glyph.classList.add('cxf-form-icon')
+      glyph.setAttribute('aria-hidden', 'true')
+      button.append(glyph, this.document.createTextNode(label))
+      button.addEventListener('click', () => { void handler() })
+      return button
+    }
+    let visible = false
+    let disposed = false
+    const update = (): void => {
+      const defaultAvailable = options.canUseDefault()
+      useDefault.disabled = !defaultAvailable
+      useDefault.title = defaultAvailable ? '' : managerCopy(this.locale(), 'form.use-default-unavailable')
+      rollback.disabled = !options.hasFieldDraft()
+    }
+    const close = (restoreFocus: boolean): void => {
+      if (!visible) return
+      visible = false
+      menu.hidden = true
+      trigger.setAttribute('aria-expanded', 'false')
+      if (restoreFocus && trigger.isConnected) trigger.focus()
+    }
+    const position = (): void => {
+      if (!visible) return
+      const view = this.document.defaultView
+      if (view === null) return
+      const rect = trigger.getBoundingClientRect()
+      const gutter = 8
+      const width = Math.min(Math.max(208, menu.offsetWidth || 208), view.innerWidth - gutter * 2)
+      const above = rect.top > view.innerHeight - rect.bottom && rect.top > (menu.offsetHeight || 120)
+      menu.style.inlineSize = `${width}px`
+      menu.style.insetInlineStart = `${Math.max(gutter, Math.min(rect.left, view.innerWidth - width - gutter))}px`
+      menu.style.insetBlockStart = `${above ? Math.max(gutter, rect.top - (menu.offsetHeight || 120) - 4) : Math.min(view.innerHeight - gutter, rect.bottom + 4)}px`
+    }
+    const open = (): void => {
+      if (disposed) return
+      update()
+      visible = true
+      menu.hidden = false
+      trigger.setAttribute('aria-expanded', 'true')
+      this.document.defaultView?.requestAnimationFrame(position)
+    }
+    const useDefault = item(managerCopy(locale, 'form.use-default'), 'host:reset', false, () => {
+      options.useDefault()
+      close(true)
+    })
+    const rollback = item(managerCopy(locale, 'form.rollback-field'), 'host:reset', false, () => {
+      options.rollback()
+      close(true)
+    })
+    const copyPath = item(managerCopy(locale, 'form.copy-path'), 'host:files', false, async () => {
+      const copied = await options.copyPath()
+      status.hidden = false
+      status.textContent = managerCopy(this.locale(), copied ? 'form.path-copied' : 'form.path-copy-unavailable')
+      this.document.defaultView?.setTimeout(() => { status.hidden = true }, 1800)
+    })
+    menu.append(useDefault, rollback, copyPath, status)
+    tdesignPortalContainer(this.portalHost).append(menu)
+    const onPointerDown = (event: Event): void => {
+      if (!visible) return
+      const path = event.composedPath()
+      if (path.includes(trigger) || path.includes(menu)) return
+      close(true)
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!visible) return
+      const enabled = [useDefault, rollback, copyPath].filter(button => !button.disabled)
+      // A menu lives in the Host portal Shadow root, so document.activeElement
+      // is the portal host rather than the focused menu button. The composed
+      // path is the stable cross-root focus identity for navigation/Enter.
+      const focusedItem = event.composedPath().find(node => node === useDefault || node === rollback || node === copyPath) as HTMLButtonElement | undefined
+      const current = focusedItem === undefined ? -1 : enabled.indexOf(focusedItem)
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        close(true)
+      } else if (event.key === 'Enter' && focusedItem !== undefined && !focusedItem.disabled) {
+        // Native buttons normally activate on Enter too. Keeping this at the
+        // Host menu boundary makes the documented keyboard contract stable
+        // across ordinary and Shadow-DOM focus paths.
+        event.preventDefault()
+        focusedItem.click()
+      } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
+        event.preventDefault()
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? enabled.length - 1
+          : (current + (event.key === 'ArrowDown' ? 1 : -1) + enabled.length) % enabled.length
+        enabled[next]?.focus()
+      }
+    }
+    const onTrigger = (): void => { visible ? close(false) : open() }
+    trigger.addEventListener('click', onTrigger)
+    this.document.addEventListener('pointerdown', onPointerDown, true)
+    this.document.addEventListener('keydown', onKeyDown, true)
+    this.document.defaultView?.addEventListener('resize', position)
+    this.document.defaultView?.addEventListener('scroll', position, true)
+    return {
+      trigger,
+      dispose: (): void => {
+        if (disposed) return
+        disposed = true
+        close(false)
+        trigger.removeEventListener('click', onTrigger)
+        this.document.removeEventListener('pointerdown', onPointerDown, true)
+        this.document.removeEventListener('keydown', onKeyDown, true)
+        this.document.defaultView?.removeEventListener('resize', position)
+        this.document.defaultView?.removeEventListener('scroll', position, true)
+        menu.remove()
       },
     }
   }
@@ -374,6 +566,117 @@ export class HostFormAdapter {
     }
     if (primitive === 'unsupported') return {
       root: this.alert(managerCopy(this.locale(), 'form.unsupported'), 'warning'), primitive, ...(diagnostic === undefined ? {} : { diagnostic }),
+    }
+    if (primitive === 'multi-select') {
+      const select = createTDesignMultiSelect<CordisXJsonScalar>(this.document, this.portalHost, field.choices!, {
+        id,
+        label: field.label ?? field.path.at(-1) ?? managerCopy(this.locale(), 'form.select-placeholder'),
+        placeholder: managerCopy(this.locale(), 'form.select-placeholder'),
+        value: Array.isArray(field.value) ? field.value as CordisXJsonScalar[] : [],
+        disabled: field.disabled,
+        clearable: true,
+        onChange: value => onDraft(value, validateHostFormValue(field, value, this.locale())),
+      })
+      setCommonControlState(select, field, id)
+      return { root: select, focusTarget: select, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
+    }
+    if (primitive === 'tag-input') {
+      const value = Array.isArray(field.value) ? field.value.filter((item): item is string | number => typeof item === 'string' || typeof item === 'number') : []
+      const tags = createTDesignTagInput(this.document, {
+        id,
+        label: field.label ?? field.path.at(-1) ?? managerCopy(this.locale(), 'form.text-placeholder'),
+        placeholder: managerCopy(this.locale(), 'form.text-placeholder'),
+        value,
+        ...(field.max === undefined ? {} : { max: field.max }),
+        disabled: field.disabled,
+        onChange: next => {
+          const normalized = field.arrayItemType === 'string' ? next.map(String)
+            : next.map(Number).filter(Number.isFinite)
+          onDraft(normalized, validateHostFormValue(field, normalized, this.locale()))
+        },
+      })
+      setCommonControlState(tags, field, id)
+      return { root: tags, focusTarget: tags, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
+    }
+    if (primitive === 'date-picker') {
+      const date = createTDesignElement(this.document, 't-date-picker', primitive)
+      date.tabIndex = field.disabled ? -1 : 0
+      setCommonControlState(date, field, id)
+      const initial = typeof field.value === 'string' ? field.value : undefined
+      setTDesignProps(date, {
+        value: initial,
+        defaultValue: initial,
+        placeholder: productLocale(this.locale()) === 'zh-CN' ? '选择日期' : 'Select date',
+        format: 'YYYY-MM-DD',
+        disabled: field.disabled,
+        popupProps: { attach: () => this.portalHost },
+        onChange: (value: string | undefined) => onDraft(value, validateHostFormValue(field, value, this.locale())),
+      })
+      return { root: date, focusTarget: date, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
+    }
+    if (primitive === 'time-picker') {
+      const options: TDesignSelectOption<string>[] = []
+      for (let hour = 0; hour < 24; hour += 1) for (let minute = 0; minute < 60; minute += 15) {
+        const value = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+        options.push({ label: value, value })
+      }
+      const time = createTDesignSelect(this.document, this.portalHost, options, {
+        id, label: field.label ?? field.path.at(-1) ?? 'Time',
+        placeholder: productLocale(this.locale()) === 'zh-CN' ? '选择时间' : 'Select time',
+        value: typeof field.value === 'string' ? field.value : undefined,
+        disabled: field.disabled,
+        clearable: true,
+        onChange: value => onDraft(value, validateHostFormValue(field, value, this.locale())),
+      })
+      time.classList.add('cxf-time-select')
+      setCommonControlState(time, field, id)
+      time.dataset.hostFormPrimitive = primitive
+      return { root: time, focusTarget: time, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
+    }
+    if (primitive === 'color-picker') {
+      const root = this.document.createElement('div')
+      root.className = 'cxf-color-control'
+      // This is a semantic pair (palette + editable HEX value), not an
+      // additional field chrome. Keep the primitive marker on the editable
+      // TDesign input so validation and ARIA feedback target it.
+      root.dataset.hostFormComposite = primitive
+      const palette: readonly TDesignSelectOption<string>[] = [
+        { label: '#3B82F6', value: '#3B82F6' }, { label: '#10B981', value: '#10B981' },
+        { label: '#F59E0B', value: '#F59E0B' }, { label: '#EF4444', value: '#EF4444' },
+        { label: '#8B5CF6', value: '#8B5CF6' }, { label: '#64748B', value: '#64748B' },
+      ]
+      const current = typeof field.value === 'string' ? field.value.toUpperCase() : ''
+      const picker = createTDesignSelect(this.document, this.portalHost, palette, {
+        id: `${id}-palette`, label: field.label ?? field.path.at(-1) ?? 'Color',
+        placeholder: productLocale(this.locale()) === 'zh-CN' ? '选择颜色' : 'Choose color',
+        value: palette.some(option => option.value === current) ? current : undefined,
+        disabled: field.disabled,
+        clearable: false,
+        onChange: value => {
+          const next = value ?? ''
+          hex.setAttribute('value', next)
+          setTDesignProps(hex, { value: next, defaultValue: next })
+          preview.style.setProperty('--cxf-color', next)
+          onDraft(next, validateHostFormValue(field, next, this.locale()))
+        },
+      })
+      const hex = createTDesignElement(this.document, 't-input', primitive)
+      hex.id = id
+      hex.tabIndex = field.disabled ? -1 : 0
+      setTDesignProps(hex, {
+        value: current, defaultValue: current, disabled: field.disabled, placeholder: '#RRGGBB',
+        onChange: (next: string) => {
+          const normalized = next.trim().toUpperCase()
+          preview.style.setProperty('--cxf-color', /^#[\dA-F]{6}$/u.test(normalized) ? normalized : 'transparent')
+          onDraft(normalized, validateHostFormValue(field, normalized, this.locale()))
+        },
+      })
+      const preview = this.document.createElement('span')
+      preview.className = 'cxf-color-swatch'
+      preview.setAttribute('aria-hidden', 'true')
+      preview.style.setProperty('--cxf-color', /^#[\dA-F]{6}$/u.test(current) ? current : 'transparent')
+      root.append(picker, hex, preview)
+      return { root, focusTarget: hex, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
     }
     if (primitive === 'select') {
       const select = createTDesignSelect<CordisXJsonScalar>(this.document, this.portalHost, field.choices!, {
@@ -453,33 +756,49 @@ export class HostFormAdapter {
       })
       return { root: control, focusTarget: control, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
     }
+    if (primitive === 'slider') {
+      const root = this.document.createElement('div')
+      root.className = 'cxf-slider-control'
+      root.dataset.hostFormComposite = primitive
+      const value = typeof field.value === 'number' ? field.value : field.min ?? 0
+      const slider = createTDesignElement(this.document, 't-slider', primitive)
+      const numeric = createTDesignElement(this.document, 't-input-number', primitive)
+      slider.tabIndex = field.disabled ? -1 : 0
+      numeric.tabIndex = field.disabled ? -1 : 0
+      slider.setAttribute('role', 'slider')
+      slider.setAttribute('aria-valuenow', String(value))
+      slider.setAttribute('aria-valuemin', String(field.min ?? 0))
+      slider.setAttribute('aria-valuemax', String(field.max ?? 100))
+      if (field.required) slider.setAttribute('aria-required', 'true')
+      if (field.disabled) slider.setAttribute('aria-disabled', 'true')
+      const apply = (next: number | undefined): void => {
+        const resolved = next ?? value
+        slider.setAttribute('aria-valuenow', String(resolved))
+        setTDesignProps(slider, { value: resolved, defaultValue: resolved })
+        setTDesignProps(numeric, { value: resolved, defaultValue: resolved })
+        onDraft(resolved, validateHostFormValue(field, resolved, this.locale()))
+      }
+      setTDesignProps(slider, {
+        value, defaultValue: value, min: field.min ?? 0, max: field.max ?? 100, step: field.step ?? 1, disabled: field.disabled,
+        onChange: (next: number) => apply(next),
+      })
+      setTDesignProps(numeric, {
+        value, defaultValue: value, min: field.min, max: field.max, step: field.step, disabled: field.disabled,
+        placeholder: managerCopy(this.locale(), 'form.text-placeholder'),
+        onChange: (next: number | undefined) => apply(next),
+      })
+      root.append(slider, numeric)
+      return { root, focusTarget: slider, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
+    }
     const tag = primitive === 'textarea' || primitive === 'json-textarea' ? 't-textarea'
       : primitive === 'number-input' ? 't-input-number'
-        : primitive === 'slider' ? 't-slider'
-          : 't-input'
+        : 't-input'
     const input = createTDesignElement(this.document, tag, primitive)
     input.classList.toggle('cxf-textarea', primitive === 'textarea' || primitive === 'json-textarea')
     input.classList.toggle('cxf-json', primitive === 'json-textarea')
     input.tabIndex = field.disabled ? -1 : 0
     setCommonControlState(input, field, id)
-    if (primitive === 'slider') {
-      const value = typeof field.value === 'number' ? field.value : field.min ?? 0
-      input.setAttribute('role', 'slider')
-      input.setAttribute('aria-valuenow', String(value))
-      input.setAttribute('aria-valuemin', String(field.min ?? 0))
-      input.setAttribute('aria-valuemax', String(field.max ?? 100))
-      setTDesignProps(input, {
-        value,
-        min: field.min ?? 0,
-        max: field.max ?? 100,
-        step: field.step ?? 1,
-        disabled: field.disabled,
-        onChange: (next: number) => {
-          input.setAttribute('aria-valuenow', String(next))
-          onDraft(next, validateHostFormValue(field, next, this.locale()))
-        },
-      })
-    } else if (primitive === 'number-input') {
+    if (primitive === 'number-input') {
       setTDesignProps(input, {
         value: typeof field.value === 'number' ? field.value : undefined,
         defaultValue: typeof field.value === 'number' ? field.value : undefined,
@@ -515,11 +834,31 @@ export class HostFormAdapter {
     return { root: input, focusTarget: input, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
   }
 
-  button(label: string, options: { readonly type?: 'button' | 'submit'; readonly variant?: 'default' | 'primary'; readonly tone?: 'default' | 'danger' } = {}): TDesignButtonElement {
+  button(label: string, options: {
+    readonly type?: 'button' | 'submit'
+    readonly variant?: 'default' | 'primary'
+    readonly tone?: 'default' | 'danger'
+    readonly icon?: CordisXConfigFormIcon
+    readonly density?: 'icon' | 'icon-label'
+    readonly action?: 'restore-default' | 'undo' | 'save'
+  } = {}): TDesignButtonElement {
     const button = createTDesignButton(this.document, label, options)
     button.className = 'cxf-button cxf-tdesign-control'
     button.dataset.variant = options.variant ?? 'default'
     button.dataset.tone = options.tone ?? 'default'
+    button.dataset.density = options.density ?? 'icon-label'
+    if (options.action !== undefined) button.dataset.hostFormAction = options.action
+    const icon = options.icon ?? (options.action === 'save' ? 'host:save' : options.action === undefined ? undefined : 'host:reset')
+    if (icon !== undefined) {
+      button.dataset.hostFormActionIcon = icon
+      // The icon remains Host-owned and decorative. TDesign keeps the button
+      // chrome and keyboard behavior; no plugin SVG or component instance is
+      // projected into the control.
+      const glyph = createHostSurfaceIcon(this.document, icon)
+      glyph.classList.add('cxf-form-icon')
+      glyph.setAttribute('slot', 'icon')
+      button.append(glyph)
+    }
     return button
   }
 

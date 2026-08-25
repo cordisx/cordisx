@@ -366,6 +366,13 @@ type CopyKey =
   | 'form.empty-no-schema'
   | 'form.empty-no-fields'
   | 'form.restore-default'
+  | 'form.field-actions'
+  | 'form.use-default'
+  | 'form.use-default-unavailable'
+  | 'form.rollback-field'
+  | 'form.copy-path'
+  | 'form.path-copied'
+  | 'form.path-copy-unavailable'
   | 'form.undo-changes'
   | 'form.save-configuration'
   | 'form.configuration-saved'
@@ -732,6 +739,13 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'form.empty-no-schema': { en: 'This plugin does not provide editable settings.', 'zh-CN': '此插件未提供可编辑设置。' },
   'form.empty-no-fields': { en: 'This plugin has no editable settings.', 'zh-CN': '此插件没有可编辑设置。' },
   'form.restore-default': { en: 'Restore default', 'zh-CN': '恢复默认值' },
+  'form.field-actions': { en: 'Field actions', 'zh-CN': '字段操作' },
+  'form.use-default': { en: 'Use default value', 'zh-CN': '使用默认值' },
+  'form.use-default-unavailable': { en: 'No default value is available', 'zh-CN': '此字段没有可用默认值' },
+  'form.rollback-field': { en: 'Revert field change', 'zh-CN': '回滚此字段修改' },
+  'form.copy-path': { en: 'Copy configuration path', 'zh-CN': '复制配置路径' },
+  'form.path-copied': { en: 'Path copied', 'zh-CN': '已复制路径' },
+  'form.path-copy-unavailable': { en: 'Clipboard unavailable', 'zh-CN': '剪贴板不可用' },
   'form.undo-changes': { en: 'Undo changes', 'zh-CN': '撤销更改' },
   'form.save-configuration': { en: 'Save configuration', 'zh-CN': '保存配置' },
   'form.configuration-saved': { en: 'Configuration saved', 'zh-CN': '配置已保存' },

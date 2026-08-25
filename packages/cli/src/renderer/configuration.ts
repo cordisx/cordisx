@@ -2,6 +2,9 @@ import { Context, Service, type Disposable } from '@deepseek-ai/cordis'
 import type {
   CordisXConfigApplies,
   CordisXConfigAppliesInput,
+  CordisXConfigFormActionIcons,
+  CordisXConfigFormGroupSnapshot,
+  CordisXConfigFormIcon,
   CordisXConfigFieldController,
   CordisXConfigFieldPath,
   CordisXConfigFieldSnapshot,
@@ -38,6 +41,16 @@ interface SchemaNode {
     readonly role?: string
     readonly extra?: {
       readonly label?: string | Readonly<Record<string, string>>
+      readonly cordisxForm?: {
+        readonly icon?: string
+        readonly group?: {
+          readonly id?: string
+          readonly title?: string | Readonly<Record<string, string>>
+          readonly description?: string | Readonly<Record<string, string>>
+          readonly icon?: string
+        }
+        readonly actions?: { readonly save?: string; readonly reset?: string }
+      }
     }
     readonly description?: string | Readonly<Record<string, string>>
     readonly hidden?: boolean
@@ -85,6 +98,7 @@ export interface ManagerPluginConfigSnapshot {
   readonly value: unknown
   readonly fields: readonly CordisXConfigFieldSnapshot[]
   readonly secrets: readonly { readonly path: CordisXConfigFieldPath; readonly set: boolean }[]
+  readonly actionIcons?: CordisXConfigFormActionIcons
 }
 
 export interface ConfigCandidate {
@@ -249,6 +263,41 @@ function choices(schema: SchemaNode): readonly { readonly label: string; readonl
   return result
 }
 
+const FORM_ICONS = new Set<CordisXConfigFormIcon>([
+  'host:calendar', 'host:clock', 'host:palette', 'host:tags', 'host:folder',
+  'host:key', 'host:settings', 'host:info', 'host:files', 'host:save', 'host:reset',
+])
+
+function formIcon(value: unknown): CordisXConfigFormIcon | undefined {
+  return typeof value === 'string' && FORM_ICONS.has(value as CordisXConfigFormIcon)
+    ? value as CordisXConfigFormIcon
+    : undefined
+}
+
+function formGroup(schema: SchemaNode, locale: string): CordisXConfigFormGroupSnapshot | undefined {
+  const group = schema.meta?.extra?.cordisxForm?.group
+  if (group?.id === undefined || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(group.id)) return undefined
+  const title = localizedText(group.title, locale)
+  const description = localizedText(group.description, locale)
+  const icon = formIcon(group.icon)
+  return {
+    id: group.id,
+    ...(title === undefined ? {} : { title }),
+    ...(description === undefined ? {} : { description }),
+    ...(icon === undefined ? {} : { icon }),
+  }
+}
+
+function actionIcons(schema: SchemaNode | undefined): CordisXConfigFormActionIcons | undefined {
+  const actions = schema?.meta?.extra?.cordisxForm?.actions
+  const save = formIcon(actions?.save)
+  const reset = formIcon(actions?.reset)
+  return save === undefined && reset === undefined ? undefined : {
+    ...(save === undefined ? {} : { save }),
+    ...(reset === undefined ? {} : { reset }),
+  }
+}
+
 function fields(
   schema: SchemaNode | undefined,
   raw: unknown,
@@ -267,6 +316,15 @@ function fields(
   const label = localizedText(schema.meta?.extra?.label, locale)
   const description = localizedText(schema.meta?.description, locale)
   const fieldChoices = choices(schema)
+  const arrayChoices = schema.type === 'array' && schema.inner !== undefined ? choices(schema.inner) : undefined
+  const fieldOptions = fieldChoices ?? arrayChoices
+  const arrayItemType = schema.type === 'array' && ['string', 'number', 'natural'].includes(schema.inner?.type ?? '')
+    ? schema.inner?.type as 'string' | 'number' | 'natural'
+    : undefined
+  const icon = formIcon(schema.meta?.extra?.cordisxForm?.icon)
+  const group = formGroup(schema, locale)
+  const hasDefault = Object.hasOwn(schema.meta ?? {}, 'default')
+  const defaultValue = hasDefault && !sensitive ? immutable(ownValue(resolved, path)) : undefined
   return [{
     namespace,
     path,
@@ -275,12 +333,17 @@ function fields(
     ...(label === undefined ? {} : { label }),
     ...(description === undefined ? {} : { description }),
     value: sensitive ? undefined : immutable(hasOwnPath(raw, path) ? ownValue(raw, path) : ownValue(resolved, path)),
+    ...(hasDefault ? { hasDefault: true } : {}),
+    ...(hasDefault && !sensitive ? { defaultValue } : {}),
     disabled: schema.meta?.disabled === true || sensitive,
     required: schema.meta?.required === true,
     ...(schema.meta?.min === undefined ? {} : { min: schema.meta.min }),
     ...(schema.meta?.max === undefined ? {} : { max: schema.meta.max }),
     ...(schema.meta?.step === undefined ? {} : { step: schema.meta.step }),
-    ...(fieldChoices === undefined ? {} : { choices: fieldChoices }),
+    ...(fieldOptions === undefined ? {} : { choices: fieldOptions }),
+    ...(arrayItemType === undefined ? {} : { arrayItemType }),
+    ...(icon === undefined ? {} : { icon }),
+    ...(group === undefined ? {} : { group }),
   }]
 }
 
@@ -437,6 +500,7 @@ export class PluginConfigurationRegistry {
     const schemastery = record.schema !== undefined
       && record.schema['~standard'].vendor === 'schemastery'
       && typeof record.schema.toJSON === 'function'
+    const descriptorActionIcons = actionIcons(record.schema)
     return {
       namespace: record.namespace,
       schemaKind: record.schema === undefined ? 'none' : schemastery ? 'schemastery' : 'standard',
@@ -453,6 +517,7 @@ export class PluginConfigurationRegistry {
         locale,
       ) : [],
       secrets: record.secretPaths.map(path => ({ path, set: false })),
+      ...(descriptorActionIcons === undefined ? {} : { actionIcons: descriptorActionIcons }),
     }
   }
 

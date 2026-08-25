@@ -194,6 +194,10 @@ describe('Manager extension point catalog', () => {
       expect(panel.querySelector('.cxm-usage-item .cxm-plugin-name')?.textContent).toBe('Showcase')
       expect(panel.querySelector('.cxm-plugin-description')?.textContent).toBe('演示提交前刷新操作。')
       expect(panel.querySelector('.cxm-usage-item .cxm-catalog-id')?.textContent).toBe('showcase')
+      const policy = panel.querySelector<HTMLElement>('t-select.cxm-usage-policy-select')
+      expect(policy).not.toBeNull()
+      expect(policy?.classList.contains('cxm-source-input')).toBe(false)
+      expect(policy?.getAttribute('role')).toBe('combobox')
       const contribution = panel.querySelector<HTMLElement>('[data-contribution-id="submit-before"]')!
       expect(contribution.querySelector('.cxm-resource-title')?.textContent).toBe('提交前刷新')
       expect(contribution.querySelector('.cxm-resource-description')?.textContent).toBe('在提交前刷新当前数据。 · 已渲染')
@@ -201,6 +205,8 @@ describe('Manager extension point catalog', () => {
       expect(contribution.querySelector('.cxm-slot-card, .cxm-kind-badge, .cxm-chevron')).toBeNull()
       const styles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
       expect(styles).toContain('.cxm-usage-item { padding: 12px 2px; }')
+      expect(styles).toContain('.cxm-usage-policy-select { inline-size: 100%; min-inline-size: 0; }')
+      expect(styles).not.toContain('.cxm-usage-header .cxm-source-input')
       expect(styles).toContain('.cxm-resource-row + .cxm-resource-row { border-top:')
       expect(styles).toContain('.cxm-resource-id { grid-column: 2; grid-row: 1 / span 2;')
 

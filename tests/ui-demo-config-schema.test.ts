@@ -139,6 +139,7 @@ describe('UI demo Config Schemas', () => {
       releaseTrack: 'stable',
       approvalMode: 'manual',
       audienceTags: ['design', 'research'],
+      quickLabels: ['weekly', 'planning'],
       notificationRules: [{ destination: 'Daily summary', enabled: true }],
       appearance: { density: 'comfortable', showActivity: true },
       referenceCode: 'DEMO-NORTHSTAR-01',
@@ -163,10 +164,17 @@ describe('UI demo Config Schemas', () => {
     expect(enField('backgroundSync')).toMatchObject({ label: 'Background sync', role: 'switch' })
     expect(enField('releaseTrack')).toMatchObject({ label: 'Release track', choices: [{ label: 'stable', value: 'stable' }, { label: 'preview', value: 'preview' }, { label: 'early-access', value: 'early-access' }] })
     expect(enField('approvalMode')).toMatchObject({ label: 'Approval mode', role: 'radio' })
-    expect(enField('preferredReviewDate')).toMatchObject({ label: 'Preferred review date', role: 'date' })
-    expect(enField('dailyQuietTime')).toMatchObject({ label: 'Daily quiet time', role: 'time' })
-    expect(enField('accentColor')).toMatchObject({ label: 'Accent color', role: 'color' })
-    expect(enField('audienceTags')).toMatchObject({ label: 'Audience tags', type: 'array', role: 'multi-select', min: 1, max: 5 })
+    expect(enField('preferredReviewDate')).toMatchObject({ label: 'Preferred review date', role: 'date', icon: 'host:calendar', group: { id: 'schedule', title: 'Schedule' } })
+    expect(enField('dailyQuietTime')).toMatchObject({ label: 'Daily quiet time', role: 'time', icon: 'host:clock' })
+    expect(enField('accentColor')).toMatchObject({ label: 'Accent color', role: 'color', icon: 'host:palette' })
+    expect(enField('audienceTags')).toMatchObject({
+      label: 'Audience tags', type: 'array', role: 'multi-select', min: 1, max: 5,
+      choices: [
+        { label: 'design', value: 'design' }, { label: 'research', value: 'research' },
+        { label: 'operations', value: 'operations' }, { label: 'community', value: 'community' },
+      ],
+    })
+    expect(enField('quickLabels')).toMatchObject({ label: 'Quick labels', type: 'array', arrayItemType: 'string', max: 6 })
     expect(enField('notificationRules')).toMatchObject({ label: 'Notification rules', type: 'array', min: 1, max: 4 })
     expect(enField('appearance.density')).toMatchObject({ label: 'Display density' })
     expect(enField('appearance.showActivity')).toMatchObject({ label: 'Show recent activity' })
