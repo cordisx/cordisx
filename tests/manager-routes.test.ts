@@ -167,7 +167,7 @@ describe('Manager route and page catalog', () => {
       expect(enPanel.querySelector('[data-route-product-row="demo:legacy"] .cxc-description')?.textContent).toBe('No description provided')
 
       const styles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
-      expect(styles).toContain('repeat(auto-fill, minmax(min(100%, 220px), 360px))')
+      expect(styles).toContain('repeat(auto-fit, minmax(min(100%, 220px), 1fr))')
       expect(styles).toContain('.cxc-machine-id')
     } finally {
       dispose()

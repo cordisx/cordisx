@@ -152,7 +152,7 @@ describe('Manager extension point catalog', () => {
       expect(styles).toContain('.cxc-list {')
       expect(styles).toContain('.cxc-status {')
       expect(styles).toContain('user-select: text')
-      expect(styles).toContain('repeat(auto-fill, minmax(min(100%, 220px), 360px))')
+      expect(styles).toContain('repeat(auto-fit, minmax(min(100%, 220px), 1fr))')
 
       pending.click()
       expect(dom.window.document.querySelector('[data-extension-point-detail-tab="diagnostics"]')?.getAttribute('aria-selected')).toBe('true')

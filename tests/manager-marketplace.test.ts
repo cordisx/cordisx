@@ -208,6 +208,7 @@ describe('Manager Marketplace product list', () => {
       expect(tools.querySelector('.cxm-toolbar > .cxc-search [data-collection-search="marketplace"]')).not.toBeNull()
       expect(tools.querySelector('.cxm-toolbar > [data-marketplace-source-menu]')).not.toBeNull()
       expect(tools.querySelector('.cxm-marketplace-filter-row [data-marketplace-certified-only]')).not.toBeNull()
+      expect(tools.querySelector('.cxm-marketplace-filter-row [data-marketplace-official-only]')).not.toBeNull()
       expect(results.contains(tools)).toBe(false)
       expect([...dom.window.document.querySelectorAll('a')].some(link => link.textContent?.includes('插件商店文档'))).toBe(false)
       expect(dom.window.document.body.textContent).not.toContain('商店收录、schema 校验和页面展示都不代表')
@@ -225,7 +226,7 @@ describe('Manager Marketplace product list', () => {
 
       const styles = [...dom.window.document.querySelectorAll('style')].map(item => item.textContent ?? '').join('\n')
       expect(styles).toContain('.cxc-primary {')
-      expect(styles).toContain('repeat(auto-fill, minmax(min(100%, 220px), 360px))')
+      expect(styles).toContain('repeat(auto-fit, minmax(min(100%, 220px), 1fr))')
       expect(styles).toContain('.cxc-card:focus-within .cxc-actions')
       expect(styles).toContain('.cxm-content[data-marketplace-discovery="true"] { overflow: hidden; }')
       expect(styles).toContain('.cxm-marketplace-results { min-width: 0; min-height: 0; flex: 1 1 auto;')

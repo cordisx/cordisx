@@ -83,6 +83,7 @@ describe('settings navigation demo bundle', () => {
     const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-page="settings-tab-demo:navigation"]')!
     expect(page.closest('[data-manager-content-root]')).not.toBeNull()
     expect(dom.window.document.querySelector('.cxm-heading-leading-stack [data-host-icon]')?.getAttribute('data-host-icon')).toBe('host:settings')
+    expect(dom.window.document.getElementById('cordisx-manager-style')?.textContent).toContain('grid-template-columns: max-content minmax(0, 1fr)')
     expect(page.querySelector('[data-settings-navigation-demo-body-title]')?.textContent).toBe('Plugin settings content')
     expect(page.querySelector<HTMLInputElement>('[data-settings-navigation-demo-focus]')?.value).toBe('CordisX')
     expect(item()?.getAttribute('aria-current')).toBe('page')
