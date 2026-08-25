@@ -355,7 +355,7 @@ describe('Manager plugin card actions', () => {
       menuTrigger().click()
       popup().querySelector<HTMLButtonElement>('[data-collection-action="diagnostics"]')!.click()
       await settle()
-      expect(dom.window.document.querySelector('[data-manager-page-route="plugin:base:runtime"]')).not.toBeNull()
+      expect(dom.window.document.querySelector('[data-manager-page-route="plugin:base:logs"]')).not.toBeNull()
       expect(dom.window.document.querySelector('[data-plugin-card="base"]')).toBeNull()
       expect(primary.isConnected).toBe(false)
     } finally {
@@ -365,7 +365,7 @@ describe('Manager plugin card actions', () => {
     }
   })
 
-  it('labels unavailable package operations without exposing implementation details', () => {
+  it('hides unavailable package operations without exposing implementation details', () => {
     const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
     const state = snapshot()
     state.plugins[0] = { ...state.plugins[0]!, package: undefined }
@@ -379,10 +379,7 @@ describe('Manager plugin card actions', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-menu="base"] .cxc-menu-trigger')!.click()
       const popup = dom.window.document.querySelector<HTMLElement>('body > .cxc-menu-popup')!
       for (const action of ['share', 'source', 'uninstall'] as const) {
-        const item = popup.querySelector<HTMLButtonElement>(`[data-collection-action="${action}"]`)!
-        expect(item.disabled).toBe(true)
-        expect(item.getAttribute('aria-disabled')).toBe('true')
-        expect(item.getAttribute('aria-description')).toBe('Currently unavailable')
+        expect(popup.querySelector(`[data-collection-action="${action}"]`)).toBeNull()
       }
       expect(popup.querySelector<HTMLButtonElement>('[data-collection-action="diagnostics"]')!.disabled).toBe(false)
     } finally {

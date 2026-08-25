@@ -3530,7 +3530,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   if (!['about', 'extension-points', 'routes', 'plugins', 'marketplace', 'settings'].includes(managerTab)) throw new Error(`unknown manager tab: ${managerTab}`)
   const managerPlugin = parsed.values['manager-plugin']
   const managerDetailTab = parsed.values['manager-detail-tab']
-  if (managerDetailTab !== undefined && !['readme', 'config', 'permissions', 'runtime', 'extension-points', 'routes'].includes(managerDetailTab)) throw new Error(`unknown manager detail tab: ${managerDetailTab}`)
+  if (managerDetailTab !== undefined && !['readme', 'config', 'permissions', 'runtime', 'logs', 'extension-points', 'routes'].includes(managerDetailTab)) throw new Error(`unknown manager detail tab: ${managerDetailTab}`)
   const managerPermissionCapability = parsed.values['manager-permission-capability']
   if (managerPermissionCapability !== undefined && managerDetailTab !== 'permissions') throw new Error('--manager-permission-capability requires --manager-detail-tab permissions')
   const managerSettingsTab = parsed.values['manager-settings-tab']
@@ -3791,15 +3791,14 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         if (!(card instanceof HTMLElement) || card.hidden) throw new Error('Channel candidate card was not found after search')
         card.click()
         await nextPaint()
-        const configuration = document.querySelector('[data-host-form="channel-configuration"]')
+        const configuration = document.querySelector('[data-channel-configuration]')
         const tabs = [...document.querySelectorAll('[data-channel-detail-tab]')]
         document.querySelector('[data-channel-detail-tab="logs"]')?.click()
         await nextPaint()
-        const logsUnavailable = document.querySelector('[data-channel-logs="unavailable"]') !== null
+        const logsUnavailable = document.querySelector('[data-channel-logs="true"]') !== null
         document.querySelector('[data-channel-detail-tab="sessions"]')?.click()
         await nextPaint()
-        const sessionsUnavailable = document.querySelector('[data-channel-session-actions="unavailable"]') !== null
-        const readiness = document.querySelector('[data-channel-real-readiness="unavailable"]')
+        const sessionsUnavailable = document.querySelector('[data-channel-session-actions="true"]') !== null
         channelManagerFlow = {
           list: list !== null,
           create: create !== null,
@@ -3809,7 +3808,6 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           tabs: tabs.map(tab => tab.getAttribute('data-channel-detail-tab')),
           logsUnavailable,
           sessionsUnavailable,
-          readiness: readiness !== null,
           secretRendered: /secretRef|keychain:|host-secret:/iu.test(document.querySelector('[data-channel-manager]')?.outerHTML ?? ''),
         }
       }
@@ -4531,7 +4529,6 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       || channel.managerFlow.tabs?.join(',') !== 'configuration,logs,sessions'
       || channel.managerFlow.logsUnavailable !== true
       || channel.managerFlow.sessionsUnavailable !== true
-      || channel.managerFlow.readiness !== true
       || channel.managerFlow.secretRendered !== false)) {
       throw new Error(`Channel Manager flow smoke assertions failed: ${JSON.stringify(channel.managerFlow)}`)
     }

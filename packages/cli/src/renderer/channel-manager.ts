@@ -3,7 +3,7 @@ import type { CordisXConfigFieldSnapshot, CordisXPageMountContext } from '../con
 import { createHostCollection, HOST_COLLECTION_STYLES, type HostCollectionItem } from './host-collection.js'
 import { HOST_FORM_STYLES, HostFormAdapter } from './host-form.js'
 import { HostThemeProjection } from './host-theme.js'
-import { createHostSurfaceIcon } from './icons.js'
+import { createHostSurfaceIcon, createManagerIcon } from './icons.js'
 import { managerCopy } from './ui-copy.js'
 
 export type ChannelProductStatus = 'implemented' | 'verified' | 'experimental' | 'unavailable' | 'planned'
@@ -120,16 +120,18 @@ function projectionFor(service: object): ChannelManagerProjectionV1 {
 
 const CHANNEL_MANAGER_STYLES = String.raw`
   .cxc-channel-manager { min-width: 0; color: var(--cx-text); }
-  .cxc-channel-list-page { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 14px; height: clamp(20rem, 62vh, 38rem); min-height: 0; }
-  .cxc-channel-list-head, .cxc-channel-detail-head { display: grid; gap: 4px; }
-  .cxc-channel-list-head h2, .cxc-channel-detail-head h2, .cxc-channel-section h3 { margin: 0; color: var(--cx-text); }
-  .cxc-channel-list-head h2, .cxc-channel-detail-head h2 { font-size: 16px; }
-  .cxc-channel-list-head p, .cxc-channel-detail-head p, .cxc-channel-section p { margin: 0; color: var(--cx-muted); font-size: 11px; line-height: 1.5; }
+  .cxc-channel-list-page { display: grid; grid-template-rows: minmax(0, 1fr); height: clamp(20rem, 62vh, 38rem); min-height: 0; }
+  .cxc-channel-detail-head { display: grid; gap: 4px; }
+  .cxc-channel-detail-head h2, .cxc-channel-section h3 { margin: 0; color: var(--cx-text); }
+  .cxc-channel-detail-head h2 { font-size: 16px; }
+  .cxc-channel-detail-head p, .cxc-channel-section p { margin: 0; color: var(--cx-muted); font-size: 11px; line-height: 1.5; }
   .cxc-channel-list-collection { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr); min-height: 0; column-gap: 8px; }
   .cxc-channel-list-collection > .cxc-search { grid-column: 1; grid-row: 1; }
   .cxc-channel-list-collection > .cxc-list { grid-column: 1 / -1; grid-row: 2; }
   .cxc-channel-list-collection .cxc-list { min-height: 0; max-height: none; overflow: auto; padding-right: 3px; align-content: start; scrollbar-gutter: stable; }
-  .cxc-channel-create { grid-column: 2; grid-row: 1; white-space: nowrap; }
+  .cxc-channel-create { display: grid; grid-column: 2; grid-row: 1; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid var(--cx-border); border-radius: 9px; background: var(--cx-surface-raised); color: var(--cx-text); cursor: pointer; }
+  .cxc-channel-create:hover, .cxc-channel-create:focus-visible { border-color: var(--cx-primary); background: var(--cx-hover); outline: 2px solid var(--cx-focus); outline-offset: 2px; }
+  .cxc-channel-create .cxm-material-icon { width: 18px; height: 18px; }
   .cxc-channel-detail { display: grid; gap: 16px; min-width: 0; }
   .cxc-channel-detail-title-row { display: flex; align-items: flex-start; gap: 9px; min-width: 0; }
   .cxc-channel-back { display: grid; place-items: center; width: 28px; height: 28px; flex: none; margin-top: -3px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--cx-muted); cursor: pointer; }
@@ -141,7 +143,8 @@ const CHANNEL_MANAGER_STYLES = String.raw`
   .cxc-channel-tab:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: -2px; }
   .cxc-channel-panel { min-width: 0; }
   .cxc-channel-config-form { inline-size: 100%; margin-inline: 0; }
-  .cxc-channel-log-empty { display: grid; gap: 8px; max-width: 44rem; }
+  .cxc-channel-empty { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 11px 12px; border: 1px solid var(--cx-border); border-radius: 10px; background: var(--cx-surface-raised); color: var(--cx-muted); font-size: 12px; }
+  .cxc-channel-empty .cordisx-host-icon, .cxc-channel-empty .cordisx-host-icon svg { width: 18px; height: 18px; flex: none; }
   .cxc-channel-create-actions { display: flex; justify-content: flex-end; }
   .cxc-channel-section { display: grid; gap: 7px; min-width: 0; }
   .cxc-channel-section-head { display: grid; gap: 2px; }
@@ -151,7 +154,7 @@ const CHANNEL_MANAGER_STYLES = String.raw`
   @media (max-width: 520px) {
     .cxc-channel-list-page { height: clamp(18rem, 60vh, 34rem); }
     .cxc-channel-list-collection .cxc-list { grid-template-columns: minmax(0, 1fr); }
-    .cxc-channel-create { padding-inline: .55rem; }
+    .cxc-channel-create { width: 38px; }
   }
 `
 
@@ -394,10 +397,20 @@ function channelState(record: ChannelRecord): ChannelManagerAccountProjection['c
   return record.account?.connectionState ?? (record.connection.enabled ? 'unavailable' : 'disabled')
 }
 
-function channelHealth(record: ChannelRecord): string {
-  const state = channelState(record)
-  if (record.account === undefined) return `${state}; no launcher runtime snapshot`
-  return `${state}; inbound ${record.account.inbound.pending}; outbound ${record.account.outbound.pending}`
+function channelStateLabel(locale: string, state: ChannelManagerAccountProjection['connectionState']): string {
+  const values: Record<ChannelManagerAccountProjection['connectionState'], readonly [string, string]> = {
+    disabled: ['Disabled', '已停用'], starting: ['Starting', '启动中'], ready: ['Connected', '已连接'],
+    retrying: ['Retrying', '重试中'], unavailable: ['Unavailable', '不可用'], stopped: ['Stopped', '已停止'],
+  }
+  return values[state][locale.startsWith('zh') ? 1 : 0]
+}
+
+function conciseEmpty(document: Document, label: string, attribute: string): HTMLElement {
+  const root = document.createElement('div')
+  root.className = 'cxc-channel-empty'
+  root.dataset[attribute] = 'true'
+  root.append(createHostSurfaceIcon(document, 'host:info'), document.createTextNode(label))
+  return root
 }
 
 function accountItems(
@@ -416,20 +429,24 @@ function channelItem(
   const { id, connection, account } = record
   const state = account?.connectionState ?? (connection.enabled ? 'unavailable' : 'disabled')
   const description = record.candidate === true
-    ? 'Local candidate · adapter unavailable · no credentials'
-    : `${connection.adapterKind} · ${state} · ${channelHealth(record)}`
+    ? '等待连接'
+    : connection.adapterKind
   return {
     id,
     title: connection.ref.accountId,
-    description,
+    description: record.candidate === true ? description : connection.adapterKind,
     machineId: id,
     searchText: [connection.ref.adapterId, connection.ref.tenantId, connection.adapterKind, connection.transportMode, state],
     icon: () => createHostSurfaceIcon(document, state === 'ready' ? 'host:success' : 'host:layers'),
+    avatar: {
+      label: connection.ref.accountId,
+      badge: () => createHostSurfaceIcon(document, connection.adapterKind === 'feishu' ? 'host:layers' : 'host:info'),
+    },
+    statusPosition: 'card',
     status: {
-      label: state,
+      label: channelStateLabel(document.documentElement.lang || 'en', state),
       tone: statusTone(state),
-      detail: record.candidate === true ? 'Local candidate; no external configuration was written.'
-        : account === undefined ? channelHealth(record) : `${channelHealth(record)}; generation ${account.generation}`,
+      ...(record.candidate === true ? { detail: 'Local candidate; no external configuration was written.' } : {}),
     },
     ...(onOpen === undefined ? {} : { openLabel: 'Open channel details', onOpen: () => onOpen(record) }),
   }
@@ -465,36 +482,6 @@ function bindingItems(document: Document, projection: ChannelManagerProjectionV1
       detail: `route ${binding.routeId}`,
     },
   }))
-}
-
-function diagnosticItems(document: Document, projection: ChannelManagerProjectionV1): readonly HostCollectionItem[] {
-  return projection.diagnostics.map(diagnostic => ({
-    id: diagnostic.id,
-    title: diagnostic.id,
-    description: diagnostic.message,
-    icon: () => createHostSurfaceIcon(document, diagnostic.status === 'unavailable' ? 'host:warning' : 'host:info'),
-    status: { label: diagnostic.status, tone: statusTone(diagnostic.status), detail: diagnostic.message },
-  }))
-}
-
-function readonlyField(
-  forms: HostFormAdapter,
-  sectionRoot: HTMLElement,
-  id: string,
-  label: string,
-  value: string | boolean,
-  help?: string,
-): void {
-  const item = forms.item({ id, label, ...(help === undefined ? {} : { help }), fullWidth: true })
-  const field: CordisXConfigFieldSnapshot = {
-    namespace: 'channel-manager', path: [id], type: typeof value === 'boolean' ? 'boolean' : 'string',
-    ...(typeof value === 'boolean' ? { role: 'switch' } : {}),
-    value, disabled: true, required: false,
-  }
-  const control = forms.control(field, id, () => undefined)
-  forms.connect(item, control)
-  item.control.append(control.root)
-  sectionRoot.append(item.root)
 }
 
 export interface CordisXChannelManager {
@@ -546,13 +533,6 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       const page = document.createElement('section')
       page.className = 'cxc-channel-list-page'
       page.dataset.channelPage = 'list'
-      const head = document.createElement('header')
-      head.className = 'cxc-channel-list-head'
-      const title = document.createElement('h2')
-      title.textContent = managerCopy(locale, 'channel.title')
-      const description = document.createElement('p')
-      description.textContent = managerCopy(locale, 'channel.description')
-      head.append(title, description)
       const collection = createHostCollection(document, {
         id: 'channel-list',
         label: managerCopy(locale, 'channel.accounts'),
@@ -575,12 +555,16 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         noMatchesLabel: managerCopy(locale, 'channel.search.empty'),
       })
       collection.element.classList.add('cxc-channel-list-collection')
-      const create = forms.button(managerCopy(locale, 'channel.create'), { type: 'button', variant: 'primary' })
+      const create = document.createElement('button')
+      create.type = 'button'
       create.classList.add('cxc-channel-create')
       create.dataset.channelCreate = 'true'
+      create.setAttribute('aria-label', managerCopy(locale, 'channel.create.icon-label'))
+      create.title = managerCopy(locale, 'channel.create.icon-label')
+      create.append(createManagerIcon(document, 'marketplace-source-add'))
       create.addEventListener('click', () => { creating = true; render() })
       collection.element.append(create)
-      page.append(head, collection.element)
+      page.append(collection.element)
       content.replaceChildren(page)
       disposeCurrent = collection.dispose
     }
@@ -634,13 +618,12 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       forms.connect(platformItem, platformControl)
       platformItem.control.append(platformControl.root)
       configuration.content.append(nameItem.root, platformItem.root)
-      const notice = forms.alert(managerCopy(locale, 'channel.create.unavailable'), 'warning')
       const actions = document.createElement('div')
       actions.className = 'cxc-channel-create-actions'
       const submit = forms.button(managerCopy(locale, 'channel.create.save'), { type: 'submit', variant: 'primary' })
       submit.dataset.channelCreateSubmit = 'true'
       actions.append(submit)
-      form.append(configuration.root, notice, actions)
+      form.append(configuration.root, actions)
       form.addEventListener('submit', event => {
         event.preventDefault()
         const name = candidateName.trim()
@@ -660,41 +643,31 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     }
 
     const renderConfiguration = (record: ChannelRecord, panel: HTMLElement): void => {
-      const form = forms.form('channel-configuration')
-      form.classList.add('cxc-channel-config-form')
-      form.dataset.channelConfiguration = record.id
-      const config = forms.section(managerCopy(locale, 'channel.configuration'), managerCopy(locale, 'channel.configuration.description'))
-      const state = channelState(record)
-      readonlyField(forms, config.content, `channel-platform-${record.id}`, managerCopy(locale, 'channel.field.platform'), record.connection.adapterKind)
-      readonlyField(forms, config.content, `channel-transport-${record.id}`, managerCopy(locale, 'channel.field.transport'), record.connection.transportMode)
-      readonlyField(forms, config.content, `channel-enabled-${record.id}`, managerCopy(locale, 'channel.field.enabled'), record.connection.enabled)
-      readonlyField(forms, config.content, `channel-state-${record.id}`, managerCopy(locale, 'channel.field.status'), state)
-      readonlyField(forms, config.content, `channel-credential-${record.id}`, managerCopy(locale, 'channel.field.credentials'), record.connection.secretState, managerCopy(locale, 'channel.credentials.help'))
-      form.append(config.root, forms.note(managerCopy(locale, 'channel.configuration.unavailable')))
-      panel.append(form)
+      const configuration = document.createElement('section')
+      configuration.dataset.channelConfiguration = record.id
+      if (!projection.service.writable) {
+        configuration.append(conciseEmpty(document, managerCopy(locale, 'channel.configuration.unavailable'), 'channelConfigurationUnavailable'))
+        panel.append(configuration)
+        return
+      }
+      // A writable projection is the only point at which a Host-owned schema form is rendered.
+      // The current protocol intentionally does not expose secrets or raw adapter credentials here.
+      configuration.append(conciseEmpty(document, managerCopy(locale, 'channel.accounts.empty'), 'channelConfigurationEmpty'))
+      panel.append(configuration)
     }
 
     const renderLogs = (panel: HTMLElement): (() => void) => {
-      const empty = document.createElement('section')
-      empty.className = 'cxc-channel-log-empty'
-      empty.dataset.channelLogs = 'unavailable'
-      empty.append(forms.alert(managerCopy(locale, 'channel.logs.unavailable'), 'warning'))
-      empty.append(forms.note(managerCopy(locale, 'channel.logs.native-semantics')))
-      const diagnostics = section(document, managerCopy(locale, 'channel.diagnostics'), managerCopy(locale, 'channel.diagnostics.description'))
-      const collection = createHostCollection(document, {
-        id: 'channel-diagnostics', label: managerCopy(locale, 'channel.diagnostics'), items: diagnosticItems(document, projection),
-        search: { enabled: false, reason: 'Diagnostics are a fixed, small Host status catalog.' },
-        emptyLabel: managerCopy(locale, 'channel.diagnostics.empty'),
-      })
-      diagnostics.body.append(collection.element)
-      empty.append(diagnostics.root)
-      panel.append(empty)
-      return collection.dispose
+      panel.append(conciseEmpty(document, managerCopy(locale, 'channel.logs.unavailable'), 'channelLogs'))
+      return () => {}
     }
 
     const renderSessions = (record: ChannelRecord, panel: HTMLElement): (() => void) => {
       const matchingRoutes = projection.routes.filter(route => compositeRef(route.connection) === record.id)
       const matchingBindings = projection.bindings.filter(binding => compositeRef(binding.channel) === record.id)
+      if (matchingRoutes.length === 0 && matchingBindings.length === 0) {
+        panel.append(conciseEmpty(document, managerCopy(locale, 'channel.sessions.unavailable'), 'channelSessionActions'))
+        return () => {}
+      }
       const routes = section(document, managerCopy(locale, 'channel.routes'), managerCopy(locale, 'channel.routes.description'))
       const routeCollection = createHostCollection(document, {
         id: 'channel-routes', label: managerCopy(locale, 'channel.routes'), items: routeItems(document, { ...projection, routes: matchingRoutes }),
@@ -707,17 +680,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         search: { enabled: false, reason: 'This detail view only presents the selected channel.' }, emptyLabel: managerCopy(locale, 'channel.bindings.empty'),
       })
       bindings.body.append(bindingCollection.element)
-      const unavailable = forms.alert(managerCopy(locale, 'channel.sessions.unavailable'), 'warning')
-      unavailable.dataset.channelSessionActions = 'unavailable'
-      const readiness = forms.section(managerCopy(locale, 'channel.real-readiness'), managerCopy(locale, 'channel.real-readiness.description'))
-      readiness.root.dataset.channelRealReadiness = 'unavailable'
-      for (const [id, label, value] of [
-        ['app', managerCopy(locale, 'channel.field.platform'), managerCopy(locale, 'channel.real-readiness.app')],
-        ['events', managerCopy(locale, 'channel.real-readiness.events-label'), managerCopy(locale, 'channel.real-readiness.events')],
-        ['credentials', managerCopy(locale, 'channel.field.credentials'), managerCopy(locale, 'channel.real-readiness.credentials')],
-        ['adapter', managerCopy(locale, 'channel.real-readiness.adapter-label'), managerCopy(locale, 'channel.real-readiness.adapter')],
-      ] as const) readonlyField(forms, readiness.content, `channel-readiness-${id}-${record.id}`, label, value)
-      panel.append(unavailable, readiness.root, routes.root, bindings.root)
+      panel.append(routes.root, bindings.root)
       return () => { bindingCollection.dispose(); routeCollection.dispose() }
     }
 
@@ -742,7 +705,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       const title = document.createElement('h2')
       title.textContent = record.connection.ref.accountId
       const description = document.createElement('p')
-      description.textContent = `${record.connection.adapterKind} · ${channelHealth(record)}`
+      description.textContent = `${record.connection.adapterKind} · ${channelStateLabel(locale, channelState(record))}`
       titleCopy.append(title, description)
       titleRow.append(back, titleCopy)
       head.append(titleRow)

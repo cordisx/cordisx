@@ -747,7 +747,7 @@ describe('renderer bundle', () => {
     expect(overflow.getAttribute('aria-expanded')).toBe('true')
     expect(overflowMenu?.getAttribute('role')).toBe('menu')
     expect([...overflowMenu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []].map(item => [item.dataset.collectionAction, item.disabled])).toEqual([
-      ['share', true], ['source', true], ['diagnostics', false], ['uninstall', true],
+      ['diagnostics', false],
     ])
     overflowMenu?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(dom.window.document.querySelector('body > .cxc-menu-popup')).toBeNull()
@@ -933,20 +933,20 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('.cxm-readme h1')?.textContent).toBe('Slot Showcase')
     expect(managerModal?.textContent).toContain('结构化 UI 端到端演示插件')
     expect(managerModal?.textContent).not.toContain('插件配置')
-    expect(dom.window.document.querySelectorAll('[data-plugin-detail-tab]')).toHaveLength(6)
+    expect(dom.window.document.querySelectorAll('[data-plugin-detail-tab]')).toHaveLength(7)
     const pluginDetailTabs = [...dom.window.document.querySelectorAll<HTMLElement>('[data-plugin-detail-tab]')]
     expect(pluginDetailTabs.every(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('aria-hidden') === 'true')).toBe(true)
     expect(pluginDetailTabs.every(tab => tab.querySelector('.cxm-tab-icon svg') !== null)).toBe(true)
     expect(pluginDetailTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-material-icon'))).toEqual([
-      'document', 'configuration', 'permissions', 'runtime', 'outlets', 'routes',
+      'document', 'configuration', 'permissions', 'runtime', 'diagnostics', 'outlets', 'routes',
     ])
-    expect(pluginDetailTabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1, -1, -1, -1])
-    expect(pluginDetailTabs.map(tab => tab.textContent)).toEqual(['README', '配置管理', '权限', '运行状态', '扩展点位', '路由'])
+    expect(pluginDetailTabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1])
+    expect(pluginDetailTabs.map(tab => tab.textContent)).toEqual(['README', '配置管理', '权限', '运行状态', '日志与诊断', '扩展点位', '路由'])
     expectLocalTabLeadingSeat('[data-plugin-detail-tab]')
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
     expect(dom.window.document.activeElement?.getAttribute('data-plugin-detail-tab')).toBe('config')
-    expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-plugin-detail-tab]')].map(tab => tab.tabIndex)).toEqual([-1, 0, -1, -1, -1, -1])
+    expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-plugin-detail-tab]')].map(tab => tab.tabIndex)).toEqual([-1, 0, -1, -1, -1, -1, -1])
     expect(managerModal?.textContent).not.toContain('插件配置')
     const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="配置管理"]')
     const sessionField = configPanel?.querySelector<HTMLElement>('[data-config-path="sessionId"]')
@@ -1018,13 +1018,14 @@ describe('renderer bundle', () => {
     expect(dom.window.document.activeElement?.getAttribute('data-plugin-detail-tab')).toBe('routes')
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
     expect(dom.window.document.activeElement?.getAttribute('data-plugin-detail-tab')).toBe('runtime')
-    expect(managerModal?.textContent).toContain('服务: i18n, commands, slots, pages, routes')
+    expect(dom.window.document.querySelector('[data-plugin-runtime-status="slot-showcase"]')?.textContent).toContain('运行中')
     expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="运行状态"]')?.textContent).not.toContain('slot-showcase:main.analytics')
     expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="运行状态"]')?.textContent).not.toContain('controlled mount')
-    expect(managerHeadings()).toEqual(['运行状态', '本地化', '运行时详情'])
+    expect(managerHeadings()).toContain('运行状态')
     expect(breadcrumbLabels()).toEqual(['插件', 'Slot Showcase', '运行状态'])
-    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="运行状态"] .cxm-detail-id')?.textContent).toBe('slot-showcase')
+    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="运行状态"] .cxm-detail-id')).toBeNull()
     expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="运行状态"]')?.textContent?.match(/Slot Showcase/g) ?? []).toHaveLength(0)
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="logs"]')?.click()
     const platformDiagnostics = dom.window.document.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
     expect(platformDiagnostics?.open).toBe(false)
     expect(platformDiagnostics?.querySelector('summary')?.textContent).toBe('诊断')
@@ -1032,9 +1033,15 @@ describe('renderer bundle', () => {
       .toBe('配置: Schemastery · plugin-restart · 版本 0 · 最后可用 0 · 写入器 不可用')
     expect(platformDiagnostics?.textContent).toContain('current-connection-client-unavailable')
     expect(platformDiagnostics?.textContent).toContain('当前权限仅适用于 Host API 调用。')
-    expect(platformDiagnostics?.textContent).toContain('查看权限说明')
+    expect(platformDiagnostics?.textContent).not.toContain('查看权限说明')
 
-    dom.window.document.querySelector<HTMLButtonElement>('.cxm-plugin-runtime-action')?.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      key: 'Enter', bubbles: true, cancelable: true,
+    }))
+    await settle()
+    const runtimeAction = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-runtime-action="slot-showcase"]')
+    expect(runtimeAction).not.toBeNull()
+    runtimeAction?.click()
     for (let attempt = 0; attempt < 20 && runtime?.snapshot().plugins[0]?.status !== 'blocked'; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
@@ -1042,7 +1049,7 @@ describe('renderer bundle', () => {
     expect(JSON.parse(dom.window.localStorage.getItem('cordisx.manager.blockedPlugins.v1') ?? '[]')).toContain('slot-showcase')
     expect(runtime!.snapshot().commands).toEqual([])
     expect(dom.window.document.querySelector('.cordisx-nav-row')).toBeNull()
-    dom.window.document.querySelector<HTMLButtonElement>('.cxm-plugin-runtime-action')?.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-runtime-action="slot-showcase"]')?.click()
     await new Promise(resolve => setTimeout(resolve, 0))
     dom.window.document.querySelector<HTMLButtonElement>('[data-authorization-decision="allow"]')?.click()
     for (let attempt = 0; attempt < 20 && runtime?.snapshot().plugins[0]?.status !== 'active'; attempt += 1) {

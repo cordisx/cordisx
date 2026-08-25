@@ -383,7 +383,7 @@ describe('Platform permission presentation hierarchy', () => {
     }
   })
 
-  it('moves host connection and security engineering facts into collapsed runtime diagnostics', () => {
+  it('moves host connection and security engineering facts into collapsed logs and diagnostics', () => {
     const { dom, dispose } = install(snapshot())
     try {
       const permissions = openPluginTab(dom.window.document, 'empty', 'permissions')
@@ -391,7 +391,7 @@ describe('Platform permission presentation hierarchy', () => {
       expect(permissions.querySelector('[role="list"]')).toBeNull()
       expect(permissions.textContent).not.toContain('Codex Desktop')
 
-      const runtime = openPluginTab(dom.window.document, 'demo', 'runtime')
+      const runtime = openPluginTab(dom.window.document, 'demo', 'logs')
       const lifecycle = runtime.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="demo"]')
       expect(lifecycle?.open).toBe(false)
       expect(lifecycle?.querySelector('summary')?.textContent).toBe('运行详情 · 运行中')
@@ -404,7 +404,7 @@ describe('Platform permission presentation hierarchy', () => {
       expect(diagnostics?.textContent).toContain('二次连接 否')
       expect(diagnostics?.textContent).toContain('原始 bridge 暴露 否')
       expect(diagnostics?.textContent).toContain('当前权限仅适用于 Host API 调用。')
-      expect(diagnostics?.textContent).toContain('查看权限说明')
+      expect(diagnostics?.textContent).not.toContain('查看权限说明')
     } finally {
       dispose()
       dom.window.close()
@@ -414,7 +414,7 @@ describe('Platform permission presentation hierarchy', () => {
   it('localizes expanded runtime lifecycle and diagnostics chrome for English', () => {
     const { dom, dispose } = install(snapshot([], 'en'))
     try {
-      const runtime = openPluginTab(dom.window.document, 'demo', 'runtime')
+      const runtime = openPluginTab(dom.window.document, 'demo', 'logs')
       const lifecycle = runtime.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="demo"]')
       const diagnostics = runtime.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
       expect(lifecycle?.open).toBe(false)
@@ -427,7 +427,7 @@ describe('Platform permission presentation hierarchy', () => {
       diagnostics!.open = true
       expect([...diagnostics!.querySelectorAll('h3')].map(item => item.textContent)).toEqual(['Localization', 'Runtime details'])
       expect(diagnostics?.textContent).toContain('Permissions apply only to Host API calls.')
-      expect(diagnostics?.textContent).toContain('View permission documentation')
+      expect(diagnostics?.textContent).not.toContain('View permission documentation')
       expect(diagnostics?.textContent).not.toMatch(/[\u3400-\u9fff]/u)
     } finally {
       dispose()
