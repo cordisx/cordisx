@@ -26,6 +26,7 @@ import { createConfigBridgeHandler, type ConfigBridgeHandler } from '../launcher
 import { HostServiceConfigNarrowApi, type HostSecretState } from '../launcher/service-config.js'
 import { createServiceConfigBridgeHandler, type ServiceConfigBridgeHandler } from '../launcher/service-config-rpc.js'
 import { createChannelCredentialBridgeHandler, type ChannelCredentialBridgeHandler } from '../launcher/channel-credential-rpc.js'
+import { createChannelActionsBridgeHandler, type ChannelActionsBridgeHandler } from '../launcher/channel-actions-rpc.js'
 import { LauncherSecretStore } from '../launcher/secret-store.js'
 import { readServiceConfigState } from '../config/service-config.js'
 import {
@@ -299,6 +300,7 @@ async function runInjectedHost(input: {
   readonly configBridge?: ConfigBridgeHandler
   readonly serviceConfigBridge?: ServiceConfigBridgeHandler
   readonly channelCredentialBridge?: ChannelCredentialBridgeHandler
+  readonly channelActionsBridge?: ChannelActionsBridgeHandler
   readonly permissionPersistence?: PermissionPersistenceContext
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
   readonly executable?: string
@@ -326,6 +328,7 @@ async function runInjectedHost(input: {
     ...(input.configBridge === undefined ? {} : { configBridge: input.configBridge }),
     ...(input.serviceConfigBridge === undefined ? {} : { serviceConfigBridge: input.serviceConfigBridge }),
     ...(input.channelCredentialBridge === undefined ? {} : { channelCredentialBridge: input.channelCredentialBridge }),
+    ...(input.channelActionsBridge === undefined ? {} : { channelActionsBridge: input.channelActionsBridge }),
     ...(input.permissionPersistence === undefined ? {} : { permissionPersistence: input.permissionPersistence }),
     ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
     onStatus: message => input.stdout(`[cordisx] ${message}`),
@@ -542,6 +545,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   }
   const channelPlugin = composition.plugins.find(plugin => plugin.enabled && plugin.id === 'channel')
   const channelCredentialBridgeToken = channelPlugin === undefined ? undefined : randomBytes(32).toString('hex')
+  const channelActionsBridgeToken = channelPlugin === undefined ? undefined : randomBytes(32).toString('hex')
   let channelService: LocalChannelService | undefined
   let channelManager: ChannelManagerBundleProjection | undefined
   if (channelPlugin !== undefined) {
@@ -593,6 +597,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     },
     ...(channelManager === undefined ? {} : { channelManager }),
     ...(channelCredentialBridgeToken === undefined ? {} : { channelCredentialBridgeToken }),
+    ...(channelActionsBridgeToken === undefined ? {} : { channelActionsBridgeToken }),
   })
   const configBridge = rendererComposition.configBridgeToken === undefined
     ? undefined
@@ -658,6 +663,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         token: channelCredentialBridgeToken, profileId: selection.profileId,
         store: new LauncherSecretStore(), service: channelConfigApi,
       })
+  const channelActionsBridge = channelActionsBridgeToken === undefined || channelService === undefined
+    ? undefined
+    : createChannelActionsBridgeHandler({ token: channelActionsBridgeToken, api: channelService.manager })
   if (invocation.options.attach) {
     const debugPort = invocation.options.debugPort ?? composition.codex.debugPort
     if (invocation.options.dryRun) {
@@ -677,6 +685,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       ...(configBridge === undefined ? {} : { configBridge }),
       ...(serviceConfigBridge === undefined ? {} : { serviceConfigBridge }),
       ...(channelCredentialBridge === undefined ? {} : { channelCredentialBridge }),
+      ...(channelActionsBridge === undefined ? {} : { channelActionsBridge }),
       ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
       pluginLifecycle,
       debugPort,
@@ -735,6 +744,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     ...(configBridge === undefined ? {} : { configBridge }),
     ...(serviceConfigBridge === undefined ? {} : { serviceConfigBridge }),
     ...(channelCredentialBridge === undefined ? {} : { channelCredentialBridge }),
+    ...(channelActionsBridge === undefined ? {} : { channelActionsBridge }),
     ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
     pluginLifecycle,
     executable: plan.executable,

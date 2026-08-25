@@ -61,6 +61,11 @@ import {
   type ChannelCredentialBridgeHandler,
 } from './channel-credential-rpc.js'
 import {
+  CHANNEL_ACTIONS_BINDING,
+  CHANNEL_ACTIONS_RECEIVER,
+  type ChannelActionsBridgeHandler,
+} from './channel-actions-rpc.js'
+import {
   MAX_PERMISSION_REQUEST_BYTES,
   MAX_PERMISSION_REQUESTS,
   PERMISSION_BINDING,
@@ -549,6 +554,9 @@ interface InstalledScript {
   readonly credentialController?: AbortController
   readonly removeCredentialBindingListener?: () => void
   readonly credentialBindingInstalled: boolean
+  readonly actionsController?: AbortController
+  readonly removeActionsBindingListener?: () => void
+  readonly actionsBindingInstalled: boolean
   readonly permissionController?: AbortController
   readonly removePermissionBindingListener?: () => void
   readonly permissionBindingInstalled: boolean
@@ -634,6 +642,10 @@ async function sendChannelCredentialBindingResponse(session: CdpSession, payload
   await session.send('Runtime.evaluate', { expression: `void globalThis.${CHANNEL_CREDENTIAL_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`, allowUnsafeEvalBlockedByCSP: true })
 }
 
+async function sendChannelActionsBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
+  await session.send('Runtime.evaluate', { expression: `void globalThis.${CHANNEL_ACTIONS_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`, allowUnsafeEvalBlockedByCSP: true })
+}
+
 async function sendPermissionBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
   await session.send('Runtime.evaluate', {
     expression: `void globalThis.${PERMISSION_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
@@ -673,6 +685,7 @@ async function install(
   config?: ConfigBridgeHandler,
   serviceConfig?: ServiceConfigBridgeHandler,
   credential?: ChannelCredentialBridgeHandler,
+  actions?: ChannelActionsBridgeHandler,
   permission?: PermissionPersistenceContext,
   lifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime },
 ): Promise<InstalledScript> {
@@ -685,6 +698,7 @@ async function install(
   const configController = config === undefined ? undefined : new AbortController()
   const serviceConfigController = serviceConfig === undefined ? undefined : new AbortController()
   const credentialController = credential === undefined ? undefined : new AbortController()
+  const actionsController = actions === undefined ? undefined : new AbortController()
   const permissionController = permission === undefined ? undefined : new AbortController()
   const lifecycleController = lifecycle === undefined ? undefined : new AbortController()
   let removeBindingListener = (): void => {}
@@ -693,6 +707,7 @@ async function install(
   let removeConfigBindingListener = (): void => {}
   let removeServiceConfigBindingListener = (): void => {}
   let removeCredentialBindingListener = (): void => {}
+  let removeActionsBindingListener = (): void => {}
   let removePermissionBindingListener = (): void => {}
   let removeLifecycleBindingListener = (): void => {}
   let unregisterLifecycleSession = (): void => {}
@@ -705,6 +720,7 @@ async function install(
     if (config !== undefined) await session.send('Runtime.addBinding', { name: CONFIG_BINDING })
     if (serviceConfig !== undefined) await session.send('Runtime.addBinding', { name: SERVICE_CONFIG_BINDING })
     if (credential !== undefined) await session.send('Runtime.addBinding', { name: CHANNEL_CREDENTIAL_BINDING })
+    if (actions !== undefined) await session.send('Runtime.addBinding', { name: CHANNEL_ACTIONS_BINDING })
     if (permission !== undefined) await session.send('Runtime.addBinding', { name: PERMISSION_BINDING })
     if (lifecycle !== undefined) await session.send('Runtime.addBinding', { name: PLUGIN_LIFECYCLE_BINDING })
     let activeMarketplaceRequests = 0
@@ -885,6 +901,24 @@ async function install(
         })()
       })
     }
+    if (actions !== undefined) {
+      removeActionsBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
+        if (params.name !== CHANNEL_ACTIONS_BINDING || typeof params.payload !== 'string') return
+        const payload = params.payload
+        void (async () => {
+          let requestId = 'invalid'
+          try {
+            const raw = JSON.parse(payload) as { requestId?: unknown }
+            requestId = typeof raw.requestId === 'string' ? raw.requestId : requestId
+            if (actionsController?.signal.aborted === true) throw new Error('channel action bridge is closed')
+            const value = await actions.handle(raw)
+            await sendChannelActionsBindingResponse(session, { requestId, ok: true, value })
+          } catch {
+            await sendChannelActionsBindingResponse(session, { requestId, ok: false, code: 'channel-action-unavailable' }).catch(() => undefined)
+          }
+        })()
+      })
+    }
     let activePermissionRequests = 0
     if (permission !== undefined) {
       removePermissionBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
@@ -971,6 +1005,8 @@ async function install(
       serviceConfigBindingInstalled: serviceConfig !== undefined,
       ...(credentialController === undefined ? {} : { credentialController, removeCredentialBindingListener }),
       credentialBindingInstalled: credential !== undefined,
+      ...(actionsController === undefined ? {} : { actionsController, removeActionsBindingListener }),
+      actionsBindingInstalled: actions !== undefined,
       ...(permissionController === undefined ? {} : { permissionController, removePermissionBindingListener }),
       permissionBindingInstalled: permission !== undefined,
       ...(lifecycleController === undefined ? {} : { lifecycleController, removeLifecycleBindingListener, unregisterLifecycleSession }),
@@ -983,6 +1019,7 @@ async function install(
     configController?.abort()
     serviceConfigController?.abort()
     credentialController?.abort()
+    actionsController?.abort()
     permissionController?.abort()
     lifecycleController?.abort()
     removeBindingListener()
@@ -991,6 +1028,7 @@ async function install(
     removeConfigBindingListener()
     removeServiceConfigBindingListener()
     removeCredentialBindingListener()
+    removeActionsBindingListener()
     removePermissionBindingListener()
     removeLifecycleBindingListener()
     unregisterLifecycleSession()
@@ -1006,6 +1044,7 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.configController?.abort()
   installed.serviceConfigController?.abort()
   installed.credentialController?.abort()
+  installed.actionsController?.abort()
   installed.permissionController?.abort()
   installed.lifecycleController?.abort()
   installed.removeBindingListener()
@@ -1014,6 +1053,7 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.removeConfigBindingListener?.()
   installed.removeServiceConfigBindingListener?.()
   installed.removeCredentialBindingListener?.()
+  installed.removeActionsBindingListener?.()
   installed.removePermissionBindingListener?.()
   installed.removeLifecycleBindingListener?.()
   installed.unregisterLifecycleSession?.()
@@ -1040,6 +1080,9 @@ async function uninstall(installed: InstalledScript): Promise<void> {
       ...(installed.credentialBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: CHANNEL_CREDENTIAL_BINDING })]
         : []),
+      ...(installed.actionsBindingInstalled
+        ? [installed.session.send('Runtime.removeBinding', { name: CHANNEL_ACTIONS_BINDING })]
+        : []),
       ...(installed.permissionBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: PERMISSION_BINDING })]
         : []),
@@ -1064,6 +1107,7 @@ export interface WatchInjectionOptions {
   readonly configBridge?: ConfigBridgeHandler
   readonly serviceConfigBridge?: ServiceConfigBridgeHandler
   readonly channelCredentialBridge?: ChannelCredentialBridgeHandler
+  readonly channelActionsBridge?: ChannelActionsBridgeHandler
   readonly permissionPersistence?: PermissionPersistenceContext
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
 }
@@ -1102,6 +1146,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             options.configBridge,
             options.serviceConfigBridge,
             options.channelCredentialBridge,
+            options.channelActionsBridge,
             options.permissionPersistence,
             options.pluginLifecycle,
           )

@@ -80,6 +80,7 @@ import {
 } from './configuration.js'
 import { BrowserServiceConfigBridge } from './service-config-binding.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
+import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
 import type { HostServiceConfigDescriptor, HostServiceConfigMutation, HostServiceConfigMutationResult } from '../launcher/service-config.js'
 import { BindingPermissionPolicyStore } from './permission-binding.js'
 import { BrowserPluginLifecycleBridge } from './plugin-lifecycle-binding.js'
@@ -121,6 +122,7 @@ interface CordisXRuntimeMetadata {
   readonly configBridgeToken?: string
   readonly serviceConfigBridgeToken?: string
   readonly channelCredentialBridgeToken?: string
+  readonly channelActionsBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
   readonly pluginActivation?: CordisXPluginActivationRecordV1
   readonly initialRegistryEpoch?: number
@@ -390,6 +392,9 @@ async function start(
   const channelCredentialBridge = metadata.channelCredentialBridgeToken === undefined
     ? undefined
     : BrowserChannelCredentialBridge.connect(metadata.channelCredentialBridgeToken)
+  const channelActionsBridge = metadata.channelActionsBridgeToken === undefined
+    ? undefined
+    : BrowserChannelActionsBridge.connect(metadata.channelActionsBridgeToken)
   const lifecycleBridge = metadata.pluginLifecycleBridgeToken === undefined
     ? undefined
     : new BrowserPluginLifecycleBridge(metadata.pluginLifecycleBridgeToken, metadata.profileId, generation)
@@ -1903,6 +1908,9 @@ async function start(
           }),
           ...(channelCredentialBridge === undefined ? {} : {
             createCredentialedConnection: async input => await channelCredentialBridge.create(input),
+          }),
+          ...(channelActionsBridge === undefined ? {} : {
+            actions: { run: async (action, input) => await channelActionsBridge.run(action, input) },
           }),
         })
     await channelManagerFiber

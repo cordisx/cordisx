@@ -68,6 +68,8 @@ type CopyKey =
   | 'channel.status.outbound'
   | 'channel.status.generation'
   | 'channel.reconnect'
+  | 'channel.enable'
+  | 'channel.disable'
   | 'channel.reconnecting'
   | 'channel.reconnected'
   | 'channel.runtime.unavailable'
@@ -432,6 +434,8 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'channel.status.outbound': { en: 'Outbound pending', 'zh-CN': '待处理出站' },
   'channel.status.generation': { en: 'Service generation', 'zh-CN': '服务代次' },
   'channel.reconnect': { en: 'Reconnect', 'zh-CN': '重新连接' },
+  'channel.enable': { en: 'Enable', 'zh-CN': '启用' },
+  'channel.disable': { en: 'Disable', 'zh-CN': '停用' },
   'channel.reconnecting': { en: 'Reconnecting…', 'zh-CN': '正在重新连接…' },
   'channel.reconnected': { en: 'Reconnected', 'zh-CN': '已重新连接' },
   'channel.runtime.unavailable': { en: 'Runtime status is currently unavailable.', 'zh-CN': '运行状态当前不可用。' },

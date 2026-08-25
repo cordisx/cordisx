@@ -10,6 +10,10 @@ import type {
   HostServiceConfigMutation,
   HostServiceConfigMutationResult,
 } from '../launcher/service-config.js'
+import type {
+  ChannelManagerActionResult,
+  ChannelManagerRuntimeProjection,
+} from '../launcher/channel-manager-api.js'
 
 export type ChannelProductStatus = 'implemented' | 'verified' | 'experimental' | 'unavailable' | 'planned'
 
@@ -124,8 +128,14 @@ interface ChannelManagerState {
   readonly projection: ChannelManagerProjectionV1
   readonly serviceConfig?: ChannelManagerServiceConfigApi
   readonly createCredentialedConnection?: ChannelManagerServiceInput['createCredentialedConnection']
+  readonly actions?: ChannelManagerServiceInput['actions']
   readonly localConnections: ChannelManagerConnectionProjection[]
   readonly listeners: Set<() => void>
+}
+
+/** This renderer client can invoke only the launcher allowlist and receives only the redacted result projection. */
+export interface ChannelManagerActionsApi {
+  run(action: 'enable' | 'disable' | 'reconnect' | 'archive' | 'restore' | 'unbind', input: Record<string, unknown>): Promise<ChannelManagerActionResult>
 }
 
 const projections = new WeakMap<object, ChannelManagerState>()
@@ -392,6 +402,37 @@ function cloneProjection(projection: ChannelManagerProjectionV1): ChannelManager
   return normalizeProjection(JSON.parse(JSON.stringify(projection)) as unknown)
 }
 
+/** Merge a launcher action response into the existing renderer-safe product view. */
+function withRuntimeProjection(
+  base: ChannelManagerProjectionV1,
+  runtime: ChannelManagerRuntimeProjection | undefined,
+): ChannelManagerProjectionV1 {
+  if (runtime === undefined) return base
+  const accountKey = (item: { readonly ref: ChannelManagerConnectionProjection['ref'] }) => compositeRef(item.ref)
+  const updates = new Map(runtime.accounts.map(item => [accountKey(item), item]))
+  const bindingUpdates = new Map(runtime.bindings.map(item => [item.bindingId, item]))
+  return normalizeProjection({
+    ...base,
+    accounts: base.accounts.map(account => {
+      const update = updates.get(accountKey(account))
+      return update === undefined ? account : {
+        ...account,
+        adapterKind: update.adapterKind,
+        implementationStatus: update.implementationStatus,
+        connectionState: update.connectionState,
+        secretState: update.secretState,
+        generation: update.generation,
+        inbound: update.inbound,
+        outbound: update.outbound,
+      }
+    }),
+    bindings: base.bindings.map(binding => {
+      const update = bindingUpdates.get(binding.bindingId)
+      return update === undefined ? binding : { ...binding, state: update.state }
+    }),
+  })
+}
+
 function selector(value: string): string {
   return value === 'default' ? 'default' : value
 }
@@ -558,6 +599,7 @@ export interface ChannelManagerServiceInput {
     readonly secret: string
     readonly mutation: HostServiceConfigMutation
   }) => Promise<HostServiceConfigMutationResult>
+  readonly actions?: ChannelManagerActionsApi
 }
 
 /** Host-owned Channel settings renderer. Plugins can request the seat but never receive its DOM internals. */
@@ -571,6 +613,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       projection: normalizeProjection(wrapped.projection ?? EMPTY_PROJECTION),
       ...(wrapped.serviceConfig === undefined ? {} : { serviceConfig: wrapped.serviceConfig }),
       ...(wrapped.createCredentialedConnection === undefined ? {} : { createCredentialedConnection: wrapped.createCredentialedConnection }),
+      ...(wrapped.actions === undefined ? {} : { actions: wrapped.actions }),
       localConnections: [],
       listeners: new Set<() => void>(),
     }))
@@ -600,6 +643,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     const state = stateFor(this)
     const projection = state.projection
     const serviceConfig = state.serviceConfig
+    const actions = state.actions
     const locale = document.documentElement.lang || 'en'
     const theme = new HostThemeProjection(document)
     const root = document.createElement('div')
@@ -631,8 +675,22 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     let candidateNotifications = true
     let candidateSecret = ''
     let disposeCurrent = (): void => {}
+    let actionRuntime: ChannelManagerRuntimeProjection | undefined
+    let renderCurrent = (): void => {}
 
-    const records = (): readonly ChannelRecord[] => channelRecords(projectionFor(this))
+    const viewProjection = (): ChannelManagerProjectionV1 => withRuntimeProjection(projectionFor(this), actionRuntime)
+    const runAction = async (
+      action: 'enable' | 'disable' | 'reconnect' | 'archive' | 'restore' | 'unbind',
+      input: Record<string, unknown>,
+    ): Promise<ChannelManagerActionResult> => {
+      if (actions === undefined) throw new Error('channel-action-unavailable')
+      const result = await actions.run(action, input)
+      if (result.projection !== undefined) actionRuntime = result.projection
+      renderCurrent()
+      return result
+    }
+
+    const records = (): readonly ChannelRecord[] => channelRecords(viewProjection())
 
     const renderList = (): void => {
       disposeCurrent()
@@ -754,9 +812,10 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         void (async () => {
           const credentialedConnection = state.createCredentialedConnection
           const createFeishu = candidatePlatform === 'feishu'
+          const secret = candidateSecret
           candidateSecret = ''
           credential.value = ''
-          if (createFeishu && (candidateSecret === '' || credentialedConnection === undefined)) throw new Error('Host credential capture is unavailable')
+          if (createFeishu && (secret === '' || credentialedConnection === undefined)) throw new Error('Host credential capture is unavailable')
           return await serviceConfig.list().then(async descriptors => {
           const descriptor = descriptors.find(item => item.identity.pluginId === 'channel' && item.identity.serviceId === 'runtime')
           const raw = descriptor?.configuration
@@ -785,7 +844,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
             configuration: configuration as HostServiceConfigMutation['configuration'],
           }
           return createFeishu
-            ? await credentialedConnection!({ account: record.connection.ref, secret: candidateSecret, mutation })
+            ? await credentialedConnection!({ account: record.connection.ref, secret, mutation })
             : await serviceConfig.mutate(mutation)
           })
         })().then(result => {
@@ -813,7 +872,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     const renderConfiguration = (record: ChannelRecord, panel: HTMLElement): void => {
       const configuration = document.createElement('section')
       configuration.dataset.channelConfiguration = record.id
-      if (!projection.service.writable || serviceConfig === undefined) {
+      if (!viewProjection().service.writable || serviceConfig === undefined) {
         configuration.append(conciseEmpty(document, managerCopy(locale, 'channel.configuration.unavailable'), 'channelConfigurationUnavailable'))
         panel.append(configuration)
         return
@@ -847,8 +906,8 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         forms.connect(item, control)
         item.control.append(control.root)
         grid.append(item.root)
-        const actions = document.createElement('div')
-        actions.className = 'cxc-channel-create-actions'
+        const actionRow = document.createElement('div')
+        actionRow.className = 'cxc-channel-create-actions'
         const status = forms.note('')
         status.dataset.channelConfigurationStatus = 'true'
         const submit = forms.button(managerCopy(locale, 'form.save-configuration'), { type: 'submit', variant: 'primary' })
@@ -858,8 +917,8 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         let operation: 'save' | 'reconnect' = 'save'
         submit.addEventListener('click', () => { operation = 'save' })
         reconnect.addEventListener('click', () => { operation = 'reconnect'; form.requestSubmit() })
-        actions.append(status, reconnect, submit)
-        form.append(grid, actions)
+        actionRow.append(status, reconnect, submit)
+        form.append(grid, actionRow)
         form.addEventListener('submit', event => {
           event.preventDefault()
           const candidate = structuredClone(source) as { connections?: Array<Record<string, unknown>> }
@@ -874,9 +933,12 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
             identity: activeDescriptor.identity, scope: activeDescriptor.scope, expectedRevision: activeDescriptor.revision,
             configuration: candidate as HostServiceConfigMutation['configuration'],
           }
-          void serviceConfig.mutate(mutation).then(async result => {
+          const submitOperation = operation === 'reconnect' && actions !== undefined
+            ? runAction('reconnect', { ref: record.connection.ref })
+            : serviceConfig.mutate(mutation)
+          void submitOperation.then(async result => {
             if (!configuration.isConnected) return
-            if (result.status === 'applied') {
+            if (result.status === 'applied' && operation !== 'reconnect') {
               const refreshed = (await serviceConfig.list()).find(item => item.identity.pluginId === 'channel' && item.identity.serviceId === 'runtime')
               if (refreshed === undefined || refreshed.configuration === null || typeof refreshed.configuration !== 'object' || Array.isArray(refreshed.configuration)) {
                 throw new Error('Channel service configuration is unavailable')
@@ -923,11 +985,42 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         card.append(strong, caption); cards.append(card)
       }
       panel.append(cards)
+      const controls = document.createElement('div')
+      controls.className = 'cxc-channel-create-actions'
+      const note = document.createElement('span')
+      note.className = 'cxc-channel-operation-note'
+      note.dataset.channelRuntimeActionStatus = record.id
+      if (actions === undefined) note.textContent = managerCopy(locale, 'channel.runtime.unavailable')
+      controls.append(note)
+      for (const [action, label] of [
+        ['enable', 'channel.enable'],
+        ['disable', 'channel.disable'],
+        ['reconnect', 'channel.reconnect'],
+      ] as const) {
+        const button = forms.button(managerCopy(locale, label), { type: 'button' })
+        button.dataset.channelRuntimeAction = action
+        button.dataset.channelRuntimeActionAccount = record.id
+        button.disabled = actions === undefined
+        button.addEventListener('click', () => {
+          button.disabled = true
+          note.textContent = action === 'reconnect' ? managerCopy(locale, 'channel.reconnecting') : managerCopy(locale, 'form.saving')
+          void runAction(action, { ref: record.connection.ref }).then(result => {
+            if (!button.isConnected) return
+            note.textContent = result.status === 'applied'
+              ? (action === 'reconnect' ? managerCopy(locale, 'channel.reconnected') : managerCopy(locale, 'form.apply-service-restart'))
+              : managerCopy(locale, 'channel.runtime.unavailable')
+          }).catch(() => {
+            if (button.isConnected) { button.disabled = false; note.textContent = managerCopy(locale, 'channel.runtime.unavailable') }
+          })
+        })
+        controls.append(button)
+      }
+      panel.append(controls)
       return () => {}
     }
 
     const renderLogs = (record: ChannelRecord, panel: HTMLElement): (() => void) => {
-      const all = (projection.logs ?? []).filter(entry => compositeRef(entry.account) === record.id)
+      const all = (viewProjection().logs ?? []).filter(entry => compositeRef(entry.account) === record.id)
       const root = document.createElement('section')
       root.dataset.channelLogs = 'true'
       if (all.length === 0) {
@@ -999,29 +1092,40 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     }
 
     const renderSessions = (record: ChannelRecord, panel: HTMLElement): (() => void) => {
-      const matchingRoutes = projection.routes.filter(route => compositeRef(route.connection) === record.id)
-      const matchingBindings = projection.bindings.filter(binding => compositeRef(binding.channel) === record.id)
+      const current = viewProjection()
+      const matchingRoutes = current.routes.filter(route => compositeRef(route.connection) === record.id)
+      const matchingBindings = current.bindings.filter(binding => compositeRef(binding.channel) === record.id)
       if (matchingRoutes.length === 0 && matchingBindings.length === 0) {
         panel.append(conciseEmpty(document, managerCopy(locale, 'channel.sessions.unavailable'), 'channelSessionActions'))
         return () => {}
       }
       const routes = section(document, managerCopy(locale, 'channel.routes'), managerCopy(locale, 'channel.routes.description'))
       const routeCollection = createHostCollection(document, {
-        id: 'channel-routes', label: managerCopy(locale, 'channel.routes'), items: routeItems(document, { ...projection, routes: matchingRoutes }),
+        id: 'channel-routes', label: managerCopy(locale, 'channel.routes'), items: routeItems(document, { ...current, routes: matchingRoutes }),
         search: { enabled: false, reason: 'This detail view only presents the selected channel.' }, emptyLabel: managerCopy(locale, 'channel.routes.empty'),
       })
       routes.body.append(routeCollection.element)
       const bindings = section(document, managerCopy(locale, 'channel.bindings'), managerCopy(locale, 'channel.bindings.description'))
       const bindingCollection = createHostCollection(document, {
-        id: 'channel-bindings', label: managerCopy(locale, 'channel.bindings'), items: bindingItems(document, { ...projection, bindings: matchingBindings }),
+        id: 'channel-bindings', label: managerCopy(locale, 'channel.bindings'), items: bindingItems(document, { ...current, bindings: matchingBindings }),
         search: { enabled: false, reason: 'This detail view only presents the selected channel.' }, emptyLabel: managerCopy(locale, 'channel.bindings.empty'),
       })
       bindings.body.append(bindingCollection.element)
       const unavailableOperations = document.createElement('div')
       unavailableOperations.className = 'cxc-channel-create-actions'
-      const note = document.createElement('span'); note.className = 'cxc-channel-operation-note'; note.textContent = managerCopy(locale, 'channel.binding-operations.unavailable')
+      const note = document.createElement('span'); note.className = 'cxc-channel-operation-note'; note.textContent = actions === undefined
+        ? managerCopy(locale, 'channel.binding-operations.unavailable') : ''
+      const target = matchingBindings[0]
       for (const [action, label] of [['archive', 'channel.binding.archive'], ['restore', 'channel.binding.restore'], ['unbind', 'channel.binding.unbind']] as const) {
-        const button = forms.button(managerCopy(locale, label), { type: 'button' }); button.disabled = true; button.dataset.channelBindingOperation = action; button.title = managerCopy(locale, 'channel.binding-operations.unavailable'); unavailableOperations.append(button)
+        const button = forms.button(managerCopy(locale, label), { type: 'button' }); button.disabled = actions === undefined || target === undefined; button.dataset.channelBindingOperation = action
+        if (target !== undefined) button.dataset.channelBindingId = target.bindingId
+        if (actions === undefined) button.title = managerCopy(locale, 'channel.binding-operations.unavailable')
+        button.addEventListener('click', () => {
+          if (target === undefined) return
+          button.disabled = true
+          void runAction(action, { bindingId: target.bindingId }).catch(() => { if (button.isConnected) button.disabled = false })
+        })
+        unavailableOperations.append(button)
       }
       unavailableOperations.prepend(note); bindings.body.append(unavailableOperations)
       panel.append(routes.root, bindings.root)
@@ -1065,6 +1169,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       renderDetail(selected, tab)
     }
 
+    renderCurrent = render
     render()
     root.append(style, content)
     context.container.append(root)
