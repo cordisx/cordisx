@@ -3808,6 +3808,19 @@ if (parsed.values['manager-screenshot'] !== undefined) {
                 type: control instanceof HTMLInputElement ? control.type : null, id: control.id,
                 required: control.getAttribute('aria-required'), invalid: control.getAttribute('aria-invalid'),
                 describedBy: control.getAttribute('aria-describedby'), disabled: control.matches(':disabled,[aria-disabled="true"]'),
+                placeholder: control.getAttribute('placeholder'),
+                shadowPlaceholder: (() => {
+                  const roots = control.shadowRoot === null ? [] : [control.shadowRoot]
+                  while (roots.length > 0) {
+                    const root = roots.shift()
+                    const textControl = root?.querySelector('input,textarea')
+                    if (textControl !== null && textControl !== undefined) return textControl.getAttribute('placeholder')
+                    for (const child of root?.querySelectorAll('*') ?? []) {
+                      if (child.shadowRoot !== null) roots.push(child.shadowRoot)
+                    }
+                  }
+                  return null
+                })(),
               })),
               firstControlRect: firstRect === undefined ? null : { x: firstRect.x, y: firstRect.y, width: firstRect.width, height: firstRect.height },
             }
