@@ -818,7 +818,10 @@ export class NavigationRegistry {
       // A tab may only point at a concrete declaration owned by this plugin.
       // Dropping an unresolved projection keeps the Host renderer from exposing
       // a navigation target that cannot be mounted by the same owner.
-      if (this.managerContent.resolve(owner, tab.route) === undefined) return []
+      const targetDeclaration = this.managerContent.resolve(owner, tab.route)
+      if (targetDeclaration === undefined) return []
+      const targetTabs = targetDeclaration.declaration.tabs ?? []
+      if (targetTabs.length > 0 && targetTabs.filter(candidate => sameReference(candidate.route, tab.route)).length !== 1) return []
       const resolution = this.managerContentRoute(owner, tab.route, record.candidateView)
       if (resolution.state !== 'available' || resolution.resolved === undefined) return []
       const icon = resolution.resolved.page.metadata.icon
@@ -831,6 +834,10 @@ export class NavigationRegistry {
         active: sameReference(tab.route, reference),
       })]
     })
+    // A declared tabset is all-or-nothing: the current exact route must be a
+    // single renderable member. Otherwise publishing the projection would let
+    // the renderer create an ARIA tablist with no selected tab.
+    if ((declaration.declaration.tabs?.length ?? 0) > 0 && tabs.filter(tab => tab.active).length !== 1) return undefined
     return Object.freeze({
       title,
       description,

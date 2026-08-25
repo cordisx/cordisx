@@ -695,6 +695,7 @@ const MANAGER_STYLES = `
     align-items: center;
     min-width: 0;
     max-width: 100%;
+    box-sizing: border-box;
     flex: none;
     padding: 7px 9px;
     border: 0;
@@ -717,7 +718,7 @@ const MANAGER_STYLES = `
   .cxm-settings-panel[aria-busy="true"] .cxm-settings-panel-body { opacity: .78; }
   .cxm-settings-tab-icon.cordisx-host-icon { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; }
   .cxm-settings-tab-icon.cordisx-host-icon svg { width: 17px; height: 17px; }
-  .cxm-manager-content-root { min-width: 0; max-width: 100%; overflow-x: clip; }
+  .cxm-manager-content-root { min-width: 0; max-width: 100%; }
   .cxm-tab:disabled { cursor: default; opacity: .42; }
   .cxm-about-identity { display: flex; align-items: center; gap: 18px; padding: 4px 2px 22px; }
   .cxm-about-identity-copy { min-width: 0; white-space: nowrap; }
@@ -5936,7 +5937,29 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     | { readonly kind: 'tab'; readonly id: string }
     | undefined
 
-  const managerContentKey = (id: string, reference: CordisXRouteReference): string => `${id}:${reference.id}:${JSON.stringify(reference.params ?? {})}`
+  const managerContentReferenceKey = (reference: CordisXRouteReference): string => (
+    `${reference.id}\u0000${JSON.stringify(Object.entries(reference.params ?? {}).sort(([left], [right]) => left.localeCompare(right)))}`
+  )
+
+  const managerContentKey = (id: string, reference: CordisXRouteReference): string => `${id}\u0000${managerContentReferenceKey(reference)}`
+
+  // Encode each local-id code point independently. Concatenated punctuation
+  // cannot alias: e.g. "a.b" and "a-b" deliberately produce different IDs.
+  const managerContentDomIdPart = (value: string): string => [...value]
+    .map(character => character.codePointAt(0)!.toString(16))
+    .join('-')
+
+  const managerContentPanelId = (id: string): string => `cordisx-manager-content-panel-${managerContentDomIdPart(id)}`
+
+  const managerContentTabId = (id: string, tabId: string): string => (
+    `cordisx-manager-content-tab-${managerContentDomIdPart(id)}-${managerContentDomIdPart(tabId)}`
+  )
+
+  const managerContentFocusRestore = (id: string, reference: CordisXRouteReference): ManagerContentFocusRestore => {
+    const tabs = model.managerContentPresentation?.(id, reference)?.tabs ?? []
+    const active = tabs.filter(tab => managerContentReferenceKey(tab.route) === managerContentReferenceKey(reference))
+    return active.length === 1 ? { kind: 'tab', id: active[0]!.id } : { kind: 'navigation' }
+  }
 
   const activateManagerContent = async (
     id: string,
@@ -6017,6 +6040,16 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       icon: item.icon,
       tabs: [],
     }
+    // The current exact route is the only authority for selection. An invalid
+    // projection is rendered as an untabbed page instead of emitting a broken
+    // tablist with no active tab or an orphaned aria-labelledby reference.
+    const activeTabs = projection.tabs.filter(tab => (
+      managerContentReferenceKey(tab.route) === managerContentReferenceKey(reference)
+    ))
+    const activeTab = activeTabs.length === 1 ? activeTabs[0] : undefined
+    const tabs = activeTab === undefined
+      ? []
+      : projection.tabs.map(tab => ({ ...tab, active: tab === activeTab }))
     setHeading(projection.description, snapshot, { icon: projection.icon ?? item.icon })
     if (managerContentRoot === undefined || !managerContentRoot.isConnected) {
       managerContentRoot = create(document, 'div', 'cxm-manager-content-root')
@@ -6027,20 +6060,20 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       ? document.activeElement.dataset.managerContentTab
       : undefined
     content.querySelector<HTMLElement>('[data-manager-content-tabs]')?.remove()
-    if (projection.tabs.length > 0) {
-      const tabs = create(document, 'div', 'cxm-tabs')
-      tabs.dataset.managerContentTabs = 'true'
-      tabs.setAttribute('role', 'tablist')
-      tabs.setAttribute('aria-label', projection.title)
-      tabs.setAttribute('aria-orientation', 'horizontal')
-      const panelId = 'cordisx-manager-content-panel'
+    if (tabs.length > 0 && activeTab !== undefined) {
+      const tablist = create(document, 'div', 'cxm-tabs')
+      tablist.dataset.managerContentTabs = 'true'
+      tablist.setAttribute('role', 'tablist')
+      tablist.setAttribute('aria-label', projection.title)
+      tablist.setAttribute('aria-orientation', 'horizontal')
+      const panelId = managerContentPanelId(id)
       managerContentRoot.id = panelId
       managerContentRoot.setAttribute('role', 'tabpanel')
       managerContentRoot.tabIndex = 0
-      for (const tab of projection.tabs) {
+      for (const tab of tabs) {
         const button = create(document, 'button', 'cxm-tab')
         button.type = 'button'
-        button.id = `cordisx-manager-content-tab-${id.replace(/[^a-zA-Z0-9_-]/g, '-')}-${tab.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+        button.id = managerContentTabId(id, tab.id)
         button.dataset.managerContentTab = tab.id
         button.setAttribute('role', 'tab')
         button.setAttribute('aria-controls', panelId)
@@ -6059,23 +6092,20 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
             activate()
             return
           }
-          const current = projection.tabs.findIndex(candidate => candidate.id === tab.id)
-          let next: (typeof projection.tabs)[number] | undefined
-          if (event.key === 'ArrowRight') next = projection.tabs[(current + 1) % projection.tabs.length]
-          if (event.key === 'ArrowLeft') next = projection.tabs[(current - 1 + projection.tabs.length) % projection.tabs.length]
-          if (event.key === 'Home') next = projection.tabs[0]
-          if (event.key === 'End') next = projection.tabs.at(-1)
+          const current = tabs.findIndex(candidate => candidate.id === tab.id)
+          let next: (typeof tabs)[number] | undefined
+          if (event.key === 'ArrowRight') next = tabs[(current + 1) % tabs.length]
+          if (event.key === 'ArrowLeft') next = tabs[(current - 1 + tabs.length) % tabs.length]
+          if (event.key === 'Home') next = tabs[0]
+          if (event.key === 'End') next = tabs.at(-1)
           if (next === undefined) return
           event.preventDefault()
           void activateManagerContent(id, next.route, { kind: 'tab', id: next.id })
         })
-        tabs.append(button)
+        tablist.append(button)
       }
-      const active = projection.tabs.find(tab => tab.active)
-      if (active !== undefined) {
-        managerContentRoot.setAttribute('aria-labelledby', `cordisx-manager-content-tab-${id.replace(/[^a-zA-Z0-9_-]/g, '-')}-${active.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`)
-      }
-      content.insertBefore(tabs, managerContentRoot)
+      managerContentRoot.setAttribute('aria-labelledby', managerContentTabId(id, activeTab.id))
+      content.insertBefore(tablist, managerContentRoot)
       if (focusedTabId !== undefined) focusManagerContentTab(focusedTabId)
     } else {
       managerContentRoot.removeAttribute('role')
@@ -6164,16 +6194,25 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       await activateSettingsTab(next.tabId, restoreFocus, recordHistory)
       return
     }
+    if (next.kind === 'manager-content') {
+      await activateManagerContent(
+        next.id,
+        next.reference,
+        restoreFocus ? managerContentFocusRestore(next.id, next.reference) : undefined,
+        recordHistory,
+      )
+      return
+    }
     const previous = routeState
     if (recordHistory) navigationHistory.push(previous)
     if (activePrimary(previous) === 'settings') await disposeSettingsForRouteChange()
-    if (previous.kind === 'manager-content' && (next.kind !== 'manager-content' || next.id !== previous.id
-      || managerContentKey(previous.id, previous.reference) !== managerContentKey(next.id, next.reference))) {
+    if (previous.kind === 'manager-content') {
       await resetManagerContent()
     }
     routeState = next
     renderContent()
     if (next.kind === 'primary') restoreListScroll()
+    if (restoreFocus && next.kind === 'primary') navButtons.get(next.primary)?.focus()
   }
 
   const navigateBack = async (): Promise<void> => {
@@ -6192,6 +6231,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       ))?.target
     }
     if (target !== undefined) await navigateRoute(target, { recordHistory: false, restoreFocus: true })
+    else navButtons.get(activePrimary())?.focus()
   }
 
   function renderContent(): void {

@@ -90,7 +90,7 @@ describe('settings navigation demo bundle', () => {
     const managerStyles = dom.window.document.getElementById('cordisx-manager-style')?.textContent
     expect(managerStyles).toContain('grid-template-columns: 26px minmax(0, 1fr)')
     expect(managerStyles).toContain('.cxm-tabs {\n    display: flex;\n    width: 100%;\n    min-width: 0;')
-    expect(managerStyles).toContain('.cxm-manager-content-root { min-width: 0; max-width: 100%; overflow-x: clip; }')
+    expect(managerStyles).toContain('.cxm-manager-content-root { min-width: 0; max-width: 100%; }')
     expect(page.querySelector('[data-settings-navigation-demo-body-title]')?.textContent).toBe('Plugin settings content')
     expect(page.querySelector<HTMLInputElement>('[data-settings-navigation-demo-focus]')?.value).toBe('CordisX')
     expect(item()?.getAttribute('aria-current')).toBe('page')

@@ -91,18 +91,19 @@ describe('Manager settings navigation projection', () => {
   it('renders manager-content navigation as Host icon tabs with complete ARIA and keyboard focus recovery', async () => {
     const dom = managerDom()
     const listeners = new Set<() => void>()
+    let invalidProjection = false
     const routes = [
-      { id: 'configuration', label: 'Configuration', icon: 'host:settings' },
-      { id: 'logs', label: 'Logs', icon: 'host:history' },
+      { id: 'a.b', label: 'Configuration', icon: 'host:settings' },
+      { id: 'a-b', label: 'Logs', icon: 'host:history' },
       { id: 'sessions', label: 'Sessions', icon: 'host:layers' },
     ] as const
     const manager: ManagerModel = {
-      snapshot: () => modelSnapshot([item({ route: { id: 'configuration', params: { accountId: 'one' } } })]),
+      snapshot: () => modelSnapshot([item({ route: { id: 'a.b', params: { accountId: 'one' } } })]),
       setPluginBlocked: async () => {}, setPermissionPolicy: async () => {},
       subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) },
       managerContentPresentation: (_id, reference) => ({
         title: 'Demo account', description: 'Host-owned detail navigation.', icon: 'host:layers',
-        tabs: routes.map(tab => ({
+        tabs: (invalidProjection ? [routes[1]!] : routes).map(tab => ({
           ...tab,
           route: { id: tab.id, params: { accountId: 'one' } },
           active: tab.id === reference.id,
@@ -127,45 +128,90 @@ describe('Manager settings navigation projection', () => {
       await settle()
       const tablist = dom.window.document.querySelector<HTMLElement>('[data-manager-content-tabs]')!
       const tabs = () => [...dom.window.document.querySelectorAll<HTMLButtonElement>('[data-manager-content-tabs] [data-manager-content-tab]')]
-      const panel = dom.window.document.querySelector<HTMLElement>('[data-manager-content-root]')!
+      const panel = () => dom.window.document.querySelector<HTMLElement>('[data-manager-content-root]')!
       expect(tablist.getAttribute('role')).toBe('tablist')
       expect(tablist.getAttribute('aria-orientation')).toBe('horizontal')
       expect(tabs().map(tab => tab.getAttribute('role'))).toEqual(['tab', 'tab', 'tab'])
       expect(tabs().map(tab => tab.tabIndex)).toEqual([0, -1, -1])
+      expect(new Set(tabs().map(tab => tab.id)).size).toBe(tabs().length)
       expect(tabs().map(tab => tab.querySelector('[data-host-icon]')?.getAttribute('data-host-icon')))
         .toEqual(['host:settings', 'host:history', 'host:layers'])
-      expect(panel.getAttribute('role')).toBe('tabpanel')
-      expect(panel.getAttribute('aria-labelledby')).toBe(tabs()[0]!.id)
-      expect(tabs().every(tab => tab.getAttribute('aria-controls') === panel.id)).toBe(true)
+      expect(panel().getAttribute('role')).toBe('tabpanel')
+      expect(panel().getAttribute('aria-labelledby')).toBe(tabs()[0]!.id)
+      expect(tabs().every(tab => tab.getAttribute('aria-controls') === panel().id)).toBe(true)
       expect(dom.window.getComputedStyle(tablist).flexWrap).toBe('wrap')
       expect(dom.window.getComputedStyle(tabs()[0]!).borderRadius).toBe('9px')
       expect(dom.window.getComputedStyle(tabs()[0]!).fontSize).toBe('11px')
-      expect(dom.window.getComputedStyle(panel).overflowX).toBe('clip')
+      expect(dom.window.getComputedStyle(tabs()[0]!).boxSizing).toBe('border-box')
+
+      // Simulate a narrow renderer layout with measured, wrapped rows. The
+      // tab strip's scrollWidth is derived from its child geometry, rather
+      // than accepted merely because a parent clips overflowing content.
+      const narrowWidth = 104
+      Object.defineProperty(tablist, 'clientWidth', { configurable: true, value: narrowWidth })
+      for (const [index, tab] of tabs().entries()) {
+        Object.defineProperty(tab, 'getBoundingClientRect', { configurable: true, value: () => ({ left: 0, right: 96, top: index * 32, bottom: index * 32 + 28, width: 96, height: 28, x: 0, y: index * 32, toJSON: () => ({}) }) })
+      }
+      Object.defineProperty(tablist, 'scrollWidth', {
+        configurable: true,
+        get: () => Math.max(...tabs().map(tab => tab.getBoundingClientRect().right - tablist.getBoundingClientRect().left)),
+      })
+      Object.defineProperty(tablist, 'getBoundingClientRect', { configurable: true, value: () => ({ left: 0, right: narrowWidth, top: 0, bottom: 96, width: narrowWidth, height: 96, x: 0, y: 0, toJSON: () => ({}) }) })
+      expect(tablist.scrollWidth).toBeLessThanOrEqual(tablist.clientWidth)
+      expect(tabs().every(tab => tab.getBoundingClientRect().right <= tablist.getBoundingClientRect().right)).toBe(true)
 
       tabs()[0]!.focus()
       tabs()[0]!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
       await settle()
       expect(tabs().map(tab => tab.getAttribute('aria-selected'))).toEqual(['false', 'true', 'false'])
-      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('logs')
-      expect(panel.getAttribute('aria-labelledby')).toBe(tabs()[1]!.id)
-      expect(panel.querySelector('[data-active-manager-content-body="logs"]')).not.toBeNull()
+      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('a-b')
+      expect(panel().getAttribute('aria-labelledby')).toBe(tabs()[1]!.id)
+      expect(panel().querySelector('[data-active-manager-content-body="a-b"]')).not.toBeNull()
+
+      // The real heading Back action restores the prior manager-content tab,
+      // not document.body, after the Host remounts the controlled page.
+      dom.window.document.querySelector<HTMLButtonElement>('.cxm-heading .cxm-back')!.click()
+      await settle()
+      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('a.b')
+      expect(panel().getAttribute('aria-labelledby')).toBe(tabs()[0]!.id)
+
+      // Back from the first manager-content route restores the primary source
+      // navigation target instead of leaving focus on the removed Back node.
+      dom.window.document.querySelector<HTMLButtonElement>('.cxm-heading .cxm-back')!.click()
+      await settle()
+      expect(dom.window.document.activeElement?.getAttribute('data-tab')).toBe('plugins')
+      expect(dom.window.document.activeElement).not.toBe(dom.window.document.body)
+
+      dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="demo:navigation"]')!.click()
+      await settle()
+      tabs()[0]!.focus()
+      tabs()[0]!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+      await settle()
 
       // Projection updates recreate the tablist, but the active tab remains the
       // focus target instead of falling back to the Manager sidebar.
       for (const listener of listeners) listener()
-      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('logs')
+      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('a-b')
       tabs()[1]!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }))
       await settle()
       expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('sessions')
       tabs()[2]!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }))
       await settle()
-      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('logs')
+      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('a-b')
       tabs()[1]!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }))
       await settle()
       expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('sessions')
       tabs()[2]!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }))
       await settle()
-      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('configuration')
+      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('a.b')
+
+      // A malformed consumer projection cannot leave a tablist whose buttons
+      // are all tabindex=-1 or point aria-labelledby at a missing tab.
+      invalidProjection = true
+      for (const listener of listeners) listener()
+      expect(dom.window.document.querySelector('[data-manager-content-tabs]')).toBeNull()
+      expect(panel().getAttribute('role')).toBeNull()
+      expect(panel().getAttribute('aria-labelledby')).toBeNull()
     } finally { dispose(); dom.window.close() }
   })
 })
