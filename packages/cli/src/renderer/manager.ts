@@ -734,6 +734,30 @@ const MANAGER_STYLES = `
   .cxm-tab-panel { min-width: 0; }
   .cxm-tab-panel:has(.cxf-form), .cxm-permission-detail { inline-size: 100%; max-inline-size: none; margin-inline: 0; }
   .cxm-tab-panel > .cxm-section-title:first-child { margin-top: 0; }
+  /* README is content rather than a second page shell: keep a comfortable
+     reading measure while configuration and catalog views remain full width. */
+  .cxm-readme { max-width: 780px; color: var(--cx-text); font-size: 12px; line-height: 1.62; overflow-wrap: anywhere; }
+  .cxm-readme > :first-child { margin-top: 0; }
+  .cxm-readme > :last-child { margin-bottom: 0; }
+  .cxm-readme h1, .cxm-readme h2, .cxm-readme h3, .cxm-readme h4, .cxm-readme h5, .cxm-readme h6 { margin: 1.4em 0 .55em; color: var(--cx-text); line-height: 1.28; }
+  .cxm-readme h1 { padding-bottom: .35em; border-bottom: 1px solid var(--cx-border); font-size: 1.55em; }
+  .cxm-readme h2 { padding-bottom: .28em; border-bottom: 1px solid var(--cx-border); font-size: 1.28em; }
+  .cxm-readme h3 { font-size: 1.12em; }
+  .cxm-readme p, .cxm-readme ul, .cxm-readme ol, .cxm-readme blockquote, .cxm-readme pre, .cxm-readme table { margin: .7em 0; }
+  .cxm-readme ul, .cxm-readme ol { padding-left: 1.55em; }
+  .cxm-readme li + li { margin-top: .22em; }
+  .cxm-readme .task-list-item { display: flex; align-items: baseline; gap: .45em; list-style: none; margin-left: -1.3em; }
+  .cxm-readme .task-list-item input { accent-color: var(--cx-primary); }
+  .cxm-readme a { color: var(--cx-primary); text-underline-offset: 2px; }
+  .cxm-readme code { padding: .12em .28em; border-radius: 4px; background: var(--cx-hover); font: .92em ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-readme pre { overflow: auto; padding: 10px 12px; border: 1px solid var(--cx-border); border-radius: 8px; background: color-mix(in srgb, var(--cx-surface-raised) 86%, #000); }
+  .cxm-readme pre code { padding: 0; background: transparent; }
+  .cxm-readme blockquote { padding: .1em 1em; border-left: 3px solid var(--cx-border); color: var(--cx-muted); }
+  .cxm-readme blockquote p { margin: .55em 0; }
+  .cxm-readme hr { height: 1px; margin: 1.35em 0; border: 0; background: var(--cx-border); }
+  .cxm-readme table { display: block; max-width: 100%; overflow: auto; border-spacing: 0; border-collapse: collapse; }
+  .cxm-readme th, .cxm-readme td { padding: .45em .65em; border: 1px solid var(--cx-border); text-align: left; }
+  .cxm-readme th { background: var(--cx-hover); font-weight: 650; }
   .cxm-flat-list {
     margin-top: 8px;
     border-top: 1px solid rgba(255, 255, 255, .08);
@@ -798,21 +822,24 @@ const MANAGER_STYLES = `
   .cxm-diagnostics-body { padding: 0 2px 4px; }
   .cxm-runtime-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .cxm-console-summary { display: flex; min-width: 0; align-items: stretch; gap: 1px; margin: 10px 0 8px; overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(255,255,255,.08); }
-  .cxm-runtime-status { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--cx-border); border-radius: 12px; background: var(--cx-surface-raised); }
+  .cxm-runtime-overview { display: grid; gap: 10px; max-width: 760px; }
+  .cxm-runtime-status { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--cx-border); border-radius: 12px; background: var(--cx-surface-raised); }
   .cxm-runtime-status-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; background: var(--cx-hover); color: var(--cx-primary); }
   .cxm-runtime-status-icon .cxm-material-icon { width: 19px; height: 19px; }
   .cxm-runtime-status-copy { min-width: 0; }
   .cxm-runtime-status-label { display: block; color: var(--cx-text); font-size: 13px; font-weight: 680; }
   .cxm-runtime-status-meta { display: block; margin-top: 3px; overflow: hidden; color: var(--cx-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-  .cxm-runtime-status-facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-  .cxm-runtime-status-fact { min-width: 0; padding: 8px 10px; border-radius: 8px; background: var(--cx-surface-raised); color: var(--cx-muted); font-size: 11px; }
+  .cxm-runtime-status-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .cxm-runtime-status-fact { display: grid; gap: 2px; min-width: 0; padding: 9px 10px; border: 1px solid var(--cx-border); border-radius: 9px; background: var(--cx-surface-raised); color: var(--cx-muted); font-size: 10px; }
+  .cxm-runtime-status-fact strong { overflow: hidden; color: var(--cx-text); font-size: 15px; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+  .cxm-runtime-status-fact span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cxm-console-metric { min-width: 72px; padding: 7px 10px; background: #191b1f; }
   .cxm-console-metric strong { display: inline; color: #eceef2; font: 600 13px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-metric span { margin-left: 6px; color: #818a99; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
   .cxm-console-performance { flex: 1; min-width: 0; background: #191b1f; }
   .cxm-console-performance summary { padding: 8px 10px; color: #8d96a8; cursor: pointer; font-size: 10px; list-style-position: inside; }
   .cxm-console-performance-body { padding: 0 10px 8px; color: #aab2c0; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .cxm-console-controls { display: grid; grid-template-columns: minmax(150px, 1fr) repeat(3, minmax(90px, max-content)) max-content; gap: 7px; align-items: center; margin: 8px 0; }
+  .cxm-console-controls { display: grid; grid-template-columns: minmax(150px, 1.35fr) repeat(3, minmax(96px, 1fr)) max-content; gap: 7px; align-items: center; min-width: 0; margin: 8px 0; }
   .cxm-console-controls input { min-width: 0; height: 30px; border: 1px solid #353a42; border-radius: 6px; padding: 0 8px; background: #15171a; color: #d8dce3; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-controls t-select { min-width: 0; width: 100%; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-action-toolbar { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; white-space: nowrap; }
@@ -834,7 +861,7 @@ const MANAGER_STYLES = `
   .cxm-console-inspector-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; margin: 0; padding: 10px; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-inspector-grid dt { color: #778294; }
   .cxm-console-inspector-grid dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: #bdc5d2; }
-  .cxm-console-empty { display: grid; min-height: 180px; place-items: center; padding: 20px 16px; color: #737d8e; text-align: center; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-console-empty { display: grid; min-height: 160px; place-items: center; padding: 20px 16px; color: #737d8e; text-align: center; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
   [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-summary { border-color: rgba(18,24,33,.12); background: rgba(18,24,33,.12); }
   [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-metric,
   [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-performance { background: #f4f5f7; }
@@ -943,7 +970,14 @@ const MANAGER_STYLES = `
   .cxm-plugin-row:hover .cxm-plugin-actions,
   .cxm-plugin-row:focus-within .cxm-plugin-actions,
   .cxm-plugin-row[data-action-menu-open="true"] .cxm-plugin-actions { opacity: 1; pointer-events: auto; }
-  .cxm-manager-icon-action, .cxm-plugin-icon-action, .cxm-plugin-menu-trigger { display: inline-grid; place-items: center; width: 30px; height: 30px; flex: none; box-sizing: border-box; border: 0; border-radius: 8px; background: transparent; color: #aeb5c3; cursor: pointer; }
+  /* One compact, rounded-square geometry for every Host icon action. It is
+     deliberately not a circular affordance: native toolbar actions, close,
+     overflow, and extension controls belong to the same control family. */
+  .cxm-manager-icon-action, .cxm-plugin-icon-action, .cxm-plugin-menu-trigger {
+    display: inline-grid; place-items: center; width: 32px; height: 32px; flex: none;
+    box-sizing: border-box; border: 1px solid transparent; border-radius: 8px;
+    background: transparent; color: #aeb5c3; cursor: pointer;
+  }
   .cxm-manager-icon-action:hover:not(:disabled), .cxm-plugin-icon-action:hover:not(:disabled), .cxm-plugin-menu-trigger:hover { background: var(--cx-hover, rgba(199, 204, 212, .12)); color: var(--cx-text, #eef0f4); }
   .cxm-manager-icon-action:focus-visible, .cxm-plugin-icon-action:focus-visible, .cxm-plugin-menu-trigger:focus-visible { outline: 2px solid var(--cx-focus, #c7ccd4); outline-offset: 1px; }
   .cxm-manager-icon-action:disabled, .cxm-plugin-icon-action:disabled { cursor: default; opacity: var(--cx-disabled, .34); }
@@ -1166,9 +1200,11 @@ const MANAGER_STYLES = `
     .cxm-usage-resources { margin-left: 42px; }
     .cxm-resource-row { grid-template-columns: minmax(0, 1fr); }
     .cxm-resource-id { grid-column: 1; grid-row: auto; }
-    .cxm-console-controls { grid-template-columns: minmax(0, 1fr) repeat(2, minmax(90px, max-content)); }
-    .cxm-console-action-toolbar { grid-column: 1 / -1; }
+    .cxm-console-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cxm-console-controls > input { grid-column: 1 / -1; }
+    .cxm-console-action-toolbar { grid-column: 1 / -1; justify-content: flex-start; }
     .cxm-console-workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr); }
+    .cxm-runtime-status-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .cxm-catalog-row { gap: 8px; padding: 12px 2px; }
     .cxm-catalog-icon { width: 24px; height: 24px; }
     .cxm-catalog-status { max-width: 34%; }
@@ -1180,8 +1216,10 @@ const MANAGER_STYLES = `
     .cxm-permission-control t-select { inline-size: min(100%, 13rem); }
   }
   @media (max-width: 520px) {
-    .cxm-console-controls { grid-template-columns: minmax(0, 1fr) minmax(72px, 1fr); }
-    .cxm-console-controls > input { grid-column: 1 / -1; }
+    .cxm-console-controls { grid-template-columns: minmax(0, 1fr); }
+    .cxm-runtime-status { grid-template-columns: auto minmax(0, 1fr); }
+    .cxm-runtime-status > .cxm-manager-icon-action { grid-column: 2; justify-self: start; }
+    .cxm-runtime-status-facts { grid-template-columns: 1fr; }
     .cxm-console-action-toolbar { grid-column: 1 / -1; justify-content: flex-start; }
   }
 `
@@ -4576,14 +4614,16 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const blocked = plugin.status === 'blocked' || plugin.status === 'failed'
       const permissionBlocked = plugin.status === 'permission-blocked'
       const restorable = blocked || permissionBlocked
+      const overview = create(document, 'section', 'cxm-runtime-overview')
       const status = create(document, 'section', 'cxm-runtime-status')
       status.dataset.pluginRuntimeStatus = plugin.id
       const icon = create(document, 'span', 'cxm-runtime-status-icon')
       icon.append(createManagerIcon(document, plugin.status === 'active' ? 'runtime' : 'diagnostics'))
       const statusCopy = create(document, 'span', 'cxm-runtime-status-copy')
+      const hasDetail = plugin.error !== undefined || plugin.blockedReason !== undefined
       statusCopy.append(
         create(document, 'span', 'cxm-runtime-status-label', statusLabel(plugin.status, snapshot.localization.locale)),
-        create(document, 'span', 'cxm-runtime-status-meta', plugin.error ?? plugin.blockedReason ?? copy('runtime.healthy')),
+        create(document, 'span', 'cxm-runtime-status-meta', hasDetail ? copy('runtime.status-details-in-logs') : copy('runtime.healthy')),
       )
       status.append(icon, statusCopy)
       if (plugin.status !== 'configured-disabled') {
@@ -4603,9 +4643,18 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         [copy('runtime.active-contributions'), pluginRegistrations.filter(item => item.visible && item.valid).length],
         [copy('runtime.commands'), pluginCommands.length],
         [copy('console.requests'), (model.pluginConsole?.(plugin.id)?.entries ?? []).filter(item => item.kind === 'invocation' && item.phase === 'requested').length],
-      ] as const) facts.append(create(document, 'span', 'cxm-runtime-status-fact', `${label} ${value}`))
-      panel.append(status, facts)
-      if (operationError !== undefined) panel.append(create(document, 'div', 'cxm-error', operationError))
+      ] as const) {
+        const fact = create(document, 'span', 'cxm-runtime-status-fact')
+        fact.append(create(document, 'strong', undefined, String(value)), create(document, 'span', undefined, label))
+        facts.append(fact)
+      }
+      overview.append(status, facts)
+      panel.append(overview)
+      if (operationError !== undefined) {
+        const notice = create(document, 'div', 'cxm-notice', copy('runtime.status-attention'))
+        notice.dataset.tone = 'warning'
+        panel.append(notice)
+      }
       content.append(panel)
       return
     }

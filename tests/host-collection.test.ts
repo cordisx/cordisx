@@ -68,6 +68,8 @@ describe('Host collection primitive', () => {
       expect(HOST_COLLECTION_STYLES).not.toContain('justify-content: start')
       expect(HOST_COLLECTION_STYLES).not.toContain('repeat(2,')
       expect(HOST_COLLECTION_STYLES).toContain('.cxc-list[data-layout="rows"] { grid-template-columns: minmax(0, 1fr); }')
+      expect(HOST_COLLECTION_STYLES).toContain('width: 32px; height: 32px;')
+      expect(HOST_COLLECTION_STYLES).toContain('font: 12px/1.35 system-ui, sans-serif;')
     } finally {
       view.dispose()
       dom.window.close()
