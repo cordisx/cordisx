@@ -124,11 +124,11 @@ describe('Manager plugin card actions', () => {
       expect(card.querySelectorAll('.cxc-primary')).toHaveLength(1)
       expect(card.querySelectorAll('[data-plugin-action]')).toHaveLength(3)
       expect(primary.getAttribute('aria-label')).toBe('Open plugin details · Base Plugin')
-      expect(primary.getAttribute('aria-description')).toBe('运行中')
+      expect(primary.getAttribute('aria-description')).toBe('Active')
       expect(primary.querySelector('.cxc-description')?.textContent).toBe('Keeps local work in sync.')
       expect(primary.querySelector('.cxc-machine-id')?.textContent).toBe('base')
       expect(primary.querySelector('.cxc-status')?.getAttribute('data-tone')).toBe('success')
-      expect(primary.textContent).not.toContain('运行中')
+      expect(primary.textContent).not.toContain('Active')
       expect([...card.querySelectorAll<HTMLButtonElement>('[data-plugin-action]')].map(button => button.getAttribute('aria-label')))
         .toEqual(['Disable plugin', 'Favorite plugin', 'Reload plugin'])
       expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain('Plugins')
@@ -251,10 +251,10 @@ describe('Manager plugin card actions', () => {
     const dispose = installCordisXManager(dom.window.document, model)
     try {
       const primary = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-primary="base"]')!
-      expect(primary.getAttribute('aria-description')).toBe('启动失败：entry module crashed')
+      expect(primary.getAttribute('aria-description')).toBe('Failed to start: entry module crashed')
       expect(primary.querySelector('.cxc-status')?.getAttribute('data-tone')).toBe('danger')
-      expect(primary.querySelector('.cxc-status')?.getAttribute('aria-label')).toBe('启动失败：entry module crashed')
-      expect(primary.textContent).not.toContain('启动失败')
+      expect(primary.querySelector('.cxc-status')?.getAttribute('aria-label')).toBe('Failed to start: entry module crashed')
+      expect(primary.textContent).not.toContain('Failed to start')
       expect(primary.textContent).not.toContain('entry module crashed')
     } finally {
       dispose()
