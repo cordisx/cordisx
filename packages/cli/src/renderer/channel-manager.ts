@@ -831,7 +831,8 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
           configuration.replaceChildren(conciseEmpty(document, managerCopy(locale, 'channel.configuration.unavailable'), 'channelConfigurationUnavailable'))
           return
         }
-        const source = cloneJson(raw) as { connections?: Array<Record<string, unknown>> }
+        let activeDescriptor: HostServiceConfigDescriptor = descriptor
+        let source = cloneJson(raw) as { connections?: Array<Record<string, unknown>> }
         const connection = source.connections?.find(item => compositeRef(item.ref as ChannelManagerConnectionProjection['ref']) === record.id)
         if (connection === undefined || typeof connection.enabled !== 'boolean') {
           configuration.replaceChildren(conciseEmpty(document, managerCopy(locale, 'channel.configuration.unavailable'), 'channelConfigurationUnavailable'))
@@ -857,7 +858,9 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         submit.dataset.channelConfigurationSave = record.id
         const reconnect = forms.button(managerCopy(locale, 'channel.reconnect'), { type: 'button' })
         reconnect.dataset.channelReconnect = record.id
-        reconnect.addEventListener('click', () => form.requestSubmit())
+        let operation: 'save' | 'reconnect' = 'save'
+        submit.addEventListener('click', () => { operation = 'save' })
+        reconnect.addEventListener('click', () => { operation = 'reconnect'; form.requestSubmit() })
         actions.append(status, reconnect, submit)
         form.append(grid, actions)
         form.addEventListener('submit', event => {
@@ -867,20 +870,34 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
           if (target === undefined) return
           target.enabled = enabled
           submit.disabled = true
-          status.textContent = managerCopy(locale, 'form.saving')
+          reconnect.disabled = true
+          status.textContent = operation === 'reconnect' ? managerCopy(locale, 'channel.reconnecting') : managerCopy(locale, 'form.saving')
           const mutation: HostServiceConfigMutation = {
             contract: 'cordisx.service-config-mutation/v1', schemaVersion: 1,
-            identity: descriptor.identity, scope: descriptor.scope, expectedRevision: descriptor.revision,
+            identity: activeDescriptor.identity, scope: activeDescriptor.scope, expectedRevision: activeDescriptor.revision,
             configuration: candidate as HostServiceConfigMutation['configuration'],
           }
-          void serviceConfig.mutate(mutation).then(result => {
+          void serviceConfig.mutate(mutation).then(async result => {
             if (!configuration.isConnected) return
+            if (result.status === 'applied') {
+              const refreshed = (await serviceConfig.list()).find(item => item.identity.pluginId === 'channel' && item.identity.serviceId === 'runtime')
+              if (refreshed === undefined || refreshed.configuration === null || typeof refreshed.configuration !== 'object' || Array.isArray(refreshed.configuration)) {
+                throw new Error('Channel service configuration is unavailable')
+              }
+              activeDescriptor = refreshed
+              source = cloneJson(refreshed.configuration) as typeof source
+              const refreshedConnection = source.connections?.find(item => compositeRef(item.ref as ChannelManagerConnectionProjection['ref']) === record.id)
+              if (refreshedConnection !== undefined && typeof refreshedConnection.enabled === 'boolean') enabled = refreshedConnection.enabled
+            }
             submit.disabled = false
-            status.textContent = result.status === 'applied' ? managerCopy(locale, 'form.apply-service-restart') : result.status === 'conflict'
+            reconnect.disabled = false
+            status.textContent = result.status === 'applied'
+              ? (operation === 'reconnect' ? managerCopy(locale, 'channel.reconnected') : managerCopy(locale, 'form.apply-service-restart')) : result.status === 'conflict'
               ? managerCopy(locale, 'form.conflict-retained') : managerCopy(locale, 'channel.configuration.unavailable')
           }).catch(() => {
             if (!configuration.isConnected) return
             submit.disabled = false
+            reconnect.disabled = false
             status.textContent = managerCopy(locale, 'channel.configuration.unavailable')
           })
         })
