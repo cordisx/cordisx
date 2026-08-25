@@ -138,7 +138,8 @@ interface RendererComposition {
 
 type ChannelManagerBundleProjection = NonNullable<Parameters<typeof buildRendererBundle>[1]>['channelManager']
 
-async function bundle(
+/** Build the exact renderer composition that the launcher will inject through CDP. */
+export async function buildRendererComposition(
   config: CordisXConfig,
   stdout: (line: string) => void,
   options: {
@@ -156,6 +157,9 @@ async function bundle(
       readonly registryEpoch?: number
     }
     readonly channelManager?: ChannelManagerBundleProjection
+    /** Transient, launcher-created tokens. They are published only in the injected runtime metadata. */
+    readonly channelCredentialBridgeToken?: string
+    readonly channelActionsBridgeToken?: string
   } = {},
 ): Promise<RendererComposition> {
   const providerBridgeToken = (config.providers.some(provider => provider.enabled)
@@ -172,6 +176,8 @@ async function bundle(
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
     ...(serviceConfigBridgeToken === undefined ? {} : { serviceConfigBridgeToken }),
+    ...(options.channelCredentialBridgeToken === undefined ? {} : { channelCredentialBridgeToken: options.channelCredentialBridgeToken }),
+    ...(options.channelActionsBridgeToken === undefined ? {} : { channelActionsBridgeToken: options.channelActionsBridgeToken }),
     ...(options.permission === undefined
       ? (options.profileId === undefined ? {} : { profileId: options.profileId })
       : {
@@ -425,7 +431,7 @@ async function runDevelopment(
   const config = invocation.pluginPath === undefined
     ? await loadConfig(path.resolve(cwd, invocation.configPath ?? 'cordisx.config.json'))
     : developmentPluginConfig(invocation.pluginPath, cwd)
-  const composition = await bundle(config, stdout, {
+  const composition = await buildRendererComposition(config, stdout, {
     profileId: 'development',
     permission: { profileId: 'development', policies: [], persistent: false },
   })
@@ -626,7 +632,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     },
     runtime: lifecycleRuntime,
   }
-  const rendererComposition = await bundle(composition, stdout, {
+  const rendererComposition = await buildRendererComposition(composition, stdout, {
     profileId: selection.profileId,
     writable: true,
     permission: {

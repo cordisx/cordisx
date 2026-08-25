@@ -1023,11 +1023,6 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       const all = (viewProjection().logs ?? []).filter(entry => compositeRef(entry.account) === record.id)
       const root = document.createElement('section')
       root.dataset.channelLogs = 'true'
-      if (all.length === 0) {
-        root.append(conciseEmpty(document, managerCopy(locale, 'channel.logs.unavailable'), 'channelLogsEmpty'))
-        panel.append(root)
-        return () => {}
-      }
       let query = ''
       let outcome: 'all' | 'success' | 'failure' = 'all'
       let page = 0
@@ -1068,7 +1063,12 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
           const result = document.createElement('span'); result.className = 'cxc-channel-log-outcome'; result.textContent = entry.outcome
           item.append(time, action, result); return item
         }))
-        if (windowed.length === 0) list.replaceChildren(conciseEmpty(document, managerCopy(locale, 'channel.search.empty'), 'channelLogsNoMatches'))
+        if (windowed.length === 0) list.replaceChildren(conciseEmpty(
+          document,
+          managerCopy(locale, all.length === 0 ? 'channel.logs.unavailable' : 'channel.search.empty'),
+          all.length === 0 ? 'channelLogsEmpty' : 'channelLogsNoMatches',
+        ))
+        exportButton.disabled = items.length === 0
         const previous = document.createElement('button'); previous.type = 'button'; previous.className = 'cxc-channel-log-page'; previous.textContent = '‹'; previous.disabled = page === 0
         previous.addEventListener('click', () => { page -= 1; draw() })
         const label = document.createElement('span'); label.textContent = `${managerCopy(locale, 'channel.logs.page')} ${page + 1}/${totalPages}`
