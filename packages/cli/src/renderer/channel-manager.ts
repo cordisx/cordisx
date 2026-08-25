@@ -138,6 +138,8 @@ const CHANNEL_MANAGER_STYLES = String.raw`
   .cxc-channel-back:hover, .cxc-channel-back:focus-visible { background: var(--cx-hover); color: var(--cx-text); outline: none; }
   .cxc-channel-back:focus-visible { box-shadow: 0 0 0 2px var(--cx-focus); }
   .cxc-channel-tabs { display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--cx-border); }
+  .cxc-channel-detail-tools { display: flex; align-items: center; gap: 5px; border-bottom: 1px solid var(--cx-border); }
+  .cxc-channel-detail-tools .cxc-channel-tabs { flex: 1; border-bottom: 0; }
   .cxc-channel-tab { flex: none; padding: 8px 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--cx-muted); cursor: pointer; font: inherit; font-size: 12px; font-weight: 620; }
   .cxc-channel-tab[aria-selected="true"] { border-bottom-color: var(--cx-primary); color: var(--cx-text); }
   .cxc-channel-tab:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: -2px; }
@@ -690,10 +692,8 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       page.className = 'cxc-channel-detail'
       page.dataset.channelPage = 'detail'
       page.dataset.channelDetail = record.id
-      const head = document.createElement('header')
-      head.className = 'cxc-channel-detail-head'
-      const titleRow = document.createElement('div')
-      titleRow.className = 'cxc-channel-detail-title-row'
+      const toolbar = document.createElement('div')
+      toolbar.className = 'cxc-channel-detail-tools'
       const back = document.createElement('button')
       back.className = 'cxc-channel-back'
       back.type = 'button'
@@ -701,14 +701,6 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       back.setAttribute('aria-label', managerCopy(locale, 'channel.back'))
       back.append(createHostSurfaceIcon(document, 'host:back'))
       back.addEventListener('click', () => { selectedId = undefined; render() })
-      const titleCopy = document.createElement('div')
-      const title = document.createElement('h2')
-      title.textContent = record.connection.ref.accountId
-      const description = document.createElement('p')
-      description.textContent = `${record.connection.adapterKind} · ${channelStateLabel(locale, channelState(record))}`
-      titleCopy.append(title, description)
-      titleRow.append(back, titleCopy)
-      head.append(titleRow)
       const tabs = document.createElement('div')
       tabs.className = 'cxc-channel-tabs'
       tabs.setAttribute('role', 'tablist')
@@ -741,7 +733,8 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       if (activeTab === 'configuration') renderConfiguration(record, panel)
       else if (activeTab === 'logs') disposePanel = renderLogs(panel)
       else disposePanel = renderSessions(record, panel)
-      page.append(head, tabs, panel)
+      toolbar.append(back, tabs)
+      page.append(toolbar, panel)
       content.replaceChildren(page)
       disposeCurrent = disposePanel
     }
