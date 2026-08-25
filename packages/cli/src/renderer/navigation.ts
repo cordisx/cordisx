@@ -5,15 +5,21 @@ import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_ROUTE_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
+  CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
 } from '../contracts.js'
 import type {
   CordisXJsonScalar,
+  CordisXLocalizedText,
+  CordisXManagerContentNavigation,
+  CordisXManagerContentNavigationDeclarationV1,
+  CordisXManagerContentRecordTitleV1,
   CordisXMessageDefinition,
   CordisXOutletName,
   CordisXPageHeaderAction,
   CordisXPageMetadata,
   CordisXPageMount,
   CordisXPageMountContext,
+  CordisXPageNavigation,
   CordisXPages,
   CordisXRouteDefinition,
   CordisXRouteReference,
@@ -579,16 +585,185 @@ function matchPath(record: RouteRecord, path: string): Readonly<Record<string, s
   return Object.freeze(params)
 }
 
+/** Host-side, data-only registry for protocol manager-content-navigation.v1. */
+interface ManagerContentDeclarationRecord {
+  readonly owner: string
+  readonly declaration: CordisXManagerContentNavigationDeclarationV1
+}
+
+function sameReference(left: CordisXRouteReference, right: CordisXRouteReference): boolean {
+  return left.id === right.id && sameRouteParams(left.params ?? {}, right.params ?? {})
+}
+
+export interface ManagerContentPresentation {
+  readonly title: string
+  readonly description: string
+  readonly icon?: string
+  readonly parent?: CordisXRouteReference
+  readonly tabs: readonly Readonly<{ readonly id: string; readonly label: string; readonly route: CordisXRouteReference; readonly active: boolean }>[]
+}
+
+export class ManagerContentNavigationRegistry {
+  private readonly declarations = new Map<string, ManagerContentDeclarationRecord>()
+  private readonly titles = new Map<string, CordisXLocalizedText>()
+  private readonly projections = new Map<string, () => void>()
+  private readonly listeners = new Set<() => void>()
+  private notificationDepth = 0
+  private notificationPending = false
+
+  register(owner: string, declaration: CordisXManagerContentNavigationDeclarationV1): () => void {
+    assertKeys(declaration, ['$schema', 'schemaVersion', 'id', 'route', 'parentRoute', 'header', 'tabs'], 'manager content navigation declaration')
+    if (declaration.$schema !== CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1 || declaration.schemaVersion !== 1) {
+      throw new Error('manager content navigation declaration has an unsupported schema tuple')
+    }
+    assertLocalId(declaration.id, 'manager content navigation declaration id')
+    this.assertRouteReference(declaration.route, 'manager content navigation declaration route')
+    if (declaration.parentRoute !== undefined) this.assertRouteReference(declaration.parentRoute, 'manager content navigation declaration parent route')
+    assertKeys(declaration.header, ['title'], 'manager content navigation declaration header')
+    const title = declaration.header.title
+    if (title === null || typeof title !== 'object' || Array.isArray(title)) {
+      throw new Error('manager content navigation header title is invalid')
+    }
+    if (title.kind === 'record') {
+      assertKeys(title, ['kind', 'recordIdParam', 'fallback'], 'manager content navigation record header')
+      if (!/^[a-z][a-zA-Z0-9]*$/u.test(title.recordIdParam)) {
+        throw new Error('manager content navigation recordIdParam is invalid')
+      }
+      assertLocalizedText(title.fallback, 'manager content navigation record fallback')
+      if (!Object.hasOwn(declaration.route.params ?? {}, title.recordIdParam)) {
+        throw new Error('manager content navigation record header requires its current route parameter')
+      }
+    } else if (title.kind === 'route') {
+      assertKeys(title, ['kind'], 'manager content navigation route header')
+    } else {
+      throw new Error('manager content navigation header title kind is invalid')
+    }
+    const ids = new Set<string>()
+    for (const tab of declaration.tabs ?? []) {
+      assertKeys(tab, ['id', 'route'], 'manager content navigation tab')
+      assertLocalId(tab.id, 'manager content navigation tab id')
+      if (ids.has(tab.id)) throw new Error(`manager content navigation declaration has duplicate tab ${tab.id}`)
+      ids.add(tab.id)
+      this.assertRouteReference(tab.route, 'manager content navigation tab route')
+    }
+    const key = `${owner}\u0000${declaration.id}`
+    if (this.declarations.has(key)) throw new Error(`manager content navigation declaration ${declaration.id} is already registered`)
+    this.declarations.set(key, { owner, declaration: immutableSnapshot(declaration) })
+    this.notify()
+    return () => {
+      if (!this.declarations.delete(key)) return
+      this.notify()
+    }
+  }
+
+  registerRecordTitles(owner: string, records: readonly CordisXManagerContentRecordTitleV1[]): () => void {
+    const entries: string[] = []
+    for (const record of records) {
+      assertKeys(record, ['id', 'title'], 'manager content record title')
+      if (typeof record.id !== 'string' || record.id.length < 1 || record.id.length > 512) throw new Error('manager content record title id is invalid')
+      assertLocalizedText(record.title, 'manager content record title')
+      const key = `${owner}\u0000${record.id}`
+      if (this.titles.has(key)) throw new Error(`manager content record title ${record.id} is already registered`)
+      this.titles.set(key, immutableSnapshot(record.title))
+      entries.push(key)
+    }
+    this.notify()
+    return () => {
+      let changed = false
+      for (const key of entries) changed = this.titles.delete(key) || changed
+      if (changed) this.notify()
+    }
+  }
+
+  /** Atomically replace an owner projection so route observers never see a partial catalog. */
+  replaceProjection(
+    owner: string,
+    projection: Readonly<{
+      readonly declarations: readonly CordisXManagerContentNavigationDeclarationV1[]
+      readonly recordTitles: readonly CordisXManagerContentRecordTitleV1[]
+    }>,
+  ): () => void {
+    let dispose: () => void = () => {}
+    this.transaction(() => {
+      this.projections.get(owner)?.()
+      const declarations = projection.declarations.map(declaration => this.register(owner, declaration))
+      const titles = this.registerRecordTitles(owner, projection.recordTitles)
+      dispose = () => this.transaction(() => {
+        titles()
+        for (const unregister of declarations.reverse()) unregister()
+      })
+      this.projections.set(owner, dispose)
+    })
+    return () => {
+      if (this.projections.get(owner) !== dispose) return
+      this.projections.delete(owner)
+      dispose()
+    }
+  }
+
+  resolve(owner: string, reference: CordisXRouteReference): ManagerContentDeclarationRecord | undefined {
+    return [...this.declarations.values()].find(record => record.owner === owner && sameReference(record.declaration.route, reference))
+  }
+
+  title(owner: string, id: string): CordisXLocalizedText | undefined {
+    return this.titles.get(`${owner}\u0000${id}`)
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  dispose(): void {
+    this.projections.clear()
+    this.declarations.clear()
+    this.titles.clear()
+    this.listeners.clear()
+  }
+
+  private assertRouteReference(reference: CordisXRouteReference, label: string): void {
+    assertKeys(reference, ['id', 'params'], label)
+    assertLocalId(reference.id, `${label} id`)
+    for (const [key, value] of Object.entries(reference.params ?? {})) {
+      if (!/^[a-z][a-zA-Z0-9]*$/u.test(key)) throw new Error(`${label} param ${key} is invalid`)
+      if (!['string', 'number', 'boolean'].includes(typeof value) && value !== null) throw new Error(`${label} param ${key} is not scalar`)
+    }
+  }
+
+  private notify(): void {
+    if (this.notificationDepth > 0) {
+      this.notificationPending = true
+      return
+    }
+    for (const listener of this.listeners) listener()
+  }
+
+  private transaction<Value>(work: () => Value): Value {
+    this.notificationDepth += 1
+    try {
+      return work()
+    } finally {
+      this.notificationDepth -= 1
+      if (this.notificationDepth === 0 && this.notificationPending) {
+        this.notificationPending = false
+        for (const listener of this.listeners) listener()
+      }
+    }
+  }
+}
+
 export class NavigationRegistry {
   private readonly records = new Map<string, RouteRecord>()
   private readonly states = new Map<string, OutletNavigationState>()
   private readonly listeners = new Set<() => void>()
+  readonly managerContent = new ManagerContentNavigationRegistry()
   private metadataProjectionSites = new Map<string, string>()
   private presentationOrder: string[] = []
   private managerSettingsMount: ManagedSettingsPageMountRecord | undefined
   private managerContentMount: ManagedManagerPageMountRecord | undefined
   private readonly unsubscribePages: () => void
   private readonly unsubscribeOutlets: () => void
+  private readonly unsubscribeManagerContent: () => void
   private operation = Promise.resolve()
   private disposed = false
   private readonly disconnectVisibility: (() => void) | undefined
@@ -603,9 +778,48 @@ export class NavigationRegistry {
   ) {
     this.unsubscribePages = pages.subscribe(() => { void this.enqueue(() => this.reconcileDependencies()) })
     this.unsubscribeOutlets = outlets.subscribe(() => { void this.enqueue(() => this.reconcileDependencies()) })
+    this.unsubscribeManagerContent = this.managerContent.subscribe(() => this.notify())
     this.disconnectVisibility = pages.visibility?.connect({ notify: () => {
       void this.enqueue(() => this.reconcileGeneration())
     } })
+  }
+
+  managerContentPresentation(
+    owner: string,
+    reference: CordisXRouteReference,
+  ): ManagerContentPresentation | undefined {
+    const declaration = this.managerContent.resolve(owner, reference)
+    if (declaration === undefined) return undefined
+    const record = this.findRecord(owner, reference.id)
+    if (record === undefined || record.definition.outlet !== 'manager.content') return undefined
+    try { buildPath(record, reference.params ?? {}) } catch { return undefined }
+    const page = this.pages.get(owner, record.definition.page, record.candidateView)
+    if (page === undefined) return undefined
+    const text = (value: CordisXLocalizedText, site: string): string => (
+      this.i18n.resolveFor(owner, value, site).text ?? value.fallback ?? value.key
+    )
+    const header = declaration.declaration.header.title
+    const title = header.kind === 'record'
+      ? text(this.managerContent.title(owner, String(reference.params?.[header.recordIdParam])) ?? header.fallback, `manager-content:${owner}:${declaration.declaration.id}:record`)
+      : text(page.metadata.title, `manager-content:${owner}:${declaration.declaration.id}:title`)
+    const description = text(page.metadata.description ?? record.definition.description ?? record.definition.title ?? page.metadata.title, `manager-content:${owner}:${declaration.declaration.id}:description`)
+    const tabs = (declaration.declaration.tabs ?? []).map(tab => {
+      const tabRecord = this.findRecord(owner, tab.route.id)
+      const tabPage = tabRecord === undefined ? undefined : this.pages.get(owner, tabRecord.definition.page, tabRecord.candidateView)
+      return Object.freeze({
+        id: tab.id,
+        label: tabPage === undefined ? tab.id : text(tabPage.metadata.title, `manager-content:${owner}:${declaration.declaration.id}:tab:${tab.id}`),
+        route: Object.freeze({ id: tab.route.id, ...(tab.route.params === undefined ? {} : { params: immutableSnapshot(tab.route.params) }) }),
+        active: sameReference(tab.route, reference),
+      })
+    })
+    return Object.freeze({
+      title,
+      description,
+      ...(page.metadata.icon === undefined ? {} : { icon: page.metadata.icon }),
+      ...(declaration.declaration.parentRoute === undefined ? {} : { parent: declaration.declaration.parentRoute }),
+      tabs: Object.freeze(tabs),
+    })
   }
 
   setAccessResolver(access: ExtensionPointAccessResolver): void {
@@ -794,6 +1008,23 @@ export class NavigationRegistry {
     }
   }
 
+  managerContentRoute(
+    requestingOwner: string,
+    reference: CordisXRouteReference,
+    view?: PluginGenerationView,
+  ): ManagerSettingsNavigationRouteResolution {
+    const resolution = this.managerSettingsNavigationRoute(requestingOwner, reference.id, view)
+    if (resolution.state !== 'available' || resolution.resolved === undefined) return resolution
+    try {
+      const record = this.findRecord(requestingOwner, reference.id, view)
+      if (record === undefined) return { state: 'pending', detail: `route ${reference.id} is not registered` }
+      buildPath(record, reference.params ?? {})
+    } catch (error) {
+      return { state: 'invalid', detail: error instanceof Error ? error.message : String(error) }
+    }
+    return resolution
+  }
+
   mountManagerSettings(
     requestingOwner: string,
     reference: CordisXRouteReference,
@@ -894,6 +1125,7 @@ export class NavigationRegistry {
     reference: CordisXRouteReference,
     contributionId: string,
     container: HTMLElement,
+    managerNavigation?: CordisXPageNavigation,
   ): Promise<ManagedManagerPageMount> {
     let result: ManagedManagerPageMount | undefined
     return this.enqueue(async () => {
@@ -901,7 +1133,7 @@ export class NavigationRegistry {
       assertLocalId(reference.id, 'manager content route reference')
       const record = this.findRecord(requestingOwner, reference.id)
       if (record === undefined || record.owner !== requestingOwner) throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
-      const resolution = this.managerSettingsNavigationRoute(requestingOwner, reference.id)
+      const resolution = this.managerContentRoute(requestingOwner, reference)
       if (resolution.state !== 'available') throw new Error(resolution.detail ?? `route ${record.qualifiedId} is not available`)
       const page = this.pages.get(record.owner, record.definition.page, record.candidateView)!
       const surfaceAccess = this.access?.authorizeSurfaceRoute(requestingOwner, 'manager.settings.navigation-items', contributionId, record.qualifiedId)
@@ -965,7 +1197,7 @@ export class NavigationRegistry {
           routeId: record.qualifiedId,
           outlet: 'manager.content',
           params,
-          navigation: {
+          navigation: managerNavigation ?? {
             navigate: next => this.navigate(page.owner, next),
             back: outlet => this.back(page.owner, outlet),
             close: outlet => this.close(page.owner, outlet),
@@ -1175,11 +1407,13 @@ export class NavigationRegistry {
     this.disposed = true
     this.unsubscribePages()
     this.unsubscribeOutlets()
+    this.unsubscribeManagerContent()
     await this.operation.catch(() => {})
     await this.unmountManagerSettings()
     await this.unmountManagerContent()
     for (const [name] of this.states) await this.closeNow(name)
     this.records.clear()
+    this.managerContent.dispose()
     this.states.clear()
     this.presentationOrder = []
     this.listeners.clear()
@@ -1922,6 +2156,10 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
     return this.registry.managerSettingsNavigationRoute(owner, id, view)
   }
 
+  managerContentPresentationFor(owner: string, reference: CordisXRouteReference): ManagerContentPresentation | undefined {
+    return this.registry.managerContentPresentation(owner, reference)
+  }
+
   mountManagerSettingsFor(
     owner: string,
     reference: CordisXRouteReference,
@@ -1936,8 +2174,9 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
     reference: CordisXRouteReference,
     contributionId: string,
     container: HTMLElement,
+    managerNavigation?: CordisXPageNavigation,
   ): Promise<ManagedManagerPageMount> {
-    return this.registry.mountManagerContent(owner, reference, contributionId, container)
+    return this.registry.mountManagerContent(owner, reference, contributionId, container, managerNavigation)
   }
 
   closeManagerSettings(): Promise<void> {
@@ -1994,5 +2233,44 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
 
   settled(): Promise<void> {
     return this.registry.settled()
+  }
+}
+
+/** Exposes only versioned Manager-content data declarations to plugin fibers. */
+export class CordisXManagerContentNavigationService extends Service implements CordisXManagerContentNavigation {
+  static readonly inject = ['routes']
+
+  constructor(ctx: Context) {
+    super(ctx, 'managerContent')
+    if ((ctx.routes as CordisXRouteService | undefined)?.registry === undefined) {
+      throw new Error('CordisX manager content navigation requires the route service')
+    }
+  }
+
+  register(declaration: CordisXManagerContentNavigationDeclarationV1): ReturnType<CordisXManagerContentNavigation['register']> {
+    const routes = this.ctx.routes as CordisXRouteService
+    const owner = ownerFromContext(this.ctx)
+    return this.ctx.effect(
+      () => routes.registry.managerContent.register(owner, declaration),
+      `managerContent.register(${JSON.stringify(declaration.id)})`,
+    )
+  }
+
+  registerRecordTitles(records: readonly CordisXManagerContentRecordTitleV1[]): ReturnType<CordisXManagerContentNavigation['registerRecordTitles']> {
+    const routes = this.ctx.routes as CordisXRouteService
+    const owner = ownerFromContext(this.ctx)
+    return this.ctx.effect(
+      () => routes.registry.managerContent.registerRecordTitles(owner, records),
+      'managerContent.registerRecordTitles',
+    )
+  }
+
+  replaceProjection(projection: import('../contracts.js').CordisXManagerContentNavigationProjectionV1): ReturnType<CordisXManagerContentNavigation['replaceProjection']> {
+    const routes = this.ctx.routes as CordisXRouteService
+    const owner = ownerFromContext(this.ctx)
+    return this.ctx.effect(
+      () => routes.registry.managerContent.replaceProjection(owner, projection),
+      'managerContent.replaceProjection',
+    )
   }
 }

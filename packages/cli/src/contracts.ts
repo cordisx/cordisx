@@ -773,6 +773,51 @@ export const CORDISX_ROUTE_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/route.v1.schema.json' as const
 export const CORDISX_ROUTE_SCHEMA_V2 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/route.v2.schema.json' as const
+/** Data-only Manager subroute declaration. The Host, never a plugin body, owns the chrome. */
+export const CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-navigation.v1.schema.json' as const
+/** Renderer-safe Host projection of an active Manager subroute. */
+export const CORDISX_MANAGER_CONTENT_PROJECTION_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-projection.v1.schema.json' as const
+
+export interface CordisXManagerContentNavigationDeclarationV1 {
+  readonly $schema: typeof CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1
+  readonly schemaVersion: 1
+  readonly id: string
+  readonly route: CordisXRouteReference
+  readonly parentRoute?: CordisXRouteReference
+  readonly header: Readonly<{
+    readonly title:
+      | Readonly<{ readonly kind: 'route' }>
+      | Readonly<{ readonly kind: 'record'; readonly recordIdParam: string; readonly fallback: CordisXLocalizedText }>
+  }>
+  readonly tabs?: readonly Readonly<{ readonly id: string; readonly route: CordisXRouteReference }>[]
+}
+
+/**
+ * A bounded record-title catalog.  It is data only: no DOM, CSS, callback,
+ * secret, path, or raw bridge crosses this boundary.
+ */
+export interface CordisXManagerContentRecordTitleV1 {
+  readonly id: string
+  readonly title: CordisXLocalizedText
+}
+
+/**
+ * An atomic, renderer-safe replacement for one plugin's Manager-content
+ * catalog. It prevents observers from ever seeing a route catalog without
+ * the record it is currently rendering.
+ */
+export interface CordisXManagerContentNavigationProjectionV1 {
+  readonly declarations: readonly CordisXManagerContentNavigationDeclarationV1[]
+  readonly recordTitles: readonly CordisXManagerContentRecordTitleV1[]
+}
+
+export interface CordisXManagerContentNavigation {
+  register(declaration: CordisXManagerContentNavigationDeclarationV1): Disposable<void | Promise<void>>
+  registerRecordTitles(records: readonly CordisXManagerContentRecordTitleV1[]): Disposable<void | Promise<void>>
+  replaceProjection(projection: CordisXManagerContentNavigationProjectionV1): Disposable<void | Promise<void>>
+}
 
 export interface CordisXPageMetadata {
   /** Omitted only for the pre-versioned third-party compatibility path. */
@@ -973,6 +1018,8 @@ declare module '@deepseek-ai/cordis' {
     commands: CordisXCommands
     pages: CordisXPages
     routes: CordisXRoutes
+    /** Data-only Manager subroute declarations; the Host renders chrome and controls history. */
+    managerContent: CordisXManagerContentNavigation
     /** Fiber-owned locale dictionaries and typed translator seats. */
     i18n: CordisXI18n
     /** Owner-bound config snapshots and live subscriptions. */

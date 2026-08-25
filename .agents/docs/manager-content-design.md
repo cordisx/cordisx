@@ -209,6 +209,25 @@ destination, and its page-v3 title/description/required Host icon label the
 standard header. See
 [`manager-settings-navigation.md`](manager-settings-navigation.md).
 
+### Manager Content child routes
+
+`manager-content-navigation.v1` is the only plugin-to-Host declaration for a
+B subroute. It contains an exact same-owner route reference, optional parent
+route, a route or renderer-safe-record header title, and exact sibling tab
+route references. It contains no DOM, CSS, callbacks, URLs, secret data, or
+arbitrary header action. The Host resolves and validates the declaration, then
+owns its breadcrumb/back/history behavior, title, description, and tablist.
+The plugin receives only the active page-body seat plus bounded navigation
+helpers; therefore a detail page must not recreate a title, back button, or
+tabs inside that seat.
+
+When a writable Host mutation adds or removes a record, the owner replaces its
+record-title catalog and exact child-route declarations as one atomic
+projection. Observers must never receive an intermediate catalog without the
+currently visible record: that would cause the Host history normalizer to
+discard a valid detail route. Display labels are renderer-safe presentation
+data, never route identity or credential material.
+
 ## Page headers
 
 Every primary page reserves the same fixed-width leading seat immediately to

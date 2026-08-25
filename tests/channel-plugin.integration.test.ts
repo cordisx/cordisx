@@ -139,10 +139,108 @@ describe('built-in Channel product bundle', () => {
       expect(runtime.snapshot().navigation.outlets).toContainEqual(expect.objectContaining({
         id: 'manager.content', mounted: true, activeRoute: 'channel:settings',
       }))
+      const card = dom.window.document.querySelector<HTMLButtonElement>('[data-host-collection="channel-list"] [data-collection-item="simulator/local/test"] .cxc-primary')!
+      card.click()
+      await waitFor(() => dom.window.document.querySelector('[data-manager-content-tabs]') !== null)
+      expect(dom.window.document.querySelector('[data-channel-page="detail"]')).not.toBeNull()
+      expect(dom.window.document.querySelector('.cxm-heading-current-heading')?.textContent).toBe('local')
+      expect(dom.window.document.querySelector('.cxc-channel-back,.cxc-channel-tabs')).toBeNull()
+      expect(dom.window.document.querySelector('[data-manager-content-tabs] [data-manager-content-tab="configuration"]')).not.toBeNull()
+      dom.window.document.querySelector<HTMLButtonElement>('[data-manager-content-tabs] [data-manager-content-tab="logs"]')!.click()
+      await waitFor(() => dom.window.document.querySelector('[data-channel-detail-panel="logs"]') !== null)
+      expect(dom.window.document.querySelector('[data-channel-logs]')?.textContent).toContain('No logs yet.')
       expect(dom.window.location.href).toBe('https://codex.local/native')
     } finally {
       await runtime.dispose()
       expect(dom.window.document.querySelector('[data-channel-manager]')).toBeNull()
+      dom.window.close()
+    }
+  })
+
+  it('reprojects a newly created local account into exact Host routes and its Host-owned title', async () => {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const entry = path.join(root, 'packages/cli/src/plugins/channel/index.ts')
+    const serviceConfigToken = 'e'.repeat(64)
+    const generation = 'channel-created-record-test'
+    const bundle = await buildRendererBundle({
+      version: 1,
+      rootDir: root,
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: [{ id: 'channel', entry, enabled: true, config: {} }],
+    }, {
+      profileId: 'work', generation, serviceConfigBridgeToken: serviceConfigToken,
+      channelManager: { ...projection, service: { ...projection.service, writable: true } },
+    })
+    const dom = new JSDOM(`
+      <html lang="en" class="electron-dark"><head></head><body>
+        <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
+      </body></html>
+    `, { runScripts: 'dangerously', url: 'https://codex.local/native' })
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+    Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+    const descriptor = {
+      contract: 'cordisx.service-config-descriptor/v1', schemaVersion: 1,
+      identity: { source: 'file:///channel', pluginId: 'channel', serviceId: 'runtime' },
+      scope: { profileId: 'work', generation },
+      schema: { id: 'https://example.test/channel-runtime', projection: { kind: 'standard', renderable: false } },
+      revision: 4, lastGoodRevision: 4, configApplies: 'service-restart', writable: true, restartRequired: false,
+      configuration: {
+        contract: 'cordisx.channel-service-config/v1', schemaVersion: 1,
+        connections: [{ ref: projection.connections[0]!.ref, adapterKind: 'simulator', enabled: true, transport: { mode: 'simulator' } }],
+        routes: [], reliability: {
+          leaseMs: 30_000,
+          retry: { maxAttempts: 5, baseDelayMs: 1_000, maxDelayMs: 60_000, maxAgeMs: 86_400_000, jitterRatio: .2 },
+          rateLimit: { perAccountPerMinute: 120, perUserPerMinute: 20, perConversationPerMinute: 60, maxConcurrent: 8, maxBacklog: 1_000 },
+          attachments: { maxFiles: 4, maxBytesPerFile: 10_485_760, allowedMediaTypes: ['text/plain'] },
+        },
+      }, secrets: [],
+    }
+    Object.defineProperty(dom.window, '__cordisxServiceConfigRequestV1', {
+      configurable: true,
+      value: (payload: string) => {
+        const request = JSON.parse(payload) as { requestId: string; token: string; operation: 'list' | 'mutate' }
+        expect(request.token).toBe(serviceConfigToken)
+        const value = request.operation === 'list'
+          ? [descriptor]
+          : {
+              contract: 'cordisx.service-config-result/v1', schemaVersion: 1,
+              identity: descriptor.identity, scope: descriptor.scope, revision: 5,
+              status: 'applied', configApplies: 'service-restart', serviceGeneration: 'channel-created-record-next',
+            }
+        queueMicrotask(() => {
+          const receiver = (dom.window as unknown as { __cordisxServiceConfigReceiveV1?: (response: string) => void }).__cordisxServiceConfigReceiveV1
+          receiver?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
+        })
+      },
+    })
+    dom.window.eval(bundle)
+    await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true')
+    const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime!
+    try {
+      dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')!.click()
+      dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="channel:channels"]')!.click()
+      await waitFor(() => dom.window.document.querySelector('[data-channel-page="list"]') !== null)
+      dom.window.document.querySelector<HTMLButtonElement>('[data-channel-create="true"]')!.click()
+      await waitFor(() => dom.window.document.querySelector('[data-channel-page="create"]') !== null)
+      const name = dom.window.document.querySelector<HTMLElement>('#channel-create-name') as HTMLElement & { onChange?: (value: string) => void }
+      expect(name.onChange).toBeTypeOf('function')
+      name.onChange?.('Local smoke')
+      dom.window.document.querySelector<HTMLFormElement>('[data-channel-create-form="true"]')!
+        .dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }))
+      const selector = '[data-host-collection="channel-list"] [data-collection-item="simulator/local-smoke/local"]'
+      await waitFor(() => dom.window.document.querySelector(selector) !== null)
+      const card = dom.window.document.querySelector<HTMLElement>(selector)!
+      expect(card.textContent).toContain('Local smoke')
+      expect(card.querySelector('.cxc-avatar')).not.toBeNull()
+      expect(card.querySelector('.cxc-avatar-badge')).not.toBeNull()
+      expect(card.querySelector('.cxc-status[data-position="card"]')).not.toBeNull()
+      card.querySelector<HTMLButtonElement>('.cxc-primary')!.click()
+      await waitFor(() => dom.window.document.querySelector('[data-channel-page="detail"][data-channel-detail="simulator/local-smoke/local"]') !== null)
+      expect(dom.window.document.querySelector('.cxm-heading-current-heading')?.textContent).toBe('Local smoke')
+      expect(dom.window.document.querySelector('[data-manager-content-tabs] [data-manager-content-tab="configuration"]')).not.toBeNull()
+    } finally {
+      await runtime.dispose()
       dom.window.close()
     }
   })
@@ -178,10 +276,13 @@ describe('built-in Channel product bundle', () => {
     })
     const controller = new AbortController()
     const container = dom.window.document.querySelector<HTMLElement>('#seat')!
+    const navigations: unknown[] = []
     const dispose = manager.mount({
       document: dom.window.document,
       container,
       signal: controller.signal,
+      routeId: 'channel:settings', outlet: 'manager.content', params: {},
+      navigation: { navigate: reference => { navigations.push(reference); return Promise.resolve() }, back: () => Promise.resolve(), close: () => Promise.resolve() },
     } as never)
     const page = container.querySelector<HTMLElement>('[data-channel-manager="mounted"]')!
     expect(page.dataset.channelStatus).toBe('experimental')
@@ -189,47 +290,71 @@ describe('built-in Channel product bundle', () => {
     const search = page.querySelector<HTMLInputElement>('[data-collection-search="channel-list"]')!
     expect(search.getAttribute('aria-label')).toBe('Search configured channels')
     const card = page.querySelector<HTMLButtonElement>('[data-host-collection="channel-list"] [data-collection-item="simulator/local/test"] .cxc-primary')!
+    const initialCard = card.closest<HTMLElement>('[data-collection-item="simulator/local/test"]')!
+    expect(initialCard.querySelector('.cxc-avatar')).not.toBeNull()
+    expect(initialCard.querySelector('.cxc-avatar-badge')).not.toBeNull()
+    expect(initialCard.querySelector('.cxc-status[data-position="card"]')).not.toBeNull()
     search.value = 'simulator'
     search.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     card.click()
-    const detail = page.querySelector('[data-channel-page="detail"][data-channel-detail="simulator/local/test"]')!
+    expect(navigations).toContainEqual({ id: 'configuration', params: { accountId: 'simulator/local/test' } })
+    dispose()
+    const detailDispose = manager.mount({
+      document: dom.window.document, container, signal: controller.signal,
+      routeId: 'channel:configuration', outlet: 'manager.content', params: { accountId: 'simulator/local/test' },
+      navigation: { navigate: reference => { navigations.push(reference); return Promise.resolve() }, back: () => Promise.resolve(), close: () => Promise.resolve() },
+    } as never)
+    const detail = container.querySelector<HTMLElement>('[data-channel-page="detail"][data-channel-detail="simulator/local/test"]')!
     expect(detail).not.toBeNull()
-    expect(detail.querySelector('.cxc-channel-detail-tools [data-channel-back="true"]')).not.toBeNull()
-    expect(detail.querySelector('h2')).toBeNull()
-    const channelTabs = detail.querySelector('[role="tablist"]')!
-    expect(channelTabs.classList.contains('cxm-tabs')).toBe(true)
-    expect(channelTabs.querySelector('[data-channel-detail-tab="configuration"]')?.classList.contains('cxm-tab')).toBe(true)
-    expect(channelTabs.querySelector('.cxm-tab-content .cxm-tab-icon')).not.toBeNull()
-    expect(page.querySelector('[data-channel-configuration="simulator/local/test"]')).not.toBeNull()
-    await waitFor(() => page.querySelector('[data-channel-configuration-form="simulator/local/test"]') !== null)
-    page.querySelector<HTMLButtonElement>('[data-channel-detail-tab="logs"]')!.click()
-    expect(page.querySelector('[data-channel-logs="true"]')?.textContent).toContain('No logs yet.')
-    expect(page.querySelector('[data-host-collection="channel-diagnostics"]')).toBeNull()
-    page.querySelector<HTMLButtonElement>('[data-channel-detail-tab="sessions"]')!.click()
-    expect(page.querySelector('[data-channel-real-readiness]')).toBeNull()
-    expect(page.querySelector('[data-channel-session-actions]')).toBeNull()
-    expect(page.querySelector('[data-host-collection="channel-routes"] [data-collection-item="default"]')).not.toBeNull()
-    expect(page.querySelector('[data-host-collection="channel-bindings"] [data-collection-item="binding-1"]')?.textContent).toContain('codex')
-    page.querySelector<HTMLButtonElement>('[data-channel-back="true"]')!.click()
-    expect(page.querySelector<HTMLInputElement>('[data-collection-search="channel-list"]')?.value).toBe('simulator')
-    page.querySelector<HTMLButtonElement>('[data-channel-create="true"]')!.click()
-    expect(page.querySelector('[data-channel-create-form="true"]')).not.toBeNull()
-    const name = page.querySelector<HTMLElement>('#channel-create-name') as HTMLElement & { onChange?: (value: string) => void }
+    expect(detail.querySelector('[role="tablist"],h2,.cxc-channel-back,.cxc-channel-tabs')).toBeNull()
+    expect(detail.querySelector('[data-channel-configuration="simulator/local/test"]')).not.toBeNull()
+    await waitFor(() => detail.querySelector('[data-channel-configuration-form="simulator/local/test"]') !== null)
+    detailDispose()
+    const logsDispose = manager.mount({
+      document: dom.window.document, container, signal: controller.signal,
+      routeId: 'channel:logs', outlet: 'manager.content', params: { accountId: 'simulator/local/test' },
+      navigation: { navigate: () => Promise.resolve(), back: () => Promise.resolve(), close: () => Promise.resolve() },
+    } as never)
+    expect(container.querySelector('[data-channel-logs="true"]')?.textContent).toContain('No logs yet.')
+    logsDispose()
+    const sessionsDispose = manager.mount({
+      document: dom.window.document, container, signal: controller.signal,
+      routeId: 'channel:sessions', outlet: 'manager.content', params: { accountId: 'simulator/local/test' },
+      navigation: { navigate: () => Promise.resolve(), back: () => Promise.resolve(), close: () => Promise.resolve() },
+    } as never)
+    expect(container.querySelector('[data-channel-real-readiness],[data-channel-session-actions]')).toBeNull()
+    expect(container.querySelector('[data-host-collection="channel-routes"] [data-collection-item="default"]')).not.toBeNull()
+    expect(container.querySelector('[data-host-collection="channel-bindings"] [data-collection-item="binding-1"]')?.textContent).toContain('codex')
+    sessionsDispose()
+    const createDispose = manager.mount({
+      document: dom.window.document, container, signal: controller.signal,
+      routeId: 'channel:create', outlet: 'manager.content', params: {},
+      navigation: { navigate: reference => { navigations.push(reference); return Promise.resolve() }, back: () => Promise.resolve(), close: () => Promise.resolve() },
+    } as never)
+    const createPage = container.querySelector<HTMLElement>('[data-channel-page="create"]')!
+    expect(createPage.querySelector('[data-channel-create-form="true"]')).not.toBeNull()
+    const name = createPage.querySelector<HTMLElement>('#channel-create-name') as HTMLElement & { onChange?: (value: string) => void }
     name.onChange?.('Local smoke')
-    page.querySelector<HTMLFormElement>('[data-channel-create-form="true"]')!.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }))
+    createPage.querySelector<HTMLFormElement>('[data-channel-create-form="true"]')!.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }))
     await waitFor(() => mutations.length === 1)
-    await waitFor(() => page.querySelector('[data-channel-page="list"]') !== null)
-    expect(page.querySelector('[data-channel-page="list"]')).not.toBeNull()
-    expect(page.querySelector('[data-host-collection="channel-list"] [data-collection-item="simulator/local-smoke/local"]')).not.toBeNull()
+    await waitFor(() => navigations.some(item => JSON.stringify(item) === JSON.stringify({ id: 'settings' })))
     expect(mutations[0]).toMatchObject({ identity: { pluginId: 'channel', serviceId: 'runtime' }, expectedRevision: 4 })
-    const savedCard = page.querySelector<HTMLElement>('[data-collection-item="simulator/local-smoke/local"]')!
+    createDispose()
+    const returnedRootDispose = manager.mount({
+      document: dom.window.document, container, signal: controller.signal,
+      routeId: 'channel:settings', outlet: 'manager.content', params: {},
+      navigation: { navigate: reference => { navigations.push(reference); return Promise.resolve() }, back: () => Promise.resolve(), close: () => Promise.resolve() },
+    } as never)
+    const savedCard = container.querySelector<HTMLElement>('[data-host-collection="channel-list"] [data-collection-item="simulator/local-smoke/local"]')!
+    expect(savedCard).not.toBeNull()
+    expect(savedCard.textContent).toContain('Local smoke')
     expect(savedCard.querySelector('.cxc-avatar')).not.toBeNull()
     expect(savedCard.querySelector('.cxc-avatar-badge')).not.toBeNull()
     expect(savedCard.querySelector('.cxc-status[data-position="card"]')).not.toBeNull()
-    expect(page.outerHTML).not.toMatch(/secretRef|keychain:|host-secret:/i)
+    expect(container.outerHTML).not.toMatch(/secretRef|keychain:|host-secret:/i)
     controller.abort()
-    expect(page.dataset.channelManagerAborted).toBe('true')
-    dispose()
+    expect(container.querySelector<HTMLElement>('[data-channel-manager="mounted"]')?.dataset.channelManagerAborted).toBe('true')
+    returnedRootDispose()
     expect(container.querySelector('[data-channel-manager]')).toBeNull()
     dom.window.close()
   })
@@ -264,8 +389,11 @@ describe('built-in Channel product bundle', () => {
       },
     })
     const container = dom.window.document.querySelector<HTMLElement>('#seat')!
-    const dispose = manager.mount({ document: dom.window.document, container, signal: new AbortController().signal } as never)
-    container.querySelector<HTMLElement>('[data-collection-item="simulator/local/test"] .cxc-primary')!.click()
+    const dispose = manager.mount({
+      document: dom.window.document, container, signal: new AbortController().signal,
+      routeId: 'channel:configuration', outlet: 'manager.content', params: { accountId: 'simulator/local/test' },
+      navigation: { navigate: () => Promise.resolve(), back: () => Promise.resolve(), close: () => Promise.resolve() },
+    } as never)
     await waitFor(() => container.querySelector('[data-channel-configuration-form="simulator/local/test"]') !== null)
     container.querySelector<HTMLFormElement>('[data-channel-configuration-form="simulator/local/test"]')!.requestSubmit()
     await waitFor(() => mutations.length === 1)

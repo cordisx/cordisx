@@ -49,7 +49,7 @@ describe('Manager settings navigation projection', () => {
     let body: HTMLElement | undefined
     const manager: ManagerModel = {
       snapshot: () => modelSnapshot([item()]), setPluginBlocked: async () => {}, setPermissionPolicy: async () => {}, subscribe: () => () => {},
-      mountManagerContent: async (id, container): Promise<ManagedManagerPageMount> => {
+      mountManagerContent: async (id, _reference, container): Promise<ManagedManagerPageMount> => {
         body = container.ownerDocument.createElement('section'); body.dataset.demoBody = id; container.append(body); const controller = new AbortController(); events.push(`mount:${id}`)
         return { owner: 'demo', contributionId: id, routeId: id, pageId: id, signal: controller.signal, abort: () => { controller.abort(); events.push(`abort:${id}`) }, dispose: async () => body?.remove() }
       }, closeManagerContent: async () => { body?.remove(); events.push('close') },
@@ -73,7 +73,7 @@ describe('Manager settings navigation projection', () => {
     const listeners = new Set<() => void>()
     const manager: ManagerModel = {
       snapshot: () => state, setPluginBlocked: async () => {}, setPermissionPolicy: async () => {}, subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) },
-      mountManagerContent: async (id, container) => { const node = container.ownerDocument.createElement('div'); node.dataset.activeBody = id; container.append(node); const controller = new AbortController(); return { owner: 'demo', contributionId: id, routeId: id, pageId: id, signal: controller.signal, abort: () => controller.abort(), dispose: async () => node.remove() } }, closeManagerContent: async () => {},
+      mountManagerContent: async (id, _reference, container) => { const node = container.ownerDocument.createElement('div'); node.dataset.activeBody = id; container.append(node); const controller = new AbortController(); return { owner: 'demo', contributionId: id, routeId: id, pageId: id, signal: controller.signal, abort: () => controller.abort(), dispose: async () => node.remove() } }, closeManagerContent: async () => {},
     }
     const dispose = installCordisXManager(dom.window.document, manager)
     try {

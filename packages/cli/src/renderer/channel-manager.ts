@@ -15,6 +15,8 @@ export type ChannelProductStatus = 'implemented' | 'verified' | 'experimental' |
 
 export interface ChannelManagerConnectionProjection {
   readonly ref: { readonly adapterId: string; readonly accountId: string; readonly tenantId: string }
+  /** Renderer-safe human label for this configured account. Never a credential or secret reference. */
+  readonly displayName?: string
   readonly adapterKind: string
   readonly enabled: boolean
   readonly transportMode: string
@@ -109,6 +111,8 @@ const CORDIS_ORIGINAL = Symbol.for('cordis.original')
 interface ChannelManagerState {
   readonly projection: ChannelManagerProjectionV1
   readonly serviceConfig?: ChannelManagerServiceConfigApi
+  readonly localConnections: ChannelManagerConnectionProjection[]
+  readonly listeners: Set<() => void>
 }
 
 const projections = new WeakMap<object, ChannelManagerState>()
@@ -129,16 +133,17 @@ function stateFor(service: object): ChannelManagerState {
 }
 
 function projectionFor(service: object): ChannelManagerProjectionV1 {
-  return stateFor(service).projection
+  const state = stateFor(service)
+  if (state.localConnections.length === 0) return state.projection
+  return normalizeProjection({
+    ...state.projection,
+    connections: [...state.projection.connections, ...state.localConnections],
+  })
 }
 
 const CHANNEL_MANAGER_STYLES = String.raw`
   .cxc-channel-manager { min-width: 0; color: var(--cx-text); }
   .cxc-channel-list-page { display: grid; grid-template-rows: minmax(0, 1fr); height: clamp(20rem, 62vh, 38rem); min-height: 0; }
-  .cxc-channel-detail-head { display: grid; gap: 4px; }
-  .cxc-channel-detail-head h2, .cxc-channel-section h3 { margin: 0; color: var(--cx-text); }
-  .cxc-channel-detail-head h2 { font-size: 16px; }
-  .cxc-channel-detail-head p, .cxc-channel-section p { margin: 0; color: var(--cx-muted); font-size: 11px; line-height: 1.5; }
   .cxc-channel-list-collection { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr); min-height: 0; column-gap: 8px; }
   .cxc-channel-list-collection > .cxc-search { grid-column: 1; grid-row: 1; }
   .cxc-channel-list-collection > .cxc-list { grid-column: 1 / -1; grid-row: 2; }
@@ -147,12 +152,6 @@ const CHANNEL_MANAGER_STYLES = String.raw`
   .cxc-channel-create:hover, .cxc-channel-create:focus-visible { border-color: var(--cx-primary); background: var(--cx-hover); outline: 2px solid var(--cx-focus); outline-offset: 2px; }
   .cxc-channel-create .cxm-material-icon { width: 18px; height: 18px; }
   .cxc-channel-detail { display: grid; gap: 16px; min-width: 0; }
-  .cxc-channel-detail-title-row { display: flex; align-items: flex-start; gap: 9px; min-width: 0; }
-  .cxc-channel-back { display: grid; place-items: center; width: 28px; height: 28px; flex: none; margin-top: -3px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--cx-muted); cursor: pointer; }
-  .cxc-channel-back:hover, .cxc-channel-back:focus-visible { background: var(--cx-hover); color: var(--cx-text); outline: none; }
-  .cxc-channel-back:focus-visible { box-shadow: 0 0 0 2px var(--cx-focus); }
-  .cxc-channel-detail-tools { display: flex; align-items: center; gap: 5px; }
-  .cxc-channel-detail-tools > .cxm-tabs { flex: 1; margin: 0; }
   .cxc-channel-panel { min-width: 0; }
   .cxc-channel-config-form { inline-size: 100%; margin-inline: 0; }
   .cxc-channel-empty { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 11px 12px; border: 1px solid var(--cx-border); border-radius: 10px; background: var(--cx-surface-raised); color: var(--cx-muted); font-size: 12px; }
@@ -162,7 +161,6 @@ const CHANNEL_MANAGER_STYLES = String.raw`
   .cxc-channel-section-head { display: grid; gap: 2px; }
   .cxc-channel-section h3 { font-size: 12px; }
   .cxc-channel-manager .cordisx-host-icon, .cxc-channel-manager .cordisx-host-icon svg { width: 22px; height: 22px; }
-  .cxc-channel-back .cordisx-host-icon, .cxc-channel-back .cordisx-host-icon svg { width: 18px; height: 18px; }
   @media (max-width: 520px) {
     .cxc-channel-list-page { height: clamp(18rem, 60vh, 34rem); }
     .cxc-channel-list-collection .cxc-list { grid-template-columns: minmax(0, 1fr); }
@@ -172,6 +170,12 @@ const CHANNEL_MANAGER_STYLES = String.raw`
 
 function compositeRef(ref: ChannelManagerConnectionProjection['ref']): string {
   return `${ref.adapterId}/${ref.accountId}/${ref.tenantId}`
+}
+
+function cloneJson<Value>(value: Value): Value {
+  return typeof globalThis.structuredClone === 'function'
+    ? globalThis.structuredClone(value)
+    : JSON.parse(JSON.stringify(value)) as Value
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -221,10 +225,11 @@ function ref(value: unknown, label: string): ChannelManagerConnectionProjection[
 
 function connection(value: unknown, label: string): ChannelManagerConnectionProjection {
   const item = object(value, label)
-  exactKeys(item, ['ref', 'adapterKind', 'enabled', 'transportMode', 'secretState'], label)
+  exactKeys(item, ['ref', 'displayName', 'adapterKind', 'enabled', 'transportMode', 'secretState'], label)
   if (typeof item.enabled !== 'boolean') throw new TypeError(`${label}.enabled is invalid`)
   return {
     ref: ref(item.ref, `${label}.ref`),
+    ...(item.displayName === undefined ? {} : { displayName: boundedText(item.displayName, `${label}.displayName`, 160) }),
     adapterKind: boundedText(item.adapterKind, `${label}.adapterKind`),
     enabled: item.enabled,
     transportMode: boundedText(item.transportMode, `${label}.transportMode`),
@@ -268,11 +273,11 @@ function normalizeProjection(value: unknown): ChannelManagerProjectionV1 {
     const item = object(value, `Channel Manager projection.accounts[${index}]`)
     const label = `Channel Manager projection.accounts[${index}]`
     exactKeys(item, [
-      'ref', 'adapterKind', 'enabled', 'transportMode', 'secretState', 'implementationStatus', 'connectionState',
+      'ref', 'displayName', 'adapterKind', 'enabled', 'transportMode', 'secretState', 'implementationStatus', 'connectionState',
       'generation', 'inbound', 'outbound',
     ], label)
     const base = connection(Object.fromEntries(
-      ['ref', 'adapterKind', 'enabled', 'transportMode', 'secretState'].map(key => [key, item[key]]),
+      ['ref', 'displayName', 'adapterKind', 'enabled', 'transportMode', 'secretState'].map(key => [key, item[key]]),
     ), label)
     const counts = (raw: unknown, countLabel: string) => {
       const count = object(raw, countLabel)
@@ -394,12 +399,13 @@ function channelRecords(projection: ChannelManagerProjectionV1): readonly Channe
 }
 
 function localSimulatorRecord(name: string): ChannelRecord {
-  const accountId = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'local'
+  const displayName = name.trim()
+  const accountId = displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'local'
   const ref = { adapterId: 'simulator', accountId, tenantId: 'local' }
   return {
     id: compositeRef(ref),
     connection: {
-      ref, adapterKind: 'simulator', enabled: true, transportMode: 'simulator', secretState: 'unavailable',
+      ref, displayName, adapterKind: 'simulator', enabled: true, transportMode: 'simulator', secretState: 'unavailable',
     },
   }
 }
@@ -439,15 +445,16 @@ function channelItem(
 ): HostCollectionItem {
   const { id, connection, account } = record
   const state = account?.connectionState ?? (connection.enabled ? 'unavailable' : 'disabled')
+  const displayName = account?.displayName ?? connection.displayName ?? connection.ref.accountId
   return {
     id,
-    title: connection.ref.accountId,
+    title: displayName,
     description: connection.adapterKind,
     machineId: id,
-    searchText: [connection.ref.adapterId, connection.ref.tenantId, connection.adapterKind, connection.transportMode, state],
+    searchText: [displayName, connection.ref.adapterId, connection.ref.tenantId, connection.adapterKind, connection.transportMode, state],
     icon: () => createHostSurfaceIcon(document, state === 'ready' ? 'host:success' : 'host:layers'),
     avatar: {
-      label: connection.ref.accountId,
+      label: displayName,
       badge: () => createHostSurfaceIcon(document, connection.adapterKind === 'feishu' ? 'host:layers' : 'host:info'),
     },
     statusPosition: 'card',
@@ -493,6 +500,8 @@ function bindingItems(document: Document, projection: ChannelManagerProjectionV1
 
 export interface CordisXChannelManager {
   snapshot(): ChannelManagerProjectionV1
+  subscribe(listener: () => void): Disposable<void>
+  rememberLocalCandidate(connection: ChannelManagerConnectionProjection): void
   mount(context: CordisXPageMountContext): Disposable<void>
 }
 
@@ -516,11 +525,28 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     projections.set(this, Object.freeze({
       projection: normalizeProjection(wrapped.projection ?? EMPTY_PROJECTION),
       ...(wrapped.serviceConfig === undefined ? {} : { serviceConfig: wrapped.serviceConfig }),
+      localConnections: [],
+      listeners: new Set<() => void>(),
     }))
   }
 
   snapshot(): ChannelManagerProjectionV1 {
     return cloneProjection(projectionFor(this))
+  }
+
+  subscribe(listener: () => void): Disposable<void> {
+    const listeners = stateFor(this).listeners
+    listeners.add(listener)
+    return () => listeners.delete(listener)
+  }
+
+  rememberLocalCandidate(connection: ChannelManagerConnectionProjection): void {
+    const state = stateFor(this)
+    const normalized = normalizeProjection({ ...state.projection, connections: [connection] }).connections[0]!
+    const id = compositeRef(normalized.ref)
+    if ([...state.projection.connections, ...state.localConnections].some(item => compositeRef(item.ref) === id)) return
+    state.localConnections.push(normalized)
+    for (const listener of state.listeners) listener()
   }
 
   mount(context: CordisXPageMountContext): Disposable<void> {
@@ -546,15 +572,11 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     const content = document.createElement('div')
     content.dataset.channelManagerContent = 'true'
     const forms = new HostFormAdapter(document, root, () => locale)
-    let selectedId: string | undefined
-    let activeTab: ChannelDetailTab = 'configuration'
     let listQuery = ''
-    let creating = false
-    const committedRecords: ChannelRecord[] = []
     let candidateName = ''
     let disposeCurrent = (): void => {}
 
-    const records = (): readonly ChannelRecord[] => [...channelRecords(projection), ...committedRecords]
+    const records = (): readonly ChannelRecord[] => channelRecords(projectionFor(this))
 
     const renderList = (): void => {
       disposeCurrent()
@@ -567,9 +589,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         items: records().map(record => channelItem(document, record)).map(item => ({
           ...item,
           onOpen: () => {
-            selectedId = item.id
-            activeTab = 'configuration'
-            render()
+            void context.navigation?.navigate({ id: 'configuration', params: { accountId: item.id } })
           },
           openLabel: managerCopy(locale, 'channel.open'),
         })),
@@ -590,7 +610,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       create.setAttribute('aria-label', managerCopy(locale, 'channel.create.icon-label'))
       create.title = managerCopy(locale, 'channel.create.icon-label')
       create.append(createManagerIcon(document, 'marketplace-source-add'))
-      create.addEventListener('click', () => { creating = true; render() })
+      create.addEventListener('click', () => { void context.navigation?.navigate({ id: 'create' }) })
       collection.element.append(create)
       page.append(collection.element)
       content.replaceChildren(page)
@@ -602,25 +622,6 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       const page = document.createElement('section')
       page.className = 'cxc-channel-detail'
       page.dataset.channelPage = 'create'
-      const head = document.createElement('header')
-      head.className = 'cxc-channel-detail-head'
-      const titleRow = document.createElement('div')
-      titleRow.className = 'cxc-channel-detail-title-row'
-      const back = document.createElement('button')
-      back.className = 'cxc-channel-back'
-      back.type = 'button'
-      back.dataset.channelCreateBack = 'true'
-      back.setAttribute('aria-label', managerCopy(locale, 'channel.back'))
-      back.append(createHostSurfaceIcon(document, 'host:back'))
-      back.addEventListener('click', () => { creating = false; render() })
-      const titleCopy = document.createElement('div')
-      const title = document.createElement('h2')
-      title.textContent = managerCopy(locale, 'channel.create')
-      const description = document.createElement('p')
-      description.textContent = managerCopy(locale, 'channel.create.description')
-      titleCopy.append(title, description)
-      titleRow.append(back, titleCopy)
-      head.append(titleRow)
       const form = forms.form('channel-create')
       form.classList.add('cxc-channel-config-form')
       form.dataset.channelCreateForm = 'true'
@@ -659,7 +660,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
           const descriptor = descriptors.find(item => item.identity.pluginId === 'channel' && item.identity.serviceId === 'runtime')
           const raw = descriptor?.configuration
           if (descriptor === undefined || raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Channel service configuration is unavailable')
-          const configuration = structuredClone(raw) as { connections?: Array<Record<string, unknown>>; routes?: Array<Record<string, unknown>> }
+          const configuration = cloneJson(raw) as { connections?: Array<Record<string, unknown>>; routes?: Array<Record<string, unknown>> }
           const existing = configuration.connections?.some(item => compositeRef(item.ref as ChannelManagerConnectionProjection['ref']) === record.id) === true
           if (existing) throw new Error('A local simulator channel with this name already exists')
           const routeId = `${record.connection.ref.accountId}-default`
@@ -687,20 +688,17 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
             status.textContent = result.status === 'conflict' ? managerCopy(locale, 'form.conflict-retained') : managerCopy(locale, 'channel.create.unavailable')
             return
           }
-          committedRecords.push(record)
-          selectedId = undefined
-          activeTab = 'configuration'
+          this.rememberLocalCandidate(record.connection)
           candidateName = ''
           listQuery = ''
-          creating = false
-          render()
+          void context.navigation?.navigate({ id: 'settings' })
         }).catch(() => {
           if (!form.isConnected) return
           submit.disabled = false
           status.textContent = managerCopy(locale, 'channel.create.unavailable')
         })
       })
-      page.append(head, form)
+      page.append(form)
       content.replaceChildren(page)
       disposeCurrent = (): void => {}
     }
@@ -723,7 +721,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
           configuration.replaceChildren(conciseEmpty(document, managerCopy(locale, 'channel.configuration.unavailable'), 'channelConfigurationUnavailable'))
           return
         }
-        const source = structuredClone(raw) as { connections?: Array<Record<string, unknown>> }
+        const source = cloneJson(raw) as { connections?: Array<Record<string, unknown>> }
         const connection = source.connections?.find(item => compositeRef(item.ref as ChannelManagerConnectionProjection['ref']) === record.id)
         if (connection === undefined || typeof connection.enabled !== 'boolean') {
           configuration.replaceChildren(conciseEmpty(document, managerCopy(locale, 'channel.configuration.unavailable'), 'channelConfigurationUnavailable'))
@@ -807,83 +805,39 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       return () => { bindingCollection.dispose(); routeCollection.dispose() }
     }
 
-    const renderDetail = (record: ChannelRecord): void => {
+    const renderDetail = (record: ChannelRecord, tab: ChannelDetailTab): void => {
       disposeCurrent()
       const page = document.createElement('section')
       page.className = 'cxc-channel-detail'
       page.dataset.channelPage = 'detail'
       page.dataset.channelDetail = record.id
-      const toolbar = document.createElement('div')
-      toolbar.className = 'cxc-channel-detail-tools'
-      const back = document.createElement('button')
-      back.className = 'cxc-channel-back'
-      back.type = 'button'
-      back.dataset.channelBack = 'true'
-      back.setAttribute('aria-label', managerCopy(locale, 'channel.back'))
-      back.append(createHostSurfaceIcon(document, 'host:back'))
-      back.addEventListener('click', () => { selectedId = undefined; render() })
-      const tabs = document.createElement('div')
-      tabs.className = 'cxm-tabs cxc-channel-tabs'
-      tabs.setAttribute('role', 'tablist')
-      tabs.setAttribute('aria-orientation', 'horizontal')
       const panel = document.createElement('div')
       panel.className = 'cxc-channel-panel'
       panel.setAttribute('role', 'tabpanel')
-      panel.dataset.channelDetailPanel = activeTab
-      const tabEntries: readonly { readonly id: ChannelDetailTab; readonly label: string; readonly icon: 'configuration' | 'diagnostics' | 'outlets' }[] = [
-        { id: 'configuration', label: managerCopy(locale, 'channel.configuration'), icon: 'configuration' },
-        { id: 'logs', label: managerCopy(locale, 'channel.logs'), icon: 'diagnostics' },
-        { id: 'sessions', label: managerCopy(locale, 'channel.sessions'), icon: 'outlets' },
-      ]
-      const activateTab = (tab: ChannelDetailTab): void => {
-        activeTab = tab
-        render()
-        page.querySelector<HTMLButtonElement>(`[data-channel-detail-tab="${tab}"]`)?.focus()
-      }
-      for (const [index, entry] of tabEntries.entries()) {
-        const tab = document.createElement('button')
-        tab.type = 'button'
-        tab.className = 'cxm-tab cxc-channel-tab'
-        tab.dataset.channelDetailTab = entry.id
-        tab.id = `channel-tab-${entry.id}`
-        tab.setAttribute('role', 'tab')
-        tab.setAttribute('aria-controls', `channel-panel-${entry.id}`)
-        tab.setAttribute('aria-selected', String(entry.id === activeTab))
-        tab.tabIndex = entry.id === activeTab ? 0 : -1
-        const tabContent = document.createElement('span')
-        tabContent.className = 'cxm-tab-content'
-        tabContent.append(createManagerIcon(document, entry.icon, 'cxm-tab-icon'), document.createTextNode(entry.label))
-        tab.append(tabContent)
-        tab.addEventListener('click', () => activateTab(entry.id))
-        tab.addEventListener('keydown', (event) => {
-          let nextIndex: number | undefined
-          if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabEntries.length
-          if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabEntries.length) % tabEntries.length
-          if (event.key === 'Home') nextIndex = 0
-          if (event.key === 'End') nextIndex = tabEntries.length - 1
-          if (nextIndex === undefined) return
-          event.preventDefault()
-          activateTab(tabEntries[nextIndex]!.id)
-        })
-        tabs.append(tab)
-      }
-      panel.id = `channel-panel-${activeTab}`
-      panel.setAttribute('aria-labelledby', `channel-tab-${activeTab}`)
+      panel.dataset.channelDetailPanel = tab
       let disposePanel = (): void => {}
-      if (activeTab === 'configuration') renderConfiguration(record, panel)
-      else if (activeTab === 'logs') disposePanel = renderLogs(panel)
+      if (tab === 'configuration') renderConfiguration(record, panel)
+      else if (tab === 'logs') disposePanel = renderLogs(panel)
       else disposePanel = renderSessions(record, panel)
-      toolbar.append(back, tabs)
-      page.append(toolbar, panel)
+      page.append(panel)
       content.replaceChildren(page)
       disposeCurrent = disposePanel
     }
 
     const render = (): void => {
-      const selected = selectedId === undefined ? undefined : records().find(record => record.id === selectedId)
-      if (creating) renderCreate()
-      else if (selected === undefined) renderList()
-      else renderDetail(selected)
+      const routeId = context.routeId ?? 'channel:settings'
+      if (routeId.endsWith(':settings')) { renderList(); return }
+      if (routeId.endsWith(':create')) { renderCreate(); return }
+      const accountId = context.params?.accountId
+      const selected = typeof accountId === 'string' ? records().find(record => record.id === accountId) : undefined
+      if (selected === undefined) {
+        disposeCurrent()
+        content.replaceChildren(conciseEmpty(document, managerCopy(locale, 'channel.accounts.empty'), 'channelMissingAccount'))
+        return
+      }
+      const tab: ChannelDetailTab = routeId.endsWith(':logs') ? 'logs'
+        : routeId.endsWith(':sessions') ? 'sessions' : 'configuration'
+      renderDetail(selected, tab)
     }
 
     render()

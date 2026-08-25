@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_ROUTE_SCHEMA_V2,
+  CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
   type CordisXLocalizationSeat,
 } from '../packages/cli/src/contracts.js'
 import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
@@ -194,6 +195,38 @@ describe('Manager Settings navigation core', () => {
     mount.abort()
     await mount.dispose()
     expect(managerBody.querySelector('[data-demo-manager-content]')).toBeNull()
+
+    for (const [id, title] of [['configuration', 'Configuration'], ['logs', 'Logs']] as const) {
+      pages.register('demo', {
+        $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3, id,
+        title: { key: `page.${id}`, fallback: title }, description: { key: `description.${id}`, fallback: `${title} body` },
+        icon: 'host:layers', chrome: 'standard',
+      }, () => undefined)
+    }
+    navigation.register('demo', {
+      $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2,
+      id: 'configuration', path: '/manager/extensions/demo/:accountId', outlet: 'manager.content', page: 'configuration',
+      title: { key: 'route.configuration' }, description: { key: 'route.configuration.description' },
+    })
+    navigation.register('demo', {
+      $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2,
+      id: 'logs', path: '/manager/extensions/demo/:accountId/logs', outlet: 'manager.content', page: 'logs',
+      title: { key: 'route.logs' }, description: { key: 'route.logs.description' },
+    })
+    const configuration = { id: 'configuration', params: { accountId: 'account-1' } } as const
+    const logs = { id: 'logs', params: { accountId: 'account-1' } } as const
+    navigation.managerContent.registerRecordTitles('demo', [{ id: 'account-1', title: { key: 'account', fallback: 'Ada' } }])
+    navigation.managerContent.register('demo', {
+      $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1, schemaVersion: 1, id: 'account-configuration', route: configuration,
+      parentRoute: { id: 'ready' }, header: { title: { kind: 'record', recordIdParam: 'accountId', fallback: { key: 'account.fallback', fallback: 'Account' } } },
+      tabs: [{ id: 'configuration', route: configuration }, { id: 'logs', route: logs }],
+    })
+    const presentation = navigation.managerContentPresentation('demo', configuration)
+    expect(presentation).toMatchObject({ title: 'Ada', description: 'Configuration body', parent: { id: 'ready' } })
+    expect(presentation?.tabs).toEqual([
+      expect.objectContaining({ id: 'configuration', label: 'Configuration', active: true }),
+      expect.objectContaining({ id: 'logs', label: 'Logs', active: false }),
+    ])
 
     pages.register('demo', {
       $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3,

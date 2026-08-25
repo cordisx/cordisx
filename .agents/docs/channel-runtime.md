@@ -48,7 +48,7 @@ formal remote mains before the productization slice was implemented.
 | Provider Fleet | Launcher-owned provider processes, provider-specific persistence, generation fencing, and a token-bound normalized RPC exist. | implemented and reusable; native Desktop current connection remains unavailable |
 | Agent events and delivery | Agent event v2, delivery snapshots, `followup`, `steer`, `inject`, cancellation-before-claim, and generation/owner fencing exist. | implemented and reusable after an explicit Platform-to-Agent binding is added |
 | Permission Broker | Source-bound required/optional declarations, `ask`/`allow`/`deny`, scope checks, audit, and plugin activation reconciliation exist in the renderer runtime. | implemented foundation; the Channel core has a source/generation-bound broker port, while the production Node policy-store adapter remains planned |
-| Manager navigation and plugin Config | Configuration protocol #19, Host #60, TDesign-aligned Host forms/collections, and Manager navigation core #106 are merged. | Channel B navigation/route/standard-page data plane and bounded Host `manager.content` mount are implemented and verified; launcher live projection and writes remain unavailable |
+| Manager navigation and plugin Config | Configuration protocol #19, Host #60, TDesign-aligned Host forms/collections, and Manager navigation core #106 are merged. | Channel B navigation/route/standard-page data plane and bounded Host `manager.content` mount are implemented and verified; service-config writes are available through the narrow Host bridge, while the renderer is still a launch-time snapshot rather than a continuous transport feed. |
 | Agent Trace | Fixture, product package, event/delivery lifecycle, and README are merged. | useful notification evidence; not a Channel transport |
 | Node plugin surface | The host-neutral core and source-bound Node Cordis `channel` service exist. Package service entries are now source-validated, bundled, integrity-bound into the immutable package object, authority-projected, imported, activated, and disposed by generation. | loader path implemented/verified with the simulator; lifecycle-coordinator orchestration and production gateway/broker/store wiring remain planned |
 | Mono pins | Mono was audited read-only against its formal remote main before this slice. | deliberately unchanged by this owning-repo delivery |
@@ -647,38 +647,44 @@ renderer owns all body nodes, styles, state indicators, adaptive searchable
 collections, empty states, diagnostics, theme projection, accessibility, and
 cleanup; the plugin receives no header or navigation DOM.
 
-The data plane and read-only Manager page are `implemented/verified`: isolated
+The data plane and Manager page are `implemented/verified`: isolated
 `app://-/index.html` CDP evidence proves an active plugin with `schemaKind=none`,
 valid authorized B registration, exact route, separate route/page metadata,
 standard Host icon/header, active `manager.content` mount, and a bounded Channel
 body. The Host owns navigation, header, seat, theme, accessibility, and cleanup;
-the Channel renderer contributes no navigation or header DOM. This is still a
-simulator/read-only status page, not a connected account manager.
+the Channel renderer contributes no navigation or header DOM. The renderer only
+receives a safe launch-time projection, never a credential or raw transport.
 
 The current Manager information architecture is Host-owned and
 `implemented/verified`: a fixed Channel list header has a fixed search field
-and a primary **New channel** action; only the card list scrolls. A card opens a
-detail destination with **Configuration**, **Logs**, and **Connections &
-sessions** tabs. Configuration uses read-only, full-width Host form chrome;
+and an icon-only **New channel** action; only the card list scrolls. The
+Channel bundle declares the exact `manager-content-navigation.v1` child routes
+for the root list, create flow, and each safe account projection. A card opens
+one of those detail destinations; the Host resolves the renderer-safe account
+title, owns breadcrumb/back/history and renders the **Configuration**,
+**Logs**, and **Connections & sessions** tabs. The Channel body never renders a
+second heading, back control, or tablist. Configuration uses full-width Host
+form chrome and saves only through the narrow Host service-config CAS bridge;
 logs never synthesize strings and reserve the native `console.*` argument-array
 and structured-event shapes for when a real transport publishes them. A create
-flow may save an explicitly local, Manager-session-only candidate with no
-secret, credential reference, callback, or external write, then returns to the
-list. It is displayed as unavailable and is not a configured or connected
-account.
+flow writes an explicitly local simulator configuration through that Host
+bridge, retains only its renderer-safe display name in the Manager session,
+atomically reprojects exact record routes/titles, and returns to the list. It
+does not place a secret, credential reference, callback, or raw transport in
+the renderer. A card may still be unavailable until the configured adapter has
+an actual verified connection.
 
-The Host has a read-only record of Feishu temporary test application
-`cli_aaba90fcc4389cb3`: it is an enabled known test target, not a verified
-connection. No app secret was read. No event/callback is configured; credential
-reference, official adapter, and launcher transport are unavailable. The UI
-must keep that distinction visible in **Connections & sessions**. It does not
-require or create a separate test enterprise; any future account/organization
+The official Feishu/Lark WebSocket adapter is implemented and automated
+verified. A real account/message smoke is still not verified, so the UI must
+keep that distinction visible in **Connections & sessions**. Credential
+creation broker and WeCom remain unavailable. It does not require or create a
+separate test enterprise; any future account/organization
 verification remains an action-time, user-authorized real-adapter step with
 per-requirement audit and readback.
 
-Launcher-to-renderer live snapshot transport, configuration writes,
-reconnect/dead-letter actions, and credential operations remain `planned` or
-`unavailable`. The complete Channel settings experience needs:
+Continuous launcher-to-renderer live transport, reconnect/dead-letter actions,
+and credential creation remain `planned` or `unavailable`. The complete
+Channel settings experience needs:
 
 1. channels and adapter availability;
 2. accounts and secret-handle readiness;
@@ -818,7 +824,7 @@ reviewable. A source branch head is never a final gitlink.
 | Secrets/attachments | secret handle only, redacted logs/errors/snapshots/audit, no renderer/config plaintext, size/type/hash/expiry quarantine, unsafe media refusal, and opaque transfer handles. |
 | Simulator phase one | create, continue, completion/failure notification, duplicate inbound event, restart, retry/dead letter, permission denial, approval expiry/deny fixture, binding revision, and generation disposal without a real account. |
 | Adapter conformance | official fixture normalization, direct/group/topic/reply mapping, outbound formatting/limits, token refresh where applicable, platform-specific retry hints, and no unsupported personal-WeChat path. |
-| Manager data plane and DOM | Implemented/verified: valid authorized B navigation record, exact `manager.content` route, Host-rendered route label/page header, fixed searchable Channel cards, card detail tabs, Host form read-only configuration, unavailable log/session states, local candidate-only create flow, controlled mount, close/reopen cleanup, and no `secretRef`/secret/raw payload. Writable actions remain planned. |
+| Manager data plane and DOM | Implemented/verified: valid authorized B navigation record; exact root/create/account `manager.content` routes; Host-rendered route label, dynamic safe account header, breadcrumbs/back/history and tabs; fixed searchable Channel cards; body-only Host-form configuration; unavailable log/session states; local candidate-only create flow; controlled mount/close/reopen cleanup; and no `secretRef`/secret/raw payload. Writable actions remain planned. |
 | Session surface | structured Channel status/open/share action only; no arbitrary title DOM/CSS, no native node replacement, correct composite session target, policy hide/restore, and generation cleanup. |
 | Real smoke | exact SDK, CordisX, protocol, adapter, account mode, and app version; authorized account only; one inbound create/continue and one outbound notification; redacted evidence; unavailable features reported honestly. |
 | Release | focused tests, typecheck, build, full `npm run check`, audit, `git diff --check`, isolated real `app://-/index.html` smoke, normal PR/CI, and head-fenced owning merge. Mono and roadmap remain untouched by this slice. |
