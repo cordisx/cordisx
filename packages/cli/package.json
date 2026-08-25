@@ -21,13 +21,13 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "build": "npm run build --workspace=@cordisx/channel-runtime && tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "check": "npm run typecheck",
     "check:package": "node scripts/check-package-contents.mjs",
     "dev": "tsx src/cli.ts",
     "prepack": "npm run build",
     "smoke": "node scripts/live-smoke.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "npm run build --workspace=@cordisx/channel-runtime && tsc -p tsconfig.json --noEmit"
   },
   "engines": {
     "node": ">=22.19"
@@ -66,6 +66,7 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@cordisx/channel-runtime": "file:../channel-runtime",
     "@types/node": "^22.18.1",
     "@types/ws": "^8.18.1",
     "jsdom": "^26.1.0",

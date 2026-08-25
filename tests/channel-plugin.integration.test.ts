@@ -140,9 +140,35 @@ describe('built-in Channel product bundle', () => {
     }
   })
 
-  it('renders and disposes the bounded Channel body through the internal Host service', () => {
+  it('renders and disposes the bounded Channel body through the internal Host service', async () => {
     const dom = new JSDOM('<html lang="en"><body><main id="seat"></main></body></html>')
-    const manager = new CordisXChannelManagerService(new Context(), projection)
+    const mutations: unknown[] = []
+    const manager = new CordisXChannelManagerService(new Context(), {
+      projection: { ...projection, service: { ...projection.service, writable: true } },
+      serviceConfig: {
+        list: async () => [{
+          contract: 'cordisx.service-config-descriptor/v1', schemaVersion: 1,
+          identity: { source: 'file:///channel', pluginId: 'channel', serviceId: 'runtime' },
+          scope: { profileId: 'work', generation: 'channel-test-generation' },
+          schema: { id: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json', projection: { kind: 'standard', renderable: false } },
+          revision: 4, lastGoodRevision: 4, configApplies: 'service-restart', writable: true, restartRequired: false,
+          configuration: {
+            contract: 'cordisx.channel-service-config/v1', schemaVersion: 1,
+            connections: [{ ref: projection.connections[0]!.ref, adapterKind: 'simulator', enabled: true, transport: { mode: 'simulator' } }],
+            routes: [], reliability: {
+              leaseMs: 30_000,
+              retry: { maxAttempts: 5, baseDelayMs: 1_000, maxDelayMs: 60_000, maxAgeMs: 86_400_000, jitterRatio: .2 },
+              rateLimit: { perAccountPerMinute: 120, perUserPerMinute: 20, perConversationPerMinute: 60, maxConcurrent: 8, maxBacklog: 1_000 },
+              attachments: { maxFiles: 4, maxBytesPerFile: 10_485_760, allowedMediaTypes: ['text/plain'] },
+            },
+          }, secrets: [],
+        }] as never,
+        mutate: async mutation => {
+          mutations.push(mutation)
+          return { contract: 'cordisx.service-config-result/v1', schemaVersion: 1, identity: mutation.identity, scope: mutation.scope, revision: 5, status: 'applied', configApplies: 'service-restart', serviceGeneration: 'channel-test-next' }
+        },
+      },
+    })
     const controller = new AbortController()
     const container = dom.window.document.querySelector<HTMLElement>('#seat')!
     const dispose = manager.mount({
@@ -168,7 +194,7 @@ describe('built-in Channel product bundle', () => {
     expect(channelTabs.querySelector('[data-channel-detail-tab="configuration"]')?.classList.contains('cxm-tab')).toBe(true)
     expect(channelTabs.querySelector('.cxm-tab-content .cxm-tab-icon')).not.toBeNull()
     expect(page.querySelector('[data-channel-configuration="simulator/local/test"]')).not.toBeNull()
-    expect(page.querySelector('[data-channel-configuration-unavailable="true"]')?.textContent).toContain('No configurable items yet.')
+    await waitFor(() => page.querySelector('[data-channel-configuration-form="simulator/local/test"]') !== null)
     page.querySelector<HTMLButtonElement>('[data-channel-detail-tab="logs"]')!.click()
     expect(page.querySelector('[data-channel-logs="true"]')?.textContent).toContain('No logs yet.')
     expect(page.querySelector('[data-host-collection="channel-diagnostics"]')).toBeNull()
@@ -182,20 +208,63 @@ describe('built-in Channel product bundle', () => {
     page.querySelector<HTMLButtonElement>('[data-channel-create="true"]')!.click()
     expect(page.querySelector('[data-channel-create-form="true"]')).not.toBeNull()
     const name = page.querySelector<HTMLElement>('#channel-create-name') as HTMLElement & { onChange?: (value: string) => void }
-    name.onChange?.('Feishu candidate')
+    name.onChange?.('Local smoke')
     page.querySelector<HTMLFormElement>('[data-channel-create-form="true"]')!.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }))
+    await waitFor(() => mutations.length === 1)
+    await waitFor(() => page.querySelector('[data-channel-page="list"]') !== null)
     expect(page.querySelector('[data-channel-page="list"]')).not.toBeNull()
-    expect(page.querySelector('[data-host-collection="channel-list"] [data-collection-item="candidate/feishu/1"]')).not.toBeNull()
-    expect(page.textContent).toContain('等待连接')
-    const candidateCard = page.querySelector<HTMLElement>('[data-collection-item="candidate/feishu/1"]')!
-    expect(candidateCard.querySelector('.cxc-avatar')).not.toBeNull()
-    expect(candidateCard.querySelector('.cxc-avatar-badge')).not.toBeNull()
-    expect(candidateCard.querySelector('.cxc-status[data-position="card"]')).not.toBeNull()
+    expect(page.querySelector('[data-host-collection="channel-list"] [data-collection-item="simulator/local-smoke/local"]')).not.toBeNull()
+    expect(mutations[0]).toMatchObject({ identity: { pluginId: 'channel', serviceId: 'runtime' }, expectedRevision: 4 })
+    const savedCard = page.querySelector<HTMLElement>('[data-collection-item="simulator/local-smoke/local"]')!
+    expect(savedCard.querySelector('.cxc-avatar')).not.toBeNull()
+    expect(savedCard.querySelector('.cxc-avatar-badge')).not.toBeNull()
+    expect(savedCard.querySelector('.cxc-status[data-position="card"]')).not.toBeNull()
     expect(page.outerHTML).not.toMatch(/secretRef|keychain:|host-secret:/i)
     controller.abort()
     expect(page.dataset.channelManagerAborted).toBe('true')
     dispose()
     expect(container.querySelector('[data-channel-manager]')).toBeNull()
+    dom.window.close()
+  })
+
+  it('saves an account switch only through the Host service-config bridge', async () => {
+    const dom = new JSDOM('<html lang="en"><body><main id="seat"></main></body></html>')
+    const mutations: unknown[] = []
+    const manager = new CordisXChannelManagerService(new Context(), {
+      projection: { ...projection, service: { ...projection.service, writable: true } },
+      serviceConfig: {
+        list: async () => [{
+          contract: 'cordisx.service-config-descriptor/v1', schemaVersion: 1,
+          identity: { source: 'file:///channel', pluginId: 'channel', serviceId: 'runtime' },
+          scope: { profileId: 'work', generation: 'channel-test-generation' },
+          schema: { id: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json', projection: { kind: 'standard', renderable: false } },
+          revision: 4, lastGoodRevision: 4, configApplies: 'service-restart', writable: true, restartRequired: false,
+          configuration: {
+            contract: 'cordisx.channel-service-config/v1', schemaVersion: 1,
+            connections: [{ ref: projection.connections[0]!.ref, adapterKind: 'simulator', enabled: true, transport: { mode: 'simulator' } }],
+            routes: [], reliability: {
+              leaseMs: 30_000,
+              retry: { maxAttempts: 5, baseDelayMs: 1_000, maxDelayMs: 60_000, maxAgeMs: 86_400_000, jitterRatio: .2 },
+              rateLimit: { perAccountPerMinute: 120, perUserPerMinute: 20, perConversationPerMinute: 60, maxConcurrent: 8, maxBacklog: 1_000 },
+              attachments: { maxFiles: 4, maxBytesPerFile: 10_485_760, allowedMediaTypes: ['text/plain'] },
+            },
+          }, secrets: [],
+        }] as never,
+        mutate: async mutation => {
+          mutations.push(mutation)
+          return { contract: 'cordisx.service-config-result/v1', schemaVersion: 1, identity: mutation.identity, scope: mutation.scope, revision: 5, status: 'applied', configApplies: 'service-restart', serviceGeneration: 'channel-test-next' }
+        },
+      },
+    })
+    const container = dom.window.document.querySelector<HTMLElement>('#seat')!
+    const dispose = manager.mount({ document: dom.window.document, container, signal: new AbortController().signal } as never)
+    container.querySelector<HTMLElement>('[data-collection-item="simulator/local/test"] .cxc-primary')!.click()
+    await waitFor(() => container.querySelector('[data-channel-configuration-form="simulator/local/test"]') !== null)
+    container.querySelector<HTMLFormElement>('[data-channel-configuration-form="simulator/local/test"]')!.requestSubmit()
+    await waitFor(() => mutations.length === 1)
+    expect(mutations[0]).toMatchObject({ identity: { pluginId: 'channel', serviceId: 'runtime' }, expectedRevision: 4 })
+    expect(container.textContent).not.toMatch(/secretRef|keychain:|host-secret:/i)
+    dispose()
     dom.window.close()
   })
 })

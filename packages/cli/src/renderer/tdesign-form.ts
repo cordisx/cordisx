@@ -13,6 +13,7 @@ export interface TDesignElement extends HTMLElement {
   value?: unknown
   checked?: boolean
   update?: () => void
+  updateProps?: (props: Readonly<Record<string, unknown>>) => void
   props?: Record<string, unknown>
   [key: string]: unknown
 }
@@ -79,11 +80,14 @@ function ensureInstalled(document: Document): void {
 
 export function setTDesignProps(element: TDesignElement, props: Readonly<Record<string, unknown>>): void {
   for (const [name, value] of Object.entries(props)) element[name] = value
-  // Omi custom elements read their initial props from attributes when they are
-  // connected. Host form controls are configured before insertion, so a
-  // property-only placeholder would otherwise be replaced by TDesign's own
-  // default locale (currently Chinese) at first connection. Keep this
-  // user-facing, scalar value in the declarative initial-prop channel as well.
+  // Omi custom elements read their initial props from attributes when they
+  // connect. Host controls are configured before insertion, so a property-only
+  // scalar may be replaced by the component default during its first render.
+  // Reapply the typed props once it is connected: serializing a Boolean to an
+  // attribute is not safe here because TDesign's `value` accepts String first,
+  // which turns true into the literal string "true" and makes a switch appear
+  // off. Placeholder is the sole user-facing scalar that must also be an
+  // attribute for the component's first locale-sensitive paint.
   if (Object.hasOwn(props, 'placeholder')) {
     const placeholder = props.placeholder
     if (typeof placeholder === 'string') element.setAttribute('placeholder', placeholder)
@@ -91,6 +95,20 @@ export function setTDesignProps(element: TDesignElement, props: Readonly<Record<
   }
   if (element.props !== undefined) Object.assign(element.props, props)
   element.update?.()
+  const restoreTypedProps = () => {
+    if (!element.isConnected) return
+    if (typeof element.updateProps === 'function') {
+      element.updateProps(props)
+      return
+    }
+    if (element.props !== undefined) Object.assign(element.props, props)
+    element.update?.()
+  }
+  queueMicrotask(restoreTypedProps)
+  // TDesign schedules its own first prop normalization in a microtask. Run one
+  // bounded task after it so Boolean/number values stay typed on the visible
+  // first frame instead of being reset to the component default.
+  setTimeout(restoreTypedProps, 0)
 }
 
 export function createTDesignElement(document: Document, tag: string, primitive: string): TDesignElement {

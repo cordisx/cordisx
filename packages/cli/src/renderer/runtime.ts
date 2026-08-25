@@ -1873,7 +1873,17 @@ async function start(
     await settingsFiber
     configRendererFiber = ctx.plugin(CordisXConfigRendererService, { registry: configRenderers, console: pluginConsole })
     await configRendererFiber
-    channelManagerFiber = ctx.plugin(CordisXChannelManagerService, metadata.channelManager)
+    channelManagerFiber = metadata.channelManager === undefined && serviceConfigBridge === undefined
+      ? ctx.plugin(CordisXChannelManagerService)
+      : ctx.plugin(CordisXChannelManagerService, {
+          ...(metadata.channelManager === undefined ? {} : { projection: metadata.channelManager }),
+          ...(serviceConfigBridge === undefined ? {} : {
+            serviceConfig: {
+              list: async () => await serviceConfigBridge.list('channel'),
+              mutate: async mutation => await serviceConfigBridge.mutate(mutation),
+            },
+          }),
+        })
     await channelManagerFiber
     registrySubscriptions.push(configuration.subscribe(notifyFrom('configuration')))
     platformFiber = ctx.plugin(CordisXPlatformService, { adapter: platformAdapter, broker, console: pluginConsole })

@@ -434,13 +434,23 @@ export class HostFormAdapter {
       control.tabIndex = field.disabled ? -1 : 0
       control.setAttribute('role', 'switch')
       control.setAttribute('aria-checked', String(field.value === true))
+      // t-switch parses a declarative `value` as its String arm before its
+      // Boolean arm. Give it an explicit, typed wire pair so its first render
+      // remains in sync with the Host Boolean rather than falling back to off.
+      const switchValue = field.value === true ? 'true' : 'false'
+      control.setAttribute('value', switchValue)
+      control.setAttribute('default-value', switchValue)
+      control.setAttribute('custom-value', '["true","false"]')
       setTDesignProps(control, {
-        value: field.value === true,
+        value: switchValue,
+        defaultValue: switchValue,
+        customValue: ['true', 'false'],
         disabled: field.disabled,
         label: [managerCopy(this.locale(), 'form.switch-on'), managerCopy(this.locale(), 'form.switch-off')],
-        onChange: (value: boolean) => {
-          control.setAttribute('aria-checked', String(value))
-          onDraft(value)
+        onChange: (value: boolean | string) => {
+          const checked = value === true || value === 'true'
+          control.setAttribute('aria-checked', String(checked))
+          onDraft(checked)
         },
       })
       return { root: control, focusTarget: control, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }

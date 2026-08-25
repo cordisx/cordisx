@@ -5,6 +5,11 @@ import { HOST_FORM_STYLES, HostFormAdapter } from './host-form.js'
 import { HostThemeProjection } from './host-theme.js'
 import { createHostSurfaceIcon, createManagerIcon } from './icons.js'
 import { managerCopy } from './ui-copy.js'
+import type {
+  HostServiceConfigDescriptor,
+  HostServiceConfigMutation,
+  HostServiceConfigMutationResult,
+} from '../launcher/service-config.js'
 
 export type ChannelProductStatus = 'implemented' | 'verified' | 'experimental' | 'unavailable' | 'planned'
 
@@ -101,21 +106,30 @@ const EMPTY_PROJECTION: ChannelManagerProjectionV1 = Object.freeze({
 })
 
 const CORDIS_ORIGINAL = Symbol.for('cordis.original')
-const projections = new WeakMap<object, ChannelManagerProjectionV1>()
+interface ChannelManagerState {
+  readonly projection: ChannelManagerProjectionV1
+  readonly serviceConfig?: ChannelManagerServiceConfigApi
+}
 
-function projectionFor(service: object): ChannelManagerProjectionV1 {
+const projections = new WeakMap<object, ChannelManagerState>()
+
+function stateFor(service: object): ChannelManagerState {
   const original = (service as { [CORDIS_ORIGINAL]?: object })[CORDIS_ORIGINAL]
   if (original !== undefined) {
-    const projection = projections.get(original)
-    if (projection !== undefined) return projection
+    const state = projections.get(original)
+    if (state !== undefined) return state
   }
   let candidate: object | null = service
   while (candidate !== null) {
-    const projection = projections.get(candidate)
-    if (projection !== undefined) return projection
+    const state = projections.get(candidate)
+    if (state !== undefined) return state
     candidate = Object.getPrototypeOf(candidate) as object | null
   }
   throw new Error('CordisX Channel Manager is detached from its Host projection')
+}
+
+function projectionFor(service: object): ChannelManagerProjectionV1 {
+  return stateFor(service).projection
 }
 
 const CHANNEL_MANAGER_STYLES = String.raw`
@@ -365,7 +379,6 @@ interface ChannelRecord {
   readonly id: string
   readonly connection: ChannelManagerConnectionProjection
   readonly account?: ChannelManagerAccountProjection
-  readonly candidate?: true
 }
 
 type ChannelDetailTab = 'configuration' | 'logs' | 'sessions'
@@ -380,13 +393,13 @@ function channelRecords(projection: ChannelManagerProjectionV1): readonly Channe
   })
 }
 
-function candidateRecord(id: string, name: string, platform: string): ChannelRecord {
+function localSimulatorRecord(name: string): ChannelRecord {
+  const accountId = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'local'
+  const ref = { adapterId: 'simulator', accountId, tenantId: 'local' }
   return {
-    id,
-    candidate: true,
+    id: compositeRef(ref),
     connection: {
-      ref: { adapterId: platform, accountId: name, tenantId: 'local-candidate' },
-      adapterKind: platform, enabled: false, transportMode: 'not-configured', secretState: 'missing',
+      ref, adapterKind: 'simulator', enabled: true, transportMode: 'simulator', secretState: 'unavailable',
     },
   }
 }
@@ -426,13 +439,10 @@ function channelItem(
 ): HostCollectionItem {
   const { id, connection, account } = record
   const state = account?.connectionState ?? (connection.enabled ? 'unavailable' : 'disabled')
-  const description = record.candidate === true
-    ? '等待连接'
-    : connection.adapterKind
   return {
     id,
     title: connection.ref.accountId,
-    description: record.candidate === true ? description : connection.adapterKind,
+    description: connection.adapterKind,
     machineId: id,
     searchText: [connection.ref.adapterId, connection.ref.tenantId, connection.adapterKind, connection.transportMode, state],
     icon: () => createHostSurfaceIcon(document, state === 'ready' ? 'host:success' : 'host:layers'),
@@ -444,7 +454,6 @@ function channelItem(
     status: {
       label: channelStateLabel(document.documentElement.lang || 'en', state),
       tone: statusTone(state),
-      ...(record.candidate === true ? { detail: 'Local candidate; no external configuration was written.' } : {}),
     },
     ...(onOpen === undefined ? {} : { openLabel: 'Open channel details', onOpen: () => onOpen(record) }),
   }
@@ -487,11 +496,27 @@ export interface CordisXChannelManager {
   mount(context: CordisXPageMountContext): Disposable<void>
 }
 
+export interface ChannelManagerServiceConfigApi {
+  list(): Promise<readonly HostServiceConfigDescriptor[]>
+  mutate(mutation: HostServiceConfigMutation): Promise<HostServiceConfigMutationResult>
+}
+
+export interface ChannelManagerServiceInput {
+  readonly projection?: ChannelManagerProjectionV1
+  readonly serviceConfig?: ChannelManagerServiceConfigApi
+}
+
 /** Host-owned Channel settings renderer. Plugins can request the seat but never receive its DOM internals. */
 export class CordisXChannelManagerService extends Service implements CordisXChannelManager {
-  constructor(ctx: Context, projection: ChannelManagerProjectionV1 = EMPTY_PROJECTION) {
+  constructor(ctx: Context, input: ChannelManagerProjectionV1 | ChannelManagerServiceInput = EMPTY_PROJECTION) {
     super(ctx, 'channelManager')
-    projections.set(this, normalizeProjection(projection))
+    const wrapped = 'projection' in input || 'serviceConfig' in input
+      ? input as ChannelManagerServiceInput
+      : { projection: input as ChannelManagerProjectionV1 }
+    projections.set(this, Object.freeze({
+      projection: normalizeProjection(wrapped.projection ?? EMPTY_PROJECTION),
+      ...(wrapped.serviceConfig === undefined ? {} : { serviceConfig: wrapped.serviceConfig }),
+    }))
   }
 
   snapshot(): ChannelManagerProjectionV1 {
@@ -500,7 +525,9 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
 
   mount(context: CordisXPageMountContext): Disposable<void> {
     const { document } = context
-    const projection = projectionFor(this)
+    const state = stateFor(this)
+    const projection = state.projection
+    const serviceConfig = state.serviceConfig
     const locale = document.documentElement.lang || 'en'
     const theme = new HostThemeProjection(document)
     const root = document.createElement('div')
@@ -518,13 +545,11 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     let activeTab: ChannelDetailTab = 'configuration'
     let listQuery = ''
     let creating = false
-    let candidateSequence = 0
-    const candidates: ChannelRecord[] = []
+    const committedRecords: ChannelRecord[] = []
     let candidateName = ''
-    let candidatePlatform = 'feishu'
     let disposeCurrent = (): void => {}
 
-    const records = (): readonly ChannelRecord[] => [...channelRecords(projection), ...candidates]
+    const records = (): readonly ChannelRecord[] => [...channelRecords(projection), ...committedRecords]
 
     const renderList = (): void => {
       disposeCurrent()
@@ -534,7 +559,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       const collection = createHostCollection(document, {
         id: 'channel-list',
         label: managerCopy(locale, 'channel.accounts'),
-        items: [...accountItems(document, projection), ...candidates.map(record => channelItem(document, record))].map(item => ({
+        items: records().map(record => channelItem(document, record)).map(item => ({
           ...item,
           onOpen: () => {
             selectedId = item.id
@@ -605,35 +630,70 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       })
       forms.connect(nameItem, nameControl)
       nameItem.control.append(nameControl.root)
-      const platformItem = forms.item({ id: 'channel-create-platform', label: managerCopy(locale, 'channel.create.platform'), fullWidth: true })
-      const platformControl = forms.control({
-        namespace: 'channel-manager', path: ['candidate', 'platform'], type: 'string', value: candidatePlatform, disabled: false, required: true,
-        choices: [
-          { label: 'Feishu / Lark', value: 'feishu' },
-          { label: 'WeCom', value: 'wecom' },
-        ],
-      }, 'channel-create-platform', value => { candidatePlatform = typeof value === 'string' ? value : 'feishu' })
-      forms.connect(platformItem, platformControl)
-      platformItem.control.append(platformControl.root)
-      configuration.content.append(nameItem.root, platformItem.root)
+      configuration.content.append(nameItem.root)
       const actions = document.createElement('div')
       actions.className = 'cxc-channel-create-actions'
+      const status = forms.note('')
+      status.dataset.channelCreateStatus = 'true'
       const submit = forms.button(managerCopy(locale, 'channel.create.save'), { type: 'submit', variant: 'primary' })
       submit.dataset.channelCreateSubmit = 'true'
-      actions.append(submit)
+      actions.append(status, submit)
       form.append(configuration.root, actions)
       form.addEventListener('submit', event => {
         event.preventDefault()
         const name = candidateName.trim()
         if (name === '') { nameItem.setError(managerCopy(locale, 'form.required')); return }
-        candidateSequence += 1
-        const id = `candidate/${candidatePlatform}/${candidateSequence}`
-        candidates.push(candidateRecord(id, name, candidatePlatform))
-        selectedId = undefined
-        candidateName = ''
-        listQuery = ''
-        creating = false
-        render()
+        if (!projection.service.writable || serviceConfig === undefined) {
+          status.textContent = managerCopy(locale, 'channel.create.unavailable')
+          return
+        }
+        const record = localSimulatorRecord(name)
+        submit.disabled = true
+        status.textContent = managerCopy(locale, 'form.saving')
+        void serviceConfig.list().then(descriptors => {
+          const descriptor = descriptors.find(item => item.identity.pluginId === 'channel' && item.identity.serviceId === 'runtime')
+          const raw = descriptor?.configuration
+          if (descriptor === undefined || raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Channel service configuration is unavailable')
+          const configuration = structuredClone(raw) as { connections?: Array<Record<string, unknown>>; routes?: Array<Record<string, unknown>> }
+          const existing = configuration.connections?.some(item => compositeRef(item.ref as ChannelManagerConnectionProjection['ref']) === record.id) === true
+          if (existing) throw new Error('A local simulator channel with this name already exists')
+          const routeId = `${record.connection.ref.accountId}-default`
+          configuration.connections = [...(configuration.connections ?? []), {
+            ref: record.connection.ref, adapterKind: 'simulator', enabled: true,
+            transport: { mode: 'simulator' },
+          }]
+          configuration.routes = [...(configuration.routes ?? []), {
+            id: routeId, connection: record.connection.ref, enabled: true,
+            policy: { conversationKinds: ['direct'] },
+            task: {
+              provider: { useDefault: true }, model: { useDefault: true }, profile: { useDefault: true }, workspaceAlias: 'cordisx',
+            },
+            notifications: ['completion', 'failure', 'approval-required'],
+          }]
+          return serviceConfig.mutate({
+            contract: 'cordisx.service-config-mutation/v1', schemaVersion: 1,
+            identity: descriptor.identity, scope: descriptor.scope, expectedRevision: descriptor.revision,
+            configuration: configuration as HostServiceConfigMutation['configuration'],
+          })
+        }).then(result => {
+          if (!form.isConnected) return
+          submit.disabled = false
+          if (result.status !== 'applied') {
+            status.textContent = result.status === 'conflict' ? managerCopy(locale, 'form.conflict-retained') : managerCopy(locale, 'channel.create.unavailable')
+            return
+          }
+          committedRecords.push(record)
+          selectedId = undefined
+          activeTab = 'configuration'
+          candidateName = ''
+          listQuery = ''
+          creating = false
+          render()
+        }).catch(() => {
+          if (!form.isConnected) return
+          submit.disabled = false
+          status.textContent = managerCopy(locale, 'channel.create.unavailable')
+        })
       })
       page.append(head, form)
       content.replaceChildren(page)
@@ -643,15 +703,75 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     const renderConfiguration = (record: ChannelRecord, panel: HTMLElement): void => {
       const configuration = document.createElement('section')
       configuration.dataset.channelConfiguration = record.id
-      if (!projection.service.writable) {
+      if (!projection.service.writable || serviceConfig === undefined) {
         configuration.append(conciseEmpty(document, managerCopy(locale, 'channel.configuration.unavailable'), 'channelConfigurationUnavailable'))
         panel.append(configuration)
         return
       }
-      // A writable projection is the only point at which a Host-owned schema form is rendered.
-      // The current protocol intentionally does not expose secrets or raw adapter credentials here.
-      configuration.append(conciseEmpty(document, managerCopy(locale, 'channel.accounts.empty'), 'channelConfigurationEmpty'))
+      configuration.append(conciseEmpty(document, managerCopy(locale, 'form.saving'), 'channelConfigurationLoading'))
       panel.append(configuration)
+      void serviceConfig.list().then(descriptors => {
+        if (!configuration.isConnected) return
+        const descriptor = descriptors.find(item => item.identity.pluginId === 'channel' && item.identity.serviceId === 'runtime')
+        const raw = descriptor?.configuration
+        if (descriptor === undefined || raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+          configuration.replaceChildren(conciseEmpty(document, managerCopy(locale, 'channel.configuration.unavailable'), 'channelConfigurationUnavailable'))
+          return
+        }
+        const source = structuredClone(raw) as { connections?: Array<Record<string, unknown>> }
+        const connection = source.connections?.find(item => compositeRef(item.ref as ChannelManagerConnectionProjection['ref']) === record.id)
+        if (connection === undefined || typeof connection.enabled !== 'boolean') {
+          configuration.replaceChildren(conciseEmpty(document, managerCopy(locale, 'channel.configuration.unavailable'), 'channelConfigurationUnavailable'))
+          return
+        }
+        let enabled = connection.enabled
+        const form = forms.form(`channel-config-${record.id}`)
+        form.dataset.channelConfigurationForm = record.id
+        const grid = forms.grid()
+        const item = forms.item({ id: `channel-enabled-${record.id}`, label: managerCopy(locale, 'channel.field.status'), fullWidth: true })
+        const control = forms.control({
+          namespace: 'channel-manager', path: ['connections', record.id, 'enabled'], type: 'boolean', role: 'switch',
+          value: enabled, disabled: false, required: false,
+        }, `channel-enabled-${record.id}`, value => { enabled = value === true })
+        forms.connect(item, control)
+        item.control.append(control.root)
+        grid.append(item.root)
+        const actions = document.createElement('div')
+        actions.className = 'cxc-channel-create-actions'
+        const status = forms.note('')
+        status.dataset.channelConfigurationStatus = 'true'
+        const submit = forms.button(managerCopy(locale, 'form.save-configuration'), { type: 'submit', variant: 'primary' })
+        submit.dataset.channelConfigurationSave = record.id
+        actions.append(status, submit)
+        form.append(grid, actions)
+        form.addEventListener('submit', event => {
+          event.preventDefault()
+          const candidate = structuredClone(source) as { connections?: Array<Record<string, unknown>> }
+          const target = candidate.connections?.find(item => compositeRef(item.ref as ChannelManagerConnectionProjection['ref']) === record.id)
+          if (target === undefined) return
+          target.enabled = enabled
+          submit.disabled = true
+          status.textContent = managerCopy(locale, 'form.saving')
+          const mutation: HostServiceConfigMutation = {
+            contract: 'cordisx.service-config-mutation/v1', schemaVersion: 1,
+            identity: descriptor.identity, scope: descriptor.scope, expectedRevision: descriptor.revision,
+            configuration: candidate as HostServiceConfigMutation['configuration'],
+          }
+          void serviceConfig.mutate(mutation).then(result => {
+            if (!configuration.isConnected) return
+            submit.disabled = false
+            status.textContent = result.status === 'applied' ? managerCopy(locale, 'form.apply-service-restart') : result.status === 'conflict'
+              ? managerCopy(locale, 'form.conflict-retained') : managerCopy(locale, 'channel.configuration.unavailable')
+          }).catch(() => {
+            if (!configuration.isConnected) return
+            submit.disabled = false
+            status.textContent = managerCopy(locale, 'channel.configuration.unavailable')
+          })
+        })
+        configuration.replaceChildren(form)
+      }).catch(() => {
+        if (configuration.isConnected) configuration.replaceChildren(conciseEmpty(document, managerCopy(locale, 'channel.configuration.unavailable'), 'channelConfigurationUnavailable'))
+      })
     }
 
     const renderLogs = (panel: HTMLElement): (() => void) => {
