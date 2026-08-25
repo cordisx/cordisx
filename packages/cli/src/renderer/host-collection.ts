@@ -104,8 +104,8 @@ export const HOST_COLLECTION_STYLES = String.raw`
     min-width: 0;
   }
   .cxc-collection[data-density="compact"] {
-    --cxc-icon-seat-size: var(--cx-compact-list-icon-seat, 24px);
-    --cxc-icon-glyph-size: var(--cx-compact-list-icon-glyph, 18px);
+    --cxc-icon-seat-size: var(--cx-compact-list-icon-seat, 22px);
+    --cxc-icon-glyph-size: var(--cx-compact-list-icon-glyph, 16px);
   }
   .cxc-search {
     display: flex;
@@ -131,16 +131,20 @@ export const HOST_COLLECTION_STYLES = String.raw`
        complete content width. This avoids a blank trailing column without
        requiring every catalog to carry its own width exception. */
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+    /* A scrollable list owns the remaining height, not each product card. */
+    align-content: start;
+    align-items: start;
     gap: 8px;
     margin-top: 12px;
   }
   .cxc-list[data-layout="rows"] { grid-template-columns: minmax(0, 1fr); }
-  .cxc-listitem { min-width: 0; }
+  .cxc-listitem { min-width: 0; align-self: start; }
   .cxc-card {
     position: relative;
     container-type: inline-size;
     min-width: 0;
-    height: 100%;
+    height: auto;
+    align-self: start;
     box-sizing: border-box;
     border: 1px solid var(--cx-border);
     border-radius: 11px;
@@ -155,7 +159,7 @@ export const HOST_COLLECTION_STYLES = String.raw`
     width: 100%;
     min-width: 0;
     min-height: 82px;
-    height: 100%;
+    height: auto;
     box-sizing: border-box;
     padding: 12px;
     border: 0;
@@ -170,6 +174,9 @@ export const HOST_COLLECTION_STYLES = String.raw`
   .cxc-primary:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: -3px; }
   .cxc-icon-seat { position: relative; display: grid; place-items: center; width: var(--cxc-icon-seat-size); height: var(--cxc-icon-seat-size); flex: none; color: var(--cx-muted); }
   .cxc-icon-seat > :first-child { width: var(--cxc-icon-glyph-size); height: var(--cxc-icon-glyph-size); max-width: 100%; max-height: 100%; pointer-events: none; }
+  /* Host icon wrappers may carry SVG width/height attributes from their source
+     asset. Keep the rendered glyph inside the shared seat regardless of token. */
+  .cxc-icon-seat > :first-child > svg { display: block; width: 100% !important; height: 100% !important; }
   .cxc-status {
     position: absolute;
     right: -3px;

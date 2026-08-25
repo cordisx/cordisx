@@ -137,7 +137,8 @@ function pluginConsoleSmokeAssertions(report, owner) {
     'ui.lunaOnly': report.ui.lunaOnly,
     'ui.nativePayloads': report.ui.nativePayloads,
     'ui.firstLineAtTop': report.ui.firstLineAtTop,
-    'ui.contentDrivenHeight': report.ui.contentDrivenHeight,
+    'ui.fillsRemainingHeight': report.ui.fillsRemainingHeight,
+    'ui.logsOnlyConsoleTools': report.ui.logsOnlyConsoleTools,
     'ui.independentEntries': report.ui.independentEntries,
     'ui.independentEntryCount': report.ui.independentEntryCount > 0,
     'ui.mountedEntryCount': report.ui.mountedEntryCount === report.ui.independentEntryCount,
@@ -145,6 +146,7 @@ function pluginConsoleSmokeAssertions(report, owner) {
     'ui.objectExpanded': report.ui.objectExpanded,
     'ui.coverageRemoved': report.ui.coverageRemoved,
     'ui.iconToolbar': report.ui.iconToolbar,
+    'ui.runtimeConsoleSummary': report.ui.runtimeConsoleSummary,
     'ui.pointerPaused': report.ui.pointerPaused,
     'ui.pointerPauseDetail.label': nonEmptyText(report.ui.pointerPauseDetail?.label),
     'ui.pointerPauseDetail.rect': positiveRect(report.ui.pointerPauseDetail?.rect),
@@ -3308,7 +3310,7 @@ if (parsed.values['plugin-console-exercise']) {
     if (document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]') === null) {
       document.querySelector('[data-tab="plugins"]')?.click()
       document.querySelector('[data-plugin-id="' + CSS.escape(owner) + '"]')?.click()
-      document.querySelector('[data-plugin-detail-tab="runtime"]')?.click()
+      document.querySelector('[data-plugin-detail-tab="logs"]')?.click()
     }
     let button
     let rect
@@ -3402,7 +3404,7 @@ if (parsed.values['plugin-console-exercise']) {
     if (document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]') === null) {
       document.querySelector('[data-tab="plugins"]')?.click()
       document.querySelector('[data-plugin-id="' + CSS.escape(owner) + '"]')?.click()
-      document.querySelector('[data-plugin-detail-tab="runtime"]')?.click()
+      document.querySelector('[data-plugin-detail-tab="logs"]')?.click()
     }
     const consoleFrame = () => document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
     const runtimePanel = consoleFrame()?.closest('[role="tabpanel"]')
@@ -3430,7 +3432,14 @@ if (parsed.values['plugin-console-exercise']) {
     const firstEntry = lunaEntries[0]
     const firstLineAtTop = lunaFrame !== null && firstEntry !== undefined
       && firstEntry.getBoundingClientRect().top - lunaFrame.getBoundingClientRect().top < 16
-    const contentDrivenHeight = lunaFrame !== null && lunaFrame.getBoundingClientRect().height <= 522
+    const logsPanel = lunaFrame?.closest('[role="tabpanel"]')
+    const workspaceRect = lunaFrame?.closest('.cxm-console-workspace')?.getBoundingClientRect()
+    const frameRect = lunaFrame?.getBoundingClientRect()
+    const fillsRemainingHeight = frameRect !== undefined && workspaceRect !== undefined
+      && frameRect.height >= 160 && Math.abs(frameRect.bottom - workspaceRect.bottom) <= 2
+    const logsOnlyConsoleTools = logsPanel?.classList.contains('cxm-console-panel') === true
+      && logsPanel.querySelector('.cxm-runtime-console-summary') === null
+      && logsPanel.querySelector('[data-runtime-lifecycle]') === null
     const lunaOnly = lunaFrame?.classList.contains('luna-console') === true
       && lunaFrame.querySelector('.luna-text-viewer-text, pre, .cxm-console-hit-layer') === null
     const objectEntry = lunaEntries.find(item => item.dataset.consoleSource === 'console.log')
@@ -3448,7 +3457,7 @@ if (parsed.values['plugin-console-exercise']) {
     const coverageRemoved = !pausedPanel?.textContent?.includes('采集范围')
       && !pausedPanel?.textContent?.includes('Host API 自动切面')
     const toolbarButtons = [...(document.querySelectorAll('.cxm-console-action-toolbar [data-console-action]') ?? [])]
-    const iconToolbar = toolbarButtons.length === 4 && toolbarButtons.every(item => item.textContent === '' && item.querySelector('[data-material-icon]') !== null)
+    const iconToolbar = toolbarButtons.length === 5 && toolbarButtons.every(item => item.textContent === '' && item.querySelector('[data-material-icon]') !== null)
     if (lunaFrame instanceof HTMLElement) {
       lunaFrame.style.maxHeight = '120px'
       lunaFrame.scrollTop = 0
@@ -3507,9 +3516,12 @@ if (parsed.values['plugin-console-exercise']) {
     }
     screenshotFrame = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
     const screenshotPreparedAtTop = screenshotFrame instanceof HTMLElement && screenshotFrame.scrollTop === 0
-    const runtimePanelForChrome = screenshotFrame?.closest('[role="tabpanel"]')
+    document.querySelector('[data-plugin-detail-tab="runtime"]')?.click()
+    await new Promise(resolve => setTimeout(resolve, 40))
+    const runtimePanelForChrome = document.querySelector('[data-plugin-runtime-status="' + CSS.escape(owner) + '"]')?.closest('[role="tabpanel"]')
     const runtimeLifecycle = runtimePanelForChrome?.querySelector('[data-runtime-lifecycle="' + CSS.escape(owner) + '"]')
     const runtimeDiagnostics = runtimePanelForChrome?.querySelector('[data-runtime-diagnostics="platform"]')
+    const runtimeConsoleSummary = runtimePanelForChrome?.querySelectorAll('.cxm-runtime-console-metric').length === 4
     const lifecycleCollapsed = runtimeLifecycle instanceof HTMLDetailsElement && !runtimeLifecycle.open
     const diagnosticsCollapsed = runtimeDiagnostics instanceof HTMLDetailsElement && !runtimeDiagnostics.open
     runtimeLifecycle?.querySelector('summary')?.click()
@@ -3540,9 +3552,9 @@ if (parsed.values['plugin-console-exercise']) {
       },
       ui: {
         paused, detailOpened, inspectorMetadataOnly: !inspectorText.includes('arg['), scopedFiltered, cleared,
-        lunaOnly, nativePayloads, firstLineAtTop, contentDrivenHeight,
+        lunaOnly, nativePayloads, firstLineAtTop, fillsRemainingHeight, logsOnlyConsoleTools,
         independentEntries, independentEntryCount, mountedEntryCount: lunaEntries.length,
-        levelVisuals, objectExpanded, coverageRemoved, iconToolbar,
+        levelVisuals, objectExpanded, coverageRemoved, iconToolbar, runtimeConsoleSummary,
         pointerPaused: ${JSON.stringify(pointerPaused.pressed)}, pointerPauseDetail: ${JSON.stringify(pointerPaused)},
         keyboardFocused: ${JSON.stringify(keyboardFocused)}, keyboardResumed: ${JSON.stringify(keyboardResumed.pressed)},
         keyboardResumeDetail: ${JSON.stringify(keyboardResumed)},
@@ -4473,6 +4485,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             const actionsRestOpacity = actionStyle?.opacity ?? null
             const listStyle = list === null ? null : getComputedStyle(list)
             const cardRects = cards.map(card => card.getBoundingClientRect())
+            const listRect = list?.getBoundingClientRect()
             const rowTops = [...new Set(cardRects.filter(rect => rect.width > 0).map(rect => Math.round(rect.top)))]
             const firstRowTop = rowTops[0]
             let actionsFocusOpacity = null
@@ -4499,6 +4512,9 @@ if (parsed.values['manager-screenshot'] !== undefined) {
               itemCount: collection.querySelectorAll('[data-collection-item]').length,
               visibleColumns: firstRowTop === undefined ? 0 : cardRects.filter(rect => Math.round(rect.top) === firstRowTop).length,
               cardWidths: [...new Set(cardRects.filter(rect => rect.width > 0).map(rect => Math.round(rect.width)))],
+              cardHeights: [...new Set(cardRects.filter(rect => rect.height > 0).map(rect => Math.round(rect.height)))],
+              listHeight: listRect === undefined ? null : Math.round(listRect.height),
+              cardsUseContentHeight: listRect === undefined || cardRects.length === 0 || cardRects.every(rect => rect.height < listRect.height - 2),
               gridTemplateColumns: listStyle?.gridTemplateColumns ?? null,
               actionsPosition: actionStyle?.position ?? null,
               actionsRestOpacity,

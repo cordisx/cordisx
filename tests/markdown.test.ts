@@ -1,6 +1,6 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
-import { renderSafeMarkdown } from '../packages/cli/src/renderer/markdown.js'
+import { highlightSafeMarkdownCodeBlocks, renderSafeMarkdown } from '../packages/cli/src/renderer/markdown.js'
 
 describe('safe manager Markdown renderer', () => {
   it('renders README structure without interpreting raw HTML', () => {
@@ -42,9 +42,23 @@ describe('safe manager Markdown renderer', () => {
     expect(article.querySelector('table td')?.textContent).toBe('Demo')
     expect(article.querySelector('hr')).not.toBeNull()
     expect(article.querySelector('pre code')?.textContent).toBe('<script>alert(1)</script>')
+    expect(article.querySelector('pre code')?.dataset.language).toBe('html')
     expect(article.querySelector('script')).toBeNull()
     expect(article.querySelector('img')).toBeNull()
     expect(article.textContent).toContain('<img src=x onerror=alert(1)>')
+    dom.window.close()
+  })
+
+  it('projects fenced code through Shiki token spans without inserting source HTML', async () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>')
+    const article = renderSafeMarkdown(dom.window.document, '```ts\nconst answer = 42\n```')
+    dom.window.document.body.append(article)
+    await highlightSafeMarkdownCodeBlocks(article, 'dark')
+    const code = article.querySelector<HTMLElement>('pre > code')!
+    expect(code.dataset.shikiTheme).toBe('dark')
+    expect(code.querySelectorAll('.cxm-readme-code-line span').length).toBeGreaterThan(0)
+    expect(code.textContent).toBe('const answer = 42')
+    expect(code.querySelector('script')).toBeNull()
     dom.window.close()
   })
 })

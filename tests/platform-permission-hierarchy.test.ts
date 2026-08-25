@@ -264,12 +264,13 @@ describe('Platform permission presentation hierarchy', () => {
       expect(content.querySelectorAll('[data-permission-availability][data-availability-state="unavailable"]')).toHaveLength(7)
       expect(content.querySelectorAll('[data-permission-capability]')).toHaveLength(7)
       expect(content.querySelector('.cxm-slot-card')).toBeNull()
-      expect([...content.querySelectorAll('h3')].map(item => item.textContent)).toContain('权限策略')
+      expect([...content.querySelectorAll('h3')].map(item => item.textContent)).not.toContain('权限策略')
 
       const text = content.textContent ?? ''
       for (const hidden of [
         'models.read', '{}', '最近使用', '拒绝次数', 'Required capability denied',
         'current-connection-client-unavailable', '二次连接', '原始 bridge', '不是安全沙箱',
+        '插件声明所需能力；Host 负责策略选择、持久化与执行。',
       ]) expect(text).not.toContain(hidden)
     } finally {
       dispose()
@@ -383,7 +384,7 @@ describe('Platform permission presentation hierarchy', () => {
     }
   })
 
-  it('moves host connection and security engineering facts into collapsed logs and diagnostics', () => {
+  it('keeps host connection and security engineering facts in collapsed Runtime diagnostics', () => {
     const { dom, dispose } = install(snapshot())
     try {
       const permissions = openPluginTab(dom.window.document, 'empty', 'permissions')
@@ -391,11 +392,11 @@ describe('Platform permission presentation hierarchy', () => {
       expect(permissions.querySelector('[role="list"]')).toBeNull()
       expect(permissions.textContent).not.toContain('Codex Desktop')
 
-      const runtime = openPluginTab(dom.window.document, 'demo', 'logs')
+      const runtime = openPluginTab(dom.window.document, 'demo', 'runtime')
       const lifecycle = runtime.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="demo"]')
       expect(lifecycle?.open).toBe(false)
       expect(lifecycle?.querySelector('summary')?.textContent).toBe('运行详情 · 运行中')
-      expect(lifecycle?.querySelector('.cxm-plugin-runtime-action')?.textContent).toBe('屏蔽插件')
+      expect(runtime.querySelector('[data-plugin-runtime-action="demo"]')?.getAttribute('aria-label')).toBe('屏蔽插件')
       const diagnostics = runtime.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
       expect(diagnostics).not.toBeNull()
       expect(diagnostics?.open).toBe(false)
@@ -414,13 +415,13 @@ describe('Platform permission presentation hierarchy', () => {
   it('localizes expanded runtime lifecycle and diagnostics chrome for English', () => {
     const { dom, dispose } = install(snapshot([], 'en'))
     try {
-      const runtime = openPluginTab(dom.window.document, 'demo', 'logs')
+      const runtime = openPluginTab(dom.window.document, 'demo', 'runtime')
       const lifecycle = runtime.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="demo"]')
       const diagnostics = runtime.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
       expect(lifecycle?.open).toBe(false)
       expect(diagnostics?.open).toBe(false)
       expect(lifecycle?.querySelector('summary')?.textContent).toBe('Runtime details · Active')
-      expect(lifecycle?.querySelector('.cxm-plugin-runtime-action')?.textContent).toBe('Block plugin')
+      expect(runtime.querySelector('[data-plugin-runtime-action="demo"]')?.getAttribute('aria-label')).toBe('Block plugin')
       expect(diagnostics?.querySelector('summary')?.textContent).toBe('Diagnostics')
 
       lifecycle!.open = true

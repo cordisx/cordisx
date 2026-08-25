@@ -479,6 +479,14 @@ diagnostics, and uninstall live in the Host-owned overflow menu without
 squeezing the plugin name or state. Closing the menu restores focus to its
 trigger when it remains connected, and both menu and tooltips are constrained
 to the manager viewport.
+
+The collection's scroll viewport may fill its available panel height, but its
+grid aligns content at the start and every card is content-height. Unused space
+therefore remains below a short result set; grid or flex stretch must never
+turn three plugin cards into viewport-height columns. Compact catalog, route,
+and page seats use one shared 22-pixel icon seat and 16-pixel decorative glyph
+token. The seat is never an icon button, and its status dot must not outweigh
+the title or create a second interaction target.
 Unavailable lifecycle operations are absent or explicitly unavailable; a
 button must never restart the launcher while claiming to reload one plugin.
 A launcher-configured legacy plugin remains explicitly unavailable for package
@@ -582,6 +590,14 @@ frameless semantic icon, name, one-sentence reason, a `必需` badge when
 applicable, and an official TDesign Select/Option policy control. Runtime
 availability never replaces or disables policy editing. Optional declarations
 do not need an `可选` badge.
+
+`日志与诊断` is an operational viewer only: its toolbar contains the log
+search/filter/pause/export controls and its Luna Console body owns all remaining
+tabpanel height and scroll. Invocation counters, denials, performance/usage,
+and runtime lifecycle or ownership diagnostics belong in `运行状态`, not beneath
+the Console. Plugin README fenced code is safely projected by Host-owned Shiki
+token spans using the current Host light/dark theme; inline code stays compact
+and code blocks do not receive an extra card wrapper.
 
 The primary permission list never exposes capability ids, scope objects,
 audit counters, blocked reasons, adapter diagnostics, transport facts, raw

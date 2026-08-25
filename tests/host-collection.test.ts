@@ -65,6 +65,10 @@ describe('Host collection primitive', () => {
       expect(view.element.querySelectorAll<HTMLElement>('[data-collection-item][hidden]')).toHaveLength(0)
 
       expect(HOST_COLLECTION_STYLES).toContain('repeat(auto-fit, minmax(min(100%, 220px), 1fr))')
+      expect(HOST_COLLECTION_STYLES).toContain('align-content: start;')
+      expect(HOST_COLLECTION_STYLES).toContain('align-items: start;')
+      expect(HOST_COLLECTION_STYLES).toContain('.cxc-listitem { min-width: 0; align-self: start; }')
+      expect(HOST_COLLECTION_STYLES).toContain('height: auto;')
       expect(HOST_COLLECTION_STYLES).not.toContain('justify-content: start')
       expect(HOST_COLLECTION_STYLES).not.toContain('repeat(2,')
       expect(HOST_COLLECTION_STYLES).toContain('.cxc-list[data-layout="rows"] { grid-template-columns: minmax(0, 1fr); }')
@@ -86,9 +90,10 @@ describe('Host collection primitive', () => {
     try {
       expect(view.element.dataset.density).toBe('compact')
       expect(view.element.querySelector('.cxc-icon-seat')?.querySelector('button')).toBeNull()
-      expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-seat-size: var(--cx-compact-list-icon-seat, 24px);')
-      expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-glyph-size: var(--cx-compact-list-icon-glyph, 18px);')
+      expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-seat-size: var(--cx-compact-list-icon-seat, 22px);')
+      expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-glyph-size: var(--cx-compact-list-icon-glyph, 16px);')
       expect(HOST_COLLECTION_STYLES).toContain('width: var(--cxc-icon-seat-size); height: var(--cxc-icon-seat-size);')
+      expect(HOST_COLLECTION_STYLES).toContain('.cxc-icon-seat > :first-child > svg { display: block; width: 100% !important; height: 100% !important; }')
     } finally {
       view.dispose()
       dom.window.close()

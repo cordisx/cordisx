@@ -47,10 +47,10 @@ describe('UI copy principles', () => {
     const [manager, trace, cliProxy, principles] = await Promise.all([
       readFile(managerPath, 'utf8'), readFile(tracePath, 'utf8'), readFile(cliProxyPath, 'utf8'), readFile(principlesPath, 'utf8'),
     ])
-    const runtime = section(manager, "if (activeFacet === 'runtime')", "if (activeFacet === 'extension-points')")
+    const runtime = section(manager, 'const appendRuntimeLifecycle', "if (activeFacet === 'logs')")
     const marketplaceDetail = section(manager, 'const renderMarketplaceDetail', 'const marketplaceSourceState')
 
-    expect(runtime).toContain("diagnostics.append(diagnosticsBody)")
+    expect(runtime).toContain('runtimeDiagnostics.append(diagnosticsBody)')
     expect(trace).toContain("'Agent events are currently unavailable.'")
     expect(trace).not.toContain('This plugin will not inspect a raw bridge or private adapter store.')
     expect(cliProxy).toContain("'navigation.description': 'Manage provider models and sessions'")
@@ -78,7 +78,7 @@ describe('UI copy principles', () => {
 
   it('keeps Console chrome locale-aware and leaves raw diagnostics out of its primary controls', async () => {
     const manager = await readFile(managerPath, 'utf8')
-    const consoleChrome = section(manager, "if (activeFacet === 'runtime')", "const lifecycle = create")
+    const consoleChrome = section(manager, "if (activeFacet === 'logs')", "if (activeFacet === 'extension-points')")
 
     expect(consoleChrome).not.toMatch(/[\p{Script=Han}]/u)
     expect(consoleChrome).toContain("copy('console.toolbar')")
@@ -117,11 +117,15 @@ describe('UI copy principles', () => {
     expect(manager).toContain('width: 32px; min-width: 32px; height: 32px; min-height: 32px;')
     expect(manager).toContain('.cxm-content[data-manager-list-page="true"] { display: flex; overflow: hidden; }')
     expect(manager).toContain('.cxm-fixed-list-collection .cxc-list { min-height: 0; flex: 1 1 auto; overflow: auto;')
+    expect(manager).toContain('.cxm-content:has(.cxm-console-panel) { display: flex; flex-direction: column; overflow: hidden; }')
     expect(manager).toContain('.cxm-console-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }')
     expect(runtime).toContain("create(document, 'section', 'cxm-runtime-overview')")
-    expect(runtime).toContain("copy('runtime.status-details-in-logs')")
+    expect(runtime).toContain("copy('runtime.status-details')")
     expect(runtime).toContain("create(document, 'details', 'cxm-runtime-diagnostics')")
     expect(runtime).not.toContain("'cxm-error', plugin.error")
+    expect(manager).toContain("panel.classList.add('cxm-console-panel')")
+    expect(manager).not.toContain("create(document, 'div', 'cxm-console-summary')")
+    expect(manager).toContain("appendRuntimeLifecycle(overview)")
   })
 
   it('keeps shared tabs complete when their content area becomes narrow', async () => {
