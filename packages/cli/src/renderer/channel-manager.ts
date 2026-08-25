@@ -59,6 +59,15 @@ export interface ChannelManagerDiagnosticProjection {
   readonly message: string
 }
 
+/** A bounded, content-free activity record emitted by the launcher runtime. */
+export interface ChannelManagerLogProjection {
+  readonly id: string
+  readonly account: ChannelManagerConnectionProjection['ref']
+  readonly recordedAt: string
+  readonly action: string
+  readonly outcome: string
+}
+
 /** Renderer-safe Host projection. It deliberately has no secretRef or credential value field. */
 export interface ChannelManagerProjectionV1 {
   readonly contract: 'cordisx.channel-manager-projection/v1'
@@ -75,6 +84,8 @@ export interface ChannelManagerProjectionV1 {
   readonly routes: readonly ChannelManagerRouteProjection[]
   readonly accounts: readonly ChannelManagerAccountProjection[]
   readonly bindings: readonly ChannelManagerBindingProjection[]
+  /** Operational metadata only. Message bodies, credentials, and raw errors never enter this projection. */
+  readonly logs?: readonly ChannelManagerLogProjection[]
   readonly diagnostics: readonly ChannelManagerDiagnosticProjection[]
 }
 
@@ -93,6 +104,7 @@ const EMPTY_PROJECTION: ChannelManagerProjectionV1 = Object.freeze({
   routes: Object.freeze([]),
   accounts: Object.freeze([]),
   bindings: Object.freeze([]),
+  logs: Object.freeze([]),
   diagnostics: Object.freeze([
     Object.freeze({
       id: 'channel-runtime',
@@ -111,6 +123,7 @@ const CORDIS_ORIGINAL = Symbol.for('cordis.original')
 interface ChannelManagerState {
   readonly projection: ChannelManagerProjectionV1
   readonly serviceConfig?: ChannelManagerServiceConfigApi
+  readonly captureCredential?: ChannelManagerServiceInput['captureCredential']
   readonly localConnections: ChannelManagerConnectionProjection[]
   readonly listeners: Set<() => void>
 }
@@ -157,6 +170,15 @@ const CHANNEL_MANAGER_STYLES = String.raw`
   .cxc-channel-empty { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 11px 12px; border: 1px solid var(--cx-border); border-radius: 10px; background: var(--cx-surface-raised); color: var(--cx-muted); font-size: 12px; }
   .cxc-channel-empty .cordisx-host-icon, .cxc-channel-empty .cordisx-host-icon svg { width: 18px; height: 18px; flex: none; }
   .cxc-channel-create-actions { display: flex; justify-content: flex-end; }
+  .cxc-channel-log-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-block-end: 10px; }
+  .cxc-channel-log-toolbar input, .cxc-channel-log-toolbar select { min-height: 32px; min-width: min(100%, 12rem); padding-inline: 9px; border: 1px solid var(--cx-border); border-radius: 8px; background: var(--cx-surface-raised); color: var(--cx-text); font: inherit; }
+  .cxc-channel-log-toolbar input { flex: 1 1 14rem; }
+  .cxc-channel-log-export, .cxc-channel-log-page { min-height: 32px; padding-inline: 10px; border: 1px solid var(--cx-border); border-radius: 8px; background: var(--cx-surface-raised); color: var(--cx-text); font: inherit; cursor: pointer; }
+  .cxc-channel-log-list { display: grid; gap: 6px; }
+  .cxc-channel-log-entry { display: grid; grid-template-columns: minmax(8rem, auto) minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 9px 10px; border: 1px solid var(--cx-border); border-radius: 9px; background: var(--cx-surface-raised); font-size: 12px; }
+  .cxc-channel-log-entry time { color: var(--cx-muted); font-variant-numeric: tabular-nums; }
+  .cxc-channel-log-outcome { color: var(--cx-muted); }
+  .cxc-channel-log-pagination { display: flex; justify-content: flex-end; gap: 6px; align-items: center; margin-block-start: 10px; color: var(--cx-muted); font-size: 12px; }
   .cxc-channel-section { display: grid; gap: 7px; min-width: 0; }
   .cxc-channel-section-head { display: grid; gap: 2px; }
   .cxc-channel-section h3 { font-size: 12px; }
@@ -239,7 +261,7 @@ function connection(value: unknown, label: string): ChannelManagerConnectionProj
 
 function normalizeProjection(value: unknown): ChannelManagerProjectionV1 {
   const projection = object(value, 'Channel Manager projection')
-  exactKeys(projection, ['contract', 'schemaVersion', 'status', 'service', 'connections', 'routes', 'accounts', 'bindings', 'diagnostics'], 'Channel Manager projection')
+  exactKeys(projection, ['contract', 'schemaVersion', 'status', 'service', 'connections', 'routes', 'accounts', 'bindings', 'logs', 'diagnostics'], 'Channel Manager projection')
   if (projection.contract !== 'cordisx.channel-manager-projection/v1' || projection.schemaVersion !== 1) {
     throw new TypeError('Channel Manager projection contract is unsupported')
   }
@@ -320,6 +342,17 @@ function normalizeProjection(value: unknown): ChannelManagerProjectionV1 {
       state: oneOf(item.state, ['active', 'archived', 'unavailable'], `${label}.state`),
     }
   })
+  const logs = (projection.logs === undefined ? [] : array(projection.logs, 'Channel Manager projection.logs', 2_000)).map((value, index): ChannelManagerLogProjection => {
+    const item = object(value, `Channel Manager projection.logs[${index}]`)
+    const label = `Channel Manager projection.logs[${index}]`
+    exactKeys(item, ['id', 'account', 'recordedAt', 'action', 'outcome'], label)
+    const recordedAt = boundedText(item.recordedAt, `${label}.recordedAt`, 64)
+    if (Number.isNaN(Date.parse(recordedAt))) throw new TypeError(`${label}.recordedAt is invalid`)
+    return {
+      id: boundedText(item.id, `${label}.id`, 256), account: ref(item.account, `${label}.account`), recordedAt,
+      action: boundedText(item.action, `${label}.action`, 160), outcome: boundedText(item.outcome, `${label}.outcome`, 160),
+    }
+  })
   const diagnostics = array(projection.diagnostics, 'Channel Manager projection.diagnostics', 128).map((value, index): ChannelManagerDiagnosticProjection => {
     const item = object(value, `Channel Manager projection.diagnostics[${index}]`)
     const label = `Channel Manager projection.diagnostics[${index}]`
@@ -345,6 +378,7 @@ function normalizeProjection(value: unknown): ChannelManagerProjectionV1 {
     routes,
     accounts,
     bindings,
+    logs,
     diagnostics,
   }
 }
@@ -513,6 +547,15 @@ export interface ChannelManagerServiceConfigApi {
 export interface ChannelManagerServiceInput {
   readonly projection?: ChannelManagerProjectionV1
   readonly serviceConfig?: ChannelManagerServiceConfigApi
+  /**
+   * A Host-private capture seam. The typed request is the only permitted path
+   * for a newly typed credential; its return value is an opaque reference and
+   * neither value is admitted to the renderer projection or service config.
+   */
+  readonly captureCredential?: (input: {
+    readonly account: ChannelManagerConnectionProjection['ref']
+    readonly secret: string
+  }) => Promise<{ readonly secretRef: string }>
 }
 
 /** Host-owned Channel settings renderer. Plugins can request the seat but never receive its DOM internals. */
@@ -525,6 +568,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     projections.set(this, Object.freeze({
       projection: normalizeProjection(wrapped.projection ?? EMPTY_PROJECTION),
       ...(wrapped.serviceConfig === undefined ? {} : { serviceConfig: wrapped.serviceConfig }),
+      ...(wrapped.captureCredential === undefined ? {} : { captureCredential: wrapped.captureCredential }),
       localConnections: [],
       listeners: new Set<() => void>(),
     }))
@@ -574,6 +618,16 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     const forms = new HostFormAdapter(document, root, () => locale)
     let listQuery = ''
     let candidateName = ''
+    let candidatePlatform: 'simulator' | 'feishu' = 'simulator'
+    let candidateAppId = ''
+    let candidateTenant = 'default'
+    let candidateTransport: 'simulator' | 'websocket' = 'simulator'
+    let candidateProvider = 'default'
+    let candidateModel = 'default'
+    let candidateProfile = 'default'
+    let candidateWorkspace = 'cordisx'
+    let candidateNotifications = true
+    let candidateSecret = ''
     let disposeCurrent = (): void => {}
 
     const records = (): readonly ChannelRecord[] => channelRecords(projectionFor(this))
@@ -637,6 +691,35 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       forms.connect(nameItem, nameControl)
       nameItem.control.append(nameControl.root)
       configuration.content.append(nameItem.root)
+      const platformItem = forms.item({ id: 'channel-create-platform', label: managerCopy(locale, 'channel.create.platform'), required: true, fullWidth: true })
+      const platformControl = forms.control({
+        namespace: 'channel-manager', path: ['candidate', 'platform'], type: 'string', value: candidatePlatform, disabled: false, required: true,
+        choices: [{ value: 'simulator', label: managerCopy(locale, 'channel.create.simulator') }, { value: 'feishu', label: managerCopy(locale, 'channel.create.feishu') }],
+      }, 'channel-create-platform', value => {
+        candidatePlatform = value === 'feishu' ? 'feishu' : 'simulator'
+        candidateTransport = candidatePlatform === 'feishu' ? 'websocket' : 'simulator'
+      })
+      forms.connect(platformItem, platformControl); platformItem.control.append(platformControl.root); configuration.content.append(platformItem.root)
+      const addText = (id: string, label: string, value: () => string, set: (next: string) => void, required = false): void => {
+        const item = forms.item({ id, label, required, fullWidth: true })
+        const control = forms.control({ namespace: 'channel-manager', path: ['candidate', id], type: 'string', value: value(), disabled: false, required }, id, next => set(typeof next === 'string' ? next : ''))
+        forms.connect(item, control); item.control.append(control.root); configuration.content.append(item.root)
+      }
+      addText('channel-create-app-id', managerCopy(locale, 'channel.create.app-id'), () => candidateAppId, value => { candidateAppId = value })
+      addText('channel-create-tenant', managerCopy(locale, 'channel.create.tenant'), () => candidateTenant, value => { candidateTenant = value })
+      addText('channel-create-transport', managerCopy(locale, 'channel.field.transport'), () => candidateTransport, value => { candidateTransport = value === 'websocket' ? 'websocket' : 'simulator' })
+      addText('channel-create-provider', managerCopy(locale, 'channel.create.provider'), () => candidateProvider, value => { candidateProvider = value })
+      addText('channel-create-model', managerCopy(locale, 'channel.create.model'), () => candidateModel, value => { candidateModel = value })
+      addText('channel-create-profile', managerCopy(locale, 'channel.create.profile'), () => candidateProfile, value => { candidateProfile = value })
+      addText('channel-create-workspace', managerCopy(locale, 'channel.create.workspace'), () => candidateWorkspace, value => { candidateWorkspace = value })
+      const notificationItem = forms.item({ id: 'channel-create-notifications', label: managerCopy(locale, 'channel.create.notifications'), fullWidth: true })
+      const notificationControl = forms.control({ namespace: 'channel-manager', path: ['candidate', 'notifications'], type: 'boolean', role: 'switch', value: candidateNotifications, disabled: false, required: false }, 'channel-create-notifications', value => { candidateNotifications = value === true })
+      forms.connect(notificationItem, notificationControl); notificationItem.control.append(notificationControl.root); configuration.content.append(notificationItem.root)
+      const credentialItem = forms.item({ id: 'channel-create-credential', label: managerCopy(locale, 'channel.field.credentials'), help: managerCopy(locale, 'channel.credentials.help'), fullWidth: true })
+      const credential = document.createElement('input')
+      credential.id = 'channel-create-credential'; credential.type = 'password'; credential.autocomplete = 'new-password'; credential.dataset.channelCredentialCapture = 'true'
+      credential.addEventListener('input', () => { candidateSecret = credential.value })
+      credentialItem.control.append(credential); configuration.content.append(credentialItem.root)
       const actions = document.createElement('div')
       actions.className = 'cxc-channel-create-actions'
       const status = forms.note('')
@@ -653,10 +736,28 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
           status.textContent = managerCopy(locale, 'channel.create.unavailable')
           return
         }
-        const record = localSimulatorRecord(name)
+        const accountId = candidatePlatform === 'feishu' ? candidateAppId.trim() : undefined
+        if (candidatePlatform === 'feishu' && accountId === '') { status.textContent = managerCopy(locale, 'form.required'); return }
+        const record = candidatePlatform === 'simulator'
+          ? localSimulatorRecord(name)
+          : {
+              id: compositeRef({ adapterId: 'feishu', accountId: accountId!, tenantId: candidateTenant.trim() || 'default' }),
+              connection: {
+                ref: { adapterId: 'feishu', accountId: accountId!, tenantId: candidateTenant.trim() || 'default' }, displayName: name,
+                adapterKind: 'feishu', enabled: false, transportMode: 'websocket', secretState: 'missing' as const,
+              },
+            }
         submit.disabled = true
         status.textContent = managerCopy(locale, 'form.saving')
-        void serviceConfig.list().then(descriptors => {
+        void (async () => {
+          const capture = state.captureCredential
+          const captured = candidatePlatform === 'feishu'
+            ? (candidateSecret === '' || capture === undefined ? undefined : await capture({ account: record.connection.ref, secret: candidateSecret }))
+            : undefined
+          candidateSecret = ''
+          credential.value = ''
+          if (candidatePlatform === 'feishu' && captured === undefined) throw new Error('Host credential capture is unavailable')
+          return await serviceConfig.list().then(descriptors => {
           const descriptor = descriptors.find(item => item.identity.pluginId === 'channel' && item.identity.serviceId === 'runtime')
           const raw = descriptor?.configuration
           if (descriptor === undefined || raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Channel service configuration is unavailable')
@@ -665,23 +766,27 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
           if (existing) throw new Error('A local simulator channel with this name already exists')
           const routeId = `${record.connection.ref.accountId}-default`
           configuration.connections = [...(configuration.connections ?? []), {
-            ref: record.connection.ref, adapterKind: 'simulator', enabled: true,
-            transport: { mode: 'simulator' },
+            ref: record.connection.ref, adapterKind: candidatePlatform, enabled: candidatePlatform === 'simulator',
+            transport: { mode: candidateTransport },
+            ...(captured === undefined ? {} : { secretRef: captured.secretRef }),
           }]
           configuration.routes = [...(configuration.routes ?? []), {
             id: routeId, connection: record.connection.ref, enabled: true,
             policy: { conversationKinds: ['direct'] },
             task: {
-              provider: { useDefault: true }, model: { useDefault: true }, profile: { useDefault: true }, workspaceAlias: 'cordisx',
+              provider: candidateProvider === 'default' ? { useDefault: true } : { id: candidateProvider },
+              model: candidateModel === 'default' ? { useDefault: true } : { id: candidateModel },
+              profile: candidateProfile === 'default' ? { useDefault: true } : { id: candidateProfile }, workspaceAlias: candidateWorkspace.trim() || 'cordisx',
             },
-            notifications: ['completion', 'failure', 'approval-required'],
+            notifications: candidateNotifications ? ['completion', 'failure', 'approval-required'] : [],
           }]
           return serviceConfig.mutate({
             contract: 'cordisx.service-config-mutation/v1', schemaVersion: 1,
             identity: descriptor.identity, scope: descriptor.scope, expectedRevision: descriptor.revision,
             configuration: configuration as HostServiceConfigMutation['configuration'],
           })
-        }).then(result => {
+          })
+        })().then(result => {
           if (!form.isConnected) return
           submit.disabled = false
           if (result.status !== 'applied') {
@@ -777,8 +882,75 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       })
     }
 
-    const renderLogs = (panel: HTMLElement): (() => void) => {
-      panel.append(conciseEmpty(document, managerCopy(locale, 'channel.logs.unavailable'), 'channelLogs'))
+    const renderLogs = (record: ChannelRecord, panel: HTMLElement): (() => void) => {
+      const all = (projection.logs ?? []).filter(entry => compositeRef(entry.account) === record.id)
+      const root = document.createElement('section')
+      root.dataset.channelLogs = 'true'
+      if (all.length === 0) {
+        root.append(conciseEmpty(document, managerCopy(locale, 'channel.logs.unavailable'), 'channelLogsEmpty'))
+        panel.append(root)
+        return () => {}
+      }
+      let query = ''
+      let outcome = 'all'
+      let page = 0
+      const pageSize = 25
+      const toolbar = document.createElement('div')
+      toolbar.className = 'cxc-channel-log-toolbar'
+      const search = document.createElement('input')
+      search.type = 'search'
+      search.dataset.channelLogQuery = 'true'
+      search.placeholder = managerCopy(locale, 'channel.logs.search')
+      search.setAttribute('aria-label', managerCopy(locale, 'channel.logs.search'))
+      const filter = document.createElement('select')
+      filter.dataset.channelLogOutcome = 'true'
+      for (const [value, label] of [['all', managerCopy(locale, 'channel.logs.all')], ['success', managerCopy(locale, 'channel.logs.success')], ['failure', managerCopy(locale, 'channel.logs.failure')]] as const) {
+        const option = document.createElement('option'); option.value = value; option.textContent = label; filter.append(option)
+      }
+      const exportButton = document.createElement('button')
+      exportButton.type = 'button'; exportButton.className = 'cxc-channel-log-export'; exportButton.dataset.channelLogExport = 'json'
+      exportButton.textContent = managerCopy(locale, 'channel.logs.export')
+      const list = document.createElement('div'); list.className = 'cxc-channel-log-list'; list.dataset.channelLogList = 'true'
+      const pagination = document.createElement('div'); pagination.className = 'cxc-channel-log-pagination'; pagination.dataset.channelLogPagination = 'true'
+      const filtered = (): readonly ChannelManagerLogProjection[] => all.filter(entry => {
+        const text = `${entry.action} ${entry.outcome} ${entry.recordedAt}`.toLowerCase()
+        const matchesQuery = query === '' || text.includes(query.toLowerCase())
+        const matchesOutcome = outcome === 'all' || (outcome === 'success' ? /success|allow|complete|applied|ready/iu : /fail|deny|error|dead|unavailable|reject/iu).test(entry.outcome)
+        return matchesQuery && matchesOutcome
+      }).sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))
+      const draw = (): void => {
+        const items = filtered()
+        const totalPages = Math.max(1, Math.ceil(items.length / pageSize))
+        page = Math.min(page, totalPages - 1)
+        const windowed = items.slice(page * pageSize, (page + 1) * pageSize)
+        list.replaceChildren(...windowed.map(entry => {
+          const item = document.createElement('article'); item.className = 'cxc-channel-log-entry'; item.dataset.channelLogEntry = entry.id
+          const time = document.createElement('time'); time.dateTime = entry.recordedAt; time.textContent = new Date(entry.recordedAt).toLocaleString(locale)
+          const action = document.createElement('span'); action.textContent = entry.action
+          const result = document.createElement('span'); result.className = 'cxc-channel-log-outcome'; result.textContent = entry.outcome
+          item.append(time, action, result); return item
+        }))
+        if (windowed.length === 0) list.replaceChildren(conciseEmpty(document, managerCopy(locale, 'channel.search.empty'), 'channelLogsNoMatches'))
+        const previous = document.createElement('button'); previous.type = 'button'; previous.className = 'cxc-channel-log-page'; previous.textContent = '‹'; previous.disabled = page === 0
+        previous.addEventListener('click', () => { page -= 1; draw() })
+        const label = document.createElement('span'); label.textContent = `${managerCopy(locale, 'channel.logs.page')} ${page + 1}/${totalPages}`
+        const next = document.createElement('button'); next.type = 'button'; next.className = 'cxc-channel-log-page'; next.textContent = '›'; next.disabled = page + 1 >= totalPages
+        next.addEventListener('click', () => { page += 1; draw() })
+        pagination.replaceChildren(previous, label, next)
+      }
+      search.addEventListener('input', () => { query = search.value.trim(); page = 0; draw() })
+      filter.addEventListener('change', () => { outcome = filter.value; page = 0; draw() })
+      exportButton.addEventListener('click', () => {
+        const view = document.defaultView
+        const createObjectURL = view?.URL?.createObjectURL
+        if (createObjectURL === undefined) return
+        const payload = filtered().map(({ id, recordedAt, action, outcome }) => ({ id, recordedAt, action, outcome }))
+        const href = createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }))
+        const download = document.createElement('a'); download.href = href; download.download = `cordisx-channel-${record.connection.ref.accountId}-logs.json`; download.hidden = true
+        root.append(download); download.click(); download.remove(); view?.setTimeout(() => view.URL.revokeObjectURL(href), 0)
+      })
+      toolbar.append(search, filter, exportButton)
+      root.append(toolbar, list, pagination); panel.append(root); draw()
       return () => {}
     }
 
@@ -817,7 +989,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       panel.dataset.channelDetailPanel = tab
       let disposePanel = (): void => {}
       if (tab === 'configuration') renderConfiguration(record, panel)
-      else if (tab === 'logs') disposePanel = renderLogs(panel)
+      else if (tab === 'logs') disposePanel = renderLogs(record, panel)
       else disposePanel = renderSessions(record, panel)
       page.append(panel)
       content.replaceChildren(page)

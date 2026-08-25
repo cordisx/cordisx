@@ -559,6 +559,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       lastGoodRevision: state.lastGoodRevision,
       writable: true,
       ...(channelService.snapshot() === undefined ? {} : { runtime: channelService.snapshot()! }),
+      audit: channelService.auditSnapshot(),
     })
   }
   const pluginLifecycleBridgeToken = randomBytes(32).toString('hex')

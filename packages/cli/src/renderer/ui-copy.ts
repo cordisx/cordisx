@@ -36,12 +36,27 @@ type CopyKey =
   | 'channel.create.platform'
   | 'channel.create.unavailable'
   | 'channel.create.save'
+  | 'channel.create.simulator'
+  | 'channel.create.feishu'
+  | 'channel.create.app-id'
+  | 'channel.create.tenant'
+  | 'channel.create.provider'
+  | 'channel.create.model'
+  | 'channel.create.profile'
+  | 'channel.create.workspace'
+  | 'channel.create.notifications'
   | 'channel.configuration'
   | 'channel.configuration.description'
   | 'channel.configuration.unavailable'
   | 'channel.logs'
   | 'channel.logs.unavailable'
   | 'channel.logs.native-semantics'
+  | 'channel.logs.search'
+  | 'channel.logs.all'
+  | 'channel.logs.success'
+  | 'channel.logs.failure'
+  | 'channel.logs.export'
+  | 'channel.logs.page'
   | 'channel.sessions'
   | 'channel.sessions.unavailable'
   | 'channel.field.platform'
@@ -374,12 +389,27 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'channel.create.platform': { en: 'Platform', 'zh-CN': '平台' },
   'channel.create.unavailable': { en: 'The local Channel configuration is unavailable.', 'zh-CN': '本地频道配置当前不可用。' },
   'channel.create.save': { en: 'Add local simulator', 'zh-CN': '添加本地模拟频道' },
+  'channel.create.simulator': { en: 'Local simulator', 'zh-CN': '本地模拟器' },
+  'channel.create.feishu': { en: 'Feishu', 'zh-CN': '飞书' },
+  'channel.create.app-id': { en: 'App ID', 'zh-CN': '应用 ID' },
+  'channel.create.tenant': { en: 'Tenant', 'zh-CN': '租户' },
+  'channel.create.provider': { en: 'Provider', 'zh-CN': 'Provider' },
+  'channel.create.model': { en: 'Model', 'zh-CN': '模型' },
+  'channel.create.profile': { en: 'Profile', 'zh-CN': '配置档' },
+  'channel.create.workspace': { en: 'Workspace', 'zh-CN': '工作区' },
+  'channel.create.notifications': { en: 'Completion notifications', 'zh-CN': '完成通知' },
   'channel.configuration': { en: 'Configuration', 'zh-CN': '配置' },
   'channel.configuration.description': { en: 'Host-rendered, read-only connection information.', 'zh-CN': '由宿主渲染的只读连接信息。' },
   'channel.configuration.unavailable': { en: 'No configurable items yet.', 'zh-CN': '暂无可配置项。' },
   'channel.logs': { en: 'Logs', 'zh-CN': '日志' },
   'channel.logs.unavailable': { en: 'No logs yet.', 'zh-CN': '暂无日志。' },
   'channel.logs.native-semantics': { en: 'When available, logs preserve native console argument arrays and structured event records. This page does not synthesize log entries.', 'zh-CN': '日志可用后将保留原生 console 参数数组和结构化事件记录；当前页面不会伪造日志。' },
+  'channel.logs.search': { en: 'Search activity', 'zh-CN': '搜索活动记录' },
+  'channel.logs.all': { en: 'All results', 'zh-CN': '全部结果' },
+  'channel.logs.success': { en: 'Successful', 'zh-CN': '成功' },
+  'channel.logs.failure': { en: 'Needs attention', 'zh-CN': '需要处理' },
+  'channel.logs.export': { en: 'Export JSON', 'zh-CN': '导出 JSON' },
+  'channel.logs.page': { en: 'Page', 'zh-CN': '第' },
   'channel.sessions': { en: 'Connections & sessions', 'zh-CN': '连接与会话管理' },
   'channel.sessions.unavailable': { en: 'No connected sessions yet.', 'zh-CN': '暂无连接或会话。' },
   'channel.field.platform': { en: 'Platform', 'zh-CN': '平台' },
