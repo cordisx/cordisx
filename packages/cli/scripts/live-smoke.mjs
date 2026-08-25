@@ -65,6 +65,7 @@ const parsed = parseArgs({
     'clear-demo': { type: 'boolean', default: false },
     'plugin-lifecycle': { type: 'boolean', default: false },
     'plugin-console-exercise': { type: 'boolean', default: false },
+    'plugin-console-expanded-screenshot': { type: 'string' },
     'generation-transaction-exercise': { type: 'boolean', default: false },
     'adapter-commit': { type: 'string' },
     'protocol-commit': { type: 'string' },
@@ -96,6 +97,68 @@ if (parsed.values['host-collection-menu-screenshot'] !== undefined && !parsed.va
 }
 if (parsed.values['plugin-console-exercise'] && parsed.values.report === undefined) {
   throw new Error('--plugin-console-exercise requires --report')
+}
+if (parsed.values['plugin-console-expanded-screenshot'] !== undefined && !parsed.values['plugin-console-exercise']) {
+  throw new Error('--plugin-console-expanded-screenshot requires --plugin-console-exercise')
+}
+
+function pluginConsoleSmokeAssertions(report, owner) {
+  const nonEmptyText = value => typeof value === 'string' && value.trim().length > 0
+  const positiveRect = value => value !== null
+    && typeof value === 'object'
+    && typeof value.width === 'number' && value.width > 0
+    && typeof value.height === 'number' && value.height > 0
+  const expectedMethods = ['debug', 'log', 'info', 'warn', 'error']
+  return {
+    owner: report.owner === owner,
+    'before.entries': report.before.entries > 0,
+    'before.methods': expectedMethods.every(method => report.before.methods.includes(method)),
+    'before.sources': report.before.sources.length > 0,
+    'before.permissionDenied': report.before.permissionDenied,
+    'before.success': report.before.success,
+    'before.failure': report.before.failure,
+    'silent.entries': report.silent.entries > 0,
+    'silent.automaticWithoutConsole': report.silent.automaticWithoutConsole,
+    'ui.paused': report.ui.paused,
+    'ui.detailOpened': report.ui.detailOpened,
+    'ui.inspectorMetadataOnly': report.ui.inspectorMetadataOnly,
+    'ui.scopedFiltered': report.ui.scopedFiltered,
+    'ui.cleared': report.ui.cleared,
+    'ui.lunaOnly': report.ui.lunaOnly,
+    'ui.nativePayloads': report.ui.nativePayloads,
+    'ui.firstLineAtTop': report.ui.firstLineAtTop,
+    'ui.contentDrivenHeight': report.ui.contentDrivenHeight,
+    'ui.independentEntries': report.ui.independentEntries,
+    'ui.independentEntryCount': report.ui.independentEntryCount > 0,
+    'ui.mountedEntryCount': report.ui.mountedEntryCount === report.ui.independentEntryCount,
+    'ui.levelVisuals': report.ui.levelVisuals,
+    'ui.objectExpanded': report.ui.objectExpanded,
+    'ui.coverageRemoved': report.ui.coverageRemoved,
+    'ui.iconToolbar': report.ui.iconToolbar,
+    'ui.pointerPaused': report.ui.pointerPaused,
+    'ui.pointerPauseDetail.label': nonEmptyText(report.ui.pointerPauseDetail?.label),
+    'ui.pointerPauseDetail.rect': positiveRect(report.ui.pointerPauseDetail?.rect),
+    'ui.keyboardFocused': report.ui.keyboardFocused,
+    'ui.keyboardResumed': report.ui.keyboardResumed,
+    'ui.keyboardResumeDetail.label': nonEmptyText(report.ui.keyboardResumeDetail?.label),
+    'ui.toolbarTooltip.text': nonEmptyText(report.ui.toolbarTooltip?.text),
+    'ui.toolbarTooltip.describedBy': nonEmptyText(report.ui.toolbarTooltip?.describedBy),
+    'ui.returnLatestVisible': report.ui.returnLatestVisible,
+    'ui.returnedToLatest': report.ui.returnedToLatest,
+    'ui.lightTheme': report.ui.lightTheme,
+    'ui.darkTheme': report.ui.darkTheme,
+    'ui.screenshotPreparedAtTop': report.ui.screenshotPreparedAtTop,
+    'ui.runtimeChrome.lifecycleCollapsed': report.ui.runtimeChrome.lifecycleCollapsed,
+    'ui.runtimeChrome.diagnosticsCollapsed': report.ui.runtimeChrome.diagnosticsCollapsed,
+    'ui.runtimeChrome.expanded': report.ui.runtimeChrome.expanded,
+    'ui.runtimeChrome.localized': report.ui.runtimeChrome.localized,
+    'ui.runtimeChrome.expandedNoCjk': report.ui.runtimeChrome.expandedNoCjk,
+    'reload.entries': report.reload.entries > 0,
+    'reload.lifecycle': report.reload.lifecycle,
+    'reload.terminalCount': report.reload.terminalCount > 0,
+    'privacy.structuredOnly': report.privacy.structuredOnly,
+    'privacy.partialObservability': report.privacy.partialObservability,
+  }
 }
 if (parsed.values['generation-transaction-exercise'] && parsed.values['manager-lifecycle-source'] === undefined) {
   throw new Error('--generation-transaction-exercise requires --manager-lifecycle-source')
@@ -3161,8 +3224,12 @@ let managerReport
 let managerFormExerciseFailure
 let managerServiceConfigurationFailure
 let pluginConsoleReport
+let pluginConsoleAssertions
 if (parsed.values['plugin-console-exercise']) {
   const owner = parsed.values['plugin-owner'] ?? 'console-showcase'
+  const pluginConsoleLocale = locale === 'zh-CN'
+    ? { kindSelect: 'API / 类型', runtimeSummary: '运行详情 · 运行中', diagnostics: '诊断' }
+    : { kindSelect: 'API / type', runtimeSummary: 'Runtime details · Active', diagnostics: 'Diagnostics' }
   const toolbarTarget = await evaluateByValue(`(async () => {
     const owner = ${JSON.stringify(owner)}
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
@@ -3172,7 +3239,7 @@ if (parsed.values['plugin-console-exercise']) {
     const trigger = document.querySelector('[data-cordisx-manager-trigger]')
     if (modal?.hidden === true && trigger !== null) trigger.click()
     else if (modal instanceof HTMLElement && modal.hidden) modal.hidden = false
-    if (document.querySelector('[role="tabpanel"][aria-label="运行状态"]') === null) {
+    if (document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]') === null) {
       document.querySelector('[data-tab="plugins"]')?.click()
       document.querySelector('[data-plugin-id="' + CSS.escape(owner) + '"]')?.click()
       document.querySelector('[data-plugin-detail-tab="runtime"]')?.click()
@@ -3190,18 +3257,29 @@ if (parsed.values['plugin-console-exercise']) {
       ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
   })()`, true)
   if (toolbarTarget === null) throw new Error('Plugin Console icon toolbar is unavailable')
-  await pointerClick(toolbarTarget)
-  await new Promise(resolve => setTimeout(resolve, 300))
-  const pointerPaused = await evaluateByValue(`(() => {
-    const button = document.querySelector('[data-console-action="pause"]')
-    const rect = button?.getBoundingClientRect()
-    return {
-      pressed: button?.getAttribute('aria-pressed') === 'true',
-      label: button?.getAttribute('aria-label') ?? null,
-      activeAction: document.activeElement?.getAttribute('data-console-action') ?? null,
-      rect: rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-    }
-  })()`)
+  let pointerPaused
+  let pointerTarget = toolbarTarget
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await pointerClick(pointerTarget)
+    await new Promise(resolve => setTimeout(resolve, 120))
+    pointerPaused = await evaluateByValue(`(() => {
+      const button = document.querySelector('[data-console-action="pause"]')
+      const rect = button?.getBoundingClientRect()
+      return {
+        pressed: button?.getAttribute('aria-pressed') === 'true',
+        label: button?.getAttribute('aria-label') ?? null,
+        activeAction: document.activeElement?.getAttribute('data-console-action') ?? null,
+        rect: rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      }
+    })()`)
+    if (pointerPaused.pressed) break
+    pointerTarget = await evaluateByValue(`(() => {
+      const rect = document.querySelector('[data-console-action="pause"]')?.getBoundingClientRect()
+      return rect === undefined || rect.width === 0 || rect.height === 0
+        ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    })()`)
+    if (pointerTarget === null) break
+  }
   if (pointerPaused.rect !== null) {
     await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1, pointerType: 'mouse' })
     await send('Input.dispatchMouseEvent', {
@@ -3211,12 +3289,19 @@ if (parsed.values['plugin-console-exercise']) {
       pointerType: 'mouse',
     })
   }
-  await new Promise(resolve => setTimeout(resolve, 120))
-  const toolbarTooltip = await evaluateByValue(`(() => {
-    const button = document.querySelector('[data-console-action="pause"]')
-    const tooltip = document.querySelector('[role="tooltip"]')
-    return { text: tooltip?.textContent ?? null, describedBy: button?.getAttribute('aria-describedby') ?? null }
+  await evaluateByValue(`(() => {
+    document.querySelector('[data-console-action="pause"]')?.focus()
   })()`)
+  let toolbarTooltip
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    toolbarTooltip = await evaluateByValue(`(() => {
+      const button = document.querySelector('[data-console-action="pause"]')
+      const tooltip = document.querySelector('[role="tooltip"]')
+      return { text: tooltip?.textContent ?? null, describedBy: button?.getAttribute('aria-describedby') ?? null }
+    })()`)
+    if (toolbarTooltip.text !== null && toolbarTooltip.describedBy !== null) break
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
   const keyboardFocused = await evaluateByValue(`(() => {
     const button = document.querySelector('[data-console-action="pause"]')
     button?.focus()
@@ -3228,6 +3313,14 @@ if (parsed.values['plugin-console-exercise']) {
     const button = document.querySelector('[data-console-action="pause"]')
     return { pressed: button?.getAttribute('aria-pressed') === 'false', label: button?.getAttribute('aria-label') ?? null }
   })()`)
+  const consoleEntryFocused = await evaluateByValue(`(() => {
+    const frame = document.querySelector('[data-plugin-console=${JSON.stringify(owner)}]')
+    frame?.focus()
+    return document.activeElement === frame
+  })()`)
+  if (!consoleEntryFocused) throw new Error('Plugin Console entry list cannot receive keyboard focus')
+  await pressKey('ArrowDown', 'ArrowDown', 40)
+  await new Promise(resolve => setTimeout(resolve, 80))
   pluginConsoleReport = await evaluateByValue(`(async () => {
     const owner = ${JSON.stringify(owner)}
     const runtime = globalThis.__cordisxRuntime
@@ -3240,26 +3333,24 @@ if (parsed.values['plugin-console-exercise']) {
     const trigger = document.querySelector('[data-cordisx-manager-trigger]')
     if (modal?.hidden === true && trigger !== null) trigger.click()
     else if (modal instanceof HTMLElement && modal.hidden) modal.hidden = false
-    if (document.querySelector('[role="tabpanel"][aria-label="运行状态"]') === null) {
+    if (document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]') === null) {
       document.querySelector('[data-tab="plugins"]')?.click()
       document.querySelector('[data-plugin-id="' + CSS.escape(owner) + '"]')?.click()
       document.querySelector('[data-plugin-detail-tab="runtime"]')?.click()
     }
-    const runtimePanel = document.querySelector('[role="tabpanel"][aria-label="运行状态"]')
+    const consoleFrame = () => document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
+    const runtimePanel = consoleFrame()?.closest('[role="tabpanel"]')
     let pause = runtimePanel?.querySelector('[data-console-action="pause"]')
     if (pause?.getAttribute('aria-pressed') === 'true') {
       pause.click()
-      pause = document.querySelector('[role="tabpanel"][aria-label="运行状态"] [data-console-action="pause"]')
+      pause = consoleFrame()?.closest('[role="tabpanel"]')?.querySelector('[data-console-action="pause"]')
     }
     pause?.click()
-    const pausedPanel = document.querySelector('[role="tabpanel"][aria-label="运行状态"]')
+    const pausedPanel = consoleFrame()?.closest('[role="tabpanel"]')
     const paused = pause !== null && pausedPanel?.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed') === 'true'
-    const initialFrame = pausedPanel?.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
-    await new Promise(resolve => setTimeout(resolve, 80))
-    initialFrame?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientY: initialFrame.getBoundingClientRect().top + 7 }))
     const detailOpened = document.querySelector('[data-console-detail]') !== null
     const inspectorText = document.querySelector('[data-console-detail]')?.textContent ?? ''
-    const kind = document.querySelector('t-select[aria-label="API / 类型"]')
+    const kind = pausedPanel?.querySelector('t-select[aria-label=' + JSON.stringify(${JSON.stringify(pluginConsoleLocale.kindSelect)}) + ']')
     kind?.setSelectedValue?.('console', true)
     let lunaFrame
     for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -3288,8 +3379,8 @@ if (parsed.values['plugin-console-exercise']) {
     const levelVisuals = lunaEntries.some(item => item.querySelector('.luna-console-debug') !== null)
       && lunaEntries.some(item => item.querySelector('.luna-console-warn') !== null)
       && lunaEntries.some(item => item.querySelector('.luna-console-error') !== null)
-    const coverageRemoved = !document.querySelector('[role="tabpanel"][aria-label="运行状态"]')?.textContent?.includes('采集范围')
-      && !document.querySelector('[role="tabpanel"][aria-label="运行状态"]')?.textContent?.includes('Host API 自动切面')
+    const coverageRemoved = !pausedPanel?.textContent?.includes('采集范围')
+      && !pausedPanel?.textContent?.includes('Host API 自动切面')
     const toolbarButtons = [...(document.querySelectorAll('.cxm-console-action-toolbar [data-console-action]') ?? [])]
     const iconToolbar = toolbarButtons.length === 4 && toolbarButtons.every(item => item.textContent === '' && item.querySelector('[data-material-icon]') !== null)
     if (lunaFrame instanceof HTMLElement) {
@@ -3303,14 +3394,32 @@ if (parsed.values['plugin-console-exercise']) {
     const returnedToLatest = lunaFrame instanceof HTMLElement && lunaFrame.scrollTop > 0
     const managerModal = document.querySelector('[data-cordisx-manager-modal]')
     const originalThemeClass = document.documentElement.className
+    const originalTheme = document.documentElement.getAttribute('data-theme')
+    globalThis.__cordisxRestoreSmokeTheme?.()
     document.documentElement.classList.remove('electron-dark')
     document.documentElement.classList.add('electron-light')
+    document.documentElement.setAttribute('data-theme', 'light')
     await new Promise(resolve => setTimeout(resolve, 20))
-    const lightTheme = managerModal?.getAttribute('data-cordisx-app-theme') === 'light'
-      && lunaFrame?.classList.contains('luna-console-theme-light') === true
+    let lightTheme = false
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      lightTheme = managerModal?.getAttribute('data-cordisx-app-theme') === 'light'
+        && lunaFrame?.classList.contains('luna-console-theme-light') === true
+      if (lightTheme) break
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    document.documentElement.classList.remove('electron-light')
+    document.documentElement.classList.add('electron-dark')
+    document.documentElement.setAttribute('data-theme', 'dark')
+    let darkTheme = false
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      darkTheme = managerModal?.getAttribute('data-cordisx-app-theme') === 'dark'
+        && lunaFrame?.classList.contains('luna-console-theme-dark') === true
+      if (darkTheme) break
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
     document.documentElement.className = originalThemeClass
-    await new Promise(resolve => setTimeout(resolve, 20))
-    const darkTheme = managerModal?.getAttribute('data-cordisx-app-theme') === 'dark'
+    if (originalTheme === null) document.documentElement.removeAttribute('data-theme')
+    else document.documentElement.setAttribute('data-theme', originalTheme)
     const resumed = document.querySelector('[data-console-action="pause"]')
     if (resumed?.getAttribute('aria-pressed') === 'true') resumed.click()
     const clear = document.querySelector('[data-console-action="clear"]')
@@ -3324,13 +3433,30 @@ if (parsed.values['plugin-console-exercise']) {
     const after = runtime.pluginConsole(owner)
     const automatic = after.entries.filter(entry => entry.coverage === 'host-mediated')
     const terminal = automatic.filter(entry => ['success', 'failure', 'cancel'].includes(entry.phase))
-    const screenshotFrame = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
+    let screenshotFrame = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
     if (screenshotFrame instanceof HTMLElement) {
       screenshotFrame.scrollTop = 0
       screenshotFrame.dispatchEvent(new Event('scroll'))
       screenshotFrame.querySelector('[data-console-source="console.log"] .luna-console-preview')?.click()
     }
+    screenshotFrame = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')
     const screenshotPreparedAtTop = screenshotFrame instanceof HTMLElement && screenshotFrame.scrollTop === 0
+    const runtimePanelForChrome = screenshotFrame?.closest('[role="tabpanel"]')
+    const runtimeLifecycle = runtimePanelForChrome?.querySelector('[data-runtime-lifecycle="' + CSS.escape(owner) + '"]')
+    const runtimeDiagnostics = runtimePanelForChrome?.querySelector('[data-runtime-diagnostics="platform"]')
+    const lifecycleCollapsed = runtimeLifecycle instanceof HTMLDetailsElement && !runtimeLifecycle.open
+    const diagnosticsCollapsed = runtimeDiagnostics instanceof HTMLDetailsElement && !runtimeDiagnostics.open
+    runtimeLifecycle?.querySelector('summary')?.click()
+    runtimeDiagnostics?.querySelector('summary')?.click()
+    const runtimeChrome = {
+      lifecycleCollapsed,
+      diagnosticsCollapsed,
+      expanded: runtimeLifecycle instanceof HTMLDetailsElement && runtimeLifecycle.open
+        && runtimeDiagnostics instanceof HTMLDetailsElement && runtimeDiagnostics.open,
+      localized: runtimeLifecycle?.querySelector('summary')?.textContent === ${JSON.stringify(pluginConsoleLocale.runtimeSummary)}
+        && runtimeDiagnostics?.querySelector('summary')?.textContent === ${JSON.stringify(pluginConsoleLocale.diagnostics)},
+      expandedNoCjk: ${JSON.stringify(locale !== 'zh-CN')} === false || !/[\u3400-\u9fff]/u.test(runtimeLifecycle?.textContent ?? ''),
+    }
     return {
       owner,
       before: {
@@ -3355,7 +3481,7 @@ if (parsed.values['plugin-console-exercise']) {
         keyboardFocused: ${JSON.stringify(keyboardFocused)}, keyboardResumed: ${JSON.stringify(keyboardResumed.pressed)},
         keyboardResumeDetail: ${JSON.stringify(keyboardResumed)},
         toolbarTooltip: ${JSON.stringify(toolbarTooltip)},
-        returnLatestVisible, returnedToLatest, lightTheme, darkTheme, screenshotPreparedAtTop,
+        returnLatestVisible, returnedToLatest, lightTheme, darkTheme, screenshotPreparedAtTop, runtimeChrome,
       },
       reload: {
         entries: after.entries.length,
@@ -3368,6 +3494,18 @@ if (parsed.values['plugin-console-exercise']) {
       },
     }
   })()`, true)
+  pluginConsoleAssertions = pluginConsoleSmokeAssertions(pluginConsoleReport, owner)
+  pluginConsoleReport = { ...pluginConsoleReport, assertions: pluginConsoleAssertions }
+  if (parsed.values['plugin-console-expanded-screenshot'] !== undefined) {
+    const expandedRect = await evaluateByValue(`(() => {
+      const lifecycle = document.querySelector('[data-runtime-lifecycle=${JSON.stringify(owner)}]')
+      const panel = lifecycle?.closest('[role="tabpanel"]')
+      const rect = panel?.getBoundingClientRect()
+      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    })()`)
+    if (expandedRect === null) throw new Error('expanded Plugin Console runtime panel is unavailable')
+    await capture(expandedRect, parsed.values['plugin-console-expanded-screenshot'], 'expanded Plugin Console runtime')
+  }
   console.log(`plugin-console=${JSON.stringify(pluginConsoleReport, null, 2)}`)
 }
 if (parsed.values['manager-screenshot'] !== undefined) {
@@ -4847,3 +4985,9 @@ if (interactionSafety.pendingPermissionDialogs !== 0 || interactionSafety.pendin
 }
 if (managerFormExerciseFailure !== undefined) throw new Error(managerFormExerciseFailure)
 if (managerServiceConfigurationFailure !== undefined) throw new Error(managerServiceConfigurationFailure)
+if (pluginConsoleAssertions !== undefined) {
+  const failures = Object.entries(pluginConsoleAssertions)
+    .filter(([, passed]) => passed !== true)
+    .map(([name]) => name)
+  if (failures.length > 0) throw new Error(`plugin Console smoke assertions failed: ${failures.join(', ')}`)
+}

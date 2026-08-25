@@ -302,7 +302,7 @@ describe('plugin config runtime', () => {
     const diagnostics = dom.window.document.querySelector<HTMLDetailsElement>('[data-runtime-diagnostics="platform"]')
     expect(diagnostics?.open).toBe(false)
     expect(diagnostics?.querySelector('[data-config-diagnostics="live-config"]')?.textContent)
-      .toBe('配置：Schemastery · live · revision 0 · last-good 0 · writer available')
+      .toBe('Configuration: Schemastery · live · revision 0 · last good 0 · writer available')
     await runtime.setPluginBlocked('live-config', true)
     expect(state.rendererAbort).toBe(state.rendererMount)
     expect(state.rendererDispose).toBe(state.rendererMount)
