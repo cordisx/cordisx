@@ -159,6 +159,9 @@ describe('Manager plugin card actions', () => {
       expect(managerStyles).toContain('.cxm-content[data-manager-list-page="true"] { display: flex; overflow: hidden; }')
       expect(managerStyles).toContain('.cxm-fixed-list-collection .cxc-list { min-height: 0; flex: 1 1 auto; overflow: auto;')
       expect(managerStyles).toContain('.cxm-local-import-dialog { width: min(420px, 100%); padding: 12px; }')
+      expect(managerStyles).toContain('.cxm-directory-control { display: grid; min-inline-size: 0; grid-template-columns: minmax(0, 1fr) 32px;')
+      expect(managerStyles).toContain('.cxm-directory-control > :first-child { min-inline-size: 0; }')
+      expect(managerStyles).toContain('.cxm-directory-picker { width: 32px; height: 32px; }')
       expect([...card.querySelectorAll<HTMLButtonElement>('.cxc-actions button')].every(button => button.tabIndex === 0)).toBe(true)
 
       card.querySelector<HTMLButtonElement>('[data-plugin-action="favorite"]')!.click()
@@ -226,6 +229,20 @@ describe('Manager plugin card actions', () => {
     }
     const dispose = installCordisXManager(dom.window.document, model)
     try {
+      const importButton = dom.window.document.querySelector<HTMLButtonElement>('[data-import-local-plugin]')!
+      importButton.focus()
+      expect(dom.window.document.activeElement).toBe(importButton)
+      dom.window.document.querySelector<HTMLButtonElement>('[data-import-local-plugin]')!.click()
+      const firstDialog = dom.window.document.querySelector<HTMLElement>('.cxm-local-import-dialog')!
+      expect(firstDialog.getAttribute('role')).toBeNull()
+      expect(firstDialog.parentElement?.getAttribute('role')).toBe('dialog')
+      expect(firstDialog.parentElement?.getAttribute('aria-labelledby')).toBe('cxm-local-package-directory-heading')
+      expect(firstDialog.querySelector('h2')?.id).toBe('cxm-local-package-directory-heading')
+      firstDialog.querySelector<HTMLButtonElement>('[data-import-local-close]')!.click()
+      await settle()
+      expect(dom.window.document.querySelector('.cxm-local-import-dialog')).toBeNull()
+      expect(dom.window.document.activeElement?.getAttribute('data-import-local-plugin')).toBe('true')
+
       dom.window.document.querySelector<HTMLButtonElement>('[data-import-local-plugin]')!.click()
       const form = dom.window.document.querySelector<HTMLFormElement>('[data-host-form="local-package-directory"]')!
       const input = form.querySelector<HTMLElement & { value: string; onChange?: (value: string) => void }>('[data-host-form-primitive="path-input"]')!
@@ -247,6 +264,16 @@ describe('Manager plugin card actions', () => {
       expect(form.querySelector('.cxf-section')).toBeNull()
       expect(form.querySelector('.cxf-form-grid, .cxm-settings-group, .cxm-card')).toBeNull()
       expect(dialog.querySelectorAll('.cxf-actions')).toHaveLength(1)
+      input.value = '/tmp/local-plugin'
+      input.onChange?.(input.value)
+      expect((dom.window.document.querySelector('[data-import-local-submit]') as { disabled?: boolean }).disabled).toBe(false)
+      const picker = dom.window.document.querySelector<HTMLInputElement>('[data-import-local-picker]')!
+      picker.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+      expect(input.value).toBe('')
+      expect(input.getAttribute('aria-invalid')).toBe('true')
+      expect(form.querySelector('[role="alert"]')?.textContent).toContain('当前环境无法读取目录路径')
+      expect((dom.window.document.querySelector('[data-import-local-submit]') as { disabled?: boolean }).disabled).toBe(true)
+      expect(dom.window.document.activeElement).toBe(input)
       input.value = '/tmp/local-plugin'
       input.onChange?.(input.value)
       expect((dom.window.document.querySelector('[data-import-local-submit]') as { disabled?: boolean }).disabled).toBe(false)

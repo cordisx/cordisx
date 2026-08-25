@@ -1062,11 +1062,12 @@ const MANAGER_STYLES = `
   .cxm-lifecycle-dialog p { margin: 6px 0 0; color: #bfc5ce; font-size: 12px; line-height: 1.45; }
   .cxm-lifecycle-impact { margin: 12px 0; padding: 10px 12px; border-radius: 9px; background: rgba(255,255,255,.05); color: #d7dbe3; }
   .cxm-lifecycle-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-  .cxm-directory-control { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; gap: 7px; }
-  .cxm-directory-picker { width: 30px; height: 30px; }
+  .cxm-directory-control { display: grid; min-inline-size: 0; grid-template-columns: minmax(0, 1fr) 32px; align-items: center; gap: 7px; }
+  .cxm-directory-control > :first-child { min-inline-size: 0; }
+  .cxm-directory-picker { width: 32px; height: 32px; }
   .cxm-local-import-dialog { width: min(420px, 100%); padding: 12px; }
   .cxm-local-import-dialog .cxm-lifecycle-header { min-block-size: 32px; }
-  .cxm-local-import-form { gap: 12px; padding: 10px 0 0; }
+  .cxm-local-import-form { min-inline-size: 0; gap: 12px; padding: 10px 0 0; }
   .cxm-local-import-field { display: grid; gap: 6px; min-width: 0; }
   .cxm-local-import-field .cxf-label { font-size: 12px; }
   .cxm-local-import-field[data-invalid="true"] .cxf-tdesign-control { border-color: var(--td-error-color); }
@@ -2305,8 +2306,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     cancel.focus()
   })
 
-  const requestLocalPackageDirectory = (): Promise<string | undefined> => new Promise(resolve => {
+  const requestLocalPackageDirectory = (invoker?: HTMLElement): Promise<string | undefined> => new Promise(resolve => {
     const overlay = create(document, 'div', 'cxm-lifecycle-overlay')
+    const HTMLElementCtor = document.defaultView?.HTMLElement
+    const returnFocus = invoker ?? (HTMLElementCtor !== undefined && document.activeElement instanceof HTMLElementCtor
+        ? document.activeElement
+        : undefined)
     let unmountOverlay = (): void => {}
     overlay.setAttribute('role', 'dialog')
     overlay.setAttribute('aria-modal', 'true')
@@ -2314,6 +2319,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     panel.classList.add('cxf-scope')
     const header = create(document, 'div', 'cxm-lifecycle-header')
     const heading = create(document, 'h2', undefined, '导入本地插件')
+    heading.id = 'cxm-local-package-directory-heading'
+    overlay.setAttribute('aria-labelledby', heading.id)
     const close = managerIconAction('close', '关闭')
     close.dataset.importLocalClose = 'true'
     header.append(heading, close)
@@ -2328,6 +2335,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     label.htmlFor = 'cxm-local-package-directory'
     const error = create(document, 'p', 'cxm-local-import-error')
     error.id = 'cxm-local-package-directory-error'
+    error.setAttribute('role', 'alert')
     error.hidden = true
     let pathValue = ''
     let inspect: TDesignButtonElement | undefined
@@ -2366,10 +2374,14 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const filePath = file?.path
       const relative = file?.webkitRelativePath
       if (filePath === undefined || relative === undefined || relative === '') {
+        pathValue = ''
+        setTDesignProps(control.focusTarget as TDesignElement, { value: '', defaultValue: '' })
         error.textContent = '当前环境无法读取目录路径，请粘贴绝对路径'
         error.hidden = false
         field.dataset.invalid = 'true'
         control.focusTarget?.setAttribute('aria-invalid', 'true')
+        if (inspect !== undefined) setTDesignDisabled(inspect, true)
+        control.focusTarget?.focus()
         return
       }
       const separator = filePath.includes('\\') ? '\\' : '/'
@@ -2386,9 +2398,19 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     directoryControl.append(control.root, choose)
     field.append(label, directoryControl, picker, error)
     const actions = create(document, 'div', 'cxf-actions cxm-local-import-actions')
+    const restoreInvokerFocus = (): void => {
+      const currentInvoker = invoker?.isConnected === true
+        ? invoker
+        : document.querySelector<HTMLElement>('[data-import-local-plugin]')
+      ;(currentInvoker ?? returnFocus)?.focus({ preventScroll: true })
+    }
     const finish = (value?: string): void => {
       unmountOverlay()
+      restoreInvokerFocus()
       resolve(value)
+      document.defaultView?.setTimeout(() => {
+        restoreInvokerFocus()
+      }, 0)
     }
     close.addEventListener('click', () => finish(), { once: true })
     const cancel = forms.button('取消')
@@ -2438,8 +2460,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     return result
   }
 
-  const runLocalPackageInstall = async (): Promise<void> => {
-    const sourceDirectory = await requestLocalPackageDirectory()
+  const runLocalPackageInstall = async (invoker?: HTMLElement): Promise<void> => {
+    const sourceDirectory = await requestLocalPackageDirectory(invoker)
     if (sourceDirectory === undefined) return
     lifecycleInstallBusy = true
     operationError = undefined
@@ -3740,7 +3762,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     })
     install.dataset.installLocalPlugin = 'true'
     install.dataset.importLocalPlugin = 'true'
-    install.addEventListener('click', () => { void runLocalPackageInstall() })
+    install.addEventListener('click', () => { void runLocalPackageInstall(install) })
 
     const favorites = favoritePlugins(snapshot)
     const plugins = [...snapshot.plugins].sort((left, right) => Number(favorites.has(right.id)) - Number(favorites.has(left.id)))
