@@ -13,6 +13,7 @@ import {
   type ChannelRuntimeSnapshot,
 } from '@cordisx/channel-runtime'
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
+import { createChannelManagerApi, type ChannelManagerApi, type ChannelManagerActionStatus } from './channel-manager-api.js'
 import { feishuDefinitionsForConfig } from './feishu-adapter.js'
 
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
@@ -33,6 +34,8 @@ export interface LocalChannelService {
     finalize(): Promise<void>
   }>
   snapshot(): ChannelRuntimeSnapshot | undefined
+  /** Launcher-private runtime controls; never bind this object into renderer code. */
+  readonly manager: ChannelManagerApi
   dispose(): Promise<void>
 }
 
@@ -136,6 +139,7 @@ export function createLocalChannelService(input: {
 }): LocalChannelService {
   const artifactDirectory = input.artifactDirectory
   let active: ActiveRuntime | undefined
+  let activeConfiguration: ReturnType<typeof parseChannelServiceConfig> | undefined
   let sequence = 0
 
   const createActive = async (value: unknown): Promise<ActiveRuntime> => {
@@ -186,32 +190,78 @@ export function createLocalChannelService(input: {
     }
   }
 
+  const replaceActive = async (
+    configuration: ReturnType<typeof parseChannelServiceConfig>,
+    expectedGeneration: string,
+  ): Promise<ChannelManagerActionStatus> => {
+    const prior = active
+    if (prior === undefined || prior.generation !== expectedGeneration) return 'unavailable'
+    const next = await createActive(configuration)
+    if (active !== prior) {
+      await next.dispose().catch(() => undefined)
+      return 'unavailable'
+    }
+    active = next
+    activeConfiguration = configuration
+    await prior.dispose()
+    return 'applied'
+  }
+
+  const manager = createChannelManagerApi({
+    active: () => active === undefined ? undefined : { generation: active.generation, runtime: active.runtime },
+    connection: async (action, ref, expectedGeneration) => {
+      const configuration = activeConfiguration
+      if (configuration === undefined) return 'unavailable'
+      const index = configuration.connections.findIndex(connection => (
+        connection.ref.adapterId === ref.adapterId
+        && connection.ref.accountId === ref.accountId
+        && connection.ref.tenantId === ref.tenantId
+      ))
+      if (index < 0) return 'not-found'
+      const next = action === 'reconnect' ? configuration : {
+        ...configuration,
+        connections: configuration.connections.map((connection, candidate) => (
+          candidate === index ? { ...connection, enabled: action === 'enable' } : connection
+        )),
+      }
+      return await replaceActive(parseChannelServiceConfig(next), expectedGeneration)
+    },
+  })
+
   return {
     async start(configuration) {
-      const next = await createActive(configuration)
+      const nextConfiguration = parseChannelServiceConfig(configuration)
+      const next = await createActive(nextConfiguration)
       const prior = active
       active = next
+      activeConfiguration = nextConfiguration
       await prior?.dispose()
       return next.generation
     },
     async restart(configuration) {
-      const next = await createActive(configuration)
+      const nextConfiguration = parseChannelServiceConfig(configuration)
+      const next = await createActive(nextConfiguration)
       const prior = active
+      const priorConfiguration = activeConfiguration
       active = next
+      activeConfiguration = nextConfiguration
       return {
         generation: next.generation,
         rollback: async () => {
           if (active !== next) return
           active = prior
+          activeConfiguration = priorConfiguration
           await next.dispose()
         },
         finalize: async () => { await prior?.dispose() },
       }
     },
     snapshot: () => active?.runtime.snapshot(),
+    manager,
     async dispose() {
       const prior = active
       active = undefined
+      activeConfiguration = undefined
       await prior?.dispose()
     },
   }
