@@ -111,12 +111,16 @@ describe('UI copy principles', () => {
   it('keeps plugin detail readability, compact icon controls, and raw failures out of the runtime overview', async () => {
     const manager = await readFile(managerPath, 'utf8')
     const runtime = section(manager, "if (activeFacet === 'runtime')", "if (activeFacet === 'logs')")
-    expect(manager).toContain('.cxm-readme { max-width: 780px;')
+    expect(manager).toContain('.cxm-readme { inline-size: 100%; max-inline-size: 96rem;')
+    expect(manager).toContain('.cxm-readme p, .cxm-readme li, .cxm-readme blockquote { max-inline-size: 76ch; }')
     expect(manager).toContain('.cxm-manager-icon-action, .cxm-plugin-icon-action, .cxm-plugin-menu-trigger')
-    expect(manager).toContain('width: 32px; height: 32px;')
+    expect(manager).toContain('width: 32px; min-width: 32px; height: 32px; min-height: 32px;')
+    expect(manager).toContain('.cxm-content[data-manager-list-page="true"] { display: flex; overflow: hidden; }')
+    expect(manager).toContain('.cxm-fixed-list-collection .cxc-list { min-height: 0; flex: 1 1 auto; overflow: auto;')
     expect(manager).toContain('.cxm-console-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }')
     expect(runtime).toContain("create(document, 'section', 'cxm-runtime-overview')")
     expect(runtime).toContain("copy('runtime.status-details-in-logs')")
+    expect(runtime).toContain("create(document, 'details', 'cxm-runtime-diagnostics')")
     expect(runtime).not.toContain("'cxm-error', plugin.error")
   })
 

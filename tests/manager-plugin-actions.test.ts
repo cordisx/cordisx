@@ -8,6 +8,7 @@ import {
 } from '../packages/cli/src/contracts.js'
 import {
   installCordisXManager,
+  serializePluginConsoleExport,
   type ManagerModel,
   type ManagerPluginStatus,
   type ManagerSnapshot,
@@ -74,9 +75,11 @@ describe('Manager plugin card actions', () => {
       try {
         const primary = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="base"]')!
         expect(primary.getAttribute('aria-label')).toBe(expectedOpen)
+        expect(dom.window.document.querySelector('.cxm-content')?.getAttribute('data-manager-list-page')).toBe('true')
         primary.click()
         await settle()
         expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain(expectedHeading)
+        expect(dom.window.document.querySelector('.cxm-content')?.hasAttribute('data-manager-list-page')).toBe(false)
       } finally {
         dispose()
         dom.window.close()
@@ -133,6 +136,8 @@ describe('Manager plugin card actions', () => {
         .toEqual(['Disable plugin', 'Favorite plugin', 'Reload plugin'])
       expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain('Plugins')
       expect(dom.window.document.querySelector('[role="list"]')?.getAttribute('aria-label')).toBe('Current bundle plugins')
+      expect(dom.window.document.querySelector('.cxm-content')?.getAttribute('data-manager-list-page')).toBe('true')
+      expect(dom.window.document.querySelector('.cxm-fixed-list-collection .cxc-list')).not.toBeNull()
       expect(dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="plugins"]')?.getAttribute('aria-label')).toBe('Search plugins')
       expect(dom.window.document.querySelector('[data-collection-search="plugins"]')?.parentElement?.querySelector('.cxc-search-clear')?.getAttribute('aria-label')).toBe('Clear plugin search')
       const importButton = dom.window.document.querySelector<HTMLButtonElement>('[data-import-local-plugin]')!
@@ -151,6 +156,9 @@ describe('Manager plugin card actions', () => {
       expect(managerStyles).toContain('min-height: 38px')
       expect(managerStyles).toContain('opacity: 0;')
       expect(managerStyles).toContain('.cxc-card:focus-within .cxc-actions')
+      expect(managerStyles).toContain('.cxm-content[data-manager-list-page="true"] { display: flex; overflow: hidden; }')
+      expect(managerStyles).toContain('.cxm-fixed-list-collection .cxc-list { min-height: 0; flex: 1 1 auto; overflow: auto;')
+      expect(managerStyles).toContain('.cxm-local-import-dialog { width: min(420px, 100%); padding: 12px; }')
       expect([...card.querySelectorAll<HTMLButtonElement>('.cxc-actions button')].every(button => button.tabIndex === 0)).toBe(true)
 
       card.querySelector<HTMLButtonElement>('[data-plugin-action="favorite"]')!.click()
@@ -222,18 +230,23 @@ describe('Manager plugin card actions', () => {
       const form = dom.window.document.querySelector<HTMLFormElement>('[data-host-form="local-package-directory"]')!
       const input = form.querySelector<HTMLElement & { value: string; onChange?: (value: string) => void }>('[data-host-form-primitive="path-input"]')!
       expect(form.classList.contains('cxf-scope')).toBe(true)
-      expect(form.querySelector('.cxf-label')?.textContent).toBe('插件目录')
-      expect(input.getAttribute('aria-describedby')).toContain('cxm-local-package-directory-help')
+      expect(form.classList.contains('cxm-local-import-form')).toBe(true)
+      const dialog = dom.window.document.querySelector<HTMLElement>('.cxm-local-import-dialog')!
+      expect(form.querySelector('.cxm-local-import-field > .cxf-label')?.textContent).toBe('插件目录')
+      expect(input.getAttribute('aria-labelledby')).toBe('cxm-local-package-directory-label')
+      expect(input.getAttribute('aria-describedby')).toContain('cxm-local-package-directory-error')
       expect(input.hasAttribute('data-import-local-path')).toBe(true)
       expect(dom.window.document.querySelector('[data-import-local-submit]')?.textContent).toBe('检查并导入')
       expect((dom.window.document.querySelector('[data-import-local-submit]') as { disabled?: boolean }).disabled).toBe(true)
-      expect(dom.window.document.querySelector('.cxm-lifecycle-dialog h2')?.textContent).toBe('导入本地插件')
-      expect(dom.window.document.querySelector('.cxm-lifecycle-dialog')?.textContent).toContain('选择插件目录；检查通过后再确认授权与激活。')
-      expect(dom.window.document.querySelector('.cxm-lifecycle-dialog')?.textContent).not.toContain('查看导入说明')
+      expect(dialog.querySelector('h2')?.textContent).toBe('导入本地插件')
+      expect(dialog.textContent).not.toContain('选择插件目录；检查通过后再确认授权与激活。')
+      expect(dialog.textContent).not.toContain('查看导入说明')
       expect(dom.window.document.querySelector('[data-import-local-choose]')).not.toBeNull()
       expect(dom.window.document.querySelector('[data-import-local-picker]')).not.toBeNull()
       expect(dom.window.document.querySelector('[data-import-local-close]')).not.toBeNull()
       expect(form.querySelector('.cxf-section')).toBeNull()
+      expect(form.querySelector('.cxf-form-grid, .cxm-settings-group, .cxm-card')).toBeNull()
+      expect(dialog.querySelectorAll('.cxf-actions')).toHaveLength(1)
       input.value = '/tmp/local-plugin'
       input.onChange?.(input.value)
       expect((dom.window.document.querySelector('[data-import-local-submit]') as { disabled?: boolean }).disabled).toBe(false)
@@ -286,6 +299,10 @@ describe('Manager plugin card actions', () => {
       expect(overview.textContent).not.toContain('entry module crashed')
       expect(overview.querySelectorAll('.cxm-runtime-status-fact')).toHaveLength(3)
       expect(overview.querySelector('.cxm-runtime-status-fact strong')?.textContent).toBe('0')
+      const diagnostics = overview.querySelector<HTMLDetailsElement>('[data-plugin-runtime-diagnostics="base"]')
+      expect(diagnostics?.open).toBe(false)
+      expect(diagnostics?.querySelectorAll('[role="listitem"]')).toHaveLength(4)
+      expect(diagnostics?.textContent).not.toContain('entry module crashed')
       dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="logs"]')!.click()
       await settle()
       expect(dom.window.document.querySelector('[data-runtime-lifecycle="base"]')?.textContent).toContain('entry module crashed')
@@ -293,6 +310,32 @@ describe('Manager plugin card actions', () => {
       dispose()
       dom.window.close()
     }
+  })
+
+  it('exports only Host-bound console entries without flattening console argument arrays', () => {
+    const page = {
+      contract: 'cordisx.plugin-console-page/v1', schemaVersion: 1,
+      plugin: { source: 'file:///base.ts', pluginId: 'base' }, generation: 'runtime-a', generatedAt: 1,
+      partialObservability: false,
+      entries: [
+        {
+          entryId: 'base-1', plugin: { source: 'file:///base.ts', pluginId: 'base' }, generation: 'runtime-a',
+          time: 1, kind: 'console', method: 'info', source: 'console.info', message: 'first second',
+          args: [{ type: 'string', preview: 'first' }, { type: 'number', preview: '2', value: 2 }], coverage: 'scoped-console',
+        },
+        {
+          entryId: 'other-1', plugin: { source: 'file:///other.ts', pluginId: 'other' }, generation: 'runtime-a',
+          time: 2, kind: 'console', method: 'warn', source: 'console.warn', message: 'foreign', args: [], coverage: 'scoped-console',
+        },
+      ],
+    } as never
+    const exported = JSON.parse(serializePluginConsoleExport(page, '2026-08-25T00:00:00.000Z')) as {
+      exportedAt: string; plugin: { pluginId: string }; entries: { plugin: { pluginId: string }; args: unknown[] }[]
+    }
+    expect(exported).toMatchObject({ exportedAt: '2026-08-25T00:00:00.000Z', plugin: { pluginId: 'base' } })
+    expect(exported.entries).toHaveLength(1)
+    expect(exported.entries[0]?.plugin.pluginId).toBe('base')
+    expect(exported.entries[0]?.args).toEqual([{ type: 'string', preview: 'first' }, { type: 'number', preview: '2', value: 2 }])
   })
 
   it('keeps the Host-owned more menu actionable, keyboard accessible, and closed across every manager lifecycle boundary', async () => {

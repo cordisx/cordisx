@@ -198,13 +198,13 @@ export const HOST_COLLECTION_STYLES = String.raw`
   .cxc-card:hover .cxc-actions,
   .cxc-card:focus-within .cxc-actions,
   .cxc-card[data-action-menu-open="true"] .cxc-actions { opacity: 1; pointer-events: auto; }
-  .cxc-action, .cxc-menu-trigger { display: inline-grid; place-items: center; width: 32px; height: 32px; box-sizing: border-box; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--cx-muted); cursor: pointer; }
+  .cxc-action, .cxc-menu-trigger { display: inline-grid; place-items: center; width: 32px; min-width: 32px; height: 32px; min-height: 32px; flex: none; box-sizing: border-box; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--cx-muted); cursor: pointer; }
   .cxc-action:hover:not(:disabled), .cxc-menu-trigger:hover { background: var(--cx-hover); color: var(--cx-text); }
   .cxc-action:focus-visible, .cxc-menu-trigger:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: 1px; }
   .cxc-action:disabled { cursor: default; opacity: var(--cx-disabled, .4); }
   .cxc-action[data-tone="danger"] { color: var(--cx-danger); }
   .cxc-action > *, .cxc-menu-trigger > * { width: 17px; height: 17px; pointer-events: none; }
-  .cxc-menu-popup { position: fixed; z-index: 2147483646; width: max-content; min-width: 160px; max-width: min(240px, calc(100vw - 32px)); padding: 5px; border: 1px solid var(--cx-border); border-radius: 10px; background: var(--cx-surface-raised); color: var(--cx-text); box-shadow: 0 14px 44px var(--cx-shadow); font: 12px/1.35 system-ui, sans-serif; }
+  .cxc-menu-popup { position: fixed; z-index: 2147483646; width: max-content; min-width: 160px; max-width: min(240px, calc(100vw - 32px)); padding: 5px; border: 1px solid var(--cx-border); border-radius: 10px; background: var(--cx-surface-raised); color: var(--cx-text); box-shadow: 0 14px 44px var(--cx-shadow); font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; }
   .cxc-menu-item { display: flex; align-items: center; gap: 9px; width: 100%; box-sizing: border-box; padding: 8px 9px; border: 0; border-radius: 7px; background: transparent; color: inherit; cursor: pointer; text-align: left; font: inherit; }
   .cxc-menu-item:hover:not(:disabled), .cxc-menu-item:focus-visible { background: var(--cx-hover); outline: none; }
   .cxc-menu-item:disabled { cursor: default; opacity: var(--cx-disabled, .4); }
@@ -326,6 +326,10 @@ export function createHostCollection(document: Document, options: HostCollection
     closeMenu(false)
     const popup = document.createElement('div')
     popup.className = 'cxc-menu-popup'
+    // Menus are portaled to body for clipping-safe positioning. Copy the
+    // trigger's computed font so their chrome still belongs to the Host seat.
+    const triggerFont = document.defaultView?.getComputedStyle(trigger).font
+    if (triggerFont !== undefined && triggerFont !== '') popup.style.font = triggerFont
     const controls = trigger.getAttribute('aria-controls')
     if (controls !== null) popup.id = controls
     popup.setAttribute('role', 'menu')

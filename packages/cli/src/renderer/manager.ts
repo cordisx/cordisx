@@ -671,6 +671,9 @@ const MANAGER_STYLES = `
     scrollbar-gutter: stable;
   }
   .cxm-content[data-marketplace-discovery="true"] { overflow: hidden; }
+  .cxm-content[data-manager-list-page="true"] { display: flex; overflow: hidden; }
+  .cxm-content[data-manager-list-page="true"] > .cxm-fixed-list-collection { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; }
+  .cxm-content[data-manager-list-page="true"] > .cxm-fixed-list-collection .cxc-list { min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
   .cxm-marketplace-discovery { display: flex; min-width: 0; min-height: 0; height: 100%; flex-direction: column; }
   .cxm-marketplace-discovery-tools { flex: 0 0 auto; }
   .cxm-marketplace-filter-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
@@ -749,9 +752,10 @@ const MANAGER_STYLES = `
   .cxm-tab-panel { min-width: 0; }
   .cxm-tab-panel:has(.cxf-form), .cxm-permission-detail { inline-size: 100%; max-inline-size: none; margin-inline: 0; }
   .cxm-tab-panel > .cxm-section-title:first-child { margin-top: 0; }
-  /* README is content rather than a second page shell: keep a comfortable
-     reading measure while configuration and catalog views remain full width. */
-  .cxm-readme { max-width: 780px; color: var(--cx-text); font-size: 12px; line-height: 1.62; overflow-wrap: anywhere; }
+  /* The Markdown surface uses the available detail width; prose itself keeps
+     a GitHub-like reading measure while code, tables, and headings can span it. */
+  .cxm-readme { inline-size: 100%; max-inline-size: 96rem; color: var(--cx-text); font-size: 12px; line-height: 1.62; overflow-wrap: anywhere; }
+  .cxm-readme p, .cxm-readme li, .cxm-readme blockquote { max-inline-size: 76ch; }
   .cxm-readme > :first-child { margin-top: 0; }
   .cxm-readme > :last-child { margin-bottom: 0; }
   .cxm-readme h1, .cxm-readme h2, .cxm-readme h3, .cxm-readme h4, .cxm-readme h5, .cxm-readme h6 { margin: 1.4em 0 .55em; color: var(--cx-text); line-height: 1.28; }
@@ -818,7 +822,7 @@ const MANAGER_STYLES = `
   .cxm-required-badge { padding: 2px 5px; border-radius: 5px; background: rgba(251, 191, 36, .1); color: #d6c37e; font-size: 9px; font-weight: 700; }
   .cxm-permission-reason { display: block; margin-top: 3px; overflow: hidden; color: #858fa1; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
   .cxm-permission-control { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 118px; }
-  .cxm-permission-control .cxm-source-input { width: 118px; padding-block: 7px; }
+  .cxm-permission-policy-select { inline-size: min(100%, 12rem); min-inline-size: 0; }
   .cxm-permission-detail-intro { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 12px; }
   .cxm-permission-detail-intro .cxm-capability-icon { width: 34px; height: 34px; }
   .cxm-permission-detail-intro .cxm-capability-icon svg { width: 26px; height: 26px; }
@@ -837,7 +841,7 @@ const MANAGER_STYLES = `
   .cxm-diagnostics-body { padding: 0 2px 4px; }
   .cxm-runtime-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .cxm-console-summary { display: flex; min-width: 0; align-items: stretch; gap: 1px; margin: 10px 0 8px; overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(255,255,255,.08); }
-  .cxm-runtime-overview { display: grid; gap: 10px; max-width: 760px; }
+  .cxm-runtime-overview { display: grid; gap: 10px; inline-size: 100%; max-inline-size: none; }
   .cxm-runtime-status { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--cx-border); border-radius: 12px; background: var(--cx-surface-raised); }
   .cxm-runtime-status-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; background: var(--cx-hover); color: var(--cx-primary); }
   .cxm-runtime-status-icon .cxm-material-icon { width: 19px; height: 19px; }
@@ -848,6 +852,13 @@ const MANAGER_STYLES = `
   .cxm-runtime-status-fact { display: grid; gap: 2px; min-width: 0; padding: 9px 10px; border: 1px solid var(--cx-border); border-radius: 9px; background: var(--cx-surface-raised); color: var(--cx-muted); font-size: 10px; }
   .cxm-runtime-status-fact strong { overflow: hidden; color: var(--cx-text); font-size: 15px; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
   .cxm-runtime-status-fact span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cxm-runtime-diagnostics { overflow: hidden; border: 1px solid var(--cx-border); border-radius: 10px; background: var(--cx-surface-raised); }
+  .cxm-runtime-diagnostics > summary { padding: 10px 12px; color: var(--cx-text); cursor: pointer; font-size: 11px; font-weight: 650; }
+  .cxm-runtime-diagnostics > summary::marker { color: var(--cx-muted); }
+  .cxm-runtime-diagnostic-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 1px; border-top: 1px solid var(--cx-border); background: var(--cx-border); }
+  .cxm-runtime-diagnostic { display: grid; min-width: 0; gap: 3px; padding: 10px 12px; background: var(--cx-surface-raised); }
+  .cxm-runtime-diagnostic-label { color: var(--cx-muted); font-size: 10px; }
+  .cxm-runtime-diagnostic-value { overflow-wrap: anywhere; color: var(--cx-text); font-size: 11px; line-height: 1.4; }
   .cxm-console-metric { min-width: 72px; padding: 7px 10px; background: #191b1f; }
   .cxm-console-metric strong { display: inline; color: #eceef2; font: 600 13px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-metric span { margin-left: 6px; color: #818a99; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
@@ -856,7 +867,7 @@ const MANAGER_STYLES = `
   .cxm-console-performance-body { padding: 0 10px 8px; color: #aab2c0; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-controls { display: grid; grid-template-columns: minmax(150px, 1.35fr) repeat(3, minmax(96px, 1fr)) max-content; gap: 7px; align-items: center; min-width: 0; margin: 8px 0; }
   .cxm-console-controls input { min-width: 0; height: 30px; border: 1px solid #353a42; border-radius: 6px; padding: 0 8px; background: #15171a; color: #d8dce3; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .cxm-console-controls t-select { min-width: 0; width: 100%; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-console-controls t-select { min-width: 0; width: 100%; box-sizing: border-box; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-action-toolbar { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; white-space: nowrap; }
   .cxm-console-warning { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 8px; }
   .cxm-console-warning button { flex: none; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 11px; }
@@ -989,7 +1000,7 @@ const MANAGER_STYLES = `
      deliberately not a circular affordance: native toolbar actions, close,
      overflow, and extension controls belong to the same control family. */
   .cxm-manager-icon-action, .cxm-plugin-icon-action, .cxm-plugin-menu-trigger {
-    display: inline-grid; place-items: center; width: 32px; height: 32px; flex: none;
+    display: inline-grid; place-items: center; width: 32px; min-width: 32px; height: 32px; min-height: 32px; flex: none;
     box-sizing: border-box; border: 1px solid transparent; border-radius: 8px;
     background: transparent; color: #aeb5c3; cursor: pointer;
   }
@@ -997,7 +1008,7 @@ const MANAGER_STYLES = `
   .cxm-manager-icon-action:focus-visible, .cxm-plugin-icon-action:focus-visible, .cxm-plugin-menu-trigger:focus-visible { outline: 2px solid var(--cx-focus, #c7ccd4); outline-offset: 1px; }
   .cxm-manager-icon-action:disabled, .cxm-plugin-icon-action:disabled { cursor: default; opacity: var(--cx-disabled, .34); }
   .cxm-manager-icon-action[aria-pressed="true"] { background: var(--cx-pressed, rgba(199, 204, 212, .2)); color: var(--cx-text, #eef0f4); }
-  .cxm-manager-icon-action .cxm-material-icon { width: 17px; height: 17px; }
+  .cxm-manager-icon-action .cxm-material-icon { width: 17px; height: 17px; max-width: 100%; max-height: 100%; }
   .cxm-plugin-icon {
     position: relative;
     display: grid;
@@ -1053,6 +1064,15 @@ const MANAGER_STYLES = `
   .cxm-lifecycle-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
   .cxm-directory-control { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; gap: 7px; }
   .cxm-directory-picker { width: 30px; height: 30px; }
+  .cxm-local-import-dialog { width: min(420px, 100%); padding: 12px; }
+  .cxm-local-import-dialog .cxm-lifecycle-header { min-block-size: 32px; }
+  .cxm-local-import-form { gap: 12px; padding: 10px 0 0; }
+  .cxm-local-import-field { display: grid; gap: 6px; min-width: 0; }
+  .cxm-local-import-field .cxf-label { font-size: 12px; }
+  .cxm-local-import-field[data-invalid="true"] .cxf-tdesign-control { border-color: var(--td-error-color); }
+  .cxm-local-import-error { margin: 0; color: var(--td-error-color); font-size: 11px; line-height: 1.4; }
+  .cxm-local-import-error[hidden] { display: none; }
+  .cxm-local-import-actions { margin: 0; }
   .cxm-visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
   .cxm-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   .cxm-detail-id { color: #747f91; font: 10px/1.3 ui-monospace, monospace; }
@@ -1089,7 +1109,7 @@ const MANAGER_STYLES = `
   .cxm-marketplace-trust-evidence { display: inline-flex; margin-top: 8px; }
   .cxm-code { max-height: 140px; margin: 6px 0 0; overflow: auto; color: #bac2d2; font: 10px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
   .cxm-config-renderer { min-height: 2rem; }
-  .cxm-readme { inline-size: 100%; max-inline-size: none; box-sizing: border-box; color: var(--cx-text); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+  .cxm-readme { inline-size: 100%; max-inline-size: 96rem; box-sizing: border-box; color: var(--cx-text); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
   .cxm-readme > :first-child { margin-top: 0 !important; }
   .cxm-readme > :last-child { margin-bottom: 0 !important; }
   .cxm-readme h1, .cxm-readme h2, .cxm-readme h3, .cxm-readme h4, .cxm-readme h5, .cxm-readme h6 { color: var(--cx-text); line-height: 1.25; }
@@ -1384,6 +1404,18 @@ function pluginConsoleEntryCopyText(entry: CordisXPluginConsoleEntryV1): string 
   return `${lunaConsoleTime(entry.time)} ${entry.method} ${entry.source} ${entry.kind === 'console' ? args || entry.message : `${entry.message}${args === '' ? '' : ` ${args}`}`}`
 }
 
+/**
+ * Export only Host-issued entries for the page identity. Keep each immutable
+ * `args` array intact: collapsing it into message text would change native
+ * console.* semantics and lose the ownership fence carried by every entry.
+ */
+export function serializePluginConsoleExport(page: CordisXPluginConsolePageV1, exportedAt = new Date().toISOString()): string {
+  const entries = page.entries.filter(entry => (
+    entry.plugin.source === page.plugin.source && entry.plugin.pluginId === page.plugin.pluginId
+  ))
+  return JSON.stringify({ exportedAt, plugin: page.plugin, generation: page.generation, entries }, undefined, 2)
+}
+
 function capabilityPresentation(capability: CordisXPlatformCapability): CapabilityPresentation {
   const known = CAPABILITY_PRESENTATIONS[capability]
   if (known !== undefined) return known
@@ -1424,7 +1456,7 @@ function createPermissionPolicySelect(
     permission.policy,
     value => { if (value !== undefined) void onChange(value, policy) },
   )
-  policy.classList.add('cxm-source-input')
+  policy.classList.add('cxm-permission-policy-select')
   policy.dataset.hostFormPrimitive = 'select'
   policy.dataset.permissionCapability = permission.capability
   return policy
@@ -2278,25 +2310,36 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     let unmountOverlay = (): void => {}
     overlay.setAttribute('role', 'dialog')
     overlay.setAttribute('aria-modal', 'true')
-    const panel = create(document, 'div', 'cxm-lifecycle-dialog')
+    const panel = create(document, 'div', 'cxm-lifecycle-dialog cxm-local-import-dialog')
     panel.classList.add('cxf-scope')
     const header = create(document, 'div', 'cxm-lifecycle-header')
     const heading = create(document, 'h2', undefined, '导入本地插件')
     const close = managerIconAction('close', '关闭')
     close.dataset.importLocalClose = 'true'
     header.append(heading, close)
-    panel.append(header, create(document, 'p', undefined, '选择插件目录；检查通过后再确认授权与激活。'))
+    // The Host overlay title plus the labelled directory control already
+    // explains this bounded operation. Do not add a second title/CTA shell.
+    panel.append(header)
     const form = forms.form('local-package-directory')
-    const item = forms.item({
-      id: 'cxm-local-package-directory', label: '插件目录',
-      help: '可直接选择目录，或粘贴本地绝对路径。', fullWidth: true, required: true,
-    })
+    form.classList.add('cxm-local-import-form')
+    const field = create(document, 'div', 'cxm-local-import-field')
+    const label = create(document, 'label', 'cxf-label', '插件目录')
+    label.id = 'cxm-local-package-directory-label'
+    label.htmlFor = 'cxm-local-package-directory'
+    const error = create(document, 'p', 'cxm-local-import-error')
+    error.id = 'cxm-local-package-directory-error'
+    error.hidden = true
     let pathValue = ''
     let inspect: TDesignButtonElement | undefined
     const validPath = (value: string): boolean => value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value)
     const updatePath = (value: string): void => {
       pathValue = value.trim()
-      item.setError(pathValue === '' ? undefined : validPath(pathValue) ? undefined : '请选择目录或输入绝对路径')
+      const message = pathValue === '' ? undefined : validPath(pathValue) ? undefined : '请选择目录或输入绝对路径'
+      error.textContent = message ?? ''
+      error.hidden = message === undefined
+      field.dataset.invalid = String(!error.hidden)
+      if (error.hidden) control?.focusTarget?.removeAttribute('aria-invalid')
+      else control?.focusTarget?.setAttribute('aria-invalid', 'true')
       if (inspect !== undefined) setTDesignDisabled(inspect, !validPath(pathValue))
     }
     const pathField: CordisXConfigFieldSnapshot = {
@@ -2305,8 +2348,9 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     const control = forms.control(pathField, 'cxm-local-package-directory', value => {
       updatePath(typeof value === 'string' ? value : '')
     })
+    control.focusTarget?.setAttribute('aria-labelledby', label.id)
+    control.focusTarget?.setAttribute('aria-describedby', error.id)
     control.focusTarget?.setAttribute('data-import-local-path', '')
-    forms.connect(item, control)
     const directoryControl = create(document, 'div', 'cxm-directory-control')
     const picker = create(document, 'input', 'cxm-visually-hidden')
     picker.type = 'file'
@@ -2322,7 +2366,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       const filePath = file?.path
       const relative = file?.webkitRelativePath
       if (filePath === undefined || relative === undefined || relative === '') {
-        item.setError('当前环境无法读取目录路径，请粘贴绝对路径')
+        error.textContent = '当前环境无法读取目录路径，请粘贴绝对路径'
+        error.hidden = false
+        field.dataset.invalid = 'true'
+        control.focusTarget?.setAttribute('aria-invalid', 'true')
         return
       }
       const separator = filePath.includes('\\') ? '\\' : '/'
@@ -2337,9 +2384,8 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       control.focusTarget?.focus()
     })
     directoryControl.append(control.root, choose)
-    item.control.append(directoryControl, picker)
-    form.append(item.root)
-    const actions = create(document, 'div', 'cxf-actions')
+    field.append(label, directoryControl, picker, error)
+    const actions = create(document, 'div', 'cxf-actions cxm-local-import-actions')
     const finish = (value?: string): void => {
       unmountOverlay()
       resolve(value)
@@ -2353,7 +2399,10 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     form.addEventListener('submit', event => {
       event.preventDefault()
       if (!validPath(pathValue)) {
-        item.setError(pathValue === '' ? '请选择插件目录' : '请选择目录或输入绝对路径')
+        error.textContent = pathValue === '' ? '请选择插件目录' : '请选择目录或输入绝对路径'
+        error.hidden = false
+        field.dataset.invalid = 'true'
+        control.focusTarget?.setAttribute('aria-invalid', 'true')
         control.focusTarget?.focus()
         return
       }
@@ -2367,7 +2416,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       }
     })
     actions.append(cancel, inspect)
-    form.append(actions)
+    form.append(field, actions)
     panel.append(form)
     overlay.append(panel)
     unmountOverlay = mountPortal(overlay)
@@ -3681,6 +3730,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
 
   const renderPluginList = (snapshot: ManagerSnapshot): void => {
     setHeading(copy('manager.nav.plugins'), snapshot, { icon: 'plugins' })
+    content.dataset.managerListPage = 'true'
     const install = managerIconAction('import-plugin', lifecycleInstallBusy ? copy('plugins.install-checking') : copy('plugins.install'), {
       className: 'cxm-toolbar-icon-action',
       disabled: lifecycleInstallBusy
@@ -3851,6 +3901,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         if (favorite !== null) favorite.setAttribute('aria-pressed', String(favoritePluginIds.has(pluginId)))
       }
     })
+    view.element.classList.add('cxm-fixed-list-collection')
     const search = view.element.querySelector<HTMLElement>('.cxc-search')
     if (search !== null) {
       const toolbar = create(document, 'div', 'cxm-toolbar')
@@ -4520,9 +4571,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   const exportPluginConsole = (pluginId: string, page: CordisXPluginConsolePageV1): void => {
     const view = document.defaultView
     if (view === null || typeof view.Blob !== 'function' || typeof view.URL.createObjectURL !== 'function') return
-    const payload = JSON.stringify({
-      exportedAt: new Date().toISOString(), plugin: page.plugin, generation: page.generation, entries: page.entries,
-    }, undefined, 2)
+    const payload = serializePluginConsoleExport(page)
     const url = view.URL.createObjectURL(new view.Blob([payload], { type: 'application/json' }))
     const link = create(document, 'a')
     link.href = url
@@ -4664,6 +4713,28 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         facts.append(fact)
       }
       overview.append(status, facts)
+      const diagnostics = create(document, 'details', 'cxm-runtime-diagnostics')
+      diagnostics.dataset.pluginRuntimeDiagnostics = plugin.id
+      diagnostics.append(create(document, 'summary', undefined, copy('runtime.diagnostics')))
+      const diagnosticList = create(document, 'div', 'cxm-runtime-diagnostic-list')
+      diagnosticList.setAttribute('role', 'list')
+      const addDiagnostic = (label: string, value: string): void => {
+        const item = create(document, 'div', 'cxm-runtime-diagnostic')
+        item.setAttribute('role', 'listitem')
+        item.append(
+          create(document, 'span', 'cxm-runtime-diagnostic-label', label),
+          create(document, 'span', 'cxm-runtime-diagnostic-value', value),
+        )
+        diagnosticList.append(item)
+      }
+      addDiagnostic(copy('console.field.generation'), plugin.package?.moduleGeneration ?? copy('runtime.unavailable'))
+      addDiagnostic(copy('runtime.services'), plugin.inject.join(', ') || copy('runtime.none'))
+      addDiagnostic(copy('runtime.configuration'), plugin.configuration.schemaKind === 'schemastery'
+        ? `Schemastery · ${plugin.configuration.applies}`
+        : plugin.configuration.schemaKind === 'standard' ? `Standard Schema · ${plugin.configuration.applies}` : copy('runtime.not-declared'))
+      if (hasDetail) addDiagnostic(copy('plugin-tab.logs'), copy('runtime.status-details-in-logs'))
+      diagnostics.append(diagnosticList)
+      overview.append(diagnostics)
       panel.append(overview)
       if (operationError !== undefined) {
         const notice = create(document, 'div', 'cxm-notice', copy('runtime.status-attention'))
@@ -6240,6 +6311,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     marketplaceCollectionView?.dispose()
     marketplaceCollectionView = undefined
     delete content.dataset.marketplaceDiscovery
+    delete content.dataset.managerListPage
     const snapshot = model.snapshot()
     renderedLocale = snapshot.localization.locale
     syncPrimaryChrome(renderedLocale)
