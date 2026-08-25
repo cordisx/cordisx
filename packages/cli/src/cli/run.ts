@@ -546,6 +546,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       artifactDirectory: path.dirname(channelPlugin.entry),
       dataDir: path.join(rootFromConfigPath(configPath), 'cache', 'channel-runtime'),
       source: channelPlugin.source ?? pathToFileURL(channelPlugin.entry).href,
+      environment: runtime.env ?? process.env,
     })
     await channelService.start(state.config)
     channelManager = projectLocalChannelManager({

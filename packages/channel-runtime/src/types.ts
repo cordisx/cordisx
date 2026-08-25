@@ -222,6 +222,9 @@ export interface ChannelAdapterHost {
   readonly generation: number
   readonly ref: ChannelTenantRef
   receive(envelope: ChannelInboundEnvelope): Promise<ChannelReceiveReceipt>
+  /** Launcher-private drains; adapters use them to complete bounded delivery. */
+  drainInbound(limit?: number): Promise<number>
+  drainOutbound(limit?: number): Promise<number>
 }
 
 export interface ChannelAdapterDefinition {

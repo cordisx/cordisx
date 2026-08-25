@@ -36,4 +36,32 @@ describe('built-in local Channel service', () => {
     expect(service.snapshot()?.accounts).toEqual([])
     await service.dispose()
   })
+
+  it('keeps the launcher alive and projects an official account unavailable when its private secret is absent', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-channel-feishu-'))
+    temporary.add(root)
+    const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const artifactDirectory = path.join(repo, 'packages/cli/src/plugins/channel')
+    const configuration = structuredClone(SIMULATOR_CHANNEL_SERVICE_CONFIG)
+    configuration.connections.push({
+      ref: { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'tenant-test' },
+      adapterKind: 'feishu', enabled: true, transport: { mode: 'websocket' },
+      secretRef: 'host-secret:env/CORDISX_MISSING_TEST_SECRET',
+    })
+    configuration.routes.push({
+      ...structuredClone(configuration.routes[0]!), id: 'feishu-direct',
+      connection: { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'tenant-test' },
+      policy: { conversationKinds: ['direct'], allowedUserIds: ['user-1'] },
+    })
+    const service = createLocalChannelService({
+      artifactDirectory, dataDir: path.join(root, 'runtime'),
+      source: pathToFileURL(path.join(artifactDirectory, 'index.ts')).href,
+      environment: {},
+    })
+    await service.start(configuration)
+    expect(service.snapshot()?.accounts).toContainEqual(expect.objectContaining({
+      adapterKind: 'feishu', connectionState: 'unavailable', secretState: 'missing',
+    }))
+    await service.dispose()
+  })
 })

@@ -13,6 +13,7 @@ import {
   type ChannelRuntimeSnapshot,
 } from '@cordisx/channel-runtime'
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
+import { feishuDefinitionsForConfig } from './feishu-adapter.js'
 
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
@@ -51,20 +52,25 @@ export function projectLocalChannelManager(input: {
   const runtimeAccounts = new Map((input.runtime?.accounts ?? []).map(account => [
     JSON.stringify([account.ref.adapterId, account.ref.accountId, account.ref.tenantId]), account,
   ]))
-  const connections = configuration.connections.map(connection => ({
-    ref: connection.ref,
-    adapterKind: connection.adapterKind,
-    enabled: connection.enabled,
-    transportMode: connection.transport.mode,
-    secretState: connection.adapterKind === 'simulator' ? 'unavailable' as const : 'missing' as const,
-  }))
+  const connections = configuration.connections.map(connection => {
+    const runtime = runtimeAccounts.get(JSON.stringify([
+      connection.ref.adapterId, connection.ref.accountId, connection.ref.tenantId,
+    ]))
+    return {
+      ref: connection.ref,
+      adapterKind: connection.adapterKind,
+      enabled: connection.enabled,
+      transportMode: connection.transport.mode,
+      secretState: runtime?.secretState ?? (connection.adapterKind === 'simulator' ? 'unavailable' as const : 'missing' as const),
+    }
+  })
   const accounts = connections.map(connection => {
     const runtime = runtimeAccounts.get(JSON.stringify([
       connection.ref.adapterId, connection.ref.accountId, connection.ref.tenantId,
     ]))
     return {
       ...connection,
-      implementationStatus: connection.adapterKind === 'simulator' ? 'verified' as const : 'unavailable' as const,
+      implementationStatus: runtime?.implementationStatus ?? (connection.adapterKind === 'simulator' ? 'verified' as const : 'implemented' as const),
       connectionState: runtime?.connectionState ?? (connection.enabled ? 'starting' as const : 'disabled' as const),
       generation: runtime?.generation ?? 0,
       inbound: runtime?.inbound ?? { pending: 0, retrying: 0, deadLetter: 0 },
@@ -93,10 +99,9 @@ export function projectLocalChannelManager(input: {
       routeId: binding.routeId,
       state: binding.state,
     })),
-    diagnostics: [{
-      id: 'channel-simulator', status: 'verified',
-      message: 'The local simulator is active. Official channel adapters are not connected.',
-    }],
+    diagnostics: configuration.connections
+      .filter(connection => connection.adapterKind === 'simulator')
+      .map(() => ({ id: 'channel-simulator', status: 'verified' as const, message: 'The local simulator is active.' })),
   }
 }
 
@@ -112,7 +117,7 @@ function localPermissions() {
     // Only the built-in simulator is granted its local registration seat.
     // Task execution is still unavailable through the local gateway above.
     authorize: async (request: { readonly source: { readonly adapterId: string } }) => (
-      request.source.adapterId === 'simulator' ? 'allow' as const : 'deny' as const
+      ['simulator', 'feishu', 'lark'].includes(request.source.adapterId) ? 'allow' as const : 'deny' as const
     ),
   }
 }
@@ -126,6 +131,8 @@ export function createLocalChannelService(input: {
   readonly artifactDirectory: string
   readonly dataDir: string
   readonly source: string
+  /** Effective launcher environment; never project it or any resolved secret. */
+  readonly environment?: NodeJS.ProcessEnv
 }): LocalChannelService {
   const artifactDirectory = input.artifactDirectory
   let active: ActiveRuntime | undefined
@@ -154,6 +161,18 @@ export function createLocalChannelService(input: {
         artifactDirectory,
         runtimeEntry: './service.mjs',
       }, configuration)
+      // The official adapter is deliberately launcher-owned: it gets an
+      // opaque secret reference only, resolves it privately, and publishes
+      // only the redacted runtime snapshot. A bad/missing credential leaves
+      // that account unavailable without preventing the rest of CordisX from
+      // starting.
+      for (const definition of feishuDefinitionsForConfig(configuration, {
+        source: input.source,
+        configurationRevision: sequence,
+        ...(input.environment === undefined ? {} : { secretResolver: { environment: input.environment } }),
+      })) {
+        await runtime.activate(definition, { source: input.source, pluginId: 'channel', generation }).catch(() => undefined)
+      }
       return {
         generation,
         runtime,
