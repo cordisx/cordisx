@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "playground": {
+    "name": "Comprehensive UI demos",
+    "description": "Local multi-plugin fixture for CordisX UI Playground."
+  },
+  "codex": {
+    "debugPort": 9229
+  },
+  "providers": [],
+  "plugins": [
+    {
+      "id": "slot-showcase",
+      "entry": "./examples/plugins/slot-showcase/index.ts",
+      "enabled": true,
+      "config": {
+        "sessionId": ""
+      }
+    },
+    {
+      "id": "hello-toolbar",
+      "entry": "./examples/plugins/hello-toolbar/index.ts",
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "form-schema-gallery",
+      "entry": "./examples/plugins/form-schema-gallery/index.ts",
+      "enabled": true,
+      "config": {
+        "workspaceName": "Northstar workspace"
+      }
+    },
+    {
+      "id": "settings-tab-demo",
+      "entry": "./examples/plugins/settings-tab-demo/index.ts",
+      "enabled": true,
+      "config": {
+        "demoValue": "CordisX"
+      }
+    },
+    {
+      "id": "console-showcase",
+      "entry": "./examples/plugins/console-showcase/index.ts",
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "channel",
+      "entry": "cordisx:channel",
+      "enabled": true,
+      "config": {}
+    },
+    {
+      "id": "cli-proxy-api",
+      "entry": "cordisx:cli-proxy-api",
+      "enabled": true,
+      "config": {}
+    }
+  ]
+}
