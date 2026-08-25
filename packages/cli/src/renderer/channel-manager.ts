@@ -922,7 +922,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         return () => {}
       }
       let query = ''
-      let outcome = 'all'
+      let outcome: 'all' | 'success' | 'failure' = 'all'
       let page = 0
       const pageSize = 25
       const toolbar = document.createElement('div')
@@ -932,11 +932,12 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       search.dataset.channelLogQuery = 'true'
       search.placeholder = managerCopy(locale, 'channel.logs.search')
       search.setAttribute('aria-label', managerCopy(locale, 'channel.logs.search'))
-      const filter = document.createElement('select')
+      const filter = forms.select<'all' | 'success' | 'failure'>(managerCopy(locale, 'channel.logs.all'), [
+        { value: 'all', label: managerCopy(locale, 'channel.logs.all') },
+        { value: 'success', label: managerCopy(locale, 'channel.logs.success') },
+        { value: 'failure', label: managerCopy(locale, 'channel.logs.failure') },
+      ], outcome, next => { outcome = next ?? 'all'; page = 0; draw() }, { id: 'channel-log-outcome' })
       filter.dataset.channelLogOutcome = 'true'
-      for (const [value, label] of [['all', managerCopy(locale, 'channel.logs.all')], ['success', managerCopy(locale, 'channel.logs.success')], ['failure', managerCopy(locale, 'channel.logs.failure')]] as const) {
-        const option = document.createElement('option'); option.value = value; option.textContent = label; filter.append(option)
-      }
       const exportButton = document.createElement('button')
       exportButton.type = 'button'; exportButton.className = 'cxc-channel-log-export'; exportButton.dataset.channelLogExport = 'json'
       exportButton.textContent = managerCopy(locale, 'channel.logs.export')
@@ -969,7 +970,6 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         pagination.replaceChildren(previous, label, next)
       }
       search.addEventListener('input', () => { query = search.value.trim(); page = 0; draw() })
-      filter.addEventListener('change', () => { outcome = filter.value; page = 0; draw() })
       exportButton.addEventListener('click', () => {
         const view = document.defaultView
         const createObjectURL = view?.URL?.createObjectURL
