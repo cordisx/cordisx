@@ -107,4 +107,16 @@ describe('UI copy principles', () => {
     expect(principles).toContain('one title, at most one concise')
     expect(principles).toContain('must not draw a second button, Select, or Input')
   })
+
+  it('keeps plugin detail readability, compact icon controls, and raw failures out of the runtime overview', async () => {
+    const manager = await readFile(managerPath, 'utf8')
+    const runtime = section(manager, "if (activeFacet === 'runtime')", "if (activeFacet === 'logs')")
+    expect(manager).toContain('.cxm-readme { max-width: 780px;')
+    expect(manager).toContain('.cxm-manager-icon-action, .cxm-plugin-icon-action, .cxm-plugin-menu-trigger')
+    expect(manager).toContain('width: 32px; height: 32px;')
+    expect(manager).toContain('.cxm-console-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }')
+    expect(runtime).toContain("create(document, 'section', 'cxm-runtime-overview')")
+    expect(runtime).toContain("copy('runtime.status-details-in-logs')")
+    expect(runtime).not.toContain("'cxm-error', plugin.error")
+  })
 })

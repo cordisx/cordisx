@@ -268,6 +268,33 @@ describe('Manager plugin card actions', () => {
     }
   })
 
+  it('keeps the runtime tab as a compact human overview and moves raw failure detail to Logs & diagnostics', async () => {
+    const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
+    const model: ManagerModel = {
+      snapshot: () => snapshot('failed'),
+      setPluginBlocked: async () => {}, setPermissionPolicy: async () => {}, subscribe: () => () => {},
+    }
+    const dispose = installCordisXManager(dom.window.document, model)
+    try {
+      dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="base"]')!.click()
+      await settle()
+      dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')!.click()
+      await settle()
+      const overview = dom.window.document.querySelector<HTMLElement>('.cxm-runtime-overview')!
+      expect(overview.querySelector('[data-plugin-runtime-status="base"]')?.textContent).toContain('Failed to start')
+      expect(overview.textContent).toContain('Details are available in Logs & diagnostics.')
+      expect(overview.textContent).not.toContain('entry module crashed')
+      expect(overview.querySelectorAll('.cxm-runtime-status-fact')).toHaveLength(3)
+      expect(overview.querySelector('.cxm-runtime-status-fact strong')?.textContent).toBe('0')
+      dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="logs"]')!.click()
+      await settle()
+      expect(dom.window.document.querySelector('[data-runtime-lifecycle="base"]')?.textContent).toContain('entry module crashed')
+    } finally {
+      dispose()
+      dom.window.close()
+    }
+  })
+
   it('keeps the Host-owned more menu actionable, keyboard accessible, and closed across every manager lifecycle boundary', async () => {
     const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
     const listeners = new Set<() => void>()
