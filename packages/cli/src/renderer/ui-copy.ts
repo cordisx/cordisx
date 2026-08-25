@@ -64,6 +64,15 @@ type CopyKey =
   | 'channel.field.enabled'
   | 'channel.field.status'
   | 'channel.field.credentials'
+  | 'channel.status.inbound'
+  | 'channel.status.outbound'
+  | 'channel.status.generation'
+  | 'channel.reconnect'
+  | 'channel.runtime.unavailable'
+  | 'channel.binding.archive'
+  | 'channel.binding.restore'
+  | 'channel.binding.unbind'
+  | 'channel.binding-operations.unavailable'
   | 'channel.credentials.help'
   | 'channel.real-readiness'
   | 'channel.real-readiness.description'
@@ -417,6 +426,15 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'channel.field.enabled': { en: 'Enabled', 'zh-CN': '已启用' },
   'channel.field.status': { en: 'Connection status', 'zh-CN': '连接状态' },
   'channel.field.credentials': { en: 'Credentials', 'zh-CN': '凭据' },
+  'channel.status.inbound': { en: 'Inbound pending', 'zh-CN': '待处理入站' },
+  'channel.status.outbound': { en: 'Outbound pending', 'zh-CN': '待处理出站' },
+  'channel.status.generation': { en: 'Service generation', 'zh-CN': '服务代次' },
+  'channel.reconnect': { en: 'Reconnect', 'zh-CN': '重新连接' },
+  'channel.runtime.unavailable': { en: 'Runtime status is currently unavailable.', 'zh-CN': '运行状态当前不可用。' },
+  'channel.binding.archive': { en: 'Archive binding', 'zh-CN': '归档绑定' },
+  'channel.binding.restore': { en: 'Restore binding', 'zh-CN': '恢复绑定' },
+  'channel.binding.unbind': { en: 'Unbind', 'zh-CN': '解除绑定' },
+  'channel.binding-operations.unavailable': { en: 'Binding operations are currently unavailable.', 'zh-CN': '绑定操作当前不可用。' },
   'channel.credentials.help': { en: 'Only readiness is projected; credential references and values are never rendered.', 'zh-CN': '仅展示就绪状态；不会渲染凭据引用或值。' },
   'channel.real-readiness': { en: 'Real connection readiness', 'zh-CN': '真实连接就绪状态' },
   'channel.real-readiness.description': { en: 'Known test-target information is not evidence of a connected channel.', 'zh-CN': '已知测试目标不代表频道已连接。' },

@@ -406,4 +406,33 @@ describe('built-in Channel product bundle', () => {
     dispose()
     dom.window.close()
   })
+
+  it('keeps runtime state and operational logs in separate Host-owned tabs', () => {
+    const dom = new JSDOM('<html lang="en"><body><main id="seat"></main></body></html>')
+    const manager = new CordisXChannelManagerService(new Context(), {
+      projection: {
+        ...projection,
+        logs: [{
+          id: 'audit-1', account: projection.connections[0]!.ref, recordedAt: '2026-08-25T12:00:00.000Z',
+          action: 'adapter.receive', outcome: 'success',
+        }],
+      },
+    })
+    const container = dom.window.document.querySelector<HTMLElement>('#seat')!
+    const common = {
+      document: dom.window.document, container, signal: new AbortController().signal,
+      outlet: 'manager.content', params: { accountId: 'simulator/local/test' },
+      navigation: { navigate: () => Promise.resolve(), back: () => Promise.resolve(), close: () => Promise.resolve() },
+    } as const
+    const runtimeDispose = manager.mount({ ...common, routeId: 'channel:runtime' } as never)
+    expect(container.querySelector('[data-channel-runtime-status="simulator/local/test"]')).not.toBeNull()
+    expect(container.querySelector('[data-channel-logs]')).toBeNull()
+    runtimeDispose()
+    const logsDispose = manager.mount({ ...common, routeId: 'channel:logs' } as never)
+    expect(container.querySelector('[data-channel-logs="true"] [data-channel-log-entry="audit-1"]')?.textContent).toContain('adapter.receive')
+    expect(container.querySelector('[data-channel-log-query]')).not.toBeNull()
+    expect(container.querySelector('[data-channel-log-outcome]')).not.toBeNull()
+    expect(container.querySelector('[data-channel-log-export="json"]')).not.toBeNull()
+    logsDispose(); dom.window.close()
+  })
 })

@@ -182,6 +182,11 @@ const CHANNEL_MANAGER_STYLES = String.raw`
   .cxc-channel-section { display: grid; gap: 7px; min-width: 0; }
   .cxc-channel-section-head { display: grid; gap: 2px; }
   .cxc-channel-section h3 { font-size: 12px; }
+  .cxc-channel-status-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-block-end: 12px; }
+  .cxc-channel-status-card { display: grid; gap: 3px; min-width: 0; padding: 10px; border: 1px solid var(--cx-border); border-radius: 9px; background: var(--cx-surface-raised); }
+  .cxc-channel-status-card strong { font-size: 13px; overflow-wrap: anywhere; }
+  .cxc-channel-status-card span { color: var(--cx-muted); font-size: 11px; }
+  .cxc-channel-operation-note { margin-inline-end: auto; color: var(--cx-muted); font-size: 12px; }
   .cxc-channel-manager .cordisx-host-icon, .cxc-channel-manager .cordisx-host-icon svg { width: 22px; height: 22px; }
   @media (max-width: 520px) {
     .cxc-channel-list-page { height: clamp(18rem, 60vh, 34rem); }
@@ -420,7 +425,7 @@ interface ChannelRecord {
   readonly account?: ChannelManagerAccountProjection
 }
 
-type ChannelDetailTab = 'configuration' | 'logs' | 'sessions'
+type ChannelDetailTab = 'configuration' | 'runtime' | 'logs' | 'sessions'
 
 function channelRecords(projection: ChannelManagerProjectionV1): readonly ChannelRecord[] {
   const configured = new Map(projection.connections.map(item => [compositeRef(item.ref), item]))
@@ -850,7 +855,10 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         status.dataset.channelConfigurationStatus = 'true'
         const submit = forms.button(managerCopy(locale, 'form.save-configuration'), { type: 'submit', variant: 'primary' })
         submit.dataset.channelConfigurationSave = record.id
-        actions.append(status, submit)
+        const reconnect = forms.button(managerCopy(locale, 'channel.reconnect'), { type: 'button' })
+        reconnect.dataset.channelReconnect = record.id
+        reconnect.addEventListener('click', () => form.requestSubmit())
+        actions.append(status, reconnect, submit)
         form.append(grid, actions)
         form.addEventListener('submit', event => {
           event.preventDefault()
@@ -880,6 +888,28 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       }).catch(() => {
         if (configuration.isConnected) configuration.replaceChildren(conciseEmpty(document, managerCopy(locale, 'channel.configuration.unavailable'), 'channelConfigurationUnavailable'))
       })
+    }
+
+    const renderRuntime = (record: ChannelRecord, panel: HTMLElement): (() => void) => {
+      const account = record.account
+      if (account === undefined) {
+        panel.append(conciseEmpty(document, managerCopy(locale, 'channel.runtime.unavailable'), 'channelRuntimeUnavailable'))
+        return () => {}
+      }
+      const cards = document.createElement('section'); cards.className = 'cxc-channel-status-cards'; cards.dataset.channelRuntimeStatus = record.id
+      for (const [label, value] of [
+        [managerCopy(locale, 'channel.field.status'), channelStateLabel(locale, account.connectionState)],
+        [managerCopy(locale, 'channel.status.inbound'), String(account.inbound.pending + account.inbound.retrying)],
+        [managerCopy(locale, 'channel.status.outbound'), String(account.outbound.pending + account.outbound.retrying)],
+        [managerCopy(locale, 'channel.status.generation'), String(account.generation)],
+      ]) {
+        const card = document.createElement('div'); card.className = 'cxc-channel-status-card'
+        const strong = document.createElement('strong'); strong.textContent = value ?? ''
+        const caption = document.createElement('span'); caption.textContent = label ?? ''
+        card.append(strong, caption); cards.append(card)
+      }
+      panel.append(cards)
+      return () => {}
     }
 
     const renderLogs = (record: ChannelRecord, panel: HTMLElement): (() => void) => {
@@ -973,6 +1003,13 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         search: { enabled: false, reason: 'This detail view only presents the selected channel.' }, emptyLabel: managerCopy(locale, 'channel.bindings.empty'),
       })
       bindings.body.append(bindingCollection.element)
+      const unavailableOperations = document.createElement('div')
+      unavailableOperations.className = 'cxc-channel-create-actions'
+      const note = document.createElement('span'); note.className = 'cxc-channel-operation-note'; note.textContent = managerCopy(locale, 'channel.binding-operations.unavailable')
+      for (const [action, label] of [['archive', 'channel.binding.archive'], ['restore', 'channel.binding.restore'], ['unbind', 'channel.binding.unbind']] as const) {
+        const button = forms.button(managerCopy(locale, label), { type: 'button' }); button.disabled = true; button.dataset.channelBindingOperation = action; button.title = managerCopy(locale, 'channel.binding-operations.unavailable'); unavailableOperations.append(button)
+      }
+      unavailableOperations.prepend(note); bindings.body.append(unavailableOperations)
       panel.append(routes.root, bindings.root)
       return () => { bindingCollection.dispose(); routeCollection.dispose() }
     }
@@ -989,6 +1026,7 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       panel.dataset.channelDetailPanel = tab
       let disposePanel = (): void => {}
       if (tab === 'configuration') renderConfiguration(record, panel)
+      else if (tab === 'runtime') disposePanel = renderRuntime(record, panel)
       else if (tab === 'logs') disposePanel = renderLogs(record, panel)
       else disposePanel = renderSessions(record, panel)
       page.append(panel)
@@ -1007,7 +1045,8 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
         content.replaceChildren(conciseEmpty(document, managerCopy(locale, 'channel.accounts.empty'), 'channelMissingAccount'))
         return
       }
-      const tab: ChannelDetailTab = routeId.endsWith(':logs') ? 'logs'
+      const tab: ChannelDetailTab = routeId.endsWith(':runtime') ? 'runtime'
+        : routeId.endsWith(':logs') ? 'logs'
         : routeId.endsWith(':sessions') ? 'sessions' : 'configuration'
       renderDetail(selected, tab)
     }

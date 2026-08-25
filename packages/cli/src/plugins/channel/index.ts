@@ -94,6 +94,8 @@ interface Messages {
   'route.configuration.description': undefined
   'route.logs.title': undefined
   'route.logs.description': undefined
+  'route.runtime.title': undefined
+  'route.runtime.description': undefined
   'route.sessions.title': undefined
   'route.sessions.description': undefined
   'page.title': undefined
@@ -104,6 +106,8 @@ interface Messages {
   'page.configuration.description': undefined
   'page.logs.title': undefined
   'page.logs.description': undefined
+  'page.runtime.title': undefined
+  'page.runtime.description': undefined
   'page.sessions.title': undefined
   'page.sessions.description': undefined
   'page.record.fallback': undefined
@@ -150,6 +154,10 @@ const logsPage = {
   $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3, id: 'logs',
   title: message('page.logs.title'), description: message('page.logs.description'), icon: 'host:history', chrome: 'standard',
 } satisfies CordisXPageMetadataV3
+const runtimePage = {
+  $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3, id: 'runtime',
+  title: message('page.runtime.title'), description: message('page.runtime.description'), icon: 'host:open', chrome: 'standard',
+} satisfies CordisXPageMetadataV3
 const sessionsPage = {
   $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3, id: 'sessions',
   title: message('page.sessions.title'), description: message('page.sessions.description'), icon: 'host:layers', chrome: 'standard',
@@ -166,6 +174,10 @@ const configurationRoute = {
 const logsRoute = {
   $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2, id: 'logs', path: '/manager/extensions/channels/:accountId/logs', outlet: 'manager.content', page: 'logs',
   title: message('route.logs.title'), description: message('route.logs.description'),
+} satisfies CordisXRouteDefinitionV2<'manager.content'>
+const runtimeRoute = {
+  $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2, id: 'runtime', path: '/manager/extensions/channels/:accountId/runtime', outlet: 'manager.content', page: 'runtime',
+  title: message('route.runtime.title'), description: message('route.runtime.description'),
 } satisfies CordisXRouteDefinitionV2<'manager.content'>
 const sessionsRoute = {
   $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2, id: 'sessions', path: '/manager/extensions/channels/:accountId/sessions', outlet: 'manager.content', page: 'sessions',
@@ -202,12 +214,14 @@ export function apply(ctx: Context): void {
       'route.create.title': 'Channel candidate', 'route.create.description': 'Open the local candidate creation flow.',
       'route.configuration.title': 'Channel account', 'route.configuration.description': 'Open a safe account configuration projection.',
       'route.logs.title': 'Channel account logs', 'route.logs.description': 'Open the account log projection.',
+      'route.runtime.title': 'Channel runtime', 'route.runtime.description': 'Review the current connection and queue state.',
       'route.sessions.title': 'Channel account sessions', 'route.sessions.description': 'Open account routes and session bindings.',
       'page.title': 'Channels',
       'page.description': 'Manage configured channel accounts, connections, and sessions.',
       'page.create.title': 'Create channel', 'page.create.description': 'Create a local candidate without exposing credentials.',
       'page.configuration.title': 'Configuration', 'page.configuration.description': 'Review safe account configuration.',
       'page.logs.title': 'Logs', 'page.logs.description': 'Inspect available channel logs.',
+      'page.runtime.title': 'Runtime status', 'page.runtime.description': 'Review current channel activity and connection state.',
       'page.sessions.title': 'Connections & sessions', 'page.sessions.description': 'Review routes and session bindings.',
       'page.record.fallback': 'Channel',
       'page.record.title': '{name}',
@@ -222,12 +236,14 @@ export function apply(ctx: Context): void {
       'route.create.title': '渠道候选', 'route.create.description': '打开本地候选创建流程。',
       'route.configuration.title': '渠道账号', 'route.configuration.description': '打开安全的账号配置投影。',
       'route.logs.title': '渠道账号日志', 'route.logs.description': '打开账号日志投影。',
+      'route.runtime.title': '渠道运行状态', 'route.runtime.description': '查看当前连接与队列状态。',
       'route.sessions.title': '渠道账号会话', 'route.sessions.description': '打开账号路由和会话绑定。',
       'page.title': '渠道',
       'page.description': '管理已配置的渠道账号、连接和会话。',
       'page.create.title': '新建渠道', 'page.create.description': '创建本地候选，不展示凭据。',
       'page.configuration.title': '配置', 'page.configuration.description': '查看安全的账号配置。',
       'page.logs.title': '日志', 'page.logs.description': '查看可用的渠道日志。',
+      'page.runtime.title': '运行状态', 'page.runtime.description': '查看当前渠道活动与连接状态。',
       'page.sessions.title': '连接与会话管理', 'page.sessions.description': '查看路由与会话绑定。',
       'page.record.fallback': '渠道',
       'page.record.title': '{name}',
@@ -237,11 +253,13 @@ export function apply(ctx: Context): void {
   ctx.pages.register<Messages>(createPage, context => mountChannelManager(channelContext, context))
   ctx.pages.register<Messages>(configurationPage, context => mountChannelManager(channelContext, context))
   ctx.pages.register<Messages>(logsPage, context => mountChannelManager(channelContext, context))
+  ctx.pages.register<Messages>(runtimePage, context => mountChannelManager(channelContext, context))
   ctx.pages.register<Messages>(sessionsPage, context => mountChannelManager(channelContext, context))
   ctx.routes.register(settingsRoute)
   ctx.routes.register(createRoute)
   ctx.routes.register(configurationRoute)
   ctx.routes.register(logsRoute)
+  ctx.routes.register(runtimeRoute)
   ctx.routes.register(sessionsRoute)
   ctx.effect(() => {
     let disposeProjection: Disposable<void | Promise<void>> = () => {}
@@ -263,6 +281,7 @@ export function apply(ctx: Context): void {
       for (const [accountId] of unique) {
         const tabs = [
           { id: 'configuration', route: { id: 'configuration', params: { accountId } } },
+          { id: 'runtime', route: { id: 'runtime', params: { accountId } } },
           { id: 'logs', route: { id: 'logs', params: { accountId } } },
           { id: 'sessions', route: { id: 'sessions', params: { accountId } } },
         ] as const
