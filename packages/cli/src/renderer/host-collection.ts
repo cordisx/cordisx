@@ -1,5 +1,11 @@
 export type HostCollectionLayout = 'cards' | 'rows'
 
+/**
+ * Catalogs with dense, host-owned machine metadata use the same icon rhythm as
+ * Manager list rows instead of promoting each Material glyph into an avatar.
+ */
+export type HostCollectionDensity = 'default' | 'compact'
+
 export type HostCollectionStatusTone = 'neutral' | 'success' | 'warning' | 'danger' | 'progress'
 
 export type HostCollectionActionTone = 'neutral' | 'danger'
@@ -64,6 +70,7 @@ export interface HostCollectionOptions {
   readonly label: string
   readonly items: readonly HostCollectionItem[]
   readonly layout?: HostCollectionLayout
+  readonly density?: HostCollectionDensity
   readonly search?: HostCollectionSearchOptions | HostCollectionSearchOmission
   readonly emptyLabel?: string
   readonly noMatchesLabel?: string
@@ -91,7 +98,15 @@ interface RenderedItem {
 }
 
 export const HOST_COLLECTION_STYLES = String.raw`
-  .cxc-collection { min-width: 0; }
+  .cxc-collection {
+    --cxc-icon-seat-size: 36px;
+    --cxc-icon-glyph-size: 24px;
+    min-width: 0;
+  }
+  .cxc-collection[data-density="compact"] {
+    --cxc-icon-seat-size: var(--cx-compact-list-icon-seat, 24px);
+    --cxc-icon-glyph-size: var(--cx-compact-list-icon-glyph, 18px);
+  }
   .cxc-search {
     display: flex;
     align-items: center;
@@ -153,8 +168,8 @@ export const HOST_COLLECTION_STYLES = String.raw`
   }
   div.cxc-primary { cursor: default; }
   .cxc-primary:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: -3px; }
-  .cxc-icon-seat { position: relative; display: grid; place-items: center; width: 36px; height: 36px; flex: none; color: var(--cx-muted); }
-  .cxc-icon-seat > :first-child { max-width: 100%; max-height: 100%; pointer-events: none; }
+  .cxc-icon-seat { position: relative; display: grid; place-items: center; width: var(--cxc-icon-seat-size); height: var(--cxc-icon-seat-size); flex: none; color: var(--cx-muted); }
+  .cxc-icon-seat > :first-child { width: var(--cxc-icon-glyph-size); height: var(--cxc-icon-glyph-size); max-width: 100%; max-height: 100%; pointer-events: none; }
   .cxc-status {
     position: absolute;
     right: -3px;
@@ -171,7 +186,7 @@ export const HOST_COLLECTION_STYLES = String.raw`
   .cxc-status[data-tone="warning"] { background: var(--cx-warning, #fbbf24); }
   .cxc-status[data-tone="danger"] { background: var(--cx-danger, #fb7185); }
   .cxc-status[data-tone="progress"] { background: var(--cx-progress, #60a5fa); }
-  .cxc-avatar { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--cx-hover); color: var(--cx-text); font-size: 12px; font-weight: 700; }
+  .cxc-avatar { display: grid; place-items: center; width: var(--cxc-icon-seat-size); height: var(--cxc-icon-seat-size); border-radius: 50%; background: var(--cx-hover); color: var(--cx-text); font-size: 12px; font-weight: 700; }
   .cxc-avatar-badge { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; width: 16px; height: 16px; box-sizing: border-box; border: 2px solid var(--cx-surface-raised); border-radius: 50%; background: var(--cx-surface); color: var(--cx-muted); }
   .cxc-avatar-badge > * { width: 10px; height: 10px; }
   .cxc-card > .cxc-status[data-position="card"] { top: 10px; right: 10px; bottom: auto; z-index: 1; }
@@ -264,6 +279,7 @@ export function createHostCollection(document: Document, options: HostCollection
   const root = document.createElement('section')
   root.className = 'cxc-collection'
   root.dataset.hostCollection = options.id
+  root.dataset.density = options.density ?? 'default'
   root.setAttribute('aria-label', options.label)
 
   const list = document.createElement('div')

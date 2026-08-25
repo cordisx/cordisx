@@ -76,6 +76,25 @@ describe('Host collection primitive', () => {
     }
   })
 
+  it('marks compact catalogs explicitly and keeps their icon seat in the shared Manager rhythm', () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>')
+    const view = createHostCollection(dom.window.document, {
+      id: 'catalog', label: 'Catalog', density: 'compact',
+      items: [{ id: 'alpha', title: 'Alpha', icon: icon(dom.window.document, 'A') }],
+    })
+    dom.window.document.body.append(view.element)
+    try {
+      expect(view.element.dataset.density).toBe('compact')
+      expect(view.element.querySelector('.cxc-icon-seat')?.querySelector('button')).toBeNull()
+      expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-seat-size: var(--cx-compact-list-icon-seat, 24px);')
+      expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-glyph-size: var(--cx-compact-list-icon-glyph, 18px);')
+      expect(HOST_COLLECTION_STYLES).toContain('width: var(--cxc-icon-seat-size); height: var(--cxc-icon-seat-size);')
+    } finally {
+      view.dispose()
+      dom.window.close()
+    }
+  })
+
   it('overlays direct actions without moving card copy and keeps keyboard focus actions visible', () => {
     const dom = new JSDOM('<!doctype html><html><body></body></html>')
     const opened = vi.fn()

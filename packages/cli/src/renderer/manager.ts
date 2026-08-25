@@ -503,6 +503,8 @@ const MANAGER_STYLES = `
     backdrop-filter: blur(8px);
   }
   .cxm-dialog {
+    --cx-compact-list-icon-seat: 24px;
+    --cx-compact-list-icon-glyph: 18px;
     display: grid;
     grid-template-columns: 248px minmax(0, 1fr);
     width: min(1440px, calc(100vw - 40px));
@@ -654,13 +656,16 @@ const MANAGER_STYLES = `
     width: 30px;
     height: 30px;
     flex: none;
-    border: 1px solid rgba(255, 255, 255, .1);
-    border-radius: 9px;
-    background: rgba(255, 255, 255, .04);
+    box-sizing: border-box;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
     color: #d8dce5;
     cursor: pointer;
   }
-  .cxm-close-icon { width: 18px; height: 18px; }
+  .cxm-close-icon { display: block; width: 18px; height: 18px; }
+  .cxm-close:hover { background: rgba(199, 204, 212, .14); color: #eef0f3; }
   .cxm-content {
     min-height: 0;
     flex: 1 1 0%;
@@ -1189,8 +1194,8 @@ const MANAGER_STYLES = `
   button.cxm-route-card { cursor: pointer; }
   button.cxm-route-card:hover { background: color-mix(in srgb, var(--cx-text) 5%, transparent); }
   button.cxm-route-card:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: -3px; border-radius: 10px; }
-  .cxm-route-card-icon { width: 28px; height: 28px; flex: none; color: var(--cx-muted); }
-  .cxm-route-card-icon svg { width: 19px; height: 19px; }
+  .cxm-route-card-icon { display: grid; place-items: center; width: var(--cx-compact-list-icon-seat); height: var(--cx-compact-list-icon-seat); flex: none; color: var(--cx-muted); }
+  .cxm-route-card-icon svg { width: var(--cx-compact-list-icon-glyph); height: var(--cx-compact-list-icon-glyph); }
   .cxm-route-card-body { min-width: 0; flex: 1 1 auto; }
   .cxm-route-card-title { display: block; overflow: hidden; color: var(--cx-text); font-size: 12px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
   .cxm-route-card-description { display: -webkit-box; margin-top: 3px; overflow: hidden; color: var(--cx-muted); font-size: 11px; line-height: 1.42; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
@@ -1250,7 +1255,6 @@ const MANAGER_STYLES = `
     .cxm-catalog-icon { width: 24px; height: 24px; }
     .cxm-catalog-status { max-width: 34%; }
     .cxm-route-card { gap: 9px; padding: 12px; }
-    .cxm-route-card-icon { width: 24px; height: 24px; }
     .cxm-route-machine { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
     .cxm-permission-item { grid-template-columns: minmax(0, 1fr); }
     .cxm-permission-control { justify-content: space-between; padding-inline-start: 35px; }
@@ -1282,7 +1286,9 @@ const HOST_THEME_OVERLAY_STYLES = `
   .cxm-about-action:hover .cxm-about-action-arrow, .cxm-about-action:focus-visible .cxm-about-action-arrow { color: var(--cx-text); }
   .cxm-heading-title, .cxm-breadcrumb-current, .cxm-card-value, .cxm-section-title, .cxm-about-name, .cxm-search, .cxm-source-input, .cxm-plugin-name, .cxm-catalog-title, .cxm-marketplace-trust-title, .cxm-field-value { color: var(--cx-text); }
   .cxm-card, .cxm-slot-card, .cxm-source-row, .cxm-field, .cxm-lifecycle-impact, .cxm-marketplace-trust-item, .cxm-marketplace-trust-badge { border-color: var(--cx-border); background: var(--cx-hover); }
-  .cxm-search, .cxm-source-input, .cxm-close, .cxm-action, .cxm-mini-action, .cxm-marketplace-filter { border-color: var(--cx-border); background: var(--cx-surface-raised); color: var(--cx-text); }
+  .cxm-search, .cxm-source-input, .cxm-action, .cxm-mini-action, .cxm-marketplace-filter { border-color: var(--cx-border); background: var(--cx-surface-raised); color: var(--cx-text); }
+  .cxm-close { background: transparent; color: var(--cx-text); }
+  .cxm-close:hover { background: var(--cx-hover); color: var(--cx-text); }
   .cxm-action:hover:not(:disabled), .cxm-mini-action:hover:not(:disabled) { border-color: var(--cx-primary); background: var(--cx-hover); color: var(--cx-text); }
   .cxm-breadcrumb-menu { border-color: var(--cx-border); background: var(--cx-surface-raised); box-shadow: 0 12px 32px var(--cx-shadow); }
   .cxm-authorization-dialog > p, .cxm-authorization-reason, .cxm-authorization-choice { color: var(--cx-text); }
@@ -3014,7 +3020,17 @@ export function installCordisXManager(
       renderProjection(full)
       const widths = route.segments.map((_, index) => {
         const item = list.querySelector<HTMLElement>(`[data-breadcrumb-index="${index}"]`)
-        return item === null ? 0 : Math.max(item.getBoundingClientRect().width, item.scrollWidth)
+        if (item === null) return 0
+        // The current item fills free flex space, so its outer rectangle is
+        // not its content width. Project from its label and separator instead:
+        // a comfortable header keeps every segment, while only real pressure
+        // introduces the explicit overflow menu.
+        const label = item.querySelector<HTMLElement>('.cxm-breadcrumb-action, .cxm-breadcrumb-current')
+        const separator = item.querySelector<HTMLElement>('.cxm-breadcrumb-separator')
+        const naturalWidth = (label?.scrollWidth ?? 0) + (separator?.getBoundingClientRect().width ?? 0)
+        // JSDOM has no layout width for leaf inline elements; its Host DOM
+        // regression harness supplies the item geometry instead.
+        return naturalWidth > 0 ? naturalWidth : Math.max(item.getBoundingClientRect().width, item.scrollWidth)
       })
       const projection = projectManagerBreadcrumbs(widths, breadcrumbs.clientWidth)
       renderProjection(projection)
@@ -3078,7 +3094,7 @@ export function installCordisXManager(
   }
 
   const setHeading = (
-    headingCopy: string,
+    headingCopy: string | undefined,
     snapshot: ManagerSnapshot,
     options: { readonly icon?: ManagerIconToken | CordisXIconToken; readonly brand?: boolean } = {},
   ): void => {
@@ -3109,7 +3125,14 @@ export function installCordisXManager(
     const current = pageRoute.segments.at(-1)?.label ?? ''
     title.append(create(document, 'h2', 'cxm-heading-current-heading', current), renderBreadcrumbs(pageRoute))
     row.append(title)
-    heading.append(row, create(document, 'p', undefined, headingCopy))
+    heading.append(row)
+    // Breadcrumbs already identify a detail page. Repeating generic wording
+    // such as “Plugin details” or “Configuration” expands shared chrome
+    // without adding context; primary pages may retain a distinct purpose.
+    const description = headingCopy?.trim()
+    if (pageRoute.segments.length <= 1 && description !== undefined && description !== '' && description !== current.trim()) {
+      heading.append(create(document, 'p', undefined, description))
+    }
   }
 
   const renderAbout = (snapshot: ManagerSnapshot): void => {
@@ -3217,7 +3240,9 @@ export function installCordisXManager(
   }
 
   const renderExtensionPointList = (snapshot: ManagerSnapshot): void => {
-    setHeading(copy('extension.heading'), snapshot, { icon: 'contributions' })
+    // The primary breadcrumb already says “Extension points”. Adding the old
+    // heading copy below it only restated the same page subject.
+    setHeading(undefined, snapshot, { icon: 'contributions' })
     const points = snapshot.extensionPoints?.points ?? []
     const catalogText = snapshot.extensionPoints?.catalogText
     const items: HostCollectionItem[] = points.map(point => {
@@ -3263,6 +3288,7 @@ export function installCordisXManager(
       id: 'extension-points',
       label: copy('extension.collection-label'),
       items,
+      density: 'compact',
       search: {
         label: copy('extension.search-label'),
         placeholder: copy('extension.search-placeholder'),
@@ -3706,6 +3732,7 @@ export function installCordisXManager(
       id: 'routes',
       label: copy('routes.collection-label'),
       items,
+      density: 'compact',
       search: {
         label: copy('routes.search-label'),
         placeholder: copy('routes.search-placeholder'),

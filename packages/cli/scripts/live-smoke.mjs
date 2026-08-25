@@ -4529,9 +4529,51 @@ if (parsed.values['manager-screenshot'] !== undefined) {
               }),
             }
           }),
-          extensionPointCatalog: document.querySelector('[aria-label="扩展点列表"]') === null ? null : {
+          headerChrome: (() => {
+            const header = document.querySelector('.cxm-heading')
+            const close = document.querySelector('.cxm-close')
+            const glyph = close?.querySelector('.cxm-close-icon')
+            const closeRect = close?.getBoundingClientRect()
+            const glyphRect = glyph?.getBoundingClientRect()
+            const closeStyle = close === null ? null : getComputedStyle(close)
+            return {
+              descriptions: [...(header?.querySelectorAll(':scope > p') ?? [])].map(item => item.textContent?.trim() ?? ''),
+              breadcrumbOverflowCount: header?.querySelector('.cxm-breadcrumbs')?.getAttribute('data-breadcrumb-overflow-count') ?? null,
+              breadcrumbLabels: [...(header?.querySelectorAll('.cxm-breadcrumb-action, .cxm-breadcrumb-current') ?? [])]
+                .map(item => item.textContent?.trim() ?? ''),
+              close: {
+                isButton: close?.matches('button') ?? false,
+                seat: closeRect === undefined ? null : { width: Math.round(closeRect.width), height: Math.round(closeRect.height) },
+                glyph: glyphRect === undefined ? null : { width: Math.round(glyphRect.width), height: Math.round(glyphRect.height) },
+                idleBackground: closeStyle?.backgroundColor ?? null,
+                idleBorder: closeStyle?.borderTopWidth ?? null,
+              },
+            }
+          })(),
+          extensionPointCatalog: document.querySelector('[data-host-collection="extension-points"]') === null ? null : {
             locale: document.documentElement.lang,
-            rows: [...document.querySelectorAll('[aria-label="扩展点列表"] [data-extension-point-id]')].map(row => {
+            header: (() => {
+              const header = document.querySelector('.cxm-heading')
+              return {
+                title: header?.querySelector('.cxm-heading-current-heading')?.textContent?.trim() ?? null,
+                descriptions: [...(header?.querySelectorAll(':scope > p') ?? [])].map(item => item.textContent?.trim() ?? ''),
+              }
+            })(),
+            compactIconLayout: (() => {
+              const collection = document.querySelector('[data-host-collection="extension-points"]')
+              const row = collection?.querySelector('[data-extension-point-id]')
+              const seat = row?.querySelector('.cxc-icon-seat')
+              const glyph = seat?.querySelector('[data-host-icon]')
+              const seatRect = seat?.getBoundingClientRect()
+              const glyphRect = glyph?.getBoundingClientRect()
+              return {
+                density: collection?.getAttribute('data-density') ?? null,
+                seat: seatRect === undefined ? null : { width: Math.round(seatRect.width), height: Math.round(seatRect.height) },
+                glyph: glyphRect === undefined ? null : { width: Math.round(glyphRect.width), height: Math.round(glyphRect.height) },
+                iconButtons: collection?.querySelectorAll('.cxc-icon-seat button').length ?? 0,
+              }
+            })(),
+            rows: [...document.querySelectorAll('[data-host-collection="extension-points"] [data-extension-point-id]')].map(row => {
               const rect = row.getBoundingClientRect()
               const status = row.querySelector('.cxc-status')
               const statusRect = status?.getBoundingClientRect()
@@ -4575,6 +4617,19 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             return {
               locale: document.documentElement.lang,
               pageRoute: document.querySelector('[data-manager-page-route]')?.getAttribute('data-manager-page-route') ?? null,
+              compactIconLayout: (() => {
+                const row = collection?.querySelector('[data-route-product-row], [data-page-product-row]')
+                const seat = row?.querySelector('.cxc-icon-seat')
+                const glyph = seat?.querySelector('[data-material-icon]')
+                const seatRect = seat?.getBoundingClientRect()
+                const glyphRect = glyph?.getBoundingClientRect()
+                return {
+                  density: collection?.getAttribute('data-density') ?? null,
+                  seat: seatRect === undefined ? null : { width: Math.round(seatRect.width), height: Math.round(seatRect.height) },
+                  glyph: glyphRect === undefined ? null : { width: Math.round(glyphRect.width), height: Math.round(glyphRect.height) },
+                  iconButtons: collection?.querySelectorAll('.cxc-icon-seat button').length ?? 0,
+                }
+              })(),
               listRole: collection?.querySelector('.cxc-list')?.getAttribute('role') ?? null,
               rowCount: rows.length,
               rows,
@@ -4588,6 +4643,23 @@ if (parsed.values['manager-screenshot'] !== undefined) {
                 }
               })(),
             }
+          })(),
+          routePageDetail: (() => {
+            const cards = [...document.querySelectorAll('.cxm-route-card')]
+            if (cards.length === 0) return null
+            const icons = cards.map(card => {
+              const icon = card.querySelector('.cxm-route-card-icon')
+              const rect = icon?.getBoundingClientRect()
+              const glyph = icon?.querySelector('svg')?.getBoundingClientRect()
+              return {
+                token: icon?.getAttribute('data-material-icon') ?? null,
+                seat: rect === undefined ? null : { width: Math.round(rect.width), height: Math.round(rect.height) },
+                glyph: glyph === undefined ? null : { width: Math.round(glyph.width), height: Math.round(glyph.height) },
+                isButton: icon?.matches('button') ?? false,
+                nestedButtons: icon?.querySelectorAll('button').length ?? 0,
+              }
+            })
+            return { icons, nestedButtons: cards.reduce((count, card) => count + card.querySelectorAll('.cxm-route-card-icon button').length, 0) }
           })(),
           marketplaceCatalog: document.querySelector('[aria-label="插件商店列表"]') === null ? null : {
             locale: document.documentElement.lang,

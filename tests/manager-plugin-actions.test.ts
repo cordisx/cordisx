@@ -60,10 +60,10 @@ async function settle(): Promise<void> {
 }
 
 describe('Manager plugin card actions', () => {
-  it('localizes the primary plugin-card action and detail heading in en and zh-CN', async () => {
-    for (const [locale, expectedOpen, expectedHeading] of [
-      ['en', 'Open plugin details · Base Plugin', 'Plugin details'],
-      ['zh-CN', '打开插件详情 · Base Plugin', '插件详情'],
+  it('localizes the primary plugin-card action while detail headers use their breadcrumb without duplicate copy', async () => {
+    for (const [locale, expectedOpen, expectedCurrent] of [
+      ['en', 'Open plugin details · Base Plugin', 'Base Plugin'],
+      ['zh-CN', '打开插件详情 · Base Plugin', 'Base Plugin'],
     ] as const) {
       const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
       const state = snapshot('active', locale)
@@ -78,7 +78,8 @@ describe('Manager plugin card actions', () => {
         expect(dom.window.document.querySelector('.cxm-content')?.getAttribute('data-manager-list-page')).toBe('true')
         primary.click()
         await settle()
-        expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain(expectedHeading)
+        expect(dom.window.document.querySelector('.cxm-heading')?.textContent).toContain(expectedCurrent)
+        expect(dom.window.document.querySelector('.cxm-heading > p')).toBeNull()
         expect(dom.window.document.querySelector('.cxm-content')?.hasAttribute('data-manager-list-page')).toBe(false)
       } finally {
         dispose()
