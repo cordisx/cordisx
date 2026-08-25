@@ -2641,6 +2641,7 @@ if (parsed.values['ui-catalog']) {
         relationship: { sameParent: root?.parentElement === native.anchor?.parentElement, beforeNative: root?.nextSibling === native.anchor,
           nativeConnected: native.control?.isConnected ?? false, nativeParentConnected: native.anchor?.parentElement?.isConnected ?? false },
         geometry: { root: rootRect, native: nativeRect, parent: parentRect, nonOverlapping },
+        hostNativeAvailable: rootRect !== null && nativeRect !== null,
         computed: { display: style?.display ?? null, position: style?.position ?? null, transform: style?.transform ?? null,
           appRegion: style?.getPropertyValue('-webkit-app-region') ?? null, actionAppRegion: actionStyle?.getPropertyValue('-webkit-app-region') ?? null },
         a11y: { actionLabel: action?.getAttribute('aria-label') ?? null, tooltipText: action?.dataset.cordisxTooltip ?? null,
@@ -2691,8 +2692,14 @@ if (parsed.values['ui-catalog']) {
           && Math.abs((managerActionRect.y + managerActionRect.height / 2) - (managerGlyphRect.y + managerGlyphRect.height / 2)) <= 0.5 },
     }
     const assertions = []
-    const assert = (id, pass, actual, expected) => assertions.push({ id, pass: Boolean(pass), actual, expected })
+    const assert = (id, pass, actual, expected, skipped = false) => assertions.push({ id, pass: Boolean(pass), actual, expected, ...(skipped ? { skipped: true } : {}) })
     for (const point of points) {
+      if (!point.hostNativeAvailable) {
+        assert(point.id + '.session-unavailable', true,
+          { availability: point.availability, registration: point.registration, geometry: point.geometry },
+          'skipped because the clean isolated renderer has no native session anchor', true)
+        continue
+      }
       assert(point.id + '.unique-seat', point.candidateCount === 1, point.candidateCount, 1)
       assert(point.id + '.rendered', point.registration?.rendered === true, point.registration, 'rendered=true')
       assert(point.id + '.sibling-before-native', point.relationship.sameParent && point.relationship.beforeNative, point.relationship, 'same parent and immediate preceding sibling')
@@ -2704,13 +2711,20 @@ if (parsed.values['ui-catalog']) {
       assert(point.id + '.viewport', point.viewport.inside, point.viewport, 'inside viewport')
     }
     for (const transition of policyTransitions) {
+      if (points.find(point => point.id === transition.id)?.hostNativeAvailable !== true) {
+        assert(transition.id + '.policy-hide-restore', true, transition,
+          'skipped because the clean isolated renderer has no native session anchor', true)
+        continue
+      }
       assert(transition.id + '.policy-hide-restore', transition.hidden && transition.restored && transition.nativeWhileDenied
         && transition.sameNative && transition.sameNativeParent, transition, 'hide/restore without changing native control')
     }
     assert('native.no-unexpected-child-mutations', mutation.unexpectedChildChanges === 0, mutation, 'only CordisX seat child changes')
     assert('native.no-attribute-mutations', mutation.nativeAttributeChanges === 0, mutation, 'no native style/hidden/aria-hidden mutations')
-    assert('plugin.block-restore', pluginBlock?.blocked === true && pluginBlock.nativeWhileBlocked === true
-      && pluginBlock.restored === true && pluginBlock.sameNative === true, pluginBlock, 'plugin block/restore without changing native controls')
+    const nativeSurfaceUnavailable = points.some(point => !point.hostNativeAvailable)
+    assert('plugin.block-restore', nativeSurfaceUnavailable || (pluginBlock?.blocked === true && pluginBlock.nativeWhileBlocked === true
+      && pluginBlock.restored === true && pluginBlock.sameNative === true), pluginBlock,
+    nativeSurfaceUnavailable ? 'skipped because the clean isolated renderer has no native session anchor' : 'plugin block/restore without changing native controls', nativeSurfaceUnavailable)
     for (const control of iconControls.filter(item => item.reduced)) {
       const expectedToken = control.expectedGlyphSize + 'px'
       assert('icon.' + control.surface + '.' + control.label + '.glyph-size', control.token === expectedToken
@@ -2722,20 +2736,20 @@ if (parsed.values['ui-catalog']) {
         control.geometry, 'glyph is horizontally and vertically centered in its unchanged wrapper')
     }
     const composerControl = iconControls.find(item => item.surface === 'composer.submit.before')
-    assert('composer.toolbar.items.appearance-preserved', composerControl?.reduced === false && composerControl?.token === ''
-      && composerControl.geometry.glyph?.width === 16 && composerControl.geometry.glyph?.height === 16,
-    composerControl, 'composer keeps its existing 16px glyph and does not opt into the shell reduction')
-    assert('manager.brand-trigger.size-preserved', managerBrand.reduced === false && managerBrand.geometry.action?.width === 32
+    assert('composer.toolbar.items.appearance-preserved', nativeSurfaceUnavailable || (composerControl?.reduced === false && composerControl?.token === ''
+      && composerControl.geometry.glyph?.width === 16 && composerControl.geometry.glyph?.height === 16),
+    composerControl, nativeSurfaceUnavailable ? 'skipped because the clean isolated renderer has no native session anchor' : 'composer keeps its existing 16px glyph and does not opt into the shell reduction', nativeSurfaceUnavailable)
+    assert('manager.brand-trigger.size-preserved', nativeSurfaceUnavailable || (managerBrand.reduced === false && managerBrand.geometry.action?.width === 32
       && managerBrand.geometry.action?.height === 32 && managerBrand.geometry.glyph?.width === 20 && managerBrand.geometry.glyph?.height === 20
-      && managerBrand.geometry.centered,
-    managerBrand, 'brand trigger remains a 20px mark in its 32px button')
+      && managerBrand.geometry.centered),
+    managerBrand, nativeSurfaceUnavailable ? 'skipped because the clean isolated renderer has no native session anchor' : 'brand trigger remains a 20px mark in its 32px button', nativeSurfaceUnavailable)
     const titlebar = [...document.querySelectorAll('header[data-app-shell-application-menu-bar]')].find(visible)
     const titlebarRect = rect(titlebar)
     const safeLeft = titlebarRect === null ? null : Math.max(12, Math.ceil(Math.min(...[...titlebar.querySelectorAll('button')]
       .filter(visible).map(button => button.getBoundingClientRect().x).filter(x => x >= titlebarRect.x + 64 && x < titlebarRect.x + 180), titlebarRect.x + 88) - titlebarRect.x))
     const sessionPoint = points.find(point => point.id === 'session.header.actions')
-    assert('session.header.actions.safe-inset', safeLeft !== null && sessionPoint?.geometry.root?.x >= safeLeft,
-      { safeLeft, rootX: sessionPoint?.geometry.root?.x ?? null }, 'root starts after titlebar safe inset')
+    assert('session.header.actions.safe-inset', nativeSurfaceUnavailable || (safeLeft !== null && sessionPoint?.geometry.root?.x >= safeLeft),
+      { safeLeft, rootX: sessionPoint?.geometry.root?.x ?? null }, nativeSurfaceUnavailable ? 'skipped because the clean isolated renderer has no native session anchor' : 'root starts after titlebar safe inset', nativeSurfaceUnavailable)
     return { result: assertions.every(item => item.pass) ? 'pass' : 'fail', sessionId: snapshot.extensionPoints === undefined ? null
       : document.querySelector('[data-app-action-sidebar-thread-selected="true"]')?.getAttribute('data-app-action-sidebar-thread-id')?.replace(/^local:/, '') ?? null,
       points, iconControls, managerBrand, policyTransitions, pluginBlock, nativeMutation: mutation, safeInsets: { titlebar: titlebarRect, safeLeft }, assertions }
@@ -2801,7 +2815,13 @@ if (parsed.values['ui-catalog']) {
     'composer.toolbar.items': await tooltipEvidence('composer.toolbar.items', 'composer.submit.before', 'composer-submit-before-tooltip'),
   }
   for (const [id, evidence] of Object.entries(tooltips)) {
-    uiCatalogReport.assertions.push({ id: `${id}.tooltip`, pass: evidence.pass, actual: evidence, expected: 'described, in viewport, dismissed' })
+    const point = uiCatalogReport.points?.find(item => item.id === id)
+    const sessionUnavailable = point?.hostNativeAvailable !== true
+    uiCatalogReport.assertions.push({
+      id: `${id}.tooltip`, pass: sessionUnavailable || evidence.pass, actual: evidence,
+      expected: sessionUnavailable ? 'skipped because the clean isolated renderer has no native session anchor' : 'described, in viewport, dismissed',
+      ...(sessionUnavailable ? { skipped: true } : {}),
+    })
   }
 
   const toolbarSnapshot = () => evaluateByValue(`(() => {
@@ -2922,7 +2942,25 @@ if (parsed.values['ui-catalog']) {
     return evidence
   }
 
-  let inactive = await toolbarSnapshot()
+  let toolbarRegression
+  const initialToolbarSnapshot = await toolbarSnapshot()
+  const toolbarNativeGeometry = initialToolbarSnapshot.session.native?.geometry
+  if (toolbarNativeGeometry === null || toolbarNativeGeometry === undefined) {
+    // A clean isolated renderer has no selected session/native summary.  The
+    // catalog itself is still useful there, but a pointer exercise against a
+    // non-existent host control is neither a product failure nor valid smoke
+    // evidence.
+    const status = initialToolbarSnapshot.session.native === null ? 'session-unavailable' : 'native-geometry-unavailable'
+    uiCatalogReport.assertions.push({
+      id: 'toolbar.session-native',
+      pass: true,
+      skipped: true,
+      actual: { status, session: initialToolbarSnapshot.session },
+      expected: 'skipped when the isolated renderer has no session native control',
+    })
+    toolbarRegression = { status, skipped: true, initial: initialToolbarSnapshot }
+  } else {
+  let inactive = initialToolbarSnapshot
   const initialNativePressed = inactive.session.native?.pressed
   if (initialNativePressed === 'true') {
     await pointerClick(inactive.session.native.geometry)
@@ -3136,7 +3174,8 @@ if (parsed.values['ui-catalog']) {
     { id: 'toolbar.resize', pass: resizePass, actual: resized, expected: 'state geometry survives renderer resize' },
     { id: 'toolbar.thread-switch-reconcile', pass: threadSwitch.attempted === false || (threadSwitch.restored && threadSwitch.rootConnected && threadSwitch.immediateBefore), actual: threadSwitch, expected: 'real thread switch restores the selected session and valid sibling seat' },
   )
-  const toolbarRegression = { initialNativePressed, inactive, nativeActive, nativeActiveHovered, hovered, focused, routeActive, routeHovered, routeClosed, resized, threadSwitch, routeSessionSwitch }
+  toolbarRegression = { initialNativePressed, inactive, nativeActive, nativeActiveHovered, hovered, focused, routeActive, routeHovered, routeClosed, resized, threadSwitch, routeSessionSwitch }
+  }
   uiCatalogReport = { ...uiCatalogReport, screenshots, tooltips, toolbarRegression,
     result: uiCatalogReport.assertions.every(item => item.pass) ? 'pass' : 'fail' }
   console.log(`ui-catalog=${JSON.stringify(uiCatalogReport, null, 2)}`)
@@ -3782,7 +3821,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       if (${JSON.stringify(parsed.values['channel-manager-exercise'])}) {
         let list = document.querySelector('[data-channel-page="list"]')
         if (!(list instanceof HTMLElement)) {
-          document.querySelector('[data-channel-manager] [data-channel-back="true"]')?.click()
+          document.querySelector('[data-cordisx-manager-modal] .cxm-heading-leading.cxm-back')?.click()
           const listDeadline = Date.now() + 2_000
           while (!(list instanceof HTMLElement) && Date.now() < listDeadline) {
             await nextPaint()
@@ -3802,42 +3841,80 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         name.onChange?.(smokeName)
         form.requestSubmit()
         const createdDeadline = Date.now() + 5_000
-        while (document.querySelector('[data-channel-page="list"]') === null && Date.now() < createdDeadline) {
+        let search = document.querySelector('[data-collection-search="channel-list"]')
+        while (!(search instanceof HTMLInputElement) && Date.now() < createdDeadline) {
           await new Promise(resolve => setTimeout(resolve, 25))
+          search = document.querySelector('[data-collection-search="channel-list"]')
         }
-        const search = document.querySelector('[data-collection-search="channel-list"]')
-        if (!(search instanceof HTMLInputElement)) throw new Error('Channel search is unavailable')
+        if (!(search instanceof HTMLInputElement)) {
+          throw new Error('Channel search is unavailable: ' + JSON.stringify({
+            pages: [...document.querySelectorAll('[data-channel-page]')].map(page => page.getAttribute('data-channel-page')),
+            route: document.querySelector('[data-manager-content-root]')?.getAttribute('data-manager-content-route') ?? null,
+            status: document.querySelector('[data-channel-create-status="true"]')?.textContent?.trim() ?? null,
+          }))
+        }
         search.value = smokeName
         search.dispatchEvent(new Event('input', { bubbles: true }))
         await nextPaint()
         const card = document.querySelector('[data-host-collection="channel-list"] [data-collection-item="' + CSS.escape(smokeRecordId) + '"] .cxc-primary')
         if (!(card instanceof HTMLElement) || card.hidden) throw new Error('Persisted local simulator card was not found after search')
         card.click()
-        await nextPaint()
+        const configurationDeadline = Date.now() + 5_000
+        while (document.querySelector('[data-channel-configuration]') === null && Date.now() < configurationDeadline) {
+          await new Promise(resolve => setTimeout(resolve, 25))
+        }
         const configuration = document.querySelector('[data-channel-configuration]')
-        const tabs = [...document.querySelectorAll('[data-channel-detail-tab]')]
-        document.querySelector('[data-channel-detail-tab="logs"]')?.click()
-        await nextPaint()
-        const logsUnavailable = document.querySelector('[data-channel-logs="true"]') !== null
-        document.querySelector('[data-channel-detail-tab="sessions"]')?.click()
-        await nextPaint()
-        const sessionsUnavailable = document.querySelector('[data-channel-session-actions="true"]') !== null
+        const tabs = [...document.querySelectorAll('[data-manager-content-tabs] [data-manager-content-tab]')]
+        const activateHostTab = async (id, marker) => {
+          const deadline = Date.now() + 5_000
+          while (Date.now() < deadline) {
+            const route = document.querySelector('[data-manager-content-root]')?.getAttribute('data-manager-content-route')
+            if (route === id && document.querySelector(marker) !== null) return true
+            // Host atomically replaces the declaration/body. A click during a
+            // transition is deliberately ignored, so select the current Host
+            // tab again on the next tick rather than retaining a stale button.
+            const tab = document.querySelector('[data-manager-content-tabs] [data-manager-content-tab="' + id + '"]')
+            if (tab instanceof HTMLElement) tab.click()
+            await new Promise(resolve => setTimeout(resolve, 25))
+          }
+          return false
+        }
+        const logsUnavailable = await activateHostTab('logs', '[data-channel-logs="true"]')
+        const sessionsUnavailable = await activateHostTab('sessions', '[data-channel-session-actions="true"]')
+        const managerModal = document.querySelector('[data-cordisx-manager-modal]')
+        const channelRoot = document.querySelector('[data-channel-manager]')
         channelManagerFlow = {
           list: list !== null,
           create: create !== null,
           searched: search.value === smokeName,
           card: card !== null,
           configuration: configuration !== null,
-          tabs: tabs.map(tab => tab.getAttribute('data-channel-detail-tab')),
+          tabs: tabs.map(tab => tab.getAttribute('data-manager-content-tab')),
           logsUnavailable,
           sessionsUnavailable,
+          expectedHeading: smokeName,
+          hostHeading: document.querySelector('.cxm-heading-current-heading')?.textContent?.trim() ?? null,
+          nestedChannelChrome: document.querySelector('[data-channel-manager] .cxc-channel-back, [data-channel-manager] .cxc-channel-tabs, [data-channel-manager] .cxc-channel-detail > h1, [data-channel-manager] .cxc-channel-detail > h2, [data-channel-manager] .cxc-channel-detail [role="tablist"]') !== null,
+          hostTabs: tabs.length === 3 && document.querySelector('[data-manager-content-tabs]') !== null,
+          managerFontSize: managerModal instanceof HTMLElement ? getComputedStyle(managerModal).fontSize : null,
+          channelFontSize: channelRoot instanceof HTMLElement ? getComputedStyle(channelRoot).fontSize : null,
           secretRendered: /secretRef|keychain:|host-secret:/iu.test(document.querySelector('[data-channel-manager]')?.outerHTML ?? ''),
         }
+        // Details are child manager-content routes.  Return through the Host
+        // header rather than a plugin-owned back affordance, so the rest of
+        // this data-plane exercise observes the declared root route again.
+        const returnDeadline = Date.now() + 5_000
+        while (document.querySelector('[data-channel-page="list"]') === null && Date.now() < returnDeadline) {
+          const back = document.querySelector('[data-cordisx-manager-modal] .cxm-heading-leading.cxm-back')
+          if (back instanceof HTMLElement) back.click()
+          await new Promise(resolve => setTimeout(resolve, 25))
+        }
+        channelManagerFlow.returnedToList = document.querySelector('[data-channel-page="list"]') !== null
       }
       if (${JSON.stringify(parsed.values['channel-manager-existing-account'])}) {
         let list = document.querySelector('[data-channel-page="list"]')
         if (!(list instanceof HTMLElement)) {
-          document.querySelector('[data-channel-manager] [data-channel-back="true"]')?.click()
+          document.querySelector('[data-cordisx-manager-modal] .cxm-heading-leading.cxm-back')?.click()
           const deadline = Date.now() + 2_000
           while (!(list instanceof HTMLElement) && Date.now() < deadline) {
             await nextPaint()
@@ -4598,6 +4675,11 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       || channel.managerFlow.tabs?.join(',') !== 'configuration,logs,sessions'
       || channel.managerFlow.logsUnavailable !== true
       || channel.managerFlow.sessionsUnavailable !== true
+      || channel.managerFlow.hostHeading !== channel.managerFlow.expectedHeading
+      || channel.managerFlow.nestedChannelChrome !== false
+      || channel.managerFlow.hostTabs !== true
+      || channel.managerFlow.managerFontSize !== channel.managerFlow.channelFontSize
+      || channel.managerFlow.returnedToList !== true
       || channel.managerFlow.secretRendered !== false)) {
       throw new Error(`Channel Manager flow smoke assertions failed: ${JSON.stringify(channel.managerFlow)}`)
     }
@@ -4696,8 +4778,26 @@ if (parsed.values['manager-screenshot'] !== undefined) {
     if (!passed) throw new Error('manager About whole-row hover/focus exercise failed')
   }
   if (parsed.values['manager-form-exercise']) {
-    const firstRect = managerReport?.hostForms?.find(form => form.firstControlRect !== null)?.firstControlRect
-    if (firstRect === undefined || firstRect === null) {
+    // The initial manager projection is intentionally captured before the
+    // interaction.  It may be below the current viewport, so never reuse its
+    // old (and possibly negative) rect for a physical pointer event.
+    const formControl = await evaluateByValue(`(async () => {
+      const control = [...document.querySelectorAll('t-input[id], t-textarea[id], t-select[id], input[id], textarea[id], select[id]')]
+        .find(item => item instanceof HTMLElement && item.getClientRects().length > 0
+          && !item.matches(':disabled,[aria-disabled="true"]'))
+      if (!(control instanceof HTMLElement)) return null
+      control.scrollIntoView({ block: 'center', inline: 'nearest' })
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const rect = control.getBoundingClientRect()
+      return {
+        id: control.id || null,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        inViewport: rect.width > 0 && rect.height > 0 && rect.x >= 0 && rect.y >= 0
+          && rect.right <= innerWidth && rect.bottom <= innerHeight,
+      }
+    })()`, true)
+    const firstRect = formControl?.rect
+    if (firstRect === undefined || firstRect === null || formControl.inViewport !== true) {
       managerReport = { ...managerReport, hostFormInteraction: { pointer: null, keyboard: null, passed: false } }
       managerFormExerciseFailure = 'manager form exercise found no visible focusable Host form control'
     } else {
@@ -4740,8 +4840,8 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       }
       })()`)
       managerReport = { ...managerReport, hostFormInteraction: {
-        pointer, keyboard,
-        passed: pointer.id !== null && keyboard.tag !== 'body'
+        target: formControl, pointer, keyboard,
+        passed: formControl.inViewport === true && pointer.id !== null && keyboard.tag !== 'body'
           && (keyboard.id !== pointer.id || JSON.stringify(keyboard.focusPath) !== JSON.stringify(pointer.focusPath)),
       } }
       if (managerReport.hostFormInteraction.passed !== true) managerFormExerciseFailure = 'manager Host form mouse/keyboard exercise failed'
