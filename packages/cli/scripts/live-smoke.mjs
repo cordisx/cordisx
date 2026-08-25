@@ -3879,8 +3879,19 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           }
           return false
         }
-        const logsUnavailable = await activateHostTab('logs', '[data-channel-logs="true"]')
-        const sessionsUnavailable = await activateHostTab('sessions', '[data-channel-session-actions="true"]')
+        const runtimeAvailable = await activateHostTab('runtime', '[data-channel-detail-panel="runtime"]')
+        const runtimeActionCount = document.querySelectorAll('[data-channel-runtime-action]').length
+        const logsAvailable = await activateHostTab('logs', '[data-channel-logs="true"]')
+        const logs = document.querySelector('[data-channel-logs="true"]')
+        const logControlsPresent = logs?.querySelector('[data-channel-log-query="true"]') !== null
+          && logs?.querySelector('[data-channel-log-outcome="true"]') !== null
+          && logs?.querySelector('[data-channel-log-export="json"]') !== null
+        const logExport = logs?.querySelector('[data-channel-log-export="json"]')
+        const logsEmpty = logs?.querySelector('[data-channel-logs-empty="true"], [data-channel-logs-no-matches="true"]') !== null
+        const sessionsAvailable = await activateHostTab('sessions', '[data-channel-detail-panel="sessions"]')
+        const sessionPanel = document.querySelector('[data-channel-detail-panel="sessions"]')
+        const bindingActions = [...sessionPanel?.querySelectorAll('[data-channel-binding-operation]') ?? []]
+        const sessionEmpty = sessionPanel?.querySelector('[data-channel-session-actions="true"]') !== null
         const managerModal = document.querySelector('[data-cordisx-manager-modal]')
         const channelRoot = document.querySelector('[data-channel-manager]')
         channelManagerFlow = {
@@ -3890,12 +3901,20 @@ if (parsed.values['manager-screenshot'] !== undefined) {
           card: card !== null,
           configuration: configuration !== null,
           tabs: tabs.map(tab => tab.getAttribute('data-manager-content-tab')),
-          logsUnavailable,
-          sessionsUnavailable,
+          runtimeAvailable,
+          runtimeActionCount,
+          logsAvailable,
+          logControlsPresent,
+          logExportDisabled: logExport instanceof HTMLButtonElement ? logExport.disabled : null,
+          logsEmpty,
+          sessionsAvailable,
+          bindingActionCount: bindingActions.length,
+          bindingActionsEnabled: bindingActions.some(button => !button.disabled),
+          sessionEmpty,
           expectedHeading: smokeName,
           hostHeading: document.querySelector('.cxm-heading-current-heading')?.textContent?.trim() ?? null,
           nestedChannelChrome: document.querySelector('[data-channel-manager] .cxc-channel-back, [data-channel-manager] .cxc-channel-tabs, [data-channel-manager] .cxc-channel-detail > h1, [data-channel-manager] .cxc-channel-detail > h2, [data-channel-manager] .cxc-channel-detail [role="tablist"]') !== null,
-          hostTabs: tabs.length === 3 && document.querySelector('[data-manager-content-tabs]') !== null,
+          hostTabs: tabs.length === 4 && document.querySelector('[data-manager-content-tabs]') !== null,
           managerFontSize: managerModal instanceof HTMLElement ? getComputedStyle(managerModal).fontSize : null,
           channelFontSize: channelRoot instanceof HTMLElement ? getComputedStyle(channelRoot).fontSize : null,
           secretRendered: /secretRef|keychain:|host-secret:/iu.test(document.querySelector('[data-channel-manager]')?.outerHTML ?? ''),
@@ -3930,11 +3949,37 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         }
         const form = document.querySelector('[data-channel-configuration-form]')
         const channelSwitch = form?.querySelector('t-switch')
+        const activateHostTab = async (id, marker) => {
+          const deadline = Date.now() + 5_000
+          while (Date.now() < deadline) {
+            const route = document.querySelector('[data-manager-content-root]')?.getAttribute('data-manager-content-route')
+            if (route === id && document.querySelector(marker) !== null) return true
+            const tab = document.querySelector('[data-manager-content-tabs] [data-manager-content-tab="' + id + '"]')
+            if (tab instanceof HTMLElement) tab.click()
+            await new Promise(resolve => setTimeout(resolve, 25))
+          }
+          return false
+        }
+        const runtimeAvailable = await activateHostTab('runtime', '[data-channel-detail-panel="runtime"]')
+        const runtimeActions = [...document.querySelectorAll('[data-channel-runtime-action]')]
+        const logsAvailable = await activateHostTab('logs', '[data-channel-logs="true"]')
+        const logs = document.querySelector('[data-channel-logs="true"]')
+        const logsControlsPresent = logs?.querySelector('[data-channel-log-query="true"]') !== null
+          && logs?.querySelector('[data-channel-log-outcome="true"]') !== null
+          && logs?.querySelector('[data-channel-log-export="json"]') !== null
+        const logExport = logs?.querySelector('[data-channel-log-export="json"]')
+        const logsEmpty = logs?.querySelector('[data-channel-logs-empty="true"], [data-channel-logs-no-matches="true"]') !== null
+        const sessionsAvailable = await activateHostTab('sessions', '[data-channel-detail-panel="sessions"]')
+        const sessionPanel = document.querySelector('[data-channel-detail-panel="sessions"]')
+        const bindingActions = [...sessionPanel?.querySelectorAll('[data-channel-binding-operation]') ?? []]
+        const sessionEmpty = sessionPanel?.querySelector('[data-channel-session-actions="true"]') !== null
+        const configurationAvailable = await activateHostTab('configuration', '[data-channel-configuration-form]')
+        const activeForm = document.querySelector('[data-channel-configuration-form]')
         let saved = false
         let saveStatus = null
         if (${JSON.stringify(parsed.values['channel-manager-existing-account-save'])}) {
-          if (!(form instanceof HTMLFormElement)) throw new Error('Configured Channel account form is unavailable for save')
-          form.requestSubmit()
+          if (!(activeForm instanceof HTMLFormElement)) throw new Error('Configured Channel account form is unavailable for save')
+          activeForm.requestSubmit()
           const deadline = Date.now() + 5_000
           while (Date.now() < deadline) {
             saveStatus = document.querySelector('[data-channel-configuration-status]')?.textContent?.trim() ?? null
@@ -3946,13 +3991,25 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         channelManagerExistingAccount = {
           list: list !== null,
           detail: document.querySelector('[data-channel-page="detail"]') !== null,
-          form: form !== null,
+          form: activeForm !== null,
+          configurationAvailable,
           switchValue: channelSwitch?.value ?? null,
           switchPropsValue: channelSwitch?.props?.value ?? null,
           switchAriaChecked: channelSwitch?.getAttribute('aria-checked') ?? null,
           switchShadowText: channelSwitch?.shadowRoot?.textContent?.trim() ?? null,
           saved,
           saveStatus,
+          runtimeAvailable,
+          runtimeActionCount: runtimeActions.length,
+          runtimeActionsEnabled: runtimeActions.length === 3 && runtimeActions.every(button => !button.disabled),
+          logsAvailable,
+          logsControlsPresent,
+          logExportDisabled: logExport instanceof HTMLButtonElement ? logExport.disabled : null,
+          logsEmpty,
+          sessionsAvailable,
+          bindingActionCount: bindingActions.length,
+          bindingActionsEnabled: bindingActions.some(button => !button.disabled),
+          sessionEmpty,
           secretRendered: /secretRef|keychain:|host-secret:/iu.test(document.querySelector('[data-channel-manager]')?.outerHTML ?? ''),
         }
       }
@@ -4640,7 +4697,6 @@ if (parsed.values['manager-screenshot'] !== undefined) {
     const channel = managerReport?.channelDataPlane
     const channelLocale = channel?.locale
     const channelNavigationTitle = channelLocale === 'zh-CN' ? '渠道配置' : 'Channel settings'
-    const channelPageTitle = channelLocale === 'zh-CN' ? '渠道' : 'Channels'
     if (channel?.plugin?.status !== 'active'
       || channel.plugin.schemaKind !== 'none'
       || channel.plugin.configFields !== 0
@@ -4660,10 +4716,10 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       || channel.page.diagnostics !== 0
       || channel.outlet?.available !== true
       || channel.outlet.mounted !== true
-      || channel.outlet.activeRoute !== 'channel:settings'
+      || !['channel:settings', 'channel:configuration', 'channel:runtime', 'channel:logs', 'channel:sessions', 'channel:create'].includes(channel.outlet.activeRoute)
       || channel.navigationItem?.label !== channelNavigationTitle
       || channel.navigationItem.icon !== 'host:layers'
-      || channel.pageTitle !== channelPageTitle
+      || typeof channel.pageTitle !== 'string' || channel.pageTitle.trim() === ''
       || channel.mounted !== true) {
       throw new Error(`Channel data-plane smoke assertions failed: ${JSON.stringify(channel)}`)
     }
@@ -4672,9 +4728,13 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       || channel.managerFlow.searched !== true
       || channel.managerFlow.card !== true
       || channel.managerFlow.configuration !== true
-      || channel.managerFlow.tabs?.join(',') !== 'configuration,logs,sessions'
-      || channel.managerFlow.logsUnavailable !== true
-      || channel.managerFlow.sessionsUnavailable !== true
+      || channel.managerFlow.tabs?.join(',') !== 'configuration,runtime,logs,sessions'
+      || channel.managerFlow.runtimeAvailable !== true
+      || channel.managerFlow.logsAvailable !== true
+      || channel.managerFlow.sessionsAvailable !== true
+      || channel.managerFlow.logControlsPresent !== true
+      || (channel.managerFlow.logsEmpty === true && channel.managerFlow.logExportDisabled !== true)
+      || (channel.managerFlow.bindingActionCount !== 3 && channel.managerFlow.sessionEmpty !== true)
       || channel.managerFlow.hostHeading !== channel.managerFlow.expectedHeading
       || channel.managerFlow.nestedChannelChrome !== false
       || channel.managerFlow.hostTabs !== true
@@ -4685,9 +4745,18 @@ if (parsed.values['manager-screenshot'] !== undefined) {
     }
     if (parsed.values['channel-manager-existing-account'] && (channel.existingAccount?.list !== true
       || channel.existingAccount.detail !== true || channel.existingAccount.form !== true
+      || channel.existingAccount.configurationAvailable !== true
       || !['true', 'false'].includes(channel.existingAccount.switchValue)
       || channel.existingAccount.switchPropsValue !== channel.existingAccount.switchValue
       || channel.existingAccount.switchAriaChecked !== channel.existingAccount.switchValue
+      || channel.existingAccount.runtimeAvailable !== true
+      || channel.existingAccount.runtimeActionCount !== 3
+      || channel.existingAccount.runtimeActionsEnabled !== true
+      || channel.existingAccount.logsAvailable !== true
+      || channel.existingAccount.logsControlsPresent !== true
+      || (channel.existingAccount.logsEmpty === true && channel.existingAccount.logExportDisabled !== true)
+      || channel.existingAccount.sessionsAvailable !== true
+      || (channel.existingAccount.bindingActionCount !== 3 && channel.existingAccount.sessionEmpty !== true)
       || channel.existingAccount.secretRendered !== false)) {
       throw new Error(`Channel existing-account smoke assertions failed: ${JSON.stringify(channel.existingAccount)}`)
     }
