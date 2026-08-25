@@ -37,6 +37,8 @@ describe('Manager settings navigation projection', () => {
     const dispose = installCordisXManager(dom.window.document, manager)
     try {
       dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).toBeNull()
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-icon')?.getAttribute('data-material-icon')).toBe('plugins')
       expect(CORDISX_BUILTIN_MANAGER_SETTINGS_TABS).toEqual([])
       expect(dom.window.document.querySelector('[data-tab="settings"],[data-settings-tab],[data-settings-navigation-item]')).toBeNull()
       expect(mounts).toBe(0)
@@ -83,6 +85,87 @@ describe('Manager settings navigation projection', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="demo:navigation"]')!.click(); await settle()
       state = modelSnapshot([item({ id: 'demo:disabled', disabled: true })]); for (const listener of listeners) listener(); await settle()
       expect(dom.window.document.querySelector('[data-active-body]')).toBeNull(); expect(dom.window.document.querySelector('[data-tab="plugins"]')?.getAttribute('aria-current')).toBe('page')
+    } finally { dispose(); dom.window.close() }
+  })
+
+  it('renders manager-content navigation as Host icon tabs with complete ARIA and keyboard focus recovery', async () => {
+    const dom = managerDom()
+    const listeners = new Set<() => void>()
+    const routes = [
+      { id: 'configuration', label: 'Configuration', icon: 'host:settings' },
+      { id: 'logs', label: 'Logs', icon: 'host:history' },
+      { id: 'sessions', label: 'Sessions', icon: 'host:layers' },
+    ] as const
+    const manager: ManagerModel = {
+      snapshot: () => modelSnapshot([item({ route: { id: 'configuration', params: { accountId: 'one' } } })]),
+      setPluginBlocked: async () => {}, setPermissionPolicy: async () => {},
+      subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) },
+      managerContentPresentation: (_id, reference) => ({
+        title: 'Demo account', description: 'Host-owned detail navigation.', icon: 'host:layers',
+        tabs: routes.map(tab => ({
+          ...tab,
+          route: { id: tab.id, params: { accountId: 'one' } },
+          active: tab.id === reference.id,
+        })),
+      }),
+      mountManagerContent: async (_id, reference, container) => {
+        const body = container.ownerDocument.createElement('section')
+        body.dataset.activeManagerContentBody = reference.id
+        container.append(body)
+        const controller = new AbortController()
+        return {
+          owner: 'demo', contributionId: 'demo:navigation', routeId: `demo:${reference.id}`, pageId: `demo:${reference.id}`,
+          signal: controller.signal, abort: () => controller.abort(), dispose: async () => body.remove(),
+        }
+      },
+      closeManagerContent: async () => {},
+    }
+    const dispose = installCordisXManager(dom.window.document, manager)
+    try {
+      dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
+      dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="demo:navigation"]')!.click()
+      await settle()
+      const tablist = dom.window.document.querySelector<HTMLElement>('[data-manager-content-tabs]')!
+      const tabs = () => [...dom.window.document.querySelectorAll<HTMLButtonElement>('[data-manager-content-tabs] [data-manager-content-tab]')]
+      const panel = dom.window.document.querySelector<HTMLElement>('[data-manager-content-root]')!
+      expect(tablist.getAttribute('role')).toBe('tablist')
+      expect(tablist.getAttribute('aria-orientation')).toBe('horizontal')
+      expect(tabs().map(tab => tab.getAttribute('role'))).toEqual(['tab', 'tab', 'tab'])
+      expect(tabs().map(tab => tab.tabIndex)).toEqual([0, -1, -1])
+      expect(tabs().map(tab => tab.querySelector('[data-host-icon]')?.getAttribute('data-host-icon')))
+        .toEqual(['host:settings', 'host:history', 'host:layers'])
+      expect(panel.getAttribute('role')).toBe('tabpanel')
+      expect(panel.getAttribute('aria-labelledby')).toBe(tabs()[0]!.id)
+      expect(tabs().every(tab => tab.getAttribute('aria-controls') === panel.id)).toBe(true)
+      expect(dom.window.getComputedStyle(tablist).flexWrap).toBe('wrap')
+      expect(dom.window.getComputedStyle(tabs()[0]!).borderRadius).toBe('9px')
+      expect(dom.window.getComputedStyle(tabs()[0]!).fontSize).toBe('11px')
+      expect(dom.window.getComputedStyle(panel).overflowX).toBe('clip')
+
+      tabs()[0]!.focus()
+      tabs()[0]!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+      await settle()
+      expect(tabs().map(tab => tab.getAttribute('aria-selected'))).toEqual(['false', 'true', 'false'])
+      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('logs')
+      expect(panel.getAttribute('aria-labelledby')).toBe(tabs()[1]!.id)
+      expect(panel.querySelector('[data-active-manager-content-body="logs"]')).not.toBeNull()
+
+      // Projection updates recreate the tablist, but the active tab remains the
+      // focus target instead of falling back to the Manager sidebar.
+      for (const listener of listeners) listener()
+      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('logs')
+      tabs()[1]!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }))
+      await settle()
+      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('sessions')
+      tabs()[2]!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }))
+      await settle()
+      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('logs')
+      tabs()[1]!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }))
+      await settle()
+      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('sessions')
+      tabs()[2]!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }))
+      await settle()
+      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('configuration')
     } finally { dispose(); dom.window.close() }
   })
 })

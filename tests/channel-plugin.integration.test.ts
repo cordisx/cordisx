@@ -144,6 +144,10 @@ describe('built-in Channel product bundle', () => {
       await waitFor(() => dom.window.document.querySelector('[data-manager-content-tabs]') !== null)
       expect(dom.window.document.querySelector('[data-channel-page="detail"]')).not.toBeNull()
       expect(dom.window.document.querySelector('.cxm-heading-current-heading')?.textContent).toBe('local')
+      // Detail history replaces the same leading seat; it must never retain a
+      // decorative route icon beside the Host Back affordance.
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).not.toBeNull()
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-icon,.cxm-heading-leading-stack')).toBeNull()
       expect(dom.window.document.querySelector('.cxc-channel-back,.cxc-channel-tabs')).toBeNull()
       expect(dom.window.document.querySelector('[data-manager-content-tabs] [data-manager-content-tab="configuration"]')).not.toBeNull()
       dom.window.document.querySelector<HTMLButtonElement>('[data-manager-content-tabs] [data-manager-content-tab="logs"]')!.click()

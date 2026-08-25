@@ -9,6 +9,7 @@ import {
 } from '../contracts.js'
 import type {
   CordisXJsonScalar,
+  CordisXIconToken,
   CordisXLocalizedText,
   CordisXManagerContentNavigation,
   CordisXManagerContentNavigationDeclarationV1,
@@ -598,9 +599,19 @@ function sameReference(left: CordisXRouteReference, right: CordisXRouteReference
 export interface ManagerContentPresentation {
   readonly title: string
   readonly description: string
-  readonly icon?: string
+  readonly icon?: CordisXIconToken
   readonly parent?: CordisXRouteReference
-  readonly tabs: readonly Readonly<{ readonly id: string; readonly label: string; readonly route: CordisXRouteReference; readonly active: boolean }>[]
+  /**
+   * A Host semantic icon is projected from the exact same-owner page route.
+   * The manager renders it; plugins never supply DOM or renderer callbacks.
+   */
+  readonly tabs: readonly Readonly<{
+    readonly id: string
+    readonly label: string
+    readonly icon: CordisXIconToken
+    readonly route: CordisXRouteReference
+    readonly active: boolean
+  }>[]
 }
 
 export class ManagerContentNavigationRegistry {
@@ -803,15 +814,22 @@ export class NavigationRegistry {
       ? text(this.managerContent.title(owner, String(reference.params?.[header.recordIdParam])) ?? header.fallback, `manager-content:${owner}:${declaration.declaration.id}:record`)
       : text(page.metadata.title, `manager-content:${owner}:${declaration.declaration.id}:title`)
     const description = text(page.metadata.description ?? record.definition.description ?? record.definition.title ?? page.metadata.title, `manager-content:${owner}:${declaration.declaration.id}:description`)
-    const tabs = (declaration.declaration.tabs ?? []).map(tab => {
-      const tabRecord = this.findRecord(owner, tab.route.id)
-      const tabPage = tabRecord === undefined ? undefined : this.pages.get(owner, tabRecord.definition.page, tabRecord.candidateView)
-      return Object.freeze({
+    const tabs = (declaration.declaration.tabs ?? []).flatMap(tab => {
+      // A tab may only point at a concrete declaration owned by this plugin.
+      // Dropping an unresolved projection keeps the Host renderer from exposing
+      // a navigation target that cannot be mounted by the same owner.
+      if (this.managerContent.resolve(owner, tab.route) === undefined) return []
+      const resolution = this.managerContentRoute(owner, tab.route, record.candidateView)
+      if (resolution.state !== 'available' || resolution.resolved === undefined) return []
+      const icon = resolution.resolved.page.metadata.icon
+      if (icon === undefined) return []
+      return [Object.freeze({
         id: tab.id,
-        label: tabPage === undefined ? tab.id : text(tabPage.metadata.title, `manager-content:${owner}:${declaration.declaration.id}:tab:${tab.id}`),
+        label: text(resolution.resolved.page.metadata.title, `manager-content:${owner}:${declaration.declaration.id}:tab:${tab.id}`),
+        icon,
         route: Object.freeze({ id: tab.route.id, ...(tab.route.params === undefined ? {} : { params: immutableSnapshot(tab.route.params) }) }),
         active: sameReference(tab.route, reference),
-      })
+      })]
     })
     return Object.freeze({
       title,

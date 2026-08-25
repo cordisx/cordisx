@@ -656,7 +656,7 @@ describe('renderer bundle', () => {
     expect(primaryNavigation.find(item => item.dataset.tab === 'marketplace')?.nextElementSibling?.getAttribute('data-tab')).toBe('about')
     const managerStyles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
     expect(managerStyles).toContain('.cxm-nav-button[data-tab="about"] { margin-top: auto; }')
-    expect(managerStyles).toContain('grid-template-columns: max-content minmax(0, 1fr)')
+    expect(managerStyles).toContain('grid-template-columns: 26px minmax(0, 1fr)')
     expect(managerStyles).toContain('grid-template-columns: 248px minmax(0, 1fr)')
     expect(managerStyles).toContain('width: min(1440px, calc(100vw - 40px))')
     expect(managerStyles).toContain('height: min(960px, calc(100vh - 40px))')
@@ -665,7 +665,8 @@ describe('renderer bundle', () => {
     expect(managerStyles).toContain('overflow-y: auto')
     expect(managerStyles).toContain('border-radius: 9px;')
     expect(managerStyles).toContain('.cxm-nav-button[aria-current="page"]')
-    expect(managerStyles).toContain('grid-template-columns: 18px max-content')
+    expect(managerStyles).toContain('grid-template-columns: 18px minmax(0, 1fr)')
+    expect(managerStyles).toContain('.cxm-manager-content-root { min-width: 0; max-width: 100%; overflow-x: clip; }')
     expect(managerStyles).toContain('.cxm-tab[aria-selected="true"] { background: rgba(199, 204, 212, .14);')
     expect(managerStyles).not.toContain('.cxm-tab[aria-selected="true"]::after')
     expect(managerStyles).toContain('.cxm-heading p { grid-column: 1 / -1; margin: 3px 0 0;')
@@ -709,7 +710,7 @@ describe('renderer bundle', () => {
       expect(dom.window.getComputedStyle(firstTab!).borderRadius).toBe('9px')
       expect(dom.window.getComputedStyle(icon!).width).toBe('18px')
       expect(dom.window.getComputedStyle(icon!).height).toBe('18px')
-      expect(dom.window.getComputedStyle(visibleContent!).gridTemplateColumns).toBe('18px max-content')
+      expect(dom.window.getComputedStyle(visibleContent!).gridTemplateColumns).toBe('18px minmax(0, 1fr)')
     }
     const managerHeadings = (): string[] => [...dom.window.document.querySelectorAll<HTMLElement>('.cxm-heading h2, .cxm-section-title')]
       .map(element => element.textContent?.trim() ?? '')
