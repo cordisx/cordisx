@@ -115,7 +115,11 @@ describe('built-in Channel product bundle', () => {
       }))
       expect(snapshot.navigation.pages).toContainEqual(expect.objectContaining({
         qualifiedId: 'channel:settings', metadata: expect.objectContaining({ chrome: 'standard' }),
-        productMetadata: expect.objectContaining({ title: 'Channels', diagnostics: [] }),
+        productMetadata: expect.objectContaining({
+          title: 'Channels',
+          description: 'Manage configured channel accounts, connections, and sessions.',
+          diagnostics: [],
+        }),
       }))
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')!.click()
       const channelEntry = dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="channel:channels"]')!

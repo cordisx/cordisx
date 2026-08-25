@@ -135,7 +135,7 @@ export function apply(ctx: Context): void {
       'route.title': 'Channel settings',
       'route.description': 'Open launcher-owned Channel accounts, routes, task bindings, and diagnostics.',
       'page.title': 'Channels',
-      'page.description': 'Host-rendered Channel service status and safe configuration projection.',
+      'page.description': 'Manage configured channel accounts, connections, and sessions.',
     },
   })
   ctx.i18n.define<Messages>({
@@ -145,7 +145,7 @@ export function apply(ctx: Context): void {
       'route.title': '渠道配置',
       'route.description': '打开由启动器持有的渠道账号、路由、任务绑定与诊断。',
       'page.title': '渠道',
-      'page.description': '由宿主渲染渠道服务状态与安全配置投影。',
+      'page.description': '管理已配置的渠道账号、连接和会话。',
     },
   })
   ctx.pages.register<Messages>(settingsPage, context => mountChannelManager(channelContext, context))
