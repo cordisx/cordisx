@@ -171,6 +171,36 @@ npm run dev -- dev --config cordisx.config.json
 npm run dev -- dev ./plugins/example.ts --dry-run
 ```
 
+`cordisx.config.ui-demos.json` is intentionally read-only developer
+composition. For editable configuration and restart/readback testing, use the
+separate `config/ui-demos/config.json` CordisX Home. A normal launch keeps this
+CordisX configuration independent while its `shared` Host-data profile can use
+the already signed-in Codex account:
+
+```bash
+CORDISX_HOME="$PWD/config/ui-demos" npm run dev -- codex ui-demo --data shared
+```
+
+Automated smoke instead copies the same template into a disposable private
+CordisX Home and removes only that runner-created Home:
+
+```bash
+npm run smoke:isolated-app -- \
+  --port 58323 \
+  --profile-dir /tmp/cordisx-ui-demo-profile \
+  --home-config "$PWD/config/ui-demos/config.json" -- \
+  --manager-tab plugins \
+  --manager-plugin form-schema-gallery \
+  --manager-detail-tab config \
+  --manager-form-exercise \
+  --manager-screenshot /tmp/cordisx-ui-demo.png \
+  --report /tmp/cordisx-ui-demo.json
+```
+
+The template contains no credentials or external provider endpoints. Its
+profile-scoped plugin revisions make the Host configuration writer available,
+so edits can be verified instead of showing a read-only developer projection.
+
 `--online-devtools` additionally permits the official Chrome DevTools frontend
 to connect to the loopback endpoint. That frontend receives full debugging
 authority over the isolated renderer and must not be enabled for a normal

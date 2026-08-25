@@ -51,6 +51,7 @@ describe('npm workspace boundary', () => {
     await expect(access(path.join(repositoryRoot, 'cordisx.config.settings-demo.json'))).resolves.toBeUndefined()
     await expect(access(path.join(repositoryRoot, 'cordisx.config.hello-toolbar.json'))).resolves.toBeUndefined()
     await expect(access(path.join(repositoryRoot, 'cordisx.config.ui-demos.json'))).resolves.toBeUndefined()
+    await expect(access(path.join(repositoryRoot, 'config/ui-demos/config.json'))).resolves.toBeUndefined()
     expect(iconSource).toContain("from '@material-symbols/svg-400/rounded/extension.svg'")
     expect(iconSource).toContain("from '@material-symbols/svg-400/rounded/close.svg'")
     expect(iconSource).not.toContain("from '@material-symbols/svg-400'")
