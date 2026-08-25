@@ -746,6 +746,32 @@ export class ChannelRuntime {
     return this.#store.snapshot().audit
   }
 
+  /**
+   * Launcher-private binding controls. These change only the durable Channel
+   * binding record; task/session controls remain the responsibility of the
+   * configured gateway.
+   */
+  async archiveBinding(bindingId: string): Promise<'applied' | 'unavailable' | 'not-found'> {
+    return await this.#setBindingState(bindingId, 'active', 'archived', 'archive')
+  }
+
+  async restoreBinding(bindingId: string): Promise<'applied' | 'unavailable' | 'not-found'> {
+    return await this.#setBindingState(bindingId, 'archived', 'active', 'restore')
+  }
+
+  async unbind(bindingId: string): Promise<'applied' | 'not-found'> {
+    this.#assertRuntimeActive()
+    const now = this.#now()
+    return await this.#store.transaction(state => {
+      const index = state.bindings.findIndex(binding => binding.bindingId === bindingId)
+      if (index < 0) return 'not-found' as const
+      const binding = state.bindings[index]!
+      state.bindings.splice(index, 1)
+      this.#appendBindingAudit(state, binding, 'channel.binding.unbind', 'applied', now)
+      return 'applied' as const
+    })
+  }
+
   async dispose(): Promise<void> {
     if (this.#disposed) return
     this.#disposed = true
@@ -1265,6 +1291,46 @@ export class ChannelRuntime {
         state.adapters[key] = { ...adapter, connectionState: 'stopped' }
       }
     })
+  }
+
+  async #setBindingState(
+    bindingId: string,
+    currentState: ChannelSessionBinding['state'],
+    nextState: ChannelSessionBinding['state'],
+    action: 'archive' | 'restore',
+  ): Promise<'applied' | 'unavailable' | 'not-found'> {
+    this.#assertRuntimeActive()
+    const now = this.#now()
+    return await this.#store.transaction(state => {
+      const index = state.bindings.findIndex(binding => binding.bindingId === bindingId)
+      if (index < 0) return 'not-found' as const
+      const binding = state.bindings[index]!
+      if (binding.state !== currentState) return 'unavailable' as const
+      state.bindings[index] = { ...binding, state: nextState, updatedAt: now }
+      this.#appendBindingAudit(state, binding, `channel.binding.${action}`, 'applied', now)
+      return 'applied' as const
+    })
+  }
+
+  #appendBindingAudit(
+    state: ChannelStoreState,
+    binding: ChannelSessionBinding,
+    action: string,
+    outcome: string,
+    recordedAt: string,
+  ): void {
+    const adapter = state.adapters[accountKey(binding.channel)]
+    if (adapter === undefined) return
+    appendAudit(state, auditRecord({
+      caller: adapter.owner,
+      recordedAt,
+      accountKey: accountKey(binding.channel),
+      generation: adapter.generation,
+      operationId: `binding:${binding.bindingId}`,
+      action,
+      outcome,
+      bindingRevision: binding.revision,
+    }))
   }
 
   #assertGeneration(ref: ChannelTenantRef, generation: number): void {
