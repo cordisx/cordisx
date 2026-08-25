@@ -41,8 +41,6 @@ export const codexAdapter: HostAdapter = {
   displayName: 'Codex',
 
   async resolveLaunchPlan(input: ResolveLaunchPlanInput): Promise<ResolvedLaunchPlan> {
-    const root = profileRoot(input.cordisxHomeDir, input.profileId)
-    const chromiumProfileDir = path.resolve(input.chromiumProfileDir ?? path.join(root, 'chromium'))
     const executable = await resolveCodexExecutable(input.executable)
     const ordinaryHome = os.homedir()
     const ordinaryCodexHome = process.env.CODEX_HOME === undefined
@@ -50,6 +48,9 @@ export const codexAdapter: HostAdapter = {
       : path.resolve(process.env.CODEX_HOME)
 
     if (input.dataMode === 'shared') {
+      if (input.chromiumProfileDir !== undefined) {
+        throw new Error('--profile-dir requires an isolated host-data profile')
+      }
       return {
         version: 1,
         appId: this.id,
@@ -57,18 +58,21 @@ export const codexAdapter: HostAdapter = {
         profileId: input.profileId,
         dataMode: input.dataMode,
         executable,
-        chromiumProfile: { mode: 'independent', path: chromiumProfileDir },
+        // `shared` is the interactive profile: it must preserve the current
+        // signed-in Codex/ChatGPT state rather than silently opening a fresh
+        // Chromium data directory under CORDISX_HOME.
+        chromiumProfile: { mode: 'system' },
         environment: {},
         sharedDataRoots: [
           { name: 'HOME', path: ordinaryHome, managed: false },
           { name: 'CODEX_HOME', path: ordinaryCodexHome, managed: false },
         ],
-        isolatedDataRoots: [
-          { name: 'Chromium profile', path: chromiumProfileDir, managed: input.chromiumProfileDir === undefined },
-        ],
+        isolatedDataRoots: [],
       }
     }
 
+    const root = profileRoot(input.cordisxHomeDir, input.profileId)
+    const chromiumProfileDir = path.resolve(input.chromiumProfileDir ?? path.join(root, 'chromium'))
     const isolatedEnvironment = isolatedCodexEnvironment(root)
     return {
       version: 1,

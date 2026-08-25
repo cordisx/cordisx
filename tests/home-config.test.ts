@@ -199,6 +199,17 @@ describe('CordisX home configuration', () => {
     expect((await stat(cordisxHome)).mode & 0o777).toBe(0o755)
   })
 
+  it.skipIf(process.platform === 'win32')('tightens an explicit user-owned CORDISX_HOME without touching its parents', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-home-directory-'))
+    const cordisxHome = path.join(root, 'ui-demos')
+    await chmod(root, 0o755)
+    await mkdir(cordisxHome, { mode: 0o755 })
+    await ensureHomeConfig({ env: { CORDISX_HOME: cordisxHome } })
+    expect((await stat(cordisxHome)).mode & 0o777).toBe(0o700)
+    expect((await stat(root)).mode & 0o777).not.toBe(0o700)
+    expect((await stat(path.join(cordisxHome, 'config.json'))).mode & 0o777).toBe(0o600)
+  })
+
   it('tightens only the canonical default ~/.cordisx directory for legacy migration', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-home-directory-'))
     const cordisxHome = path.join(root, '.cordisx')

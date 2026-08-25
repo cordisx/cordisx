@@ -86,8 +86,9 @@ npx cordisx@beta codex
 ```
 
 `setup` creates `~/.cordisx/config.json` with `providers: []` and `plugins: []`. The default profile
-shares the existing Codex account, conversations, projects, and models; use an
-isolated named profile when its host data should also be separate:
+uses the existing signed-in Codex/ChatGPT Host profile, account, conversations,
+projects, and models; use an isolated named profile when its host data should
+also be separate:
 
 ```bash
 npx cordisx@beta codex default --data shared

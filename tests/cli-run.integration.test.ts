@@ -69,6 +69,27 @@ describe('functional CordisX CLI', () => {
     await expect(access(path.join(home, 'apps', 'codex', 'profiles', 'default'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it('keeps a shared UI-demo launch on the existing Host profile', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))
+    const home = path.join(root, 'ui-demos')
+    const output: string[] = []
+    await runCordisXCli(['codex', 'ui-demo', '--data', 'shared', '--dry-run', '--executable', process.execPath], {
+      env: { CORDISX_HOME: home },
+      stdout: line => { output.push(line) },
+    })
+    expect(output.join('\n')).toContain('"chromiumProfile": {\n      "mode": "system"')
+    await expect(access(path.join(home, 'apps', 'codex', 'profiles', 'ui-demo'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('does not let a shared profile silently open a new Chromium directory', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))
+    await expect(runCordisXCli([
+      'codex', '--data', 'shared', '--profile-dir', path.join(root, 'private-profile'), '--dry-run', '--executable', process.execPath,
+    ], { env: { CORDISX_HOME: path.join(root, 'home') }, stdout: () => undefined })).rejects.toThrow(
+      '--profile-dir requires --data isolated; shared reuses the current Host profile',
+    )
+  })
+
   it('fails closed when a development system launch port is already occupied', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))
     const configPath = path.join(root, 'cordisx.config.json')
