@@ -153,13 +153,11 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${String.raw`
   .cxf-status[data-state="dirty"] { color: var(--td-brand-color); }
   .cxf-status[data-state="saved"] { color: var(--td-success-color); }
   .cxf-button {
-    display: inline-flex; align-items: center; justify-content: center; gap: .375rem; min-block-size: 2rem;
-    border: 1px solid var(--td-border-level-2-color); border-radius: var(--td-radius-default);
-    padding: .375rem .75rem; background: var(--td-bg-color-specialcomponent); color: var(--td-text-color-primary);
-    font: inherit; line-height: 1.25; cursor: pointer;
+    display: inline-block; min-block-size: 0; border: 0; padding: 0; background: transparent;
+    color: inherit; font: inherit; line-height: 1; cursor: pointer;
   }
-  .cxf-button:hover:not(:disabled) { border-color: var(--td-brand-color); background: var(--td-bg-color-component-hover); }
-  .cxf-button[data-variant="primary"] { border-color: var(--td-brand-color); background: var(--td-brand-color); color: var(--cx-primary-text); }
+  .cxf-button:hover:not(:disabled) { background: transparent; }
+  .cxf-button[data-variant="primary"] { background: transparent; color: inherit; }
   .cxf-button[data-tone="danger"] { color: var(--td-error-color); }
   .cxf-button[aria-disabled="true"], .cxf-button:disabled { cursor: default; opacity: var(--cx-disabled); }
   .cxf-alert { border: 1px solid var(--td-border-level-2-color); border-radius: var(--td-radius-default); padding: .625rem .75rem; background: var(--td-bg-color-specialcomponent); color: var(--td-text-color-secondary); overflow-wrap: anywhere; }

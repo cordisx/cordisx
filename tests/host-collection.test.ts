@@ -64,7 +64,8 @@ describe('Host collection primitive', () => {
       expect(search.value).toBe('')
       expect(view.element.querySelectorAll<HTMLElement>('[data-collection-item][hidden]')).toHaveLength(0)
 
-      expect(HOST_COLLECTION_STYLES).toContain('repeat(auto-fill, minmax(min(100%, 220px), 360px))')
+      expect(HOST_COLLECTION_STYLES).toContain('repeat(auto-fit, minmax(min(100%, 220px), 1fr))')
+      expect(HOST_COLLECTION_STYLES).not.toContain('justify-content: start')
       expect(HOST_COLLECTION_STYLES).not.toContain('repeat(2,')
       expect(HOST_COLLECTION_STYLES).toContain('.cxc-list[data-layout="rows"] { grid-template-columns: minmax(0, 1fr); }')
     } finally {

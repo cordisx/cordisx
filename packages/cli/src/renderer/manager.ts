@@ -554,7 +554,7 @@ const MANAGER_STYLES = `
     padding: 0 22px;
     border-bottom: 1px solid rgba(255, 255, 255, .08);
   }
-  .cxm-heading { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: start; column-gap: 9px; min-width: 0; flex: 1 1 auto; }
+  .cxm-heading { position: relative; display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; column-gap: 9px; min-width: 0; flex: 1 1 auto; }
   .cxm-heading[data-heading-actions="true"] { padding-right: 36px; }
   .cxm-heading-menu { position: absolute; z-index: 8; top: -2px; right: 0; }
   .cxm-heading-menu > .cxm-manager-icon-action { color: var(--cx-muted); }
@@ -996,11 +996,15 @@ const MANAGER_STYLES = `
   .cxm-status-dot[data-status="installing"], .cxm-status-dot[data-status="updating"], .cxm-status-dot[data-status="enabling"], .cxm-status-dot[data-status="disabling"], .cxm-status-dot[data-status="reloading"], .cxm-status-dot[data-status="uninstalling"], .cxm-status-dot[data-status="rolling-back"] { background: #60a5fa; }
   .cxm-status-dot[data-status="rollback-failed"] { background: #fb7185; }
   .cxm-lifecycle-overlay { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / 58%); }
-  .cxm-lifecycle-dialog { width: min(520px, 100%); max-height: min(700px, calc(100vh - 48px)); overflow: auto; box-sizing: border-box; border: 1px solid #3b4048; border-radius: 14px; padding: 20px; background: #20242b; color: #edf0f4; box-shadow: 0 24px 80px rgb(0 0 0 / 45%); }
-  .cxm-lifecycle-dialog h2 { margin: 0; font-size: 18px; }
-  .cxm-lifecycle-dialog p { color: #bfc5ce; line-height: 1.5; }
+  .cxm-lifecycle-dialog { width: min(460px, 100%); max-height: min(660px, calc(100vh - 48px)); overflow: auto; box-sizing: border-box; border: 1px solid #3b4048; border-radius: 14px; padding: 16px; background: #20242b; color: #edf0f4; font: 13px/1.45 system-ui, sans-serif; box-shadow: 0 24px 80px rgb(0 0 0 / 45%); }
+  .cxm-lifecycle-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; }
+  .cxm-lifecycle-dialog h2 { min-width: 0; margin: 0; font-size: 15px; line-height: 1.3; }
+  .cxm-lifecycle-dialog p { margin: 6px 0 0; color: #bfc5ce; font-size: 12px; line-height: 1.45; }
   .cxm-lifecycle-impact { margin: 12px 0; padding: 10px 12px; border-radius: 9px; background: rgba(255,255,255,.05); color: #d7dbe3; }
-  .cxm-lifecycle-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .cxm-lifecycle-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  .cxm-directory-control { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; gap: 7px; }
+  .cxm-directory-picker { width: 30px; height: 30px; }
+  .cxm-visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
   .cxm-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   .cxm-detail-id { color: #747f91; font: 10px/1.3 ui-monospace, monospace; }
   .cxm-detail-description { max-width: 680px; margin: 14px 0 0; color: #a7afbe; font-size: 12px; }
@@ -1036,16 +1040,28 @@ const MANAGER_STYLES = `
   .cxm-marketplace-trust-evidence { display: inline-flex; margin-top: 8px; }
   .cxm-code { max-height: 140px; margin: 6px 0 0; overflow: auto; color: #bac2d2; font: 10px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
   .cxm-config-renderer { min-height: 2rem; }
-  .cxm-readme { inline-size: 100%; max-inline-size: none; color: var(--cx-text); font-size: 13px; line-height: 1.62; }
-  .cxm-readme h1, .cxm-readme h2, .cxm-readme h3, .cxm-readme h4 { color: var(--cx-text); line-height: 1.3; }
-  .cxm-readme h1 { margin: 0 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--cx-border); font-size: 24px; }
-  .cxm-readme h2 { margin: 28px 0 12px; padding-bottom: 7px; border-bottom: 1px solid var(--cx-border); font-size: 18px; }
-  .cxm-readme h3, .cxm-readme h4 { margin: 22px 0 8px; font-size: 14px; }
+  .cxm-readme { inline-size: 100%; max-inline-size: none; box-sizing: border-box; color: var(--cx-text); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+  .cxm-readme > :first-child { margin-top: 0 !important; }
+  .cxm-readme > :last-child { margin-bottom: 0 !important; }
+  .cxm-readme h1, .cxm-readme h2, .cxm-readme h3, .cxm-readme h4, .cxm-readme h5, .cxm-readme h6 { color: var(--cx-text); line-height: 1.25; }
+  .cxm-readme h1 { margin: 0 0 16px; padding-bottom: 9px; border-bottom: 1px solid var(--cx-border); font-size: 24px; }
+  .cxm-readme h2 { margin: 24px 0 12px; padding-bottom: 7px; border-bottom: 1px solid var(--cx-border); font-size: 18px; }
+  .cxm-readme h3 { margin: 20px 0 8px; font-size: 15px; }
+  .cxm-readme h4, .cxm-readme h5, .cxm-readme h6 { margin: 18px 0 7px; font-size: 13px; }
   .cxm-readme p { margin: 0 0 14px; color: var(--cx-text); }
-  .cxm-readme ul { margin: 0 0 16px; padding-left: 24px; }
+  .cxm-readme ul, .cxm-readme ol { margin: 0 0 16px; padding-left: 24px; }
   .cxm-readme li { margin: 5px 0; }
+  .cxm-readme .task-list-item { list-style: none; }
+  .cxm-readme .task-list-item > input { margin: 0 7px 0 -20px; accent-color: var(--cx-primary); }
   .cxm-readme a { color: var(--cx-primary); text-decoration: none; }
   .cxm-readme a:hover { text-decoration: underline; }
+  .cxm-readme blockquote { margin: 0 0 16px; padding: 0 14px; border-left: 4px solid var(--cx-border); color: var(--cx-muted); }
+  .cxm-readme blockquote p { color: inherit; }
+  .cxm-readme hr { height: 1px; margin: 22px 0; border: 0; background: var(--cx-border); }
+  .cxm-readme table { display: block; inline-size: 100%; margin: 0 0 16px; overflow: auto; border-spacing: 0; border-collapse: collapse; }
+  .cxm-readme th, .cxm-readme td { padding: 7px 11px; border: 1px solid var(--cx-border); text-align: left; }
+  .cxm-readme th { background: var(--cx-hover); font-weight: 650; }
+  .cxm-readme tr:nth-child(2n) td { background: color-mix(in srgb, var(--cx-hover) 48%, transparent); }
   .cxm-readme code { padding: 2px 5px; border-radius: 4px; background: var(--cx-hover); color: var(--cx-text); font: 11px/1.5 ui-monospace, monospace; }
   .cxm-readme pre { margin: 14px 0 18px; overflow: auto; padding: 14px 16px; border: 1px solid var(--cx-border); border-radius: 8px; background: color-mix(in srgb, var(--cx-surface-raised) 82%, #000); }
   .cxm-readme pre code { padding: 0; background: transparent; color: inherit; white-space: pre; }
@@ -2012,6 +2028,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
   let pluginQuery = ''
   let marketplaceQuery = ''
   let marketplaceCertifiedOnly = false
+  let marketplaceOfficialOnly = false
   let extensionPointQuery = ''
   let routeQuery = ''
   const extensionPointUsageQueries = new Map<string, string>()
@@ -2209,45 +2226,81 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     overlay.setAttribute('role', 'dialog')
     overlay.setAttribute('aria-modal', 'true')
     const panel = create(document, 'div', 'cxm-lifecycle-dialog')
-    panel.append(
-      create(document, 'h2', undefined, '导入本地插件'),
-      create(document, 'p', undefined, '选择本地插件目录以导入。'),
-      documentationLink('查看导入说明', PRODUCT_DOCUMENTATION.runtime),
-    )
+    panel.classList.add('cxf-scope')
+    const header = create(document, 'div', 'cxm-lifecycle-header')
+    const heading = create(document, 'h2', undefined, '导入本地插件')
+    const close = managerIconAction('close', '关闭')
+    close.dataset.importLocalClose = 'true'
+    header.append(heading, close)
+    panel.append(header, create(document, 'p', undefined, '选择插件目录；检查通过后再确认授权与激活。'))
     const form = forms.form('local-package-directory')
     const item = forms.item({
-      id: 'cxm-local-package-directory', label: '本地插件包绝对路径',
-      help: '仅接受明确的本地绝对目录；Host 将先检查包内容，再进入授权和激活事务。', fullWidth: true, required: true,
+      id: 'cxm-local-package-directory', label: '插件目录',
+      help: '可直接选择目录，或粘贴本地绝对路径。', fullWidth: true, required: true,
     })
     let pathValue = ''
+    let inspect: TDesignButtonElement | undefined
+    const validPath = (value: string): boolean => value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value)
+    const updatePath = (value: string): void => {
+      pathValue = value.trim()
+      item.setError(pathValue === '' ? undefined : validPath(pathValue) ? undefined : '请选择目录或输入绝对路径')
+      if (inspect !== undefined) setTDesignDisabled(inspect, !validPath(pathValue))
+    }
     const pathField: CordisXConfigFieldSnapshot = {
       namespace: 'cordisx.host', path: ['localPackageDirectory'], type: 'string', role: 'directory', value: '', disabled: false, required: true,
     }
     const control = forms.control(pathField, 'cxm-local-package-directory', value => {
-      pathValue = typeof value === 'string' ? value.trim() : ''
-      const absolute = pathValue.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(pathValue)
-      item.setError(pathValue === '' ? '请输入本地包绝对路径' : absolute ? undefined : '请输入绝对路径')
+      updatePath(typeof value === 'string' ? value : '')
     })
     control.focusTarget?.setAttribute('data-import-local-path', '')
     forms.connect(item, control)
-    item.control.append(control.root)
-    const section = forms.section('本地来源', 'Host 会先检查目录内容，再进入授权与原子激活事务。')
-    section.content.append(item.root)
-    form.append(section.root)
+    const directoryControl = create(document, 'div', 'cxm-directory-control')
+    const picker = create(document, 'input', 'cxm-visually-hidden')
+    picker.type = 'file'
+    picker.tabIndex = -1
+    picker.setAttribute('webkitdirectory', '')
+    picker.setAttribute('directory', '')
+    picker.dataset.importLocalPicker = 'true'
+    const choose = managerIconAction('import-plugin', '选择插件目录', { className: 'cxm-directory-picker' })
+    choose.dataset.importLocalChoose = 'true'
+    choose.addEventListener('click', () => picker.click())
+    picker.addEventListener('change', () => {
+      const file = picker.files?.[0] as (File & { readonly path?: string }) | undefined
+      const filePath = file?.path
+      const relative = file?.webkitRelativePath
+      if (filePath === undefined || relative === undefined || relative === '') {
+        item.setError('当前环境无法读取目录路径，请粘贴绝对路径')
+        return
+      }
+      const separator = filePath.includes('\\') ? '\\' : '/'
+      const relativePath = relative.replaceAll('/', separator)
+      const rootName = relative.split('/')[0] ?? ''
+      const root = filePath.endsWith(relativePath)
+        ? `${filePath.slice(0, -relativePath.length)}${rootName}`
+        : filePath.slice(0, Math.max(filePath.lastIndexOf(separator), 0))
+      setTDesignProps(control.focusTarget as TDesignElement, { value: root })
+      ;(control.focusTarget as TDesignElement & { onChange?: (value: string) => void }).onChange?.(root)
+      updatePath(root)
+      control.focusTarget?.focus()
+    })
+    directoryControl.append(control.root, choose)
+    item.control.append(directoryControl, picker)
+    form.append(item.root)
     const actions = create(document, 'div', 'cxf-actions')
     const finish = (value?: string): void => {
       unmountOverlay()
       resolve(value)
     }
+    close.addEventListener('click', () => finish(), { once: true })
     const cancel = forms.button('取消')
     cancel.addEventListener('click', () => finish(), { once: true })
-    const inspect = forms.button('检查并导入', { type: 'submit', variant: 'primary' })
+    inspect = forms.button('检查并导入', { type: 'submit', variant: 'primary' })
+    setTDesignDisabled(inspect, true)
     inspect.setAttribute('data-import-local-submit', '')
     form.addEventListener('submit', event => {
       event.preventDefault()
-      const absolute = pathValue.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(pathValue)
-      if (pathValue === '' || !absolute) {
-        item.setError(pathValue === '' ? '请输入本地包绝对路径' : '请输入绝对路径')
+      if (!validPath(pathValue)) {
+        item.setError(pathValue === '' ? '请选择插件目录' : '请选择目录或输入绝对路径')
         control.focusTarget?.focus()
         return
       }
@@ -5063,10 +5116,25 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       renderContent()
       content.querySelector<HTMLButtonElement>('[data-marketplace-certified-only]')?.focus()
     })
+    const officialFilter = create(document, 'button', 'cxm-marketplace-filter')
+    officialFilter.type = 'button'
+    officialFilter.dataset.marketplaceOfficialOnly = 'true'
+    officialFilter.setAttribute('aria-pressed', String(marketplaceOfficialOnly))
+    officialFilter.setAttribute('aria-label', marketplaceOfficialOnly ? copy('marketplace.filter-all') : copy('marketplace.filter-official'))
+    officialFilter.append(
+      createManagerIcon(document, 'marketplace-official'),
+      create(document, 'span', undefined, copy('marketplace.filter-official-only')),
+    )
+    officialFilter.addEventListener('click', () => {
+      marketplaceOfficialOnly = !marketplaceOfficialOnly
+      renderContent()
+      content.querySelector<HTMLButtonElement>('[data-marketplace-official-only]')?.focus()
+    })
     const ranked = searchMarketplaceCatalog(snapshot.plugins, {
       query: marketplaceQuery,
       currentLocale: managerSnapshot.localization.locale,
       certifiedOnly: marketplaceCertifiedOnly,
+      officialOnly: marketplaceOfficialOnly,
       ...(model.marketplaceEligibility === undefined ? {} : { eligibility: plugin => model.marketplaceEligibility!(plugin) }),
     })
     const results = create(document, 'div', 'cxm-marketplace-results')
@@ -5142,7 +5210,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
     toolbar.append(sourceMenu)
     const filters = create(document, 'div', 'cxm-marketplace-filter-row')
     filters.setAttribute('aria-label', '插件商店筛选')
-    filters.append(certifiedFilter)
+    filters.append(officialFilter, certifiedFilter)
     tools.append(toolbar, filters)
     page.append(tools, results)
     content.append(page)

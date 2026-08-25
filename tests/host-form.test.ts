@@ -220,6 +220,8 @@ describe('Host form DOM and accessibility', () => {
     expect(HOST_FORM_STYLES).toContain('inline-size: 100%; min-inline-size: 0; margin: 0;')
     expect(HOST_FORM_STYLES).toContain('.cxf-form-grid')
     expect(HOST_FORM_STYLES).toContain('@media (max-width: 760px)')
+    expect(HOST_FORM_STYLES).toContain('.cxf-button {\n    display: inline-block; min-block-size: 0; border: 0; padding: 0; background: transparent;')
+    expect(HOST_FORM_STYLES).not.toContain('.cxf-button {\n    display: inline-flex;')
     expect(HOST_FORM_STYLES).not.toMatch(/(^|[\s,{])(:root|html|body|\*)\s*[{,]/u)
   })
 

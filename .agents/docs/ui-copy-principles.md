@@ -61,6 +61,11 @@ id, URL, diagnostic code, or raw error.
   native-looking controls. Plugins provide structured data and actions only.
 - A heading and its introduction are rendered once. Do not repeat them in the
   first content section or use an empty page as an implicit description.
+- A Host overlay uses the same type scale, icon geometry, spacing, and semantic
+  tokens as the Manager that opened it. It has one title, at most one concise
+  introduction, a rounded-square close control, and one content surface. Do not
+  place a second section card around a single field or repeat the field help in
+  the overlay introduction.
 - Prefer an icon button with an accessible name and tooltip for a familiar,
   compact action. Text labels remain for names, state, and an action whose
   meaning would otherwise be ambiguous. Icon buttons use the Host rounded-square
@@ -76,6 +81,10 @@ id, URL, diagnostic code, or raw error.
   page-template guarantees covered during implementation. Final acceptance
   checks the real user journey; it must not be the first place basic layout
   defects are found.
+- Official custom elements own their visible border, background, radius, and
+  padding inside their component shadow root. Host CSS may size and position
+  the custom-element host, but must not draw a second button, Select, or Input
+  shell around the official control.
 
 ## Review gate
 

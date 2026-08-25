@@ -656,7 +656,7 @@ describe('renderer bundle', () => {
     expect(primaryNavigation.find(item => item.dataset.tab === 'marketplace')?.nextElementSibling?.getAttribute('data-tab')).toBe('about')
     const managerStyles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
     expect(managerStyles).toContain('.cxm-nav-button[data-tab="about"] { margin-top: auto; }')
-    expect(managerStyles).toContain('grid-template-columns: 26px minmax(0, 1fr)')
+    expect(managerStyles).toContain('grid-template-columns: max-content minmax(0, 1fr)')
     expect(managerStyles).toContain('grid-template-columns: 248px minmax(0, 1fr)')
     expect(managerStyles).toContain('width: min(1440px, calc(100vw - 40px))')
     expect(managerStyles).toContain('height: min(960px, calc(100vh - 40px))')

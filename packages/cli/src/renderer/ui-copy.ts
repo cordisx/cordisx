@@ -231,6 +231,8 @@ type CopyKey =
   | 'marketplace.filter-all'
   | 'marketplace.filter-certified'
   | 'marketplace.filter-certified-only'
+  | 'marketplace.filter-official'
+  | 'marketplace.filter-official-only'
   | 'marketplace.official'
   | 'marketplace.certified'
   | 'marketplace.open'
@@ -565,6 +567,8 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'marketplace.filter-all': { en: 'Show all plugins', 'zh-CN': '显示全部插件' },
   'marketplace.filter-certified': { en: 'Show certified plugins only', 'zh-CN': '仅显示已认证插件' },
   'marketplace.filter-certified-only': { en: 'Certified only', 'zh-CN': '仅看已认证' },
+  'marketplace.filter-official': { en: 'Show official plugins only', 'zh-CN': '仅显示官方插件' },
+  'marketplace.filter-official-only': { en: 'Official only', 'zh-CN': '仅看官方' },
   'marketplace.official': { en: 'Official', 'zh-CN': '官方' },
   'marketplace.certified': { en: 'Certified', 'zh-CN': '已认证' },
   'marketplace.open': { en: 'Open plugin details', 'zh-CN': '打开插件详情' },

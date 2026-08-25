@@ -112,8 +112,10 @@ export const HOST_COLLECTION_STYLES = String.raw`
   .cxc-search-clear[hidden] { display: none; }
   .cxc-list {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 360px));
-    justify-content: start;
+    /* Collapse unused tracks and let the remaining product cards use the
+       complete content width. This avoids a blank trailing column without
+       requiring every catalog to carry its own width exception. */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
     gap: 8px;
     margin-top: 12px;
   }

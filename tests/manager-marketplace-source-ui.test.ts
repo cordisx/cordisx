@@ -87,6 +87,7 @@ describe('Manager Marketplace discovery and source IA', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="marketplace"]')!.click()
       await waitFor(() => dom.window.document.querySelector('[data-marketplace-discovery-page]') !== null)
       const page = dom.window.document.querySelector<HTMLElement>('[data-marketplace-discovery-page]')!
+      expect(page.textContent).toContain(managerCopy(locale, 'marketplace.filter-official-only'))
       expect(page.textContent).toContain(managerCopy(locale, 'marketplace.filter-certified-only'))
       expect(page.textContent).toContain(managerCopy(locale, 'marketplace.no-plugins'))
       expect([...page.querySelectorAll('a, button')].map(item => item.textContent).join(' ')).not.toMatch(/docs|文档/iu)
@@ -110,9 +111,11 @@ describe('Manager Marketplace discovery and source IA', () => {
       const results = page.querySelector<HTMLElement>('[data-marketplace-results-scroll]')!
       const search = tools.querySelector<HTMLElement>('[data-collection-search="marketplace"]')!
       const filter = tools.querySelector<HTMLElement>('[data-marketplace-certified-only]')!
+      const officialFilter = tools.querySelector<HTMLElement>('[data-marketplace-official-only]')!
       expect(content.dataset.marketplaceDiscovery).toBe('true')
       expect(search.parentElement?.parentElement?.classList.contains('cxm-toolbar')).toBe(true)
       expect(filter.parentElement?.classList.contains('cxm-marketplace-filter-row')).toBe(true)
+      expect(officialFilter.parentElement).toBe(filter.parentElement)
       expect(results.contains(tools)).toBe(false)
       expect([...dom.window.document.querySelectorAll('a, button')].map(item => item.textContent).join(' ')).not.toMatch(/docs|文档/iu)
 

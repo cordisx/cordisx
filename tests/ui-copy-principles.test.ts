@@ -101,4 +101,10 @@ describe('UI copy principles', () => {
     expect(managerCopy('en', 'plugins.demo.slot-showcase-description')).toBe('Explore plugins, navigation, pages, and status.')
     expect(managerCopy('zh-CN', 'plugins.demo.slot-showcase-description')).toBe('查看插件、导航、页面与状态。')
   })
+
+  it('records shared overlay and official-control ownership instead of page-local exceptions', async () => {
+    const principles = await readFile(principlesPath, 'utf8')
+    expect(principles).toContain('one title, at most one concise')
+    expect(principles).toContain('must not draw a second button, Select, or Input')
+  })
 })
