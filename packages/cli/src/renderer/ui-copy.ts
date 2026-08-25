@@ -91,6 +91,51 @@ type CopyKey =
   | 'plugins.reload'
   | 'plugins.open'
   | 'plugins.heading'
+  | 'plugin.status.active'
+  | 'plugin.status.blocked'
+  | 'plugin.status.permission-blocked'
+  | 'plugin.status.failed'
+  | 'plugin.status.installing'
+  | 'plugin.status.updating'
+  | 'plugin.status.enabling'
+  | 'plugin.status.disabling'
+  | 'plugin.status.reloading'
+  | 'plugin.status.uninstalling'
+  | 'plugin.status.rolling-back'
+  | 'plugin.status.rollback-failed'
+  | 'plugin.status.configured-disabled'
+  | 'runtime.lifecycle-summary'
+  | 'runtime.services'
+  | 'runtime.none'
+  | 'runtime.active-contributions'
+  | 'runtime.commands'
+  | 'runtime.processing'
+  | 'runtime.configured-disabled'
+  | 'runtime.reauthorize'
+  | 'runtime.restore-plugin'
+  | 'runtime.block-plugin'
+  | 'runtime.locale-catalogs-empty'
+  | 'runtime.commands-empty'
+  | 'runtime.diagnostics'
+  | 'runtime.section.localization'
+  | 'runtime.section.details'
+  | 'runtime.configuration'
+  | 'runtime.not-declared'
+  | 'runtime.revision'
+  | 'runtime.last-good'
+  | 'runtime.writer'
+  | 'runtime.available'
+  | 'runtime.unavailable'
+  | 'runtime.availability-supported'
+  | 'runtime.availability-degraded'
+  | 'runtime.host'
+  | 'runtime.adapter'
+  | 'runtime.secondary-connection'
+  | 'runtime.raw-bridge'
+  | 'runtime.yes'
+  | 'runtime.no'
+  | 'runtime.permission-boundary'
+  | 'runtime.permission-documentation'
   | 'console.requests'
   | 'console.successes'
   | 'console.failures'
@@ -376,6 +421,51 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'plugins.reload': { en: 'Reload plugin', 'zh-CN': '重载插件' },
   'plugins.open': { en: 'Open plugin details', 'zh-CN': '打开插件详情' },
   'plugins.heading': { en: 'Plugin details', 'zh-CN': '插件详情' },
+  'plugin.status.active': { en: 'Active', 'zh-CN': '运行中' },
+  'plugin.status.blocked': { en: 'Blocked', 'zh-CN': '已屏蔽' },
+  'plugin.status.permission-blocked': { en: 'Permission blocked', 'zh-CN': '权限阻止' },
+  'plugin.status.failed': { en: 'Failed to start', 'zh-CN': '启动失败' },
+  'plugin.status.installing': { en: 'Installing', 'zh-CN': '安装中' },
+  'plugin.status.updating': { en: 'Updating', 'zh-CN': '更新中' },
+  'plugin.status.enabling': { en: 'Enabling', 'zh-CN': '启用中' },
+  'plugin.status.disabling': { en: 'Disabling', 'zh-CN': '禁用中' },
+  'plugin.status.reloading': { en: 'Reloading', 'zh-CN': '重载中' },
+  'plugin.status.uninstalling': { en: 'Uninstalling', 'zh-CN': '卸载中' },
+  'plugin.status.rolling-back': { en: 'Restoring', 'zh-CN': '正在恢复' },
+  'plugin.status.rollback-failed': { en: 'Restore failed', 'zh-CN': '恢复失败' },
+  'plugin.status.configured-disabled': { en: 'Disabled by configuration', 'zh-CN': '配置禁用' },
+  'runtime.lifecycle-summary': { en: 'Runtime details', 'zh-CN': '运行详情' },
+  'runtime.services': { en: 'Services', 'zh-CN': '服务' },
+  'runtime.none': { en: 'None', 'zh-CN': '无' },
+  'runtime.active-contributions': { en: 'Active contributions', 'zh-CN': '活跃贡献' },
+  'runtime.commands': { en: 'Commands', 'zh-CN': '命令' },
+  'runtime.processing': { en: 'Working…', 'zh-CN': '处理中…' },
+  'runtime.configured-disabled': { en: 'Disabled by configuration', 'zh-CN': '配置中已禁用' },
+  'runtime.reauthorize': { en: 'Reauthorize', 'zh-CN': '重新授权' },
+  'runtime.restore-plugin': { en: 'Restore plugin', 'zh-CN': '恢复插件' },
+  'runtime.block-plugin': { en: 'Block plugin', 'zh-CN': '屏蔽插件' },
+  'runtime.locale-catalogs-empty': { en: 'No active locale catalogs', 'zh-CN': '当前插件没有活跃 locale dictionary' },
+  'runtime.commands-empty': { en: 'No commands registered', 'zh-CN': '当前插件没有 command 注册' },
+  'runtime.diagnostics': { en: 'Diagnostics', 'zh-CN': '诊断' },
+  'runtime.section.localization': { en: 'Localization', 'zh-CN': '本地化' },
+  'runtime.section.details': { en: 'Runtime details', 'zh-CN': '运行时详情' },
+  'runtime.configuration': { en: 'Configuration', 'zh-CN': '配置' },
+  'runtime.not-declared': { en: 'Not declared', 'zh-CN': '未声明' },
+  'runtime.revision': { en: 'revision', 'zh-CN': '版本' },
+  'runtime.last-good': { en: 'last good', 'zh-CN': '最后可用' },
+  'runtime.writer': { en: 'writer', 'zh-CN': '写入器' },
+  'runtime.available': { en: 'available', 'zh-CN': '可用' },
+  'runtime.unavailable': { en: 'unavailable', 'zh-CN': '不可用' },
+  'runtime.availability-supported': { en: 'Available', 'zh-CN': '可用' },
+  'runtime.availability-degraded': { en: 'Partially available', 'zh-CN': '部分可用' },
+  'runtime.host': { en: 'Host', 'zh-CN': '宿主' },
+  'runtime.adapter': { en: 'adapter', 'zh-CN': '适配器' },
+  'runtime.secondary-connection': { en: 'secondary connection', 'zh-CN': '二次连接' },
+  'runtime.raw-bridge': { en: 'raw bridge', 'zh-CN': '原始 bridge 暴露' },
+  'runtime.yes': { en: 'yes', 'zh-CN': '是' },
+  'runtime.no': { en: 'no', 'zh-CN': '否' },
+  'runtime.permission-boundary': { en: 'Permissions apply only to Host API calls.', 'zh-CN': '当前权限仅适用于 Host API 调用。' },
+  'runtime.permission-documentation': { en: 'View permission documentation', 'zh-CN': '查看权限说明' },
   'console.requests': { en: 'Requests', 'zh-CN': '调用' },
   'console.successes': { en: 'Succeeded', 'zh-CN': '成功' },
   'console.failures': { en: 'Failed', 'zh-CN': '失败' },

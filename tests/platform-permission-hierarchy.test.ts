@@ -41,7 +41,10 @@ function permission(
   }
 }
 
-function snapshot(supportedCapabilities: ManagerSnapshot['platform']['supportedCapabilities'] = []): ManagerSnapshot {
+function snapshot(
+  supportedCapabilities: ManagerSnapshot['platform']['supportedCapabilities'] = [],
+  locale: 'en' | 'zh-CN' = 'zh-CN',
+): ManagerSnapshot {
   return {
     version: '0.1.0',
     plugins: [
@@ -51,7 +54,7 @@ function snapshot(supportedCapabilities: ManagerSnapshot['platform']['supportedC
     registrations: [],
     commands: [],
     navigation: { routes: [], pages: [], outlets: [] },
-    localization: { locale: 'zh-CN', direction: 'ltr', version: 1 },
+    localization: { locale, direction: 'ltr', version: 1 },
     localeCatalogs: [],
     localizationDiagnostics: [],
     platform: {
@@ -389,6 +392,10 @@ describe('Platform permission presentation hierarchy', () => {
       expect(permissions.textContent).not.toContain('Codex Desktop')
 
       const runtime = openPluginTab(dom.window.document, 'demo', 'runtime')
+      const lifecycle = runtime.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="demo"]')
+      expect(lifecycle?.open).toBe(false)
+      expect(lifecycle?.querySelector('summary')?.textContent).toBe('运行详情 · 运行中')
+      expect(lifecycle?.querySelector('.cxm-plugin-runtime-action')?.textContent).toBe('屏蔽插件')
       const diagnostics = runtime.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
       expect(diagnostics).not.toBeNull()
       expect(diagnostics?.open).toBe(false)
@@ -398,6 +405,30 @@ describe('Platform permission presentation hierarchy', () => {
       expect(diagnostics?.textContent).toContain('原始 bridge 暴露 否')
       expect(diagnostics?.textContent).toContain('当前权限仅适用于 Host API 调用。')
       expect(diagnostics?.textContent).toContain('查看权限说明')
+    } finally {
+      dispose()
+      dom.window.close()
+    }
+  })
+
+  it('localizes expanded runtime lifecycle and diagnostics chrome for English', () => {
+    const { dom, dispose } = install(snapshot([], 'en'))
+    try {
+      const runtime = openPluginTab(dom.window.document, 'demo', 'runtime')
+      const lifecycle = runtime.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="demo"]')
+      const diagnostics = runtime.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
+      expect(lifecycle?.open).toBe(false)
+      expect(diagnostics?.open).toBe(false)
+      expect(lifecycle?.querySelector('summary')?.textContent).toBe('Runtime details · Active')
+      expect(lifecycle?.querySelector('.cxm-plugin-runtime-action')?.textContent).toBe('Block plugin')
+      expect(diagnostics?.querySelector('summary')?.textContent).toBe('Diagnostics')
+
+      lifecycle!.open = true
+      diagnostics!.open = true
+      expect([...diagnostics!.querySelectorAll('h3')].map(item => item.textContent)).toEqual(['Localization', 'Runtime details'])
+      expect(diagnostics?.textContent).toContain('Permissions apply only to Host API calls.')
+      expect(diagnostics?.textContent).toContain('View permission documentation')
+      expect(diagnostics?.textContent).not.toMatch(/[\u3400-\u9fff]/u)
     } finally {
       dispose()
       dom.window.close()

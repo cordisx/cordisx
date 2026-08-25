@@ -1326,8 +1326,12 @@ function createCapabilityIcon(document: Document, capability: CordisXPlatformCap
   return createManagerIcon(document, capabilityPresentation(capability).icon, 'cxm-capability-icon')
 }
 
-function capabilityAvailabilityLabel(status: CordisXCapabilityAvailabilityState): string {
-  return status === 'supported' ? '可用' : status === 'degraded' ? '部分可用' : '不可用'
+function capabilityAvailabilityLabel(status: CordisXCapabilityAvailabilityState, locale = 'zh-CN'): string {
+  return status === 'supported'
+    ? managerCopy(locale, 'runtime.availability-supported')
+    : status === 'degraded'
+      ? managerCopy(locale, 'runtime.availability-degraded')
+      : managerCopy(locale, 'runtime.unavailable')
 }
 
 function createPermissionPolicySelect(
@@ -1590,20 +1594,20 @@ function createSectionTitle(document: Document, text: string): HTMLHeadingElemen
   return create(document, 'h3', 'cxm-section-title', text)
 }
 
-function statusLabel(status: ManagerPluginStatus): string {
-  if (status === 'active') return '运行中'
-  if (status === 'blocked') return '已屏蔽'
-  if (status === 'permission-blocked') return '权限阻止'
-  if (status === 'failed') return '启动失败'
-  if (status === 'installing') return '安装中'
-  if (status === 'updating') return '更新中'
-  if (status === 'enabling') return '启用中'
-  if (status === 'disabling') return '禁用中'
-  if (status === 'reloading') return '重载中'
-  if (status === 'uninstalling') return '卸载中'
-  if (status === 'rolling-back') return '正在恢复'
-  if (status === 'rollback-failed') return '恢复失败'
-  return '配置禁用'
+function statusLabel(status: ManagerPluginStatus, locale: string): string {
+  if (status === 'active') return managerCopy(locale, 'plugin.status.active')
+  if (status === 'blocked') return managerCopy(locale, 'plugin.status.blocked')
+  if (status === 'permission-blocked') return managerCopy(locale, 'plugin.status.permission-blocked')
+  if (status === 'failed') return managerCopy(locale, 'plugin.status.failed')
+  if (status === 'installing') return managerCopy(locale, 'plugin.status.installing')
+  if (status === 'updating') return managerCopy(locale, 'plugin.status.updating')
+  if (status === 'enabling') return managerCopy(locale, 'plugin.status.enabling')
+  if (status === 'disabling') return managerCopy(locale, 'plugin.status.disabling')
+  if (status === 'reloading') return managerCopy(locale, 'plugin.status.reloading')
+  if (status === 'uninstalling') return managerCopy(locale, 'plugin.status.uninstalling')
+  if (status === 'rolling-back') return managerCopy(locale, 'plugin.status.rolling-back')
+  if (status === 'rollback-failed') return managerCopy(locale, 'plugin.status.rollback-failed')
+  return managerCopy(locale, 'plugin.status.configured-disabled')
 }
 
 function formatConfig(config: unknown): string {
@@ -1624,14 +1628,16 @@ function createPluginIcon(document: Document, name: string): HTMLSpanElement {
   return markDecorative(icon)
 }
 
-function pluginStatusDescription(plugin: ManagerPluginSnapshot, status: ManagerPluginStatus): string {
+function pluginStatusDescription(plugin: ManagerPluginSnapshot, status: ManagerPluginStatus, locale: string): string {
   const reason = status === 'failed' || status === 'rollback-failed'
     ? plugin.error
     : status === 'blocked' || status === 'permission-blocked' ? plugin.blockedReason ?? plugin.error : undefined
-  return reason === undefined ? statusLabel(status) : `${statusLabel(status)}：${reason}`
+  const label = statusLabel(status, locale)
+  if (reason === undefined) return label
+  return productLocale(locale) === 'zh-CN' ? `${label}：${reason}` : `${label}: ${reason}`
 }
 
-function pluginCollectionStatus(plugin: ManagerPluginSnapshot, status: ManagerPluginStatus): HostCollectionStatus {
+function pluginCollectionStatus(plugin: ManagerPluginSnapshot, status: ManagerPluginStatus, locale: string): HostCollectionStatus {
   const tone = status === 'active'
     ? 'success'
     : status === 'failed' || status === 'rollback-failed'
@@ -1642,7 +1648,7 @@ function pluginCollectionStatus(plugin: ManagerPluginSnapshot, status: ManagerPl
         : status === 'blocked' || status === 'permission-blocked'
           ? 'warning'
           : 'neutral'
-  return { label: statusLabel(status), tone, detail: pluginStatusDescription(plugin, status) }
+  return { label: statusLabel(status, locale), tone, detail: pluginStatusDescription(plugin, status, locale) }
 }
 
 function safeStorage(view: Window | null): MarketplaceStorage | undefined {
@@ -3687,7 +3693,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         machineId: plugin.id,
         searchText: [plugin.source, ...plugin.inject, ...registrations.flatMap(item => [item.surface, item.id])],
         icon: () => createPluginIcon(document, plugin.name),
-        status: pluginCollectionStatus(plugin, status),
+        status: pluginCollectionStatus(plugin, status, snapshot.localization.locale),
         actions,
         openLabel: `${copy('plugins.open')} · ${plugin.name}`,
         onOpen: () => {
@@ -4680,15 +4686,16 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       panel.append(workspace)
       if (projections.length > 0) mountLunaConsole(frame, projections, plugin.id, latest)
       const lifecycle = create(document, 'details', 'cxm-diagnostics')
-      lifecycle.append(create(document, 'summary', undefined, `生命周期 / 诊断 · ${statusLabel(plugin.status)}`))
+      lifecycle.dataset.runtimeLifecycle = plugin.id
+      lifecycle.append(create(document, 'summary', undefined, `${copy('runtime.lifecycle-summary')} · ${statusLabel(plugin.status, snapshot.localization.locale)}`))
       const lifecycleBody = create(document, 'div', 'cxm-diagnostics-body')
-      lifecycleBody.append(create(document, 'div', 'cxm-copy', `注入服务：${plugin.inject.join(', ') || '无'} · 活跃贡献：${pluginRegistrations.filter(item => item.visible && item.valid).length} · Commands：${pluginCommands.length}`))
+      lifecycleBody.append(create(document, 'div', 'cxm-copy', `${copy('runtime.services')}: ${plugin.inject.join(', ') || copy('runtime.none')} · ${copy('runtime.active-contributions')}: ${pluginRegistrations.filter(item => item.visible && item.valid).length} · ${copy('runtime.commands')}: ${pluginCommands.length}`))
       const action = create(document, 'button', 'cxm-action cxm-plugin-runtime-action')
       action.type = 'button'
       const blocked = plugin.status === 'blocked' || plugin.status === 'failed'
       const permissionBlocked = plugin.status === 'permission-blocked'
       const restorable = blocked || permissionBlocked
-      action.textContent = busyPluginId === plugin.id ? '处理中…' : plugin.status === 'configured-disabled' ? '配置中已禁用' : permissionBlocked ? '重新授权' : blocked ? '恢复插件' : '屏蔽插件'
+      action.textContent = busyPluginId === plugin.id ? copy('runtime.processing') : plugin.status === 'configured-disabled' ? copy('runtime.configured-disabled') : permissionBlocked ? copy('runtime.reauthorize') : blocked ? copy('runtime.restore-plugin') : copy('runtime.block-plugin')
       action.disabled = busyPluginId !== undefined || plugin.status === 'configured-disabled'
       action.addEventListener('click', async () => {
         busyPluginId = plugin.id
@@ -4704,24 +4711,24 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
       lifecycleBody.append(create(document, 'code', 'cxm-detail-id', plugin.id))
       const localeCatalogs = snapshot.localeCatalogs.filter(item => item.owner === plugin.id)
       const localizationDiagnostics = create(document, 'div', 'cxm-copy', localeCatalogs.length === 0
-        ? '当前插件没有活跃 locale dictionary'
+        ? copy('runtime.locale-catalogs-empty')
         : localeCatalogs.map(item => `${item.namespace} · ${item.locale} · ${item.messageCount} keys`).join('\n'))
       const runtimeDiagnostics = create(document, 'div', 'cxm-copy', pluginCommands.length === 0
-        ? '当前插件没有 command 注册'
+        ? copy('runtime.commands-empty')
         : pluginCommands.map(command => `${command.qualifiedId} · running ${command.running}`).join('\n'))
       const adapter = snapshot.platform
       const diagnostics = create(document, 'details', 'cxm-diagnostics')
       diagnostics.dataset.runtimeDiagnostics = 'platform'
-      diagnostics.append(create(document, 'summary', undefined, '诊断'))
+      diagnostics.append(create(document, 'summary', undefined, copy('runtime.diagnostics')))
       const diagnosticsBody = create(document, 'div', 'cxm-diagnostics-body')
-      diagnosticsBody.append(createSectionTitle(document, '本地化'), localizationDiagnostics)
-      diagnosticsBody.append(createSectionTitle(document, '运行时详情'), runtimeDiagnostics)
+      diagnosticsBody.append(createSectionTitle(document, copy('runtime.section.localization')), localizationDiagnostics)
+      diagnosticsBody.append(createSectionTitle(document, copy('runtime.section.details')), runtimeDiagnostics)
       if (plugin.configuration !== undefined) {
         const configSchema = plugin.configuration.schemaKind === 'schemastery'
           ? 'Schemastery'
-          : plugin.configuration.schemaKind === 'standard' ? 'Standard Schema' : '未声明'
+          : plugin.configuration.schemaKind === 'standard' ? 'Standard Schema' : copy('runtime.not-declared')
         const configApplies = plugin.configuration.applies
-        const configDiagnostics = create(document, 'div', 'cxm-copy', `配置：${configSchema} · ${configApplies} · revision ${plugin.configuration.revision} · last-good ${plugin.configuration.lastGoodRevision} · writer ${plugin.configuration.writable ? 'available' : 'unavailable'}`)
+        const configDiagnostics = create(document, 'div', 'cxm-copy', `${copy('runtime.configuration')}: ${configSchema} · ${configApplies} · ${copy('runtime.revision')} ${plugin.configuration.revision} · ${copy('runtime.last-good')} ${plugin.configuration.lastGoodRevision} · ${copy('runtime.writer')} ${plugin.configuration.writable ? copy('runtime.available') : copy('runtime.unavailable')}`)
         configDiagnostics.dataset.configDiagnostics = plugin.id
         diagnosticsBody.append(configDiagnostics)
       }
@@ -4730,7 +4737,7 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
           document,
           'div',
           'cxm-copy',
-          `${provider.providerNameText} · ${capabilityAvailabilityLabel(provider.status)} · ${provider.reasonText}`,
+          `${provider.providerNameText} · ${capabilityAvailabilityLabel(provider.status, snapshot.localization.locale)} · ${provider.reasonText}`,
         )
         providerDiagnostic.dataset.capabilityProvider = provider.providerId
         diagnosticsBody.append(providerDiagnostic)
@@ -4739,12 +4746,12 @@ export function installCordisXManager(document: Document, model: ManagerModel): 
         document,
         'div',
         'cxm-copy',
-        `宿主：${adapter.hostName} · adapter ${adapter.mode} · 二次连接 ${adapter.secondConnectionCreated ? '是' : '否'} · 原始 bridge 暴露 ${adapter.rawBridgeExposed ? '是' : '否'}`,
+        `${copy('runtime.host')}: ${adapter.hostName} · ${copy('runtime.adapter')} ${adapter.mode} · ${copy('runtime.secondary-connection')} ${adapter.secondConnectionCreated ? copy('runtime.yes') : copy('runtime.no')} · ${copy('runtime.raw-bridge')} ${adapter.rawBridgeExposed ? copy('runtime.yes') : copy('runtime.no')}`,
       ))
       for (const diagnostic of adapter.diagnostics) diagnosticsBody.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
-      const securityBoundary = create(document, 'div', 'cxm-notice', '当前权限仅适用于 Host API 调用。')
+      const securityBoundary = create(document, 'div', 'cxm-notice', copy('runtime.permission-boundary'))
       securityBoundary.dataset.tone = 'warning'
-      diagnosticsBody.append(securityBoundary, documentationLink('查看权限说明', PRODUCT_DOCUMENTATION.permissions))
+      diagnosticsBody.append(securityBoundary, documentationLink(copy('runtime.permission-documentation'), PRODUCT_DOCUMENTATION.permissions))
       diagnostics.append(diagnosticsBody)
       lifecycleBody.append(diagnostics)
       lifecycle.append(lifecycleBody)
