@@ -122,11 +122,18 @@ describe('built-in Channel product bundle', () => {
         }),
       }))
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')!.click()
+      const managerModal = dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal="true"]')!
+      expect(dom.window.getComputedStyle(managerModal).fontSize).toBe('13px')
       const channelEntry = dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="channel:channels"]')!
       expect(channelEntry.textContent).toContain('Channel settings')
       expect(channelEntry.querySelector('[data-host-icon="host:layers"]')).not.toBeNull()
       channelEntry.click()
       await waitFor(() => dom.window.document.querySelector('[data-channel-manager="mounted"]') !== null)
+      // Channel content may add its own local styling, but it must never reset
+      // the shared Manager modal typography to the browser default.
+      expect(dom.window.getComputedStyle(managerModal).fontSize).toBe('13px')
+      expect(dom.window.document.querySelector<HTMLElement>('[data-channel-manager-styles="true"]')?.textContent)
+        .not.toContain('.cxf-scope')
       expect(dom.window.document.querySelector('.cxm-heading-current-heading')?.textContent).toBe('Channels')
       expect(dom.window.document.querySelector('[data-manager-content-root]')?.textContent).not.toContain('正在加载插件页面')
       expect(runtime.snapshot().navigation.outlets).toContainEqual(expect.objectContaining({

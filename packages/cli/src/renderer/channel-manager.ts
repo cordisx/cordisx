@@ -1,7 +1,7 @@
 import { Service, type Context, type Disposable } from '@deepseek-ai/cordis'
 import type { CordisXConfigFieldSnapshot, CordisXPageMountContext } from '../contracts.js'
-import { createHostCollection, HOST_COLLECTION_STYLES, type HostCollectionItem } from './host-collection.js'
-import { HOST_FORM_STYLES, HostFormAdapter } from './host-form.js'
+import { createHostCollection, type HostCollectionItem } from './host-collection.js'
+import { HostFormAdapter } from './host-form.js'
 import { HostThemeProjection } from './host-theme.js'
 import { createHostSurfaceIcon, createManagerIcon } from './icons.js'
 import { managerCopy } from './ui-copy.js'
@@ -537,7 +537,12 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     const detachTheme = theme.attach(root)
     const style = document.createElement('style')
     style.dataset.channelManagerStyles = 'true'
-    style.textContent = `${HOST_COLLECTION_STYLES}\n${HOST_FORM_STYLES}\n${CHANNEL_MANAGER_STYLES}`
+    // `manager.content` is mounted inside the Host-owned Manager, which has
+    // already installed the shared collection and form foundations. Repeating
+    // those global selectors here would place `.cxf-scope { font: inherit }`
+    // after the Manager modal rule and reset the whole dialog to the browser
+    // default font size when the Channel page opens.
+    style.textContent = CHANNEL_MANAGER_STYLES
     const content = document.createElement('div')
     content.dataset.channelManagerContent = 'true'
     const forms = new HostFormAdapter(document, root, () => locale)
