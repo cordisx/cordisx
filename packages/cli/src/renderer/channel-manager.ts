@@ -137,12 +137,8 @@ const CHANNEL_MANAGER_STYLES = String.raw`
   .cxc-channel-back { display: grid; place-items: center; width: 28px; height: 28px; flex: none; margin-top: -3px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--cx-muted); cursor: pointer; }
   .cxc-channel-back:hover, .cxc-channel-back:focus-visible { background: var(--cx-hover); color: var(--cx-text); outline: none; }
   .cxc-channel-back:focus-visible { box-shadow: 0 0 0 2px var(--cx-focus); }
-  .cxc-channel-tabs { display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--cx-border); }
-  .cxc-channel-detail-tools { display: flex; align-items: center; gap: 5px; border-bottom: 1px solid var(--cx-border); }
-  .cxc-channel-detail-tools .cxc-channel-tabs { flex: 1; border-bottom: 0; }
-  .cxc-channel-tab { flex: none; padding: 8px 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--cx-muted); cursor: pointer; font: inherit; font-size: 12px; font-weight: 620; }
-  .cxc-channel-tab[aria-selected="true"] { border-bottom-color: var(--cx-primary); color: var(--cx-text); }
-  .cxc-channel-tab:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: -2px; }
+  .cxc-channel-detail-tools { display: flex; align-items: center; gap: 5px; }
+  .cxc-channel-detail-tools > .cxm-tabs { flex: 1; margin: 0; }
   .cxc-channel-panel { min-width: 0; }
   .cxc-channel-config-form { inline-size: 100%; margin-inline: 0; }
   .cxc-channel-empty { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 11px 12px; border: 1px solid var(--cx-border); border-radius: 10px; background: var(--cx-surface-raised); color: var(--cx-muted); font-size: 12px; }
@@ -702,29 +698,48 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
       back.append(createHostSurfaceIcon(document, 'host:back'))
       back.addEventListener('click', () => { selectedId = undefined; render() })
       const tabs = document.createElement('div')
-      tabs.className = 'cxc-channel-tabs'
+      tabs.className = 'cxm-tabs cxc-channel-tabs'
       tabs.setAttribute('role', 'tablist')
+      tabs.setAttribute('aria-orientation', 'horizontal')
       const panel = document.createElement('div')
       panel.className = 'cxc-channel-panel'
       panel.setAttribute('role', 'tabpanel')
       panel.dataset.channelDetailPanel = activeTab
-      const tabEntries: readonly { readonly id: ChannelDetailTab; readonly label: string }[] = [
-        { id: 'configuration', label: managerCopy(locale, 'channel.configuration') },
-        { id: 'logs', label: managerCopy(locale, 'channel.logs') },
-        { id: 'sessions', label: managerCopy(locale, 'channel.sessions') },
+      const tabEntries: readonly { readonly id: ChannelDetailTab; readonly label: string; readonly icon: 'configuration' | 'diagnostics' | 'outlets' }[] = [
+        { id: 'configuration', label: managerCopy(locale, 'channel.configuration'), icon: 'configuration' },
+        { id: 'logs', label: managerCopy(locale, 'channel.logs'), icon: 'diagnostics' },
+        { id: 'sessions', label: managerCopy(locale, 'channel.sessions'), icon: 'outlets' },
       ]
-      for (const entry of tabEntries) {
+      const activateTab = (tab: ChannelDetailTab): void => {
+        activeTab = tab
+        render()
+        page.querySelector<HTMLButtonElement>(`[data-channel-detail-tab="${tab}"]`)?.focus()
+      }
+      for (const [index, entry] of tabEntries.entries()) {
         const tab = document.createElement('button')
         tab.type = 'button'
-        tab.className = 'cxc-channel-tab'
+        tab.className = 'cxm-tab cxc-channel-tab'
         tab.dataset.channelDetailTab = entry.id
         tab.id = `channel-tab-${entry.id}`
         tab.setAttribute('role', 'tab')
         tab.setAttribute('aria-controls', `channel-panel-${entry.id}`)
         tab.setAttribute('aria-selected', String(entry.id === activeTab))
         tab.tabIndex = entry.id === activeTab ? 0 : -1
-        tab.textContent = entry.label
-        tab.addEventListener('click', () => { activeTab = entry.id; render() })
+        const tabContent = document.createElement('span')
+        tabContent.className = 'cxm-tab-content'
+        tabContent.append(createManagerIcon(document, entry.icon, 'cxm-tab-icon'), document.createTextNode(entry.label))
+        tab.append(tabContent)
+        tab.addEventListener('click', () => activateTab(entry.id))
+        tab.addEventListener('keydown', (event) => {
+          let nextIndex: number | undefined
+          if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabEntries.length
+          if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabEntries.length) % tabEntries.length
+          if (event.key === 'Home') nextIndex = 0
+          if (event.key === 'End') nextIndex = tabEntries.length - 1
+          if (nextIndex === undefined) return
+          event.preventDefault()
+          activateTab(tabEntries[nextIndex]!.id)
+        })
         tabs.append(tab)
       }
       panel.id = `channel-panel-${activeTab}`

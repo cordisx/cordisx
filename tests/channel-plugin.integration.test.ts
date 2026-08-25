@@ -159,6 +159,10 @@ describe('built-in Channel product bundle', () => {
     expect(detail).not.toBeNull()
     expect(detail.querySelector('.cxc-channel-detail-tools [data-channel-back="true"]')).not.toBeNull()
     expect(detail.querySelector('h2')).toBeNull()
+    const channelTabs = detail.querySelector('[role="tablist"]')!
+    expect(channelTabs.classList.contains('cxm-tabs')).toBe(true)
+    expect(channelTabs.querySelector('[data-channel-detail-tab="configuration"]')?.classList.contains('cxm-tab')).toBe(true)
+    expect(channelTabs.querySelector('.cxm-tab-content .cxm-tab-icon')).not.toBeNull()
     expect(page.querySelector('[data-channel-configuration="simulator/local/test"]')).not.toBeNull()
     expect(page.querySelector('[data-channel-configuration-unavailable="true"]')?.textContent).toContain('No configurable items yet.')
     page.querySelector<HTMLButtonElement>('[data-channel-detail-tab="logs"]')!.click()
