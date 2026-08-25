@@ -40,6 +40,8 @@ const parsed = parseArgs({
     'manager-theme-cycle': { type: 'boolean', default: false },
     'channel-data-plane': { type: 'boolean', default: false },
     'channel-manager-exercise': { type: 'boolean', default: false },
+    'channel-manager-existing-account': { type: 'boolean', default: false },
+    'channel-manager-existing-account-save': { type: 'boolean', default: false },
     'host-collection-menu-exercise': { type: 'boolean', default: false },
     'host-collection-menu-screenshot': { type: 'string' },
     'manager-light-screenshot': { type: 'string' },
@@ -88,6 +90,12 @@ if (parsed.values['channel-data-plane'] && parsed.values.report === undefined) {
 }
 if (parsed.values['channel-manager-exercise'] && (!parsed.values['channel-data-plane'] || parsed.values['manager-screenshot'] === undefined)) {
   throw new Error('--channel-manager-exercise requires --channel-data-plane and --manager-screenshot')
+}
+if (parsed.values['channel-manager-existing-account'] && (!parsed.values['channel-data-plane'] || parsed.values['manager-screenshot'] === undefined)) {
+  throw new Error('--channel-manager-existing-account requires --channel-data-plane and --manager-screenshot')
+}
+if (parsed.values['channel-manager-existing-account-save'] && !parsed.values['channel-manager-existing-account']) {
+  throw new Error('--channel-manager-existing-account-save requires --channel-manager-existing-account')
 }
 if (parsed.values['host-collection-menu-exercise'] && parsed.values.report === undefined) {
   throw new Error('--host-collection-menu-exercise requires --report')
@@ -3770,25 +3778,40 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         await new Promise(resolve => setTimeout(resolve, 250))
       }
       let channelManagerFlow = null
+      let channelManagerExistingAccount = null
       if (${JSON.stringify(parsed.values['channel-manager-exercise'])}) {
-        const list = document.querySelector('[data-channel-page="list"]')
+        let list = document.querySelector('[data-channel-page="list"]')
+        if (!(list instanceof HTMLElement)) {
+          document.querySelector('[data-channel-manager] [data-channel-back="true"]')?.click()
+          const listDeadline = Date.now() + 2_000
+          while (!(list instanceof HTMLElement) && Date.now() < listDeadline) {
+            await nextPaint()
+            list = document.querySelector('[data-channel-page="list"]')
+          }
+        }
         const create = document.querySelector('[data-channel-create="true"]')
         if (!(list instanceof HTMLElement) || !(create instanceof HTMLElement)) throw new Error('Channel list or create action is unavailable')
         create.click()
         await nextPaint()
         const form = document.querySelector('[data-channel-create-form="true"]')
         const name = document.querySelector('#channel-create-name')
-        if (!(form instanceof HTMLFormElement) || !(name instanceof HTMLElement)) throw new Error('Channel candidate form is unavailable')
-        name.onChange?.('Smoke candidate')
+        if (!(form instanceof HTMLFormElement) || !(name instanceof HTMLElement)) throw new Error('Channel local-simulator form is unavailable')
+        const smokeName = 'Smoke local ' + Date.now()
+        const smokeAccountId = smokeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'local'
+        const smokeRecordId = 'simulator/' + smokeAccountId + '/local'
+        name.onChange?.(smokeName)
         form.requestSubmit()
-        await nextPaint()
+        const createdDeadline = Date.now() + 5_000
+        while (document.querySelector('[data-channel-page="list"]') === null && Date.now() < createdDeadline) {
+          await new Promise(resolve => setTimeout(resolve, 25))
+        }
         const search = document.querySelector('[data-collection-search="channel-list"]')
         if (!(search instanceof HTMLInputElement)) throw new Error('Channel search is unavailable')
-        search.value = 'Smoke candidate'
+        search.value = smokeName
         search.dispatchEvent(new Event('input', { bubbles: true }))
         await nextPaint()
-        const card = document.querySelector('[data-host-collection="channel-list"] [data-collection-item="candidate/feishu/1"] .cxc-primary')
-        if (!(card instanceof HTMLElement) || card.hidden) throw new Error('Channel candidate card was not found after search')
+        const card = document.querySelector('[data-host-collection="channel-list"] [data-collection-item="' + CSS.escape(smokeRecordId) + '"] .cxc-primary')
+        if (!(card instanceof HTMLElement) || card.hidden) throw new Error('Persisted local simulator card was not found after search')
         card.click()
         await nextPaint()
         const configuration = document.querySelector('[data-channel-configuration]')
@@ -3802,12 +3825,57 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         channelManagerFlow = {
           list: list !== null,
           create: create !== null,
-          searched: search.value === 'Smoke candidate',
+          searched: search.value === smokeName,
           card: card !== null,
           configuration: configuration !== null,
           tabs: tabs.map(tab => tab.getAttribute('data-channel-detail-tab')),
           logsUnavailable,
           sessionsUnavailable,
+          secretRendered: /secretRef|keychain:|host-secret:/iu.test(document.querySelector('[data-channel-manager]')?.outerHTML ?? ''),
+        }
+      }
+      if (${JSON.stringify(parsed.values['channel-manager-existing-account'])}) {
+        let list = document.querySelector('[data-channel-page="list"]')
+        if (!(list instanceof HTMLElement)) {
+          document.querySelector('[data-channel-manager] [data-channel-back="true"]')?.click()
+          const deadline = Date.now() + 2_000
+          while (!(list instanceof HTMLElement) && Date.now() < deadline) {
+            await nextPaint()
+            list = document.querySelector('[data-channel-page="list"]')
+          }
+        }
+        const card = document.querySelector('[data-channel-page="list"] [data-collection-item] .cxc-primary')
+        if (!(list instanceof HTMLElement) || !(card instanceof HTMLElement)) throw new Error('Configured Channel account card is unavailable')
+        card.click()
+        const deadline = Date.now() + 5_000
+        while (document.querySelector('[data-channel-configuration-form]') === null && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 25))
+        }
+        const form = document.querySelector('[data-channel-configuration-form]')
+        const channelSwitch = form?.querySelector('t-switch')
+        let saved = false
+        let saveStatus = null
+        if (${JSON.stringify(parsed.values['channel-manager-existing-account-save'])}) {
+          if (!(form instanceof HTMLFormElement)) throw new Error('Configured Channel account form is unavailable for save')
+          form.requestSubmit()
+          const deadline = Date.now() + 5_000
+          while (Date.now() < deadline) {
+            saveStatus = document.querySelector('[data-channel-configuration-status]')?.textContent?.trim() ?? null
+            if (saveStatus !== null && saveStatus !== '' && !saveStatus.includes('正在保存') && !saveStatus.includes('Saving')) break
+            await new Promise(resolve => setTimeout(resolve, 25))
+          }
+          saved = saveStatus === '保存后重启相关服务生效' || saveStatus === 'Takes effect after restarting the service'
+        }
+        channelManagerExistingAccount = {
+          list: list !== null,
+          detail: document.querySelector('[data-channel-page="detail"]') !== null,
+          form: form !== null,
+          switchValue: channelSwitch?.value ?? null,
+          switchPropsValue: channelSwitch?.props?.value ?? null,
+          switchAriaChecked: channelSwitch?.getAttribute('aria-checked') ?? null,
+          switchShadowText: channelSwitch?.shadowRoot?.textContent?.trim() ?? null,
+          saved,
+          saveStatus,
           secretRendered: /secretRef|keychain:|host-secret:/iu.test(document.querySelector('[data-channel-manager]')?.outerHTML ?? ''),
         }
       }
@@ -4067,6 +4135,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
               pageTitle: document.querySelector('.cxm-heading-current-heading')?.textContent?.trim() ?? null,
               mounted: document.querySelector('[data-channel-manager]') !== null,
               managerFlow: channelManagerFlow,
+              existingAccount: channelManagerExistingAccount,
             }
           })(),
           tabGeometry: leadingRect === undefined || tabIconRect === undefined || tabLabelRect === undefined || titleRect === undefined ? null : {
@@ -4531,6 +4600,17 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       || channel.managerFlow.sessionsUnavailable !== true
       || channel.managerFlow.secretRendered !== false)) {
       throw new Error(`Channel Manager flow smoke assertions failed: ${JSON.stringify(channel.managerFlow)}`)
+    }
+    if (parsed.values['channel-manager-existing-account'] && (channel.existingAccount?.list !== true
+      || channel.existingAccount.detail !== true || channel.existingAccount.form !== true
+      || !['true', 'false'].includes(channel.existingAccount.switchValue)
+      || channel.existingAccount.switchPropsValue !== channel.existingAccount.switchValue
+      || channel.existingAccount.switchAriaChecked !== channel.existingAccount.switchValue
+      || channel.existingAccount.secretRendered !== false)) {
+      throw new Error(`Channel existing-account smoke assertions failed: ${JSON.stringify(channel.existingAccount)}`)
+    }
+    if (parsed.values['channel-manager-existing-account-save'] && channel.existingAccount?.saved !== true) {
+      throw new Error(`Channel existing-account save smoke assertions failed: ${JSON.stringify(channel.existingAccount)}`)
     }
   }
   if (managerPlugin === 'cli-proxy-api' && managerDetailTab === 'config') {

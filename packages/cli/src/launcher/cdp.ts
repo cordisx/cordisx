@@ -828,12 +828,17 @@ async function install(
             if (serviceConfigController?.signal.aborted === true) throw new Error('service configuration bridge is closed')
             if (activeServiceConfigRequests >= 1) throw new Error('another service configuration request is already active')
             activeServiceConfigRequests += 1
+            let value: unknown
             try {
-              const value = await serviceConfig.handle(request)
-              await sendServiceConfigBindingResponse(session, { requestId, ok: true, value }, executionContextId)
+              value = await serviceConfig.handle(request)
             } finally {
               activeServiceConfigRequests -= 1
             }
+            // The renderer may immediately use a descriptor to submit its CAS
+            // mutation. Release the single-flight seat before publishing the
+            // response, otherwise that legitimate follow-up races its own
+            // completed read and is incorrectly rejected as concurrent.
+            await sendServiceConfigBindingResponse(session, { requestId, ok: true, value }, executionContextId)
           } catch (error) {
             await sendServiceConfigBindingResponse(
               session,

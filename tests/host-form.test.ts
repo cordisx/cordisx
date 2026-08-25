@@ -129,6 +129,8 @@ describe('Host form DOM and accessibility', () => {
     const secret = adapter.control(field({ role: 'credential', value: undefined, disabled: true }), 'credential', () => undefined)
     expect(switchControl.root.tagName).toBe('T-SWITCH')
     expect(switchControl.root.getAttribute('role')).toBe('switch')
+    expect(switchControl.root.getAttribute('value')).toBe('true')
+    expect(switchControl.root.getAttribute('custom-value')).toBe('["true","false"]')
     expect(checkbox.root.tagName).toBe('T-CHECKBOX-GROUP')
     expect(checkbox.root.dataset.tdesignComponent).toBe('checkbox-group')
     expect(checkbox.root.getAttribute('role')).toBe('checkbox')

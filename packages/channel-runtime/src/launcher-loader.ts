@@ -20,7 +20,8 @@ export interface LauncherChannelServiceModuleAccess {
   readonly serviceKind: 'channel-adapter'
   readonly configuration: ChannelServiceConfigurationDeclaration
   readonly artifactDirectory: string
-  readonly runtimeEntry: `./services/${string}.mjs`
+  /** Authority-projected bounded module path; built-ins may live at package root. */
+  readonly runtimeEntry: `./${string}.mjs`
 }
 
 export interface LauncherChannelServiceModule {
@@ -72,7 +73,7 @@ export async function loadLauncherChannelServiceModule(
   access: LauncherChannelServiceModuleAccess,
 ): Promise<LauncherChannelServiceModule> {
   if (access.serviceKind !== 'channel-adapter'
-    || !/^\.\/services\/[a-z0-9][a-z0-9._-]{0,95}\.mjs$/.test(access.runtimeEntry)
+    || !/^\.\/(?:services\/)?[a-z0-9][a-z0-9._-]{0,95}\.mjs$/.test(access.runtimeEntry)
     || !path.isAbsolute(access.artifactDirectory)) {
     throw new Error('Channel service module projection is invalid')
   }

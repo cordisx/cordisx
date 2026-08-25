@@ -36,6 +36,13 @@ import {
   parseCliProxyProviderStartupConfig,
   resolveCliProxyProviderConfigs,
 } from '../plugins/cli-proxy-api/service-config.js'
+import {
+  CHANNEL_SERVICE_CONFIG_INITIAL,
+  createChannelHostServiceConfigContract,
+  createLocalChannelService,
+  projectLocalChannelManager,
+  type LocalChannelService,
+} from '../launcher/channel-service.js'
 import type { CordisXPluginIdentity } from '../platform-contracts.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import { PluginPermissionIdentityRegistry, type PermissionPersistenceContext } from '../launcher/permission-rpc.js'
@@ -126,6 +133,8 @@ interface RendererComposition {
   readonly pluginLifecycleBridgeToken?: string
 }
 
+type ChannelManagerBundleProjection = NonNullable<Parameters<typeof buildRendererBundle>[1]>['channelManager']
+
 async function bundle(
   config: CordisXConfig,
   stdout: (line: string) => void,
@@ -143,6 +152,7 @@ async function bundle(
       readonly activation: CordisXPluginActivationRecordV1
       readonly registryEpoch?: number
     }
+    readonly channelManager?: ChannelManagerBundleProjection
   } = {},
 ): Promise<RendererComposition> {
   const providerBridgeToken = (config.providers.some(provider => provider.enabled)
@@ -177,6 +187,7 @@ async function bundle(
         ? {}
         : { initialRegistryEpoch: options.pluginLifecycle.registryEpoch }),
     }),
+    ...(options.channelManager === undefined ? {} : { channelManager: options.channelManager }),
   })
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
   stdout(`[cordisx] bundle ready: ${source.length} bytes, plugins: ${enabled.join(', ') || '(none)'}`)
@@ -215,7 +226,7 @@ function pluginIdentities(config: CordisXConfig): readonly CordisXPluginIdentity
   return config.plugins.map(plugin => ({ source: plugin.source ?? pathToFileURL(plugin.entry).href, id: plugin.id }))
 }
 
-function cliProxyServiceConfigBridge(input: {
+function cliProxyServiceConfigApis(input: {
   readonly token: string
   readonly profileId: string
   readonly generation: string
@@ -223,7 +234,7 @@ function cliProxyServiceConfigBridge(input: {
   readonly rootDir: string
   readonly environment: NodeJS.ProcessEnv
   readonly fleet: ProviderFleet
-}): ServiceConfigBridgeHandler {
+}): readonly { readonly pluginId: string; readonly serviceId: string; readonly api: HostServiceConfigNarrowApi }[] {
   const secretState = (reference: string | undefined): HostSecretState => {
     if (reference === undefined || reference === '') return 'missing'
     const environmentName = /^host-secret:env\/([A-Z_][A-Z0-9_]*)$/u.exec(reference)?.[1]
@@ -254,13 +265,10 @@ function cliProxyServiceConfigBridge(input: {
       return await input.fleet.reconfigure(providers)
     },
   })
-  return createServiceConfigBridgeHandler({
-    token: input.token, profileId: input.profileId, generation: input.generation,
-    services: [
-      { pluginId: 'cli-proxy-api', serviceId: CLI_PROXY_PROVIDER_RUNTIME_SERVICE_ID, api: runtime },
-      { pluginId: 'cli-proxy-api', serviceId: CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID, api: startup },
-    ],
-  })
+  return [
+    { pluginId: 'cli-proxy-api', serviceId: CLI_PROXY_PROVIDER_RUNTIME_SERVICE_ID, api: runtime },
+    { pluginId: 'cli-proxy-api', serviceId: CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID, api: startup },
+  ]
 }
 
 function recoveredActivation(plan: RollbackPlan, runtimeGeneration: string): CordisXPluginActivationRecordV1 {
@@ -524,6 +532,30 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     ...configuredComposition,
     plugins: [...configuredComposition.plugins, ...activatedPlugins],
   }
+  const channelPlugin = composition.plugins.find(plugin => plugin.enabled && plugin.id === 'channel')
+  let channelService: LocalChannelService | undefined
+  let channelManager: ChannelManagerBundleProjection | undefined
+  if (channelPlugin !== undefined) {
+    const state = await readServiceConfigState({
+      profileId: selection.profileId,
+      pluginId: 'channel',
+      serviceId: 'runtime',
+      initialConfig: CHANNEL_SERVICE_CONFIG_INITIAL as unknown as Parameters<typeof readServiceConfigState>[0]['initialConfig'],
+    }, configPath)
+    channelService = createLocalChannelService({
+      artifactDirectory: path.dirname(channelPlugin.entry),
+      dataDir: path.join(rootFromConfigPath(configPath), 'cache', 'channel-runtime'),
+      source: channelPlugin.source ?? pathToFileURL(channelPlugin.entry).href,
+    })
+    await channelService.start(state.config)
+    channelManager = projectLocalChannelManager({
+      configuration: state.config,
+      revision: state.revision,
+      lastGoodRevision: state.lastGoodRevision,
+      writable: true,
+      ...(channelService.snapshot() === undefined ? {} : { runtime: channelService.snapshot()! }),
+    })
+  }
   const pluginLifecycleBridgeToken = randomBytes(32).toString('hex')
   const pluginLifecycle = {
     handler: {
@@ -548,6 +580,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       activation: initialActivation ?? await lifecycleStore.loadActive(),
       ...(recoveryPlan === undefined ? {} : { registryEpoch: recoveryPlan.rollbackRegistryEpoch }),
     },
+    ...(channelManager === undefined ? {} : { channelManager }),
   })
   const configBridge = rendererComposition.configBridgeToken === undefined
     ? undefined
@@ -572,24 +605,48 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   const providerFleet = rendererComposition.providerBridgeToken === undefined
     ? undefined
     : await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } })
-  const serviceConfigBridge = providerFleet === undefined || rendererComposition.serviceConfigBridgeToken === undefined
+  const serviceConfigToken = rendererComposition.serviceConfigBridgeToken
+  const services: Array<{ readonly pluginId: string; readonly serviceId: string; readonly api: HostServiceConfigNarrowApi }> = []
+  if (serviceConfigToken !== undefined && providerFleet !== undefined) {
+    services.push(...cliProxyServiceConfigApis({
+      token: serviceConfigToken,
+      profileId: selection.profileId,
+      generation: rendererComposition.generation,
+      configPath,
+      rootDir: rootFromConfigPath(configPath),
+      environment: runtime.env ?? process.env,
+      fleet: providerFleet,
+    }))
+  }
+  if (serviceConfigToken !== undefined && channelPlugin !== undefined && channelService !== undefined) {
+    const contract = createChannelHostServiceConfigContract({
+      source: channelPlugin.source ?? pathToFileURL(channelPlugin.entry).href,
+      pluginId: 'channel', serviceId: 'runtime',
+    })
+    services.push({
+      pluginId: 'channel', serviceId: 'runtime',
+      api: new HostServiceConfigNarrowApi({
+        contract: contract as unknown as ConstructorParameters<typeof HostServiceConfigNarrowApi>[0]['contract'],
+        profileId: selection.profileId, generation: rendererComposition.generation,
+        ownerToken: serviceConfigToken, configPath, writable: true, authorize: () => true,
+        restartService: async candidate => await channelService!.restart(candidate),
+      }),
+    })
+  }
+  const serviceConfigBridge = serviceConfigToken === undefined || services.length === 0
     ? undefined
-    : cliProxyServiceConfigBridge({
-        token: rendererComposition.serviceConfigBridgeToken,
-        profileId: selection.profileId,
-        generation: rendererComposition.generation,
-        configPath,
-        rootDir: rootFromConfigPath(configPath),
-        environment: runtime.env ?? process.env,
-        fleet: providerFleet,
+    : createServiceConfigBridgeHandler({
+        token: serviceConfigToken, profileId: selection.profileId, generation: rendererComposition.generation, services,
       })
   if (invocation.options.attach) {
     const debugPort = invocation.options.debugPort ?? composition.codex.debugPort
     if (invocation.options.dryRun) {
       stdout(JSON.stringify({ status: 'ready', mode: 'attach', appId, debugPort }, null, 2))
+      await channelService?.dispose()
       return
     }
-    await runInjectedHost({
+    try {
+      await runInjectedHost({
       source: rendererComposition.source,
       agentHistoryHost: agentHistoryHost(runtime.env ?? process.env, configPath, `${appId}:${selection.profileId}:attach`),
       agentHistoryBridgeToken: rendererComposition.agentHistoryBridgeToken,
@@ -604,8 +661,11 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       debugPort,
       hostArgs: invocation.hostArgs,
       launcher: invocation.options,
-      stdout,
-    })
+        stdout,
+      })
+    } finally {
+      await channelService?.dispose()
+    }
     return
   }
 
@@ -627,6 +687,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   printPlan(plan, stdout)
   if (invocation.options.dryRun) {
     stdout(`[cordisx] loopback CDP port: ${invocation.options.debugPort ?? 'automatic'}`)
+    await channelService?.dispose()
     return
   }
 
@@ -637,7 +698,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   const profile = plan.chromiumProfile.mode === 'independent'
     ? { userDataDir: plan.chromiumProfile.path }
     : undefined
-  await runInjectedHost({
+  try {
+    await runInjectedHost({
     source: rendererComposition.source,
     agentHistoryHost: agentHistoryHost(
       { ...(runtime.env ?? process.env), ...plan.environment },
@@ -659,6 +721,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     launcher: invocation.options,
     ...(profile === undefined ? {} : { profile }),
     ...(Object.keys(plan.environment).length === 0 ? {} : { environment: plan.environment }),
-    stdout,
-  })
+      stdout,
+    })
+  } finally {
+    await channelService?.dispose()
+  }
 }
