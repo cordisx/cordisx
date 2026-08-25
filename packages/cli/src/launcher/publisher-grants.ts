@@ -1,4 +1,8 @@
-import { createHash, randomBytes, verify, type KeyObject } from 'node:crypto'
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, verify, type KeyObject } from 'node:crypto'
+import { chmod, lstat, mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import path from 'node:path'
+import { createMacOSKeychainBackend, LauncherKeychainError, type LauncherKeychainBackend } from './secret-store.js'
 
 export const CORDISX_PUBLISHER_GRANT_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/publisher-grant.v1.schema.json' as const
@@ -41,6 +45,168 @@ export interface PublisherGrantTarget { readonly pluginId: string; readonly vers
 export type PublisherGrantDecision =
   | { readonly state: 'active' | 'grace'; readonly effectiveNow: string; readonly refreshDue: boolean; readonly clockRollbackDetected: boolean }
   | { readonly state: 'not-yet-valid' | 'expired' | 'invalid'; readonly effectiveNow?: string; readonly reason: string }
+
+const MACHINE_IDENTITY_SERVICE = 'cordisx/machine-identity/v1'
+const MACHINE_IDENTITY_ACCOUNT = 'ed25519-pkcs8'
+const DIRECT_STATE_CONTRACT = 'cordisx.publisher-grants/direct-device-bound/v1'
+
+/** macOS Keychain-backed machine key. Its location deliberately does not contain CORDISX_HOME. */
+export class MacOSMachineIdentityProvider implements DeviceKeyProvider {
+  private readonly backend: LauncherKeychainBackend | undefined
+  constructor(options: { readonly platform?: NodeJS.Platform; readonly backend?: LauncherKeychainBackend } = {}) {
+    this.backend = (options.platform ?? process.platform) === 'darwin' ? (options.backend ?? createMacOSKeychainBackend()) : undefined
+  }
+  async current(): Promise<DeviceKeyIdentity | undefined> {
+    if (this.backend === undefined) return undefined
+    let serialized: string
+    try {
+      serialized = await this.backend.read(MACHINE_IDENTITY_SERVICE, MACHINE_IDENTITY_ACCOUNT)
+    } catch (error) {
+      if (!(error instanceof LauncherKeychainError) || error.code !== 'MISSING') return undefined
+      const pair = generateKeyPairSync('ed25519')
+      serialized = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
+      try { await this.backend.upsert(MACHINE_IDENTITY_SERVICE, MACHINE_IDENTITY_ACCOUNT, serialized) } catch { return undefined }
+    }
+    try {
+      const privateKey = createPrivateKey(serialized)
+      const publicKey = createPublicKey(privateKey).export({ type: 'spki', format: 'der' })
+      return Object.freeze({
+        keyId: devicePublicKeyHash(publicKey).slice('sha256:'.length, 32),
+        publicKey,
+        async sign(input: Uint8Array) { return sign(null, input, privateKey) },
+      })
+    } catch { return undefined }
+  }
+}
+
+export interface DeviceChallenge {
+  readonly schemaVersion: 1
+  readonly devicePublicKey: string
+  readonly devicePublicKeyHash: string
+  readonly nonce: string
+  readonly issuedAt: string
+  readonly proof: string
+}
+
+/** Publisher-safe public data. The private key stays inside the machine identity provider. */
+export async function createDeviceChallenge(provider: DeviceKeyProvider, now = new Date()): Promise<DeviceChallenge> {
+  const device = await provider.current()
+  if (device === undefined) throw new Error('a machine identity key is unavailable')
+  const digest = devicePublicKeyHash(device.publicKey)
+  const unsigned = { schemaVersion: 1 as const, devicePublicKey: Buffer.from(device.publicKey).toString('base64url'), devicePublicKeyHash: digest, nonce: randomBytes(32).toString('base64url'), issuedAt: now.toISOString() }
+  return Object.freeze({ ...unsigned, proof: Buffer.from(await device.sign(Buffer.from(JSON.stringify(unsigned), 'utf8'))).toString('base64url') })
+}
+
+interface DirectGrantRecord { readonly statement: PublisherGrantStatement; readonly importedAt: string; readonly revokedAt?: string }
+interface DirectGrantState { readonly contract: typeof DIRECT_STATE_CONTRACT; readonly revision: number; readonly lastTrustedAt?: string; readonly statements: Readonly<Record<string, string>>; readonly grants: Readonly<Record<string, DirectGrantRecord>> }
+export type DirectPublisherGrantStatus = 'authorized' | 'refresh-due' | 'grace' | 'expired' | 'not-yet-valid' | 'revoked' | 'device-mismatch' | 'unavailable'
+export interface DirectPublisherGrantProjection { readonly status: DirectPublisherGrantStatus; readonly grantId?: string; readonly features: readonly string[]; readonly expiresAt?: string; readonly refreshAfter?: string }
+
+function grantRecordKey(statement: PublisherGrantStatement, grantId: string): string { return `${statement.issuer.environment}:${statement.issuer.id}:${grantId}` }
+function directInitial(): DirectGrantState { return { contract: DIRECT_STATE_CONTRACT, revision: 0, statements: {}, grants: {} } }
+function storedTime(previous: string | undefined, statement: PublisherGrantStatement): string | undefined {
+  const candidate = Date.parse(statement.issuedAt)
+  const prior = previous === undefined ? Number.NEGATIVE_INFINITY : Date.parse(previous)
+  return candidate > prior ? new Date(candidate).toISOString() : previous
+}
+
+/** Home-scoped signed-statement state; never stores the machine private key. */
+export class DirectPublisherGrantStore implements TrustedTimeStore {
+  private readonly file: string
+  private tail: Promise<void> = Promise.resolve()
+  private constructor(readonly homeDir: string) { this.file = path.join(homeDir, 'state', 'publisher-grants', 'direct-device-bound.v1.json') }
+  static async open(homeDir: string): Promise<DirectPublisherGrantStore> {
+    const store = new DirectPublisherGrantStore(homeDir)
+    await mkdir(path.dirname(store.file), { recursive: true, mode: 0o700 })
+    if (process.platform !== 'win32') await chmod(path.dirname(store.file), 0o700)
+    try { await store.readState() } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; await store.writeState(directInitial()) }
+    return store
+  }
+  async read(): Promise<TrustedTimeState> { const state = await this.readState(); return state.lastTrustedAt === undefined ? {} : { lastTrustedAt: state.lastTrustedAt } }
+  async write(value: TrustedTimeState): Promise<void> { await this.update(state => ({ ...state, ...(value.lastTrustedAt === undefined ? {} : { lastTrustedAt: value.lastTrustedAt }) })) }
+  async import(statement: PublisherGrantStatement): Promise<void> {
+    const fingerprint = createHash('sha256').update(JSON.stringify(statement)).digest('hex')
+    await this.update(state => {
+      const known = state.statements[statement.statementId]
+      if (known !== undefined && known !== fingerprint) throw new Error('PublisherGrant statementId replay differs from the accepted statement')
+      const statements = { ...state.statements, [statement.statementId]: fingerprint }
+      if (statement.kind === 'transfer') throw new Error('transfer requires a publisher-signed grant for the new device')
+      if (statement.kind === 'revoke') {
+        const payload = statement.payload as { readonly grantId: string; readonly effectiveAt: string }
+        const key = grantRecordKey(statement, payload.grantId)
+        const current = state.grants[key]
+        const lastTrustedAt = storedTime(state.lastTrustedAt, statement)
+        return { ...state, revision: state.revision + 1, ...(lastTrustedAt === undefined ? {} : { lastTrustedAt }), statements, grants: current === undefined ? state.grants : { ...state.grants, [key]: { ...current, revokedAt: payload.effectiveAt } } }
+      }
+      const grant = grantPayload(statement)
+      const key = grantRecordKey(statement, grant.grantId)
+      const lastTrustedAt = storedTime(state.lastTrustedAt, statement)
+      return { ...state, revision: state.revision + 1, ...(lastTrustedAt === undefined ? {} : { lastTrustedAt }), statements, grants: { ...state.grants, [key]: { statement, importedAt: new Date().toISOString() } } }
+    })
+  }
+  async records(): Promise<readonly DirectGrantRecord[]> { return Object.values((await this.readState()).grants) }
+  private async readState(): Promise<DirectGrantState> {
+    const meta = await lstat(this.file)
+    if (!meta.isFile() || meta.isSymbolicLink()) throw new Error('PublisherGrant state must be a regular file')
+    const value = JSON.parse(await readFile(this.file, 'utf8')) as DirectGrantState
+    if (value.contract !== DIRECT_STATE_CONTRACT || !Number.isInteger(value.revision) || value.statements === null || value.grants === null) throw new Error('PublisherGrant state is invalid')
+    return value
+  }
+  private async update(mutate: (state: DirectGrantState) => DirectGrantState): Promise<void> {
+    const previous = this.tail.catch(() => undefined)
+    const operation = previous.then(async () => await this.writeState(mutate(await this.readState())))
+    this.tail = operation.then(() => undefined, () => undefined)
+    await operation
+  }
+  private async writeState(state: DirectGrantState): Promise<void> {
+    const temporary = `${this.file}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`
+    const handle = await open(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
+    try { await handle.writeFile(`${JSON.stringify(state, null, 2)}\n`); await handle.sync(); await handle.close(); await rename(temporary, this.file) } finally { await handle.close().catch(() => undefined); await unlink(temporary).catch(() => undefined) }
+  }
+}
+
+/** Direct-device-bound authorization owns import, renew/revoke recovery, and Host-only feature projection. */
+export class DirectPublisherGrantAuthority {
+  constructor(private readonly keys: PublisherKeyRegistry, private readonly device: DeviceKeyProvider, private readonly store: DirectPublisherGrantStore) {}
+  async challenge(now = new Date()): Promise<DeviceChallenge> { return await createDeviceChallenge(this.device, now) }
+  async import(value: unknown): Promise<DirectPublisherGrantProjection> {
+    const statement = await verifyPublisherGrantStatement(value, this.keys)
+    if (statement.kind === 'grant' || statement.kind === 'renew') {
+      const current = await this.device.current()
+      if (current === undefined || devicePublicKeyHash(current.publicKey) !== grantPayload(statement).devicePublicKeyHash) return { status: 'device-mismatch', features: [] }
+    }
+    await this.store.import(statement)
+    if (statement.kind === 'revoke') return { status: 'revoked', grantId: (statement.payload as { readonly grantId: string }).grantId, features: [] }
+    if (statement.kind === 'transfer') return { status: 'unavailable', features: [] }
+    const grant = grantPayload(statement)
+    const evaluated = evaluatePublisherGrantTime(grant, await this.store.read())
+    return evaluated.state === 'active'
+      ? { status: evaluated.refreshDue ? 'refresh-due' : 'authorized', grantId: grant.grantId, features: grant.features, expiresAt: grant.expiresAt, refreshAfter: grant.refreshAfter }
+      : evaluated.state === 'grace'
+        ? { status: 'grace', grantId: grant.grantId, features: grant.features, expiresAt: grant.expiresAt, refreshAfter: grant.refreshAfter }
+        : { status: evaluated.state === 'expired' ? 'expired' : 'not-yet-valid', grantId: grant.grantId, features: [], expiresAt: grant.expiresAt, refreshAfter: grant.refreshAfter }
+  }
+  async status(target: PublisherGrantTarget, now = new Date()): Promise<DirectPublisherGrantProjection> {
+    const device = await this.device.current()
+    if (device === undefined) return { status: 'unavailable', features: [] }
+    const digest = devicePublicKeyHash(device.publicKey)
+    const state = await this.store.read()
+    const records = await this.store.records()
+    const candidates = records.filter(record => record.statement.kind === 'grant' || record.statement.kind === 'renew')
+      .map(record => ({ record, grant: grantPayload(record.statement) }))
+      .filter(({ grant }) => grant.pluginId === target.pluginId && publisherGrantVersionMatches(grant.versionRange, target.version))
+      .sort((left, right) => Date.parse(right.grant.expiresAt) - Date.parse(left.grant.expiresAt))
+    const candidate = candidates[0]
+    if (candidate === undefined) return { status: 'unavailable', features: [] }
+    if (candidate.grant.devicePublicKeyHash !== digest) return { status: 'device-mismatch', grantId: candidate.grant.grantId, features: [] }
+    const effectiveNow = evaluatePublisherGrantTime(candidate.grant, state, now)
+    const features = target.requestedFeatures === undefined ? candidate.grant.features : target.requestedFeatures.filter(feature => candidate.grant.features.includes(feature))
+    if (candidate.record.revokedAt !== undefined && Date.parse(candidate.record.revokedAt) <= Date.parse(effectiveNow.effectiveNow ?? now.toISOString())) return { status: 'revoked', grantId: candidate.grant.grantId, features: [], expiresAt: candidate.grant.expiresAt, refreshAfter: candidate.grant.refreshAfter }
+    if (effectiveNow.state === 'active') return { status: effectiveNow.refreshDue ? 'refresh-due' : 'authorized', grantId: candidate.grant.grantId, features, expiresAt: candidate.grant.expiresAt, refreshAfter: candidate.grant.refreshAfter }
+    if (effectiveNow.state === 'grace') return { status: 'grace', grantId: candidate.grant.grantId, features, expiresAt: candidate.grant.expiresAt, refreshAfter: candidate.grant.refreshAfter }
+    return { status: effectiveNow.state === 'expired' ? 'expired' : 'not-yet-valid', grantId: candidate.grant.grantId, features: [], expiresAt: candidate.grant.expiresAt, refreshAfter: candidate.grant.refreshAfter }
+  }
+}
 
 function record(value: unknown, label: string): Record<string, unknown> { if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`); return value as Record<string, unknown> }
 function exact(value: Record<string, unknown>, keys: readonly string[], label: string): void { const allowed = new Set(keys); const unknown = Object.keys(value).find(key => !allowed.has(key)); if (unknown !== undefined) throw new Error(`${label}.${unknown} is unsupported`) }
@@ -151,7 +317,14 @@ export class PublisherGrantLifecycleGate {
     const features = target.requestedFeatures === undefined ? grant.features : target.requestedFeatures.filter(feature => grant.features.includes(feature))
     const local = evaluatePublisherGrantTime(grant, await this.trustedTime.read(), now)
     if (local.state === 'expired' || local.state === 'not-yet-valid' || local.state === 'invalid') return { state: 'rejected', features: [] }
-    if (this.registry === undefined) return { state: 'unavailable', features: [] }
+    if (this.registry === undefined) {
+      const before = await this.trustedTime.read()
+      const prior = before.lastTrustedAt === undefined ? Number.NEGATIVE_INFINITY : Date.parse(before.lastTrustedAt)
+      const issued = Date.parse(statement.issuedAt)
+      if (issued > prior) await this.trustedTime.write({ lastTrustedAt: new Date(issued).toISOString() })
+      const evaluated = evaluatePublisherGrantTime(grant, await this.trustedTime.read(), now)
+      return evaluated.state === 'active' ? { state: 'activated', features } : evaluated.state === 'grace' ? { state: 'grace', features } : { state: 'rejected', features: [] }
+    }
     let response: PublisherGrantActivationResponse; try { response = await this.registry.activate(await buildPublisherGrantActivationRequest(statement, this.device)) } catch { return { state: 'unavailable', features: [] } }
     if (response.status !== 'activated' && response.status !== 'already-activated') return { state: response.status === 'unavailable' ? 'unavailable' : 'rejected', features: [] }
     if (response.trustedAt === undefined || !Number.isFinite(Date.parse(response.trustedAt))) return { state: 'rejected', features: [] }
