@@ -25,6 +25,9 @@ import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
 import { createConfigBridgeHandler, type ConfigBridgeHandler } from '../launcher/config-rpc.js'
 import { HostServiceConfigNarrowApi, type HostSecretState } from '../launcher/service-config.js'
 import { createServiceConfigBridgeHandler, type ServiceConfigBridgeHandler } from '../launcher/service-config-rpc.js'
+import { createChannelCredentialBridgeHandler, type ChannelCredentialBridgeHandler } from '../launcher/channel-credential-rpc.js'
+import { createChannelActionsBridgeHandler, type ChannelActionsBridgeHandler } from '../launcher/channel-actions-rpc.js'
+import { LauncherSecretStore } from '../launcher/secret-store.js'
 import { readServiceConfigState } from '../config/service-config.js'
 import {
   CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
@@ -296,6 +299,8 @@ async function runInjectedHost(input: {
   readonly agentHistoryBridgeToken: string
   readonly configBridge?: ConfigBridgeHandler
   readonly serviceConfigBridge?: ServiceConfigBridgeHandler
+  readonly channelCredentialBridge?: ChannelCredentialBridgeHandler
+  readonly channelActionsBridge?: ChannelActionsBridgeHandler
   readonly permissionPersistence?: PermissionPersistenceContext
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
   readonly executable?: string
@@ -322,6 +327,8 @@ async function runInjectedHost(input: {
     agentHistoryBridgeToken: input.agentHistoryBridgeToken,
     ...(input.configBridge === undefined ? {} : { configBridge: input.configBridge }),
     ...(input.serviceConfigBridge === undefined ? {} : { serviceConfigBridge: input.serviceConfigBridge }),
+    ...(input.channelCredentialBridge === undefined ? {} : { channelCredentialBridge: input.channelCredentialBridge }),
+    ...(input.channelActionsBridge === undefined ? {} : { channelActionsBridge: input.channelActionsBridge }),
     ...(input.permissionPersistence === undefined ? {} : { permissionPersistence: input.permissionPersistence }),
     ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
     onStatus: message => input.stdout(`[cordisx] ${message}`),
@@ -537,6 +544,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     plugins: [...configuredComposition.plugins, ...activatedPlugins],
   }
   const channelPlugin = composition.plugins.find(plugin => plugin.enabled && plugin.id === 'channel')
+  const channelCredentialBridgeToken = channelPlugin === undefined ? undefined : randomBytes(32).toString('hex')
+  const channelActionsBridgeToken = channelPlugin === undefined ? undefined : randomBytes(32).toString('hex')
   let channelService: LocalChannelService | undefined
   let channelManager: ChannelManagerBundleProjection | undefined
   if (channelPlugin !== undefined) {
@@ -559,6 +568,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       lastGoodRevision: state.lastGoodRevision,
       writable: true,
       ...(channelService.snapshot() === undefined ? {} : { runtime: channelService.snapshot()! }),
+      audit: channelService.auditSnapshot(),
     })
   }
   const pluginLifecycleBridgeToken = randomBytes(32).toString('hex')
@@ -586,6 +596,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       ...(recoveryPlan === undefined ? {} : { registryEpoch: recoveryPlan.rollbackRegistryEpoch }),
     },
     ...(channelManager === undefined ? {} : { channelManager }),
+    ...(channelCredentialBridgeToken === undefined ? {} : { channelCredentialBridgeToken }),
+    ...(channelActionsBridgeToken === undefined ? {} : { channelActionsBridgeToken }),
   })
   const configBridge = rendererComposition.configBridgeToken === undefined
     ? undefined
@@ -612,6 +624,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     : await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } })
   const serviceConfigToken = rendererComposition.serviceConfigBridgeToken
   const services: Array<{ readonly pluginId: string; readonly serviceId: string; readonly api: HostServiceConfigNarrowApi }> = []
+  let channelConfigApi: HostServiceConfigNarrowApi | undefined
   if (serviceConfigToken !== undefined && providerFleet !== undefined) {
     services.push(...cliProxyServiceConfigApis({
       token: serviceConfigToken,
@@ -628,14 +641,15 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       source: channelPlugin.source ?? pathToFileURL(channelPlugin.entry).href,
       pluginId: 'channel', serviceId: 'runtime',
     })
+    channelConfigApi = new HostServiceConfigNarrowApi({
+      contract: contract as unknown as ConstructorParameters<typeof HostServiceConfigNarrowApi>[0]['contract'],
+      profileId: selection.profileId, generation: rendererComposition.generation,
+      ownerToken: serviceConfigToken, configPath, writable: true, authorize: () => true,
+      restartService: async candidate => await channelService!.restart(candidate),
+    })
     services.push({
       pluginId: 'channel', serviceId: 'runtime',
-      api: new HostServiceConfigNarrowApi({
-        contract: contract as unknown as ConstructorParameters<typeof HostServiceConfigNarrowApi>[0]['contract'],
-        profileId: selection.profileId, generation: rendererComposition.generation,
-        ownerToken: serviceConfigToken, configPath, writable: true, authorize: () => true,
-        restartService: async candidate => await channelService!.restart(candidate),
-      }),
+      api: channelConfigApi,
     })
   }
   const serviceConfigBridge = serviceConfigToken === undefined || services.length === 0
@@ -643,6 +657,15 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     : createServiceConfigBridgeHandler({
         token: serviceConfigToken, profileId: selection.profileId, generation: rendererComposition.generation, services,
       })
+  const channelCredentialBridge = channelCredentialBridgeToken === undefined || channelConfigApi === undefined
+    ? undefined
+    : createChannelCredentialBridgeHandler({
+        token: channelCredentialBridgeToken, profileId: selection.profileId,
+        store: new LauncherSecretStore(), service: channelConfigApi,
+      })
+  const channelActionsBridge = channelActionsBridgeToken === undefined || channelService === undefined
+    ? undefined
+    : createChannelActionsBridgeHandler({ token: channelActionsBridgeToken, api: channelService.manager })
   if (invocation.options.attach) {
     const debugPort = invocation.options.debugPort ?? composition.codex.debugPort
     if (invocation.options.dryRun) {
@@ -661,6 +684,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       }),
       ...(configBridge === undefined ? {} : { configBridge }),
       ...(serviceConfigBridge === undefined ? {} : { serviceConfigBridge }),
+      ...(channelCredentialBridge === undefined ? {} : { channelCredentialBridge }),
+      ...(channelActionsBridge === undefined ? {} : { channelActionsBridge }),
       ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
       pluginLifecycle,
       debugPort,
@@ -718,6 +743,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     }),
     ...(configBridge === undefined ? {} : { configBridge }),
     ...(serviceConfigBridge === undefined ? {} : { serviceConfigBridge }),
+    ...(channelCredentialBridge === undefined ? {} : { channelCredentialBridge }),
+    ...(channelActionsBridge === undefined ? {} : { channelActionsBridge }),
     ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
     pluginLifecycle,
     executable: plan.executable,

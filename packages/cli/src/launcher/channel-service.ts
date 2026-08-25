@@ -34,6 +34,7 @@ export interface LocalChannelService {
     finalize(): Promise<void>
   }>
   snapshot(): ChannelRuntimeSnapshot | undefined
+  auditSnapshot(): ReturnType<ChannelRuntime['auditSnapshot']>
   /** Launcher-private runtime controls; never bind this object into renderer code. */
   readonly manager: ChannelManagerApi
   dispose(): Promise<void>
@@ -50,10 +51,14 @@ export function projectLocalChannelManager(input: {
   readonly lastGoodRevision: number
   readonly writable: boolean
   readonly runtime?: ChannelRuntimeSnapshot
+  readonly audit?: ReturnType<ChannelRuntime['auditSnapshot']>
 }): ChannelManagerProjectionV1 {
   const configuration = parseChannelServiceConfig(input.configuration)
   const runtimeAccounts = new Map((input.runtime?.accounts ?? []).map(account => [
     JSON.stringify([account.ref.adapterId, account.ref.accountId, account.ref.tenantId]), account,
+  ]))
+  const refForAccountKey = new Map(configuration.connections.map(connection => [
+    JSON.stringify([connection.ref.adapterId, connection.ref.accountId, connection.ref.tenantId]), connection.ref,
   ]))
   const connections = configuration.connections.map(connection => {
     const runtime = runtimeAccounts.get(JSON.stringify([
@@ -102,6 +107,10 @@ export function projectLocalChannelManager(input: {
       routeId: binding.routeId,
       state: binding.state,
     })),
+    logs: (input.audit ?? []).flatMap(entry => {
+      const account = refForAccountKey.get(entry.accountKey)
+      return account === undefined ? [] : [{ id: entry.auditId, account, recordedAt: entry.recordedAt, action: entry.action, outcome: entry.outcome }]
+    }),
     diagnostics: configuration.connections
       .filter(connection => connection.adapterKind === 'simulator')
       .map(() => ({ id: 'channel-simulator', status: 'verified' as const, message: 'The local simulator is active.' })),
@@ -257,6 +266,7 @@ export function createLocalChannelService(input: {
       }
     },
     snapshot: () => active?.runtime.snapshot(),
+    auditSnapshot: () => active?.runtime.auditSnapshot() ?? [],
     manager,
     async dispose() {
       const prior = active

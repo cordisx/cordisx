@@ -36,12 +36,27 @@ type CopyKey =
   | 'channel.create.platform'
   | 'channel.create.unavailable'
   | 'channel.create.save'
+  | 'channel.create.simulator'
+  | 'channel.create.feishu'
+  | 'channel.create.app-id'
+  | 'channel.create.tenant'
+  | 'channel.create.provider'
+  | 'channel.create.model'
+  | 'channel.create.profile'
+  | 'channel.create.workspace'
+  | 'channel.create.notifications'
   | 'channel.configuration'
   | 'channel.configuration.description'
   | 'channel.configuration.unavailable'
   | 'channel.logs'
   | 'channel.logs.unavailable'
   | 'channel.logs.native-semantics'
+  | 'channel.logs.search'
+  | 'channel.logs.all'
+  | 'channel.logs.success'
+  | 'channel.logs.failure'
+  | 'channel.logs.export'
+  | 'channel.logs.page'
   | 'channel.sessions'
   | 'channel.sessions.unavailable'
   | 'channel.field.platform'
@@ -49,6 +64,19 @@ type CopyKey =
   | 'channel.field.enabled'
   | 'channel.field.status'
   | 'channel.field.credentials'
+  | 'channel.status.inbound'
+  | 'channel.status.outbound'
+  | 'channel.status.generation'
+  | 'channel.reconnect'
+  | 'channel.enable'
+  | 'channel.disable'
+  | 'channel.reconnecting'
+  | 'channel.reconnected'
+  | 'channel.runtime.unavailable'
+  | 'channel.binding.archive'
+  | 'channel.binding.restore'
+  | 'channel.binding.unbind'
+  | 'channel.binding-operations.unavailable'
   | 'channel.credentials.help'
   | 'channel.real-readiness'
   | 'channel.real-readiness.description'
@@ -374,12 +402,27 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'channel.create.platform': { en: 'Platform', 'zh-CN': '平台' },
   'channel.create.unavailable': { en: 'The local Channel configuration is unavailable.', 'zh-CN': '本地频道配置当前不可用。' },
   'channel.create.save': { en: 'Add local simulator', 'zh-CN': '添加本地模拟频道' },
+  'channel.create.simulator': { en: 'Local simulator', 'zh-CN': '本地模拟器' },
+  'channel.create.feishu': { en: 'Feishu', 'zh-CN': '飞书' },
+  'channel.create.app-id': { en: 'App ID', 'zh-CN': '应用 ID' },
+  'channel.create.tenant': { en: 'Tenant', 'zh-CN': '租户' },
+  'channel.create.provider': { en: 'Provider', 'zh-CN': 'Provider' },
+  'channel.create.model': { en: 'Model', 'zh-CN': '模型' },
+  'channel.create.profile': { en: 'Profile', 'zh-CN': '配置档' },
+  'channel.create.workspace': { en: 'Workspace', 'zh-CN': '工作区' },
+  'channel.create.notifications': { en: 'Completion notifications', 'zh-CN': '完成通知' },
   'channel.configuration': { en: 'Configuration', 'zh-CN': '配置' },
   'channel.configuration.description': { en: 'Host-rendered, read-only connection information.', 'zh-CN': '由宿主渲染的只读连接信息。' },
   'channel.configuration.unavailable': { en: 'No configurable items yet.', 'zh-CN': '暂无可配置项。' },
   'channel.logs': { en: 'Logs', 'zh-CN': '日志' },
   'channel.logs.unavailable': { en: 'No logs yet.', 'zh-CN': '暂无日志。' },
   'channel.logs.native-semantics': { en: 'When available, logs preserve native console argument arrays and structured event records. This page does not synthesize log entries.', 'zh-CN': '日志可用后将保留原生 console 参数数组和结构化事件记录；当前页面不会伪造日志。' },
+  'channel.logs.search': { en: 'Search activity', 'zh-CN': '搜索活动记录' },
+  'channel.logs.all': { en: 'All results', 'zh-CN': '全部结果' },
+  'channel.logs.success': { en: 'Successful', 'zh-CN': '成功' },
+  'channel.logs.failure': { en: 'Needs attention', 'zh-CN': '需要处理' },
+  'channel.logs.export': { en: 'Export JSON', 'zh-CN': '导出 JSON' },
+  'channel.logs.page': { en: 'Page', 'zh-CN': '第' },
   'channel.sessions': { en: 'Connections & sessions', 'zh-CN': '连接与会话管理' },
   'channel.sessions.unavailable': { en: 'No connected sessions yet.', 'zh-CN': '暂无连接或会话。' },
   'channel.field.platform': { en: 'Platform', 'zh-CN': '平台' },
@@ -387,6 +430,19 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'channel.field.enabled': { en: 'Enabled', 'zh-CN': '已启用' },
   'channel.field.status': { en: 'Connection status', 'zh-CN': '连接状态' },
   'channel.field.credentials': { en: 'Credentials', 'zh-CN': '凭据' },
+  'channel.status.inbound': { en: 'Inbound pending', 'zh-CN': '待处理入站' },
+  'channel.status.outbound': { en: 'Outbound pending', 'zh-CN': '待处理出站' },
+  'channel.status.generation': { en: 'Service generation', 'zh-CN': '服务代次' },
+  'channel.reconnect': { en: 'Reconnect', 'zh-CN': '重新连接' },
+  'channel.enable': { en: 'Enable', 'zh-CN': '启用' },
+  'channel.disable': { en: 'Disable', 'zh-CN': '停用' },
+  'channel.reconnecting': { en: 'Reconnecting…', 'zh-CN': '正在重新连接…' },
+  'channel.reconnected': { en: 'Reconnected', 'zh-CN': '已重新连接' },
+  'channel.runtime.unavailable': { en: 'Runtime status is currently unavailable.', 'zh-CN': '运行状态当前不可用。' },
+  'channel.binding.archive': { en: 'Archive binding', 'zh-CN': '归档绑定' },
+  'channel.binding.restore': { en: 'Restore binding', 'zh-CN': '恢复绑定' },
+  'channel.binding.unbind': { en: 'Unbind', 'zh-CN': '解除绑定' },
+  'channel.binding-operations.unavailable': { en: 'Binding operations are currently unavailable.', 'zh-CN': '绑定操作当前不可用。' },
   'channel.credentials.help': { en: 'Only readiness is projected; credential references and values are never rendered.', 'zh-CN': '仅展示就绪状态；不会渲染凭据引用或值。' },
   'channel.real-readiness': { en: 'Real connection readiness', 'zh-CN': '真实连接就绪状态' },
   'channel.real-readiness.description': { en: 'Known test-target information is not evidence of a connected channel.', 'zh-CN': '已知测试目标不代表频道已连接。' },
