@@ -68,8 +68,8 @@ describe('Host collection primitive', () => {
       expect(HOST_COLLECTION_STYLES).not.toContain('justify-content: start')
       expect(HOST_COLLECTION_STYLES).not.toContain('repeat(2,')
       expect(HOST_COLLECTION_STYLES).toContain('.cxc-list[data-layout="rows"] { grid-template-columns: minmax(0, 1fr); }')
-      expect(HOST_COLLECTION_STYLES).toContain('width: 32px; height: 32px;')
-      expect(HOST_COLLECTION_STYLES).toContain('font: 12px/1.35 system-ui, sans-serif;')
+      expect(HOST_COLLECTION_STYLES).toContain('width: 32px; min-width: 32px; height: 32px; min-height: 32px;')
+      expect(HOST_COLLECTION_STYLES).toContain('font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;')
     } finally {
       view.dispose()
       dom.window.close()
@@ -148,11 +148,14 @@ describe('Host collection primitive', () => {
     dom.window.document.body.append(view.element)
     try {
       const trigger = view.element.querySelector<HTMLButtonElement>('.cxc-menu-trigger')!
+      trigger.style.font = '13px/1.45 ui-sans-serif'
       trigger.click()
       const popup = dom.window.document.querySelector<HTMLElement>('body > .cxc-menu-popup')!
       expect(trigger.getAttribute('aria-expanded')).toBe('true')
       expect(trigger.getAttribute('aria-controls')).toBe(popup.id)
       expect(popup.getAttribute('role')).toBe('menu')
+      expect(popup.style.font).toContain('13px')
+      expect(popup.style.font).toContain('ui-sans-serif')
       expect([...popup.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(['share分享', 'up上移', 'info诊断', 'delete卸载'])
       expect(view.element.querySelector('.cxc-card')?.getAttribute('data-action-menu-open')).toBe('true')
       expect(dom.window.document.activeElement?.getAttribute('data-collection-action')).toBe('share')
