@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { createServer } from 'node:net'
@@ -88,6 +88,22 @@ describe('functional CordisX CLI', () => {
     ], { env: { CORDISX_HOME: path.join(root, 'home') }, stdout: () => undefined })).rejects.toThrow(
       '--profile-dir requires --data isolated; shared reuses the current Host profile',
     )
+  })
+
+  it('fails instead of claiming readiness when an already-running shared Host exits the singleton hand-off', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))
+    const executable = path.join(root, 'singleton-handoff')
+    await writeFile(executable, '#!/usr/bin/env node\nprocess.exit(0)\n')
+    await chmod(executable, 0o755)
+    const output: string[] = []
+    await expect(runCordisXCli([
+      'codex', '--data', 'shared', '--executable', executable,
+    ], {
+      env: { CORDISX_HOME: path.join(root, 'home') },
+      stdout: line => { output.push(line) },
+    })).rejects.toThrow('当前 Host 已运行且未启用 CordisX 调试；正常退出 Host 后重跑同一 shared 命令')
+    expect(output.join('\n')).toContain('"status": "launching"')
+    expect(output.join('\n')).not.toContain('CDP renderer ready')
   })
 
   it('fails closed when a development system launch port is already occupied', async () => {

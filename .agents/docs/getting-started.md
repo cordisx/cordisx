@@ -166,6 +166,10 @@ A `shared` profile uses the existing Host Chromium data plus `HOME` and
 remain available without a new login. An `isolated` profile instead projects
 private host and Chromium roots. Both use a loopback CDP port; shutdown removes
 the tracked injection and stops only the process started by this launcher.
+If the normal Host is already running and has not been started with CordisX
+debugging, Electron can hand the launch to that process and exit before CDP is
+ready. CordisX reports `当前 Host 已运行且未启用 CordisX 调试；正常退出 Host 后重跑同一 shared 命令`
+instead of claiming the Manager was injected.
 
 Project-local composition is an explicit developer mode only:
 
