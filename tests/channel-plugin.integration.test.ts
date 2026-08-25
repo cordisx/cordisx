@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom'
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
+import { buildRendererComposition } from '../packages/cli/src/cli/run.js'
 import { manifest } from '../packages/cli/src/plugins/channel/index.js'
 import {
   CordisXChannelManagerService,
@@ -84,13 +85,14 @@ describe('built-in Channel product bundle', () => {
 
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const entry = path.join(root, 'packages/cli/src/plugins/channel/index.ts')
-    const bundle = await buildRendererBundle({
+    const rendererComposition = await buildRendererComposition({
       version: 1,
       rootDir: root,
       codex: { debugPort: 9229 },
       providers: [],
       plugins: [{ id: 'channel', entry, enabled: true, config: {} }],
-    }, { profileId: 'work', channelManager: projection, channelActionsBridgeToken: 'a'.repeat(64) })
+    }, () => undefined, { profileId: 'work', channelManager: projection, channelActionsBridgeToken: 'a'.repeat(64) })
+    const bundle = rendererComposition.source
     const dom = new JSDOM(`
       <html lang="en" class="electron-dark"><head></head><body>
         <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
@@ -164,6 +166,9 @@ describe('built-in Channel product bundle', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-manager-content-tabs] [data-manager-content-tab="logs"]')!.click()
       await waitFor(() => dom.window.document.querySelector('[data-channel-detail-panel="logs"]') !== null)
       expect(dom.window.document.querySelector('[data-channel-logs]')?.textContent).toContain('No logs yet.')
+      expect(dom.window.document.querySelector('[data-channel-log-query]')).not.toBeNull()
+      expect(dom.window.document.querySelector('[data-channel-log-outcome]')).not.toBeNull()
+      expect(dom.window.document.querySelector<HTMLButtonElement>('[data-channel-log-export="json"]')?.disabled).toBe(true)
       expect(dom.window.location.href).toBe('https://codex.local/native')
     } finally {
       await runtime.dispose()
