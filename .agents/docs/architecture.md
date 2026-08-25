@@ -490,41 +490,19 @@ remain later security stages.
 
 `launcher/publisher-grants.ts` is a launcher-only seam for the normative
 `publisher-grant.v1` protocol. It verifies a Host-registered Ed25519 issuer
-key, requires a Host device-key provider (OS secure storage/hardware protected
-where available), builds nonce-bound proof-of-possession activation requests,
-and uses a persisted non-decreasing registry-attested clock for expiry and
-offline grace. It deliberately has no renderer binding and no local-file key
-fallback.
+key, creates or retrieves one macOS Keychain machine identity outside
+`CORDISX_HOME`, and keeps signed-grant/import state inside each selected home.
+The default `direct-device-bound` path accepts a publisher grant only when its
+public-key digest matches that machine identity; no CordisX registry is needed.
+It persists a non-decreasing accepted-statement time for expiry/offline grace.
+An optional registry-enhanced request may add first-claim semantics but cannot
+block the direct path when absent. It deliberately has no raw renderer bridge
+and no local-file private-key fallback.
 
-The required activation registry has not been deployed or assigned an owning
-service repository. Therefore omitting the registry returns `unavailable` and
-cannot activate a grant: this prevents a local wrapper from falsely claiming
-that another machine cannot redeem the same grant. When deployed, its durable
-record is limited to issuer/grant -> plugin/device-key-hash/status plus required
-environment/idempotency fields; it never receives payment, order, price,
-currency, refund, tax, invoice, chargeback, settlement, or KYC data. The Host
-can gate CordisX installation/update/activation/feature projection only; it
-does not claim to stop source from executing outside CordisX.
-
-### PublisherGrant authorization seam
-
-`launcher/publisher-grants.ts` is a launcher-only seam for the normative
-`publisher-grant.v1` protocol. It verifies a Host-registered Ed25519 issuer
-key, requires a Host device-key provider (OS secure storage/hardware protected
-where available), builds nonce-bound proof-of-possession activation requests,
-and uses a persisted non-decreasing registry-attested clock for expiry and
-offline grace. It deliberately has no renderer binding and no local-file key
-fallback.
-
-The required activation registry has not been deployed or assigned an owning
-service repository. Therefore omitting the registry returns `unavailable` and
-cannot activate a grant: this prevents a local wrapper from falsely claiming
-that another machine cannot redeem the same grant. When deployed, its durable
-record is limited to issuer/grant -> plugin/device-key-hash/status plus required
-environment/idempotency fields; it never receives payment, order, price,
-currency, refund, tax, invoice, chargeback, settlement, or KYC data. The Host
-can gate CordisX installation/update/activation/feature projection only; it
-does not claim to stop source from executing outside CordisX.
+The Host gates CordisX package/feature projection only; it does not claim to
+stop source or a modified Host outside CordisX. It never receives payment,
+order, price, currency, refund, tax, invoice, chargeback, settlement, or KYC
+data, and no payment webhook exists in this architecture.
 
 The Platform slice adds versioned capability declarations, an identity-bound
 Permission Broker, and manager permission projections. These controls govern

@@ -1,7 +1,14 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
+import { mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { LauncherKeychainError } from '../packages/cli/src/launcher/secret-store.js'
 import {
   CORDISX_PUBLISHER_GRANT_SCHEMA_V1,
+  DirectPublisherGrantAuthority,
+  DirectPublisherGrantStore,
+  MacOSMachineIdentityProvider,
   PublisherGrantLifecycleGate,
   canonicalPublisherGrantSigningInput,
   devicePublicKeyHash,
@@ -75,9 +82,9 @@ describe('PublisherGrant launcher gate', () => {
     expect(publisherGrantVersionMatches('^1.0.0', '1.2.3')).toBe(false)
   })
 
-  it('fails closed without a registry and refuses a second-device response', async () => {
-    const unavailable = new PublisherGrantLifecycleGate(keys, devices, clock())
-    await expect(unavailable.activate(statement(), target, new Date('2026-08-27T00:00:00Z'))).resolves.toEqual({ state: 'unavailable', features: [] })
+  it('accepts a pre-bound direct grant without a registry and still rejects registry conflicts when selected', async () => {
+    const direct = new PublisherGrantLifecycleGate(keys, devices, clock())
+    await expect(direct.activate(statement(), target, new Date('2026-08-27T00:00:00Z'))).resolves.toEqual({ state: 'activated', features: ['sync', 'export'] })
     const boundElsewhere = new PublisherGrantLifecycleGate(keys, devices, clock(), { async activate() { return { status: 'bound-to-other-device' as const } } })
     await expect(boundElsewhere.activate(statement(), target, new Date('2026-08-27T00:00:00Z'))).resolves.toEqual({ state: 'rejected', features: [] })
   })
@@ -90,5 +97,27 @@ describe('PublisherGrant launcher gate', () => {
     expect(request).toMatchObject({ nonce: '0123456789abcdefghijklmnopqrstuv', devicePublicKeyHash: devicePublicKeyHash(devicePublicKey) })
     expect(request?.proof).toMatch(/^[A-Za-z0-9_-]{86}$/)
     expect(trusted.state.lastTrustedAt).toBe('2026-08-27T00:00:00.000Z')
+  })
+
+  it('keeps one machine identity outside home-scoped direct grant records and rejects copied grants on another key', async () => {
+    const values = new Map<string, string>()
+    const backend = {
+      async read(service: string, account: string) { const value = values.get(`${service}:${account}`); if (value === undefined) throw new LauncherKeychainError('MISSING'); return value },
+      async upsert(service: string, account: string, value: string) { values.set(`${service}:${account}`, value) },
+      async remove() {}, async status() { return 'set' as const },
+    }
+    const identity = new MacOSMachineIdentityProvider({ platform: 'darwin', backend })
+    const first = await identity.current()
+    const second = await identity.current()
+    expect(first?.publicKey).toEqual(second?.publicKey)
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-direct-grant-'))
+    try {
+      const authority = new DirectPublisherGrantAuthority(keys, devices, await DirectPublisherGrantStore.open(path.join(root, 'one')))
+      await expect(authority.import(statement())).resolves.toMatchObject({ status: 'authorized', grantId: 'grant-000000000001' })
+      await expect(authority.status(target, new Date('2026-08-27T00:00:00Z'))).resolves.toMatchObject({ status: 'authorized', features: ['sync', 'export'] })
+      const foreign = generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'der' })
+      const foreignGrant = statement({ payload: { ...(statement().payload as object), devicePublicKeyHash: devicePublicKeyHash(foreign) } })
+      await expect(authority.import(foreignGrant)).resolves.toEqual({ status: 'device-mismatch', features: [] })
+    } finally { await rm(root, { recursive: true, force: true }) }
   })
 })
