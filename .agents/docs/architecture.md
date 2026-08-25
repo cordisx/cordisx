@@ -147,6 +147,16 @@ declaration maps to `service-restart`, the schema is
 publication use the shared narrow API, and opaque credential handles are
 preserved only launcher-side across non-secret updates.
 
+For a Channel connection on macOS, the launcher-private secret store issues a
+scoped opaque capture id and accepts only that id plus a transient secret. It
+maps the value to `keychain:cordisx/channel/<profile>/<connection>` using a
+fixed stdin-fed helper backed by `Security.framework`; values never enter
+argv, environment, configuration, launcher logs, descriptors, or Manager
+projection. Capture results contain only `set`/`unset`/`unavailable` and an
+opaque operation token. Non-macOS returns `unavailable`, rather than claiming
+a portable credential backend. The Feishu/Lark launcher adapter reuses the
+same Keychain read backend when it resolves an opaque connection reference.
+
 Online Chrome DevTools support is opt-in. `--online-devtools` adds `https://chrome-devtools-frontend.appspot.com` to `--remote-allow-origins`; once connected, that origin has full renderer debugging authority for the isolated instance.
 
 ### Renderer plane
