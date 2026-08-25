@@ -23,6 +23,19 @@ export interface PublisherGrantStatement {
 
 /** Host registration is the sole source of active issuer keys; sandbox and live are separate. */
 export interface PublisherKeyRegistry { resolve(input: PublisherIssuer): Promise<KeyObject | undefined> }
+/** Explicit Host registration; Marketplace metadata never supplies signing keys. */
+export interface PublisherRegisteredKey extends PublisherIssuer { readonly publicKeySpki: string }
+export class StaticPublisherKeyRegistry implements PublisherKeyRegistry {
+  private readonly keys = new Map<string, KeyObject>()
+  constructor(entries: readonly PublisherRegisteredKey[]) {
+    for (const entry of entries) {
+      const key = `${entry.environment}:${entry.id}:${entry.keyId}`
+      if (this.keys.has(key)) throw new Error(`duplicate PublisherGrant issuer key registration: ${key}`)
+      this.keys.set(key, createPublicKey({ key: Buffer.from(entry.publicKeySpki, 'base64url'), format: 'der', type: 'spki' }))
+    }
+  }
+  async resolve(input: PublisherIssuer): Promise<KeyObject | undefined> { return this.keys.get(`${input.environment}:${input.id}:${input.keyId}`) }
+}
 export interface DeviceKeyIdentity {
   readonly keyId: string
   /** DER SubjectPublicKeyInfo bytes; this is not a hardware serial or fingerprint. */
@@ -307,7 +320,7 @@ export function publisherGrantVersionMatches(range: string, version: string): bo
     return operator === '>=' ? result >= 0 : operator === '>' ? result > 0 : operator === '<=' ? result <= 0 : operator === '<' ? result < 0 : result === 0
   })
 }
-/** Launcher-only gate. An omitted registry is deliberately unavailable, never local-only success. */
+/** Launcher-only gate. A pre-bound direct grant works without the optional activation registry. */
 export class PublisherGrantLifecycleGate {
   constructor(private readonly keys: PublisherKeyRegistry, private readonly device: DeviceKeyProvider, private readonly trustedTime: TrustedTimeStore, private readonly registry?: PublisherGrantActivationRegistry) {}
   async activate(value: unknown, target: PublisherGrantTarget, now = new Date()): Promise<{ readonly state: 'activated' | 'grace' | 'rejected' | 'unavailable'; readonly features: readonly string[] }> {

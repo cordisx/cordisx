@@ -91,12 +91,22 @@ export interface HomeConfigApp {
   readonly profiles: Readonly<Record<string, HomeConfigProfile>>
 }
 
+/** Registered publisher verification keys are Host-local, never catalog metadata. */
+export interface HomeConfigPublisherGrantIssuer {
+  readonly id: string
+  readonly keyId: string
+  readonly environment: 'sandbox' | 'live'
+  /** Ed25519 SubjectPublicKeyInfo DER, base64url encoded. */
+  readonly publicKeySpki: string
+}
+
 export interface HomeConfig {
   readonly version: 1
   readonly defaultApp: string
   readonly providers: readonly HomeConfigProvider[]
   readonly plugins: readonly HomeConfigPlugin[]
   readonly permissions: readonly CordisXPersistedPermissionPolicyRecord[]
+  readonly publisherGrantIssuers: readonly HomeConfigPublisherGrantIssuer[]
   readonly apps: Readonly<Record<string, HomeConfigApp>>
 }
 
@@ -384,10 +394,24 @@ function parseApp(value: unknown, label: string): HomeConfigApp {
   return { defaultProfile, profiles }
 }
 
+function parsePublisherGrantIssuer(value: unknown, index: number): HomeConfigPublisherGrantIssuer {
+  const label = `config.publisherGrantIssuers[${index}]`
+  const issuer = record(value, label)
+  rejectUnknownKeys(issuer, ['id', 'keyId', 'environment', 'publicKeySpki'], label)
+  const id = nonEmptyString(issuer.id, `${label}.id`)
+  const keyId = nonEmptyString(issuer.keyId, `${label}.keyId`)
+  if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(id)) throw new Error(`${label}.id is invalid`)
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(keyId)) throw new Error(`${label}.keyId is invalid`)
+  if (issuer.environment !== 'sandbox' && issuer.environment !== 'live') throw new Error(`${label}.environment is invalid`)
+  const publicKeySpki = nonEmptyString(issuer.publicKeySpki, `${label}.publicKeySpki`)
+  if (!/^[A-Za-z0-9_-]+$/.test(publicKeySpki)) throw new Error(`${label}.publicKeySpki must be base64url`)
+  return { id, keyId, environment: issuer.environment, publicKeySpki }
+}
+
 /** Strictly validate and normalize a version-1 CordisX home configuration. */
 export function parseHomeConfig(value: unknown): HomeConfig {
   const config = record(value, 'config')
-  rejectUnknownKeys(config, ['version', 'defaultApp', 'providers', 'plugins', 'permissions', 'apps'], 'config')
+  rejectUnknownKeys(config, ['version', 'defaultApp', 'providers', 'plugins', 'permissions', 'publisherGrantIssuers', 'apps'], 'config')
   if (config.version !== 1) throw new Error('config.version must be 1')
   const defaultApp = portableId(config.defaultApp, 'config.defaultApp')
   if (config.providers !== undefined && !Array.isArray(config.providers)) throw new Error('config.providers must be an array')
@@ -415,6 +439,14 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     seenPermissions.add(key)
     return policy
   })
+  if (config.publisherGrantIssuers !== undefined && !Array.isArray(config.publisherGrantIssuers)) throw new Error('config.publisherGrantIssuers must be an array')
+  const publisherGrantIssuers = (config.publisherGrantIssuers ?? []).map(parsePublisherGrantIssuer)
+  const seenIssuerKeys = new Set<string>()
+  for (const issuer of publisherGrantIssuers) {
+    const key = `${issuer.environment}:${issuer.id}:${issuer.keyId}`
+    if (seenIssuerKeys.has(key)) throw new Error(`duplicate PublisherGrant issuer key: ${key}`)
+    seenIssuerKeys.add(key)
+  }
   const rawApps = record(config.apps, 'config.apps')
   const apps: Record<string, HomeConfigApp> = Object.create(null) as Record<string, HomeConfigApp>
   for (const [appId, rawApp] of Object.entries(rawApps)) {
@@ -422,7 +454,7 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     apps[appId] = parseApp(rawApp, `config.apps.${appId}`)
   }
   if (!Object.hasOwn(apps, defaultApp)) throw new Error(`config.defaultApp references missing app: ${defaultApp}`)
-  return { version: 1, defaultApp, providers, plugins, permissions, apps }
+  return { version: 1, defaultApp, providers, plugins, permissions, publisherGrantIssuers, apps }
 }
 
 /** Return a new deterministic configuration for first launch or non-interactive setup. */
@@ -433,6 +465,7 @@ export function createDefaultHomeConfig(): HomeConfig {
     providers: [],
     plugins: [],
     permissions: [],
+    publisherGrantIssuers: [],
     apps: {
       codex: {
         defaultProfile: 'default',

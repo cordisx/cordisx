@@ -22,6 +22,8 @@ const PLUGIN_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-prot
 const FEED_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json'
 const PLUGIN_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v3.schema.json'
 const FEED_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v3.schema.json'
+const PLUGIN_SCHEMA_V4 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v4.schema.json'
+const FEED_SCHEMA_V4 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v4.schema.json'
 const OFFICIAL_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v1.schema.json'
 const CERTIFICATION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certification.v1.schema.json'
 const TRUST_SOURCE = 'https://github.com/cordisx/trusted'
@@ -251,6 +253,22 @@ describe('marketplace feed', () => {
       trustedRoots: [OFFICIAL_MARKETPLACE_SOURCE],
       now: '2026-08-24T13:00:00Z',
     }).trust?.byPluginIdentity.size).toBe(1)
+  })
+
+  it('accepts only versioned external-publisher commerce without price or payment state', () => {
+    const value = {
+      $schema: FEED_SCHEMA_V4, schemaVersion: 4, generatedAt: '2026-08-26T00:00:00Z',
+      trust: { authority: 'cordisx.marketplace.codeowners/v1', root: 'https://catalog.example/feed.json', grantModel: 'protected-merge-chain-v1', cryptographicAttestation: 'unsupported' },
+      fallbackLocale: 'en', name: 'Example', homepage: 'https://catalog.example/', official: [], certifications: [],
+      plugins: [{
+        $schema: PLUGIN_SCHEMA_V4, schemaVersion: 4, id: 'paid-notes', fallbackLocale: 'en', name: 'Paid Notes', description: 'Publisher-authorized notes.', version: '1.2.3', source: 'https://github.com/example/paid-notes', license: 'Proprietary', compatibility: { cordisx: '^0.1.0' }, authors: [{ name: 'Example' }],
+        commerce: { $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/commerce-descriptor.v1.schema.json', schemaVersion: 1, mode: 'external-publisher-v1', purchaseUrl: 'https://example.com/buy', authorization: { method: 'publisher-grant.v1', environment: 'live' } },
+      }],
+    }
+    expect(parseMarketplaceFeed(value, { feedUrl: 'https://catalog.example/feed.json', trustedRoots: [] }).plugins[0]?.commerce).toEqual(expect.objectContaining({ purchaseUrl: 'https://example.com/buy', environment: 'live' }))
+    const priced = structuredClone(value)
+    ;((priced.plugins[0] as Record<string, unknown>).commerce as Record<string, unknown>).price = '9.99'
+    expect(() => parseMarketplaceFeed(priced, { feedUrl: 'https://catalog.example/feed.json', trustedRoots: [] })).toThrow('不支持的字段: price')
   })
 })
 

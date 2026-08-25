@@ -8,6 +8,8 @@ import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
 import { ensureHomeConfig, loadHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
 import { CdpPluginLifecycleRuntime, watchAndInject } from '../launcher/cdp.js'
+import { DirectPublisherGrantAuthority, DirectPublisherGrantStore, MacOSMachineIdentityProvider, StaticPublisherKeyRegistry } from '../launcher/publisher-grants.js'
+import { createPublisherGrantBridgeHandler, type PublisherGrantBridgeHandler } from '../launcher/publisher-grant-rpc.js'
 import { loadConfig, type CordisXConfig } from '../launcher/config.js'
 import {
   assertLoopbackPortAvailable,
@@ -330,6 +332,7 @@ async function runInjectedHost(input: {
   readonly channelActionsBridge?: ChannelActionsBridgeHandler
   readonly permissionPersistence?: PermissionPersistenceContext
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
+  readonly publisherGrant?: PublisherGrantBridgeHandler
   readonly executable?: string
   readonly debugPort: number
   readonly hostArgs: readonly string[]
@@ -361,6 +364,7 @@ async function runInjectedHost(input: {
     ...(input.channelActionsBridge === undefined ? {} : { channelActionsBridge: input.channelActionsBridge }),
     ...(input.permissionPersistence === undefined ? {} : { permissionPersistence: input.permissionPersistence }),
     ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
+    ...(input.publisherGrant === undefined ? {} : { publisherGrant: input.publisherGrant }),
     onReady: () => {
       if (reportedReady) return
       reportedReady = true
@@ -463,6 +467,11 @@ async function runDevelopment(
     hostArgs: invocation.hostArgs,
     launcher: invocation.options,
     ...(profile === undefined ? {} : { profile }),
+    publisherGrant: createPublisherGrantBridgeHandler(new DirectPublisherGrantAuthority(
+      new StaticPublisherKeyRegistry([]),
+      new MacOSMachineIdentityProvider(),
+      await DirectPublisherGrantStore.open(config.rootDir),
+    )),
     stdout,
   })
 }
@@ -544,6 +553,11 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
 
   const configuredComposition = await loadConfig(configPath, { profileId: selection.profileId })
   const currentHomeConfig = await loadHomeConfig(configPath)
+  const publisherGrant = createPublisherGrantBridgeHandler(new DirectPublisherGrantAuthority(
+    new StaticPublisherKeyRegistry(currentHomeConfig.publisherGrantIssuers),
+    new MacOSMachineIdentityProvider(),
+    await DirectPublisherGrantStore.open(rootFromConfigPath(configPath)),
+  ))
   const permissionPolicies = currentHomeConfig.permissions.filter(policy => policy.key.profileId === selection.profileId)
   const lifecycleGeneration = randomBytes(16).toString('hex')
   const lifecycleStore = new PluginActivationStore(rootFromConfigPath(configPath), selection.profileId, lifecycleGeneration)
@@ -812,6 +826,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     ...(channelActionsBridge === undefined ? {} : { channelActionsBridge }),
     ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
     pluginLifecycle,
+    publisherGrant,
     executable: plan.executable,
     debugPort,
     hostArgs: invocation.hostArgs,
