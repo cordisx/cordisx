@@ -115,6 +115,14 @@ npm run dev
 [最小插件指南](./.agents/docs/getting-started.md#create-a-plugin)和
 [扩展点示例](./examples/plugins/slot-showcase/README.md)。
 
+AI 编码 Agent 可以安装仓库内置的 CordisX 插件开发 Skill，在实现前统一应用
+公共契约、Host-owned UI、Schemastery 展现模型、生命周期清理和真实 Playground
+工作流：
+
+```bash
+npx skills@latest add cordisx/cordisx --skill cordisx-plugin-development
+```
+
 ## 生态、文档与社区
 
 - [官方网站](https://cordisx.github.io/)——产品介绍与项目入口。

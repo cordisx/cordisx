@@ -7,6 +7,7 @@ import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { managerCopy } from '../packages/cli/src/renderer/ui-copy.js'
 
 type TestTDesignSelect = HTMLElement & {
+  disabled: boolean
   options: readonly { readonly value: string; readonly label: string }[]
   setSelectedValue(value: string | undefined, notify?: boolean): void
 }
@@ -656,7 +657,7 @@ describe('renderer bundle', () => {
     expect(primaryNavigation.find(item => item.dataset.tab === 'marketplace')?.nextElementSibling?.getAttribute('data-tab')).toBe('about')
     const managerStyles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
     expect(managerStyles).toContain('.cxm-nav-button[data-tab="about"] { margin-top: auto; }')
-    expect(managerStyles).toContain('grid-template-columns: 26px minmax(0, 1fr)')
+    expect(managerStyles).toContain('grid-template-columns: var(--cx-manager-header-leading-seat) minmax(0, 1fr)')
     expect(managerStyles).toContain('grid-template-columns: 248px minmax(0, 1fr)')
     expect(managerStyles).toContain('width: min(1440px, calc(100vw - 40px))')
     expect(managerStyles).toContain('height: min(960px, calc(100vh - 40px))')
@@ -671,7 +672,7 @@ describe('renderer bundle', () => {
     expect(managerStyles).not.toContain('.cxm-tab[aria-selected="true"]::after')
     expect(managerStyles).toContain('.cxm-heading p { grid-column: 1 / -1; margin: 3px 0 0;')
     expect(managerStyles).toContain('.cxm-heading-leading {')
-    expect(managerStyles).toContain('min-height: 26px')
+    expect(managerStyles).toContain('min-height: var(--cx-manager-header-leading-seat)')
     expect(managerStyles).toContain('transform: translateY(-.5px)')
     expect(managerStyles).toContain('-webkit-user-select: none')
     expect(managerStyles).toContain('user-select: none')
@@ -719,7 +720,7 @@ describe('renderer bundle', () => {
       .map(element => element.textContent?.trim() ?? '')
     const primaryLeading = dom.window.document.querySelector<HTMLElement>('.cxm-heading-leading')
     expect(primaryLeading?.classList.contains('cxm-heading-icon')).toBe(true)
-    expect(dom.window.getComputedStyle(primaryLeading as HTMLElement).width).toBe('26px')
+    expect(dom.window.getComputedStyle(primaryLeading as HTMLElement).width).toBe('var(--cx-manager-header-leading-seat)')
     expect(dom.window.getComputedStyle(primaryLeading as HTMLElement).borderTopWidth).toBe('0px')
     expect(dom.window.getComputedStyle(primaryLeading as HTMLElement).backgroundColor).toBe('rgba(0, 0, 0, 0)')
     expect(primaryLeading?.dataset.materialIcon).toBe('plugins')
@@ -928,7 +929,7 @@ describe('renderer bundle', () => {
     expect(back?.getAttribute('aria-label')).toBe('返回')
     expect(back?.classList.contains('cxm-heading-leading')).toBe(true)
     expect(back?.querySelector('[data-material-icon="back"]')).not.toBeNull()
-    expect(dom.window.getComputedStyle(back as HTMLElement).width).toBe('26px')
+    expect(dom.window.getComputedStyle(back as HTMLElement).width).toBe('var(--cx-manager-header-leading-seat)')
     expect(dom.window.getComputedStyle(back as HTMLElement).borderTopWidth).toBe('0px')
     expect(dom.window.getComputedStyle(back as HTMLElement).backgroundColor).toBe('rgba(0, 0, 0, 0)')
     expect(breadcrumbLabels()).toEqual(['插件', 'Slot Showcase', 'README'])
@@ -982,13 +983,12 @@ describe('renderer bundle', () => {
     expect(permissionsPanel?.textContent).not.toContain('models.read')
     expect(permissionsPanel?.textContent).toContain('读取可用模型')
     expect(managerModal?.textContent).toContain('显示当前宿主连接实际可用的模型')
-    expect(permissionsPanel?.textContent).toContain('不可用')
     expect(permissionsPanel?.textContent).not.toContain('current-connection-client-unavailable')
     expect(permissionsPanel?.textContent).not.toContain('trusted renderer code 不是安全沙箱')
     expect(permissionsPanel?.textContent).not.toContain('二次连接')
     expect(permissionsPanel?.textContent).not.toContain('原始 bridge 暴露')
     expect(permissionsPanel?.textContent).not.toContain('不是安全沙箱')
-    expect(permissionsPanel?.querySelector('[data-permission-availability="models.read"]')?.getAttribute('data-availability-state')).toBe('unavailable')
+    expect(permissionsPanel?.querySelector('[data-permission-availability="models.read"]')).toBeNull()
     expect(permissionsPanel?.querySelector('[data-permission-capability="models.read"]')).not.toBeNull()
     dom.window.document.documentElement.lang = 'zh-CN'
     await new Promise(resolve => setTimeout(resolve, 0))
@@ -1003,12 +1003,8 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('[data-permission-detail="models.read"]')?.textContent).toContain('models.read')
     expect(dom.window.document.querySelector('[data-permission-provider="desktop-current-connection"]')).not.toBeNull()
     const permissionPolicy = dom.window.document.querySelector<TestTDesignSelect>('t-select[data-permission-capability="models.read"]')
-    expect(permissionPolicy!.options.map(option => option.label)).toEqual(['每次询问', '始终允许', '始终拒绝'])
-    permissionPolicy!.setSelectedValue('deny', true)
-    for (let attempt = 0; attempt < 20 && runtime?.snapshot().permissions[0]?.policy !== 'deny'; attempt += 1) {
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
-    expect(runtime?.snapshot().permissions[0]?.policy).toBe('deny')
+    expect(permissionPolicy!.options.map(option => option.label)).toEqual(['不可用'])
+    expect(permissionPolicy!.disabled).toBe(true)
     expect(runtime?.snapshot().plugins[0]?.status).toBe('active')
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
     expect(dom.window.document.querySelector('[data-plugin-detail-tab="permissions"]')?.getAttribute('aria-selected')).toBe('true')
@@ -1025,18 +1021,17 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="运行状态"]')?.textContent).not.toContain('controlled mount')
     expect(managerHeadings()).toContain('运行状态')
     expect(breadcrumbLabels()).toEqual(['插件', 'Slot Showcase', '运行状态'])
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="logs"]')?.click()
+    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="日志与诊断"] [data-runtime-lifecycle]')).toBeNull()
+    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="日志与诊断"] [data-runtime-console-summary]')).toBeNull()
     const platformDiagnostics = dom.window.document.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
     expect(platformDiagnostics?.open).toBe(false)
     expect(platformDiagnostics?.querySelector('summary')?.textContent).toBe('诊断')
     expect(platformDiagnostics?.querySelector('[data-config-diagnostics="slot-showcase"]')?.textContent)
       .toBe('配置: Schemastery · plugin-restart · 版本 0 · 最后可用 0 · 写入器 不可用')
     expect(platformDiagnostics?.textContent).toContain('current-connection-client-unavailable')
-    expect(platformDiagnostics?.textContent).toContain('当前权限仅适用于 Host API 调用。')
+    expect(platformDiagnostics?.textContent).not.toContain('当前权限仅适用于 Host API 调用。')
     expect(platformDiagnostics?.textContent).not.toContain('查看权限说明')
-
-    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="logs"]')?.click()
-    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="日志与诊断"] [data-runtime-lifecycle]')).toBeNull()
-    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="日志与诊断"] [data-runtime-console-summary]')).toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
       key: 'Enter', bubbles: true, cancelable: true,
     }))

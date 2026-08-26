@@ -15,6 +15,7 @@ import {
 
 const identity = { source: 'file:///plugins/demo/index.ts', id: 'demo' }
 type TestTDesignSelect = HTMLElement & {
+  disabled: boolean
   options: readonly { readonly value: string; readonly label: string }[]
   setSelectedValue(value: string | undefined, notify?: boolean): void
 }
@@ -245,7 +246,7 @@ describe('Platform permission presentation hierarchy', () => {
     dom.window.close()
   })
 
-  it('renders a concise flat list with host-owned names, icons, availability, and editable policy', () => {
+  it('renders a concise flat list with host-owned names and unavailable policy selects', () => {
     const { dom, dispose } = install(snapshot())
     try {
       const content = openPluginTab(dom.window.document, 'demo', 'permissions')
@@ -261,8 +262,11 @@ describe('Platform permission presentation hierarchy', () => {
       ])
       expect(content.querySelector('[data-permission-item="tasks.create"] .cxm-required-badge')?.textContent).toBe('必需')
       expect(content.querySelector('[data-permission-item="models.read"] .cxm-required-badge')).toBeNull()
-      expect(content.querySelectorAll('[data-permission-availability][data-availability-state="unavailable"]')).toHaveLength(7)
+      expect(content.querySelectorAll('[data-permission-availability]')).toHaveLength(0)
       expect(content.querySelectorAll('[data-permission-capability]')).toHaveLength(7)
+      const unavailablePolicies = [...content.querySelectorAll<TestTDesignSelect>('t-select[data-permission-capability]')]
+      expect(unavailablePolicies.every(policy => policy.disabled)).toBe(true)
+      expect(unavailablePolicies.every(policy => policy.options.map(option => option.label).join() === '不可用')).toBe(true)
       expect(content.querySelector('.cxm-slot-card')).toBeNull()
       expect([...content.querySelectorAll('h3')].map(item => item.textContent)).not.toContain('权限策略')
 
@@ -278,7 +282,7 @@ describe('Platform permission presentation hierarchy', () => {
     }
   })
 
-  it('keeps all three localized policies editable independently from runtime availability', async () => {
+  it('makes unavailable capabilities honestly non-editable without offering inactive policies', async () => {
     const state = snapshot(['models.read', 'tasks.create'])
     const { dom, dispose, policies } = install(state)
     try {
@@ -287,20 +291,20 @@ describe('Platform permission presentation hierarchy', () => {
       const createTask = content.querySelector<TestTDesignSelect>('t-select[data-permission-capability="tasks.create"]')
       expect(models).not.toBeNull()
       expect(createTask).not.toBeNull()
-      expect(models!.options.map(option => [option.value, option.label])).toEqual([
-        ['ask', '每次询问'], ['allow', '始终允许'], ['deny', '始终拒绝'],
-      ])
+      expect(models!.options.map(option => [option.value, option.label])).toEqual([['ask', '不可用']])
+      expect(createTask!.options.map(option => [option.value, option.label])).toEqual([['deny', '不可用']])
+      expect(models!.disabled).toBe(true)
+      expect(createTask!.disabled).toBe(true)
       expect(content.querySelector('[data-permission-capability="tasks.catalog.read"]')).not.toBeNull()
-      models!.setSelectedValue('allow', true)
       await new Promise(resolve => setTimeout(resolve, 0))
-      expect(policies).toEqual(['models.read:allow'])
+      expect(policies).toEqual([])
     } finally {
       dispose()
       dom.window.close()
     }
   })
 
-  it('opens a third-level permission detail, keeps policy recovery available, and returns to the permission tab', async () => {
+  it('opens a third-level permission detail with an honest unavailable policy and returns to the permission tab', async () => {
     const state = snapshot()
     const { dom, dispose, policies } = install(state)
     try {
@@ -327,10 +331,10 @@ describe('Platform permission presentation hierarchy', () => {
       expect(detail?.textContent).not.toContain('current-connection-client-unavailable')
 
       const policy = detail?.querySelector<TestTDesignSelect>('t-select[data-permission-capability="tasks.create"]')
-      expect(policy!.options.map(option => option.label)).toEqual(['每次询问', '始终允许', '始终拒绝'])
-      policy!.setSelectedValue('ask', true)
+      expect(policy!.options.map(option => option.label)).toEqual(['不可用'])
+      expect(policy!.disabled).toBe(true)
       await new Promise(resolve => setTimeout(resolve, 0))
-      expect(policies).toEqual(['tasks.create:ask'])
+      expect(policies).toEqual([])
       dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
       expect(dom.window.document.querySelector('[data-permission-detail]')).toBeNull()
       expect(dom.window.document.querySelector('[data-plugin-detail-tab="permissions"]')?.getAttribute('aria-selected')).toBe('true')
@@ -384,7 +388,7 @@ describe('Platform permission presentation hierarchy', () => {
     }
   })
 
-  it('keeps host connection and security engineering facts in collapsed Runtime diagnostics', () => {
+  it('keeps only actionable Host diagnostics in collapsed logs diagnostics', () => {
     const { dom, dispose } = install(snapshot())
     try {
       const permissions = openPluginTab(dom.window.document, 'empty', 'permissions')
@@ -393,18 +397,18 @@ describe('Platform permission presentation hierarchy', () => {
       expect(permissions.textContent).not.toContain('Codex Desktop')
 
       const runtime = openPluginTab(dom.window.document, 'demo', 'runtime')
-      const lifecycle = runtime.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="demo"]')
-      expect(lifecycle?.open).toBe(false)
-      expect(lifecycle?.querySelector('summary')?.textContent).toBe('运行详情 · 运行中')
       expect(runtime.querySelector('[data-plugin-runtime-action="demo"]')?.getAttribute('aria-label')).toBe('屏蔽插件')
-      const diagnostics = runtime.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
+      expect(runtime.querySelector('[data-runtime-lifecycle="demo"]')).toBeNull()
+      const logs = openPluginTab(dom.window.document, 'demo', 'logs')
+      expect(logs.querySelector('[data-runtime-lifecycle="demo"]')).toBeNull()
+      const diagnostics = logs.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
       expect(diagnostics).not.toBeNull()
       expect(diagnostics?.open).toBe(false)
       expect(diagnostics?.querySelector('summary')?.textContent).toBe('诊断')
       expect(diagnostics?.textContent).toContain('current-connection-client-unavailable')
-      expect(diagnostics?.textContent).toContain('二次连接 否')
-      expect(diagnostics?.textContent).toContain('原始 bridge 暴露 否')
-      expect(diagnostics?.textContent).toContain('当前权限仅适用于 Host API 调用。')
+      expect(diagnostics?.textContent).not.toContain('二次连接')
+      expect(diagnostics?.textContent).not.toContain('原始 bridge')
+      expect(diagnostics?.textContent).not.toContain('当前权限仅适用于 Host API 调用。')
       expect(diagnostics?.textContent).not.toContain('查看权限说明')
     } finally {
       dispose()
@@ -412,22 +416,22 @@ describe('Platform permission presentation hierarchy', () => {
     }
   })
 
-  it('localizes expanded runtime lifecycle and diagnostics chrome for English', () => {
+  it('localizes actionable diagnostics chrome for English', () => {
     const { dom, dispose } = install(snapshot([], 'en'))
     try {
       const runtime = openPluginTab(dom.window.document, 'demo', 'runtime')
-      const lifecycle = runtime.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="demo"]')
-      const diagnostics = runtime.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
-      expect(lifecycle?.open).toBe(false)
-      expect(diagnostics?.open).toBe(false)
-      expect(lifecycle?.querySelector('summary')?.textContent).toBe('Runtime details · Active')
+      expect(runtime.querySelector('[data-runtime-lifecycle="demo"]')).toBeNull()
       expect(runtime.querySelector('[data-plugin-runtime-action="demo"]')?.getAttribute('aria-label')).toBe('Block plugin')
+      const logs = openPluginTab(dom.window.document, 'demo', 'logs')
+      const diagnostics = logs.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
+      expect(logs.querySelector('[data-runtime-lifecycle="demo"]')).toBeNull()
+      expect(diagnostics?.open).toBe(false)
       expect(diagnostics?.querySelector('summary')?.textContent).toBe('Diagnostics')
 
-      lifecycle!.open = true
       diagnostics!.open = true
-      expect([...diagnostics!.querySelectorAll('h3')].map(item => item.textContent)).toEqual(['Localization', 'Runtime details'])
-      expect(diagnostics?.textContent).toContain('Permissions apply only to Host API calls.')
+      expect(diagnostics?.querySelectorAll('h3')).toHaveLength(0)
+      expect(diagnostics?.textContent).toContain('current-connection-client-unavailable')
+      expect(diagnostics?.textContent).not.toContain('Permissions apply only to Host API calls.')
       expect(diagnostics?.textContent).not.toContain('View permission documentation')
       expect(diagnostics?.textContent).not.toMatch(/[\u3400-\u9fff]/u)
     } finally {

@@ -35,6 +35,9 @@ describe('Host collection primitive', () => {
       id: 'plugins', label: '插件列表', items,
       search: { onQueryChange: queryChanged },
     })
+    const styles = dom.window.document.createElement('style')
+    styles.textContent = HOST_COLLECTION_STYLES
+    dom.window.document.head.append(styles)
     dom.window.document.body.append(view.element)
     try {
       const search = view.element.querySelector<HTMLInputElement>('[data-collection-search="plugins"]')!
@@ -66,22 +69,36 @@ describe('Host collection primitive', () => {
 
       expect(HOST_COLLECTION_STYLES).toContain('repeat(auto-fit, minmax(min(100%, 220px), 1fr))')
       expect(HOST_COLLECTION_STYLES).toContain('align-content: start;')
-      expect(HOST_COLLECTION_STYLES).toContain('align-items: start;')
-      expect(HOST_COLLECTION_STYLES).toContain('.cxc-listitem { min-width: 0; align-self: start; }')
-      expect(HOST_COLLECTION_STYLES).toContain('height: auto;')
+      expect(HOST_COLLECTION_STYLES).toContain('align-items: stretch;')
+      expect(HOST_COLLECTION_STYLES).toContain('.cxc-listitem { display: flex; width: 100%; min-width: 0; align-self: stretch; }')
+      expect(HOST_COLLECTION_STYLES).toContain('display: flex;\n    container-type: inline-size;\n    width: 100%;\n    min-width: 0;\n    height: 100%;\n    align-self: stretch;\n    flex: 1 1 auto;')
+      expect(HOST_COLLECTION_STYLES).toContain('flex: 1 1 auto;\n    box-sizing: border-box;')
+      expect(HOST_COLLECTION_STYLES).toContain('.cxc-copy { display: flex; min-width: 0; align-self: stretch; flex: 1 1 auto; flex-direction: column; }')
+      expect(HOST_COLLECTION_STYLES).toContain('min-block-size: 2.84em;')
+      expect(HOST_COLLECTION_STYLES).toContain('margin-top: auto; padding-top: var(--cxc-copy-machine-gap);')
+      expect(HOST_COLLECTION_STYLES).toContain('--cxc-grid-gap: 8px;')
+      expect(HOST_COLLECTION_STYLES).toContain('--cxc-card-padding: 12px;')
       expect(HOST_COLLECTION_STYLES).not.toContain('justify-content: start')
       expect(HOST_COLLECTION_STYLES).not.toContain('repeat(2,')
       expect(HOST_COLLECTION_STYLES).toContain('.cxc-list[data-layout="rows"] { grid-template-columns: minmax(0, 1fr); }')
       expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-seat-size: 32px;')
       expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-glyph-size: 16px;')
-      expect(HOST_COLLECTION_STYLES).toContain('align-items: start;')
-      expect(HOST_COLLECTION_STYLES).toContain('.cxc-listitem { min-width: 0; align-self: start; }')
-      expect(HOST_COLLECTION_STYLES).not.toContain('.cxc-card {\n    position: relative;\n    container-type: inline-size;\n    min-width: 0;\n    height: 100%;')
+      expect(HOST_COLLECTION_STYLES).not.toContain('.cxc-list {\n    display: grid;\n    height: 100%;')
       expect(HOST_COLLECTION_STYLES).not.toContain('.cxc-primary {\n    display: flex;\n    align-items: flex-start;\n    gap: 11px;\n    width: 100%;\n    min-width: 0;\n    min-height: 82px;')
       expect(HOST_COLLECTION_STYLES).not.toContain('min-height: 82px;')
       expect(HOST_COLLECTION_STYLES).toContain('width: var(--cxc-icon-glyph-size); height: var(--cxc-icon-glyph-size);')
       expect(HOST_COLLECTION_STYLES).toContain('fill: currentColor; color: currentColor;')
       expect(HOST_COLLECTION_STYLES).toContain('font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;')
+      // A containment-enabled card has no intrinsic inline size. Both the grid
+      // item and card must claim the complete grid track so the title/copy is
+      // visible instead of collapsing to its border width.
+      const listitem = view.element.querySelector<HTMLElement>('[data-collection-item="alpha"]')!
+      const card = listitem.querySelector<HTMLElement>('.cxc-card')!
+      expect(card.querySelector('.cxc-title')?.textContent).toBe('Alpha 插件')
+      expect(listitem.classList.contains('cxc-listitem')).toBe(true)
+      expect(card.classList.contains('cxc-card')).toBe(true)
+      expect(dom.window.getComputedStyle(listitem).width).toBe('100%')
+      expect(dom.window.getComputedStyle(card).width).toBe('100%')
     } finally {
       view.dispose()
       dom.window.close()

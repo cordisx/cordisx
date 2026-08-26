@@ -560,6 +560,12 @@ const MANAGER_STYLES = `
   }
   .cxm-main { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
   .cxm-header {
+    --cx-manager-header-leading-seat: 26px;
+    --cx-manager-header-leading-glyph: 18px;
+    --cx-manager-header-title-size: 16px;
+    --cx-manager-header-title-line-height: 26px;
+    --cx-manager-icon-control-size: 30px;
+    --cx-manager-icon-control-glyph: 18px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -569,7 +575,7 @@ const MANAGER_STYLES = `
     padding: 0 22px;
     border-bottom: 1px solid rgba(255, 255, 255, .08);
   }
-  .cxm-heading { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: start; column-gap: 9px; min-width: 0; flex: 1 1 auto; }
+  .cxm-heading { position: relative; display: grid; grid-template-columns: var(--cx-manager-header-leading-seat) minmax(0, 1fr); align-items: start; column-gap: 9px; min-width: 0; flex: 1 1 auto; }
   .cxm-heading[data-heading-actions="true"] { padding-right: 36px; }
   .cxm-heading-menu { position: absolute; z-index: 8; top: -2px; right: 0; }
   .cxm-heading-menu > .cxm-manager-icon-action { color: var(--cx-muted); }
@@ -580,15 +586,15 @@ const MANAGER_STYLES = `
   .cxm-heading-menu-item:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: 1px; }
   .cxm-heading-menu-item .cxm-material-icon { width: 16px; height: 16px; }
   .cxm-heading-row { display: contents; }
-  .cxm-heading-title { display: flex; grid-column: 2; align-items: center; min-width: 0; min-height: 26px; color: #fff; font-size: 16px; font-weight: 700; line-height: 1.2; }
+  .cxm-heading-title { display: flex; grid-column: 2; align-items: center; min-width: 0; min-height: var(--cx-manager-header-leading-seat); color: #fff; font-size: var(--cx-manager-header-title-size); font-weight: 700; line-height: var(--cx-manager-header-title-line-height); }
   .cxm-heading-current-heading { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .cxm-heading p { grid-column: 1 / -1; margin: 3px 0 0; color: #7f899a; font-size: 11px; }
-  .cxm-heading-direct-title { grid-column: 2; min-width: 0; min-height: 26px; margin: 0; color: #fff; font-size: 16px; font-weight: 700; line-height: 26px; }
+  .cxm-heading-direct-title { grid-column: 2; min-width: 0; min-height: var(--cx-manager-header-leading-seat); margin: 0; color: #fff; font-size: var(--cx-manager-header-title-size); font-weight: 700; line-height: var(--cx-manager-header-title-line-height); }
   .cxm-heading-leading {
     display: grid;
     place-items: center;
-    width: 26px;
-    height: 26px;
+    width: var(--cx-manager-header-leading-seat);
+    height: var(--cx-manager-header-leading-seat);
     flex: none;
     box-sizing: border-box;
     border: 0;
@@ -596,19 +602,19 @@ const MANAGER_STYLES = `
     color: #d8dce3;
     align-self: start;
   }
-  .cxm-heading-icon svg { width: 18px; height: 18px; transform: translateY(-.5px); }
+  .cxm-heading-icon svg { width: var(--cx-manager-header-leading-glyph); height: var(--cx-manager-header-leading-glyph); transform: translateY(-.5px); }
   .cxm-back {
     padding: 0;
     cursor: pointer;
   }
   .cxm-back { border-radius: 7px; }
-  .cxm-back-icon { width: 18px; height: 18px; }
+  .cxm-back-icon { width: var(--cx-manager-header-leading-glyph); height: var(--cx-manager-header-leading-glyph); }
   .cxm-back-icon svg { transform: translateY(-.5px); }
   .cxm-back:hover { background: rgba(199, 204, 212, .14); color: #eef0f3; }
   .cxm-back:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
   .cxm-breadcrumbs { min-width: 0; width: 100%; }
-  .cxm-breadcrumb-list { display: flex; min-width: 0; margin: 0; padding: 0; align-items: center; list-style: none; white-space: nowrap; }
-  .cxm-breadcrumb-item { display: inline-flex; min-width: 0; flex: 0 0 auto; align-items: center; }
+  .cxm-breadcrumb-list { display: flex; min-width: 0; min-height: var(--cx-manager-header-leading-seat); margin: 0; padding: 0; align-items: center; list-style: none; line-height: var(--cx-manager-header-title-line-height); white-space: nowrap; }
+  .cxm-breadcrumb-item { display: inline-flex; min-width: 0; min-height: var(--cx-manager-header-leading-seat); flex: 0 0 auto; align-items: center; }
   .cxm-breadcrumb-item:last-child { flex: 1 1 auto; }
   .cxm-breadcrumb-separator { padding: 0 6px; color: #656e7e; font-weight: 400; }
   .cxm-breadcrumb-action {
@@ -622,6 +628,7 @@ const MANAGER_STYLES = `
     cursor: pointer;
     font: inherit;
     font-weight: 500;
+    line-height: calc(var(--cx-manager-header-title-line-height) - 4px);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -660,8 +667,8 @@ const MANAGER_STYLES = `
   .cxm-close {
     display: grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
+    width: var(--cx-manager-icon-control-size);
+    height: var(--cx-manager-icon-control-size);
     flex: none;
     box-sizing: border-box;
     padding: 0;
@@ -671,17 +678,23 @@ const MANAGER_STYLES = `
     color: #d8dce5;
     cursor: pointer;
   }
-  .cxm-close-icon { display: block; width: 18px; height: 18px; }
+  .cxm-close-icon { display: block; width: var(--cx-manager-icon-control-glyph); height: var(--cx-manager-icon-control-glyph); }
   .cxm-close:hover { background: rgba(199, 204, 212, .14); color: #eef0f3; }
   .cxm-content {
+    --cx-manager-content-block-start: 20px;
+    --cx-manager-content-inline: 22px;
+    --cx-manager-content-block-end: 24px;
     min-height: 0;
     flex: 1 1 0%;
     overflow-x: hidden;
     overflow-y: auto;
-    padding: 20px 22px 24px;
+    padding: var(--cx-manager-content-block-start) var(--cx-manager-content-inline) var(--cx-manager-content-block-end);
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
   }
+  /* A sidebar-owned manager.content page is a plugin-owned content seat. The
+     shared scroll viewport must not add an outer Host inset around it. */
+  .cxm-content[data-manager-content-page="true"] { padding: 0; }
   .cxm-content[data-marketplace-discovery="true"] { overflow: hidden; }
   .cxm-content[data-manager-list-page="true"] { display: flex; overflow: hidden; }
   .cxm-content[data-manager-list-page="true"] > .cxm-fixed-list-collection { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; }
@@ -734,6 +747,8 @@ const MANAGER_STYLES = `
   .cxm-settings-tab-icon.cordisx-host-icon { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; }
   .cxm-settings-tab-icon.cordisx-host-icon svg { width: 17px; height: 17px; }
   .cxm-manager-content-root { min-width: 0; max-width: 100%; }
+  .cxm-content[data-manager-content-page="true"] > .cxm-manager-content-root { padding: 0; }
+  .cxm-content[data-manager-content-page="true"] > .cxm-tabs { margin: 16px calc(var(--cx-manager-content-inline) - 8px) 16px; }
   .cxm-tab:disabled { cursor: default; opacity: .42; }
   .cxm-about-identity { display: flex; align-items: center; gap: 18px; padding: 4px 2px 22px; }
   .cxm-about-identity-copy { min-width: 0; white-space: nowrap; }
@@ -885,10 +900,10 @@ const MANAGER_STYLES = `
   .cxm-console-action-toolbar { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; white-space: nowrap; }
   .cxm-console-warning { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 8px; }
   .cxm-console-warning button { flex: none; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 11px; }
-  .cxm-console-workspace { display: grid; min-width: 0; min-height: 0; flex: 1 1 auto; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: stretch; }
+  .cxm-console-workspace { display: grid; min-width: 0; min-height: 0; flex: 1 1 auto; overflow: hidden; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: stretch; }
   .cxm-console-workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr) minmax(220px, 280px); }
-  .cxm-console-body { position: relative; display: flex; min-width: 0; min-height: 0; }
-  .cxm-console-frame { width: 100%; min-height: 0; flex: 1 1 auto; overflow: auto; box-sizing: border-box; border: 1px solid #30343a; border-radius: 7px; background: #101215; scrollbar-gutter: stable; overscroll-behavior: contain; }
+  .cxm-console-body { position: relative; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+  .cxm-console-frame { width: 100%; height: 100%; min-height: 0; flex: 1 1 auto; overflow: auto; box-sizing: border-box; border: 1px solid #30343a; border-radius: 7px; background: #101215; scrollbar-gutter: stable; overscroll-behavior: contain; }
   .cxm-console-frame.cxm-console-luna { min-height: 28px; color: #cad0da; cursor: default; }
   .cxm-console-frame.cxm-console-luna.luna-console { height: 100%; border: 1px solid #30343a; background: #101215; }
   .cxm-console-frame.cxm-console-luna .luna-console-log-content { font-size: 11px; line-height: 16px; }
@@ -1406,10 +1421,10 @@ export function projectPluginConsoleValueForLuna(snapshot: CordisXPluginConsoleV
   return snapshot.preview
 }
 
-function lunaConsoleTime(timestamp: number): string {
+function lunaConsoleTime(timestamp: number, includeMilliseconds = false): string {
   const date = new Date(timestamp)
   const parts = [date.getHours(), date.getMinutes(), date.getSeconds()].map(value => String(value).padStart(2, '0'))
-  return `${parts.join(':')}.${String(date.getMilliseconds()).padStart(3, '0')}`
+  return `${parts.join(':')}${includeMilliseconds ? `.${String(date.getMilliseconds()).padStart(3, '0')}` : ''}`
 }
 
 /** Keep each Host entry independent and preserve native Console argument-array semantics. */
@@ -1425,7 +1440,7 @@ export function projectPluginConsoleEntryForLuna(entry: CordisXPluginConsoleEntr
 
 function pluginConsoleEntryCopyText(entry: CordisXPluginConsoleEntryV1): string {
   const args = entry.args.map(argument => argument.preview).join(' ')
-  return `${lunaConsoleTime(entry.time)} ${entry.method} ${entry.source} ${entry.kind === 'console' ? args || entry.message : `${entry.message}${args === '' ? '' : ` ${args}`}`}`
+  return `${lunaConsoleTime(entry.time, true)} ${entry.method} ${entry.source} ${entry.kind === 'console' ? args || entry.message : `${entry.message}${args === '' ? '' : ` ${args}`}`}`
 }
 
 /**
@@ -1513,12 +1528,16 @@ function createPermissionPolicySelect(
   permission: ManagerPermissionSnapshot,
   onChange: (policy: CordisXPermissionPolicy, control: TDesignSelectElement<CordisXPermissionPolicy>) => Promise<void>,
 ): TDesignSelectElement<CordisXPermissionPolicy> {
+  const unavailable = permission.availability.status === 'unavailable'
   let policy: TDesignSelectElement<CordisXPermissionPolicy>
   policy = forms.select(
     `${capabilityPresentation(permission.capability).name}的权限策略`,
-    (['ask', 'allow', 'deny'] as const).map(value => ({ value, label: POLICY_LABELS[value] })),
+    unavailable
+      ? [{ value: permission.policy, label: capabilityAvailabilityLabel(permission.availability.status) }]
+      : (['ask', 'allow', 'deny'] as const).map(value => ({ value, label: POLICY_LABELS[value] })),
     permission.policy,
     value => { if (value !== undefined) void onChange(value, policy) },
+    { disabled: unavailable },
   )
   policy.classList.add('cxm-permission-policy-select')
   policy.dataset.hostFormPrimitive = 'select'
@@ -4405,25 +4424,35 @@ export function installCordisXManager(
     const form = forms.form(plugin.id)
     form.dataset.pluginConfigForm = plugin.id
     form.dataset.state = draft.state
+    const groupKeys = new Set(visibleFields.map(field => field.group?.id ?? '__root__'))
+    const needsGeneralHeading = groupKeys.size > 1
     let generalGrid: HTMLElement | undefined
     const groupGrids = new Map<string, HTMLElement>()
     const gridFor = (field: CordisXConfigFieldSnapshot): HTMLElement => {
       if (field.group !== undefined) {
         const existing = groupGrids.get(field.group.id)
         if (existing !== undefined) return existing
-        const section = forms.section(
-          field.group.title ?? managerCopy(locale, 'form.section-general'),
-          field.group.description,
-          field.group.icon,
-        )
-        groupGrids.set(field.group.id, section.content)
-        form.append(section.root)
-        return section.content
+        const title = field.group.title
+        if (title !== undefined || needsGeneralHeading) {
+          const section = forms.section(title ?? managerCopy(locale, 'form.section-general'), field.group.description, field.group.icon)
+          groupGrids.set(field.group.id, section.content)
+          form.append(section.root)
+          return section.content
+        }
+        const grid = forms.grid()
+        groupGrids.set(field.group.id, grid)
+        form.append(grid)
+        return grid
       }
       if (generalGrid !== undefined) return generalGrid
-      const section = forms.section(managerCopy(locale, 'form.section-general'))
-      generalGrid = section.content
-      form.append(section.root)
+      if (needsGeneralHeading) {
+        const section = forms.section(managerCopy(locale, 'form.section-general'))
+        generalGrid = section.content
+        form.append(section.root)
+      } else {
+        generalGrid = forms.grid()
+        form.append(generalGrid)
+      }
       return generalGrid
     }
     let submit: TDesignButtonElement | undefined
@@ -4513,6 +4542,7 @@ export function installCordisXManager(
       if (descriptor.writable) {
         const fieldMenu = forms.fieldActionMenu({
           label: fieldLabel(field),
+          ...(field.icon === undefined ? {} : { icon: field.icon }),
           canUseDefault: () => field.hasDefault === true,
           hasFieldDraft: () => draft!.operations.has(pathKey),
           useDefault: () => {
@@ -4560,7 +4590,7 @@ export function installCordisXManager(
         : draft.state === 'saved' ? hostConfigApplyMessage(descriptor.applies, 'saved', locale)
           : draft.operations.size > 0 ? hostConfigApplyMessage(descriptor.applies, 'dirty', locale) : ''
       const resetDraft = forms.button(managerCopy(locale, 'form.undo-changes'), {
-        action: 'undo',
+        action: 'undo', density: 'icon',
         ...(descriptor.actionIcons?.reset === undefined ? {} : { icon: descriptor.actionIcons.reset }),
       })
       setTDesignDisabled(resetDraft, draft.operations.size === 0 || busyPluginId !== undefined)
@@ -4573,7 +4603,7 @@ export function installCordisXManager(
         renderContent()
       })
       submit = forms.button(busyPluginId === plugin.id ? managerCopy(locale, 'form.saving') : managerCopy(locale, 'form.save-configuration'), {
-        type: 'submit', variant: 'primary', action: 'save',
+        type: 'submit', variant: 'primary', density: 'icon', action: 'save',
         ...(descriptor.actionIcons?.save === undefined ? {} : { icon: descriptor.actionIcons.save }),
       })
       setTDesignDisabled(submit, !descriptor.writable || busyPluginId !== undefined || draft.operations.size === 0 || draft.issues.size > 0)
@@ -4586,7 +4616,8 @@ export function installCordisXManager(
         draft!.state = 'saving'
         delete draft!.message
         setTDesignDisabled(submit!, true)
-        setTDesignText(submit!, managerCopy(model.snapshot().localization.locale, 'form.saving'))
+        submit!.setAttribute('aria-label', managerCopy(model.snapshot().localization.locale, 'form.saving'))
+        submit!.setAttribute('title', managerCopy(model.snapshot().localization.locale, 'form.saving'))
         status.dataset.state = 'saving'
         status.textContent = hostConfigApplyMessage(descriptor.applies, 'saving', model.snapshot().localization.locale)
         form.setAttribute('aria-busy', 'true')
@@ -4632,6 +4663,7 @@ export function installCordisXManager(
     interface LunaConsoleViewer {
       destroy(): void
       setOption(name: string, value: unknown): void
+      renderViewport(options?: unknown): void
       on(name: string, listener: (record: LunaLogRecord) => void): void
       insert(options: {
         readonly type: CordisXPluginConsoleEntryV1['method']
@@ -4697,6 +4729,22 @@ export function installCordisXManager(
       state.scrollTop = container.scrollTop
       syncLatest()
     }
+    const refreshLunaViewport = (): void => {
+      viewer?.renderViewport()
+      const view = document.defaultView
+      if (view?.requestAnimationFrame !== undefined) {
+        view.requestAnimationFrame(() => {
+          if (destroyed) return
+          viewer?.renderViewport()
+          restoreScroll()
+        })
+      } else queueMicrotask(() => {
+        if (!destroyed) {
+          viewer?.renderViewport()
+          restoreScroll()
+        }
+      })
+    }
     const mount = {
       destroy: (): void => {
         if (destroyed) return
@@ -4751,16 +4799,22 @@ export function installCordisXManager(
         viewer.insert({ type: projection.type, args: projection.args, header: projection.header })
       }
       pendingEntry = undefined
+      // Luna virtualizes against the dimensions present at construction. A tab
+      // can be connected before it is visible, so refresh after inserting the
+      // first records and again on the next frame.
+      refreshLunaViewport()
       const ResizeObserverConstructor = document.defaultView?.ResizeObserver
       if (ResizeObserverConstructor !== undefined) {
         resizeObserver = new ResizeObserverConstructor(() => {
+          viewer?.renderViewport()
           if (state.follow) scrollToLatest()
           else syncLatest()
         })
+        resizeObserver.observe(container)
         const space = container.querySelector<HTMLElement>('.luna-console-logs-space')
         if (space !== null) resizeObserver.observe(space)
       }
-      queueMicrotask(restoreScroll)
+      refreshLunaViewport()
     }).catch((error: unknown) => {
       if (destroyed) return
       container.classList.remove('cxm-console-luna')
@@ -4866,16 +4920,7 @@ export function installCordisXManager(
           void navigateRoute({ kind: 'permission', pluginId: plugin.id, capability: permission.capability })
         })
         const control = create(document, 'div', 'cxm-permission-control')
-        const availability = create(
-          document,
-          'span',
-          'cxm-kind-badge cxm-permission-availability',
-          capabilityAvailabilityLabel(permission.availability.status),
-        )
-        availability.dataset.permissionAvailability = permission.capability
-        availability.dataset.availabilityState = permission.availability.status
         control.append(
-          availability,
           createPermissionPolicySelect(forms, permission, async (policy, select) => {
             await commitPermissionPolicy(plugin.id, permission, policy, select)
           }),
@@ -4893,48 +4938,42 @@ export function installCordisXManager(
     const pluginCommands = snapshot.commands.filter(item => item.owner === plugin.id)
     const pluginRoutes = snapshot.navigation.routes.filter(item => item.owner === plugin.id)
     const pluginPages = snapshot.navigation.pages.filter(item => item.owner === plugin.id)
-    const appendRuntimeLifecycle = (target: HTMLElement): void => {
-      const lifecycle = create(document, 'details', 'cxm-diagnostics')
-      lifecycle.dataset.runtimeLifecycle = plugin.id
-      lifecycle.append(create(document, 'summary', undefined, `${copy('runtime.lifecycle-summary')} · ${statusLabel(plugin.status, snapshot.localization.locale)}`))
-      const lifecycleBody = create(document, 'div', 'cxm-diagnostics-body')
-      lifecycleBody.append(create(document, 'div', 'cxm-copy', `${copy('runtime.services')}: ${plugin.inject.join(', ') || copy('runtime.none')} · ${copy('runtime.active-contributions')}: ${pluginRegistrations.filter(item => item.visible && item.valid).length} · ${copy('runtime.commands')}: ${pluginCommands.length}`))
-      if (plugin.error !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', plugin.error))
-      if (plugin.blockedReason !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', plugin.blockedReason))
-      if (operationError !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', operationError))
-      lifecycleBody.append(create(document, 'code', 'cxm-detail-id', plugin.id))
+    const appendRuntimeDiagnostics = (target: HTMLElement): void => {
       const runtimeDiagnostics = create(document, 'details', 'cxm-diagnostics')
       runtimeDiagnostics.dataset.runtimeDiagnostics = 'platform'
       runtimeDiagnostics.append(create(document, 'summary', undefined, copy('runtime.diagnostics')))
       const diagnosticsBody = create(document, 'div', 'cxm-diagnostics-body')
-      const localeCatalogs = snapshot.localeCatalogs.filter(item => item.owner === plugin.id)
-      diagnosticsBody.append(
-        createSectionTitle(document, copy('runtime.section.localization')),
-        create(document, 'div', 'cxm-copy', localeCatalogs.length === 0
-          ? copy('runtime.locale-catalogs-empty')
-          : localeCatalogs.map(item => `${item.namespace} · ${item.locale} · ${item.messageCount} keys`).join('\n')),
-        createSectionTitle(document, copy('runtime.section.details')),
-        create(document, 'div', 'cxm-copy', pluginCommands.length === 0
-          ? copy('runtime.commands-empty')
-          : pluginCommands.map(command => `${command.qualifiedId} · running ${command.running}`).join('\n')),
-      )
-      if (plugin.configuration !== undefined) {
+      let hasDiagnostics = false
+      if (plugin.error !== undefined) {
+        diagnosticsBody.append(create(document, 'div', 'cxm-error', plugin.error))
+        hasDiagnostics = true
+      }
+      if (plugin.blockedReason !== undefined) {
+        diagnosticsBody.append(create(document, 'div', 'cxm-error', plugin.blockedReason))
+        hasDiagnostics = true
+      }
+      if (operationError !== undefined) {
+        diagnosticsBody.append(create(document, 'div', 'cxm-error', operationError))
+        hasDiagnostics = true
+      }
+      if (plugin.configuration !== undefined && !plugin.configuration.writable) {
         const configSchema = plugin.configuration.schemaKind === 'schemastery'
           ? 'Schemastery'
           : plugin.configuration.schemaKind === 'standard' ? 'Standard Schema' : copy('runtime.not-declared')
         const configurationDiagnostics = create(document, 'div', 'cxm-copy', `${copy('runtime.configuration')}: ${configSchema} · ${plugin.configuration.applies} · ${copy('runtime.revision')} ${plugin.configuration.revision} · ${copy('runtime.last-good')} ${plugin.configuration.lastGoodRevision} · ${copy('runtime.writer')} ${plugin.configuration.writable ? copy('runtime.available') : copy('runtime.unavailable')}`)
         configurationDiagnostics.dataset.configDiagnostics = plugin.id
         diagnosticsBody.append(configurationDiagnostics)
+        hasDiagnostics = true
       }
-      for (const provider of (snapshot.capabilityProviders ?? []).filter(item => item.kind !== 'current-connection')) {
+      for (const provider of (snapshot.capabilityProviders ?? []).filter(item => item.kind !== 'current-connection' && item.status !== 'supported')) {
         diagnosticsBody.append(create(document, 'div', 'cxm-copy', `${provider.providerNameText} · ${capabilityAvailabilityLabel(provider.status, snapshot.localization.locale)} · ${provider.reasonText}`))
+        hasDiagnostics = true
       }
       const adapter = snapshot.platform
-      diagnosticsBody.append(create(document, 'div', 'cxm-copy', `${copy('runtime.host')}: ${adapter.hostName} · ${copy('runtime.adapter')} ${adapter.mode} · ${copy('runtime.secondary-connection')} ${adapter.secondConnectionCreated ? copy('runtime.yes') : copy('runtime.no')} · ${copy('runtime.raw-bridge')} ${adapter.rawBridgeExposed ? copy('runtime.yes') : copy('runtime.no')}`))
-      for (const diagnostic of adapter.diagnostics) diagnosticsBody.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
-      diagnosticsBody.append(create(document, 'div', 'cxm-notice', copy('runtime.permission-boundary')))
-      runtimeDiagnostics.append(diagnosticsBody)
-      lifecycleBody.append(runtimeDiagnostics)
+      for (const diagnostic of adapter.diagnostics) {
+        diagnosticsBody.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
+        hasDiagnostics = true
+      }
       const unattributed = (model.pluginConsole?.(plugin.id)?.unattributedEntries ?? 0)
       if (unattributed > 0 && dismissedConsoleWarnings.get(plugin.id) !== unattributed) {
         const warning = create(document, 'div', 'cxm-notice cxm-console-warning')
@@ -4943,10 +4982,12 @@ export function installCordisXManager(
         const dismissWarning = managerIconAction('close', copy('console.dismiss-ownership-warning'))
         dismissWarning.addEventListener('click', () => { dismissedConsoleWarnings.set(plugin.id, unattributed); renderContent() })
         warning.append(dismissWarning)
-        lifecycleBody.append(warning)
+        diagnosticsBody.append(warning)
+        hasDiagnostics = true
       }
-      lifecycle.append(lifecycleBody)
-      target.append(lifecycle)
+      if (!hasDiagnostics) return
+      runtimeDiagnostics.append(diagnosticsBody)
+      target.append(runtimeDiagnostics)
     }
     if (activeFacet === 'runtime') {
       const panel = createTabPanel(document, copy('plugin-tab.runtime'))
@@ -5013,30 +5054,6 @@ export function installCordisXManager(
         : consoleSummary.consumption.join('   ')))
       consoleOverview.append(performance)
       overview.append(consoleOverview)
-      const diagnostics = create(document, 'details', 'cxm-runtime-diagnostics')
-      diagnostics.dataset.pluginRuntimeDiagnostics = plugin.id
-      diagnostics.append(create(document, 'summary', undefined, copy('runtime.diagnostics')))
-      const diagnosticList = create(document, 'div', 'cxm-runtime-diagnostic-list')
-      diagnosticList.setAttribute('role', 'list')
-      const addDiagnostic = (label: string, value: string): void => {
-        const item = create(document, 'div', 'cxm-runtime-diagnostic')
-        item.setAttribute('role', 'listitem')
-        item.append(
-          create(document, 'span', 'cxm-runtime-diagnostic-label', label),
-          create(document, 'span', 'cxm-runtime-diagnostic-value', value),
-        )
-        diagnosticList.append(item)
-      }
-      addDiagnostic(copy('console.field.generation'), plugin.package?.moduleGeneration ?? copy('runtime.unavailable'))
-      addDiagnostic(copy('runtime.services'), plugin.inject.join(', ') || copy('runtime.none'))
-      const configuration = plugin.configuration
-      addDiagnostic(copy('runtime.configuration'), configuration?.schemaKind === 'schemastery'
-        ? `Schemastery · ${configuration.applies}`
-        : configuration?.schemaKind === 'standard' ? `Standard Schema · ${configuration.applies}` : copy('runtime.not-declared'))
-      if (hasDetail) addDiagnostic(copy('plugin-tab.runtime'), copy('runtime.status-details'))
-      diagnostics.append(diagnosticList)
-      overview.append(diagnostics)
-      appendRuntimeLifecycle(overview)
       panel.append(overview)
       if (operationError !== undefined) {
         const notice = create(document, 'div', 'cxm-notice', copy('runtime.status-attention'))
@@ -5175,6 +5192,7 @@ export function installCordisXManager(
         inspectorHead.append(closeInspector)
         const grid = create(document, 'dl', 'cxm-console-inspector-grid')
         const metadata: readonly (readonly [string, string | number | undefined])[] = [
+          [copy('console.field.timestamp'), new Date(selected.time).toISOString()],
           [copy('console.field.plugin'), `${selected.plugin.pluginId} · ${selected.plugin.source}`],
           [copy('console.field.generation'), selected.generation],
           [copy('console.field.source'), selected.source],
@@ -5199,6 +5217,9 @@ export function installCordisXManager(
       } else workspace.append(body)
       panel.append(workspace)
       if (projections.length > 0) mountLunaConsole(frame, projections, plugin.id, latest)
+      // The console page only carries actionable diagnostics. Runtime status
+      // and API summaries stay on the dedicated Runtime status tab.
+      appendRuntimeDiagnostics(panel)
       content.append(panel)
       return
     }
@@ -6565,6 +6586,7 @@ export function installCordisXManager(
     marketplaceCollectionView = undefined
     delete content.dataset.marketplaceDiscovery
     delete content.dataset.managerListPage
+    delete content.dataset.managerContentPage
     const snapshot = model.snapshot()
     renderedLocale = snapshot.localization.locale
     syncPrimaryChrome(renderedLocale)
@@ -6600,7 +6622,10 @@ export function installCordisXManager(
     if (routeState.kind === 'extension-point') return renderExtensionPointDetail(snapshot, routeState.pointId)
     if (routeState.kind === 'route') return renderRouteDetail(snapshot, routeState.qualifiedId)
     if (routeState.kind === 'page') return renderPageDetail(snapshot, routeState.qualifiedId)
-    if (routeState.kind === 'manager-content') return renderManagerContent(snapshot, routeState.id, routeState.reference)
+    if (routeState.kind === 'manager-content') {
+      content.dataset.managerContentPage = 'true'
+      return renderManagerContent(snapshot, routeState.id, routeState.reference)
+    }
     if (routeState.kind !== 'primary') return renderPluginList(snapshot)
     if (routeState.primary === 'about') renderAbout(snapshot)
     if (routeState.primary === 'extension-points') renderExtensionPointList(snapshot)

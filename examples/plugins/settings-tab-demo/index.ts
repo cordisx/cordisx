@@ -48,7 +48,7 @@ function mountSettingsNavigation(context: CordisXPageMountContext, config: Setti
   const section = context.document.createElement('section')
   section.dataset.settingsNavigationDemoContent = 'mounted'
   Object.assign(section.style, {
-    display: 'grid', gap: '12px', maxWidth: '620px', padding: '24px', color: 'inherit',
+    display: 'grid', gap: '12px', maxWidth: '620px', color: 'inherit',
     font: '14px/1.55 ui-sans-serif, system-ui, sans-serif',
   })
   const label = context.document.createElement('label')

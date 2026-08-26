@@ -15,6 +15,11 @@ export interface TDesignElement extends HTMLElement {
   checked?: boolean
   update?: () => void
   updateProps?: (props: Readonly<Record<string, unknown>>) => void
+  /** Omi uses this lifecycle hook to synchronize controlled component state. */
+  receiveProps?: (
+    nextProps: Readonly<Record<string, unknown>>,
+    previousProps: Readonly<Record<string, unknown>>,
+  ) => unknown
   props?: Record<string, unknown>
   [key: string]: unknown
 }
@@ -26,7 +31,7 @@ export interface TDesignButtonElement extends TDesignElement {
 
 export interface TDesignButtonOptions {
   readonly type?: 'button' | 'submit'
-  readonly variant?: 'default' | 'primary'
+  readonly variant?: 'default' | 'primary' | 'text'
   readonly tone?: 'default' | 'danger'
   /** Compact actions retain an accessible label but render only their icon. */
   readonly density?: 'icon' | 'icon-label'
@@ -81,16 +86,52 @@ export function unwrapTDesignChangeValue<Value>(payload: unknown): Value | undef
     }
     if (detail !== undefined) return detail as Value
     if (Object.hasOwn(payload, 'value')) return (payload as { readonly value?: Value }).value
+    const target = (payload as { readonly target?: unknown }).target
+    // Native Event targets expose `value` through HTMLElement's prototype,
+    // while TDesign's CustomEvent payload keeps it in `detail`. Accept both
+    // official browser shapes before a draft observes the event object.
+    if (target !== null && typeof target === 'object' && 'value' in target) {
+      return (target as { readonly value?: Value }).value
+    }
+    const currentTarget = (payload as { readonly currentTarget?: unknown }).currentTarget
+    if (currentTarget !== null && typeof currentTarget === 'object' && 'value' in currentTarget) {
+      return (currentTarget as { readonly value?: Value }).value
+    }
   }
   return payload as Value | undefined
 }
 
-function normalizeTDesignProps(props: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+function normalizeTDesignProps(element: TDesignElement, props: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
   const change = props.onChange
   if (typeof change !== 'function') return props
   return {
     ...props,
-    onChange: (payload: unknown, ...rest: readonly unknown[]) => (change as (value: unknown, ...args: readonly unknown[]) => unknown)(unwrapTDesignChangeValue(payload), ...rest),
+    onChange: (payload: unknown, ...rest: readonly unknown[]) => {
+      const value = unwrapTDesignChangeValue(payload)
+      // TDesign Input is controlled whenever Host passes `value`: its native
+      // input invokes this callback and then immediately re-renders from the
+      // component props. Mirror the normalized value before returning so that
+      // render cannot restore the previous field value while Manager records
+      // the draft. Textarea emits the same value through CustomEvent.detail.
+      if (Object.hasOwn(props, 'value')) {
+        // `element.props.value = value` is insufficient for the real Omi
+        // components: their visible Shadow DOM keeps a separate `innerValue`
+        // that only advances during `receiveProps(next, previous)`. Preserve a
+        // genuine old-props snapshot, then invoke that supported lifecycle
+        // before mutating the live prop bag. This is the same seam Omi uses
+        // when a parent re-renders a controlled custom element.
+        const liveProps = element.props
+        const previousProps = liveProps === undefined ? undefined : { ...liveProps }
+        const nextProps = previousProps === undefined ? undefined : { ...previousProps, value }
+        element.value = value
+        if (nextProps !== undefined && previousProps !== undefined && liveProps !== undefined) {
+          element.receiveProps?.(nextProps, previousProps)
+          Object.assign(liveProps, nextProps)
+          element.update?.()
+        }
+      }
+      return (change as (value: unknown, ...args: readonly unknown[]) => unknown)(value, ...rest)
+    },
   }
 }
 
@@ -132,7 +173,7 @@ function ensureInstalled(document: Document): void {
 }
 
 export function setTDesignProps(element: TDesignElement, props: Readonly<Record<string, unknown>>): void {
-  const normalizedProps = normalizeTDesignProps(props)
+  const normalizedProps = normalizeTDesignProps(element, props)
   for (const [name, value] of Object.entries(normalizedProps)) element[name] = value
   // Omi custom elements read their initial props from attributes when they
   // connect. Host controls are configured before insertion, so a property-only
@@ -828,7 +869,7 @@ export function createTDesignButton(
   const buttonProps = {
     content: iconOnly ? '' : label,
     theme: options.tone === 'danger' ? 'danger' : options.variant === 'primary' ? 'primary' : 'default',
-    variant: options.variant === 'primary' ? 'base' : 'outline',
+    variant: options.variant === 'primary' ? 'base' : options.variant === 'text' ? 'text' : 'outline',
     size: iconOnly ? 'small' : 'medium',
     shape: iconOnly ? 'square' : 'rectangle',
     type: element.type,

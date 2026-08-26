@@ -47,7 +47,7 @@ describe('UI copy principles', () => {
     const [manager, trace, cliProxy, principles] = await Promise.all([
       readFile(managerPath, 'utf8'), readFile(tracePath, 'utf8'), readFile(cliProxyPath, 'utf8'), readFile(principlesPath, 'utf8'),
     ])
-    const runtime = section(manager, 'const appendRuntimeLifecycle', "if (activeFacet === 'logs')")
+    const runtime = section(manager, 'const appendRuntimeDiagnostics', "if (activeFacet === 'logs')")
     const marketplaceDetail = section(manager, 'const renderMarketplaceDetail', 'const marketplaceSourceState')
 
     expect(runtime).toContain('runtimeDiagnostics.append(diagnosticsBody)')
@@ -121,11 +121,11 @@ describe('UI copy principles', () => {
     expect(manager).toContain('.cxm-console-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }')
     expect(runtime).toContain("create(document, 'section', 'cxm-runtime-overview')")
     expect(runtime).toContain("copy('runtime.status-details')")
-    expect(runtime).toContain("create(document, 'details', 'cxm-runtime-diagnostics')")
+    expect(runtime).not.toContain("create(document, 'details', 'cxm-runtime-diagnostics')")
     expect(runtime).not.toContain("'cxm-error', plugin.error")
     expect(manager).toContain("panel.classList.add('cxm-console-panel')")
     expect(manager).not.toContain("create(document, 'div', 'cxm-console-summary')")
-    expect(manager).toContain("appendRuntimeLifecycle(overview)")
+    expect(manager).toContain("appendRuntimeDiagnostics(panel)")
   })
 
   it('keeps shared tabs complete when their content area becomes narrow', async () => {

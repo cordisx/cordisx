@@ -1,0 +1,4 @@
+interface:
+  display_name: "CordisX Plugin Development"
+  short_description: "Build CordisX plugins with Host-owned UI contracts"
+  default_prompt: "Create or update this CordisX plugin using public structured contracts and the Host-owned UI system."

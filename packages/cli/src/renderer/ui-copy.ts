@@ -133,9 +133,6 @@ type CopyKey =
   | 'plugin.status.rolling-back'
   | 'plugin.status.rollback-failed'
   | 'plugin.status.configured-disabled'
-  | 'runtime.lifecycle-summary'
-  | 'runtime.services'
-  | 'runtime.none'
   | 'runtime.active-contributions'
   | 'runtime.commands'
   | 'runtime.processing'
@@ -146,11 +143,7 @@ type CopyKey =
   | 'runtime.reauthorize'
   | 'runtime.restore-plugin'
   | 'runtime.block-plugin'
-  | 'runtime.locale-catalogs-empty'
-  | 'runtime.commands-empty'
   | 'runtime.diagnostics'
-  | 'runtime.section.localization'
-  | 'runtime.section.details'
   | 'runtime.configuration'
   | 'runtime.not-declared'
   | 'runtime.revision'
@@ -195,6 +188,7 @@ type CopyKey =
   | 'console.back-to-latest'
   | 'console.entry-details'
   | 'console.close-details'
+  | 'console.field.timestamp'
   | 'console.field.plugin'
   | 'console.field.generation'
   | 'console.field.source'
@@ -384,6 +378,7 @@ type CopyKey =
   | 'form.delete-item'
   | 'form.move-item-up'
   | 'form.move-item-down'
+  | 'form.reorder-handle'
   | 'form.array-item'
   | 'form.close'
 
@@ -514,24 +509,17 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'plugin.status.rolling-back': { en: 'Restoring', 'zh-CN': '正在恢复' },
   'plugin.status.rollback-failed': { en: 'Restore failed', 'zh-CN': '恢复失败' },
   'plugin.status.configured-disabled': { en: 'Disabled by configuration', 'zh-CN': '配置禁用' },
-  'runtime.lifecycle-summary': { en: 'Runtime details', 'zh-CN': '运行详情' },
-  'runtime.services': { en: 'Services', 'zh-CN': '服务' },
-  'runtime.none': { en: 'None', 'zh-CN': '无' },
   'runtime.active-contributions': { en: 'Active contributions', 'zh-CN': '活跃贡献' },
   'runtime.commands': { en: 'Commands', 'zh-CN': '命令' },
   'runtime.processing': { en: 'Working…', 'zh-CN': '处理中…' },
   'runtime.healthy': { en: 'Healthy', 'zh-CN': '运行正常' },
   'runtime.status-attention': { en: 'Needs attention', 'zh-CN': '需要处理' },
-  'runtime.status-details': { en: 'Details are shown in Runtime status.', 'zh-CN': '详细信息请在运行状态中查看。' },
+  'runtime.status-details': { en: 'Details are available in Logs & diagnostics.', 'zh-CN': '详细信息请在日志与诊断中查看。' },
   'runtime.configured-disabled': { en: 'Disabled by configuration', 'zh-CN': '配置中已禁用' },
   'runtime.reauthorize': { en: 'Reauthorize', 'zh-CN': '重新授权' },
   'runtime.restore-plugin': { en: 'Restore plugin', 'zh-CN': '恢复插件' },
   'runtime.block-plugin': { en: 'Block plugin', 'zh-CN': '屏蔽插件' },
-  'runtime.locale-catalogs-empty': { en: 'No active locale catalogs', 'zh-CN': '当前插件没有活跃 locale dictionary' },
-  'runtime.commands-empty': { en: 'No commands registered', 'zh-CN': '当前插件没有 command 注册' },
   'runtime.diagnostics': { en: 'Diagnostics', 'zh-CN': '诊断' },
-  'runtime.section.localization': { en: 'Localization', 'zh-CN': '本地化' },
-  'runtime.section.details': { en: 'Runtime details', 'zh-CN': '运行时详情' },
   'runtime.configuration': { en: 'Configuration', 'zh-CN': '配置' },
   'runtime.not-declared': { en: 'Not declared', 'zh-CN': '未声明' },
   'runtime.revision': { en: 'revision', 'zh-CN': '版本' },
@@ -576,6 +564,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'console.back-to-latest': { en: 'Back to latest', 'zh-CN': '回到最新' },
   'console.entry-details': { en: 'Entry details', 'zh-CN': '日志详情' },
   'console.close-details': { en: 'Close log details', 'zh-CN': '关闭日志详情' },
+  'console.field.timestamp': { en: 'Timestamp', 'zh-CN': '时间戳' },
   'console.field.plugin': { en: 'Plugin', 'zh-CN': '插件' },
   'console.field.generation': { en: 'Generation', 'zh-CN': 'Generation' },
   'console.field.source': { en: 'Capability / source', 'zh-CN': '能力 / 来源' },
@@ -765,6 +754,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'form.delete-item': { en: 'Delete item', 'zh-CN': '删除条目' },
   'form.move-item-up': { en: 'Move item up', 'zh-CN': '上移条目' },
   'form.move-item-down': { en: 'Move item down', 'zh-CN': '下移条目' },
+  'form.reorder-handle': { en: 'Reorder with the move controls', 'zh-CN': '使用上下移动操作调整顺序' },
   'form.array-item': { en: 'Array item', 'zh-CN': '数组条目' },
   'form.close': { en: 'Close', 'zh-CN': '关闭' },
 })

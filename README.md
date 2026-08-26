@@ -126,6 +126,14 @@ separate development host. Continue with the
 [minimal plugin guide](./.agents/docs/getting-started.md#create-a-plugin) and the
 [slot showcase](./examples/plugins/slot-showcase/README.md).
 
+AI coding agents can install the repository's CordisX plugin-development skill
+to apply the public contract, Host-owned UI rules, Schemastery presentation
+model, lifecycle cleanup, and real Playground workflow before implementation:
+
+```bash
+npx skills@latest add cordisx/cordisx --skill cordisx-plugin-development
+```
+
 ## Ecosystem and community
 
 - [Website](https://cordisx.github.io/) — product overview and project entry.

@@ -82,6 +82,7 @@ describe('settings navigation demo bundle', () => {
     await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content="mounted"]') !== null)
     const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-page="settings-tab-demo:navigation"]')!
     expect(page.closest('[data-manager-content-root]')).not.toBeNull()
+    expect(page.closest<HTMLElement>('.cxm-content')?.dataset.managerContentPage).toBe('true')
     // A first-level Manager navigation entry owns the direct Host header: it
     // has its own icon and title, without a history Back control or breadcrumb.
     expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).toBeNull()
@@ -90,9 +91,15 @@ describe('settings navigation demo bundle', () => {
     expect(dom.window.document.querySelector('.cxm-heading p')).toBeNull()
     expect(dom.window.document.querySelector('.cxm-heading-direct-title')?.textContent).toBe('Demo plugin settings')
     const managerStyles = dom.window.document.getElementById('cordisx-manager-style')?.textContent
-    expect(managerStyles).toContain('grid-template-columns: 26px minmax(0, 1fr)')
+    expect(managerStyles).toContain('grid-template-columns: var(--cx-manager-header-leading-seat) minmax(0, 1fr)')
     expect(managerStyles).toContain('.cxm-tabs {\n    display: flex;\n    width: 100%;\n    min-width: 0;')
     expect(managerStyles).toContain('.cxm-manager-content-root { min-width: 0; max-width: 100%; }')
+    expect(managerStyles).toContain('--cx-manager-content-inline: 22px;')
+    expect(managerStyles).toContain('.cxm-content[data-manager-content-page="true"] { padding: 0; }')
+    expect(managerStyles).toContain('.cxm-content[data-manager-content-page="true"] > .cxm-manager-content-root { padding: 0; }')
+    expect(managerStyles).not.toContain('.cxm-manager-content-root { box-sizing: border-box; padding: var(--cx-manager-content-block-start)')
+    expect(dom.window.getComputedStyle(page.closest<HTMLElement>('[data-manager-content-root]')!).padding).toBe('0px')
+    expect(page.style.padding).toBe('')
     expect(page.querySelector('[data-settings-navigation-demo-body-title]')).toBeNull()
     expect(page.textContent).not.toContain('Settings for this demo plugin.')
     expect(page.querySelector<HTMLInputElement>('[data-settings-navigation-demo-focus]')?.value).toBe('CordisX')

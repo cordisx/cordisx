@@ -97,6 +97,8 @@ describe('Manager route and page catalog', () => {
       dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')!.hidden = false
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="routes"]')!.click()
       const catalog = dom.window.document.querySelector<HTMLElement>('.cxm-content')!
+      expect(dom.window.document.querySelector('.cxm-heading-leading')?.getAttribute('data-material-icon')).toBe('routes')
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).toBeNull()
       const visibleCount = (selector: string): number => [...dom.window.document.querySelectorAll<HTMLElement>(selector)]
         .filter(item => !item.closest<HTMLElement>('[data-collection-item]')?.hidden).length
       expect(catalog.querySelector('[data-host-collection="routes"]')).not.toBeNull()
@@ -121,6 +123,7 @@ describe('Manager route and page catalog', () => {
       resetCatalog.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
 
       dom.window.document.querySelector<HTMLButtonElement>('[data-route-product-row="demo:analytics"]')!.click()
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).not.toBeNull()
       const routeDetailIcons = [...dom.window.document.querySelectorAll<HTMLElement>('.cxm-route-card-icon')]
       expect(routeDetailIcons.map(icon => icon.dataset.materialIcon)).toEqual(['routes', 'document'])
       expect(routeDetailIcons.every(icon => icon.tagName === 'SPAN' && icon.getAttribute('aria-hidden') === 'true')).toBe(true)
@@ -182,6 +185,12 @@ describe('Manager route and page catalog', () => {
       expect(styles).toContain('.cxc-machine-id')
       expect(styles).toContain('.cxm-route-card-icon { display: grid; place-items: center; width: var(--cx-compact-list-icon-seat);')
       expect(styles).toContain('.cxm-route-card-icon svg { width: var(--cx-compact-list-icon-glyph); height: var(--cx-compact-list-icon-glyph); }')
+      expect(styles).toContain('--cx-manager-header-leading-seat: 26px;')
+      expect(styles).toContain('--cx-manager-header-leading-glyph: 18px;')
+      expect(styles).toContain('--cx-manager-header-title-size: 16px;')
+      expect(styles).toContain('--cx-manager-header-title-line-height: 26px;')
+      expect(styles).toContain('.cxm-breadcrumb-list { display: flex; min-width: 0; min-height: var(--cx-manager-header-leading-seat);')
+      expect(styles).toContain('line-height: calc(var(--cx-manager-header-title-line-height) - 4px);')
       expect(styles).toContain('.cxm-close { background: transparent; color: var(--cx-text); }')
       expect(styles).toContain('.cxm-close:hover { background: var(--cx-hover); color: var(--cx-text); }')
     } finally {
