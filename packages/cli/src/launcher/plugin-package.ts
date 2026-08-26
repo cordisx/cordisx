@@ -33,6 +33,10 @@ import {
 } from '../plugin-lifecycle-contracts.js'
 import { normalizePermissionScope } from '../permissions.js'
 import type { ResolvedPackageCandidate } from './packages/types.js'
+import {
+  assertNoPrivateReactBundle,
+  cordisXReactVirtualModules,
+} from './react-virtual-modules.js'
 
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const SEMANTIC_VERSION = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
@@ -231,6 +235,9 @@ async function buildArtifact(root: string, entry: string): Promise<{ readonly mo
     sourcemap: false,
     metafile: true,
     loader: { '.svg': 'text' as const },
+    jsx: 'automatic' as const,
+    jsxImportSource: 'cordisx/react',
+    plugins: [cordisXReactVirtualModules()],
     write: false,
     logLevel: 'silent' as const,
   }
@@ -250,6 +257,8 @@ async function buildArtifact(root: string, entry: string): Promise<{ readonly mo
   if (moduleResult.metafile === undefined || artifactResult.metafile === undefined) {
     throw new Error('plugin build produced no dependency metadata')
   }
+  assertNoPrivateReactBundle(moduleResult.metafile, 'plugin artifact')
+  assertNoPrivateReactBundle(artifactResult.metafile, 'plugin artifact')
   const inputs = [...Object.keys(moduleResult.metafile.inputs), ...Object.keys(artifactResult.metafile.inputs)]
     .map(input => input.replaceAll('\\', '/'))
   if (inputs.some(input => input.includes('node_modules/@deepseek-ai/cordis/'))) {

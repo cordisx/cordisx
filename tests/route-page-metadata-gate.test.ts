@@ -57,10 +57,14 @@ const expectedRegistrations = [
   'packages/cli/src/plugins/channel/index.ts|route|sessions',
   'packages/cli/src/plugins/cli-proxy-api/index.ts|page|providers.sessions',
   'packages/cli/src/plugins/cli-proxy-api/index.ts|route|providers.sessions',
+  'packages/create-cordisx-plugin/template/src/{{packageName}}.tsx|page|overview',
+  'packages/create-cordisx-plugin/template/src/{{packageName}}.tsx|route|overview',
   'tests/fixtures/generation-base-plugin.ts|page|generation-base',
   'tests/fixtures/generation-base-plugin.ts|route|generation-base',
   'tests/fixtures/lifecycle-smoke-update/index.ts|page|overview',
   'tests/fixtures/lifecycle-smoke-update/index.ts|route|overview',
+  'tests/fixtures/shared-react-page-plugin.tsx|page|overview',
+  'tests/fixtures/shared-react-page-plugin.tsx|route|overview',
   'tests/fixtures/session-header-sibling-plugin.ts|page|session.sibling',
   'tests/fixtures/session-header-sibling-plugin.ts|route|session.sibling',
 ] as const
@@ -71,7 +75,7 @@ async function sourceFiles(root: string): Promise<string[]> {
   const nested = await Promise.all(entries.map(async entry => {
     const item = path.join(root, entry.name)
     if (entry.isDirectory()) return sourceFiles(item)
-    return /\.(?:ts|mjs)$/.test(entry.name) ? [item] : []
+    return /\.(?:tsx?|mjs)$/.test(entry.name) ? [item] : []
   }))
   return nested.flat()
 }
@@ -96,7 +100,7 @@ function registrationKind(expression: ts.LeftHandSideExpression): RegistrationKi
 }
 
 function registrations(file: string, source: string, lineOffset = 0): Registration[] {
-  const scriptKind = file.endsWith('.mjs') ? ts.ScriptKind.JS : ts.ScriptKind.TS
+  const scriptKind = file.endsWith('.mjs') ? ts.ScriptKind.JS : file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, scriptKind)
   const declarations = new Map<string, ts.Expression>()
   const result: Registration[] = []

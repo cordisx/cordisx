@@ -1,4 +1,5 @@
 import type { Context, Disposable, Effect } from '@deepseek-ai/cordis'
+import type { ComponentType } from 'react'
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
 import type { CordisXPluginManifestV4 } from './permission-contracts.js'
 import type { CordisXPluginDependencyV1 } from './plugin-lifecycle-contracts.js'
@@ -900,6 +901,16 @@ export type CordisXPageMount<
 > = (
   context: CordisXPageMountContext<Messages>,
 ) => void | Disposable<void>
+
+/** Props passed by the Host to a shared-React page component. */
+export type CordisXReactPageProps<
+  Messages extends CordisXMessageDefinition<Messages> = CordisXMessageSchema,
+> = Omit<CordisXPageMountContext<Messages>, 'container' | 'document' | 'controls'>
+
+/** A plugin page body rendered with the Host's single React runtime. */
+export type CordisXReactPageComponent<
+  Messages extends CordisXMessageDefinition<Messages> = CordisXMessageSchema,
+> = ComponentType<CordisXReactPageProps<Messages>>
 
 export interface CordisXPages {
   register<Messages extends CordisXMessageDefinition<Messages>>(

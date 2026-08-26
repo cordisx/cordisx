@@ -1,5 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from 'cordisx/contracts'
+import { defineReactPage } from 'cordisx/react'
+import { createLifecyclePage } from './view.js'
 
 interface LifecycleSmokeState {
   apply: number
@@ -54,7 +56,7 @@ export function apply(ctx: Context): void {
     description: message('page.overview.description', 'Shows local-package lifecycle state.'),
     icon: 'host:refresh',
     chrome: 'body-only',
-  }, () => () => undefined)
+  }, defineReactPage(createLifecyclePage(counters)))
   ctx.routes.register({
     $schema: CORDISX_ROUTE_SCHEMA_V2,
     schemaVersion: 2,

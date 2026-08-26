@@ -25,6 +25,14 @@ CordisX starts a separate process and does not modify the installed Codex
 application. Plugins are trusted local renderer code; this beta is not a
 security sandbox.
 
+## React plugins
+
+Plugins write controlled page bodies with the React singleton supplied by the
+Host. Import React and Hooks from `cordisx/react`, and reusable Host components
+from `cordisx/ui`. Plugin projects install only `cordisx`; they must not install
+or bundle `react`, `react-dom`, or a private React component library. The Host
+owns the React root, page chrome, theme, error boundary, and lifecycle cleanup.
+
 ## License
 
 The CordisX host, runtime, CLI, manager, launcher, and adapters are licensed

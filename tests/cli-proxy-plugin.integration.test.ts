@@ -306,11 +306,9 @@ describe('CLIProxy provider plugin renderer', () => {
     const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-provider-fleet="true"]')
     expect(page?.closest('[data-cordisx-page-outlet="main"]')).not.toBeNull()
     expect(dom.window.document.getElementById('native-conversation')?.textContent).toBe('native session remains')
-    expect(page!.querySelector('select')).toBeNull()
-    const modelControl = page!.querySelector<HTMLElement>('[data-cordisx-host-page-control="select"] [aria-label="Model"]')
-    expect(modelControl?.tagName).toBe('T-SELECT')
-    const modelLabels = [...(dom.window.document.querySelector<HTMLElement>('[data-cxf-tdesign-portal-host="true"]')?.shadowRoot
-      ?.querySelectorAll<HTMLElement>('[role="listbox"][aria-label="Model"] t-option') ?? [])].map(option => option.textContent)
+    const modelControl = page!.querySelector<HTMLSelectElement>('select[aria-label="Model"]')
+    expect(modelControl).not.toBeNull()
+    const modelLabels = [...modelControl!.options].map(option => option.textContent)
     expect(modelLabels).toEqual(['[gateway-a] Shared model', '[gateway-b] Shared model'])
     const keys = [...page!.querySelectorAll<HTMLElement>('[data-session]')].map(row => row.dataset.session)
     expect(keys).toEqual([

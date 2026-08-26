@@ -1,5 +1,6 @@
-import type { Context, Disposable } from '@deepseek-ai/cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
+import { defineReactPage } from 'cordisx/react'
 import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
@@ -8,9 +9,9 @@ import {
   type CordisXEnvironmentRow,
   type CordisXLocalizedText,
   type CordisXMessageParams,
-  type CordisXPageMountContext,
 } from '../../../packages/cli/src/contracts.js'
 import type {} from '../../../packages/cli/src/contracts.js'
+import { ShowcasePage } from './view.js'
 
 export const name = 'structured-showcase'
 export const inject = ['i18n', 'commands', 'slots', 'pages', 'routes']
@@ -90,34 +91,6 @@ function message<Key extends keyof Messages>(
     key,
     ...(args[0] === undefined ? {} : { params: args[0] }),
   }
-}
-
-function mountCard(context: CordisXPageMountContext, body: CordisXLocalizedText): Disposable<void> {
-  const card = context.document.createElement('article')
-  card.dataset.cordisxDemoMarker = context.outlet
-  Object.assign(card.style, {
-    display: 'grid',
-    gap: '14px',
-    margin: '24px',
-    padding: '24px',
-    border: '1px solid var(--color-border, rgba(255, 255, 255, .084))',
-    borderRadius: '14px',
-    background: 'var(--color-background-elevated-secondary, rgba(255, 255, 255, .032))',
-    color: 'var(--color-text, #dfdfdf)',
-    font: '14px/1.55 ui-sans-serif, system-ui, sans-serif',
-  })
-  const eyebrow = context.document.createElement('strong')
-  eyebrow.textContent = `CORDISX · ${context.outlet.toUpperCase()}`
-  eyebrow.style.color = 'var(--color-text-secondary, rgba(255, 255, 255, .71))'
-  const copy = context.document.createElement('p')
-  copy.style.margin = '0'
-  context.localization.bindText(copy, body)
-  const route = context.document.createElement('code')
-  route.textContent = `${context.routeId} · ${JSON.stringify(context.params)}`
-  route.style.color = 'var(--color-text-tertiary, rgba(255, 255, 255, .498))'
-  card.append(eyebrow, copy, route)
-  context.container.append(card)
-  return () => card.remove()
 }
 
 /** End-to-end demo for every structured shell surface and all three built-in page outlets. */
@@ -216,7 +189,7 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       { id: 'overview', label: message('page.tab.overview'), icon: 'host:layers' },
       { id: 'details', label: message('page.tab.details'), icon: 'host:info' },
     ],
-  }, context => mountCard(context, message('page.app.body')))
+  }, defineReactPage<Messages>(ShowcasePage))
   ctx.pages.register<Messages>({
     $schema: CORDISX_PAGE_SCHEMA_V3,
     schemaVersion: 3,
@@ -230,7 +203,7 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       icon: 'host:refresh',
       command: { id: 'refresh' },
     }],
-  }, context => mountCard(context, message('page.main.body')))
+  }, defineReactPage<Messages>(ShowcasePage))
   ctx.pages.register<Messages>({
     $schema: CORDISX_PAGE_SCHEMA_V3,
     schemaVersion: 3,
@@ -238,7 +211,7 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     title: message('page.session.title'),
     description: message('page.session.description'),
     icon: 'host:analytics',
-  }, context => mountCard(context, message('page.session.body', { sessionId: String(context.params.sessionId) })))
+  }, defineReactPage<Messages>(ShowcasePage))
 
   ctx.routes.register({
     $schema: CORDISX_ROUTE_SCHEMA_V2,

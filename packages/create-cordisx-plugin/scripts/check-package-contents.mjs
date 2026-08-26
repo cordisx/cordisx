@@ -28,7 +28,7 @@ for (const required of [
   'template/README.md',
   'template/_gitignore',
   'template/package.json',
-  'template/src/{{packageName}}.ts',
+  'template/src/{{packageName}}.tsx',
   'template/test/manifest.mjs',
   'template/tsconfig.json',
 ]) {

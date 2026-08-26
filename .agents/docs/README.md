@@ -26,6 +26,9 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `host-form-system.md` defines the Host-owned TDesign-aligned primitive
   adapter, official Web Components audit, scoped theme/layout/a11y contract,
   schema selection, draft/validation states, and current Manager integration.
+- `plugin-react-runtime.md` defines the direct shared-React authoring API,
+  Host component surface, private-React rejection, page-body ownership, and
+  root lifecycle/verification contract.
 - `service-configuration.md` defines plugin-owned launcher service schemas,
   Host CAS/permission/secret boundaries, and explicit service/app restart
   planes used by CLIProxy Providers.

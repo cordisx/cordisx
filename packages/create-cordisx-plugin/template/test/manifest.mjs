@@ -6,6 +6,6 @@ test('exports a minimal CordisX plugin module', () => {
   assert.equal(manifest.schemaVersion, 1)
   assert.equal(manifest.id, '{{pluginId}}')
   assert.deepEqual(manifest.capabilities, [])
-  assert.deepEqual(inject, ['i18n', 'commands', 'slots'])
+  assert.deepEqual(inject, ['i18n', 'pages', 'routes', 'slots'])
   assert.equal(typeof apply, 'function')
 })

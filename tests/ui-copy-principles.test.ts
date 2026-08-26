@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { MANAGER_PRODUCT_COPY, managerCopy } from '../packages/cli/src/renderer/ui-copy.js'
 
 const managerPath = fileURLToPath(new URL('../packages/cli/src/renderer/manager.ts', import.meta.url))
-const tracePath = fileURLToPath(new URL('../packages/agent-trace-showcase/src/view.ts', import.meta.url))
+const tracePath = fileURLToPath(new URL('../packages/agent-trace-showcase/src/react-view.tsx', import.meta.url))
 const cliProxyPath = fileURLToPath(new URL('../packages/cli/src/plugins/cli-proxy-api/index.ts', import.meta.url))
 const principlesPath = fileURLToPath(new URL('../.agents/docs/ui-copy-principles.md', import.meta.url))
 
@@ -51,7 +51,7 @@ describe('UI copy principles', () => {
     const marketplaceDetail = section(manager, 'const renderMarketplaceDetail', 'const marketplaceSourceState')
 
     expect(runtime).toContain('runtimeDiagnostics.append(diagnosticsBody)')
-    expect(trace).toContain("'Agent events are currently unavailable.'")
+    expect(trace).toContain('Agent events are currently unavailable.')
     expect(trace).not.toContain('This plugin will not inspect a raw bridge or private adapter store.')
     expect(cliProxy).toContain("'navigation.description': 'Manage provider models and sessions'")
     expect(cliProxy).toContain("'navigation.description': '管理 Provider 模型和会话'")
