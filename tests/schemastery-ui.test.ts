@@ -55,4 +55,13 @@ describe('@cordisx/schemastery-ui', () => {
     expect(draft.value(['rules', 'opaque-id', 'title'], 'Default')).toBe('Default')
     expect(validateFormValue({ path: ['count'], type: 'number', required: true, min: 1, max: 4 }, 7)).toEqual([{ code: 'range' }])
   })
+
+  it('validates bounded array choices item by item instead of treating the array as a scalar choice', () => {
+    const field = {
+      path: ['audiences'], type: 'array' as const, itemType: 'string' as const,
+      choices: [{ label: 'Design', value: 'design' }, { label: 'Research', value: 'research' }],
+    }
+    expect(validateFormValue(field, ['design', 'research'])).toEqual([])
+    expect(validateFormValue(field, ['design', 'unknown'])).toEqual([{ code: 'choice' }])
+  })
 })

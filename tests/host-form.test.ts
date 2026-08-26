@@ -23,6 +23,16 @@ function field(overrides: Partial<CordisXConfigFieldSnapshot> = {}): CordisXConf
 }
 
 describe('Host form primitive registry', () => {
+  it('supports a headingless section when the Host page header already owns the route title', () => {
+    const dom = new JSDOM('<!doctype html><body></body>')
+    const adapter = new HostFormAdapter(dom.window.document)
+    const section = adapter.section()
+
+    expect(section.root.className).toBe('cxf-section')
+    expect(section.root.querySelector('.cxf-section-heading')).toBeNull()
+    expect(section.root.firstElementChild).toBe(section.content)
+  })
+
   it('selects every bounded primitive without exposing a library or renderer choice', () => {
     expect(selectHostFormPrimitive(field())).toBe('input')
     expect(selectHostFormPrimitive(field({ role: 'textarea' }))).toBe('textarea')
@@ -200,6 +210,23 @@ describe('Host form DOM and accessibility', () => {
     expect(control.theme).toBe('primary')
   })
 
+  it('captures one-shot secrets through an official password input without adding them to form snapshots', () => {
+    const dom = new JSDOM('<!doctype html><body></body>')
+    const adapter = new HostFormAdapter(dom.window.document)
+    const onDraft = vi.fn()
+    const secret = adapter.transientSecret('credential', onDraft)
+    const input = secret.root as TDesignElement
+
+    expect(input.tagName).toBe('T-INPUT')
+    expect(input.dataset.hostTransientSecret).toBe('true')
+    expect(input.getAttribute('autocomplete')).toBe('new-password')
+    expect(input).toMatchObject({ value: '', defaultValue: '', type: 'password' })
+    ;(input.onChange as ((value: string) => void) | undefined)?.('test-only-secret')
+    expect(onDraft).toHaveBeenCalledWith('test-only-secret')
+    expect(secret.root.textContent).not.toContain('test-only-secret')
+    secret.clear()
+    expect(input).toMatchObject({ value: '', defaultValue: '', type: 'password' })
+  })
   it('unwraps official CustomEvent and native input events before they enter Host drafts', () => {
     const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true })
     const adapter = new HostFormAdapter(dom.window.document)
@@ -281,6 +308,34 @@ describe('Host form DOM and accessibility', () => {
     const select = adapter.control(field({ value: 'safe', choices: [{ label: 'Safe', value: 'safe' }, { label: 'Fast', value: 'fast' }] }), 'select', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
     select.onChange?.(event('fast'))
     expect(onDraft).toHaveBeenLastCalledWith('fast', undefined)
+  })
+
+  it('keeps upgraded Shadow DOM text controls editable and preserves explicit textarea rows', async () => {
+    const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true })
+    const adapter = new HostFormAdapter(dom.window.document)
+    const onDraft = vi.fn()
+    const control = adapter.control({
+      namespace: 'test', path: ['introduction'], type: 'string', role: 'textarea', value: '', disabled: false, required: false,
+    }, 'introduction', onDraft, { placeholder: 'Describe this channel', textareaRows: 5 })
+    const host = control.root as TDesignElement
+    const shadow = host.attachShadow({ mode: 'open' })
+    const textarea = dom.window.document.createElement('textarea')
+    shadow.append(textarea)
+    dom.window.document.body.append(host)
+
+    await Promise.resolve()
+    textarea.value = 'Editable introduction'
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true, composed: true }))
+    await Promise.resolve()
+
+    expect(onDraft).toHaveBeenLastCalledWith('Editable introduction', undefined)
+    expect(textarea.value).toBe('Editable introduction')
+    expect(textarea.rows).toBe(5)
+    expect(textarea.style.getPropertyValue('min-height')).toBe('122px')
+    expect(textarea.style.getPropertyPriority('min-height')).toBe('important')
+    expect(host.getAttribute('placeholder')).toBe('Describe this channel')
+    control.dispose?.()
+    dom.window.close()
   })
 
   it('projects labels, help, errors, required state, TDesign controls, and draft events', () => {

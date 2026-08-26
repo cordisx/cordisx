@@ -1,11 +1,17 @@
 # Local UI Playground
 
-`npm run dev:ui` starts a loopback-only browser page for CordisX and plugin
-developers. It runs an independent Cordis renderer generation and bundles the
-configured plugin modules with the same production `buildRendererBundle`,
-runtime, Manager, HostForm, theme projection, icon, dialog, and lifecycle
-code. It does not start Codex Desktop, Chromium, a ChatGPT profile, or an
-app-server, and it does not need an authenticated session.
+`npm run dev:ui` starts a loopback-only Vite development page for CordisX and
+plugin developers. The page uses React Fast Refresh and native ESM HMR for the
+Host shell and React component tree. It runs an independent Cordis renderer
+generation and composes the configured plugin modules with the same runtime,
+Manager, HostForm, theme projection, icon, dialog, and lifecycle source used by
+the production renderer. It does not start Codex Desktop, Chromium, a ChatGPT
+profile, or an app-server, and it does not need an authenticated session.
+
+Vite is a development transport, not a second renderer implementation. The
+production `app://` path still uses `buildRendererBundle` and an injected,
+self-contained IIFE. Vite HMR is not claimed for that injected bundle: real
+Codex verification remains a production rebuild and isolated reinjection.
 
 ```sh
 npm run dev:ui
@@ -42,6 +48,8 @@ clears its temporary state.
 
 - configured local plugin modules bundle, load, activate, dispose, and rebuild
   as a new renderer generation through the normal CordisX runtime;
+- Host React components update through Vite Fast Refresh without maintaining a
+  copied Playground-only Manager implementation;
 - Manager pages, plugin details, configuration forms, Host dialogs, theme
   tokens, icons, locale attributes, and explicit `app`/`main`/`session.content`
   page seats render in a normal browser; and

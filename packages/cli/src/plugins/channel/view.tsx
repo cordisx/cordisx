@@ -6,7 +6,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'cordisx/react'
-import { Button, Card, EmptyState, Heading, Stack, Text } from 'cordisx/ui'
+import { Button, Card, EmptyState, Heading, Icon, Select, Stack, Text } from 'cordisx/ui'
 import type { CordisXReactPageProps } from '../../contracts.js'
 import type { HostServiceConfigDescriptor, HostServiceConfigMutation } from '../../launcher/service-config.js'
 import type {
@@ -17,31 +17,49 @@ import type {
   CordisXChannelManager,
 } from '../../renderer/channel-manager.js'
 import { managerCopy } from '../../renderer/ui-copy.js'
+import cordisxMarkDark from '../../../assets/brand/cordisx-mark-dark.svg'
+import cordisxMarkLight from '../../../assets/brand/cordisx-mark-light.svg'
+import feishuAppIcon from '../../../assets/apps/feishu.svg'
 
 const STYLES = `
-.cxc-channel-react{display:grid;min-width:0;color:var(--cx-text)}
+.cxc-channel-react{display:grid;min-width:0;min-height:100%;color:var(--cx-text)}
 .cxc-channel-toolbar{display:flex;min-width:0;border:1px solid var(--cx-border);border-radius:10px;overflow:hidden;background:var(--cx-surface-raised)}
+.cxc-channel-search{display:flex;min-width:0;flex:1;align-items:center;gap:8px;padding-inline:11px}.cxc-channel-search svg{width:17px;height:17px;color:var(--cx-muted)}
 .cxc-channel-toolbar input,.cxc-channel-toolbar select{min-width:0;min-height:38px;border:0;background:transparent;color:var(--cx-text);font:inherit;outline:0}
-.cxc-channel-toolbar input{flex:1;padding:8px 12px}
+.cxc-channel-toolbar input{width:100%;flex:1;padding:8px 0}
 .cxc-channel-toolbar select{padding:8px 10px;border-inline-start:1px solid var(--cx-border)}
 .cxc-channel-toolbar .cxr-ui-button{min-width:38px;min-height:38px;padding:0 11px;border:0;border-inline-start:1px solid var(--cx-border);border-radius:0}
 .cxc-channel-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-top:12px}
+.cxc-channel-empty{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:36px;align-items:start;padding:42px 0 0}.cxc-channel-empty-copy{display:grid;justify-items:start;gap:8px}.cxc-channel-empty-mark{display:grid;width:36px;height:36px;place-items:center;border-radius:10px;background:var(--cx-hover);color:var(--cx-primary)}.cxc-channel-empty-copy h3,.cxc-channel-empty-copy p{margin:0}.cxc-channel-empty-copy p{color:var(--cx-muted)}.cxc-channel-supported{display:grid;gap:10px;padding-inline-start:30px;border-inline-start:1px solid var(--cx-border);color:var(--cx-muted);font-size:12px}.cxc-channel-supported-icons{display:flex;gap:12px}.cxc-channel-supported-icons .cxc-channel-app-icon{width:38px;height:38px}
 .cxc-channel-account{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:11px;align-items:center;width:100%;padding:12px;border:1px solid var(--cx-border);border-radius:11px;background:var(--cx-surface-raised);color:var(--cx-text);text-align:start;cursor:pointer}
 .cxc-channel-account:hover,.cxc-channel-account:focus-visible{border-color:var(--cx-primary);background:var(--cx-hover);outline:0}
 .cxc-channel-avatar{display:grid;width:42px;height:42px;place-items:center;border-radius:10px;background:var(--cx-surface);font-weight:700;text-transform:uppercase}
 .cxc-channel-account-copy{display:grid;gap:2px;min-width:0}.cxc-channel-account-copy span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cxc-channel-meta{color:var(--cx-muted);font-size:12px}
 .cxc-channel-status{display:inline-flex;align-items:center;gap:6px;color:var(--cx-muted);font-size:12px}.cxc-channel-status::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--cx-muted)}.cxc-channel-status[data-state="ready"]::before{background:var(--cx-success)}.cxc-channel-status[data-state="retrying"],.cxc-channel-status[data-state="starting"]{color:var(--cx-warning)}.cxc-channel-status[data-state="unavailable"]{color:var(--cx-danger)}
-.cxc-channel-form{display:grid;gap:16px}.cxc-channel-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px}.cxc-channel-field{display:grid;gap:6px;min-width:0}.cxc-channel-field>span{font-weight:600}.cxc-channel-field input,.cxc-channel-field select{width:100%;min-height:38px;padding:7px 10px;border:1px solid var(--cx-border);border-radius:8px;background:var(--cx-surface-raised);color:var(--cx-text);font:inherit}.cxc-channel-field small{color:var(--cx-muted)}
+.cxc-channel-form{display:grid;min-height:100%;grid-template-rows:auto auto minmax(3rem,1fr);gap:20px}.cxc-channel-create-meta{display:grid;grid-template-columns:72px minmax(0,1fr);gap:22px;align-items:start}.cxc-channel-platform-icon{display:grid;width:72px;height:72px;place-items:center}.cxc-channel-app-icon{position:relative;display:grid;width:72px;height:72px;place-items:center}.cxc-channel-app-icon img{position:absolute;width:100%;height:100%;object-fit:contain;border-radius:17px}.cxc-channel-app-icon img[data-theme="dark"]{display:none}[data-cordisx-app-theme="dark"] .cxc-channel-app-icon img[data-theme="light"]{display:none}[data-cordisx-app-theme="dark"] .cxc-channel-app-icon img[data-theme="dark"]{display:block}
+.cxc-channel-create-copy{display:grid;gap:12px;min-width:0}.cxc-channel-create-primary{display:grid;grid-template-columns:minmax(12rem,5fr) minmax(14rem,7fr);min-width:0}.cxc-channel-platform-select,.cxc-channel-create-primary input,.cxc-channel-introduction{box-sizing:border-box;width:100%;min-width:0}.cxc-channel-create-primary input,.cxc-channel-introduction{border:1px solid var(--cx-border);background:var(--cx-surface-raised);color:var(--cx-text);font:inherit;outline:0}.cxc-channel-platform-select .cxr-ui-select-trigger{min-height:38px;border-radius:8px 0 0 8px}.cxc-channel-create-primary input{min-height:38px;margin-inline-start:-1px;padding:7px 10px;border-radius:0 8px 8px 0}.cxc-channel-create-primary input:focus,.cxc-channel-introduction:focus{position:relative;z-index:1;border-color:var(--cx-primary);box-shadow:0 0 0 2px var(--cx-focus)}.cxc-channel-introduction{min-height:112px;resize:vertical;border-radius:8px;padding:9px 10px}.cxc-channel-option-icon,.cxc-channel-option-icon .cxc-channel-app-icon{display:inline-grid;width:18px;height:18px;vertical-align:middle}.cxc-channel-option-icon .cxc-channel-app-icon img{border-radius:4px}
+.cxc-channel-schema{display:grid;gap:0;overflow:hidden;border:1px solid var(--cx-border);border-radius:12px;background:var(--cx-surface-raised)}.cxc-channel-schema:empty{display:none}.cxc-channel-form-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:0}.cxc-channel-field{display:grid;grid-template-columns:20px minmax(0,1fr);gap:8px 10px;min-width:0;padding:14px 16px;border-bottom:1px solid var(--cx-border)}.cxc-channel-field:last-child{border-bottom:0}.cxc-channel-field-title{display:flex;align-items:center;gap:6px;font-weight:600}.cxc-channel-field-action{display:grid;width:20px;height:20px;place-items:center;border:0;padding:0;background:transparent;color:var(--cx-muted);cursor:pointer}.cxc-channel-field-action svg{width:16px;height:16px}.cxc-channel-field-control{display:grid;gap:6px;min-width:0}.cxc-channel-field input,.cxc-channel-field select{box-sizing:border-box;width:100%;min-height:38px;padding:7px 10px;border:1px solid var(--cx-border);border-radius:8px;background:var(--cx-surface);color:var(--cx-text);font:inherit}.cxc-channel-field small{color:var(--cx-muted)}
 .cxc-channel-switch{display:flex;align-items:center;gap:9px;min-height:38px}.cxc-channel-switch input{width:18px;height:18px;margin:0;accent-color:var(--cx-primary)}
-.cxc-channel-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}.cxc-channel-actions .cxc-channel-note{margin-inline-end:auto}
+.cxc-channel-actions{display:flex;align-items:center;align-self:end;justify-content:flex-end;gap:8px;padding-top:12px}.cxc-channel-actions .cxc-channel-note{margin-inline-end:auto}
 .cxc-channel-note{color:var(--cx-muted);font-size:12px}
 .cxc-channel-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.cxc-channel-stat{display:grid;gap:4px}.cxc-channel-stat strong{font-size:18px}.cxc-channel-stat span{color:var(--cx-muted);font-size:12px}
 .cxc-channel-section{display:grid;gap:10px}.cxc-channel-section-head{display:grid;gap:3px}
 .cxc-channel-data-list{display:grid;gap:8px}.cxc-channel-data-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:11px 12px;border:1px solid var(--cx-border);border-radius:9px;background:var(--cx-surface-raised)}.cxc-channel-data-copy{display:grid;gap:2px;min-width:0}.cxc-channel-data-copy span,.cxc-channel-data-copy code{overflow-wrap:anywhere}
 .cxc-channel-log-entry{display:grid;grid-template-columns:minmax(8rem,auto) minmax(0,1fr) auto;gap:10px;align-items:baseline;padding:9px 11px;border-bottom:1px solid var(--cx-border);font-size:12px}.cxc-channel-log-entry time,.cxc-channel-log-outcome{color:var(--cx-muted)}
 .cxc-channel-log-pagination{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:10px;color:var(--cx-muted);font-size:12px}
-@media(max-width:700px){.cxc-channel-form-grid,.cxc-channel-cards{grid-template-columns:1fr}.cxc-channel-log-entry{grid-template-columns:1fr}.cxc-channel-actions{flex-wrap:wrap}}
+@media(max-width:700px){.cxc-channel-empty{grid-template-columns:1fr}.cxc-channel-supported{padding:18px 0 0;border-inline-start:0;border-block-start:1px solid var(--cx-border)}.cxc-channel-create-meta{grid-template-columns:1fr}.cxc-channel-create-primary{grid-template-columns:1fr;gap:8px}.cxc-channel-create-primary select,.cxc-channel-create-primary input{margin:0;border-radius:8px}.cxc-channel-form-grid,.cxc-channel-cards{grid-template-columns:1fr}.cxc-channel-log-entry{grid-template-columns:1fr}.cxc-channel-actions{flex-wrap:wrap}}
 `
+
+const CORDISX_LIGHT_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkLight)}`
+const CORDISX_DARK_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkDark)}`
+const FEISHU_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(feishuAppIcon)}`
+type ChannelPlatform = 'simulator' | 'feishu'
+
+function ChannelAppIcon({ platform, label }: { readonly platform: ChannelPlatform; readonly label: string }) {
+  const light = platform === 'feishu' ? FEISHU_URI : CORDISX_LIGHT_URI
+  const dark = platform === 'feishu' ? FEISHU_URI : CORDISX_DARK_URI
+  return <span className="cxc-channel-app-icon" title={label}><img src={light} alt={label} data-theme="light" /><img src={dark} alt="" data-theme="dark" /></span>
+}
 
 interface ChannelRecord {
   readonly id: string
@@ -101,15 +119,26 @@ function ChannelList(props: ChannelPageProps) {
   return <Shell {...props}>
     <div data-channel-page="list">
       <div className="cxc-channel-toolbar" role="toolbar" aria-label={managerCopy(props.locale, 'channel.accounts')}>
-        <input data-collection-search="channel-list" type="search" value={query} onChange={event => setQuery(event.currentTarget.value)}
-          aria-label={managerCopy(props.locale, 'channel.search.label')} placeholder={managerCopy(props.locale, 'channel.search.placeholder')} />
+        <span className="cxc-channel-search"><Icon name="search" /><input data-collection-search="channel-list" type="search" value={query} onChange={event => setQuery(event.currentTarget.value)}
+          aria-label={managerCopy(props.locale, 'channel.search.label')} placeholder={managerCopy(props.locale, 'channel.search.placeholder')} /></span>
         <Button data-channel-create="true" aria-label={managerCopy(props.locale, 'channel.create.icon-label')}
-          title={managerCopy(props.locale, 'channel.create.icon-label')} onClick={() => void props.navigation.navigate({ id: 'create' })}>＋</Button>
+          title={managerCopy(props.locale, 'channel.create.icon-label')} onClick={() => void props.navigation.navigate({ id: 'create' })}><Icon name="create" /></Button>
       </div>
-      {visible.length === 0 ? <EmptyState data-host-collection="channel-list"
-        title={query.trim() === '' ? managerCopy(props.locale, 'channel.accounts.empty') : managerCopy(props.locale, 'channel.search.empty')}
-        description={managerCopy(props.locale, 'channel.create.description')}
-        action={<Button variant="primary" onClick={() => void props.navigation.navigate({ id: 'create' })}>{managerCopy(props.locale, 'channel.create')}</Button>} />
+      {visible.length === 0 ? query.trim() === '' ? <section className="cxc-channel-empty" data-host-collection="channel-list" aria-label={managerCopy(props.locale, 'channel.accounts')}>
+        <div className="cxc-channel-empty-copy">
+          <span className="cxc-channel-empty-mark"><Icon name="create" /></span>
+          <h3>{managerCopy(props.locale, 'channel.accounts.empty')}</h3>
+          <p>{managerCopy(props.locale, 'channel.accounts.empty-description')}</p>
+          <Button variant="primary" onClick={() => void props.navigation.navigate({ id: 'create' })}><Icon name="create" />{managerCopy(props.locale, 'channel.create')}</Button>
+        </div>
+        <div className="cxc-channel-supported">
+          <span>{managerCopy(props.locale, 'channel.accounts.supported')}</span>
+          <div className="cxc-channel-supported-icons">
+            <ChannelAppIcon platform="simulator" label={managerCopy(props.locale, 'channel.create.simulator')} />
+            <ChannelAppIcon platform="feishu" label={managerCopy(props.locale, 'channel.create.feishu')} />
+          </div>
+        </div>
+      </section> : <EmptyState data-host-collection="channel-list" title={managerCopy(props.locale, 'channel.search.empty')} />
         : <div className="cxc-channel-list" data-host-collection="channel-list">{visible.map(record => {
           const state = record.account?.connectionState ?? (record.connection.enabled ? 'unavailable' : 'disabled')
           const title = record.account?.displayName ?? record.connection.displayName ?? record.connection.ref.accountId
@@ -124,11 +153,14 @@ function ChannelList(props: ChannelPageProps) {
   </Shell>
 }
 
-function Field(props: { readonly label: string; readonly help?: string; readonly children: ReactNode }) {
-  return <label className="cxc-channel-field"><span>{props.label}</span>{props.children}{props.help === undefined ? null : <small>{props.help}</small>}</label>
+function Field(props: { readonly id: string; readonly label: string; readonly icon: 'host:tags' | 'host:folder' | 'host:key'; readonly help?: string; readonly children: ReactNode }) {
+  return <div className="cxc-channel-field">
+    <button className="cxc-channel-field-action" type="button" aria-label={props.label} onClick={() => document.getElementById(props.id)?.focus()}><Icon name={props.icon} /></button>
+    <label className="cxc-channel-field-control" htmlFor={props.id}><span className="cxc-channel-field-title">{props.label}</span>{props.children}{props.help === undefined ? null : <small>{props.help}</small>}</label>
+  </div>
 }
 
-function cloneConfiguration(descriptor: HostServiceConfigDescriptor): { connections?: Array<Record<string, unknown>>; routes?: Array<Record<string, unknown>> } {
+function cloneConfiguration(descriptor: HostServiceConfigDescriptor): { connections?: Array<Record<string, unknown>> } {
   const value = typeof globalThis.structuredClone === 'function'
     ? globalThis.structuredClone(descriptor.configuration)
     : JSON.parse(JSON.stringify(descriptor.configuration)) as unknown
@@ -146,14 +178,10 @@ function mutation(descriptor: HostServiceConfigDescriptor, configuration: Return
 function ChannelCreate(props: ChannelPageProps) {
   const projection = useProjection(props.manager)
   const [name, setName] = useState('')
-  const [platform, setPlatform] = useState<'simulator' | 'feishu'>('simulator')
+  const [platform, setPlatform] = useState<ChannelPlatform>('simulator')
+  const [introduction, setIntroduction] = useState('')
   const [appId, setAppId] = useState('')
   const [tenant, setTenant] = useState('local')
-  const [provider, setProvider] = useState('default')
-  const [model, setModel] = useState('default')
-  const [profile, setProfile] = useState('default')
-  const [workspace, setWorkspace] = useState('cordisx')
-  const [notifications, setNotifications] = useState(true)
   const [secret, setSecret] = useState('')
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
@@ -177,23 +205,13 @@ function ChannelCreate(props: ChannelPageProps) {
       configuration.connections = [...(configuration.connections ?? []), {
         ref, adapterKind: platform, enabled: platform === 'simulator', transport: { mode: platform === 'feishu' ? 'websocket' : 'simulator' },
       }]
-      configuration.routes = [...(configuration.routes ?? []), {
-        id: `${accountId}-default`, connection: ref, enabled: true, policy: { conversationKinds: ['direct'] },
-        task: {
-          provider: provider === 'default' ? { useDefault: true } : { id: provider },
-          model: model === 'default' ? { useDefault: true } : { id: model },
-          profile: profile === 'default' ? { useDefault: true } : { id: profile },
-          workspaceAlias: workspace.trim() || 'cordisx',
-        },
-        notifications: notifications ? ['completion', 'failure', 'approval-required'] : [],
-      }]
       const request = mutation(descriptor, configuration)
       const result = platform === 'feishu'
         ? await props.manager.createConnection({ account: ref, secret, mutation: request })
         : await props.manager.mutateServiceConfiguration(request)
       setSecret('')
       if (result.status !== 'applied') {
-        setStatus(result.status === 'conflict' ? managerCopy(props.locale, 'form.conflict-retained') : managerCopy(props.locale, 'channel.create.unavailable'))
+        setStatus(result.status === 'conflict' ? managerCopy(props.locale, 'form.conflict-retained') : managerCopy(props.locale, 'channel.create.failed'))
         return
       }
       props.manager.rememberLocalCandidate({
@@ -202,28 +220,32 @@ function ChannelCreate(props: ChannelPageProps) {
       })
       await props.navigation.navigate({ id: 'settings' })
     } catch {
-      setStatus(managerCopy(props.locale, 'channel.create.unavailable'))
+      setStatus(managerCopy(props.locale, 'channel.create.failed'))
     } finally { setBusy(false) }
   }
 
   return <Shell {...props}><form className="cxc-channel-form" data-channel-page="create" data-channel-create-form="true" onSubmit={event => void submit(event)}>
-    <Card><Stack gap="medium"><div><Heading level={3}>{managerCopy(props.locale, 'channel.configuration')}</Heading><Text tone="muted">{managerCopy(props.locale, 'channel.create.local-only')}</Text></div>
-      <div className="cxc-channel-form-grid">
-        <Field label={managerCopy(props.locale, 'channel.create.name')}><input id="channel-create-name" required value={name} onChange={event => setName(event.currentTarget.value)} /></Field>
-        <Field label={managerCopy(props.locale, 'channel.create.platform')}><select id="channel-create-platform" value={platform} onChange={event => {
-          const next = event.currentTarget.value === 'feishu' ? 'feishu' : 'simulator'
-          setPlatform(next); setTenant(next === 'feishu' ? 'default' : 'local')
-        }}><option value="simulator">{managerCopy(props.locale, 'channel.create.simulator')}</option><option value="feishu">{managerCopy(props.locale, 'channel.create.feishu')}</option></select></Field>
-        {platform === 'feishu' ? <><Field label={managerCopy(props.locale, 'channel.create.app-id')}><input id="channel-create-app-id" required value={appId} onChange={event => setAppId(event.currentTarget.value)} /></Field>
-          <Field label={managerCopy(props.locale, 'channel.field.credentials')} help={managerCopy(props.locale, 'channel.credentials.help')}><input id="channel-create-credential" data-channel-credential-capture="true" type="password" autoComplete="new-password" required value={secret} onChange={event => setSecret(event.currentTarget.value)} /></Field></> : null}
-        <Field label={managerCopy(props.locale, 'channel.create.tenant')}><input id="channel-create-tenant" value={tenant} onChange={event => setTenant(event.currentTarget.value)} /></Field>
-        <Field label={managerCopy(props.locale, 'channel.create.provider')}><input id="channel-create-provider" value={provider} onChange={event => setProvider(event.currentTarget.value)} /></Field>
-        <Field label={managerCopy(props.locale, 'channel.create.model')}><input id="channel-create-model" value={model} onChange={event => setModel(event.currentTarget.value)} /></Field>
-        <Field label={managerCopy(props.locale, 'channel.create.profile')}><input id="channel-create-profile" value={profile} onChange={event => setProfile(event.currentTarget.value)} /></Field>
-        <Field label={managerCopy(props.locale, 'channel.create.workspace')}><input id="channel-create-workspace" value={workspace} onChange={event => setWorkspace(event.currentTarget.value)} /></Field>
-        <Field label={managerCopy(props.locale, 'channel.create.notifications')}><span className="cxc-channel-switch"><input id="channel-create-notifications" type="checkbox" checked={notifications} onChange={event => setNotifications(event.currentTarget.checked)} />{notifications ? managerCopy(props.locale, 'form.switch-on') : managerCopy(props.locale, 'form.switch-off')}</span></Field>
-      </div></Stack></Card>
-    <div className="cxc-channel-actions"><span className="cxc-channel-note" data-channel-create-status="true" role="status">{status}</span><Button variant="primary" data-channel-create-submit="true" type="submit" disabled={busy}>{managerCopy(props.locale, 'channel.create.save')}</Button></div>
+    <section className="cxc-channel-create-meta" aria-label={managerCopy(props.locale, 'channel.create.platform')}>
+      <div className="cxc-channel-platform-icon"><ChannelAppIcon platform={platform} label={managerCopy(props.locale, platform === 'feishu' ? 'channel.create.feishu' : 'channel.create.simulator')} /></div>
+      <div className="cxc-channel-create-copy">
+        <div className="cxc-channel-create-primary">
+          <Select className="cxc-channel-platform-select" aria-label={managerCopy(props.locale, 'channel.create.platform')} value={platform} options={([
+            { value: 'simulator', label: managerCopy(props.locale, 'channel.create.simulator'), prefixIcon: <span className="cxc-channel-option-icon"><ChannelAppIcon platform="simulator" label="" /></span> },
+            { value: 'feishu', label: managerCopy(props.locale, 'channel.create.feishu'), prefixIcon: <span className="cxc-channel-option-icon"><ChannelAppIcon platform="feishu" label="" /></span> },
+          ])} onChange={value => { const next: ChannelPlatform = value === 'feishu' ? 'feishu' : 'simulator'; setPlatform(next); setTenant(next === 'feishu' ? 'default' : 'local') }} />
+          <input id="channel-create-name" required aria-label={managerCopy(props.locale, 'channel.create.name')} placeholder={managerCopy(props.locale, 'channel.create.name-placeholder')} value={name} onChange={event => setName(event.currentTarget.value)} />
+        </div>
+        <textarea className="cxc-channel-introduction" id="channel-create-introduction" rows={4} aria-label={managerCopy(props.locale, 'channel.create.introduction')} placeholder={managerCopy(props.locale, 'channel.create.introduction-placeholder')} value={introduction} onChange={event => setIntroduction(event.currentTarget.value)} />
+      </div>
+    </section>
+    <section className="cxc-channel-schema">
+      {platform === 'feishu' ? <div className="cxc-channel-form-grid">
+        <Field id="channel-create-app-id" icon="host:tags" label={`${managerCopy(props.locale, 'channel.create.app-id')} *`}><input id="channel-create-app-id" required placeholder={managerCopy(props.locale, 'form.text-placeholder')} value={appId} onChange={event => setAppId(event.currentTarget.value)} /></Field>
+        <Field id="channel-create-tenant" icon="host:folder" label={managerCopy(props.locale, 'channel.create.tenant')}><input id="channel-create-tenant" value={tenant} onChange={event => setTenant(event.currentTarget.value)} /></Field>
+        <Field id="channel-create-credential" icon="host:key" label={`${managerCopy(props.locale, 'channel.field.credentials')} *`} help={managerCopy(props.locale, 'channel.credentials.help')}><input id="channel-create-credential" data-channel-credential-capture="true" type="password" autoComplete="new-password" required placeholder={managerCopy(props.locale, 'form.text-placeholder')} value={secret} onChange={event => setSecret(event.currentTarget.value)} /></Field>
+      </div> : null}
+    </section>
+    <div className="cxc-channel-actions"><span className="cxc-channel-note" data-channel-create-status="true" role="status">{status}</span><Button variant="primary" data-channel-create-submit="true" type="submit" disabled={busy}><Icon name="success" />{managerCopy(props.locale, 'channel.create.save')}</Button></div>
   </form></Shell>
 }
 
@@ -313,7 +335,7 @@ function ChannelLogs(props: ChannelPageProps) {
   const pageSize = 25, totalPages = Math.max(1, Math.ceil(filtered.length / pageSize)), currentPage = Math.min(page, totalPages - 1)
   const windowed = filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize)
   return <Shell {...props}><section data-channel-page="detail" data-channel-detail={record.id} data-channel-detail-panel="logs" data-channel-logs="true">
-    <div className="cxc-channel-toolbar"><input data-channel-log-query="true" type="search" value={query} onChange={event => { setQuery(event.currentTarget.value.trim()); setPage(0) }} placeholder={managerCopy(props.locale, 'channel.logs.search')} aria-label={managerCopy(props.locale, 'channel.logs.search')} /><select data-channel-log-outcome="true" value={outcome} onChange={event => { setOutcome(event.currentTarget.value as typeof outcome); setPage(0) }}><option value="all">{managerCopy(props.locale, 'channel.logs.all')}</option><option value="success">{managerCopy(props.locale, 'channel.logs.success')}</option><option value="failure">{managerCopy(props.locale, 'channel.logs.failure')}</option></select><Button data-channel-log-export="json" disabled={filtered.length === 0} onClick={() => exportLogs(record, filtered)}>{managerCopy(props.locale, 'channel.logs.export')}</Button></div>
+    <div className="cxc-channel-toolbar"><span className="cxc-channel-search"><Icon name="search" /><input data-channel-log-query="true" type="search" value={query} onChange={event => { setQuery(event.currentTarget.value.trim()); setPage(0) }} placeholder={managerCopy(props.locale, 'channel.logs.search')} aria-label={managerCopy(props.locale, 'channel.logs.search')} /></span><select data-channel-log-outcome="true" value={outcome} onChange={event => { setOutcome(event.currentTarget.value as typeof outcome); setPage(0) }}><option value="all">{managerCopy(props.locale, 'channel.logs.all')}</option><option value="success">{managerCopy(props.locale, 'channel.logs.success')}</option><option value="failure">{managerCopy(props.locale, 'channel.logs.failure')}</option></select><Button data-channel-log-export="json" disabled={filtered.length === 0} onClick={() => exportLogs(record, filtered)}>{managerCopy(props.locale, 'channel.logs.export')}</Button></div>
     <div className="cxc-channel-data-list cxc-channel-log-list">{windowed.length === 0 ? <EmptyState data-channel-logs-empty="true" title={managerCopy(props.locale, all.length === 0 ? 'channel.logs.unavailable' : 'channel.search.empty')} /> : windowed.map(entry => <article key={entry.id} className="cxc-channel-log-entry" data-channel-log-entry={entry.id}><time dateTime={entry.recordedAt}>{new Date(entry.recordedAt).toLocaleString(props.locale)}</time><span>{entry.action}</span><span className="cxc-channel-log-outcome">{entry.outcome}</span></article>)}</div>
     <div className="cxc-channel-log-pagination" data-channel-log-pagination="true"><Button className="cxc-channel-log-page" disabled={currentPage === 0} onClick={() => setPage(value => value - 1)}>‹</Button><span>{managerCopy(props.locale, 'channel.logs.page')} {currentPage + 1}/{totalPages}</span><Button className="cxc-channel-log-page" disabled={currentPage + 1 >= totalPages} onClick={() => setPage(value => value + 1)}>›</Button></div>
   </section></Shell>

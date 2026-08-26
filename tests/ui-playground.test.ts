@@ -23,9 +23,24 @@ describe('UI Playground', () => {
       expect(page).toContain('Comprehensive UI demos')
       expect(page).toContain('data-pg-plugin-count')
       expect(page).toContain('npm run dev:ui -- --config')
+      expect(page).toContain('__cordisxServiceConfigRequestV1')
+      expect(page).toContain('__cordisxChannelCredentialRequestV1')
       const bundle = await fetch(`${playground.url}api/bundle`).then(response => response.text())
       expect(bundle).toContain('hostKind: "playground"')
       expect(bundle).toContain('installCordisX')
+      const serviceConfigToken = /serviceConfigBridgeToken: "([a-f0-9]{64})"/.exec(bundle)?.[1]
+      const generation = /generation: "(playground-[a-f0-9]+)"/.exec(bundle)?.[1]
+      expect(serviceConfigToken).toBeDefined()
+      expect(generation).toBeDefined()
+      const serviceList = await fetch(`${playground.url}api/service-config`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          version: 1, token: serviceConfigToken, requestId: 'playground-service-list', operation: 'list', pluginId: 'channel',
+          scope: { profileId: 'playground', generation },
+        }),
+      }).then(response => response.json()) as { ok: boolean; value?: Array<{ writable?: boolean }> }
+      expect(serviceList.ok).toBe(true)
+      expect(serviceList.value?.[0]?.writable).toBe(true)
       const materialized = path.join(playground.homeDir, 'config', 'playground.config.json')
       const materializedInitial = await readFile(materialized, 'utf8')
       expect(JSON.parse(materializedInitial).plugins.map((plugin: { id: string }) => plugin.id)).toEqual(defaultPluginIds)

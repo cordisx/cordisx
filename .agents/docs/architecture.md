@@ -371,6 +371,28 @@ plugin contract.
 
 ### Built-in manager plane
 
+The built-in Manager implementation uses a Host-owned React 19 component tree.
+React owns rendering and local interaction state only; Cordis remains the
+runtime and plugin lifecycle authority. Manager components consume immutable
+Host snapshots and brokered Host actions through an external store. They do
+not expose React, DOM nodes, portals, CSS, or UI-library instances to plugins.
+
+The implementation is split by responsibility:
+
+- `renderer/host-ui` contains reusable Host primitives and interaction hooks;
+- `renderer/manager/model` adapts runtime snapshots and actions into a React
+  external store;
+- `renderer/manager/components` contains Manager shell and feature panels;
+- `renderer/manager/hooks` contains Host lifecycle, theme, focus, and scrolling
+  policies; and
+- `playground` composes the development host but owns no Manager behavior.
+
+The previous imperative Manager is a migration seam only. New behavior must be
+implemented in the component/store layers rather than appended to that file,
+and each migrated feature removes the corresponding imperative ownership.
+There is one React root per renderer generation and it is unmounted before the
+generation's Cordis resources are disposed.
+
 The local plugin manager is host chrome, not a plugin contribution and not a
 new public slot. Its trigger is mounted beside Codex's workspace switcher by a
 private adapter probe, and a mutation observer remounts it when the host React

@@ -13,6 +13,8 @@ type CopyKey =
   | 'channel.accounts'
   | 'channel.accounts.description'
   | 'channel.accounts.empty'
+  | 'channel.accounts.empty-description'
+  | 'channel.accounts.supported'
   | 'channel.routes'
   | 'channel.routes.description'
   | 'channel.routes.empty'
@@ -29,12 +31,20 @@ type CopyKey =
   | 'channel.open'
   | 'channel.back'
   | 'channel.create'
+  | 'channel.create.action'
   | 'channel.create.icon-label'
   | 'channel.create.description'
   | 'channel.create.local-only'
   | 'channel.create.name'
+  | 'channel.create.name-placeholder'
   | 'channel.create.platform'
+  | 'channel.create.type'
+  | 'channel.create.type-placeholder'
+  | 'channel.create.introduction'
+  | 'channel.create.introduction-placeholder'
+  | 'channel.create.no-configuration'
   | 'channel.create.unavailable'
+  | 'channel.create.failed'
   | 'channel.create.save'
   | 'channel.create.simulator'
   | 'channel.create.feishu'
@@ -389,6 +399,8 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'channel.accounts': { en: 'Accounts', 'zh-CN': '账号' },
   'channel.accounts.description': { en: 'Connection state and credential readiness.', 'zh-CN': '查看连接状态与凭据就绪情况。' },
   'channel.accounts.empty': { en: 'No channel accounts yet.', 'zh-CN': '暂无渠道账号。' },
+  'channel.accounts.empty-description': { en: 'Create a channel to connect CordisX to a local simulator or Feishu.', 'zh-CN': '创建一个频道，将 CordisX 连接到本地模拟器或飞书。' },
+  'channel.accounts.supported': { en: 'Supported channels', 'zh-CN': '当前支持的频道' },
   'channel.routes': { en: 'Routes', 'zh-CN': '路由' },
   'channel.routes.description': { en: 'Map channel messages to CordisX task defaults.', 'zh-CN': '将渠道消息映射到 CordisX 任务默认项。' },
   'channel.routes.empty': { en: 'No channel routes yet.', 'zh-CN': '暂无渠道路由。' },
@@ -405,13 +417,21 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'channel.open': { en: 'Open channel details', 'zh-CN': '打开频道详情' },
   'channel.back': { en: 'Back to channels', 'zh-CN': '返回频道列表' },
   'channel.create': { en: 'New channel', 'zh-CN': '新建频道' },
+  'channel.create.action': { en: 'Create channel', 'zh-CN': '创建频道' },
   'channel.create.icon-label': { en: 'Create channel configuration', 'zh-CN': '创建频道配置' },
   'channel.create.description': { en: 'Add a local simulator to this CordisX test configuration.', 'zh-CN': '向当前 CordisX 测试配置添加本地模拟频道。' },
   'channel.create.local-only': { en: 'The Host writes this simulator to the active test configuration and restarts only its local service. It has no credential and makes no external change.', 'zh-CN': '宿主会把这个模拟频道写入当前测试配置，并只重启本地服务；不含凭据，也不会产生外部变更。' },
   'channel.create.name': { en: 'Channel name', 'zh-CN': '频道名称' },
+  'channel.create.name-placeholder': { en: 'Enter channel name', 'zh-CN': '请输入频道名称' },
   'channel.create.platform': { en: 'Platform', 'zh-CN': '平台' },
-  'channel.create.unavailable': { en: 'The local Channel configuration is unavailable.', 'zh-CN': '本地频道配置当前不可用。' },
-  'channel.create.save': { en: 'Add local simulator', 'zh-CN': '添加本地模拟频道' },
+  'channel.create.type': { en: 'Channel type', 'zh-CN': '频道类型' },
+  'channel.create.type-placeholder': { en: 'Select channel type', 'zh-CN': '请选择频道类型' },
+  'channel.create.introduction': { en: 'Introduction', 'zh-CN': '介绍' },
+  'channel.create.introduction-placeholder': { en: 'Enter channel description', 'zh-CN': '请输入频道介绍' },
+  'channel.create.no-configuration': { en: 'This channel type does not require additional configuration.', 'zh-CN': '此频道类型无需额外配置。' },
+  'channel.create.unavailable': { en: 'This runtime does not provide a writable Channel configuration service.', 'zh-CN': '当前运行环境未提供可写的频道配置服务。' },
+  'channel.create.failed': { en: 'The channel could not be saved. Check the local configuration service and try again.', 'zh-CN': '频道保存失败，请检查本地配置服务后重试。' },
+  'channel.create.save': { en: 'Confirm', 'zh-CN': '确认' },
   'channel.create.simulator': { en: 'Local simulator', 'zh-CN': '本地模拟器' },
   'channel.create.feishu': { en: 'Feishu', 'zh-CN': '飞书' },
   'channel.create.app-id': { en: 'App ID', 'zh-CN': '应用 ID' },

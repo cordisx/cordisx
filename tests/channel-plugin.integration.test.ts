@@ -326,7 +326,11 @@ describe('built-in Channel product bundle', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-channel-create="true"]')!.click()
       await waitFor(() => dom.window.document.querySelector('[data-channel-page="create"]') !== null)
       setControl(dom.window, dom.window.document.querySelector<HTMLInputElement>('#channel-create-name')!, 'Feishu smoke')
-      setControl(dom.window, dom.window.document.querySelector<HTMLSelectElement>('#channel-create-platform')!, 'feishu')
+      dom.window.document.querySelector<HTMLButtonElement>('.cxc-channel-platform-select .cxr-ui-select-trigger')!.click()
+      await waitFor(() => [...dom.window.document.querySelectorAll<HTMLElement>('[role="option"]')]
+        .some(option => option.textContent?.includes('Feishu') === true))
+      ;[...dom.window.document.querySelectorAll<HTMLElement>('[role="option"]')]
+        .find(option => option.textContent?.includes('Feishu') === true)!.click()
       await waitFor(() => dom.window.document.querySelector('#channel-create-app-id') !== null)
       setControl(dom.window, dom.window.document.querySelector<HTMLInputElement>('#channel-create-app-id')!, 'cli_smoke')
       const credential = dom.window.document.querySelector<HTMLInputElement>('[data-channel-credential-capture="true"]')!
