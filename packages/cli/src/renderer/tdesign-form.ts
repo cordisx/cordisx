@@ -96,12 +96,24 @@ export function unwrapTDesignChangeValue<Value>(payload: unknown): Value | undef
   return payload as Value | undefined
 }
 
-function normalizeTDesignProps(props: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+function normalizeTDesignProps(element: TDesignElement, props: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
   const change = props.onChange
   if (typeof change !== 'function') return props
   return {
     ...props,
-    onChange: (payload: unknown, ...rest: readonly unknown[]) => (change as (value: unknown, ...args: readonly unknown[]) => unknown)(unwrapTDesignChangeValue(payload), ...rest),
+    onChange: (payload: unknown, ...rest: readonly unknown[]) => {
+      const value = unwrapTDesignChangeValue(payload)
+      // TDesign Input is controlled whenever Host passes `value`: its native
+      // input invokes this callback and then immediately re-renders from the
+      // component props. Mirror the normalized value before returning so that
+      // render cannot restore the previous field value while Manager records
+      // the draft. Textarea emits the same value through CustomEvent.detail.
+      if (Object.hasOwn(props, 'value')) {
+        element.value = value
+        if (element.props !== undefined) element.props.value = value
+      }
+      return (change as (value: unknown, ...args: readonly unknown[]) => unknown)(value, ...rest)
+    },
   }
 }
 
@@ -143,7 +155,7 @@ function ensureInstalled(document: Document): void {
 }
 
 export function setTDesignProps(element: TDesignElement, props: Readonly<Record<string, unknown>>): void {
-  const normalizedProps = normalizeTDesignProps(props)
+  const normalizedProps = normalizeTDesignProps(element, props)
   for (const [name, value] of Object.entries(normalizedProps)) element[name] = value
   // Omi custom elements read their initial props from attributes when they
   // connect. Host controls are configured before insertion, so a property-only

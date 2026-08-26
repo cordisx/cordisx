@@ -201,6 +201,32 @@ describe('Host form DOM and accessibility', () => {
     input.onChange?.(event('Northstar'))
     expect(onDraft).toHaveBeenLastCalledWith('Northstar', undefined)
 
+    // The official controlled `t-input` calls the Host callback from its
+    // internal input and then re-renders from `props.value`. Keep that exact
+    // CustomEvent detail path from restoring the prior value after a fill.
+    const controlledInput = adapter.control(field({ value: 'Northstar workspace' }), 'controlled-input', onDraft).root as HTMLElement & {
+      onChange?: (value: unknown) => void
+      value?: string
+      props?: { value?: string }
+    }
+    controlledInput.props = { value: 'Northstar workspace' }
+    const internalInput = dom.window.document.createElement('input')
+    internalInput.value = controlledInput.props.value
+    internalInput.addEventListener('input', () => {
+      // `t-input` first invokes its prop callback with the raw value, then
+      // emits the matching CustomEvent detail for DOM consumers.
+      controlledInput.onChange?.(internalInput.value)
+      controlledInput.onChange?.(new dom.window.CustomEvent('change', { detail: { value: internalInput.value } }))
+      // Models the immediate controlled redraw in the official component.
+      internalInput.value = controlledInput.props?.value ?? ''
+    })
+    internalInput.value = 'Northstar updated'
+    internalInput.dispatchEvent(new dom.window.Event('input'))
+    expect(controlledInput.props.value).toBe('Northstar updated')
+    expect(controlledInput.value).toBe('Northstar updated')
+    expect(internalInput.value).toBe('Northstar updated')
+    expect(onDraft).toHaveBeenLastCalledWith('Northstar updated', undefined)
+
     const textarea = adapter.control(field({ role: 'textarea', value: '' }), 'textarea', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
     textarea.onChange?.(event('Multiline value'))
     expect(onDraft).toHaveBeenLastCalledWith('Multiline value', undefined)
