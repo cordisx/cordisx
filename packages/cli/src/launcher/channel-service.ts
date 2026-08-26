@@ -15,14 +15,6 @@ import {
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
 import { createChannelManagerApi, type ChannelManagerApi, type ChannelManagerActionStatus } from './channel-manager-api.js'
 import { feishuDefinitionsForConfig } from './feishu-adapter.js'
-import {
-  DenyChannelTaskPermissionBroker,
-  LauncherChannelTaskGateway,
-  StaticChannelWorkspaceResolver,
-  type ChannelTaskPermissionBroker,
-  type ChannelWorkspaceRegistration,
-} from './channel-task-gateway.js'
-import type { ProviderFleet } from '../providers/fleet.js'
 
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
@@ -46,10 +38,6 @@ export interface LocalChannelService {
   /** Launcher-private runtime controls; never bind this object into renderer code. */
   readonly manager: ChannelManagerApi
   dispose(): Promise<void>
-}
-
-function selectorLabel(value: { readonly useDefault: true } | { readonly id: string }): string {
-  return 'id' in value ? value.id : 'default'
 }
 
 /** Build the only renderer-visible Channel state from redacted local service data. */
@@ -102,19 +90,9 @@ export function projectLocalChannelManager(input: {
       revision: input.revision, lastGoodRevision: input.lastGoodRevision, writable: input.writable,
     },
     connections,
-    routes: configuration.routes.map(route => ({
-      id: route.id, connection: route.connection, enabled: route.enabled, workspaceAlias: route.task.workspaceAlias,
-      provider: selectorLabel(route.task.provider), model: selectorLabel(route.task.model),
-      profile: selectorLabel(route.task.profile), notifications: route.notifications,
-    })),
+    routes: [],
     accounts,
-    bindings: (input.runtime?.bindings ?? []).map(binding => ({
-      bindingId: binding.bindingId,
-      channel: binding.channel,
-      session: binding.session,
-      routeId: binding.routeId,
-      state: binding.state,
-    })),
+    bindings: [],
     logs: (input.audit ?? []).flatMap(entry => {
       const account = refForAccountKey.get(entry.accountKey)
       return account === undefined ? [] : [{ id: entry.auditId, account, recordedAt: entry.recordedAt, action: entry.action, outcome: entry.outcome }]
@@ -127,8 +105,7 @@ export function projectLocalChannelManager(input: {
 
 function localPermissions() {
   return {
-    // Only the built-in simulator is granted its local registration seat.
-    // Task execution is still unavailable through the local gateway above.
+    // Only built-in connection adapters are granted their local registration seat.
     authorize: async (request: { readonly source: { readonly adapterId: string } }) => (
       ['simulator', 'feishu', 'lark'].includes(request.source.adapterId) ? 'allow' as const : 'deny' as const
     ),
@@ -146,12 +123,6 @@ export function createLocalChannelService(input: {
   readonly source: string
   /** Effective launcher environment; never project it or any resolved secret. */
   readonly environment?: NodeJS.ProcessEnv
-  /** Existing launcher-owned provider connection. No second app-server is created here. */
-  readonly fleet?: ProviderFleet
-  readonly profileId?: string
-  /** Host registry entries, never renderer configuration. */
-  readonly workspaces?: readonly ChannelWorkspaceRegistration[]
-  readonly taskPermissions?: ChannelTaskPermissionBroker
 }): LocalChannelService {
   const artifactDirectory = input.artifactDirectory
   let active: ActiveRuntime | undefined
@@ -164,21 +135,8 @@ export function createLocalChannelService(input: {
     const generation = `channel-local-${Date.now()}-${sequence}-${randomBytes(4).toString('hex')}`
     await mkdir(input.dataDir, { recursive: true })
     const runtime = await ChannelRuntime.open({
-      gateway: input.fleet === undefined
-        ? { execute: async (_operation, context) => ({ dispatch: {
-          contract: 'cordisx.platform-task-dispatch-result/v1' as const, schemaVersion: 1 as const,
-          operationId: context.operationId, operation: context.binding === undefined ? 'create' as const : 'followup' as const,
-          status: 'rejected' as const, failure: { code: 'CHANNEL_GATEWAY_UNAVAILABLE', retryable: false }, observedAt: new Date().toISOString(),
-        } }) }
-        : new LauncherChannelTaskGateway({
-          fleet: input.fleet,
-          profileId: input.profileId ?? 'default',
-          workspaces: new StaticChannelWorkspaceResolver({ [input.profileId ?? 'default']: input.workspaces ?? [] }),
-          permissions: input.taskPermissions ?? new DenyChannelTaskPermissionBroker(),
-        }),
       permissions: localPermissions(),
       storePath: path.join(input.dataDir, `${generation}.json`),
-      taskContext: { serviceGeneration: generation, configurationRevision: sequence },
     })
     const host = new LauncherChannelServiceHost(runtime)
     try {

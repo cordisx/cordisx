@@ -1,4 +1,5 @@
 import type { ChannelAdapterKind, ChannelTenantRef } from './types.js'
+import Schema from '@deepseek-ai/schemastery'
 
 export const CHANNEL_SERVICE_CONFIG_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
@@ -12,12 +13,6 @@ export const CHANNEL_PLUGIN_MANIFEST_SCHEMA_V3 =
 
 export type ChannelTransportMode = 'simulator' | 'websocket' | 'webhook' | 'outbound-webhook'
 export type ChannelSecretState = 'missing' | 'ready' | 'unavailable'
-export type ChannelNotificationKind =
-  | 'completion'
-  | 'failure'
-  | 'approval-required'
-  | 'approval-resolved'
-  | 'approval-expired'
 
 export interface ChannelServiceTransportConfig {
   readonly mode: ChannelTransportMode
@@ -33,61 +28,10 @@ export interface ChannelServiceConnectionConfig {
   readonly secretRef?: string
 }
 
-export type ChannelServiceSelector = { readonly useDefault: true } | { readonly id: string }
-
-export interface ChannelServiceRoutePolicy {
-  readonly conversationKinds?: readonly ('direct' | 'group' | 'broadcast')[]
-  readonly allowedUserIds?: readonly string[]
-  readonly allowedConversationIds?: readonly string[]
-  readonly groupTrigger?: 'deny' | 'mention' | 'reply' | 'command' | 'mention-or-command'
-  readonly commandPrefixes?: readonly string[]
-}
-
-export interface ChannelServiceTaskMapping {
-  readonly provider: ChannelServiceSelector
-  readonly model: ChannelServiceSelector
-  readonly profile: ChannelServiceSelector
-  readonly workspaceAlias: string
-}
-
-export interface ChannelServiceRouteConfig {
-  readonly id: string
-  readonly connection: ChannelTenantRef
-  readonly enabled: boolean
-  readonly policy: ChannelServiceRoutePolicy
-  readonly task: ChannelServiceTaskMapping
-  readonly notifications: readonly ChannelNotificationKind[]
-}
-
-export interface ChannelServiceReliabilityConfig {
-  readonly leaseMs: number
-  readonly retry: {
-    readonly maxAttempts: number
-    readonly baseDelayMs: number
-    readonly maxDelayMs: number
-    readonly maxAgeMs: number
-    readonly jitterRatio: number
-  }
-  readonly rateLimit: {
-    readonly perAccountPerMinute: number
-    readonly perUserPerMinute: number
-    readonly perConversationPerMinute: number
-    readonly maxConcurrent: number
-    readonly maxBacklog: number
-  }
-  readonly attachments: {
-    readonly maxFiles: number
-    readonly maxBytesPerFile: number
-    readonly allowedMediaTypes: readonly string[]
-  }
-}
-
 export interface ChannelServiceConfigV1 {
   readonly contract: 'cordisx.channel-service-config/v1'
   readonly schemaVersion: 1
   readonly connections: readonly ChannelServiceConnectionConfig[]
-  readonly routes: readonly ChannelServiceRouteConfig[]
-  readonly reliability: ChannelServiceReliabilityConfig
 }
 
 export type ChannelServiceConfigurationDeclaration =
@@ -114,14 +58,16 @@ export interface ChannelServiceConfigDescriptorV1 {
   readonly lastGoodRevision: number
   readonly configApplies: 'restart'
   readonly writable: boolean
+  readonly schema: {
+    readonly id: typeof CHANNEL_SERVICE_CONFIG_SCHEMA_V1
+    readonly projection: { readonly kind: 'schemastery'; readonly envelope: Readonly<Record<string, unknown>> }
+  }
   readonly configuration: {
     readonly contract: 'cordisx.channel-service-config/v1'
     readonly schemaVersion: 1
     readonly connections: ReadonlyArray<Omit<ChannelServiceConnectionConfig, 'secretRef'> & {
       readonly secretState: ChannelSecretState
     }>
-    readonly routes: readonly ChannelServiceRouteConfig[]
-    readonly reliability: ChannelServiceReliabilityConfig
   }
 }
 
@@ -143,7 +89,7 @@ export interface ChannelHostServiceConfigContract {
   readonly identity: { readonly source: string; readonly pluginId: string; readonly serviceId: string }
   readonly schema: {
     readonly id: typeof CHANNEL_SERVICE_CONFIG_SCHEMA_V1
-    readonly projection: { readonly kind: 'standard'; readonly renderable: false }
+    readonly projection: { readonly kind: 'schemastery'; readonly envelope: Readonly<Record<string, unknown>> }
   }
   readonly configApplies: 'service-restart'
   readonly initialConfiguration: unknown
@@ -160,11 +106,9 @@ export interface ChannelHostServiceConfigContract {
 
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const ADAPTER_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/
-const WORKSPACE_ALIAS = /^[a-z0-9][a-z0-9._-]*$/
 const CALLBACK_ALIAS = /^[a-z0-9][a-z0-9._-]*$/
 const SECRET_REF = /^(?:keychain|host-secret):[A-Za-z0-9][A-Za-z0-9._:/-]{0,500}$/
 const GENERATION = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
-const MEDIA_TYPE = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+*-]+$/
 const ADAPTER_KINDS = new Set<ChannelAdapterKind>([
   'simulator',
   'feishu',
@@ -175,15 +119,6 @@ const ADAPTER_KINDS = new Set<ChannelAdapterKind>([
   'wechat-service',
 ])
 const TRANSPORT_MODES = new Set<ChannelTransportMode>(['simulator', 'websocket', 'webhook', 'outbound-webhook'])
-const CONVERSATION_KINDS = new Set(['direct', 'group', 'broadcast'] as const)
-const GROUP_TRIGGERS = new Set(['deny', 'mention', 'reply', 'command', 'mention-or-command'] as const)
-const NOTIFICATION_KINDS = new Set<ChannelNotificationKind>([
-  'completion',
-  'failure',
-  'approval-required',
-  'approval-resolved',
-  'approval-expired',
-])
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -205,23 +140,16 @@ function text(value: unknown, label: string, maximum: number, pattern?: RegExp):
   return value
 }
 
+function boolean(value: unknown, label: string): boolean {
+  if (typeof value !== 'boolean') throw new TypeError(`${label} must be a boolean`)
+  return value
+}
+
 function integer(value: unknown, label: string, minimum: number, maximum: number): number {
   if (!Number.isInteger(value) || (value as number) < minimum || (value as number) > maximum) {
     throw new TypeError(`${label} must be an integer from ${minimum} through ${maximum}`)
   }
   return value as number
-}
-
-function finite(value: unknown, label: string, minimum: number, maximum: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum) {
-    throw new TypeError(`${label} must be a finite number from ${minimum} through ${maximum}`)
-  }
-  return value
-}
-
-function boolean(value: unknown, label: string): boolean {
-  if (typeof value !== 'boolean') throw new TypeError(`${label} must be a boolean`)
-  return value
 }
 
 function array(value: unknown, label: string, minimum: number, maximum: number): readonly unknown[] {
@@ -308,131 +236,6 @@ function parseConnection(value: unknown, label: string): ChannelServiceConnectio
   }
 }
 
-function stringList(
-  value: unknown,
-  label: string,
-  maximumItems: number,
-  maximumLength: number,
-  pattern?: RegExp,
-): readonly string[] {
-  return distinct(array(value, label, 1, maximumItems)
-    .map((item, index) => text(item, `${label}[${index}]`, maximumLength, pattern)), label)
-}
-
-function selector(value: unknown, label: string): ChannelServiceSelector {
-  const selected = record(value, label)
-  const keys = Object.keys(selected)
-  if (keys.length !== 1) throw new TypeError(`${label} must select one id or explicit default`)
-  if (Object.hasOwn(selected, 'useDefault')) {
-    if (selected.useDefault !== true) throw new TypeError(`${label}.useDefault must be true`)
-    return { useDefault: true }
-  }
-  if (Object.hasOwn(selected, 'id')) return { id: text(selected.id, `${label}.id`, 128) }
-  throw new TypeError(`${label} must select one id or explicit default`)
-}
-
-function parsePolicy(value: unknown, label: string): ChannelServiceRoutePolicy {
-  const policy = record(value, label)
-  exactKeys(policy, [
-    'conversationKinds', 'allowedUserIds', 'allowedConversationIds', 'groupTrigger', 'commandPrefixes',
-  ], label)
-  const conversationKinds = policy.conversationKinds === undefined ? undefined : distinct(
-    array(policy.conversationKinds, `${label}.conversationKinds`, 1, 3)
-      .map((item, index) => enumValue(item, CONVERSATION_KINDS, `${label}.conversationKinds[${index}]`)),
-    `${label}.conversationKinds`,
-  )
-  const allowedUserIds = policy.allowedUserIds === undefined
-    ? undefined
-    : stringList(policy.allowedUserIds, `${label}.allowedUserIds`, 256, 512)
-  const allowedConversationIds = policy.allowedConversationIds === undefined
-    ? undefined
-    : stringList(policy.allowedConversationIds, `${label}.allowedConversationIds`, 256, 512)
-  const groupTrigger = policy.groupTrigger === undefined
-    ? undefined
-    : enumValue(policy.groupTrigger, GROUP_TRIGGERS, `${label}.groupTrigger`)
-  const commandPrefixes = policy.commandPrefixes === undefined
-    ? undefined
-    : stringList(policy.commandPrefixes, `${label}.commandPrefixes`, 16, 32)
-  if ((groupTrigger === 'command' || groupTrigger === 'mention-or-command') && commandPrefixes === undefined) {
-    throw new TypeError(`${label}.commandPrefixes is required by ${groupTrigger}`)
-  }
-  return {
-    ...(conversationKinds === undefined ? {} : { conversationKinds }),
-    ...(allowedUserIds === undefined ? {} : { allowedUserIds }),
-    ...(allowedConversationIds === undefined ? {} : { allowedConversationIds }),
-    ...(groupTrigger === undefined ? {} : { groupTrigger }),
-    ...(commandPrefixes === undefined ? {} : { commandPrefixes }),
-  }
-}
-
-function parseTask(value: unknown, label: string): ChannelServiceTaskMapping {
-  const task = record(value, label)
-  exactKeys(task, ['provider', 'model', 'profile', 'workspaceAlias'], label)
-  return {
-    provider: selector(task.provider, `${label}.provider`),
-    model: selector(task.model, `${label}.model`),
-    profile: selector(task.profile, `${label}.profile`),
-    workspaceAlias: text(task.workspaceAlias, `${label}.workspaceAlias`, 128, WORKSPACE_ALIAS),
-  }
-}
-
-function parseRoute(value: unknown, label: string): ChannelServiceRouteConfig {
-  const route = record(value, label)
-  exactKeys(route, ['id', 'connection', 'enabled', 'policy', 'task', 'notifications'], label)
-  const notifications = distinct(array(route.notifications, `${label}.notifications`, 0, 5)
-    .map((item, index) => enumValue(item, NOTIFICATION_KINDS, `${label}.notifications[${index}]`)), `${label}.notifications`)
-  return {
-    id: text(route.id, `${label}.id`, 512),
-    connection: tenantRef(route.connection, `${label}.connection`),
-    enabled: boolean(route.enabled, `${label}.enabled`),
-    policy: parsePolicy(route.policy, `${label}.policy`),
-    task: parseTask(route.task, `${label}.task`),
-    notifications,
-  }
-}
-
-function parseReliability(value: unknown, label: string): ChannelServiceReliabilityConfig {
-  const reliability = record(value, label)
-  exactKeys(reliability, ['leaseMs', 'retry', 'rateLimit', 'attachments'], label)
-  const retry = record(reliability.retry, `${label}.retry`)
-  exactKeys(retry, ['maxAttempts', 'baseDelayMs', 'maxDelayMs', 'maxAgeMs', 'jitterRatio'], `${label}.retry`)
-  const parsedRetry = {
-    maxAttempts: integer(retry.maxAttempts, `${label}.retry.maxAttempts`, 1, 100),
-    baseDelayMs: integer(retry.baseDelayMs, `${label}.retry.baseDelayMs`, 1, 3_600_000),
-    maxDelayMs: integer(retry.maxDelayMs, `${label}.retry.maxDelayMs`, 1, 86_400_000),
-    maxAgeMs: integer(retry.maxAgeMs, `${label}.retry.maxAgeMs`, 1_000, 2_592_000_000),
-    jitterRatio: finite(retry.jitterRatio, `${label}.retry.jitterRatio`, 0, 1),
-  }
-  if (parsedRetry.baseDelayMs > parsedRetry.maxDelayMs) throw new TypeError(`${label}.retry.baseDelayMs exceeds maxDelayMs`)
-  if (parsedRetry.maxDelayMs > parsedRetry.maxAgeMs) throw new TypeError(`${label}.retry.maxDelayMs exceeds maxAgeMs`)
-
-  const rate = record(reliability.rateLimit, `${label}.rateLimit`)
-  exactKeys(rate, [
-    'perAccountPerMinute', 'perUserPerMinute', 'perConversationPerMinute', 'maxConcurrent', 'maxBacklog',
-  ], `${label}.rateLimit`)
-  const attachments = record(reliability.attachments, `${label}.attachments`)
-  exactKeys(attachments, ['maxFiles', 'maxBytesPerFile', 'allowedMediaTypes'], `${label}.attachments`)
-  const mediaTypes = distinct(array(attachments.allowedMediaTypes, `${label}.attachments.allowedMediaTypes`, 0, 64)
-    .map((item, index) => text(item, `${label}.attachments.allowedMediaTypes[${index}]`, 127, MEDIA_TYPE)),
-  `${label}.attachments.allowedMediaTypes`)
-  return {
-    leaseMs: integer(reliability.leaseMs, `${label}.leaseMs`, 1_000, 3_600_000),
-    retry: parsedRetry,
-    rateLimit: {
-      perAccountPerMinute: integer(rate.perAccountPerMinute, `${label}.rateLimit.perAccountPerMinute`, 1, 100_000),
-      perUserPerMinute: integer(rate.perUserPerMinute, `${label}.rateLimit.perUserPerMinute`, 1, 10_000),
-      perConversationPerMinute: integer(rate.perConversationPerMinute, `${label}.rateLimit.perConversationPerMinute`, 1, 10_000),
-      maxConcurrent: integer(rate.maxConcurrent, `${label}.rateLimit.maxConcurrent`, 1, 1_000),
-      maxBacklog: integer(rate.maxBacklog, `${label}.rateLimit.maxBacklog`, 1, 100_000),
-    },
-    attachments: {
-      maxFiles: integer(attachments.maxFiles, `${label}.attachments.maxFiles`, 0, 32),
-      maxBytesPerFile: integer(attachments.maxBytesPerFile, `${label}.attachments.maxBytesPerFile`, 1, 1_073_741_824),
-      allowedMediaTypes: mediaTypes,
-    },
-  }
-}
-
 function freeze<T>(value: T, seen = new Set<object>()): T {
   if (value === null || typeof value !== 'object' || seen.has(value)) return value
   seen.add(value)
@@ -444,30 +247,56 @@ function immutable<T>(value: T): T {
   return freeze(structuredClone(value))
 }
 
+const ChannelConnectionConfigSchema = Schema.object({
+  contract: Schema.const('cordisx.channel-service-config/v1'),
+  schemaVersion: Schema.const(1),
+  connections: Schema.array(Schema.object({
+    ref: Schema.object({
+      adapterId: Schema.string().required().max(128),
+      accountId: Schema.string().required().max(512),
+      tenantId: Schema.string().required().max(512),
+    }),
+    adapterKind: Schema.string().required(),
+    enabled: Schema.boolean().default(true),
+    transport: Schema.object({
+      mode: Schema.string().required(),
+      callbackAlias: Schema.string().max(128),
+    }),
+    secretRef: Schema.string().max(512).role('credential-ref'),
+  })).default([]).max(64),
+})
+
+function channelConnectionSchemasteryProjection(): {
+  readonly kind: 'schemastery'
+  readonly envelope: Readonly<Record<string, unknown>>
+  readonly form: { readonly version: 1; readonly fields: readonly { readonly path: readonly ['connections']; readonly presenter: { readonly version: 1; readonly kind: 'array.object-page' } }[] }
+} {
+  return Object.freeze({
+    kind: 'schemastery' as const,
+    envelope: immutable(JSON.parse(JSON.stringify(ChannelConnectionConfigSchema.toJSON())) as Record<string, unknown>),
+    form: Object.freeze({
+      version: 1 as const,
+      fields: Object.freeze([Object.freeze({
+        path: Object.freeze(['connections'] as const),
+        presenter: Object.freeze({ version: 1 as const, kind: 'array.object-page' as const }),
+      })]),
+    }),
+  })
+}
+
 export function parseChannelServiceConfig(value: unknown): ChannelServiceConfigV1 {
   const config = record(value, 'Channel service configuration')
-  exactKeys(config, ['contract', 'schemaVersion', 'connections', 'routes', 'reliability'], 'Channel service configuration')
+  exactKeys(config, ['contract', 'schemaVersion', 'connections'], 'Channel service configuration')
   if (config.contract !== 'cordisx.channel-service-config/v1' || config.schemaVersion !== 1) {
     throw new TypeError('Channel service configuration contract/version is unsupported')
   }
-  const connections = distinct(array(config.connections, 'Channel service configuration.connections', 1, 64)
+  const connections = distinct(array(config.connections, 'Channel service configuration.connections', 0, 64)
     .map((item, index) => parseConnection(item, `Channel service configuration.connections[${index}]`)),
   'Channel service configuration.connections', connection => tenantKey(connection.ref))
-  const connectionKeys = new Set(connections.map(connection => tenantKey(connection.ref)))
-  const routes = distinct(array(config.routes, 'Channel service configuration.routes', 0, 256)
-    .map((item, index) => parseRoute(item, `Channel service configuration.routes[${index}]`)),
-  'Channel service configuration.routes', route => route.id)
-  for (const route of routes) {
-    if (!connectionKeys.has(tenantKey(route.connection))) {
-      throw new TypeError(`Channel service route ${route.id} references a missing connection`)
-    }
-  }
   return immutable({
     contract: 'cordisx.channel-service-config/v1',
     schemaVersion: 1,
     connections,
-    routes,
-    reliability: parseReliability(config.reliability, 'Channel service configuration.reliability'),
   })
 }
 
@@ -568,12 +397,14 @@ export function projectChannelServiceConfig(
     lastGoodRevision,
     configApplies: 'restart',
     writable: input.writable,
+    schema: {
+      id: CHANNEL_SERVICE_CONFIG_SCHEMA_V1,
+      projection: channelConnectionSchemasteryProjection(),
+    },
     configuration: {
       contract: configuration.contract,
       schemaVersion: configuration.schemaVersion,
       connections,
-      routes: configuration.routes,
-      reliability: configuration.reliability,
     },
   })
 }
@@ -582,35 +413,7 @@ export function projectChannelServiceConfig(
 export const CHANNEL_SERVICE_CONFIG_INITIAL: ChannelServiceConfigV1 = parseChannelServiceConfig({
   contract: 'cordisx.channel-service-config/v1',
   schemaVersion: 1,
-  connections: [{
-    ref: { adapterId: 'simulator', accountId: 'local', tenantId: 'default' },
-    adapterKind: 'simulator',
-    enabled: false,
-    transport: { mode: 'simulator' },
-  }],
-  routes: [],
-  reliability: {
-    leaseMs: 30_000,
-    retry: {
-      maxAttempts: 5,
-      baseDelayMs: 1_000,
-      maxDelayMs: 60_000,
-      maxAgeMs: 86_400_000,
-      jitterRatio: 0.2,
-    },
-    rateLimit: {
-      perAccountPerMinute: 120,
-      perUserPerMinute: 20,
-      perConversationPerMinute: 60,
-      maxConcurrent: 8,
-      maxBacklog: 1_000,
-    },
-    attachments: {
-      maxFiles: 4,
-      maxBytesPerFile: 10_485_760,
-      allowedMediaTypes: ['image/png', 'text/plain'],
-    },
-  },
+  connections: [],
 })
 
 function mergeCurrentSecretRefs(value: unknown, current: unknown): ChannelServiceConfigV1 {
@@ -646,7 +449,7 @@ export function createChannelHostServiceConfigContract(
     identity: Object.freeze({ ...identity }),
     schema: Object.freeze({
       id: CHANNEL_SERVICE_CONFIG_SCHEMA_V1,
-      projection: Object.freeze({ kind: 'standard', renderable: false }),
+      projection: channelConnectionSchemasteryProjection(),
     }),
     configApplies: 'service-restart',
     initialConfiguration: initial,

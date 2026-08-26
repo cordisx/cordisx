@@ -8,7 +8,7 @@ import type {
   ChannelSendResult,
   ChannelTenantRef,
 } from '@cordisx/channel-runtime'
-import type { ChannelServiceConfigV1, ChannelServiceConnectionConfig, ChannelServiceRouteConfig } from '@cordisx/channel-runtime'
+import type { ChannelServiceConfigV1, ChannelServiceConnectionConfig } from '@cordisx/channel-runtime'
 import { LauncherSecretResolutionError, resolveLauncherSecret, type LauncherSecretResolverOptions } from './secret-resolver.js'
 
 type FeishuSdkChannel = Pick<LarkChannel, 'connect' | 'disconnect' | 'on' | 'send'>
@@ -23,7 +23,6 @@ export interface FeishuChannelFactoryOptions {
 
 export interface FeishuAdapterOptions {
   readonly connection: ChannelServiceConnectionConfig
-  readonly routes: readonly ChannelServiceRouteConfig[]
   readonly configurationRevision: number
   readonly source: string
   readonly resolveSecret?: (reference: string | undefined) => Promise<string>
@@ -31,7 +30,7 @@ export interface FeishuAdapterOptions {
 }
 
 class FeishuAdapterError extends Error {
-  constructor(code: 'ROUTE_UNAVAILABLE' | 'OUTBOUND_UNAVAILABLE') {
+  constructor(code: 'CONNECTION_UNAVAILABLE' | 'OUTBOUND_UNAVAILABLE') {
     super(code)
     this.name = `CHANNEL_FEISHU_${code}`
   }
@@ -41,32 +40,9 @@ function sameTenant(left: ChannelTenantRef, right: ChannelTenantRef): boolean {
   return left.adapterId === right.adapterId && left.accountId === right.accountId && left.tenantId === right.tenantId
 }
 
-function messageAllowed(message: NormalizedMessage, route: ChannelServiceRouteConfig): boolean {
-  const policy = route.policy
-  const kind = message.chatType === 'p2p' ? 'direct' : 'group'
-  if (policy.conversationKinds !== undefined && !policy.conversationKinds.includes(kind)) return false
-  if (policy.allowedUserIds !== undefined && !policy.allowedUserIds.includes(message.senderId)) return false
-  if (policy.allowedConversationIds !== undefined && !policy.allowedConversationIds.includes(message.chatId)) return false
-  if (kind === 'group') {
-    const text = message.content.trim()
-    const command = policy.commandPrefixes?.some(prefix => text.startsWith(prefix)) === true
-    if (policy.groupTrigger === 'deny') return false
-    if (policy.groupTrigger === 'mention' && !message.mentionedBot) return false
-    if (policy.groupTrigger === 'reply' && message.replyToMessageId === undefined) return false
-    if (policy.groupTrigger === 'command' && !command) return false
-    if (policy.groupTrigger === 'mention-or-command' && !message.mentionedBot && !command) return false
-  }
-  return true
-}
-
-function selectRoute(message: NormalizedMessage, input: FeishuAdapterOptions): ChannelServiceRouteConfig | undefined {
-  return input.routes.find(route => route.enabled && sameTenant(route.connection, input.connection.ref) && messageAllowed(message, route))
-}
-
-function inboundEnvelope(message: NormalizedMessage, connection: ChannelServiceConnectionConfig, route: ChannelServiceRouteConfig): ChannelInboundEnvelope {
+function inboundEnvelope(message: NormalizedMessage, connection: ChannelServiceConnectionConfig): ChannelInboundEnvelope {
   const threadId = message.rootId ?? message.threadId ?? message.chatId
   return {
-    routeId: route.id,
     input: {
       contract: 'cordisx.channel-user-input/v1', schemaVersion: 1, role: 'user',
       content: [{ type: 'text', text: message.content }],
@@ -85,17 +61,13 @@ function inboundEnvelope(message: NormalizedMessage, connection: ChannelServiceC
       },
       receivedAt: new Date(message.createTime).toISOString(),
     },
-    operation: { kind: 'create', provider: route.task.provider, model: route.task.model, profile: route.task.profile, workspace: { alias: route.task.workspaceAlias } },
   }
 }
 
 function compatible(input: FeishuAdapterOptions): void {
   if ((input.connection.adapterKind !== 'feishu' && input.connection.adapterKind !== 'lark')
     || input.connection.transport.mode !== 'websocket') {
-    throw new FeishuAdapterError('ROUTE_UNAVAILABLE')
-  }
-  if (!input.routes.some(route => route.enabled && sameTenant(route.connection, input.connection.ref))) {
-    throw new FeishuAdapterError('ROUTE_UNAVAILABLE')
+    throw new FeishuAdapterError('CONNECTION_UNAVAILABLE')
   }
 }
 
@@ -122,9 +94,8 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       // Never retain raw event bodies; the normalized text-only envelope is all
       // that crosses into the durable Channel core.
       const unsubscribe = channel.on('message', async message => {
-        const route = selectRoute(message, input)
-        if (route === undefined || message.content.trim().length === 0) return
-        await host.receive(inboundEnvelope(message, input.connection, route))
+        if (message.content.trim().length === 0) return
+        await host.receive(inboundEnvelope(message, input.connection))
         await host.drainInbound(1)
       })
       await channel.connect()
@@ -159,7 +130,7 @@ export function feishuDefinitionsForConfig(
   return configuration.connections
     .filter(connection => connection.enabled && (connection.adapterKind === 'feishu' || connection.adapterKind === 'lark'))
     .map(connection => createFeishuAdapterDefinition({
-      connection, routes: configuration.routes, source: input.source, configurationRevision: input.configurationRevision,
+      connection, source: input.source, configurationRevision: input.configurationRevision,
       ...(input.secretResolver === undefined ? {} : {
         resolveSecret: async reference => await resolveLauncherSecret(reference, input.secretResolver),
       }),

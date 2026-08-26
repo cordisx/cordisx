@@ -16,7 +16,6 @@ import type {
   ChannelDeliveryHandle,
   ChannelEventRef,
   ChannelInboundEnvelope,
-  ChannelInboundOperation,
   ChannelNotification,
   ChannelPermissionDecision,
   ChannelPermissionRequest,
@@ -25,14 +24,10 @@ import type {
   ChannelRuntimeAccountSnapshot,
   ChannelRuntimeOptions,
   ChannelRuntimeSnapshot,
-  ChannelSessionBinding,
   ChannelSubscriptionFilter,
   ChannelMessageListener,
-  ChannelTaskResult,
   ChannelTenantRef,
   ChannelThreadRef,
-  PlatformSessionRef,
-  ResolvedChannelTaskOperation,
 } from './types.js'
 
 const DEFAULT_MAX_ATTEMPTS = 5
@@ -71,13 +66,6 @@ export class ChannelGenerationFencedError extends Error {
   }
 }
 
-export class ChannelBindingUnavailableError extends Error {
-  constructor() {
-    super('No compatible Channel binding is available for this endpoint and route')
-    this.name = 'ChannelBindingUnavailableError'
-  }
-}
-
 export class ChannelIntegrityError extends Error {
   constructor(message: string) {
     super(message)
@@ -110,7 +98,6 @@ function normalizedErrorCode(value: string): string {
 
 function errorCode(error: unknown): string {
   if (error instanceof RetryableChannelError) return error.code
-  if (error instanceof ChannelBindingUnavailableError) return 'BINDING_UNAVAILABLE'
   if (error instanceof ChannelIntegrityError) return 'INTEGRITY_ERROR'
   return normalizedErrorCode(error instanceof Error ? error.name : 'CHANNEL_ERROR')
 }
@@ -141,24 +128,12 @@ function threadKey(ref: ChannelThreadRef): string {
   ])
 }
 
-function endpointRouteKey(ref: ChannelThreadRef, routeId: string): string {
-  return canonical([threadKey(ref), routeId])
-}
-
-function sessionKey(ref: PlatformSessionRef): string {
-  return canonical([ref.providerId, ref.remoteSessionId])
-}
-
 function replayKey(event: ChannelEventRef): string {
   return canonical([event.adapterId, event.accountId, event.eventId])
 }
 
 function sameTenant(left: ChannelTenantRef, right: ChannelTenantRef): boolean {
   return accountKey(left) === accountKey(right)
-}
-
-function sameThread(left: ChannelThreadRef, right: ChannelThreadRef): boolean {
-  return threadKey(left) === threadKey(right)
 }
 
 function appendAudit(state: ChannelStoreState, record: StoredAuditRecord): void {
@@ -189,22 +164,6 @@ function isEligibleOutbox(record: StoredOutboxRecord, now: number, leaseMs: numb
   if (record.status === 'queued') return true
   if (record.status === 'retrying') return Date.parse(record.nextAttemptAt ?? '') <= now
   return record.status === 'processing' && Date.parse(record.claimedAt ?? '') + leaseMs <= now
-}
-
-function requiredCapabilities(operation: ChannelInboundOperation): readonly ChannelCapability[] {
-  switch (operation.kind) {
-    case 'create': return ['channel.bindings.write', 'tasks.create', 'turns.submit']
-    case 'list': return ['tasks.catalog.read']
-    case 'status': return ['channel.bindings.read', 'tasks.catalog.read']
-    case 'read': return ['channel.bindings.read', 'tasks.content.read']
-    case 'open': return ['channel.bindings.read', 'tasks.catalog.read']
-    case 'continue': return ['channel.bindings.read', 'tasks.control']
-    case 'followup': return ['channel.bindings.read', 'agent.messages.append']
-    case 'steer': return ['channel.bindings.read', 'agent.messages.append']
-    case 'interrupt': return ['channel.bindings.read', 'turns.control']
-    case 'archive': return ['channel.bindings.read', 'channel.bindings.write', 'tasks.control']
-    case 'restore': return ['channel.bindings.read', 'channel.bindings.write', 'tasks.control']
-  }
 }
 
 function objectRecord(value: unknown, label: string): Record<string, unknown> {
@@ -252,45 +211,9 @@ function validateEvent(value: unknown): void {
   if (event.actor !== undefined) validateActor(event.actor)
 }
 
-function validateSelector(value: unknown, label: string): void {
-  const selector = objectRecord(value, label)
-  if ('id' in selector) {
-    exactKeys(selector, ['id'], label)
-    if (!nonEmptyText(selector.id, 512)) throw new ChannelIntegrityError(`${label} id is invalid`)
-    return
-  }
-  exactKeys(selector, ['useDefault'], label)
-  if (selector.useDefault !== true) throw new ChannelIntegrityError(`${label} default selector is invalid`)
-}
-
-function validateOperation(value: unknown): void {
-  const operation = objectRecord(value, 'Channel operation')
-  if (operation.kind === 'create') {
-    exactKeys(operation, ['kind', 'provider', 'model', 'profile', 'workspace'], 'Channel create operation')
-    if (operation.provider !== undefined) validateSelector(operation.provider, 'Channel provider selector')
-    if (operation.model !== undefined) validateSelector(operation.model, 'Channel model selector')
-    if (operation.profile !== undefined) validateSelector(operation.profile, 'Channel profile selector')
-    const workspace = objectRecord(operation.workspace, 'Channel workspace selector')
-    exactKeys(workspace, ['alias'], 'Channel workspace selector')
-    if (!nonEmptyText(workspace.alias, 512)) throw new ChannelIntegrityError('Channel workspace alias is invalid')
-    return
-  }
-  if (operation.kind === 'list') {
-    exactKeys(operation, ['kind', 'searchTerm'], 'Channel list operation')
-    if (operation.searchTerm !== undefined && !nonEmptyText(operation.searchTerm, 1_000)) {
-      throw new ChannelIntegrityError('Channel search term is invalid')
-    }
-    return
-  }
-  if (!['status', 'read', 'open', 'continue', 'followup', 'steer', 'interrupt', 'archive', 'restore'].includes(String(operation.kind))) {
-    throw new ChannelIntegrityError('Channel operation kind is invalid')
-  }
-  exactKeys(operation, ['kind'], 'Channel operation')
-}
-
 function validateInput(ref: ChannelTenantRef, envelope: ChannelInboundEnvelope): void {
   const rawEnvelope = objectRecord(envelope, 'Channel inbound envelope')
-  exactKeys(rawEnvelope, ['routeId', 'input', 'operation'], 'Channel inbound envelope')
+  exactKeys(rawEnvelope, ['input'], 'Channel inbound envelope')
   const input = objectRecord(envelope.input, 'Channel user input')
   exactKeys(input, ['contract', 'schemaVersion', 'role', 'content', 'source', 'receivedAt'], 'Channel user input')
   if (input.contract !== 'cordisx.channel-user-input/v1' || input.schemaVersion !== 1 || input.role !== 'user') {
@@ -333,8 +256,6 @@ function validateInput(ref: ChannelTenantRef, envelope: ChannelInboundEnvelope):
   if (typedEvent.actor !== undefined && !sameTenant(typedEvent, typedEvent.actor)) {
     throw new ChannelIntegrityError('Channel actor does not belong to the event account/tenant')
   }
-  if (!nonEmptyText(envelope.routeId, 512)) throw new ChannelIntegrityError('Channel route id is invalid')
-  validateOperation(envelope.operation)
 }
 
 function sanitizedTenant(ref: ChannelTenantRef): ChannelTenantRef {
@@ -394,40 +315,13 @@ function sanitizedThread(ref: ChannelThreadRef): ChannelThreadRef {
   }
 }
 
-function findBinding(
-  bindings: readonly ChannelSessionBinding[],
-  channel: ChannelThreadRef,
-  routeId: string,
-  operation: ChannelInboundOperation['kind'],
-): ChannelSessionBinding {
-  const candidates = bindings
-    .filter(binding => sameThread(binding.channel, channel) && binding.routeId === routeId)
-    .sort((left, right) => right.revision - left.revision)
-  const binding = operation === 'continue' || operation === 'restore'
-    ? candidates.find(candidate => candidate.state !== 'unavailable')
-    : candidates.find(candidate => candidate.state === 'active')
-  if (binding === undefined) throw new ChannelBindingUnavailableError()
-  return binding
-}
-
-function resolveOperation(
-  operation: ChannelInboundOperation,
-  binding: ChannelSessionBinding | undefined,
-): ResolvedChannelTaskOperation {
-  if (operation.kind === 'create' || operation.kind === 'list') return operation
-  if (binding === undefined) throw new ChannelBindingUnavailableError()
-  return { ...operation, session: binding.session }
-}
-
 export class ChannelRuntime {
-  readonly #gateway: ChannelRuntimeOptions['gateway']
   readonly #permissions: ChannelRuntimeOptions['permissions']
   readonly #store: JsonChannelStore
   readonly #clock: ChannelClock
   readonly #maxAttempts: number
   readonly #leaseMs: number
   readonly #retryBaseMs: number
-  readonly #taskContext: NonNullable<ChannelRuntimeOptions['taskContext']>
   readonly #connections = new Map<string, ActiveConnection>()
   readonly #subscriptions = new Map<string, {
     readonly caller: ChannelPluginIdentity
@@ -437,19 +331,15 @@ export class ChannelRuntime {
   #disposed = false
 
   private constructor(options: ChannelRuntimeOptions, store: JsonChannelStore) {
-    this.#gateway = options.gateway
     this.#permissions = options.permissions
     this.#store = store
     this.#clock = options.clock ?? SYSTEM_CLOCK
     this.#maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS
     this.#leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS
     this.#retryBaseMs = options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS
-    this.#taskContext = options.taskContext ?? { serviceGeneration: 'channel-runtime', configurationRevision: 1 }
     if (this.#maxAttempts < 1) throw new RangeError('maxAttempts must be at least 1')
     if (this.#leaseMs < 1) throw new RangeError('leaseMs must be positive')
     if (this.#retryBaseMs < 1) throw new RangeError('retryBaseMs must be positive')
-    if (this.#taskContext.serviceGeneration.length < 1 || !Number.isInteger(this.#taskContext.configurationRevision)
-      || this.#taskContext.configurationRevision < 1) throw new RangeError('Channel task context is invalid')
   }
 
   static async open(options: ChannelRuntimeOptions): Promise<ChannelRuntime> {
@@ -727,22 +617,11 @@ export class ChannelRuntime {
           },
         }
       })
-    const bindings = [...state.bindings]
-      .sort((left, right) => left.bindingId.localeCompare(right.bindingId))
-      .map(binding => ({
-        bindingId: binding.bindingId,
-        channel: binding.channel,
-        session: binding.session,
-        routeId: binding.routeId,
-        revision: binding.revision,
-        state: binding.state,
-      }))
     return Object.freeze({
       contract: 'cordisx.channel-runtime-snapshot/v1',
       schemaVersion: 1,
       observedAt: this.#now(),
       accounts,
-      bindings,
     })
   }
 
@@ -750,31 +629,6 @@ export class ChannelRuntime {
     return this.#store.snapshot().audit
   }
 
-  /**
-   * Launcher-private binding controls. These change only the durable Channel
-   * binding record; task/session controls remain the responsibility of the
-   * configured gateway.
-   */
-  async archiveBinding(bindingId: string): Promise<'applied' | 'unavailable' | 'not-found'> {
-    return await this.#setBindingState(bindingId, 'active', 'archived', 'archive')
-  }
-
-  async restoreBinding(bindingId: string): Promise<'applied' | 'unavailable' | 'not-found'> {
-    return await this.#setBindingState(bindingId, 'archived', 'active', 'restore')
-  }
-
-  async unbind(bindingId: string): Promise<'applied' | 'not-found'> {
-    this.#assertRuntimeActive()
-    const now = this.#now()
-    return await this.#store.transaction(state => {
-      const index = state.bindings.findIndex(binding => binding.bindingId === bindingId)
-      if (index < 0) return 'not-found' as const
-      const binding = state.bindings[index]!
-      state.bindings.splice(index, 1)
-      this.#appendBindingAudit(state, binding, 'channel.binding.unbind', 'applied', now)
-      return 'applied' as const
-    })
-  }
 
   async dispose(): Promise<void> {
     if (this.#disposed) return
@@ -806,7 +660,7 @@ export class ChannelRuntime {
     const event = envelope.input.source.event
     const eventReplayKey = replayKey(event)
     const recordId = `inbox:${digest(eventReplayKey)}`
-    const operationId = `channel-operation:${digest([eventReplayKey, envelope.routeId])}`
+    const operationId = `channel-event:${digest(eventReplayKey)}`
     const key = accountKey(ref)
     await this.#requirePermission({
       caller,
@@ -911,209 +765,24 @@ export class ChannelRuntime {
     })
     if (claimed === undefined) return
 
-    try {
-      let binding: ChannelSessionBinding | undefined
-      if (claimed.envelope.operation.kind !== 'create' && claimed.envelope.operation.kind !== 'list') {
-        binding = findBinding(
-          this.#store.snapshot().bindings,
-          claimed.envelope.input.source.event,
-          claimed.envelope.routeId,
-          claimed.envelope.operation.kind,
-        )
-      }
-      for (const capability of requiredCapabilities(claimed.envelope.operation)) {
-        const decision = await this.#permissions.authorize({
-          caller: claimed.caller,
-          capability,
-          source: claimed.envelope.input.source.event,
-          ...(binding === undefined ? {} : { session: binding.session }),
-          generation,
-          operationId: claimed.operationId,
-        })
-        if (decision !== 'allow') {
-          await this.#finalizePermission(recordId, generation, capability, decision)
-          return
-        }
-      }
-      const operation = resolveOperation(claimed.envelope.operation, binding)
-      const result = await this.#gateway.execute(operation, {
-        operationId: claimed.operationId,
-        routeId: claimed.envelope.routeId,
-        input: claimed.envelope.input,
-        serviceGeneration: this.#taskContext.serviceGeneration,
-        configurationRevision: this.#taskContext.configurationRevision,
-        ...(binding === undefined ? {} : { binding }),
-      })
-      await this.#finalizeApplied(recordId, generation, result)
-    } catch (error) {
-      await this.#finalizeFailure(recordId, generation, error)
-    }
+    await this.#finalizeEventAccepted(recordId, generation)
   }
 
-  async #finalizePermission(
-    recordId: string,
-    generation: number,
-    capability: ChannelCapability,
-    decision: Exclude<ChannelPermissionDecision, 'allow'>,
-  ): Promise<void> {
+  async #finalizeEventAccepted(recordId: string, generation: number): Promise<void> {
     const now = this.#now()
     await this.#store.transaction(state => {
       const current = state.inbox[recordId]
       if (current?.leaseGeneration !== generation || current.status !== 'processing') return
       if (state.adapters[current.accountKey]?.generation !== generation) return
-      state.inbox[recordId] = {
-        ...current,
-        status: decision === 'ask' ? 'permission-pending' : 'denied',
-        permission: decision,
-        errorCode: decision === 'ask' ? 'PERMISSION_PENDING' : 'PERMISSION_DENIED',
-        updatedAt: now,
-      }
+      state.inbox[recordId] = { ...current, status: 'applied', updatedAt: now }
       appendAudit(state, auditRecord({
         caller: current.caller,
         recordedAt: now,
         accountKey: current.accountKey,
         generation,
         operationId: current.operationId,
-        action: 'channel.permission',
-        outcome: decision,
-        capability,
-        eventKey: replayKey(current.envelope.input.source.event),
-      }))
-    })
-  }
-
-  async #finalizeApplied(recordId: string, generation: number, result: ChannelTaskResult): Promise<void> {
-    const now = this.#now()
-    await this.#store.transaction(state => {
-      const current = state.inbox[recordId]
-      if (current?.leaseGeneration !== generation || current.status !== 'processing') return
-      if (state.adapters[current.accountKey]?.generation !== generation) return
-      let bindingRevision: number | undefined
-      let targetSession = result.session
-      if (current.envelope.operation.kind === 'create') {
-        const dispatch = result.dispatch
-        if (dispatch?.status === 'rejected') throw new ChannelIntegrityError('Task creation was rejected by the Host gateway')
-        if (result.session === undefined) throw new ChannelIntegrityError('Task creation did not return a complete Platform session reference')
-        const actor = current.envelope.input.source.event.actor
-        if (actor === undefined) throw new ChannelIntegrityError('Task creation requires an attributed Channel actor')
-        const endpoint = current.envelope.input.source.event
-        const endpointKey = endpointRouteKey(endpoint, current.envelope.routeId)
-        const revisions = state.bindings.filter(binding => endpointRouteKey(binding.channel, binding.routeId) === endpointKey)
-        const revision = Math.max(0, ...revisions.map(binding => binding.revision)) + 1
-        state.bindings = state.bindings.map(binding => (
-          endpointRouteKey(binding.channel, binding.routeId) === endpointKey && binding.state === 'active'
-            ? { ...binding, state: 'archived' as const, updatedAt: now }
-            : binding
-        ))
-        const binding: ChannelSessionBinding = {
-          contract: 'cordisx.channel-binding/v1',
-          schemaVersion: 1,
-          bindingId: `binding:${digest([endpointKey, sessionKey(result.session), revision])}`,
-          channel: {
-            adapterId: endpoint.adapterId,
-            accountId: endpoint.accountId,
-            tenantId: endpoint.tenantId,
-            conversationId: endpoint.conversationId,
-            kind: endpoint.kind,
-            threadId: endpoint.threadId,
-            semantics: endpoint.semantics,
-          },
-          session: result.session,
-          createdBy: actor,
-          createdFrom: endpoint,
-          routeId: current.envelope.routeId,
-          revision,
-          state: 'active',
-          createdAt: now,
-          updatedAt: now,
-        }
-        state.bindings.push(binding)
-        bindingRevision = revision
-        if (dispatch?.lifecycle !== undefined) {
-          state.lifecycleCursors[sessionKey(dispatch.lifecycle.session)] = dispatch.lifecycle.afterSequence
-        }
-        if (dispatch?.status === 'created-initial-turn-failed' && dispatch.failure !== undefined) {
-          const deliveryId = `delivery:${digest(['channel.initial-turn-failed', current.operationId])}`
-          if (state.outbox[deliveryId] === undefined) {
-            state.outbox[deliveryId] = {
-              deliveryId,
-              accountKey: current.accountKey,
-              generation,
-              caller: current.caller,
-              target: sanitizedThread(current.envelope.input.source.event),
-              kind: 'failure',
-              text: `The task was created, but its initial turn could not start (${dispatch.failure.code}).`,
-              createdAt: now,
-              status: 'queued',
-              attempts: 0,
-              updatedAt: now,
-            }
-          }
-        }
-      } else if (current.envelope.operation.kind === 'archive'
-        || current.envelope.operation.kind === 'restore'
-        || current.envelope.operation.kind === 'continue') {
-        const desired = current.envelope.operation.kind === 'archive' ? 'archived' : 'active'
-        state.bindings = state.bindings.map(binding => {
-          if (!sameThread(binding.channel, current.envelope.input.source.event)
-            || binding.routeId !== current.envelope.routeId
-            || (targetSession !== undefined && sessionKey(binding.session) !== sessionKey(targetSession))) return binding
-          bindingRevision = binding.revision
-          targetSession = binding.session
-          return { ...binding, state: desired, updatedAt: now }
-        })
-      }
-      if (result.dispatch?.lifecycle !== undefined) {
-        state.lifecycleCursors[sessionKey(result.dispatch.lifecycle.session)] = result.dispatch.lifecycle.afterSequence
-      }
-      state.inbox[recordId] = {
-        ...current,
-        status: 'applied',
-        result,
-        updatedAt: now,
-      }
-      appendAudit(state, auditRecord({
-        caller: current.caller,
-        recordedAt: now,
-        accountKey: current.accountKey,
-        generation,
-        operationId: current.operationId,
-        action: `channel.task.${current.envelope.operation.kind}`,
+        action: 'channel.event.accept',
         outcome: 'applied',
-        ...(bindingRevision === undefined ? {} : { bindingRevision }),
-        ...(targetSession === undefined ? {} : { sessionKey: sessionKey(targetSession) }),
-        eventKey: replayKey(current.envelope.input.source.event),
-      }))
-    })
-  }
-
-  async #finalizeFailure(recordId: string, generation: number, error: unknown): Promise<void> {
-    const now = this.#clock.now()
-    await this.#store.transaction(state => {
-      const current = state.inbox[recordId]
-      if (current?.leaseGeneration !== generation || current.status !== 'processing') return
-      if (state.adapters[current.accountKey]?.generation !== generation) return
-      const retry = error instanceof RetryableChannelError && current.attempts < this.#maxAttempts
-      const terminalStatus = error instanceof RetryableChannelError ? 'dead-letter' : 'failed'
-      const status = retry ? 'retrying' : terminalStatus
-      const nextAttemptAt = retry
-        ? new Date(now.getTime() + this.#retryDelay(current.attempts)).toISOString()
-        : undefined
-      state.inbox[recordId] = {
-        ...current,
-        status,
-        ...(nextAttemptAt === undefined ? {} : { nextAttemptAt }),
-        errorCode: errorCode(error),
-        updatedAt: now.toISOString(),
-      }
-      appendAudit(state, auditRecord({
-        caller: current.caller,
-        recordedAt: now.toISOString(),
-        accountKey: current.accountKey,
-        generation,
-        operationId: current.operationId,
-        action: `channel.task.${current.envelope.operation.kind}`,
-        outcome: status,
         eventKey: replayKey(current.envelope.input.source.event),
       }))
     })
@@ -1323,46 +992,6 @@ export class ChannelRuntime {
         state.adapters[key] = { ...adapter, connectionState: 'stopped' }
       }
     })
-  }
-
-  async #setBindingState(
-    bindingId: string,
-    currentState: ChannelSessionBinding['state'],
-    nextState: ChannelSessionBinding['state'],
-    action: 'archive' | 'restore',
-  ): Promise<'applied' | 'unavailable' | 'not-found'> {
-    this.#assertRuntimeActive()
-    const now = this.#now()
-    return await this.#store.transaction(state => {
-      const index = state.bindings.findIndex(binding => binding.bindingId === bindingId)
-      if (index < 0) return 'not-found' as const
-      const binding = state.bindings[index]!
-      if (binding.state !== currentState) return 'unavailable' as const
-      state.bindings[index] = { ...binding, state: nextState, updatedAt: now }
-      this.#appendBindingAudit(state, binding, `channel.binding.${action}`, 'applied', now)
-      return 'applied' as const
-    })
-  }
-
-  #appendBindingAudit(
-    state: ChannelStoreState,
-    binding: ChannelSessionBinding,
-    action: string,
-    outcome: string,
-    recordedAt: string,
-  ): void {
-    const adapter = state.adapters[accountKey(binding.channel)]
-    if (adapter === undefined) return
-    appendAudit(state, auditRecord({
-      caller: adapter.owner,
-      recordedAt,
-      accountKey: accountKey(binding.channel),
-      generation: adapter.generation,
-      operationId: `binding:${binding.bindingId}`,
-      action,
-      outcome,
-      bindingRevision: binding.revision,
-    }))
   }
 
   #assertGeneration(ref: ChannelTenantRef, generation: number): void {
