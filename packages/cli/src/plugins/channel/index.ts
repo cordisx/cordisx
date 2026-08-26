@@ -1,4 +1,5 @@
 import type { Context, Disposable } from '@deepseek-ai/cordis'
+import { defineReactPage } from 'cordisx/react'
 import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_ROUTE_SCHEMA_V2,
@@ -7,7 +8,6 @@ import {
   type CordisXManagerContentNavigationDeclarationV1,
   type CordisXMessageParams,
   type CordisXPageMetadataV3,
-  type CordisXPageMountContext,
   type CordisXRouteDefinitionV2,
 } from '../../contracts.js'
 import {
@@ -16,6 +16,7 @@ import {
   type CordisXPluginManifestV4,
 } from '../../permission-contracts.js'
 import type { CordisXChannelManager } from '../../renderer/channel-manager.js'
+import { createChannelPage } from './view.js'
 
 export const name = 'channel'
 export const inject = ['i18n', 'slots', 'pages', 'routes', 'managerContent', 'channelManager']
@@ -183,10 +184,6 @@ function declarationId(prefix: string, accountId: string): string {
 
 type ChannelManagerContext = Context & { readonly channelManager: CordisXChannelManager }
 
-function mountChannelManager(ctx: ChannelManagerContext, context: CordisXPageMountContext) {
-  return ctx.channelManager.mount(context)
-}
-
 /** Structured Channel Settings contribution; every rendered node remains Host-owned. */
 export function apply(ctx: Context): void {
   const channelContext = ctx as ChannelManagerContext
@@ -235,12 +232,13 @@ export function apply(ctx: Context): void {
       'page.record.title': '{name}',
     },
   })
-  ctx.pages.register<Messages>(settingsPage, context => mountChannelManager(channelContext, context))
-  ctx.pages.register<Messages>(createPage, context => mountChannelManager(channelContext, context))
-  ctx.pages.register<Messages>(configurationPage, context => mountChannelManager(channelContext, context))
-  ctx.pages.register<Messages>(logsPage, context => mountChannelManager(channelContext, context))
-  ctx.pages.register<Messages>(runtimePage, context => mountChannelManager(channelContext, context))
-  ctx.pages.register<Messages>(sessionsPage, context => mountChannelManager(channelContext, context))
+  const mountPage = defineReactPage<Messages>(createChannelPage(channelContext.channelManager))
+  ctx.pages.register<Messages>(settingsPage, mountPage)
+  ctx.pages.register<Messages>(createPage, mountPage)
+  ctx.pages.register<Messages>(configurationPage, mountPage)
+  ctx.pages.register<Messages>(logsPage, mountPage)
+  ctx.pages.register<Messages>(runtimePage, mountPage)
+  ctx.pages.register<Messages>(sessionsPage, mountPage)
   ctx.routes.register(settingsRoute)
   ctx.routes.register(createRoute)
   ctx.routes.register(configurationRoute)

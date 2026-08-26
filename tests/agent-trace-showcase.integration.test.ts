@@ -601,6 +601,7 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(remountedPage.querySelector('.cxt-integrity')?.textContent).toContain('loaded 18/26')
     const generated = [...remountedPage.querySelectorAll<HTMLElement>('.cxt-row')].at(-1)!
     generated.click()
+    await settle(2)
     expect(remountedPage.querySelector('.cxt-detail-scroll')?.textContent).toContain('agent-trace-showcase@0.1.0')
     expect(remountedPage.querySelector('.cxt-detail-scroll')?.textContent).toContain('fixture-generation-7')
 
@@ -709,6 +710,7 @@ describe('Agent Trace Showcase renderer integration', () => {
     await runtime.navigate('agent-trace-showcase', {
       id: 'session.timeline', params: { sessionId: 'session-b' },
     })
+    await settle(2)
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).not.toBeNull()
     expect(dom.window.document.querySelector('.cxt-integrity')?.textContent).toContain('fixture')
 

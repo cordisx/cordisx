@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
+import { defineReactPage } from 'cordisx/react'
 import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
@@ -8,7 +9,6 @@ import {
   type CordisXAgentEvents,
   type CordisXAgents,
   type CordisXPageMetadataV3,
-  type CordisXPageMountContext,
   type CordisXPluginManifestV1,
   type CordisXRouteDefinitionV2,
   type CordisXSystemPrompt,
@@ -25,7 +25,7 @@ import {
 import { LiveTraceShowcaseStore } from './live-provider.js'
 import { HistoricalTraceShowcaseStore } from './history-provider.js'
 import type { TraceShowcaseStore } from './types.js'
-import { mountTraceShowcase } from './view.js'
+import { createTraceReactPage } from './react-view.js'
 
 export const name = 'agent-trace-showcase'
 export const inject = ['i18n', 'pages', 'routes', 'slots', 'agentEvents', 'agentHistory', 'agents', 'systemPrompt']
@@ -168,26 +168,6 @@ export function createTraceShowcaseStore(
   return new UnavailableTraceShowcaseStore(sessionId, config.timelineWindowSize)
 }
 
-function mountSessionTimeline(
-  context: CordisXPageMountContext,
-  config: AgentTraceShowcaseConfig,
-  agentEvents: CordisXAgentEvents,
-  agents: CordisXAgents,
-  systemPrompt: CordisXSystemPrompt,
-  agentHistory: CordisXAgentHistory,
-): () => void {
-  const routeSessionId = context.params.sessionId
-  if (typeof routeSessionId !== 'string' || routeSessionId.length === 0) {
-    throw new Error('Agent Trace route requires a host-issued session id')
-  }
-  const store = createTraceShowcaseStore(config, agentEvents, agents, systemPrompt, routeSessionId, agentHistory)
-  const unmount = mountTraceShowcase(context, store)
-  return () => {
-    unmount()
-    store.dispose()
-  }
-}
-
 export function installAgentTraceShowcase(
   ctx: Context,
   rawConfig: unknown,
@@ -231,7 +211,14 @@ export function installAgentTraceShowcase(
 
   ctx.pages.register(
     TRACE_SESSION_PAGE_METADATA,
-    context => mountSessionTimeline(context, config, ctx.agentEvents, ctx.agents, ctx.systemPrompt, ctx.agentHistory),
+    defineReactPage(createTraceReactPage(sessionId => createTraceShowcaseStore(
+      config,
+      ctx.agentEvents,
+      ctx.agents,
+      ctx.systemPrompt,
+      sessionId,
+      ctx.agentHistory,
+    ))),
   )
   ctx.routes.register(TRACE_SESSION_ROUTE_DEFINITION)
 

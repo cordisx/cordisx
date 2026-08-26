@@ -439,9 +439,10 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.top).toBe('0px')
     expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.getPropertyValue('--cordisx-page-chrome-safe-left')).toBe('0px')
     expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="slot-showcase:main.analytics"]')?.dataset.cordisxNoDrag).toBe('true')
+    for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-cordisx-demo-marker="main"]') === null; attempt += 1) await settle()
     const mainDemo = dom.window.document.querySelector<HTMLElement>('[data-cordisx-demo-marker="main"]')!
-    expect(mainDemo.style.background).toContain('--color-background-elevated-secondary')
-    expect(mainDemo.getAttribute('style')).not.toMatch(/#8b5cf6|#c4b5fd|linear-gradient/)
+    expect(mainDemo.classList.contains('cxr-ui-card')).toBe(true)
+    expect(mainDemo.getAttribute('style') ?? '').not.toMatch(/#8b5cf6|#c4b5fd|linear-gradient/)
     const mainChrome = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="slot-showcase:main.analytics"] [data-cordisx-page-chrome]')!
     expect(mainChrome.querySelector('[data-cordisx-page-leading] [data-host-icon="host:analytics"]')).not.toBeNull()
     expect(mainChrome.querySelector('button[aria-label="Back"]')).toBeNull()

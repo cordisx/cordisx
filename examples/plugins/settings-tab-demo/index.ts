@@ -1,5 +1,6 @@
-import type { Context, Disposable } from '@deepseek-ai/cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
+import { defineReactPage } from 'cordisx/react'
 import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
@@ -7,9 +8,9 @@ import {
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
   type CordisXLocalizedText,
   type CordisXMessageParams,
-  type CordisXPageMountContext,
   type CordisXPluginManifestV1,
 } from '../../../packages/cli/src/contracts.js'
+import { createSettingsNavigationPage } from './view.js'
 
 export const name = 'settings-tab-demo'
 export const inject = ['i18n', 'slots', 'pages', 'routes', 'managerContent']
@@ -44,37 +45,6 @@ function message<Key extends keyof Messages>(
   return { namespace: 'settings-demo', key, ...(args[0] === undefined ? {} : { params: args[0] }) }
 }
 
-function mountSettingsNavigation(context: CordisXPageMountContext, config: SettingsTabDemoConfig): Disposable<void> {
-  const section = context.document.createElement('section')
-  section.dataset.settingsNavigationDemoContent = 'mounted'
-  Object.assign(section.style, {
-    display: 'grid', gap: '12px', maxWidth: '620px', color: 'inherit',
-    font: '14px/1.55 ui-sans-serif, system-ui, sans-serif',
-  })
-  const label = context.document.createElement('label')
-  label.style.display = 'grid'
-  label.style.gap = '6px'
-  const labelText = context.document.createElement('span')
-  context.localization.bindText(labelText, message('body.label'))
-  const input = context.document.createElement('input')
-  input.dataset.settingsNavigationDemoFocus = 'true'
-  input.value = config.demoValue
-  Object.assign(input.style, {
-    width: 'min(320px, 100%)', boxSizing: 'border-box',
-    border: '1px solid color-mix(in srgb, currentColor 12%, transparent)', borderRadius: '8px', padding: '8px 10px',
-    background: 'color-mix(in srgb, currentColor 4%, transparent)', color: 'inherit',
-  })
-  label.append(labelText, input)
-  const diagnostic = context.document.createElement('code')
-  diagnostic.dataset.settingsNavigationDemoRoute = context.routeId
-  diagnostic.textContent = `${context.outlet} · ${context.routeId}`
-  diagnostic.style.opacity = '.55'
-  section.append(label, diagnostic)
-  context.container.append(section)
-  context.signal.addEventListener('abort', () => { section.dataset.settingsNavigationDemoAborted = 'true' }, { once: true })
-  return () => section.remove()
-}
-
 /** Real first-level Manager navigation demo: the Host owns navigation and page chrome. */
 export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})): void {
   ctx.i18n.define<Messages>({
@@ -100,7 +70,7 @@ export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})):
   ctx.pages.register<Messages>({
     $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3, id: 'navigation', title: message('page.title'),
     description: message('page.description'), icon: 'host:settings', chrome: 'standard',
-  }, context => mountSettingsNavigation(context, config))
+  }, defineReactPage<Messages>(createSettingsNavigationPage(config.demoValue)))
   ctx.routes.register({
     $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2, id: 'navigation', path: '/manager/extensions/settings-tab-demo',
     outlet: 'manager.content', page: 'navigation', title: message('route.title'), description: message('route.description'),

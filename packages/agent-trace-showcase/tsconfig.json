@@ -12,8 +12,10 @@
     "declaration": true,
     "sourceMap": true,
     "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "cordisx/react"
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["dist", "node_modules"]
 }
