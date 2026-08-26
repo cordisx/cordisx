@@ -159,6 +159,28 @@ describe('plugin DevTools Console runtime', () => {
     circularPayload?.querySelector<HTMLElement>('.luna-console-preview')?.click()
     circularPayload?.querySelector<HTMLElement>('.luna-object-viewer-collapsed')?.click()
     expect(circularPayload?.querySelector('.luna-object-viewer')?.textContent).toContain('[Circular]')
+
+    // A Console notification must repaint an already-mounted Logs tab. Preserve
+    // the stopped-follow setting across that replacement, then verify the
+    // refreshed Luna projection still exposes structured objects.
+    const stopFollowing = dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="follow"]')!
+    stopFollowing.click()
+    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe('false')
+    const entriesBeforeLiveUpdate = runtime!.pluginConsole('console-showcase').entries.length
+    await runtime!.setPluginBlocked('console-showcase', true)
+    await waitForState(() => runtime!.pluginConsole('console-showcase').entries.length > entriesBeforeLiveUpdate, 'live Console append')
+    await waitForState(() => (
+      dom.window.document.querySelectorAll('[data-plugin-console="console-showcase"] [data-console-entry]').length
+        === runtime!.pluginConsole('console-showcase').entries.length
+    ), 'mounted Luna Console live refresh')
+    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe('false')
+    const refreshedMixed = [...dom.window.document.querySelectorAll<HTMLElement>('[data-plugin-console="console-showcase"] [data-console-entry]')]
+      .find(item => item.textContent?.includes('object and array'))
+    refreshedMixed?.querySelector<HTMLElement>('.luna-console-preview')?.click()
+    expect(refreshedMixed?.querySelector('.luna-object-viewer')).not.toBeNull()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="follow"]')?.click()
+    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe('true')
+
     const controls = dom.window.document.querySelector('.cxm-console-controls')
     expect(controls?.textContent).not.toContain('采集范围')
     expect(controls?.parentElement?.textContent).not.toContain('Host API 自动切面')

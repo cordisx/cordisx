@@ -6739,7 +6739,8 @@ export function installCordisXManager(
   renderContent()
   const unsubscribeRuntime = model.subscribe(renderContent)
   const unsubscribePluginConsole = model.subscribePluginConsole?.(pluginId => {
-    if (!consolePaused && routeState.kind === 'plugin' && routeState.pluginId === pluginId && routeState.facet === 'runtime') renderContent()
+    if (!consolePaused && routeState.kind === 'plugin' && routeState.pluginId === pluginId
+      && (routeState.facet === 'runtime' || routeState.facet === 'logs')) renderContent()
   }) ?? (() => {})
   const unsubscribeMarketplace = marketplace.subscribe(renderContent)
   void marketplace.reload()
