@@ -560,6 +560,12 @@ const MANAGER_STYLES = `
   }
   .cxm-main { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
   .cxm-header {
+    --cx-manager-header-leading-seat: 26px;
+    --cx-manager-header-leading-glyph: 18px;
+    --cx-manager-header-title-size: 16px;
+    --cx-manager-header-title-line-height: 26px;
+    --cx-manager-icon-control-size: 30px;
+    --cx-manager-icon-control-glyph: 18px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -569,7 +575,7 @@ const MANAGER_STYLES = `
     padding: 0 22px;
     border-bottom: 1px solid rgba(255, 255, 255, .08);
   }
-  .cxm-heading { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: start; column-gap: 9px; min-width: 0; flex: 1 1 auto; }
+  .cxm-heading { position: relative; display: grid; grid-template-columns: var(--cx-manager-header-leading-seat) minmax(0, 1fr); align-items: start; column-gap: 9px; min-width: 0; flex: 1 1 auto; }
   .cxm-heading[data-heading-actions="true"] { padding-right: 36px; }
   .cxm-heading-menu { position: absolute; z-index: 8; top: -2px; right: 0; }
   .cxm-heading-menu > .cxm-manager-icon-action { color: var(--cx-muted); }
@@ -580,15 +586,15 @@ const MANAGER_STYLES = `
   .cxm-heading-menu-item:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: 1px; }
   .cxm-heading-menu-item .cxm-material-icon { width: 16px; height: 16px; }
   .cxm-heading-row { display: contents; }
-  .cxm-heading-title { display: flex; grid-column: 2; align-items: center; min-width: 0; min-height: 26px; color: #fff; font-size: 16px; font-weight: 700; line-height: 1.2; }
+  .cxm-heading-title { display: flex; grid-column: 2; align-items: center; min-width: 0; min-height: var(--cx-manager-header-leading-seat); color: #fff; font-size: var(--cx-manager-header-title-size); font-weight: 700; line-height: var(--cx-manager-header-title-line-height); }
   .cxm-heading-current-heading { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .cxm-heading p { grid-column: 1 / -1; margin: 3px 0 0; color: #7f899a; font-size: 11px; }
-  .cxm-heading-direct-title { grid-column: 2; min-width: 0; min-height: 26px; margin: 0; color: #fff; font-size: 16px; font-weight: 700; line-height: 26px; }
+  .cxm-heading-direct-title { grid-column: 2; min-width: 0; min-height: var(--cx-manager-header-leading-seat); margin: 0; color: #fff; font-size: var(--cx-manager-header-title-size); font-weight: 700; line-height: var(--cx-manager-header-title-line-height); }
   .cxm-heading-leading {
     display: grid;
     place-items: center;
-    width: 26px;
-    height: 26px;
+    width: var(--cx-manager-header-leading-seat);
+    height: var(--cx-manager-header-leading-seat);
     flex: none;
     box-sizing: border-box;
     border: 0;
@@ -596,19 +602,19 @@ const MANAGER_STYLES = `
     color: #d8dce3;
     align-self: start;
   }
-  .cxm-heading-icon svg { width: 18px; height: 18px; transform: translateY(-.5px); }
+  .cxm-heading-icon svg { width: var(--cx-manager-header-leading-glyph); height: var(--cx-manager-header-leading-glyph); transform: translateY(-.5px); }
   .cxm-back {
     padding: 0;
     cursor: pointer;
   }
   .cxm-back { border-radius: 7px; }
-  .cxm-back-icon { width: 18px; height: 18px; }
+  .cxm-back-icon { width: var(--cx-manager-header-leading-glyph); height: var(--cx-manager-header-leading-glyph); }
   .cxm-back-icon svg { transform: translateY(-.5px); }
   .cxm-back:hover { background: rgba(199, 204, 212, .14); color: #eef0f3; }
   .cxm-back:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
   .cxm-breadcrumbs { min-width: 0; width: 100%; }
-  .cxm-breadcrumb-list { display: flex; min-width: 0; margin: 0; padding: 0; align-items: center; list-style: none; white-space: nowrap; }
-  .cxm-breadcrumb-item { display: inline-flex; min-width: 0; flex: 0 0 auto; align-items: center; }
+  .cxm-breadcrumb-list { display: flex; min-width: 0; min-height: var(--cx-manager-header-leading-seat); margin: 0; padding: 0; align-items: center; list-style: none; line-height: var(--cx-manager-header-title-line-height); white-space: nowrap; }
+  .cxm-breadcrumb-item { display: inline-flex; min-width: 0; min-height: var(--cx-manager-header-leading-seat); flex: 0 0 auto; align-items: center; }
   .cxm-breadcrumb-item:last-child { flex: 1 1 auto; }
   .cxm-breadcrumb-separator { padding: 0 6px; color: #656e7e; font-weight: 400; }
   .cxm-breadcrumb-action {
@@ -622,6 +628,7 @@ const MANAGER_STYLES = `
     cursor: pointer;
     font: inherit;
     font-weight: 500;
+    line-height: calc(var(--cx-manager-header-title-line-height) - 4px);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -660,8 +667,8 @@ const MANAGER_STYLES = `
   .cxm-close {
     display: grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
+    width: var(--cx-manager-icon-control-size);
+    height: var(--cx-manager-icon-control-size);
     flex: none;
     box-sizing: border-box;
     padding: 0;
@@ -671,17 +678,23 @@ const MANAGER_STYLES = `
     color: #d8dce5;
     cursor: pointer;
   }
-  .cxm-close-icon { display: block; width: 18px; height: 18px; }
+  .cxm-close-icon { display: block; width: var(--cx-manager-icon-control-glyph); height: var(--cx-manager-icon-control-glyph); }
   .cxm-close:hover { background: rgba(199, 204, 212, .14); color: #eef0f3; }
   .cxm-content {
+    --cx-manager-content-block-start: 20px;
+    --cx-manager-content-inline: 22px;
+    --cx-manager-content-block-end: 24px;
     min-height: 0;
     flex: 1 1 0%;
     overflow-x: hidden;
     overflow-y: auto;
-    padding: 20px 22px 24px;
+    padding: var(--cx-manager-content-block-start) var(--cx-manager-content-inline) var(--cx-manager-content-block-end);
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
   }
+  /* A sidebar-owned manager.content page has one Host-owned page inset at its
+     bounded root; the shared scroll viewport must not add a second layer. */
+  .cxm-content[data-manager-content-page="true"] { padding: 0; }
   .cxm-content[data-marketplace-discovery="true"] { overflow: hidden; }
   .cxm-content[data-manager-list-page="true"] { display: flex; overflow: hidden; }
   .cxm-content[data-manager-list-page="true"] > .cxm-fixed-list-collection { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; }
@@ -734,6 +747,9 @@ const MANAGER_STYLES = `
   .cxm-settings-tab-icon.cordisx-host-icon { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; }
   .cxm-settings-tab-icon.cordisx-host-icon svg { width: 17px; height: 17px; }
   .cxm-manager-content-root { min-width: 0; max-width: 100%; }
+  .cxm-content[data-manager-content-page="true"] > .cxm-manager-content-root { box-sizing: border-box; padding: var(--cx-manager-content-block-start) var(--cx-manager-content-inline) var(--cx-manager-content-block-end); }
+  .cxm-content[data-manager-content-page="true"] > .cxm-manager-content-root[role="tabpanel"] { padding-top: 0; }
+  .cxm-content[data-manager-content-page="true"] > .cxm-tabs { margin: 16px calc(var(--cx-manager-content-inline) - 8px) 16px; }
   .cxm-tab:disabled { cursor: default; opacity: .42; }
   .cxm-about-identity { display: flex; align-items: center; gap: 18px; padding: 4px 2px 22px; }
   .cxm-about-identity-copy { min-width: 0; white-space: nowrap; }
@@ -6565,6 +6581,7 @@ export function installCordisXManager(
     marketplaceCollectionView = undefined
     delete content.dataset.marketplaceDiscovery
     delete content.dataset.managerListPage
+    delete content.dataset.managerContentPage
     const snapshot = model.snapshot()
     renderedLocale = snapshot.localization.locale
     syncPrimaryChrome(renderedLocale)
@@ -6600,7 +6617,10 @@ export function installCordisXManager(
     if (routeState.kind === 'extension-point') return renderExtensionPointDetail(snapshot, routeState.pointId)
     if (routeState.kind === 'route') return renderRouteDetail(snapshot, routeState.qualifiedId)
     if (routeState.kind === 'page') return renderPageDetail(snapshot, routeState.qualifiedId)
-    if (routeState.kind === 'manager-content') return renderManagerContent(snapshot, routeState.id, routeState.reference)
+    if (routeState.kind === 'manager-content') {
+      content.dataset.managerContentPage = 'true'
+      return renderManagerContent(snapshot, routeState.id, routeState.reference)
+    }
     if (routeState.kind !== 'primary') return renderPluginList(snapshot)
     if (routeState.primary === 'about') renderAbout(snapshot)
     if (routeState.primary === 'extension-points') renderExtensionPointList(snapshot)

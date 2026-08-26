@@ -101,6 +101,10 @@ export const HOST_COLLECTION_STYLES = String.raw`
   .cxc-collection {
     --cxc-icon-seat-size: 32px;
     --cxc-icon-glyph-size: 16px;
+    --cxc-grid-gap: 8px;
+    --cxc-card-padding: 12px;
+    --cxc-copy-description-gap: 3px;
+    --cxc-copy-machine-gap: 5px;
     min-width: 0;
   }
   .cxc-collection[data-density="compact"] {
@@ -133,18 +137,19 @@ export const HOST_COLLECTION_STYLES = String.raw`
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
     /* A scrollable list owns the remaining height, not each product card. */
     align-content: start;
-    align-items: start;
-    gap: 8px;
+    align-items: stretch;
+    gap: var(--cxc-grid-gap);
     margin-top: 12px;
   }
   .cxc-list[data-layout="rows"] { grid-template-columns: minmax(0, 1fr); }
-  .cxc-listitem { min-width: 0; align-self: start; }
+  .cxc-listitem { display: flex; min-width: 0; align-self: stretch; }
   .cxc-card {
     position: relative;
+    display: flex;
     container-type: inline-size;
     min-width: 0;
-    height: auto;
-    align-self: start;
+    height: 100%;
+    align-self: stretch;
     box-sizing: border-box;
     border: 1px solid var(--cx-border);
     border-radius: 11px;
@@ -158,9 +163,9 @@ export const HOST_COLLECTION_STYLES = String.raw`
     gap: 11px;
     width: 100%;
     min-width: 0;
-    height: auto;
+    flex: 1 1 auto;
     box-sizing: border-box;
-    padding: 12px;
+    padding: var(--cxc-card-padding);
     border: 0;
     border-radius: 10px;
     background: transparent;
@@ -196,10 +201,10 @@ export const HOST_COLLECTION_STYLES = String.raw`
   .cxc-avatar-badge { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; width: 16px; height: 16px; box-sizing: border-box; border: 2px solid var(--cx-surface-raised); border-radius: 50%; background: var(--cx-surface); color: var(--cx-muted); }
   .cxc-avatar-badge > * { width: 10px; height: 10px; }
   .cxc-card > .cxc-status[data-position="card"] { top: 10px; right: 10px; bottom: auto; z-index: 1; }
-  .cxc-copy { min-width: 0; flex: 1 1 auto; }
+  .cxc-copy { display: flex; min-width: 0; align-self: stretch; flex: 1 1 auto; flex-direction: column; }
   .cxc-title { display: block; overflow: hidden; color: var(--cx-text); font-size: 12px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
-  .cxc-description { display: -webkit-box; margin-top: 3px; overflow: hidden; color: var(--cx-muted); font-size: 11px; line-height: 1.42; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-  .cxc-machine-id { display: block; margin-top: 5px; overflow: hidden; color: var(--cx-muted); font: 10px/1.35 ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+  .cxc-description { display: -webkit-box; min-block-size: 2.84em; margin-top: var(--cxc-copy-description-gap); overflow: hidden; color: var(--cx-muted); font-size: 11px; line-height: 1.42; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .cxc-machine-id { display: block; margin-top: auto; padding-top: var(--cxc-copy-machine-gap); overflow: hidden; color: var(--cx-muted); font: 10px/1.35 ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
   .cxc-actions {
     position: absolute;
     z-index: 2;
