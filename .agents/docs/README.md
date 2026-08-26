@@ -32,6 +32,10 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `plugin-devtools-console.md` defines the plugin-scoped DevTools Console,
   issuance-bound Host instrumentation, native variadic arguments, coverage
   guarantees, Luna rendering, privacy and bounded lifetime.
+- `manager-feedback-ledger-2026-08-26.md` is the bounded follow-up ledger for
+  the accepted Manager Console and Host Form feedback from 2026-08-26. It
+  records exact user-visible outcomes, file ownership, validation, and the
+  rule that previously accepted UI work is not reopened without a regression.
 - `dynamic-plugin-lifecycle.md` defines local package staging, dependency and
   permission planning, minimum-scope plugin generations, atomic activation,
   last-good rollback, uninstall cleanup, and Host-owned manager operations.
