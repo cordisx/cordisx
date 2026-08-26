@@ -136,9 +136,8 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${HOST_ICON_16PX_C
   .cxf-item + .cxf-item { border-top: 1px solid var(--cx-border); }
   .cxf-item[data-full-width="true"] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; }
   .cxf-label-row { grid-area: label; display: flex; align-items: baseline; gap: .35rem; min-inline-size: 0; }
-  .cxf-field-menu-trigger { flex: 0 0 auto; color: var(--td-text-color-secondary); }
-  .cxf-field-menu-trigger:hover:not(:disabled), .cxf-field-menu-trigger[aria-expanded="true"] { background: var(--td-bg-color-container-hover); color: var(--td-text-color-primary); }
-  .cxf-field-menu-trigger[aria-expanded="true"] { background: var(--td-bg-color-container-active); }
+  .cxf-field-menu-trigger { flex: 0 0 auto; color: var(--td-text-color-secondary); background: transparent; }
+  .cxf-field-menu-trigger:hover:not(:disabled), .cxf-field-menu-trigger[aria-expanded="true"] { background: transparent; color: var(--td-text-color-primary); }
   .cxf-form-icon { flex: 0 0 auto; inline-size: 1rem; block-size: 1rem; color: var(--td-text-color-secondary); }
   .cxf-section-title > .cordisx-host-icon { margin-inline-end: .4rem; vertical-align: -.14em; color: var(--td-text-color-secondary); }
   .cxf-label { color: var(--td-text-color-primary); font-weight: 600; overflow-wrap: anywhere; }
@@ -147,6 +146,11 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${HOST_ICON_16PX_C
   .cxf-item[data-control-layout="compact"] .cxf-control-seat { inline-size: auto; max-inline-size: 100%; justify-self: end; }
   .cxf-item[data-control-layout="compact"] .cxf-tdesign-control { inline-size: auto; }
   .cxf-item[data-control-layout="compact"] t-input-number.cxf-tdesign-control { inline-size: 7.25rem; }
+  .cxf-item[data-control-layout="compact"] t-checkbox-group.cxf-tdesign-control,
+  .cxf-item[data-control-layout="compact"] t-switch.cxf-tdesign-control,
+  .cxf-item[data-control-layout="compact"] t-radio-group.cxf-tdesign-control { inline-size: fit-content; max-inline-size: 100%; }
+  t-select.cxf-tdesign-control { border: 0; border-radius: 0; padding: 0; background: transparent; }
+  t-select.cxf-tdesign-control::part(suffix) { display: inline-grid; place-items: center; }
   .cxf-control {
     box-sizing: border-box; inline-size: 100%; min-block-size: var(--td-comp-size-m); margin: 0;
     border: 1px solid var(--td-border-level-2-color); border-radius: var(--td-radius-default);
@@ -204,7 +208,7 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${HOST_ICON_16PX_C
   .cxf-item[data-invalid="true"] .cxf-control { border-color: var(--td-error-color); }
   .cxf-custom-seat { min-block-size: 2rem; }
   .cxf-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: .5rem; }
-  .cxf-form-footer { position: sticky; inset-block-start: 0; z-index: 3; min-block-size: 2.75rem; margin-block: 0 .85rem; padding: .6rem .75rem; border: 1px solid var(--cx-border); border-radius: .75rem; background: color-mix(in srgb, var(--cx-surface) 94%, transparent); box-shadow: 0 8px 20px color-mix(in srgb, var(--cx-shadow) 10%, transparent); backdrop-filter: blur(14px); }
+  .cxf-form-footer { position: sticky; inset-block-start: 0; z-index: 3; min-block-size: 2rem; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; backdrop-filter: none; }
   .cxf-status { margin-inline-end: auto; color: var(--td-text-color-secondary); font-size: .82em; }
   .cxf-status[data-state="dirty"] { color: var(--td-brand-color); }
   .cxf-status[data-state="saved"] { color: var(--td-success-color); }
@@ -492,7 +496,7 @@ export class HostFormAdapter {
     readonly copyPath: () => Promise<boolean>
   }): HostFormFieldActionMenu {
     const locale = this.locale()
-    const trigger = this.button(managerCopy(locale, 'form.field-actions'), { icon: 'host:settings', density: 'icon' })
+    const trigger = this.button(managerCopy(locale, 'form.field-actions'), { icon: 'host:settings', density: 'icon', variant: 'text' })
     trigger.classList.add('cxf-field-menu-trigger')
     trigger.dataset.hostFormAction = 'field-actions'
     trigger.setAttribute('aria-haspopup', 'menu')
@@ -1031,7 +1035,7 @@ export class HostFormAdapter {
 
   button(label: string, options: {
     readonly type?: 'button' | 'submit'
-    readonly variant?: 'default' | 'primary'
+    readonly variant?: 'default' | 'primary' | 'text'
     readonly tone?: 'default' | 'danger'
     readonly icon?: CordisXConfigFormIcon
     readonly density?: 'icon' | 'icon-label'

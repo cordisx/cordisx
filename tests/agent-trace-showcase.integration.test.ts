@@ -282,6 +282,8 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect([...form.querySelectorAll<HTMLElement>('[data-config-path]')].map(field => field.dataset.configPath)).toEqual([
       'mode', 'historyPageSize', 'timelineWindowSize',
     ])
+    expect(form.querySelectorAll('.cxf-section-heading')).toHaveLength(0)
+    expect(form.textContent).not.toContain('常规')
     const mode = form.querySelector<HTMLElement & { selectedValue: string; options: readonly { label: string }[] }>('[data-config-path="mode"] t-select')!
     expect(mode.selectedValue).toBe('historical')
     expect(mode.options.map(option => option.label)).toEqual(['live', 'historical', 'fixture'])

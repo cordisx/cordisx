@@ -26,7 +26,7 @@ export interface TDesignButtonElement extends TDesignElement {
 
 export interface TDesignButtonOptions {
   readonly type?: 'button' | 'submit'
-  readonly variant?: 'default' | 'primary'
+  readonly variant?: 'default' | 'primary' | 'text'
   readonly tone?: 'default' | 'danger'
   /** Compact actions retain an accessible label but render only their icon. */
   readonly density?: 'icon' | 'icon-label'
@@ -81,6 +81,17 @@ export function unwrapTDesignChangeValue<Value>(payload: unknown): Value | undef
     }
     if (detail !== undefined) return detail as Value
     if (Object.hasOwn(payload, 'value')) return (payload as { readonly value?: Value }).value
+    const target = (payload as { readonly target?: unknown }).target
+    // Native Event targets expose `value` through HTMLElement's prototype,
+    // while TDesign's CustomEvent payload keeps it in `detail`. Accept both
+    // official browser shapes before a draft observes the event object.
+    if (target !== null && typeof target === 'object' && 'value' in target) {
+      return (target as { readonly value?: Value }).value
+    }
+    const currentTarget = (payload as { readonly currentTarget?: unknown }).currentTarget
+    if (currentTarget !== null && typeof currentTarget === 'object' && 'value' in currentTarget) {
+      return (currentTarget as { readonly value?: Value }).value
+    }
   }
   return payload as Value | undefined
 }
@@ -828,7 +839,7 @@ export function createTDesignButton(
   const buttonProps = {
     content: iconOnly ? '' : label,
     theme: options.tone === 'danger' ? 'danger' : options.variant === 'primary' ? 'primary' : 'default',
-    variant: options.variant === 'primary' ? 'base' : 'outline',
+    variant: options.variant === 'primary' ? 'base' : options.variant === 'text' ? 'text' : 'outline',
     size: iconOnly ? 'small' : 'medium',
     shape: iconOnly ? 'square' : 'rectangle',
     type: element.type,

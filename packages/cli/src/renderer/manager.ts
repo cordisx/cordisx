@@ -1529,12 +1529,16 @@ function createPermissionPolicySelect(
   permission: ManagerPermissionSnapshot,
   onChange: (policy: CordisXPermissionPolicy, control: TDesignSelectElement<CordisXPermissionPolicy>) => Promise<void>,
 ): TDesignSelectElement<CordisXPermissionPolicy> {
+  const unavailable = permission.availability.status === 'unavailable'
   let policy: TDesignSelectElement<CordisXPermissionPolicy>
   policy = forms.select(
     `${capabilityPresentation(permission.capability).name}的权限策略`,
-    (['ask', 'allow', 'deny'] as const).map(value => ({ value, label: POLICY_LABELS[value] })),
+    unavailable
+      ? [{ value: permission.policy, label: capabilityAvailabilityLabel(permission.availability.status) }]
+      : (['ask', 'allow', 'deny'] as const).map(value => ({ value, label: POLICY_LABELS[value] })),
     permission.policy,
     value => { if (value !== undefined) void onChange(value, policy) },
+    { disabled: unavailable },
   )
   policy.classList.add('cxm-permission-policy-select')
   policy.dataset.hostFormPrimitive = 'select'
@@ -4421,25 +4425,35 @@ export function installCordisXManager(
     const form = forms.form(plugin.id)
     form.dataset.pluginConfigForm = plugin.id
     form.dataset.state = draft.state
+    const groupKeys = new Set(visibleFields.map(field => field.group?.id ?? '__root__'))
+    const needsGeneralHeading = groupKeys.size > 1
     let generalGrid: HTMLElement | undefined
     const groupGrids = new Map<string, HTMLElement>()
     const gridFor = (field: CordisXConfigFieldSnapshot): HTMLElement => {
       if (field.group !== undefined) {
         const existing = groupGrids.get(field.group.id)
         if (existing !== undefined) return existing
-        const section = forms.section(
-          field.group.title ?? managerCopy(locale, 'form.section-general'),
-          field.group.description,
-          field.group.icon,
-        )
-        groupGrids.set(field.group.id, section.content)
-        form.append(section.root)
-        return section.content
+        const title = field.group.title
+        if (title !== undefined || needsGeneralHeading) {
+          const section = forms.section(title ?? managerCopy(locale, 'form.section-general'), field.group.description, field.group.icon)
+          groupGrids.set(field.group.id, section.content)
+          form.append(section.root)
+          return section.content
+        }
+        const grid = forms.grid()
+        groupGrids.set(field.group.id, grid)
+        form.append(grid)
+        return grid
       }
       if (generalGrid !== undefined) return generalGrid
-      const section = forms.section(managerCopy(locale, 'form.section-general'))
-      generalGrid = section.content
-      form.append(section.root)
+      if (needsGeneralHeading) {
+        const section = forms.section(managerCopy(locale, 'form.section-general'))
+        generalGrid = section.content
+        form.append(section.root)
+      } else {
+        generalGrid = forms.grid()
+        form.append(generalGrid)
+      }
       return generalGrid
     }
     let submit: TDesignButtonElement | undefined
@@ -4576,7 +4590,7 @@ export function installCordisXManager(
         : draft.state === 'saved' ? hostConfigApplyMessage(descriptor.applies, 'saved', locale)
           : draft.operations.size > 0 ? hostConfigApplyMessage(descriptor.applies, 'dirty', locale) : ''
       const resetDraft = forms.button(managerCopy(locale, 'form.undo-changes'), {
-        action: 'undo',
+        action: 'undo', density: 'icon',
         ...(descriptor.actionIcons?.reset === undefined ? {} : { icon: descriptor.actionIcons.reset }),
       })
       setTDesignDisabled(resetDraft, draft.operations.size === 0 || busyPluginId !== undefined)
@@ -4589,7 +4603,7 @@ export function installCordisXManager(
         renderContent()
       })
       submit = forms.button(busyPluginId === plugin.id ? managerCopy(locale, 'form.saving') : managerCopy(locale, 'form.save-configuration'), {
-        type: 'submit', variant: 'primary', action: 'save',
+        type: 'submit', variant: 'primary', density: 'icon', action: 'save',
         ...(descriptor.actionIcons?.save === undefined ? {} : { icon: descriptor.actionIcons.save }),
       })
       setTDesignDisabled(submit, !descriptor.writable || busyPluginId !== undefined || draft.operations.size === 0 || draft.issues.size > 0)
@@ -4602,7 +4616,8 @@ export function installCordisXManager(
         draft!.state = 'saving'
         delete draft!.message
         setTDesignDisabled(submit!, true)
-        setTDesignText(submit!, managerCopy(model.snapshot().localization.locale, 'form.saving'))
+        submit!.setAttribute('aria-label', managerCopy(model.snapshot().localization.locale, 'form.saving'))
+        submit!.setAttribute('title', managerCopy(model.snapshot().localization.locale, 'form.saving'))
         status.dataset.state = 'saving'
         status.textContent = hostConfigApplyMessage(descriptor.applies, 'saving', model.snapshot().localization.locale)
         form.setAttribute('aria-busy', 'true')
@@ -4882,16 +4897,7 @@ export function installCordisXManager(
           void navigateRoute({ kind: 'permission', pluginId: plugin.id, capability: permission.capability })
         })
         const control = create(document, 'div', 'cxm-permission-control')
-        const availability = create(
-          document,
-          'span',
-          'cxm-kind-badge cxm-permission-availability',
-          capabilityAvailabilityLabel(permission.availability.status),
-        )
-        availability.dataset.permissionAvailability = permission.capability
-        availability.dataset.availabilityState = permission.availability.status
         control.append(
-          availability,
           createPermissionPolicySelect(forms, permission, async (policy, select) => {
             await commitPermissionPolicy(plugin.id, permission, policy, select)
           }),

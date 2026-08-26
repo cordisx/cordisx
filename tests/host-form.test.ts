@@ -183,13 +183,19 @@ describe('Host form primitive registry', () => {
 })
 
 describe('Host form DOM and accessibility', () => {
-  it('unwraps official CustomEvent change values before they enter Host drafts', () => {
+  it('unwraps official CustomEvent and native input events before they enter Host drafts', () => {
     const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true })
     const adapter = new HostFormAdapter(dom.window.document)
     const onDraft = vi.fn()
     const event = (value: unknown) => new dom.window.CustomEvent('change', { detail: { value } })
     expect(unwrapTDesignChangeValue<string>(event('Northstar'))).toBe('Northstar')
     expect(unwrapTDesignChangeValue<number>(event(42))).toBe(42)
+    const nativeInput = dom.window.document.createElement('input')
+    nativeInput.value = 'Native value'
+    nativeInput.addEventListener('input', nativeEvent => {
+      expect(unwrapTDesignChangeValue<string>(nativeEvent)).toBe('Native value')
+    })
+    nativeInput.dispatchEvent(new dom.window.Event('input'))
 
     const input = adapter.control(field({ value: '' }), 'input', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
     input.onChange?.(event('Northstar'))
@@ -365,6 +371,9 @@ describe('Host form DOM and accessibility', () => {
     expect(HOST_FORM_STYLES).toContain('.cxf-button { display: inline-block; min-block-size: 0;')
     expect(HOST_FORM_STYLES).toContain('.cxf-button[data-density="icon"] { inline-size: 2rem; block-size: 2rem; }')
     expect(HOST_FORM_STYLES).toContain('.cxf-form-footer { position: sticky; inset-block-start: 0;')
+    expect(HOST_FORM_STYLES).toContain('margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent;')
+    expect(HOST_FORM_STYLES).toContain('t-select.cxf-tdesign-control { border: 0; border-radius: 0; padding: 0; background: transparent; }')
+    expect(HOST_FORM_STYLES).toContain('t-select.cxf-tdesign-control::part(suffix) { display: inline-grid; place-items: center; }')
     expect(HOST_FORM_STYLES).not.toContain('inset-block-end: -.25rem')
     expect(HOST_FORM_STYLES).not.toContain('.cxf-button {\n    display: inline-flex;')
     expect(HOST_FORM_STYLES).not.toMatch(/(^|[\s,{])(:root|html|body|\*)\s*[{,]/u)
@@ -374,8 +383,8 @@ describe('Host form DOM and accessibility', () => {
     const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true })
     const adapter = new HostFormAdapter(dom.window.document)
     const restore = adapter.button('Restore default', { action: 'restore-default', density: 'icon' })
-    const undo = adapter.button('Undo changes', { action: 'undo' })
-    const save = adapter.button('Save configuration', { action: 'save', variant: 'primary' })
+    const undo = adapter.button('Undo changes', { action: 'undo', density: 'icon' })
+    const save = adapter.button('Save configuration', { action: 'save', variant: 'primary', density: 'icon' })
 
     expect(restore.getAttribute('aria-label')).toBe('Restore default')
     expect(restore.getAttribute('title')).toBe('Restore default')
@@ -388,9 +397,12 @@ describe('Host form DOM and accessibility', () => {
     expect(restore.querySelector('[data-host-icon="host:reset"]')?.getAttribute('slot')).toBe('icon')
     expect(undo.dataset.hostFormActionIcon).toBe('host:reset')
     expect(undo.querySelector('[data-host-icon="host:reset"]')?.getAttribute('slot')).toBe('icon')
+    expect(undo.getAttribute('aria-label')).toBe('Undo changes')
+    expect(undo.getAttribute('title')).toBe('Undo changes')
+    expect(undo.textContent).toBe('')
     expect(save.dataset.hostFormActionIcon).toBe('host:save')
     expect(save.querySelector('[data-host-icon="host:save"]')?.getAttribute('slot')).toBe('icon')
-    expect(save as unknown as { theme?: string; variant?: string; content?: string }).toMatchObject({ theme: 'primary', variant: 'base', content: 'Save configuration' })
+    expect(save as unknown as { theme?: string; variant?: string; content?: string }).toMatchObject({ theme: 'primary', variant: 'base', content: '' })
     expect(restore as unknown as { shape?: string; size?: string; content?: string }).toMatchObject({ shape: 'square', size: 'small', content: '' })
   })
 
@@ -408,6 +420,7 @@ describe('Host form DOM and accessibility', () => {
     dom.window.document.body.append(menu.trigger)
     expect(menu.trigger.textContent).toBe('')
     expect(menu.trigger.getAttribute('aria-label')).toBe('Field actions')
+    expect(menu.trigger.getAttribute('variant')).toBe('text')
     expect(menu.trigger.querySelector('[data-host-icon="host:settings"]')).not.toBeNull()
     menu.trigger.click()
     const portal = dom.window.document.querySelector<HTMLElement>('[data-cxf-tdesign-portal-host]')!
@@ -426,6 +439,7 @@ describe('Host form DOM and accessibility', () => {
     expect(portalStyles).toContain('padding: 8px 9px')
     expect(portalStyles).toContain('gap: 9px')
     expect(portalStyles).toContain('.cxf-field-menu-item:active:not(:disabled)')
+    expect(HOST_FORM_STYLES).toContain('.cxf-field-menu-trigger:hover:not(:disabled), .cxf-field-menu-trigger[aria-expanded="true"] { background: transparent;')
     entries[0]!.click()
     expect(useDefault).toHaveBeenCalledOnce()
     expect(popup.hidden).toBe(true)

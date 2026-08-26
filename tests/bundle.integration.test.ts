@@ -7,6 +7,7 @@ import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { managerCopy } from '../packages/cli/src/renderer/ui-copy.js'
 
 type TestTDesignSelect = HTMLElement & {
+  disabled: boolean
   options: readonly { readonly value: string; readonly label: string }[]
   setSelectedValue(value: string | undefined, notify?: boolean): void
 }
@@ -982,13 +983,12 @@ describe('renderer bundle', () => {
     expect(permissionsPanel?.textContent).not.toContain('models.read')
     expect(permissionsPanel?.textContent).toContain('读取可用模型')
     expect(managerModal?.textContent).toContain('显示当前宿主连接实际可用的模型')
-    expect(permissionsPanel?.textContent).toContain('不可用')
     expect(permissionsPanel?.textContent).not.toContain('current-connection-client-unavailable')
     expect(permissionsPanel?.textContent).not.toContain('trusted renderer code 不是安全沙箱')
     expect(permissionsPanel?.textContent).not.toContain('二次连接')
     expect(permissionsPanel?.textContent).not.toContain('原始 bridge 暴露')
     expect(permissionsPanel?.textContent).not.toContain('不是安全沙箱')
-    expect(permissionsPanel?.querySelector('[data-permission-availability="models.read"]')?.getAttribute('data-availability-state')).toBe('unavailable')
+    expect(permissionsPanel?.querySelector('[data-permission-availability="models.read"]')).toBeNull()
     expect(permissionsPanel?.querySelector('[data-permission-capability="models.read"]')).not.toBeNull()
     dom.window.document.documentElement.lang = 'zh-CN'
     await new Promise(resolve => setTimeout(resolve, 0))
@@ -1003,12 +1003,8 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('[data-permission-detail="models.read"]')?.textContent).toContain('models.read')
     expect(dom.window.document.querySelector('[data-permission-provider="desktop-current-connection"]')).not.toBeNull()
     const permissionPolicy = dom.window.document.querySelector<TestTDesignSelect>('t-select[data-permission-capability="models.read"]')
-    expect(permissionPolicy!.options.map(option => option.label)).toEqual(['每次询问', '始终允许', '始终拒绝'])
-    permissionPolicy!.setSelectedValue('deny', true)
-    for (let attempt = 0; attempt < 20 && runtime?.snapshot().permissions[0]?.policy !== 'deny'; attempt += 1) {
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
-    expect(runtime?.snapshot().permissions[0]?.policy).toBe('deny')
+    expect(permissionPolicy!.options.map(option => option.label)).toEqual(['不可用'])
+    expect(permissionPolicy!.disabled).toBe(true)
     expect(runtime?.snapshot().plugins[0]?.status).toBe('active')
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
     expect(dom.window.document.querySelector('[data-plugin-detail-tab="permissions"]')?.getAttribute('aria-selected')).toBe('true')

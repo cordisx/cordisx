@@ -15,6 +15,7 @@ import {
 
 const identity = { source: 'file:///plugins/demo/index.ts', id: 'demo' }
 type TestTDesignSelect = HTMLElement & {
+  disabled: boolean
   options: readonly { readonly value: string; readonly label: string }[]
   setSelectedValue(value: string | undefined, notify?: boolean): void
 }
@@ -245,7 +246,7 @@ describe('Platform permission presentation hierarchy', () => {
     dom.window.close()
   })
 
-  it('renders a concise flat list with host-owned names, icons, availability, and editable policy', () => {
+  it('renders a concise flat list with host-owned names and unavailable policy selects', () => {
     const { dom, dispose } = install(snapshot())
     try {
       const content = openPluginTab(dom.window.document, 'demo', 'permissions')
@@ -261,8 +262,11 @@ describe('Platform permission presentation hierarchy', () => {
       ])
       expect(content.querySelector('[data-permission-item="tasks.create"] .cxm-required-badge')?.textContent).toBe('必需')
       expect(content.querySelector('[data-permission-item="models.read"] .cxm-required-badge')).toBeNull()
-      expect(content.querySelectorAll('[data-permission-availability][data-availability-state="unavailable"]')).toHaveLength(7)
+      expect(content.querySelectorAll('[data-permission-availability]')).toHaveLength(0)
       expect(content.querySelectorAll('[data-permission-capability]')).toHaveLength(7)
+      const unavailablePolicies = [...content.querySelectorAll<TestTDesignSelect>('t-select[data-permission-capability]')]
+      expect(unavailablePolicies.every(policy => policy.disabled)).toBe(true)
+      expect(unavailablePolicies.every(policy => policy.options.map(option => option.label).join() === '不可用')).toBe(true)
       expect(content.querySelector('.cxm-slot-card')).toBeNull()
       expect([...content.querySelectorAll('h3')].map(item => item.textContent)).not.toContain('权限策略')
 
@@ -278,7 +282,7 @@ describe('Platform permission presentation hierarchy', () => {
     }
   })
 
-  it('keeps all three localized policies editable independently from runtime availability', async () => {
+  it('makes unavailable capabilities honestly non-editable without offering inactive policies', async () => {
     const state = snapshot(['models.read', 'tasks.create'])
     const { dom, dispose, policies } = install(state)
     try {
@@ -287,20 +291,20 @@ describe('Platform permission presentation hierarchy', () => {
       const createTask = content.querySelector<TestTDesignSelect>('t-select[data-permission-capability="tasks.create"]')
       expect(models).not.toBeNull()
       expect(createTask).not.toBeNull()
-      expect(models!.options.map(option => [option.value, option.label])).toEqual([
-        ['ask', '每次询问'], ['allow', '始终允许'], ['deny', '始终拒绝'],
-      ])
+      expect(models!.options.map(option => [option.value, option.label])).toEqual([['ask', '不可用']])
+      expect(createTask!.options.map(option => [option.value, option.label])).toEqual([['deny', '不可用']])
+      expect(models!.disabled).toBe(true)
+      expect(createTask!.disabled).toBe(true)
       expect(content.querySelector('[data-permission-capability="tasks.catalog.read"]')).not.toBeNull()
-      models!.setSelectedValue('allow', true)
       await new Promise(resolve => setTimeout(resolve, 0))
-      expect(policies).toEqual(['models.read:allow'])
+      expect(policies).toEqual([])
     } finally {
       dispose()
       dom.window.close()
     }
   })
 
-  it('opens a third-level permission detail, keeps policy recovery available, and returns to the permission tab', async () => {
+  it('opens a third-level permission detail with an honest unavailable policy and returns to the permission tab', async () => {
     const state = snapshot()
     const { dom, dispose, policies } = install(state)
     try {
@@ -327,10 +331,10 @@ describe('Platform permission presentation hierarchy', () => {
       expect(detail?.textContent).not.toContain('current-connection-client-unavailable')
 
       const policy = detail?.querySelector<TestTDesignSelect>('t-select[data-permission-capability="tasks.create"]')
-      expect(policy!.options.map(option => option.label)).toEqual(['每次询问', '始终允许', '始终拒绝'])
-      policy!.setSelectedValue('ask', true)
+      expect(policy!.options.map(option => option.label)).toEqual(['不可用'])
+      expect(policy!.disabled).toBe(true)
       await new Promise(resolve => setTimeout(resolve, 0))
-      expect(policies).toEqual(['tasks.create:ask'])
+      expect(policies).toEqual([])
       dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
       expect(dom.window.document.querySelector('[data-permission-detail]')).toBeNull()
       expect(dom.window.document.querySelector('[data-plugin-detail-tab="permissions"]')?.getAttribute('aria-selected')).toBe('true')
