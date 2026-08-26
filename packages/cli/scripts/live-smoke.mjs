@@ -160,12 +160,12 @@ function pluginConsoleSmokeAssertions(report, owner) {
     'ui.lightTheme': report.ui.lightTheme,
     'ui.darkTheme': report.ui.darkTheme,
     'ui.screenshotPreparedAtTop': report.ui.screenshotPreparedAtTop,
-    'ui.runtimeChrome.lifecycleCollapsed': report.ui.runtimeChrome.lifecycleCollapsed,
+    'ui.runtimeChrome.runtimeDetailsAbsent': report.ui.runtimeChrome.runtimeDetailsAbsent,
     'ui.runtimeChrome.diagnosticsCollapsed': report.ui.runtimeChrome.diagnosticsCollapsed,
     'ui.runtimeChrome.runtimeStatusOnly': report.ui.runtimeChrome.runtimeStatusOnly,
-    'ui.runtimeChrome.expanded': report.ui.runtimeChrome.expanded,
-    'ui.runtimeChrome.localized': report.ui.runtimeChrome.localized,
-    'ui.runtimeChrome.expandedNoCjk': report.ui.runtimeChrome.expandedNoCjk,
+    'ui.runtimeChrome.diagnosticsExpanded': report.ui.runtimeChrome.diagnosticsExpanded,
+    'ui.runtimeChrome.diagnosticsLocalized': report.ui.runtimeChrome.diagnosticsLocalized,
+    'ui.runtimeChrome.diagnosticsNoCjk': report.ui.runtimeChrome.diagnosticsNoCjk,
     'reload.entries': report.reload.entries > 0,
     'reload.lifecycle': report.reload.lifecycle,
     'reload.terminalCount': report.reload.terminalCount > 0,
@@ -3297,8 +3297,8 @@ let pluginConsoleAssertions
 if (parsed.values['plugin-console-exercise']) {
   const owner = parsed.values['plugin-owner'] ?? 'console-showcase'
   const pluginConsoleLocale = locale === 'zh-CN'
-    ? { kindSelect: 'API / 类型', runtimeSummary: '运行详情 · 运行中', diagnostics: '诊断' }
-    : { kindSelect: 'API / type', runtimeSummary: 'Runtime details · Active', diagnostics: 'Diagnostics' }
+    ? { kindSelect: 'API / 类型', diagnostics: '诊断' }
+    : { kindSelect: 'API / type', diagnostics: 'Diagnostics' }
   const toolbarTarget = await evaluateByValue(`(async () => {
     const owner = ${JSON.stringify(owner)}
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
@@ -3440,8 +3440,7 @@ if (parsed.values['plugin-console-exercise']) {
       && frameRect.height >= 160 && Math.abs(frameRect.bottom - workspaceRect.bottom) <= 2
     const logsOnlyConsoleTools = logsPanel?.classList.contains('cxm-console-panel') === true
       && logsPanel.querySelector('.cxm-runtime-console-summary') === null
-      && logsPanel.querySelector('[data-runtime-lifecycle]') instanceof HTMLDetailsElement
-      && !logsPanel.querySelector('[data-runtime-lifecycle]').open
+      && logsPanel.querySelector('[data-runtime-lifecycle]') === null
     const lunaOnly = lunaFrame?.classList.contains('luna-console') === true
       && lunaFrame.querySelector('.luna-text-viewer-text, pre, .cxm-console-hit-layer') === null
     const objectEntry = lunaEntries.find(item => item.dataset.consoleSource === 'console.log')
@@ -3527,21 +3526,16 @@ if (parsed.values['plugin-console-exercise']) {
     document.querySelector('[data-plugin-detail-tab="logs"]')?.click()
     await new Promise(resolve => setTimeout(resolve, 40))
     const logsPanelForDiagnostics = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')?.closest('[role="tabpanel"]')
-    const logsLifecycle = logsPanelForDiagnostics?.querySelector('[data-runtime-lifecycle="' + CSS.escape(owner) + '"]')
     const logsDiagnostics = logsPanelForDiagnostics?.querySelector('[data-runtime-diagnostics="platform"]')
-    const lifecycleCollapsed = logsLifecycle instanceof HTMLDetailsElement && !logsLifecycle.open
     const diagnosticsCollapsed = logsDiagnostics instanceof HTMLDetailsElement && !logsDiagnostics.open
-    logsLifecycle?.querySelector('summary')?.click()
     logsDiagnostics?.querySelector('summary')?.click()
     const runtimeChrome = {
-      lifecycleCollapsed,
+      runtimeDetailsAbsent: logsPanelForDiagnostics?.querySelector('[data-runtime-lifecycle]') === null,
       diagnosticsCollapsed,
       runtimeStatusOnly: runtimeLifecycle === null && runtimeDiagnostics === null,
-      expanded: logsLifecycle instanceof HTMLDetailsElement && logsLifecycle.open
-        && logsDiagnostics instanceof HTMLDetailsElement && logsDiagnostics.open,
-      localized: logsLifecycle?.querySelector('summary')?.textContent === ${JSON.stringify(pluginConsoleLocale.runtimeSummary)}
-        && logsDiagnostics?.querySelector('summary')?.textContent === ${JSON.stringify(pluginConsoleLocale.diagnostics)},
-      expandedNoCjk: ${JSON.stringify(locale !== 'zh-CN')} === false || !/[\u3400-\u9fff]/u.test(logsLifecycle?.textContent ?? ''),
+      diagnosticsExpanded: logsDiagnostics instanceof HTMLDetailsElement && logsDiagnostics.open,
+      diagnosticsLocalized: logsDiagnostics?.querySelector('summary')?.textContent === ${JSON.stringify(pluginConsoleLocale.diagnostics)},
+      diagnosticsNoCjk: ${JSON.stringify(locale !== 'zh-CN')} === false || !/[\u3400-\u9fff]/u.test(logsDiagnostics?.textContent ?? ''),
     }
     return {
       owner,
@@ -3584,13 +3578,13 @@ if (parsed.values['plugin-console-exercise']) {
   pluginConsoleReport = { ...pluginConsoleReport, assertions: pluginConsoleAssertions }
   if (parsed.values['plugin-console-expanded-screenshot'] !== undefined) {
     const expandedRect = await evaluateByValue(`(() => {
-      const lifecycle = document.querySelector('[data-runtime-lifecycle=${JSON.stringify(owner)}]')
-      const panel = lifecycle?.closest('[role="tabpanel"]')
+      const diagnostics = document.querySelector('[data-runtime-diagnostics="platform"]')
+      const panel = diagnostics?.closest('[role="tabpanel"]')
       const rect = panel?.getBoundingClientRect()
       return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
     })()`)
-    if (expandedRect === null) throw new Error('expanded Plugin Console runtime panel is unavailable')
-    await capture(expandedRect, parsed.values['plugin-console-expanded-screenshot'], 'expanded Plugin Console runtime')
+    if (expandedRect === null) throw new Error('expanded Plugin Console diagnostics panel is unavailable')
+    await capture(expandedRect, parsed.values['plugin-console-expanded-screenshot'], 'expanded Plugin Console diagnostics')
   }
   console.log(`plugin-console=${JSON.stringify(pluginConsoleReport, null, 2)}`)
 }

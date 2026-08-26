@@ -333,9 +333,10 @@ describe('Manager plugin card actions', () => {
       await settle()
       const logs = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"]')!
       expect(logs.querySelector('.cxm-console-summary')).toBeNull()
-      const lifecycle = logs.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="base"]')
-      expect(lifecycle?.open).toBe(false)
-      expect(lifecycle?.textContent).toContain('entry module crashed')
+      expect(logs.querySelector('[data-runtime-lifecycle="base"]')).toBeNull()
+      const diagnostics = logs.querySelector<HTMLDetailsElement>('[data-runtime-diagnostics="platform"]')
+      expect(diagnostics?.open).toBe(false)
+      expect(diagnostics?.textContent).toContain('entry module crashed')
     } finally {
       dispose()
       dom.window.close()

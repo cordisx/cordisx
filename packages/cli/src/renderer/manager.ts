@@ -4937,48 +4937,42 @@ export function installCordisXManager(
     const pluginCommands = snapshot.commands.filter(item => item.owner === plugin.id)
     const pluginRoutes = snapshot.navigation.routes.filter(item => item.owner === plugin.id)
     const pluginPages = snapshot.navigation.pages.filter(item => item.owner === plugin.id)
-    const appendRuntimeLifecycle = (target: HTMLElement): void => {
-      const lifecycle = create(document, 'details', 'cxm-diagnostics')
-      lifecycle.dataset.runtimeLifecycle = plugin.id
-      lifecycle.append(create(document, 'summary', undefined, `${copy('runtime.lifecycle-summary')} · ${statusLabel(plugin.status, snapshot.localization.locale)}`))
-      const lifecycleBody = create(document, 'div', 'cxm-diagnostics-body')
-      lifecycleBody.append(create(document, 'div', 'cxm-copy', `${copy('runtime.services')}: ${plugin.inject.join(', ') || copy('runtime.none')} · ${copy('runtime.active-contributions')}: ${pluginRegistrations.filter(item => item.visible && item.valid).length} · ${copy('runtime.commands')}: ${pluginCommands.length}`))
-      if (plugin.error !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', plugin.error))
-      if (plugin.blockedReason !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', plugin.blockedReason))
-      if (operationError !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', operationError))
-      lifecycleBody.append(create(document, 'code', 'cxm-detail-id', plugin.id))
+    const appendRuntimeDiagnostics = (target: HTMLElement): void => {
       const runtimeDiagnostics = create(document, 'details', 'cxm-diagnostics')
       runtimeDiagnostics.dataset.runtimeDiagnostics = 'platform'
       runtimeDiagnostics.append(create(document, 'summary', undefined, copy('runtime.diagnostics')))
       const diagnosticsBody = create(document, 'div', 'cxm-diagnostics-body')
-      const localeCatalogs = snapshot.localeCatalogs.filter(item => item.owner === plugin.id)
-      diagnosticsBody.append(
-        createSectionTitle(document, copy('runtime.section.localization')),
-        create(document, 'div', 'cxm-copy', localeCatalogs.length === 0
-          ? copy('runtime.locale-catalogs-empty')
-          : localeCatalogs.map(item => `${item.namespace} · ${item.locale} · ${item.messageCount} keys`).join('\n')),
-        createSectionTitle(document, copy('runtime.section.details')),
-        create(document, 'div', 'cxm-copy', pluginCommands.length === 0
-          ? copy('runtime.commands-empty')
-          : pluginCommands.map(command => `${command.qualifiedId} · running ${command.running}`).join('\n')),
-      )
-      if (plugin.configuration !== undefined) {
+      let hasDiagnostics = false
+      if (plugin.error !== undefined) {
+        diagnosticsBody.append(create(document, 'div', 'cxm-error', plugin.error))
+        hasDiagnostics = true
+      }
+      if (plugin.blockedReason !== undefined) {
+        diagnosticsBody.append(create(document, 'div', 'cxm-error', plugin.blockedReason))
+        hasDiagnostics = true
+      }
+      if (operationError !== undefined) {
+        diagnosticsBody.append(create(document, 'div', 'cxm-error', operationError))
+        hasDiagnostics = true
+      }
+      if (plugin.configuration !== undefined && !plugin.configuration.writable) {
         const configSchema = plugin.configuration.schemaKind === 'schemastery'
           ? 'Schemastery'
           : plugin.configuration.schemaKind === 'standard' ? 'Standard Schema' : copy('runtime.not-declared')
         const configurationDiagnostics = create(document, 'div', 'cxm-copy', `${copy('runtime.configuration')}: ${configSchema} · ${plugin.configuration.applies} · ${copy('runtime.revision')} ${plugin.configuration.revision} · ${copy('runtime.last-good')} ${plugin.configuration.lastGoodRevision} · ${copy('runtime.writer')} ${plugin.configuration.writable ? copy('runtime.available') : copy('runtime.unavailable')}`)
         configurationDiagnostics.dataset.configDiagnostics = plugin.id
         diagnosticsBody.append(configurationDiagnostics)
+        hasDiagnostics = true
       }
-      for (const provider of (snapshot.capabilityProviders ?? []).filter(item => item.kind !== 'current-connection')) {
+      for (const provider of (snapshot.capabilityProviders ?? []).filter(item => item.kind !== 'current-connection' && item.status !== 'supported')) {
         diagnosticsBody.append(create(document, 'div', 'cxm-copy', `${provider.providerNameText} · ${capabilityAvailabilityLabel(provider.status, snapshot.localization.locale)} · ${provider.reasonText}`))
+        hasDiagnostics = true
       }
       const adapter = snapshot.platform
-      diagnosticsBody.append(create(document, 'div', 'cxm-copy', `${copy('runtime.host')}: ${adapter.hostName} · ${copy('runtime.adapter')} ${adapter.mode} · ${copy('runtime.secondary-connection')} ${adapter.secondConnectionCreated ? copy('runtime.yes') : copy('runtime.no')} · ${copy('runtime.raw-bridge')} ${adapter.rawBridgeExposed ? copy('runtime.yes') : copy('runtime.no')}`))
-      for (const diagnostic of adapter.diagnostics) diagnosticsBody.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
-      diagnosticsBody.append(create(document, 'div', 'cxm-notice', copy('runtime.permission-boundary')))
-      runtimeDiagnostics.append(diagnosticsBody)
-      lifecycleBody.append(runtimeDiagnostics)
+      for (const diagnostic of adapter.diagnostics) {
+        diagnosticsBody.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
+        hasDiagnostics = true
+      }
       const unattributed = (model.pluginConsole?.(plugin.id)?.unattributedEntries ?? 0)
       if (unattributed > 0 && dismissedConsoleWarnings.get(plugin.id) !== unattributed) {
         const warning = create(document, 'div', 'cxm-notice cxm-console-warning')
@@ -4987,10 +4981,12 @@ export function installCordisXManager(
         const dismissWarning = managerIconAction('close', copy('console.dismiss-ownership-warning'))
         dismissWarning.addEventListener('click', () => { dismissedConsoleWarnings.set(plugin.id, unattributed); renderContent() })
         warning.append(dismissWarning)
-        lifecycleBody.append(warning)
+        diagnosticsBody.append(warning)
+        hasDiagnostics = true
       }
-      lifecycle.append(lifecycleBody)
-      target.append(lifecycle)
+      if (!hasDiagnostics) return
+      runtimeDiagnostics.append(diagnosticsBody)
+      target.append(runtimeDiagnostics)
     }
     if (activeFacet === 'runtime') {
       const panel = createTabPanel(document, copy('plugin-tab.runtime'))
@@ -5220,9 +5216,9 @@ export function installCordisXManager(
       } else workspace.append(body)
       panel.append(workspace)
       if (projections.length > 0) mountLunaConsole(frame, projections, plugin.id, latest)
-      // Raw service, localization, adapter, and capability diagnostics are
-      // secondary to user-facing runtime state and remain collapsed here.
-      appendRuntimeLifecycle(panel)
+      // The console page only carries actionable diagnostics. Runtime status
+      // and API summaries stay on the dedicated Runtime status tab.
+      appendRuntimeDiagnostics(panel)
       content.append(panel)
       return
     }

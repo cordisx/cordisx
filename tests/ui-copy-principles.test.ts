@@ -47,7 +47,7 @@ describe('UI copy principles', () => {
     const [manager, trace, cliProxy, principles] = await Promise.all([
       readFile(managerPath, 'utf8'), readFile(tracePath, 'utf8'), readFile(cliProxyPath, 'utf8'), readFile(principlesPath, 'utf8'),
     ])
-    const runtime = section(manager, 'const appendRuntimeLifecycle', "if (activeFacet === 'logs')")
+    const runtime = section(manager, 'const appendRuntimeDiagnostics', "if (activeFacet === 'logs')")
     const marketplaceDetail = section(manager, 'const renderMarketplaceDetail', 'const marketplaceSourceState')
 
     expect(runtime).toContain('runtimeDiagnostics.append(diagnosticsBody)')
@@ -125,7 +125,7 @@ describe('UI copy principles', () => {
     expect(runtime).not.toContain("'cxm-error', plugin.error")
     expect(manager).toContain("panel.classList.add('cxm-console-panel')")
     expect(manager).not.toContain("create(document, 'div', 'cxm-console-summary')")
-    expect(manager).toContain("appendRuntimeLifecycle(panel)")
+    expect(manager).toContain("appendRuntimeDiagnostics(panel)")
   })
 
   it('keeps shared tabs complete when their content area becomes narrow', async () => {

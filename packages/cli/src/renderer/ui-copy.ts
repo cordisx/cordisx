@@ -133,9 +133,6 @@ type CopyKey =
   | 'plugin.status.rolling-back'
   | 'plugin.status.rollback-failed'
   | 'plugin.status.configured-disabled'
-  | 'runtime.lifecycle-summary'
-  | 'runtime.services'
-  | 'runtime.none'
   | 'runtime.active-contributions'
   | 'runtime.commands'
   | 'runtime.processing'
@@ -146,11 +143,7 @@ type CopyKey =
   | 'runtime.reauthorize'
   | 'runtime.restore-plugin'
   | 'runtime.block-plugin'
-  | 'runtime.locale-catalogs-empty'
-  | 'runtime.commands-empty'
   | 'runtime.diagnostics'
-  | 'runtime.section.localization'
-  | 'runtime.section.details'
   | 'runtime.configuration'
   | 'runtime.not-declared'
   | 'runtime.revision'
@@ -515,9 +508,6 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'plugin.status.rolling-back': { en: 'Restoring', 'zh-CN': '正在恢复' },
   'plugin.status.rollback-failed': { en: 'Restore failed', 'zh-CN': '恢复失败' },
   'plugin.status.configured-disabled': { en: 'Disabled by configuration', 'zh-CN': '配置禁用' },
-  'runtime.lifecycle-summary': { en: 'Runtime details', 'zh-CN': '运行详情' },
-  'runtime.services': { en: 'Services', 'zh-CN': '服务' },
-  'runtime.none': { en: 'None', 'zh-CN': '无' },
   'runtime.active-contributions': { en: 'Active contributions', 'zh-CN': '活跃贡献' },
   'runtime.commands': { en: 'Commands', 'zh-CN': '命令' },
   'runtime.processing': { en: 'Working…', 'zh-CN': '处理中…' },
@@ -528,11 +518,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'runtime.reauthorize': { en: 'Reauthorize', 'zh-CN': '重新授权' },
   'runtime.restore-plugin': { en: 'Restore plugin', 'zh-CN': '恢复插件' },
   'runtime.block-plugin': { en: 'Block plugin', 'zh-CN': '屏蔽插件' },
-  'runtime.locale-catalogs-empty': { en: 'No active locale catalogs', 'zh-CN': '当前插件没有活跃 locale dictionary' },
-  'runtime.commands-empty': { en: 'No commands registered', 'zh-CN': '当前插件没有 command 注册' },
   'runtime.diagnostics': { en: 'Diagnostics', 'zh-CN': '诊断' },
-  'runtime.section.localization': { en: 'Localization', 'zh-CN': '本地化' },
-  'runtime.section.details': { en: 'Runtime details', 'zh-CN': '运行时详情' },
   'runtime.configuration': { en: 'Configuration', 'zh-CN': '配置' },
   'runtime.not-declared': { en: 'Not declared', 'zh-CN': '未声明' },
   'runtime.revision': { en: 'revision', 'zh-CN': '版本' },

@@ -2,9 +2,9 @@
 
 The plugin detail `运行状态` tab is a compact, structured availability summary,
 not a telemetry or compliance warehouse. The `日志与诊断` tab is the development
-Console: it renders a bounded, live, time-ordered stream plus a secondary
-collapsed lifecycle and adapter diagnostic disclosure. Raw diagnostics are not
-the default surface.
+Console: it renders a bounded, live, time-ordered stream. It may append a
+collapsed actionable diagnostic disclosure, but never duplicates the runtime
+status, counters, performance summary, service list, or localization details.
 
 The implementation conforms to `@cordisx/protocol` main
 `843818755142fcdeb13867a9cea068672855c49e` and its

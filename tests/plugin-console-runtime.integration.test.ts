@@ -143,7 +143,8 @@ describe('plugin DevTools Console runtime', () => {
     const logsPanel = consoleFrame?.closest<HTMLElement>('[role="tabpanel"]')!
     expect(logsPanel.classList.contains('cxm-console-panel')).toBe(true)
     expect(logsPanel.querySelector('.cxm-console-summary')).toBeNull()
-    expect(logsPanel.querySelector('[data-runtime-lifecycle="console-showcase"]')).not.toBeNull()
+    expect(logsPanel.querySelector('[data-runtime-lifecycle="console-showcase"]')).toBeNull()
+    expect(logsPanel.querySelector('[data-runtime-diagnostics="platform"]')).not.toBeNull()
     expect(dom.window.document.querySelector('[data-console-action="export"]')).not.toBeNull()
     const mixed = lunaEntries.find(item => item.textContent?.includes('object and array'))
     expect(mixed?.querySelectorAll('.luna-console-preview')).toHaveLength(2)
