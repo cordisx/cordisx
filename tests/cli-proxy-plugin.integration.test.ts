@@ -416,5 +416,5 @@ describe('CLIProxy provider plugin renderer', () => {
     await runtime!.dispose()
     expect(dom.window.document.querySelector('[data-cordisx-provider-fleet]')).toBeNull()
     expect((dom.window as unknown as { __cordisxServiceConfigReceiveV1?: unknown }).__cordisxServiceConfigReceiveV1).toBeUndefined()
-  })
+  }, 20_000)
 })

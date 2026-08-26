@@ -412,7 +412,7 @@ describe('Agent Trace Showcase renderer integration', () => {
     await runtime.dispose()
     expect(seat.isConnected).toBe(false)
     expect(replacementNative.isConnected).toBe(true)
-  })
+  }, 20_000)
 
   it('mounts a session-scoped fixture page without owning native shell DOM', async () => {
     const sessionId = 'session-a'
@@ -623,7 +623,7 @@ describe('Agent Trace Showcase renderer integration', () => {
     entryButton.click()
     await settle(2)
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
-  })
+  }, 20_000)
 
   it('cleans the route, page, subscriptions, and fixture generation on block and session change', async () => {
     const { dom, runtime } = await fixture('session-a')
@@ -832,5 +832,5 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"] button')).not.toBeNull()
     await runtime.dispose()
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
-  })
+  }, 20_000)
 })

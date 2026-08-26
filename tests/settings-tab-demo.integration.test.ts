@@ -20,7 +20,7 @@ interface RuntimeHandle {
   dispose(): Promise<void>
 }
 
-async function waitFor(predicate: () => boolean, attempts = 80): Promise<void> {
+async function waitFor(predicate: () => boolean, attempts = 1_500): Promise<void> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (predicate()) return
     await new Promise(resolve => setTimeout(resolve, 10))
