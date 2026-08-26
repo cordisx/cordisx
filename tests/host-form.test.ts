@@ -105,6 +105,8 @@ describe('Host form primitive registry', () => {
     const array = adapter.control(objectArray, 'rules', drafts)
     expect(array.primitive).toBe('object-array')
     expect(array.root.querySelectorAll('[data-host-array-item-id]')).toHaveLength(1)
+    expect(array.root.querySelector('[data-host-array-drag-handle="true"]')?.getAttribute('title')).toBe('使用上下移动操作调整顺序')
+    expect([...array.root.querySelectorAll<HTMLElement>('.cxf-array-row-actions t-button')].every(button => button.dataset.density === 'icon')).toBe(true)
     ;(array.root.querySelector('t-button') as HTMLElement).click()
     expect(array.root.querySelectorAll('[data-host-array-item-id]')).toHaveLength(2)
     expect(drafts).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ name: 'Daily summary' })]), undefined)
@@ -147,6 +149,9 @@ describe('Host form primitive registry', () => {
     const dialog = portal.shadowRoot?.querySelector<HTMLElement>('[role="dialog"]')
     expect(dialog?.getAttribute('aria-modal')).toBe('true')
     expect(dialog?.querySelector('t-input')).not.toBeNull()
+    expect(dialog?.classList.contains('cxf-array-editor-dialog')).toBe(true)
+    expect(HOST_FORM_STYLES).toContain('--cxf-manager-dialog-padding: 1rem')
+    expect(HOST_FORM_STYLES).toContain('box-shadow: 0 24px 80px var(--cx-shadow)')
     dialog?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(portal.shadowRoot?.querySelector('[role="dialog"]')).toBeNull()
     edit.click()
@@ -208,8 +213,14 @@ describe('Host form DOM and accessibility', () => {
       onChange?: (value: unknown) => void
       value?: string
       props?: { value?: string }
+      receiveProps?: (next: { value?: string }, previous: { value?: string }) => void
     }
     controlledInput.props = { value: 'Northstar workspace' }
+    const receiveProps = vi.fn((next: { value?: string }) => {
+      // Mirrors the official component's private controlled value update.
+      internalInput.value = next.value ?? ''
+    })
+    controlledInput.receiveProps = receiveProps
     const internalInput = dom.window.document.createElement('input')
     internalInput.value = controlledInput.props.value
     internalInput.addEventListener('input', () => {
@@ -225,6 +236,10 @@ describe('Host form DOM and accessibility', () => {
     expect(controlledInput.props.value).toBe('Northstar updated')
     expect(controlledInput.value).toBe('Northstar updated')
     expect(internalInput.value).toBe('Northstar updated')
+    expect(receiveProps).toHaveBeenNthCalledWith(1,
+      { value: 'Northstar updated' },
+      { value: 'Northstar workspace' },
+    )
     expect(onDraft).toHaveBeenLastCalledWith('Northstar updated', undefined)
 
     const textarea = adapter.control(field({ role: 'textarea', value: '' }), 'textarea', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
@@ -279,6 +294,8 @@ describe('Host form DOM and accessibility', () => {
     expect(numeric).not.toBeNull()
     expect(numeric?.getAttribute('placeholder')).toBe('请输入')
     expect(range.dataset.tdesignVersion).toBe('1.2.10')
+    expect((range as HTMLElement & { label?: boolean; tooltipProps?: { placement?: string } }).label).toBe(true)
+    expect((range as HTMLElement & { tooltipProps?: { placement?: string } }).tooltipProps).toEqual({ placement: 'top' })
     expect(range.getAttribute('role')).toBe('slider')
     expect(range.getAttribute('aria-required')).toBe('true')
     expect(range.getAttribute('aria-describedby')).toContain('duration-help')
@@ -327,6 +344,7 @@ describe('Host form DOM and accessibility', () => {
     expect(adapter.control(field({ role: 'date' }), 'date', () => undefined).root.tagName).toBe('T-DATE-PICKER')
     const text = adapter.control(field(), 'text', () => undefined).root as HTMLElement & { placeholder?: string }
     const textarea = adapter.control(field({ role: 'textarea' }), 'textarea', () => undefined).root as HTMLElement & { placeholder?: string }
+    const multiline = adapter.control(field({ role: 'multiline' }), 'multiline', () => undefined).root
     const number = adapter.control(field({ type: 'number', value: undefined }), 'number', () => undefined).root as HTMLElement & { placeholder?: string }
     const slider = adapter.control(field({ type: 'number', role: 'slider', value: 4, min: 0, max: 10 }), 'slider', () => undefined).root
     const select = adapter.control(field({ choices: [{ label: 'Safe', value: 'safe' }] }), 'select', () => undefined).root as HTMLElement & { placeholder?: string }
@@ -334,6 +352,7 @@ describe('Host form DOM and accessibility', () => {
     expect(text.getAttribute('placeholder')).toBe('Enter a value')
     expect(textarea.placeholder).toBe('Enter a value')
     expect(textarea.getAttribute('placeholder')).toBe('Enter a value')
+    expect(multiline.tagName).toBe('T-TEXTAREA')
     expect(number.placeholder).toBe('Enter a value')
     expect(number.getAttribute('placeholder')).toBe('Enter a value')
     expect(slider.querySelector('t-input-number')?.getAttribute('placeholder')).toBe('Enter a value')
@@ -399,7 +418,7 @@ describe('Host form DOM and accessibility', () => {
     expect(HOST_FORM_STYLES).toContain('.cxf-form-footer { position: sticky; inset-block-start: 0;')
     expect(HOST_FORM_STYLES).toContain('margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent;')
     expect(HOST_FORM_STYLES).toContain('t-select.cxf-tdesign-control { border: 0; border-radius: 0; padding: 0; background: transparent; }')
-    expect(HOST_FORM_STYLES).toContain('t-select.cxf-tdesign-control::part(suffix) { display: inline-grid; place-items: center; }')
+    expect(HOST_FORM_STYLES).toContain('t-select.cxf-tdesign-control::part(suffix), t-select.cxf-tdesign-control::part(t-select__right-icon) { display: inline-grid; align-self: center; place-items: center; block-size: 100%; }')
     expect(HOST_FORM_STYLES).not.toContain('inset-block-end: -.25rem')
     expect(HOST_FORM_STYLES).not.toContain('.cxf-button {\n    display: inline-flex;')
     expect(HOST_FORM_STYLES).not.toMatch(/(^|[\s,{])(:root|html|body|\*)\s*[{,]/u)
@@ -448,6 +467,13 @@ describe('Host form DOM and accessibility', () => {
     expect(menu.trigger.getAttribute('aria-label')).toBe('Field actions')
     expect(menu.trigger.getAttribute('variant')).toBe('text')
     expect(menu.trigger.querySelector('[data-host-icon="host:settings"]')).not.toBeNull()
+    const semanticMenu = adapter.fieldActionMenu({
+      label: 'Schedule', icon: 'host:calendar', canUseDefault: () => false, hasFieldDraft: () => false,
+      useDefault: () => undefined, rollback: () => undefined, copyPath: async () => false,
+    })
+    expect(semanticMenu.trigger.querySelector('[data-host-icon="host:calendar"]')).not.toBeNull()
+    expect(semanticMenu.trigger.querySelector('[data-host-icon="host:settings"]')).toBeNull()
+    semanticMenu.dispose()
     menu.trigger.click()
     const portal = dom.window.document.querySelector<HTMLElement>('[data-cxf-tdesign-portal-host]')!
     const popup = portal.shadowRoot?.querySelector<HTMLElement>('[role="menu"]')!
@@ -466,6 +492,9 @@ describe('Host form DOM and accessibility', () => {
     expect(portalStyles).toContain('gap: 9px')
     expect(portalStyles).toContain('.cxf-field-menu-item:active:not(:disabled)')
     expect(HOST_FORM_STYLES).toContain('.cxf-field-menu-trigger:hover:not(:disabled), .cxf-field-menu-trigger[aria-expanded="true"] { background: transparent;')
+    expect(HOST_FORM_STYLES).toContain('t-select.cxf-tdesign-control::part(t-select__right-icon)')
+    expect(HOST_FORM_STYLES).toContain('.cxf-time-select { inline-size: 100%; max-inline-size: none; }')
+    expect(HOST_FORM_STYLES).toContain('padding-inline-end: var(--td-comp-paddingLR-s)')
     entries[0]!.click()
     expect(useDefault).toHaveBeenCalledOnce()
     expect(popup.hidden).toBe(true)

@@ -4542,6 +4542,7 @@ export function installCordisXManager(
       if (descriptor.writable) {
         const fieldMenu = forms.fieldActionMenu({
           label: fieldLabel(field),
+          ...(field.icon === undefined ? {} : { icon: field.icon }),
           canUseDefault: () => field.hasDefault === true,
           hasFieldDraft: () => draft!.operations.has(pathKey),
           useDefault: () => {

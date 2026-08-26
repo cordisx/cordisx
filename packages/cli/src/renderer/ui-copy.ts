@@ -378,6 +378,7 @@ type CopyKey =
   | 'form.delete-item'
   | 'form.move-item-up'
   | 'form.move-item-down'
+  | 'form.reorder-handle'
   | 'form.array-item'
   | 'form.close'
 
@@ -753,6 +754,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'form.delete-item': { en: 'Delete item', 'zh-CN': '删除条目' },
   'form.move-item-up': { en: 'Move item up', 'zh-CN': '上移条目' },
   'form.move-item-down': { en: 'Move item down', 'zh-CN': '下移条目' },
+  'form.reorder-handle': { en: 'Reorder with the move controls', 'zh-CN': '使用上下移动操作调整顺序' },
   'form.array-item': { en: 'Array item', 'zh-CN': '数组条目' },
   'form.close': { en: 'Close', 'zh-CN': '关闭' },
 })

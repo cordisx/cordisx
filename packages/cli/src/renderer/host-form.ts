@@ -143,14 +143,14 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${HOST_ICON_16PX_C
   .cxf-label { color: var(--td-text-color-primary); font-weight: 600; overflow-wrap: anywhere; }
   .cxf-required { color: var(--td-error-color); font-weight: 700; }
   .cxf-control-seat { grid-area: control; min-inline-size: 0; justify-self: stretch; }
-  .cxf-item[data-control-layout="compact"] .cxf-control-seat { inline-size: auto; max-inline-size: 100%; justify-self: end; }
-  .cxf-item[data-control-layout="compact"] .cxf-tdesign-control { inline-size: auto; }
+  .cxf-item[data-control-layout="compact"] .cxf-control-seat { box-sizing: border-box; inline-size: auto; max-inline-size: 100%; padding-inline-end: var(--td-comp-paddingLR-s); justify-self: end; }
+  .cxf-item[data-control-layout="compact"] .cxf-tdesign-control { inline-size: auto; max-inline-size: 100%; }
   .cxf-item[data-control-layout="compact"] t-input-number.cxf-tdesign-control { inline-size: 7.25rem; }
   .cxf-item[data-control-layout="compact"] t-checkbox-group.cxf-tdesign-control,
   .cxf-item[data-control-layout="compact"] t-switch.cxf-tdesign-control,
   .cxf-item[data-control-layout="compact"] t-radio-group.cxf-tdesign-control { inline-size: fit-content; max-inline-size: 100%; }
   t-select.cxf-tdesign-control { border: 0; border-radius: 0; padding: 0; background: transparent; }
-  t-select.cxf-tdesign-control::part(suffix) { display: inline-grid; place-items: center; }
+  t-select.cxf-tdesign-control::part(suffix), t-select.cxf-tdesign-control::part(t-select__right-icon) { display: inline-grid; align-self: center; place-items: center; block-size: 100%; }
   .cxf-control {
     box-sizing: border-box; inline-size: 100%; min-block-size: var(--td-comp-size-m); margin: 0;
     border: 1px solid var(--td-border-level-2-color); border-radius: var(--td-radius-default);
@@ -180,14 +180,17 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${HOST_ICON_16PX_C
   .cxf-choice input { margin: 0; accent-color: var(--td-brand-color); }
   .cxf-slider-control { display: grid; grid-template-columns: minmax(0, 1fr) minmax(5.25rem, 6.5rem); gap: .65rem; align-items: center; inline-size: 100%; }
   .cxf-item[data-control-layout="compact"] .cxf-slider-control { inline-size: min(100%, 23rem); }
-  .cxf-slider-control > t-slider { display: block; min-inline-size: 0; --td-component-stroke: var(--cx-border); --td-brand-color: var(--cx-primary); }
+  .cxf-slider-control > t-slider { display: block; min-inline-size: 0; overflow: visible; --td-component-stroke: var(--cx-border); --td-brand-color: var(--cx-primary); }
   .cxf-slider-control > t-input-number { min-inline-size: 0; }
   .cxf-array-editor { display: grid; gap: .5rem; inline-size: 100%; }
   .cxf-array-editor-toolbar, .cxf-array-row, .cxf-array-row-actions { display: flex; align-items: center; gap: .45rem; }
   .cxf-array-editor-toolbar { justify-content: flex-end; }
   .cxf-array-row { justify-content: space-between; min-block-size: 2.25rem; padding: .45rem .6rem; border: 1px solid var(--td-border-level-2-color); border-radius: var(--td-radius-default); background: var(--td-bg-color-specialcomponent); }
+  .cxf-array-row-drag-handle { display: inline-flex; flex: 0 0 1.5rem; align-items: center; justify-content: center; color: var(--td-text-color-secondary); cursor: grab; }
+  .cxf-array-row-action-up .cxf-form-icon { transform: rotate(90deg); }
+  .cxf-array-row-action-down .cxf-form-icon { transform: rotate(-90deg); }
   .cxf-array-row-summary { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--td-text-color-secondary); }
-  .cxf-array-editor-dialog { position: fixed; inset: 10vh max(1rem, calc((100vw - 42rem) / 2)) auto; z-index: 1; display: grid; gap: .85rem; max-block-size: 80vh; overflow: auto; padding: 1rem; border: 1px solid var(--cx-border); border-radius: .8rem; background: var(--cx-surface); color: var(--cx-text); box-shadow: var(--td-shadow-3); }
+  .cxf-array-editor-dialog { --cxf-manager-dialog-gap: .85rem; --cxf-manager-dialog-padding: 1rem; position: fixed; inset: 10vh max(1rem, calc((100vw - 42rem) / 2)) auto; z-index: 1; display: grid; gap: var(--cxf-manager-dialog-gap); max-block-size: min(80vh, calc(100vh - 2rem)); overflow: auto; box-sizing: border-box; padding: var(--cxf-manager-dialog-padding); border: 1px solid var(--cx-border); border-radius: .8rem; background: var(--cx-surface); color: var(--cx-text); box-shadow: 0 24px 80px var(--cx-shadow); font: inherit; }
   .cxf-array-editor-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
   .cxf-array-editor-dialog-fields { display: grid; gap: .8rem; }
   .cxf-array-editor-dialog-field { display: grid; gap: .3rem; }
@@ -198,7 +201,7 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${HOST_ICON_16PX_C
   .cxf-color-picker::-webkit-color-swatch { border: 0; border-radius: calc(var(--td-radius-default) - .15rem); }
   .cxf-color-picker:focus-visible { outline: 2px solid var(--td-brand-color-focus); outline-offset: 2px; }
   .cxf-color-picker:disabled { cursor: not-allowed; opacity: var(--cx-disabled); }
-  .cxf-time-select { max-inline-size: 12rem; }
+  .cxf-time-select { inline-size: 100%; max-inline-size: none; }
   .cxf-help, .cxf-error { margin: 0; overflow-wrap: anywhere; font-size: .78rem; line-height: 1.45; }
   .cxf-help { grid-area: help; }
   .cxf-error { grid-area: error; }
@@ -489,6 +492,7 @@ export class HostFormAdapter {
    */
   fieldActionMenu(options: {
     readonly label: string
+    readonly icon?: CordisXConfigFormIcon
     readonly canUseDefault: () => boolean
     readonly hasFieldDraft: () => boolean
     readonly useDefault: () => void
@@ -496,7 +500,7 @@ export class HostFormAdapter {
     readonly copyPath: () => Promise<boolean>
   }): HostFormFieldActionMenu {
     const locale = this.locale()
-    const trigger = this.button(managerCopy(locale, 'form.field-actions'), { icon: 'host:settings', density: 'icon', variant: 'text' })
+    const trigger = this.button(managerCopy(locale, 'form.field-actions'), { icon: options.icon ?? 'host:settings', density: 'icon', variant: 'text' })
     trigger.classList.add('cxf-field-menu-trigger')
     trigger.dataset.hostFormAction = 'field-actions'
     trigger.setAttribute('aria-haspopup', 'menu')
@@ -672,14 +676,16 @@ export class HostFormAdapter {
       toolbar.append(add); root.append(toolbar)
       values.forEach((value, index) => {
         const row = this.document.createElement('div'); row.className = 'cxf-array-row'; row.dataset.hostArrayItemId = ids[index]!
+        const handle = this.document.createElement('span'); handle.className = 'cxf-array-row-drag-handle'; handle.dataset.hostArrayDragHandle = 'true'; handle.setAttribute('role', 'img'); handle.setAttribute('aria-label', managerCopy(this.locale(), 'form.reorder-handle')); handle.setAttribute('title', managerCopy(this.locale(), 'form.reorder-handle'))
+        const handleIcon = createHostSurfaceIcon(this.document, 'host:more'); handleIcon.classList.add('cxf-form-icon'); handleIcon.setAttribute('aria-hidden', 'true'); handle.append(handleIcon)
         const text = this.document.createElement('span'); text.className = 'cxf-array-row-summary'; text.textContent = summary(value)
         const actions = this.document.createElement('div'); actions.className = 'cxf-array-row-actions'
-        const edit = this.button(managerCopy(this.locale(), 'form.edit-item'), { icon: 'host:settings' }); edit.disabled = field.disabled; edit.addEventListener('click', () => open(index))
-        const duplicate = this.button(managerCopy(this.locale(), 'form.duplicate-item'), { icon: 'host:files' }); duplicate.disabled = field.disabled || values.length >= limit; duplicate.addEventListener('click', () => { values.splice(index + 1, 0, structuredClone(value)); ids.splice(index + 1, 0, `cxf-array-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`); emit(values); render() })
-        const moveUp = this.button(managerCopy(this.locale(), 'form.move-item-up')); moveUp.disabled = field.disabled || !canReorder || index === 0; moveUp.addEventListener('click', () => { [values[index - 1], values[index]] = [values[index]!, values[index - 1]!]; [ids[index - 1], ids[index]] = [ids[index]!, ids[index - 1]!]; emit(values); render() })
-        const moveDown = this.button(managerCopy(this.locale(), 'form.move-item-down')); moveDown.disabled = field.disabled || !canReorder || index === values.length - 1; moveDown.addEventListener('click', () => { [values[index + 1], values[index]] = [values[index]!, values[index + 1]!]; [ids[index + 1], ids[index]] = [ids[index]!, ids[index + 1]!]; emit(values); render() })
-        const remove = this.button(managerCopy(this.locale(), 'form.delete-item'), { tone: 'danger', icon: 'host:reset' }); remove.disabled = field.disabled || values.length <= (field.min ?? 0); remove.addEventListener('click', () => { values.splice(index, 1); ids.splice(index, 1); emit(values); render() })
-        actions.append(edit, duplicate, moveUp, moveDown, remove); row.append(text, actions); root.append(row)
+        const edit = this.button(managerCopy(this.locale(), 'form.edit-item'), { density: 'icon', icon: 'host:settings' }); edit.disabled = field.disabled; edit.addEventListener('click', () => open(index))
+        const duplicate = this.button(managerCopy(this.locale(), 'form.duplicate-item'), { density: 'icon', icon: 'host:files' }); duplicate.disabled = field.disabled || values.length >= limit; duplicate.addEventListener('click', () => { values.splice(index + 1, 0, structuredClone(value)); ids.splice(index + 1, 0, `cxf-array-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`); emit(values); render() })
+        const moveUp = this.button(managerCopy(this.locale(), 'form.move-item-up'), { density: 'icon', icon: 'host:back' }); moveUp.classList.add('cxf-array-row-action-up'); moveUp.disabled = field.disabled || !canReorder || index === 0; moveUp.addEventListener('click', () => { [values[index - 1], values[index]] = [values[index]!, values[index - 1]!]; [ids[index - 1], ids[index]] = [ids[index]!, ids[index - 1]!]; emit(values); render() })
+        const moveDown = this.button(managerCopy(this.locale(), 'form.move-item-down'), { density: 'icon', icon: 'host:back' }); moveDown.classList.add('cxf-array-row-action-down'); moveDown.disabled = field.disabled || !canReorder || index === values.length - 1; moveDown.addEventListener('click', () => { [values[index + 1], values[index]] = [values[index]!, values[index + 1]!]; [ids[index + 1], ids[index]] = [ids[index]!, ids[index + 1]!]; emit(values); render() })
+        const remove = this.button(managerCopy(this.locale(), 'form.delete-item'), { density: 'icon', tone: 'danger', icon: 'host:reset' }); remove.disabled = field.disabled || values.length <= (field.min ?? 0); remove.addEventListener('click', () => { values.splice(index, 1); ids.splice(index, 1); emit(values); render() })
+        actions.append(edit, duplicate, moveUp, moveDown, remove); row.append(handle, text, actions); root.append(row)
       })
     }
     const open = (index: number): void => {
@@ -978,6 +984,7 @@ export class HostFormAdapter {
       }
       setTDesignProps(slider, {
         value, defaultValue: value, min: field.min ?? 0, max: field.max ?? 100, step: field.step ?? 1, disabled: field.disabled,
+        label: true, tooltipProps: { placement: 'top' },
         onChange: (next: number) => apply(next),
       })
       setTDesignProps(numeric, {
@@ -1037,7 +1044,8 @@ export class HostFormAdapter {
     readonly type?: 'button' | 'submit'
     readonly variant?: 'default' | 'primary' | 'text'
     readonly tone?: 'default' | 'danger'
-    readonly icon?: CordisXConfigFormIcon
+    /** Internal Host actions may use bundled navigation glyphs outside schema icons. */
+    readonly icon?: string
     readonly density?: 'icon' | 'icon-label'
     readonly action?: 'restore-default' | 'undo' | 'save'
   } = {}): TDesignButtonElement {

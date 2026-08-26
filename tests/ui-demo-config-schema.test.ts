@@ -180,7 +180,12 @@ describe('UI demo Config Schemas', () => {
         { label: 'operations', value: 'operations' }, { label: 'community', value: 'community' },
       ],
     })
-    expect(enField('quickLabels')).toMatchObject({ label: 'Quick labels', type: 'array', arrayItemType: 'string', max: 6 })
+    // The gallery deliberately contains an inline scalar/set-like collection
+    // alongside object-array dialogs; it is not an object-array-only sample.
+    expect(enField('quickLabels')).toMatchObject({
+      label: 'Quick labels', type: 'array', arrayItemType: 'string', max: 6,
+      presenter: { version: 1, kind: 'array.scalar-tags' }, value: ['weekly', 'planning'],
+    })
     expect(enField('reminderChannels')).toMatchObject({ label: 'Reminder channels', type: 'array', arrayItemType: 'boolean', presenter: { version: 1, kind: 'array.scalar-rows' } })
     expect(enField('notificationRules')).toMatchObject({ label: 'Notification rules', type: 'array', min: 1, max: 4 })
     expect(enField('notificationRules')).toMatchObject({ presenter: { version: 1, kind: 'array.object-dialog' }, arrayItemSchema: { type: 'object' } })

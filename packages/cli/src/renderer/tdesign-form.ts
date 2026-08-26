@@ -15,6 +15,11 @@ export interface TDesignElement extends HTMLElement {
   checked?: boolean
   update?: () => void
   updateProps?: (props: Readonly<Record<string, unknown>>) => void
+  /** Omi uses this lifecycle hook to synchronize controlled component state. */
+  receiveProps?: (
+    nextProps: Readonly<Record<string, unknown>>,
+    previousProps: Readonly<Record<string, unknown>>,
+  ) => unknown
   props?: Record<string, unknown>
   [key: string]: unknown
 }
@@ -109,8 +114,21 @@ function normalizeTDesignProps(element: TDesignElement, props: Readonly<Record<s
       // render cannot restore the previous field value while Manager records
       // the draft. Textarea emits the same value through CustomEvent.detail.
       if (Object.hasOwn(props, 'value')) {
+        // `element.props.value = value` is insufficient for the real Omi
+        // components: their visible Shadow DOM keeps a separate `innerValue`
+        // that only advances during `receiveProps(next, previous)`. Preserve a
+        // genuine old-props snapshot, then invoke that supported lifecycle
+        // before mutating the live prop bag. This is the same seam Omi uses
+        // when a parent re-renders a controlled custom element.
+        const liveProps = element.props
+        const previousProps = liveProps === undefined ? undefined : { ...liveProps }
+        const nextProps = previousProps === undefined ? undefined : { ...previousProps, value }
         element.value = value
-        if (element.props !== undefined) element.props.value = value
+        if (nextProps !== undefined && previousProps !== undefined && liveProps !== undefined) {
+          element.receiveProps?.(nextProps, previousProps)
+          Object.assign(liveProps, nextProps)
+          element.update?.()
+        }
       }
       return (change as (value: unknown, ...args: readonly unknown[]) => unknown)(value, ...rest)
     },
