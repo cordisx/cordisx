@@ -13,6 +13,7 @@ import {
   selectHostFormPrimitive,
   validateHostFormValue,
 } from '../packages/cli/src/renderer/host-form.js'
+import { HOST_ICON_16PX_CSS } from '../packages/cli/src/renderer/icons.js'
 import { unwrapTDesignChangeValue } from '../packages/cli/src/renderer/tdesign-form.js'
 
 function field(overrides: Partial<CordisXConfigFieldSnapshot> = {}): CordisXConfigFieldSnapshot {
@@ -407,13 +408,24 @@ describe('Host form DOM and accessibility', () => {
     dom.window.document.body.append(menu.trigger)
     expect(menu.trigger.textContent).toBe('')
     expect(menu.trigger.getAttribute('aria-label')).toBe('Field actions')
+    expect(menu.trigger.querySelector('[data-host-icon="host:settings"]')).not.toBeNull()
     menu.trigger.click()
     const portal = dom.window.document.querySelector<HTMLElement>('[data-cxf-tdesign-portal-host]')!
     const popup = portal.shadowRoot?.querySelector<HTMLElement>('[role="menu"]')!
     const entries = [...popup.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
     expect(popup.hidden).toBe(false)
+    expect(menu.trigger.getAttribute('aria-expanded')).toBe('true')
     expect(entries.map(entry => entry.textContent)).toEqual(['Use default value', 'Revert field change', 'Copy configuration path'])
     expect(entries.map(entry => entry.querySelector('[data-host-icon]')?.getAttribute('data-host-icon'))).toEqual(['host:reset', 'host:reset', 'host:files'])
+    const portalStyles = portal.shadowRoot?.querySelector('style')?.textContent ?? ''
+    expect(portalStyles).toContain(HOST_ICON_16PX_CSS)
+    expect(HOST_FORM_STYLES).toContain(HOST_ICON_16PX_CSS)
+    expect(portalStyles).toContain('inline-size: 16px')
+    expect(portalStyles).toContain('fill: currentColor')
+    expect(portalStyles).toContain('min-inline-size: 160px')
+    expect(portalStyles).toContain('padding: 8px 9px')
+    expect(portalStyles).toContain('gap: 9px')
+    expect(portalStyles).toContain('.cxf-field-menu-item:active:not(:disabled)')
     entries[0]!.click()
     expect(useDefault).toHaveBeenCalledOnce()
     expect(popup.hidden).toBe(true)

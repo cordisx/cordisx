@@ -4,6 +4,7 @@ import {
   TDESIGN_SCOPED_TOKEN_CSS,
   TDESIGN_WEB_COMPONENTS_VERSION,
 } from './vendor/tdesign-web-components-1.2.10.js'
+import { HOST_ICON_16PX_CSS } from './icons.js'
 
 export { TDESIGN_SCOPED_TOKEN_CSS, TDESIGN_WEB_COMPONENTS_VERSION }
 
@@ -191,7 +192,7 @@ export function createTDesignPortal(document: Document, parent?: HTMLElement): H
   host.dataset.tdesignVersion = TDESIGN_WEB_COMPONENTS_VERSION
   const shadow = host.attachShadow({ mode: 'open' })
   const style = document.createElement('style')
-  style.textContent = `${TDESIGN_PORTAL_CSS}\n
+  style.textContent = `${TDESIGN_PORTAL_CSS}\n${HOST_ICON_16PX_CSS}\n
     :host { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; color: var(--cx-text); color-scheme: inherit; font: inherit; }
     .cxf-tdesign-portal { position: fixed; inset: 0; pointer-events: none; }
     .cxf-tdesign-portal > * { pointer-events: auto; }
@@ -208,20 +209,23 @@ export function createTDesignPortal(document: Document, parent?: HTMLElement): H
     .t-popup { z-index: 2147483001; }
     .t-popup__content { max-inline-size: min(28rem, calc(100vw - 1.5rem)); color: var(--cx-text); }
     .cxf-field-menu {
-      position: fixed; display: grid; min-inline-size: 13rem; max-inline-size: min(18rem, calc(100vw - 1rem));
-      padding: .25rem; border: 1px solid var(--cx-border); border-radius: .65rem;
+      position: fixed; display: grid; min-inline-size: 160px; max-inline-size: min(240px, calc(100vw - 32px));
+      padding: 5px; border: 1px solid var(--cx-border); border-radius: 10px;
       background: var(--td-bg-color-container, var(--cx-surface-raised)); color: var(--td-text-color-primary, var(--cx-text));
-      box-shadow: var(--td-shadow-2, 0 10px 32px var(--cx-shadow)); outline: none;
+      box-shadow: var(--td-shadow-2, 0 14px 44px var(--cx-shadow)); outline: none;
+      font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;
     }
     .cxf-field-menu[hidden] { display: none; }
     .cxf-field-menu-item {
-      display: grid; grid-template-columns: 1rem minmax(0, 1fr); gap: .5rem; align-items: center; min-block-size: 2rem;
-      border: 0; border-radius: .42rem; padding: .4rem .5rem; background: transparent; color: inherit; font: inherit;
+      display: flex; align-items: center; gap: 9px; inline-size: 100%; box-sizing: border-box;
+      border: 0; border-radius: 7px; padding: 8px 9px; background: transparent; color: inherit; font: inherit;
       text-align: start; cursor: pointer;
     }
     .cxf-field-menu-item:hover:not(:disabled), .cxf-field-menu-item:focus-visible { background: var(--td-bg-color-container-hover, var(--cx-hover)); outline: none; }
+    .cxf-field-menu-item:active:not(:disabled) { background: var(--td-bg-color-container-active, var(--cx-pressed)); }
     .cxf-field-menu-item:focus-visible { box-shadow: 0 0 0 2px var(--cx-focus); }
     .cxf-field-menu-item:disabled { color: var(--td-text-color-disabled, var(--cx-muted)); cursor: default; }
+    .cxf-field-menu-item > .cordisx-host-icon { flex: 0 0 16px; }
     .cxf-field-menu-status { padding: .25rem .5rem; color: var(--td-text-color-secondary, var(--cx-muted)); font-size: .78rem; }
     .cxf-array-editor-dialog {
       position: fixed; inset: max(1rem, 10vh) max(1rem, calc((100vw - 42rem) / 2)) auto;
