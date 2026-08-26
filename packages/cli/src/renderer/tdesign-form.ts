@@ -174,7 +174,22 @@ function ensureInstalled(document: Document): void {
 
 export function setTDesignProps(element: TDesignElement, props: Readonly<Record<string, unknown>>): void {
   const normalizedProps = normalizeTDesignProps(element, props)
-  for (const [name, value] of Object.entries(normalizedProps)) element[name] = value
+  for (const [name, value] of Object.entries(normalizedProps)) {
+    let owner: object | null = element
+    let descriptor: PropertyDescriptor | undefined
+    while (owner !== null && descriptor === undefined) {
+      descriptor = Object.getOwnPropertyDescriptor(owner, name)
+      owner = Object.getPrototypeOf(owner) as object | null
+    }
+    // Some official TDesign custom elements expose props such as `theme`
+    // through getter-only accessors backed by `element.props`. Assigning the
+    // public property throws in strict mode before the component can mount.
+    // Skip only that direct write; the typed props/updateProps path below is
+    // the component's supported mutation seam.
+    if (descriptor?.set !== undefined || descriptor?.writable === true || descriptor === undefined) {
+      element[name] = value
+    }
+  }
   // Omi custom elements read their initial props from attributes when they
   // connect. Host controls are configured before insertion, so a property-only
   // scalar may be replaced by the component default during its first render.

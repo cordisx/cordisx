@@ -14,7 +14,7 @@ import {
   validateHostFormValue,
 } from '../packages/cli/src/renderer/host-form.js'
 import { HOST_ICON_16PX_CSS } from '../packages/cli/src/renderer/icons.js'
-import { unwrapTDesignChangeValue } from '../packages/cli/src/renderer/tdesign-form.js'
+import { setTDesignProps, unwrapTDesignChangeValue, type TDesignElement } from '../packages/cli/src/renderer/tdesign-form.js'
 
 function field(overrides: Partial<CordisXConfigFieldSnapshot> = {}): CordisXConfigFieldSnapshot {
   return {
@@ -188,6 +188,18 @@ describe('Host form primitive registry', () => {
 })
 
 describe('Host form DOM and accessibility', () => {
+  it('updates getter-only official component props through the typed props seam', () => {
+    const dom = new JSDOM('<!doctype html><body></body>')
+    const control = dom.window.document.createElement('div') as TDesignElement
+    control.props = {}
+    Object.defineProperty(control, 'theme', {
+      configurable: true,
+      get: () => control.props?.theme,
+    })
+    expect(() => setTDesignProps(control, { theme: 'primary' })).not.toThrow()
+    expect(control.theme).toBe('primary')
+  })
+
   it('unwraps official CustomEvent and native input events before they enter Host drafts', () => {
     const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true })
     const adapter = new HostFormAdapter(dom.window.document)
