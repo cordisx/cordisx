@@ -123,7 +123,7 @@ describe('plugin DevTools Console runtime', () => {
     const runtimeOverview = dom.window.document.querySelector<HTMLElement>('.cxm-runtime-overview')!
     expect(runtimeOverview.querySelector('[data-runtime-console-summary="console-showcase"]')).not.toBeNull()
     expect(runtimeOverview.querySelectorAll('.cxm-runtime-console-metric')).toHaveLength(4)
-    expect(runtimeOverview.querySelector('[data-runtime-lifecycle="console-showcase"]')).not.toBeNull()
+    expect(runtimeOverview.querySelector('[data-runtime-lifecycle="console-showcase"]')).toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="logs"]')?.click()
     let consoleFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
     await waitForState(() => {
@@ -143,7 +143,7 @@ describe('plugin DevTools Console runtime', () => {
     const logsPanel = consoleFrame?.closest<HTMLElement>('[role="tabpanel"]')!
     expect(logsPanel.classList.contains('cxm-console-panel')).toBe(true)
     expect(logsPanel.querySelector('.cxm-console-summary')).toBeNull()
-    expect(logsPanel.querySelector('[data-runtime-lifecycle="console-showcase"]')).toBeNull()
+    expect(logsPanel.querySelector('[data-runtime-lifecycle="console-showcase"]')).not.toBeNull()
     expect(dom.window.document.querySelector('[data-console-action="export"]')).not.toBeNull()
     const mixed = lunaEntries.find(item => item.textContent?.includes('object and array'))
     expect(mixed?.querySelectorAll('.luna-console-preview')).toHaveLength(2)
@@ -195,6 +195,8 @@ describe('plugin DevTools Console runtime', () => {
     const inspector = dom.window.document.querySelector('[data-console-detail]')
     expect(inspector?.textContent).toContain('host-mediated')
     expect(inspector?.textContent).not.toContain('arg[')
+    expect(inspector?.textContent).toContain('Timestamp')
+    expect(inspector?.textContent).toMatch(/\.\d{3}Z/u)
     const closeInspector = inspector?.querySelector<HTMLButtonElement>('[aria-label="Close log details"]')
     expect(closeInspector?.textContent).toBe('')
     expect(closeInspector?.classList.contains('cxm-manager-icon-action')).toBe(true)

@@ -162,6 +162,7 @@ function pluginConsoleSmokeAssertions(report, owner) {
     'ui.screenshotPreparedAtTop': report.ui.screenshotPreparedAtTop,
     'ui.runtimeChrome.lifecycleCollapsed': report.ui.runtimeChrome.lifecycleCollapsed,
     'ui.runtimeChrome.diagnosticsCollapsed': report.ui.runtimeChrome.diagnosticsCollapsed,
+    'ui.runtimeChrome.runtimeStatusOnly': report.ui.runtimeChrome.runtimeStatusOnly,
     'ui.runtimeChrome.expanded': report.ui.runtimeChrome.expanded,
     'ui.runtimeChrome.localized': report.ui.runtimeChrome.localized,
     'ui.runtimeChrome.expandedNoCjk': report.ui.runtimeChrome.expandedNoCjk,
@@ -3439,7 +3440,8 @@ if (parsed.values['plugin-console-exercise']) {
       && frameRect.height >= 160 && Math.abs(frameRect.bottom - workspaceRect.bottom) <= 2
     const logsOnlyConsoleTools = logsPanel?.classList.contains('cxm-console-panel') === true
       && logsPanel.querySelector('.cxm-runtime-console-summary') === null
-      && logsPanel.querySelector('[data-runtime-lifecycle]') === null
+      && logsPanel.querySelector('[data-runtime-lifecycle]') instanceof HTMLDetailsElement
+      && !logsPanel.querySelector('[data-runtime-lifecycle]').open
     const lunaOnly = lunaFrame?.classList.contains('luna-console') === true
       && lunaFrame.querySelector('.luna-text-viewer-text, pre, .cxm-console-hit-layer') === null
     const objectEntry = lunaEntries.find(item => item.dataset.consoleSource === 'console.log')
@@ -3522,18 +3524,24 @@ if (parsed.values['plugin-console-exercise']) {
     const runtimeLifecycle = runtimePanelForChrome?.querySelector('[data-runtime-lifecycle="' + CSS.escape(owner) + '"]')
     const runtimeDiagnostics = runtimePanelForChrome?.querySelector('[data-runtime-diagnostics="platform"]')
     const runtimeConsoleSummary = runtimePanelForChrome?.querySelectorAll('.cxm-runtime-console-metric').length === 4
-    const lifecycleCollapsed = runtimeLifecycle instanceof HTMLDetailsElement && !runtimeLifecycle.open
-    const diagnosticsCollapsed = runtimeDiagnostics instanceof HTMLDetailsElement && !runtimeDiagnostics.open
-    runtimeLifecycle?.querySelector('summary')?.click()
-    runtimeDiagnostics?.querySelector('summary')?.click()
+    document.querySelector('[data-plugin-detail-tab="logs"]')?.click()
+    await new Promise(resolve => setTimeout(resolve, 40))
+    const logsPanelForDiagnostics = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')?.closest('[role="tabpanel"]')
+    const logsLifecycle = logsPanelForDiagnostics?.querySelector('[data-runtime-lifecycle="' + CSS.escape(owner) + '"]')
+    const logsDiagnostics = logsPanelForDiagnostics?.querySelector('[data-runtime-diagnostics="platform"]')
+    const lifecycleCollapsed = logsLifecycle instanceof HTMLDetailsElement && !logsLifecycle.open
+    const diagnosticsCollapsed = logsDiagnostics instanceof HTMLDetailsElement && !logsDiagnostics.open
+    logsLifecycle?.querySelector('summary')?.click()
+    logsDiagnostics?.querySelector('summary')?.click()
     const runtimeChrome = {
       lifecycleCollapsed,
       diagnosticsCollapsed,
-      expanded: runtimeLifecycle instanceof HTMLDetailsElement && runtimeLifecycle.open
-        && runtimeDiagnostics instanceof HTMLDetailsElement && runtimeDiagnostics.open,
-      localized: runtimeLifecycle?.querySelector('summary')?.textContent === ${JSON.stringify(pluginConsoleLocale.runtimeSummary)}
-        && runtimeDiagnostics?.querySelector('summary')?.textContent === ${JSON.stringify(pluginConsoleLocale.diagnostics)},
-      expandedNoCjk: ${JSON.stringify(locale !== 'zh-CN')} === false || !/[\u3400-\u9fff]/u.test(runtimeLifecycle?.textContent ?? ''),
+      runtimeStatusOnly: runtimeLifecycle === null && runtimeDiagnostics === null,
+      expanded: logsLifecycle instanceof HTMLDetailsElement && logsLifecycle.open
+        && logsDiagnostics instanceof HTMLDetailsElement && logsDiagnostics.open,
+      localized: logsLifecycle?.querySelector('summary')?.textContent === ${JSON.stringify(pluginConsoleLocale.runtimeSummary)}
+        && logsDiagnostics?.querySelector('summary')?.textContent === ${JSON.stringify(pluginConsoleLocale.diagnostics)},
+      expandedNoCjk: ${JSON.stringify(locale !== 'zh-CN')} === false || !/[\u3400-\u9fff]/u.test(logsLifecycle?.textContent ?? ''),
     }
     return {
       owner,

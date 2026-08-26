@@ -33,7 +33,7 @@ describe('plugin Console live smoke gate', () => {
       'ui.iconToolbar', 'ui.runtimeConsoleSummary', 'ui.pointerPaused', 'ui.pointerPauseDetail.label', 'ui.pointerPauseDetail.rect',
       'ui.keyboardFocused', 'ui.keyboardResumed', 'ui.keyboardResumeDetail.label', 'ui.toolbarTooltip.text',
       'ui.toolbarTooltip.describedBy', 'ui.returnLatestVisible', 'ui.returnedToLatest', 'ui.lightTheme', 'ui.darkTheme',
-      'ui.screenshotPreparedAtTop', 'ui.runtimeChrome.lifecycleCollapsed', 'ui.runtimeChrome.diagnosticsCollapsed',
+      'ui.screenshotPreparedAtTop', 'ui.runtimeChrome.lifecycleCollapsed', 'ui.runtimeChrome.diagnosticsCollapsed', 'ui.runtimeChrome.runtimeStatusOnly',
       'ui.runtimeChrome.expanded', 'ui.runtimeChrome.localized', 'ui.runtimeChrome.expandedNoCjk',
       'reload.entries', 'reload.lifecycle', 'reload.terminalCount',
       'privacy.structuredOnly', 'privacy.partialObservability',

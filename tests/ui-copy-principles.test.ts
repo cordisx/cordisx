@@ -121,11 +121,11 @@ describe('UI copy principles', () => {
     expect(manager).toContain('.cxm-console-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }')
     expect(runtime).toContain("create(document, 'section', 'cxm-runtime-overview')")
     expect(runtime).toContain("copy('runtime.status-details')")
-    expect(runtime).toContain("create(document, 'details', 'cxm-runtime-diagnostics')")
+    expect(runtime).not.toContain("create(document, 'details', 'cxm-runtime-diagnostics')")
     expect(runtime).not.toContain("'cxm-error', plugin.error")
     expect(manager).toContain("panel.classList.add('cxm-console-panel')")
     expect(manager).not.toContain("create(document, 'div', 'cxm-console-summary')")
-    expect(manager).toContain("appendRuntimeLifecycle(overview)")
+    expect(manager).toContain("appendRuntimeLifecycle(panel)")
   })
 
   it('keeps shared tabs complete when their content area becomes narrow', async () => {

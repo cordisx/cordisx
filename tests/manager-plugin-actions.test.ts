@@ -309,7 +309,7 @@ describe('Manager plugin card actions', () => {
     }
   })
 
-  it('keeps the runtime tab as a compact human overview and keeps raw failure detail in Runtime details', async () => {
+  it('keeps runtime status compact and moves raw failure detail into collapsed logs diagnostics', async () => {
     const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
     const model: ManagerModel = {
       snapshot: () => snapshot('failed'),
@@ -323,20 +323,19 @@ describe('Manager plugin card actions', () => {
       await settle()
       const overview = dom.window.document.querySelector<HTMLElement>('.cxm-runtime-overview')!
       expect(overview.querySelector('[data-plugin-runtime-status="base"]')?.textContent).toContain('Failed to start')
-      expect(overview.textContent).toContain('Details are shown in Runtime status.')
+      expect(overview.textContent).toContain('Details are available in Logs & diagnostics.')
       expect(overview.querySelector('[data-plugin-runtime-status="base"]')?.textContent).not.toContain('entry module crashed')
       expect(overview.querySelectorAll('.cxm-runtime-status-fact')).toHaveLength(2)
       expect(overview.querySelector('.cxm-runtime-status-fact strong')?.textContent).toBe('0')
-      const diagnostics = overview.querySelector<HTMLDetailsElement>('[data-plugin-runtime-diagnostics="base"]')
-      expect(diagnostics?.open).toBe(false)
-      expect(diagnostics?.querySelectorAll('[role="listitem"]')).toHaveLength(4)
-      expect(diagnostics?.textContent).not.toContain('entry module crashed')
-      expect(overview.querySelector('[data-runtime-lifecycle="base"]')?.textContent).toContain('entry module crashed')
+      expect(overview.querySelector('[data-plugin-runtime-diagnostics="base"]')).toBeNull()
+      expect(overview.querySelector('[data-runtime-lifecycle="base"]')).toBeNull()
       dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="logs"]')!.click()
       await settle()
       const logs = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"]')!
       expect(logs.querySelector('.cxm-console-summary')).toBeNull()
-      expect(logs.querySelector('[data-runtime-lifecycle="base"]')).toBeNull()
+      const lifecycle = logs.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="base"]')
+      expect(lifecycle?.open).toBe(false)
+      expect(lifecycle?.textContent).toContain('entry module crashed')
     } finally {
       dispose()
       dom.window.close()

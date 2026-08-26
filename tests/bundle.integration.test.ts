@@ -1021,6 +1021,9 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="运行状态"]')?.textContent).not.toContain('controlled mount')
     expect(managerHeadings()).toContain('运行状态')
     expect(breadcrumbLabels()).toEqual(['插件', 'Slot Showcase', '运行状态'])
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="logs"]')?.click()
+    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="日志与诊断"] [data-runtime-lifecycle]')).not.toBeNull()
+    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="日志与诊断"] [data-runtime-console-summary]')).toBeNull()
     const platformDiagnostics = dom.window.document.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
     expect(platformDiagnostics?.open).toBe(false)
     expect(platformDiagnostics?.querySelector('summary')?.textContent).toBe('诊断')
@@ -1029,10 +1032,6 @@ describe('renderer bundle', () => {
     expect(platformDiagnostics?.textContent).toContain('current-connection-client-unavailable')
     expect(platformDiagnostics?.textContent).toContain('当前权限仅适用于 Host API 调用。')
     expect(platformDiagnostics?.textContent).not.toContain('查看权限说明')
-
-    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="logs"]')?.click()
-    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="日志与诊断"] [data-runtime-lifecycle]')).toBeNull()
-    expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="日志与诊断"] [data-runtime-console-summary]')).toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
       key: 'Enter', bubbles: true, cancelable: true,
     }))

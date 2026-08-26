@@ -195,6 +195,7 @@ type CopyKey =
   | 'console.back-to-latest'
   | 'console.entry-details'
   | 'console.close-details'
+  | 'console.field.timestamp'
   | 'console.field.plugin'
   | 'console.field.generation'
   | 'console.field.source'
@@ -522,7 +523,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'runtime.processing': { en: 'Working…', 'zh-CN': '处理中…' },
   'runtime.healthy': { en: 'Healthy', 'zh-CN': '运行正常' },
   'runtime.status-attention': { en: 'Needs attention', 'zh-CN': '需要处理' },
-  'runtime.status-details': { en: 'Details are shown in Runtime status.', 'zh-CN': '详细信息请在运行状态中查看。' },
+  'runtime.status-details': { en: 'Details are available in Logs & diagnostics.', 'zh-CN': '详细信息请在日志与诊断中查看。' },
   'runtime.configured-disabled': { en: 'Disabled by configuration', 'zh-CN': '配置中已禁用' },
   'runtime.reauthorize': { en: 'Reauthorize', 'zh-CN': '重新授权' },
   'runtime.restore-plugin': { en: 'Restore plugin', 'zh-CN': '恢复插件' },
@@ -576,6 +577,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'console.back-to-latest': { en: 'Back to latest', 'zh-CN': '回到最新' },
   'console.entry-details': { en: 'Entry details', 'zh-CN': '日志详情' },
   'console.close-details': { en: 'Close log details', 'zh-CN': '关闭日志详情' },
+  'console.field.timestamp': { en: 'Timestamp', 'zh-CN': '时间戳' },
   'console.field.plugin': { en: 'Plugin', 'zh-CN': '插件' },
   'console.field.generation': { en: 'Generation', 'zh-CN': 'Generation' },
   'console.field.source': { en: 'Capability / source', 'zh-CN': '能力 / 来源' },

@@ -1,9 +1,10 @@
 # Plugin DevTools Console
 
-The plugin detail `运行状态` tab is a development Console, not a telemetry or
-compliance warehouse. It renders a bounded, live, time-ordered stream plus a
-small call summary. Lifecycle and adapter diagnostics remain available as a
-secondary collapsed region.
+The plugin detail `运行状态` tab is a compact, structured availability summary,
+not a telemetry or compliance warehouse. The `日志与诊断` tab is the development
+Console: it renders a bounded, live, time-ordered stream plus a secondary
+collapsed lifecycle and adapter diagnostic disclosure. Raw diagnostics are not
+the default surface.
 
 The implementation conforms to `@cordisx/protocol` main
 `843818755142fcdeb13867a9cea068672855c49e` and its
@@ -67,7 +68,9 @@ viewer accepts only `log: string` / `append(string)` and reduced the entire
 Console to one text blob. The production body now uses Luna Console `1.3.6`
 with its pinned Luna Object Viewer `0.3.2`, Data Grid `1.6.5`, and DOM Viewer
 `1.8.4` peers. Each Host record is inserted as one Luna log with its own method,
-argument array, timestamp and source header. Luna owns level presentation,
+argument array, timestamp and source header. The list shows second-level time
+only; selected-entry details, copy, and export retain the complete timestamp.
+Luna owns level presentation,
 repeat folding, selection, virtual viewport, format substitution and expandable
 safe objects. CordisX does not create ASCII trees, giant text streams, `<pre>`
 fallbacks or parallel record rows. The optional Inspector contains only Host
@@ -78,7 +81,8 @@ The Luna Console scroll element has intrinsic content height and a bounded
 maximum viewport. Only the empty state receives a minimum height. Follow-latest
 is preserved across live rerenders only while the viewer is already at the
 bottom; scrolling upward exposes an explicit return-to-latest action. Luna
-instances and resize observers are destroyed on rerender, route change and
+instances refresh their virtual viewport after insertion, tab visibility, and
+container resize; resize observers are destroyed on rerender, route change and
 Manager dispose. Light/dark selection comes only from the shared
 `HostThemeProjection` and its `data-cordisx-app-theme` / `--cx-*` tokens; the
 Console has no private system-theme detector. There is no CDN dependency.

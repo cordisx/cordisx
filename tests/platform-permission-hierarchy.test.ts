@@ -388,7 +388,7 @@ describe('Platform permission presentation hierarchy', () => {
     }
   })
 
-  it('keeps host connection and security engineering facts in collapsed Runtime diagnostics', () => {
+  it('keeps host connection and security engineering facts in collapsed logs diagnostics', () => {
     const { dom, dispose } = install(snapshot())
     try {
       const permissions = openPluginTab(dom.window.document, 'empty', 'permissions')
@@ -397,11 +397,13 @@ describe('Platform permission presentation hierarchy', () => {
       expect(permissions.textContent).not.toContain('Codex Desktop')
 
       const runtime = openPluginTab(dom.window.document, 'demo', 'runtime')
-      const lifecycle = runtime.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="demo"]')
+      expect(runtime.querySelector('[data-plugin-runtime-action="demo"]')?.getAttribute('aria-label')).toBe('屏蔽插件')
+      expect(runtime.querySelector('[data-runtime-lifecycle="demo"]')).toBeNull()
+      const logs = openPluginTab(dom.window.document, 'demo', 'logs')
+      const lifecycle = logs.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="demo"]')
       expect(lifecycle?.open).toBe(false)
       expect(lifecycle?.querySelector('summary')?.textContent).toBe('运行详情 · 运行中')
-      expect(runtime.querySelector('[data-plugin-runtime-action="demo"]')?.getAttribute('aria-label')).toBe('屏蔽插件')
-      const diagnostics = runtime.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
+      const diagnostics = logs.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
       expect(diagnostics).not.toBeNull()
       expect(diagnostics?.open).toBe(false)
       expect(diagnostics?.querySelector('summary')?.textContent).toBe('诊断')
@@ -420,12 +422,14 @@ describe('Platform permission presentation hierarchy', () => {
     const { dom, dispose } = install(snapshot([], 'en'))
     try {
       const runtime = openPluginTab(dom.window.document, 'demo', 'runtime')
-      const lifecycle = runtime.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="demo"]')
-      const diagnostics = runtime.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
+      expect(runtime.querySelector('[data-runtime-lifecycle="demo"]')).toBeNull()
+      expect(runtime.querySelector('[data-plugin-runtime-action="demo"]')?.getAttribute('aria-label')).toBe('Block plugin')
+      const logs = openPluginTab(dom.window.document, 'demo', 'logs')
+      const lifecycle = logs.querySelector<HTMLDetailsElement>('[data-runtime-lifecycle="demo"]')
+      const diagnostics = logs.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
       expect(lifecycle?.open).toBe(false)
       expect(diagnostics?.open).toBe(false)
       expect(lifecycle?.querySelector('summary')?.textContent).toBe('Runtime details · Active')
-      expect(runtime.querySelector('[data-plugin-runtime-action="demo"]')?.getAttribute('aria-label')).toBe('Block plugin')
       expect(diagnostics?.querySelector('summary')?.textContent).toBe('Diagnostics')
 
       lifecycle!.open = true

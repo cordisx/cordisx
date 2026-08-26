@@ -22,7 +22,7 @@ describe('Luna Console entry projection', () => {
     const projection = projectPluginConsoleEntryForLuna(entry())
     expect(projection.type).toBe('log')
     expect(projection.header.from).toBe('console.log')
-    expect(projection.header.time).toMatch(/^\d{2}:\d{2}:\d{2}\.\d{3}$/u)
+    expect(projection.header.time).toMatch(/^\d{2}:\d{2}:\d{2}$/u)
     expect(projection.args).toHaveLength(4)
     expect(projection.args[0]).toBe('x=%d')
     expect(projection.args[1]).toBe(4)

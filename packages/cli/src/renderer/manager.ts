@@ -901,10 +901,10 @@ const MANAGER_STYLES = `
   .cxm-console-action-toolbar { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; white-space: nowrap; }
   .cxm-console-warning { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 8px; }
   .cxm-console-warning button { flex: none; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 11px; }
-  .cxm-console-workspace { display: grid; min-width: 0; min-height: 0; flex: 1 1 auto; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: stretch; }
+  .cxm-console-workspace { display: grid; min-width: 0; min-height: 0; flex: 1 1 auto; overflow: hidden; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: stretch; }
   .cxm-console-workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr) minmax(220px, 280px); }
-  .cxm-console-body { position: relative; display: flex; min-width: 0; min-height: 0; }
-  .cxm-console-frame { width: 100%; min-height: 0; flex: 1 1 auto; overflow: auto; box-sizing: border-box; border: 1px solid #30343a; border-radius: 7px; background: #101215; scrollbar-gutter: stable; overscroll-behavior: contain; }
+  .cxm-console-body { position: relative; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+  .cxm-console-frame { width: 100%; height: 100%; min-height: 0; flex: 1 1 auto; overflow: auto; box-sizing: border-box; border: 1px solid #30343a; border-radius: 7px; background: #101215; scrollbar-gutter: stable; overscroll-behavior: contain; }
   .cxm-console-frame.cxm-console-luna { min-height: 28px; color: #cad0da; cursor: default; }
   .cxm-console-frame.cxm-console-luna.luna-console { height: 100%; border: 1px solid #30343a; background: #101215; }
   .cxm-console-frame.cxm-console-luna .luna-console-log-content { font-size: 11px; line-height: 16px; }
@@ -1422,10 +1422,10 @@ export function projectPluginConsoleValueForLuna(snapshot: CordisXPluginConsoleV
   return snapshot.preview
 }
 
-function lunaConsoleTime(timestamp: number): string {
+function lunaConsoleTime(timestamp: number, includeMilliseconds = false): string {
   const date = new Date(timestamp)
   const parts = [date.getHours(), date.getMinutes(), date.getSeconds()].map(value => String(value).padStart(2, '0'))
-  return `${parts.join(':')}.${String(date.getMilliseconds()).padStart(3, '0')}`
+  return `${parts.join(':')}${includeMilliseconds ? `.${String(date.getMilliseconds()).padStart(3, '0')}` : ''}`
 }
 
 /** Keep each Host entry independent and preserve native Console argument-array semantics. */
@@ -1441,7 +1441,7 @@ export function projectPluginConsoleEntryForLuna(entry: CordisXPluginConsoleEntr
 
 function pluginConsoleEntryCopyText(entry: CordisXPluginConsoleEntryV1): string {
   const args = entry.args.map(argument => argument.preview).join(' ')
-  return `${lunaConsoleTime(entry.time)} ${entry.method} ${entry.source} ${entry.kind === 'console' ? args || entry.message : `${entry.message}${args === '' ? '' : ` ${args}`}`}`
+  return `${lunaConsoleTime(entry.time, true)} ${entry.method} ${entry.source} ${entry.kind === 'console' ? args || entry.message : `${entry.message}${args === '' ? '' : ` ${args}`}`}`
 }
 
 /**
@@ -4663,6 +4663,7 @@ export function installCordisXManager(
     interface LunaConsoleViewer {
       destroy(): void
       setOption(name: string, value: unknown): void
+      renderViewport(options?: unknown): void
       on(name: string, listener: (record: LunaLogRecord) => void): void
       insert(options: {
         readonly type: CordisXPluginConsoleEntryV1['method']
@@ -4728,6 +4729,22 @@ export function installCordisXManager(
       state.scrollTop = container.scrollTop
       syncLatest()
     }
+    const refreshLunaViewport = (): void => {
+      viewer?.renderViewport()
+      const view = document.defaultView
+      if (view?.requestAnimationFrame !== undefined) {
+        view.requestAnimationFrame(() => {
+          if (destroyed) return
+          viewer?.renderViewport()
+          restoreScroll()
+        })
+      } else queueMicrotask(() => {
+        if (!destroyed) {
+          viewer?.renderViewport()
+          restoreScroll()
+        }
+      })
+    }
     const mount = {
       destroy: (): void => {
         if (destroyed) return
@@ -4782,16 +4799,22 @@ export function installCordisXManager(
         viewer.insert({ type: projection.type, args: projection.args, header: projection.header })
       }
       pendingEntry = undefined
+      // Luna virtualizes against the dimensions present at construction. A tab
+      // can be connected before it is visible, so refresh after inserting the
+      // first records and again on the next frame.
+      refreshLunaViewport()
       const ResizeObserverConstructor = document.defaultView?.ResizeObserver
       if (ResizeObserverConstructor !== undefined) {
         resizeObserver = new ResizeObserverConstructor(() => {
+          viewer?.renderViewport()
           if (state.follow) scrollToLatest()
           else syncLatest()
         })
+        resizeObserver.observe(container)
         const space = container.querySelector<HTMLElement>('.luna-console-logs-space')
         if (space !== null) resizeObserver.observe(space)
       }
-      queueMicrotask(restoreScroll)
+      refreshLunaViewport()
     }).catch((error: unknown) => {
       if (destroyed) return
       container.classList.remove('cxm-console-luna')
@@ -5035,30 +5058,6 @@ export function installCordisXManager(
         : consoleSummary.consumption.join('   ')))
       consoleOverview.append(performance)
       overview.append(consoleOverview)
-      const diagnostics = create(document, 'details', 'cxm-runtime-diagnostics')
-      diagnostics.dataset.pluginRuntimeDiagnostics = plugin.id
-      diagnostics.append(create(document, 'summary', undefined, copy('runtime.diagnostics')))
-      const diagnosticList = create(document, 'div', 'cxm-runtime-diagnostic-list')
-      diagnosticList.setAttribute('role', 'list')
-      const addDiagnostic = (label: string, value: string): void => {
-        const item = create(document, 'div', 'cxm-runtime-diagnostic')
-        item.setAttribute('role', 'listitem')
-        item.append(
-          create(document, 'span', 'cxm-runtime-diagnostic-label', label),
-          create(document, 'span', 'cxm-runtime-diagnostic-value', value),
-        )
-        diagnosticList.append(item)
-      }
-      addDiagnostic(copy('console.field.generation'), plugin.package?.moduleGeneration ?? copy('runtime.unavailable'))
-      addDiagnostic(copy('runtime.services'), plugin.inject.join(', ') || copy('runtime.none'))
-      const configuration = plugin.configuration
-      addDiagnostic(copy('runtime.configuration'), configuration?.schemaKind === 'schemastery'
-        ? `Schemastery · ${configuration.applies}`
-        : configuration?.schemaKind === 'standard' ? `Standard Schema · ${configuration.applies}` : copy('runtime.not-declared'))
-      if (hasDetail) addDiagnostic(copy('plugin-tab.runtime'), copy('runtime.status-details'))
-      diagnostics.append(diagnosticList)
-      overview.append(diagnostics)
-      appendRuntimeLifecycle(overview)
       panel.append(overview)
       if (operationError !== undefined) {
         const notice = create(document, 'div', 'cxm-notice', copy('runtime.status-attention'))
@@ -5197,6 +5196,7 @@ export function installCordisXManager(
         inspectorHead.append(closeInspector)
         const grid = create(document, 'dl', 'cxm-console-inspector-grid')
         const metadata: readonly (readonly [string, string | number | undefined])[] = [
+          [copy('console.field.timestamp'), new Date(selected.time).toISOString()],
           [copy('console.field.plugin'), `${selected.plugin.pluginId} · ${selected.plugin.source}`],
           [copy('console.field.generation'), selected.generation],
           [copy('console.field.source'), selected.source],
@@ -5221,6 +5221,9 @@ export function installCordisXManager(
       } else workspace.append(body)
       panel.append(workspace)
       if (projections.length > 0) mountLunaConsole(frame, projections, plugin.id, latest)
+      // Raw service, localization, adapter, and capability diagnostics are
+      // secondary to user-facing runtime state and remain collapsed here.
+      appendRuntimeLifecycle(panel)
       content.append(panel)
       return
     }
