@@ -16,7 +16,7 @@ import {
   type TDesignSelectElement,
   type TDesignSelectOption,
 } from './tdesign-form.js'
-import { createHostSurfaceIcon } from './icons.js'
+import { createHostSurfaceIcon, HOST_ICON_16PX_CSS } from './icons.js'
 import { managerCopy, productLocale } from './ui-copy.js'
 
 export type HostFormPrimitive =
@@ -86,7 +86,7 @@ const KNOWN_ROLES = new Set([
   'duration', 'url', 'date', 'datetime', 'time', 'color', 'multi-select', 'code', 'json',
 ])
 
-export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${String.raw`
+export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${HOST_ICON_16PX_CSS}\n${String.raw`
   .cxf-scope {
     --td-brand-color: var(--cx-primary);
     --td-brand-color-hover: color-mix(in srgb, var(--cx-primary) 88%, var(--cx-text));
@@ -136,7 +136,9 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${String.raw`
   .cxf-item + .cxf-item { border-top: 1px solid var(--cx-border); }
   .cxf-item[data-full-width="true"] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; }
   .cxf-label-row { grid-area: label; display: flex; align-items: baseline; gap: .35rem; min-inline-size: 0; }
-  .cxf-field-menu-trigger { flex: 0 0 auto; }
+  .cxf-field-menu-trigger { flex: 0 0 auto; color: var(--td-text-color-secondary); }
+  .cxf-field-menu-trigger:hover:not(:disabled), .cxf-field-menu-trigger[aria-expanded="true"] { background: var(--td-bg-color-container-hover); color: var(--td-text-color-primary); }
+  .cxf-field-menu-trigger[aria-expanded="true"] { background: var(--td-bg-color-container-active); }
   .cxf-form-icon { flex: 0 0 auto; inline-size: 1rem; block-size: 1rem; color: var(--td-text-color-secondary); }
   .cxf-section-title > .cordisx-host-icon { margin-inline-end: .4rem; vertical-align: -.14em; color: var(--td-text-color-secondary); }
   .cxf-label { color: var(--td-text-color-primary); font-weight: 600; overflow-wrap: anywhere; }

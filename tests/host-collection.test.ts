@@ -65,11 +65,43 @@ describe('Host collection primitive', () => {
       expect(view.element.querySelectorAll<HTMLElement>('[data-collection-item][hidden]')).toHaveLength(0)
 
       expect(HOST_COLLECTION_STYLES).toContain('repeat(auto-fit, minmax(min(100%, 220px), 1fr))')
+      expect(HOST_COLLECTION_STYLES).toContain('align-content: start;')
+      expect(HOST_COLLECTION_STYLES).toContain('align-items: start;')
+      expect(HOST_COLLECTION_STYLES).toContain('.cxc-listitem { min-width: 0; align-self: start; }')
+      expect(HOST_COLLECTION_STYLES).toContain('height: auto;')
       expect(HOST_COLLECTION_STYLES).not.toContain('justify-content: start')
       expect(HOST_COLLECTION_STYLES).not.toContain('repeat(2,')
       expect(HOST_COLLECTION_STYLES).toContain('.cxc-list[data-layout="rows"] { grid-template-columns: minmax(0, 1fr); }')
-      expect(HOST_COLLECTION_STYLES).toContain('width: 32px; min-width: 32px; height: 32px; min-height: 32px;')
+      expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-seat-size: 32px;')
+      expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-glyph-size: 16px;')
+      expect(HOST_COLLECTION_STYLES).toContain('align-items: start;')
+      expect(HOST_COLLECTION_STYLES).toContain('.cxc-listitem { min-width: 0; align-self: start; }')
+      expect(HOST_COLLECTION_STYLES).not.toContain('.cxc-card {\n    position: relative;\n    container-type: inline-size;\n    min-width: 0;\n    height: 100%;')
+      expect(HOST_COLLECTION_STYLES).not.toContain('.cxc-primary {\n    display: flex;\n    align-items: flex-start;\n    gap: 11px;\n    width: 100%;\n    min-width: 0;\n    min-height: 82px;')
+      expect(HOST_COLLECTION_STYLES).not.toContain('min-height: 82px;')
+      expect(HOST_COLLECTION_STYLES).toContain('width: var(--cxc-icon-glyph-size); height: var(--cxc-icon-glyph-size);')
+      expect(HOST_COLLECTION_STYLES).toContain('fill: currentColor; color: currentColor;')
       expect(HOST_COLLECTION_STYLES).toContain('font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;')
+    } finally {
+      view.dispose()
+      dom.window.close()
+    }
+  })
+
+  it('marks compact catalogs explicitly and keeps their icon seat in the shared Manager rhythm', () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>')
+    const view = createHostCollection(dom.window.document, {
+      id: 'catalog', label: 'Catalog', density: 'compact',
+      items: [{ id: 'alpha', title: 'Alpha', icon: icon(dom.window.document, 'A') }],
+    })
+    dom.window.document.body.append(view.element)
+    try {
+      expect(view.element.dataset.density).toBe('compact')
+      expect(view.element.querySelector('.cxc-icon-seat')?.querySelector('button')).toBeNull()
+      expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-seat-size: var(--cx-compact-list-icon-seat, 22px);')
+      expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-glyph-size: var(--cx-compact-list-icon-glyph, 16px);')
+      expect(HOST_COLLECTION_STYLES).toContain('width: var(--cxc-icon-seat-size); height: var(--cxc-icon-seat-size);')
+      expect(HOST_COLLECTION_STYLES).toContain('.cxc-icon-seat > :first-child > svg { display: block; width: 100% !important; height: 100% !important; fill: currentColor; color: currentColor; }')
     } finally {
       view.dispose()
       dom.window.close()

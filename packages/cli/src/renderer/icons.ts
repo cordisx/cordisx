@@ -171,6 +171,35 @@ function svgMarkup(source: string): string {
   }
 }
 
+/**
+ * Host icons render inside both ordinary Host chrome and Shadow-DOM portals.
+ * Keep the geometry and color inheritance in one rule so a portalled menu
+ * cannot fall back to an SVG's intrinsic dimensions or an unrelated fill.
+ */
+export const HOST_ICON_16PX_CSS = String.raw`
+  .cordisx-host-icon {
+    display: inline-flex;
+    flex: 0 0 16px;
+    inline-size: 16px;
+    block-size: 16px;
+    align-items: center;
+    justify-content: center;
+    color: currentColor;
+    line-height: 0;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .cordisx-host-icon > svg {
+    display: block;
+    inline-size: 100%;
+    block-size: 100%;
+    fill: currentColor;
+    color: currentColor;
+    pointer-events: none;
+  }
+`
+
 /** Create one decorative, host-owned icon from a compile-time bundled Material symbol. */
 export function createManagerIcon(
   document: Document,

@@ -298,7 +298,7 @@ describe('plugin config runtime', () => {
     expect(configPanel?.querySelector('.cxf-status')?.textContent).not.toMatch(/[\u3400-\u9fff]/u)
     expect(state.rendererMount).toBe(state.rendererDispose + 1)
     expect(state.rendererAbort).toBe(state.rendererDispose)
-    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="logs"]')?.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.click()
     const diagnostics = dom.window.document.querySelector<HTMLDetailsElement>('[data-runtime-diagnostics="platform"]')
     expect(diagnostics?.open).toBe(false)
     expect(diagnostics?.querySelector('[data-config-diagnostics="live-config"]')?.textContent)

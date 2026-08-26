@@ -40,7 +40,7 @@ import {
   type MarketplaceSourceSnapshot,
   type MarketplaceStorage,
 } from './marketplace.js'
-import { renderSafeMarkdown } from './markdown.js'
+import { highlightSafeMarkdownCodeBlocks, renderSafeMarkdown } from './markdown.js'
 import type { CommandSnapshot } from './commands.js'
 import { resolveManagerTriggerTarget } from './host-probes.js'
 import { createHostSurfaceIcon, createManagerIcon, type ManagerIconToken } from './icons.js'
@@ -462,6 +462,8 @@ const MANAGER_STYLES = `
   .cxm-brand-mark,
   .cxm-material-icon,
   .cxm-material-icon svg,
+  .cordisx-host-icon,
+  .cordisx-host-icon svg,
   .cxm-plugin-icon,
   .cxm-status-dot,
   .cxm-dot {
@@ -476,13 +478,16 @@ const MANAGER_STYLES = `
     line-height: 0;
     pointer-events: none;
   }
+  .cordisx-host-icon { flex: none; line-height: 0; pointer-events: none; }
   .cxm-material-icon svg {
     display: block;
     width: 100%;
     height: 100%;
     fill: currentColor;
+    color: currentColor;
     pointer-events: none;
   }
+  .cordisx-host-icon svg { fill: currentColor; color: currentColor; pointer-events: none; }
   .cxm-brand-mark[data-brand-rendering^="direct-"] { object-fit: contain; }
   [data-cordisx-manager-modal] {
     position: fixed;
@@ -503,6 +508,8 @@ const MANAGER_STYLES = `
     backdrop-filter: blur(8px);
   }
   .cxm-dialog {
+    --cx-compact-list-icon-seat: 22px;
+    --cx-compact-list-icon-glyph: 16px;
     display: grid;
     grid-template-columns: 248px minmax(0, 1fr);
     width: min(1440px, calc(100vw - 40px));
@@ -541,6 +548,7 @@ const MANAGER_STYLES = `
   .cxm-nav-button:disabled { cursor: default; opacity: .48; }
   .cxm-nav-button[data-tab="about"] { margin-top: auto; }
   .cxm-nav-icon { width: 20px; height: 20px; color: #b8bec8; }
+  .cxm-nav-icon.cordisx-host-icon { display: inline-grid; place-items: center; }
   .cxm-nav-icon svg { width: 18px; height: 18px; }
   .cxm-nav-button:focus-visible,
   .cxm-close:focus-visible,
@@ -575,6 +583,7 @@ const MANAGER_STYLES = `
   .cxm-heading-title { display: flex; grid-column: 2; align-items: center; min-width: 0; min-height: 26px; color: #fff; font-size: 16px; font-weight: 700; line-height: 1.2; }
   .cxm-heading-current-heading { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .cxm-heading p { grid-column: 1 / -1; margin: 3px 0 0; color: #7f899a; font-size: 11px; }
+  .cxm-heading-direct-title { grid-column: 2; min-width: 0; min-height: 26px; margin: 0; color: #fff; font-size: 16px; font-weight: 700; line-height: 26px; }
   .cxm-heading-leading {
     display: grid;
     place-items: center;
@@ -654,13 +663,16 @@ const MANAGER_STYLES = `
     width: 30px;
     height: 30px;
     flex: none;
-    border: 1px solid rgba(255, 255, 255, .1);
-    border-radius: 9px;
-    background: rgba(255, 255, 255, .04);
+    box-sizing: border-box;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
     color: #d8dce5;
     cursor: pointer;
   }
-  .cxm-close-icon { width: 18px; height: 18px; }
+  .cxm-close-icon { display: block; width: 18px; height: 18px; }
+  .cxm-close:hover { background: rgba(199, 204, 212, .14); color: #eef0f3; }
   .cxm-content {
     min-height: 0;
     flex: 1 1 0%;
@@ -750,6 +762,8 @@ const MANAGER_STYLES = `
   .cxm-card-value { margin-top: 6px; color: #fff; font-size: 20px; font-weight: 700; }
   .cxm-section-title { margin: 22px 0 8px; color: #f2f4f8; font-size: 13px; font-weight: 700; }
   .cxm-tab-panel { min-width: 0; }
+  .cxm-content:has(.cxm-console-panel) { display: flex; flex-direction: column; overflow: hidden; }
+  .cxm-console-panel { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; }
   .cxm-tab-panel:has(.cxf-form), .cxm-permission-detail { inline-size: 100%; max-inline-size: none; margin-inline: 0; }
   .cxm-tab-panel > .cxm-section-title:first-child { margin-top: 0; }
   /* The Markdown surface uses the available detail width; prose itself keeps
@@ -840,7 +854,7 @@ const MANAGER_STYLES = `
   .cxm-diagnostics[open] summary { color: #d8dce3; }
   .cxm-diagnostics-body { padding: 0 2px 4px; }
   .cxm-runtime-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-  .cxm-console-summary { display: flex; min-width: 0; align-items: stretch; gap: 1px; margin: 10px 0 8px; overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(255,255,255,.08); }
+  .cxm-runtime-console-summary { display: flex; min-width: 0; align-items: stretch; gap: 1px; overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(255,255,255,.08); }
   .cxm-runtime-overview { display: grid; gap: 10px; inline-size: 100%; max-inline-size: none; }
   .cxm-runtime-status { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--cx-border); border-radius: 12px; background: var(--cx-surface-raised); }
   .cxm-runtime-status-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; background: var(--cx-hover); color: var(--cx-primary); }
@@ -859,39 +873,39 @@ const MANAGER_STYLES = `
   .cxm-runtime-diagnostic { display: grid; min-width: 0; gap: 3px; padding: 10px 12px; background: var(--cx-surface-raised); }
   .cxm-runtime-diagnostic-label { color: var(--cx-muted); font-size: 10px; }
   .cxm-runtime-diagnostic-value { overflow-wrap: anywhere; color: var(--cx-text); font-size: 11px; line-height: 1.4; }
-  .cxm-console-metric { min-width: 72px; padding: 7px 10px; background: #191b1f; }
-  .cxm-console-metric strong { display: inline; color: #eceef2; font: 600 13px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .cxm-console-metric span { margin-left: 6px; color: #818a99; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
-  .cxm-console-performance { flex: 1; min-width: 0; background: #191b1f; }
-  .cxm-console-performance summary { padding: 8px 10px; color: #8d96a8; cursor: pointer; font-size: 10px; list-style-position: inside; }
-  .cxm-console-performance-body { padding: 0 10px 8px; color: #aab2c0; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-runtime-console-metric { min-width: 72px; padding: 7px 10px; background: #191b1f; }
+  .cxm-runtime-console-metric strong { display: inline; color: #eceef2; font: 600 13px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-runtime-console-metric span { margin-left: 6px; color: #818a99; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
+  .cxm-runtime-console-performance { flex: 1; min-width: 0; background: #191b1f; }
+  .cxm-runtime-console-performance summary { padding: 8px 10px; color: #8d96a8; cursor: pointer; font-size: 10px; list-style-position: inside; }
+  .cxm-runtime-console-performance-body { padding: 0 10px 8px; color: #aab2c0; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-controls { display: grid; grid-template-columns: minmax(150px, 1.35fr) repeat(3, minmax(96px, 1fr)) max-content; gap: 7px; align-items: center; min-width: 0; margin: 8px 0; }
   .cxm-console-controls input { min-width: 0; height: 30px; border: 1px solid #353a42; border-radius: 6px; padding: 0 8px; background: #15171a; color: #d8dce3; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-controls t-select { min-width: 0; width: 100%; box-sizing: border-box; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-action-toolbar { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; white-space: nowrap; }
   .cxm-console-warning { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 8px; }
   .cxm-console-warning button { flex: none; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 11px; }
-  .cxm-console-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: start; }
+  .cxm-console-workspace { display: grid; min-width: 0; min-height: 0; flex: 1 1 auto; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: stretch; }
   .cxm-console-workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr) minmax(220px, 280px); }
-  .cxm-console-body { position: relative; min-width: 0; }
-  .cxm-console-frame { width: 100%; max-height: min(52vh, 520px); overflow: auto; box-sizing: border-box; border: 1px solid #30343a; border-radius: 7px; background: #101215; scrollbar-gutter: stable; overscroll-behavior: contain; }
-  .cxm-console-frame.cxm-console-luna { height: var(--cxm-console-content-height, 80px); min-height: 28px; color: #cad0da; cursor: default; }
-  .cxm-console-frame.cxm-console-luna.luna-console { border: 1px solid #30343a; background: #101215; }
+  .cxm-console-body { position: relative; display: flex; min-width: 0; min-height: 0; }
+  .cxm-console-frame { width: 100%; min-height: 0; flex: 1 1 auto; overflow: auto; box-sizing: border-box; border: 1px solid #30343a; border-radius: 7px; background: #101215; scrollbar-gutter: stable; overscroll-behavior: contain; }
+  .cxm-console-frame.cxm-console-luna { min-height: 28px; color: #cad0da; cursor: default; }
+  .cxm-console-frame.cxm-console-luna.luna-console { height: 100%; border: 1px solid #30343a; background: #101215; }
   .cxm-console-frame.cxm-console-luna .luna-console-log-content { font-size: 11px; line-height: 16px; }
   .cxm-console-frame.cxm-console-luna .luna-console-header { font-size: 10px; }
   .cxm-console-frame.cxm-console-luna:focus-visible { outline: 2px solid #8e98a9; outline-offset: 2px; }
   .cxm-console-latest { position: absolute; right: 14px; bottom: 12px; z-index: 1; border: 1px solid #4a515c; background: #252a31; color: #e3e7ee; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
-  .cxm-console-inspector { min-width: 0; overflow: hidden; border: 1px solid #30343a; border-radius: 7px; background: #141619; }
+  .cxm-console-inspector { min-width: 0; min-height: 0; overflow: auto; border: 1px solid #30343a; border-radius: 7px; background: #141619; }
   .cxm-console-inspector-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #30343a; color: #cdd2db; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-inspector-head button { border: 0; background: transparent; color: #98a1b2; cursor: pointer; }
   .cxm-console-inspector-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; margin: 0; padding: 10px; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-inspector-grid dt { color: #778294; }
   .cxm-console-inspector-grid dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: #bdc5d2; }
   .cxm-console-empty { display: grid; min-height: 160px; place-items: center; padding: 20px 16px; color: #737d8e; text-align: center; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
-  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-summary { border-color: rgba(18,24,33,.12); background: rgba(18,24,33,.12); }
-  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-metric,
-  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-performance { background: #f4f5f7; }
-  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-metric strong { color: #1d222b; }
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-runtime-console-summary { border-color: rgba(18,24,33,.12); background: rgba(18,24,33,.12); }
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-runtime-console-metric,
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-runtime-console-performance { background: #f4f5f7; }
+  [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-runtime-console-metric strong { color: #1d222b; }
   [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-controls input { border-color: #c7ccd4; background: #fff; color: #20242c; }
   [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-frame.cxm-console-luna.luna-console { border-color: #c7ccd4; background: #fff; color: #252b35; }
   [data-cordisx-manager-modal][data-cordisx-app-theme="light"] .cxm-console-inspector { border-color: #c7ccd4; background: #f8f9fa; }
@@ -1136,6 +1150,8 @@ const MANAGER_STYLES = `
   .cxm-readme code { padding: 2px 5px; border-radius: 4px; background: var(--cx-hover); color: var(--cx-text); font: 11px/1.5 ui-monospace, monospace; }
   .cxm-readme pre { margin: 14px 0 18px; overflow: auto; padding: 14px 16px; border: 1px solid var(--cx-border); border-radius: 8px; background: color-mix(in srgb, var(--cx-surface-raised) 82%, #000); }
   .cxm-readme pre code { padding: 0; background: transparent; color: inherit; white-space: pre; }
+  .cxm-readme pre code[data-shiki-theme] { display: block; }
+  .cxm-readme-code-line { display: block; min-height: 1.45em; }
   .cxm-error { margin-top: 12px; color: #fda4af; font-size: 11px; }
   .cxm-catalog-list { margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, .08); border-bottom: 1px solid rgba(255, 255, 255, .08); }
   .cxm-catalog-row {
@@ -1189,8 +1205,8 @@ const MANAGER_STYLES = `
   button.cxm-route-card { cursor: pointer; }
   button.cxm-route-card:hover { background: color-mix(in srgb, var(--cx-text) 5%, transparent); }
   button.cxm-route-card:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: -3px; border-radius: 10px; }
-  .cxm-route-card-icon { width: 28px; height: 28px; flex: none; color: var(--cx-muted); }
-  .cxm-route-card-icon svg { width: 19px; height: 19px; }
+  .cxm-route-card-icon { display: grid; place-items: center; width: var(--cx-compact-list-icon-seat); height: var(--cx-compact-list-icon-seat); flex: none; color: var(--cx-muted); }
+  .cxm-route-card-icon svg { width: var(--cx-compact-list-icon-glyph); height: var(--cx-compact-list-icon-glyph); }
   .cxm-route-card-body { min-width: 0; flex: 1 1 auto; }
   .cxm-route-card-title { display: block; overflow: hidden; color: var(--cx-text); font-size: 12px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
   .cxm-route-card-description { display: -webkit-box; margin-top: 3px; overflow: hidden; color: var(--cx-muted); font-size: 11px; line-height: 1.42; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
@@ -1250,7 +1266,6 @@ const MANAGER_STYLES = `
     .cxm-catalog-icon { width: 24px; height: 24px; }
     .cxm-catalog-status { max-width: 34%; }
     .cxm-route-card { gap: 9px; padding: 12px; }
-    .cxm-route-card-icon { width: 24px; height: 24px; }
     .cxm-route-machine { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
     .cxm-permission-item { grid-template-columns: minmax(0, 1fr); }
     .cxm-permission-control { justify-content: space-between; padding-inline-start: 35px; }
@@ -1273,6 +1288,7 @@ const HOST_THEME_OVERLAY_STYLES = `
   .cxm-header, .cxm-about-actions, .cxm-about-action-item + .cxm-about-action-item, .cxm-flat-item + .cxm-flat-item { border-color: var(--cx-border); }
   .cxm-about-actions { background: var(--cx-surface-raised); }
   .cxm-nav-button, .cxm-heading p, .cxm-detail-description, .cxm-permission-reason, .cxm-copy, .cxm-source-state, .cxm-detail-id, .cxm-plugin-description, .cxm-plugin-meta, .cxm-catalog-description, .cxm-catalog-id, .cxm-catalog-status, .cxm-marketplace-trust-copy, .cxm-marketplace-trust-meta, .cxm-field-label { color: var(--cx-muted); }
+  .cxm-heading-direct-title { color: var(--cx-text); }
   .cxm-nav-icon { color: currentColor; }
   .cxm-heading-leading { color: var(--cx-text); }
   .cxm-nav-button:hover, .cxm-nav-button[aria-current="page"], .cxm-nav-button[aria-selected="true"], .cxm-back:hover, .cxm-breadcrumb-action:hover, .cxm-breadcrumb-overflow > summary:hover, .cxm-tab:hover, .cxm-tab[aria-selected="true"], .cxm-about-action:hover, .cxm-about-action:focus-visible { background: var(--cx-hover); color: var(--cx-text); }
@@ -1282,7 +1298,9 @@ const HOST_THEME_OVERLAY_STYLES = `
   .cxm-about-action:hover .cxm-about-action-arrow, .cxm-about-action:focus-visible .cxm-about-action-arrow { color: var(--cx-text); }
   .cxm-heading-title, .cxm-breadcrumb-current, .cxm-card-value, .cxm-section-title, .cxm-about-name, .cxm-search, .cxm-source-input, .cxm-plugin-name, .cxm-catalog-title, .cxm-marketplace-trust-title, .cxm-field-value { color: var(--cx-text); }
   .cxm-card, .cxm-slot-card, .cxm-source-row, .cxm-field, .cxm-lifecycle-impact, .cxm-marketplace-trust-item, .cxm-marketplace-trust-badge { border-color: var(--cx-border); background: var(--cx-hover); }
-  .cxm-search, .cxm-source-input, .cxm-close, .cxm-action, .cxm-mini-action, .cxm-marketplace-filter { border-color: var(--cx-border); background: var(--cx-surface-raised); color: var(--cx-text); }
+  .cxm-search, .cxm-source-input, .cxm-action, .cxm-mini-action, .cxm-marketplace-filter { border-color: var(--cx-border); background: var(--cx-surface-raised); color: var(--cx-text); }
+  .cxm-close { background: transparent; color: var(--cx-text); }
+  .cxm-close:hover { background: var(--cx-hover); color: var(--cx-text); }
   .cxm-action:hover:not(:disabled), .cxm-mini-action:hover:not(:disabled) { border-color: var(--cx-primary); background: var(--cx-hover); color: var(--cx-text); }
   .cxm-breadcrumb-menu { border-color: var(--cx-border); background: var(--cx-surface-raised); box-shadow: 0 12px 32px var(--cx-shadow); }
   .cxm-authorization-dialog > p, .cxm-authorization-reason, .cxm-authorization-choice { color: var(--cx-text); }
@@ -1420,6 +1438,46 @@ export function serializePluginConsoleExport(page: CordisXPluginConsolePageV1, e
     entry.plugin.source === page.plugin.source && entry.plugin.pluginId === page.plugin.pluginId
   ))
   return JSON.stringify({ exportedAt, plugin: page.plugin, generation: page.generation, entries }, undefined, 2)
+}
+
+interface PluginConsoleRuntimeSummary {
+  readonly requests: number
+  readonly successes: number
+  readonly failures: number
+  readonly denials: number
+  readonly averageDurationMs: number | undefined
+  readonly consumption: readonly string[]
+}
+
+/** Host-owned aggregate telemetry belongs to runtime state, not the log viewer. */
+function summarizePluginConsole(page: CordisXPluginConsolePageV1): PluginConsoleRuntimeSummary {
+  const requests = page.entries.filter(entry => entry.kind === 'invocation' && entry.phase === 'requested').length
+  const successes = page.entries.filter(entry => entry.kind === 'invocation' && entry.phase === 'success').length
+  const failures = page.entries.filter(entry => entry.kind === 'invocation' && entry.phase === 'failure').length
+  const denials = page.entries.filter(entry => entry.kind === 'permission' && entry.phase === 'deny').length
+  const durations = page.entries.filter(entry => entry.kind === 'invocation' && entry.durationMs !== undefined).map(entry => entry.durationMs!)
+  const sources = new Map<string, { calls: number; items: number; bytes: number }>()
+  for (const entry of page.entries) {
+    if (entry.kind === 'invocation' && entry.phase === 'requested') {
+      const current = sources.get(entry.source) ?? { calls: 0, items: 0, bytes: 0 }
+      current.calls += 1
+      sources.set(entry.source, current)
+    }
+    if (entry.kind === 'invocation' && ['success', 'failure', 'cancel'].includes(entry.phase ?? '')) {
+      const current = sources.get(entry.source) ?? { calls: 0, items: 0, bytes: 0 }
+      current.items += entry.result?.itemCount ?? 0
+      current.bytes += entry.result?.byteCount ?? 0
+      sources.set(entry.source, current)
+    }
+  }
+  return {
+    requests,
+    successes,
+    failures,
+    denials,
+    averageDurationMs: durations.length === 0 ? undefined : durations.reduce((sum, value) => sum + value, 0) / durations.length,
+    consumption: [...sources].map(([source, value]) => `${source}: ${value.calls} calls${value.items === 0 ? '' : ` · ${value.items} items`}${value.bytes === 0 ? '' : ` · ${value.bytes} B`}`),
+  }
 }
 
 function capabilityPresentation(capability: CordisXPlatformCapability): CapabilityPresentation {
@@ -3014,7 +3072,17 @@ export function installCordisXManager(
       renderProjection(full)
       const widths = route.segments.map((_, index) => {
         const item = list.querySelector<HTMLElement>(`[data-breadcrumb-index="${index}"]`)
-        return item === null ? 0 : Math.max(item.getBoundingClientRect().width, item.scrollWidth)
+        if (item === null) return 0
+        // The current item fills free flex space, so its outer rectangle is
+        // not its content width. Project from its label and separator instead:
+        // a comfortable header keeps every segment, while only real pressure
+        // introduces the explicit overflow menu.
+        const label = item.querySelector<HTMLElement>('.cxm-breadcrumb-action, .cxm-breadcrumb-current')
+        const separator = item.querySelector<HTMLElement>('.cxm-breadcrumb-separator')
+        const naturalWidth = (label?.scrollWidth ?? 0) + (separator?.getBoundingClientRect().width ?? 0)
+        // JSDOM has no layout width for leaf inline elements; its Host DOM
+        // regression harness supplies the item geometry instead.
+        return naturalWidth > 0 ? naturalWidth : Math.max(item.getBoundingClientRect().width, item.scrollWidth)
       })
       const projection = projectManagerBreadcrumbs(widths, breadcrumbs.clientWidth)
       renderProjection(projection)
@@ -3078,7 +3146,7 @@ export function installCordisXManager(
   }
 
   const setHeading = (
-    headingCopy: string,
+    headingCopy: string | undefined,
     snapshot: ManagerSnapshot,
     options: { readonly icon?: ManagerIconToken | CordisXIconToken; readonly brand?: boolean } = {},
   ): void => {
@@ -3109,7 +3177,27 @@ export function installCordisXManager(
     const current = pageRoute.segments.at(-1)?.label ?? ''
     title.append(create(document, 'h2', 'cxm-heading-current-heading', current), renderBreadcrumbs(pageRoute))
     row.append(title)
-    heading.append(row, create(document, 'p', undefined, headingCopy))
+    heading.append(row)
+    // Breadcrumbs already identify a detail page. Repeating generic wording
+    // such as “Plugin details” or “Configuration” expands shared chrome
+    // without adding context; primary pages may retain a distinct purpose.
+    const description = headingCopy?.trim()
+    if (pageRoute.segments.length <= 1 && description !== undefined && description !== '' && description !== current.trim()) {
+      heading.append(create(document, 'p', undefined, description))
+    }
+  }
+
+  const setDirectManagerNavigationHeading = (title: string, icon: CordisXIconToken): void => {
+    breadcrumbCleanup()
+    breadcrumbCleanup = () => {}
+    heading.replaceChildren()
+    delete heading.dataset.headingActions
+    const row = create(document, 'div', 'cxm-heading-row')
+    const leading = createHostSurfaceIcon(document, icon)
+    leading.classList.add('cxm-heading-leading', 'cxm-heading-icon')
+    leading.setAttribute('aria-hidden', 'true')
+    row.append(leading, create(document, 'h2', 'cxm-heading-direct-title', title))
+    heading.append(row)
   }
 
   const renderAbout = (snapshot: ManagerSnapshot): void => {
@@ -3217,7 +3305,9 @@ export function installCordisXManager(
   }
 
   const renderExtensionPointList = (snapshot: ManagerSnapshot): void => {
-    setHeading(copy('extension.heading'), snapshot, { icon: 'contributions' })
+    // The primary breadcrumb already says “Extension points”. Adding the old
+    // heading copy below it only restated the same page subject.
+    setHeading(undefined, snapshot, { icon: 'contributions' })
     const points = snapshot.extensionPoints?.points ?? []
     const catalogText = snapshot.extensionPoints?.catalogText
     const items: HostCollectionItem[] = points.map(point => {
@@ -3263,6 +3353,7 @@ export function installCordisXManager(
       id: 'extension-points',
       label: copy('extension.collection-label'),
       items,
+      density: 'compact',
       search: {
         label: copy('extension.search-label'),
         placeholder: copy('extension.search-placeholder'),
@@ -3706,6 +3797,7 @@ export function installCordisXManager(
       id: 'routes',
       label: copy('routes.collection-label'),
       items,
+      density: 'compact',
       search: {
         label: copy('routes.search-label'),
         placeholder: copy('routes.search-placeholder'),
@@ -4554,12 +4646,6 @@ export function installCordisXManager(
     let pendingEntry: CordisXPluginConsoleEntryV1 | undefined
     const isAtBottom = (): boolean => container.scrollHeight - container.clientHeight - container.scrollTop <= 4
     const syncLatest = (): void => { latest.hidden = state.follow || container.scrollHeight <= container.clientHeight + 4 }
-    const syncContentHeight = (): void => {
-      const space = container.querySelector<HTMLElement>('.luna-console-logs-space')
-      const measured = Number.parseFloat(space?.style.height ?? '') || space?.scrollHeight || container.scrollHeight
-      const viewportLimit = Math.min(520, Math.max(80, (document.defaultView?.innerHeight ?? 800) * .52))
-      container.style.setProperty('--cxm-console-content-height', `${Math.max(28, Math.min(viewportLimit, measured + 2))}px`)
-    }
     const scrollToLatest = (): void => {
       state.follow = true
       container.scrollTop = container.scrollHeight
@@ -4668,14 +4754,13 @@ export function installCordisXManager(
       const ResizeObserverConstructor = document.defaultView?.ResizeObserver
       if (ResizeObserverConstructor !== undefined) {
         resizeObserver = new ResizeObserverConstructor(() => {
-          syncContentHeight()
           if (state.follow) scrollToLatest()
           else syncLatest()
         })
         const space = container.querySelector<HTMLElement>('.luna-console-logs-space')
         if (space !== null) resizeObserver.observe(space)
       }
-      queueMicrotask(() => { syncContentHeight(); restoreScroll() })
+      queueMicrotask(restoreScroll)
     }).catch((error: unknown) => {
       if (destroyed) return
       container.classList.remove('cxm-console-luna')
@@ -4734,7 +4819,11 @@ export function installCordisXManager(
       } else if (plugin.readme === undefined) {
         panel.append(create(document, 'div', 'cxm-empty', '该插件没有随当前 bundle 提供 README.md'))
       } else {
-        panel.append(renderSafeMarkdown(document, plugin.readme))
+        const readme = renderSafeMarkdown(document, plugin.readme)
+        panel.append(readme)
+        // Safe Markdown creates text-only DOM synchronously. Shiki merely
+        // projects its fenced-code text into Host-owned token spans afterward.
+        void highlightSafeMarkdownCodeBlocks(readme, resolveHostTheme(document).theme).catch(() => undefined)
       }
       content.append(panel)
       return
@@ -4753,8 +4842,7 @@ export function installCordisXManager(
       if (permissions.length === 0) {
         panel.append(create(document, 'div', 'cxm-empty', '该插件没有申请任何权限。'))
       }
-      const permissionSection = forms.section('权限策略', '插件声明所需能力；Host 负责策略选择、持久化与执行。')
-      const permissionList = permissionSection.content
+      const permissionList = create(document, 'div')
       permissionList.classList.add('cxm-flat-list', 'cxm-settings-group')
       permissionList.setAttribute('role', 'list')
       permissionList.dataset.managerGroup = 'capability-declarations'
@@ -4795,7 +4883,7 @@ export function installCordisXManager(
         item.append(open, control)
         permissionList.append(item)
       }
-      if (permissions.length > 0) panel.append(permissionSection.root)
+      if (permissions.length > 0) panel.append(permissionList)
       if (operationError !== undefined) panel.append(create(document, 'div', 'cxm-error', operationError))
       content.append(panel)
       return
@@ -4805,6 +4893,61 @@ export function installCordisXManager(
     const pluginCommands = snapshot.commands.filter(item => item.owner === plugin.id)
     const pluginRoutes = snapshot.navigation.routes.filter(item => item.owner === plugin.id)
     const pluginPages = snapshot.navigation.pages.filter(item => item.owner === plugin.id)
+    const appendRuntimeLifecycle = (target: HTMLElement): void => {
+      const lifecycle = create(document, 'details', 'cxm-diagnostics')
+      lifecycle.dataset.runtimeLifecycle = plugin.id
+      lifecycle.append(create(document, 'summary', undefined, `${copy('runtime.lifecycle-summary')} · ${statusLabel(plugin.status, snapshot.localization.locale)}`))
+      const lifecycleBody = create(document, 'div', 'cxm-diagnostics-body')
+      lifecycleBody.append(create(document, 'div', 'cxm-copy', `${copy('runtime.services')}: ${plugin.inject.join(', ') || copy('runtime.none')} · ${copy('runtime.active-contributions')}: ${pluginRegistrations.filter(item => item.visible && item.valid).length} · ${copy('runtime.commands')}: ${pluginCommands.length}`))
+      if (plugin.error !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', plugin.error))
+      if (plugin.blockedReason !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', plugin.blockedReason))
+      if (operationError !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', operationError))
+      lifecycleBody.append(create(document, 'code', 'cxm-detail-id', plugin.id))
+      const runtimeDiagnostics = create(document, 'details', 'cxm-diagnostics')
+      runtimeDiagnostics.dataset.runtimeDiagnostics = 'platform'
+      runtimeDiagnostics.append(create(document, 'summary', undefined, copy('runtime.diagnostics')))
+      const diagnosticsBody = create(document, 'div', 'cxm-diagnostics-body')
+      const localeCatalogs = snapshot.localeCatalogs.filter(item => item.owner === plugin.id)
+      diagnosticsBody.append(
+        createSectionTitle(document, copy('runtime.section.localization')),
+        create(document, 'div', 'cxm-copy', localeCatalogs.length === 0
+          ? copy('runtime.locale-catalogs-empty')
+          : localeCatalogs.map(item => `${item.namespace} · ${item.locale} · ${item.messageCount} keys`).join('\n')),
+        createSectionTitle(document, copy('runtime.section.details')),
+        create(document, 'div', 'cxm-copy', pluginCommands.length === 0
+          ? copy('runtime.commands-empty')
+          : pluginCommands.map(command => `${command.qualifiedId} · running ${command.running}`).join('\n')),
+      )
+      if (plugin.configuration !== undefined) {
+        const configSchema = plugin.configuration.schemaKind === 'schemastery'
+          ? 'Schemastery'
+          : plugin.configuration.schemaKind === 'standard' ? 'Standard Schema' : copy('runtime.not-declared')
+        const configurationDiagnostics = create(document, 'div', 'cxm-copy', `${copy('runtime.configuration')}: ${configSchema} · ${plugin.configuration.applies} · ${copy('runtime.revision')} ${plugin.configuration.revision} · ${copy('runtime.last-good')} ${plugin.configuration.lastGoodRevision} · ${copy('runtime.writer')} ${plugin.configuration.writable ? copy('runtime.available') : copy('runtime.unavailable')}`)
+        configurationDiagnostics.dataset.configDiagnostics = plugin.id
+        diagnosticsBody.append(configurationDiagnostics)
+      }
+      for (const provider of (snapshot.capabilityProviders ?? []).filter(item => item.kind !== 'current-connection')) {
+        diagnosticsBody.append(create(document, 'div', 'cxm-copy', `${provider.providerNameText} · ${capabilityAvailabilityLabel(provider.status, snapshot.localization.locale)} · ${provider.reasonText}`))
+      }
+      const adapter = snapshot.platform
+      diagnosticsBody.append(create(document, 'div', 'cxm-copy', `${copy('runtime.host')}: ${adapter.hostName} · ${copy('runtime.adapter')} ${adapter.mode} · ${copy('runtime.secondary-connection')} ${adapter.secondConnectionCreated ? copy('runtime.yes') : copy('runtime.no')} · ${copy('runtime.raw-bridge')} ${adapter.rawBridgeExposed ? copy('runtime.yes') : copy('runtime.no')}`))
+      for (const diagnostic of adapter.diagnostics) diagnosticsBody.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
+      diagnosticsBody.append(create(document, 'div', 'cxm-notice', copy('runtime.permission-boundary')))
+      runtimeDiagnostics.append(diagnosticsBody)
+      lifecycleBody.append(runtimeDiagnostics)
+      const unattributed = (model.pluginConsole?.(plugin.id)?.unattributedEntries ?? 0)
+      if (unattributed > 0 && dismissedConsoleWarnings.get(plugin.id) !== unattributed) {
+        const warning = create(document, 'div', 'cxm-notice cxm-console-warning')
+        warning.dataset.tone = 'warning'
+        warning.append(create(document, 'span', undefined, copy('console.ownership-warning').replace('{count}', String(unattributed))))
+        const dismissWarning = managerIconAction('close', copy('console.dismiss-ownership-warning'))
+        dismissWarning.addEventListener('click', () => { dismissedConsoleWarnings.set(plugin.id, unattributed); renderContent() })
+        warning.append(dismissWarning)
+        lifecycleBody.append(warning)
+      }
+      lifecycle.append(lifecycleBody)
+      target.append(lifecycle)
+    }
     if (activeFacet === 'runtime') {
       const panel = createTabPanel(document, copy('plugin-tab.runtime'))
       const blocked = plugin.status === 'blocked' || plugin.status === 'failed'
@@ -4819,7 +4962,7 @@ export function installCordisXManager(
       const hasDetail = plugin.error !== undefined || plugin.blockedReason !== undefined
       statusCopy.append(
         create(document, 'span', 'cxm-runtime-status-label', statusLabel(plugin.status, snapshot.localization.locale)),
-        create(document, 'span', 'cxm-runtime-status-meta', hasDetail ? copy('runtime.status-details-in-logs') : copy('runtime.healthy')),
+        create(document, 'span', 'cxm-runtime-status-meta', hasDetail ? copy('runtime.status-details') : copy('runtime.healthy')),
       )
       status.append(icon, statusCopy)
       if (plugin.status !== 'configured-disabled') {
@@ -4838,13 +4981,38 @@ export function installCordisXManager(
       for (const [label, value] of [
         [copy('runtime.active-contributions'), pluginRegistrations.filter(item => item.visible && item.valid).length],
         [copy('runtime.commands'), pluginCommands.length],
-        [copy('console.requests'), (model.pluginConsole?.(plugin.id)?.entries ?? []).filter(item => item.kind === 'invocation' && item.phase === 'requested').length],
       ] as const) {
         const fact = create(document, 'span', 'cxm-runtime-status-fact')
         fact.append(create(document, 'strong', undefined, String(value)), create(document, 'span', undefined, label))
         facts.append(fact)
       }
       overview.append(status, facts)
+      const consolePage = model.pluginConsole?.(plugin.id) ?? {
+        contract: 'cordisx.plugin-console-page/v1' as const, schemaVersion: 1 as const,
+        plugin: { source: plugin.source, pluginId: plugin.id }, generation: 'manager-unavailable',
+        generatedAt: Date.now(), partialObservability: true, entries: [],
+      }
+      const consoleSummary = summarizePluginConsole(consolePage)
+      const consoleOverview = create(document, 'section', 'cxm-runtime-console-summary')
+      consoleOverview.dataset.runtimeConsoleSummary = plugin.id
+      consoleOverview.setAttribute('aria-label', copy('console.performance'))
+      for (const [label, value] of [
+        [copy('console.requests'), consoleSummary.requests],
+        [copy('console.successes'), consoleSummary.successes],
+        [copy('console.failures'), consoleSummary.failures],
+        [copy('console.denied'), consoleSummary.denials],
+      ] as const) {
+        const metric = create(document, 'div', 'cxm-runtime-console-metric')
+        metric.append(create(document, 'strong', undefined, String(value)), create(document, 'span', undefined, label))
+        consoleOverview.append(metric)
+      }
+      const performance = create(document, 'details', 'cxm-runtime-console-performance')
+      performance.append(create(document, 'summary', undefined, `${copy('console.performance')} ${consoleSummary.averageDurationMs === undefined ? '—' : `${consoleSummary.averageDurationMs.toFixed(1)}ms`}`))
+      performance.append(create(document, 'div', 'cxm-runtime-console-performance-body', consoleSummary.consumption.length === 0
+        ? copy('console.no-host-api-metrics')
+        : consoleSummary.consumption.join('   ')))
+      consoleOverview.append(performance)
+      overview.append(consoleOverview)
       const diagnostics = create(document, 'details', 'cxm-runtime-diagnostics')
       diagnostics.dataset.pluginRuntimeDiagnostics = plugin.id
       diagnostics.append(create(document, 'summary', undefined, copy('runtime.diagnostics')))
@@ -4861,12 +5029,14 @@ export function installCordisXManager(
       }
       addDiagnostic(copy('console.field.generation'), plugin.package?.moduleGeneration ?? copy('runtime.unavailable'))
       addDiagnostic(copy('runtime.services'), plugin.inject.join(', ') || copy('runtime.none'))
-      addDiagnostic(copy('runtime.configuration'), plugin.configuration.schemaKind === 'schemastery'
-        ? `Schemastery · ${plugin.configuration.applies}`
-        : plugin.configuration.schemaKind === 'standard' ? `Standard Schema · ${plugin.configuration.applies}` : copy('runtime.not-declared'))
-      if (hasDetail) addDiagnostic(copy('plugin-tab.logs'), copy('runtime.status-details-in-logs'))
+      const configuration = plugin.configuration
+      addDiagnostic(copy('runtime.configuration'), configuration?.schemaKind === 'schemastery'
+        ? `Schemastery · ${configuration.applies}`
+        : configuration?.schemaKind === 'standard' ? `Standard Schema · ${configuration.applies}` : copy('runtime.not-declared'))
+      if (hasDetail) addDiagnostic(copy('plugin-tab.runtime'), copy('runtime.status-details'))
       diagnostics.append(diagnosticList)
       overview.append(diagnostics)
+      appendRuntimeLifecycle(overview)
       panel.append(overview)
       if (operationError !== undefined) {
         const notice = create(document, 'div', 'cxm-notice', copy('runtime.status-attention'))
@@ -4878,6 +5048,7 @@ export function installCordisXManager(
     }
     if (activeFacet === 'logs') {
       const panel = createTabPanel(document, copy('plugin-tab.logs'))
+      panel.classList.add('cxm-console-panel')
       const livePage = model.pluginConsole?.(plugin.id) ?? {
         contract: 'cordisx.plugin-console-page/v1', schemaVersion: 1,
         plugin: { source: plugin.source, pluginId: plugin.id }, generation: 'manager-unavailable',
@@ -4885,41 +5056,6 @@ export function installCordisXManager(
       }
       if (consolePaused && (consolePausedPage === undefined || consolePausedPage.plugin.pluginId !== plugin.id)) consolePausedPage = livePage
       const page = consolePaused ? consolePausedPage ?? livePage : livePage
-      const requested = page.entries.filter(entry => entry.kind === 'invocation' && entry.phase === 'requested')
-      const successes = page.entries.filter(entry => entry.kind === 'invocation' && entry.phase === 'success')
-      const failures = page.entries.filter(entry => entry.kind === 'invocation' && entry.phase === 'failure')
-      const denials = page.entries.filter(entry => entry.kind === 'permission' && entry.phase === 'deny')
-      const durations = page.entries.filter(entry => entry.kind === 'invocation' && entry.durationMs !== undefined).map(entry => entry.durationMs!)
-      const summary = create(document, 'div', 'cxm-console-summary')
-      for (const [label, value] of [
-        [copy('console.requests'), requested.length], [copy('console.successes'), successes.length], [copy('console.failures'), failures.length], [copy('console.denied'), denials.length],
-      ]) {
-        const metric = create(document, 'div', 'cxm-console-metric')
-        metric.append(create(document, 'strong', undefined, String(value)), create(document, 'span', undefined, String(label)))
-        summary.append(metric)
-      }
-      const callSources = new Map<string, { calls: number; items: number; bytes: number }>()
-      for (const entry of page.entries) {
-        if (entry.kind === 'invocation' && entry.phase === 'requested') {
-          const current = callSources.get(entry.source) ?? { calls: 0, items: 0, bytes: 0 }
-          current.calls += 1
-          callSources.set(entry.source, current)
-        }
-        if (entry.kind === 'invocation' && ['success', 'failure', 'cancel'].includes(entry.phase ?? '')) {
-          const current = callSources.get(entry.source) ?? { calls: 0, items: 0, bytes: 0 }
-          current.items += entry.result?.itemCount ?? 0
-          current.bytes += entry.result?.byteCount ?? 0
-          callSources.set(entry.source, current)
-        }
-      }
-      const performance = create(document, 'details', 'cxm-console-performance')
-      performance.append(create(document, 'summary', undefined, `${copy('console.performance')} ${durations.length === 0 ? '—' : `${(durations.reduce((sum, value) => sum + value, 0) / durations.length).toFixed(1)}ms`}`))
-      performance.append(create(document, 'div', 'cxm-console-performance-body', callSources.size === 0
-        ? copy('console.no-host-api-metrics')
-        : [...callSources].map(([source, value]) => `${source}: ${value.calls} calls${value.items === 0 ? '' : ` · ${value.items} items`}${value.bytes === 0 ? '' : ` · ${value.bytes} B`}`).join('   ')))
-      summary.append(performance)
-      panel.append(summary)
-
       const sources = [...new Set(page.entries.map(entry => entry.source))].sort()
       const normalizedQuery = consoleQuery.trim().toLocaleLowerCase()
       const filtered = page.entries.filter(entry => (
@@ -5015,16 +5151,6 @@ export function installCordisXManager(
       actionToolbar.append(pause, autoScroll, clear, copyButton, exportButton)
       controls.append(actionToolbar)
       panel.append(controls)
-      const unattributed = page.unattributedEntries ?? 0
-      if (unattributed > 0 && dismissedConsoleWarnings.get(plugin.id) !== unattributed) {
-        const unknown = create(document, 'div', 'cxm-notice cxm-console-warning')
-        unknown.dataset.tone = 'warning'
-        unknown.append(create(document, 'span', undefined, copy('console.ownership-warning').replace('{count}', String(unattributed))))
-        const dismissWarning = managerIconAction('close', copy('console.dismiss-ownership-warning'))
-        dismissWarning.addEventListener('click', () => { dismissedConsoleWarnings.set(plugin.id, unattributed); renderContent() })
-        unknown.append(dismissWarning)
-        panel.append(unknown)
-      }
 
       const workspace = create(document, 'div', 'cxm-console-workspace')
       const body = create(document, 'div', 'cxm-console-body')
@@ -5073,77 +5199,6 @@ export function installCordisXManager(
       } else workspace.append(body)
       panel.append(workspace)
       if (projections.length > 0) mountLunaConsole(frame, projections, plugin.id, latest)
-      const lifecycle = create(document, 'details', 'cxm-diagnostics')
-      lifecycle.dataset.runtimeLifecycle = plugin.id
-      lifecycle.append(create(document, 'summary', undefined, `${copy('runtime.lifecycle-summary')} · ${statusLabel(plugin.status, snapshot.localization.locale)}`))
-      const lifecycleBody = create(document, 'div', 'cxm-diagnostics-body')
-      lifecycleBody.append(create(document, 'div', 'cxm-copy', `${copy('runtime.services')}: ${plugin.inject.join(', ') || copy('runtime.none')} · ${copy('runtime.active-contributions')}: ${pluginRegistrations.filter(item => item.visible && item.valid).length} · ${copy('runtime.commands')}: ${pluginCommands.length}`))
-      const action = create(document, 'button', 'cxm-action cxm-plugin-runtime-action')
-      action.type = 'button'
-      const blocked = plugin.status === 'blocked' || plugin.status === 'failed'
-      const permissionBlocked = plugin.status === 'permission-blocked'
-      const restorable = blocked || permissionBlocked
-      action.textContent = busyPluginId === plugin.id ? copy('runtime.processing') : plugin.status === 'configured-disabled' ? copy('runtime.configured-disabled') : permissionBlocked ? copy('runtime.reauthorize') : blocked ? copy('runtime.restore-plugin') : copy('runtime.block-plugin')
-      action.disabled = busyPluginId !== undefined || plugin.status === 'configured-disabled'
-      action.addEventListener('click', async () => {
-        busyPluginId = plugin.id
-        renderContent()
-        try { if (restorable) await authorizeAndRestore(plugin); else await model.setPluginBlocked(plugin.id, true) }
-        catch (error) { operationError = error instanceof Error ? error.message : String(error) }
-        finally { busyPluginId = undefined; renderContent() }
-      })
-      lifecycleBody.append(action)
-      if (plugin.error !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', plugin.error))
-      if (plugin.blockedReason !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', plugin.blockedReason))
-      if (operationError !== undefined) lifecycleBody.append(create(document, 'div', 'cxm-error', operationError))
-      lifecycleBody.append(create(document, 'code', 'cxm-detail-id', plugin.id))
-      const localeCatalogs = snapshot.localeCatalogs.filter(item => item.owner === plugin.id)
-      const localizationDiagnostics = create(document, 'div', 'cxm-copy', localeCatalogs.length === 0
-        ? copy('runtime.locale-catalogs-empty')
-        : localeCatalogs.map(item => `${item.namespace} · ${item.locale} · ${item.messageCount} keys`).join('\n'))
-      const runtimeDiagnostics = create(document, 'div', 'cxm-copy', pluginCommands.length === 0
-        ? copy('runtime.commands-empty')
-        : pluginCommands.map(command => `${command.qualifiedId} · running ${command.running}`).join('\n'))
-      const adapter = snapshot.platform
-      const diagnostics = create(document, 'details', 'cxm-diagnostics')
-      diagnostics.dataset.runtimeDiagnostics = 'platform'
-      diagnostics.append(create(document, 'summary', undefined, copy('runtime.diagnostics')))
-      const diagnosticsBody = create(document, 'div', 'cxm-diagnostics-body')
-      diagnosticsBody.append(createSectionTitle(document, copy('runtime.section.localization')), localizationDiagnostics)
-      diagnosticsBody.append(createSectionTitle(document, copy('runtime.section.details')), runtimeDiagnostics)
-      if (plugin.configuration !== undefined) {
-        const configSchema = plugin.configuration.schemaKind === 'schemastery'
-          ? 'Schemastery'
-          : plugin.configuration.schemaKind === 'standard' ? 'Standard Schema' : copy('runtime.not-declared')
-        const configApplies = plugin.configuration.applies
-        const configDiagnostics = create(document, 'div', 'cxm-copy', `${copy('runtime.configuration')}: ${configSchema} · ${configApplies} · ${copy('runtime.revision')} ${plugin.configuration.revision} · ${copy('runtime.last-good')} ${plugin.configuration.lastGoodRevision} · ${copy('runtime.writer')} ${plugin.configuration.writable ? copy('runtime.available') : copy('runtime.unavailable')}`)
-        configDiagnostics.dataset.configDiagnostics = plugin.id
-        diagnosticsBody.append(configDiagnostics)
-      }
-      for (const provider of (snapshot.capabilityProviders ?? []).filter(item => item.kind !== 'current-connection')) {
-        const providerDiagnostic = create(
-          document,
-          'div',
-          'cxm-copy',
-          `${provider.providerNameText} · ${capabilityAvailabilityLabel(provider.status, snapshot.localization.locale)} · ${provider.reasonText}`,
-        )
-        providerDiagnostic.dataset.capabilityProvider = provider.providerId
-        diagnosticsBody.append(providerDiagnostic)
-      }
-      diagnosticsBody.append(create(
-        document,
-        'div',
-        'cxm-copy',
-        `${copy('runtime.host')}: ${adapter.hostName} · ${copy('runtime.adapter')} ${adapter.mode} · ${copy('runtime.secondary-connection')} ${adapter.secondConnectionCreated ? copy('runtime.yes') : copy('runtime.no')} · ${copy('runtime.raw-bridge')} ${adapter.rawBridgeExposed ? copy('runtime.yes') : copy('runtime.no')}`,
-      ))
-      for (const diagnostic of adapter.diagnostics) diagnosticsBody.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
-      const securityBoundary = create(document, 'div', 'cxm-notice', copy('runtime.permission-boundary'))
-      securityBoundary.dataset.tone = 'warning'
-      diagnosticsBody.append(securityBoundary)
-      diagnostics.append(diagnosticsBody)
-      lifecycleBody.append(diagnostics)
-      lifecycle.append(lifecycleBody)
-      panel.append(lifecycle)
       content.append(panel)
       return
     }
@@ -5180,6 +5235,7 @@ export function installCordisXManager(
       mountHostCollection(panel, {
         id: `plugin-extension-points-${plugin.id}`,
         label: `${plugin.name}扩展点列表`,
+        density: 'compact',
         items,
         search: {
           label: `搜索${plugin.name}的扩展点与贡献`,
@@ -6314,7 +6370,10 @@ export function installCordisXManager(
     const tabs = activeTab === undefined
       ? []
       : projection.tabs.map(tab => ({ ...tab, active: tab === activeTab }))
-    setHeading(projection.description, snapshot, { icon: projection.icon ?? item.icon })
+    // A Manager navigation row is the page's first-level parent. Its icon and
+    // label form the Host header, so route history never adds a duplicate Back
+    // control or a "Plugins / …" breadcrumb above plugin-owned body content.
+    setDirectManagerNavigationHeading(item.title, item.icon)
     if (managerContentRoot === undefined || !managerContentRoot.isConnected) {
       managerContentRoot = create(document, 'div', 'cxm-manager-content-root')
       managerContentRoot.dataset.managerContentRoot = 'true'

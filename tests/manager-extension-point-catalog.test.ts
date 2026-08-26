@@ -119,6 +119,9 @@ describe('Manager extension point catalog', () => {
     try {
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="extension-points"]')!.click()
       const list = dom.window.document.querySelector<HTMLElement>('[aria-label="扩展点列表"]')!
+      const collection = list.closest<HTMLElement>('[data-host-collection="extension-points"]')!
+      expect(collection.dataset.density).toBe('compact')
+      expect(dom.window.document.querySelector('.cxm-heading > p')).toBeNull()
       expect(list.querySelectorAll('[data-extension-point-id]')).toHaveLength(37)
       expect(list.querySelector('.cxm-kind-badge')).toBeNull()
       expect(list.querySelector('.cxm-chevron')).toBeNull()
@@ -130,6 +133,7 @@ describe('Manager extension point catalog', () => {
       expect(available.querySelector('.cxc-description')?.textContent).toContain('语义输入区锚点')
       expect(available.querySelector('code')?.textContent).toBe('composer.toolbar.items')
       expect(available.querySelector('[data-host-icon]')?.getAttribute('aria-hidden')).toBe('true')
+      expect(available.querySelector('.cxc-icon-seat button')).toBeNull()
 
       const contextAbsent = list.querySelector<HTMLButtonElement>('[data-extension-point-id="session.header.actions"]')!
       expect(contextAbsent.dataset.extensionPointState).toBe('supported')
@@ -151,6 +155,8 @@ describe('Manager extension point catalog', () => {
       const styles = [...dom.window.document.querySelectorAll('style')].map(item => item.textContent ?? '').join('\n')
       expect(styles).toContain('.cxc-list {')
       expect(styles).toContain('.cxc-status {')
+      expect(styles).toContain('--cx-compact-list-icon-seat: 22px;')
+      expect(styles).toContain('--cx-compact-list-icon-glyph: 16px;')
       expect(styles).toContain('user-select: text')
       expect(styles).toContain('repeat(auto-fit, minmax(min(100%, 220px), 1fr))')
 

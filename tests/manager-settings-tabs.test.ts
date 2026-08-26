@@ -61,8 +61,17 @@ describe('Manager settings navigation projection', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
       const entry = dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="demo:navigation"]')!
       expect(entry.querySelector('[data-host-icon="host:settings"]')).not.toBeNull(); expect(entry.querySelector('style,section')).toBeNull()
+      const styles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
+      expect(styles).toContain('.cordisx-host-icon svg {')
+      expect(styles).toContain('fill: currentColor;')
+      expect(styles).toContain('color: currentColor;')
       entry.click(); await settle()
       expect(dom.window.document.querySelector('[data-demo-body="demo:navigation"]')).not.toBeNull(); expect(dom.window.document.querySelector('[data-settings-navigation-item="demo:navigation"]')?.getAttribute('aria-current')).toBe('page')
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).toBeNull()
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-breadcrumbs')).toBeNull()
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-icon[data-host-icon="host:settings"]')).not.toBeNull()
+      expect(dom.window.document.querySelector('.cxm-heading-direct-title')?.textContent).toBe('Demo settings')
+      expect(dom.window.document.querySelector('.cxm-heading p')).toBeNull()
       dom.window.document.querySelector<HTMLButtonElement>('.cxm-close')!.click(); await settle()
       expect(events).toEqual(['mount:demo:navigation', 'abort:demo:navigation', 'close'])
       expect(dom.window.document.querySelector('[data-demo-body]')).toBeNull()
@@ -168,19 +177,11 @@ describe('Manager settings navigation projection', () => {
       expect(panel().getAttribute('aria-labelledby')).toBe(tabs()[1]!.id)
       expect(panel().querySelector('[data-active-manager-content-body="a-b"]')).not.toBeNull()
 
-      // The real heading Back action restores the prior manager-content tab,
-      // not document.body, after the Host remounts the controlled page.
-      dom.window.document.querySelector<HTMLButtonElement>('.cxm-heading .cxm-back')!.click()
-      await settle()
-      expect(dom.window.document.activeElement?.getAttribute('data-manager-content-tab')).toBe('a.b')
-      expect(panel().getAttribute('aria-labelledby')).toBe(tabs()[0]!.id)
-
-      // Back from the first manager-content route restores the primary source
-      // navigation target instead of leaving focus on the removed Back node.
-      dom.window.document.querySelector<HTMLButtonElement>('.cxm-heading .cxm-back')!.click()
-      await settle()
-      expect(dom.window.document.activeElement?.getAttribute('data-tab')).toBe('plugins')
-      expect(dom.window.document.activeElement).not.toBe(dom.window.document.body)
+      // The navigation entry, rather than an inner route history, owns the
+      // first-level page chrome for every controlled tab.
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).toBeNull()
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-breadcrumbs')).toBeNull()
+      expect(dom.window.document.querySelector('.cxm-heading-direct-title')?.textContent).toBe('Demo settings')
 
       dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="demo:navigation"]')!.click()
       await settle()

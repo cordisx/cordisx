@@ -141,7 +141,7 @@ type CopyKey =
   | 'runtime.processing'
   | 'runtime.healthy'
   | 'runtime.status-attention'
-  | 'runtime.status-details-in-logs'
+  | 'runtime.status-details'
   | 'runtime.configured-disabled'
   | 'runtime.reauthorize'
   | 'runtime.restore-plugin'
@@ -241,7 +241,6 @@ type CopyKey =
   | 'extension-tab.usage'
   | 'extension-tab.information'
   | 'extension-tab.diagnostics'
-  | 'extension.heading'
   | 'extension.collection-label'
   | 'extension.search-label'
   | 'extension.search-placeholder'
@@ -523,7 +522,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'runtime.processing': { en: 'Working…', 'zh-CN': '处理中…' },
   'runtime.healthy': { en: 'Healthy', 'zh-CN': '运行正常' },
   'runtime.status-attention': { en: 'Needs attention', 'zh-CN': '需要处理' },
-  'runtime.status-details-in-logs': { en: 'Details are available in Logs & diagnostics.', 'zh-CN': '详细信息请在日志与诊断中查看。' },
+  'runtime.status-details': { en: 'Details are shown in Runtime status.', 'zh-CN': '详细信息请在运行状态中查看。' },
   'runtime.configured-disabled': { en: 'Disabled by configuration', 'zh-CN': '配置中已禁用' },
   'runtime.reauthorize': { en: 'Reauthorize', 'zh-CN': '重新授权' },
   'runtime.restore-plugin': { en: 'Restore plugin', 'zh-CN': '恢复插件' },
@@ -623,7 +622,6 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'extension-tab.usage': { en: 'Usage', 'zh-CN': '使用情况' },
   'extension-tab.information': { en: 'Information', 'zh-CN': '点位信息' },
   'extension-tab.diagnostics': { en: 'Diagnostics', 'zh-CN': '诊断' },
-  'extension.heading': { en: 'Extension points', 'zh-CN': '扩展点位' },
   'extension.collection-label': { en: 'Extension points', 'zh-CN': '扩展点列表' },
   'extension.search-label': { en: 'Search extension points', 'zh-CN': '搜索 CordisX 扩展点' },
   'extension.search-placeholder': { en: 'Search names, descriptions, IDs, or plugins', 'zh-CN': '搜索名称、介绍、点位 id 或插件…' },

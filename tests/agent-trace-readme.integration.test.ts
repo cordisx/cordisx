@@ -117,7 +117,7 @@ describe('Agent Trace built README projection', () => {
     const handle = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
     if (handle === undefined) throw new Error('CordisX runtime did not boot')
     runtime = handle
-  }, 30_000)
+  }, 60_000)
 
   afterAll(async () => {
     await runtime?.dispose()

@@ -68,6 +68,7 @@
     "luna-data-grid": "1.6.5",
     "luna-dom-viewer": "1.8.4",
     "luna-object-viewer": "0.3.2",
+    "shiki": "4.4.3",
     "tar": "7.5.22",
     "ws": "^8.18.3"
   },

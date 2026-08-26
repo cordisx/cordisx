@@ -235,16 +235,22 @@ the left of its title. Any structured route with more than one breadcrumb
 segment replaces the icon in that seat with an icon-only history-back button.
 The title never moves when navigation depth changes.
 
-The title occupies the first row. The description occupies its own second row
-and spans the complete header grid, so its left edge aligns with the leading
-icon or back control rather than with the title text. This applies equally to
-plain titles and breadcrumb titles.
+The title occupies the first row. A primary page may add a distinct purpose
+description on its own second row, aligned with the leading icon or back
+control. Breadcrumb detail pages omit generic duplicate subtitles: their
+complete breadcrumb is the product identity. Before collapsing any ancestor,
+the Host measures the labels' intrinsic width; only real width pressure adds
+the explicit, navigable overflow control.
 
 Leading icons are rendered directly in a transparent 26-pixel seat. They do
 not use a persistent border, background, chip, or rounded frame. The back
 control follows the same frameless resting appearance while retaining a real
 button target, an accessible `返回` label, and silver-grey hover and
 `focus-visible` feedback that does not change its dimensions.
+
+The close control is likewise a centred 30-pixel Host seat with a transparent,
+borderless resting state. Its 18-pixel glyph is decorative inside the one
+button target; hover and focus—not idle chrome—supply the surface feedback.
 
 ## Icon system
 
@@ -473,6 +479,14 @@ diagnostics, and uninstall live in the Host-owned overflow menu without
 squeezing the plugin name or state. Closing the menu restores focus to its
 trigger when it remains connected, and both menu and tooltips are constrained
 to the manager viewport.
+
+The collection's scroll viewport may fill its available panel height, but its
+grid aligns content at the start and every card is content-height. Unused space
+therefore remains below a short result set; grid or flex stretch must never
+turn three plugin cards into viewport-height columns. Compact catalog, route,
+and page seats use one shared 22-pixel icon seat and 16-pixel decorative glyph
+token. The seat is never an icon button, and its status dot must not outweigh
+the title or create a second interaction target.
 Unavailable lifecycle operations are absent or explicitly unavailable; a
 button must never restart the launcher while claiming to reload one plugin.
 A launcher-configured legacy plugin remains explicitly unavailable for package
@@ -577,6 +591,14 @@ applicable, and an official TDesign Select/Option policy control. Runtime
 availability never replaces or disables policy editing. Optional declarations
 do not need an `可选` badge.
 
+`日志与诊断` is an operational viewer only: its toolbar contains the log
+search/filter/pause/export controls and its Luna Console body owns all remaining
+tabpanel height and scroll. Invocation counters, denials, performance/usage,
+and runtime lifecycle or ownership diagnostics belong in `运行状态`, not beneath
+the Console. Plugin README fenced code is safely projected by Host-owned Shiki
+token spans using the current Host light/dark theme; inline code stays compact
+and code blocks do not receive an extra card wrapper.
+
 The primary permission list never exposes capability ids, scope objects,
 audit counters, blocked reasons, adapter diagnostics, transport facts, raw
 bridge facts, or the trusted-renderer security boundary. Selecting the item
@@ -657,11 +679,15 @@ At minimum they prove:
   name/description, compact version/source metadata, whole-card
   pointer/Enter/Space navigation, no chevron, and no permanent generic trust or
   installability warning below the browse list;
-- extension-point cards use the Host collection with a Material icon and three
-  text levels (localized name, localized description, selectable stable id);
-  type and normal-state tags are absent, while only pending/unavailable/error
-  emits a concise same-row diagnostic target that never becomes an orphan
-  second grid row at constrained width;
+- extension-point and route/page catalog cards use the Host compact collection
+  icon seat and glyph token, rather than page-specific enlarged artwork. The
+  decorative icon is never a control or a nested hit target; route/page detail
+  rows use the same token. Extension-point cards retain three text levels
+  (localized name, localized description, selectable stable id), while type
+  and normal-state tags are absent. Only pending/unavailable/error emits a
+  concise same-row diagnostic target that never becomes an orphan second grid
+  row at constrained width. A catalog whose active breadcrumb already names
+  its destination does not add a duplicate header subtitle;
 - overflow restores focus, stays within the manager viewport, keeps uninstall
   behind dependency-aware confirmation, and exposes share only for a safe
   public canonical URL;

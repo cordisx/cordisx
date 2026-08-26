@@ -142,7 +142,7 @@ describe('built-in Channel product bundle', () => {
       expect(dom.window.getComputedStyle(managerModal).fontSize).toBe('13px')
       expect(dom.window.document.querySelector<HTMLElement>('[data-channel-manager-styles="true"]')?.textContent)
         .not.toContain('.cxf-scope')
-      expect(dom.window.document.querySelector('.cxm-heading-current-heading')?.textContent).toBe('Channels')
+      expect(dom.window.document.querySelector('.cxm-heading-direct-title')?.textContent).toBe('Channel settings')
       expect(dom.window.document.querySelector('[data-manager-content-root]')?.textContent).not.toContain('正在加载插件页面')
       expect(runtime.snapshot().navigation.outlets).toContainEqual(expect.objectContaining({
         id: 'manager.content', mounted: true, activeRoute: 'channel:settings',
@@ -151,11 +151,10 @@ describe('built-in Channel product bundle', () => {
       card.click()
       await waitFor(() => dom.window.document.querySelector('[data-manager-content-tabs]') !== null)
       expect(dom.window.document.querySelector('[data-channel-page="detail"]')).not.toBeNull()
-      expect(dom.window.document.querySelector('.cxm-heading-current-heading')?.textContent).toBe('local')
-      // Detail history replaces the same leading seat; it must never retain a
-      // decorative route icon beside the Host Back affordance.
-      expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).not.toBeNull()
-      expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-icon,.cxm-heading-leading-stack')).toBeNull()
+      expect(dom.window.document.querySelector('.cxm-heading-direct-title')?.textContent).toBe('Channel settings')
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).toBeNull()
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-breadcrumbs')).toBeNull()
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-icon[data-host-icon="host:layers"]')).not.toBeNull()
       expect(dom.window.document.querySelector('.cxc-channel-back,.cxc-channel-tabs')).toBeNull()
       expect(dom.window.document.querySelector('[data-manager-content-tabs] [data-manager-content-tab="configuration"]')).not.toBeNull()
       dom.window.document.querySelector<HTMLButtonElement>('[data-manager-content-tabs] [data-manager-content-tab="runtime"]')!.click()
@@ -257,7 +256,7 @@ describe('built-in Channel product bundle', () => {
       expect(card.querySelector('.cxc-status[data-position="card"]')).not.toBeNull()
       card.querySelector<HTMLButtonElement>('.cxc-primary')!.click()
       await waitFor(() => dom.window.document.querySelector('[data-channel-page="detail"][data-channel-detail="simulator/local-smoke/local"]') !== null)
-      expect(dom.window.document.querySelector('.cxm-heading-current-heading')?.textContent).toBe('Local smoke')
+      expect(dom.window.document.querySelector('.cxm-heading-direct-title')?.textContent).toBe('Channel settings')
       expect(dom.window.document.querySelector('[data-manager-content-tabs] [data-manager-content-tab="configuration"]')).not.toBeNull()
     } finally {
       await runtime.dispose()

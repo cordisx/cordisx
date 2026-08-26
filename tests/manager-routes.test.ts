@@ -100,8 +100,10 @@ describe('Manager route and page catalog', () => {
       const visibleCount = (selector: string): number => [...dom.window.document.querySelectorAll<HTMLElement>(selector)]
         .filter(item => !item.closest<HTMLElement>('[data-collection-item]')?.hidden).length
       expect(catalog.querySelector('[data-host-collection="routes"]')).not.toBeNull()
+      expect(catalog.querySelector<HTMLElement>('[data-host-collection="routes"]')?.dataset.density).toBe('compact')
       expect(catalog.querySelectorAll('[data-route-product-row]')).toHaveLength(2)
       expect(catalog.querySelectorAll('[data-page-product-row]')).toHaveLength(2)
+      expect(catalog.querySelectorAll('[data-route-product-row] .cxc-icon-seat button, [data-page-product-row] .cxc-icon-seat button')).toHaveLength(0)
       const catalogSearch = catalog.querySelector<HTMLInputElement>('[data-collection-search="routes"]')!
       expect(catalogSearch.placeholder).toBe('搜索标题、说明、位置、页面或插件…')
       expect(catalogSearch.placeholder).not.toContain('outlet')
@@ -117,6 +119,15 @@ describe('Manager route and page catalog', () => {
       const resetCatalog = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="routes"]')!
       resetCatalog.value = ''
       resetCatalog.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+
+      dom.window.document.querySelector<HTMLButtonElement>('[data-route-product-row="demo:analytics"]')!.click()
+      const routeDetailIcons = [...dom.window.document.querySelectorAll<HTMLElement>('.cxm-route-card-icon')]
+      expect(routeDetailIcons.map(icon => icon.dataset.materialIcon)).toEqual(['routes', 'document'])
+      expect(routeDetailIcons.every(icon => icon.tagName === 'SPAN' && icon.getAttribute('aria-hidden') === 'true')).toBe(true)
+      expect(routeDetailIcons.every(icon => icon.querySelector('button') === null)).toBe(true)
+      expect(dom.window.document.querySelectorAll('.cxm-route-card button')).toHaveLength(0)
+      expect(dom.window.document.querySelector('.cxm-heading > p')).toBeNull()
+      dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')!.click()
 
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')!.click()
       dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="demo"]')!.click()
@@ -169,6 +180,10 @@ describe('Manager route and page catalog', () => {
       const styles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
       expect(styles).toContain('repeat(auto-fit, minmax(min(100%, 220px), 1fr))')
       expect(styles).toContain('.cxc-machine-id')
+      expect(styles).toContain('.cxm-route-card-icon { display: grid; place-items: center; width: var(--cx-compact-list-icon-seat);')
+      expect(styles).toContain('.cxm-route-card-icon svg { width: var(--cx-compact-list-icon-glyph); height: var(--cx-compact-list-icon-glyph); }')
+      expect(styles).toContain('.cxm-close { background: transparent; color: var(--cx-text); }')
+      expect(styles).toContain('.cxm-close:hover { background: var(--cx-hover); color: var(--cx-text); }')
     } finally {
       dispose()
       dom.window.close()

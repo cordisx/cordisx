@@ -120,6 +120,10 @@ describe('plugin DevTools Console runtime', () => {
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="console-showcase"]')?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.click()
     expect(dom.window.document.querySelector('[data-plugin-runtime-status="console-showcase"]')).not.toBeNull()
+    const runtimeOverview = dom.window.document.querySelector<HTMLElement>('.cxm-runtime-overview')!
+    expect(runtimeOverview.querySelector('[data-runtime-console-summary="console-showcase"]')).not.toBeNull()
+    expect(runtimeOverview.querySelectorAll('.cxm-runtime-console-metric')).toHaveLength(4)
+    expect(runtimeOverview.querySelector('[data-runtime-lifecycle="console-showcase"]')).not.toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="logs"]')?.click()
     let consoleFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
     await waitForState(() => {
@@ -136,6 +140,10 @@ describe('plugin DevTools Console runtime', () => {
     expect(lunaEntries.some(item => item.dataset.consoleMethod === 'warn')).toBe(true)
     expect(lunaEntries.some(item => item.dataset.consoleMethod === 'error')).toBe(true)
     expect(consoleFrame?.querySelector('.luna-console-log-content')?.textContent).toBeTruthy()
+    const logsPanel = consoleFrame?.closest<HTMLElement>('[role="tabpanel"]')!
+    expect(logsPanel.classList.contains('cxm-console-panel')).toBe(true)
+    expect(logsPanel.querySelector('.cxm-console-summary')).toBeNull()
+    expect(logsPanel.querySelector('[data-runtime-lifecycle="console-showcase"]')).toBeNull()
     expect(dom.window.document.querySelector('[data-console-action="export"]')).not.toBeNull()
     const mixed = lunaEntries.find(item => item.textContent?.includes('object and array'))
     expect(mixed?.querySelectorAll('.luna-console-preview')).toHaveLength(2)
