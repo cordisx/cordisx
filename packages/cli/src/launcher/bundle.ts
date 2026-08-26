@@ -33,6 +33,20 @@ export interface BuildRendererBundleOptions {
   }
 }
 
+export interface RendererCompositionSource {
+  /** An ESM composition module. The caller chooses whether boot is awaited. */
+  readonly source: string
+  /** Files outside the ESM graph which must invalidate the composition. */
+  readonly watchFiles: readonly string[]
+}
+
+export interface RendererCompositionSourceOptions {
+  /** Override the runtime import for development transports such as Vite. */
+  readonly runtimeImport?: string
+  /** Export the awaited runtime handle instead of fire-and-forget production boot. */
+  readonly awaitBoot?: boolean
+}
+
 function importSpecifier(fromDirectory: string, absolutePath: string): string {
   const relative = path.relative(fromDirectory, absolutePath).replaceAll(path.sep, '/')
   return relative.startsWith('.') ? relative : `./${relative}`
@@ -63,8 +77,17 @@ async function readPluginReadme(entry: string): Promise<string | undefined> {
   }
 }
 
-/** Bundle the renderer host and every enabled plugin into one Cordis generation. */
-export async function buildRendererBundle(config: CordisXConfig, options: BuildRendererBundleOptions = {}): Promise<string> {
+/**
+ * Build the shared renderer composition module.
+ *
+ * Production esbuild and the Vite Playground both consume this source so the
+ * development page cannot drift into a copied Host implementation.
+ */
+export async function buildRendererCompositionSource(
+  config: CordisXConfig,
+  options: BuildRendererBundleOptions = {},
+  sourceOptions: RendererCompositionSourceOptions = {},
+): Promise<RendererCompositionSource> {
   const enabled = config.plugins.filter(plugin => plugin.enabled)
   for (const plugin of enabled) await access(plugin.entry)
   const [version, readmes, pluginBundles] = await Promise.all([
@@ -107,9 +130,8 @@ export async function buildRendererBundle(config: CordisXConfig, options: BuildR
     if (projectRuntime !== undefined) break
   }
   if (projectRuntime === undefined) throw new Error('CordisX renderer runtime could not be resolved')
-  const imports = [
-    `import { installCordisX } from ${JSON.stringify(importSpecifier(config.rootDir, projectRuntime))}`,
-  ]
+  const runtimeImport = sourceOptions.runtimeImport ?? importSpecifier(config.rootDir, projectRuntime)
+  const imports = [`import { installCordisX } from ${JSON.stringify(runtimeImport)}`]
   const enabledIndexes = new Map(enabled.map((plugin, index) => [plugin.id, index]))
   const composition = `[${config.plugins.map((plugin, pluginIndex) => {
     const index = enabledIndexes.get(plugin.id)
@@ -123,7 +145,16 @@ export async function buildRendererBundle(config: CordisXConfig, options: BuildR
   const providers = config.providers.filter(provider => provider.enabled).map(provider => ({ id: provider.id, displayName: provider.displayName }))
   const permission = options.permission ?? { profileId: options.profileId ?? 'development', policies: [] }
   const metadata = `{ version: ${JSON.stringify(version)}, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(permission.profileId)}, permissionPolicies: ${JSON.stringify(permission.policies)}${options.playground === true ? ', hostKind: "playground"' : ''}${options.generation === undefined ? '' : `, generation: ${JSON.stringify(options.generation)}`}${options.providerBridgeToken === undefined ? '' : `, providerBridgeToken: ${JSON.stringify(options.providerBridgeToken)}`}${options.agentHistoryBridgeToken === undefined ? '' : `, agentHistoryBridgeToken: ${JSON.stringify(options.agentHistoryBridgeToken)}`}${options.configBridgeToken === undefined ? '' : `, configBridgeToken: ${JSON.stringify(options.configBridgeToken)}`}${options.serviceConfigBridgeToken === undefined ? '' : `, serviceConfigBridgeToken: ${JSON.stringify(options.serviceConfigBridgeToken)}`}${options.channelCredentialBridgeToken === undefined ? '' : `, channelCredentialBridgeToken: ${JSON.stringify(options.channelCredentialBridgeToken)}`}${options.channelActionsBridgeToken === undefined ? '' : `, channelActionsBridgeToken: ${JSON.stringify(options.channelActionsBridgeToken)}`}${options.pluginLifecycleBridgeToken === undefined ? '' : `, pluginLifecycleBridgeToken: ${JSON.stringify(options.pluginLifecycleBridgeToken)}`}${options.pluginActivation === undefined ? '' : `, pluginActivation: ${JSON.stringify(options.pluginActivation)}`}${options.initialRegistryEpoch === undefined ? '' : `, initialRegistryEpoch: ${JSON.stringify(options.initialRegistryEpoch)}`}${options.channelManager === undefined ? '' : `, channelManager: ${JSON.stringify(options.channelManager)}`}${permission.bridgeToken === undefined ? '' : `, permissionBridgeToken: ${JSON.stringify(permission.bridgeToken)}`} }`
-  const source = `${imports.join('\n')}\nvoid installCordisX(${composition}, ${metadata}).catch(error => console.error('[cordisx] boot failed', error))\n`
+  const boot = `installCordisX(${composition}, ${metadata})`
+  const source = sourceOptions.awaitBoot === true
+    ? `${imports.join('\n')}\nexport const runtime = await ${boot}\n`
+    : `${imports.join('\n')}\nvoid ${boot}.catch(error => console.error('[cordisx] boot failed', error))\n`
+  return { source, watchFiles: enabled.map(plugin => plugin.entry) }
+}
+
+/** Bundle the renderer host and every enabled plugin into one Cordis generation. */
+export async function buildRendererBundle(config: CordisXConfig, options: BuildRendererBundleOptions = {}): Promise<string> {
+  const { source } = await buildRendererCompositionSource(config, options)
 
   const result = await build({
     stdin: { contents: source, resolveDir: config.rootDir, sourcefile: 'cordisx-composition.ts' },

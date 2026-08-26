@@ -1,4 +1,5 @@
 import type * as React from 'react'
+import type { CordisXConfigFormIcon } from './contracts.js'
 
 export interface ButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'color'> {
   readonly variant?: 'primary' | 'secondary' | 'danger' | 'ghost'
@@ -31,6 +32,26 @@ export interface EmptyStateProps extends Omit<React.HTMLAttributes<HTMLDivElemen
   readonly action?: React.ReactNode
 }
 
+export type IconName = CordisXConfigFormIcon | 'search' | 'create' | 'success'
+
+export interface IconProps extends React.HTMLAttributes<HTMLSpanElement> {
+  readonly name: IconName
+}
+
+export interface SelectOption {
+  readonly value: string
+  readonly label: string
+  readonly prefixIcon?: React.ReactNode
+}
+
+export interface SelectProps {
+  readonly className?: string
+  readonly 'aria-label'?: string
+  readonly value: string
+  readonly options: readonly SelectOption[]
+  readonly onChange: (value: string) => void
+}
+
 function HostComponent<Props>(name: string): React.ComponentType<Props> {
   return function UnavailableHostComponent(): never {
     throw new Error(`${name} is available only inside the CordisX renderer Host`)
@@ -41,5 +62,7 @@ export const Button = HostComponent<ButtonProps>('Button')
 export const Card = HostComponent<CardProps>('Card')
 export const EmptyState = HostComponent<EmptyStateProps>('EmptyState')
 export const Heading = HostComponent<HeadingProps>('Heading')
+export const Icon = HostComponent<IconProps>('Icon')
+export const Select = HostComponent<SelectProps>('Select')
 export const Stack = HostComponent<StackProps>('Stack')
 export const Text = HostComponent<TextProps>('Text')

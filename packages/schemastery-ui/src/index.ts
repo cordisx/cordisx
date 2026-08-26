@@ -241,7 +241,7 @@ export function resolveFormPresenter(field: FormDescriptor): PresenterResolution
 export function validateFormValue(field: FormDescriptor, value: unknown): readonly FormIssue[] {
   const issues: FormIssue[] = []
   if (field.required && (value === undefined || value === null || value === '')) issues.push({ code: 'required' })
-  if (field.choices !== undefined && value !== undefined && !field.choices.some(choice => Object.is(choice.value, value))) issues.push({ code: 'choice' })
+  if (field.type !== 'array' && field.choices !== undefined && value !== undefined && !field.choices.some(choice => Object.is(choice.value, value))) issues.push({ code: 'choice' })
   if ((field.type === 'number' || field.type === 'natural') && value !== undefined) {
     if (typeof value !== 'number' || !Number.isFinite(value)) issues.push({ code: 'number' })
     else {
@@ -251,6 +251,7 @@ export function validateFormValue(field: FormDescriptor, value: unknown): readon
   }
   if (field.type === 'array' && value !== undefined) {
     if (!Array.isArray(value) || field.min !== undefined && value.length < field.min || field.max !== undefined && value.length > field.max) issues.push({ code: 'array' })
+    else if (field.choices !== undefined && value.some(item => !field.choices!.some(choice => Object.is(choice.value, item)))) issues.push({ code: 'choice' })
   }
   return issues
 }

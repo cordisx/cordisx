@@ -41,6 +41,12 @@ export interface TDesignSelectOption<Value> {
   readonly label: string
   readonly value: Value
   readonly disabled?: boolean
+  /** Optional Host-owned application artwork used by branded selectors. */
+  readonly iconUri?: string
+  /** App-theme dark variant; defaults to iconUri when the artwork is invariant. */
+  readonly darkIconUri?: string
+  /** Optical artwork size inside the fixed option icon seat. */
+  readonly iconSize?: number
 }
 
 export interface TDesignSelectElement<Value> extends TDesignElement {
@@ -221,6 +227,85 @@ export function setTDesignProps(element: TDesignElement, props: Readonly<Record<
   setTimeout(restoreTypedProps, 0)
 }
 
+/**
+ * Omi may recreate its internal native input while upgrading a pre-connected
+ * custom element. Listen inside the stable ShadowRoot so Host drafts still
+ * receive real typing even when the library drops a pre-upgrade callback prop.
+ */
+export function bindTDesignTextInput(element: TDesignElement, onChange: (value: string) => void): () => void {
+  let attached: ShadowRoot | undefined
+  let disposed = false
+  const receive = (event: Event): void => {
+    const value = unwrapTDesignChangeValue<string>(event)
+    if (typeof value !== 'string') return
+    onChange(value)
+    // The pinned Omi wrapper can re-render from its stale controlled prop at
+    // the end of this same input dispatch. Restore only the live native value
+    // in a microtask; never serialize drafts (especially credentials) into a
+    // host attribute or DOM text.
+    const target = event.target as HTMLInputElement | HTMLTextAreaElement | null
+    queueMicrotask(() => {
+      if (disposed) return
+      if (target !== null && 'value' in target) target.value = value
+      const current = element.shadowRoot?.querySelector<HTMLInputElement | HTMLTextAreaElement>('input, textarea')
+      if (current !== null && current !== undefined) current.value = value
+    })
+  }
+  const attach = (): void => {
+    if (disposed || element.shadowRoot === null || element.shadowRoot === attached) return
+    attached?.removeEventListener('input', receive, true)
+    attached = element.shadowRoot
+    attached.addEventListener('input', receive, true)
+  }
+  queueMicrotask(attach)
+  if (typeof element.ownerDocument.defaultView?.requestAnimationFrame === 'function') {
+    element.ownerDocument.defaultView.requestAnimationFrame(attach)
+  }
+  element.ownerDocument.defaultView?.setTimeout(attach, 0)
+  return () => {
+    disposed = true
+    attached?.removeEventListener('input', receive, true)
+  }
+}
+
+/**
+ * TDesign 1.2 can drop the object-valued `autosize` prop while upgrading a
+ * pre-connected textarea. Keep the real native textarea visibly multiline as
+ * a bounded Host layout policy; typing still flows through the normal bridge.
+ */
+export function bindTDesignTextareaRows(element: TDesignElement, rows: number): () => void {
+  let native: HTMLTextAreaElement | undefined
+  let observer: MutationObserver | undefined
+  let disposed = false
+  const minimum = `${rows * 22 + 12}px`
+  const apply = (): void => {
+    if (disposed) return
+    const next = element.shadowRoot?.querySelector<HTMLTextAreaElement>('textarea') ?? undefined
+    if (next === undefined) return
+    if (next !== native) {
+      observer?.disconnect()
+      native = next
+      const view = element.ownerDocument.defaultView
+      observer = view === null ? undefined : new view.MutationObserver(apply)
+      observer?.observe(native, { attributes: true, attributeFilter: ['style', 'rows'] })
+    }
+    if (native.rows !== rows) native.rows = rows
+    if (native.style.getPropertyValue('min-height') !== minimum || native.style.getPropertyPriority('min-height') !== 'important') {
+      native.style.setProperty('min-height', minimum, 'important')
+    }
+  }
+  queueMicrotask(apply)
+  if (typeof element.ownerDocument.defaultView?.requestAnimationFrame === 'function') {
+    element.ownerDocument.defaultView.requestAnimationFrame(apply)
+  }
+  element.ownerDocument.defaultView?.setTimeout(apply, 0)
+  return () => {
+    disposed = true
+    observer?.disconnect()
+    native = undefined
+  }
+}
+
 export function createTDesignElement(document: Document, tag: string, primitive: string): TDesignElement {
   ensureInstalled(document)
   const element = document.createElement(tag) as TDesignElement
@@ -260,8 +345,29 @@ export function createTDesignPortal(document: Document, parent?: HTMLElement): H
       scrollbar-gutter: stable; outline: none;
     }
     .cxf-tdesign-listbox[hidden] { display: none; }
-    .cxf-tdesign-listbox t-option { display: block; min-inline-size: 0; }
-    .cxf-tdesign-listbox t-option[data-active="true"] { outline: 2px solid var(--cx-focus); outline-offset: -2px; border-radius: .35rem; }
+    .cxf-tdesign-listbox t-option { display: block; min-inline-size: 0; outline: none; }
+    .cxf-tdesign-listbox t-option::part(t-select-option) {
+      display: flex; align-items: center; box-sizing: border-box; min-block-size: 36px;
+      border-radius: .35rem; outline: none;
+    }
+    .cxf-tdesign-listbox t-option[data-host-option-icon="true"]::part(t-select-option) {
+      background-image: var(--cxf-option-icon-light); background-position: 10px center;
+      background-repeat: no-repeat; background-size: var(--cxf-option-icon-size, 20px) var(--cxf-option-icon-size, 20px);
+      padding-inline-start: 40px;
+    }
+    :host([data-cordisx-app-theme="dark"]) .cxf-tdesign-listbox t-option[data-host-option-icon="true"]::part(t-select-option),
+    :host-context([data-cordisx-app-theme="dark"]) .cxf-tdesign-listbox t-option[data-host-option-icon="true"]::part(t-select-option) {
+      background-image: var(--cxf-option-icon-dark, var(--cxf-option-icon-light));
+    }
+    .cxf-tdesign-listbox t-option[aria-selected="true"]::part(t-select-option) {
+      background-color: var(--td-bg-color-container-select, var(--cx-pressed));
+    }
+    .cxf-tdesign-listbox t-option:not([aria-selected="true"]):hover::part(t-select-option) {
+      background-color: var(--td-bg-color-container-hover, var(--cx-hover));
+    }
+    .cxf-tdesign-listbox t-option[data-active="true"]::part(t-select-option) {
+      box-shadow: inset 0 0 0 1px var(--td-brand-color, var(--cx-primary));
+    }
     .t-popup { z-index: 2147483001; }
     .t-popup__content { max-inline-size: min(28rem, calc(100vw - 1.5rem)); color: var(--cx-text); }
     .cxf-field-menu {
@@ -325,6 +431,10 @@ function scheduleAccessibilityPatch(document: Document, callback: () => void): v
   if (typeof document.defaultView?.requestAnimationFrame === 'function') {
     document.defaultView.requestAnimationFrame(callback)
   }
+  // The pinned Omi components restore typed props in a zero-delay task after
+  // their first controlled update. Project Host-owned labels once more after
+  // that task so the visible SelectInput cannot fall back to its prior label.
+  document.defaultView?.setTimeout(callback, 0)
 }
 
 export function createTDesignSelect<Value>(
@@ -423,6 +533,12 @@ export function createTDesignSelect<Value>(
     rendered.setAttribute('role', 'option')
     rendered.tabIndex = -1
     rendered.textContent = option.label
+    if (option.iconUri !== undefined) {
+      rendered.dataset.hostOptionIcon = 'true'
+      rendered.style.setProperty('--cxf-option-icon-light', `url("${option.iconUri}")`)
+      rendered.style.setProperty('--cxf-option-icon-dark', `url("${option.darkIconUri ?? option.iconUri}")`)
+      rendered.style.setProperty('--cxf-option-icon-size', `${option.iconSize ?? 20}px`)
+    }
     setTDesignProps(rendered, {
       label: option.label,
       content: option.label,
@@ -430,12 +546,67 @@ export function createTDesignSelect<Value>(
       disabled: option.disabled === true,
       selected: Object.is(option.value, selected),
     })
+    rendered.addEventListener('pointerdown', event => {
+      event.preventDefault()
+      event.stopPropagation()
+      choose(index)
+    })
     rendered.addEventListener('click', event => {
       event.preventDefault()
-      choose(index)
+      // Pointer selection commits before a nested TDesign option can consume
+      // the later click. Keep click for keyboard/programmatic activation.
+      if (!Object.is(options[index]?.value, selected)) choose(index)
     })
     listbox.append(rendered)
   })
+
+  const projectSelectedOptionIcon = (): void => {
+    const option = options.find(candidate => Object.is(candidate.value, selected))
+    const input = element.shadowRoot === null
+      ? undefined
+      : deepElements(element.shadowRoot, 'input')[0] as HTMLInputElement | undefined
+    // The pinned Select updates its selected value but can retain the previous
+    // SelectInput display string after a Host-controlled option change. Keep
+    // the visible label projected from the same selected option as the icon.
+    if (input !== undefined) input.value = option?.label ?? ''
+    if (option?.iconUri === undefined) {
+      delete element.dataset.hostSelectedOptionIcon
+      element.style.removeProperty('--cxf-select-value-icon-light')
+      element.style.removeProperty('--cxf-select-value-icon-dark')
+      element.style.removeProperty('--cxf-select-value-icon-size')
+      input?.style.removeProperty('background-image')
+      input?.style.removeProperty('background-position')
+      input?.style.removeProperty('background-repeat')
+      input?.style.removeProperty('background-size')
+      input?.style.removeProperty('padding-inline-start')
+      return
+    }
+    element.dataset.hostSelectedOptionIcon = 'true'
+    element.style.setProperty('--cxf-select-value-icon-light', `url("${option.iconUri}")`)
+    element.style.setProperty('--cxf-select-value-icon-dark', `url("${option.darkIconUri ?? option.iconUri}")`)
+    element.style.setProperty('--cxf-select-value-icon-size', `${option.iconSize ?? 20}px`)
+    if (input === undefined) return
+    input.style.setProperty('background-image', 'var(--cxf-select-value-icon-current, var(--cxf-select-value-icon-light))')
+    input.style.setProperty('background-position', 'left center')
+    input.style.setProperty('background-repeat', 'no-repeat')
+    input.style.setProperty('background-size', 'var(--cxf-select-value-icon-size) var(--cxf-select-value-icon-size)')
+    input.style.setProperty('padding-inline-start', 'calc(var(--cxf-select-value-icon-size) + 8px)')
+  }
+
+  const constrainSelectInputWidth = (): void => {
+    // TDesign renders this nested host as inline-block. Its shrink-to-fit width
+    // follows the selected label, so it can become wider than the outer
+    // t-select even when the public control is width: 100%. Constrain the
+    // official nested host at the shared adapter boundary; otherwise every
+    // narrow form column leaks a few pixels into its grid gap.
+    const selectInput = element.shadowRoot?.querySelector<HTMLElement>('t-select-input')
+    if (selectInput === null || selectInput === undefined) return
+    selectInput.style.setProperty('display', 'block')
+    selectInput.style.setProperty('box-sizing', 'border-box')
+    selectInput.style.setProperty('inline-size', '100%')
+    selectInput.style.setProperty('min-inline-size', '0')
+    selectInput.style.setProperty('max-inline-size', '100%')
+  }
 
   const update = (): void => {
     setTDesignProps(element, {
@@ -487,12 +658,14 @@ export function createTDesignSelect<Value>(
       option.setAttribute('aria-selected', String(isSelected))
       setTDesignProps(option, { selected: isSelected })
     })
-    if (expanded) {
-      document.defaultView?.requestAnimationFrame(() => {
+    if (expanded && typeof document.defaultView?.requestAnimationFrame === 'function') {
+      document.defaultView.requestAnimationFrame(() => {
         positionListbox()
         listbox.querySelector<HTMLElement>('t-option[data-active="true"]')?.scrollIntoView?.({ block: 'nearest' })
       })
     }
+    scheduleAccessibilityPatch(document, constrainSelectInputWidth)
+    scheduleAccessibilityPatch(document, projectSelectedOptionIcon)
     scheduleAccessibilityPatch(document, patchAccessibility)
   }
 
@@ -530,6 +703,11 @@ export function createTDesignSelect<Value>(
   document.addEventListener('pointerdown', closeFromOutside, true)
   document.defaultView?.addEventListener('resize', positionListbox)
   document.defaultView?.addEventListener('scroll', positionListbox, true)
+  element.addEventListener('click', () => {
+    if (config.disabled || config.readonly || expanded) return
+    expanded = true
+    update()
+  })
   let connectedOnce = false
   observer = document.defaultView === null ? undefined : new document.defaultView.MutationObserver(() => {
     if (element.isConnected) {

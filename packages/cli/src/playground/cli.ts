@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { defaultUiPlaygroundConfig } from './defaults.js'
-import { startUiPlayground } from './server.js'
+import { startVitePlayground } from './vite/server.js'
 
 function value(args: readonly string[], option: string): string | undefined {
   const index = args.indexOf(option)
@@ -21,7 +21,7 @@ const rawPort = value(args, '--port')
 const port = rawPort === undefined ? undefined : Number(rawPort)
 if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) throw new Error('--port must be an integer from 0 to 65535')
 const configPath = path.resolve(value(args, '--config') ?? defaultUiPlaygroundConfig)
-const playground = await startUiPlayground({ configPath, ...(port === undefined ? {} : { port }) })
+const playground = await startVitePlayground({ configPath, ...(port === undefined ? {} : { port }) })
 console.log(`[cordisx] UI Playground: ${playground.url}`)
 console.log(`[cordisx] isolated CORDISX_HOME: ${playground.homeDir}`)
 const stop = async () => { await playground.close(); process.exit(0) }

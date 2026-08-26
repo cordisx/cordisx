@@ -1,6 +1,8 @@
 import type { CordisXConfigFieldSnapshot, CordisXConfigFormIcon, CordisXJsonScalar } from '../contracts.js'
 import { resolveFormPresenter, type FormDescriptor } from '@cordisx/schemastery-ui'
 import {
+  bindTDesignTextInput,
+  bindTDesignTextareaRows,
   createTDesignButton,
   createTDesignElement,
   createTDesignMultiSelect,
@@ -45,6 +47,10 @@ export interface HostFormControl {
   readonly primitive: HostFormPrimitive
   readonly diagnostic?: HostFormDiagnostic
   dispose?(): void
+}
+
+export interface HostTransientSecretControl extends HostFormControl {
+  clear(): void
 }
 
 export interface HostFormItem {
@@ -135,8 +141,11 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${HOST_ICON_16PX_C
   .cxf-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(13rem, min(44%, 25rem)); grid-template-areas: "label control" "help control" "error error"; align-items: center; gap: .25rem 1.25rem; min-inline-size: 0; padding: .9rem 1rem; }
   .cxf-item + .cxf-item { border-top: 1px solid var(--cx-border); }
   .cxf-item[data-full-width="true"] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; }
-  .cxf-label-row { grid-area: label; display: flex; align-items: baseline; gap: .35rem; min-inline-size: 0; }
+  .cxf-label-row { grid-area: label; display: flex; align-items: center; gap: .35rem; min-inline-size: 0; }
+  .cxf-label { display: inline-flex; min-block-size: 1.5rem; align-items: center; gap: .35rem; line-height: 1.5rem; }
+  .cxf-required { display: inline-flex; min-block-size: 1.5rem; align-items: center; line-height: 1.5rem; }
   .cxf-field-menu-trigger { flex: 0 0 auto; color: var(--td-text-color-secondary); background: transparent; }
+  .cxf-field-menu-trigger.cxf-button[data-density="icon"] { inline-size: 1.5rem; block-size: 1.5rem; }
   .cxf-field-menu-trigger:hover:not(:disabled), .cxf-field-menu-trigger[aria-expanded="true"] { background: transparent; color: var(--td-text-color-primary); }
   .cxf-form-icon { flex: 0 0 auto; inline-size: 1rem; block-size: 1rem; color: var(--td-text-color-secondary); }
   .cxf-section-title > .cordisx-host-icon { margin-inline-end: .4rem; vertical-align: -.14em; color: var(--td-text-color-secondary); }
@@ -389,29 +398,54 @@ export class HostFormAdapter {
     return grid
   }
 
-  section(title: string, description?: string, icon?: CordisXConfigFormIcon): { readonly root: HTMLElement; readonly content: HTMLElement } {
+  /** Host-private one-shot secret input. Its value is never part of a Config snapshot. */
+  transientSecret(id: string, onDraft: (value: string) => void): HostTransientSecretControl {
+    const input = createTDesignElement(this.document, 't-input', 'input')
+    input.id = id
+    input.tabIndex = 0
+    input.dataset.hostTransientSecret = 'true'
+    input.setAttribute('autocomplete', 'new-password')
+    const emit = (value: string): void => onDraft(value)
+    const apply = (value: string): void => {
+      setTDesignProps(input, {
+        value,
+        defaultValue: value,
+        type: 'password',
+        placeholder: managerCopy(this.locale(), 'form.text-placeholder'),
+        onChange: emit,
+      })
+    }
+    apply('')
+    const dispose = bindTDesignTextInput(input, emit)
+    return { root: input, focusTarget: input, primitive: 'input', clear: () => apply(''), dispose }
+  }
+
+  section(title?: string, description?: string, icon?: CordisXConfigFormIcon): { readonly root: HTMLElement; readonly content: HTMLElement } {
     const root = this.document.createElement('section')
     root.className = 'cxf-section'
-    const heading = this.document.createElement('div')
-    heading.className = 'cxf-section-heading'
-    const titleNode = this.document.createElement('h3')
-    titleNode.className = 'cxf-section-title'
-    if (icon !== undefined) {
-      const glyph = createHostSurfaceIcon(this.document, icon)
-      glyph.classList.add('cxf-form-icon')
-      titleNode.append(glyph)
-    }
-    titleNode.append(this.document.createTextNode(title))
-    heading.append(titleNode)
-    if (description !== undefined) {
-      const copy = this.document.createElement('p')
-      copy.className = 'cxf-section-description'
-      copy.textContent = description
-      heading.append(copy)
+    if (title !== undefined) {
+      const heading = this.document.createElement('div')
+      heading.className = 'cxf-section-heading'
+      const titleNode = this.document.createElement('h3')
+      titleNode.className = 'cxf-section-title'
+      if (icon !== undefined) {
+        const glyph = createHostSurfaceIcon(this.document, icon)
+        glyph.classList.add('cxf-form-icon')
+        titleNode.append(glyph)
+      }
+      titleNode.append(this.document.createTextNode(title))
+      heading.append(titleNode)
+      if (description !== undefined) {
+        const copy = this.document.createElement('p')
+        copy.className = 'cxf-section-description'
+        copy.textContent = description
+        heading.append(copy)
+      }
+      root.append(heading)
     }
     const content = this.document.createElement('div')
     content.className = 'cxf-form-grid'
-    root.append(heading, content)
+    root.append(content)
     return { root, content }
   }
 
@@ -420,11 +454,11 @@ export class HostFormAdapter {
     options: readonly TDesignSelectOption<Value>[],
     value: Value | undefined,
     onChange: (value: Value | undefined) => void,
-    config: { readonly id?: string; readonly disabled?: boolean; readonly readonly?: boolean; readonly clearable?: boolean } = {},
+    config: { readonly id?: string; readonly disabled?: boolean; readonly readonly?: boolean; readonly clearable?: boolean; readonly placeholder?: string } = {},
   ): TDesignSelectElement<Value> {
     return createTDesignSelect(this.document, this.portalHost, options, {
       label,
-      placeholder: managerCopy(this.locale(), 'form.select-placeholder'),
+      placeholder: config.placeholder ?? managerCopy(this.locale(), 'form.select-placeholder'),
       onChange,
       ...(value === undefined ? {} : { value }),
       ...config,
@@ -736,7 +770,12 @@ export class HostFormAdapter {
     }
   }
 
-  control(field: CordisXConfigFieldSnapshot, id: string, onDraft: (value: unknown, issue?: string) => void): HostFormControl {
+  control(
+    field: CordisXConfigFieldSnapshot,
+    id: string,
+    onDraft: (value: unknown, issue?: string) => void,
+    options: { readonly placeholder?: string; readonly textareaRows?: number } = {},
+  ): HostFormControl {
     const primitive = selectHostFormPrimitive(field)
     const diagnostic = hostFormDiagnostic(field)
     if (primitive === 'sensitive-unavailable') return {
@@ -1017,25 +1056,39 @@ export class HostFormAdapter {
       })
     } else {
       const initial = primitive === 'json-textarea' ? JSON.stringify(field.value, null, 2) : String(field.value ?? '')
+      const emit = (next: string): void => {
+        if (primitive !== 'json-textarea') {
+          onDraft(next, validateHostFormValue(field, next, this.locale()))
+          return
+        }
+        try {
+          const value = JSON.parse(next) as unknown
+          onDraft(value, validateHostFormValue(field, value, this.locale()))
+        } catch {
+          onDraft(undefined, managerCopy(this.locale(), 'form.json-invalid'))
+        }
+      }
       setTDesignProps(input, {
         value: initial,
         defaultValue: initial,
         disabled: field.disabled,
-        placeholder: primitive === 'path-input' ? '/absolute/path' : managerCopy(this.locale(), 'form.text-placeholder'),
-        autosize: primitive === 'textarea' || primitive === 'json-textarea' ? { minRows: 4, maxRows: 12 } : undefined,
-        onChange: (next: string) => {
-          if (primitive !== 'json-textarea') {
-            onDraft(next, validateHostFormValue(field, next, this.locale()))
-            return
-          }
-          try {
-            const value = JSON.parse(next) as unknown
-            onDraft(value, validateHostFormValue(field, value, this.locale()))
-          } catch {
-            onDraft(undefined, managerCopy(this.locale(), 'form.json-invalid'))
-          }
-        },
+        placeholder: options.placeholder ?? (primitive === 'path-input' ? '/absolute/path' : managerCopy(this.locale(), 'form.text-placeholder')),
+        autosize: primitive === 'textarea' || primitive === 'json-textarea'
+          ? { minRows: options.textareaRows ?? 4, maxRows: 12 }
+          : undefined,
+        onChange: emit,
       })
+      const disposeText = bindTDesignTextInput(input, emit)
+      const disposeRows = primitive === 'textarea' || primitive === 'json-textarea'
+        ? bindTDesignTextareaRows(input, options.textareaRows ?? 4)
+        : undefined
+      return {
+        root: input,
+        focusTarget: input,
+        primitive,
+        dispose: () => { disposeText(); disposeRows?.() },
+        ...(diagnostic === undefined ? {} : { diagnostic }),
+      }
     }
     return { root: input, focusTarget: input, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
   }

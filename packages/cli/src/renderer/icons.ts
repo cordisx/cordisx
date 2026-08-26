@@ -198,6 +198,9 @@ export const HOST_ICON_16PX_CSS = String.raw`
     color: currentColor;
     pointer-events: none;
   }
+  .cordisx-host-icon > svg :where(path, circle, rect, polygon) {
+    fill: currentColor;
+  }
 `
 
 /** Create one decorative, host-owned icon from a compile-time bundled Material symbol. */

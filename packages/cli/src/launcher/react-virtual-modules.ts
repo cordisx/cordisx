@@ -49,7 +49,7 @@ const REACT_EXPORTS = [
   'version',
 ] as const
 
-const UI_EXPORTS = ['Button', 'Card', 'EmptyState', 'Heading', 'Stack', 'Text'] as const
+const UI_EXPORTS = ['Button', 'Card', 'EmptyState', 'Heading', 'Icon', 'Select', 'Stack', 'Text'] as const
 
 function runtimePrelude(): string {
   return `const runtime = globalThis.__cordisxSharedReactRuntime;

@@ -1,0 +1,276 @@
+import { randomBytes } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
+import {
+  buildRendererBundle,
+  buildRendererCompositionSource,
+  type RendererCompositionSource,
+} from '../launcher/bundle.js'
+import { loadConfig, type CordisXConfig } from '../launcher/config.js'
+import {
+  configBridgeError,
+  createConfigBridgeHandler,
+  parseConfigBindingRequest,
+  type ConfigBridgeHandler,
+} from '../launcher/config-rpc.js'
+import { createChannelCredentialBridgeHandler, type ChannelCredentialBridgeHandler } from '../launcher/channel-credential-rpc.js'
+import { createChannelHostServiceConfigContract, projectLocalChannelManager } from '../launcher/channel-service.js'
+import { HostServiceConfigNarrowApi } from '../launcher/service-config.js'
+import {
+  createServiceConfigBridgeHandler,
+  parseServiceConfigBindingRequest,
+  serviceConfigBridgeError,
+  type ServiceConfigBridgeHandler,
+} from '../launcher/service-config-rpc.js'
+import { LauncherKeychainError, LauncherSecretStore, type LauncherKeychainBackend } from '../launcher/secret-store.js'
+import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
+
+export interface PlaygroundFixtureInfo {
+  readonly name: string
+  readonly source: string
+}
+
+interface PlaygroundGeneration {
+  readonly generation: string
+  readonly token: string
+  readonly config: CordisXConfig
+  readonly bridge: ConfigBridgeHandler
+  readonly serviceConfig?: ServiceConfigBridgeHandler
+  readonly credential?: ChannelCredentialBridgeHandler
+  readonly channelConfig?: HostServiceConfigNarrowApi
+  readonly channelManager?: ChannelManagerProjectionV1
+}
+
+export interface PreparedPlaygroundComposition extends RendererCompositionSource {
+  readonly generation: string
+}
+
+export interface PlaygroundSession {
+  readonly configPath: string
+  readonly fixture: PlaygroundFixtureInfo
+  readonly homeDir: string
+  buildBundle(): Promise<{ readonly generation: string; readonly source: string }>
+  buildComposition(runtimeImport: string): Promise<PreparedPlaygroundComposition>
+  handleConfigRequest(raw: string): Promise<unknown>
+  handleServiceConfigRequest(raw: string): Promise<unknown>
+  handleChannelCredentialRequest(raw: string): Promise<unknown>
+  reset(): Promise<void>
+  close(): Promise<void>
+}
+
+class PlaygroundCredentialBackend implements LauncherKeychainBackend {
+  private readonly values = new Map<string, string>()
+
+  private key(service: string, account: string): string { return `${service}\u0000${account}` }
+  async read(service: string, account: string): Promise<string> {
+    const value = this.values.get(this.key(service, account))
+    if (value === undefined) throw new LauncherKeychainError('MISSING')
+    return value
+  }
+  async upsert(service: string, account: string, value: string): Promise<void> { this.values.set(this.key(service, account), value) }
+  async remove(service: string, account: string): Promise<void> { this.values.delete(this.key(service, account)) }
+  async status(service: string, account: string): Promise<'set' | 'unset'> { return this.values.has(this.key(service, account)) ? 'set' : 'unset' }
+  clear(): void { this.values.clear() }
+}
+
+function fixtureInfo(source: Record<string, unknown>, sourcePath: string): PlaygroundFixtureInfo {
+  const playground = source.playground
+  const name = playground !== null
+    && typeof playground === 'object'
+    && typeof (playground as Record<string, unknown>).name === 'string'
+    ? (playground as Record<string, unknown>).name as string
+    : path.basename(sourcePath)
+  return { name, source: path.basename(sourcePath) }
+}
+
+/**
+ * Materialize a source fixture into an isolated, writable Playground home.
+ * Both the production-bundle server and Vite dev server share this authority.
+ */
+export async function createPlaygroundSession(sourceConfigPath: string): Promise<PlaygroundSession> {
+  const sourcePath = path.resolve(sourceConfigPath)
+  const source = JSON.parse(await readFile(sourcePath, 'utf8')) as Record<string, unknown>
+  if (source.version !== 1 || !Array.isArray(source.plugins)) {
+    throw new Error('Playground config must be a CordisX version-1 composition')
+  }
+
+  const fixture = fixtureInfo(source, sourcePath)
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cordisx-ui-playground-'))
+  const stateRoot = path.join(homeDir, 'state')
+  const configPath = path.join(homeDir, 'config', 'playground.config.json')
+  const serviceConfigPath = path.join(homeDir, 'config', 'playground.home.json')
+  const rootDir = path.dirname(sourcePath)
+  const { playground: _fixtureMetadata, ...compositionConfig } = source
+  const materialized = {
+    ...compositionConfig,
+    plugins: source.plugins.map((item: unknown) => {
+      const plugin = item as Record<string, unknown>
+      return {
+        ...plugin,
+        entry: typeof plugin.entry === 'string' && !plugin.entry.startsWith('cordisx:')
+          ? path.resolve(rootDir, plugin.entry)
+          : plugin.entry,
+      }
+    }),
+  }
+  const writeFixture = async (): Promise<void> => {
+    await writeFile(configPath, `${JSON.stringify(materialized, null, 2)}\n`, { mode: 0o600 })
+    await writeFile(serviceConfigPath, `${JSON.stringify({
+      version: 1,
+      defaultApp: 'codex',
+      providers: [],
+      plugins: materialized.plugins,
+      permissions: [],
+      publisherGrantIssuers: [],
+      apps: {
+        codex: {
+          defaultProfile: 'playground',
+          profiles: { playground: { displayName: 'Playground', dataMode: 'host-isolated' } },
+        },
+      },
+    }, null, 2)}\n`, { mode: 0o600 })
+  }
+
+  await mkdir(path.dirname(configPath), { recursive: true, mode: 0o700 })
+  await mkdir(path.join(homeDir, 'cache'), { recursive: true, mode: 0o700 })
+  await mkdir(stateRoot, { recursive: true, mode: 0o700 })
+  await writeFixture()
+
+  let active: PlaygroundGeneration | undefined
+  const credentialBackend = new PlaygroundCredentialBackend()
+  const nextGeneration = async (): Promise<PlaygroundGeneration> => {
+    active?.channelConfig?.dispose()
+    const generation = `playground-${randomBytes(12).toString('hex')}`
+    const token = randomBytes(32).toString('hex')
+    const serviceConfigToken = randomBytes(32).toString('hex')
+    const credentialToken = randomBytes(32).toString('hex')
+    const config = await loadConfig(configPath, { profileId: 'playground' })
+    const bridge = createConfigBridgeHandler({
+      token,
+      profileId: 'playground',
+      generation,
+      configPath,
+      composition: config,
+    })
+    const channelPlugin = config.plugins.find(plugin => plugin.id === 'channel')
+    const channelConfig = channelPlugin === undefined ? undefined : new HostServiceConfigNarrowApi({
+      contract: createChannelHostServiceConfigContract({
+        source: channelPlugin.source ?? pathToFileURL(channelPlugin.entry).href,
+        pluginId: 'channel', serviceId: 'runtime',
+      }) as unknown as ConstructorParameters<typeof HostServiceConfigNarrowApi>[0]['contract'],
+      profileId: 'playground', generation, ownerToken: serviceConfigToken,
+      configPath: serviceConfigPath, writable: true, authorize: () => true,
+      restartService: async () => ({
+        generation: `playground-service-${randomBytes(8).toString('hex')}`,
+        rollback: async () => undefined,
+      }),
+    })
+    const serviceConfig = channelConfig === undefined ? undefined : createServiceConfigBridgeHandler({
+      token: serviceConfigToken, profileId: 'playground', generation,
+      services: [{ pluginId: 'channel', serviceId: 'runtime', api: channelConfig }],
+    })
+    const credential = channelConfig === undefined ? undefined : createChannelCredentialBridgeHandler({
+      token: credentialToken, profileId: 'playground',
+      store: new LauncherSecretStore({ platform: 'darwin', backend: credentialBackend }),
+      service: channelConfig,
+    })
+    const channelDescriptor = await channelConfig?.descriptor()
+    const channelManager = channelDescriptor === undefined ? undefined : projectLocalChannelManager({
+      configuration: channelDescriptor.configuration,
+      revision: channelDescriptor.revision,
+      lastGoodRevision: channelDescriptor.lastGoodRevision,
+      writable: channelDescriptor.writable,
+    })
+    const next: PlaygroundGeneration = {
+      generation, token, config, bridge,
+      ...(channelConfig === undefined ? {} : { channelConfig }),
+      ...(serviceConfig === undefined ? {} : { serviceConfig }),
+      ...(credential === undefined ? {} : { credential }),
+      ...(channelManager === undefined ? {} : { channelManager }),
+    }
+    active = next
+    return next
+  }
+  const rendererOptions = (generation: PlaygroundGeneration) => ({
+    playground: true as const,
+    generation: generation.generation,
+    configBridgeToken: generation.token,
+    ...(generation.serviceConfig === undefined ? {} : { serviceConfigBridgeToken: generation.serviceConfig.token }),
+    ...(generation.credential === undefined ? {} : { channelCredentialBridgeToken: generation.credential.token }),
+    ...(generation.channelManager === undefined ? {} : { channelManager: generation.channelManager }),
+    profileId: 'playground',
+  })
+
+  return {
+    configPath,
+    fixture,
+    homeDir,
+    async buildBundle() {
+      const generation = await nextGeneration()
+      return {
+        generation: generation.generation,
+        source: await buildRendererBundle(generation.config, rendererOptions(generation)),
+      }
+    },
+    async buildComposition(runtimeImport) {
+      const generation = await nextGeneration()
+      const composition = await buildRendererCompositionSource(
+        generation.config,
+        rendererOptions(generation),
+        { runtimeImport, awaitBoot: true },
+      )
+      return { ...composition, generation: generation.generation }
+    },
+    async handleConfigRequest(raw) {
+      if (active === undefined) throw new Error('Playground has no active generation')
+      const parsed = parseConfigBindingRequest(
+        JSON.parse(raw),
+        active.bridge.token,
+        active.bridge.profileId,
+        active.generation,
+      )
+      try {
+        return { requestId: parsed.requestId, ok: true, value: await active.bridge.handle(parsed) }
+      } catch (error) {
+        return { requestId: parsed.requestId, ok: false, ...configBridgeError(error) }
+      }
+    },
+    async handleServiceConfigRequest(raw) {
+      if (active?.serviceConfig === undefined) throw new Error('Playground has no active Channel configuration service')
+      const parsed = parseServiceConfigBindingRequest(
+        JSON.parse(raw), active.serviceConfig.token, active.serviceConfig.profileId, active.serviceConfig.generation,
+      )
+      try {
+        return { requestId: parsed.requestId, ok: true, value: await active.serviceConfig.handle(parsed) }
+      } catch (error) {
+        return { requestId: parsed.requestId, ok: false, ...serviceConfigBridgeError(error) }
+      }
+    },
+    async handleChannelCredentialRequest(raw) {
+      if (active?.credential === undefined) throw new Error('Playground has no active Channel credential service')
+      const parsed = JSON.parse(raw) as { readonly requestId?: unknown }
+      const requestId = typeof parsed.requestId === 'string' ? parsed.requestId : ''
+      try {
+        return { requestId, ok: true, value: await active.credential.handle(parsed) }
+      } catch {
+        return { requestId, ok: false, code: 'unavailable', error: 'Channel credential capture is unavailable.' }
+      }
+    },
+    async reset() {
+      active?.channelConfig?.dispose()
+      credentialBackend.clear()
+      await writeFixture()
+      await rm(stateRoot, { recursive: true, force: true })
+      await mkdir(stateRoot, { recursive: true, mode: 0o700 })
+      active = undefined
+    },
+    async close() {
+      active?.channelConfig?.dispose()
+      credentialBackend.clear()
+      active = undefined
+      await rm(homeDir, { recursive: true, force: true })
+    },
+  }
+}
