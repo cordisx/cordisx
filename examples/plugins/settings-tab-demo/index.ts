@@ -30,9 +30,7 @@ export const manifest = {
 } as const satisfies CordisXPluginManifestV1
 
 interface Messages {
-  'body.description': undefined
   'body.label': undefined
-  'body.title': undefined
   'page.description': undefined
   'page.title': undefined
   'route.description': undefined
@@ -53,14 +51,6 @@ function mountSettingsNavigation(context: CordisXPageMountContext, config: Setti
     display: 'grid', gap: '12px', maxWidth: '620px', padding: '24px', color: 'inherit',
     font: '14px/1.55 ui-sans-serif, system-ui, sans-serif',
   })
-  const title = context.document.createElement('h2')
-  title.dataset.settingsNavigationDemoBodyTitle = 'true'
-  title.style.margin = '0'
-  context.localization.bindText(title, message('body.title'))
-  const description = context.document.createElement('p')
-  description.style.margin = '0'
-  description.style.opacity = '.72'
-  context.localization.bindText(description, message('body.description'))
   const label = context.document.createElement('label')
   label.style.display = 'grid'
   label.style.gap = '6px'
@@ -79,7 +69,7 @@ function mountSettingsNavigation(context: CordisXPageMountContext, config: Setti
   diagnostic.dataset.settingsNavigationDemoRoute = context.routeId
   diagnostic.textContent = `${context.outlet} · ${context.routeId}`
   diagnostic.style.opacity = '.55'
-  section.append(title, description, label, diagnostic)
+  section.append(label, diagnostic)
   context.container.append(section)
   context.signal.addEventListener('abort', () => { section.dataset.settingsNavigationDemoAborted = 'true' }, { once: true })
   return () => section.remove()
@@ -90,9 +80,7 @@ export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})):
   ctx.i18n.define<Messages>({
     namespace: 'settings-demo', locale: 'en', default: true,
     messages: {
-      'body.description': 'Settings for this demo plugin.',
       'body.label': 'Demo value',
-      'body.title': 'Plugin settings content',
       'page.description': 'Edit the example value for this demo plugin.',
       'page.title': 'Demo plugin settings',
       'route.description': 'Open the demo plugin settings and edit its example value.',
@@ -102,9 +90,7 @@ export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})):
   ctx.i18n.define<Messages>({
     namespace: 'settings-demo', locale: 'zh-CN',
     messages: {
-      'body.description': '此演示插件的设置。',
       'body.label': '演示值',
-      'body.title': '插件设置内容',
       'page.description': '编辑此演示插件的示例值。',
       'page.title': '演示插件设置',
       'route.description': '打开“演示插件设置”并编辑示例值。',

@@ -577,6 +577,7 @@ const MANAGER_STYLES = `
   .cxm-heading-title { display: flex; grid-column: 2; align-items: center; min-width: 0; min-height: 26px; color: #fff; font-size: 16px; font-weight: 700; line-height: 1.2; }
   .cxm-heading-current-heading { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .cxm-heading p { grid-column: 1 / -1; margin: 3px 0 0; color: #7f899a; font-size: 11px; }
+  .cxm-heading-direct-title { grid-column: 2; min-width: 0; min-height: 26px; margin: 0; color: #fff; font-size: 16px; font-weight: 700; line-height: 26px; }
   .cxm-heading-leading {
     display: grid;
     place-items: center;
@@ -1281,6 +1282,7 @@ const HOST_THEME_OVERLAY_STYLES = `
   .cxm-header, .cxm-about-actions, .cxm-about-action-item + .cxm-about-action-item, .cxm-flat-item + .cxm-flat-item { border-color: var(--cx-border); }
   .cxm-about-actions { background: var(--cx-surface-raised); }
   .cxm-nav-button, .cxm-heading p, .cxm-detail-description, .cxm-permission-reason, .cxm-copy, .cxm-source-state, .cxm-detail-id, .cxm-plugin-description, .cxm-plugin-meta, .cxm-catalog-description, .cxm-catalog-id, .cxm-catalog-status, .cxm-marketplace-trust-copy, .cxm-marketplace-trust-meta, .cxm-field-label { color: var(--cx-muted); }
+  .cxm-heading-direct-title { color: var(--cx-text); }
   .cxm-nav-icon { color: currentColor; }
   .cxm-heading-leading { color: var(--cx-text); }
   .cxm-nav-button:hover, .cxm-nav-button[aria-current="page"], .cxm-nav-button[aria-selected="true"], .cxm-back:hover, .cxm-breadcrumb-action:hover, .cxm-breadcrumb-overflow > summary:hover, .cxm-tab:hover, .cxm-tab[aria-selected="true"], .cxm-about-action:hover, .cxm-about-action:focus-visible { background: var(--cx-hover); color: var(--cx-text); }
@@ -3177,6 +3179,19 @@ export function installCordisXManager(
     if (pageRoute.segments.length <= 1 && description !== undefined && description !== '' && description !== current.trim()) {
       heading.append(create(document, 'p', undefined, description))
     }
+  }
+
+  const setDirectManagerNavigationHeading = (title: string, icon: CordisXIconToken): void => {
+    breadcrumbCleanup()
+    breadcrumbCleanup = () => {}
+    heading.replaceChildren()
+    delete heading.dataset.headingActions
+    const row = create(document, 'div', 'cxm-heading-row')
+    const leading = createHostSurfaceIcon(document, icon)
+    leading.classList.add('cxm-heading-leading', 'cxm-heading-icon')
+    leading.setAttribute('aria-hidden', 'true')
+    row.append(leading, create(document, 'h2', 'cxm-heading-direct-title', title))
+    heading.append(row)
   }
 
   const renderAbout = (snapshot: ManagerSnapshot): void => {
@@ -6349,7 +6364,10 @@ export function installCordisXManager(
     const tabs = activeTab === undefined
       ? []
       : projection.tabs.map(tab => ({ ...tab, active: tab === activeTab }))
-    setHeading(projection.description, snapshot, { icon: projection.icon ?? item.icon })
+    // A Manager navigation row is the page's first-level parent. Its icon and
+    // label form the Host header, so route history never adds a duplicate Back
+    // control or a "Plugins / …" breadcrumb above plugin-owned body content.
+    setDirectManagerNavigationHeading(item.title, item.icon)
     if (managerContentRoot === undefined || !managerContentRoot.isConnected) {
       managerContentRoot = create(document, 'div', 'cxm-manager-content-root')
       managerContentRoot.dataset.managerContentRoot = 'true'

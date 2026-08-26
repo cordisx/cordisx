@@ -82,16 +82,19 @@ describe('settings navigation demo bundle', () => {
     await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content="mounted"]') !== null)
     const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-page="settings-tab-demo:navigation"]')!
     expect(page.closest('[data-manager-content-root]')).not.toBeNull()
-    // This route has a history destination, so the one stable leading seat
-    // renders Back and never a second decorative Host icon beside it.
-    expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).not.toBeNull()
-    expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-icon[data-host-icon]')).toBeNull()
-    expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-leading-stack')).toBeNull()
+    // A first-level Manager navigation entry owns the direct Host header: it
+    // has its own icon and title, without a history Back control or breadcrumb.
+    expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).toBeNull()
+    expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-icon[data-host-icon="host:settings"]')).not.toBeNull()
+    expect(dom.window.document.querySelector('.cxm-heading .cxm-breadcrumbs')).toBeNull()
+    expect(dom.window.document.querySelector('.cxm-heading p')).toBeNull()
+    expect(dom.window.document.querySelector('.cxm-heading-direct-title')?.textContent).toBe('Demo plugin settings')
     const managerStyles = dom.window.document.getElementById('cordisx-manager-style')?.textContent
     expect(managerStyles).toContain('grid-template-columns: 26px minmax(0, 1fr)')
     expect(managerStyles).toContain('.cxm-tabs {\n    display: flex;\n    width: 100%;\n    min-width: 0;')
     expect(managerStyles).toContain('.cxm-manager-content-root { min-width: 0; max-width: 100%; }')
-    expect(page.querySelector('[data-settings-navigation-demo-body-title]')?.textContent).toBe('Plugin settings content')
+    expect(page.querySelector('[data-settings-navigation-demo-body-title]')).toBeNull()
+    expect(page.textContent).not.toContain('Settings for this demo plugin.')
     expect(page.querySelector<HTMLInputElement>('[data-settings-navigation-demo-focus]')?.value).toBe('CordisX')
     expect(item()?.getAttribute('aria-current')).toBe('page')
     expect(dom.window.location.href).toBe('https://codex.local/native')
