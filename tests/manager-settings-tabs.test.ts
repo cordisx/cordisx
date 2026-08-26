@@ -61,6 +61,10 @@ describe('Manager settings navigation projection', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
       const entry = dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="demo:navigation"]')!
       expect(entry.querySelector('[data-host-icon="host:settings"]')).not.toBeNull(); expect(entry.querySelector('style,section')).toBeNull()
+      const styles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
+      expect(styles).toContain('.cordisx-host-icon svg {')
+      expect(styles).toContain('fill: currentColor;')
+      expect(styles).toContain('color: currentColor;')
       entry.click(); await settle()
       expect(dom.window.document.querySelector('[data-demo-body="demo:navigation"]')).not.toBeNull(); expect(dom.window.document.querySelector('[data-settings-navigation-item="demo:navigation"]')?.getAttribute('aria-current')).toBe('page')
       expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).toBeNull()

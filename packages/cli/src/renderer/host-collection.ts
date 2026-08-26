@@ -99,8 +99,8 @@ interface RenderedItem {
 
 export const HOST_COLLECTION_STYLES = String.raw`
   .cxc-collection {
-    --cxc-icon-seat-size: 36px;
-    --cxc-icon-glyph-size: 24px;
+    --cxc-icon-seat-size: 32px;
+    --cxc-icon-glyph-size: 16px;
     min-width: 0;
   }
   .cxc-collection[data-density="compact"] {
@@ -158,7 +158,6 @@ export const HOST_COLLECTION_STYLES = String.raw`
     gap: 11px;
     width: 100%;
     min-width: 0;
-    min-height: 82px;
     height: auto;
     box-sizing: border-box;
     padding: 12px;
@@ -173,10 +172,10 @@ export const HOST_COLLECTION_STYLES = String.raw`
   div.cxc-primary { cursor: default; }
   .cxc-primary:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: -3px; }
   .cxc-icon-seat { position: relative; display: grid; place-items: center; width: var(--cxc-icon-seat-size); height: var(--cxc-icon-seat-size); flex: none; color: var(--cx-muted); }
-  .cxc-icon-seat > :first-child { width: var(--cxc-icon-glyph-size); height: var(--cxc-icon-glyph-size); max-width: 100%; max-height: 100%; pointer-events: none; }
+  .cxc-icon-seat > :first-child { display: inline-grid; place-items: center; width: var(--cxc-icon-glyph-size); height: var(--cxc-icon-glyph-size); max-width: 100%; max-height: 100%; flex: none; color: currentColor; line-height: 0; pointer-events: none; }
   /* Host icon wrappers may carry SVG width/height attributes from their source
      asset. Keep the rendered glyph inside the shared seat regardless of token. */
-  .cxc-icon-seat > :first-child > svg { display: block; width: 100% !important; height: 100% !important; }
+  .cxc-icon-seat > :first-child > svg { display: block; width: 100% !important; height: 100% !important; fill: currentColor; color: currentColor; }
   .cxc-status {
     position: absolute;
     right: -3px;

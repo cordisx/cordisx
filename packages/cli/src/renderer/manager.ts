@@ -462,6 +462,8 @@ const MANAGER_STYLES = `
   .cxm-brand-mark,
   .cxm-material-icon,
   .cxm-material-icon svg,
+  .cordisx-host-icon,
+  .cordisx-host-icon svg,
   .cxm-plugin-icon,
   .cxm-status-dot,
   .cxm-dot {
@@ -476,13 +478,16 @@ const MANAGER_STYLES = `
     line-height: 0;
     pointer-events: none;
   }
+  .cordisx-host-icon { flex: none; line-height: 0; pointer-events: none; }
   .cxm-material-icon svg {
     display: block;
     width: 100%;
     height: 100%;
     fill: currentColor;
+    color: currentColor;
     pointer-events: none;
   }
+  .cordisx-host-icon svg { fill: currentColor; color: currentColor; pointer-events: none; }
   .cxm-brand-mark[data-brand-rendering^="direct-"] { object-fit: contain; }
   [data-cordisx-manager-modal] {
     position: fixed;
@@ -543,6 +548,7 @@ const MANAGER_STYLES = `
   .cxm-nav-button:disabled { cursor: default; opacity: .48; }
   .cxm-nav-button[data-tab="about"] { margin-top: auto; }
   .cxm-nav-icon { width: 20px; height: 20px; color: #b8bec8; }
+  .cxm-nav-icon.cordisx-host-icon { display: inline-grid; place-items: center; }
   .cxm-nav-icon svg { width: 18px; height: 18px; }
   .cxm-nav-button:focus-visible,
   .cxm-close:focus-visible,

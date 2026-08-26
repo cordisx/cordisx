@@ -73,6 +73,13 @@ describe('Host collection primitive', () => {
       expect(HOST_COLLECTION_STYLES).not.toContain('repeat(2,')
       expect(HOST_COLLECTION_STYLES).toContain('.cxc-list[data-layout="rows"] { grid-template-columns: minmax(0, 1fr); }')
       expect(HOST_COLLECTION_STYLES).toContain('width: 32px; min-width: 32px; height: 32px; min-height: 32px;')
+      expect(HOST_COLLECTION_STYLES).toContain('align-items: start;')
+      expect(HOST_COLLECTION_STYLES).toContain('.cxc-listitem { min-width: 0; align-self: start; }')
+      expect(HOST_COLLECTION_STYLES).not.toContain('.cxc-card {\n    position: relative;\n    container-type: inline-size;\n    min-width: 0;\n    height: 100%;')
+      expect(HOST_COLLECTION_STYLES).not.toContain('.cxc-primary {\n    display: flex;\n    align-items: flex-start;\n    gap: 11px;\n    width: 100%;\n    min-width: 0;\n    min-height: 82px;')
+      expect(HOST_COLLECTION_STYLES).not.toContain('min-height: 82px;')
+      expect(HOST_COLLECTION_STYLES).toContain('width: 16px; height: 16px; flex: none; color: currentColor;')
+      expect(HOST_COLLECTION_STYLES).toContain('fill: currentColor; color: currentColor;')
       expect(HOST_COLLECTION_STYLES).toContain('font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;')
     } finally {
       view.dispose()
