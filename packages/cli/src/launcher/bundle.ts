@@ -6,6 +6,10 @@ import type { CordisXConfig } from './config.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
+import {
+  assertNoPrivateReactBundle,
+  cordisXReactVirtualModules,
+} from './react-virtual-modules.js'
 
 export interface BuildRendererBundleOptions {
   /** Use only explicit CordisX Playground seats; never inspect Codex DOM. */
@@ -76,9 +80,15 @@ export async function buildRendererBundle(config: CordisXConfig, options: BuildR
         target: ['chrome120'],
         sourcemap: 'inline',
         loader: { '.svg': 'text', '.css': 'text' },
+        jsx: 'automatic',
+        jsxImportSource: 'cordisx/react',
+        metafile: true,
+        plugins: [cordisXReactVirtualModules()],
         write: false,
         logLevel: 'silent',
       })
+      if (result.metafile === undefined) throw new Error(`esbuild produced no dependency metadata for plugin ${plugin.id}`)
+      assertNoPrivateReactBundle(result.metafile, `plugin ${plugin.id}`)
       const output = result.outputFiles[0]
       if (output === undefined) throw new Error(`esbuild produced no renderer bundle for plugin ${plugin.id}`)
       return output.text

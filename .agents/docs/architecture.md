@@ -197,6 +197,16 @@ Online Chrome DevTools support is opt-in. `--online-devtools` adds `https://chro
 
 The injected bundle creates a new Cordis `Context`, mounts `SlotService` at `ctx.slots`, then mounts each configured plugin as a child fiber. A second injection first disposes the previous host. Plugin startup is fail-loud; already-started fibers unwind in reverse order if a later plugin fails.
 
+The renderer generation also installs one Host-owned React 19 singleton before
+plugin factories run. Plugin builds resolve `cordisx/react`, its automatic JSX
+runtime subpaths, and `cordisx/ui` to this singleton; a plugin artifact that
+contains React, React DOM, or a private React component library is rejected.
+`defineReactPage` mounts a React component only in the existing page-v3 body
+seat and unmounts it on abort or generation disposal. Manager chrome and
+Schemastery configuration remain Host-owned. The public authoring and lifecycle
+contract is specified in
+[`plugin-react-runtime.md`](plugin-react-runtime.md).
+
 The public plugin surface follows DeepSeek Harness: plugins declare injected
 services and use `ctx.slots.inject/register` for structured shell data. Both
 methods install Cordis effects through the service proxy, so the caller's fiber

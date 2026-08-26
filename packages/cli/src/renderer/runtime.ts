@@ -108,6 +108,7 @@ import {
   CordisXChannelManagerService,
   type ChannelManagerProjectionV1,
 } from './channel-manager.js'
+import { installSharedReactRuntime } from './react-runtime.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 
@@ -372,6 +373,7 @@ async function start(
   await globalThis.__cordisxRuntime?.dispose()
 
   let ctx = new Context()
+  let sharedReactRuntime: ReturnType<typeof installSharedReactRuntime> | undefined
   const blockedPlugins = readBlockedPlugins()
   const agentAdapter = new UnavailableCodexHostAdapter()
   let bindingPlatformAdapter: BindingPlatformAdapter | undefined
@@ -413,6 +415,8 @@ async function start(
   if (currentActivation.profileId !== metadata.profileId || currentActivation.runtimeGeneration !== generation) {
     throw new Error('plugin activation metadata does not match the renderer scope')
   }
+  sharedReactRuntime = installSharedReactRuntime(document)
+  try {
   const generationVisibility = new GenerationVisibilityCoordinator(currentActivation, metadata.initialRegistryEpoch)
   const pluginConsole = new PluginConsoleAspect(generation, 2000, () => Date.now(), generationVisibility)
   let pluginErrorOwners = (): readonly {
@@ -1744,6 +1748,8 @@ async function start(
     routeFiber = undefined
     await pageFiber?.dispose()
     pageFiber = undefined
+    sharedReactRuntime?.dispose()
+    sharedReactRuntime = undefined
     await commandFiber?.dispose()
     commandFiber = undefined
     await platformFiber?.dispose()
@@ -2020,6 +2026,11 @@ async function start(
   const activeIds = controllers.filter(controller => controller.status === 'active').map(controller => controller.item.id)
   console.info(`[cordisx] mounted ${activeIds.length} plugin(s): ${activeIds.join(', ')}`)
   return handle
+  } catch (error) {
+    sharedReactRuntime?.dispose()
+    sharedReactRuntime = undefined
+    throw error
+  }
 }
 
 /** Serialize repeated CDP injections so a newer generation disposes the previous one first. */

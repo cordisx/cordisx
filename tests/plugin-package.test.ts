@@ -91,6 +91,18 @@ describe('local plugin package store', () => {
     expect((await loadStagedPluginPackage(home, first.digest)).artifactSource).toBe(first.artifactSource)
   })
 
+  it('compiles shared React imports into the immutable plugin artifact without bundling React', async () => {
+    const { home, source } = await fixture(`
+      import { createElement } from 'cordisx/react'
+      import { Button } from 'cordisx/ui'
+      export function apply() { globalThis.__fixtureElement = createElement(Button, null, 'Ready') }
+    `)
+    const staged = await stageLocalPluginPackage(home, source)
+    expect(staged.moduleSource).toContain('__cordisxSharedReactRuntime')
+    expect(staged.moduleSource).not.toContain('react.production.js')
+    expect(staged.moduleSource).not.toContain('react.development.js')
+  })
+
   it('rejects escaping symlinks and a second bundled Cordis runtime', async () => {
     const { home, source } = await fixture()
     const outside = path.join(path.dirname(source), 'outside.ts')
@@ -102,5 +114,8 @@ describe('local plugin package store', () => {
     await rm(path.join(source, 'src/index.ts'))
     await writeFile(path.join(source, 'src/index.ts'), "import { Context } from '@deepseek-ai/cordis'; export function apply() { return Context }")
     await expect(stageLocalPluginPackage(home, source)).rejects.toThrow('must not bundle a second')
+
+    await writeFile(path.join(source, 'src/index.ts'), "import React from 'react'; export function apply() { return React }")
+    await expect(stageLocalPluginPackage(home, source)).rejects.toThrow('must import React and UI components from cordisx/react and cordisx/ui')
   })
 })

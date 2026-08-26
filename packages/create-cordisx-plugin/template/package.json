@@ -10,8 +10,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "npm run typecheck && npm run build && npm test",
-    "dev": "cordisx dev ./src/{{pluginId}}.ts",
-    "dev:dry-run": "cordisx dev ./src/{{pluginId}}.ts --dry-run",
+    "dev": "cordisx dev ./src/{{pluginId}}.tsx",
+    "dev:dry-run": "cordisx dev ./src/{{pluginId}}.tsx --dry-run",
     "test": "node --test test/manifest.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
