@@ -9,8 +9,6 @@ import type {
   ChannelOutboundDelivery,
   ChannelPermissionDecision,
   ChannelPluginIdentity,
-  ChannelSessionBinding,
-  ChannelTaskResult,
 } from './types.js'
 
 export interface StoredAdapterState extends ChannelAdapterDescriptor {
@@ -37,7 +35,6 @@ export interface StoredInboxRecord {
   readonly leaseGeneration?: number
   readonly leaseExpiresAt?: string
   readonly permission?: ChannelPermissionDecision
-  readonly result?: ChannelTaskResult
   readonly errorCode?: string
   readonly updatedAt: string
 }
@@ -68,8 +65,6 @@ export interface StoredAuditRecord {
   readonly action: string
   readonly outcome: string
   readonly capability?: string
-  readonly bindingRevision?: number
-  readonly sessionKey?: string
   readonly eventKey?: string
 }
 
@@ -80,9 +75,6 @@ export interface ChannelStoreState {
   adapters: Record<string, StoredAdapterState>
   inbox: Record<string, StoredInboxRecord>
   outbox: Record<string, StoredOutboxRecord>
-  bindings: ChannelSessionBinding[]
-  /** Launcher-private durable cursors keyed by the complete Platform session. */
-  lifecycleCursors: Record<string, number>
   audit: StoredAuditRecord[]
 }
 
@@ -94,8 +86,6 @@ function initialState(): ChannelStoreState {
     adapters: {},
     inbox: {},
     outbox: {},
-    bindings: [],
-    lifecycleCursors: {},
     audit: [],
   }
 }
@@ -113,8 +103,6 @@ function isState(value: unknown): value is ChannelStoreState {
     && state.adapters !== null && typeof state.adapters === 'object'
     && state.inbox !== null && typeof state.inbox === 'object'
     && state.outbox !== null && typeof state.outbox === 'object'
-    && Array.isArray(state.bindings)
-    && (state.lifecycleCursors === undefined || state.lifecycleCursors !== null && typeof state.lifecycleCursors === 'object' && !Array.isArray(state.lifecycleCursors))
     && Array.isArray(state.audit)
 }
 
@@ -148,7 +136,17 @@ export class JsonChannelStore {
     try {
       const parsed: unknown = JSON.parse(await readFile(store.#file, 'utf8'))
       if (!isState(parsed)) throw new Error('Channel store has an unsupported contract or malformed root')
-      store.#state = { ...parsed, lifecycleCursors: parsed.lifecycleCursors ?? {} }
+      // The v1 connection store intentionally discards historical task-routing
+      // fields on open. Channel owns transport durability only.
+      store.#state = {
+        contract: parsed.contract,
+        schemaVersion: parsed.schemaVersion,
+        revision: parsed.revision,
+        adapters: parsed.adapters,
+        inbox: parsed.inbox,
+        outbox: parsed.outbox,
+        audit: parsed.audit,
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       await store.#persist(store.#state)

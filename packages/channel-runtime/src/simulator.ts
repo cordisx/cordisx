@@ -58,46 +58,6 @@ export const SIMULATOR_CHANNEL_SERVICE_CONFIG: ChannelServiceConfigV1 = parseCha
     enabled: true,
     transport: { mode: 'simulator' },
   }],
-  routes: [{
-    id: 'default',
-    connection: { adapterId: 'simulator', accountId: 'local', tenantId: 'test' },
-    enabled: true,
-    policy: {
-      conversationKinds: ['direct', 'group'],
-      allowedUserIds: ['alice'],
-      groupTrigger: 'mention-or-command',
-      commandPrefixes: ['/cordisx'],
-    },
-    task: {
-      provider: { id: 'codex' },
-      model: { useDefault: true },
-      profile: { id: 'work' },
-      workspaceAlias: 'cordisx',
-    },
-    notifications: ['completion', 'failure', 'approval-required'],
-  }],
-  reliability: {
-    leaseMs: 30_000,
-    retry: {
-      maxAttempts: 5,
-      baseDelayMs: 1_000,
-      maxDelayMs: 60_000,
-      maxAgeMs: 86_400_000,
-      jitterRatio: 0.2,
-    },
-    rateLimit: {
-      perAccountPerMinute: 120,
-      perUserPerMinute: 20,
-      perConversationPerMinute: 60,
-      maxConcurrent: 8,
-      maxBacklog: 1_000,
-    },
-    attachments: {
-      maxFiles: 4,
-      maxBytesPerFile: 10_485_760,
-      allowedMediaTypes: ['image/png', 'text/plain'],
-    },
-  },
 })
 
 export class ManualChannelClock implements ChannelClock {

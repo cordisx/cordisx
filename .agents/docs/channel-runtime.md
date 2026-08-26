@@ -9,14 +9,24 @@ from unavailable real platform adapters.
 
 ## Outcome
 
-CordisX will let an authorized user create, find, open, continue, and control a
-CordisX task from an external messaging channel. The first official adapters are
-Feishu/Lark and WeCom. A local simulator is a mandatory delivery dependency and
-must pass the complete lifecycle matrix without a real developer account.
+Channel is a connection-only base service. It connects accounts, durably
+receives and sends messages, preserves Channel thread/event identity, publishes
+health, and exposes a source-bound event subscription. It does not create,
+find, open, continue, or control a CordisX task.
 
-Channel is a high-level, host-neutral facade over the existing CordisX Platform
-and Agent APIs. It is not a second task runtime, does not replace the Provider
-Fleet, and does not give a platform adapter raw app-server or renderer access.
+Task dispatch is an optional consumer concern. A consumer may subscribe to
+Channel events and use the separate protocol-owned task-routing contract; it
+does not make a Provider Fleet, model, workspace, or notification policy a
+Channel configuration field. The Host consumes Protocol PR #46's formal merge
+`7f5e9a8ecd8cf6fc5f1d9fd0317a46f72a90283b`.
+
+## Normative v1 boundary
+
+This section supersedes the older task-routing, binding, selector, and
+notification design notes below. They are historical planning material only:
+no Channel core configuration, persistence, or runtime path may depend on
+them. Any future task consumer must own its own routing contract and consume
+source-bound Channel events through the public service facade.
 
 The durable transport runtime lives on the Node launcher side. A renderer
 plugin may render controlled manager content and invoke a narrow, brokered Host

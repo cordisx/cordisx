@@ -201,7 +201,6 @@ describe('launcher Channel service module loading', () => {
     })
 
     const runtime = await ChannelRuntime.open({
-      gateway: new SimulatedTaskGateway(),
       permissions: new SimulatedPermissionBroker('allow'),
       storePath: path.join(fixture.root, 'channel-store.json'),
     })

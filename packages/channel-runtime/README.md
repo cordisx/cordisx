@@ -9,12 +9,12 @@ still being delivered.
 
 | Area | Status | Evidence or boundary |
 | --- | --- | --- |
-| Channel identity, sourced input, binding, snapshot, Host config/descriptor, and package-v3/manifest-v4 service declaration | implemented | `cordisx-protocol#21` / `e4c3a15`, followed by formal package/manifest revisions |
-| Launcher-only connection/route/retry/rate config parser and redacted Manager descriptor generator | verified | focused configuration compliance tests; `secretRef` never enters the result |
-| Shared Host service-config contract | verified | maps the closed manifest `restart` declaration to `service-restart`, uses `standard/renderable=false`, preserves opaque handles across non-secret CAS updates, and redacts values through the #107 narrow API |
+| Channel identity, sourced input, health snapshot, Host config/descriptor, and package-v3/manifest-v4 service declaration | implemented | `cordisx-protocol#46` / `7f5e9a8`; task bindings are consumer-owned |
+| Launcher-only connection config parser and redacted Host descriptor generator | verified | focused configuration compliance tests; `secretRef` never enters the result |
+| Shared Host service-config contract | verified | maps the closed manifest `restart` declaration to `service-restart`, uses a Host-owned Schemastery projection, preserves opaque handles across non-secret CAS updates, and redacts values through the narrow API |
 | Explicit no-config service declaration | verified | `kind=none` returns no descriptor or placeholder form |
-| Host-neutral task gateway, JSON durable store, inbox/outbox, retry, binding, audit, generation fencing, and last-good activation | implemented | this package |
-| Local simulator create/query/open/continue/followup/steer/interrupt/archive/restore | verified | `tests/channel-runtime.integration.test.ts` |
+| JSON connection store, inbox/outbox, event deduplication, audit, generation fencing, and last-good activation | implemented | this package; no task bindings or routing are persisted |
+| Local simulator connection activation, sourced event receipt, and outbound delivery | verified | `tests/channel-runtime.integration.test.ts` |
 | Duplicate event, restart recovery, retry/backoff, permission denial, descriptor redaction, and generation disposal | verified | `tests/channel-runtime.integration.test.ts` |
 | Completion/failure/approval/reply outbox delivery handles | implemented; completion/reply verified | automated Agent notification subscription and approval resolution remain planned |
 | Node Cordis `channel` service connection list, sourced-message subscription, and queued send | verified | source-bound service integration test |
@@ -32,23 +32,31 @@ unavailable until a named official adapter and credentialed smoke land.
 ## Configuration boundary
 
 `parseChannelServiceConfig()` validates the version-1 launcher document and
-fails closed on unknown fields, incompatible official transport modes,
-duplicate/missing connection mappings, invalid retry ordering, inline secret
-schemes, and plaintext secret-like fields. It covers connections, route/user/
-group policy, provider/model/profile/workspace selectors, notifications,
-retry/rate/concurrency/backlog, and attachment limits.
+fails closed on unknown fields, incompatible official transport modes, duplicate
+connection identities, inline secret schemes, and plaintext secret-like fields.
+It covers connections only. Routing, model/workspace selection, task dispatch,
+notifications, and consumer retry policy are outside this service.
 
 `projectChannelServiceConfig()` accepts an exact Host service configuration declaration. A
 Host-configured service produces
 `cordisx.channel-service-config-descriptor/v1`; every connection loses
 `secretRef` and gains only `secretState`. A `kind=none` service produces no
-descriptor and rejects a supplied placeholder config. This descriptor is for a
-dedicated Host-owned Channel Manager body, not the ordinary renderer plugin
-form. Renderer-only preferences in a separate module should use Schemastery
-`Config`/`configApplies` from protocol #19 and Host #60.
+descriptor and rejects a supplied placeholder config. Its Host-owned
+Schemastery projection renders the connection list as a complex child page;
+plugins do not provide DOM or styles. Renderer-only preferences in a separate
+module should use Schemastery `Config`/`configApplies`.
 
 The parser/projection, shared Host service-config contract, CAS/restart
 conformance, and immutable package service loader are implemented and verified.
+
+## Superseded task-dispatch material
+
+Any older discussion below of a `ChannelTaskGateway`, routes, bindings, task
+operations, model selectors, workspaces, or task notifications is historical
+design material and is not part of the Channel core. The normative v1 boundary
+is the Protocol #46 connection schema and the runtime behavior above. A future
+consumer may own those concerns under the separate task-routing contract, but
+Channel does not configure, invoke, or persist them.
 Normal lifecycle-coordinator handler registration, Manager action wiring,
 credential resolution, full retry policy application, and rate-limit
 enforcement remain planned; this package does not claim that validated values

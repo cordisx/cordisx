@@ -21,20 +21,11 @@ export const name = 'channel'
 export const inject = ['i18n', 'slots', 'pages', 'routes', 'managerContent', 'channelManager']
 
 const capabilityNames = [
-  'tasks.catalog.read',
-  'tasks.content.read',
-  'tasks.create',
-  'tasks.control',
-  'turns.submit',
-  'turns.control',
-  'agent.events.read',
   'channel.accounts.read',
   'channel.accounts.connect',
   'channel.events.receive',
   'channel.events.subscribe',
   'channel.messages.send',
-  'channel.bindings.read',
-  'channel.bindings.write',
   'channel.attachments.read',
 ] as const
 
@@ -43,14 +34,9 @@ const simulatorTenant = { ...simulatorAccount, tenantId: 'test' } as const
 const simulatorConversation = { ...simulatorTenant, conversationId: 'direct-alice', kind: 'direct' as const }
 
 function capabilityScope(name: typeof capabilityNames[number]): CordisXCapabilityDeclarationV2['scope'] {
-  if (name === 'tasks.create') return { providers: ['codex'], cwdRoots: ['/'] }
-  if (name === 'tasks.content.read' || name === 'tasks.control' || name === 'turns.submit' || name === 'turns.control') {
-    return { sessions: [{ providerId: 'codex', remoteSessionId: 'sim-session-1' }] }
-  }
-  if (name === 'agent.events.read') return { sessionIds: ['channel-simulator'] }
   if (name === 'channel.accounts.connect') return { channelAccounts: [simulatorAccount] }
   if (name === 'channel.events.receive' || name === 'channel.events.subscribe') return { channelTenants: [simulatorTenant] }
-  if (name === 'channel.messages.send' || name === 'channel.bindings.write' || name === 'channel.attachments.read') {
+  if (name === 'channel.messages.send' || name === 'channel.attachments.read') {
     return { channelConversations: [simulatorConversation] }
   }
   return {}
@@ -62,7 +48,7 @@ const capabilities: readonly CordisXCapabilityDeclarationV2[] = capabilityNames.
   scope: capabilityScope(name),
   security: {
     dataUse: name.startsWith('channel.') ? 'profile-persistent' : 'ephemeral',
-    retention: name === 'channel.bindings.read' || name === 'channel.bindings.write' ? 'profile' : 'runtime',
+    retention: 'runtime',
     externalTransfer: name === 'channel.messages.send' || name === 'channel.accounts.connect',
   },
 }))

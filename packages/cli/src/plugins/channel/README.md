@@ -12,7 +12,13 @@ Channels is the CordisX product surface for launcher-owned messaging connections
 - **Unavailable:** credential creation broker and WeCom adapter support.
 - **Planned:** real-account smoke evidence and lifecycle-wired live renderer projections.
 
-The renderer module has no user configuration fields. Connection, mapping, retry, rate-limit, and attachment policy belong to the launcher service's versioned Host configuration declaration. Its closed manifest `restart` value maps to the Host's precise `service-restart` plane; the shared schema projection is `standard/renderable=false`, so CordisX does not put it in the ordinary renderer plugin form. A service with no configuration must declare `configuration.kind: "none"`; CordisX does not create placeholder fields.
+The renderer module has no user configuration fields. Only account connection
+configuration belongs to the launcher service declaration. The closed manifest
+`restart` value maps to the Host's precise `service-restart` plane and exposes a
+Host-owned Schemastery descriptor; task mapping, models, workspaces,
+notifications, retry policy, and task dispatch belong to independent consumer
+plugins. A service with no configuration must declare `configuration.kind:
+"none"`; CordisX does not create placeholder fields.
 
 Credentials are opaque Host handles. They must not appear in plugin configuration, renderer state, logs, Manager snapshots, or this README's examples.
 

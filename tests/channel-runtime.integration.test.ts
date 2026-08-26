@@ -33,6 +33,7 @@ import {
 } from '../packages/channel-runtime/src/simulator.js'
 
 const temporaryRoots: string[] = []
+type ConsumerInstruction = { readonly kind: string; readonly [key: string]: unknown }
 
 async function storePath(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-channel-runtime-'))
@@ -46,10 +47,10 @@ afterEach(async () => {
 
 function envelope(
   eventId: string,
-  operation: ChannelInboundEnvelope['operation'],
+  operation: ConsumerInstruction,
   text = `${operation.kind} from simulator`,
 ): ChannelInboundEnvelope {
-  return { routeId: 'default', input: simulatedInput(eventId, text), operation }
+  return { input: simulatedInput(eventId, text) }
 }
 
 function createEnvelope(eventId: string): ChannelInboundEnvelope {
@@ -76,7 +77,7 @@ function target(input: ChannelUserInput): ChannelThreadRef {
 }
 
 describe('Channel service configuration compliance', () => {
-  it('validates connections, mappings, retry/rate limits and produces a renderer-safe Manager descriptor', () => {
+  it('validates connection-only configuration and produces a Schemastery-renderable descriptor', () => {
     const configured = {
       ...structuredClone(SIMULATOR_CHANNEL_SERVICE_CONFIG),
       connections: [
@@ -91,14 +92,7 @@ describe('Channel service configuration compliance', () => {
       ],
     }
     const parsed = parseChannelServiceConfig(configured)
-    expect(parsed.routes[0]).toMatchObject({
-      id: 'default',
-      task: { provider: { id: 'codex' }, profile: { id: 'work' }, workspaceAlias: 'cordisx' },
-    })
-    expect(parsed.reliability).toMatchObject({
-      retry: { maxAttempts: 5, maxDelayMs: 60_000 },
-      rateLimit: { perUserPerMinute: 20, maxBacklog: 1_000 },
-    })
+    expect(parsed.connections).toHaveLength(2)
 
     const descriptor = projectChannelServiceConfig({
       declaration: SIMULATOR_CHANNEL_SERVICE_DECLARATION,
@@ -117,6 +111,12 @@ describe('Channel service configuration compliance', () => {
     expect(descriptor).toMatchObject({
       contract: 'cordisx.channel-service-config-descriptor/v1',
       configApplies: 'restart',
+      schema: expect.objectContaining({
+        projection: expect.objectContaining({
+          kind: 'schemastery',
+          form: expect.objectContaining({ fields: [expect.objectContaining({ presenter: { kind: 'array.object-page', version: 1 } })] }),
+        }),
+      }),
       revision: 4,
       configuration: {
         connections: [
@@ -125,8 +125,8 @@ describe('Channel service configuration compliance', () => {
         ],
       },
     })
-    expect(JSON.stringify(descriptor)).not.toContain('secretRef')
-    expect(JSON.stringify(descriptor)).not.toContain('keychain:')
+    expect(JSON.stringify(descriptor.configuration)).not.toContain('secretRef')
+    expect(JSON.stringify(descriptor.configuration)).not.toContain('keychain:')
     expect(Object.isFrozen(descriptor)).toBe(true)
     expect(Object.isFrozen(descriptor?.configuration.connections[0])).toBe(true)
   })
@@ -167,7 +167,7 @@ describe('Channel service configuration compliance', () => {
     })).toThrow('unsupported')
   })
 
-  it('fails closed on plaintext/inline secrets, incompatible transport, orphan mapping and invalid retry order', () => {
+  it('fails closed on plaintext/inline secrets, incompatible transport, and consumer routing fields', () => {
     const base = structuredClone(SIMULATOR_CHANNEL_SERVICE_CONFIG) as unknown as Record<string, unknown>
     const plaintext = structuredClone(base) as { connections: Array<Record<string, unknown>> }
     plaintext.connections[0]!.secretValue = 'must-not-enter-config'
@@ -188,13 +188,7 @@ describe('Channel service configuration compliance', () => {
     }
     expect(() => parseChannelServiceConfig(transport)).toThrow('not supported by wechat-service')
 
-    const orphan = structuredClone(base) as { routes: Array<{ connection: { accountId: string } }> }
-    orphan.routes[0]!.connection.accountId = 'missing'
-    expect(() => parseChannelServiceConfig(orphan)).toThrow('references a missing connection')
-
-    const retry = structuredClone(base) as { reliability: { retry: { baseDelayMs: number; maxDelayMs: number } } }
-    retry.reliability.retry.baseDelayMs = retry.reliability.retry.maxDelayMs + 1
-    expect(() => parseChannelServiceConfig(retry)).toThrow('baseDelayMs exceeds maxDelayMs')
+    expect(() => parseChannelServiceConfig({ ...base, routes: [] })).toThrow('not supported')
   })
 
   it('constructs the local simulator from validated Host configuration', () => {
@@ -212,7 +206,6 @@ async function fixture(options: { sendFailures?: number } = {}) {
   const gateway = new SimulatedTaskGateway()
   const permissions = new SimulatedPermissionBroker()
   const runtime = await ChannelRuntime.open({
-    gateway,
     permissions,
     storePath: await storePath(),
     clock,
@@ -224,7 +217,7 @@ async function fixture(options: { sendFailures?: number } = {}) {
 }
 
 describe('launcher-side Channel runtime and simulator', () => {
-  it('creates one composite binding and returns the durable result for duplicate events', async () => {
+  it('persists and deduplicates sourced connection events without task dispatch', async () => {
     const { gateway, handle, runtime } = await fixture()
     const message = createEnvelope('create-1')
 
@@ -234,26 +227,17 @@ describe('launcher-side Channel runtime and simulator', () => {
     await expect(handle.receive(message)).resolves.toMatchObject({ duplicate: true, status: 'applied' })
     await expect(handle.drainInbound()).resolves.toBe(0)
 
-    expect(gateway.callCount('create')).toBe(1)
-    expect(gateway.calls[0]?.context.input.role).toBe('user')
-    expect(gateway.calls[0]?.context.input.source.event.eventId).toBe('create-1')
-    expect(runtime.snapshot().bindings).toEqual([
-      expect.objectContaining({
-        routeId: 'default',
-        revision: 1,
-        state: 'active',
-        session: { providerId: 'codex', remoteSessionId: 'sim-session-1' },
-      }),
-    ])
+    expect(gateway.callCount()).toBe(0)
+    expect(JSON.stringify(runtime.snapshot())).not.toContain('bindings')
     await runtime.dispose()
   })
 
-  it('routes query, open, continue, Agent controls, archive, and restore through one gateway', async () => {
+  it('accepts every normalized inbound event without interpreting task instructions', async () => {
     const { gateway, handle, runtime } = await fixture()
     await handle.receive(createEnvelope('create-all'))
     await handle.drainInbound()
 
-    const operations: ChannelInboundEnvelope['operation'][] = [
+    const operations: ConsumerInstruction[] = [
       { kind: 'status' },
       { kind: 'read' },
       { kind: 'open' },
@@ -270,17 +254,8 @@ describe('launcher-side Channel runtime and simulator', () => {
       await handle.drainInbound()
     }
 
-    expect(gateway.calls.map(call => call.operation.kind)).toEqual([
-      'create', 'status', 'read', 'open', 'followup', 'steer', 'interrupt',
-      'archive', 'restore', 'continue', 'list',
-    ])
-    for (const call of gateway.calls.filter(call => !['create', 'list'].includes(call.operation.kind))) {
-      expect('session' in call.operation ? call.operation.session : undefined).toEqual({
-        providerId: 'codex',
-        remoteSessionId: 'sim-session-1',
-      })
-    }
-    expect(runtime.snapshot().bindings[0]?.state).toBe('active')
+    expect(gateway.callCount()).toBe(0)
+    expect(runtime.snapshot().accounts[0]?.inbound).toMatchObject({ pending: 0 })
     await runtime.dispose()
   })
 
@@ -289,35 +264,31 @@ describe('launcher-side Channel runtime and simulator', () => {
     const clock = new ManualChannelClock()
     const permissions = new SimulatedPermissionBroker()
     const firstGateway = new SimulatedTaskGateway()
-    const firstRuntime = await ChannelRuntime.open({ gateway: firstGateway, permissions, storePath: file, clock })
+    const firstRuntime = await ChannelRuntime.open({ permissions, storePath: file, clock })
     const firstAdapter = new SimulatedChannelAdapter({ configurationRevision: 1 })
     const firstHandle = await firstRuntime.activate(firstAdapter, SIMULATOR_ADAPTER_IDENTITY)
     await firstHandle.receive(createEnvelope('restart-create'))
     await firstRuntime.dispose()
 
     const secondGateway = new SimulatedTaskGateway()
-    const secondRuntime = await ChannelRuntime.open({ gateway: secondGateway, permissions, storePath: file, clock })
+    const secondRuntime = await ChannelRuntime.open({ permissions, storePath: file, clock })
     const secondAdapter = new SimulatedChannelAdapter({ configurationRevision: 2 })
     const secondHandle = await secondRuntime.activate(secondAdapter, SIMULATOR_ADAPTER_IDENTITY)
     await expect(secondHandle.drainInbound()).resolves.toBe(1)
 
     expect(firstGateway.callCount()).toBe(0)
-    expect(secondGateway.callCount('create')).toBe(1)
+    expect(secondGateway.callCount()).toBe(0)
     expect(secondRuntime.snapshot().accounts[0]).toMatchObject({ generation: 2, lastGoodRevision: 2 })
-    expect(secondRuntime.snapshot().bindings).toHaveLength(1)
+    expect(JSON.stringify(secondRuntime.snapshot())).not.toContain('bindings')
     await secondRuntime.dispose()
   })
 
-  it('retries task operations and outbound notifications with bounded backoff', async () => {
+  it('drains inbound events and retries outbound notifications with bounded backoff', async () => {
     const { adapter, clock, gateway, handle, runtime } = await fixture({ sendFailures: 1 })
-    gateway.failNext('create')
     await handle.receive(createEnvelope('retry-create'))
     await expect(handle.drainInbound()).resolves.toBe(1)
-    expect(runtime.snapshot().accounts[0]?.inbound.retrying).toBe(1)
-    clock.advance(1_000)
-    await expect(handle.drainInbound()).resolves.toBe(1)
-    expect(gateway.callCount('create')).toBe(2)
-    expect(runtime.snapshot().bindings).toHaveLength(1)
+    expect(runtime.snapshot().accounts[0]?.inbound).toMatchObject({ pending: 0, retrying: 0 })
+    expect(gateway.callCount()).toBe(0)
 
     const notification = await runtime.notify({
       target: target(simulatedInput('notification-target', 'target')),
@@ -335,7 +306,7 @@ describe('launcher-side Channel runtime and simulator', () => {
     await runtime.dispose()
   })
 
-  it('records permission denial without invoking the task gateway', async () => {
+  it('does not request task permissions for inbound connection events', async () => {
     const { gateway, handle, permissions, runtime } = await fixture()
     permissions.set(SIMULATOR_ADAPTER_IDENTITY, 'tasks.create', 'deny')
     const message = createEnvelope('denied-create')
@@ -343,21 +314,14 @@ describe('launcher-side Channel runtime and simulator', () => {
     await expect(handle.drainInbound()).resolves.toBe(1)
 
     expect(gateway.callCount()).toBe(0)
-    await expect(handle.receive(message)).resolves.toMatchObject({ duplicate: true, status: 'denied' })
-    expect(runtime.auditSnapshot()).toContainEqual(expect.objectContaining({
-      source: SIMULATOR_ADAPTER_IDENTITY.source,
-      pluginId: SIMULATOR_ADAPTER_IDENTITY.pluginId,
-      capability: 'tasks.create',
-      outcome: 'deny',
-    }))
+    await expect(handle.receive(message)).resolves.toMatchObject({ duplicate: true, status: 'applied' })
+    expect(runtime.auditSnapshot().some(item => item.capability === 'tasks.create')).toBe(false)
     await runtime.dispose()
   })
 
   it('rejects role escalation and attachment path injection before durable acceptance', async () => {
     const { gateway, handle, runtime } = await fixture()
     const unsafe = createEnvelope('unsafe-input') as unknown as {
-      routeId: string
-      operation: ChannelInboundEnvelope['operation']
       input: Record<string, unknown>
     }
     unsafe.input.role = 'system'
@@ -378,7 +342,6 @@ describe('launcher-side Channel runtime and simulator', () => {
   it('sanitizes adapter descriptors so secret values never enter store or manager snapshots', async () => {
     const file = await storePath()
     const runtime = await ChannelRuntime.open({
-      gateway: new SimulatedTaskGateway(),
       permissions: new SimulatedPermissionBroker(),
       storePath: file,
     })
@@ -422,7 +385,6 @@ describe('Node Cordis Channel service', () => {
     const clock = new ManualChannelClock()
     const permissions = new SimulatedPermissionBroker()
     const runtime = await ChannelRuntime.open({
-      gateway: new SimulatedTaskGateway(),
       permissions,
       storePath: await storePath(),
       clock,
@@ -474,7 +436,6 @@ describe('Node Cordis Channel service', () => {
   it('rejects unbound Cordis callers and separately denies subscription authority', async () => {
     const permissions = new SimulatedPermissionBroker()
     const runtime = await ChannelRuntime.open({
-      gateway: new SimulatedTaskGateway(),
       permissions,
       storePath: await storePath(),
     })

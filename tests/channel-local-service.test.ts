@@ -105,11 +105,6 @@ describe('built-in local Channel service', () => {
       adapterKind: 'feishu', enabled: true, transport: { mode: 'websocket' },
       secretRef: 'host-secret:env/CORDISX_MISSING_TEST_SECRET',
     })
-    configuration.routes.push({
-      ...structuredClone(configuration.routes[0]!), id: 'feishu-direct',
-      connection: { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'tenant-test' },
-      policy: { conversationKinds: ['direct'], allowedUserIds: ['user-1'] },
-    })
     const service = createLocalChannelService({
       artifactDirectory, dataDir: path.join(root, 'runtime'),
       source: pathToFileURL(path.join(artifactDirectory, 'index.ts')).href,

@@ -12,7 +12,22 @@ export interface ChannelManagerRuntimeProjection {
   readonly schemaVersion: 1
   readonly observedAt: string
   readonly accounts: ChannelRuntimeSnapshot['accounts']
-  readonly bindings: ChannelRuntimeSnapshot['bindings']
+  /** Consumer-owned task bindings are intentionally not supplied by Channel. */
+  readonly bindings: readonly ChannelManagerBindingProjection[]
+}
+
+export interface ChannelManagerBindingProjection {
+  readonly bindingId: string
+  readonly channel: {
+    readonly adapterId: string
+    readonly accountId: string
+    readonly tenantId: string
+    readonly conversationId: string
+    readonly threadId: string
+  }
+  readonly session: { readonly providerId: string; readonly remoteSessionId: string }
+  readonly routeId: string
+  readonly state: 'active' | 'archived' | 'unavailable'
 }
 
 export interface ChannelManagerLogRecord {
@@ -122,14 +137,7 @@ function projectSnapshot(snapshot: ChannelRuntimeSnapshot): ChannelManagerRuntim
       inbound: { ...account.inbound },
       outbound: { ...account.outbound },
     })),
-    bindings: snapshot.bindings.map(binding => Object.freeze({
-      bindingId: binding.bindingId,
-      channel: { ...binding.channel },
-      session: { ...binding.session },
-      routeId: binding.routeId,
-      revision: binding.revision,
-      state: binding.state,
-    })),
+    bindings: Object.freeze([]) as readonly ChannelManagerBindingProjection[],
   })
 }
 
@@ -148,7 +156,6 @@ function projectLog(record: ChannelAuditSnapshot, snapshot: ChannelRuntimeSnapsh
     action: record.action,
     outcome: record.outcome,
     ...(record.capability === undefined ? {} : { capability: record.capability }),
-    ...(record.bindingRevision === undefined ? {} : { bindingRevision: record.bindingRevision }),
   })
 }
 
@@ -229,10 +236,10 @@ export function createChannelManagerApi(access: ChannelManagerRuntimeAccess): Ch
     const active = expectedActive(access, input)
     if (active === undefined) return result(access, 'unavailable')
     const status = action === 'archive'
-      ? await active.runtime.archiveBinding(input.bindingId)
+      ? 'unavailable'
       : action === 'restore'
-        ? await active.runtime.restoreBinding(input.bindingId)
-        : await active.runtime.unbind(input.bindingId)
+        ? 'unavailable'
+        : 'unavailable'
     return result(access, status)
   }
 

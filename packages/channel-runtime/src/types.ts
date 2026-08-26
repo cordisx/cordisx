@@ -101,9 +101,7 @@ export type ChannelInboundOperation =
   | { readonly kind: 'restore' }
 
 export interface ChannelInboundEnvelope {
-  readonly routeId: string
   readonly input: ChannelUserInput
-  readonly operation: ChannelInboundOperation
 }
 
 export type ResolvedChannelTaskOperation =
@@ -338,10 +336,6 @@ export interface ChannelRuntimeSnapshot {
   readonly schemaVersion: 1
   readonly observedAt: string
   readonly accounts: readonly ChannelRuntimeAccountSnapshot[]
-  readonly bindings: ReadonlyArray<Pick<
-    ChannelSessionBinding,
-    'bindingId' | 'channel' | 'session' | 'routeId' | 'revision' | 'state'
-  >>
 }
 
 export interface ChannelAuditSnapshot {
@@ -366,16 +360,10 @@ export interface ChannelClock {
 }
 
 export interface ChannelRuntimeOptions {
-  readonly gateway: ChannelTaskGateway
   readonly permissions: ChannelPermissionBroker
   readonly storePath: string
   readonly clock?: ChannelClock
   readonly maxAttempts?: number
   readonly leaseMs?: number
   readonly retryBaseMs?: number
-  /** Immutable launcher context bound into every Channel task gateway call. */
-  readonly taskContext?: {
-    readonly serviceGeneration: string
-    readonly configurationRevision: number
-  }
 }

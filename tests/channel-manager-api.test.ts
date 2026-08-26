@@ -37,8 +37,6 @@ function adapter(account: ChannelTenantRef, revision: number): ChannelAdapterDef
 
 function createEnvelope(eventId: string): ChannelInboundEnvelope {
   return {
-    routeId: 'default',
-    operation: { kind: 'create', workspace: { alias: 'workspace' } },
     input: {
       contract: 'cordisx.channel-user-input/v1', schemaVersion: 1, role: 'user',
       content: [{ type: 'text', text: 'Create this task.' }],
@@ -57,9 +55,6 @@ async function fixture() {
   const runtime = await ChannelRuntime.open({
     storePath: path.join(root, 'runtime.json'),
     permissions: { authorize: async () => 'allow' },
-    gateway: { execute: async operation => operation.kind === 'create'
-      ? { session: { providerId: 'codex', remoteSessionId: 'session-1' } }
-      : {} },
   })
   const handle = await runtime.activate(adapter(ref, 1), identity)
   await runtime.activate(adapter({ adapterId: 'simulator', accountId: 'other', tenantId: 'test' }, 1), identity)
@@ -90,20 +85,13 @@ describe('launcher-private Channel manager API', () => {
     await runtime.dispose()
   })
 
-  it('archives, restores, and unbinds durable bindings while returning refreshed projections', async () => {
+  it('does not expose task bindings from the connection-only Channel core', async () => {
     const { api, runtime } = await fixture()
-    const bindingId = api.snapshot()!.bindings[0]!.bindingId
-    const archived = await api.bindings.archive({ bindingId, generation: 'local-generation-1' })
-    expect(archived).toMatchObject({ status: 'applied', projection: { bindings: [expect.objectContaining({ state: 'archived' })] } })
-    expect(api.logs({ action: 'channel.binding.archive' }).records).toEqual([
-      expect.objectContaining({ bindingRevision: 1, outcome: 'applied' }),
-    ])
-    const restored = await api.bindings.restore({ bindingId, generation: archived.generation })
-    expect(restored).toMatchObject({ status: 'applied', projection: { bindings: [expect.objectContaining({ state: 'active' })] } })
-    const unbound = await api.bindings.unbind({ bindingId, generation: restored.generation })
-    expect(unbound).toMatchObject({ status: 'applied', projection: { bindings: [] } })
-    await expect(api.bindings.archive({ bindingId, generation: unbound.generation })).resolves.toMatchObject({ status: 'not-found' })
-    await expect(api.bindings.restore({ bindingId, generation: 'stale-generation' })).resolves.toMatchObject({ status: 'unavailable' })
+    expect(api.snapshot()!.bindings).toEqual([])
+    await expect(api.bindings.archive({ bindingId: 'consumer-owned', generation: 'local-generation-1' }))
+      .resolves.toMatchObject({ status: 'unavailable', projection: { bindings: [] } })
+    await expect(api.bindings.restore({ bindingId: 'consumer-owned', generation: 'stale-generation' }))
+      .resolves.toMatchObject({ status: 'unavailable' })
     await runtime.dispose()
   })
 })

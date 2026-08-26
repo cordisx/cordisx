@@ -9,13 +9,6 @@ const connection = {
   transport: { mode: 'websocket' as const }, secretRef: 'host-secret:env/CORDISX_FEISHU_TEST_SECRET',
 }
 
-const routes = [{
-  id: 'direct', connection: connection.ref, enabled: true,
-  policy: { conversationKinds: ['direct' as const], allowedUserIds: ['user-1'] },
-  task: { provider: { id: 'codex' }, model: { useDefault: true }, profile: { useDefault: true }, workspaceAlias: 'cordisx' },
-  notifications: [],
-}]
-
 describe('launcher private secret resolution', () => {
   it('accepts only the explicit environment reference without returning reference data', async () => {
     await expect(resolveLauncherSecret('host-secret:env/CORDISX_FEISHU_TEST_SECRET', {
@@ -38,7 +31,7 @@ describe('official Feishu direct-message adapter', () => {
     }) => Promise<void>) | undefined
     const sent: Array<{ to: string; text: string }> = []
     const definition = createFeishuAdapterDefinition({
-      connection, routes, configurationRevision: 4, source: 'cordisx-test',
+      connection, configurationRevision: 4, source: 'cordisx-test',
       resolveSecret: async () => 'not-a-real-secret',
       createChannel: () => ({
         connect: async () => undefined,
@@ -59,7 +52,6 @@ describe('official Feishu direct-message adapter', () => {
     const active = await definition.start(host)
     await listener?.({ messageId: 'inbound-1', chatId: 'chat-1', chatType: 'p2p', senderId: 'user-1', content: 'hello', createTime: 0, mentionedBot: false })
     expect(received).toEqual([expect.objectContaining({
-      routeId: 'direct', operation: expect.objectContaining({ kind: 'create' }),
       input: expect.objectContaining({ content: [{ type: 'text', text: 'hello' }], source: expect.objectContaining({ event: expect.objectContaining({ eventId: 'inbound-1' }) }) }),
     })])
     expect(JSON.stringify(received)).not.toContain('not-a-real-secret')
@@ -74,17 +66,19 @@ describe('official Feishu direct-message adapter', () => {
     expect(outboundDrains).toBeGreaterThanOrEqual(0)
   })
 
-  it('does not accept an unallowlisted sender or a non-websocket Feishu configuration', async () => {
+  it('accepts attributed inbound messages without task routing and rejects non-websocket configuration', async () => {
     const wrongTransport = { ...connection, transport: { mode: 'webhook' as const } }
-    expect(() => createFeishuAdapterDefinition({ connection: wrongTransport, routes, configurationRevision: 1, source: 'test' })).toThrow('ROUTE_UNAVAILABLE')
+    expect(() => createFeishuAdapterDefinition({ connection: wrongTransport, configurationRevision: 1, source: 'test' })).toThrow('CONNECTION_UNAVAILABLE')
     let listener: ((message: { messageId: string; chatId: string; chatType: 'p2p'; senderId: string; content: string; createTime: number; mentionedBot: boolean }) => Promise<void>) | undefined
     const definition = createFeishuAdapterDefinition({
-      connection, routes, configurationRevision: 1, source: 'test', resolveSecret: async () => 'x',
+      connection, configurationRevision: 1, source: 'test', resolveSecret: async () => 'x',
       createChannel: () => ({ connect: async () => undefined, disconnect: async () => undefined, on: (_: 'message', value: typeof listener) => { listener = value; return () => {} }, send: async () => ({ messageId: 'x' }) }) as never,
     })
-    const host: ChannelAdapterHost = { generation: 1, ref: connection.ref, receive: async () => { throw new Error('must not receive') }, drainInbound: async () => 0, drainOutbound: async () => 0 }
+    let received = 0
+    const host: ChannelAdapterHost = { generation: 1, ref: connection.ref, receive: async () => { received += 1; return { recordId: 'other', duplicate: false, status: 'queued' } }, drainInbound: async () => 0, drainOutbound: async () => 0 }
     const active = await definition.start(host)
     await listener?.({ messageId: 'other', chatId: 'chat', chatType: 'p2p', senderId: 'other-user', content: 'hello', createTime: 0, mentionedBot: false })
+    expect(received).toBe(1)
     await active.stop('disposed')
   })
 })

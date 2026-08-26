@@ -64,7 +64,7 @@ describe('Channel Host service configuration contract', () => {
       identity: { pluginId: 'channel', serviceId: 'runtime' },
       schema: {
         id: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json',
-        projection: { kind: 'standard', renderable: false },
+        projection: { kind: 'schemastery' },
       },
       configApplies: 'service-restart',
       revision: 0,
