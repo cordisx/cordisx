@@ -692,8 +692,8 @@ const MANAGER_STYLES = `
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
   }
-  /* A sidebar-owned manager.content page has one Host-owned page inset at its
-     bounded root; the shared scroll viewport must not add a second layer. */
+  /* A sidebar-owned manager.content page is a plugin-owned content seat. The
+     shared scroll viewport must not add an outer Host inset around it. */
   .cxm-content[data-manager-content-page="true"] { padding: 0; }
   .cxm-content[data-marketplace-discovery="true"] { overflow: hidden; }
   .cxm-content[data-manager-list-page="true"] { display: flex; overflow: hidden; }
@@ -747,8 +747,7 @@ const MANAGER_STYLES = `
   .cxm-settings-tab-icon.cordisx-host-icon { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; }
   .cxm-settings-tab-icon.cordisx-host-icon svg { width: 17px; height: 17px; }
   .cxm-manager-content-root { min-width: 0; max-width: 100%; }
-  .cxm-content[data-manager-content-page="true"] > .cxm-manager-content-root { box-sizing: border-box; padding: var(--cx-manager-content-block-start) var(--cx-manager-content-inline) var(--cx-manager-content-block-end); }
-  .cxm-content[data-manager-content-page="true"] > .cxm-manager-content-root[role="tabpanel"] { padding-top: 0; }
+  .cxm-content[data-manager-content-page="true"] > .cxm-manager-content-root { padding: 0; }
   .cxm-content[data-manager-content-page="true"] > .cxm-tabs { margin: 16px calc(var(--cx-manager-content-inline) - 8px) 16px; }
   .cxm-tab:disabled { cursor: default; opacity: .42; }
   .cxm-about-identity { display: flex; align-items: center; gap: 18px; padding: 4px 2px 22px; }

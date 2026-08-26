@@ -142,14 +142,16 @@ export const HOST_COLLECTION_STYLES = String.raw`
     margin-top: 12px;
   }
   .cxc-list[data-layout="rows"] { grid-template-columns: minmax(0, 1fr); }
-  .cxc-listitem { display: flex; min-width: 0; align-self: stretch; }
+  .cxc-listitem { display: flex; width: 100%; min-width: 0; align-self: stretch; }
   .cxc-card {
     position: relative;
     display: flex;
     container-type: inline-size;
+    width: 100%;
     min-width: 0;
     height: 100%;
     align-self: stretch;
+    flex: 1 1 auto;
     box-sizing: border-box;
     border: 1px solid var(--cx-border);
     border-radius: 11px;
