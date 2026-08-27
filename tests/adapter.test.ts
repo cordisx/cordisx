@@ -101,10 +101,10 @@ describe('ReasoningIntensityProjection', () => {
     const range = resolveReasoningIntensityRange(dom.window.document, 'session')!
     expect(range).toMatchObject({ min: '0', max: '4', step: '1', value: '1' })
     expect(range.dataset.cordisxReasoningProxy).toBe('true')
-    expect(dom.window.document.querySelector<HTMLElement>('[data-model-picker-power-slider]')?.style.height).toBe('40px')
-    expect(dom.window.document.querySelector<HTMLElement>('[role="menu"]')?.style.width).toBe('336px')
+    expect(dom.window.document.querySelector<HTMLElement>('[data-model-picker-power-slider]')?.style.height).toBe('32px')
+    expect(dom.window.document.querySelector<HTMLElement>('[role="menu"]')?.style.width).toBe('300px')
 
-    vi.spyOn(range, 'getBoundingClientRect').mockReturnValue({ ...visibleRect, right: 334, bottom: 60, width: 324, height: 40 })
+    vi.spyOn(range, 'getBoundingClientRect').mockReturnValue({ ...visibleRect, right: 298, bottom: 52, width: 288, height: 32 })
     const projection = new ReasoningIntensityProjection(dom.window.document)
     const text = (key: string) => ({ key, fallback: key })
     projection.update(range, {
@@ -117,6 +117,7 @@ describe('ReasoningIntensityProjection', () => {
     range.value = '4'
     range.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
     expect(rightKeys).toBe(3)
+    expect(dom.window.document.querySelector<HTMLElement>('.cordisx-reasoning-thumb')?.style.left).toBe('264px')
 
     projection.dispose()
     expect(dom.window.document.querySelector('[data-cordisx-reasoning-proxy]')).toBeNull()
@@ -148,11 +149,11 @@ describe('ReasoningIntensityProjection', () => {
 
     const range = resolveReasoningIntensityRange(dom.window.document, 'session')!
     expect(range).toMatchObject({ min: '0', max: '4', step: '1', value: '2' })
-    expect(menu.style).toMatchObject({ width: '336px', minWidth: '336px' })
+    expect(menu.style).toMatchObject({ width: '300px', minWidth: '300px' })
     expect(items.every(item => item.style.display === 'none')).toBe(true)
     vi.spyOn(range, 'getBoundingClientRect').mockReturnValue({
-      x: 30, y: 50, left: 30, top: 50, right: 350, bottom: 98,
-      width: 320, height: 48, toJSON: () => ({}),
+      x: 30, y: 50, left: 30, top: 50, right: 318, bottom: 82,
+      width: 288, height: 32, toJSON: () => ({}),
     })
 
     const projection = new ReasoningIntensityProjection(dom.window.document)
