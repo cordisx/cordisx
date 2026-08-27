@@ -18,7 +18,7 @@ function snapshot(status: ManagerPluginStatus = 'active', locale = 'en'): Manage
   return {
     version: 'test',
     plugins: [{
-      id: 'base', source: 'https://plugins.example/base', name: 'Base Plugin', description: 'Keeps local work in sync.', inject: [], config: {}, status,
+      id: 'base', source: 'https://plugins.example/base', name: 'Base Plugin', icon: 'data:image/png;base64,aWNvbg==', description: 'Keeps local work in sync.', inject: [], config: {}, status,
       ...(status === 'failed' ? { error: 'entry module crashed' } : {}),
       configuration: {
         namespace: 'base', schemaKind: 'none', applies: 'plugin-restart', writable: true,
@@ -74,6 +74,7 @@ describe('Manager plugin card actions', () => {
       const dispose = installCordisXManager(dom.window.document, model)
       try {
         const primary = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="base"]')!
+        expect(primary.querySelector<HTMLImageElement>('.cxm-plugin-icon > img')?.src).toBe('data:image/png;base64,aWNvbg==')
         expect(primary.getAttribute('aria-label')).toBe(expectedOpen)
         expect(dom.window.document.querySelector('.cxm-content')?.getAttribute('data-manager-list-page')).toBe('true')
         primary.click()

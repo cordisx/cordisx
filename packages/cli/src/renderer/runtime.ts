@@ -83,6 +83,7 @@ import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
 import type { HostServiceConfigDescriptor, HostServiceConfigMutation, HostServiceConfigMutationResult } from '../launcher/service-config.js'
 import { BindingPermissionPolicyStore } from './permission-binding.js'
+import { pluginBrandIconDataUrl } from './plugin-branding.js'
 import { BrowserPluginLifecycleBridge } from './plugin-lifecycle-binding.js'
 import {
   CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS,
@@ -891,28 +892,32 @@ async function start(
     )
     return {
       version: metadata.version,
-      plugins: projectedControllers().map((controller): ManagerPluginSnapshot => ({
-        id: controller.item.id,
-        source: controller.item.source,
-        name: controller.manifest.name ?? controller.item.module?.name ?? controller.item.id,
-        ...pluginDescriptionFields(controller.item.readme),
-        inject: pluginInject(controller.item.module),
-        config: configuration.descriptor(controller.item.id, i18nService?.getSnapshot().locale ?? 'en').value,
-        configuration: configuration.descriptor(controller.item.id, i18nService?.getSnapshot().locale ?? 'en'),
-        ...(controller.item.readme === undefined ? {} : { readme: controller.item.readme }),
-        ...(controller.item.package === undefined ? {} : {
-          package: {
-            version: controller.item.package.version,
-            digest: controller.item.package.digest,
-            moduleGeneration: controller.item.package.moduleGeneration,
-            dependencies: controller.item.package.dependencies.map(item => item.id),
-            ...(controller.item.package.canonicalSource === undefined ? {} : { canonicalSource: controller.item.package.canonicalSource }),
-          },
-        }),
-        status: controller.status,
-        ...(controller.error === undefined ? {} : { error: controller.error }),
-        ...(controller.blockedReason === undefined ? {} : { blockedReason: controller.blockedReason }),
-      })),
+      plugins: projectedControllers().map((controller): ManagerPluginSnapshot => {
+        const icon = pluginBrandIconDataUrl(controller.item.module?.icon)
+        return {
+          id: controller.item.id,
+          source: controller.item.source,
+          name: controller.manifest.name ?? controller.item.module?.name ?? controller.item.id,
+          ...(icon === undefined ? {} : { icon }),
+          ...pluginDescriptionFields(controller.item.readme),
+          inject: pluginInject(controller.item.module),
+          config: configuration.descriptor(controller.item.id, i18nService?.getSnapshot().locale ?? 'en').value,
+          configuration: configuration.descriptor(controller.item.id, i18nService?.getSnapshot().locale ?? 'en'),
+          ...(controller.item.readme === undefined ? {} : { readme: controller.item.readme }),
+          ...(controller.item.package === undefined ? {} : {
+            package: {
+              version: controller.item.package.version,
+              digest: controller.item.package.digest,
+              moduleGeneration: controller.item.package.moduleGeneration,
+              dependencies: controller.item.package.dependencies.map(item => item.id),
+              ...(controller.item.package.canonicalSource === undefined ? {} : { canonicalSource: controller.item.package.canonicalSource }),
+            },
+          }),
+          status: controller.status,
+          ...(controller.error === undefined ? {} : { error: controller.error }),
+          ...(controller.blockedReason === undefined ? {} : { blockedReason: controller.blockedReason }),
+        }
+      }),
       registrations: allRegistrations,
       commands: commandService?.snapshot() ?? [],
       navigation,

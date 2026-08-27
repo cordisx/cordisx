@@ -110,6 +110,7 @@ export interface ManagerPluginSnapshot {
   readonly id: string
   readonly source: string
   readonly name: string
+  readonly icon?: string
   readonly description?: string
   readonly inject: readonly string[]
   readonly config: unknown
@@ -1052,6 +1053,13 @@ const MANAGER_STYLES = `
     font-size: 10px;
     font-weight: 800;
   }
+  .cxm-plugin-icon > img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    object-fit: contain;
+  }
   .cxm-plugin-body { min-width: 0; flex: 1; }
   .cxm-plugin-name { overflow: hidden; color: #f0f2f6; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
   .cxm-plugin-name-row { display: flex; min-width: 0; align-items: center; gap: 6px; }
@@ -1816,8 +1824,15 @@ function initials(name: string): string {
   return value || 'CX'
 }
 
-function createPluginIcon(document: Document, name: string): HTMLSpanElement {
-  const icon = create(document, 'span', 'cxm-plugin-icon', initials(name))
+function createPluginIcon(document: Document, name: string, source?: string): HTMLSpanElement {
+  const icon = create(document, 'span', 'cxm-plugin-icon', source === undefined ? initials(name) : '')
+  if (source !== undefined) {
+    const image = document.createElement('img')
+    image.src = source
+    image.alt = ''
+    image.draggable = false
+    icon.append(image)
+  }
   return markDecorative(icon)
 }
 
@@ -4056,7 +4071,7 @@ export function installCordisXManager(
         description: demoDescriptionKey === undefined ? plugin.description ?? copy('plugins.local-description') : copy(demoDescriptionKey),
         machineId: plugin.id,
         searchText: [plugin.source, ...plugin.inject, ...registrations.flatMap(item => [item.surface, item.id])],
-        icon: () => createPluginIcon(document, plugin.name),
+        icon: () => createPluginIcon(document, plugin.name, plugin.icon),
         status: pluginCollectionStatus(plugin, status, snapshot.localization.locale),
         actions: visibleActions,
         openLabel: `${copy('plugins.open')} · ${plugin.name}`,
@@ -5520,7 +5535,7 @@ export function installCordisXManager(
           ...metadata.keywords,
           ...metadata.authors.map(author => author.name),
         ],
-        icon: () => createPluginIcon(document, metadata.name),
+        icon: () => createPluginIcon(document, metadata.name, plugin.icon),
         ...(status === undefined ? {} : { status }),
         openLabel: `${copy('marketplace.open')} · ${metadata.name}`,
         onOpen: () => {
