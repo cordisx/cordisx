@@ -233,6 +233,7 @@ async function fingerprint(files: readonly string[]): Promise<string> {
 export interface LocalDevelopmentControllerOptions {
   readonly entry: string
   readonly runtimeGeneration: string
+  readonly initialConfig: CordisXConfig
   readonly runtime: Pick<CdpPluginLifecycleRuntime,
     | 'currentRegistryEpoch'
     | 'cancelPreparation'
@@ -259,6 +260,7 @@ export class LocalDevelopmentController {
   private readonly sourceRoot: string
   private readonly identitySource: string
   private active: CordisXPluginActivationRecordV1
+  private lastGoodConfig: CordisXConfig
   private watchFiles: readonly string[] = []
   private lastFingerprint = ''
   private lastSuccessfulAt: string | undefined
@@ -277,6 +279,7 @@ export class LocalDevelopmentController {
     this.sourceRoot = resolved.sourceRoot
     this.identitySource = resolved.identitySource
     this.watchFiles = [resolved.entry, path.join(resolved.sourceRoot, 'package.json')]
+    this.lastGoodConfig = structuredClone(options.initialConfig)
     this.active = {
       $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
       schemaVersion: 1,
@@ -306,6 +309,12 @@ export class LocalDevelopmentController {
 
   private async currentFingerprint(): Promise<string> {
     return await fingerprint([...this.watchFiles, ...await sourceFiles(this.sourceRoot)])
+  }
+
+  private async restoreLastGoodBootstrap(restored: Awaited<ReturnType<CdpPluginLifecycleRuntime['rollback']>>): Promise<void> {
+    this.active = structuredClone(restored.active)
+    const source = await this.options.rebuildBootstrap(this.lastGoodConfig, this.active, restored.registryEpoch)
+    this.options.setBootstrap(source)
   }
 
   private schedule(): void {
@@ -512,7 +521,7 @@ export class LocalDevelopmentController {
         },
       })
       if (attempt !== this.desiredAttempt || this.stopped) {
-        await this.options.runtime.rollback(transactionId)
+        await this.restoreLastGoodBootstrap(await this.options.runtime.rollback(transactionId))
         return
       }
       await this.options.runtime.publish(transactionId)
@@ -520,13 +529,18 @@ export class LocalDevelopmentController {
       await this.options.runtime.finalize(transactionId)
       const { transactionId: _transactionId, ...committed } = candidate
       this.active = { ...committed, recordKind: 'active', lastGoodRevision: candidate.revision }
+      this.lastGoodConfig = structuredClone(bootstrapConfig)
       this.lastSuccessfulAt = successfulAt
       this.options.setBootstrap(nextBootstrap)
       await this.options.runtime.updateDevelopmentStatus(this.state('ready'))
       this.options.stdout(`[cordisx] local-dev generation ready: ${build.id} ${moduleGeneration}`)
     } catch (error) {
-      const message = diagnostic(error)
-      await this.options.runtime.rollback(transactionId).catch(() => undefined)
+      let message = diagnostic(error)
+      try {
+        await this.restoreLastGoodBootstrap(await this.options.runtime.rollback(transactionId))
+      } catch (rollbackError) {
+        message = `${message}; rollback failed: ${diagnostic(rollbackError)}`
+      }
       await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
       this.options.stdout(`[cordisx] local-dev activation failed; last-good retained: ${message}`)
     }

@@ -175,7 +175,7 @@ describe('CdpPluginLifecycleRuntime', () => {
     await expect(runtime.rollback('tx')).resolves.toEqual({
       transactionId: 'tx',
       transactionEpoch,
-      registryEpoch: 0,
+      registryEpoch: 2,
       active: previous,
       disposedAfter: candidate,
     })
@@ -183,30 +183,74 @@ describe('CdpPluginLifecycleRuntime', () => {
     expect(permissions.allowed({ id: 'demo', source: 'file:///demo-new.js' })).toBe(false)
 
     const unregisterReplacement = runtime.register({ send: async () => ({}) } as never)
-    expect(runtime.prepare('replacement')).toMatchObject({ expectedRegistryEpoch: 0 })
+    expect(runtime.prepare('replacement')).toMatchObject({ expectedRegistryEpoch: 2 })
     runtime.cancelPreparation('replacement')
     unregisterReplacement()
   })
 
-  it('releases terminal fences when renderer finalize and abort calls fail', async () => {
-    for (const terminal of ['finalize', 'abort'] as const) {
+  it('retains a failed finalize for rollback before admitting a replacement renderer', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const previous = activation(0, 'demo-old')
+    const candidate = activation(1, 'demo-new')
+    let transactionEpoch = ''
+    const unregister = runtime.register({
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
+        } } } }
+        if (expression.includes('publishPluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'tx', transactionEpoch, registryEpoch: 1, active: candidate,
+        } } } }
+        if (expression.includes('completePluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'tx', transactionEpoch, registryEpoch: 1, active: candidate, disposedAfter: previous,
+        } } } }
+        if (expression.includes('finalizePluginMutation')) return { result: { value: { ok: false, error: 'fixture finalize failure' } } }
+        if (expression.includes('rollbackPluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'tx', transactionEpoch, registryEpoch: 2, active: previous, disposedAfter: candidate,
+        } } } }
+        return {}
+      },
+    } as never)
+    const fence = runtime.prepare('tx')
+    transactionEpoch = fence.transactionEpoch
+    await runtime.stage({
+      transactionId: 'tx', ...fence, afterRegistryEpoch: 1, operation: 'disable', previous, candidate,
+      targetId: 'demo', affectedPluginIds: ['demo'],
+    })
+    await runtime.publish('tx')
+    await runtime.complete('tx')
+    await expect(runtime.finalize('tx')).rejects.toThrow('fixture finalize failure')
+    expect(() => runtime.register({ send: async () => ({}) } as never)).toThrow('during a plugin generation transaction')
+
+    await expect(runtime.rollback('tx')).resolves.toMatchObject({ registryEpoch: 2, active: previous, disposedAfter: candidate })
+    const unregisterReplacement = runtime.register({ send: async () => ({}) } as never)
+    expect(runtime.prepare('replacement-finalize')).toMatchObject({ expectedRegistryEpoch: 2 })
+    runtime.cancelPreparation('replacement-finalize')
+    unregisterReplacement()
+    unregister()
+  })
+
+  it('fails closed on live renderer rollback and abort errors until a retry proves the terminal state', async () => {
+    for (const terminal of ['rollback', 'abort'] as const) {
       const runtime = new CdpPluginLifecycleRuntime()
       const previous = activation(0, 'demo-old')
       const candidate = activation(1, 'demo-new')
       let transactionEpoch = ''
+      let terminalAttempts = 0
       const unregister = runtime.register({
         async send(_method: string, params: Record<string, unknown>) {
           const expression = String(params.expression ?? '')
           if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
             transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
           } } } }
-          if (expression.includes('publishPluginMutation')) return { result: { value: { ok: true, result: {
-            transactionId: 'tx', transactionEpoch, registryEpoch: 1, active: candidate,
-          } } } }
-          if (expression.includes('completePluginMutation')) return { result: { value: { ok: true, result: {
-            transactionId: 'tx', transactionEpoch, registryEpoch: 1, active: candidate, disposedAfter: previous,
-          } } } }
-          if (expression.includes(`${terminal}PluginMutation`)) return { result: { value: { ok: false, error: `fixture ${terminal} failure` } } }
+          if (expression.includes(`${terminal}PluginMutation`)) {
+            terminalAttempts += 1
+            if (terminalAttempts === 1) return { result: { value: { ok: false, error: `fixture ${terminal} failure` } } }
+            return { result: { value: { ok: true, result: terminal === 'rollback' ? {
+              transactionId: 'tx', transactionEpoch, registryEpoch: 0, active: previous, disposedAfter: candidate,
+            } : true } } }
+          }
           return {}
         },
       } as never)
@@ -216,21 +260,57 @@ describe('CdpPluginLifecycleRuntime', () => {
         transactionId: 'tx', ...fence, afterRegistryEpoch: 1, operation: 'disable', previous, candidate,
         targetId: 'demo', affectedPluginIds: ['demo'],
       })
-      if (terminal === 'finalize') {
-        await runtime.publish('tx')
-        await runtime.complete('tx')
-      }
-      await expect(terminal === 'finalize' ? runtime.finalize('tx') : runtime.abort('tx')).rejects.toThrow(`fixture ${terminal} failure`)
+      const terminate = async (): Promise<unknown> => terminal === 'rollback' ? await runtime.rollback('tx') : await runtime.abort('tx')
+      await expect(terminate()).rejects.toThrow(`fixture ${terminal} failure`)
+      expect(() => runtime.register({ send: async () => ({}) } as never)).toThrow('during a plugin generation transaction')
+      if (terminal === 'rollback') await expect(terminate()).resolves.toMatchObject({ active: previous, disposedAfter: candidate })
+      else await expect(terminate()).resolves.toBeUndefined()
 
       const unregisterReplacement = runtime.register({ send: async () => ({}) } as never)
-      expect(runtime.prepare(`replacement-${terminal}`)).toMatchObject({ expectedRegistryEpoch: terminal === 'finalize' ? 1 : 0 })
+      expect(runtime.prepare(`replacement-${terminal}`)).toMatchObject({ expectedRegistryEpoch: 0 })
       runtime.cancelPreparation(`replacement-${terminal}`)
       unregisterReplacement()
       unregister()
     }
   })
 
-  it('restores the bootstrap epoch when the published renderer closes before cleanup', async () => {
+  it('retains a live transaction when renderer rollback observations disagree', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const previous = activation(0, 'demo-old')
+    const candidate = activation(1, 'demo-new')
+    let transactionEpoch = ''
+    const session = (active: CordisXPluginActivationRecordV1) => ({
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
+        } } } }
+        if (expression.includes('rollbackPluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'tx', transactionEpoch, registryEpoch: 0, active,
+          disposedAfter: active === previous ? candidate : previous,
+        } } } }
+        return {}
+      },
+    })
+    const unregisterPrevious = runtime.register(session(previous) as never)
+    const unregisterDivergent = runtime.register(session(candidate) as never)
+    const fence = runtime.prepare('tx')
+    transactionEpoch = fence.transactionEpoch
+    await runtime.stage({
+      transactionId: 'tx', ...fence, afterRegistryEpoch: 1, operation: 'disable', previous, candidate,
+      targetId: 'demo', affectedPluginIds: ['demo'],
+    })
+    await expect(runtime.rollback('tx')).rejects.toThrow('rollback observations disagree')
+    expect(() => runtime.register({ send: async () => ({}) } as never)).toThrow('during a plugin generation transaction')
+
+    unregisterDivergent()
+    await expect(runtime.rollback('tx')).resolves.toMatchObject({ active: previous, disposedAfter: candidate })
+    const unregisterReplacement = runtime.register({ send: async () => ({}) } as never)
+    unregisterReplacement()
+    unregisterPrevious()
+  })
+
+  it('advances the rollback epoch when the published renderer closes before cleanup', async () => {
     const runtime = new CdpPluginLifecycleRuntime()
     const previous = activation(0, 'demo-old')
     const candidate = activation(1, 'demo-new')
@@ -257,9 +337,9 @@ describe('CdpPluginLifecycleRuntime', () => {
 
     unregister()
     await expect(runtime.complete('tx')).rejects.toThrow('cleanup observations disagree')
-    await expect(runtime.rollback('tx')).resolves.toMatchObject({ registryEpoch: 0, active: previous, disposedAfter: candidate })
+    await expect(runtime.rollback('tx')).resolves.toMatchObject({ registryEpoch: 2, active: previous, disposedAfter: candidate })
     const unregisterReplacement = runtime.register({ send: async () => ({}) } as never)
-    expect(runtime.prepare('replacement-after-publish')).toMatchObject({ expectedRegistryEpoch: 0 })
+    expect(runtime.prepare('replacement-after-publish')).toMatchObject({ expectedRegistryEpoch: 2 })
     runtime.cancelPreparation('replacement-after-publish')
     unregisterReplacement()
   })

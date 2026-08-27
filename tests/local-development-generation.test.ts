@@ -39,11 +39,11 @@ class FixtureGenerationRuntime {
     return { transactionEpoch: `${transactionId}:fixture`, expectedRegistryEpoch: this.epoch }
   }
   async stage(mutation: PluginRuntimeMutation) {
+    this.staged = mutation
     if (this.failNextStage) {
       this.failNextStage = false
       throw new Error('fixture activation rejected')
     }
-    this.staged = mutation
     return {
       transactionId: mutation.transactionId,
       transactionEpoch: mutation.transactionEpoch,
@@ -75,6 +75,8 @@ class FixtureGenerationRuntime {
     this.staged = undefined
     const active = mutation?.previous ?? this.active
     if (active === undefined) throw new Error('fixture has no rollback activation')
+    this.epoch = (mutation?.afterRegistryEpoch ?? this.epoch) + 1
+    this.active = active
     return {
       transactionId,
       transactionEpoch: mutation?.transactionEpoch ?? `${transactionId}:fixture`,
@@ -109,6 +111,7 @@ describe('local development generations', () => {
     const controller = await LocalDevelopmentController.create({
       entry,
       runtimeGeneration: 'fixture-runtime',
+      initialConfig: { version: 1, rootDir: root, codex: { debugPort: 9229 }, providers: [], plugins: [] },
       runtime,
       rebuildBootstrap: async (config, activation, epoch) => {
         const plugin = config.plugins[0]!
@@ -141,10 +144,14 @@ describe('local development generations', () => {
       await writeFile(dependency, "export const value = 'activation-fails'\n")
       await eventually(() => expect(runtime.states.at(-1)).toMatchObject({ state: 'failed', error: 'fixture activation rejected' }))
       expect(runtime.published).toHaveLength(3)
+      expect(JSON.parse(bootstraps.at(-1)!) as { epoch: number; digest: string }).toMatchObject({
+        epoch: runtime.epoch,
+        digest: runtime.published.at(-1)!.plugins[0]!.digest,
+      })
 
       await writeFile(dependency, "export const value = 'activation-recovers'\n")
       await eventually(() => expect(runtime.published).toHaveLength(4))
-      expect(bootstraps).toHaveLength(4)
+      expect(bootstraps).toHaveLength(5)
 
       await writeFile(dependency, "export const value = 'rapid-one'\n")
       await writeFile(dependency, "export const value = 'rapid-two'\n")
@@ -174,6 +181,7 @@ describe('local development generations', () => {
     const controller = await LocalDevelopmentController.create({
       entry,
       runtimeGeneration: 'fixture-runtime',
+      initialConfig: { version: 1, rootDir: root, codex: { debugPort: 9229 }, providers: [], plugins: [] },
       runtime,
       rebuildBootstrap: async () => 'fixture-bootstrap',
       setBootstrap: () => undefined,
@@ -209,6 +217,7 @@ describe('local development generations', () => {
     const controller = await LocalDevelopmentController.create({
       entry,
       runtimeGeneration: 'fixture-runtime',
+      initialConfig: { version: 1, rootDir: root, codex: { debugPort: 9229 }, providers: [], plugins: [] },
       runtime,
       rebuildBootstrap: async () => 'fixture-bootstrap',
       setBootstrap: () => undefined,
@@ -236,6 +245,7 @@ describe('local development generations', () => {
     const controller = await LocalDevelopmentController.create({
       entry,
       runtimeGeneration: 'fixture-runtime',
+      initialConfig: { version: 1, rootDir: root, codex: { debugPort: 9229 }, providers: [], plugins: [] },
       runtime,
       rebuildBootstrap: async () => 'fixture-bootstrap',
       setBootstrap: () => undefined,
@@ -265,6 +275,7 @@ describe('local development generations', () => {
     const controller = await LocalDevelopmentController.create({
       entry,
       runtimeGeneration: 'fixture-runtime',
+      initialConfig: { version: 1, rootDir: root, codex: { debugPort: 9229 }, providers: [], plugins: [] },
       runtime,
       rebuildBootstrap: async () => 'fixture-bootstrap',
       setBootstrap: () => undefined,

@@ -418,50 +418,53 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   async finalize(transactionId: string): Promise<void> {
     const sessions = this.staged.get(transactionId) ?? []
-    try {
-      await Promise.all(sessions.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
-        const runtime = globalThis.__cordisxRuntime
-        if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
-        await runtime.finalizePluginMutation(${JSON.stringify(transactionId)})
-        return { ok: true }
-      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
-    } finally {
-      this.releaseTransaction(transactionId, 'commit')
-    }
+    await Promise.all(sessions.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
+      const runtime = globalThis.__cordisxRuntime
+      if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
+      await runtime.finalizePluginMutation(${JSON.stringify(transactionId)})
+      return { ok: true }
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    this.releaseTransaction(transactionId, 'commit')
   }
 
   async rollback(transactionId: string): Promise<RuntimeCleanupObservation> {
     const sessions = this.staged.get(transactionId) ?? []
-    try {
-      if (sessions.length === 0) {
-        const mutation = this.stagedMutations.get(transactionId)
-        const fence = this.fences.get(transactionId)
-        if (mutation === undefined || fence === undefined) throw new Error('unknown plugin generation transaction')
-        // No renderer can still observe the candidate. Restore the Host epoch to
-        // the pre-transaction bootstrap epoch so its replacement starts aligned.
-        this.registryEpoch = fence.expectedRegistryEpoch
-        return {
-          transactionId,
-          transactionEpoch: fence.transactionEpoch,
-          registryEpoch: fence.expectedRegistryEpoch,
-          active: mutation.previous,
-          disposedAfter: mutation.candidate,
-        }
+    if (sessions.length === 0) {
+      const mutation = this.stagedMutations.get(transactionId)
+      const fence = this.fences.get(transactionId)
+      if (mutation === undefined || fence === undefined) throw new Error('unknown plugin generation transaction')
+      // No renderer can still observe the candidate. Advance the Host to the
+      // monotonic rollback epoch required by the shared lifecycle authority.
+      const rollbackRegistryEpoch = mutation.afterRegistryEpoch! + 1
+      this.registryEpoch = rollbackRegistryEpoch
+      const restored = {
+        transactionId,
+        transactionEpoch: fence.transactionEpoch,
+        registryEpoch: rollbackRegistryEpoch,
+        active: mutation.previous,
+        disposedAfter: mutation.candidate,
       }
-      const results = await Promise.all(sessions.map(async session => await evaluateRuntimeOperation<RuntimeCleanupObservation>(session, `(async () => { try {
-        const runtime = globalThis.__cordisxRuntime
-        if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
-        const result = await runtime.rollbackPluginMutation(${JSON.stringify(transactionId)})
-        return { ok: true, result }
-      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
-      const first = results[0]
-      if (first === undefined || results.some(item => item.transactionEpoch !== first.transactionEpoch
-        || item.registryEpoch !== first.registryEpoch)) throw new Error('CordisX renderer rollback observations disagree')
-      this.registryEpoch = first.registryEpoch
-      return first
-    } finally {
       this.releaseTransaction(transactionId, 'abort')
+      return restored
     }
+    const results = await Promise.all(sessions.map(async session => await evaluateRuntimeOperation<RuntimeCleanupObservation>(session, `(async () => { try {
+      const runtime = globalThis.__cordisxRuntime
+      if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
+      const result = await runtime.rollbackPluginMutation(${JSON.stringify(transactionId)})
+      return { ok: true, result }
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    const first = results[0]
+    if (first === undefined || first.transactionId !== transactionId
+      || results.some(item => item.transactionId !== first.transactionId
+      || item.transactionEpoch !== first.transactionEpoch
+      || item.registryEpoch !== first.registryEpoch
+      || JSON.stringify(item.active) !== JSON.stringify(first.active)
+      || JSON.stringify(item.disposedAfter) !== JSON.stringify(first.disposedAfter))) {
+      throw new Error('CordisX renderer rollback observations disagree')
+    }
+    this.registryEpoch = first.registryEpoch
+    this.releaseTransaction(transactionId, 'abort')
+    return first
   }
 
   async recoverRollback(plan: RollbackPlan): Promise<RuntimeCleanupObservation> {
@@ -473,35 +476,32 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       active: activationRecord(plan.rollbackTarget),
       disposedAfter: activationRecord(plan.expectedPublished),
     }
-    try {
-      const results = await Promise.all(sessions.map(async session => await evaluateRuntimeOperation<RuntimeCleanupObservation>(session, `(async () => { try {
-        const runtime = globalThis.__cordisxRuntime
-        if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
-        let result
-        try {
-          result = await runtime.rollbackPluginMutation(${JSON.stringify(plan.transactionId)})
-        } catch (error) {
-          if (!(error instanceof Error) || error.message !== 'unknown plugin generation transaction') throw error
-          result = await runtime.recoverPluginMutation(${JSON.stringify(recovery)})
-        }
-        return { ok: true, result }
-      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
-      const first = results[0]
-      if (first === undefined || first.transactionId !== plan.transactionId
-        || first.transactionEpoch !== plan.transactionEpoch
-        || first.registryEpoch !== plan.rollbackRegistryEpoch
-        || results.some(item => item.transactionId !== first.transactionId
-        || item.transactionEpoch !== first.transactionEpoch
-        || item.registryEpoch !== first.registryEpoch
-        || JSON.stringify(item.active) !== JSON.stringify(first.active)
-        || JSON.stringify(item.disposedAfter) !== JSON.stringify(first.disposedAfter))) {
-        throw new Error('CordisX renderer recovery observations disagree')
+    const results = await Promise.all(sessions.map(async session => await evaluateRuntimeOperation<RuntimeCleanupObservation>(session, `(async () => { try {
+      const runtime = globalThis.__cordisxRuntime
+      if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
+      let result
+      try {
+        result = await runtime.rollbackPluginMutation(${JSON.stringify(plan.transactionId)})
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== 'unknown plugin generation transaction') throw error
+        result = await runtime.recoverPluginMutation(${JSON.stringify(recovery)})
       }
-      this.registryEpoch = first.registryEpoch
-      return first
-    } finally {
-      this.releaseTransaction(plan.transactionId, 'abort')
+      return { ok: true, result }
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    const first = results[0]
+    if (first === undefined || first.transactionId !== plan.transactionId
+      || first.transactionEpoch !== plan.transactionEpoch
+      || first.registryEpoch !== plan.rollbackRegistryEpoch
+      || results.some(item => item.transactionId !== first.transactionId
+      || item.transactionEpoch !== first.transactionEpoch
+      || item.registryEpoch !== first.registryEpoch
+      || JSON.stringify(item.active) !== JSON.stringify(first.active)
+      || JSON.stringify(item.disposedAfter) !== JSON.stringify(first.disposedAfter))) {
+      throw new Error('CordisX renderer recovery observations disagree')
     }
+    this.registryEpoch = first.registryEpoch
+    this.releaseTransaction(plan.transactionId, 'abort')
+    return first
   }
 
   async adoptRecoveredActivation(active: CordisXPluginActivationRecordV1, registryEpoch: number): Promise<void> {
@@ -532,30 +532,24 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   async commit(transactionId: string): Promise<void> {
     const sessions = this.staged.get(transactionId) ?? []
-    try {
-      await Promise.all(sessions.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
-        const runtime = globalThis.__cordisxRuntime
-        if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
-        await runtime.commitPluginMutation(${JSON.stringify(transactionId)})
-        return { ok: true }
-      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
-    } finally {
-      this.releaseTransaction(transactionId, 'commit')
-    }
+    await Promise.all(sessions.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
+      const runtime = globalThis.__cordisxRuntime
+      if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
+      await runtime.commitPluginMutation(${JSON.stringify(transactionId)})
+      return { ok: true }
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    this.releaseTransaction(transactionId, 'commit')
   }
 
   async abort(transactionId: string): Promise<void> {
     const sessions = this.staged.get(transactionId) ?? []
-    try {
-      await Promise.all(sessions.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
-        const runtime = globalThis.__cordisxRuntime
-        if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
-        await runtime.abortPluginMutation(${JSON.stringify(transactionId)})
-        return { ok: true }
-      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
-    } finally {
-      this.releaseTransaction(transactionId, 'abort')
-    }
+    await Promise.all(sessions.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
+      const runtime = globalThis.__cordisxRuntime
+      if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
+      await runtime.abortPluginMutation(${JSON.stringify(transactionId)})
+      return { ok: true }
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    this.releaseTransaction(transactionId, 'abort')
   }
 
   async reload(input: { readonly pluginId: string; readonly moduleGeneration: string; readonly runtimeGeneration: string }): Promise<void> {

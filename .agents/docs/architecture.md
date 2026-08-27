@@ -60,7 +60,10 @@ plane. It boots one stable renderer runtime, watches the entry's complete
 transitive build graph, and publishes immutable local candidates through the
 same reversible generation transaction used by package lifecycle. Failed
 candidates preserve last-good; successful candidates update the bootstrap only
-for renderer targets discovered later. Local paths and build diagnostics are
+for renderer targets discovered later. A rollback advances the shared registry
+epoch monotonically even when its last renderer has closed, then rebuilds that
+future-target bootstrap from the saved last-good configuration and activation
+at the returned rollback epoch. Local paths and build diagnostics are
 projected only into Manager and never become public package sources, lifecycle
 snapshots, permission identities, or share targets. Details and the phase-1
 entry-basename id restriction are in

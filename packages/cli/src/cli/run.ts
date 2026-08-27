@@ -471,6 +471,7 @@ async function runDevelopment(
     const controller = await LocalDevelopmentController.create({
       entry,
       runtimeGeneration,
+      initialConfig: config,
       runtime: lifecycleRuntime,
       rebuildBootstrap: composition.rebuild,
       setBootstrap: source => { bootstrapSource = source },

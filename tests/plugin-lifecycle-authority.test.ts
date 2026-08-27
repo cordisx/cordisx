@@ -19,6 +19,8 @@ import {
   CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
   type CordisXPluginActivationRecordV1,
 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
+import { CdpPluginLifecycleRuntime } from '../packages/cli/src/launcher/cdp.js'
+import type { PluginRuntimeMutation } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 
 const temporary = new Set<string>()
 afterEach(async () => {
@@ -31,7 +33,10 @@ afterEach(async () => {
   temporary.clear()
 })
 
-async function setup(decision?: Partial<HostPermissionReviewDecision>) {
+async function setup(
+  decision?: Partial<HostPermissionReviewDecision>,
+  generation: { readonly transactionEpoch?: string; readonly expectedRegistryEpoch?: number } = {},
+) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-authority-'))
   temporary.add(root)
   const homeDir = path.join(root, 'home')
@@ -95,8 +100,8 @@ async function setup(decision?: Partial<HostPermissionReviewDecision>) {
     ownerId: 'generation-runtime',
     operation: 'install',
     candidateId: 'transaction-1',
-    transactionEpoch: 'transaction-epoch-1',
-    expectedRegistryEpoch: 4,
+    transactionEpoch: generation.transactionEpoch ?? 'transaction-epoch-1',
+    expectedRegistryEpoch: generation.expectedRegistryEpoch ?? 4,
     permissionPlanRevision: 7,
     permissionPlanFingerprint: 'b'.repeat(64),
   })
@@ -279,6 +284,69 @@ describe('Host-private package lifecycle authority', () => {
     expect(restored.plugins).toEqual([])
     expect(current.revoked).toEqual([['once:opaque']])
     expect(plan.afterRegistryEpoch).toBe(5)
+  })
+
+  it('accepts a monotonic Cdp rollback receipt after the published renderer closes', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    let transactionEpoch = ''
+    let previous!: CordisXPluginActivationRecordV1
+    let candidate!: CordisXPluginActivationRecordV1
+    const unregister = runtime.register({
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'transaction-1', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
+        } } } }
+        if (expression.includes('publishPluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'transaction-1', transactionEpoch, registryEpoch: 1, active: candidate,
+        } } } }
+        if (expression.includes('completePluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'transaction-1', transactionEpoch, registryEpoch: 1, active: candidate, disposedAfter: previous,
+        } } } }
+        return {}
+      },
+    } as never)
+    const fence = runtime.prepare('transaction-1')
+    transactionEpoch = fence.transactionEpoch
+    const current = await setup(undefined, { transactionEpoch, expectedRegistryEpoch: 0 })
+    previous = await current.authority.activation.loadActive()
+    candidate = await current.authority.activation.loadCandidate('transaction-1')
+    const mutation: PluginRuntimeMutation = {
+      transactionId: 'transaction-1', ...fence, afterRegistryEpoch: 1, operation: 'install', previous, candidate,
+      targetId: 'candidate', affectedPluginIds: ['candidate'],
+    }
+    const plan = await current.authority.requestActivation(current.access)
+    const readiness = await runtime.stage(mutation)
+    const registry = createHostRegistryReceiptAuthority()
+    await current.authority.confirmReadiness(current.access, registry.issueReadiness({
+      transactionId: plan.transactionId,
+      transactionEpoch: plan.transactionEpoch,
+      candidateFingerprint: plan.candidateFingerprint,
+      expectedRegistryEpoch: readiness.expectedRegistryEpoch,
+      afterRegistryEpoch: readiness.afterRegistryEpoch,
+      observation: runtimeObservation(plan.after, readiness.afterRegistryEpoch),
+    }))
+    const publication = await runtime.publish('transaction-1')
+    await current.authority.commit(current.access)
+    expect(publication).toMatchObject({ registryEpoch: 1, active: candidate })
+
+    const rollback = await current.authority.beginRollback(current.access, 'renderer-closed-after-publish')
+    unregister()
+    const restored = await runtime.rollback('transaction-1')
+    expect(restored).toMatchObject({ registryEpoch: rollback.rollbackRegistryEpoch, active: previous, disposedAfter: candidate })
+    const accepted = await current.authority.completeRollback({
+      ownerId: 'generation-runtime',
+      profileId: 'default',
+      rollbackToken: rollback.rollbackToken,
+    }, registry.issueRollback({
+      transactionId: rollback.transactionId,
+      transactionEpoch: rollback.transactionEpoch,
+      candidateFingerprint: rollback.candidateFingerprint,
+      registryEpoch: restored.registryEpoch,
+      active: runtimeObservation(rollback.rollbackTarget, restored.registryEpoch),
+      disposedAfter: runtimeObservation(rollback.expectedPublished, rollback.expectedRegistryEpoch),
+    }))
+    expect(accepted.plugins).toEqual([])
   })
 
   it('recovers after-active interruption as rollback-published and never leaks an old review into a new candidate', async () => {
