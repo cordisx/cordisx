@@ -1,9 +1,31 @@
-import { access, chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { createServer } from 'node:net'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { runCordisXCli } from '../packages/cli/src/cli/run.js'
+import { defaultIsolatedProfileDir } from '../packages/cli/src/launcher/process.js'
+
+const directGrantStatePath = path.join('state', 'publisher-grants', 'direct-device-bound.v1.json')
+
+async function createLocalDevelopmentFixture(root: string): Promise<{
+  readonly project: string
+  readonly entry: string
+  readonly configPath: string
+  readonly executable: string
+}> {
+  const project = path.join(root, 'project')
+  const entry = path.join(project, 'demo.ts')
+  const configPath = path.join(project, 'cordisx.config.json')
+  const executable = path.join(root, 'exits-before-injection')
+  await mkdir(project, { recursive: true })
+  await writeFile(path.join(project, 'package.json'), JSON.stringify({ name: 'demo', version: '1.0.0' }))
+  await writeFile(entry, "export default { name: 'demo', apply() {} }\n")
+  await writeFile(configPath, JSON.stringify({ version: 1, plugins: [] }))
+  await writeFile(executable, '#!/usr/bin/env node\nprocess.exit(0)\n')
+  await chmod(executable, 0o755)
+  return { project, entry, configPath, executable }
+}
 
 describe('functional CordisX CLI', () => {
   it('shares setup with first launch, ignores cwd composition, and reuses an independent shared profile', async () => {
@@ -128,6 +150,191 @@ describe('functional CordisX CLI', () => {
     } finally {
       await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
     }
+  })
+
+  it('isolates direct-entry Host state and its default profile in each selected CORDISX_HOME', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-local-dev-state-'))
+    const { project, entry, executable } = await createLocalDevelopmentFixture(root)
+    const firstHome = path.join(root, 'home-one')
+    const secondHome = path.join(root, 'home-two')
+    const cwdState = path.join(project, directGrantStatePath)
+    await mkdir(path.dirname(cwdState), { recursive: true })
+    await writeFile(cwdState, 'project-sentinel\n')
+    await mkdir(firstHome, { mode: 0o755 })
+    await mkdir(secondHome, { mode: 0o755 })
+
+    const launch = async (home: string): Promise<void> => {
+      await expect(runCordisXCli(['dev', entry, '--executable', executable], {
+        cwd: project,
+        env: { CORDISX_HOME: home },
+        stdout: () => undefined,
+      })).rejects.toThrow('Host exited before CordisX CDP became ready')
+    }
+
+    await launch(firstHome)
+    const firstStatePath = path.join(firstHome, directGrantStatePath)
+    const firstState = JSON.parse(await readFile(firstStatePath, 'utf8')) as Record<string, unknown>
+    await writeFile(firstStatePath, `${JSON.stringify({ ...firstState, revision: 7, lastTrustedAt: '2026-08-28T00:00:00.000Z' }, null, 2)}\n`)
+    await launch(secondHome)
+
+    expect(JSON.parse(await readFile(firstStatePath, 'utf8'))).toMatchObject({ revision: 7, lastTrustedAt: '2026-08-28T00:00:00.000Z' })
+    expect(JSON.parse(await readFile(path.join(secondHome, directGrantStatePath), 'utf8'))).toMatchObject({
+      contract: 'cordisx.publisher-grants/direct-device-bound/v1',
+      revision: 0,
+    })
+    await expect(readFile(cwdState, 'utf8')).resolves.toBe('project-sentinel\n')
+    await expect(access(defaultIsolatedProfileDir(project, firstHome))).resolves.toBeUndefined()
+    await expect(access(defaultIsolatedProfileDir(project, secondHome))).resolves.toBeUndefined()
+    if (process.platform !== 'win32') {
+      expect((await stat(firstHome)).mode & 0o777).toBe(0o700)
+      expect((await stat(secondHome)).mode & 0o777).toBe(0o700)
+      expect((await stat(defaultIsolatedProfileDir(project, firstHome))).mode & 0o777).toBe(0o700)
+      expect((await stat(defaultIsolatedProfileDir(project, secondHome))).mode & 0o777).toBe(0o700)
+    }
+  })
+
+  it('keeps config-based development Host state under CORDISX_HOME and leaves cwd state untouched', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-config-dev-state-'))
+    const { project, configPath, executable } = await createLocalDevelopmentFixture(root)
+    const home = path.join(root, 'home')
+    const cwdState = path.join(project, directGrantStatePath)
+    await mkdir(path.dirname(cwdState), { recursive: true })
+    await writeFile(cwdState, 'config-project-sentinel\n')
+    await mkdir(home, { mode: 0o755 })
+
+    await expect(runCordisXCli(['dev', '--config', configPath, '--executable', executable], {
+      cwd: project,
+      env: { CORDISX_HOME: home },
+      stdout: () => undefined,
+    })).rejects.toThrow('Host exited before CordisX CDP became ready')
+
+    expect(JSON.parse(await readFile(path.join(home, directGrantStatePath), 'utf8'))).toMatchObject({
+      contract: 'cordisx.publisher-grants/direct-device-bound/v1',
+      revision: 0,
+    })
+    await expect(readFile(cwdState, 'utf8')).resolves.toBe('config-project-sentinel\n')
+    await expect(access(defaultIsolatedProfileDir(project, home))).resolves.toBeUndefined()
+    if (process.platform !== 'win32') {
+      expect((await stat(home)).mode & 0o777).toBe(0o700)
+      expect((await stat(defaultIsolatedProfileDir(project, home))).mode & 0o777).toBe(0o700)
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('rejects a symlinked CORDISX_HOME before either development path can write', async () => {
+    for (const mode of ['direct', 'config'] as const) {
+      const root = await mkdtemp(path.join(os.tmpdir(), `cordisx-cli-dev-${mode}-symlink-home-`))
+      const { project, entry, configPath, executable } = await createLocalDevelopmentFixture(root)
+      const target = path.join(root, 'target-home')
+      const link = path.join(root, 'linked-home')
+      await mkdir(target, { mode: 0o755 })
+      await symlink(target, link)
+      const args = mode === 'direct'
+        ? ['dev', entry, '--executable', executable]
+        : ['dev', '--config', configPath, '--executable', executable]
+
+      await expect(runCordisXCli(args, {
+        cwd: project,
+        env: { CORDISX_HOME: link },
+        stdout: () => undefined,
+      })).rejects.toThrow('CordisX home must be a real directory')
+
+      expect((await stat(target)).mode & 0o777).toBe(0o755)
+      await expect(access(path.join(target, 'state'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(access(path.join(target, 'projects'))).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  })
+
+  it('rejects a non-directory CORDISX_HOME before either development path can write', async () => {
+    for (const mode of ['direct', 'config'] as const) {
+      const root = await mkdtemp(path.join(os.tmpdir(), `cordisx-cli-dev-${mode}-file-home-`))
+      const { project, entry, configPath, executable } = await createLocalDevelopmentFixture(root)
+      const home = path.join(root, 'home-file')
+      await writeFile(home, 'home-sentinel\n')
+      const args = mode === 'direct'
+        ? ['dev', entry, '--executable', executable]
+        : ['dev', '--config', configPath, '--executable', executable]
+
+      await expect(runCordisXCli(args, {
+        cwd: project,
+        env: { CORDISX_HOME: home },
+        stdout: () => undefined,
+      })).rejects.toThrow('failed to create CordisX home directory')
+      await expect(readFile(home, 'utf8')).resolves.toBe('home-sentinel\n')
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('rejects a non-owned broad CORDISX_HOME before development state writes', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-owner-home-'))
+    const { project, entry, executable } = await createLocalDevelopmentFixture(root)
+    const home = path.join(root, 'foreign-home')
+    await mkdir(home, { mode: 0o755 })
+    const metadata = await stat(home)
+    const getuid = vi.spyOn(process, 'getuid').mockReturnValue(metadata.uid + 1)
+    try {
+      await expect(runCordisXCli(['dev', entry, '--executable', executable], {
+        cwd: project,
+        env: { CORDISX_HOME: home },
+        stdout: () => undefined,
+      })).rejects.toThrow('CordisX home must be owned by the current user')
+    } finally {
+      getuid.mockRestore()
+    }
+    expect((await stat(home)).mode & 0o777).toBe(0o755)
+    await expect(access(path.join(home, 'state'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(path.join(home, 'projects'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('uses an isolated homedir for a fresh default ~/.cordisx development Home', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-default-home-'))
+    const { project, entry, executable } = await createLocalDevelopmentFixture(root)
+    const isolatedHomedir = path.join(root, 'isolated-user-home')
+    const home = path.join(isolatedHomedir, '.cordisx')
+
+    await expect(runCordisXCli(['dev', entry, '--executable', executable], {
+      cwd: project,
+      env: {},
+      homedir: isolatedHomedir,
+      stdout: () => undefined,
+    })).rejects.toThrow('Host exited before CordisX CDP became ready')
+
+    await expect(access(path.join(home, directGrantStatePath))).resolves.toBeUndefined()
+    await expect(access(defaultIsolatedProfileDir(project, home))).resolves.toBeUndefined()
+    if (process.platform !== 'win32') {
+      expect((await stat(home)).mode & 0o777).toBe(0o700)
+      expect((await stat(defaultIsolatedProfileDir(project, home))).mode & 0o777).toBe(0o700)
+    }
+  })
+
+  it('keeps both direct-entry and config-based development dry-runs write-free', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-dry-run-state-'))
+    const { project, entry, configPath } = await createLocalDevelopmentFixture(root)
+    const directHome = path.join(root, 'direct-home')
+    const configHome = path.join(root, 'config-home')
+
+    await runCordisXCli(['dev', entry, '--dry-run'], {
+      cwd: project,
+      env: { CORDISX_HOME: directHome },
+      stdout: () => undefined,
+    })
+    await runCordisXCli(['dev', '--config', configPath, '--dry-run'], {
+      cwd: project,
+      env: { CORDISX_HOME: configHome },
+      stdout: () => undefined,
+    })
+
+    await expect(access(directHome)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(configHome)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('rejects a relative CORDISX_HOME before a development dry-run can write', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-relative-home-'))
+    const { project, entry } = await createLocalDevelopmentFixture(root)
+    await expect(runCordisXCli(['dev', entry, '--dry-run'], {
+      cwd: project,
+      env: { CORDISX_HOME: 'relative-cordisx-home' },
+      stdout: () => undefined,
+    })).rejects.toThrow('CORDISX_HOME must be an absolute path')
+    await expect(access(path.join(project, 'relative-cordisx-home'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('reports the explicit local-dev source and validates its transitive build during dry-run', async () => {

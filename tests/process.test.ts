@@ -1,4 +1,4 @@
-import { access, chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
@@ -23,19 +23,25 @@ describe('isolated Codex process support', () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-profile-test-'))
     const profileDir = path.join(directory, 'codex-app-profile')
     try {
-      const profile = await prepareIsolatedCodexProfile('/project/example', profileDir)
+      const profile = await prepareIsolatedCodexProfile('/project/example', {
+        cordisxHomeDir: path.join(directory, 'home'),
+        explicitProfileDir: profileDir,
+      })
       expect(profile).toEqual({ userDataDir: profileDir, cleanupOwned: false })
       await expect(access(profile.userDataDir)).resolves.toBeUndefined()
+      if (process.platform !== 'win32') expect((await stat(profile.userDataDir)).mode & 0o777).toBe(0o700)
     } finally {
       await rm(directory, { recursive: true })
     }
   })
 
   it('derives deterministic and checkout-specific default profile paths', () => {
+    const home = path.join(path.sep, 'selected', 'cordisx-home')
     expect(projectProfileKey('/work/alpha')).toBe(projectProfileKey('/work/alpha'))
     expect(projectProfileKey('/work/alpha')).not.toBe(projectProfileKey('/other/alpha'))
-    expect(defaultIsolatedProfileDir('/work/alpha')).toContain(path.join('.cordisx', 'projects'))
-    expect(defaultIsolatedProfileDir('/work/alpha')).toMatch(/codex-app-profile$/)
+    expect(defaultIsolatedProfileDir('/work/alpha', home)).toContain(path.join(home, 'projects'))
+    expect(defaultIsolatedProfileDir('/work/alpha', home)).not.toContain(path.join(os.homedir(), '.cordisx'))
+    expect(defaultIsolatedProfileDir('/work/alpha', home)).toMatch(/codex-app-profile$/)
   })
 
   it('puts enforced isolation and loopback arguments after user arguments', async () => {

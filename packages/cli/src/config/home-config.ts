@@ -582,6 +582,13 @@ async function ensurePrivateDirectory(directory: string, policy: PrivateDirector
   }
 }
 
+/** Validate or create the selected CordisX home without creating config.json. */
+export async function ensureCordisXHomeDirectory(options: HomeConfigPathOptions = {}): Promise<string> {
+  const directory = path.dirname(resolveHomeConfigPath(options))
+  await ensurePrivateDirectory(directory, privateDirectoryPolicy(options))
+  return directory
+}
+
 function privateDirectoryPolicy(options: HomeConfigWriteOptions): PrivateDirectoryPolicy {
   if (options.configPath !== undefined) {
     return { allowTightenExisting: false, requireCurrentUserOwnership: false }
@@ -698,7 +705,7 @@ async function publishAtomic(configPath: string, config: HomeConfig): Promise<vo
 export async function ensureHomeConfig(options?: string | HomeConfigWriteOptions): Promise<HomeConfig> {
   const normalized = normalizeOptions(options)
   const configPath = resolveHomeConfigPath(normalized)
-  await ensurePrivateDirectory(path.dirname(configPath), privateDirectoryPolicy(normalized))
+  await ensureCordisXHomeDirectory(normalized)
   const lock = await acquireLock(configPath, normalized)
   try {
     try {
@@ -727,7 +734,7 @@ export async function updateHomeConfigAtomic(
 ): Promise<HomeConfig> {
   const normalized = normalizeOptions(options)
   const configPath = resolveHomeConfigPath(normalized)
-  await ensurePrivateDirectory(path.dirname(configPath), privateDirectoryPolicy(normalized))
+  await ensureCordisXHomeDirectory(normalized)
   const lock = await acquireLock(configPath, normalized)
   try {
     let current: HomeConfig

@@ -550,6 +550,15 @@ remain later security stages.
 `publisher-grant.v1` protocol. It verifies a Host-registered Ed25519 issuer
 key, creates or retrieves one macOS Keychain machine identity outside
 `CORDISX_HOME`, and keeps signed-grant/import state inside each selected home.
+This persistence boundary also applies to direct-entry and config-based
+development launches: project/config roots resolve project inputs, while the
+PublisherGrant store remains under `CORDISX_HOME/state/publisher-grants`.
+Their default project-scoped Chromium profile likewise remains below the
+selected `CORDISX_HOME/projects`; only an explicit `--profile-dir` relocates
+that profile. Non-dry development applies the canonical CordisX Home ownership,
+real-directory, and `0700` policy before either write, and creates new default
+or explicit profile directories as `0700`. Dry-run development performs
+neither write.
 The default `direct-device-bound` path accepts a publisher grant only when its
 public-key digest matches that machine identity; no CordisX registry is needed.
 It persists a non-decreasing accepted-statement time for expiry/offline grace.

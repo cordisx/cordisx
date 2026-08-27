@@ -5,7 +5,13 @@ import os from 'node:os'
 import type { ChildProcess } from 'node:child_process'
 import { resolveHostAdapter } from '../adapters/registry.js'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
-import { ensureHomeConfig, loadHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
+import {
+  ensureCordisXHomeDirectory,
+  ensureHomeConfig,
+  loadHomeConfig,
+  resolveHomeConfigPath,
+  type HomeConfigPathOptions,
+} from '../config/home-config.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
 import { CdpPluginLifecycleRuntime, watchAndInject } from '../launcher/cdp.js'
 import { LocalDevelopmentController, buildLocalDevelopmentPlugin } from '../launcher/development.js'
@@ -82,6 +88,8 @@ Options:
 export interface CordisXCliRuntime {
   readonly cwd?: string
   readonly env?: NodeJS.ProcessEnv
+  /** Test/integration seam for the canonical default `~/.cordisx` root. */
+  readonly homedir?: string
   readonly stdout?: (line: string) => void
 }
 
@@ -427,7 +435,11 @@ async function runDevelopment(
   cwd: string,
   stdout: (line: string) => void,
   environment: NodeJS.ProcessEnv,
+  homeConfigPath: string,
+  homeConfigOptions: HomeConfigPathOptions,
 ): Promise<void> {
+  const cordisxHomeDir = rootFromConfigPath(homeConfigPath)
+  if (!invocation.options.dryRun) await ensureCordisXHomeDirectory(homeConfigOptions)
   if (invocation.pluginPath !== undefined) {
     const entry = path.resolve(cwd, invocation.pluginPath)
     const config = localDevelopmentHostConfig(cwd)
@@ -488,11 +500,14 @@ async function runDevelopment(
       : await resolveCodexExecutable(invocation.options.executable ?? config.codex.executable)
     const profile = invocation.options.attach || invocation.options.system
       ? undefined
-      : await prepareIsolatedCodexProfile(config.rootDir, invocation.options.profileDir)
+      : await prepareIsolatedCodexProfile(config.rootDir, {
+          cordisxHomeDir,
+          ...(invocation.options.profileDir === undefined ? {} : { explicitProfileDir: invocation.options.profileDir }),
+        })
     try {
       await runInjectedHost({
         source: () => bootstrapSource,
-        agentHistoryHost: agentHistoryHost(environment, resolveHomeConfigPath({ env: environment }), `development:${config.rootDir}`),
+        agentHistoryHost: agentHistoryHost(environment, homeConfigPath, `development:${config.rootDir}`),
         agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
         developmentRuntime: lifecycleRuntime,
         ...(executable === undefined ? {} : { executable }),
@@ -503,7 +518,7 @@ async function runDevelopment(
         publisherGrant: createPublisherGrantBridgeHandler(new DirectPublisherGrantAuthority(
           new StaticPublisherKeyRegistry([]),
           new MacOSMachineIdentityProvider(),
-          await DirectPublisherGrantStore.open(config.rootDir),
+          await DirectPublisherGrantStore.open(cordisxHomeDir),
         )),
         onReady: () => { void controller.start().catch(error => stdout(`[cordisx] local-dev start failed: ${String(error)}`)) },
         stdout,
@@ -542,10 +557,13 @@ async function runDevelopment(
     : await resolveCodexExecutable(invocation.options.executable ?? config.codex.executable)
   const profile = invocation.options.attach || invocation.options.system
     ? undefined
-    : await prepareIsolatedCodexProfile(config.rootDir, invocation.options.profileDir)
+    : await prepareIsolatedCodexProfile(config.rootDir, {
+        cordisxHomeDir,
+        ...(invocation.options.profileDir === undefined ? {} : { explicitProfileDir: invocation.options.profileDir }),
+      })
   await runInjectedHost({
     source: composition.source,
-    agentHistoryHost: agentHistoryHost(environment, resolveHomeConfigPath({ env: environment }), `development:${config.rootDir}`),
+    agentHistoryHost: agentHistoryHost(environment, homeConfigPath, `development:${config.rootDir}`),
     agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
     ...(composition.providerBridgeToken === undefined ? {} : {
       providerFleet: await ProviderFleet.create(config.providers, { appServer: { environment } }),
@@ -559,7 +577,7 @@ async function runDevelopment(
     publisherGrant: createPublisherGrantBridgeHandler(new DirectPublisherGrantAuthority(
       new StaticPublisherKeyRegistry([]),
       new MacOSMachineIdentityProvider(),
-      await DirectPublisherGrantStore.open(config.rootDir),
+      await DirectPublisherGrantStore.open(cordisxHomeDir),
     )),
     stdout,
   })
@@ -570,30 +588,35 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   const invocation = parseCordisXCli(argv)
   const stdout = runtime.stdout ?? console.log
   const cwd = runtime.cwd ?? process.cwd()
-  const configPath = resolveHomeConfigPath({ env: runtime.env ?? process.env })
+  const environment = runtime.env ?? process.env
+  const homeConfigOptions: HomeConfigPathOptions = {
+    env: environment,
+    ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
+  }
+  const configPath = resolveHomeConfigPath(homeConfigOptions)
 
   if (invocation.action === 'help') {
     stdout(HELP)
     return
   }
   if (invocation.action === 'setup') {
-    const config = await ensureHomeConfig({ env: runtime.env ?? process.env })
+    const config = await ensureHomeConfig(homeConfigOptions)
     stdout(`[cordisx] configuration ready: ${configPath}`)
     stdout(JSON.stringify(config, null, 2))
     return
   }
   if (invocation.action === 'config') {
-    const config = await ensureHomeConfig({ env: runtime.env ?? process.env })
+    const config = await ensureHomeConfig(homeConfigOptions)
     stdout(`[cordisx] configuration: ${configPath}`)
     stdout(JSON.stringify(config, null, 2))
     return
   }
   if (invocation.action === 'dev') {
-    await runDevelopment(invocation, cwd, stdout, runtime.env ?? process.env)
+    await runDevelopment(invocation, cwd, stdout, environment, configPath, homeConfigOptions)
     return
   }
 
-  const config = await ensureHomeConfig({ env: runtime.env ?? process.env })
+  const config = await ensureHomeConfig(homeConfigOptions)
   const appId = invocation.action === 'launch' ? invocation.app ?? config.defaultApp : config.defaultApp
   const adapter = resolveHostAdapter(appId)
   if (invocation.action === 'launch' && invocation.options.attach && (
