@@ -225,6 +225,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private recoveredActivation: CordisXPluginActivationRecordV1 | undefined
   private readonly recoveredSessions = new WeakSet<CdpSession>()
   private readonly developmentStates = new Map<string, CordisXLocalDevelopmentSnapshot>()
+  private developmentVersion = 0
 
   constructor(permissionIdentities?: PluginPermissionIdentityRegistry) {
     this.permissionIdentities = permissionIdentities
@@ -277,7 +278,10 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   }
 
   /** Reserve one boot-ready renderer for cold recovery before normal admission. */
-  beginJoin(session: CdpSession): { readonly commit: () => () => void; readonly abort: () => void } {
+  beginJoin(session: CdpSession): {
+    readonly commit: (developmentVersion: number) => (() => void) | undefined
+    readonly abort: () => void
+  } {
     if (this.joining.size !== 0 || this.fences.size !== 0
       || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
       throw new Error('cannot join a CordisX renderer during a plugin generation transaction')
@@ -285,8 +289,12 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     this.joining.add(session)
     let settled = false
     return {
-      commit: () => {
-        if (settled || !this.joining.delete(session)) throw new Error('CordisX renderer join reservation is stale')
+      commit: developmentVersion => {
+        if (settled || !this.joining.has(session)) throw new Error('CordisX renderer join reservation is stale')
+        // Synchronous compare-and-move is the join barrier. A status update
+        // cannot interleave between this version check and sessions.add().
+        if (developmentVersion !== this.developmentVersion) return undefined
+        this.joining.delete(session)
         settled = true
         this.sessions.add(session)
         return () => {
@@ -326,12 +334,16 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   async updateDevelopmentStatus(state: CordisXLocalDevelopmentSnapshot): Promise<void> {
     this.developmentStates.set(state.sourcePath, structuredClone(state))
+    this.developmentVersion += 1
     await Promise.all([...this.sessions].map(async session => await this.projectDevelopmentState(session, state)))
   }
 
-  async synchronizeDevelopmentStatus(session: CdpSession): Promise<void> {
-    for (const state of this.developmentStates.values()) {
-      await this.projectDevelopmentState(session, state)
+  async synchronizeDevelopmentStatus(session: CdpSession): Promise<number> {
+    while (true) {
+      const version = this.developmentVersion
+      const states = [...this.developmentStates.values()].map(state => structuredClone(state))
+      for (const state of states) await this.projectDevelopmentState(session, state)
+      if (version === this.developmentVersion) return version
     }
   }
 
@@ -1138,11 +1150,16 @@ async function install(
         await lifecycle.handler.coordinator.recover()
         await generationRuntime.synchronizeRecoveredActivation(session)
       }
-      await generationRuntime.synchronizeDevelopmentStatus(session)
       // It becomes a normal generation participant only after its bootstrap
       // and recovered/private projections are ready. Committing the reserved
       // join is atomic with respect to prepare/register.
-      unregisterLifecycleSession = generationJoin.commit()
+      while (true) {
+        const developmentVersion = await generationRuntime.synchronizeDevelopmentStatus(session)
+        const unregister = generationJoin.commit(developmentVersion)
+        if (unregister === undefined) continue
+        unregisterLifecycleSession = unregister
+        break
+      }
       generationJoin = undefined
     }
     return {

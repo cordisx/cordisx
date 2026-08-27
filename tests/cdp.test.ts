@@ -60,6 +60,44 @@ function activation(revision: number, generation: string): CordisXPluginActivati
 }
 
 describe('CdpPluginLifecycleRuntime', () => {
+  it('replays a newer local-development state before atomically committing a joining renderer', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const sourcePath = '/absolute/plugin/join-state.ts'
+    await runtime.updateDevelopmentStatus({
+      origin: 'local-dev', pluginId: 'join-state', sourcePath, state: 'ready',
+    })
+    let releaseReady!: () => void
+    let readyStarted!: () => void
+    const readyGate = new Promise<void>(resolve => { releaseReady = resolve })
+    const readyObserved = new Promise<void>(resolve => { readyStarted = resolve })
+    const expressions: string[] = []
+    const session = {
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        expressions.push(expression)
+        if (expression.includes('"state":"ready"')) {
+          readyStarted()
+          await readyGate
+        }
+        return { result: { value: { ok: true, result: true } } }
+      },
+    }
+    const join = runtime.beginJoin(session as never)
+    const synchronizing = runtime.synchronizeDevelopmentStatus(session as never)
+    await readyObserved
+    await runtime.updateDevelopmentStatus({
+      origin: 'local-dev', pluginId: 'join-state', sourcePath, state: 'failed', error: 'new failure',
+    })
+    releaseReady()
+    const version = await synchronizing
+    const unregister = join.commit(version)
+    expect(unregister).toBeTypeOf('function')
+    expect(expressions.filter(expression => expression.includes('updateLocalDevelopmentStatus'))).toHaveLength(2)
+    expect(expressions.at(-1)).toContain('"state":"failed"')
+    expect(expressions.at(-1)).toContain('new failure')
+    unregister?.()
+  })
+
   it('joins a booting renderer only after readiness and retries when a generation fence wins the race', async () => {
     const runtime = new CdpPluginLifecycleRuntime()
     const unregisterExisting = runtime.register({ send: async () => ({}) } as never)

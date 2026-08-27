@@ -270,7 +270,7 @@ export class LocalDevelopmentController {
   private polling: Promise<void> | undefined
   private debounce: ReturnType<typeof setTimeout> | undefined
   private poller: ReturnType<typeof setTimeout> | undefined
-  private rollbackRetry: ReturnType<typeof setTimeout> | undefined
+  private retryTimer: ReturnType<typeof setTimeout> | undefined
 
   private constructor(private readonly options: LocalDevelopmentControllerOptions, resolved: LocalDevelopmentEntry) {
     this.entry = resolved.entry
@@ -325,22 +325,22 @@ export class LocalDevelopmentController {
     await this.restoreLastGoodBootstrap(pending.restored)
     if (this.pendingRollback === pending) {
       this.pendingRollback = undefined
-      if (this.rollbackRetry !== undefined) clearTimeout(this.rollbackRetry)
-      this.rollbackRetry = undefined
+      if (this.retryTimer !== undefined) clearTimeout(this.retryTimer)
+      this.retryTimer = undefined
     }
   }
 
-  private armRollbackRetry(): void {
-    if (this.stopped || this.pendingRollback === undefined || this.rollbackRetry !== undefined) return
+  private armRetry(expectedTransactionId?: string): void {
+    if (this.stopped || this.retryTimer !== undefined) return
     const epoch = this.watchEpoch
-    const transactionId = this.pendingRollback.transactionId
-    this.rollbackRetry = setTimeout(() => {
-      this.rollbackRetry = undefined
-      if (this.stopped || epoch !== this.watchEpoch
-        || this.pendingRollback?.transactionId !== transactionId) return
-      // Re-enter the normal single-flight drain. The next attempt first
-      // resolves this exact transaction and restores its bootstrap before it
-      // is allowed to build/publish the latest source fingerprint.
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined
+      if (this.stopped || epoch !== this.watchEpoch) return
+      if (expectedTransactionId === undefined) {
+        if (this.pendingRollback !== undefined) return
+      } else if (this.pendingRollback?.transactionId !== expectedTransactionId) return
+      // Re-enter the normal single-flight drain. A pending transaction is
+      // resolved before the latest source fingerprint can build/publish.
       this.schedule()
     }, ROLLBACK_RETRY_MS)
   }
@@ -358,6 +358,8 @@ export class LocalDevelopmentController {
 
   private schedule(): void {
     if (this.stopped) return
+    if (this.retryTimer !== undefined) clearTimeout(this.retryTimer)
+    this.retryTimer = undefined
     this.desiredAttempt += 1
     if (this.debounce !== undefined) clearTimeout(this.debounce)
     this.debounce = setTimeout(() => {
@@ -419,10 +421,10 @@ export class LocalDevelopmentController {
     this.watchEpoch += 1
     if (this.debounce !== undefined) clearTimeout(this.debounce)
     if (this.poller !== undefined) clearTimeout(this.poller)
-    if (this.rollbackRetry !== undefined) clearTimeout(this.rollbackRetry)
+    if (this.retryTimer !== undefined) clearTimeout(this.retryTimer)
     this.debounce = undefined
     this.poller = undefined
-    this.rollbackRetry = undefined
+    this.retryTimer = undefined
     await Promise.all([this.starting, this.polling])
     while (this.running) await new Promise(resolve => setTimeout(resolve, 10))
   }
@@ -451,7 +453,7 @@ export class LocalDevelopmentController {
         const message = `pending rollback ${transactionId} failed: ${diagnostic(error)}`
         await this.projectStatus('failed', message)
         this.options.stdout(`[cordisx] local-dev ${message}`)
-        this.armRollbackRetry()
+        this.armRetry(transactionId)
         return
       }
       if (attempt !== this.desiredAttempt || this.stopped) return
@@ -551,8 +553,15 @@ export class LocalDevelopmentController {
       return
     }
     let prepared = false
+    let retryPreparation = false
     try {
-      const fence = this.options.runtime.prepare(transactionId)
+      let fence: ReturnType<CdpPluginLifecycleRuntime['prepare']>
+      try {
+        fence = this.options.runtime.prepare(transactionId)
+      } catch (error) {
+        retryPreparation = true
+        throw error
+      }
       prepared = true
       if (fence.expectedRegistryEpoch !== expectedRegistryEpoch) {
         await this.options.runtime.cancelPreparation(transactionId)
@@ -587,7 +596,7 @@ export class LocalDevelopmentController {
           const message = `pending rollback ${transactionId} failed: ${diagnostic(error)}`
           await this.projectStatus('failed', message)
           this.options.stdout(`[cordisx] local-dev ${message}`)
-          this.armRollbackRetry()
+          this.armRetry(transactionId)
         }
         return
       }
@@ -610,9 +619,10 @@ export class LocalDevelopmentController {
           await this.finishPendingRollback(transactionId)
         } catch (rollbackError) {
           message = `${message}; rollback failed: ${diagnostic(rollbackError)}`
-          this.armRollbackRetry()
+          this.armRetry(transactionId)
         }
       }
+      if (retryPreparation) this.armRetry()
       await this.projectStatus('failed', message)
       this.options.stdout(`[cordisx] local-dev activation failed; last-good retained: ${message}`)
     }

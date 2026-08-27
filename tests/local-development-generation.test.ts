@@ -29,6 +29,7 @@ class FixtureGenerationRuntime {
   epoch = 0
   failNextStatus = false
   closedRenderer = false
+  readyRenderer = true
   staged: PluginRuntimeMutation | undefined
   active: CordisXPluginActivationRecordV1 | undefined
   readonly published: CordisXPluginActivationRecordV1[] = []
@@ -38,6 +39,7 @@ class FixtureGenerationRuntime {
   currentRegistryEpoch(): number { return this.epoch }
   cancelPreparation(): void {}
   prepare(transactionId: string) {
+    if (!this.readyRenderer) throw new Error('no ready CordisX renderer is available')
     return { transactionEpoch: `${transactionId}:fixture`, expectedRegistryEpoch: this.epoch }
   }
   async stage(mutation: PluginRuntimeMutation) {
@@ -175,6 +177,12 @@ describe('local development generations', () => {
       // source write is required for the controller-owned rollback retry to
       // restore last-good and publish the already-current source fingerprint.
       runtime.closedRenderer = false
+      runtime.readyRenderer = false
+      await eventually(() => expect(runtime.states.at(-1)).toMatchObject({
+        state: 'failed', error: 'no ready CordisX renderer is available',
+      }))
+      expect(runtime.published).toHaveLength(3)
+      runtime.readyRenderer = true
       await eventually(() => expect(runtime.published).toHaveLength(4))
       expect(runtime.rollbackTransactions.slice(-2)).toEqual([failedTransaction, failedTransaction])
       expect(JSON.parse(bootstraps.at(-2)!) as { epoch: number; digest: string }).toMatchObject({
@@ -198,7 +206,7 @@ describe('local development generations', () => {
       await controller.stop()
       await rm(root, { recursive: true, force: true })
     }
-  })
+  }, 12_000)
 
   it('reports an explicit source failure before any plugin becomes active and then recovers', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-dev-first-failure-'))
@@ -314,10 +322,10 @@ describe('local development generations', () => {
       await controller.start()
       const internal = controller as unknown as {
         pendingRollback?: { transactionId: string }
-        armRollbackRetry(): void
+        armRetry(transactionId?: string): void
       }
       internal.pendingRollback = { transactionId: 'pending-stop' }
-      internal.armRollbackRetry()
+      internal.armRetry('pending-stop')
       expect(vi.getTimerCount()).toBeGreaterThan(0)
       await controller.stop()
       expect(vi.getTimerCount()).toBe(0)
