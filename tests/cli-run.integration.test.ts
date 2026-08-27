@@ -129,4 +129,24 @@ describe('functional CordisX CLI', () => {
       await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
     }
   })
+
+  it('reports the explicit local-dev source and validates its transitive build during dry-run', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-local-dev-'))
+    const entry = path.join(root, 'demo.ts')
+    const dependency = path.join(root, 'value.ts')
+    await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'demo', version: '1.0.0' }))
+    await writeFile(entry, "import { value } from './value.js'\nexport default { name: value, apply() {} }\n")
+    await writeFile(dependency, "export const value = 'demo'\n")
+    const output: string[] = []
+    await runCordisXCli(['dev', entry, '--dry-run'], { cwd: root, stdout: line => { output.push(line) } })
+    expect(JSON.parse(output.at(-1)!) as unknown).toMatchObject({
+      status: 'ready',
+      mode: 'development',
+      origin: 'local-dev',
+      pluginId: 'demo',
+      sourcePath: entry,
+    })
+    await writeFile(dependency, 'export const value =\n')
+    await expect(runCordisXCli(['dev', entry, '--dry-run'], { cwd: root, stdout: () => undefined })).rejects.toThrow(/Build failed/u)
+  })
 })

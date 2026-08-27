@@ -79,8 +79,13 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
   .cxr-status-dot[data-status="blocked"], .cxr-status-dot[data-status="permission-blocked"] { background: var(--cx-warning,#e7b75b); }
   .cxr-card-body { min-width: 0; flex: 1; }
   .cxr-card-title { display: block; overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .cxr-badge { display: inline-flex; align-items: center; margin-left: 7px; border-radius: 999px; padding: 1px 6px; background: color-mix(in srgb,var(--cx-primary,#7da2ff) 16%,transparent); color: var(--cx-primary,#7da2ff); font-size: 9px; font-weight: 600; vertical-align: middle; }
   .cxr-card-description { display: block; margin-top: 3px; overflow: hidden; color: var(--cx-muted,#9ca5b5); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
   .cxr-card-code { display: block; margin-top: 4px; overflow: hidden; color: var(--cx-muted,#7f899a); font: 10px/1.3 ui-monospace,monospace; text-overflow: ellipsis; white-space: nowrap; }
+  .cxr-local-development-source { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border: 1px solid var(--cx-border,#353a42); border-radius: 10px; background: var(--cx-surface-raised,#20242b); }
+  .cxr-local-development-source > strong { color: var(--cx-muted,#9ca5b5); font-size: 11px; }
+  .cxr-local-development-source[data-development-state="failed"] > strong, .cxr-local-development-error { color: var(--cx-danger,#f59aa4); }
+  .cxr-local-development-error { display: block; margin-top: 6px; overflow-wrap: anywhere; font-size: 11px; }
   .cxr-status { flex: none; color: var(--cx-muted,#9ca5b5); font-size: 11px; }
   .cxr-status[data-tone="danger"] { color: var(--cx-danger,#f59aa4); }
   .cxr-plugin-row { position: relative; display: flex; min-width: 0; min-height: 78px; align-items: center; border: 1px solid var(--cx-border,#353a42); border-radius: 11px; background: var(--cx-surface-raised,#20242b); }
@@ -97,6 +102,10 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
   .cxr-section { padding: 13px; border: 1px solid var(--cx-border,#353a42); border-radius: 11px; background: var(--cx-surface-raised,#20242b); }
   .cxr-section h3, .cxr-section h4 { margin: 0; }
   .cxr-section p { margin: 5px 0 0; color: var(--cx-muted,#9ca5b5); }
+  .cxr-facts { display: grid; gap: 7px; margin: 10px 0 0; }
+  .cxr-facts > div { display: grid; grid-template-columns: 76px minmax(0,1fr); gap: 9px; }
+  .cxr-facts dt { color: var(--cx-muted,#9ca5b5); }
+  .cxr-facts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
   .cxr-item-full { grid-column: 1 / -1; }
   .cxr-danger { color: var(--cx-danger,#f59aa4) !important; }
   .cxr-policy-select { width: min(180px, 35%); flex: none; }

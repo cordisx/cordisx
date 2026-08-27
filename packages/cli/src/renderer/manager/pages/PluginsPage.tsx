@@ -14,6 +14,10 @@ export function PluginsPage({ model, snapshot, router }: { readonly model: Manag
   const [busyPluginId, setBusyPluginId] = useState<string>()
   const normalized = query.trim().toLocaleLowerCase()
   const plugins = useMemo(() => snapshot.plugins.filter(plugin => normalized === '' || `${plugin.name} ${plugin.id} ${plugin.description ?? ''}`.toLocaleLowerCase().includes(normalized)), [normalized, snapshot.plugins])
+  const pendingDevelopment = useMemo(() => (snapshot.localDevelopment ?? []).filter(item => (
+    !snapshot.plugins.some(plugin => plugin.id === item.pluginId)
+    && (normalized === '' || `${item.pluginId} ${item.sourcePath} ${item.error ?? ''}`.toLocaleLowerCase().includes(normalized))
+  )), [normalized, snapshot.localDevelopment, snapshot.plugins])
   const run = async (plugin: ManagerPluginSnapshot, operation: CordisXPluginLifecycleOperationV1) => {
     if (model.requestPluginLifecycle === undefined) return
     setBusyPluginId(plugin.id)
@@ -30,11 +34,15 @@ export function PluginsPage({ model, snapshot, router }: { readonly model: Manag
     <section className="cxr-page" aria-label={managerCopy(snapshot.localization.locale, 'plugins.heading')}>
       <SearchField className="cxr-search" value={query} aria-label={managerCopy(snapshot.localization.locale, 'plugins.search-label')} placeholder={managerCopy(snapshot.localization.locale, 'plugins.search-placeholder')} onChange={setQuery} />
       <div className="cxr-list" role="list">
+        {pendingDevelopment.map(item => <div key={item.sourcePath} className="cxr-local-development-source" role="listitem" data-plugin-origin="local-dev" data-development-state={item.state}>
+          <span className="cxr-card-body"><span className="cxr-card-title">{item.pluginId}<span className="cxr-badge">本地开发</span></span><code className="cxr-card-code">{item.sourcePath}</code>{item.error === undefined ? null : <span className="cxr-local-development-error" role="alert">{item.error}</span>}</span>
+          <strong>{item.state}</strong>
+        </div>)}
         {plugins.map(plugin => (
           <div key={`${plugin.source}\0${plugin.id}`} className="cxr-plugin-row" role="listitem">
             <button className="cxr-plugin-primary" type="button" data-plugin-id={plugin.id} aria-label={`打开插件详情 · ${plugin.name}`} onClick={() => router.navigate({ kind: 'plugin', pluginId: plugin.id, page: 'readme' })}>
               <PluginIdentityIcon pluginId={plugin.id} name={plugin.name} icon={plugin.icon} status={plugin.status} />
-              <span className="cxr-card-body"><span className="cxr-card-title">{plugin.name}</span><span className="cxr-card-description">{plugin.description}</span><code className="cxr-card-code">{plugin.id}</code></span>
+              <span className="cxr-card-body"><span className="cxr-card-title">{plugin.name}{plugin.development === undefined ? null : <span className="cxr-badge" data-plugin-origin="local-dev">本地开发</span>}</span><span className="cxr-card-description">{plugin.description}</span><code className="cxr-card-code">{plugin.id}</code></span>
             </button>
             <span className="cxr-plugin-actions">
               <IconButton icon={plugin.status === 'configured-disabled' ? 'enable-plugin' : 'disable-plugin'} label={plugin.status === 'configured-disabled' ? '启用' : '停用'} loading={busyPluginId === plugin.id} disabled={model.requestPluginLifecycle === undefined} onClick={() => void run(plugin, plugin.status === 'configured-disabled' ? { kind: 'enable', pluginId: plugin.id } : { kind: 'disable', pluginId: plugin.id, impactToken: '' })} />
@@ -46,7 +54,7 @@ export function PluginsPage({ model, snapshot, router }: { readonly model: Manag
             </span>
           </div>
         ))}
-        {plugins.length === 0 ? <div className="cxr-empty">没有匹配的插件</div> : null}
+        {plugins.length === 0 && pendingDevelopment.length === 0 ? <div className="cxr-empty">没有匹配的插件</div> : null}
       </div>
     </section>
   )

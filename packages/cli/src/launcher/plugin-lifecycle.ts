@@ -66,6 +66,7 @@ import {
 import type { PackageCandidatePlan, PackageRuntimeObservation } from './packages/types.js'
 import type { RollbackPlan } from './packages/authority.js'
 import { loadPluginGenerationArtifact } from './plugin-generation-loader.js'
+import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 
 export interface PluginRuntimeMutation {
   readonly transactionId: string
@@ -78,6 +79,15 @@ export interface PluginRuntimeMutation {
   readonly targetId: string
   readonly affectedPluginIds: readonly string[]
   readonly package?: StagedPluginPackage
+  /** Host-private candidate for one explicitly selected local development entry. */
+  readonly developmentPackage?: {
+    readonly id: string
+    readonly version: string
+    readonly digest: `sha256:${string}`
+    readonly identitySource: string
+    readonly readme?: string
+    readonly development: CordisXLocalDevelopmentSnapshot
+  }
   /** Host-only renderer artifact compiled from the authority-resolved immutable runtime module. */
   readonly runtimeArtifactSource?: string
   readonly authorizationDecision?: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2

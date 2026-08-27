@@ -499,10 +499,10 @@ export class GenerationVisibilityCoordinator {
     this.transition = undefined
   }
 
-  /** Fence a Host-authorized rollback after staging failed before publication. */
-  rollbackFailedStage(handle: PluginGenerationTransitionHandle): number {
+  /** Fence every Host-authorized rollback before publication at the canonical +2 epoch. */
+  rollbackUnpublished(handle: PluginGenerationTransitionHandle): number {
     const transition = this.assertHandle(handle)
-    if (transition.phase !== 'staged') throw new Error('failed-stage rollback is stale')
+    if (transition.phase !== 'staged') throw new Error('unpublished plugin generation rollback is stale')
     this.visibilityVersion += 2
     this.transition = undefined
     return this.visibilityVersion
@@ -518,6 +518,32 @@ export class GenerationVisibilityCoordinator {
       lastGoodRevision: transition.after.revision,
     }
     this.transition = undefined
+  }
+
+  /** Restore a just-finalized candidate when another renderer failed finalize. */
+  rollbackLastGood(publication: PluginGenerationPublication): CordisXPluginActivationRecordV1 {
+    if (!this.publications.has(publication as object) || this.transition !== undefined) {
+      throw new Error('stale plugin generation finalized rollback')
+    }
+    const { transactionId: _transactionId, ...candidate } = publication.active
+    const committed = {
+      ...candidate,
+      recordKind: 'active' as const,
+      lastGoodRevision: publication.active.revision,
+    }
+    if (!activationEqual(this.active, committed) || this.visibilityVersion !== publication.registryEpoch) {
+      throw new Error('stale plugin generation finalized rollback')
+    }
+    this.active = publication.retiring
+    this.visibilityVersion += 1
+    for (const participant of this.participants) {
+      try {
+        participant.notify(this.visibilityVersion)
+      } catch {
+        // The complete map is already restored. Listener failures are isolated.
+      }
+    }
+    return this.active
   }
 
   completeRollback(publication: PluginGenerationPublication): void {

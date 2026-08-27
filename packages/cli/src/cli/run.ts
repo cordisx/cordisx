@@ -8,6 +8,7 @@ import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
 import { ensureHomeConfig, loadHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
 import { CdpPluginLifecycleRuntime, watchAndInject } from '../launcher/cdp.js'
+import { LocalDevelopmentController, buildLocalDevelopmentPlugin } from '../launcher/development.js'
 import { DirectPublisherGrantAuthority, DirectPublisherGrantStore, MacOSMachineIdentityProvider, StaticPublisherKeyRegistry } from '../launcher/publisher-grants.js'
 import { createPublisherGrantBridgeHandler, type PublisherGrantBridgeHandler } from '../launcher/publisher-grant-rpc.js'
 import { loadConfig, type CordisXConfig } from '../launcher/config.js'
@@ -107,23 +108,13 @@ function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | unde
   return Object.hasOwn(record, key) ? record[key] : undefined
 }
 
-function pluginId(pluginPath: string): string {
-  const name = path.basename(pluginPath, path.extname(pluginPath))
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9._-]+/g, '-')
-    .replace(/^[^a-z0-9]+/, '')
-    .slice(0, 96)
-  return name === '' || name === 'host' || name.startsWith('cordisx.') ? 'local-plugin' : name
-}
-
-function developmentPluginConfig(pluginPath: string, cwd: string): CordisXConfig {
-  const entry = path.resolve(cwd, pluginPath)
+function localDevelopmentHostConfig(cwd: string): CordisXConfig {
   return {
     version: 1,
     rootDir: cwd,
     codex: { debugPort: 9229 },
     providers: [],
-    plugins: [{ id: pluginId(entry), entry, enabled: true, config: {}, revision: 0 }],
+    plugins: [],
   }
 }
 
@@ -136,6 +127,11 @@ interface RendererComposition {
   readonly generation: string
   readonly permissionBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
+  readonly rebuild: (
+    config: CordisXConfig,
+    pluginActivation: CordisXPluginActivationRecordV1,
+    initialRegistryEpoch: number,
+  ) => Promise<string>
 }
 
 type ChannelManagerBundleProjection = NonNullable<Parameters<typeof buildRendererBundle>[1]>['channelManager']
@@ -158,6 +154,8 @@ export async function buildRendererComposition(
       readonly activation: CordisXPluginActivationRecordV1
       readonly registryEpoch?: number
     }
+    readonly pluginActivation?: CordisXPluginActivationRecordV1
+    readonly initialRegistryEpoch?: number
     readonly channelManager?: ChannelManagerBundleProjection
     /** Transient, launcher-created tokens. They are published only in the injected runtime metadata. */
     readonly channelCredentialBridgeToken?: string
@@ -173,7 +171,7 @@ export async function buildRendererComposition(
   const serviceConfigBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
   const permissionBridgeToken = options.permission?.persistent === true ? randomBytes(32).toString('hex') : undefined
   const generation = options.generation ?? randomBytes(16).toString('hex')
-  const source = await buildRendererBundle(config, {
+  const bundleOptions = {
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
@@ -191,15 +189,16 @@ export async function buildRendererComposition(
           },
         }),
     generation,
-    ...(options.pluginLifecycle === undefined ? {} : {
-      pluginLifecycleBridgeToken: options.pluginLifecycle.token,
-      pluginActivation: options.pluginLifecycle.activation,
-      ...(options.pluginLifecycle.registryEpoch === undefined
-        ? {}
-        : { initialRegistryEpoch: options.pluginLifecycle.registryEpoch }),
-    }),
+    ...(options.pluginLifecycle === undefined ? {} : { pluginLifecycleBridgeToken: options.pluginLifecycle.token }),
+    ...((options.pluginActivation ?? options.pluginLifecycle?.activation) === undefined
+      ? {}
+      : { pluginActivation: options.pluginActivation ?? options.pluginLifecycle!.activation }),
+    ...((options.initialRegistryEpoch ?? options.pluginLifecycle?.registryEpoch) === undefined
+      ? {}
+      : { initialRegistryEpoch: options.initialRegistryEpoch ?? options.pluginLifecycle!.registryEpoch }),
     ...(options.channelManager === undefined ? {} : { channelManager: options.channelManager }),
-  })
+  } satisfies NonNullable<Parameters<typeof buildRendererBundle>[1]>
+  const source = await buildRendererBundle(config, bundleOptions)
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
   stdout(`[cordisx] bundle ready: ${source.length} bytes, plugins: ${enabled.join(', ') || '(none)'}`)
   return {
@@ -211,6 +210,11 @@ export async function buildRendererComposition(
     generation,
     ...(permissionBridgeToken === undefined ? {} : { permissionBridgeToken }),
     ...(options.pluginLifecycle === undefined ? {} : { pluginLifecycleBridgeToken: options.pluginLifecycle.token }),
+    rebuild: async (nextConfig, pluginActivation, initialRegistryEpoch) => await buildRendererBundle(nextConfig, {
+      ...bundleOptions,
+      pluginActivation,
+      initialRegistryEpoch,
+    }),
   }
 }
 
@@ -320,7 +324,7 @@ export async function waitForHostExitAfterReadiness(input: {
 }
 
 async function runInjectedHost(input: {
-  readonly source: string
+  readonly source: string | (() => string)
   readonly providerFleet?: ProviderFleet
   readonly providerBridgeToken?: string
   readonly agentHistoryHost: CodexAgentHistoryHost
@@ -331,6 +335,7 @@ async function runInjectedHost(input: {
   readonly channelActionsBridge?: ChannelActionsBridgeHandler
   readonly permissionPersistence?: PermissionPersistenceContext
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
+  readonly developmentRuntime?: CdpPluginLifecycleRuntime
   readonly publisherGrant?: PublisherGrantBridgeHandler
   readonly executable?: string
   readonly debugPort: number
@@ -339,6 +344,7 @@ async function runInjectedHost(input: {
   readonly profile?: IsolatedCodexProfile
   readonly environment?: Readonly<Record<string, string>>
   readonly stdout: (line: string) => void
+  readonly onReady?: () => void
 }): Promise<void> {
   const controller = new AbortController()
   const stop = (): void => controller.abort()
@@ -363,12 +369,14 @@ async function runInjectedHost(input: {
     ...(input.channelActionsBridge === undefined ? {} : { channelActionsBridge: input.channelActionsBridge }),
     ...(input.permissionPersistence === undefined ? {} : { permissionPersistence: input.permissionPersistence }),
     ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
+    ...(input.developmentRuntime === undefined ? {} : { developmentRuntime: input.developmentRuntime }),
     ...(input.publisherGrant === undefined ? {} : { publisherGrant: input.publisherGrant }),
     onReady: () => {
       if (reportedReady) return
       reportedReady = true
       markReady()
       input.stdout('[cordisx] CDP renderer ready')
+      input.onReady?.()
     },
     onStatus: message => input.stdout(`[cordisx] ${message}`),
   })
@@ -420,9 +428,93 @@ async function runDevelopment(
   stdout: (line: string) => void,
   environment: NodeJS.ProcessEnv,
 ): Promise<void> {
-  const config = invocation.pluginPath === undefined
-    ? await loadConfig(path.resolve(cwd, invocation.configPath ?? 'cordisx.config.json'))
-    : developmentPluginConfig(invocation.pluginPath, cwd)
+  if (invocation.pluginPath !== undefined) {
+    const entry = path.resolve(cwd, invocation.pluginPath)
+    const config = localDevelopmentHostConfig(cwd)
+    if (invocation.options.dryRun) {
+      const candidate = await buildLocalDevelopmentPlugin(entry)
+      stdout(`[cordisx] bundle ready: ${candidate.moduleFactorySource.length + candidate.runtimeArtifactSource.length} bytes, plugins: ${candidate.id}`)
+      stdout(JSON.stringify({
+        status: 'ready',
+        mode: 'development',
+        origin: 'local-dev',
+        pluginId: candidate.id,
+        sourcePath: entry,
+        watchFileCount: candidate.watchFiles.length,
+        debugPort: invocation.options.debugPort ?? (
+          invocation.options.attach || invocation.options.system ? config.codex.debugPort : 'automatic'
+        ),
+        hostArgs: invocation.hostArgs,
+      }, null, 2))
+      return
+    }
+    const runtimeGeneration = randomBytes(16).toString('hex')
+    const active: CordisXPluginActivationRecordV1 = {
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1,
+      recordKind: 'active',
+      profileId: 'development',
+      revision: 0,
+      lastGoodRevision: 0,
+      runtimeGeneration,
+      plugins: [],
+    }
+    const lifecycleRuntime = new CdpPluginLifecycleRuntime()
+    const composition = await buildRendererComposition(config, stdout, {
+      profileId: 'development',
+      permission: { profileId: 'development', policies: [], persistent: false },
+      generation: runtimeGeneration,
+      pluginActivation: active,
+      initialRegistryEpoch: 0,
+    })
+    let bootstrapSource = composition.source
+    const controller = await LocalDevelopmentController.create({
+      entry,
+      runtimeGeneration,
+      initialConfig: config,
+      runtime: lifecycleRuntime,
+      rebuildBootstrap: composition.rebuild,
+      setBootstrap: source => { bootstrapSource = source },
+      stdout,
+    })
+    const debugPort = invocation.options.debugPort ?? (
+      invocation.options.attach || invocation.options.system ? config.codex.debugPort : await findFreeLoopbackPort()
+    )
+    if (!invocation.options.attach && (invocation.options.debugPort !== undefined || invocation.options.system)) {
+      await assertLoopbackPortAvailable(debugPort)
+    }
+    const executable = invocation.options.attach
+      ? undefined
+      : await resolveCodexExecutable(invocation.options.executable ?? config.codex.executable)
+    const profile = invocation.options.attach || invocation.options.system
+      ? undefined
+      : await prepareIsolatedCodexProfile(config.rootDir, invocation.options.profileDir)
+    try {
+      await runInjectedHost({
+        source: () => bootstrapSource,
+        agentHistoryHost: agentHistoryHost(environment, resolveHomeConfigPath({ env: environment }), `development:${config.rootDir}`),
+        agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
+        developmentRuntime: lifecycleRuntime,
+        ...(executable === undefined ? {} : { executable }),
+        debugPort,
+        hostArgs: invocation.hostArgs,
+        launcher: invocation.options,
+        ...(profile === undefined ? {} : { profile }),
+        publisherGrant: createPublisherGrantBridgeHandler(new DirectPublisherGrantAuthority(
+          new StaticPublisherKeyRegistry([]),
+          new MacOSMachineIdentityProvider(),
+          await DirectPublisherGrantStore.open(config.rootDir),
+        )),
+        onReady: () => { void controller.start().catch(error => stdout(`[cordisx] local-dev start failed: ${String(error)}`)) },
+        stdout,
+      })
+    } finally {
+      await controller.stop()
+    }
+    return
+  }
+
+  const config = await loadConfig(path.resolve(cwd, invocation.configPath ?? 'cordisx.config.json'))
   const composition = await buildRendererComposition(config, stdout, {
     profileId: 'development',
     permission: { profileId: 'development', policies: [], persistent: false },
@@ -431,9 +523,7 @@ async function runDevelopment(
     stdout(JSON.stringify({
       status: 'ready',
       mode: 'development',
-      config: invocation.pluginPath === undefined
-        ? path.resolve(cwd, invocation.configPath ?? 'cordisx.config.json')
-        : pathToFileURL(path.resolve(cwd, invocation.pluginPath)).href,
+      config: path.resolve(cwd, invocation.configPath ?? 'cordisx.config.json'),
       debugPort: invocation.options.debugPort ?? (
         invocation.options.attach || invocation.options.system ? config.codex.debugPort : 'automatic'
       ),

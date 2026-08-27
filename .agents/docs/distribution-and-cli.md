@@ -245,7 +245,7 @@ The beta package boundaries are:
 
 | Package | Owns | Must not imply |
 | --- | --- | --- |
-| `cordisx` | Launcher CLI, home configuration, trusted-local plugin bundling, public contracts, and developer dry-run | Marketplace installation, signing, an execution sandbox, enforced capability isolation, or HMR |
+| `cordisx` | Launcher CLI, home configuration, trusted-local plugin bundling, public contracts, and explicit-entry local generation watch | Marketplace installation, signing, an execution sandbox, enforced capability isolation, or a general-purpose module HMR API |
 | `create-cordisx-plugin` | Directory creation, the versioned minimal template, manifest-bearing entry, project scripts, README, and generated-project verification | Registry/catalog submission, signing, permission grants, marketplace activation, or a watch/reload service |
 
 The scaffolder package exclusively owns
@@ -256,6 +256,47 @@ capabilities by default, uses structured host-owned surfaces, and is testable
 with `cordisx dev <entry> --dry-run`. Template changes and their generated-
 project tests land in the same PR; no second copy is maintained in CordisXMono
 or the docs repository.
+
+### Explicit local development entry
+
+`cordisx dev <entry>` is the local plugin development path. The positional
+entry is resolved to one absolute path and reported as `origin: local-dev`;
+this is not an installed package source, marketplace source, canonical share
+URL, or durable lifecycle record. Phase 1 derives the launcher plugin id from
+the entry basename. The module's runtime manifest must declare that same id;
+an id mismatch is an activation failure and retains the previous generation.
+Phase 1 is renderer-only: a manifest-v4 entry with Node `services`, or a nearby
+formal package descriptor with non-empty `dependencies`, is unavailable and
+fails the candidate while retaining last-good. Developers must use the formal
+package lifecycle for those Host/service/dependency graphs.
+
+After the first Codex renderer is ready, the launcher watches the complete
+esbuild input graph plus the entry's source-root fallback graph. The fallback
+is required so creating a previously missing import can recover a failed
+build. Changes are debounced and serialized. Every attempt is fenced against
+newer attempts; only the newest ready candidate may publish. A successful
+candidate uses the normal renderer generation transaction. Build, bootstrap,
+manifest, or activation failure leaves the last-good fiber live, while a later
+file change retries and can recover without restarting the Host. A rollback
+blocked by a stale closed renderer also has a controller-owned single backoff
+timer: after CDP target pruning it retries the same transaction, restores the
+last-good bootstrap, and continues the current build without another source
+write. If rollback wins the race before the replacement renderer commits its
+join, the same timer retains and retries the desired build across the temporary
+`no ready renderer` prepare result.
+
+The initial Host bootstrap contains no fabricated active plugin. If the first
+build fails, Manager instead receives a Host-private local-development
+diagnostic containing the absolute source path, `building`/`failed` state, and
+the bounded error. Once a candidate publishes, the same diagnostic is shown on
+the real plugin with `ready` and the most recent success time. Installed plugin
+snapshots, public lifecycle results, package sources, and share actions never
+receive that absolute path. The global renderer runtime `snapshot()` is public
+for this purpose and omits both per-plugin development fields and the local
+development collection; only the Host-private React Manager model contains
+them. Stopping `cordisx dev` cancels debounce/poll timers,
+waits for the active attempt, removes CDP installation state, and terminates
+only the launcher's owned Host process/profile resources.
 
 Publishing is allowed only from merged `main` through
 `.github/workflows/release-beta.yml`, on a GitHub-hosted runner with OIDC and the

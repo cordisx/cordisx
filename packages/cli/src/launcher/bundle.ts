@@ -133,6 +133,7 @@ export async function buildRendererCompositionSource(
       return await readPluginReadmes(plugin.entry)
     })),
     Promise.all(enabled.map(async plugin => {
+      if (plugin.moduleFactorySource !== undefined) return plugin.moduleFactorySource
       const result = await build({
         entryPoints: [plugin.entry],
         bundle: true,
@@ -184,7 +185,8 @@ export async function buildRendererCompositionSource(
     const readmesField = Object.keys(localizedReadmes).length === 0 ? '' : `, readmes: ${JSON.stringify(localizedReadmes)}`
     const manifestField = plugin.manifest === undefined ? '' : `, manifest: ${JSON.stringify(plugin.manifest)}`
     const packageField = plugin.package === undefined ? '' : `, package: ${JSON.stringify(plugin.package)}`
-    return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${plugin.revision ?? 0}${readmeField}${readmesField}${manifestField}${packageField}${moduleField} }`
+    const developmentField = plugin.development === undefined ? '' : `, development: ${JSON.stringify(plugin.development)}`
+    return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${plugin.revision ?? 0}${readmeField}${readmesField}${manifestField}${packageField}${developmentField}${moduleField} }`
   }).join(',')}]`
   const providers = config.providers.filter(provider => provider.enabled).map(provider => ({ id: provider.id, displayName: provider.displayName }))
   const permission = options.permission ?? { profileId: options.profileId ?? 'development', policies: [] }

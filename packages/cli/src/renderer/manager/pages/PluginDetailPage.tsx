@@ -35,6 +35,15 @@ function RuntimePanel({ model, plugin, permissionCount, pointCount, routeCount }
     ['依赖', String(plugin.package?.dependencies.length ?? 0)],
   ] as const
   return <div className="cxm-runtime-overview">
+    {plugin.development === undefined ? null : <section className="cxr-section" data-plugin-development={plugin.development.state}>
+      <h3>本地开发</h3>
+      <dl className="cxr-facts">
+        <div><dt>源码路径</dt><dd><code>{plugin.development.sourcePath}</code></dd></div>
+        <div><dt>构建状态</dt><dd>{plugin.development.state}</dd></div>
+        {plugin.development.lastSuccessfulAt === undefined ? null : <div><dt>最近成功</dt><dd>{plugin.development.lastSuccessfulAt}</dd></div>}
+      </dl>
+      {plugin.development.error === undefined ? null : <div className="cxr-notice cxr-danger" role="alert">{plugin.development.error}</div>}
+    </section>}
     <section data-plugin-runtime-status={plugin.id}><strong>{plugin.status}</strong>{plugin.error === undefined ? null : <span>{plugin.error}</span>}</section>
     <div className="cxr-metrics">{metrics.map(([label, value]) => <section className="cxr-metric" key={label}><span>{label}</span><strong>{value}</strong></section>)}</div>
     <section className="cxm-runtime-console-summary" data-runtime-console-summary={plugin.id}>{consoleMetrics.map(([label, value]) => <div className="cxm-runtime-console-metric" key={label}><strong>{value}</strong><span>{label}</span></div>)}</section>
@@ -73,7 +82,7 @@ export function PluginDetailPage({ model, snapshot, router }: { readonly model: 
   return <section className="cxr-page" data-plugin-detail={plugin.id}>
     <section className="cxr-plugin-identity" aria-label="插件信息与操作">
       <PluginIdentityIcon pluginId={plugin.id} name={plugin.name} icon={plugin.icon} status={plugin.status} />
-      <span className="cxr-plugin-identity-copy"><strong>{plugin.name}</strong><span className="cxr-plugin-identity-meta"><span>{plugin.package?.version ?? '开发态'}</span><code>{plugin.id}</code>{sourceLink === undefined ? null : <a href={sourceLink} target="_blank" rel="noopener noreferrer">项目链接</a>}</span></span>
+      <span className="cxr-plugin-identity-copy"><strong>{plugin.name}</strong><span className="cxr-plugin-identity-meta"><span>{plugin.development === undefined ? plugin.package?.version ?? '开发态' : '本地开发'}</span><code>{plugin.id}</code>{sourceLink === undefined ? null : <a href={sourceLink} target="_blank" rel="noopener noreferrer">项目链接</a>}</span></span>
       <span className="cxr-plugin-identity-actions">
         <Button shape="square" variant="outline" aria-label="重新加载" title="重新加载" data-plugin-lifecycle-action="reload" icon={<HostIcon token="reload-plugin" />} loading={busy} disabled={model.requestPluginLifecycle === undefined || plugin.status !== 'active'} onClick={() => void run({ kind: 'reload', pluginId: plugin.id })} />
         {plugin.status === 'configured-disabled'
