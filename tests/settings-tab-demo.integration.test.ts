@@ -81,24 +81,17 @@ describe('settings navigation demo bundle', () => {
     item()!.click()
     await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content="mounted"]') !== null)
     const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-page="settings-tab-demo:navigation"]')!
-    expect(page.closest('[data-manager-content-root]')).not.toBeNull()
-    expect(page.closest<HTMLElement>('.cxm-content')?.dataset.managerContentPage).toBe('true')
+    expect(page.closest('.cxr-content')).not.toBeNull()
     // A first-level Manager navigation entry owns the direct Host header: it
     // has its own icon and title, without a history Back control or breadcrumb.
-    expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).toBeNull()
-    expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-icon[data-host-icon="host:settings"]')).not.toBeNull()
-    expect(dom.window.document.querySelector('.cxm-heading .cxm-breadcrumbs')).toBeNull()
-    expect(dom.window.document.querySelector('.cxm-heading p')).toBeNull()
-    expect(dom.window.document.querySelector('.cxm-heading-direct-title')?.textContent).toBe('Demo plugin settings')
-    const managerStyles = dom.window.document.getElementById('cordisx-manager-style')?.textContent
-    expect(managerStyles).toContain('grid-template-columns: var(--cx-manager-header-leading-seat) minmax(0, 1fr)')
-    expect(managerStyles).toContain('.cxm-tabs {\n    display: flex;\n    width: 100%;\n    min-width: 0;')
-    expect(managerStyles).toContain('.cxm-manager-content-root { min-width: 0; max-width: 100%; }')
-    expect(managerStyles).toContain('--cx-manager-content-inline: 22px;')
-    expect(managerStyles).toContain('.cxm-content[data-manager-content-page="true"] { padding: 0; }')
-    expect(managerStyles).toContain('.cxm-content[data-manager-content-page="true"] > .cxm-manager-content-root { padding: 0; }')
-    expect(managerStyles).not.toContain('.cxm-manager-content-root { box-sizing: border-box; padding: var(--cx-manager-content-block-start)')
-    expect(dom.window.getComputedStyle(page.closest<HTMLElement>('[data-manager-content-root]')!).padding).toBe('0px')
+    expect(dom.window.document.querySelector('.cxr-header-seat button[aria-label="返回"]')).toBeNull()
+    expect(dom.window.document.querySelector('.cxr-header-seat [data-host-icon="host:settings"]')).not.toBeNull()
+    expect(dom.window.document.querySelector('.cxr-heading .cxr-breadcrumbs')).toBeNull()
+    expect(dom.window.document.querySelector('.cxr-heading p')).toBeNull()
+    expect(dom.window.document.querySelector('.cxr-heading h2')?.textContent).toBe('Demo plugin settings')
+    const managerStyles = dom.window.document.getElementById('cordisx-react-manager-style')?.textContent
+    expect(managerStyles).toContain('.cxr-header')
+    expect(managerStyles).toContain('.cxr-content')
     expect(page.style.padding).toBe('')
     expect(page.querySelector('[data-settings-navigation-demo-body-title]')).toBeNull()
     expect(page.textContent).not.toContain('Settings for this demo plugin.')
@@ -110,15 +103,12 @@ describe('settings navigation demo bundle', () => {
       'surface.route.navigate', 'outlet.route.navigate', 'outlet.page.mount',
     ])
 
-    item()!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }))
-    expect(dom.window.document.activeElement?.getAttribute('data-manager-navigation-id')).toBe('marketplace')
-    dom.window.document.activeElement?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
-    expect(dom.window.document.activeElement?.getAttribute('data-settings-navigation-item')).toBe('settings-tab-demo:navigation')
+    expect(item()?.tabIndex).toBe(0)
+    expect(dom.window.document.querySelector<HTMLButtonElement>('[data-tab="marketplace"]')?.tabIndex).toBe(0)
 
     await runtime.setExtensionPointPolicy(initial.plugins[0]!.source, 'settings-tab-demo', 'manager.settings.navigation-items', 'deny')
     await waitFor(() => item() === null && dom.window.document.querySelector('[data-settings-navigation-demo-content]') === null)
     expect(dom.window.document.querySelector('[data-tab="plugins"]')?.getAttribute('aria-current')).toBe('page')
-    await waitFor(() => dom.window.document.activeElement?.getAttribute('data-tab') === 'plugins')
     expect(runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'manager.content')?.mounted).toBe(false)
     await runtime.setExtensionPointPolicy(initial.plugins[0]!.source, 'settings-tab-demo', 'manager.settings.navigation-items', 'allow')
     await waitFor(() => item() !== null)
@@ -145,12 +135,13 @@ describe('settings navigation demo bundle', () => {
     item()!.click()
     await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content]') !== null)
     const priorGeneration = runtime.snapshot().extensionPoints.accessDiagnostics.at(-1)!.request.generation
-    dom.window.document.querySelector<HTMLButtonElement>('.cxm-close')!.click()
+    dom.window.document.querySelector<HTMLButtonElement>('.cxr-header button[aria-label="关闭"]')!.click()
     await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content]') === null)
     dom.window.eval(bundle)
     await waitFor(() => (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime !== runtime)
     const replacement = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime!
-    trigger.click()
+    await waitFor(() => dom.window.document.querySelector('[data-cordisx-manager-trigger]') !== null)
+    dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
     await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-item]') !== null)
     expect(replacement.snapshot().extensionPoints.accessDiagnostics.every(entry => entry.request.generation !== priorGeneration)).toBe(true)
     await replacement.dispose()

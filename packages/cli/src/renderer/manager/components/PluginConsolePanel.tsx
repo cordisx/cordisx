@@ -11,16 +11,18 @@ import { createPluginConsoleStore } from '../model/console-store.js'
 
 export const PLUGIN_CONSOLE_REACT_STYLES = String.raw`
   .cxm-console-panel { display: grid; min-height: 0; flex: 1; grid-template-rows: auto minmax(0,1fr); gap: 0; overflow: hidden; }
-  .cxm-console-controls { display: flex; min-width: 0; align-items: center; gap: 6px; margin: 0; padding: 0; }
-  .cxm-console-controls .cxm-console-search { min-width: 9rem; height: 30px; flex: 1 1 13rem; gap: 6px; box-sizing: border-box; border: 1px solid #353a42; border-radius: 6px; padding: 0 8px; background: #15171a; color: #d8dce3; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxm-console-controls { display: grid; min-width: 0; grid-template-columns: minmax(12rem,1fr) auto auto; align-items: center; gap: 6px; margin: 0; padding: 0; }
+  .cxm-console-controls .cxm-console-search { min-width: 0; height: 30px; gap: 6px; box-sizing: border-box; border: 1px solid var(--cx-border,#353a42); border-radius: 7px; padding: 0 9px; background: var(--cx-surface-raised,#20242b); color: var(--cx-text,#d8dce3); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxm-console-controls .cxm-console-search:focus-within { border-color: var(--cx-primary, #2f7cff); outline: 2px solid var(--cx-focus, rgba(47,124,255,.26)); outline-offset: 1px; }
   .cxm-console-controls .cxm-console-search input { width: 100%; height: 28px; }
-  .cxm-console-filters { display: flex; min-width: 0; flex: 0 1 auto; align-items: center; gap: 5px; }
-  .cxh-select-field { display: grid; min-width: 0; height: 30px; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 3px; box-sizing: border-box; border: 1px solid #353a42; border-radius: 6px; padding: 0 5px; background: #15171a; color: #aeb5c3; }
-  .cxh-select-field .cxh-icon-seat, .cxh-select-field .cxm-material-icon { display: grid; place-items: center; width: 15px; height: 15px; }
-  .cxh-select-field select { min-width: 0; width: 5.6rem; height: 28px; border: 0; outline: 0; background: transparent; color: #d8dce3; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .cxh-select-field.cxm-console-source select { width: 7rem; }
-  .cxm-console-action-toolbar { position: relative; margin-left: auto; }
+  .cxm-console-filters { display: flex; min-width: 0; align-items: center; gap: 5px; }
+  .cxh-select-field { display: block; width: 6.75rem; min-width: 0; height: 30px; color: var(--cx-muted,#aeb5c3); }
+  .cxh-select-field.cxm-console-source { width: 8rem; }
+  .cxh-select-field .t-select, .cxh-select-field .t-input__wrap, .cxh-select-field .t-input { width: 100%; height: 30px; }
+  .cxh-select-field .t-input { box-sizing: border-box; border-color: var(--cx-border,#353a42); border-radius: 7px; background: var(--cx-surface-raised,#20242b); color: var(--cx-text,#d8dce3); }
+  .cxh-select-field .t-input__inner { min-width: 0; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cxh-select-field .t-input__prefix, .cxh-select-field .t-input__suffix { color: var(--cx-muted,#aeb5c3); }
+  .cxm-console-action-toolbar { position: relative; display: flex; align-items: center; gap: 2px; }
   .cxh-more-menu { position: relative; display: inline-flex; }
   .cxh-more-menu-popup { position: absolute; top: calc(100% + 5px); right: 0; z-index: 4; display: grid; min-width: 180px; padding: 4px; border: 1px solid var(--cx-border); border-radius: 8px; background: var(--cx-surface-raised); box-shadow: 0 12px 30px var(--cx-shadow); }
   .cxh-more-menu-popup button { display: flex; align-items: center; gap: 8px; min-height: 30px; border: 0; border-radius: 6px; padding: 5px 8px; background: transparent; color: var(--cx-text); cursor: pointer; text-align: left; font: 11px/1.3 system-ui, sans-serif; }
@@ -35,10 +37,9 @@ export const PLUGIN_CONSOLE_REACT_STYLES = String.raw`
   .cxm-console-row[data-method="error"] { color: #f2a5ad; }
   .cxm-console-inspector { font-size: 11px; }
   @media (max-width: 900px) {
-    .cxm-console-controls { flex-wrap: wrap; }
-    .cxm-console-search { flex-basis: 100%; }
-    .cxm-console-filters { flex: 1 1 auto; flex-wrap: wrap; }
-    .cxm-console-action-toolbar { margin-left: 0; }
+    .cxm-console-controls { grid-template-columns: minmax(0,1fr) auto; }
+    .cxm-console-filters { grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; }
+    .cxm-console-action-toolbar { grid-column: 2; grid-row: 1; }
   }
 `
 

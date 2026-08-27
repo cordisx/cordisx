@@ -8,6 +8,7 @@ import {
   type CordisXManagerContentNavigationDeclarationV1,
   type CordisXMessageParams,
   type CordisXPageMetadataV3,
+  type CordisXPluginPresentation,
   type CordisXRouteDefinitionV2,
 } from '../../contracts.js'
 import {
@@ -73,6 +74,8 @@ export const manifest = {
 } as const satisfies CordisXPluginManifestV4
 
 interface Messages {
+  'plugin.name': undefined
+  'plugin.description': undefined
   'route.title': undefined
   'route.description': undefined
   'route.create.title': undefined
@@ -107,6 +110,11 @@ function message<Key extends keyof Messages>(
 ): CordisXLocalizedText {
   return { namespace: 'channel', key, ...(args[0] === undefined ? {} : { params: args[0] }) }
 }
+
+export const presentation = {
+  name: message('plugin.name'),
+  description: message('plugin.description'),
+} satisfies CordisXPluginPresentation
 
 const settingsPage = {
   $schema: CORDISX_PAGE_SCHEMA_V3,
@@ -192,6 +200,8 @@ export function apply(ctx: Context): void {
     locale: 'en',
     default: true,
     messages: {
+      'plugin.name': 'Channels',
+      'plugin.description': 'Manage channel accounts, connections, and sessions.',
       'route.title': 'Channel settings',
       'route.description': 'Open launcher-owned Channel accounts, routes, task bindings, and diagnostics.',
       'route.create.title': 'Channel candidate', 'route.create.description': 'Open the local candidate creation flow.',
@@ -214,6 +224,8 @@ export function apply(ctx: Context): void {
     namespace: 'channel',
     locale: 'zh-CN',
     messages: {
+      'plugin.name': '渠道',
+      'plugin.description': '管理渠道账号、连接和会话。',
       'route.title': '渠道配置',
       'route.description': '打开由启动器持有的渠道账号、路由、任务绑定与诊断。',
       'route.create.title': '渠道候选', 'route.create.description': '打开本地候选创建流程。',

@@ -2,7 +2,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+  type CordisXLocalizedText,
   type CordisXPluginManifestV1,
+  type CordisXPluginPresentation,
 } from '../../../packages/cli/src/contracts.js'
 
 const label = (en: string, zh: string, cordisxForm?: Record<string, unknown>) => ({
@@ -17,7 +19,16 @@ const group = (id: string, title: string, titleZh: string, icon: string) => ({ g
  * commands: the Manager owns the detail page and every control in it.
  */
 export const name = 'form-schema-gallery'
-export const inject: readonly string[] = []
+export const inject = ['i18n']
+interface Messages {
+  'plugin.name': undefined
+  'plugin.description': undefined
+}
+const message = (key: keyof Messages): CordisXLocalizedText => ({ namespace: name, key })
+export const presentation = {
+  name: message('plugin.name'),
+  description: message('plugin.description'),
+} satisfies CordisXPluginPresentation
 const fields = {
   workspaceName: Schema.string().required().default('Northstar workspace').min(3).max(48).pattern(/\S/u)
     .extra('extra', label('Workspace name', '工作区名称', group('workspace', 'Workspace', '工作区', 'host:settings')))
@@ -139,4 +150,19 @@ export const manifest = {
   capabilities: [],
 } as const satisfies CordisXPluginManifestV1
 
-export function apply(_ctx: Context, _config: FormSchemaGalleryConfig = Config({})): void {}
+export function apply(ctx: Context, _config: FormSchemaGalleryConfig = Config({})): void {
+  ctx.i18n.define<Messages>({
+    namespace: name, locale: 'en', default: true,
+    messages: {
+      'plugin.name': 'Form Schema Gallery',
+      'plugin.description': 'Demonstrates form schemas and controls rendered consistently by the Host.',
+    },
+  })
+  ctx.i18n.define<Messages>({
+    namespace: name, locale: 'zh-CN',
+    messages: {
+      'plugin.name': '表单结构展示',
+      'plugin.description': '展示由 Host 统一渲染的表单结构和控件。',
+    },
+  })
+}

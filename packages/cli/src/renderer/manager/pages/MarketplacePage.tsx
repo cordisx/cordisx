@@ -8,22 +8,14 @@ import type { ManagerRouter } from '../model/routes.js'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
-
-const FAVORITES_KEY = 'cordisx.manager.favoriteMarketplacePlugins.v1'
-
-function readFavorites(): Set<string> {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(FAVORITES_KEY) ?? '[]') as unknown
-    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [])
-  } catch { return new Set() }
-}
+import { readMarketplaceFavorites, writeMarketplaceFavorites } from '../model/marketplace-favorites.js'
 
 export function MarketplacePage({ marketplace, manager, snapshot, router }: { readonly marketplace: MarketplaceModel; readonly manager: ManagerModel; readonly snapshot: ManagerSnapshot; readonly router: ManagerRouter }) {
   const catalog = useMarketplaceSnapshot(marketplace)
   const [query, setQuery] = useState('')
   const [officialOnly, setOfficialOnly] = useState(false)
   const [certifiedOnly, setCertifiedOnly] = useState(false)
-  const [favorites, setFavorites] = useState(readFavorites)
+  const [favorites, setFavorites] = useState(readMarketplaceFavorites)
   const results = useMemo(() => searchMarketplaceCatalog(catalog.plugins, {
     query, currentLocale: snapshot.localization.locale, officialOnly, certifiedOnly,
     ...(manager.marketplaceEligibility === undefined ? {} : { eligibility: manager.marketplaceEligibility }),
@@ -32,7 +24,7 @@ export function MarketplacePage({ marketplace, manager, snapshot, router }: { re
     setFavorites(current => {
       const next = new Set(current)
       if (next.has(identity)) next.delete(identity); else next.add(identity)
-      try { window.localStorage.setItem(FAVORITES_KEY, JSON.stringify([...next].sort())) } catch {}
+      writeMarketplaceFavorites(next)
       return next
     })
   }

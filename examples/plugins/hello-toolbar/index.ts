@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
-import type {} from '../../../packages/cli/src/contracts.js'
+import type { CordisXLocalizedText, CordisXPluginPresentation } from '../../../packages/cli/src/contracts.js'
 
 export const name = 'hello-toolbar'
 export const inject = ['i18n', 'commands', 'slots']
@@ -10,7 +10,16 @@ export const configApplies = 'plugin-restart'
 interface Messages {
   action: undefined
   command: undefined
+  'plugin.name': undefined
+  'plugin.description': undefined
 }
+
+const text = (key: keyof Messages): CordisXLocalizedText => ({ namespace: 'hello', key })
+
+export const presentation = {
+  name: text('plugin.name'),
+  description: text('plugin.description'),
+} satisfies CordisXPluginPresentation
 
 /** Minimal structured plugin: the host owns the toolbar DOM and invokes one command. */
 export function apply(ctx: Context): void {
@@ -18,9 +27,21 @@ export function apply(ctx: Context): void {
     namespace: 'hello',
     locale: 'en',
     default: true,
-    messages: { action: 'Hello from CordisX', command: 'Show hello notification' },
+    messages: {
+      action: 'Hello from CordisX', command: 'Show hello notification',
+      'plugin.name': 'Hello Toolbar',
+      'plugin.description': 'Provides a simple greeting action in the workspace toolbar.',
+    },
   })
-  const text = (key: keyof Messages) => ({ namespace: 'hello', key })
+  ctx.i18n.define<Messages>({
+    namespace: 'hello',
+    locale: 'zh-CN',
+    messages: {
+      action: '来自 CordisX 的问候', command: '显示问候通知',
+      'plugin.name': '工具栏问候',
+      'plugin.description': '在工作区工具栏提供一个简单的问候操作。',
+    },
+  })
   ctx.commands.register({ id: 'hello', title: text('command') }, () => {
     console.info('[cordisx] hello-toolbar command invoked')
   })

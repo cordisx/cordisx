@@ -17,10 +17,10 @@ const PROTOCOL_ICON_MAP: Readonly<Record<string, ManagerIconToken>> = {
   'host:open': 'external-link',
   'host:palette': 'configuration',
   'host:refresh': 'reload-plugin',
-  'host:reset': 'reload-plugin',
+  'host:reset': 'reset-configuration',
   'host:review': 'overview',
   'host:settings': 'settings',
-  'host:save': 'configuration',
+  'host:save': 'save-configuration',
   'host:clock': 'runtime',
   'host:success': 'overview',
   'host:warning': 'diagnostics',
@@ -29,5 +29,5 @@ const PROTOCOL_ICON_MAP: Readonly<Record<string, ManagerIconToken>> = {
 
 /** Closed protocol icon projection; unknown plugin tokens receive a neutral Host fallback. */
 export function HostSurfaceIcon({ token }: { readonly token: CordisXIconToken }) {
-  return <HostIcon token={PROTOCOL_ICON_MAP[token] ?? 'more'} />
+  return <span className="cordisx-host-icon" data-host-icon={token} aria-hidden="true"><HostIcon token={PROTOCOL_ICON_MAP[token] ?? 'more'} /></span>
 }

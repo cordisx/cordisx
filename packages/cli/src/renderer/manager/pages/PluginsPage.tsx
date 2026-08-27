@@ -33,7 +33,7 @@ export function PluginsPage({ model, snapshot, router }: { readonly model: Manag
         {plugins.map(plugin => (
           <div key={`${plugin.source}\0${plugin.id}`} className="cxr-plugin-row" role="listitem">
             <button className="cxr-plugin-primary" type="button" data-plugin-id={plugin.id} aria-label={`打开插件详情 · ${plugin.name}`} onClick={() => router.navigate({ kind: 'plugin', pluginId: plugin.id, page: 'readme' })}>
-              <PluginIdentityIcon name={plugin.name} icon={plugin.icon} status={plugin.status} />
+              <PluginIdentityIcon pluginId={plugin.id} name={plugin.name} icon={plugin.icon} status={plugin.status} />
               <span className="cxr-card-body"><span className="cxr-card-title">{plugin.name}</span><span className="cxr-card-description">{plugin.description}</span><code className="cxr-card-code">{plugin.id}</code></span>
             </button>
             <span className="cxr-plugin-actions">

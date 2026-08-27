@@ -1,5 +1,6 @@
 import type { CordisXLocaleCatalog } from './contracts.js'
 import { HOST_CAPABILITY_RISK_ENTRIES } from './capability-risk-catalog.js'
+import type { CordisXPermissionCapabilityV2 } from './permission-contracts.js'
 
 export const CORDISX_PERMISSION_NAMESPACE = 'permission'
 
@@ -213,3 +214,11 @@ export const CORDISX_PERMISSION_LOCALE_CATALOGS: readonly CordisXLocaleCatalog[]
     messages: Object.freeze({ ...ZH_UI_MESSAGES, ...ZH_CAPABILITY_MESSAGES }),
   }),
 ])
+
+/** Resolve the Host-owned capability name from the same catalogs used by permission review. */
+export function projectPermissionCapabilityName(capability: CordisXPermissionCapabilityV2, locale: string): string {
+  const presentation = HOST_CAPABILITY_RISK_ENTRIES.find(entry => entry.capability === capability)?.presentation.name
+  if (presentation === undefined) return capability
+  const messages = new Intl.Locale(locale).language === 'zh' ? ZH_CAPABILITY_MESSAGES : EN_CAPABILITY_MESSAGES
+  return messages[presentation.key] ?? presentation.fallback ?? capability
+}

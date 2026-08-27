@@ -104,6 +104,8 @@ export const MANAGER_ICON_TOKENS = [
   'import-plugin',
   'more',
   'reload-plugin',
+  'reset-configuration',
+  'save-configuration',
   'share-plugin',
   'uninstall-plugin',
 ] as const
@@ -158,6 +160,8 @@ const MANAGER_ICON_SOURCES: Readonly<Record<ManagerIconToken, string>> = {
   'import-plugin': folder,
   more: moreHoriz,
   'reload-plugin': refresh,
+  'reset-configuration': restartAlt,
+  'save-configuration': save,
   'share-plugin': share,
   'uninstall-plugin': deleteForever,
 }

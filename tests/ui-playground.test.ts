@@ -68,15 +68,78 @@ describe('UI Playground', () => {
       for (let attempt = 0; attempt < 100 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 10))
       }
-      const runtime = dom.window as unknown as { __cordisxRuntime?: { snapshot(): { plugins: readonly { id: string; status: string }[]; platform: { mode: string } }; dispose(): Promise<void> } }
+      const runtime = dom.window as unknown as { __cordisxRuntime?: { snapshot(): { plugins: readonly { id: string; name: string; description?: string; icon?: string; status: string }[]; platform: { mode: string } }; dispose(): Promise<void> } }
       expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
       expect(runtime.__cordisxRuntime?.snapshot().plugins.map(plugin => ({ id: plugin.id, status: plugin.status })))
         .toEqual(defaultPluginIds.map(id => ({ id, status: 'active' })))
+      expect(runtime.__cordisxRuntime?.snapshot().plugins.map(plugin => plugin.name)).toEqual([
+        'Slot Showcase', 'Hello Toolbar', 'Form Schema Gallery', 'Settings Navigation Demo',
+        'Plugin Console Showcase', 'Channels', 'CLIProxy Providers',
+      ])
+      dom.window.document.documentElement.lang = 'zh-CN'
+      await new Promise(resolve => setTimeout(resolve, 0))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(runtime.__cordisxRuntime?.snapshot().plugins.map(plugin => plugin.name)).toEqual([
+        '点位展示', '工具栏问候', '表单结构展示', '设置导航演示',
+        '插件控制台展示', '渠道', 'CLIProxy 提供方',
+      ])
+      expect(runtime.__cordisxRuntime?.snapshot().plugins.find(plugin => plugin.id === 'channel')?.description)
+        .toBe('管理渠道账号、连接和会话。')
+      expect(runtime.__cordisxRuntime?.snapshot().plugins.find(plugin => plugin.id === 'cli-proxy-api')?.icon)
+        .toMatch(/^data:image\/png;base64,/)
       expect(runtime.__cordisxRuntime?.snapshot().platform.mode).toBe('unavailable')
       const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!
-      expect(trigger.previousElementSibling).toBe(dom.window.document.querySelector('[data-cordisx-playground-manager-trigger]'))
+      const reactManager = dom.window.document.querySelector('[data-cordisx-react-manager="true"]')
+      expect(reactManager).not.toBeNull()
+      const managerStyles = dom.window.document.getElementById('cordisx-react-manager-style')?.textContent ?? ''
+      expect(managerStyles).toContain('.t-input {')
+      expect(managerStyles).toContain('.t-textarea__inner {')
+      expect(managerStyles).toContain('.cxr-tabs { display: flex; min-height: 38px; flex: none;')
+      expect(managerStyles).toContain('.cxr-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));')
+      expect(managerStyles).toContain('.cxr-plugin-actions { position: absolute; top: 50%;')
+      expect(managerStyles).toContain('transform: translateY(-50%);')
+      expect(managerStyles).toContain('.cxf-form-body { display: grid; min-width: 0; align-content: start; grid-auto-rows: max-content;')
+      expect(managerStyles).toContain('.cxr-page[data-plugin-detail]:has(> .cxr-plugin-config-panel)')
+      expect(managerStyles).not.toContain('.cxr-page[data-plugin-detail] { display: flex;')
+      expect(trigger.parentElement?.previousElementSibling).toBe(dom.window.document.querySelector('[data-cordisx-playground-manager-trigger]'))
+      expect(trigger.querySelector('.cxr-trigger-mark img')).not.toBeNull()
+      expect(trigger.querySelector('svg')).toBeNull()
       trigger.click()
-      expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')?.hidden).toBe(false)
+      expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')).not.toBeNull()
+      expect(dom.window.document.querySelector<HTMLImageElement>('[data-plugin-id="cli-proxy-api"] .cxr-card-icon img')?.src)
+        .toMatch(/^data:image\/png;base64,/)
+      const internalAccents = new Map([
+        ['slot-showcase', 'spectral'],
+        ['hello-toolbar', 'solar'],
+        ['form-schema-gallery', 'violet'],
+        ['settings-tab-demo', 'polar'],
+        ['console-showcase', 'ember'],
+        ['channel', 'jade'],
+      ])
+      const gradientPhases = new Set<string>()
+      for (const [pluginId, accent] of internalAccents) {
+        const internalBadge = dom.window.document.querySelector(`[data-plugin-id="${pluginId}"] [data-internal-plugin-badge="${pluginId}"]`)
+        expect(internalBadge?.getAttribute('data-accent')).toBe(accent)
+        expect(internalBadge?.getAttribute('data-brand-geometry')).toBe('official-1440-segments')
+        expect(internalBadge?.getAttribute('data-gradient-mode')).toBe('segment-depth')
+        expect(internalBadge?.getAttribute('data-gradient-phase')).toMatch(/^\d+$/)
+        gradientPhases.add(internalBadge?.getAttribute('data-gradient-phase') ?? '')
+        const derivedMarks = internalBadge?.querySelectorAll<HTMLImageElement>('img') ?? []
+        expect(derivedMarks).toHaveLength(2)
+        for (const mark of derivedMarks) expect(mark.src).toMatch(/^data:image\/svg\+xml;charset=utf-8,/)
+        expect(internalBadge?.textContent).toBe('')
+      }
+      expect(gradientPhases.size).toBe(internalAccents.size)
+      for (const [index, id] of defaultPluginIds.entries()) {
+        dom.window.document.querySelector<HTMLButtonElement>(`[data-plugin-id="${id}"]`)?.click()
+        await new Promise(resolve => setTimeout(resolve, 0))
+        expect(dom.window.document.querySelector('[data-plugin-detail]')?.getAttribute('data-plugin-detail')).toBe(id)
+        expect(dom.window.document.querySelectorAll('[data-plugin-detail-tab]')).toHaveLength(7)
+        if (index < defaultPluginIds.length - 1) {
+          dom.window.document.querySelector<HTMLButtonElement>('.cxr-breadcrumbs button')?.click()
+          await new Promise(resolve => setTimeout(resolve, 0))
+        }
+      }
       const firstRuntime = runtime.__cordisxRuntime!
       let disposed = false
       const dispose = firstRuntime.dispose.bind(firstRuntime)
@@ -89,6 +152,8 @@ describe('UI Playground', () => {
       expect(disposed).toBe(true)
       expect(runtime.__cordisxRuntime?.snapshot().plugins.map(plugin => ({ id: plugin.id, status: plugin.status })))
         .toEqual(defaultPluginIds.map(id => ({ id, status: 'active' })))
+      expect(dom.window.document.querySelector('[data-plugin-detail]')?.getAttribute('data-plugin-detail')).toBe('cli-proxy-api')
+      expect(dom.window.document.querySelectorAll('[data-plugin-detail-tab]')).toHaveLength(7)
       await runtime.__cordisxRuntime?.dispose()
       await new Promise(resolve => setTimeout(resolve, 200))
     } finally { dom.window.close() }

@@ -2,17 +2,20 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { flushSync } from 'react-dom'
 import { Button, ConfigProvider } from 'tdesign-react'
+import { projectPermissionCapabilityName } from '../../permission-locales.js'
 import type { MarketplaceModel } from '../marketplace.js'
 import type { ManagerModel, ManagerSnapshot } from '../manager.js'
 import { HostIcon } from '../host-ui/HostIcon.js'
 import { BrandMark } from '../host-ui/BrandMark.js'
 import { HostSurfaceIcon } from '../host-ui/HostSurfaceIcon.js'
+import { productLocale } from '../ui-copy.js'
 import { Navigation } from './components/Navigation.js'
 import { useManagerRouter } from './hooks/useManagerRouter.js'
 import { projectManagerContentBreadcrumbs } from './model/manager-content-breadcrumbs.js'
 import { useManagerSnapshot } from './model/store.js'
 import type { ManagerRoute } from './model/routes.js'
 import { AboutPage } from './pages/AboutPage.js'
+import { AcknowledgementsPage } from './pages/AcknowledgementsPage.js'
 import { ExtensionPointDetailPage } from './pages/ExtensionPointDetailPage.js'
 import { ExtensionPointsPage } from './pages/ExtensionPointsPage.js'
 import { ManagerContentPage } from './pages/ManagerContentPage.js'
@@ -27,11 +30,12 @@ import { RoutesPage } from './pages/RoutesPage.js'
 
 function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
   if (route.kind === 'plugin') return snapshot.plugins.find(item => item.id === route.pluginId)?.name ?? route.pluginId
-  if (route.kind === 'permission') return route.capability
+  if (route.kind === 'permission') return projectPermissionCapabilityName(route.capability, snapshot.localization.locale)
   if (route.kind === 'extension-point') return snapshot.extensionPoints?.points.find(item => item.id === route.pointId)?.titleProjection.text ?? route.pointId
   if (route.kind === 'route' || route.kind === 'page') return route.qualifiedId
   if (route.kind === 'marketplace-plugin') return '插件详情'
   if (route.kind === 'marketplace-sources') return '插件来源'
+  if (route.kind === 'about-acknowledgements') return productLocale(snapshot.localization.locale) === 'zh-CN' ? '致谢' : 'Acknowledgements'
   if (route.kind === 'manager-content') return snapshot.settingsNavigationItems?.find(item => item.id === route.id)?.pageTitle ?? route.id
   const titles = { plugins: '插件', 'extension-points': '扩展点', routes: '路由', marketplace: '插件商店', about: '关于 CordisX' }
   return titles[route.page]
@@ -91,6 +95,14 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
       <span aria-current="page">{PLUGIN_FACET_LABELS[route.page]}</span>
     </nav>
   }
+  if (route.kind === 'about-acknowledgements') {
+    const about = productLocale(snapshot.localization.locale) === 'zh-CN' ? '关于 CordisX' : 'About CordisX'
+    return <nav className="cxr-breadcrumbs" aria-label="面包屑">
+      <button type="button" onClick={() => navigate({ kind: 'primary', page: 'about' })}>{about}</button>
+      <span aria-hidden="true">/</span>
+      <span aria-current="page">{heading}</span>
+    </nav>
+  }
   const parent = route.kind === 'extension-point'
     ? { label: '扩展点', page: 'extension-points' as const }
     : route.kind === 'route' || route.kind === 'page'
@@ -111,14 +123,15 @@ function Content({ model, marketplace, snapshot, route }: { readonly model: Mana
   if (current.kind === 'permission') return <PermissionDetailPage model={model} snapshot={snapshot} router={route} />
   if (current.kind === 'extension-point') return <ExtensionPointDetailPage model={model} snapshot={snapshot} router={route} />
   if (current.kind === 'route' || current.kind === 'page') return <NavigationDetailPage snapshot={snapshot} router={route} />
-  if (current.kind === 'marketplace-plugin') return <MarketplacePluginPage marketplace={marketplace} locale={snapshot.localization.locale} router={route} />
+  if (current.kind === 'marketplace-plugin') return <MarketplacePluginPage marketplace={marketplace} snapshot={snapshot} router={route} />
   if (current.kind === 'marketplace-sources') return <MarketplaceSourcesPage marketplace={marketplace} locale={snapshot.localization.locale} />
+  if (current.kind === 'about-acknowledgements') return <AcknowledgementsPage locale={snapshot.localization.locale} />
   if (current.kind === 'manager-content') return <ManagerContentPage model={model} router={route} />
   if (current.page === 'plugins') return <PluginsPage model={model} snapshot={snapshot} router={route} />
   if (current.page === 'extension-points') return <ExtensionPointsPage snapshot={snapshot} router={route} />
   if (current.page === 'routes') return <RoutesPage snapshot={snapshot} router={route} />
   if (current.page === 'marketplace') return <MarketplacePage marketplace={marketplace} manager={model} snapshot={snapshot} router={route} />
-  return <AboutPage snapshot={snapshot} />
+  return <AboutPage snapshot={snapshot} router={route} />
 }
 
 export interface ManagerAppProps {
@@ -142,6 +155,12 @@ export function ManagerApp({ model, marketplace, triggerSeat }: ManagerAppProps)
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
   useEffect(() => { playgroundStorage?.setItem('cordisx.playground.manager.open.v1', String(open)) }, [open, playgroundStorage])
+  useEffect(() => {
+    const route = router.route
+    if (!open || route.kind !== 'manager-content') return
+    if (snapshot.settingsNavigationItems?.some(item => item.id === route.id) === true) return
+    router.navigate({ kind: 'primary', page: 'plugins' })
+  }, [open, router.navigate, router.route, snapshot.settingsNavigationItems])
   const attach = useMemo(() => () => triggerSeat.ownerDocument.querySelector<HTMLElement>('[data-cordisx-react-manager]') ?? triggerSeat.ownerDocument.body, [triggerSeat])
   const contributionId = router.route.kind === 'manager-content' ? router.route.id : undefined
   const contributionIcon = contributionId === undefined ? undefined : snapshot.settingsNavigationItems?.find(item => item.id === contributionId)?.icon
@@ -152,7 +171,7 @@ export function ManagerApp({ model, marketplace, triggerSeat }: ManagerAppProps)
     ? { kind: 'manager-content' as const, id: router.route.id, reference: managerContentParent }
     : undefined
   return <ConfigProvider globalConfig={{ attach }}>
-    {createPortal(<Button className="cxr-trigger" type="button" shape="square" variant="text" data-cordisx-manager-trigger="true" aria-label="管理 CordisX 插件" aria-haspopup="dialog" aria-expanded={open} icon={<HostIcon token="plugins" />} onClick={() => flushSync(() => setOpen(true))} />, triggerSeat)}
+    {createPortal(<Button className="cxr-trigger" type="button" shape="square" variant="text" data-cordisx-manager-trigger="true" aria-label="管理 CordisX 插件" aria-haspopup="dialog" aria-expanded={open} title="管理 CordisX 插件" icon={<BrandMark className="cxr-trigger-mark" />} onClick={() => flushSync(() => setOpen(true))} />, triggerSeat)}
     {open ? <div className="cxr-backdrop" data-cordisx-manager-modal="true" onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false) }}>
       <section ref={dialog} className="cxr-dialog" role="dialog" aria-modal="true" aria-label="CordisX 插件管理器" tabIndex={-1}>
         <aside className="cxr-sidebar"><Navigation snapshot={snapshot} router={router} /></aside>

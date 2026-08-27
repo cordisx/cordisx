@@ -6,6 +6,7 @@ import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
   type CordisXPluginManifestV1,
+  type CordisXPluginPresentation,
   type CordisXEnvironmentRow,
   type CordisXLocalizedText,
   type CordisXMessageParams,
@@ -38,7 +39,7 @@ export const manifest = {
       reason: {
         namespace: 'showcase',
         key: 'permission.models',
-        fallback: 'Show models currently available through the host connection',
+        fallback: 'Display models available through the Host connection in the Slot Showcase diagnostics view',
       },
       scope: {},
     },
@@ -46,6 +47,8 @@ export const manifest = {
 } as const satisfies CordisXPluginManifestV1
 
 interface Messages {
+  'plugin.name': undefined
+  'plugin.description': undefined
   'action.open-app': undefined
   'action.open-main': undefined
   'action.quick': undefined
@@ -93,6 +96,11 @@ function message<Key extends keyof Messages>(
   }
 }
 
+export const presentation = {
+  name: message('plugin.name'),
+  description: message('plugin.description'),
+} satisfies CordisXPluginPresentation
+
 /** End-to-end demo for every structured shell surface and all three built-in page outlets. */
 export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): void {
   ctx.i18n.define<Messages>({
@@ -100,6 +108,8 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     locale: 'en',
     default: true,
     messages: {
+      'plugin.name': 'Slot Showcase',
+      'plugin.description': 'Demonstrates CordisX extension points, navigation, pages, and state interactions.',
       'action.open-app': 'Open app page',
       'action.open-main': 'Open main page',
       'action.quick': 'Quick action',
@@ -127,7 +137,7 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'page.session.title': 'Session analytics',
       'page.tab.details': 'Details',
       'page.tab.overview': 'Overview',
-      'permission.models': 'Show models currently available through the host connection',
+      'permission.models': 'Display models available through the Host connection in the Slot Showcase diagnostics view',
       'route.app.description': 'Open the application overview from the sidebar footer or showcase settings.',
       'route.app.title': 'Application overview',
       'route.main.description': 'Open workspace analytics from showcase navigation, the workspace toolbar, or a session action.',
@@ -140,6 +150,8 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     namespace: 'showcase',
     locale: 'zh-CN',
     messages: {
+      'plugin.name': '点位展示',
+      'plugin.description': '展示 CordisX 扩展点、导航、页面和状态交互。',
       'action.open-app': '打开应用页',
       'action.open-main': '打开主区域页',
       'action.quick': '独立快捷操作',
@@ -161,7 +173,7 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'page.session.title': '会话分析',
       'page.tab.details': '详情',
       'page.tab.overview': '概览',
-      'permission.models': '显示当前宿主连接实际可用的模型',
+      'permission.models': '用于在点位展示的诊断视图中显示当前宿主连接实际可用的模型',
       'command.open-session': '打开已配置原生会话的分析页',
       'route.app.description': '从侧栏底部或演示设置打开应用概览。',
       'route.app.title': '应用概览',

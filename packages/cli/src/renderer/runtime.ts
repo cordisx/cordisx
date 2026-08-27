@@ -33,7 +33,6 @@ import { UnavailableCodexHostAdapter } from '../adapters/codex-agent.js'
 import { CordisXAgentService, CordisXHostAgentRuntime, CordisXSystemPromptService } from './agent.js'
 import { CordisXAgentEventService } from './agent-events.js'
 import {
-  installCordisXManager,
   type ManagerModel,
   type ManagerPluginSnapshot,
   type ManagerPluginStatus,
@@ -41,6 +40,8 @@ import {
   type ManagerSettingsTabSnapshot,
   type ManagerSettingsNavigationItemSnapshot,
 } from './manager.js'
+import { installReactCordisXManager } from './manager/install.js'
+import { selectPluginReadme } from './readme.js'
 import { CordisXCommandService } from './commands.js'
 import { CordisXI18nService } from './i18n.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
@@ -310,6 +311,36 @@ function pluginReadmeSummary(readme: string | undefined): string | undefined {
 function pluginDescriptionFields(readme: string | undefined): { readonly description?: string } {
   const description = pluginReadmeSummary(readme)
   return description === undefined ? {} : { description }
+}
+
+function localizedPluginText(value: unknown): CordisXLocalizedText | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const candidate = value as Partial<CordisXLocalizedText>
+  return typeof candidate.key === 'string' ? candidate as CordisXLocalizedText : undefined
+}
+
+function pluginPresentation(
+  controller: PluginController,
+  readme: string | undefined,
+  i18n: CordisXI18nService | undefined,
+): Pick<ManagerPluginSnapshot, 'name' | 'description'> {
+  const fallbackName = controller.manifest.name ?? controller.item.module?.name ?? controller.item.id
+  const presentation = controller.item.module?.presentation
+  const nameMessage = localizedPluginText(presentation?.name)
+  const descriptionMessage = localizedPluginText(presentation?.description)
+  const nameSite = `manager-plugin:${controller.item.id}:name`
+  const descriptionSite = `manager-plugin:${controller.item.id}:description`
+  const name = nameMessage === undefined
+    ? fallbackName
+    : i18n?.resolveFor(controller.item.id, nameMessage, nameSite).text ?? nameMessage.fallback ?? fallbackName
+  if (nameMessage === undefined) i18n?.clearDiagnosticSite(controller.item.id, nameSite)
+  if (descriptionMessage === undefined) {
+    i18n?.clearDiagnosticSite(controller.item.id, descriptionSite)
+    return { name, ...pluginDescriptionFields(readme) }
+  }
+  const description = i18n?.resolveFor(controller.item.id, descriptionMessage, descriptionSite).text
+    ?? descriptionMessage.fallback
+  return { name, ...(description === undefined ? {} : { description }) }
 }
 
 function errorMessage(error: unknown): string {
@@ -890,20 +921,21 @@ async function start(
       ?? value.fallback
       ?? `[[host:${value.key}]]`
     )
+    const locale = i18nService?.getSnapshot().locale ?? 'en'
     return {
       version: metadata.version,
       plugins: projectedControllers().map((controller): ManagerPluginSnapshot => {
         const icon = pluginBrandIconDataUrl(controller.item.module?.icon)
+        const readme = selectPluginReadme(controller.item, locale)
         return {
           id: controller.item.id,
           source: controller.item.source,
-          name: controller.manifest.name ?? controller.item.module?.name ?? controller.item.id,
+          ...pluginPresentation(controller, readme, i18nService),
           ...(icon === undefined ? {} : { icon }),
-          ...pluginDescriptionFields(controller.item.readme),
           inject: pluginInject(controller.item.module),
-          config: configuration.descriptor(controller.item.id, i18nService?.getSnapshot().locale ?? 'en').value,
-          configuration: configuration.descriptor(controller.item.id, i18nService?.getSnapshot().locale ?? 'en'),
-          ...(controller.item.readme === undefined ? {} : { readme: controller.item.readme }),
+          config: configuration.descriptor(controller.item.id, locale).value,
+          configuration: configuration.descriptor(controller.item.id, locale),
+          ...(readme === undefined ? {} : { readme }),
           ...(controller.item.package === undefined ? {} : {
             package: {
               version: controller.item.package.version,
@@ -983,8 +1015,7 @@ async function start(
         plugins: activeControllers().map(controller => ({
           id: controller.item.id,
           source: controller.item.source,
-          name: controller.manifest.name ?? controller.item.module?.name ?? controller.item.id,
-          ...pluginDescriptionFields(controller.item.readme),
+          ...pluginPresentation(controller, selectPluginReadme(controller.item, locale), i18nService),
           status: controller.status,
         })),
         registrations: allRegistrations,
@@ -1302,6 +1333,7 @@ async function start(
       ...(replacesTarget
         ? mutation.package!.readme === undefined ? {} : { readme: mutation.package!.readme }
         : existing!.item.readme === undefined ? {} : { readme: existing!.item.readme }),
+      ...(!replacesTarget && existing!.item.readmes !== undefined ? { readmes: existing!.item.readmes } : {}),
     }
     const controller = createController(item, pluginConsole)
     controller.generationContext = generationVisibility.context(handle, pluginId)
@@ -2018,7 +2050,7 @@ async function start(
       if (controller.status !== 'active') continue
       await mountPlugin(controller)
     }
-    disposeManager = installCordisXManager(document, handle, metadata.hostKind === 'playground'
+    disposeManager = installReactCordisXManager(document, handle, metadata.hostKind === 'playground'
       ? { triggerTarget: () => document.querySelector<HTMLElement>('[data-cordisx-playground-manager-trigger]') ?? undefined }
       : {})
   } catch (error) {

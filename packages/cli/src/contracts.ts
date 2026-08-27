@@ -1184,11 +1184,19 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+/** Host-projected, locale-aware product identity for one plugin module. */
+export interface CordisXPluginPresentation {
+  readonly name: CordisXLocalizedText
+  readonly description?: CordisXLocalizedText
+}
+
 /** Cordis plugin module after browser bundling. */
 export interface CordisXPluginModule {
   readonly name?: string
   /** Optional local brand artwork. The Host validates and renders it inside Host-owned chrome. */
   readonly icon?: CordisXPluginBrandIcon
+  /** User-facing identity; stable ids and manifest names remain untranslated fallbacks. */
+  readonly presentation?: CordisXPluginPresentation
   readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly Config?: CordisXStandardSchema
@@ -1226,4 +1234,6 @@ export interface CordisXBrowserPlugin {
   }
   /** Adjacent README.md captured by the launcher for this browser generation. */
   readonly readme?: string
+  /** Locale-keyed adjacent READMEs; `default` is README.md. */
+  readonly readmes?: Readonly<Record<string, string>>
 }
