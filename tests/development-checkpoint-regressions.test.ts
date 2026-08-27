@@ -11,9 +11,13 @@ describe('development checkpoint regressions', () => {
 
     expect(rootManifest.scripts.predev).toBe('npm run prepare:dev')
     expect(rootManifest.scripts['prepare:dev']).toBe('npm run prepare:dev --workspace=cordisx')
+    expect(rootManifest.scripts['check:clean-dev']).toBe('node scripts/check-clean-dev.mjs')
+    expect(rootManifest.scripts.check).toContain('npm run check:clean-dev')
     expect(cliManifest.scripts.predev).toBe('npm run prepare:dev')
-    expect(cliManifest.scripts['prepare:dev']).toContain('npm run build --workspace=@cordisx/channel-runtime')
-    expect(cliManifest.scripts['prepare:dev']).toContain('npm run build --workspace=@cordisx/schemastery-ui')
+    expect(cliManifest.scripts['prepare:dev']).toBe('npm run build')
+    expect(cliManifest.scripts.build).toContain('npm run build --workspace=@cordisx/channel-runtime')
+    expect(cliManifest.scripts.build).toContain('npm run build --workspace=@cordisx/schemastery-ui')
+    expect(cliManifest.scripts.build).toContain('tsc -p tsconfig.json')
   })
 
   it('opens the on-demand React Manager before collecting live-smoke state', async () => {
