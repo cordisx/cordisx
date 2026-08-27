@@ -86,7 +86,9 @@ export async function highlightSafeMarkdownCodeBlocks(article: HTMLElement, them
   const highlighter = await loadShiki()
   for (const code of blocks) {
     if (!code.isConnected) return
-    const source = code.textContent ?? ''
+    // Markdown parsers preserve the newline immediately before the closing
+    // fence. It is fence syntax, not an intentional empty code row.
+    const source = (code.textContent ?? '').replace(/\n$/u, '')
     const tokens = await highlighter.codeToTokens(source, {
       lang: shikiLanguage(code.dataset.language),
       theme: theme === 'dark' ? 'github-dark' : 'github-light',

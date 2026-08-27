@@ -152,7 +152,7 @@ export function ManagerApp({ model, marketplace, triggerSeat }: ManagerAppProps)
     ? { kind: 'manager-content' as const, id: router.route.id, reference: managerContentParent }
     : undefined
   return <ConfigProvider globalConfig={{ attach }}>
-    {createPortal(<Button className="cxr-trigger" type="button" shape="square" variant="text" data-cordisx-manager-trigger="true" aria-label="管理 CordisX 插件" aria-haspopup="dialog" aria-expanded={open} icon={<HostIcon token="plugins" />} onClick={() => flushSync(() => setOpen(true))} />, triggerSeat)}
+    {createPortal(<Button className="cxr-trigger" type="button" shape="square" variant="text" data-cordisx-manager-trigger="true" aria-label="管理 CordisX 插件" aria-haspopup="dialog" aria-expanded={open} title="管理 CordisX 插件" icon={<BrandMark className="cxr-trigger-mark" />} onClick={() => flushSync(() => setOpen(true))} />, triggerSeat)}
     {open ? <div className="cxr-backdrop" data-cordisx-manager-modal="true" onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false) }}>
       <section ref={dialog} className="cxr-dialog" role="dialog" aria-modal="true" aria-label="CordisX 插件管理器" tabIndex={-1}>
         <aside className="cxr-sidebar"><Navigation snapshot={snapshot} router={router} /></aside>

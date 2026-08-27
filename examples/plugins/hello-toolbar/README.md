@@ -1,13 +1,22 @@
 # Hello Toolbar
 
-在工作区工具栏提供一个简单的问候操作。
+Hello Toolbar adds a simple greeting action to the workspace toolbar.
 
-这是最小结构化 toolbar 插件：插件只提交本地化 action、Host icon token 与 command 引用，CordisX 拥有 DOM、样式、tooltip、无障碍、排序、权限和卸载清理。
+It is the smallest structured toolbar plugin: the plugin submits only a
+localized action, a Host icon token, and a command reference. CordisX owns the
+DOM, styling, tooltip, accessibility, ordering, permission projection, and
+cleanup when the plugin unloads.
 
-插件没有用户配置。它仍显式导出空的 Schemastery `Config = Schema.object({})` 与 `configApplies = 'plugin-restart'`，因此 Manager 能稳定显示只读“没有可编辑设置”状态，而不会制造无意义开关。
+The plugin has no user configuration. It still exports the explicit empty
+Schemastery `Config = Schema.object({})` and
+`configApplies = 'plugin-restart'`, so Manager can show an honest read-only
+“no editable settings” state instead of inventing a meaningless switch.
 
-从仓库根目录运行：
+Run it from the repository root:
 
-```sh
+```bash
 npm run dev -- --config cordisx.config.hello-toolbar.json
 ```
+
+This example is trusted local renderer code, not an isolated process or
+security sandbox.

@@ -1,4 +1,4 @@
-import { access, readFile } from 'node:fs/promises'
+import { access, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
@@ -68,24 +68,47 @@ async function readCordisXVersion(): Promise<string> {
   }
 }
 
-interface ResolvedPluginReadme {
-  readonly contents: string
-  readonly path?: string
+interface PluginReadmes {
+  readonly default?: string
+  readonly localized: Readonly<Record<string, string>>
+  readonly files: readonly string[]
 }
 
-async function readPluginReadme(entry: string): Promise<ResolvedPluginReadme | undefined> {
+const README_FILE = /^README(?:\.([A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*))?\.(?:md|markdown)$/iu
+
+async function readPluginReadmesIn(directory: string): Promise<PluginReadmes> {
+  try {
+    const names = await readdir(directory)
+    const matches = names.flatMap(name => {
+      const match = README_FILE.exec(name)
+      return match === null ? [] : [{ name, locale: match[1]?.toLocaleLowerCase() }]
+    })
+    const values = await Promise.all(matches.map(async ({ name, locale }) => ({
+      file: path.join(directory, name),
+      locale,
+      source: await readFile(path.join(directory, name), 'utf8'),
+    })))
+    const fallback = values.find(value => value.locale === undefined)
+    return {
+      ...(fallback === undefined ? {} : { default: fallback.source }),
+      localized: Object.fromEntries(values.flatMap(value => value.locale === undefined ? [] : [[value.locale, value.source]])),
+      files: values.map(value => value.file),
+    }
+  } catch {
+    return { localized: {}, files: [] }
+  }
+}
+
+async function readPluginReadmes(entry: string): Promise<PluginReadmes> {
   const entryDirectory = path.dirname(entry)
   let directory = entryDirectory
   while (true) {
-    const readmePath = path.join(directory, 'README.md')
-    const contents = await readFile(readmePath, 'utf8').catch(() => undefined)
-    if (directory === entryDirectory && contents !== undefined) return { contents, path: readmePath }
-
+    const readmes = await readPluginReadmesIn(directory)
+    if (directory === entryDirectory && readmes.files.length > 0) return readmes
     const packageRoot = await access(path.join(directory, 'package.json')).then(() => true).catch(() => false)
-    if (packageRoot) return contents === undefined ? undefined : { contents, path: readmePath }
-
+    if (packageRoot) return readmes
     const parent = path.dirname(directory)
-    if (parent === directory) return undefined
+    if (parent === directory) return { localized: {}, files: [] }
     directory = parent
   }
 }
@@ -105,9 +128,10 @@ export async function buildRendererCompositionSource(
   for (const plugin of enabled) await access(plugin.entry)
   const [version, readmes, pluginBundles] = await Promise.all([
     readCordisXVersion(),
-    Promise.all(config.plugins.map(async plugin => plugin.readme === undefined
-      ? await readPluginReadme(plugin.entry)
-      : { contents: plugin.readme })),
+    Promise.all(config.plugins.map(async plugin => {
+      if (plugin.readme !== undefined) return { default: plugin.readme, localized: {}, files: [] } satisfies PluginReadmes
+      return await readPluginReadmes(plugin.entry)
+    })),
     Promise.all(enabled.map(async plugin => {
       const result = await build({
         entryPoints: [plugin.entry],
@@ -152,10 +176,15 @@ export async function buildRendererCompositionSource(
     const index = enabledIndexes.get(plugin.id)
     const moduleField = index === undefined ? '' : `, moduleFactory: (console) => { ${pluginBundles[index]}\nreturn __cordisxPluginModule }`
     const readme = readmes[pluginIndex]
-    const readmeField = readme === undefined ? '' : `, readme: ${JSON.stringify(readme.contents)}`
+    const readmeField = readme?.default === undefined ? '' : `, readme: ${JSON.stringify(readme.default)}`
+    const localizedReadmes = readme === undefined ? {} : {
+      ...(readme.default === undefined ? {} : { default: readme.default }),
+      ...readme.localized,
+    }
+    const readmesField = Object.keys(localizedReadmes).length === 0 ? '' : `, readmes: ${JSON.stringify(localizedReadmes)}`
     const manifestField = plugin.manifest === undefined ? '' : `, manifest: ${JSON.stringify(plugin.manifest)}`
     const packageField = plugin.package === undefined ? '' : `, package: ${JSON.stringify(plugin.package)}`
-    return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${plugin.revision ?? 0}${readmeField}${manifestField}${packageField}${moduleField} }`
+    return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${plugin.revision ?? 0}${readmeField}${readmesField}${manifestField}${packageField}${moduleField} }`
   }).join(',')}]`
   const providers = config.providers.filter(provider => provider.enabled).map(provider => ({ id: provider.id, displayName: provider.displayName }))
   const permission = options.permission ?? { profileId: options.profileId ?? 'development', policies: [] }
@@ -168,7 +197,7 @@ export async function buildRendererCompositionSource(
     source,
     watchFiles: [...new Set([
       ...enabled.map(plugin => plugin.entry),
-      ...readmes.flatMap(readme => readme?.path === undefined ? [] : [readme.path]),
+      ...readmes.flatMap(readme => readme.files),
     ])],
   }
 }

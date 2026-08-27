@@ -9,6 +9,7 @@ import {
   type CordisXMessageParams,
   type CordisXPageMetadataV3,
   type CordisXPluginManifestV1,
+  type CordisXPluginPresentation,
   type CordisXRouteDefinitionV2,
 } from '../../contracts.js'
 import { createProviderFleetPage } from './view.js'
@@ -38,6 +39,8 @@ export const manifest = {
 } satisfies CordisXPluginManifestV1
 
 interface Messages {
+  'plugin.name': undefined
+  'plugin.description': undefined
   'navigation.title': undefined
   'navigation.description': undefined
   'route.title': undefined
@@ -113,6 +116,11 @@ function message<Key extends keyof Messages>(
   return { namespace: 'cli-proxy-api', key, ...(args[0] === undefined ? {} : { params: args[0] }) }
 }
 
+export const presentation = {
+  name: message('plugin.name'),
+  description: message('plugin.description'),
+} satisfies CordisXPluginPresentation
+
 const providerSessionsPage = {
   $schema: CORDISX_PAGE_SCHEMA_V3,
   schemaVersion: 3,
@@ -136,6 +144,8 @@ const providerSessionsRoute = {
 export function apply(ctx: Context, config: Config = Config({})): void {
   ctx.i18n.define<Messages>({
     namespace: 'cli-proxy-api', locale: 'en', default: true, messages: {
+      'plugin.name': 'CLIProxy Providers',
+      'plugin.description': 'Manage configured CLIProxy providers, models, and sessions.',
       'navigation.title': 'Providers', 'navigation.description': 'Manage provider models and sessions',
       'route.title': 'Open Provider sessions',
       'route.description': 'Enter the external Provider sessions fleet from CordisX navigation or the Manager route catalog.',
@@ -158,6 +168,8 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   })
   ctx.i18n.define<Messages>({
     namespace: 'cli-proxy-api', locale: 'zh-CN', messages: {
+      'plugin.name': 'CLIProxy 提供方',
+      'plugin.description': '管理已配置的 CLIProxy 提供方、模型和会话。',
       'navigation.title': 'Providers', 'navigation.description': '管理 Provider 模型和会话',
       'route.title': '打开 Provider 会话',
       'route.description': '从 CordisX 导航或 Manager 路由目录进入外部 Provider 会话 Fleet。',

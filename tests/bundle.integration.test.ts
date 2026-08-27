@@ -198,7 +198,7 @@ describe('renderer bundle', () => {
         id: 'slot-showcase',
         status: 'active',
         readme: expect.stringContaining('# Slot Showcase'),
-        description: '在插件管理器中展示扩展点、导航、页面与状态交互的完整示例。',
+        description: 'Demonstrates CordisX extension points, navigation, pages, and state interactions.',
         configuration: expect.objectContaining({
           schemaKind: 'schemastery',
           applies: 'plugin-restart',

@@ -61,4 +61,13 @@ describe('safe manager Markdown renderer', () => {
     expect(code.querySelector('script')).toBeNull()
     dom.window.close()
   })
+
+  it('does not project the closing-fence newline as an empty code row', async () => {
+    const dom = new JSDOM('<!doctype html><html><body><article><pre><code data-language="bash">npm run dev\n</code></pre></article></body></html>')
+    const article = dom.window.document.querySelector<HTMLElement>('article')!
+    await highlightSafeMarkdownCodeBlocks(article, 'dark')
+    expect(article.querySelectorAll('.cxm-readme-code-line')).toHaveLength(1)
+    expect(article.querySelector('code')?.textContent).toBe('npm run dev')
+    dom.window.close()
+  })
 })

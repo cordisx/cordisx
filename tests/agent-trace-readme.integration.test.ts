@@ -33,6 +33,8 @@ function rect(left: number, top: number, width: number, height: number): DOMRect
 describe('Agent Trace built README projection', () => {
   let canonicalReadme = ''
   let builtReadme = ''
+  let canonicalLocalizedReadme = ''
+  let builtLocalizedReadme = ''
   let dom: JSDOM
   let runtime: RuntimeHandle
 
@@ -42,9 +44,11 @@ describe('Agent Trace built README projection', () => {
     })
     await readFile(path.join(packageRoot, 'dist/entry.js'), 'utf8')
     await readFile(path.join(packageRoot, 'dist/index.js'), 'utf8')
-    ;[canonicalReadme, builtReadme] = await Promise.all([
+    ;[canonicalReadme, builtReadme, canonicalLocalizedReadme, builtLocalizedReadme] = await Promise.all([
       readFile(path.join(packageRoot, 'README.md'), 'utf8'),
       readFile(path.join(packageRoot, 'dist/README.md'), 'utf8'),
+      readFile(path.join(packageRoot, 'README.zh-Hans.md'), 'utf8'),
+      readFile(path.join(packageRoot, 'dist/README.zh-Hans.md'), 'utf8'),
     ])
 
     const config: CordisXConfig = {
@@ -133,6 +137,9 @@ describe('Agent Trace built README projection', () => {
     expect(builtReadme).toContain('## Fixture, live, and historical modes')
     expect(builtReadme).toContain('agent.history.read')
     expect(builtReadme).toContain('current-connection-client-unavailable')
+    expect(builtLocalizedReadme).toBe(canonicalLocalizedReadme)
+    expect(builtLocalizedReadme).toContain('## Fixture、实时与历史模式')
+    expect(builtLocalizedReadme).toContain('agent.history.read')
   })
 
   it('embeds that adjacent README in the real launcher bundle item', () => {
@@ -140,12 +147,12 @@ describe('Agent Trace built README projection', () => {
       expect.objectContaining({
         id: 'agent-trace-showcase',
         status: 'active',
-        readme: canonicalReadme,
+        readme: canonicalLocalizedReadme,
       }),
     ])
   })
 
-  it('renders the Agent Trace product README in the manager README tab', () => {
+  it('renders the localized Agent Trace product README in the manager README tab', () => {
     const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')
     expect(trigger).not.toBeNull()
     trigger?.click()
@@ -153,9 +160,9 @@ describe('Agent Trace built README projection', () => {
 
     const panel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="README"]')
     expect(panel?.querySelector('.cxm-readme h1')?.textContent).toBe('CordisX Agent Trace Showcase')
-    expect(panel?.textContent).toContain('Fixture, live, and historical modes')
+    expect(panel?.textContent).toContain('Fixture、实时与历史模式')
     expect(panel?.textContent).toContain('agent.history.read')
-    expect(panel?.textContent).toContain('Explicit Agent demonstrations')
+    expect(panel?.textContent).toContain('显式 Agent 演示')
     expect(panel?.textContent).toContain('current-connection-client-unavailable')
     expect(panel?.textContent).not.toContain('该插件没有随当前 bundle 提供 README.md')
   })

@@ -6,6 +6,7 @@ import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
   type CordisXPluginManifestV1,
+  type CordisXPluginPresentation,
   type CordisXEnvironmentRow,
   type CordisXLocalizedText,
   type CordisXMessageParams,
@@ -46,6 +47,8 @@ export const manifest = {
 } as const satisfies CordisXPluginManifestV1
 
 interface Messages {
+  'plugin.name': undefined
+  'plugin.description': undefined
   'action.open-app': undefined
   'action.open-main': undefined
   'action.quick': undefined
@@ -93,6 +96,11 @@ function message<Key extends keyof Messages>(
   }
 }
 
+export const presentation = {
+  name: message('plugin.name'),
+  description: message('plugin.description'),
+} satisfies CordisXPluginPresentation
+
 /** End-to-end demo for every structured shell surface and all three built-in page outlets. */
 export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): void {
   ctx.i18n.define<Messages>({
@@ -100,6 +108,8 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     locale: 'en',
     default: true,
     messages: {
+      'plugin.name': 'Slot Showcase',
+      'plugin.description': 'Demonstrates CordisX extension points, navigation, pages, and state interactions.',
       'action.open-app': 'Open app page',
       'action.open-main': 'Open main page',
       'action.quick': 'Quick action',
@@ -140,6 +150,8 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     namespace: 'showcase',
     locale: 'zh-CN',
     messages: {
+      'plugin.name': '点位展示',
+      'plugin.description': '展示 CordisX 扩展点、导航、页面和状态交互。',
       'action.open-app': '打开应用页',
       'action.open-main': '打开主区域页',
       'action.quick': '独立快捷操作',

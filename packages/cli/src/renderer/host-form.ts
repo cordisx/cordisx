@@ -153,6 +153,7 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${HOST_ICON_16PX_C
   .cxf-required { color: var(--td-error-color); font-weight: 700; }
   .cxf-control-seat { grid-area: control; min-inline-size: 0; justify-self: stretch; }
   .cxf-item[data-control-layout="compact"] .cxf-control-seat { box-sizing: border-box; inline-size: auto; max-inline-size: 100%; padding-inline-end: var(--td-comp-paddingLR-s); justify-self: end; }
+  .cxf-item[data-primitive="slider"] .cxf-control-seat { inline-size: auto; padding-inline-end: var(--td-comp-paddingLR-s); justify-self: stretch; }
   .cxf-item[data-control-layout="compact"] .cxf-tdesign-control { inline-size: auto; max-inline-size: 100%; }
   .cxf-item[data-control-layout="compact"] t-input-number.cxf-tdesign-control { inline-size: 7.25rem; }
   .cxf-item[data-control-layout="compact"] t-checkbox-group.cxf-tdesign-control,
@@ -188,7 +189,7 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${HOST_ICON_16PX_C
   .cxf-choice { display: inline-flex; align-items: center; gap: .4rem; min-block-size: 2rem; }
   .cxf-choice input { margin: 0; accent-color: var(--td-brand-color); }
   .cxf-slider-control { display: grid; grid-template-columns: minmax(0, 1fr) minmax(5.25rem, 6.5rem); gap: .65rem; align-items: center; inline-size: 100%; }
-  .cxf-item[data-control-layout="compact"] .cxf-slider-control { inline-size: min(100%, 23rem); }
+  .cxf-item[data-control-layout="compact"] .cxf-slider-control { inline-size: 100%; }
   .cxf-slider-control > t-slider { display: block; min-inline-size: 0; overflow: visible; --td-component-stroke: var(--cx-border); --td-brand-color: var(--cx-primary); }
   .cxf-slider-control > t-input-number { min-inline-size: 0; }
   .cxf-array-editor { display: grid; gap: .5rem; inline-size: 100%; }
@@ -235,7 +236,7 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${HOST_ICON_16PX_C
   .cxf-empty { padding: 1.25rem; text-align: center; color: var(--td-text-color-secondary); }
   .cxf-note { margin: 0; padding-inline: .25rem; color: var(--cx-muted); font-size: .78rem; line-height: 1.5; }
   .cxf-loading { display: inline-flex; align-items: center; gap: .5rem; color: var(--td-text-color-secondary); }
-  @media (max-width: 760px) { .cxf-item { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; gap: .35rem; } .cxf-form { inline-size: 100%; } .cxf-slider-control { grid-template-columns: minmax(0, 1fr) 5.25rem; } .cxf-datetime-control { grid-template-columns: minmax(0, 1fr); } .cxf-item[data-control-layout="compact"] .cxf-slider-control { inline-size: min(100%, 23rem); } }
+  @media (max-width: 760px) { .cxf-item { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; gap: .35rem; } .cxf-form { inline-size: 100%; } .cxf-slider-control { grid-template-columns: minmax(0, 1fr) 5.25rem; } .cxf-datetime-control { grid-template-columns: minmax(0, 1fr); } .cxf-item[data-control-layout="compact"] .cxf-slider-control { inline-size: 100%; } }
   @media (forced-colors: active) { .cxf-control:focus-visible, .cxf-button:focus-visible, .cxf-choice input:focus-visible, .cxf-tdesign-control:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; } }
   @media (prefers-reduced-motion: reduce) { .cxf-scope .cxf-control, .cxf-scope .cxf-button, .cxf-scope .cxf-switch::after { transition: none; } }
 `}`

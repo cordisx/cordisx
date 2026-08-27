@@ -16,7 +16,8 @@ import { ArrayEditor } from './ArrayEditor.js'
 import { HostSurfaceIcon } from './HostSurfaceIcon.js'
 
 export const HOST_FORM_REACT_STYLES = String.raw`
-  .cxf-react-form { display: grid; gap: 1.35rem; width: 100%; min-width: 0; margin: 0; padding: 4px 0 16px; }
+  .cxf-react-form { display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; margin: 0; }
+  .cxf-form-body { display: grid; min-width: 0; gap: 1.35rem; padding: 4px 0 16px; }
   .cxf-section { display: grid; min-width: 0; gap: 9px; }
   .cxf-section-heading { padding: 0 4px; }
   .cxf-section-heading h3 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 650; }
@@ -34,16 +35,23 @@ export const HOST_FORM_REACT_STYLES = String.raw`
   .cxf-field-menu-trigger .t-icon { display: block; font-size: 15px; }
   .cxf-control-seat { grid-area: control; min-width: 0; justify-self: stretch; }
   .cxf-item[data-control-layout="compact"] .cxf-control-seat { width: auto; max-width: 100%; padding-right: 10px; justify-self: end; }
+  .cxf-item[data-control-layout="fill"] .cxf-control-seat > :not(.cxf-custom-seat) { width: 100%; }
+  .cxf-item[data-primitive="date-picker"] .cxf-control-seat .t-date-picker,
+  .cxf-item[data-primitive="time-picker"] .cxf-control-seat .t-time-picker,
+  .cxf-item[data-primitive="color-picker"] .cxf-control-seat .t-color-picker__trigger,
+  .cxf-item[data-primitive="color-picker"] .cxf-control-seat .t-color-picker__trigger--default,
+  .cxf-item[data-primitive="color-picker"] .cxf-control-seat .t-input__wrap { width: 100%; }
+  .cxf-item[data-primitive="slider"] .cxf-control-seat { width: auto; padding-right: 10px; justify-self: stretch; }
+  .cxf-item[data-primitive="slider"] .cxf-control-seat > :not(.cxf-custom-seat) { width: 100%; }
   .cxf-item[data-control-layout="compact"] .t-input-number { width: 116px; }
   .cxf-item[data-control-layout="compact"] .t-radio-group { width: fit-content; max-width: 100%; }
   .cxf-help, .cxf-error { margin: 0; overflow-wrap: anywhere; font-size: 11px; line-height: 1.45; }
   .cxf-help { grid-area: help; color: var(--cx-muted,#9ca5b5); }
   .cxf-error { grid-area: error; color: var(--cx-danger,#e34d59); }
   .cxf-control-seat .t-input-number, .cxf-control-seat .t-input-number__input, .cxf-control-seat .t-input-number .t-input { min-width: 0; max-width: 100%; }
-  .cxf-control-seat > .t-date-picker, .cxf-control-seat > .t-time-picker { width: 100%; }
   .cxf-textarea textarea { min-height: 104px !important; resize: vertical; }
   .cxf-json textarea { font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 12px; }
-  .cxf-slider-control { display: grid; width: min(100%,368px); grid-template-columns: minmax(0,1fr) 104px; align-items: center; gap: 10px; }
+  .cxf-slider-control { display: grid; width: 100%; grid-template-columns: minmax(0,1fr) 104px; align-items: center; gap: 10px; }
   .cxf-segmented .t-radio-button { min-height: 32px; }
   .cxf-array-editor { display: grid; gap: 7px; width: 100%; }
   .cxf-item[data-primitive="object-array"] { position: relative; }
@@ -59,7 +67,9 @@ export const HOST_FORM_REACT_STYLES = String.raw`
   .cxf-array-delete { color: var(--td-error-color,#e34d59); }
   .cxf-array-dialog-fields { display: grid; gap: 12px; }
   .cxf-array-dialog-fields label { display: grid; gap: 5px; }
-  .cxf-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .cxf-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .cxf-status { min-width: 0; flex: 1; color: var(--cx-muted,#9ca5b5); font-size: 11px; }
+  .cxf-form-action-buttons { display: flex; flex: none; gap: 8px; }
   @media (max-width: 760px) {
     .cxf-item, .cxf-item[data-full-width="true"] { grid-template-columns: minmax(0,1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; gap: 5px; }
     .cxf-item[data-control-layout="compact"] .cxf-control-seat { padding-right: 0; justify-self: start; }
@@ -278,7 +288,7 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
       .catch(error => { const text = error instanceof Error ? error.message : String(error); const conflict = /conflict|revision/iu.test(text); setFormState(conflict ? 'conflict' : 'error'); setMessage(conflict ? managerCopy(locale, 'form.conflict-retained') : text) })
       .finally(() => setSaving(false))
   }}>
-    {groups.map(([id, group]) => <section key={id} className="cxf-section">
+    <div className="cxf-form-body">{groups.map(([id, group]) => <section key={id} className="cxf-section">
       <header className="cxf-section-heading"><h3>{group.title}</h3>{group.description === undefined ? null : <p>{group.description}</p>}</header>
       <div className="cxf-form-grid">{group.fields.map((field, fieldIndex) => {
         const value = formDraft.value(field.path, field.defaultValue)
@@ -296,7 +306,10 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
       })}</div>
     </section>)}
     {message === undefined ? null : <div className="cxr-notice cxf-alert" data-tone={formState === 'saved' ? 'info' : 'error'} role="status">{message}</div>}
-    <div className="cxf-status" data-state={formState} role="status">{operations.length === 0 ? '' : formState === 'saving' ? managerCopy(locale, 'form.saving') : `${managerCopy(locale, 'form.dirty-prefix')} · ${managerCopy(locale, 'form.apply-live')}`}</div>
-    <div className="cxf-form-actions"><Button type="reset" variant="outline" disabled={saving || operations.length === 0} onClick={() => { setDraftOperations(new Map()); setFormState('pristine'); setMessage(undefined) }}>重置</Button><Button type="submit" theme="primary" loading={saving} disabled={!plugin.configuration.writable || operations.length === 0}>保存</Button></div>
+    </div>
+    <div className="cxf-form-actions">
+      <div className="cxf-status" data-state={formState} role="status">{operations.length === 0 ? '' : formState === 'saving' ? managerCopy(locale, 'form.saving') : `${managerCopy(locale, 'form.dirty-prefix')} · ${managerCopy(locale, 'form.apply-live')}`}</div>
+      <div className="cxf-form-action-buttons"><Button type="reset" variant="outline" disabled={saving || operations.length === 0} onClick={() => { setDraftOperations(new Map()); setFormState('pristine'); setMessage(undefined) }}>重置</Button><Button type="submit" theme="primary" loading={saving} disabled={!plugin.configuration.writable || operations.length === 0}>保存</Button></div>
+    </div>
   </Form>
 }

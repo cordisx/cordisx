@@ -10,6 +10,7 @@ import {
   type CordisXAgents,
   type CordisXPageMetadataV3,
   type CordisXPluginManifestV1,
+  type CordisXPluginPresentation,
   type CordisXRouteDefinitionV2,
   type CordisXSystemPrompt,
 } from 'cordisx/contracts'
@@ -33,6 +34,14 @@ export const inject = ['i18n', 'pages', 'routes', 'slots', 'agentEvents', 'agent
 function metadataText(key: string, fallback: string) {
   return Object.freeze({ namespace: 'agent-trace-showcase', key, fallback } as const)
 }
+
+export const presentation = Object.freeze({
+  name: metadataText('plugin.name', 'Agent Trace Showcase'),
+  description: metadataText(
+    'plugin.description',
+    'Inspects input, model, tool, delivery, and prompt-contribution events for Agent sessions.',
+  ),
+} satisfies CordisXPluginPresentation)
 
 export const TRACE_SESSION_PAGE_METADATA = Object.freeze({
   $schema: CORDISX_PAGE_SCHEMA_V3,
@@ -180,6 +189,8 @@ export function installAgentTraceShowcase(
     locale: 'en',
     default: true,
     messages: {
+      'plugin.name': 'Agent Trace Showcase',
+      'plugin.description': 'Inspects input, model, tool, delivery, and prompt-contribution events for Agent sessions.',
       'action.open': 'Open Agent Trace Timeline',
       'route.timeline.title': 'Open Agent Trace',
       'route.timeline.description': 'Use the conversation header action to open the Agent Trace Timeline for the active session.',
@@ -196,6 +207,8 @@ export function installAgentTraceShowcase(
     namespace: 'agent-trace-showcase',
     locale: 'zh-CN',
     messages: {
+      'plugin.name': 'Agent Trace 展示',
+      'plugin.description': '查看 Agent 会话中的输入、模型、工具、投递与提示词贡献事件。',
       'action.open': '打开 Agent Trace 时间线',
       'route.timeline.title': '打开 Agent Trace',
       'route.timeline.description': '使用会话标题栏入口打开当前会话的 Agent Trace 时间线。',

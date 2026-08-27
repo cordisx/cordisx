@@ -9,6 +9,7 @@ import {
   type CordisXLocalizedText,
   type CordisXMessageParams,
   type CordisXPluginManifestV1,
+  type CordisXPluginPresentation,
 } from '../../../packages/cli/src/contracts.js'
 import { createSettingsNavigationPage } from './view.js'
 
@@ -31,6 +32,8 @@ export const manifest = {
 } as const satisfies CordisXPluginManifestV1
 
 interface Messages {
+  'plugin.name': undefined
+  'plugin.description': undefined
   'body.label': undefined
   'page.description': undefined
   'page.title': undefined
@@ -42,14 +45,21 @@ function message<Key extends keyof Messages>(
   key: Key,
   ...args: Messages[Key] extends CordisXMessageParams ? [params: Messages[Key]] : [params?: undefined]
 ): CordisXLocalizedText {
-  return { namespace: 'settings-demo', key, ...(args[0] === undefined ? {} : { params: args[0] }) }
+  return { namespace: name, key, ...(args[0] === undefined ? {} : { params: args[0] }) }
 }
+
+export const presentation = {
+  name: message('plugin.name'),
+  description: message('plugin.description'),
+} satisfies CordisXPluginPresentation
 
 /** Real first-level Manager navigation demo: the Host owns navigation and page chrome. */
 export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})): void {
   ctx.i18n.define<Messages>({
-    namespace: 'settings-demo', locale: 'en', default: true,
+    namespace: name, locale: 'en', default: true,
     messages: {
+      'plugin.name': 'Settings Navigation Demo',
+      'plugin.description': 'Demonstrates Host-rendered settings navigation and a controlled page.',
       'body.label': 'Demo value',
       'page.description': 'Edit the example value for this demo plugin.',
       'page.title': 'Demo plugin settings',
@@ -58,8 +68,10 @@ export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})):
     },
   })
   ctx.i18n.define<Messages>({
-    namespace: 'settings-demo', locale: 'zh-CN',
+    namespace: name, locale: 'zh-CN',
     messages: {
+      'plugin.name': '设置导航演示',
+      'plugin.description': '演示由 Host 渲染的设置导航和受控页面。',
       'body.label': '演示值',
       'page.description': '编辑此演示插件的示例值。',
       'page.title': '演示插件设置',
