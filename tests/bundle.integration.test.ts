@@ -234,8 +234,8 @@ describe('renderer bundle', () => {
       diagnostics: [],
     })
     expect(snapshot.navigation.outlets).toHaveLength(5)
-    expect(snapshot.extensionPoints.points).toHaveLength(38)
-    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(31)
+    expect(snapshot.extensionPoints.points).toHaveLength(39)
+    expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(32)
     expect(snapshot.extensionPoints.points.filter(item => item.kind === 'outlet')).toHaveLength(7)
     expect(snapshot.extensionPoints.descriptorDiagnostics).toEqual([])
     expect(snapshot.localeCatalogs).toHaveLength(6)

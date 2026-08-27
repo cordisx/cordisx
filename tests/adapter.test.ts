@@ -1,6 +1,11 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
-import { DomOutletController, ReasoningIntensityProjection } from '../packages/cli/src/renderer/adapter.js'
+import {
+  DomOutletController,
+  ReasoningIntensityProjection,
+  SessionBackdropProjection,
+  resolveReasoningIntensityRange,
+} from '../packages/cli/src/renderer/adapter.js'
 
 async function settle(): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, 0))
@@ -84,6 +89,96 @@ describe('DomOutletController', () => {
 })
 
 describe('ReasoningIntensityProjection', () => {
+  it('adapts the current Radix power slider without replacing its native value authority', () => {
+    const dom = new JSDOM(`<body><div role="menu"><div data-model-picker-power-slider style="height:40px"><span data-orientation="horizontal"><span role="slider" aria-valuemin="0" aria-valuemax="4" aria-valuenow="1" aria-label="Intensity"></span></span></div></div></body>`)
+    const native = dom.window.document.querySelector<HTMLElement>('[role="slider"]')!
+    const visibleRect = { x: 10, y: 20, left: 10, top: 20, right: 310, bottom: 60, width: 300, height: 40, toJSON: () => ({}) }
+    vi.spyOn(native, 'getBoundingClientRect').mockReturnValue(visibleRect)
+    vi.spyOn(native, 'getClientRects').mockReturnValue({ 0: visibleRect, length: 1, item: () => visibleRect } as DOMRectList)
+    let rightKeys = 0
+    native.addEventListener('keydown', event => { if (event.key === 'ArrowRight') rightKeys += 1 })
+
+    const range = resolveReasoningIntensityRange(dom.window.document, 'session')!
+    expect(range).toMatchObject({ min: '0', max: '4', step: '1', value: '1' })
+    expect(range.dataset.cordisxReasoningProxy).toBe('true')
+    expect(dom.window.document.querySelector<HTMLElement>('[data-model-picker-power-slider]')?.style.height).toBe('56px')
+    expect(dom.window.document.querySelector<HTMLElement>('[role="menu"]')?.style.width).toBe('420px')
+
+    vi.spyOn(range, 'getBoundingClientRect').mockReturnValue({ ...visibleRect, right: 418, bottom: 76, width: 408, height: 56 })
+    const projection = new ReasoningIntensityProjection(dom.window.document)
+    const text = (key: string) => ({ key, fallback: key })
+    projection.update(range, {
+      variant: 'imperium', motion: 'ascension', title: text('Intensity'), stages: [
+        { label: text('Plastic'), material: 'plastic' }, { label: text('Bronze'), material: 'bronze' },
+        { label: text('Steel'), material: 'steel' }, { label: text('Silver'), material: 'silver' },
+        { label: text('Gold'), material: 'gold' },
+      ],
+    }, 'Intensity', ['Plastic', 'Bronze', 'Steel', 'Silver', 'Gold'])
+    range.value = '4'
+    range.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    expect(rightKeys).toBe(3)
+
+    projection.dispose()
+    expect(dom.window.document.querySelector('[data-cordisx-reasoning-proxy]')).toBeNull()
+    expect(dom.window.document.querySelector<HTMLElement>('[data-model-picker-power-slider]')?.style.height).toBe('40px')
+    expect(dom.window.document.querySelector<HTMLElement>('[role="menu"]')?.style.width).toBe('')
+    dom.window.close()
+  })
+
+  it('adapts the current native reasoning menu into a reversible range', () => {
+    const dom = new JSDOM(`<body><div role="menu" id="menu"><div id="items">
+      <div>Reasoning intensity</div>
+      <div role="menuitem">Low</div><div role="menuitem">Medium</div>
+      <div role="menuitem">High<svg></svg></div><div role="menuitem">Extra high</div>
+      <div role="menuitem">Extra high<span>Faster usage</span></div>
+    </div></div></body>`)
+    const menu = dom.window.document.getElementById('menu') as HTMLElement
+    const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    const visibleRect = {
+      x: 20, y: 30, left: 20, top: 30, right: 220, bottom: 230,
+      width: 200, height: 200, toJSON: () => ({}),
+    }
+    vi.spyOn(menu, 'getBoundingClientRect').mockReturnValue(visibleRect)
+    vi.spyOn(menu, 'getClientRects').mockReturnValue({ 0: visibleRect, length: 1, item: () => visibleRect } as DOMRectList)
+    for (const item of items) {
+      vi.spyOn(item, 'getBoundingClientRect').mockReturnValue(visibleRect)
+      vi.spyOn(item, 'getClientRects').mockReturnValue({ 0: visibleRect, length: 1, item: () => visibleRect } as DOMRectList)
+    }
+    const selected = vi.spyOn(items[4]!, 'click')
+
+    const range = resolveReasoningIntensityRange(dom.window.document, 'session')!
+    expect(range).toMatchObject({ min: '0', max: '4', step: '1', value: '2' })
+    expect(menu.style).toMatchObject({ width: '360px', minWidth: '360px' })
+    expect(items.every(item => item.style.display === 'none')).toBe(true)
+    vi.spyOn(range, 'getBoundingClientRect').mockReturnValue({
+      x: 30, y: 50, left: 30, top: 50, right: 350, bottom: 98,
+      width: 320, height: 48, toJSON: () => ({}),
+    })
+
+    const projection = new ReasoningIntensityProjection(dom.window.document)
+    const localized = (key: string) => ({ key, fallback: key })
+    projection.update(range, {
+      variant: 'imperium', motion: 'ascension', title: localized('Intensity'), stages: [
+        { label: localized('Plastic'), material: 'plastic' },
+        { label: localized('Bronze'), material: 'bronze' },
+        { label: localized('Steel'), material: 'steel' },
+        { label: localized('Silver'), material: 'silver' },
+        { label: localized('Gold'), material: 'gold' },
+      ],
+    }, 'Intensity', ['Plastic', 'Bronze', 'Steel', 'Silver', 'Gold'])
+    range.value = '4'
+    range.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    range.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    expect(selected).toHaveBeenCalledOnce()
+    expect(dom.window.document.querySelector<HTMLElement>('.cordisx-reasoning-intensity')?.dataset.material).toBe('gold')
+
+    projection.dispose()
+    expect(items.every(item => item.style.display === '')).toBe(true)
+    expect(menu.style.width).toBe('')
+    expect(menu.dataset.cordisxReasoningMenu).toBeUndefined()
+    dom.window.close()
+  })
+
   it('keeps the native range interactive, animates its projection, and restores styles on cleanup', () => {
     const dom = new JSDOM('<body><input id="range" type="range" min="0" max="4" value="0" style="opacity:.8;accent-color:red"></body>')
     const range = dom.window.document.getElementById('range') as HTMLInputElement
@@ -120,6 +215,39 @@ describe('ReasoningIntensityProjection', () => {
     expect(range.style.opacity).toBe('0.8')
     expect(range.style.accentColor).toBe('red')
     expect(range.dataset.cordisxReasoningNative).toBeUndefined()
+    expect(root.isConnected).toBe(false)
+    dom.window.close()
+  })
+})
+
+describe('SessionBackdropProjection', () => {
+  it('follows the native range, retains the last stage after the menu closes, and removes cleanly', () => {
+    const dom = new JSDOM('<body><input id="range" type="range" min="0" max="4" value="0"></body>')
+    const range = dom.window.document.getElementById('range') as HTMLInputElement
+    const projection = new SessionBackdropProjection(dom.window.document)
+    const text = (key: string) => ({ key, fallback: key })
+    const portrait = (data: string, key: string) => ({ mediaType: 'image/png' as const, data, alt: text(key) })
+    const presentation = {
+      variant: 'imperium' as const, driver: 'reasoning-intensity' as const, motion: 'ascension' as const,
+      stages: [
+        { material: 'plastic' as const, ambience: 'dormant' as const, portrait: portrait('cGxhc3RpYw==', 'plastic') },
+        { material: 'gold' as const, ambience: 'imperial' as const, portrait: portrait('Z29sZA==', 'gold') },
+      ],
+    }
+    projection.update('session-a', range, presentation, ['Plastic portrait', 'Gold portrait'])
+    const root = dom.window.document.querySelector<HTMLElement>('.cordisx-session-backdrop')!
+    expect(root.dataset).toMatchObject({ material: 'plastic', ambience: 'dormant', stage: '0', peak: 'false' })
+    expect(root.style.pointerEvents).toBe('')
+    expect(root.getAttribute('aria-hidden')).toBe('true')
+
+    range.value = '4'
+    range.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    expect(root.dataset).toMatchObject({ material: 'gold', ambience: 'imperial', stage: '1', peak: 'true', portraitLabel: 'Gold portrait' })
+    expect(root.querySelector<HTMLImageElement>('img[data-active="true"]')?.src).toBe('data:image/png;base64,Z29sZA==')
+
+    projection.update('session-a', undefined, presentation, ['Plastic portrait', 'Gold portrait'])
+    expect(root.dataset.stage).toBe('1')
+    projection.dispose()
     expect(root.isConnected).toBe(false)
     dom.window.close()
   })

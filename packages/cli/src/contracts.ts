@@ -216,6 +216,8 @@ export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v5.schema.json' as const
 export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v6.schema.json' as const
+export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V7 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v7.schema.json' as const
 export const CORDISX_EXTENSION_POINT_RUNTIME_CONTEXT_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-runtime-context.v1.schema.json' as const
 export const CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1 =
@@ -239,6 +241,7 @@ export type CordisXExtensionPointPayloadFamily =
   | 'manager-settings-content-tab'
   | 'manager-settings-navigation-item'
   | 'reasoning-intensity-presentation'
+  | 'session-backdrop-presentation'
   | 'presenter'
   | 'navigation-item'
   | 'environment-section'
@@ -334,6 +337,15 @@ export interface CordisXHostExtensionPointCatalogV6 {
   readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6
   readonly schemaVersion: 6
   readonly points: readonly CordisXHostExtensionPointDescriptorV6[]
+}
+
+/** Protocol-v7 adds a reasoning-driven, Host-owned session backdrop family. */
+export type CordisXHostExtensionPointDescriptorV7 = CordisXHostExtensionPointDescriptorV6
+
+export interface CordisXHostExtensionPointCatalogV7 {
+  readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V7
+  readonly schemaVersion: 7
+  readonly points: readonly CordisXHostExtensionPointDescriptorV7[]
 }
 
 export interface CordisXExtensionPointAnchorCurrentContextV1 {
@@ -560,6 +572,28 @@ export interface CordisXReasoningIntensityPresentation {
   readonly stages: readonly CordisXReasoningIntensityStage[]
 }
 
+export type CordisXSessionBackdropAmbience = 'dormant' | 'ember' | 'forged' | 'luminous' | 'imperial'
+
+export interface CordisXEmbeddedPng {
+  readonly mediaType: 'image/png'
+  readonly data: string
+  readonly alt: CordisXLocalizedText
+}
+
+export interface CordisXSessionBackdropStage {
+  readonly material: CordisXReasoningIntensityMaterial
+  readonly ambience: CordisXSessionBackdropAmbience
+  readonly portrait: CordisXEmbeddedPng
+}
+
+/** Pointer-inert visual data driven by the native reasoning-intensity value. */
+export interface CordisXSessionBackdropPresentation {
+  readonly variant: 'imperium'
+  readonly driver: 'reasoning-intensity'
+  readonly motion?: 'smooth' | 'ascension'
+  readonly stages: readonly CordisXSessionBackdropStage[]
+}
+
 export interface CordisXEnvironmentSection {
   readonly sectionId: string
   readonly title: CordisXLocalizedText
@@ -603,6 +637,7 @@ export interface CordisXSurfaceMap {
   'session.message.actions': CordisXStructuredAction
   'session.turn.footer': CordisXPresenterItem
   'session.tool.actions': CordisXStructuredAction
+  'session.backdrop': CordisXSessionBackdropPresentation
   'composer.toolbar.items': CordisXToolbarItem
   'composer.reasoning-intensity': CordisXReasoningIntensityPresentation
   'composer.command-menu.items': CordisXStructuredAction
@@ -639,6 +674,7 @@ export const CORDISX_SURFACE_NAMES = [
   'session.message.actions',
   'session.turn.footer',
   'session.tool.actions',
+  'session.backdrop',
   'composer.toolbar.items',
   'composer.reasoning-intensity',
   'composer.command-menu.items',
@@ -665,6 +701,7 @@ export const CORDISX_IMPLEMENTED_SURFACE_NAMES = [
   'sidebar.navigation.items',
   'workspace.toolbar.items',
   'session.header.actions',
+  'session.backdrop',
   'composer.toolbar.items',
   'composer.reasoning-intensity',
   'environment.panel.header-actions',

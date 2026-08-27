@@ -146,6 +146,28 @@ describe('SurfaceRegistry', () => {
     contexts.dispose()
   })
 
+  it('accepts bounded session backdrop stages and rejects remote portrait URLs', () => {
+    const contexts = new HostContextStore()
+    const registry = new SurfaceRegistry(contexts)
+    const portrait = { mediaType: 'image/png', data: 'Ym91bmRlZC10cmFuc3BhcmVudC1wbmctZml4dHVyZQ==', alt: { key: 'portrait' } }
+    registry.register('imperium', { name: 'session.backdrop', id: 'backdrop' }, {
+      variant: 'imperium', driver: 'reasoning-intensity', motion: 'ascension', stages: [
+        { material: 'plastic', ambience: 'dormant', portrait },
+        { material: 'gold', ambience: 'imperial', portrait },
+      ],
+    })
+    registry.register('imperium', { name: 'session.backdrop', id: 'remote' }, {
+      variant: 'imperium', driver: 'reasoning-intensity', stages: [
+        { material: 'plastic', ambience: 'dormant', portrait: { ...portrait, url: 'https://example.com/tibo.png' } },
+        { material: 'gold', ambience: 'imperial', portrait },
+      ],
+    } as never)
+    expect(registry.snapshot().find(item => item.id === 'backdrop')).toMatchObject({ valid: true })
+    expect(registry.snapshot().find(item => item.id === 'remote')?.error).toMatch(/unknown field url/)
+    registry.dispose()
+    contexts.dispose()
+  })
+
   it('uses command precedence while validating independent navigation actions', () => {
     const contexts = new HostContextStore()
     const registry = new SurfaceRegistry(contexts)
