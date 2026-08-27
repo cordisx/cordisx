@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
+import { CdpPluginLifecycleRuntime } from '../packages/cli/src/launcher/cdp.js'
 import {
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
   CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
@@ -68,7 +69,130 @@ interface RuntimeHandle {
   dispose(): Promise<void>
 }
 
+async function bootRuntime(bundle: string): Promise<{ readonly dom: JSDOM; readonly runtime: RuntimeHandle }> {
+  const dom = new JSDOM('<!doctype html><html><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>', {
+    runScripts: 'dangerously',
+    url: 'https://codex.local/native',
+  })
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+  Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+  dom.window.eval(bundle)
+  for (let attempt = 0; attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
+  if (runtime === undefined) throw new Error('fixture CordisX runtime did not boot')
+  return { dom, runtime }
+}
+
 describe('renderer plugin generation transactions', () => {
+  it('replays a canonical rollback receipt so two real renderers converge after one terminal RPC failure', async () => {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const generation = 'runtime-generation-retry'
+    const active = activation(generation)
+    const entries = new Map([
+      ['generation-base', path.join(root, 'tests/fixtures/generation-base-plugin.ts')],
+      ['generation-consumer', path.join(root, 'tests/fixtures/generation-consumer-plugin.ts')],
+      ['generation-unrelated', path.join(root, 'tests/fixtures/generation-unrelated-plugin.ts')],
+    ])
+    const config: CordisXConfig = {
+      version: 1,
+      rootDir: root,
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: active.plugins.map(item => ({
+        id: item.id,
+        entry: entries.get(item.id)!,
+        source: source(item.id, item.id === 'generation-base' ? 'a' : item.id === 'generation-consumer' ? 'b' : 'c'),
+        enabled: true,
+        config: {},
+        revision: 0,
+        manifest: packageManifest(item.id).runtimeManifest,
+        package: {
+          version: item.version,
+          digest: item.digest,
+          moduleGeneration: item.moduleGeneration,
+          dependencies: item.dependencies,
+        },
+      })),
+    }
+    const bundle = await buildRendererBundle(config, { generation, profileId: 'work', pluginActivation: active })
+    const first = await bootRuntime(bundle)
+    const second = await bootRuntime(bundle)
+    const host = new CdpPluginLifecycleRuntime()
+    let failSecondRollback = true
+    let failSecondFinalize = true
+    const session = (dom: JSDOM, failFirstRollback: boolean) => ({
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        if (failFirstRollback && failSecondRollback && expression.includes('rollbackPluginMutation')) {
+          failSecondRollback = false
+          return { result: { value: { ok: false, error: 'fixture terminal transport failure' } } }
+        }
+        if (failFirstRollback && failSecondFinalize && expression.includes('finalizePluginMutation')) {
+          failSecondFinalize = false
+          return { result: { value: { ok: false, error: 'fixture finalize transport failure' } } }
+        }
+        try {
+          return { result: { value: await dom.window.eval(expression) } }
+        } catch (error) {
+          return { exceptionDetails: { text: error instanceof Error ? error.message : String(error) } }
+        }
+      },
+    })
+    const unregisterFirst = host.register(session(first.dom, false) as never)
+    const unregisterSecond = host.register(session(second.dom, true) as never)
+    const fence = host.prepare('multi-renderer-rollback')
+    const candidate: CordisXPluginActivationRecordV1 = {
+      ...active,
+      recordKind: 'candidate',
+      transactionId: 'multi-renderer-rollback',
+      revision: 2,
+      lastGoodRevision: 1,
+      plugins: active.plugins.map(item => item.id === 'generation-unrelated'
+        ? item
+        : { ...item, moduleGeneration: `${item.id}-disabled`, enabled: false }),
+    }
+    await host.stage({
+      transactionId: 'multi-renderer-rollback', ...fence, afterRegistryEpoch: 1,
+      operation: 'disable', previous: active, candidate, targetId: 'generation-base',
+      affectedPluginIds: ['generation-base', 'generation-consumer'],
+    })
+    await expect(host.rollback('multi-renderer-rollback')).rejects.toThrow('fixture terminal transport failure')
+    expect(() => host.prepare('overlap')).toThrow('another plugin generation transaction is unresolved')
+    await expect(host.rollback('multi-renderer-rollback')).resolves.toMatchObject({
+      registryEpoch: 2, active, disposedAfter: candidate,
+    })
+    const replay = await first.runtime.rollbackPluginMutation('multi-renderer-rollback')
+    expect(replay).toMatchObject({ registryEpoch: 2, active, disposedAfter: candidate })
+    const finalizeFence = host.prepare('multi-renderer-finalize')
+    const finalizeCandidate: CordisXPluginActivationRecordV1 = {
+      ...candidate,
+      transactionId: 'multi-renderer-finalize',
+      plugins: active.plugins.map(item => item.id === 'generation-unrelated'
+        ? item
+        : { ...item, moduleGeneration: `${item.id}-finalize-disabled`, enabled: false }),
+    }
+    await host.stage({
+      transactionId: 'multi-renderer-finalize', ...finalizeFence, afterRegistryEpoch: 3,
+      operation: 'disable', previous: active, candidate: finalizeCandidate, targetId: 'generation-base',
+      affectedPluginIds: ['generation-base', 'generation-consumer'],
+    })
+    await host.publish('multi-renderer-finalize')
+    await host.complete('multi-renderer-finalize')
+    await expect(host.finalize('multi-renderer-finalize')).rejects.toThrow('fixture finalize transport failure')
+    expect(() => host.prepare('overlap-finalize')).toThrow('another plugin generation transaction is unresolved')
+    await expect(host.rollback('multi-renderer-finalize')).resolves.toMatchObject({
+      registryEpoch: 4, active, disposedAfter: finalizeCandidate,
+    })
+    expect(host.prepare('after-retry')).toMatchObject({ expectedRegistryEpoch: 4 })
+    host.cancelPreparation('after-retry')
+
+    unregisterSecond()
+    unregisterFirst()
+    await Promise.all([first.runtime.dispose(), second.runtime.dispose()])
+  })
+
   it('switches only the dependent closure, rolls back readiness failures, fences stale reloads, and cleans uninstall ownership', async () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const generation = 'runtime-generation-a'

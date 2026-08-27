@@ -132,7 +132,6 @@ export async function buildLocalDevelopmentPlugin(rawEntry: string): Promise<Loc
   await access(entry)
   const { root, version } = await packageRoot(entry)
   const id = pluginId(entry)
-  const specifier = `./${path.relative(root, entry).replaceAll(path.sep, '/')}`
   const common = {
     absWorkingDir: root,
     bundle: true,
@@ -147,34 +146,27 @@ export async function buildLocalDevelopmentPlugin(rawEntry: string): Promise<Loc
     write: false,
     logLevel: 'silent' as const,
   }
-  const [moduleResult, artifactResult, readme, packageFiles] = await Promise.all([
+  const [moduleResult, readme, packageFiles] = await Promise.all([
     build({ entryPoints: [entry], format: 'iife', globalName: '__cordisxPluginModule', ...common }),
-    build({
-      stdin: {
-        contents: `import * as pluginModule from ${JSON.stringify(specifier)}\nglobalThis.__cordisxPendingPluginModuleV1 = pluginModule\n`,
-        resolveDir: root,
-        sourcefile: 'cordisx-local-dev-generation.ts',
-      },
-      format: 'iife',
-      ...common,
-    }),
     readReadme(root),
     assertRendererOnlyPackage(root),
   ])
-  if (moduleResult.metafile === undefined || artifactResult.metafile === undefined) {
+  if (moduleResult.metafile === undefined) {
     throw new Error('local development build produced no dependency metadata')
   }
   assertNoPrivateReactBundle(moduleResult.metafile, `local development plugin ${id}`)
-  assertNoPrivateReactBundle(artifactResult.metafile, `local development plugin ${id}`)
   const moduleOutput = moduleResult.outputFiles?.[0]
-  const artifactOutput = artifactResult.outputFiles?.[0]
-  if (moduleOutput === undefined || artifactOutput === undefined) {
+  if (moduleOutput === undefined) {
     throw new Error('local development build produced no browser artifact')
   }
+  // Both an existing renderer and a future bootstrap must instantiate the
+  // exact same module factory with the Host-issued Plugin Console facade.  Do
+  // not evaluate a module object eagerly in the CDP global console.
+  const runtimeArtifactSource = `globalThis.__cordisxPendingPluginModuleFactoryV1 = (console) => {\n${moduleOutput.text}\nreturn __cordisxPluginModule;\n};\n`
   const digest = `sha256:${createHash('sha256')
     .update(moduleOutput.text)
     .update('\0')
-    .update(artifactOutput.text)
+    .update(runtimeArtifactSource)
     .update('\0')
     .update(version)
     .update('\0')
@@ -189,14 +181,13 @@ export async function buildLocalDevelopmentPlugin(rawEntry: string): Promise<Loc
     identitySource: `file:///cordisx-local-dev/${sourceKey}/${id}.js`,
     digest,
     moduleFactorySource: moduleOutput.text,
-    runtimeArtifactSource: artifactOutput.text,
+    runtimeArtifactSource,
     watchFiles: [...new Set([
       entry,
       path.join(root, 'package.json'),
       ...packageFiles,
       ...readme.files,
       ...absoluteInputs(root, moduleResult.metafile.inputs),
-      ...absoluteInputs(root, artifactResult.metafile.inputs),
     ])].sort(),
     ...(readme.text === undefined ? {} : { readme: readme.text }),
   }
@@ -333,13 +324,26 @@ export class LocalDevelopmentController {
     if (this.pendingRollback === pending) this.pendingRollback = undefined
   }
 
+  private async projectStatus(
+    state: CordisXLocalDevelopmentSnapshot['state'],
+    error?: string,
+  ): Promise<void> {
+    try {
+      await this.options.runtime.updateDevelopmentStatus(this.state(state, error))
+    } catch (projectionError) {
+      this.options.stdout(`[cordisx] local-dev status projection failed: ${diagnostic(projectionError)}`)
+    }
+  }
+
   private schedule(): void {
     if (this.stopped) return
     this.desiredAttempt += 1
     if (this.debounce !== undefined) clearTimeout(this.debounce)
     this.debounce = setTimeout(() => {
       this.debounce = undefined
-      void this.drain()
+      void this.drain().catch(error => {
+        this.options.stdout(`[cordisx] local-dev drain failed: ${diagnostic(error)}`)
+      })
     }, DEBOUNCE_MS)
   }
 
@@ -415,14 +419,14 @@ export class LocalDevelopmentController {
   }
 
   private async attempt(attempt: number): Promise<void> {
-    await this.options.runtime.updateDevelopmentStatus(this.state('building'))
+    await this.projectStatus('building')
     if (this.pendingRollback !== undefined) {
       const transactionId = this.pendingRollback.transactionId
       try {
         await this.finishPendingRollback(transactionId)
       } catch (error) {
         const message = `pending rollback ${transactionId} failed: ${diagnostic(error)}`
-        await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
+        await this.projectStatus('failed', message)
         this.options.stdout(`[cordisx] local-dev ${message}`)
         return
       }
@@ -435,7 +439,7 @@ export class LocalDevelopmentController {
       this.watchFiles = build.watchFiles
     } catch (error) {
       const message = diagnostic(error)
-      await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
+      await this.projectStatus('failed', message)
       this.options.stdout(`[cordisx] local-dev build failed; last-good retained: ${message}`)
       return
     }
@@ -444,12 +448,12 @@ export class LocalDevelopmentController {
     const prior = previous.plugins.find(item => item.id === build.id)
     if (prior?.digest === build.digest) {
       this.lastSuccessfulAt = new Date().toISOString()
-      await this.options.runtime.updateDevelopmentStatus(this.state('ready'))
+      await this.projectStatus('ready')
       return
     }
     if (previous.plugins.length > 0 && prior === undefined) {
       const message = `local development plugin id changed from ${previous.plugins[0]!.id} to ${build.id}`
-      await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
+      await this.projectStatus('failed', message)
       this.options.stdout(`[cordisx] ${message}`)
       return
     }
@@ -515,7 +519,7 @@ export class LocalDevelopmentController {
       }, expectedRegistryEpoch + 1)
     } catch (error) {
       const message = diagnostic(error)
-      await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
+      await this.projectStatus('failed', message)
       this.options.stdout(`[cordisx] local-dev bootstrap build failed; last-good retained: ${message}`)
       return
     }
@@ -557,7 +561,7 @@ export class LocalDevelopmentController {
           await this.finishPendingRollback(transactionId)
         } catch (error) {
           const message = `pending rollback ${transactionId} failed: ${diagnostic(error)}`
-          await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
+          await this.projectStatus('failed', message)
           this.options.stdout(`[cordisx] local-dev ${message}`)
         }
         return
@@ -571,7 +575,7 @@ export class LocalDevelopmentController {
       this.lastGoodConfig = structuredClone(bootstrapConfig)
       this.lastSuccessfulAt = successfulAt
       this.options.setBootstrap(nextBootstrap)
-      await this.options.runtime.updateDevelopmentStatus(this.state('ready'))
+      await this.projectStatus('ready')
       this.options.stdout(`[cordisx] local-dev generation ready: ${build.id} ${moduleGeneration}`)
     } catch (error) {
       let message = diagnostic(error)
@@ -583,7 +587,7 @@ export class LocalDevelopmentController {
           message = `${message}; rollback failed: ${diagnostic(rollbackError)}`
         }
       }
-      await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
+      await this.projectStatus('failed', message)
       this.options.stdout(`[cordisx] local-dev activation failed; last-good retained: ${message}`)
     }
   }

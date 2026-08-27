@@ -1079,9 +1079,6 @@ async function install(
       })
     }
     const generationRuntime = lifecycle?.runtime ?? developmentRuntime
-    if (generationRuntime !== undefined) {
-      unregisterLifecycleSession = generationRuntime.register(session)
-    }
     const added = await session.send(
       'Page.addScriptToEvaluateOnNewDocument',
       { source },
@@ -1107,6 +1104,11 @@ async function install(
         await generationRuntime.synchronizeRecoveredActivation(session)
       }
       await generationRuntime.synchronizeDevelopmentStatus(session)
+      // A renderer is a generation participant only after its bootstrap and
+      // recovered/private projections are ready.  register() is the atomic
+      // join fence: if a transaction began while this target was booting, the
+      // install is discarded and watchAndInject retries it after resolution.
+      unregisterLifecycleSession = generationRuntime.register(session)
     }
     return {
       target,

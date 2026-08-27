@@ -114,6 +114,13 @@ import {
 import { installSharedReactRuntime } from './react-runtime.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
+const MAX_ROLLBACK_RECEIPTS = 64
+
+function cloneRendererValue<Value>(value: Value): Value {
+  return typeof globalThis.structuredClone === 'function'
+    ? globalThis.structuredClone(value)
+    : JSON.parse(JSON.stringify(value)) as Value
+}
 
 interface CordisXRuntimeMetadata {
   readonly version: string
@@ -199,6 +206,7 @@ interface RendererGenerationTransaction {
   readonly candidateActivation: CordisXPluginActivationRecordV1
   publication?: PluginGenerationPublication
   failedStage?: boolean
+  finalizedRollbackStarted?: boolean
   disposedAfter: string[]
 }
 
@@ -673,6 +681,8 @@ async function start(
   const disposeExtensionPointCatalogs: (() => void | Promise<void>)[] = []
   const registrySubscriptions: (() => void)[] = []
   const generationTransactions = new Map<string, RendererGenerationTransaction>()
+  const finalizedTransactions = new Map<string, RendererGenerationTransaction>()
+  const rollbackReceipts = new Map<string, RendererGenerationCleanupObservation>()
   let operation: Promise<unknown> = Promise.resolve()
   let disposed = false
   let notificationsSuppressed = false
@@ -687,6 +697,25 @@ async function start(
   }
   const emitListeners = (): void => {
     for (const listener of listeners) listener()
+  }
+
+  const rememberRollbackReceipt = (receipt: RendererGenerationCleanupObservation): RendererGenerationCleanupObservation => {
+    const stored = cloneRendererValue(receipt)
+    rollbackReceipts.set(receipt.transactionId, stored)
+    while (rollbackReceipts.size > MAX_ROLLBACK_RECEIPTS) {
+      const oldest = rollbackReceipts.keys().next().value as string | undefined
+      if (oldest === undefined) break
+      rollbackReceipts.delete(oldest)
+    }
+    return cloneRendererValue(stored)
+  }
+  const rememberFinalizedTransaction = (transactionId: string, transaction: RendererGenerationTransaction): void => {
+    finalizedTransactions.set(transactionId, transaction)
+    while (finalizedTransactions.size > MAX_ROLLBACK_RECEIPTS) {
+      const oldest = finalizedTransactions.keys().next().value as string | undefined
+      if (oldest === undefined) break
+      finalizedTransactions.delete(oldest)
+    }
   }
   const notifyBatch = (): void => {
     traceNotification('generation-batch', false)
@@ -818,7 +847,7 @@ async function start(
     }
   }
 
-  const snapshot = (): ManagerSnapshot => {
+  const managerSnapshot = (): ManagerSnapshot => {
     const liveRegistrations = slotService?.snapshot() ?? []
     const livePluginIds = new Set(liveRegistrations.map(item => item.owner))
     const activeRegistrationKeys = new Set(activeControllers().map(controller => (
@@ -1042,6 +1071,20 @@ async function start(
         commands: commandService?.snapshot() ?? [],
         navigation,
         surfaceAvailability: slotService?.registry.availabilitySnapshot() ?? [],
+      }),
+    }
+  }
+
+  // The global runtime handle is a plugin-facing/debug surface. Absolute
+  // local paths and Host-private build diagnostics are available only to the
+  // Manager model installed below.
+  const publicSnapshot = (): ManagerSnapshot => {
+    const { localDevelopment: _localDevelopment, ...projected } = managerSnapshot()
+    return {
+      ...projected,
+      plugins: projected.plugins.map(plugin => {
+        const { development: _development, ...publicPlugin } = plugin
+        return publicPlugin
       }),
     }
   }
@@ -1460,6 +1503,8 @@ async function start(
         || mutation.candidate.revision !== mutation.previous.revision + 1) {
         throw new Error('invalid plugin activation revision transition')
       }
+      if (rollbackReceipts.has(mutation.transactionId)) throw new Error('plugin generation transaction is already rolled back')
+      if (finalizedTransactions.has(mutation.transactionId)) throw new Error('plugin generation transaction is already finalized')
       if (generationTransactions.has(mutation.transactionId)) throw new Error('plugin generation transaction already exists')
       const handle = generationVisibility.begin(
         mutation.transactionId,
@@ -1609,6 +1654,7 @@ async function start(
 
   const finalizePluginMutation = (transactionId: string): Promise<void> => {
     const task = operation.then(() => {
+      if (finalizedTransactions.has(transactionId)) return
       const transaction = generationTransactions.get(transactionId)
       if (transaction?.publication === undefined || transaction.disposedAfter.length !== transaction.previous.length) {
         throw new Error('plugin generation cleanup is incomplete')
@@ -1616,6 +1662,7 @@ async function start(
       generationVisibility.completeLastGood(transaction.publication)
       currentActivation = committedActivation(transaction.candidateActivation)
       generationTransactions.delete(transactionId)
+      rememberFinalizedTransaction(transactionId, transaction)
     })
     operation = task.catch(() => {})
     return task
@@ -1629,7 +1676,11 @@ async function start(
 
   const rollbackPluginMutation = (transactionId: string): Promise<RendererGenerationCleanupObservation> => {
     const task = operation.then(async () => {
-      const transaction = generationTransactions.get(transactionId)
+      const cached = rollbackReceipts.get(transactionId)
+      if (cached !== undefined) return cloneRendererValue(cached)
+      const liveTransaction = generationTransactions.get(transactionId)
+      const finalizedTransaction = finalizedTransactions.get(transactionId)
+      const transaction = liveTransaction ?? finalizedTransaction
       if (transaction === undefined) throw new Error('unknown plugin generation transaction')
       const disposedCandidates: string[] = []
       if (transaction.publication === undefined) {
@@ -1637,36 +1688,47 @@ async function start(
         try {
           await disposeControllers(transaction.candidates, transaction.candidateActivation, disposedCandidates)
           await drainSuppressedNotifications()
-          const registryEpoch = transaction.failedStage
-            ? generationVisibility.rollbackFailedStage(transaction.handle)
-            : (generationVisibility.abort(transaction.handle), generationVisibility.registryEpoch())
+          const registryEpoch = generationVisibility.rollbackUnpublished(transaction.handle)
           generationTransactions.delete(transactionId)
-          return {
+          return rememberRollbackReceipt({
             transactionId,
             transactionEpoch: transaction.handle.transactionEpoch,
             registryEpoch,
             active: transaction.previousActivation,
             disposedAfter: transaction.candidateActivation,
-          }
+          })
         } finally {
           notificationsSuppressed = false
         }
       } else {
         notificationsSuppressed = true
         try {
+          if (finalizedTransaction !== undefined && transaction.finalizedRollbackStarted !== true) {
+            generationVisibility.rollbackLastGood(transaction.publication)
+            currentActivation = transaction.previousActivation
+            transaction.finalizedRollbackStarted = true
+          }
+          if (finalizedTransaction !== undefined) {
+            for (const controller of transaction.previous) {
+              delete controller.generationContext
+              delete controller.generationView
+            }
+          }
           await restoreControllers(
             transaction.previous,
             transaction.previousActivation,
             transaction.disposedAfter,
-            transaction.publication,
+            finalizedTransaction === undefined ? transaction.publication : undefined,
           )
           orderControllersFor(transaction.previousActivation)
-          generationVisibility.rollback(transaction.publication)
-          currentActivation = transaction.previousActivation
+          if (finalizedTransaction === undefined) {
+            generationVisibility.rollback(transaction.publication)
+            currentActivation = transaction.previousActivation
+          }
           await disposeControllers(transaction.candidates, transaction.candidateActivation, disposedCandidates)
           await routeService?.settled()
           await broker.settled()
-          generationVisibility.completeRollback(transaction.publication)
+          if (finalizedTransaction === undefined) generationVisibility.completeRollback(transaction.publication)
           await drainSuppressedNotifications()
           notifyBatch()
           await drainBatchSubscriberMicrotasks()
@@ -1675,13 +1737,14 @@ async function start(
         }
       }
       generationTransactions.delete(transactionId)
-      return {
+      finalizedTransactions.delete(transactionId)
+      return rememberRollbackReceipt({
         transactionId,
         transactionEpoch: transaction.handle.transactionEpoch,
         registryEpoch: generationVisibility.registryEpoch(),
         active: transaction.previousActivation,
         disposedAfter: transaction.candidateActivation,
-      }
+      })
     })
     operation = task.catch(() => {})
     return task
@@ -1798,6 +1861,8 @@ async function start(
       delete controller.fiber
     }
     generationTransactions.clear()
+    finalizedTransactions.clear()
+    rollbackReceipts.clear()
     configBridge?.dispose()
     serviceConfigBridge?.dispose()
     lifecycleBridge?.dispose()
@@ -1946,7 +2011,7 @@ async function start(
     abortPluginMutation,
     reloadPluginGeneration,
     updateLocalDevelopmentStatus,
-    snapshot,
+    snapshot: publicSnapshot,
     setPluginBlocked,
     updatePluginConfig,
     listServiceConfigs: async (pluginId: string): Promise<readonly HostServiceConfigDescriptor[]> => {
@@ -1962,6 +2027,7 @@ async function start(
     subscribe,
     dispose,
   }
+  const managerModel: ManagerModel = { ...handle, snapshot: managerSnapshot }
 
   try {
     i18nFiber = ctx.plugin(CordisXI18nService)
@@ -2089,7 +2155,7 @@ async function start(
       if (controller.status !== 'active') continue
       await mountPlugin(controller)
     }
-    disposeManager = installReactCordisXManager(document, handle, metadata.hostKind === 'playground'
+    disposeManager = installReactCordisXManager(document, managerModel, metadata.hostKind === 'playground'
       ? { triggerTarget: () => document.querySelector<HTMLElement>('[data-cordisx-playground-manager-trigger]') ?? undefined }
       : {})
   } catch (error) {

@@ -285,7 +285,10 @@ diagnostic containing the absolute source path, `building`/`failed` state, and
 the bounded error. Once a candidate publishes, the same diagnostic is shown on
 the real plugin with `ready` and the most recent success time. Installed plugin
 snapshots, public lifecycle results, package sources, and share actions never
-receive that absolute path. Stopping `cordisx dev` cancels debounce/poll timers,
+receive that absolute path. The global renderer runtime `snapshot()` is public
+for this purpose and omits both per-plugin development fields and the local
+development collection; only the Host-private React Manager model contains
+them. Stopping `cordisx dev` cancels debounce/poll timers,
 waits for the active attempt, removes CDP installation state, and terminates
 only the launcher's owned Host process/profile resources.
 

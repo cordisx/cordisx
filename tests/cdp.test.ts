@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { once } from 'node:events'
+import { WebSocketServer } from 'ws'
+import { describe, expect, it, vi } from 'vitest'
 import {
   CdpLifecycleRequestGate,
   CdpPluginLifecycleRuntime,
   injectableTargets,
   serviceConfigResponseEvaluation,
+  watchAndInject,
   type CdpTarget,
 } from '../packages/cli/src/launcher/cdp.js'
 import type { PluginRuntimeMutation } from '../packages/cli/src/launcher/plugin-lifecycle.js'
@@ -57,6 +60,71 @@ function activation(revision: number, generation: string): CordisXPluginActivati
 }
 
 describe('CdpPluginLifecycleRuntime', () => {
+  it('joins a booting renderer only after readiness and retries when a generation fence wins the race', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const unregisterExisting = runtime.register({ send: async () => ({}) } as never)
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const address = server.address()
+    if (typeof address === 'string') throw new Error('fixture websocket did not bind a TCP port')
+    let releaseBoot!: () => void
+    let bootBlocked = true
+    const bootGate = new Promise<void>(resolve => { releaseBoot = resolve })
+    server.on('connection', socket => {
+      socket.on('message', data => {
+        void (async () => {
+          const request = JSON.parse(String(data)) as { id: number; method: string; params?: { expression?: string } }
+          if (request.method === 'Runtime.evaluate'
+            && request.params?.expression?.includes('await globalThis.__cordisxBoot') === true
+            && bootBlocked) await bootGate
+          const result = request.method === 'Page.addScriptToEvaluateOnNewDocument'
+            ? { identifier: `fixture-${request.id}` }
+            : request.method === 'Runtime.evaluate'
+              ? { result: { value: { ok: true, result: true } } }
+              : {}
+          socket.send(JSON.stringify({ id: request.id, result }))
+        })()
+      })
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([{
+      id: 'joining-renderer', title: 'Codex', url: 'app://-/index.html', type: 'page',
+      webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
+    }]), { status: 200 })) as typeof fetch
+    const statuses: string[] = []
+    const abort = new AbortController()
+    const watching = watchAndInject({
+      port: address.port,
+      source: 'void 0',
+      signal: abort.signal,
+      developmentRuntime: runtime,
+      onStatus: message => { statuses.push(message) },
+    })
+    try {
+      await new Promise(resolve => setTimeout(resolve, 30))
+      const fence = runtime.prepare('join-race')
+      expect(fence.expectedRegistryEpoch).toBe(0)
+      releaseBoot()
+      bootBlocked = false
+      for (let attempt = 0; attempt < 50 && !statuses.some(item => item.includes('during a plugin generation transaction')); attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      expect(statuses).toContainEqual(expect.stringContaining('during a plugin generation transaction'))
+      runtime.cancelPreparation('join-race')
+      for (let attempt = 0; attempt < 80 && !statuses.some(item => item.includes('injected target joining-renderer')); attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      expect(statuses).toContainEqual(expect.stringContaining('injected target joining-renderer'))
+    } finally {
+      abort.abort()
+      await watching
+      unregisterExisting()
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+  })
+
   it('removes a closed development renderer and refuses a replacement until the generation fence clears', () => {
     const runtime = new CdpPluginLifecycleRuntime()
     const first = { send: async () => ({}) } as never

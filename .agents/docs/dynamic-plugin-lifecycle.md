@@ -463,13 +463,24 @@ authority.
 The local entry's absolute path and build status are Host-private Manager
 diagnostics. They are not `plugin-package-source`, canonical source,
 activation-journal, permission identity, public lifecycle result, or share
-metadata. Before a first successful generation, Manager may show a
+metadata. They are also removed from the plugin-facing/global renderer runtime
+`snapshot()`; React Manager receives them through a separate Host-private model.
+Before a first successful generation, Manager may show a
 launcher-owned source diagnostic but must not synthesize an active plugin row.
 After success it associates the diagnostic with the actual active plugin.
 Build/readiness failure retains last-good and exposes the most recent bounded
 error; repair creates a new fenced attempt. Watcher shutdown removes every
 timer and waits for the single in-flight attempt before the CDP runtime is
 disposed.
+
+A renderer joins the Host generation participant set only after its bootstrap,
+recovery projection, and local diagnostic synchronization finish. A concurrent
+generation fence rejects that late join and target injection retries after the
+transaction resolves. Terminal renderer rollback receipts are bounded and
+idempotent; a partial multi-renderer rollback or finalize can therefore retry
+the same Host transaction without admitting an overlapping generation. Both
+published and unpublished Host-authorized rollback use the canonical monotonic
+rollback epoch.
 
 The installed-plugin page is a searchable list with states for installing,
 updating, enabling, disabling, reloading, uninstalling, blocked, permission

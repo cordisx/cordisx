@@ -29,6 +29,7 @@ class FixtureGenerationRuntime {
   epoch = 0
   failNextStage = false
   failNextRollback = false
+  failNextStatus = false
   staged: PluginRuntimeMutation | undefined
   active: CordisXPluginActivationRecordV1 | undefined
   readonly published: CordisXPluginActivationRecordV1[] = []
@@ -93,6 +94,10 @@ class FixtureGenerationRuntime {
     }
   }
   async updateDevelopmentStatus(state: CordisXLocalDevelopmentSnapshot): Promise<void> {
+    if (this.failNextStatus) {
+      this.failNextStatus = false
+      throw new Error('fixture renderer closed during status broadcast')
+    }
     this.states.push(state)
   }
 }
@@ -105,16 +110,32 @@ describe('local development generations', () => {
     const dependency = path.join(source, 'value.ts')
     await mkdir(source)
     await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.2.3' }))
-    await writeFile(entry, "import { value } from './value.js'\nexport default { manifest: { id: 'demo', name: value }, apply() {} }\n")
+    await writeFile(entry, "import { value } from './value.js'\nconsole.info('plugin-top-level')\nexport default { manifest: { id: 'demo', name: value }, apply() {} }\n")
     await writeFile(dependency, "export const value = 'one'\n")
 
     const firstBuild = await buildLocalDevelopmentPlugin(entry)
     expect(firstBuild.watchFiles).toContain(dependency)
     expect(firstBuild.identitySource).toMatch(/^file:\/\/\/cordisx-local-dev\//u)
     expect(firstBuild.identitySource).not.toContain(root)
+    expect(firstBuild.runtimeArtifactSource).toContain('__cordisxPendingPluginModuleFactoryV1 = (console) =>')
+    expect(firstBuild.runtimeArtifactSource).not.toContain('__cordisxPendingPluginModuleV1 =')
+    const artifactDom = new (await import('jsdom')).JSDOM('', { runScripts: 'dangerously' })
+    const globalLogs: string[] = []
+    const facadeLogs: string[] = []
+    Object.defineProperty(artifactDom.window, 'console', { value: { info: (message: string) => globalLogs.push(message) } })
+    artifactDom.window.eval(firstBuild.runtimeArtifactSource)
+    expect(globalLogs).toEqual([])
+    const dynamicFactory = (artifactDom.window as unknown as {
+      __cordisxPendingPluginModuleFactoryV1: (console: { info(message: string): void }) => unknown
+    }).__cordisxPendingPluginModuleFactoryV1
+    dynamicFactory({ info: message => facadeLogs.push(message) })
+    expect(facadeLogs).toEqual(['plugin-top-level'])
+    artifactDom.window.close()
 
     const runtime = new FixtureGenerationRuntime()
+    runtime.failNextStatus = true
     const bootstraps: string[] = []
+    const output: string[] = []
     const controller = await LocalDevelopmentController.create({
       entry,
       runtimeGeneration: 'fixture-runtime',
@@ -127,12 +148,13 @@ describe('local development generations', () => {
         return JSON.stringify({ digest: plugin.package?.digest, revision: activation.revision, epoch })
       },
       setBootstrap: sourceText => { bootstraps.push(sourceText) },
-      stdout: () => undefined,
+      stdout: line => { output.push(line) },
     })
 
     try {
       await controller.start()
       await eventually(() => expect(runtime.published).toHaveLength(1))
+      expect(output).toContainEqual(expect.stringContaining('status projection failed'))
       const firstDigest = runtime.published[0]!.plugins[0]!.digest
 
       await writeFile(dependency, "export const value = 'two'\n")

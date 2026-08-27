@@ -13,7 +13,6 @@ import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 } from '../packages/cli/src/permissio
 interface DevelopmentRuntimeHandle {
   snapshot(): {
     readonly plugins: readonly { readonly id: string }[]
-    readonly localDevelopment?: readonly CordisXLocalDevelopmentSnapshot[]
   }
   updateLocalDevelopmentStatus(status: CordisXLocalDevelopmentSnapshot): boolean
   stagePluginMutation(mutation: unknown, module?: CordisXPluginModule): Promise<unknown>
@@ -69,13 +68,14 @@ describe('local development Manager projection', () => {
       error: 'fixture build failed',
     })
     expect(runtime.snapshot().plugins).toEqual([])
-    expect(runtime.snapshot().localDevelopment).toEqual([{
-      origin: 'local-dev',
-      pluginId: 'broken',
-      sourcePath,
-      state: 'failed',
-      error: 'fixture build failed',
-    }])
+    expect(JSON.stringify(runtime.snapshot())).not.toContain(sourcePath)
+    expect(JSON.stringify(runtime.snapshot())).not.toContain('localDevelopment')
+    dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const privateProjection = dom.window.document.querySelector<HTMLElement>('.cxr-local-development-source')
+    expect(privateProjection?.textContent).toContain(sourcePath)
+    expect(privateProjection?.textContent).toContain('fixture build failed')
+    expect(privateProjection?.dataset.developmentState).toBe('failed')
 
     const candidate = {
       ...activation,
