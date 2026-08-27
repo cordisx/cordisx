@@ -55,6 +55,17 @@ closure publication order are specified in
 slice lands, the single-bundle behavior in the next sections remains the
 implemented current state.
 
+The explicit `cordisx dev <entry>` path is a separate Host-private source
+plane. It boots one stable renderer runtime, watches the entry's complete
+transitive build graph, and publishes immutable local candidates through the
+same reversible generation transaction used by package lifecycle. Failed
+candidates preserve last-good; successful candidates update the bootstrap only
+for renderer targets discovered later. Local paths and build diagnostics are
+projected only into Manager and never become public package sources, lifecycle
+snapshots, permission identities, or share targets. Details and the phase-1
+entry-basename id restriction are in
+[`distribution-and-cli.md`](distribution-and-cli.md#explicit-local-development-entry).
+
 The launcher implementation of that boundary is specified separately in
 [`dynamic-package-store.md`](dynamic-package-store.md): it maps source-v1 and
 package-v2 intake plus a Host-private journal/token/permission/rollback layer

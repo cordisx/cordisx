@@ -65,6 +65,7 @@ import type {
   ManagerPluginConfigSnapshot,
 } from './configuration.js'
 import type { CordisXConfigFieldSnapshot, CordisXJsonValue } from '../contracts.js'
+import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 import type { HostServiceConfigDescriptor, HostServiceConfigMutation, HostServiceConfigMutationResult } from '../launcher/service-config.js'
 import type {
   CordisXCapabilityAvailabilityState,
@@ -126,6 +127,8 @@ export interface ManagerPluginSnapshot {
     readonly dependencies: readonly string[]
     readonly canonicalSource?: string
   }
+  /** Host-private local development provenance and build diagnostics. */
+  readonly development?: CordisXLocalDevelopmentSnapshot
 }
 
 export interface ManagerPermissionSnapshot {
@@ -164,6 +167,8 @@ export interface ManagerCapabilityAvailabilitySnapshot {
 export interface ManagerSnapshot {
   readonly version: string
   readonly plugins: readonly ManagerPluginSnapshot[]
+  /** Launcher-owned entries, including a source whose first candidate has not activated yet. */
+  readonly localDevelopment?: readonly CordisXLocalDevelopmentSnapshot[]
   readonly registrations: readonly SurfaceContributionSnapshot[]
   readonly commands: readonly CommandSnapshot[]
   readonly navigation: NavigationSnapshot

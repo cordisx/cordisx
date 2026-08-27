@@ -1,0 +1,479 @@
+import { createHash } from 'node:crypto'
+import { access, readFile, readdir, stat } from 'node:fs/promises'
+import path from 'node:path'
+import { build } from 'esbuild'
+import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
+import {
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+  type CordisXPluginActivationRecordV1,
+} from '../plugin-lifecycle-contracts.js'
+import type { CordisXConfig } from './config.js'
+import { CdpPluginLifecycleRuntime } from './cdp.js'
+import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
+
+const WATCH_INTERVAL_MS = 200
+const DEBOUNCE_MS = 120
+const IGNORED_DIRECTORIES = new Set(['.git', '.next', 'coverage', 'dist', 'node_modules'])
+const MAX_DIAGNOSTIC_LENGTH = 4_000
+
+function diagnostic(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.length <= MAX_DIAGNOSTIC_LENGTH ? message : `${message.slice(0, MAX_DIAGNOSTIC_LENGTH - 1)}…`
+}
+
+export interface LocalDevelopmentBuild {
+  readonly id: string
+  readonly version: string
+  readonly entry: string
+  readonly sourceRoot: string
+  readonly identitySource: string
+  readonly digest: `sha256:${string}`
+  readonly moduleFactorySource: string
+  readonly runtimeArtifactSource: string
+  readonly watchFiles: readonly string[]
+  readonly readme?: string
+}
+
+interface LocalDevelopmentEntry {
+  readonly entry: string
+  readonly sourceRoot: string
+  readonly identitySource: string
+}
+
+function pluginId(entry: string): string {
+  const name = path.basename(entry, path.extname(entry))
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9._-]+/g, '-')
+    .replace(/^[^a-z0-9]+/, '')
+    .slice(0, 96)
+  return name === '' || name === 'host' || name.startsWith('cordisx.') ? 'local-plugin' : name
+}
+
+async function findPackageRoot(entry: string): Promise<string> {
+  let directory = path.dirname(entry)
+  while (true) {
+    const manifestPath = path.join(directory, 'package.json')
+    if (await access(manifestPath).then(() => true).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+      throw error
+    })) return directory
+    const parent = path.dirname(directory)
+    if (parent === directory) return path.dirname(entry)
+    directory = parent
+  }
+}
+
+async function packageRoot(entry: string): Promise<{ readonly root: string; readonly version: string }> {
+  const root = await findPackageRoot(entry)
+  const manifest: { readonly version?: unknown } = await readFile(path.join(root, 'package.json'), 'utf8')
+    .then(text => JSON.parse(text) as { readonly version?: unknown })
+    .catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {} as const
+      throw error
+    })
+  return {
+    root,
+    version: typeof manifest.version === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)
+      ? manifest.version
+      : '0.0.0-local-dev',
+  }
+}
+
+async function resolveLocalDevelopmentEntry(rawEntry: string): Promise<LocalDevelopmentEntry> {
+  const entry = path.resolve(rawEntry)
+  await access(entry)
+  const root = await findPackageRoot(entry)
+  const id = pluginId(entry)
+  const sourceKey = createHash('sha256').update(entry).digest('hex').slice(0, 24)
+  return {
+    entry,
+    sourceRoot: root,
+    identitySource: `file:///cordisx-local-dev/${sourceKey}/${id}.js`,
+  }
+}
+
+async function readReadme(root: string): Promise<{ readonly text?: string; readonly files: readonly string[] }> {
+  const names = await readdir(root).catch(() => [])
+  const files = names
+    .filter(name => /^README(?:\.[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)?\.(?:md|markdown)$/iu.test(name))
+    .map(name => path.join(root, name))
+    .sort()
+  const fallback = files.find(file => /^README\.(?:md|markdown)$/iu.test(path.basename(file)))
+  return {
+    ...(fallback === undefined ? {} : { text: await readFile(fallback, 'utf8') }),
+    files,
+  }
+}
+
+function absoluteInputs(root: string, inputs: Readonly<Record<string, unknown>>): readonly string[] {
+  return Object.keys(inputs).map(input => path.resolve(root, input))
+}
+
+/** Build one immutable local-dev candidate and return its complete esbuild input graph. */
+export async function buildLocalDevelopmentPlugin(rawEntry: string): Promise<LocalDevelopmentBuild> {
+  const entry = path.resolve(rawEntry)
+  await access(entry)
+  const { root, version } = await packageRoot(entry)
+  const id = pluginId(entry)
+  const specifier = `./${path.relative(root, entry).replaceAll(path.sep, '/')}`
+  const common = {
+    absWorkingDir: root,
+    bundle: true,
+    platform: 'browser' as const,
+    target: ['chrome120'],
+    sourcemap: 'inline' as const,
+    metafile: true,
+    loader: { '.svg': 'text' as const, '.css': 'text' as const, '.png': 'dataurl' as const },
+    jsx: 'automatic' as const,
+    jsxImportSource: 'cordisx/react',
+    plugins: [cordisXReactVirtualModules()],
+    write: false,
+    logLevel: 'silent' as const,
+  }
+  const [moduleResult, artifactResult, readme] = await Promise.all([
+    build({ entryPoints: [entry], format: 'iife', globalName: '__cordisxPluginModule', ...common }),
+    build({
+      stdin: {
+        contents: `import * as pluginModule from ${JSON.stringify(specifier)}\nglobalThis.__cordisxPendingPluginModuleV1 = pluginModule\n`,
+        resolveDir: root,
+        sourcefile: 'cordisx-local-dev-generation.ts',
+      },
+      format: 'iife',
+      ...common,
+    }),
+    readReadme(root),
+  ])
+  if (moduleResult.metafile === undefined || artifactResult.metafile === undefined) {
+    throw new Error('local development build produced no dependency metadata')
+  }
+  assertNoPrivateReactBundle(moduleResult.metafile, `local development plugin ${id}`)
+  assertNoPrivateReactBundle(artifactResult.metafile, `local development plugin ${id}`)
+  const moduleOutput = moduleResult.outputFiles?.[0]
+  const artifactOutput = artifactResult.outputFiles?.[0]
+  if (moduleOutput === undefined || artifactOutput === undefined) {
+    throw new Error('local development build produced no browser artifact')
+  }
+  const digest = `sha256:${createHash('sha256')
+    .update(moduleOutput.text)
+    .update('\0')
+    .update(artifactOutput.text)
+    .update('\0')
+    .update(version)
+    .update('\0')
+    .update(readme.text ?? '')
+    .digest('hex')}` as const
+  const sourceKey = createHash('sha256').update(entry).digest('hex').slice(0, 24)
+  return {
+    id,
+    version,
+    entry,
+    sourceRoot: root,
+    identitySource: `file:///cordisx-local-dev/${sourceKey}/${id}.js`,
+    digest,
+    moduleFactorySource: moduleOutput.text,
+    runtimeArtifactSource: artifactOutput.text,
+    watchFiles: [...new Set([
+      entry,
+      path.join(root, 'package.json'),
+      ...readme.files,
+      ...absoluteInputs(root, moduleResult.metafile.inputs),
+      ...absoluteInputs(root, artifactResult.metafile.inputs),
+    ])].sort(),
+    ...(readme.text === undefined ? {} : { readme: readme.text }),
+  }
+}
+
+async function sourceFiles(root: string): Promise<readonly string[]> {
+  const output: string[] = []
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      if (entry.isDirectory() && IGNORED_DIRECTORIES.has(entry.name)) continue
+      const target = path.join(directory, entry.name)
+      if (entry.isDirectory()) await visit(target)
+      else if (entry.isFile()) output.push(target)
+    }
+  }
+  await visit(root)
+  return output
+}
+
+async function fingerprint(files: readonly string[]): Promise<string> {
+  const values = await Promise.all([...new Set(files)].sort().map(async file => {
+    try {
+      const value = await stat(file)
+      return `${file}\0${value.size}\0${value.mtimeMs}`
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return `${file}\0missing`
+      throw error
+    }
+  }))
+  return createHash('sha256').update(values.join('\n')).digest('hex')
+}
+
+export interface LocalDevelopmentControllerOptions {
+  readonly entry: string
+  readonly runtimeGeneration: string
+  readonly runtime: Pick<CdpPluginLifecycleRuntime,
+    | 'currentRegistryEpoch'
+    | 'cancelPreparation'
+    | 'prepare'
+    | 'stage'
+    | 'publish'
+    | 'complete'
+    | 'finalize'
+    | 'rollback'
+    | 'updateDevelopmentStatus'>
+  readonly rebuildBootstrap: (
+    config: CordisXConfig,
+    activation: CordisXPluginActivationRecordV1,
+    registryEpoch: number,
+  ) => Promise<string>
+  readonly setBootstrap: (source: string) => void
+  readonly stdout: (line: string) => void
+}
+
+/** Single-flight, attempt-fenced local development generation coordinator. */
+export class LocalDevelopmentController {
+  private readonly entry: string
+  private readonly pluginId: string
+  private readonly sourceRoot: string
+  private readonly identitySource: string
+  private active: CordisXPluginActivationRecordV1
+  private watchFiles: readonly string[] = []
+  private lastFingerprint = ''
+  private lastSuccessfulAt: string | undefined
+  private desiredAttempt = 0
+  private running = false
+  private stopped = true
+  private debounce: ReturnType<typeof setTimeout> | undefined
+  private poller: ReturnType<typeof setInterval> | undefined
+
+  private constructor(private readonly options: LocalDevelopmentControllerOptions, resolved: LocalDevelopmentEntry) {
+    this.entry = resolved.entry
+    this.pluginId = pluginId(resolved.entry)
+    this.sourceRoot = resolved.sourceRoot
+    this.identitySource = resolved.identitySource
+    this.watchFiles = [resolved.entry, path.join(resolved.sourceRoot, 'package.json')]
+    this.active = {
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1,
+      recordKind: 'active',
+      profileId: 'development',
+      revision: 0,
+      lastGoodRevision: 0,
+      runtimeGeneration: options.runtimeGeneration,
+      plugins: [],
+    }
+  }
+
+  static async create(options: LocalDevelopmentControllerOptions): Promise<LocalDevelopmentController> {
+    return new LocalDevelopmentController(options, await resolveLocalDevelopmentEntry(options.entry))
+  }
+
+  private state(state: CordisXLocalDevelopmentSnapshot['state'], error?: string): CordisXLocalDevelopmentSnapshot {
+    return {
+      origin: 'local-dev',
+      pluginId: this.pluginId,
+      sourcePath: this.entry,
+      state,
+      ...(this.lastSuccessfulAt === undefined ? {} : { lastSuccessfulAt: this.lastSuccessfulAt }),
+      ...(error === undefined ? {} : { error }),
+    }
+  }
+
+  private async currentFingerprint(): Promise<string> {
+    return await fingerprint([...this.watchFiles, ...await sourceFiles(this.sourceRoot)])
+  }
+
+  private schedule(): void {
+    if (this.stopped) return
+    this.desiredAttempt += 1
+    if (this.debounce !== undefined) clearTimeout(this.debounce)
+    this.debounce = setTimeout(() => {
+      this.debounce = undefined
+      void this.drain()
+    }, DEBOUNCE_MS)
+  }
+
+  private async poll(): Promise<void> {
+    const next = await this.currentFingerprint()
+    if (next === this.lastFingerprint) return
+    this.lastFingerprint = next
+    this.schedule()
+  }
+
+  async start(): Promise<void> {
+    if (!this.stopped) return
+    this.stopped = false
+    this.lastFingerprint = await this.currentFingerprint()
+    this.schedule()
+    this.poller = setInterval(() => { void this.poll().catch(error => this.options.stdout(`[cordisx] local-dev watch failed: ${String(error)}`)) }, WATCH_INTERVAL_MS)
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true
+    if (this.debounce !== undefined) clearTimeout(this.debounce)
+    if (this.poller !== undefined) clearInterval(this.poller)
+    this.debounce = undefined
+    this.poller = undefined
+    while (this.running) await new Promise(resolve => setTimeout(resolve, 10))
+  }
+
+  private async drain(): Promise<void> {
+    if (this.running || this.stopped) return
+    this.running = true
+    try {
+      while (!this.stopped) {
+        const attempt = this.desiredAttempt
+        await this.attempt(attempt)
+        if (attempt === this.desiredAttempt) break
+      }
+    } finally {
+      this.running = false
+    }
+  }
+
+  private async attempt(attempt: number): Promise<void> {
+    await this.options.runtime.updateDevelopmentStatus(this.state('building'))
+    this.options.stdout(`[cordisx] local-dev build ${attempt}: ${this.entry}`)
+    let build: LocalDevelopmentBuild
+    try {
+      build = await buildLocalDevelopmentPlugin(this.entry)
+      this.watchFiles = build.watchFiles
+    } catch (error) {
+      const message = diagnostic(error)
+      await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
+      this.options.stdout(`[cordisx] local-dev build failed; last-good retained: ${message}`)
+      return
+    }
+    if (attempt !== this.desiredAttempt || this.stopped) return
+    const previous = this.active
+    const prior = previous.plugins.find(item => item.id === build.id)
+    if (prior?.digest === build.digest) {
+      this.lastSuccessfulAt = new Date().toISOString()
+      await this.options.runtime.updateDevelopmentStatus(this.state('ready'))
+      return
+    }
+    if (previous.plugins.length > 0 && prior === undefined) {
+      const message = `local development plugin id changed from ${previous.plugins[0]!.id} to ${build.id}`
+      await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
+      this.options.stdout(`[cordisx] ${message}`)
+      return
+    }
+    const transactionId = `local-dev-${attempt}-${build.digest.slice(-12)}`
+    const moduleGeneration = `${build.id}-local-dev-${attempt}-${build.digest.slice(-12)}`
+    const item = {
+      id: build.id,
+      version: build.version,
+      digest: build.digest,
+      moduleGeneration,
+      enabled: true,
+      dependencies: [],
+    }
+    const candidate: CordisXPluginActivationRecordV1 = {
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1,
+      recordKind: 'candidate',
+      transactionId,
+      profileId: previous.profileId,
+      revision: previous.revision + 1,
+      lastGoodRevision: previous.revision,
+      runtimeGeneration: previous.runtimeGeneration,
+      plugins: [item],
+    }
+    const expectedRegistryEpoch = this.options.runtime.currentRegistryEpoch()
+    const successfulAt = new Date().toISOString()
+    const readyState: CordisXLocalDevelopmentSnapshot = {
+      origin: 'local-dev',
+      pluginId: build.id,
+      sourcePath: this.entry,
+      state: 'ready',
+      lastSuccessfulAt: successfulAt,
+    }
+    const bootstrapConfig: CordisXConfig = {
+      version: 1,
+      rootDir: build.sourceRoot,
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: [{
+        id: build.id,
+        entry: build.entry,
+        source: build.identitySource,
+        enabled: true,
+        config: {},
+        revision: 0,
+        package: {
+          version: build.version,
+          digest: build.digest,
+          moduleGeneration,
+          dependencies: [],
+        },
+        moduleFactorySource: build.moduleFactorySource,
+        development: readyState,
+        ...(build.readme === undefined ? {} : { readme: build.readme }),
+      }],
+    }
+    let nextBootstrap: string
+    try {
+      nextBootstrap = await this.options.rebuildBootstrap(bootstrapConfig, {
+        ...candidate,
+        recordKind: 'active',
+        lastGoodRevision: candidate.revision,
+      }, expectedRegistryEpoch + 1)
+    } catch (error) {
+      const message = diagnostic(error)
+      await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
+      this.options.stdout(`[cordisx] local-dev bootstrap build failed; last-good retained: ${message}`)
+      return
+    }
+    if (attempt !== this.desiredAttempt || this.stopped) {
+      return
+    }
+    const fence = this.options.runtime.prepare(transactionId)
+    if (fence.expectedRegistryEpoch !== expectedRegistryEpoch) {
+      await this.options.runtime.cancelPreparation(transactionId)
+      this.schedule()
+      return
+    }
+    try {
+      await this.options.runtime.stage({
+        transactionId,
+        ...fence,
+        afterRegistryEpoch: fence.expectedRegistryEpoch + 1,
+        operation: prior === undefined ? 'install' : 'update',
+        previous,
+        candidate,
+        targetId: build.id,
+        affectedPluginIds: [build.id],
+        runtimeArtifactSource: build.runtimeArtifactSource,
+        developmentPackage: {
+          id: build.id,
+          version: build.version,
+          digest: build.digest,
+          identitySource: this.identitySource,
+          development: readyState,
+          ...(build.readme === undefined ? {} : { readme: build.readme }),
+        },
+      })
+      if (attempt !== this.desiredAttempt || this.stopped) {
+        await this.options.runtime.rollback(transactionId)
+        return
+      }
+      await this.options.runtime.publish(transactionId)
+      await this.options.runtime.complete(transactionId)
+      await this.options.runtime.finalize(transactionId)
+      const { transactionId: _transactionId, ...committed } = candidate
+      this.active = { ...committed, recordKind: 'active', lastGoodRevision: candidate.revision }
+      this.lastSuccessfulAt = successfulAt
+      this.options.setBootstrap(nextBootstrap)
+      await this.options.runtime.updateDevelopmentStatus(this.state('ready'))
+      this.options.stdout(`[cordisx] local-dev generation ready: ${build.id} ${moduleGeneration}`)
+    } catch (error) {
+      const message = diagnostic(error)
+      await this.options.runtime.rollback(transactionId).catch(() => undefined)
+      await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
+      this.options.stdout(`[cordisx] local-dev activation failed; last-good retained: ${message}`)
+    }
+  }
+}

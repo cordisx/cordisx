@@ -27,6 +27,7 @@ import {
 } from './provider-rpc.js'
 import type { CodexAgentHistoryHost } from './agent-history.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
+import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../plugin-lifecycle-contracts.js'
 import type { RollbackPlan } from './packages/authority.js'
 import type { PackageActivationTuple } from './packages/types.js'
@@ -221,6 +222,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private permissionIdentities: PluginPermissionIdentityRegistry | undefined
   private recoveredActivation: CordisXPluginActivationRecordV1 | undefined
   private readonly recoveredSessions = new WeakSet<CdpSession>()
+  private readonly developmentStates = new Map<string, CordisXLocalDevelopmentSnapshot>()
 
   constructor(permissionIdentities?: PluginPermissionIdentityRegistry) {
     this.permissionIdentities = permissionIdentities
@@ -229,6 +231,15 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   setPermissionIdentities(permissionIdentities: PluginPermissionIdentityRegistry): void {
     if (this.staged.size !== 0 || this.fences.size !== 0) throw new Error('cannot replace permission identities during a generation transaction')
     this.permissionIdentities = permissionIdentities
+  }
+
+  currentRegistryEpoch(): number {
+    return this.registryEpoch
+  }
+
+  cancelPreparation(transactionId: string): void {
+    if (this.staged.has(transactionId)) throw new Error('cannot cancel a staged plugin generation')
+    this.fences.delete(transactionId)
   }
 
   prepare(transactionId: string): RuntimeGenerationFence {
@@ -251,6 +262,29 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         if (remaining.length === 0) this.staged.delete(transactionId)
         else if (remaining.length !== sessions.length) this.staged.set(transactionId, remaining)
       }
+    }
+  }
+
+  private async projectDevelopmentState(
+    session: CdpSession,
+    state: CordisXLocalDevelopmentSnapshot,
+  ): Promise<void> {
+    await evaluateRuntimeOperation(session, `(async () => { try {
+      await globalThis.__cordisxBoot
+      const runtime = globalThis.__cordisxRuntime
+      if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
+      return { ok: true, result: runtime.updateLocalDevelopmentStatus(${JSON.stringify(state)}) }
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)
+  }
+
+  async updateDevelopmentStatus(state: CordisXLocalDevelopmentSnapshot): Promise<void> {
+    this.developmentStates.set(state.sourcePath, structuredClone(state))
+    await Promise.all([...this.sessions].map(async session => await this.projectDevelopmentState(session, state)))
+  }
+
+  async synchronizeDevelopmentStatus(session: CdpSession): Promise<void> {
+    for (const state of this.developmentStates.values()) {
+      await this.projectDevelopmentState(session, state)
     }
   }
 
@@ -287,14 +321,14 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     try {
       const results = await Promise.allSettled(sessions.map(async session => {
         let artifactFailure: unknown
-        if (mutation.package !== undefined) {
+        if (mutation.package !== undefined || runtimeArtifactSource !== undefined) {
           try {
             await session.send('Runtime.evaluate', {
               expression: 'delete globalThis.__cordisxPendingPluginModuleV1; delete globalThis.__cordisxPendingPluginModuleFactoryV1',
               allowUnsafeEvalBlockedByCSP: true,
             })
             const artifact = await session.send('Runtime.evaluate', {
-              expression: runtimeArtifactSource ?? mutation.package.artifactSource,
+              expression: runtimeArtifactSource ?? mutation.package!.artifactSource,
               allowUnsafeEvalBlockedByCSP: true,
             })
             if (artifact.exceptionDetails !== undefined) artifactFailure = new Error('plugin artifact evaluation failed')
@@ -709,6 +743,7 @@ async function install(
   actions?: ChannelActionsBridgeHandler,
   permission?: PermissionPersistenceContext,
   lifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime },
+  developmentRuntime?: CdpPluginLifecycleRuntime,
   publisherGrant?: PublisherGrantBridgeHandler,
 ): Promise<InstalledScript> {
   const url = target.webSocketDebuggerUrl
@@ -1015,8 +1050,9 @@ async function install(
         })()
       })
     }
-    if (lifecycle !== undefined) {
-      unregisterLifecycleSession = lifecycle.runtime.register(session)
+    const generationRuntime = lifecycle?.runtime ?? developmentRuntime
+    if (generationRuntime !== undefined) {
+      unregisterLifecycleSession = generationRuntime.register(session)
     }
     const added = await session.send(
       'Page.addScriptToEvaluateOnNewDocument',
@@ -1033,13 +1069,16 @@ async function install(
       },
       CDP_INJECTION_TIMEOUT_MS,
     )
-    if (lifecycle !== undefined) {
+    if (generationRuntime !== undefined) {
       await evaluateRuntimeOperation(session, `(async () => { try {
         await globalThis.__cordisxBoot
         return { ok: globalThis.__cordisxRuntime !== undefined }
       } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)
-      await lifecycle.handler.coordinator.recover()
-      await lifecycle.runtime.synchronizeRecoveredActivation(session)
+      if (lifecycle !== undefined) {
+        await lifecycle.handler.coordinator.recover()
+        await generationRuntime.synchronizeRecoveredActivation(session)
+      }
+      await generationRuntime.synchronizeDevelopmentStatus(session)
     }
     return {
       target,
@@ -1158,7 +1197,8 @@ async function uninstall(installed: InstalledScript): Promise<void> {
 
 export interface WatchInjectionOptions {
   readonly port: number
-  readonly source: string
+  /** Latest immutable bootstrap. Existing renderers are never reinjected when it changes. */
+  readonly source: string | (() => string)
   readonly signal: AbortSignal
   readonly onStatus?: (message: string) => void
   /** Called after the first renderer accepts the CordisX bootstrap. */
@@ -1173,6 +1213,8 @@ export interface WatchInjectionOptions {
   readonly channelActionsBridge?: ChannelActionsBridgeHandler
   readonly permissionPersistence?: PermissionPersistenceContext
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
+  /** Host-private generation plane used by `cordisx dev`; it installs no public lifecycle binding. */
+  readonly developmentRuntime?: CdpPluginLifecycleRuntime
   readonly publisherGrant?: PublisherGrantBridgeHandler
 }
 
@@ -1204,7 +1246,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             : { host: options.agentHistoryHost, token: options.agentHistoryBridgeToken }
           const record = await install(
             target,
-            options.source,
+            typeof options.source === 'string' ? options.source : options.source(),
             provider,
             history,
             options.configBridge,
@@ -1213,6 +1255,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             options.channelActionsBridge,
             options.permissionPersistence,
             options.pluginLifecycle,
+            options.developmentRuntime,
             options.publisherGrant,
           )
           installed.set(target.id, record)

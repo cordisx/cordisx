@@ -23,6 +23,7 @@ import type {
   CordisXPluginModule,
   CordisXRouteReference,
 } from '../contracts.js'
+import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type {
   CordisXPermissionAuthorizationDecisionV2,
@@ -135,8 +136,12 @@ interface CordisXRuntimeMetadata {
   readonly hostKind?: 'codex' | 'playground'
 }
 
+interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
+  readonly development?: CordisXLocalDevelopmentSnapshot
+}
+
 interface PluginController {
-  item: CordisXBrowserPlugin
+  item: RuntimeBrowserPlugin
   readonly identity: CordisXPluginIdentity
   manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4
   principal: PluginPrincipalToken
@@ -213,6 +218,14 @@ export interface RendererPluginMutation {
     readonly identitySource: string
     readonly readme?: string
   }
+  readonly developmentPackage?: {
+    readonly id: string
+    readonly version: string
+    readonly digest: `sha256:${string}`
+    readonly identitySource: string
+    readonly readme?: string
+    readonly development: CordisXLocalDevelopmentSnapshot
+  }
   readonly authorizationDecision?: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2
 }
 
@@ -250,6 +263,7 @@ interface CordisXRuntimeHandle extends ManagerModel {
   commitPluginMutation(transactionId: string): Promise<void>
   abortPluginMutation(transactionId: string): Promise<void>
   reloadPluginGeneration(pluginId: string, moduleGeneration: string, runtimeGeneration: string): Promise<void>
+  updateLocalDevelopmentStatus(status: CordisXLocalDevelopmentSnapshot): boolean
   dispose(): Promise<void>
 }
 
@@ -347,14 +361,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function createController(item: CordisXBrowserPlugin, pluginConsole: PluginConsoleAspect): PluginController {
+function createController(item: RuntimeBrowserPlugin, pluginConsole: PluginConsoleAspect): PluginController {
   const identity = Object.freeze({ source: item.source, id: item.id })
   const activation = 1
   const pluginGeneration = item.package?.moduleGeneration ?? `${pluginConsole.generation}:${item.id}:bundled`
   const principal = pluginConsole.issue(identity, pluginGeneration)
   try {
     const module = item.moduleFactory?.(pluginConsole.consoleFacade(principal)) ?? item.module
-    const boundItem: CordisXBrowserPlugin = module === undefined || module === item.module ? item : { ...item, module }
+    const boundItem: RuntimeBrowserPlugin = module === undefined || module === item.module ? item : { ...item, module }
     return {
       item: boundItem,
       identity,
@@ -399,7 +413,7 @@ function writeBlockedPlugins(ids: ReadonlySet<string>): void {
 }
 
 async function start(
-  plugins: readonly CordisXBrowserPlugin[],
+  plugins: readonly RuntimeBrowserPlugin[],
   metadata: CordisXRuntimeMetadata,
 ): Promise<CordisXRuntimeHandle> {
   await globalThis.__cordisxRuntime?.dispose()
@@ -434,6 +448,9 @@ async function start(
   const lifecycleBridge = metadata.pluginLifecycleBridgeToken === undefined
     ? undefined
     : new BrowserPluginLifecycleBridge(metadata.pluginLifecycleBridgeToken, metadata.profileId, generation)
+  const localDevelopment = new Map(plugins.flatMap(plugin => plugin.development === undefined
+    ? []
+    : [[plugin.development.sourcePath, structuredClone(plugin.development)] as const]))
   let currentActivation: CordisXPluginActivationRecordV1 = metadata.pluginActivation ?? {
     $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
     schemaVersion: 1,
@@ -927,6 +944,7 @@ async function start(
       plugins: projectedControllers().map((controller): ManagerPluginSnapshot => {
         const icon = pluginBrandIconDataUrl(controller.item.module?.icon)
         const readme = selectPluginReadme(controller.item, locale)
+        const development = [...localDevelopment.values()].find(item => item.pluginId === controller.item.id)
         return {
           id: controller.item.id,
           source: controller.item.source,
@@ -945,11 +963,13 @@ async function start(
               ...(controller.item.package.canonicalSource === undefined ? {} : { canonicalSource: controller.item.package.canonicalSource }),
             },
           }),
+          ...(development === undefined ? {} : { development }),
           status: controller.status,
           ...(controller.error === undefined ? {} : { error: controller.error }),
           ...(controller.blockedReason === undefined ? {} : { blockedReason: controller.blockedReason }),
         }
       }),
+      localDevelopment: [...localDevelopment.values()].map(item => structuredClone(item)),
       registrations: allRegistrations,
       commands: commandService?.snapshot() ?? [],
       navigation,
@@ -1299,13 +1319,16 @@ async function start(
     const existing = activeController(pluginId)
     const replacesTarget = pluginId === mutation.targetId
       && (mutation.operation === 'install' || mutation.operation === 'update' || mutation.operation === 'enable')
+    const replacementPackage = mutation.package ?? mutation.developmentPackage
+    const replacementId = mutation.package?.manifest.id ?? mutation.developmentPackage?.id
+    const replacementVersion = mutation.package?.manifest.version ?? mutation.developmentPackage?.version
     if (!replacesTarget && existing === undefined) throw new Error(`affected plugin ${pluginId} is not active`)
-    if (replacesTarget && (mutation.package === undefined || (module === undefined && moduleFactory === undefined))) {
+    if (replacesTarget && (replacementPackage === undefined || (module === undefined && moduleFactory === undefined))) {
       throw new Error('candidate package module is unavailable')
     }
-    if (replacesTarget && (mutation.package!.manifest.id !== pluginId
-      || mutation.package!.digest !== activation.digest
-      || mutation.package!.manifest.version !== activation.version)) {
+    if (replacesTarget && (replacementId !== pluginId
+      || replacementPackage!.digest !== activation.digest
+      || replacementVersion !== activation.version)) {
       throw new Error('candidate package does not match the activation tuple')
     }
     const descriptor = existing === undefined
@@ -1313,10 +1336,10 @@ async function start(
       : configuration.descriptor(pluginId, i18nService?.getSnapshot().locale ?? 'en')
     const candidateModule = replacesTarget ? module : existing!.item.module
     const candidateModuleFactory = replacesTarget ? moduleFactory : existing!.item.moduleFactory
-    const candidateManifest = replacesTarget ? mutation.package!.manifest.runtimeManifest : existing!.item.manifest
-    const item: CordisXBrowserPlugin = {
+    const candidateManifest = replacesTarget ? mutation.package?.manifest.runtimeManifest : existing!.item.manifest
+    const item: RuntimeBrowserPlugin = {
       id: pluginId,
-      source: replacesTarget ? mutation.package!.identitySource : existing!.item.source,
+      source: replacesTarget ? replacementPackage!.identitySource : existing!.item.source,
       enabled: activation.enabled,
       ...(candidateModule === undefined ? {} : { module: candidateModule }),
       ...(candidateModuleFactory === undefined ? {} : { moduleFactory: candidateModuleFactory }),
@@ -1331,11 +1354,14 @@ async function start(
         ...(activation.canonicalSource === undefined ? {} : { canonicalSource: activation.canonicalSource }),
       },
       ...(replacesTarget
-        ? mutation.package!.readme === undefined ? {} : { readme: mutation.package!.readme }
+        ? replacementPackage!.readme === undefined ? {} : { readme: replacementPackage!.readme }
         : existing!.item.readme === undefined ? {} : { readme: existing!.item.readme }),
       ...(!replacesTarget && existing!.item.readmes !== undefined ? { readmes: existing!.item.readmes } : {}),
     }
     const controller = createController(item, pluginConsole)
+    if (replacesTarget && mutation.developmentPackage !== undefined && controller.status === 'failed') {
+      throw new Error(`local development candidate ${pluginId} is invalid: ${controller.error ?? 'module initialization failed'}`)
+    }
     controller.generationContext = generationVisibility.context(handle, pluginId)
     const candidateContext = ctx.extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
@@ -1740,6 +1766,14 @@ async function start(
     return task
   }
 
+  const updateLocalDevelopmentStatus = (
+    status: CordisXLocalDevelopmentSnapshot,
+  ): boolean => {
+    localDevelopment.set(status.sourcePath, structuredClone(status))
+    notify()
+    return true
+  }
+
   const dispose = async (): Promise<void> => {
     if (disposed) return
     disposed = true
@@ -1907,6 +1941,7 @@ async function start(
     commitPluginMutation,
     abortPluginMutation,
     reloadPluginGeneration,
+    updateLocalDevelopmentStatus,
     snapshot,
     setPluginBlocked,
     updatePluginConfig,
@@ -2072,7 +2107,7 @@ async function start(
 
 /** Serialize repeated CDP injections so a newer generation disposes the previous one first. */
 export function installCordisX(
-  plugins: readonly CordisXBrowserPlugin[],
+  plugins: readonly RuntimeBrowserPlugin[],
   metadata: CordisXRuntimeMetadata,
 ): Promise<CordisXRuntimeHandle> {
   const previous = globalThis.__cordisxBoot ?? Promise.resolve(undefined)

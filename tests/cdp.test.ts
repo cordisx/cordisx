@@ -56,6 +56,27 @@ function activation(revision: number, generation: string): CordisXPluginActivati
 }
 
 describe('CdpPluginLifecycleRuntime', () => {
+  it('projects first-build local diagnostics without requiring a formal lifecycle bridge', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const expressions: string[] = []
+    runtime.register({
+      async send(_method: string, params: Record<string, unknown>) {
+        expressions.push(String(params.expression ?? ''))
+        return { result: { value: { ok: true, result: true } } }
+      },
+    } as never)
+    await runtime.updateDevelopmentStatus({
+      origin: 'local-dev',
+      pluginId: 'broken',
+      sourcePath: '/absolute/plugin/broken.ts',
+      state: 'failed',
+      error: 'fixture build failed',
+    })
+    expect(expressions).toHaveLength(1)
+    expect(expressions[0]).toContain('updateLocalDevelopmentStatus')
+    expect(expressions[0]).toContain('/absolute/plugin/broken.ts')
+  })
+
   it('stages every renderer before reporting one failure so the closure can roll back everywhere', async () => {
     const runtime = new CdpPluginLifecycleRuntime()
     const previous = activation(0, 'demo-old')

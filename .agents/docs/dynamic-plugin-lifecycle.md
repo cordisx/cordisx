@@ -444,6 +444,28 @@ form, lifecycle result, or last-good package metadata.
 
 ## Manager contract
 
+### Host-private local development generations
+
+Direct `cordisx dev <entry>` generations reuse the renderer transaction and
+readiness boundary but do not enter the durable package authority. The
+launcher builds an immutable candidate from the transitive esbuild graph,
+stages it beside the live fiber, publishes only after readiness, and disposes
+the old fiber only in the normal completion phase. It must not reinject or
+dispose the whole CordisX runtime while calling that operation a plugin reload.
+New renderer targets receive the latest successful immutable bootstrap; an
+already installed renderer changes only through the transaction.
+
+The local entry's absolute path and build status are Host-private Manager
+diagnostics. They are not `plugin-package-source`, canonical source,
+activation-journal, permission identity, public lifecycle result, or share
+metadata. Before a first successful generation, Manager may show a
+launcher-owned source diagnostic but must not synthesize an active plugin row.
+After success it associates the diagnostic with the actual active plugin.
+Build/readiness failure retains last-good and exposes the most recent bounded
+error; repair creates a new fenced attempt. Watcher shutdown removes every
+timer and waits for the single in-flight attempt before the CDP runtime is
+disposed.
+
 The installed-plugin page is a searchable list with states for installing,
 updating, enabling, disabling, reloading, uninstalling, blocked, permission
 blocked, failed, rollback, and active. Normal rows show product state, not raw

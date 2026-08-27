@@ -13,6 +13,7 @@ import {
   resolveCliProxyProviderConfigs,
 } from '../plugins/cli-proxy-api/service-config.js'
 import type { CordisXPluginDependencyV1 } from '../plugin-lifecycle-contracts.js'
+import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 import type { CordisXPluginManifestV1 } from '../platform-contracts.js'
 import type { CordisXPluginManifestV4 } from '../permission-contracts.js'
 
@@ -32,6 +33,9 @@ export interface CordisXConfigPlugin {
     readonly canonicalSource?: string
   }
   readonly readme?: string
+  /** Prebuilt lexical module body used only by the launcher local-dev bootstrap. */
+  readonly moduleFactorySource?: string
+  readonly development?: CordisXLocalDevelopmentSnapshot
 }
 
 export interface LoadConfigOptions {
