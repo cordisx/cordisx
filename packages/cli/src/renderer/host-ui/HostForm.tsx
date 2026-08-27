@@ -17,7 +17,7 @@ import { HostSurfaceIcon } from './HostSurfaceIcon.js'
 
 export const HOST_FORM_REACT_STYLES = String.raw`
   .cxf-react-form { display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; margin: 0; }
-  .cxf-form-body { display: grid; min-width: 0; gap: 1.35rem; padding: 4px 0 16px; }
+  .cxf-form-body { display: grid; min-width: 0; align-content: start; grid-auto-rows: max-content; gap: 1.35rem; padding: 4px 0 16px; }
   .cxf-section { display: grid; min-width: 0; gap: 9px; }
   .cxf-section-heading { padding: 0 4px; }
   .cxf-section-heading h3 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 650; }
@@ -309,7 +309,7 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
     </div>
     <div className="cxf-form-actions">
       <div className="cxf-status" data-state={formState} role="status">{operations.length === 0 ? '' : formState === 'saving' ? managerCopy(locale, 'form.saving') : `${managerCopy(locale, 'form.dirty-prefix')} · ${managerCopy(locale, 'form.apply-live')}`}</div>
-      <div className="cxf-form-action-buttons"><Button type="reset" variant="outline" disabled={saving || operations.length === 0} onClick={() => { setDraftOperations(new Map()); setFormState('pristine'); setMessage(undefined) }}>重置</Button><Button type="submit" theme="primary" loading={saving} disabled={!plugin.configuration.writable || operations.length === 0}>保存</Button></div>
+      <div className="cxf-form-action-buttons"><Button type="reset" variant="outline" icon={<HostSurfaceIcon token="host:reset" />} disabled={saving || operations.length === 0} onClick={() => { setDraftOperations(new Map()); setFormState('pristine'); setMessage(undefined) }}>重置</Button><Button type="submit" theme="primary" icon={<HostSurfaceIcon token="host:save" />} loading={saving} disabled={!plugin.configuration.writable || operations.length === 0}>保存</Button></div>
     </div>
   </Form>
 }

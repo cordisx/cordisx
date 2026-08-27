@@ -4,3 +4,6 @@ dist/
 *.log
 cordisx.config.json
 artifacts/
+config/ui-demos/apps/
+config/ui-demos/cache/
+config/ui-demos/state/

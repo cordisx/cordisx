@@ -13,9 +13,11 @@ import {
   type CordisXRouteDefinitionV2,
 } from '../../contracts.js'
 import { createProviderFleetPage } from './view.js'
+import { CLI_PROXY_ICON } from './icon.js'
 
 export const name = 'cli-proxy-api'
 export const inject = ['i18n', 'slots', 'pages', 'routes', 'platform']
+export const icon = CLI_PROXY_ICON
 
 const capabilities = [
   'models.read', 'tasks.catalog.read', 'tasks.content.read', 'tasks.create', 'tasks.control', 'turns.submit', 'turns.control',

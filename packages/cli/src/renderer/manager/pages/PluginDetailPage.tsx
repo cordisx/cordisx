@@ -63,7 +63,7 @@ export function PluginDetailPage({ model, snapshot, router }: { readonly model: 
   const sourceLink = plugin.package?.canonicalSource
   return <section className="cxr-page" data-plugin-detail={plugin.id}>
     <section className="cxr-plugin-identity" aria-label="插件信息与操作">
-      <PluginIdentityIcon name={plugin.name} icon={plugin.icon} status={plugin.status} />
+      <PluginIdentityIcon pluginId={plugin.id} name={plugin.name} icon={plugin.icon} status={plugin.status} />
       <span className="cxr-plugin-identity-copy"><strong>{plugin.name}</strong><span className="cxr-plugin-identity-meta"><span>{plugin.package?.version ?? '开发态'}</span><code>{plugin.id}</code>{sourceLink === undefined ? null : <a href={sourceLink} target="_blank" rel="noopener noreferrer">项目链接</a>}</span></span>
       <span className="cxr-plugin-identity-actions">
         <Button shape="square" variant="outline" aria-label="重新加载" title="重新加载" data-plugin-lifecycle-action="reload" icon={<HostIcon token="reload-plugin" />} loading={busy} disabled={model.requestPluginLifecycle === undefined || plugin.status !== 'active'} onClick={() => void run({ kind: 'reload', pluginId: plugin.id })} />

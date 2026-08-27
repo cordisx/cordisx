@@ -67,6 +67,12 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
   button.cxr-card:hover { border-color: color-mix(in srgb, var(--cx-text,#fff) 30%, var(--cx-border,#353a42)); background: var(--cx-hover,rgba(255,255,255,.07)); }
   .cxr-card-icon { position: relative; display: grid; width: 34px; height: 34px; flex: none; place-items: center; border-radius: 9px; background: var(--cx-hover,rgba(255,255,255,.08)); color: var(--cx-muted,#aab2c0); font-weight: 700; }
   .cxr-card-icon > img { display: block; width: 100%; height: 100%; border-radius: inherit; object-fit: contain; }
+  .cxr-card-icon[data-icon-kind="artwork"], .cxr-card-icon:has(> .cxr-plugin-badge) { background: transparent; }
+  .cxr-plugin-badge { display: grid; width: 100%; height: 100%; overflow: hidden; place-items: center; border-radius: inherit; background: transparent; }
+  .cxr-plugin-badge > img { display: block; grid-area: 1 / 1; width: 100%; height: 100%; border: 0; background: transparent; object-fit: contain; pointer-events: none; }
+  .cxr-plugin-badge > .cxr-plugin-badge-light { display: none; }
+  .cxr-root[data-cordisx-app-theme="light"] .cxr-plugin-badge > .cxr-plugin-badge-dark { display: none; }
+  .cxr-root[data-cordisx-app-theme="light"] .cxr-plugin-badge > .cxr-plugin-badge-light { display: block; }
   .cxr-status-dot { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border: 2px solid var(--cx-surface-raised,#20242b); border-radius: 50%; background: var(--cx-muted,#8b95a5); }
   .cxr-status-dot[data-status="active"] { background: var(--cx-success,#4dc78f); }
   .cxr-status-dot[data-status="failed"], .cxr-status-dot[data-status="rollback-failed"] { background: var(--cx-danger,#f36d7d); }

@@ -3,7 +3,7 @@ import {
   AppIcon, ArrowLeftIcon, CloseIcon, ControlPlatformIcon, CopyIcon, DashboardIcon,
   DeleteIcon, DownloadIcon, EditIcon, ExtensionIcon, FileCopyIcon, FolderIcon,
   InfoCircleIcon, JumpIcon, KeyIcon, LayersIcon, MoreIcon, PauseIcon, PlayIcon, RefreshIcon,
-  SearchIcon, SealIcon, SettingIcon, ShopIcon, StarIcon, ToolsIcon, UploadIcon, UserIcon,
+  RollbackIcon, SaveIcon, SearchIcon, SealIcon, SettingIcon, ShopIcon, StarIcon, ToolsIcon, UploadIcon, UserIcon,
   VerifiedIcon, ViewListIcon,
 } from 'tdesign-icons-react'
 import type { ManagerIconToken } from '../icons.js'
@@ -58,6 +58,8 @@ const ICONS: Readonly<Record<ManagerIconToken, TDesignIcon>> = {
   'import-plugin': FolderIcon,
   more: MoreIcon,
   'reload-plugin': RefreshIcon,
+  'reset-configuration': RollbackIcon,
+  'save-configuration': SaveIcon,
   'share-plugin': AppIcon,
   'uninstall-plugin': DeleteIcon,
 }
