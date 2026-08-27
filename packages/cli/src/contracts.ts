@@ -586,11 +586,17 @@ export interface CordisXSessionBackdropStage {
   readonly portrait: CordisXEmbeddedPng
 }
 
+export interface CordisXSessionBackdropLayers {
+  readonly portrait?: boolean
+  readonly effects?: boolean
+}
+
 /** Pointer-inert visual data driven by the native reasoning-intensity value. */
 export interface CordisXSessionBackdropPresentation {
   readonly variant: 'imperium'
   readonly driver: 'reasoning-intensity'
   readonly motion?: 'smooth' | 'ascension'
+  readonly layers?: CordisXSessionBackdropLayers
   readonly stages: readonly CordisXSessionBackdropStage[]
 }
 

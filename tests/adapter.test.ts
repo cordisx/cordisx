@@ -241,7 +241,7 @@ describe('SessionBackdropProjection', () => {
     expect(root.parentElement).toBe(host)
     expect(host.firstElementChild).toBe(root)
     expect(host.style.isolation).toBe('isolate')
-    expect(root.dataset).toMatchObject({ material: 'plastic', ambience: 'dormant', stage: '0', peak: 'false' })
+    expect(root.dataset).toMatchObject({ material: 'plastic', ambience: 'dormant', stage: '0', peak: 'false', portrait: 'true', effects: 'true' })
     expect(root.style.pointerEvents).toBe('')
     expect(root.getAttribute('aria-hidden')).toBe('true')
 
@@ -255,6 +255,36 @@ describe('SessionBackdropProjection', () => {
     projection.dispose()
     expect(root.isConnected).toBe(false)
     expect(host.style.isolation).toBe('auto')
+    dom.window.close()
+  })
+
+  it('mounts only the backdrop layers requested by the structured presentation', () => {
+    const dom = new JSDOM('<body><div id="root"><main><div data-app-shell-main-content-layout="thread-edge-scroll"></div></main></div></body>')
+    const projection = new SessionBackdropProjection(dom.window.document)
+    const text = (key: string) => ({ key, fallback: key })
+    const stages = [
+      { material: 'plastic' as const, ambience: 'dormant' as const, portrait: { mediaType: 'image/png' as const, data: 'cGxhc3RpYw==', alt: text('plastic') } },
+      { material: 'gold' as const, ambience: 'imperial' as const, portrait: { mediaType: 'image/png' as const, data: 'Z29sZA==', alt: text('gold') } },
+    ]
+
+    projection.update('session-a', undefined, {
+      variant: 'imperium', driver: 'reasoning-intensity', layers: { portrait: false, effects: true }, stages,
+    }, ['Plastic portrait', 'Gold portrait'])
+    const root = dom.window.document.querySelector<HTMLElement>('.cordisx-session-backdrop')!
+    expect(root.dataset).toMatchObject({ portrait: 'false', effects: 'true' })
+    expect(root.querySelector('.cordisx-session-backdrop-architecture')).not.toBeNull()
+    expect(root.querySelector('.cordisx-session-backdrop-glow')).not.toBeNull()
+    expect(root.querySelector('.cordisx-session-backdrop-portrait')).toBeNull()
+
+    projection.update('session-a', undefined, {
+      variant: 'imperium', driver: 'reasoning-intensity', layers: { portrait: true, effects: false }, stages,
+    }, ['Plastic portrait', 'Gold portrait'])
+    expect(root.dataset).toMatchObject({ portrait: 'true', effects: 'false' })
+    expect(root.querySelector('.cordisx-session-backdrop-architecture')).toBeNull()
+    expect(root.querySelector('.cordisx-session-backdrop-glow')).toBeNull()
+    expect(root.querySelectorAll('.cordisx-session-backdrop-portrait')).toHaveLength(2)
+
+    projection.dispose()
     dom.window.close()
   })
 })

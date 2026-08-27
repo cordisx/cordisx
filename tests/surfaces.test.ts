@@ -151,7 +151,7 @@ describe('SurfaceRegistry', () => {
     const registry = new SurfaceRegistry(contexts)
     const portrait = { mediaType: 'image/png', data: 'Ym91bmRlZC10cmFuc3BhcmVudC1wbmctZml4dHVyZQ==', alt: { key: 'portrait' } }
     registry.register('imperium', { name: 'session.backdrop', id: 'backdrop' }, {
-      variant: 'imperium', driver: 'reasoning-intensity', motion: 'ascension', stages: [
+      variant: 'imperium', driver: 'reasoning-intensity', motion: 'ascension', layers: { portrait: true, effects: false }, stages: [
         { material: 'plastic', ambience: 'dormant', portrait },
         { material: 'gold', ambience: 'imperial', portrait },
       ],
@@ -162,8 +162,15 @@ describe('SurfaceRegistry', () => {
         { material: 'gold', ambience: 'imperial', portrait },
       ],
     } as never)
+    registry.register('imperium', { name: 'session.backdrop', id: 'invalid-layers' }, {
+      variant: 'imperium', driver: 'reasoning-intensity', layers: { portrait: 'yes' }, stages: [
+        { material: 'plastic', ambience: 'dormant', portrait },
+        { material: 'gold', ambience: 'imperial', portrait },
+      ],
+    } as never)
     expect(registry.snapshot().find(item => item.id === 'backdrop')).toMatchObject({ valid: true })
     expect(registry.snapshot().find(item => item.id === 'remote')?.error).toMatch(/unknown field url/)
+    expect(registry.snapshot().find(item => item.id === 'invalid-layers')?.error).toMatch(/portrait layer is invalid/)
     registry.dispose()
     contexts.dispose()
   })
