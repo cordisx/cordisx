@@ -16,6 +16,7 @@ import type {
   CordisXHostExtensionPointCatalogV3,
   CordisXHostExtensionPointCatalogV5,
   CordisXHostExtensionPointCatalogV6,
+  CordisXHostExtensionPointCatalogV7,
   CordisXHostExtensionPointAnchorDescriptorV2,
   CordisXHostExtensionPointAnchorDescriptorV5,
   CordisXHostExtensionPointDescriptor,
@@ -36,6 +37,7 @@ import {
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V7,
 } from '../contracts.js'
 import type { CordisXI18nService } from './i18n.js'
 import type { CommandSnapshot } from './commands.js'
@@ -118,6 +120,10 @@ const V6_PAYLOAD_FAMILIES = new Set<CordisXExtensionPointPayloadFamily>([
   ...V5_PAYLOAD_FAMILIES,
   'reasoning-intensity-presentation',
 ])
+const V7_PAYLOAD_FAMILIES = new Set<CordisXExtensionPointPayloadFamily>([
+  ...V6_PAYLOAD_FAMILIES,
+  'session-backdrop-presentation',
+])
 const AVAILABILITIES = new Set<CordisXExtensionPointAvailability>(['available', 'pending', 'unavailable'])
 const MATURITIES = new Set<CordisXExtensionPointMaturity>(['stable', 'experimental', 'reserved'])
 const ADAPTER_SUPPORT = new Set<CordisXExtensionPointAdapterSupport>(['supported', 'unsupported', 'unverified'])
@@ -157,7 +163,7 @@ function legacyAdapterSupport(availability: CordisXExtensionPointAvailability): 
   return availability === 'available' ? 'supported' : availability === 'pending' ? 'unverified' : 'unsupported'
 }
 
-function normalizeAnchor(value: unknown, pointId: string, schemaVersion: 1 | 2 | 3 | 5 | 6): CordisXHostExtensionPointAnchorDescriptorV5 {
+function normalizeAnchor(value: unknown, pointId: string, schemaVersion: 1 | 2 | 3 | 5 | 6 | 7): CordisXHostExtensionPointAnchorDescriptorV5 {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`extension point ${pointId} anchor must be an object`)
   exactKeys(value, schemaVersion >= 5
     ? ['id', 'placements', 'adapterSupport', 'diagnostic']
@@ -188,7 +194,7 @@ function normalizeAnchor(value: unknown, pointId: string, schemaVersion: 1 | 2 |
   } as CordisXHostExtensionPointAnchorDescriptorV5)
 }
 
-function normalizeDescriptor(value: unknown, schemaVersion: 1 | 2 | 3 | 5 | 6): CordisXHostExtensionPointDescriptorV5 {
+function normalizeDescriptor(value: unknown, schemaVersion: 1 | 2 | 3 | 5 | 6 | 7): CordisXHostExtensionPointDescriptorV5 {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('descriptor must be an object')
   exactKeys(value, schemaVersion === 1
     ? ['id', 'kind', 'title', 'description', 'icon']
@@ -213,7 +219,7 @@ function normalizeDescriptor(value: unknown, schemaVersion: 1 | 2 | 3 | 5 | 6): 
     throw new Error(`extension point ${descriptor.id} requires a host icon token`)
   }
   const payloadFamily = schemaVersion === 1 ? descriptor.kind === 'outlet' ? 'outlet' : 'action' : descriptor.payloadFamily
-  const payloadFamilies = schemaVersion === 6 ? V6_PAYLOAD_FAMILIES : schemaVersion === 5 ? V5_PAYLOAD_FAMILIES : PAYLOAD_FAMILIES
+  const payloadFamilies = schemaVersion === 7 ? V7_PAYLOAD_FAMILIES : schemaVersion === 6 ? V6_PAYLOAD_FAMILIES : schemaVersion === 5 ? V5_PAYLOAD_FAMILIES : PAYLOAD_FAMILIES
   if (!payloadFamilies.has(payloadFamily as CordisXExtensionPointPayloadFamily)) {
     throw new Error(`extension point ${descriptor.id} payload family is invalid`)
   }
@@ -289,14 +295,14 @@ export class ExtensionPointDescriptorRegistry {
     }
   }
 
-  registerCatalog(value: CordisXHostExtensionPointCatalogV1 | CordisXHostExtensionPointCatalogV2 | CordisXHostExtensionPointCatalogV3 | CordisXHostExtensionPointCatalogV5 | CordisXHostExtensionPointCatalogV6 | unknown): () => void {
+  registerCatalog(value: CordisXHostExtensionPointCatalogV1 | CordisXHostExtensionPointCatalogV2 | CordisXHostExtensionPointCatalogV3 | CordisXHostExtensionPointCatalogV5 | CordisXHostExtensionPointCatalogV6 | CordisXHostExtensionPointCatalogV7 | unknown): () => void {
     if (this.disposed) throw new Error('CordisX extension point descriptor registry is disposed')
     const descriptors: CordisXHostExtensionPointDescriptorV5[] = []
     const diagnostics: ExtensionPointDescriptorDiagnostic[] = []
     try {
       if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('catalog must be an object')
       exactKeys(value, ['$schema', 'schemaVersion', 'points'], 'extension point catalog')
-      const catalog = value as Partial<CordisXHostExtensionPointCatalogV1 | CordisXHostExtensionPointCatalogV2 | CordisXHostExtensionPointCatalogV3 | CordisXHostExtensionPointCatalogV5 | CordisXHostExtensionPointCatalogV6>
+      const catalog = value as Partial<CordisXHostExtensionPointCatalogV1 | CordisXHostExtensionPointCatalogV2 | CordisXHostExtensionPointCatalogV3 | CordisXHostExtensionPointCatalogV5 | CordisXHostExtensionPointCatalogV6 | CordisXHostExtensionPointCatalogV7>
       const schemaVersion = catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1 && catalog.schemaVersion === 1
         ? 1
         : catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2 && catalog.schemaVersion === 2
@@ -307,6 +313,8 @@ export class ExtensionPointDescriptorRegistry {
               ? 5
               : catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6 && catalog.schemaVersion === 6
                 ? 6
+                : catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V7 && catalog.schemaVersion === 7
+                  ? 7
             : undefined
       if (schemaVersion === undefined) {
         throw new Error('extension point catalog schema/version is unsupported')
@@ -1076,8 +1084,8 @@ const RESERVED = Object.freeze({ diagnostic: diagnostic('reserved', 'Reserved by
 const UNVERIFIED_ADAPTER = Object.freeze({ diagnostic: diagnostic('adapter-unverified', 'This adapter seat is not release-verified.') })
 
 export const CORDISX_BUILTIN_EXTENSION_POINT_CATALOG = Object.freeze({
-  $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6,
-  schemaVersion: 6,
+  $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V7,
+  schemaVersion: 7,
   points: Object.freeze([
     descriptor('sidebar.footer.before-control', 'surface', 'sidebar.footer.before-control', 'Sidebar footer before control', 'Adds a compact action before the designated sidebar footer control.', 'host:open', 'action', 'stable', 'supported'),
     descriptor('sidebar.footer.after-control', 'surface', 'sidebar.footer.after-control', 'Sidebar footer after control', 'Adds a compact action after the designated sidebar footer control.', 'host:open', 'action', 'stable', 'supported'),
@@ -1096,6 +1104,7 @@ export const CORDISX_BUILTIN_EXTENSION_POINT_CATALOG = Object.freeze({
     descriptor('session.message.actions', 'surface', 'session.message.actions', 'Message actions', 'Adds contextual actions to a canonically identified message.', 'host:more', 'contextual-action', 'reserved', 'unsupported', { diagnostic: diagnostic('message-identity', 'Canonical message identity is unavailable.') }),
     descriptor('session.turn.footer', 'surface', 'session.turn.footer', 'Turn footer', 'Adds a structured presenter after a canonically identified turn.', 'host:info', 'presenter', 'reserved', 'unsupported', RESERVED),
     descriptor('session.tool.actions', 'surface', 'session.tool.actions', 'Tool actions', 'Adds contextual actions to a canonically identified tool item.', 'host:more', 'contextual-action', 'reserved', 'unsupported', { diagnostic: diagnostic('tool-identity', 'Canonical tool identity is unavailable.') }),
+    descriptor('session.backdrop', 'surface', 'session.backdrop', 'Session backdrop', 'Projects a structured, pointer-inert ambience and portrait behind the active session.', 'host:layers', 'session-backdrop-presentation', 'stable', 'supported'),
     descriptor('composer.toolbar.items', 'surface', 'composer.toolbar.items', 'Composer toolbar', 'Adds a host-rendered action at a verified semantic composer anchor.', 'host:more', 'contextual-action', 'stable', 'supported', {
       anchors: Object.freeze([
         { id: 'submit', placements: Object.freeze(['before'] as const), adapterSupport: 'supported' },
@@ -1122,7 +1131,7 @@ export const CORDISX_BUILTIN_EXTENSION_POINT_CATALOG = Object.freeze({
     descriptor('panel.right.content', 'outlet', 'outlet.panel.right.content', 'Right panel content', 'Hosts controlled trusted-local page content in the right panel.', 'host:layers', 'outlet', 'reserved', 'unsupported', RESERVED),
     descriptor('panel.bottom.content', 'outlet', 'outlet.panel.bottom.content', 'Bottom panel content', 'Hosts controlled trusted-local page content in the bottom panel.', 'host:layers', 'outlet', 'reserved', 'unsupported', RESERVED),
   ]),
-}) satisfies CordisXHostExtensionPointCatalogV6
+}) satisfies CordisXHostExtensionPointCatalogV7
 
 export const CORDISX_MANAGER_EXTENSION_POINT_CATALOG = Object.freeze({
   $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
@@ -1223,6 +1232,8 @@ const ZH_MESSAGES: Readonly<Record<string, string>> = {
   'session.turn.footer.description': '在具有规范标识的轮次之后添加结构化展示项。',
   'session.tool.actions.title': '工具项操作',
   'session.tool.actions.description': '向具有规范标识的工具项添加上下文操作。',
+  'session.backdrop.title': '会话背景',
+  'session.backdrop.description': '在当前会话后方投射结构化且不接收指针事件的氛围和人像。',
   'composer.toolbar.items.title': '输入区工具栏',
   'composer.toolbar.items.description': '在已验证的语义输入区锚点添加由宿主渲染的操作。',
   'composer.reasoning-intensity.title': '思考强度',

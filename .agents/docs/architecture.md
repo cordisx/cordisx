@@ -244,6 +244,15 @@ does not fall back to a fixed covering card. Mutation repair may reinsert a
 detached seat after React replaces its parent, but plugins never receive that
 DOM.
 
+The bounded `composer.reasoning-intensity` and `session.backdrop` surfaces are
+the same ownership rule applied to presentation data. The Host alone observes
+the native range and renders the control, ambient geometry, transitions,
+pointer policy, and cleanup. A plugin may supply ordered semantic materials and
+one embedded transparent PNG portrait per backdrop stage; it cannot supply a
+selector, network URL, CSS, HTML, or executable renderer. The backdrop retains
+the last observed stage only for the same active session and is removed on
+session change, contribution withdrawal, or adapter disposal.
+
 The host-neutral surface/outlet vocabulary, current Codex adapter availability,
 DeepSeek Harness intent mapping, explicit replacement refusals, contextual
 identity boundary, PR order, and validation matrix are maintained in

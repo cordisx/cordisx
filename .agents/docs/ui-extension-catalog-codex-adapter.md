@@ -169,6 +169,7 @@ environment family is not duplicated under generic panel names.
 | Session | `session.message.actions` | contextual action | reserved | Requires a unique host message identity and an invocation-time context seat. |
 | Session | `session.turn.footer` | presenter | reserved | Requires an observed turn identity and a unique turn-tail seat. |
 | Session | `session.tool.actions` | contextual action | reserved | Requires an observed tool-call/item identity; no keyed tool renderer. |
+| Session | `session.backdrop` | session-backdrop presentation | implemented | Host projects one pointer-inert ambience layer and one embedded transparent portrait behind the active session. The native reasoning value is the only driver; plugins cannot provide selectors, CSS, URLs, or executable renderers. |
 | Composer | `composer.toolbar.items` | action | implemented | Semantic anchors `leading`, `model`, and `submit`; placements `before`, `after`, and only an existing native `menu`. The release proof covers `submit`/`before`. |
 | Composer | `composer.reasoning-intensity` | reasoning-intensity presentation | implemented | Host projects one uniquely visible native range without replacing its values, events, focus, keyboard behavior, or accessible name. The plugin supplies only ordered semantic material stages. |
 | Composer | `composer.command-menu.items` | menu item | experimental | Project only into the unique open native command menu; never create a CordisX command-menu trigger. |
@@ -268,6 +269,7 @@ resembles an identity never becomes host context.
 | --- | --- | --- |
 | `input.left` / `input.right` | `composer.toolbar.items` | Semantic anchor and placement; host-rendered action only. |
 | native reasoning intensity | `composer.reasoning-intensity` | Host-owned visual projection over the native range; no plugin selector, DOM, CSS, or setting semantics. |
+| reasoning-driven session ambience | `session.backdrop` | Host-owned code-native backdrop plus one bounded embedded PNG portrait per stage; it retains the last observed stage while the native menu is closed and clears on session change or plugin disposal. |
 | input/composer dock | `composer.dock.above` / `composer.dock.below` | Finite presenters; no plugin DOM in Codex shell. |
 | session header actions/utilities | `session.header.actions` | `group=action` or `group=utility`; host decides direct/overflow layout. |
 | `conversation.view` | route/page plus `session.tabs` and `session.content` | Page body mounts only in the controlled outlet. |

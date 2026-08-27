@@ -102,7 +102,7 @@ export async function buildRendererCompositionSource(
         platform: 'browser',
         target: ['chrome120'],
         sourcemap: 'inline',
-        loader: { '.svg': 'text', '.css': 'text' },
+        loader: { '.svg': 'text', '.css': 'text', '.png': 'dataurl' },
         jsx: 'automatic',
         jsxImportSource: 'cordisx/react',
         metafile: true,
@@ -163,7 +163,7 @@ export async function buildRendererBundle(config: CordisXConfig, options: BuildR
     platform: 'browser',
     target: ['chrome120'],
     sourcemap: 'inline',
-    loader: { '.svg': 'text', '.css': 'text' },
+    loader: { '.svg': 'text', '.css': 'text', '.png': 'dataurl' },
     write: false,
     logLevel: 'silent',
   })

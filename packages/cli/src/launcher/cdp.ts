@@ -87,6 +87,7 @@ const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
 const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
 const MAX_MARKETPLACE_REQUESTS = 4
 const CDP_REQUEST_TIMEOUT_MS = 5_000
+const CDP_INJECTION_TIMEOUT_MS = 60_000
 
 export interface CdpTarget {
   readonly id: string
@@ -140,13 +141,17 @@ class CdpSession {
     return new CdpSession(socket)
   }
 
-  send(method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  send(
+    method: string,
+    params: Record<string, unknown> = {},
+    timeoutMs = CDP_REQUEST_TIMEOUT_MS,
+  ): Promise<Record<string, unknown>> {
     const id = this.nextId++
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new Error(`CDP request timed out: ${method}`))
-      }, CDP_REQUEST_TIMEOUT_MS)
+      }, timeoutMs)
       this.pending.set(id, {
         resolve: value => {
           clearTimeout(timer)
@@ -1013,13 +1018,21 @@ async function install(
     if (lifecycle !== undefined) {
       unregisterLifecycleSession = lifecycle.runtime.register(session)
     }
-    const added = await session.send('Page.addScriptToEvaluateOnNewDocument', { source })
+    const added = await session.send(
+      'Page.addScriptToEvaluateOnNewDocument',
+      { source },
+      CDP_INJECTION_TIMEOUT_MS,
+    )
     const identifier = added.identifier
     if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
-    await session.send('Runtime.evaluate', {
-      expression: source,
-      allowUnsafeEvalBlockedByCSP: true,
-    })
+    await session.send(
+      'Runtime.evaluate',
+      {
+        expression: source,
+        allowUnsafeEvalBlockedByCSP: true,
+      },
+      CDP_INJECTION_TIMEOUT_MS,
+    )
     if (lifecycle !== undefined) {
       await evaluateRuntimeOperation(session, `(async () => { try {
         await globalThis.__cordisxBoot
