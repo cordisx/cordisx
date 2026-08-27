@@ -528,10 +528,10 @@ function reasoningPowerSliderRange(document: Document): HTMLInputElement | undef
   const menuMinWidth = menu.style.minWidth
   container.dataset.cordisxSurfaceHost = 'composer.reasoning-intensity'
   container.style.position = 'relative'
-  container.style.height = '40px'
+  container.style.height = '32px'
   visualRoot.style.opacity = '0'
-  menu.style.width = '336px'
-  menu.style.minWidth = '336px'
+  menu.style.width = '300px'
+  menu.style.minWidth = '300px'
   container.append(input)
 
   const commit = (): void => {
@@ -605,8 +605,8 @@ function reasoningMenuRange(document: Document): HTMLInputElement | undefined {
   const menuMinWidth = menu.style.minWidth
   const displays = items.map(item => item.style.display)
   menu.dataset.cordisxReasoningMenu = 'true'
-  menu.style.width = '336px'
-  menu.style.minWidth = '336px'
+  menu.style.width = '300px'
+  menu.style.minWidth = '300px'
   for (const item of items) item.style.display = 'none'
   parent.append(shell)
 
@@ -797,8 +797,9 @@ export class ReasoningIntensityProjection {
   }
 
   private positionThumb(progress: number, width: number): void {
-    const thumbWidth = 52
-    this.thumb.style.left = `${thumbWidth / 2 + progress * Math.max(0, width - thumbWidth)}px`
+    const thumbWidth = 42
+    const trackInset = 3
+    this.thumb.style.left = `${trackInset + thumbWidth / 2 + progress * Math.max(0, width - thumbWidth - trackInset * 2)}px`
   }
 }
 
@@ -1643,25 +1644,25 @@ function installStyles(document: Document): () => void {
     [data-cordisx-no-drag="true"], [data-cordisx-no-drag="true"] * { -webkit-app-region: no-drag !important; }
     .cordisx-native-seat { box-sizing: border-box; color: inherit; font: inherit; pointer-events: auto; -webkit-app-region: no-drag; }
     .cordisx-native-seat[hidden] { display: none !important; }
-    .cordisx-reasoning-intensity { --cordisx-reasoning-edge:#dad7cf; --cordisx-reasoning-light:#f8f7f2; --cordisx-reasoning-mid:#cbc6ba; --cordisx-reasoning-dark:#5a5650; box-sizing:border-box; display:block; min-height:36px; padding:4px; overflow:visible; border:1px solid color-mix(in oklab,var(--cordisx-reasoning-edge) 46%,#16120d); border-radius:999px; background:linear-gradient(180deg,color-mix(in oklab,var(--cordisx-reasoning-dark) 24%,#17130e),color-mix(in oklab,var(--cordisx-reasoning-dark) 46%,#0b0907)); box-shadow:inset 0 1px rgba(255,255,255,.08),0 2px 4px rgba(0,0,0,.14); transition:border-color 360ms ease,background 360ms ease,box-shadow 360ms ease; }
+    .cordisx-reasoning-intensity { --cordisx-reasoning-edge:#dad7cf; --cordisx-reasoning-light:#f8f7f2; --cordisx-reasoning-mid:#cbc6ba; --cordisx-reasoning-dark:#5a5650; box-sizing:border-box; display:block; min-height:28px; padding:3px; overflow:hidden; border:1px solid color-mix(in oklab,var(--cordisx-reasoning-edge) 46%,#16120d); border-radius:999px; background:linear-gradient(180deg,color-mix(in oklab,var(--cordisx-reasoning-dark) 24%,#17130e),color-mix(in oklab,var(--cordisx-reasoning-dark) 46%,#0b0907)); box-shadow:inset 0 1px rgba(255,255,255,.08),0 2px 4px rgba(0,0,0,.14); transition:border-color 360ms ease,background 360ms ease,box-shadow 360ms ease; }
     .cordisx-reasoning-intensity[data-material="plastic"] { --cordisx-reasoning-edge:#eeeae1; --cordisx-reasoning-light:#fffefa; --cordisx-reasoning-mid:#d8d4cb; --cordisx-reasoning-dark:#77736c; }
     .cordisx-reasoning-intensity[data-material="bronze"] { --cordisx-reasoning-edge:#d09b5b; --cordisx-reasoning-light:#ffd197; --cordisx-reasoning-mid:#a9632d; --cordisx-reasoning-dark:#4d2a19; }
     .cordisx-reasoning-intensity[data-material="steel"] { --cordisx-reasoning-edge:#9fb1b7; --cordisx-reasoning-light:#dce7e9; --cordisx-reasoning-mid:#70868e; --cordisx-reasoning-dark:#27383e; }
     .cordisx-reasoning-intensity[data-material="silver"] { --cordisx-reasoning-edge:#e8e9ea; --cordisx-reasoning-light:#fff; --cordisx-reasoning-mid:#aeb4ba; --cordisx-reasoning-dark:#555d65; }
     .cordisx-reasoning-intensity[data-material="gold"] { --cordisx-reasoning-edge:#d7bd70; --cordisx-reasoning-light:#ead28a; --cordisx-reasoning-mid:#b8872f; --cordisx-reasoning-dark:#5e4824; }
-    .cordisx-reasoning-fill { position:absolute; inset:4px auto 4px 4px; max-width:calc(100% - 8px); border-radius:999px; background:linear-gradient(180deg,var(--cordisx-reasoning-light) 0%,var(--cordisx-reasoning-mid) 48%,color-mix(in oklab,var(--cordisx-reasoning-mid) 72%,var(--cordisx-reasoning-dark)) 100%); box-shadow:inset 0 1px rgba(255,255,255,.48),inset 0 -1px rgba(0,0,0,.16),0 0 5px color-mix(in oklab,var(--cordisx-reasoning-mid) 24%,transparent); transition:width 320ms cubic-bezier(.22,.8,.2,1),background 360ms ease,box-shadow 360ms ease; }
+    .cordisx-reasoning-fill { position:absolute; inset:3px auto 3px 3px; max-width:calc(100% - 6px); border-radius:999px; background:linear-gradient(180deg,var(--cordisx-reasoning-light) 0%,var(--cordisx-reasoning-mid) 48%,color-mix(in oklab,var(--cordisx-reasoning-mid) 72%,var(--cordisx-reasoning-dark)) 100%); box-shadow:inset 0 1px rgba(255,255,255,.48),inset 0 -1px rgba(0,0,0,.16),0 0 4px color-mix(in oklab,var(--cordisx-reasoning-mid) 22%,transparent); transition:width 320ms cubic-bezier(.22,.8,.2,1),background 360ms ease,box-shadow 360ms ease; }
     .cordisx-reasoning-fill::after { content:""; position:absolute; inset:12% 7% auto; height:18%; border-radius:999px; background:linear-gradient(90deg,transparent,rgba(255,255,255,.38),transparent); opacity:.65; }
-    .cordisx-reasoning-ticks { position:absolute; inset:4px; display:flex; justify-content:space-between; align-items:center; padding:0 6px; }
+    .cordisx-reasoning-ticks { position:absolute; inset:3px; display:flex; justify-content:space-between; align-items:center; padding:0 5px; }
     .cordisx-reasoning-ticks i { display:block; width:3px; height:3px; border-radius:50%; background:color-mix(in oklab,var(--cordisx-reasoning-light) 62%,transparent); box-shadow:0 1px rgba(0,0,0,.24); opacity:.62; }
-    .cordisx-reasoning-thumb { position:absolute; top:50%; width:52px; height:calc(100% - 6px); min-height:30px; max-height:36px; display:flex; gap:2px; align-items:center; justify-content:center; padding:3px; border:1px solid color-mix(in oklab,var(--cordisx-reasoning-edge) 62%,#5b451b); border-radius:999px; background:linear-gradient(145deg,var(--cordisx-reasoning-light),var(--cordisx-reasoning-mid)); box-shadow:inset 0 1px rgba(255,255,255,.52),inset 0 -1px rgba(0,0,0,.09),0 2px 3px rgba(0,0,0,.17); transform:translate(-50%,-50%); transition:left 320ms cubic-bezier(.22,.8,.2,1),background 360ms ease,border-color 360ms ease,box-shadow 360ms ease; }
-    .cordisx-reasoning-thumb i { display:block; width:20px; height:20px; border-radius:50%; background:radial-gradient(circle at 34% 28%,#fff 0%,var(--cordisx-reasoning-light) 44%,var(--cordisx-reasoning-mid) 100%); box-shadow:inset -1px -1px 2px rgba(0,0,0,.08),0 1px 1px rgba(0,0,0,.10); }
-    .cordisx-reasoning-particles { position:absolute; inset:-7px -3px; overflow:visible; opacity:0; transition:opacity 420ms ease; }
-    .cordisx-reasoning-particles i { position:absolute; left:var(--cordisx-reasoning-progress); top:var(--particle-y); width:3px; height:1.5px; border-radius:100% 0 100% 0; background:var(--cordisx-reasoning-light); box-shadow:0 0 4px var(--cordisx-reasoning-mid); transform:translate(-50%,-50%) rotate(calc(var(--particle-index) * 29deg)); }
+    .cordisx-reasoning-thumb { position:absolute; top:50%; width:42px; height:calc(100% - 6px); min-height:24px; max-height:28px; display:flex; gap:2px; align-items:center; justify-content:center; padding:2px; border:1px solid color-mix(in oklab,var(--cordisx-reasoning-edge) 62%,#5b451b); border-radius:999px; background:linear-gradient(145deg,var(--cordisx-reasoning-light),var(--cordisx-reasoning-mid)); box-shadow:inset 0 1px rgba(255,255,255,.52),inset 0 -1px rgba(0,0,0,.09),0 1px 2px rgba(0,0,0,.16); transform:translate(-50%,-50%); transition:left 320ms cubic-bezier(.22,.8,.2,1),background 360ms ease,border-color 360ms ease,box-shadow 360ms ease; }
+    .cordisx-reasoning-thumb i { display:block; width:16px; height:16px; border-radius:50%; background:radial-gradient(circle at 34% 28%,#fff 0%,var(--cordisx-reasoning-light) 44%,var(--cordisx-reasoning-mid) 100%); box-shadow:inset -1px -1px 2px rgba(0,0,0,.08),0 1px 1px rgba(0,0,0,.10); }
+    .cordisx-reasoning-particles { position:absolute; inset:3px; overflow:hidden; opacity:0; transition:opacity 420ms ease; }
+    .cordisx-reasoning-particles i { position:absolute; left:calc(var(--cordisx-reasoning-progress) - 24px); top:var(--particle-y); width:2.5px; height:1.25px; border-radius:100% 0 100% 0; background:var(--cordisx-reasoning-light); box-shadow:0 0 3px var(--cordisx-reasoning-mid); transform:translate(-50%,-50%) rotate(calc(var(--particle-index) * 29deg)); }
     .cordisx-reasoning-intensity[data-peak="true"][data-motion="ascension"] .cordisx-reasoning-particles { opacity:1; }
     .cordisx-reasoning-intensity[data-peak="true"][data-motion="ascension"] .cordisx-reasoning-particles i { animation:cordisx-reasoning-spark 1.45s var(--particle-delay) ease-in-out infinite; }
     .cordisx-reasoning-intensity[data-dragging="true"] .cordisx-reasoning-fill,.cordisx-reasoning-intensity[data-dragging="true"] .cordisx-reasoning-thumb { transition-duration:0ms; }
     @keyframes cordisx-reasoning-spark { 0%,100% { opacity:.15; transform:translate(-8px,-50%) scale(.55) rotate(calc(var(--particle-index) * 29deg)); } 42% { opacity:1; transform:translate(calc(8px + var(--particle-index) * 1.4px),calc(-50% - 7px)) scale(1) rotate(calc(24deg + var(--particle-index) * 29deg)); } 75% { opacity:.35; transform:translate(calc(18px + var(--particle-index) * 2px),calc(-50% + 5px)) scale(.7) rotate(calc(56deg + var(--particle-index) * 29deg)); } }
-    .cordisx-reasoning-native-menu-shell { position:relative; height:40px; margin:6px 10px 8px; }
+    .cordisx-reasoning-native-menu-shell { position:relative; height:32px; margin:4px 8px 6px; }
     .cordisx-reasoning-native-menu-range { position:absolute; inset:0; z-index:1; width:100%; height:100%; margin:0; cursor:grab; }
     .cordisx-reasoning-native-menu-range:active { cursor:grabbing; }
     .cordisx-session-backdrop { --cordisx-backdrop-accent:#e8e2d8; --cordisx-backdrop-strength:.16; position:absolute; inset:0; z-index:0; overflow:hidden; pointer-events:none; }
@@ -1673,7 +1674,7 @@ function installStyles(document: Document): () => void {
     .cordisx-session-backdrop-architecture { position:absolute; width:min(58vw,720px); aspect-ratio:1; right:-5vw; bottom:clamp(92px,11vh,128px); border:1px solid color-mix(in oklab,var(--cordisx-backdrop-accent) 40%,transparent); border-radius:50%; box-shadow:0 0 0 5vw color-mix(in oklab,var(--cordisx-backdrop-accent) 3.5%,transparent),0 0 0 11vw color-mix(in oklab,var(--cordisx-backdrop-accent) 2.5%,transparent); opacity:calc(.10 + var(--cordisx-backdrop-progress) * .34); transform:translateY(44%) rotate(calc(-12deg + var(--cordisx-backdrop-progress) * 18deg)); transition:opacity 480ms ease,transform 620ms cubic-bezier(.2,.8,.2,1),border-color 480ms ease; }
     .cordisx-session-backdrop-architecture::before,.cordisx-session-backdrop-architecture::after { content:""; position:absolute; inset:10%; border:1px solid color-mix(in oklab,var(--cordisx-backdrop-accent) 36%,transparent); border-radius:50%; }
     .cordisx-session-backdrop-architecture::after { inset:24%; border-radius:2%; transform:rotate(45deg); }
-    .cordisx-session-backdrop-portrait { position:absolute; right:0; bottom:0; width:auto; height:150vh; max-width:none; max-height:none; object-fit:contain; object-position:right bottom; filter:drop-shadow(-16px 6px 24px rgba(0,0,0,.34)) saturate(calc(.84 + var(--cordisx-backdrop-progress) * .24)); opacity:calc(.26 + var(--cordisx-backdrop-progress) * .52); transform:scale(calc(.94 + var(--cordisx-backdrop-progress) * .06)); transform-origin:right bottom; transition:opacity 520ms ease,transform 620ms cubic-bezier(.2,.8,.2,1),filter 520ms ease; }
+    .cordisx-session-backdrop-portrait { position:absolute; right:0; bottom:0; width:auto; height:66.6667vh; max-width:none; max-height:none; object-fit:contain; object-position:right bottom; filter:drop-shadow(-16px 6px 24px rgba(0,0,0,.34)) saturate(calc(.84 + var(--cordisx-backdrop-progress) * .24)); opacity:calc(.26 + var(--cordisx-backdrop-progress) * .52); transform-origin:right bottom; transition:opacity 520ms ease,filter 520ms ease; }
     .cordisx-session-backdrop-portrait[data-active="false"] { opacity:0; }
     .cordisx-session-backdrop[data-peak="true"] .cordisx-session-backdrop-architecture { animation:cordisx-backdrop-crown 8s linear infinite; }
     @keyframes cordisx-backdrop-crown { to { transform:translateY(44%) rotate(366deg); } }
