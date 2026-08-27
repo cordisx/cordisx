@@ -62,6 +62,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
   button.cxr-card { cursor: pointer; }
   button.cxr-card:hover { border-color: color-mix(in srgb, var(--cx-text,#fff) 30%, var(--cx-border,#353a42)); background: var(--cx-hover,rgba(255,255,255,.07)); }
   .cxr-card-icon { position: relative; display: grid; width: 34px; height: 34px; flex: none; place-items: center; border-radius: 9px; background: var(--cx-hover,rgba(255,255,255,.08)); color: var(--cx-muted,#aab2c0); font-weight: 700; }
+  .cxr-card-icon > img { display: block; width: 100%; height: 100%; border-radius: inherit; object-fit: contain; }
   .cxr-status-dot { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border: 2px solid var(--cx-surface-raised,#20242b); border-radius: 50%; background: var(--cx-muted,#8b95a5); }
   .cxr-status-dot[data-status="active"] { background: var(--cx-success,#4dc78f); }
   .cxr-status-dot[data-status="failed"], .cxr-status-dot[data-status="rollback-failed"] { background: var(--cx-danger,#f36d7d); }
@@ -101,7 +102,6 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
   .cxr-marketplace-card { position: relative; display: flex; min-width: 0; min-height: 96px; align-items: center; border: 1px solid var(--cx-border); border-radius: 11px; background: var(--cx-surface-raised); color: inherit; }
   .cxr-marketplace-card:hover { border-color: color-mix(in srgb,var(--cx-text) 32%,var(--cx-border)); }
   .cxr-marketplace-primary { display: flex; min-width: 0; min-height: 94px; flex: 1; align-items: center; gap: 11px; border: 0; padding: 13px; background: transparent; color: inherit; cursor: pointer; text-align: left; }
-  .cxr-marketplace-card .cxr-card-icon img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
   .cxr-marketplace-actions { position: absolute; top: 8px; right: 8px; z-index: 1; display: flex; align-items: center; gap: 2px; border-radius: 8px; padding: 2px; background: color-mix(in srgb,var(--cx-surface-raised,#20242b) 92%,transparent); box-shadow: 0 2px 12px rgb(0 0 0 / 20%); opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
   .cxr-marketplace-card:hover .cxr-marketplace-actions, .cxr-marketplace-card:focus-within .cxr-marketplace-actions { opacity: 1; pointer-events: auto; }
   .cxr-marketplace-meta { align-self: end; color: var(--cx-muted); font-size: 10px; }

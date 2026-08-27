@@ -7,6 +7,7 @@ import type { ManagerRouter } from '../model/routes.js'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
 import { SearchField } from '../../host-ui/SearchField.js'
+import { PluginIdentityIcon } from '../components/PluginIdentityIcon.js'
 
 export function PluginsPage({ model, snapshot, router }: { readonly model: ManagerModel; readonly snapshot: ManagerSnapshot; readonly router: ManagerRouter }) {
   const [query, setQuery] = useState('')
@@ -32,7 +33,7 @@ export function PluginsPage({ model, snapshot, router }: { readonly model: Manag
         {plugins.map(plugin => (
           <div key={`${plugin.source}\0${plugin.id}`} className="cxr-plugin-row" role="listitem">
             <button className="cxr-plugin-primary" type="button" data-plugin-id={plugin.id} aria-label={`打开插件详情 · ${plugin.name}`} onClick={() => router.navigate({ kind: 'plugin', pluginId: plugin.id, page: 'readme' })}>
-              <span className="cxr-card-icon">{plugin.name.slice(0, 2).toLocaleUpperCase()}<span className="cxr-status-dot" data-status={plugin.status} title={plugin.status} aria-label={`状态：${plugin.status}`} /></span>
+              <PluginIdentityIcon name={plugin.name} icon={plugin.icon} status={plugin.status} />
               <span className="cxr-card-body"><span className="cxr-card-title">{plugin.name}</span><span className="cxr-card-description">{plugin.description}</span><code className="cxr-card-code">{plugin.id}</code></span>
             </button>
             <span className="cxr-plugin-actions">

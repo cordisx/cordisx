@@ -1181,12 +1181,20 @@ declare module '@deepseek-ai/cordis' {
 /** Cordis plugin module after browser bundling. */
 export interface CordisXPluginModule {
   readonly name?: string
+  /** Optional local brand artwork. The Host validates and renders it inside Host-owned chrome. */
+  readonly icon?: CordisXPluginBrandIcon
   readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly Config?: CordisXStandardSchema
   readonly configApplies?: CordisXConfigAppliesInput
   readonly apply?: (ctx: Context, config: unknown) => unknown
   readonly default?: unknown
+}
+
+/** Inline local-plugin artwork accepted by the Host without network access. */
+export interface CordisXPluginBrandIcon {
+  readonly mediaType: 'image/png' | 'image/webp'
+  readonly data: string
 }
 
 /** Plugin composition delivered from the launcher to the renderer. */
