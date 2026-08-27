@@ -12,6 +12,7 @@ export type ManagerRoute =
   | { readonly kind: 'page'; readonly qualifiedId: string }
   | { readonly kind: 'marketplace-plugin'; readonly identity: string }
   | { readonly kind: 'marketplace-sources' }
+  | { readonly kind: 'about-acknowledgements' }
   | { readonly kind: 'manager-content'; readonly id: string; readonly reference: CordisXRouteReference }
 
 export interface ManagerRouter {
@@ -25,5 +26,6 @@ export function primaryFor(route: ManagerRoute): ManagerPrimaryPage {
   if (route.kind === 'extension-point') return 'extension-points'
   if (route.kind === 'route' || route.kind === 'page') return 'routes'
   if (route.kind === 'marketplace-plugin' || route.kind === 'marketplace-sources') return 'marketplace'
+  if (route.kind === 'about-acknowledgements') return 'about'
   return 'plugins'
 }

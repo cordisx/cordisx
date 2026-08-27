@@ -42,6 +42,8 @@ for (const required of [
   'dist/src/plugins/channel/service.mjs',
   'dist/assets/brand/cordisx-mark-light.svg',
   'dist/assets/brand/cordisx-mark-dark.svg',
+  'dist/assets/brand/cordisx-mark-animated-light.svg',
+  'dist/assets/brand/cordisx-mark-animated-dark.svg',
   'node_modules/@cordisx/schemastery-ui/package.json',
   'node_modules/@cordisx/schemastery-ui/LICENSE',
   'node_modules/@cordisx/schemastery-ui/CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md',

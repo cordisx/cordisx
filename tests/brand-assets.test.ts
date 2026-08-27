@@ -40,4 +40,35 @@ describe('CordisX brand assets', () => {
       expect(readme).toContain('<img alt="CordisX three-ring spherical mark" src="./packages/cli/assets/brand/cordisx-mark-light.svg" width="180">')
     }
   })
+
+  it('publishes one-shot animated marks for the About page', async () => {
+    const [light, dark, component, page, styles] = await Promise.all([
+      read('packages/cli/assets/brand/cordisx-mark-animated-light.svg'),
+      read('packages/cli/assets/brand/cordisx-mark-animated-dark.svg'),
+      read('packages/cli/src/renderer/host-ui/BrandMark.tsx'),
+      read('packages/cli/src/renderer/manager/pages/AboutPage.tsx'),
+      read('packages/cli/src/renderer/manager/styles.ts'),
+    ])
+
+    for (const source of [light, dark]) {
+      expect(source).toContain('data-cordisx-animation="one-shot"')
+      expect(source).toContain('const finish = 3200;')
+      expect(source).toContain('else renderOfficial();')
+      expect(source.match(/<line\b/g)?.length).toBe(1440)
+      expect(source).not.toMatch(/setInterval|repeatCount|%\s*cycle/i)
+    }
+    expect(component).toContain('export function AnimatedBrandMark')
+    expect(component).toContain('data-cordisx-animation="one-shot"')
+    expect(component).toContain('window.requestAnimationFrame(frame)')
+    expect(component).toContain('window.cancelAnimationFrame(animationFrame)')
+    expect(component).toContain('<AnimatedMarkSvg className="cxr-brand-mark-dark"')
+    expect(component).toContain('<AnimatedMarkSvg className="cxr-brand-mark-light"')
+    expect(component).not.toMatch(/<object|<embed/)
+    expect(page).toContain('<AnimatedBrandMark />')
+    expect(page).toContain("poweredBy: '由 Cordis 与 React 驱动'")
+    expect(page).toContain("poweredBy: 'Powered by Cordis & React'")
+    expect(page).toContain("release: 'Beta 预览版 · AGPL-3.0-or-later'")
+    expect(page).toContain('productLocale(snapshot.localization.locale)')
+    expect(styles).toContain('.cxr-about-identity > .cxr-brand-mark { width: 128px; height: 128px; }')
+  })
 })
