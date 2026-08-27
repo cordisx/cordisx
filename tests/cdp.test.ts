@@ -233,7 +233,8 @@ describe('CdpPluginLifecycleRuntime', () => {
 
   it('fails closed on live renderer rollback and abort errors until a retry proves the terminal state', async () => {
     for (const terminal of ['rollback', 'abort'] as const) {
-      const runtime = new CdpPluginLifecycleRuntime()
+      const permissions = new PluginPermissionIdentityRegistry([{ id: 'demo', source: 'file:///demo-old.js' }])
+      const runtime = new CdpPluginLifecycleRuntime(permissions)
       const previous = activation(0, 'demo-old')
       const candidate = activation(1, 'demo-new')
       let transactionEpoch = ''
@@ -259,12 +260,20 @@ describe('CdpPluginLifecycleRuntime', () => {
       await runtime.stage({
         transactionId: 'tx', ...fence, afterRegistryEpoch: 1, operation: 'disable', previous, candidate,
         targetId: 'demo', affectedPluginIds: ['demo'],
+        ...(terminal === 'rollback' ? { package: {
+          manifest: { id: 'demo' }, digest: `sha256:${'b'.repeat(64)}`, moduleSource: '', artifactSource: 'void 0',
+          serviceModules: [], identitySource: 'file:///demo-new.js',
+        } as never } : {}),
       })
+      if (terminal === 'rollback') expect(permissions.allowed({ id: 'demo', source: 'file:///demo-new.js' })).toBe(true)
       const terminate = async (): Promise<unknown> => terminal === 'rollback' ? await runtime.rollback('tx') : await runtime.abort('tx')
       await expect(terminate()).rejects.toThrow(`fixture ${terminal} failure`)
       expect(() => runtime.register({ send: async () => ({}) } as never)).toThrow('during a plugin generation transaction')
+      expect(() => runtime.prepare(`overlap-${terminal}`)).toThrow('another plugin generation transaction is unresolved')
+      if (terminal === 'rollback') expect(permissions.allowed({ id: 'demo', source: 'file:///demo-new.js' })).toBe(true)
       if (terminal === 'rollback') await expect(terminate()).resolves.toMatchObject({ active: previous, disposedAfter: candidate })
       else await expect(terminate()).resolves.toBeUndefined()
+      if (terminal === 'rollback') expect(permissions.allowed({ id: 'demo', source: 'file:///demo-old.js' })).toBe(true)
 
       const unregisterReplacement = runtime.register({ send: async () => ({}) } as never)
       expect(runtime.prepare(`replacement-${terminal}`)).toMatchObject({ expectedRegistryEpoch: 0 })

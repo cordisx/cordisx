@@ -249,6 +249,9 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   prepare(transactionId: string): RuntimeGenerationFence {
     if (this.fences.has(transactionId)) throw new Error('plugin generation fence already exists')
+    if (this.fences.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
+      throw new Error('another plugin generation transaction is unresolved')
+    }
     if (this.sessions.size === 0) throw new Error('no ready CordisX renderer is available')
     const fence = Object.freeze({
       transactionEpoch: `${transactionId}:${crypto.randomUUID()}`,

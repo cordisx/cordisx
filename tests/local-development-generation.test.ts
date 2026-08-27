@@ -28,10 +28,12 @@ async function eventually(assertion: () => void, timeout = 8_000): Promise<void>
 class FixtureGenerationRuntime {
   epoch = 0
   failNextStage = false
+  failNextRollback = false
   staged: PluginRuntimeMutation | undefined
   active: CordisXPluginActivationRecordV1 | undefined
   readonly published: CordisXPluginActivationRecordV1[] = []
   readonly states: CordisXLocalDevelopmentSnapshot[] = []
+  readonly rollbackTransactions: string[] = []
 
   currentRegistryEpoch(): number { return this.epoch }
   cancelPreparation(): void {}
@@ -71,6 +73,11 @@ class FixtureGenerationRuntime {
   }
   async finalize(): Promise<void> { this.staged = undefined }
   async rollback(transactionId: string) {
+    this.rollbackTransactions.push(transactionId)
+    if (this.failNextRollback) {
+      this.failNextRollback = false
+      throw new Error('fixture rollback rejected')
+    }
     const mutation = this.staged
     this.staged = undefined
     const active = mutation?.previous ?? this.active
@@ -141,16 +148,21 @@ describe('local development generations', () => {
       expect(runtime.states.at(-1)).toMatchObject({ state: 'ready' })
 
       runtime.failNextStage = true
+      runtime.failNextRollback = true
       await writeFile(dependency, "export const value = 'activation-fails'\n")
-      await eventually(() => expect(runtime.states.at(-1)).toMatchObject({ state: 'failed', error: 'fixture activation rejected' }))
+      await eventually(() => expect(runtime.states.at(-1)).toMatchObject({
+        state: 'failed', error: expect.stringContaining('rollback failed: fixture rollback rejected'),
+      }))
       expect(runtime.published).toHaveLength(3)
-      expect(JSON.parse(bootstraps.at(-1)!) as { epoch: number; digest: string }).toMatchObject({
-        epoch: runtime.epoch,
-        digest: runtime.published.at(-1)!.plugins[0]!.digest,
-      })
+      const failedTransaction = runtime.rollbackTransactions.at(-1)
 
       await writeFile(dependency, "export const value = 'activation-recovers'\n")
       await eventually(() => expect(runtime.published).toHaveLength(4))
+      expect(runtime.rollbackTransactions.slice(-2)).toEqual([failedTransaction, failedTransaction])
+      expect(JSON.parse(bootstraps.at(-2)!) as { epoch: number; digest: string }).toMatchObject({
+        epoch: runtime.epoch - 1,
+        digest: runtime.published.at(-2)!.plugins[0]!.digest,
+      })
       expect(bootstraps).toHaveLength(5)
 
       await writeFile(dependency, "export const value = 'rapid-one'\n")

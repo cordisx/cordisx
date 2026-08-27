@@ -253,6 +253,11 @@ export interface LocalDevelopmentControllerOptions {
   readonly stdout: (line: string) => void
 }
 
+interface PendingLocalDevelopmentRollback {
+  readonly transactionId: string
+  restored?: Awaited<ReturnType<CdpPluginLifecycleRuntime['rollback']>>
+}
+
 /** Single-flight, attempt-fenced local development generation coordinator. */
 export class LocalDevelopmentController {
   private readonly entry: string
@@ -267,6 +272,7 @@ export class LocalDevelopmentController {
   private desiredAttempt = 0
   private running = false
   private stopped = true
+  private pendingRollback: PendingLocalDevelopmentRollback | undefined
   private watchEpoch = 0
   private starting: Promise<void> | undefined
   private polling: Promise<void> | undefined
@@ -315,6 +321,16 @@ export class LocalDevelopmentController {
     this.active = structuredClone(restored.active)
     const source = await this.options.rebuildBootstrap(this.lastGoodConfig, this.active, restored.registryEpoch)
     this.options.setBootstrap(source)
+  }
+
+  private async finishPendingRollback(transactionId: string): Promise<void> {
+    const pending: PendingLocalDevelopmentRollback = this.pendingRollback?.transactionId === transactionId
+      ? this.pendingRollback
+      : { transactionId }
+    this.pendingRollback = pending
+    pending.restored ??= await this.options.runtime.rollback(transactionId)
+    await this.restoreLastGoodBootstrap(pending.restored)
+    if (this.pendingRollback === pending) this.pendingRollback = undefined
   }
 
   private schedule(): void {
@@ -400,6 +416,18 @@ export class LocalDevelopmentController {
 
   private async attempt(attempt: number): Promise<void> {
     await this.options.runtime.updateDevelopmentStatus(this.state('building'))
+    if (this.pendingRollback !== undefined) {
+      const transactionId = this.pendingRollback.transactionId
+      try {
+        await this.finishPendingRollback(transactionId)
+      } catch (error) {
+        const message = `pending rollback ${transactionId} failed: ${diagnostic(error)}`
+        await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
+        this.options.stdout(`[cordisx] local-dev ${message}`)
+        return
+      }
+      if (attempt !== this.desiredAttempt || this.stopped) return
+    }
     this.options.stdout(`[cordisx] local-dev build ${attempt}: ${this.entry}`)
     let build: LocalDevelopmentBuild
     try {
@@ -494,13 +522,16 @@ export class LocalDevelopmentController {
     if (attempt !== this.desiredAttempt || this.stopped) {
       return
     }
-    const fence = this.options.runtime.prepare(transactionId)
-    if (fence.expectedRegistryEpoch !== expectedRegistryEpoch) {
-      await this.options.runtime.cancelPreparation(transactionId)
-      this.schedule()
-      return
-    }
+    let prepared = false
     try {
+      const fence = this.options.runtime.prepare(transactionId)
+      prepared = true
+      if (fence.expectedRegistryEpoch !== expectedRegistryEpoch) {
+        await this.options.runtime.cancelPreparation(transactionId)
+        prepared = false
+        this.schedule()
+        return
+      }
       await this.options.runtime.stage({
         transactionId,
         ...fence,
@@ -521,12 +552,20 @@ export class LocalDevelopmentController {
         },
       })
       if (attempt !== this.desiredAttempt || this.stopped) {
-        await this.restoreLastGoodBootstrap(await this.options.runtime.rollback(transactionId))
+        this.pendingRollback = { transactionId }
+        try {
+          await this.finishPendingRollback(transactionId)
+        } catch (error) {
+          const message = `pending rollback ${transactionId} failed: ${diagnostic(error)}`
+          await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
+          this.options.stdout(`[cordisx] local-dev ${message}`)
+        }
         return
       }
       await this.options.runtime.publish(transactionId)
       await this.options.runtime.complete(transactionId)
       await this.options.runtime.finalize(transactionId)
+      prepared = false
       const { transactionId: _transactionId, ...committed } = candidate
       this.active = { ...committed, recordKind: 'active', lastGoodRevision: candidate.revision }
       this.lastGoodConfig = structuredClone(bootstrapConfig)
@@ -536,10 +575,13 @@ export class LocalDevelopmentController {
       this.options.stdout(`[cordisx] local-dev generation ready: ${build.id} ${moduleGeneration}`)
     } catch (error) {
       let message = diagnostic(error)
-      try {
-        await this.restoreLastGoodBootstrap(await this.options.runtime.rollback(transactionId))
-      } catch (rollbackError) {
-        message = `${message}; rollback failed: ${diagnostic(rollbackError)}`
+      if (prepared) {
+        this.pendingRollback = { transactionId }
+        try {
+          await this.finishPendingRollback(transactionId)
+        } catch (rollbackError) {
+          message = `${message}; rollback failed: ${diagnostic(rollbackError)}`
+        }
       }
       await this.options.runtime.updateDevelopmentStatus(this.state('failed', message))
       this.options.stdout(`[cordisx] local-dev activation failed; last-good retained: ${message}`)
