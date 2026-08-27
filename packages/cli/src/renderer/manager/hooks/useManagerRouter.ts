@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { flushSync } from 'react-dom'
 import type { ManagerRoute, ManagerRouter } from '../model/routes.js'
 
 const PLAYGROUND_ROUTE_KEY = 'cordisx.playground.manager.history.v1'
@@ -17,10 +16,10 @@ export function useManagerRouter(storage?: Storage): ManagerRouter {
   const route = history.at(-1) ?? { kind: 'primary' as const, page: 'plugins' as const }
   useEffect(() => { storage?.setItem(PLAYGROUND_ROUTE_KEY, JSON.stringify(history)) }, [history, storage])
   const navigate = useCallback((next: ManagerRoute) => {
-    flushSync(() => setHistory(current => [...current, next]))
+    setHistory(current => [...current, next])
   }, [])
   const back = useCallback(() => {
-    flushSync(() => setHistory(current => current.length > 1 ? current.slice(0, -1) : current))
+    setHistory(current => current.length > 1 ? current.slice(0, -1) : current)
   }, [])
   return useMemo(() => ({ route, navigate, back }), [back, navigate, route])
 }

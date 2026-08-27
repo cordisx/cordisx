@@ -15,8 +15,8 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
   .cxr-brand-mark { display: inline-grid; width: 18px; height: 18px; flex: none; place-items: center; }
   .cxr-brand-mark > img, .cxr-brand-mark > svg { display: block; grid-area: 1 / 1; width: 100%; height: 100%; border: 0; background: transparent; object-fit: contain; pointer-events: none; }
   .cxr-brand-mark > .cxr-brand-mark-light { display: none; }
-  .cxr-root[data-cordisx-app-theme="light"] .cxr-brand-mark > .cxr-brand-mark-dark { display: none; }
-  .cxr-root[data-cordisx-app-theme="light"] .cxr-brand-mark > .cxr-brand-mark-light { display: block; }
+  [data-cordisx-app-theme="light"] .cxr-brand-mark > .cxr-brand-mark-dark { display: none; }
+  [data-cordisx-app-theme="light"] .cxr-brand-mark > .cxr-brand-mark-light { display: block; }
   .cxr-trigger { display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; margin-left: 2px; border: 0; border-radius: 9px; padding: 0; background: transparent; color: inherit; cursor: pointer; opacity: .72; }
   .cxr-trigger:hover, .cxr-trigger[aria-expanded="true"] { background: var(--cx-hover, color-mix(in srgb,currentColor 9%,transparent)); opacity: 1; }
   .cxr-trigger:focus-visible { outline: 2px solid var(--cx-focus, #c7ccd4); outline-offset: 1px; }

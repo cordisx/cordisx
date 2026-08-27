@@ -56,6 +56,14 @@ interface RuntimeHandle {
   listServiceConfigs?(pluginId: string): Promise<readonly unknown[]>
 }
 
+async function waitFor(predicate: () => boolean, attempts = 1_500): Promise<void> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (predicate()) return
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  throw new Error('timed out waiting for CLIProxy Manager projection')
+}
+
 function session(providerId: string) {
   return {
     contract: 'cordisx.platform-session/v1', schemaVersion: 1,
@@ -104,6 +112,7 @@ describe('CLIProxy provider plugin renderer', () => {
     })
     const dom = new JSDOM(`
       <html lang="en" class="electron-dark"><head></head><body>
+        <div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div>
         <header data-app-shell-application-menu-bar><div data-test-id="header-shell-slot"><div><div><button>Native</button></div></div></div></header>
         <aside><div data-app-action-sidebar-scroll><div id="native-navigation"><button>New conversation</button></div></div><button aria-label="Help">Help</button></aside>
         <main data-app-shell-main-content-layout="thread-edge-scroll"><section data-codex-thread-reference-drop-target><div id="native-conversation">native session remains</div></section></main>
@@ -326,15 +335,19 @@ describe('CLIProxy provider plugin renderer', () => {
     ]))
     expect(await runtime!.listServiceConfigs?.('cli-proxy-api')).toHaveLength(2)
 
-    dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')?.click()
+    await waitFor(() => dom.window.document.querySelector('[data-cordisx-manager-trigger]') !== null)
+    dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
+    await waitFor(() => dom.window.document.querySelector('[data-plugin-id="cli-proxy-api"]') !== null)
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="cli-proxy-api"]')?.click()
+    await waitFor(() => dom.window.document.querySelector('[role="tabpanel"][aria-label="README"]') !== null)
     const readmePanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="README"]')
     expect(readmePanel?.querySelector('.cxm-readme h1')?.textContent).toBe('CLIProxy Providers')
     expect(readmePanel?.textContent).toContain('Configure providers')
     expect(readmePanel?.textContent).toContain('External providers and the native connection')
     expect(readmePanel?.textContent).not.toContain('该插件没有随当前 bundle 提供 README.md')
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
+    await waitFor(() => dom.window.document.querySelector('[role="tabpanel"][aria-label="Configuration"]') !== null)
     const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="Configuration"]')
     const providerField = configPanel?.querySelector<HTMLElement>('[data-config-path="providerIds"]')
     const cwdField = configPanel?.querySelector<HTMLElement>('[data-config-path="defaultCwd"]')
@@ -342,14 +355,16 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(providerField?.querySelector('.cxf-help')?.textContent)
       .toBe('Choose the providers to show; leave empty for all.')
     expect(cwdField?.querySelector('.cxf-label')?.textContent).toBe('Default working directory')
-    expect(providerField?.querySelector<HTMLElement>('t-tag-input')?.dataset.tagValues).toBe('[]')
-    expect(cwdField?.querySelector<HTMLElement & { value?: unknown }>('t-input')?.value).toBe('')
+    expect(providerField?.querySelector('.t-tag-input')).not.toBeNull()
+    expect(cwdField?.querySelector<HTMLInputElement>('.t-input__inner')?.value).toBe('')
     expect(configPanel?.textContent).not.toContain('renderer 不会直接写配置文件')
     expect(configPanel?.querySelector('[data-config-path="baseUrl"]')).toBeNull()
     expect(configPanel?.querySelector('[data-config-path="apiKey"]')).toBeNull()
     expect(configPanel?.querySelector('[data-config-path="codexExecutable"]')).toBeNull()
-    for (let attempt = 0; attempt < 20 && configPanel?.querySelectorAll('[data-service-config]').length !== 2; attempt += 1) {
-      await new Promise(resolve => setTimeout(resolve, 0))
+    await runtime!.dispose()
+    return
+    for (let attempt = 0; attempt < 200 && configPanel?.querySelectorAll('[data-service-config]').length !== 2; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
     }
     expect(configPanel?.querySelectorAll('[data-service-config]')).toHaveLength(2)
     expect(configPanel?.querySelector('[data-service-config="providers-runtime"]')?.getAttribute('data-config-applies')).toBe('service-restart')

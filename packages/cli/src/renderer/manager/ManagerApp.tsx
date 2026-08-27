@@ -155,6 +155,12 @@ export function ManagerApp({ model, marketplace, triggerSeat }: ManagerAppProps)
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
   useEffect(() => { playgroundStorage?.setItem('cordisx.playground.manager.open.v1', String(open)) }, [open, playgroundStorage])
+  useEffect(() => {
+    const route = router.route
+    if (!open || route.kind !== 'manager-content') return
+    if (snapshot.settingsNavigationItems?.some(item => item.id === route.id) === true) return
+    router.navigate({ kind: 'primary', page: 'plugins' })
+  }, [open, router.navigate, router.route, snapshot.settingsNavigationItems])
   const attach = useMemo(() => () => triggerSeat.ownerDocument.querySelector<HTMLElement>('[data-cordisx-react-manager]') ?? triggerSeat.ownerDocument.body, [triggerSeat])
   const contributionId = router.route.kind === 'manager-content' ? router.route.id : undefined
   const contributionIcon = contributionId === undefined ? undefined : snapshot.settingsNavigationItems?.find(item => item.id === contributionId)?.icon

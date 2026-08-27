@@ -152,11 +152,17 @@ describe('Agent Trace built README projection', () => {
     ])
   })
 
-  it('renders the localized Agent Trace product README in the manager README tab', () => {
+  it('renders the localized Agent Trace product README in the manager README tab', async () => {
     const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')
     expect(trigger).not.toBeNull()
     trigger?.click()
-    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="agent-trace-showcase"]')?.click()
+    for (let attempt = 0; attempt < 200 && dom.window.document.querySelector('[data-plugin-id="agent-trace-showcase"]') === null; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="agent-trace-showcase"]')!.click()
+    for (let attempt = 0; attempt < 200 && dom.window.document.querySelector('[role="tabpanel"][aria-label="README"]') === null; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
 
     const panel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="README"]')
     expect(panel?.querySelector('.cxm-readme h1')?.textContent).toBe('CordisX Agent Trace Showcase')

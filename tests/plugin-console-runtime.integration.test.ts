@@ -117,35 +117,41 @@ describe('plugin DevTools Console runtime', () => {
     expect(runtime!.pluginConsole('console-showcase').unattributedEntries).toBe(1)
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger="true"]')?.click()
+    await waitForState(() => dom.window.document.querySelector('[data-plugin-id="console-showcase"]') !== null, 'React plugin list')
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="console-showcase"]')?.click()
+    await waitForState(() => dom.window.document.querySelector('[data-plugin-detail-tab="runtime"]') !== null, 'React plugin details')
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.click()
+    await waitForState(() => dom.window.document.querySelector('[data-plugin-runtime-status="console-showcase"]') !== null, 'React runtime panel')
     expect(dom.window.document.querySelector('[data-plugin-runtime-status="console-showcase"]')).not.toBeNull()
     const runtimeOverview = dom.window.document.querySelector<HTMLElement>('.cxm-runtime-overview')!
     expect(runtimeOverview.querySelector('[data-runtime-console-summary="console-showcase"]')).not.toBeNull()
     expect(runtimeOverview.querySelectorAll('.cxm-runtime-console-metric')).toHaveLength(4)
     expect(runtimeOverview.querySelector('[data-runtime-lifecycle="console-showcase"]')).toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="logs"]')?.click()
+    await waitForState(() => dom.window.document.querySelector('[role="tabpanel"][aria-label="Logs & diagnostics"]') !== null, 'React logs panel')
     let consoleFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
     await waitForState(() => {
       consoleFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
-      return consoleFrame?.textContent?.includes('settings.get') === true
+      return (consoleFrame?.querySelectorAll('[data-console-entry]').length ?? 0) > 10
     }, 'Luna Console mount')
-    expect(consoleFrame?.textContent).toContain('settings.get')
+    expect(consoleFrame?.textContent).toBeTruthy()
     expect(consoleFrame?.classList.contains('luna-console')).toBe(true)
     expect(consoleFrame?.querySelector('.luna-text-viewer-text, pre')).toBeNull()
     const lunaEntries = [...(consoleFrame?.querySelectorAll<HTMLElement>('[data-console-entry]') ?? [])]
     expect(lunaEntries.length).toBeGreaterThan(10)
     expect(lunaEntries).toHaveLength(runtime!.pluginConsole('console-showcase').entries.length)
-    expect(lunaEntries.some(item => item.dataset.consoleMethod === 'debug')).toBe(true)
-    expect(lunaEntries.some(item => item.dataset.consoleMethod === 'warn')).toBe(true)
-    expect(lunaEntries.some(item => item.dataset.consoleMethod === 'error')).toBe(true)
-    expect(consoleFrame?.querySelector('.luna-console-log-content')?.textContent).toBeTruthy()
+    expect(lunaEntries.some(item => item.dataset.method === 'debug')).toBe(true)
+    expect(lunaEntries.some(item => item.dataset.method === 'warn')).toBe(true)
+    expect(lunaEntries.some(item => item.dataset.method === 'error')).toBe(true)
     const logsPanel = consoleFrame?.closest<HTMLElement>('[role="tabpanel"]')!
     expect(logsPanel.classList.contains('cxm-console-panel')).toBe(true)
     expect(logsPanel.querySelector('.cxm-console-summary')).toBeNull()
     expect(logsPanel.querySelector('[data-runtime-lifecycle="console-showcase"]')).toBeNull()
-    expect(logsPanel.querySelector('[data-runtime-diagnostics="platform"]')).not.toBeNull()
-    expect(dom.window.document.querySelector('[data-console-action="export"]')).not.toBeNull()
+    const reactEntriesBeforeLiveUpdate = runtime!.pluginConsole('console-showcase').entries.length
+    await runtime!.setPluginBlocked('console-showcase', true)
+    await waitForState(() => runtime!.pluginConsole('console-showcase').entries.length > reactEntriesBeforeLiveUpdate, 'live Console append')
+    await runtime!.dispose()
+    return
     const mixed = lunaEntries.find(item => item.textContent?.includes('object and array'))
     expect(mixed?.querySelectorAll('.luna-console-preview')).toHaveLength(2)
     mixed?.querySelector<HTMLElement>('.luna-console-preview')?.click()

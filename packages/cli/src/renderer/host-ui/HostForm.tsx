@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import {
   Button, Checkbox, ColorPicker, DatePicker, Dropdown, Form, Input, InputNumber,
   RadioGroup, Select, Slider, Switch, TagInput, Textarea, TimePicker,
@@ -80,6 +81,14 @@ const SENSITIVE_ROLES = new Set(['secret', 'credential', 'credential-ref', 'perm
 
 function pathKey(field: CordisXConfigFieldSnapshot): string { return field.path.join('.') }
 
+function humanizeFieldName(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  return value
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, character => character.toLocaleUpperCase())
+}
+
 function descriptor(field: CordisXConfigFieldSnapshot): FormDescriptor {
   return {
     path: field.path,
@@ -117,16 +126,17 @@ function numericProps(field: Pick<CordisXConfigFieldSnapshot, 'min' | 'max' | 's
   }
 }
 
-function Control({ field, resolved, value, onChange, controlId, transientSecret }: {
+function Control({ field, resolved, value, onChange, controlId, locale, transientSecret }: {
   readonly field: CordisXConfigFieldSnapshot
   readonly resolved: ReturnType<typeof primitive>
   readonly value: unknown
   readonly onChange: (value: unknown) => void
   readonly controlId?: string
+  readonly locale: string
   readonly transientSecret?: boolean
 }) {
   const choices = field.choices?.flatMap(choice => choice.value === null ? [] : [{ label: choice.label, value: choice.value }]) ?? []
-  if (resolved === 'sensitive-unavailable') return <Input value="由 Host 凭据管理" disabled />
+  if (resolved === 'sensitive-unavailable') return <div className="cxr-notice cxf-alert" role="note">{managerCopy(locale, 'form.sensitive-unavailable')}</div>
   if (resolved === 'unsupported') return <div className="cxr-notice">当前 Schemastery 字段无法安全编辑</div>
   if (resolved === 'object-array') return <ArrayEditor field={field} value={Array.isArray(value) ? value as Record<string, unknown>[] : []} onChange={onChange} />
   if (resolved === 'textarea') return <Textarea className="cxf-textarea" value={typeof value === 'string' ? value : ''} autosize={{ minRows: 5, maxRows: 14 }} disabled={field.disabled} onChange={onChange} />
@@ -145,7 +155,7 @@ function Control({ field, resolved, value, onChange, controlId, transientSecret 
   return <Input {...(controlId === undefined ? {} : { id: controlId })} type={field.role === 'url' ? 'url' : field.role === 'password' ? 'password' : 'text'} value={typeof value === 'string' ? value : ''} disabled={field.disabled} {...(field.role === 'password' ? { autocomplete: 'new-password' } : {})} {...(transientSecret === true ? { 'data-channel-credential-capture': 'true' } : {})} onChange={onChange} />
 }
 
-function ConfigControl({ model, pluginId, field, value, resolved, onChange, controlId }: {
+function ConfigControl({ model, pluginId, field, value, resolved, onChange, controlId, locale }: {
   readonly model: ManagerModel
   readonly pluginId: string
   readonly field: CordisXConfigFieldSnapshot
@@ -153,6 +163,7 @@ function ConfigControl({ model, pluginId, field, value, resolved, onChange, cont
   readonly resolved: ReturnType<typeof primitive>
   readonly onChange: (value: unknown) => void
   readonly controlId: string
+  readonly locale: string
 }) {
   const custom = useRef<HTMLDivElement>(null)
   const latestChange = useRef(onChange)
@@ -180,7 +191,7 @@ function ConfigControl({ model, pluginId, field, value, resolved, onChange, cont
   // tear down and recreate that renderer.
   }, [controlId, field.disabled, field.path, field.required, model, pluginId])
   return <>
-    <div hidden={customMounted}><Control field={field} resolved={resolved} value={value} onChange={onChange} controlId={controlId} /></div>
+    <div hidden={customMounted}><Control field={field} resolved={resolved} value={value} onChange={onChange} controlId={controlId} locale={locale} /></div>
     <div ref={custom} className="cxm-config-renderer cxf-custom-seat" hidden={!customMounted} />
   </>
 }
@@ -206,7 +217,7 @@ function FieldLabel({ field, changed, locale, onUseDefault, onRollback, onCopyPa
     }}>
       <Button type="button" shape="square" variant="text" className="cxf-field-menu-trigger" aria-label={managerCopy(locale, 'form.field-actions')} aria-haspopup="menu" data-host-form-action="field-actions" data-host-form-action-icon={field.icon ?? 'host:settings'} icon={<HostSurfaceIcon token={field.icon ?? 'host:settings'} />} />
     </Dropdown>
-    <span className="cxf-field-label-text cxf-label">{field.label ?? field.path.at(-1)}</span>
+    <span className="cxf-field-label-text cxf-label">{field.label ?? humanizeFieldName(field.path.at(-1))}</span>
   </span>
 }
 
@@ -239,8 +250,8 @@ export function HostFieldRow({ field, value, changed, locale, idPrefix, issueTex
       {field.required ? <span className="cxf-required" aria-label={managerCopy(locale, 'form.required')}>*</span> : null}
     </div>
     <div className="cxf-control-seat" role="group" aria-labelledby={labelId}>{customControl === undefined || resolved === 'sensitive-unavailable'
-      ? <Control field={field} resolved={resolved} value={value} onChange={onChange} controlId={resolvedControlId} {...(transientSecret === undefined ? {} : { transientSecret })} />
-      : <ConfigControl {...customControl} field={field} value={value} resolved={resolved} onChange={onChange} controlId={resolvedControlId} />}</div>
+      ? <Control field={field} resolved={resolved} value={value} onChange={onChange} controlId={resolvedControlId} locale={locale} {...(transientSecret === undefined ? {} : { transientSecret })} />
+      : <ConfigControl {...customControl} field={field} value={value} resolved={resolved} onChange={onChange} controlId={resolvedControlId} locale={locale} />}</div>
     {field.description === undefined ? null : <p className="cxf-help">{field.description}</p>}
     {issueText === undefined ? <p className="cxf-error" id={`${resolvedControlId}-error`} role="alert" hidden /> : <p className="cxf-error" id={`${resolvedControlId}-error`} role="alert">{issueText}</p>}
   </div>
@@ -255,10 +266,10 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
   const locale = model.snapshot().localization.locale
   useEffect(() => { setDraftOperations(new Map()); setFormState('pristine'); setMessage(undefined) }, [plugin.configuration.revision])
   const groups = useMemo(() => {
-    const result = new Map<string, { title: string; description?: string; fields: CordisXConfigFieldSnapshot[] }>()
+    const result = new Map<string, { title?: string; description?: string; fields: CordisXConfigFieldSnapshot[] }>()
     for (const field of fields) {
       const id = field.group?.id ?? 'general'
-      const current = result.get(id) ?? { title: field.group?.title ?? '常规', ...(field.group?.description === undefined ? {} : { description: field.group.description }), fields: [] }
+      const current = result.get(id) ?? { ...(field.group?.title === undefined ? {} : { title: field.group.title }), ...(field.group?.description === undefined ? {} : { description: field.group.description }), fields: [] }
       current.fields.push(field)
       result.set(id, current)
     }
@@ -273,13 +284,15 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
     return next
   }, [draftOperations, fields])
   const operations = [...draftOperations.values()]
-  const change = (field: CordisXConfigFieldSnapshot, operation: ConfigMutationOperation) => { setFormState('dirty'); setMessage(undefined); setDraftOperations(current => {
-    const next = new Map(current); next.set(pathKey(field), operation); return next
-  }) }
+  const change = (field: CordisXConfigFieldSnapshot, operation: ConfigMutationOperation) => flushSync(() => {
+    setFormState('dirty'); setMessage(undefined); setDraftOperations(current => {
+      const next = new Map(current); next.set(pathKey(field), operation); return next
+    })
+  })
   const rollback = (field: CordisXConfigFieldSnapshot) => setDraftOperations(current => {
     const next = new Map(current); next.delete(pathKey(field)); return next
   })
-  return <Form className="cxf-react-form" data-plugin-config-form={plugin.id} data-state={formState} onSubmit={event => {
+  return <div className="cxf-react-form-shell" data-plugin-config-form={plugin.id} data-state={formState}><Form className="cxf-react-form" onSubmit={event => {
     event.e?.preventDefault()
     if (model.updatePluginConfig === undefined || operations.length === 0) return
     setSaving(true); setFormState('saving'); setMessage(undefined)
@@ -289,7 +302,7 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
       .finally(() => setSaving(false))
   }}>
     <div className="cxf-form-body">{groups.map(([id, group]) => <section key={id} className="cxf-section">
-      <header className="cxf-section-heading"><h3>{group.title}</h3>{group.description === undefined ? null : <p>{group.description}</p>}</header>
+      {group.title === undefined && group.description === undefined ? null : <header className="cxf-section-heading">{group.title === undefined ? null : <h3>{group.title}</h3>}{group.description === undefined ? null : <p>{group.description}</p>}</header>}
       <div className="cxf-form-grid">{group.fields.map((field, fieldIndex) => {
         const value = formDraft.value(field.path, field.defaultValue)
         const changed = formDraft.isDirty(field.path)
@@ -311,5 +324,5 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
       <div className="cxf-status" data-state={formState} role="status">{operations.length === 0 ? '' : formState === 'saving' ? managerCopy(locale, 'form.saving') : `${managerCopy(locale, 'form.dirty-prefix')} · ${managerCopy(locale, 'form.apply-live')}`}</div>
       <div className="cxf-form-action-buttons"><Button type="reset" variant="outline" icon={<HostSurfaceIcon token="host:reset" />} disabled={saving || operations.length === 0} onClick={() => { setDraftOperations(new Map()); setFormState('pristine'); setMessage(undefined) }}>重置</Button><Button type="submit" theme="primary" icon={<HostSurfaceIcon token="host:save" />} loading={saving} disabled={!plugin.configuration.writable || operations.length === 0}>保存</Button></div>
     </div>
-  </Form>
+  </Form></div>
 }

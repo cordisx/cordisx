@@ -18,7 +18,14 @@ function tabs(locale: string): readonly ManagerTab<PluginDetailTab>[] { return [
   { id: 'runtime', label: managerCopy(locale, 'plugin-tab.runtime'), icon: 'runtime' }, { id: 'logs', label: managerCopy(locale, 'plugin-tab.logs'), icon: 'diagnostics' }, { id: 'extension-points', label: managerCopy(locale, 'plugin-tab.extension-points'), icon: 'outlets' }, { id: 'routes', label: managerCopy(locale, 'plugin-tab.routes'), icon: 'routes' },
 ] }
 
-function RuntimePanel({ plugin, permissionCount, pointCount, routeCount }: { readonly plugin: ManagerPluginSnapshot; readonly permissionCount: number; readonly pointCount: number; readonly routeCount: number }) {
+function RuntimePanel({ model, plugin, permissionCount, pointCount, routeCount }: { readonly model: ManagerModel; readonly plugin: ManagerPluginSnapshot; readonly permissionCount: number; readonly pointCount: number; readonly routeCount: number }) {
+  const consoleEntries = model.pluginConsole?.(plugin.id).entries ?? []
+  const consoleMetrics = [
+    ['请求', consoleEntries.filter(entry => entry.kind === 'invocation').length],
+    ['成功', consoleEntries.filter(entry => entry.status === 'success').length],
+    ['失败', consoleEntries.filter(entry => entry.status === 'failure').length],
+    ['拒绝', consoleEntries.filter(entry => entry.status === 'denied').length],
+  ] as const
   const metrics = [
     ['状态', plugin.status],
     ['权限', String(permissionCount)],
@@ -27,8 +34,10 @@ function RuntimePanel({ plugin, permissionCount, pointCount, routeCount }: { rea
     ['注入能力', String(plugin.inject.length)],
     ['依赖', String(plugin.package?.dependencies.length ?? 0)],
   ] as const
-  return <div>
+  return <div className="cxm-runtime-overview">
+    <section data-plugin-runtime-status={plugin.id}><strong>{plugin.status}</strong>{plugin.error === undefined ? null : <span>{plugin.error}</span>}</section>
     <div className="cxr-metrics">{metrics.map(([label, value]) => <section className="cxr-metric" key={label}><span>{label}</span><strong>{value}</strong></section>)}</div>
+    <section className="cxm-runtime-console-summary" data-runtime-console-summary={plugin.id}>{consoleMetrics.map(([label, value]) => <div className="cxm-runtime-console-metric" key={label}><strong>{value}</strong><span>{label}</span></div>)}</section>
     {plugin.error === undefined ? null : <div className="cxr-notice cxr-danger" role="alert">{plugin.error}</div>}
     <section className="cxr-section" style={{ marginTop: 10 }}><h3>注入能力</h3><div className="cxr-token-list">{plugin.inject.map(item => <code key={item}>{item}</code>)}{plugin.inject.length === 0 ? <span>无</span> : null}</div></section>
   </div>
@@ -78,7 +87,7 @@ export function PluginDetailPage({ model, snapshot, router }: { readonly model: 
     {route.page === 'readme' && <div role="tabpanel" aria-label="README"><MarkdownDocument source={plugin.readme ?? plugin.description ?? '此插件没有提供 README。'} /></div>}
     {route.page === 'config' && <div className="cxr-plugin-config-panel" role="tabpanel" aria-label={managerCopy(snapshot.localization.locale, 'plugin-tab.configuration')}><HostForm model={model} plugin={plugin} /></div>}
     {route.page === 'permissions' && <div className="cxr-list">{permissions.map(item => <button className="cxr-card" type="button" key={item.capability} onClick={() => router.navigate({ kind: 'permission', pluginId: plugin.id, capability: item.capability })}><span className="cxr-card-body"><span className="cxr-card-title">{projectPermissionCapabilityName(item.capability, snapshot.localization.locale)}</span><span className="cxr-card-description">{item.reasonText}</span><code className="cxr-card-code">{item.capability}</code></span><span className="cxr-status">{item.policy}</span></button>)}{permissions.length === 0 ? <div className="cxr-empty">该插件未声明平台权限</div> : null}</div>}
-    {route.page === 'runtime' && <RuntimePanel plugin={plugin} permissionCount={permissions.length} pointCount={pointUsage.length} routeCount={routes.length} />}
+    {route.page === 'runtime' && <RuntimePanel model={model} plugin={plugin} permissionCount={permissions.length} pointCount={pointUsage.length} routeCount={routes.length} />}
     {route.page === 'logs' && <PluginConsolePanel model={model} pluginId={plugin.id} pluginSource={plugin.source} locale={snapshot.localization.locale} />}
     {route.page === 'extension-points' && <><SearchField className="cxr-search" value={query} aria-label="搜索插件扩展点" placeholder="搜索扩展点、介绍或 id…" onChange={setQuery} /><div className="cxr-list">{visiblePoints.map(point => <button type="button" className="cxr-card" key={point.id} onClick={() => router.navigate({ kind: 'extension-point', pointId: point.id })}><span className="cxr-card-body"><span className="cxr-card-title">{point.titleProjection.text}</span><span className="cxr-card-description">{point.descriptionProjection.text}</span><code className="cxr-card-code">{point.id}</code></span></button>)}{visiblePoints.length === 0 ? <div className="cxr-empty">{pointUsage.length === 0 ? '该插件未使用扩展点' : '没有匹配的扩展点'}</div> : null}</div></>}
     {route.page === 'routes' && <><SearchField className="cxr-search" value={query} aria-label="搜索插件路由" placeholder="搜索标题、路径或 id…" onChange={setQuery} /><div className="cxr-list">{visibleRoutes.map(item => <button type="button" className="cxr-card" key={item.qualifiedId} onClick={() => router.navigate({ kind: 'route', qualifiedId: item.qualifiedId })}><span className="cxr-card-body"><span className="cxr-card-title">{item.productMetadata.title ?? item.qualifiedId}</span><span className="cxr-card-description">{item.productMetadata.description}</span><code className="cxr-card-code">{item.definition.path}</code></span></button>)}{visibleRoutes.length === 0 ? <div className="cxr-empty">{routes.length === 0 ? '该插件未注册路由' : '没有匹配的路由'}</div> : null}</div></>}
