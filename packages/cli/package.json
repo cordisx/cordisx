@@ -47,6 +47,8 @@
     "dev:ui": "tsx src/playground/cli.ts",
     "generate:brand-animation": "node scripts/generate-animated-brand-marks.mjs",
     "generate:contributors": "node scripts/generate-contributors.mjs",
+    "predev": "npm run prepare:dev",
+    "prepare:dev": "npm run build --workspace=@cordisx/channel-runtime && npm run build --workspace=@cordisx/schemastery-ui && node scripts/prepare-bundled-schemastery-ui.mjs",
     "prepack": "npm run build",
     "smoke": "node scripts/live-smoke.mjs",
     "typecheck": "npm run build --workspace=@cordisx/channel-runtime && npm run build --workspace=@cordisx/schemastery-ui && node scripts/prepare-bundled-schemastery-ui.mjs && tsc -p tsconfig.json --noEmit"

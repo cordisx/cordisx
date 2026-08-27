@@ -802,6 +802,61 @@ async function evaluateByValue(expression, awaitPromise = false) {
   return value.result?.value
 }
 
+async function ensureManagerVisible() {
+  const state = await evaluateByValue(`(async () => {
+    const visibleManager = () => {
+      const modal = document.querySelector('[data-cordisx-manager-modal]')
+      const dialog = modal?.querySelector('[role="dialog"], .cxr-dialog')
+      if (!(modal instanceof HTMLElement) || modal.hidden || !(dialog instanceof HTMLElement)) return null
+      const rect = dialog.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0 ? modal : null
+    }
+    let modal = visibleManager()
+    if (modal !== null) return { visible: true, openedBy: 'already-open' }
+    const trigger = document.querySelector('[data-cordisx-manager-trigger]')
+    const legacyModal = document.querySelector('[data-cordisx-manager-modal][hidden]')
+    if (trigger instanceof HTMLElement) trigger.click()
+    else if (legacyModal instanceof HTMLElement) legacyModal.hidden = false
+    else return { visible: false, openedBy: 'unavailable' }
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      modal = visibleManager()
+      if (modal !== null) {
+        return {
+          visible: true,
+          openedBy: trigger instanceof HTMLElement ? 'manager-trigger' : 'legacy-fallback',
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 40))
+    }
+    return { visible: false, openedBy: trigger instanceof HTMLElement ? 'manager-trigger' : 'legacy-fallback' }
+  })()`, true)
+  if (state?.visible !== true) throw new Error(`CordisX manager is not visible: ${JSON.stringify(state)}`)
+  return state
+}
+
+async function ensureManagerClosed() {
+  const state = await evaluateByValue(`(async () => {
+    const visibleManager = () => {
+      const modal = document.querySelector('[data-cordisx-manager-modal]')
+      const dialog = modal?.querySelector('[role="dialog"], .cxr-dialog')
+      if (!(modal instanceof HTMLElement) || modal.hidden || !(dialog instanceof HTMLElement)) return null
+      const rect = dialog.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0 ? modal : null
+    }
+    if (visibleManager() === null) return { closed: true, closedBy: 'already-closed' }
+    const close = document.querySelector('[data-cordisx-manager-modal] [aria-label="关闭"], [data-cordisx-manager-modal] .cxm-close')
+    if (!(close instanceof HTMLElement)) return { closed: false, closedBy: 'unavailable' }
+    close.click()
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (visibleManager() === null) return { closed: true, closedBy: 'manager-close' }
+      await new Promise(resolve => setTimeout(resolve, 40))
+    }
+    return { closed: false, closedBy: 'manager-close' }
+  })()`, true)
+  if (state?.closed !== true) throw new Error(`CordisX manager did not close: ${JSON.stringify(state)}`)
+  return state
+}
+
 let exerciseReport
 let settingsTabsReport
 let configExerciseReport
@@ -3589,6 +3644,7 @@ if (parsed.values['plugin-console-exercise']) {
   console.log(`plugin-console=${JSON.stringify(pluginConsoleReport, null, 2)}`)
 }
 if (parsed.values['manager-screenshot'] !== undefined) {
+  const managerOpenState = await ensureManagerVisible()
   const managerTab = parsed.values['manager-tab'] ?? 'plugins'
   if (!['about', 'extension-points', 'routes', 'plugins', 'marketplace', 'settings'].includes(managerTab)) throw new Error(`unknown manager tab: ${managerTab}`)
   const managerPlugin = parsed.values['manager-plugin']
@@ -3700,9 +3756,10 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       let marketplaceMenuKeyboard = null
       const trigger = document.querySelector('[data-cordisx-manager-trigger]')
       const modal = document.querySelector('[data-cordisx-manager-modal]')
-      const openedBy = trigger === null ? 'host-smoke-fallback' : 'manager-trigger'
-      if (modal?.hidden === true && trigger !== null) trigger.click()
-      else if (modal instanceof HTMLElement && modal.hidden) modal.hidden = false
+      const openedBy = ${JSON.stringify(managerOpenState.openedBy)}
+      if (!(modal instanceof HTMLElement) || modal.hidden || modal.querySelector('[role="dialog"], .cxr-dialog') === null) {
+        throw new Error('CordisX manager became unavailable after the visibility gate')
+      }
       const marketplaceSource = ${JSON.stringify(managerMarketplaceSource)}
       let marketplaceSourceConfigured = false
       if (marketplaceSource !== undefined) {
@@ -5317,15 +5374,15 @@ if (parsed.values['manager-theme-cycle']) {
 }
 
 if (parsed.values['trigger-screenshot'] !== undefined) {
+  await ensureManagerClosed()
   const evaluatedTrigger = await send('Runtime.evaluate', {
     expression: `(() => {
-      const modal = document.querySelector('[data-cordisx-manager-modal]')
-      if (modal !== null && !modal.hidden) document.querySelector('.cxm-close')?.click()
       const trigger = document.querySelector('[data-cordisx-manager-trigger]')
       const switcher = trigger?.previousElementSibling
-      const left = switcher?.getBoundingClientRect()
       const right = trigger?.getBoundingClientRect()
-      if (left === undefined || right === undefined) return null
+      if (right === undefined) return null
+      const switcherRect = switcher?.getBoundingClientRect()
+      const left = switcherRect !== undefined && switcherRect.width > 0 && switcherRect.height > 0 ? switcherRect : right
       const x = Math.min(left.x, right.x)
       const y = Math.min(left.y, right.y)
       const edge = Math.max(left.right, right.right)
