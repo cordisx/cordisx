@@ -117,6 +117,35 @@ describe('SurfaceRegistry', () => {
     contexts.dispose()
   })
 
+  it('accepts bounded reasoning materials and rejects plugin-owned visual code', () => {
+    const contexts = new HostContextStore()
+    const registry = new SurfaceRegistry(contexts)
+    registry.register('imperium', { name: 'composer.reasoning-intensity', id: 'theme' }, {
+      variant: 'imperium', motion: 'ascension', title: { key: 'title' }, stages: [
+        { label: { key: 'plastic' }, material: 'plastic' },
+        { label: { key: 'gold' }, material: 'gold' },
+      ],
+    })
+    registry.register('imperium', { name: 'composer.reasoning-intensity', id: 'raw-css' }, {
+      variant: 'imperium', title: { key: 'title' }, stages: [
+        { label: { key: 'plastic' }, material: 'plastic' },
+        { label: { key: 'gold' }, material: 'gold' },
+      ], css: '.native { display:none }',
+    } as never)
+    expect(registry.snapshot().find(item => item.id === 'theme')).toMatchObject({ valid: true })
+    expect(registry.snapshot().find(item => item.id === 'raw-css')?.error).toMatch(/unknown field css/)
+    expect(() => registry.register('imperium', {
+      name: 'composer.reasoning-intensity', id: 'grouped', group: 'theme',
+    } as never, {
+      variant: 'imperium', title: { key: 'title' }, stages: [
+        { label: { key: 'plastic' }, material: 'plastic' },
+        { label: { key: 'gold' }, material: 'gold' },
+      ],
+    })).toThrow(/does not accept a contribution group/)
+    registry.dispose()
+    contexts.dispose()
+  })
+
   it('uses command precedence while validating independent navigation actions', () => {
     const contexts = new HostContextStore()
     const registry = new SurfaceRegistry(contexts)

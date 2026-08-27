@@ -214,6 +214,8 @@ export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v3.schema.json' as const
 export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v5.schema.json' as const
+export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v6.schema.json' as const
 export const CORDISX_EXTENSION_POINT_RUNTIME_CONTEXT_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-runtime-context.v1.schema.json' as const
 export const CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1 =
@@ -236,6 +238,7 @@ export type CordisXExtensionPointPayloadFamily =
   | 'manager-settings-tab'
   | 'manager-settings-content-tab'
   | 'manager-settings-navigation-item'
+  | 'reasoning-intensity-presentation'
   | 'presenter'
   | 'navigation-item'
   | 'environment-section'
@@ -322,6 +325,15 @@ export interface CordisXHostExtensionPointCatalogV5 {
   readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5
   readonly schemaVersion: 5
   readonly points: readonly CordisXHostExtensionPointDescriptorV5[]
+}
+
+/** Protocol-v6 adds the bounded reasoning-intensity presentation family. */
+export type CordisXHostExtensionPointDescriptorV6 = CordisXHostExtensionPointDescriptorV5
+
+export interface CordisXHostExtensionPointCatalogV6 {
+  readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6
+  readonly schemaVersion: 6
+  readonly points: readonly CordisXHostExtensionPointDescriptorV6[]
 }
 
 export interface CordisXExtensionPointAnchorCurrentContextV1 {
@@ -533,6 +545,21 @@ export interface CordisXPresenterItem {
   readonly progress?: Readonly<{ current: number; total: number }>
 }
 
+export type CordisXReasoningIntensityMaterial = 'plastic' | 'bronze' | 'steel' | 'silver' | 'gold'
+
+export interface CordisXReasoningIntensityStage {
+  readonly label: CordisXLocalizedText
+  readonly material: CordisXReasoningIntensityMaterial
+}
+
+/** Visual data only. The native Host remains the owner of values and interaction. */
+export interface CordisXReasoningIntensityPresentation {
+  readonly variant: 'imperium'
+  readonly title: CordisXLocalizedText
+  readonly motion?: 'smooth' | 'ascension'
+  readonly stages: readonly CordisXReasoningIntensityStage[]
+}
+
 export interface CordisXEnvironmentSection {
   readonly sectionId: string
   readonly title: CordisXLocalizedText
@@ -577,6 +604,7 @@ export interface CordisXSurfaceMap {
   'session.turn.footer': CordisXPresenterItem
   'session.tool.actions': CordisXStructuredAction
   'composer.toolbar.items': CordisXToolbarItem
+  'composer.reasoning-intensity': CordisXReasoningIntensityPresentation
   'composer.command-menu.items': CordisXStructuredAction
   'composer.dock.above': CordisXPresenterItem
   'composer.dock.below': CordisXPresenterItem
@@ -612,6 +640,7 @@ export const CORDISX_SURFACE_NAMES = [
   'session.turn.footer',
   'session.tool.actions',
   'composer.toolbar.items',
+  'composer.reasoning-intensity',
   'composer.command-menu.items',
   'composer.dock.above',
   'composer.dock.below',
@@ -637,6 +666,7 @@ export const CORDISX_IMPLEMENTED_SURFACE_NAMES = [
   'workspace.toolbar.items',
   'session.header.actions',
   'composer.toolbar.items',
+  'composer.reasoning-intensity',
   'environment.panel.header-actions',
   'environment.panel.sections',
   'environment.section.actions',
@@ -660,7 +690,7 @@ export type CordisXContributionOptions<Name extends CordisXSurfaceName = CordisX
   CordisXContributionOptionsBase<Name>
   & (Name extends 'manager.settings.navigation-items'
     ? { readonly group: CordisXManagerSettingsNavigationGroup }
-    : Name extends 'manager.settings.tabs'
+    : Name extends 'manager.settings.tabs' | 'composer.reasoning-intensity'
       ? { readonly group?: never }
       : { readonly group?: string })
 
