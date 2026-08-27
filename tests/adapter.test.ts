@@ -101,10 +101,10 @@ describe('ReasoningIntensityProjection', () => {
     const range = resolveReasoningIntensityRange(dom.window.document, 'session')!
     expect(range).toMatchObject({ min: '0', max: '4', step: '1', value: '1' })
     expect(range.dataset.cordisxReasoningProxy).toBe('true')
-    expect(dom.window.document.querySelector<HTMLElement>('[data-model-picker-power-slider]')?.style.height).toBe('56px')
-    expect(dom.window.document.querySelector<HTMLElement>('[role="menu"]')?.style.width).toBe('420px')
+    expect(dom.window.document.querySelector<HTMLElement>('[data-model-picker-power-slider]')?.style.height).toBe('40px')
+    expect(dom.window.document.querySelector<HTMLElement>('[role="menu"]')?.style.width).toBe('336px')
 
-    vi.spyOn(range, 'getBoundingClientRect').mockReturnValue({ ...visibleRect, right: 418, bottom: 76, width: 408, height: 56 })
+    vi.spyOn(range, 'getBoundingClientRect').mockReturnValue({ ...visibleRect, right: 334, bottom: 60, width: 324, height: 40 })
     const projection = new ReasoningIntensityProjection(dom.window.document)
     const text = (key: string) => ({ key, fallback: key })
     projection.update(range, {
@@ -148,7 +148,7 @@ describe('ReasoningIntensityProjection', () => {
 
     const range = resolveReasoningIntensityRange(dom.window.document, 'session')!
     expect(range).toMatchObject({ min: '0', max: '4', step: '1', value: '2' })
-    expect(menu.style).toMatchObject({ width: '360px', minWidth: '360px' })
+    expect(menu.style).toMatchObject({ width: '336px', minWidth: '336px' })
     expect(items.every(item => item.style.display === 'none')).toBe(true)
     vi.spyOn(range, 'getBoundingClientRect').mockReturnValue({
       x: 30, y: 50, left: 30, top: 50, right: 350, bottom: 98,
@@ -222,7 +222,7 @@ describe('ReasoningIntensityProjection', () => {
 
 describe('SessionBackdropProjection', () => {
   it('follows the native range, retains the last stage after the menu closes, and removes cleanly', () => {
-    const dom = new JSDOM('<body><input id="range" type="range" min="0" max="4" value="0"></body>')
+    const dom = new JSDOM('<body><div id="root"><main id="main-surface" style="isolation:auto"><div data-app-shell-main-content-layout="thread-edge-scroll"></div><div id="native-content"></div><input id="range" type="range" min="0" max="4" value="0"></main></div></body>')
     const range = dom.window.document.getElementById('range') as HTMLInputElement
     const projection = new SessionBackdropProjection(dom.window.document)
     const text = (key: string) => ({ key, fallback: key })
@@ -236,6 +236,10 @@ describe('SessionBackdropProjection', () => {
     }
     projection.update('session-a', range, presentation, ['Plastic portrait', 'Gold portrait'])
     const root = dom.window.document.querySelector<HTMLElement>('.cordisx-session-backdrop')!
+    const host = dom.window.document.getElementById('main-surface')!
+    expect(root.parentElement).toBe(host)
+    expect(host.firstElementChild).toBe(root)
+    expect(host.style.isolation).toBe('isolate')
     expect(root.dataset).toMatchObject({ material: 'plastic', ambience: 'dormant', stage: '0', peak: 'false' })
     expect(root.style.pointerEvents).toBe('')
     expect(root.getAttribute('aria-hidden')).toBe('true')
@@ -249,6 +253,7 @@ describe('SessionBackdropProjection', () => {
     expect(root.dataset.stage).toBe('1')
     projection.dispose()
     expect(root.isConnected).toBe(false)
+    expect(host.style.isolation).toBe('auto')
     dom.window.close()
   })
 })
