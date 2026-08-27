@@ -75,6 +75,7 @@ describe('Manager plugin card actions', () => {
       try {
         const primary = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="base"]')!
         expect(primary.querySelector<HTMLImageElement>('.cxm-plugin-icon > img')?.src).toBe('data:image/png;base64,aWNvbg==')
+        expect(primary.querySelector('.cxc-icon-seat')?.getAttribute('data-icon-kind')).toBe('artwork')
         expect(primary.getAttribute('aria-label')).toBe(expectedOpen)
         expect(dom.window.document.querySelector('.cxm-content')?.getAttribute('data-manager-list-page')).toBe('true')
         primary.click()

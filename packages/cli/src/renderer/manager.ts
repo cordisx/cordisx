@@ -4072,6 +4072,7 @@ export function installCordisXManager(
         machineId: plugin.id,
         searchText: [plugin.source, ...plugin.inject, ...registrations.flatMap(item => [item.surface, item.id])],
         icon: () => createPluginIcon(document, plugin.name, plugin.icon),
+        ...(plugin.icon === undefined ? {} : { iconKind: 'artwork' as const }),
         status: pluginCollectionStatus(plugin, status, snapshot.localization.locale),
         actions: visibleActions,
         openLabel: `${copy('plugins.open')} · ${plugin.name}`,
@@ -5536,6 +5537,7 @@ export function installCordisXManager(
           ...metadata.authors.map(author => author.name),
         ],
         icon: () => createPluginIcon(document, metadata.name, plugin.icon),
+        ...(plugin.icon === undefined ? {} : { iconKind: 'artwork' as const }),
         ...(status === undefined ? {} : { status }),
         openLabel: `${copy('marketplace.open')} · ${metadata.name}`,
         onOpen: () => {

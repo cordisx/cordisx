@@ -6,6 +6,9 @@ export type HostCollectionLayout = 'cards' | 'rows'
  */
 export type HostCollectionDensity = 'default' | 'compact'
 
+/** Glyphs use the compact symbol size; artwork fills the complete Host-owned icon seat. */
+export type HostCollectionIconKind = 'glyph' | 'artwork'
+
 export type HostCollectionStatusTone = 'neutral' | 'success' | 'warning' | 'danger' | 'progress'
 
 export type HostCollectionActionTone = 'neutral' | 'danger'
@@ -40,6 +43,7 @@ export interface HostCollectionItem {
   readonly machineId?: string
   readonly searchText?: readonly string[]
   readonly icon: () => Node
+  readonly iconKind?: HostCollectionIconKind
   /** A product avatar can replace the generic icon while retaining a compact type badge. */
   readonly avatar?: { readonly label: string; readonly badge?: () => Node }
   readonly status?: HostCollectionStatus
@@ -180,6 +184,7 @@ export const HOST_COLLECTION_STYLES = String.raw`
   .cxc-primary:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: -3px; }
   .cxc-icon-seat { position: relative; display: grid; place-items: center; width: var(--cxc-icon-seat-size); height: var(--cxc-icon-seat-size); flex: none; color: var(--cx-muted); }
   .cxc-icon-seat > :first-child { display: inline-grid; place-items: center; width: var(--cxc-icon-glyph-size); height: var(--cxc-icon-glyph-size); max-width: 100%; max-height: 100%; flex: none; color: currentColor; line-height: 0; pointer-events: none; }
+  .cxc-icon-seat[data-icon-kind="artwork"] > :first-child { width: var(--cxc-icon-seat-size); height: var(--cxc-icon-seat-size); }
   /* Host icon wrappers may carry SVG width/height attributes from their source
      asset. Keep the rendered glyph inside the shared seat regardless of token. */
   .cxc-icon-seat > :first-child > svg { display: block; width: 100% !important; height: 100% !important; fill: currentColor; color: currentColor; }
@@ -463,6 +468,7 @@ export function createHostCollection(document: Document, options: HostCollection
 
     const icon = document.createElement('span')
     icon.className = 'cxc-icon-seat'
+    if (item.iconKind === 'artwork') icon.dataset.iconKind = 'artwork'
     if (item.avatar === undefined) appendIcon(icon, item.icon)
     else {
       const avatar = document.createElement('span')
