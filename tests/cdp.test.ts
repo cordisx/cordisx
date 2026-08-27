@@ -7,6 +7,7 @@ import {
   type CdpTarget,
 } from '../packages/cli/src/launcher/cdp.js'
 import type { PluginRuntimeMutation } from '../packages/cli/src/launcher/plugin-lifecycle.js'
+import { PluginPermissionIdentityRegistry } from '../packages/cli/src/launcher/permission-rpc.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authority.js'
 
@@ -130,6 +131,137 @@ describe('CdpPluginLifecycleRuntime', () => {
     expect(stageCalls).toEqual([1, 1])
     await expect(runtime.rollback('tx')).resolves.toMatchObject({ registryEpoch: 2, active: previous, disposedAfter: candidate })
     expect(runtime.prepare('tx-after-rollback')).toMatchObject({ expectedRegistryEpoch: 2 })
+  })
+
+  it('releases an empty staged transaction when its last renderer closes before rollback', async () => {
+    const permissions = new PluginPermissionIdentityRegistry([{ id: 'demo', source: 'file:///demo-old.js' }])
+    const runtime = new CdpPluginLifecycleRuntime(permissions)
+    const previous = activation(0, 'demo-old')
+    const candidate = activation(1, 'demo-new')
+    let transactionEpoch = ''
+    const unregister = runtime.register({
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
+        } } } }
+        return { result: { value: undefined } }
+      },
+    } as never)
+    const fence = runtime.prepare('tx')
+    transactionEpoch = fence.transactionEpoch
+    const mutation: PluginRuntimeMutation = {
+      transactionId: 'tx',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'update',
+      previous,
+      candidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
+      package: {
+        manifest: { id: 'demo' },
+        digest: `sha256:${'b'.repeat(64)}`,
+        moduleSource: '',
+        artifactSource: 'void 0',
+        serviceModules: [],
+        identitySource: 'file:///demo-new.js',
+      } as never,
+    }
+    await runtime.stage(mutation)
+    expect(permissions.allowed({ id: 'demo', source: 'file:///demo-new.js' })).toBe(true)
+
+    unregister()
+    await expect(runtime.rollback('tx')).resolves.toEqual({
+      transactionId: 'tx',
+      transactionEpoch,
+      registryEpoch: 0,
+      active: previous,
+      disposedAfter: candidate,
+    })
+    expect(permissions.allowed({ id: 'demo', source: 'file:///demo-old.js' })).toBe(true)
+    expect(permissions.allowed({ id: 'demo', source: 'file:///demo-new.js' })).toBe(false)
+
+    const unregisterReplacement = runtime.register({ send: async () => ({}) } as never)
+    expect(runtime.prepare('replacement')).toMatchObject({ expectedRegistryEpoch: 0 })
+    runtime.cancelPreparation('replacement')
+    unregisterReplacement()
+  })
+
+  it('releases terminal fences when renderer finalize and abort calls fail', async () => {
+    for (const terminal of ['finalize', 'abort'] as const) {
+      const runtime = new CdpPluginLifecycleRuntime()
+      const previous = activation(0, 'demo-old')
+      const candidate = activation(1, 'demo-new')
+      let transactionEpoch = ''
+      const unregister = runtime.register({
+        async send(_method: string, params: Record<string, unknown>) {
+          const expression = String(params.expression ?? '')
+          if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
+            transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
+          } } } }
+          if (expression.includes('publishPluginMutation')) return { result: { value: { ok: true, result: {
+            transactionId: 'tx', transactionEpoch, registryEpoch: 1, active: candidate,
+          } } } }
+          if (expression.includes('completePluginMutation')) return { result: { value: { ok: true, result: {
+            transactionId: 'tx', transactionEpoch, registryEpoch: 1, active: candidate, disposedAfter: previous,
+          } } } }
+          if (expression.includes(`${terminal}PluginMutation`)) return { result: { value: { ok: false, error: `fixture ${terminal} failure` } } }
+          return {}
+        },
+      } as never)
+      const fence = runtime.prepare('tx')
+      transactionEpoch = fence.transactionEpoch
+      await runtime.stage({
+        transactionId: 'tx', ...fence, afterRegistryEpoch: 1, operation: 'disable', previous, candidate,
+        targetId: 'demo', affectedPluginIds: ['demo'],
+      })
+      if (terminal === 'finalize') {
+        await runtime.publish('tx')
+        await runtime.complete('tx')
+      }
+      await expect(terminal === 'finalize' ? runtime.finalize('tx') : runtime.abort('tx')).rejects.toThrow(`fixture ${terminal} failure`)
+
+      const unregisterReplacement = runtime.register({ send: async () => ({}) } as never)
+      expect(runtime.prepare(`replacement-${terminal}`)).toMatchObject({ expectedRegistryEpoch: terminal === 'finalize' ? 1 : 0 })
+      runtime.cancelPreparation(`replacement-${terminal}`)
+      unregisterReplacement()
+      unregister()
+    }
+  })
+
+  it('restores the bootstrap epoch when the published renderer closes before cleanup', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const previous = activation(0, 'demo-old')
+    const candidate = activation(1, 'demo-new')
+    let transactionEpoch = ''
+    const unregister = runtime.register({
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
+        } } } }
+        if (expression.includes('publishPluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'tx', transactionEpoch, registryEpoch: 1, active: candidate,
+        } } } }
+        return {}
+      },
+    } as never)
+    const fence = runtime.prepare('tx')
+    transactionEpoch = fence.transactionEpoch
+    await runtime.stage({
+      transactionId: 'tx', ...fence, afterRegistryEpoch: 1, operation: 'disable', previous, candidate,
+      targetId: 'demo', affectedPluginIds: ['demo'],
+    })
+    await expect(runtime.publish('tx')).resolves.toMatchObject({ registryEpoch: 1, active: candidate })
+
+    unregister()
+    await expect(runtime.complete('tx')).rejects.toThrow('cleanup observations disagree')
+    await expect(runtime.rollback('tx')).resolves.toMatchObject({ registryEpoch: 0, active: previous, disposedAfter: candidate })
+    const unregisterReplacement = runtime.register({ send: async () => ({}) } as never)
+    expect(runtime.prepare('replacement-after-publish')).toMatchObject({ expectedRegistryEpoch: 0 })
+    runtime.cancelPreparation('replacement-after-publish')
+    unregisterReplacement()
   })
 
   it('recovers a rollback plan in a fresh renderer and adopts the restored durable revision', async () => {
