@@ -8,6 +8,7 @@ import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/plugin-
 import type { CordisXLocalDevelopmentSnapshot } from '../packages/cli/src/local-development-contracts.js'
 import type { CordisXPluginModule } from '../packages/cli/src/contracts.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../packages/cli/src/platform-contracts.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 } from '../packages/cli/src/permission-contracts.js'
 
 interface DevelopmentRuntimeHandle {
   snapshot(): {
@@ -109,6 +110,34 @@ describe('local development Manager projection', () => {
       },
     }, mismatchedModule)).rejects.toThrow('plugin manifest id not-demo does not match launcher id demo')
     await runtime.abortPluginMutation(candidate.transactionId)
+    expect(runtime.snapshot().plugins).toEqual([])
+
+    const serviceTransaction = 'renderer-only-service'
+    const serviceCandidate = { ...candidate, transactionId: serviceTransaction }
+    const serviceModule: CordisXPluginModule = {
+      manifest: {
+        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+        schemaVersion: 4,
+        id: 'demo',
+        capabilities: [],
+        services: [{ id: 'fixture', kind: 'channel-adapter', entry: './service.js', configuration: { kind: 'none' } }],
+      },
+      apply() {},
+    }
+    await expect(runtime.stagePluginMutation({
+      transactionId: serviceTransaction,
+      operation: 'install',
+      previous: activation,
+      candidate: serviceCandidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
+      developmentPackage: {
+        id: 'demo', version: '1.0.0', digest: serviceCandidate.plugins[0]!.digest,
+        identitySource: 'file:///cordisx-local-dev/fixture/demo.js',
+        development: { origin: 'local-dev', pluginId: 'demo', sourcePath, state: 'building' },
+      },
+    }, serviceModule)).rejects.toThrow('local development phase 1 is renderer-only; manifest services are unavailable')
+    await runtime.abortPluginMutation(serviceTransaction)
     expect(runtime.snapshot().plugins).toEqual([])
     await runtime.dispose()
     dom.window.close()

@@ -1362,6 +1362,10 @@ async function start(
     if (replacesTarget && mutation.developmentPackage !== undefined && controller.status === 'failed') {
       throw new Error(`local development candidate ${pluginId} is invalid: ${controller.error ?? 'module initialization failed'}`)
     }
+    if (replacesTarget && mutation.developmentPackage !== undefined
+      && controller.manifest.schemaVersion === 4 && controller.manifest.services.length > 0) {
+      throw new Error('local development phase 1 is renderer-only; manifest services are unavailable')
+    }
     controller.generationContext = generationVisibility.context(handle, pluginId)
     const candidateContext = ctx.extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,

@@ -105,6 +105,23 @@ async function readReadme(root: string): Promise<{ readonly text?: string; reado
   }
 }
 
+async function assertRendererOnlyPackage(root: string): Promise<readonly string[]> {
+  const manifestPath = path.join(root, 'cordisx-package.json')
+  const text = await readFile(manifestPath, 'utf8').catch(error => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  })
+  if (text === undefined) return []
+  const manifest = JSON.parse(text) as { readonly dependencies?: unknown }
+  if (manifest.dependencies !== undefined && !Array.isArray(manifest.dependencies)) {
+    throw new Error('local development package dependencies must be an array')
+  }
+  if (Array.isArray(manifest.dependencies) && manifest.dependencies.length > 0) {
+    throw new Error('local development phase 1 is renderer-only; package dependencies are unavailable')
+  }
+  return [manifestPath]
+}
+
 function absoluteInputs(root: string, inputs: Readonly<Record<string, unknown>>): readonly string[] {
   return Object.keys(inputs).map(input => path.resolve(root, input))
 }
@@ -130,7 +147,7 @@ export async function buildLocalDevelopmentPlugin(rawEntry: string): Promise<Loc
     write: false,
     logLevel: 'silent' as const,
   }
-  const [moduleResult, artifactResult, readme] = await Promise.all([
+  const [moduleResult, artifactResult, readme, packageFiles] = await Promise.all([
     build({ entryPoints: [entry], format: 'iife', globalName: '__cordisxPluginModule', ...common }),
     build({
       stdin: {
@@ -142,6 +159,7 @@ export async function buildLocalDevelopmentPlugin(rawEntry: string): Promise<Loc
       ...common,
     }),
     readReadme(root),
+    assertRendererOnlyPackage(root),
   ])
   if (moduleResult.metafile === undefined || artifactResult.metafile === undefined) {
     throw new Error('local development build produced no dependency metadata')
@@ -175,6 +193,7 @@ export async function buildLocalDevelopmentPlugin(rawEntry: string): Promise<Loc
     watchFiles: [...new Set([
       entry,
       path.join(root, 'package.json'),
+      ...packageFiles,
       ...readme.files,
       ...absoluteInputs(root, moduleResult.metafile.inputs),
       ...absoluteInputs(root, artifactResult.metafile.inputs),
@@ -246,8 +265,11 @@ export class LocalDevelopmentController {
   private desiredAttempt = 0
   private running = false
   private stopped = true
+  private watchEpoch = 0
+  private starting: Promise<void> | undefined
+  private polling: Promise<void> | undefined
   private debounce: ReturnType<typeof setTimeout> | undefined
-  private poller: ReturnType<typeof setInterval> | undefined
+  private poller: ReturnType<typeof setTimeout> | undefined
 
   private constructor(private readonly options: LocalDevelopmentControllerOptions, resolved: LocalDevelopmentEntry) {
     this.entry = resolved.entry
@@ -296,27 +318,60 @@ export class LocalDevelopmentController {
     }, DEBOUNCE_MS)
   }
 
-  private async poll(): Promise<void> {
+  private async poll(epoch: number): Promise<void> {
     const next = await this.currentFingerprint()
+    if (this.stopped || epoch !== this.watchEpoch) return
     if (next === this.lastFingerprint) return
     this.lastFingerprint = next
     this.schedule()
   }
 
+  private armPoller(epoch: number): void {
+    if (this.stopped || epoch !== this.watchEpoch) return
+    this.poller = setTimeout(() => {
+      this.poller = undefined
+      let polling!: Promise<void>
+      polling = (async (): Promise<void> => {
+        try {
+          await this.poll(epoch)
+        } catch (error) {
+          this.options.stdout(`[cordisx] local-dev watch failed: ${String(error)}`)
+        } finally {
+          if (this.polling === polling) this.polling = undefined
+          this.armPoller(epoch)
+        }
+      })()
+      this.polling = polling
+    }, WATCH_INTERVAL_MS)
+  }
+
   async start(): Promise<void> {
-    if (!this.stopped) return
+    if (!this.stopped) return await this.starting
     this.stopped = false
-    this.lastFingerprint = await this.currentFingerprint()
-    this.schedule()
-    this.poller = setInterval(() => { void this.poll().catch(error => this.options.stdout(`[cordisx] local-dev watch failed: ${String(error)}`)) }, WATCH_INTERVAL_MS)
+    const epoch = ++this.watchEpoch
+    const starting = (async (): Promise<void> => {
+      const initialFingerprint = await this.currentFingerprint()
+      if (this.stopped || epoch !== this.watchEpoch) return
+      this.lastFingerprint = initialFingerprint
+      this.schedule()
+      this.armPoller(epoch)
+    })()
+    this.starting = starting
+    try {
+      await starting
+    } finally {
+      if (this.starting === starting) this.starting = undefined
+    }
   }
 
   async stop(): Promise<void> {
     this.stopped = true
+    this.watchEpoch += 1
     if (this.debounce !== undefined) clearTimeout(this.debounce)
-    if (this.poller !== undefined) clearInterval(this.poller)
+    if (this.poller !== undefined) clearTimeout(this.poller)
     this.debounce = undefined
     this.poller = undefined
+    await Promise.all([this.starting, this.polling])
     while (this.running) await new Promise(resolve => setTimeout(resolve, 10))
   }
 

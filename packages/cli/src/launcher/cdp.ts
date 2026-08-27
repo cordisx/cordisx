@@ -254,6 +254,9 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   }
 
   register(session: CdpSession): () => void {
+    if (this.fences.size !== 0 || this.staged.size !== 0) {
+      throw new Error('cannot register a CordisX renderer during a plugin generation transaction')
+    }
     this.sessions.add(session)
     return () => {
       this.sessions.delete(session)
@@ -609,7 +612,7 @@ interface InstalledScript {
   readonly lifecycleController?: AbortController
   readonly removeLifecycleBindingListener?: () => void
   readonly lifecycleBindingInstalled: boolean
-  readonly unregisterLifecycleSession?: () => void
+  readonly unregisterLifecycleSession: () => void
   readonly publisherGrantController?: AbortController
   readonly removePublisherGrantBindingListener?: () => void
   readonly publisherGrantBindingInstalled: boolean
@@ -1100,8 +1103,9 @@ async function install(
       actionsBindingInstalled: actions !== undefined,
       ...(permissionController === undefined ? {} : { permissionController, removePermissionBindingListener }),
       permissionBindingInstalled: permission !== undefined,
-      ...(lifecycleController === undefined ? {} : { lifecycleController, removeLifecycleBindingListener, unregisterLifecycleSession }),
+      ...(lifecycleController === undefined ? {} : { lifecycleController, removeLifecycleBindingListener }),
       lifecycleBindingInstalled: lifecycle !== undefined,
+      unregisterLifecycleSession,
       ...(publisherGrantController === undefined ? {} : { publisherGrantController, removePublisherGrantBindingListener }),
       publisherGrantBindingInstalled: publisherGrant !== undefined,
     }
@@ -1152,7 +1156,7 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.removeActionsBindingListener?.()
   installed.removePermissionBindingListener?.()
   installed.removeLifecycleBindingListener?.()
-  installed.unregisterLifecycleSession?.()
+  installed.unregisterLifecycleSession()
   installed.removePublisherGrantBindingListener?.()
   try {
     await Promise.allSettled([

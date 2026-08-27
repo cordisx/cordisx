@@ -454,6 +454,11 @@ the old fiber only in the normal completion phase. It must not reinject or
 dispose the whole CordisX runtime while calling that operation a plugin reload.
 New renderer targets receive the latest successful immutable bootstrap; an
 already installed renderer changes only through the transaction.
+This phase is renderer-only. Runtime manifest `services` and formal package
+`dependencies` are rejected as unavailable before publication; local-dev does
+not pretend that a renderer fiber also started Node services or resolved a
+package dependency graph. Those declarations require the formal package
+authority.
 
 The local entry's absolute path and build status are Host-private Manager
 diagnostics. They are not `plugin-package-source`, canonical source,

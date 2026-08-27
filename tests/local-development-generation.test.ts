@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   LocalDevelopmentController,
   buildLocalDevelopmentPlugin,
@@ -221,6 +221,64 @@ describe('local development generations', () => {
       await writeFile(missing, "export const value = 'created'\n")
       await eventually(() => expect(runtime.published).toHaveLength(1))
       expect(runtime.states.at(-1)).toMatchObject({ state: 'ready' })
+    } finally {
+      await controller.stop()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('does not install a late watcher when stop races the initial fingerprint', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-dev-start-stop-'))
+    const entry = path.join(root, 'race.ts')
+    await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'race', version: '1.0.0' }))
+    await writeFile(entry, 'export default { apply() {} }\n')
+    const runtime = new FixtureGenerationRuntime()
+    const controller = await LocalDevelopmentController.create({
+      entry,
+      runtimeGeneration: 'fixture-runtime',
+      runtime,
+      rebuildBootstrap: async () => 'fixture-bootstrap',
+      setBootstrap: () => undefined,
+      stdout: () => undefined,
+    })
+    vi.useFakeTimers()
+    try {
+      const starting = controller.start()
+      const stopping = controller.stop()
+      await Promise.all([starting, stopping])
+      expect(vi.getTimerCount()).toBe(0)
+      expect(runtime.published).toHaveLength(0)
+    } finally {
+      await controller.stop()
+      vi.useRealTimers()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('reports formal package dependencies as unavailable in the renderer-only phase', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-dev-dependencies-'))
+    const entry = path.join(root, 'dependent.ts')
+    await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'dependent', version: '1.0.0' }))
+    await writeFile(path.join(root, 'cordisx-package.json'), JSON.stringify({ dependencies: [{ id: 'base', version: '1.0.0' }] }))
+    await writeFile(entry, 'export default { apply() {} }\n')
+    const runtime = new FixtureGenerationRuntime()
+    const controller = await LocalDevelopmentController.create({
+      entry,
+      runtimeGeneration: 'fixture-runtime',
+      runtime,
+      rebuildBootstrap: async () => 'fixture-bootstrap',
+      setBootstrap: () => undefined,
+      stdout: () => undefined,
+    })
+    try {
+      await controller.start()
+      await eventually(() => expect(runtime.states.at(-1)).toMatchObject({
+        state: 'failed',
+        error: 'local development phase 1 is renderer-only; package dependencies are unavailable',
+      }))
+      expect(runtime.published).toHaveLength(0)
+      await writeFile(path.join(root, 'cordisx-package.json'), JSON.stringify({ dependencies: [] }))
+      await eventually(() => expect(runtime.published).toHaveLength(1))
     } finally {
       await controller.stop()
       await rm(root, { recursive: true, force: true })

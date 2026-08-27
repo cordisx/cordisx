@@ -56,6 +56,21 @@ function activation(revision: number, generation: string): CordisXPluginActivati
 }
 
 describe('CdpPluginLifecycleRuntime', () => {
+  it('removes a closed development renderer and refuses a replacement until the generation fence clears', () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const first = { send: async () => ({}) } as never
+    const second = { send: async () => ({}) } as never
+    const unregisterFirst = runtime.register(first)
+    const fence = runtime.prepare('in-flight')
+    expect(fence.expectedRegistryEpoch).toBe(0)
+    expect(() => runtime.register(second)).toThrow('cannot register a CordisX renderer during a plugin generation transaction')
+    runtime.cancelPreparation('in-flight')
+    const unregisterSecond = runtime.register(second)
+    unregisterSecond()
+    unregisterFirst()
+    expect(() => runtime.prepare('after-target-close')).toThrow('no ready CordisX renderer is available')
+  })
+
   it('projects first-build local diagnostics without requiring a formal lifecycle bridge', async () => {
     const runtime = new CdpPluginLifecycleRuntime()
     const expressions: string[] = []

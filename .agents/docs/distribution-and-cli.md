@@ -265,6 +265,10 @@ this is not an installed package source, marketplace source, canonical share
 URL, or durable lifecycle record. Phase 1 derives the launcher plugin id from
 the entry basename. The module's runtime manifest must declare that same id;
 an id mismatch is an activation failure and retains the previous generation.
+Phase 1 is renderer-only: a manifest-v4 entry with Node `services`, or a nearby
+formal package descriptor with non-empty `dependencies`, is unavailable and
+fails the candidate while retaining last-good. Developers must use the formal
+package lifecycle for those Host/service/dependency graphs.
 
 After the first Codex renderer is ready, the launcher watches the complete
 esbuild input graph plus the entry's source-root fallback graph. The fallback
