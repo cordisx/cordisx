@@ -18,6 +18,7 @@ import {
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6,
   type CordisXExtensionPointPolicyRecordV1,
 } from '../packages/cli/src/contracts.js'
 import type { CordisXI18nService } from '../packages/cli/src/renderer/i18n.js'
@@ -73,21 +74,22 @@ describe('extension point runtime contract', () => {
     descriptors.dispose()
   })
 
-  it('declares the complete v5 catalog with static maturity and adapter support', () => {
+  it('declares the complete v6 catalog with static maturity and adapter support', () => {
     const registry = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     const remove = registry.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     expect(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG).toMatchObject({
-      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
-      schemaVersion: 5,
+      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6,
+      schemaVersion: 6,
     })
-    expect(registry.descriptors()).toHaveLength(33)
-    expect(registry.descriptors().filter(item => item.kind === 'surface')).toHaveLength(28)
+    expect(registry.descriptors()).toHaveLength(34)
+    expect(registry.descriptors().filter(item => item.kind === 'surface')).toHaveLength(29)
     expect(registry.descriptors().filter(item => item.kind === 'outlet')).toHaveLength(5)
     expect(registry.descriptors()
       .filter(item => item.maturity === 'stable' && item.adapterSupport === 'supported')
       .map(item => item.id)
       .sort()).toEqual([
       'app',
+      'composer.reasoning-intensity',
       'composer.toolbar.items',
       'environment.panel.header-actions',
       'environment.panel.sections',
@@ -121,6 +123,9 @@ describe('extension point runtime contract', () => {
         { id: 'leading', adapterSupport: 'unverified' },
         { id: 'model', adapterSupport: 'unverified' },
       ],
+    })
+    expect(registry.descriptor('composer.reasoning-intensity')).toMatchObject({
+      kind: 'surface', payloadFamily: 'reasoning-intensity-presentation', maturity: 'stable', adapterSupport: 'supported',
     })
     expect(registry.descriptor('panel.right.content')).toMatchObject({
       kind: 'outlet', maturity: 'reserved', adapterSupport: 'unsupported',

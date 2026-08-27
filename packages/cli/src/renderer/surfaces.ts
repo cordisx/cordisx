@@ -23,6 +23,7 @@ import {
   type CordisXSurfaceName,
   type CordisXTabItem,
   type CordisXPresenterItem,
+  type CordisXReasoningIntensityPresentation,
   type CordisXToolbarItem,
   type CordisXWhen,
 } from '../contracts.js'
@@ -188,8 +189,8 @@ function assertPresentationOptions(
   options: CordisXContributionPresentationOptions,
 ): void {
   assertKeys(options, ['group', 'order', 'when', 'disabled'], 'surface contribution presentation options')
-  if (surface === 'manager.settings.tabs' && options.group !== undefined) {
-    throw new Error('manager.settings.tabs does not accept a contribution group')
+  if ((surface === 'manager.settings.tabs' || surface === 'composer.reasoning-intensity') && options.group !== undefined) {
+    throw new Error(`${surface} does not accept a contribution group`)
   }
   if (surface === 'manager.settings.navigation-items'
     && options.group !== 'before-settings'
@@ -264,6 +265,25 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
     if (tab.badge !== undefined && typeof tab.badge === 'object') assertLocalizedText(tab.badge, 'tab badge')
     if (tab.order !== undefined && (!Number.isInteger(tab.order) || tab.order < -100000 || tab.order > 100000)) throw new Error('tab order is invalid')
     assertWhenExpression(tab.when)
+  } else if (surface === 'composer.reasoning-intensity') {
+    const presentation = snapshot as CordisXReasoningIntensityPresentation
+    assertKeys(snapshot, ['variant', 'title', 'motion', 'stages'], 'reasoning intensity presentation')
+    if (presentation.variant !== 'imperium') throw new Error('reasoning intensity variant is invalid')
+    assertLocalizedText(presentation.title, 'reasoning intensity title')
+    if (presentation.motion !== undefined && !['smooth', 'ascension'].includes(presentation.motion)) {
+      throw new Error('reasoning intensity motion is invalid')
+    }
+    if (!Array.isArray(presentation.stages) || presentation.stages.length < 2 || presentation.stages.length > 8) {
+      throw new Error('reasoning intensity requires between two and eight stages')
+    }
+    for (const [index, stage] of presentation.stages.entries()) {
+      if (stage === null || typeof stage !== 'object' || Array.isArray(stage)) throw new Error(`reasoning intensity stage ${index} must be an object`)
+      assertKeys(stage, ['label', 'material'], `reasoning intensity stage ${index}`)
+      assertLocalizedText(stage.label, `reasoning intensity stage ${index} label`)
+      if (!['plastic', 'bronze', 'steel', 'silver', 'gold'].includes(stage.material)) {
+        throw new Error(`reasoning intensity stage ${index} material is invalid`)
+      }
+    }
   } else if (surface === 'session.banner.items'
     || surface === 'session.turn.footer'
     || surface === 'composer.dock.above'

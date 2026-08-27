@@ -1,7 +1,7 @@
 # UI extension catalog and Codex adapter
 
 Status: approved architecture and delivery contract. The catalog is
-host-neutral. Catalog v5 records maturity and release-level adapter support;
+host-neutral. Catalog v6 records maturity and release-level adapter support;
 runtime context v1 separately records whether a seat is active, inactive, or
 not mounted on the current page. Automated fixtures and an isolated
 real-renderer report remain required before a release claims support.
@@ -170,6 +170,7 @@ environment family is not duplicated under generic panel names.
 | Session | `session.turn.footer` | presenter | reserved | Requires an observed turn identity and a unique turn-tail seat. |
 | Session | `session.tool.actions` | contextual action | reserved | Requires an observed tool-call/item identity; no keyed tool renderer. |
 | Composer | `composer.toolbar.items` | action | implemented | Semantic anchors `leading`, `model`, and `submit`; placements `before`, `after`, and only an existing native `menu`. The release proof covers `submit`/`before`. |
+| Composer | `composer.reasoning-intensity` | reasoning-intensity presentation | implemented | Host projects one uniquely visible native range without replacing its values, events, focus, keyboard behavior, or accessible name. The plugin supplies only ordered semantic material stages. |
 | Composer | `composer.command-menu.items` | menu item | experimental | Project only into the unique open native command menu; never create a CordisX command-menu trigger. |
 | Composer | `composer.dock.above` | presenter | experimental | Pending unless one active composer and its session identity resolve uniquely. |
 | Composer | `composer.dock.below` | presenter | experimental | Same as above; no fixed overlay below the window. |
@@ -266,6 +267,7 @@ resembles an identity never becomes host context.
 | DeepSeek Harness intent | CordisX contract | Boundary |
 | --- | --- | --- |
 | `input.left` / `input.right` | `composer.toolbar.items` | Semantic anchor and placement; host-rendered action only. |
+| native reasoning intensity | `composer.reasoning-intensity` | Host-owned visual projection over the native range; no plugin selector, DOM, CSS, or setting semantics. |
 | input/composer dock | `composer.dock.above` / `composer.dock.below` | Finite presenters; no plugin DOM in Codex shell. |
 | session header actions/utilities | `session.header.actions` | `group=action` or `group=utility`; host decides direct/overflow layout. |
 | `conversation.view` | route/page plus `session.tabs` and `session.content` | Page body mounts only in the controlled outlet. |
@@ -275,7 +277,7 @@ resembles an identity never becomes host context.
 | Settings content switcher | `manager.settings.tabs` plus `manager.settings.content` | A: Host-rendered tabs inside Settings plus controlled body-only content; never a Codex shell selector. |
 | top-level Manager plugin destination | `manager.settings.navigation-items` plus `manager.content` | B: Host-rendered left-navigation row, route-v2 text, page-v3 standard header/body; no plugin DOM or Codex selector. |
 | keyed chat/message/tool renderers | refused | No keyed renderer or native-node replacement registry. |
-| whole composer/session/header/chat replacement | refused | CordisX does not grant native React ownership. |
+| whole composer/session/header/chat replacement | refused | CordisX does not grant native React ownership; the bounded reasoning-range projection is not whole-composer authority. |
 
 The adapter also refuses selector strings, Codex DOM/container references,
 arbitrary HTML/SVG/CSS, plugin-owned tooltips, plugin-owned overflow/popovers,

@@ -1,6 +1,7 @@
 import {
   CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1,
   type CordisXLocalizedText,
+  type CordisXReasoningIntensityPresentation,
   type CordisXRouteReference,
   type CordisXStructuredAction,
   type CordisXSurfaceInvocationContextV1,
@@ -491,6 +492,165 @@ function resolveComposerSubmitSeat(document: Document, sessionId: string | undef
   }
 }
 
+function resolveReasoningIntensityRange(document: Document, sessionId: string | undefined): HTMLInputElement | undefined {
+  if (sessionId === undefined) return undefined
+  const Input = document.defaultView?.HTMLInputElement
+  if (Input === undefined) return undefined
+  const candidates = [...document.querySelectorAll<HTMLInputElement>('input[type="range"]')]
+    .filter((candidate): candidate is HTMLInputElement => candidate instanceof Input && strictlyVisible(candidate))
+    .filter(candidate => candidate.dataset.cordisxReasoningNative !== 'true')
+    .filter((candidate) => {
+      const rect = candidate.getBoundingClientRect()
+      return rect.width >= 120 && rect.height <= 96 && Number.isFinite(candidate.valueAsNumber)
+    })
+  return candidates.length === 1 ? candidates[0] : undefined
+}
+
+/** @internal Host-owned projection used by the Codex adapter and focused renderer tests. */
+export class ReasoningIntensityProjection {
+  private readonly root: HTMLElement
+  private readonly fill: HTMLElement
+  private readonly thumb: HTMLElement
+  private readonly ticks: HTMLElement
+  private readonly particles: HTMLElement
+  private native: HTMLInputElement | undefined
+  private nativeOpacity = ''
+  private nativeAccentColor = ''
+  private resizeObserver: ResizeObserver | undefined
+  private dragging = false
+  private pointerX = 0
+  private presentation: CordisXReasoningIntensityPresentation | undefined
+  private title = ''
+  private labels: readonly string[] = []
+
+  constructor(private readonly document: Document) {
+    this.root = create(document, 'div', 'cordisx-reasoning-intensity')
+    this.root.dataset.cordisxSurfaceHost = 'composer.reasoning-intensity'
+    this.root.dataset.cordisxNoDrag = 'true'
+    this.root.setAttribute('aria-hidden', 'true')
+    this.fill = create(document, 'span', 'cordisx-reasoning-fill')
+    this.ticks = create(document, 'span', 'cordisx-reasoning-ticks')
+    this.particles = create(document, 'span', 'cordisx-reasoning-particles')
+    this.thumb = create(document, 'span', 'cordisx-reasoning-thumb')
+    this.thumb.append(create(document, 'i'), create(document, 'i'))
+    for (let index = 0; index < 14; index += 1) {
+      const particle = create(document, 'i')
+      particle.style.setProperty('--particle-index', String(index))
+      particle.style.setProperty('--particle-y', `${12 + ((index * 37) % 76)}%`)
+      particle.style.setProperty('--particle-delay', `${-((index * 173) % 1100)}ms`)
+      this.particles.append(particle)
+    }
+    this.root.append(this.fill, this.ticks, this.particles, this.thumb)
+    Object.assign(this.root.style, { position: 'fixed', pointerEvents: 'none', zIndex: '2147483190' })
+    ;(document.body ?? document.documentElement).append(this.root)
+  }
+
+  update(
+    native: HTMLInputElement,
+    presentation: CordisXReasoningIntensityPresentation,
+    title: string,
+    stageLabels: readonly string[],
+  ): void {
+    if (this.native !== native) this.connect(native)
+    this.presentation = presentation
+    this.title = title
+    this.labels = stageLabels
+    this.root.dataset.motion = presentation.motion ?? 'smooth'
+    this.ticks.replaceChildren(...presentation.stages.map(() => create(this.document, 'i')))
+    this.sync(presentation, title, stageLabels)
+    this.align()
+  }
+
+  dispose(): void {
+    this.disconnect()
+    this.root.remove()
+  }
+
+  private readonly onInput = (): void => {
+    if (this.presentation !== undefined) this.sync(this.presentation, this.title, this.labels)
+  }
+  private readonly onPointerDown = (event: PointerEvent): void => {
+    this.pointerX = event.clientX
+    this.dragging = false
+  }
+  private readonly onPointerMove = (event: PointerEvent): void => {
+    if ((event.buttons & 1) === 0 || Math.abs(event.clientX - this.pointerX) < 4) return
+    this.dragging = true
+    this.root.dataset.dragging = 'true'
+  }
+  private readonly onPointerUp = (): void => {
+    this.dragging = false
+    delete this.root.dataset.dragging
+  }
+  private readonly align = (): void => {
+    if (this.native === undefined || !this.native.isConnected) return
+    const rect = this.native.getBoundingClientRect()
+    Object.assign(this.root.style, {
+      left: `${rect.left}px`,
+      top: `${rect.top}px`,
+      width: `${rect.width}px`,
+      height: `${rect.height}px`,
+    })
+  }
+
+  private connect(native: HTMLInputElement): void {
+    this.disconnect()
+    this.native = native
+    this.nativeOpacity = native.style.opacity
+    this.nativeAccentColor = native.style.accentColor
+    native.dataset.cordisxReasoningNative = 'true'
+    native.style.opacity = '0'
+    native.style.accentColor = 'transparent'
+    native.addEventListener('input', this.onInput)
+    native.addEventListener('change', this.onInput)
+    native.addEventListener('pointerdown', this.onPointerDown)
+    native.addEventListener('pointermove', this.onPointerMove)
+    native.addEventListener('pointerup', this.onPointerUp)
+    const Resize = this.document.defaultView?.ResizeObserver
+    if (Resize !== undefined) {
+      this.resizeObserver = new Resize(this.align)
+      this.resizeObserver.observe(native)
+    }
+    this.document.defaultView?.addEventListener('resize', this.align)
+    this.document.defaultView?.addEventListener('scroll', this.align, true)
+  }
+
+  private disconnect(): void {
+    this.resizeObserver?.disconnect()
+    this.resizeObserver = undefined
+    this.document.defaultView?.removeEventListener('resize', this.align)
+    this.document.defaultView?.removeEventListener('scroll', this.align, true)
+    if (this.native === undefined) return
+    this.native.removeEventListener('input', this.onInput)
+    this.native.removeEventListener('change', this.onInput)
+    this.native.removeEventListener('pointerdown', this.onPointerDown)
+    this.native.removeEventListener('pointermove', this.onPointerMove)
+    this.native.removeEventListener('pointerup', this.onPointerUp)
+    this.native.style.opacity = this.nativeOpacity
+    this.native.style.accentColor = this.nativeAccentColor
+    delete this.native.dataset.cordisxReasoningNative
+    this.native = undefined
+  }
+
+  private sync(presentation: CordisXReasoningIntensityPresentation, title: string, stageLabels: readonly string[]): void {
+    if (this.native === undefined) return
+    this.root.dataset.title = title
+    const min = Number(this.native.min || 0)
+    const max = Number(this.native.max || 100)
+    const value = Number.isFinite(this.native.valueAsNumber) ? this.native.valueAsNumber : Number(this.native.value)
+    const progress = max > min ? Math.max(0, Math.min(1, (value - min) / (max - min))) : 0
+    const index = Math.round(progress * (presentation.stages.length - 1))
+    const stage = presentation.stages[index] ?? presentation.stages[0]!
+    const label = stageLabels[index] ?? title
+    this.root.dataset.material = stage.material
+    this.root.title = `${title}: ${label}`
+    this.root.style.setProperty('--cordisx-reasoning-progress', `${progress * 100}%`)
+    this.fill.style.width = `${progress * 100}%`
+    this.thumb.style.left = `${progress * 100}%`
+    this.root.dataset.peak = index === presentation.stages.length - 1 ? 'true' : 'false'
+  }
+}
+
 function nativeToolbarCornerRadius(template: HTMLButtonElement): string {
   const style = template.ownerDocument.defaultView?.getComputedStyle(template)
   const radius = (style?.borderTopLeftRadius || style?.borderRadius || '').trim()
@@ -509,6 +669,7 @@ class StructuredSurfaceRenderer {
   private disposed = false
   private nextContext = 0
   private readonly routeProjectors = new Map<HTMLButtonElement, () => void>()
+  private reasoningProjection: ReasoningIntensityProjection | undefined
 
   constructor(
     private readonly document: Document,
@@ -556,6 +717,8 @@ class StructuredSurfaceRenderer {
     this.disposed = true
     this.observer?.disconnect()
     this.restoreToolbarSlot()
+    this.reasoningProjection?.dispose()
+    this.reasoningProjection = undefined
     this.tooltips.dispose()
     for (const unsubscribe of this.unsubscribers) unsubscribe()
     for (const root of this.roots.values()) root.remove()
@@ -604,6 +767,7 @@ class StructuredSurfaceRenderer {
     const sessionId = managerOverlay ? undefined : currentSessionId(this.document)
     const sessionHeaderSeat = resolveSessionHeaderSeat(this.document, sessionId)
     const composerSubmitSeat = resolveComposerSubmitSeat(this.document, sessionId)
+    const reasoningRange = managerOverlay ? undefined : resolveReasoningIntensityRange(this.document, sessionId)
     const contextValues = {
       'sidebar.visible': sidebarNavigation !== undefined || sidebarFooterControl !== undefined,
       'toolbar.visible': toolbarControl !== undefined,
@@ -640,6 +804,7 @@ class StructuredSurfaceRenderer {
           { id: 'model', placements: ['before', 'after', 'menu'], state: 'not-mounted', code: 'anchor.not-mounted', detail: contextDetail('composer-model.not-mounted', 'The model anchor is not mounted by this adapter.') },
         ],
       },
+      { surface: 'composer.reasoning-intensity', state: reasoningRange === undefined ? sessionContextState : 'active', ...(reasoningRange === undefined ? { code: sessionId === undefined ? 'session.not-mounted' : 'anchor.unresolved', detail: contextDetail(sessionId === undefined ? 'reasoning-intensity.not-mounted' : 'reasoning-intensity.unresolved', sessionId === undefined ? 'The native reasoning control is not mounted in the current page.' : 'The native reasoning range could not be resolved uniquely.') } : {}) },
       ...(['environment.panel.header-actions', 'environment.panel.sections', 'environment.section.actions', 'environment.section.rows', 'environment.row.trailing-actions'] as const)
         .map(surface => ({ surface, state: environmentState, ...(environment === undefined
           ? environmentCandidates.length > 0
@@ -651,6 +816,7 @@ class StructuredSurfaceRenderer {
     const snapshots = this.slots.snapshot()
 
     const active = snapshots.filter(item => item.visible && item.authorized && item.valid && !item.pending)
+    let renderedReasoningId: string | undefined
     if (sidebarNavigation !== undefined) {
       availableSurfaces.add('sidebar.navigation.items')
       const items = active.filter(item => item.surface === 'sidebar.navigation.items')
@@ -737,6 +903,24 @@ class StructuredSurfaceRenderer {
         if (rebuild || root.childElementCount === 0) this.renderActions(root, items, nextSites, 'submit.before', composerSubmitSeat.template, 'composer', 2, false)
       }
     }
+    if (reasoningRange !== undefined) {
+      availableSurfaces.add('composer.reasoning-intensity')
+      const snapshot = active.find(item => item.surface === 'composer.reasoning-intensity')
+      if (snapshot !== undefined) {
+        const presentation = snapshot.item as CordisXReasoningIntensityPresentation
+        const title = this.text(snapshot, presentation.title, 'title', nextSites)
+        const labels = presentation.stages.map((stage, index) => this.text(snapshot, stage.label, `stages.${index}.label`, nextSites))
+        this.reasoningProjection ??= new ReasoningIntensityProjection(this.document)
+        this.reasoningProjection.update(reasoningRange, presentation, title, labels)
+        renderedReasoningId = snapshot.qualifiedId
+      } else {
+        this.reasoningProjection?.dispose()
+        this.reasoningProjection = undefined
+      }
+    } else {
+      this.reasoningProjection?.dispose()
+      this.reasoningProjection = undefined
+    }
     if (environment !== undefined) {
       for (const surface of [
         'environment.panel.header-actions', 'environment.panel.sections', 'environment.section.actions',
@@ -763,6 +947,7 @@ class StructuredSurfaceRenderer {
     for (const snapshot of snapshots) {
       const rendered = snapshot.visible && snapshot.authorized && snapshot.valid && !snapshot.pending
         && availableSurfaces.has(snapshot.surface)
+        && (snapshot.surface !== 'composer.reasoning-intensity' || snapshot.qualifiedId === renderedReasoningId)
       const renderToken = this.slots.registry.renderToken(snapshot.surface, snapshot.qualifiedId)
       if (renderToken !== undefined) this.slots.registry.markRendered(snapshot.surface, snapshot.qualifiedId, renderToken, rendered)
     }
@@ -1156,6 +1341,25 @@ function installStyles(document: Document): () => void {
     [data-cordisx-no-drag="true"], [data-cordisx-no-drag="true"] * { -webkit-app-region: no-drag !important; }
     .cordisx-native-seat { box-sizing: border-box; color: inherit; font: inherit; pointer-events: auto; -webkit-app-region: no-drag; }
     .cordisx-native-seat[hidden] { display: none !important; }
+    .cordisx-reasoning-intensity { --cordisx-reasoning-edge: #dad7cf; --cordisx-reasoning-light: #f8f7f2; --cordisx-reasoning-mid: #cbc6ba; --cordisx-reasoning-dark: #5a5650; box-sizing: border-box; display: block; min-height: 28px; padding: 5px; overflow: visible; border: 1px solid color-mix(in oklab,var(--cordisx-reasoning-edge) 74%,#111); border-radius: 999px; background: linear-gradient(180deg,color-mix(in oklab,var(--cordisx-reasoning-dark) 50%,#111),color-mix(in oklab,var(--cordisx-reasoning-dark) 78%,#000)); box-shadow: inset 0 1px 2px rgba(255,255,255,.12),0 2px 8px rgba(0,0,0,.22); }
+    .cordisx-reasoning-intensity[data-material="plastic"] { --cordisx-reasoning-edge:#eeeae1; --cordisx-reasoning-light:#fffefa; --cordisx-reasoning-mid:#d8d4cb; --cordisx-reasoning-dark:#77736c; }
+    .cordisx-reasoning-intensity[data-material="bronze"] { --cordisx-reasoning-edge:#d09b5b; --cordisx-reasoning-light:#ffd197; --cordisx-reasoning-mid:#a9632d; --cordisx-reasoning-dark:#4d2a19; }
+    .cordisx-reasoning-intensity[data-material="steel"] { --cordisx-reasoning-edge:#9fb1b7; --cordisx-reasoning-light:#dce7e9; --cordisx-reasoning-mid:#70868e; --cordisx-reasoning-dark:#27383e; }
+    .cordisx-reasoning-intensity[data-material="silver"] { --cordisx-reasoning-edge:#e8e9ea; --cordisx-reasoning-light:#fff; --cordisx-reasoning-mid:#aeb4ba; --cordisx-reasoning-dark:#555d65; }
+    .cordisx-reasoning-intensity[data-material="gold"] { --cordisx-reasoning-edge:#ffe68a; --cordisx-reasoning-light:#fff3b2; --cordisx-reasoning-mid:#d69b16; --cordisx-reasoning-dark:#5b3a06; }
+    .cordisx-reasoning-fill { position:absolute; inset:5px auto 5px 5px; max-width:calc(100% - 10px); border-radius:999px; background:linear-gradient(180deg,var(--cordisx-reasoning-light) 0%,var(--cordisx-reasoning-mid) 42%,color-mix(in oklab,var(--cordisx-reasoning-mid) 70%,var(--cordisx-reasoning-dark)) 100%); box-shadow:inset 0 1px 0 rgba(255,255,255,.75),inset 0 -2px 3px rgba(0,0,0,.28),0 0 10px color-mix(in oklab,var(--cordisx-reasoning-mid) 45%,transparent); transition:width 280ms cubic-bezier(.22,.8,.2,1),background 320ms ease,box-shadow 320ms ease; }
+    .cordisx-reasoning-fill::after { content:""; position:absolute; inset:14% 5% auto; height:24%; border-radius:999px; background:linear-gradient(90deg,transparent,rgba(255,255,255,.52),transparent); opacity:.72; }
+    .cordisx-reasoning-ticks { position:absolute; inset:5px; display:flex; justify-content:space-between; align-items:center; padding:0 3px; }
+    .cordisx-reasoning-ticks i { display:block; width:4px; height:4px; border-radius:50%; background:color-mix(in oklab,var(--cordisx-reasoning-light) 72%,transparent); box-shadow:0 1px 1px rgba(0,0,0,.38); opacity:.72; }
+    .cordisx-reasoning-thumb { position:absolute; top:50%; width:max(44px,calc(100% / 7)); height:calc(100% - 6px); min-height:22px; max-height:46px; display:flex; gap:3px; align-items:center; justify-content:center; padding:3px; border:1px solid color-mix(in oklab,var(--cordisx-reasoning-edge) 74%,#5b451b); border-radius:999px; background:linear-gradient(145deg,var(--cordisx-reasoning-light),var(--cordisx-reasoning-mid)); box-shadow:inset 0 1px 1px rgba(255,255,255,.75),inset 0 -2px 2px rgba(0,0,0,.16),0 3px 7px rgba(0,0,0,.30); transform:translate(-50%,-50%); transition:left 280ms cubic-bezier(.22,.8,.2,1),background 320ms ease,border-color 320ms ease,box-shadow 320ms ease; }
+    .cordisx-reasoning-thumb i { display:block; width:42%; aspect-ratio:1; border-radius:50%; background:radial-gradient(circle at 36% 30%,#fff 0%,var(--cordisx-reasoning-light) 38%,var(--cordisx-reasoning-mid) 100%); box-shadow:inset -1px -2px 3px rgba(0,0,0,.12),0 1px 2px rgba(0,0,0,.16); }
+    .cordisx-reasoning-particles { position:absolute; inset:-14px -6px; overflow:visible; opacity:0; transition:opacity 420ms ease; }
+    .cordisx-reasoning-particles i { position:absolute; left:var(--cordisx-reasoning-progress); top:var(--particle-y); width:4px; height:2px; border-radius:100% 0 100% 0; background:var(--cordisx-reasoning-light); box-shadow:0 0 6px var(--cordisx-reasoning-mid); transform:translate(-50%,-50%) rotate(calc(var(--particle-index) * 29deg)); }
+    .cordisx-reasoning-intensity[data-peak="true"][data-motion="ascension"] .cordisx-reasoning-particles { opacity:1; }
+    .cordisx-reasoning-intensity[data-peak="true"][data-motion="ascension"] .cordisx-reasoning-particles i { animation:cordisx-reasoning-spark 1.45s var(--particle-delay) ease-in-out infinite; }
+    .cordisx-reasoning-intensity[data-dragging="true"] .cordisx-reasoning-fill,.cordisx-reasoning-intensity[data-dragging="true"] .cordisx-reasoning-thumb { transition-duration:0ms; }
+    @keyframes cordisx-reasoning-spark { 0%,100% { opacity:.15; transform:translate(-8px,-50%) scale(.55) rotate(calc(var(--particle-index) * 29deg)); } 42% { opacity:1; transform:translate(calc(8px + var(--particle-index) * 1.4px),calc(-50% - 7px)) scale(1) rotate(calc(24deg + var(--particle-index) * 29deg)); } 75% { opacity:.35; transform:translate(calc(18px + var(--particle-index) * 2px),calc(-50% + 5px)) scale(.7) rotate(calc(56deg + var(--particle-index) * 29deg)); } }
+    @media (prefers-reduced-motion:reduce) { .cordisx-reasoning-intensity * { animation:none!important; transition-duration:0ms!important; } }
     .cordisx-sidebar-navigation { display: block; width: 100%; min-width: 0; }
     .cordisx-sidebar-footer-before, .cordisx-sidebar-footer-after { display: flex; flex: 0 0 auto; height: 32px; align-items: center; gap: 4px; min-width: 0; }
     .cordisx-toolbar-before, .cordisx-toolbar-after, .cordisx-session-header-actions { --cordisx-toolbar-action-target-size: 28px; --cordisx-toolbar-action-corner-radius: 8px; --cordisx-toolbar-action-idle-background: transparent; --cordisx-toolbar-action-hover-background: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); --cordisx-toolbar-action-focus-ring: var(--color-ring,rgba(131,195,255,.76)); --cordisx-toolbar-action-disabled-opacity: .4; --cordisx-toolbar-action-pressed-background: color-mix(in oklab,var(--color-text,currentColor) 5%,transparent); --cordisx-toolbar-action-pressed-hover-background: color-mix(in oklab,var(--color-text,currentColor) 10%,transparent); --cordisx-toolbar-action-pressed-foreground: var(--color-text,currentColor); --cordisx-toolbar-action-gap: 6px; display: flex; flex: 0 0 auto; height: var(--cordisx-toolbar-action-target-size); align-items: center; gap: var(--cordisx-toolbar-action-gap); min-width: 0; }
