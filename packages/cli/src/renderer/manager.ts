@@ -1060,6 +1060,7 @@ const MANAGER_STYLES = `
     border-radius: inherit;
     object-fit: contain;
   }
+  .cxc-icon-seat[data-icon-kind="artwork"] > .cxm-plugin-icon { border: 0; }
   .cxm-plugin-body { min-width: 0; flex: 1; }
   .cxm-plugin-name { overflow: hidden; color: #f0f2f6; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
   .cxm-plugin-name-row { display: flex; min-width: 0; align-items: center; gap: 6px; }
