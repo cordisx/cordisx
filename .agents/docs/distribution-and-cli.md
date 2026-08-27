@@ -277,7 +277,11 @@ build. Changes are debounced and serialized. Every attempt is fenced against
 newer attempts; only the newest ready candidate may publish. A successful
 candidate uses the normal renderer generation transaction. Build, bootstrap,
 manifest, or activation failure leaves the last-good fiber live, while a later
-file change retries and can recover without restarting the Host.
+file change retries and can recover without restarting the Host. A rollback
+blocked by a stale closed renderer also has a controller-owned single backoff
+timer: after CDP target pruning it retries the same transaction, restores the
+last-good bootstrap, and continues the current build without another source
+write.
 
 The initial Host bootstrap contains no fabricated active plugin. If the first
 build fails, Manager instead receives a Host-private local-development

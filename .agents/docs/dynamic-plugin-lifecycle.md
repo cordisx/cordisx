@@ -469,14 +469,21 @@ Before a first successful generation, Manager may show a
 launcher-owned source diagnostic but must not synthesize an active plugin row.
 After success it associates the diagnostic with the actual active plugin.
 Build/readiness failure retains last-good and exposes the most recent bounded
-error; repair creates a new fenced attempt. Watcher shutdown removes every
-timer and waits for the single in-flight attempt before the CDP runtime is
-disposed.
+error; repair creates a new fenced attempt. If a stale renderer makes rollback
+temporarily unavailable, one controller-owned backoff timer retries that same
+transaction and restores its bootstrap before rebuilding the latest source; it
+does not require another file write after target pruning. Watcher shutdown
+removes poll, debounce, and rollback-retry timers and waits for the single
+in-flight attempt before the CDP runtime is disposed.
 
 A renderer joins the Host generation participant set only after its bootstrap,
-recovery projection, and local diagnostic synchronization finish. A concurrent
-generation fence rejects that late join and target injection retries after the
-transaction resolves. Terminal renderer rollback receipts are bounded and
+recovery projection, and local diagnostic synchronization finish. Immediately
+after boot readiness it first holds an atomic join reservation: the reserved
+session participates in durable cold-start rollback while new prepare/register
+operations remain fenced. Successful recovery and synchronization commit the
+reservation into a normal session; failure aborts it and target injection
+retries. A concurrent generation fence rejects a target that loses the initial
+reservation race. Terminal renderer rollback receipts are bounded and
 idempotent; a partial multi-renderer rollback or finalize can therefore retry
 the same Host transaction without admitting an overlapping generation. Both
 published and unpublished Host-authorized rollback use the canonical monotonic

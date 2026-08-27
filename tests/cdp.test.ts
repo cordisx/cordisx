@@ -125,6 +125,96 @@ describe('CdpPluginLifecycleRuntime', () => {
     }
   })
 
+  it('uses a join reservation to recover a durable rollback on the first cold-start renderer', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const previous = activation(0, 'demo-old')
+    const candidate = activation(1, 'demo-new')
+    const tuple = (record: CordisXPluginActivationRecordV1) => ({
+      profileId: record.profileId,
+      revision: record.revision,
+      lastGoodRevision: record.lastGoodRevision,
+      runtimeGeneration: record.runtimeGeneration,
+      plugins: record.plugins,
+    })
+    const plan: RollbackPlan = {
+      transactionId: 'cold-recovery',
+      transactionEpoch: 'cold-recovery:formal',
+      rollbackToken: 'rollback:cold-recovery' as RollbackPlan['rollbackToken'],
+      candidateFingerprint: 'cold-recovery-fingerprint',
+      expectedPublished: tuple(candidate),
+      rollbackTarget: tuple(previous),
+      expectedRegistryEpoch: 0,
+      rollbackRegistryEpoch: 2,
+    }
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const address = server.address()
+    if (typeof address === 'string') throw new Error('fixture websocket did not bind a TCP port')
+    server.on('connection', socket => {
+      socket.on('message', data => {
+        void (async () => {
+          const request = JSON.parse(String(data)) as { id: number; method: string; params?: { expression?: string } }
+          const expression = request.params?.expression ?? ''
+          const result = request.method === 'Page.addScriptToEvaluateOnNewDocument'
+            ? { identifier: `cold-${request.id}` }
+            : request.method !== 'Runtime.evaluate'
+              ? {}
+              : expression.includes('recoverPluginMutation')
+                ? { result: { value: { ok: true, result: {
+                    transactionId: plan.transactionId,
+                    transactionEpoch: plan.transactionEpoch,
+                    registryEpoch: plan.rollbackRegistryEpoch,
+                    active: previous,
+                    disposedAfter: candidate,
+                  } } } }
+                : { result: { value: { ok: true, result: true } } }
+          socket.send(JSON.stringify({ id: request.id, result }))
+        })()
+      })
+    })
+    let recovered = false
+    const handler = {
+      coordinator: {
+        recover: async () => {
+          const observation = await runtime.recoverRollback(plan)
+          const restored = { ...observation.active, recordKind: 'active' as const, revision: 2 }
+          await runtime.adoptRecoveredActivation(restored, observation.registryEpoch)
+          recovered = true
+          return [plan.transactionId]
+        },
+      },
+    }
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([{
+      id: 'cold-renderer', title: 'Codex', url: 'app://-/index.html', type: 'page',
+      webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
+    }]), { status: 200 })) as typeof fetch
+    const statuses: string[] = []
+    const abort = new AbortController()
+    const watching = watchAndInject({
+      port: address.port,
+      source: 'void 0',
+      signal: abort.signal,
+      pluginLifecycle: { handler: handler as never, runtime },
+      onStatus: message => { statuses.push(message) },
+    })
+    try {
+      for (let attempt = 0; attempt < 80 && !statuses.some(item => item.includes('injected target cold-renderer')); attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      expect(recovered).toBe(true)
+      expect(statuses).toContainEqual(expect.stringContaining('injected target cold-renderer'))
+      expect(runtime.prepare('after-cold-recovery')).toMatchObject({ expectedRegistryEpoch: 2 })
+      runtime.cancelPreparation('after-cold-recovery')
+    } finally {
+      abort.abort()
+      await watching
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+  })
+
   it('removes a closed development renderer and refuses a replacement until the generation fence clears', () => {
     const runtime = new CdpPluginLifecycleRuntime()
     const first = { send: async () => ({}) } as never

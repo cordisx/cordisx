@@ -216,6 +216,7 @@ function activationRecord(tuple: PackageActivationTuple): CordisXPluginActivatio
 /** Broadcast one reversible generation transaction to every injected Codex renderer. */
 export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private readonly sessions = new Set<CdpSession>()
+  private readonly joining = new Set<CdpSession>()
   private readonly staged = new Map<string, readonly CdpSession[]>()
   private readonly stagedMutations = new Map<string, PluginRuntimeMutation>()
   private readonly fences = new Map<string, RuntimeGenerationFence>()
@@ -230,7 +231,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   }
 
   setPermissionIdentities(permissionIdentities: PluginPermissionIdentityRegistry): void {
-    if (this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.fences.size !== 0) {
+    if (this.joining.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.fences.size !== 0) {
       throw new Error('cannot replace permission identities during a generation transaction')
     }
     this.permissionIdentities = permissionIdentities
@@ -249,7 +250,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   prepare(transactionId: string): RuntimeGenerationFence {
     if (this.fences.has(transactionId)) throw new Error('plugin generation fence already exists')
-    if (this.fences.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
+    if (this.joining.size !== 0 || this.fences.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
       throw new Error('another plugin generation transaction is unresolved')
     }
     if (this.sessions.size === 0) throw new Error('no ready CordisX renderer is available')
@@ -262,7 +263,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   }
 
   register(session: CdpSession): () => void {
-    if (this.fences.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
+    if (this.joining.size !== 0 || this.fences.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
       throw new Error('cannot register a CordisX renderer during a plugin generation transaction')
     }
     this.sessions.add(session)
@@ -272,6 +273,35 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         const remaining = sessions.filter(item => item !== session)
         if (remaining.length !== sessions.length) this.staged.set(transactionId, remaining)
       }
+    }
+  }
+
+  /** Reserve one boot-ready renderer for cold recovery before normal admission. */
+  beginJoin(session: CdpSession): { readonly commit: () => () => void; readonly abort: () => void } {
+    if (this.joining.size !== 0 || this.fences.size !== 0
+      || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
+      throw new Error('cannot join a CordisX renderer during a plugin generation transaction')
+    }
+    this.joining.add(session)
+    let settled = false
+    return {
+      commit: () => {
+        if (settled || !this.joining.delete(session)) throw new Error('CordisX renderer join reservation is stale')
+        settled = true
+        this.sessions.add(session)
+        return () => {
+          this.sessions.delete(session)
+          for (const [transactionId, sessions] of this.staged) {
+            const remaining = sessions.filter(item => item !== session)
+            if (remaining.length !== sessions.length) this.staged.set(transactionId, remaining)
+          }
+        }
+      },
+      abort: () => {
+        if (settled) return
+        settled = true
+        this.joining.delete(session)
+      },
     }
   }
 
@@ -471,7 +501,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   }
 
   async recoverRollback(plan: RollbackPlan): Promise<RuntimeCleanupObservation> {
-    const sessions = [...this.sessions]
+    const sessions = [...this.sessions, ...this.joining]
     const recovery = {
       transactionId: plan.transactionId,
       transactionEpoch: plan.transactionEpoch,
@@ -508,7 +538,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   }
 
   async adoptRecoveredActivation(active: CordisXPluginActivationRecordV1, registryEpoch: number): Promise<void> {
-    const sessions = [...this.sessions]
+    const sessions = [...this.sessions, ...this.joining]
     await Promise.all(sessions.map(async session => await this.adoptRecoveredActivationFor(session, active, registryEpoch)))
     this.registryEpoch = registryEpoch
     this.recoveredActivation = active
@@ -797,6 +827,7 @@ async function install(
   let removePermissionBindingListener = (): void => {}
   let removeLifecycleBindingListener = (): void => {}
   let unregisterLifecycleSession = (): void => {}
+  let generationJoin: ReturnType<CdpPluginLifecycleRuntime['beginJoin']> | undefined
   let removePublisherGrantBindingListener = (): void => {}
   try {
     await session.send('Runtime.enable')
@@ -1099,16 +1130,20 @@ async function install(
         await globalThis.__cordisxBoot
         return { ok: globalThis.__cordisxRuntime !== undefined }
       } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)
+      // Reserve this boot-ready renderer before durable recovery. The
+      // reservation participates in recovery RPCs while prepare/register stay
+      // fenced until all recovered/private projections are synchronized.
+      generationJoin = generationRuntime.beginJoin(session)
       if (lifecycle !== undefined) {
         await lifecycle.handler.coordinator.recover()
         await generationRuntime.synchronizeRecoveredActivation(session)
       }
       await generationRuntime.synchronizeDevelopmentStatus(session)
-      // A renderer is a generation participant only after its bootstrap and
-      // recovered/private projections are ready.  register() is the atomic
-      // join fence: if a transaction began while this target was booting, the
-      // install is discarded and watchAndInject retries it after resolution.
-      unregisterLifecycleSession = generationRuntime.register(session)
+      // It becomes a normal generation participant only after its bootstrap
+      // and recovered/private projections are ready. Committing the reserved
+      // join is atomic with respect to prepare/register.
+      unregisterLifecycleSession = generationJoin.commit()
+      generationJoin = undefined
     }
     return {
       target,
@@ -1156,6 +1191,7 @@ async function install(
     removeActionsBindingListener()
     removePermissionBindingListener()
     removeLifecycleBindingListener()
+    generationJoin?.abort()
     unregisterLifecycleSession()
     removePublisherGrantBindingListener()
     session.close()

@@ -27,9 +27,8 @@ async function eventually(assertion: () => void, timeout = 8_000): Promise<void>
 
 class FixtureGenerationRuntime {
   epoch = 0
-  failNextStage = false
-  failNextRollback = false
   failNextStatus = false
+  closedRenderer = false
   staged: PluginRuntimeMutation | undefined
   active: CordisXPluginActivationRecordV1 | undefined
   readonly published: CordisXPluginActivationRecordV1[] = []
@@ -43,10 +42,7 @@ class FixtureGenerationRuntime {
   }
   async stage(mutation: PluginRuntimeMutation) {
     this.staged = mutation
-    if (this.failNextStage) {
-      this.failNextStage = false
-      throw new Error('fixture activation rejected')
-    }
+    if (this.closedRenderer) throw new Error('fixture renderer session is closed')
     return {
       transactionId: mutation.transactionId,
       transactionEpoch: mutation.transactionEpoch,
@@ -75,10 +71,7 @@ class FixtureGenerationRuntime {
   async finalize(): Promise<void> { this.staged = undefined }
   async rollback(transactionId: string) {
     this.rollbackTransactions.push(transactionId)
-    if (this.failNextRollback) {
-      this.failNextRollback = false
-      throw new Error('fixture rollback rejected')
-    }
+    if (this.closedRenderer) throw new Error('fixture renderer session is closed')
     const mutation = this.staged
     this.staged = undefined
     const active = mutation?.previous ?? this.active
@@ -94,11 +87,12 @@ class FixtureGenerationRuntime {
     }
   }
   async updateDevelopmentStatus(state: CordisXLocalDevelopmentSnapshot): Promise<void> {
+    this.states.push(state)
+    if (this.closedRenderer) throw new Error('fixture renderer session is closed')
     if (this.failNextStatus) {
       this.failNextStatus = false
       throw new Error('fixture renderer closed during status broadcast')
     }
-    this.states.push(state)
   }
 }
 
@@ -169,16 +163,18 @@ describe('local development generations', () => {
       await eventually(() => expect(runtime.published).toHaveLength(3))
       expect(runtime.states.at(-1)).toMatchObject({ state: 'ready' })
 
-      runtime.failNextStage = true
-      runtime.failNextRollback = true
+      runtime.closedRenderer = true
       await writeFile(dependency, "export const value = 'activation-fails'\n")
       await eventually(() => expect(runtime.states.at(-1)).toMatchObject({
-        state: 'failed', error: expect.stringContaining('rollback failed: fixture rollback rejected'),
+        state: 'failed', error: expect.stringContaining('rollback failed: fixture renderer session is closed'),
       }))
       expect(runtime.published).toHaveLength(3)
       const failedTransaction = runtime.rollbackTransactions.at(-1)
 
-      await writeFile(dependency, "export const value = 'activation-recovers'\n")
+      // watchAndInject prunes the closed session independently. No further
+      // source write is required for the controller-owned rollback retry to
+      // restore last-good and publish the already-current source fingerprint.
+      runtime.closedRenderer = false
       await eventually(() => expect(runtime.published).toHaveLength(4))
       expect(runtime.rollbackTransactions.slice(-2)).toEqual([failedTransaction, failedTransaction])
       expect(JSON.parse(bootstraps.at(-2)!) as { epoch: number; digest: string }).toMatchObject({
@@ -292,6 +288,39 @@ describe('local development generations', () => {
       await Promise.all([starting, stopping])
       expect(vi.getTimerCount()).toBe(0)
       expect(runtime.published).toHaveLength(0)
+    } finally {
+      await controller.stop()
+      vi.useRealTimers()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('clears a pending rollback retry timer on stop', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-dev-retry-stop-'))
+    const entry = path.join(root, 'retry-stop.ts')
+    await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'retry-stop', version: '1.0.0' }))
+    await writeFile(entry, 'export default { apply() {} }\n')
+    const controller = await LocalDevelopmentController.create({
+      entry,
+      runtimeGeneration: 'fixture-runtime',
+      initialConfig: { version: 1, rootDir: root, codex: { debugPort: 9229 }, providers: [], plugins: [] },
+      runtime: new FixtureGenerationRuntime(),
+      rebuildBootstrap: async () => 'fixture-bootstrap',
+      setBootstrap: () => undefined,
+      stdout: () => undefined,
+    })
+    vi.useFakeTimers()
+    try {
+      await controller.start()
+      const internal = controller as unknown as {
+        pendingRollback?: { transactionId: string }
+        armRollbackRetry(): void
+      }
+      internal.pendingRollback = { transactionId: 'pending-stop' }
+      internal.armRollbackRetry()
+      expect(vi.getTimerCount()).toBeGreaterThan(0)
+      await controller.stop()
+      expect(vi.getTimerCount()).toBe(0)
     } finally {
       await controller.stop()
       vi.useRealTimers()

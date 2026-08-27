@@ -13,6 +13,7 @@ import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-
 
 const WATCH_INTERVAL_MS = 200
 const DEBOUNCE_MS = 120
+const ROLLBACK_RETRY_MS = 750
 const IGNORED_DIRECTORIES = new Set(['.git', '.next', 'coverage', 'dist', 'node_modules'])
 const MAX_DIAGNOSTIC_LENGTH = 4_000
 
@@ -269,6 +270,7 @@ export class LocalDevelopmentController {
   private polling: Promise<void> | undefined
   private debounce: ReturnType<typeof setTimeout> | undefined
   private poller: ReturnType<typeof setTimeout> | undefined
+  private rollbackRetry: ReturnType<typeof setTimeout> | undefined
 
   private constructor(private readonly options: LocalDevelopmentControllerOptions, resolved: LocalDevelopmentEntry) {
     this.entry = resolved.entry
@@ -321,7 +323,26 @@ export class LocalDevelopmentController {
     this.pendingRollback = pending
     pending.restored ??= await this.options.runtime.rollback(transactionId)
     await this.restoreLastGoodBootstrap(pending.restored)
-    if (this.pendingRollback === pending) this.pendingRollback = undefined
+    if (this.pendingRollback === pending) {
+      this.pendingRollback = undefined
+      if (this.rollbackRetry !== undefined) clearTimeout(this.rollbackRetry)
+      this.rollbackRetry = undefined
+    }
+  }
+
+  private armRollbackRetry(): void {
+    if (this.stopped || this.pendingRollback === undefined || this.rollbackRetry !== undefined) return
+    const epoch = this.watchEpoch
+    const transactionId = this.pendingRollback.transactionId
+    this.rollbackRetry = setTimeout(() => {
+      this.rollbackRetry = undefined
+      if (this.stopped || epoch !== this.watchEpoch
+        || this.pendingRollback?.transactionId !== transactionId) return
+      // Re-enter the normal single-flight drain. The next attempt first
+      // resolves this exact transaction and restores its bootstrap before it
+      // is allowed to build/publish the latest source fingerprint.
+      this.schedule()
+    }, ROLLBACK_RETRY_MS)
   }
 
   private async projectStatus(
@@ -398,8 +419,10 @@ export class LocalDevelopmentController {
     this.watchEpoch += 1
     if (this.debounce !== undefined) clearTimeout(this.debounce)
     if (this.poller !== undefined) clearTimeout(this.poller)
+    if (this.rollbackRetry !== undefined) clearTimeout(this.rollbackRetry)
     this.debounce = undefined
     this.poller = undefined
+    this.rollbackRetry = undefined
     await Promise.all([this.starting, this.polling])
     while (this.running) await new Promise(resolve => setTimeout(resolve, 10))
   }
@@ -428,6 +451,7 @@ export class LocalDevelopmentController {
         const message = `pending rollback ${transactionId} failed: ${diagnostic(error)}`
         await this.projectStatus('failed', message)
         this.options.stdout(`[cordisx] local-dev ${message}`)
+        this.armRollbackRetry()
         return
       }
       if (attempt !== this.desiredAttempt || this.stopped) return
@@ -563,6 +587,7 @@ export class LocalDevelopmentController {
           const message = `pending rollback ${transactionId} failed: ${diagnostic(error)}`
           await this.projectStatus('failed', message)
           this.options.stdout(`[cordisx] local-dev ${message}`)
+          this.armRollbackRetry()
         }
         return
       }
@@ -585,6 +610,7 @@ export class LocalDevelopmentController {
           await this.finishPendingRollback(transactionId)
         } catch (rollbackError) {
           message = `${message}; rollback failed: ${diagnostic(rollbackError)}`
+          this.armRollbackRetry()
         }
       }
       await this.projectStatus('failed', message)
