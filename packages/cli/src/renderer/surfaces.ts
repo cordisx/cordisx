@@ -287,11 +287,23 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
     }
   } else if (surface === 'session.backdrop') {
     const presentation = snapshot as CordisXSessionBackdropPresentation
-    assertKeys(snapshot, ['variant', 'driver', 'motion', 'stages'], 'session backdrop presentation')
+    assertKeys(snapshot, ['variant', 'driver', 'motion', 'layers', 'stages'], 'session backdrop presentation')
     if (presentation.variant !== 'imperium') throw new Error('session backdrop variant is invalid')
     if (presentation.driver !== 'reasoning-intensity') throw new Error('session backdrop driver is invalid')
     if (presentation.motion !== undefined && !['smooth', 'ascension'].includes(presentation.motion)) {
       throw new Error('session backdrop motion is invalid')
+    }
+    if (presentation.layers !== undefined) {
+      if (presentation.layers === null || typeof presentation.layers !== 'object' || Array.isArray(presentation.layers)) {
+        throw new Error('session backdrop layers must be an object')
+      }
+      assertKeys(presentation.layers, ['portrait', 'effects'], 'session backdrop layers')
+      if (presentation.layers.portrait !== undefined && typeof presentation.layers.portrait !== 'boolean') {
+        throw new Error('session backdrop portrait layer is invalid')
+      }
+      if (presentation.layers.effects !== undefined && typeof presentation.layers.effects !== 'boolean') {
+        throw new Error('session backdrop effects layer is invalid')
+      }
     }
     if (!Array.isArray(presentation.stages) || presentation.stages.length < 2 || presentation.stages.length > 8) {
       throw new Error('session backdrop requires between two and eight stages')
