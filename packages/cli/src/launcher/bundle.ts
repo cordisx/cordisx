@@ -68,12 +68,25 @@ async function readCordisXVersion(): Promise<string> {
   }
 }
 
-async function readPluginReadme(entry: string): Promise<string | undefined> {
-  try {
-    await access(entry)
-    return await readFile(path.join(path.dirname(entry), 'README.md'), 'utf8')
-  } catch {
-    return undefined
+interface ResolvedPluginReadme {
+  readonly contents: string
+  readonly path?: string
+}
+
+async function readPluginReadme(entry: string): Promise<ResolvedPluginReadme | undefined> {
+  const entryDirectory = path.dirname(entry)
+  let directory = entryDirectory
+  while (true) {
+    const readmePath = path.join(directory, 'README.md')
+    const contents = await readFile(readmePath, 'utf8').catch(() => undefined)
+    if (directory === entryDirectory && contents !== undefined) return { contents, path: readmePath }
+
+    const packageRoot = await access(path.join(directory, 'package.json')).then(() => true).catch(() => false)
+    if (packageRoot) return contents === undefined ? undefined : { contents, path: readmePath }
+
+    const parent = path.dirname(directory)
+    if (parent === directory) return undefined
+    directory = parent
   }
 }
 
@@ -92,7 +105,9 @@ export async function buildRendererCompositionSource(
   for (const plugin of enabled) await access(plugin.entry)
   const [version, readmes, pluginBundles] = await Promise.all([
     readCordisXVersion(),
-    Promise.all(config.plugins.map(async plugin => plugin.readme ?? await readPluginReadme(plugin.entry))),
+    Promise.all(config.plugins.map(async plugin => plugin.readme === undefined
+      ? await readPluginReadme(plugin.entry)
+      : { contents: plugin.readme })),
     Promise.all(enabled.map(async plugin => {
       const result = await build({
         entryPoints: [plugin.entry],
@@ -137,7 +152,7 @@ export async function buildRendererCompositionSource(
     const index = enabledIndexes.get(plugin.id)
     const moduleField = index === undefined ? '' : `, moduleFactory: (console) => { ${pluginBundles[index]}\nreturn __cordisxPluginModule }`
     const readme = readmes[pluginIndex]
-    const readmeField = readme === undefined ? '' : `, readme: ${JSON.stringify(readme)}`
+    const readmeField = readme === undefined ? '' : `, readme: ${JSON.stringify(readme.contents)}`
     const manifestField = plugin.manifest === undefined ? '' : `, manifest: ${JSON.stringify(plugin.manifest)}`
     const packageField = plugin.package === undefined ? '' : `, package: ${JSON.stringify(plugin.package)}`
     return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${plugin.revision ?? 0}${readmeField}${manifestField}${packageField}${moduleField} }`
@@ -149,7 +164,13 @@ export async function buildRendererCompositionSource(
   const source = sourceOptions.awaitBoot === true
     ? `${imports.join('\n')}\nexport const runtime = await ${boot}\n`
     : `${imports.join('\n')}\nvoid ${boot}.catch(error => console.error('[cordisx] boot failed', error))\n`
-  return { source, watchFiles: enabled.map(plugin => plugin.entry) }
+  return {
+    source,
+    watchFiles: [...new Set([
+      ...enabled.map(plugin => plugin.entry),
+      ...readmes.flatMap(readme => readme?.path === undefined ? [] : [readme.path]),
+    ])],
+  }
 }
 
 /** Bundle the renderer host and every enabled plugin into one Cordis generation. */
