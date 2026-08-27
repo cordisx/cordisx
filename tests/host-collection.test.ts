@@ -28,7 +28,7 @@ describe('Host collection primitive', () => {
       },
       {
         id: 'beta', title: 'Beta', description: 'Route catalog', machineId: 'plugin.beta',
-        icon: icon(dom.window.document, 'B'), onOpen: opened,
+        icon: icon(dom.window.document, 'B'), iconKind: 'artwork', onOpen: opened,
       },
     ]
     const view = createHostCollection(dom.window.document, {
@@ -49,6 +49,8 @@ describe('Host collection primitive', () => {
       expect(view.element.querySelector('[data-collection-item="alpha"] .cxc-title')?.textContent).toBe('Alpha 插件')
       expect(view.element.querySelector('[data-collection-item="alpha"] .cxc-description')?.textContent).toBe('同步本地工作。')
       expect(view.element.querySelector('[data-collection-item="alpha"] .cxc-machine-id')?.textContent).toBe('plugin.alpha')
+      expect(view.element.querySelector('[data-collection-item="alpha"] .cxc-icon-seat')?.hasAttribute('data-icon-kind')).toBe(false)
+      expect(view.element.querySelector('[data-collection-item="beta"] .cxc-icon-seat')?.getAttribute('data-icon-kind')).toBe('artwork')
       expect(view.element.querySelector('.cxm-chevron')).toBeNull()
 
       view.element.querySelector<HTMLButtonElement>('[data-collection-open="alpha"]')!.click()
@@ -87,6 +89,7 @@ describe('Host collection primitive', () => {
       expect(HOST_COLLECTION_STYLES).not.toContain('.cxc-primary {\n    display: flex;\n    align-items: flex-start;\n    gap: 11px;\n    width: 100%;\n    min-width: 0;\n    min-height: 82px;')
       expect(HOST_COLLECTION_STYLES).not.toContain('min-height: 82px;')
       expect(HOST_COLLECTION_STYLES).toContain('width: var(--cxc-icon-glyph-size); height: var(--cxc-icon-glyph-size);')
+      expect(HOST_COLLECTION_STYLES).toContain('.cxc-icon-seat[data-icon-kind="artwork"] > :first-child { width: var(--cxc-icon-seat-size); height: var(--cxc-icon-seat-size); }')
       expect(HOST_COLLECTION_STYLES).toContain('fill: currentColor; color: currentColor;')
       expect(HOST_COLLECTION_STYLES).toContain('font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;')
       // A containment-enabled card has no intrinsic inline size. Both the grid
