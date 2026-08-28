@@ -84,8 +84,14 @@ function tupleKey(key: SemanticIconKey, variant: IconVariant, state: IconState):
   return `${key}\0${variant}\0${state}`
 }
 
+function clone<Value>(value: Value): Value {
+  return typeof globalThis.structuredClone === 'function'
+    ? globalThis.structuredClone(value)
+    : JSON.parse(JSON.stringify(value)) as Value
+}
+
 function cloneDescriptor(descriptor: NormalizedVectorDescriptor): NormalizedVectorDescriptor {
-  return structuredClone(descriptor)
+  return clone(descriptor)
 }
 
 function reference(record: ProviderRecord): IconThemeProviderReference {
@@ -399,9 +405,9 @@ export class IconThemeRegistry {
     if (record === undefined) return undefined
     return {
       $schema: REGISTRATION_SCHEMA, schemaVersion: 1, authority: 'host', hostGeneration: this.hostGeneration,
-      revision: record.revision, providerHandle: record.providerHandle, principal: structuredClone(record.principal),
+      revision: record.revision, providerHandle: record.providerHandle, principal: clone(record.principal),
       identity: { ...record.identity }, providerGeneration: record.providerGeneration, status: record.status,
-      coverage: structuredClone(record.coverage),
+      coverage: clone(record.coverage),
       ...(record.lastGoodGeneration === undefined ? {} : { lastGoodGeneration: record.lastGoodGeneration }),
       ...(record.failureCode === undefined ? {} : { failureCode: record.failureCode }),
     }

@@ -83,6 +83,15 @@ import {
   type PermissionPersistenceContext,
   type PluginPermissionIdentityRegistry,
 } from './permission-rpc.js'
+import {
+  ICON_THEME_PREFERENCE_BINDING,
+  ICON_THEME_PREFERENCE_RECEIVER,
+  MAX_ICON_THEME_PREFERENCE_REQUEST_BYTES,
+  iconThemePreferenceBridgeError,
+  parseIconThemePreferenceBindingRequest,
+  persistIconThemePreference,
+  type IconThemePreferencePersistenceContext,
+} from './icon-theme-rpc.js'
 
 const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
 const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
@@ -676,6 +685,9 @@ interface InstalledScript {
   readonly permissionController?: AbortController
   readonly removePermissionBindingListener?: () => void
   readonly permissionBindingInstalled: boolean
+  readonly iconThemePreferenceController?: AbortController
+  readonly removeIconThemePreferenceBindingListener?: () => void
+  readonly iconThemePreferenceBindingInstalled: boolean
   readonly lifecycleController?: AbortController
   readonly removeLifecycleBindingListener?: () => void
   readonly lifecycleBindingInstalled: boolean
@@ -726,6 +738,13 @@ async function sendAgentHistoryBindingResponse(session: CdpSession, payload: Rec
 async function sendConfigBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
   await session.send('Runtime.evaluate', {
     expression: `void globalThis.${CONFIG_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    allowUnsafeEvalBlockedByCSP: true,
+  })
+}
+
+async function sendIconThemePreferenceBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
+  await session.send('Runtime.evaluate', {
+    expression: `void globalThis.${ICON_THEME_PREFERENCE_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
     allowUnsafeEvalBlockedByCSP: true,
   })
 }
@@ -812,6 +831,7 @@ async function install(
   credential?: ChannelCredentialBridgeHandler,
   actions?: ChannelActionsBridgeHandler,
   permission?: PermissionPersistenceContext,
+  iconThemePreference?: IconThemePreferencePersistenceContext,
   lifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime },
   developmentRuntime?: CdpPluginLifecycleRuntime,
   publisherGrant?: PublisherGrantBridgeHandler,
@@ -827,6 +847,7 @@ async function install(
   const credentialController = credential === undefined ? undefined : new AbortController()
   const actionsController = actions === undefined ? undefined : new AbortController()
   const permissionController = permission === undefined ? undefined : new AbortController()
+  const iconThemePreferenceController = iconThemePreference === undefined ? undefined : new AbortController()
   const lifecycleController = lifecycle === undefined ? undefined : new AbortController()
   const publisherGrantController = publisherGrant === undefined ? undefined : new AbortController()
   let removeBindingListener = (): void => {}
@@ -837,6 +858,7 @@ async function install(
   let removeCredentialBindingListener = (): void => {}
   let removeActionsBindingListener = (): void => {}
   let removePermissionBindingListener = (): void => {}
+  let removeIconThemePreferenceBindingListener = (): void => {}
   let removeLifecycleBindingListener = (): void => {}
   let unregisterLifecycleSession = (): void => {}
   let generationJoin: ReturnType<CdpPluginLifecycleRuntime['beginJoin']> | undefined
@@ -852,6 +874,7 @@ async function install(
     if (credential !== undefined) await session.send('Runtime.addBinding', { name: CHANNEL_CREDENTIAL_BINDING })
     if (actions !== undefined) await session.send('Runtime.addBinding', { name: CHANNEL_ACTIONS_BINDING })
     if (permission !== undefined) await session.send('Runtime.addBinding', { name: PERMISSION_BINDING })
+    if (iconThemePreference !== undefined) await session.send('Runtime.addBinding', { name: ICON_THEME_PREFERENCE_BINDING })
     if (lifecycle !== undefined) await session.send('Runtime.addBinding', { name: PLUGIN_LIFECYCLE_BINDING })
     if (publisherGrant !== undefined) await session.send('Runtime.addBinding', { name: PUBLISHER_GRANT_BINDING })
     let activeMarketplaceRequests = 0
@@ -1080,6 +1103,37 @@ async function install(
         })()
       })
     }
+    let activeIconThemePreferenceRequests = 0
+    if (iconThemePreference !== undefined) {
+      removeIconThemePreferenceBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
+        if (params.name !== ICON_THEME_PREFERENCE_BINDING || typeof params.payload !== 'string') return
+        const payload = params.payload
+        void (async () => {
+          let requestId = 'invalid'
+          try {
+            if (Buffer.byteLength(payload) > MAX_ICON_THEME_PREFERENCE_REQUEST_BYTES) throw new Error('icon theme preference request exceeds maximum size')
+            const request = parseIconThemePreferenceBindingRequest(JSON.parse(payload) as unknown, iconThemePreference)
+            requestId = request.requestId
+            if (iconThemePreferenceController?.signal.aborted === true) throw new Error('icon theme preference bridge is closed')
+            if (activeIconThemePreferenceRequests >= 1) throw new Error('another icon theme preference request is active')
+            activeIconThemePreferenceRequests += 1
+            let value
+            try {
+              value = await persistIconThemePreference(iconThemePreference, request)
+            } finally {
+              activeIconThemePreferenceRequests -= 1
+            }
+            await sendIconThemePreferenceBindingResponse(session, { requestId, ok: true, value })
+          } catch (error) {
+            await sendIconThemePreferenceBindingResponse(session, {
+              requestId,
+              ok: false,
+              ...iconThemePreferenceBridgeError(error),
+            }).catch(() => undefined)
+          }
+        })()
+      })
+    }
     const lifecycleRequests = new CdpLifecycleRequestGate()
     if (lifecycle !== undefined) {
       removeLifecycleBindingListener = session.onEvent('Runtime.bindingCalled', params => {
@@ -1182,6 +1236,8 @@ async function install(
       actionsBindingInstalled: actions !== undefined,
       ...(permissionController === undefined ? {} : { permissionController, removePermissionBindingListener }),
       permissionBindingInstalled: permission !== undefined,
+      ...(iconThemePreferenceController === undefined ? {} : { iconThemePreferenceController, removeIconThemePreferenceBindingListener }),
+      iconThemePreferenceBindingInstalled: iconThemePreference !== undefined,
       ...(lifecycleController === undefined ? {} : { lifecycleController, removeLifecycleBindingListener }),
       lifecycleBindingInstalled: lifecycle !== undefined,
       unregisterLifecycleSession,
@@ -1197,6 +1253,7 @@ async function install(
     credentialController?.abort()
     actionsController?.abort()
     permissionController?.abort()
+    iconThemePreferenceController?.abort()
     lifecycleController?.abort()
     publisherGrantController?.abort()
     removeBindingListener()
@@ -1207,6 +1264,7 @@ async function install(
     removeCredentialBindingListener()
     removeActionsBindingListener()
     removePermissionBindingListener()
+    removeIconThemePreferenceBindingListener()
     removeLifecycleBindingListener()
     generationJoin?.abort()
     unregisterLifecycleSession()
@@ -1225,6 +1283,7 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.credentialController?.abort()
   installed.actionsController?.abort()
   installed.permissionController?.abort()
+  installed.iconThemePreferenceController?.abort()
   installed.lifecycleController?.abort()
   installed.publisherGrantController?.abort()
   installed.removeBindingListener()
@@ -1235,6 +1294,7 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.removeCredentialBindingListener?.()
   installed.removeActionsBindingListener?.()
   installed.removePermissionBindingListener?.()
+  installed.removeIconThemePreferenceBindingListener?.()
   installed.removeLifecycleBindingListener?.()
   installed.unregisterLifecycleSession()
   installed.removePublisherGrantBindingListener?.()
@@ -1267,6 +1327,9 @@ async function uninstall(installed: InstalledScript): Promise<void> {
       ...(installed.permissionBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: PERMISSION_BINDING })]
         : []),
+      ...(installed.iconThemePreferenceBindingInstalled
+        ? [installed.session.send('Runtime.removeBinding', { name: ICON_THEME_PREFERENCE_BINDING })]
+        : []),
       ...(installed.lifecycleBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: PLUGIN_LIFECYCLE_BINDING })]
         : []),
@@ -1296,6 +1359,7 @@ export interface WatchInjectionOptions {
   readonly channelCredentialBridge?: ChannelCredentialBridgeHandler
   readonly channelActionsBridge?: ChannelActionsBridgeHandler
   readonly permissionPersistence?: PermissionPersistenceContext
+  readonly iconThemePreferencePersistence?: IconThemePreferencePersistenceContext
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
   /** Host-private generation plane used by `cordisx dev`; it installs no public lifecycle binding. */
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
@@ -1338,6 +1402,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             options.channelCredentialBridge,
             options.channelActionsBridge,
             options.permissionPersistence,
+            options.iconThemePreferencePersistence,
             options.pluginLifecycle,
             options.developmentRuntime,
             options.publisherGrant,

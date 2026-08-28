@@ -133,7 +133,7 @@ function Content({ model, marketplace, snapshot, route }: { readonly model: Mana
   if (current.page === 'extension-points') return <ExtensionPointsPage snapshot={snapshot} router={route} />
   if (current.page === 'routes') return <RoutesPage snapshot={snapshot} router={route} />
   if (current.page === 'marketplace') return <MarketplacePage marketplace={marketplace} manager={model} snapshot={snapshot} router={route} />
-  return <AboutPage snapshot={snapshot} router={route} />
+  return <AboutPage model={model} snapshot={snapshot} router={route} />
 }
 
 export interface ManagerAppProps {

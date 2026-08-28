@@ -26,6 +26,7 @@ import type {
 } from '../contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import type { HomeConfigIconThemePreference } from '../config/home-config.js'
 import type {
   CordisXPermissionAuthorizationDecisionV2,
   CordisXPermissionAuthorizationPlanV2,
@@ -127,6 +128,7 @@ import { installSharedReactRuntime } from './react-runtime.js'
 import { IconThemeRegistry } from './icon-theme-registry.js'
 import { CordisXIconThemeService } from './icon-theme-service.js'
 import { bindIconThemeRegistry } from './icons.js'
+import { BrowserIconThemePreferenceBridge } from './icon-theme-preference-binding.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 const MAX_ROLLBACK_RECEIPTS = 64
@@ -141,6 +143,9 @@ interface CordisXRuntimeMetadata {
   readonly version: string
   readonly providers: readonly { readonly id: string; readonly displayName: string }[]
   readonly profileId: string
+  readonly appId?: string
+  readonly iconThemePreference?: HomeConfigIconThemePreference
+  readonly iconThemePreferenceBridgeToken?: string
   readonly permissionPolicies?: readonly CordisXPersistedPermissionPolicyRecord[]
   readonly permissionBridgeToken?: string
   readonly providerBridgeToken?: string
@@ -471,6 +476,15 @@ async function start(
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const iconThemeRegistry = new IconThemeRegistry(generation, metadata.profileId)
   const unbindIconThemeRegistry = bindIconThemeRegistry(document, iconThemeRegistry)
+  const iconThemePreferenceBridge = metadata.iconThemePreferenceBridgeToken === undefined || metadata.appId === undefined
+    ? undefined
+    : new BrowserIconThemePreferenceBridge(
+        metadata.iconThemePreferenceBridgeToken,
+        metadata.appId,
+        metadata.profileId,
+        generation,
+        metadata.iconThemePreference,
+      )
   const permissionStore = metadata.permissionBridgeToken === undefined
     ? new BrowserPermissionPolicyStore(metadata.profileId)
     : BindingPermissionPolicyStore.connect(metadata.permissionBridgeToken, metadata.permissionPolicies ?? [])
@@ -2000,6 +2014,7 @@ async function start(
     rollbackReceipts.clear()
     configBridge?.dispose()
     serviceConfigBridge?.dispose()
+    iconThemePreferenceBridge?.dispose()
     lifecycleBridge?.dispose()
     configRenderers.dispose()
     configuration.dispose()
@@ -2174,7 +2189,9 @@ async function start(
   const managerModel: ManagerModel = {
     ...handle,
     snapshot: managerSnapshot,
+    iconThemePreferenceWritable: iconThemePreferenceBridge !== undefined,
     selectIconTheme: async (expectedProfileRevision, candidate) => {
+      const previous = iconThemeRegistry.redactedSnapshot().selected
       const result = iconThemeRegistry.selectProvider(
         `iconselect_${String(Date.now()).padStart(16, '0')}`,
         expectedProfileRevision,
@@ -2182,6 +2199,32 @@ async function start(
         candidate,
       )
       if (result.outcome !== 'applied') throw new Error(`icon theme selection failed: ${result.error?.code ?? result.outcome}`)
+      if (iconThemePreferenceBridge === undefined) return
+      try {
+        await iconThemePreferenceBridge.persist(expectedProfileRevision, result.profileRevision, candidate)
+      } catch (error) {
+        // Persistence is part of the Host-owned selection transaction. Restore
+        // the exact previous identity only if no later registry event won.
+        const currentRevision = iconThemeRegistry.selection().profileRevision
+        if (currentRevision === result.profileRevision) {
+          const restored = iconThemeRegistry.selectProvider(
+            `iconrevert_${String(Date.now()).padStart(16, '0')}`,
+            currentRevision,
+            generation,
+            previous,
+          )
+          if (restored.outcome !== 'applied') {
+            const builtin = iconThemeRegistry.redactedSnapshot().providers.find(provider => provider.providerId === 'builtin:reicon')
+            if (builtin !== undefined) iconThemeRegistry.selectProvider(
+              `icondefault_${String(Date.now()).padStart(16, '0')}`,
+              iconThemeRegistry.selection().profileRevision,
+              generation,
+              builtin,
+            )
+          }
+        }
+        throw error
+      }
     },
   }
 
@@ -2316,6 +2359,17 @@ async function start(
     for (const controller of controllers) {
       if (controller.status !== 'active') continue
       await mountPlugin(controller)
+    }
+    if (metadata.iconThemePreference !== undefined) {
+      // Restore only after every provider has had a chance to register. An
+      // unknown, stale, disposed, or version-mismatched identity leaves the
+      // pinned Reicon default active without exposing private registration data.
+      iconThemeRegistry.selectProvider(
+        `iconrestore_${String(Date.now()).padStart(16, '0')}`,
+        iconThemeRegistry.selection().profileRevision,
+        generation,
+        metadata.iconThemePreference,
+      )
     }
     disposeManager = installReactCordisXManager(document, managerModel, metadata.hostKind === 'playground'
       ? { triggerTarget: () => document.querySelector<HTMLElement>('[data-cordisx-playground-manager-trigger]') ?? undefined }

@@ -278,6 +278,8 @@ export interface ManagerModel {
   setExtensionPointControlGroupChoice?(expectedPolicyRevision: number, choice: ControlledSurfaceGroupChoice): Promise<void>
   /** Host-private exact selection; plugin-facing runtime snapshots cannot invoke it. */
   selectIconTheme?(expectedProfileRevision: number, candidate: Pick<RedactedIconThemeProvider, 'providerId' | 'namespace' | 'providerVersion' | 'providerGeneration'>): Promise<void>
+  /** Whether the launcher can durably CAS this profile's selection. */
+  readonly iconThemePreferenceWritable?: boolean
   mountSettingsTab?(id: string, panelBody: HTMLElement): Promise<ManagedSettingsPageMount>
   closeSettingsTabContent?(): Promise<void>
   managerContentPresentation?(id: string, reference: CordisXRouteReference): ManagerContentPresentation | undefined

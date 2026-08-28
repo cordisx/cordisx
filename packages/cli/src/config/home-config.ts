@@ -19,6 +19,15 @@ import {
 
 export type HomeDataMode = 'shared' | 'host-isolated'
 
+/** Host-owned, profile-scoped icon-theme preference. Opaque handles are never durable. */
+export interface HomeConfigIconThemePreference {
+  readonly revision: number
+  readonly providerId: `builtin:${string}` | `plugin:${string}:${string}`
+  readonly namespace: string
+  readonly providerVersion: string
+  readonly providerGeneration: string
+}
+
 export interface HomeConfigPlugin {
   readonly id: string
   readonly entry: string
@@ -84,6 +93,7 @@ export interface HomeConfigProvider {
 export interface HomeConfigProfile {
   readonly displayName: string
   readonly dataMode: HomeDataMode
+  readonly iconTheme?: HomeConfigIconThemePreference
 }
 
 export interface HomeConfigApp {
@@ -131,6 +141,10 @@ export interface HomeConfigWriteOptions extends HomeConfigPathOptions {
 
 const APP_OR_PROFILE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
+const ICON_PROVIDER_ID = /^(?:builtin:[a-z0-9][a-z0-9._-]{0,63}|plugin:[a-z0-9][a-z0-9._-]{0,63}:[a-z0-9][a-z0-9._-]{0,63})$/
+const ICON_NAMESPACE = /^[a-z0-9][a-z0-9._-]{0,63}$/
+const ICON_GENERATION = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
+const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 const DEFAULT_LOCK_TIMEOUT_MS = 2_000
 const DEFAULT_LOCK_RETRY_MS = 25
 const DEFAULT_LOCK_STALE_MS = 30_000
@@ -366,16 +380,41 @@ function parseProvider(value: unknown, index: number): HomeConfigProvider {
   }
 }
 
+function parseIconThemePreference(value: unknown): HomeConfigIconThemePreference | undefined {
+  // A corrupted optional preference must not make the whole Host profile
+  // unavailable. Discard it atomically and let the pinned Reicon default win.
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const preference = value as Record<string, unknown>
+  if (Object.keys(preference).sort().join(',') !== 'namespace,providerGeneration,providerId,providerVersion,revision'
+    || !Number.isSafeInteger(preference.revision) || (preference.revision as number) < 1
+    || typeof preference.providerId !== 'string' || !ICON_PROVIDER_ID.test(preference.providerId)
+    || typeof preference.namespace !== 'string' || !ICON_NAMESPACE.test(preference.namespace)
+    || typeof preference.providerVersion !== 'string' || !SEMVER.test(preference.providerVersion)
+    || typeof preference.providerGeneration !== 'string' || !ICON_GENERATION.test(preference.providerGeneration)) return undefined
+  return {
+    revision: preference.revision as number,
+    providerId: preference.providerId as HomeConfigIconThemePreference['providerId'],
+    namespace: preference.namespace,
+    providerVersion: preference.providerVersion,
+    providerGeneration: preference.providerGeneration,
+  }
+}
+
 function parseProfile(value: unknown, label: string): HomeConfigProfile {
   const profile = record(value, label)
-  rejectUnknownKeys(profile, ['displayName', 'dataMode'], label)
+  rejectUnknownKeys(profile, ['displayName', 'dataMode', 'iconTheme'], label)
   const displayName = nonEmptyString(profile.displayName, `${label}.displayName`)
   if (profile.dataMode !== 'shared' && profile.dataMode !== 'host-isolated' && profile.dataMode !== 'isolated') {
     throw new Error(`${label}.dataMode must be shared or host-isolated`)
   }
   // `isolated` was the v1 spelling for an opt-in private Host root. Reading it
   // does not rewrite the file; later writes use the explicit current spelling.
-  return { displayName, dataMode: profile.dataMode === 'isolated' ? 'host-isolated' : profile.dataMode }
+  const iconTheme = parseIconThemePreference(profile.iconTheme)
+  return {
+    displayName,
+    dataMode: profile.dataMode === 'isolated' ? 'host-isolated' : profile.dataMode,
+    ...(iconTheme === undefined ? {} : { iconTheme }),
+  }
 }
 
 function parseApp(value: unknown, label: string): HomeConfigApp {

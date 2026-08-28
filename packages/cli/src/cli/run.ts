@@ -10,6 +10,7 @@ import {
   ensureHomeConfig,
   loadHomeConfig,
   resolveHomeConfigPath,
+  type HomeConfigIconThemePreference,
   type HomeConfigPathOptions,
 } from '../config/home-config.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
@@ -58,6 +59,7 @@ import {
 import type { CordisXPluginIdentity } from '../platform-contracts.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import { PluginPermissionIdentityRegistry, type PermissionPersistenceContext } from '../launcher/permission-rpc.js'
+import type { IconThemePreferencePersistenceContext } from '../launcher/icon-theme-rpc.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { loadActivatedPluginComposition, loadPluginComposition } from '../launcher/plugin-composition.js'
 import { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
@@ -140,6 +142,7 @@ interface RendererComposition {
   readonly serviceConfigBridgeToken?: string
   readonly generation: string
   readonly permissionBridgeToken?: string
+  readonly iconThemePreferenceBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
   readonly rebuild: (
     config: CordisXConfig,
@@ -156,6 +159,8 @@ export async function buildRendererComposition(
   stdout: (line: string) => void,
   options: {
     readonly profileId?: string
+    readonly appId?: string
+    readonly iconThemePreference?: HomeConfigIconThemePreference
     readonly writable?: boolean
     readonly permission?: {
       readonly profileId: string
@@ -185,12 +190,18 @@ export async function buildRendererComposition(
   const configBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
   const serviceConfigBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
   const permissionBridgeToken = options.permission?.persistent === true ? randomBytes(32).toString('hex') : undefined
+  const iconThemePreferenceBridgeToken = options.writable === true && options.appId !== undefined
+    ? randomBytes(32).toString('hex')
+    : undefined
   const generation = options.generation ?? randomBytes(16).toString('hex')
   const bundleOptions = {
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
     ...(serviceConfigBridgeToken === undefined ? {} : { serviceConfigBridgeToken }),
+    ...(options.appId === undefined ? {} : { appId: options.appId }),
+    ...(options.iconThemePreference === undefined ? {} : { iconThemePreference: options.iconThemePreference }),
+    ...(iconThemePreferenceBridgeToken === undefined ? {} : { iconThemePreferenceBridgeToken }),
     ...(options.channelCredentialBridgeToken === undefined ? {} : { channelCredentialBridgeToken: options.channelCredentialBridgeToken }),
     ...(options.channelActionsBridgeToken === undefined ? {} : { channelActionsBridgeToken: options.channelActionsBridgeToken }),
     ...(options.permission === undefined
@@ -225,6 +236,7 @@ export async function buildRendererComposition(
     ...(serviceConfigBridgeToken === undefined ? {} : { serviceConfigBridgeToken }),
     generation,
     ...(permissionBridgeToken === undefined ? {} : { permissionBridgeToken }),
+    ...(iconThemePreferenceBridgeToken === undefined ? {} : { iconThemePreferenceBridgeToken }),
     ...(options.pluginLifecycle === undefined ? {} : { pluginLifecycleBridgeToken: options.pluginLifecycle.token }),
     rebuild: async (nextConfig, pluginActivation, initialRegistryEpoch) => await buildBundle(nextConfig, {
       ...bundleOptions,
@@ -350,6 +362,7 @@ async function runInjectedHost(input: {
   readonly channelCredentialBridge?: ChannelCredentialBridgeHandler
   readonly channelActionsBridge?: ChannelActionsBridgeHandler
   readonly permissionPersistence?: PermissionPersistenceContext
+  readonly iconThemePreferencePersistence?: IconThemePreferencePersistenceContext
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
   readonly publisherGrant?: PublisherGrantBridgeHandler
@@ -384,6 +397,7 @@ async function runInjectedHost(input: {
     ...(input.channelCredentialBridge === undefined ? {} : { channelCredentialBridge: input.channelCredentialBridge }),
     ...(input.channelActionsBridge === undefined ? {} : { channelActionsBridge: input.channelActionsBridge }),
     ...(input.permissionPersistence === undefined ? {} : { permissionPersistence: input.permissionPersistence }),
+    ...(input.iconThemePreferencePersistence === undefined ? {} : { iconThemePreferencePersistence: input.iconThemePreferencePersistence }),
     ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
     ...(input.developmentRuntime === undefined ? {} : { developmentRuntime: input.developmentRuntime }),
     ...(input.publisherGrant === undefined ? {} : { publisherGrant: input.publisherGrant }),
@@ -752,7 +766,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     runtime: lifecycleRuntime,
   }
   const rendererComposition = await buildRendererComposition(composition, stdout, {
+    appId,
     profileId: selection.profileId,
+    ...(selection.profile.iconTheme === undefined ? {} : { iconThemePreference: selection.profile.iconTheme }),
     writable: true,
     permission: {
       profileId: selection.profileId,
@@ -790,6 +806,13 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     identities: pluginIdentities(configuredComposition),
     identityAllowed: (identity: CordisXPluginIdentity) => permissionIdentities.allowed(identity),
   }
+  const iconThemePreferencePersistence = rendererComposition.iconThemePreferenceBridgeToken === undefined ? undefined : {
+    configPath,
+    appId,
+    profileId: selection.profileId,
+    hostGeneration: rendererComposition.generation,
+    token: rendererComposition.iconThemePreferenceBridgeToken,
+  } satisfies IconThemePreferencePersistenceContext
   const providerFleet = rendererComposition.providerBridgeToken === undefined
     ? undefined
     : await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } })
@@ -859,6 +882,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       ...(channelCredentialBridge === undefined ? {} : { channelCredentialBridge }),
       ...(channelActionsBridge === undefined ? {} : { channelActionsBridge }),
       ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
+      ...(iconThemePreferencePersistence === undefined ? {} : { iconThemePreferencePersistence }),
       pluginLifecycle,
       debugPort,
       hostArgs: invocation.hostArgs,
@@ -925,6 +949,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     ...(channelCredentialBridge === undefined ? {} : { channelCredentialBridge }),
     ...(channelActionsBridge === undefined ? {} : { channelActionsBridge }),
     ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
+    ...(iconThemePreferencePersistence === undefined ? {} : { iconThemePreferencePersistence }),
     pluginLifecycle,
     publisherGrant,
     executable: plan.executable,

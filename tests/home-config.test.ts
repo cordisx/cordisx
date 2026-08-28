@@ -85,6 +85,37 @@ describe('CordisX home configuration', () => {
     expect(await readFile(configPath, 'utf8')).toBe(original)
   })
 
+  it('normalizes an exact profile icon-theme preference and drops only a corrupted preference', () => {
+    const base = createDefaultHomeConfig()
+    const exact = {
+      revision: 3,
+      providerId: 'plugin:aurora:aurora' as const,
+      namespace: 'aurora',
+      providerVersion: '2.1.0',
+      providerGeneration: 'aurora-3',
+    }
+    const parsed = parseHomeConfig({
+      ...base,
+      apps: { codex: { ...base.apps.codex, profiles: { default: { ...base.apps.codex!.profiles.default, iconTheme: exact } } } },
+    })
+    expect(parsed.apps.codex?.profiles.default?.iconTheme).toEqual(exact)
+
+    for (const iconTheme of [
+      { ...exact, revision: -1 },
+      { ...exact, providerId: 'plugin:spoof' },
+      { ...exact, providerGeneration: '../private/path' },
+      { ...exact, descriptors: [] },
+      'corrupted',
+    ]) {
+      const recovered = parseHomeConfig({
+        ...base,
+        apps: { codex: { ...base.apps.codex, profiles: { default: { ...base.apps.codex!.profiles.default, iconTheme } } } },
+      })
+      expect(recovered.apps.codex?.profiles.default?.iconTheme).toBeUndefined()
+      expect(recovered.apps.codex?.profiles.default?.dataMode).toBe('shared')
+    }
+  })
+
   it('strictly rejects unsupported, unknown, and inconsistent fields', () => {
     expect(() => parseHomeConfig({ ...createDefaultHomeConfig(), version: 2 }))
       .toThrow('config.version must be 1')
