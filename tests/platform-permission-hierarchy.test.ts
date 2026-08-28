@@ -255,9 +255,9 @@ describe('Platform permission presentation hierarchy', () => {
       expect([...content.querySelectorAll('[data-permission-item]')].map(item => item.getAttribute('aria-label'))).toEqual([
         '读取可用模型', '查看任务列表', '查看任务内容', '创建任务', '管理任务', '提交消息', '控制对话轮次',
       ])
-      const capabilityIcons = [...content.querySelectorAll<HTMLElement>('.cxm-capability-icon[aria-hidden="true"][data-material-icon]')]
+      const capabilityIcons = [...content.querySelectorAll<HTMLElement>('.cxm-capability-icon[aria-hidden="true"][data-host-icon-key]')]
       expect(capabilityIcons).toHaveLength(7)
-      expect(capabilityIcons.map(icon => icon.dataset.materialIcon)).toEqual([
+      expect(capabilityIcons.map(icon => icon.dataset.hostIconKey)).toEqual([
         'models-read', 'tasks-catalog-read', 'tasks-content-read', 'tasks-create', 'tasks-control', 'turns-submit', 'turns-control',
       ])
       expect(content.querySelector('[data-permission-item="tasks.create"] .cxm-required-badge')?.textContent).toBe('必需')

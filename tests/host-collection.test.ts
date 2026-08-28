@@ -90,7 +90,7 @@ describe('Host collection primitive', () => {
       expect(HOST_COLLECTION_STYLES).not.toContain('min-height: 82px;')
       expect(HOST_COLLECTION_STYLES).toContain('width: var(--cxc-icon-glyph-size); height: var(--cxc-icon-glyph-size);')
       expect(HOST_COLLECTION_STYLES).toContain('.cxc-icon-seat[data-icon-kind="artwork"] > :first-child { width: var(--cxc-icon-seat-size); height: var(--cxc-icon-seat-size); }')
-      expect(HOST_COLLECTION_STYLES).toContain('fill: currentColor; color: currentColor;')
+      expect(HOST_COLLECTION_STYLES).toContain('color: currentColor;')
       expect(HOST_COLLECTION_STYLES).toContain('font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;')
       // A containment-enabled card has no intrinsic inline size. Both the grid
       // item and card must claim the complete grid track so the title/copy is
@@ -121,7 +121,7 @@ describe('Host collection primitive', () => {
       expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-seat-size: var(--cx-compact-list-icon-seat, 22px);')
       expect(HOST_COLLECTION_STYLES).toContain('--cxc-icon-glyph-size: var(--cx-compact-list-icon-glyph, 16px);')
       expect(HOST_COLLECTION_STYLES).toContain('width: var(--cxc-icon-seat-size); height: var(--cxc-icon-seat-size);')
-      expect(HOST_COLLECTION_STYLES).toContain('.cxc-icon-seat > :first-child > svg { display: block; width: 100% !important; height: 100% !important; fill: currentColor; color: currentColor; }')
+      expect(HOST_COLLECTION_STYLES).toContain('.cxc-icon-seat > :first-child > svg { display: block; width: 100% !important; height: 100% !important; color: currentColor; }')
     } finally {
       view.dispose()
       dom.window.close()

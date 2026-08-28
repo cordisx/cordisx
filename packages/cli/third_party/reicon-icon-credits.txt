@@ -1,0 +1,18 @@
+Reicon upstream icon credits
+
+Source: https://github.com/dqev/reicon
+
+Reicon states that its base icons are built using elements from:
+
+- Solar Icons, designed by 480 Design, licensed under CC BY 4.0; the package
+  referenced by Reicon is maintained by Saoudi H. under the MIT License.
+  https://solar-icons.vercel.app/
+  https://creativecommons.org/licenses/by/4.0/
+- Zappicon, licensed under the Zappicon License.
+  https://zappicon.com/
+  https://zappicon.com/license
+
+CordisX uses selected Reicon glyph modules as its default Host icon provider.
+These icons remain upstream assets and are not represented as CordisX-owned
+MIT icon assets. CordisX does not export the raw Reicon SVG/icon dataset or act
+as an icon-library redistribution channel.

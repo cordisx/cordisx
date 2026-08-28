@@ -1924,7 +1924,7 @@ function installStyles(document: Document): () => void {
     .cordisx-composer-action:focus-visible { outline: 2px solid var(--color-ring,rgba(131,195,255,.76)); outline-offset: 0; }
     .cordisx-composer-action:disabled { cursor: default; opacity: .4; }
     .cordisx-host-icon { display: inline-flex; flex: 0 0 auto; width: 20px; height: 20px; align-items: center; justify-content: center; line-height: 0; pointer-events: none; user-select: none; -webkit-user-select: none; }
-    .cordisx-host-icon svg { display: block; width: 20px; height: 20px; fill: currentColor; pointer-events: none; }
+    .cordisx-host-icon svg { display: block; width: 20px; height: 20px; color: currentColor; pointer-events: none; }
     .cordisx-nav-primary > .cordisx-host-icon { width: 16px; height: 16px; }
     .cordisx-nav-primary > .cordisx-host-icon svg, .cordisx-shortcut-action .cordisx-host-icon, .cordisx-shortcut-action .cordisx-host-icon svg { width: 16px; height: 16px; }
     .cordisx-icon-only-control { --cordisx-icon-only-glyph-size: 16px; }

@@ -38,7 +38,7 @@ describe('Manager settings navigation projection', () => {
     try {
       dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
       expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).toBeNull()
-      expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-icon')?.getAttribute('data-material-icon')).toBe('plugins')
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-icon')?.getAttribute('data-host-icon-key')).toBe('plugins')
       expect(CORDISX_BUILTIN_MANAGER_SETTINGS_TABS).toEqual([])
       expect(dom.window.document.querySelector('[data-tab="settings"],[data-settings-tab],[data-settings-navigation-item]')).toBeNull()
       expect(mounts).toBe(0)
@@ -63,7 +63,7 @@ describe('Manager settings navigation projection', () => {
       expect(entry.querySelector('[data-host-icon="host:settings"]')).not.toBeNull(); expect(entry.querySelector('style,section')).toBeNull()
       const styles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
       expect(styles).toContain('.cordisx-host-icon svg {')
-      expect(styles).toContain('fill: currentColor;')
+      expect(styles).toContain('color: currentColor;')
       expect(styles).toContain('color: currentColor;')
       entry.click(); await settle()
       expect(dom.window.document.querySelector('[data-demo-body="demo:navigation"]')).not.toBeNull(); expect(dom.window.document.querySelector('[data-settings-navigation-item="demo:navigation"]')?.getAttribute('aria-current')).toBe('page')

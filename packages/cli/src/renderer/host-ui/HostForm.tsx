@@ -33,7 +33,7 @@ export const HOST_FORM_REACT_STYLES = String.raw`
   .cxf-required { order: 2; color: var(--td-error-color,var(--cx-danger,#e34d59)); font-weight: 700; line-height: 24px; }
   .cxf-field-menu-trigger.t-button { width: 24px; height: 24px; flex: none; margin-left: -4px; padding: 0; color: var(--cx-muted,#9ca5b5); vertical-align: middle; }
   .cxf-field-menu-trigger.t-button:hover, .cxf-field-menu-trigger.t-button[aria-expanded="true"] { background: transparent; color: var(--cx-text,#edf0f4); }
-  .cxf-field-menu-trigger .t-icon { display: block; font-size: 15px; }
+  .cxf-field-menu-trigger :is(.t-icon,.cordisx-host-icon) { display: block; width: 15px; height: 15px; font-size: 15px; }
   .cxf-control-seat { grid-area: control; min-width: 0; justify-self: stretch; }
   .cxf-item[data-control-layout="compact"] .cxf-control-seat { width: auto; max-width: 100%; padding-right: 10px; justify-self: end; }
   .cxf-item[data-control-layout="fill"] .cxf-control-seat > :not(.cxf-custom-seat) { width: 100%; }

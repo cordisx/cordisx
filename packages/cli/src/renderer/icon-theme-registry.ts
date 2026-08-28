@@ -78,6 +78,8 @@ export interface RedactedIconThemeSnapshot {
   }[]
 }
 
+export type RedactedIconThemeProvider = RedactedIconThemeSnapshot['providers'][number]
+
 function tupleKey(key: SemanticIconKey, variant: IconVariant, state: IconState): string {
   return `${key}\0${variant}\0${state}`
 }
@@ -105,6 +107,7 @@ export class IconThemeRegistry {
   private selectionOutcome: IconThemeSelection['outcome'] = 'default'
   private selectionReason: IconThemeSelection['reason'] = 'host-default'
   private requestedProviderHandle: `iph_${string}` | undefined
+  private forceNeutralFallback = false
   private disposed = false
   private readonly listeners = new Set<() => void>()
 
@@ -253,10 +256,28 @@ export class IconThemeRegistry {
     this.requestedProviderHandle = providerHandle
     this.selectionOutcome = providerHandle === BUILTIN_HANDLE ? 'default' : 'selected'
     this.selectionReason = providerHandle === BUILTIN_HANDLE ? 'host-default' : 'user-selection'
+    this.forceNeutralFallback = false
     this.profileRevision += 1
     record.revision = this.profileRevision
     this.notify()
     return this.result(requestId, 'select', 'applied', { affectedProviderHandle: providerHandle })
+  }
+
+  /** Host Manager selects one exact redacted identity; opaque handles stay private. */
+  selectProvider(
+    requestId: string,
+    expectedProfileRevision: number,
+    hostGeneration: string,
+    candidate: Pick<RedactedIconThemeProvider, 'providerId' | 'namespace' | 'providerVersion' | 'providerGeneration'>,
+  ): IconThemeLifecycleResult {
+    this.assertLive()
+    const conflict = this.fence(requestId, 'select', expectedProfileRevision, hostGeneration)
+    if (conflict !== undefined) return conflict
+    const record = [...this.records.values()].find(item => item.identity.providerId === candidate.providerId
+      && item.identity.namespace === candidate.namespace && item.identity.providerVersion === candidate.providerVersion
+      && item.providerGeneration === candidate.providerGeneration)
+    if (record === undefined) return this.result(requestId, 'select', 'rejected', { error: { code: 'unknown-provider' } })
+    return this.select(requestId, expectedProfileRevision, hostGeneration, record.providerHandle, candidate.providerGeneration)
   }
 
   disposeProvider(requestId: string, expectedProfileRevision: number, hostGeneration: string, providerHandle: `iph_${string}`, providerGeneration: string): IconThemeLifecycleResult {
@@ -294,6 +315,8 @@ export class IconThemeRegistry {
     const restore = this.records.get(restoreProviderHandle)
     if (failed === undefined || failed.providerGeneration !== failedGeneration || this.selectedHandle !== failedProviderHandle
       || restore === undefined || restore.providerHandle !== BUILTIN_HANDLE || restore.providerGeneration !== restoreGeneration || restore.status === 'disposed') {
+      if (failed !== undefined && failed.providerGeneration === failedGeneration && this.selectedHandle === failedProviderHandle) failed.status = 'failed'
+      this.forceNeutralFallback = true
       return this.result(requestId, 'rollback', 'rollback-failed', { affectedProviderHandle: failedProviderHandle, error: { code: 'rollback-failed' } })
     }
     failed.status = 'failed'
@@ -303,6 +326,7 @@ export class IconThemeRegistry {
     this.requestedProviderHandle = failedProviderHandle
     this.selectionOutcome = 'rolled-back'
     this.selectionReason = reason
+    this.forceNeutralFallback = false
     this.profileRevision += 1
     failed.revision = this.profileRevision
     restore.revision = this.profileRevision
@@ -353,6 +377,12 @@ export class IconThemeRegistry {
   }
 
   private reiconFallback(request: IconThemeResolutionRequest, fallback: 'none' | 'reicon' = 'reicon'): IconThemeResolution {
+    if (this.forceNeutralFallback) {
+      return {
+        descriptor: resolveBuiltinReiconDescriptor('control.minus', 'regular', 'default'),
+        provider: { providerId: 'host:neutral' }, fallback: 'neutral', request,
+      }
+    }
     const builtin = this.records.get(BUILTIN_HANDLE)
     if (builtin !== undefined && builtin.status !== 'disposed' && builtin.status !== 'failed') {
       return { descriptor: resolveBuiltinReiconDescriptor(request.key, request.variant, request.state), provider: reference(builtin), fallback, request }

@@ -17,8 +17,12 @@ export function bindIconThemeRegistry(document: Document, registry: IconThemeReg
   return () => { if (documentRegistries.get(document) === registry) documentRegistries.delete(document) }
 }
 
+export function iconThemeRegistryForDocument(document: Document): IconThemeRegistry | undefined {
+  return documentRegistries.get(document)
+}
+
 export const MANAGER_ICON_TOKENS = [
-  'back', 'capability-fallback', 'close', 'configuration', 'console-clear', 'console-copy',
+  'add', 'back', 'capability-fallback', 'close', 'configuration', 'copy', 'delete', 'edit', 'move', 'console-clear', 'console-copy',
   'console-export', 'console-follow', 'console-pause', 'console-resume', 'contributions',
   'diagnostics', 'document', 'external-link', 'launcher', 'marketplace', 'marketplace-certified',
   'marketplace-official', 'marketplace-source-add', 'marketplace-source-copy',
@@ -36,10 +40,15 @@ export type HostIconState = 'default' | 'active' | 'favorite'
 
 /** Existing Host chrome terms map explicitly into Protocol v1 semantics. */
 export const MANAGER_ICON_SEMANTICS: Readonly<Record<ManagerIconToken, SemanticIconKey>> = Object.freeze({
+  add: 'action.add',
   back: 'action.back',
   'capability-fallback': 'status.info',
   close: 'action.close',
   configuration: 'action.settings',
+  copy: 'action.copy',
+  delete: 'action.delete',
+  edit: 'action.edit',
+  move: 'content.layers',
   'console-clear': 'action.delete',
   'console-copy': 'action.copy',
   'console-export': 'action.open',

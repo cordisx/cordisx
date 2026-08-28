@@ -40,7 +40,9 @@ describe('descriptor-only icon theme registry', () => {
       identity: { providerId: 'plugin:aurora:aurora', namespace: 'aurora', providerVersion: '2.1.0' },
       providerGeneration: 'aurora-3', status: 'ready', coverage: { kind: 'partial' },
     })
-    expect(registry.select('select-1', 1, 'host-12', registration.providerHandle, 'aurora-3')).toMatchObject({ outcome: 'applied', profileRevision: 2 })
+    expect(registry.selectProvider('select-1', 1, 'host-12', {
+      providerId: 'plugin:aurora:aurora', namespace: 'aurora', providerVersion: '2.1.0', providerGeneration: 'aurora-3',
+    })).toMatchObject({ outcome: 'applied', profileRevision: 2 })
     expect(registry.resolve('action.save', 'regular', 'default')).toMatchObject({ provider: { providerId: 'plugin:aurora:aurora' }, fallback: 'none' })
     expect(registry.resolve('action.save', 'filled', 'default')).toMatchObject({ provider: { providerId: 'builtin:reicon' }, fallback: 'reicon' })
   })
@@ -93,5 +95,13 @@ describe('descriptor-only icon theme registry', () => {
     const snapshot = JSON.stringify(registry.redactedSnapshot())
     expect(snapshot).not.toMatch(/providerHandle|principalHandle|descriptors|commands|paths|source|requestId|raw/u)
     expect(snapshot).toContain('plugin:aurora:aurora')
+  })
+
+  it('fails a drifted rollback closed onto the non-provider neutral fallback', () => {
+    const registry = new IconThemeRegistry('host-12', 'profile-main')
+    const registration = registry.registerPlugin('register-1', 0, 'host-12', principal, definition()).registration!
+    registry.select('select-1', 1, 'host-12', registration.providerHandle, 'aurora-3')
+    expect(registry.rollback('rollback-bad', 2, 'host-12', registration.providerHandle, 'aurora-3', BUILTIN_REICON_PROVIDER_HANDLE, 'reicon-drift')).toMatchObject({ outcome: 'rollback-failed', profileRevision: 2 })
+    expect(registry.resolve('action.save', 'regular', 'default')).toMatchObject({ provider: { providerId: 'host:neutral' }, fallback: 'neutral' })
   })
 })

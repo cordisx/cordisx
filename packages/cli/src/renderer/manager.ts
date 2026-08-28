@@ -54,7 +54,7 @@ import type {
 } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
 import type { ControlledSurfaceGroupChoice, ControlledSurfaceManagerSnapshot } from './controlled-surfaces.js'
-import type { RedactedIconThemeSnapshot } from './icon-theme-registry.js'
+import type { RedactedIconThemeProvider, RedactedIconThemeSnapshot } from './icon-theme-registry.js'
 import type {
   ExtensionPointPluginUsageSnapshot,
   ExtensionPointRuntimeSnapshot,
@@ -269,6 +269,8 @@ export interface ManagerModel {
     policy: 'inherit' | 'allow' | 'deny',
   ): Promise<void>
   setExtensionPointControlGroupChoice?(expectedPolicyRevision: number, choice: ControlledSurfaceGroupChoice): Promise<void>
+  /** Host-private exact selection; plugin-facing runtime snapshots cannot invoke it. */
+  selectIconTheme?(expectedProfileRevision: number, candidate: Pick<RedactedIconThemeProvider, 'providerId' | 'namespace' | 'providerVersion' | 'providerGeneration'>): Promise<void>
   mountSettingsTab?(id: string, panelBody: HTMLElement): Promise<ManagedSettingsPageMount>
   closeSettingsTabContent?(): Promise<void>
   managerContentPresentation?(id: string, reference: CordisXRouteReference): ManagerContentPresentation | undefined
@@ -485,8 +487,8 @@ const MANAGER_STYLES = `
     height: 20px;
   }
   .cxm-brand-mark,
-  .cxm-material-icon,
-  .cxm-material-icon svg,
+  .cxm-host-icon,
+  .cxm-host-icon svg,
   .cordisx-host-icon,
   .cordisx-host-icon svg,
   .cxm-plugin-icon,
@@ -496,7 +498,7 @@ const MANAGER_STYLES = `
     user-select: none;
     -webkit-user-drag: none;
   }
-  .cxm-material-icon {
+  .cxm-host-icon {
     display: inline-grid;
     place-items: center;
     flex: none;
@@ -504,15 +506,14 @@ const MANAGER_STYLES = `
     pointer-events: none;
   }
   .cordisx-host-icon { flex: none; line-height: 0; pointer-events: none; }
-  .cxm-material-icon svg {
+  .cxm-host-icon svg {
     display: block;
     width: 100%;
     height: 100%;
-    fill: currentColor;
     color: currentColor;
     pointer-events: none;
   }
-  .cordisx-host-icon svg { fill: currentColor; color: currentColor; pointer-events: none; }
+  .cordisx-host-icon svg { color: currentColor; pointer-events: none; }
   .cxm-brand-mark[data-brand-rendering^="direct-"] { object-fit: contain; }
   [data-cordisx-manager-modal] {
     position: fixed;
@@ -609,7 +610,7 @@ const MANAGER_STYLES = `
   .cxm-heading-menu-item { display: flex; width: 100%; align-items: center; gap: 8px; box-sizing: border-box; padding: 8px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--cx-text); cursor: pointer; font: inherit; text-align: left; }
   .cxm-heading-menu-item:hover { background: var(--cx-hover); }
   .cxm-heading-menu-item:focus-visible { outline: 2px solid var(--cx-focus); outline-offset: 1px; }
-  .cxm-heading-menu-item .cxm-material-icon { width: 16px; height: 16px; }
+  .cxm-heading-menu-item .cxm-host-icon { width: 16px; height: 16px; }
   .cxm-heading-row { display: contents; }
   .cxm-heading-title { display: flex; grid-column: 2; align-items: center; min-width: 0; min-height: var(--cx-manager-header-leading-seat); color: #fff; font-size: var(--cx-manager-header-title-size); font-weight: 700; line-height: var(--cx-manager-header-title-line-height); }
   .cxm-heading-current-heading { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
@@ -898,7 +899,7 @@ const MANAGER_STYLES = `
   .cxm-runtime-overview { display: grid; gap: 10px; inline-size: 100%; max-inline-size: none; }
   .cxm-runtime-status { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--cx-border); border-radius: 12px; background: var(--cx-surface-raised); }
   .cxm-runtime-status-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; background: var(--cx-hover); color: var(--cx-primary); }
-  .cxm-runtime-status-icon .cxm-material-icon { width: 19px; height: 19px; }
+  .cxm-runtime-status-icon .cxm-host-icon { width: 19px; height: 19px; }
   .cxm-runtime-status-copy { min-width: 0; }
   .cxm-runtime-status-label { display: block; color: var(--cx-text); font-size: 13px; font-weight: 680; }
   .cxm-runtime-status-meta { display: block; margin-top: 3px; overflow: hidden; color: var(--cx-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -1010,7 +1011,7 @@ const MANAGER_STYLES = `
   .cxm-marketplace-filter:hover { border-color: rgba(199, 204, 212, .38); color: #eef0f4; }
   .cxm-marketplace-filter[aria-pressed="true"] { border-color: rgba(125, 211, 252, .45); background: rgba(125, 211, 252, .12); color: #dff5ff; }
   .cxm-marketplace-filter:focus-visible { outline: 2px solid #c7ccd4; outline-offset: 2px; }
-  .cxm-marketplace-filter .cxm-material-icon { width: 17px; height: 17px; }
+  .cxm-marketplace-filter .cxm-host-icon { width: 17px; height: 17px; }
   .cxm-list-search-icon { width: 18px; height: 18px; margin-left: 10px; color: #8e98a9; }
   .cxm-list-search .cxm-search { min-width: 0; padding-left: 0; border-width: 0; background: transparent; }
   .cxm-list-search:focus-within { border-color: rgba(199, 204, 212, .65); outline: 2px solid #c7ccd4; outline-offset: 2px; }
@@ -1062,7 +1063,7 @@ const MANAGER_STYLES = `
   .cxm-manager-icon-action:focus-visible, .cxm-plugin-icon-action:focus-visible, .cxm-plugin-menu-trigger:focus-visible { outline: 2px solid var(--cx-focus, #c7ccd4); outline-offset: 1px; }
   .cxm-manager-icon-action:disabled, .cxm-plugin-icon-action:disabled { cursor: default; opacity: var(--cx-disabled, .34); }
   .cxm-manager-icon-action[aria-pressed="true"] { background: var(--cx-pressed, rgba(199, 204, 212, .2)); color: var(--cx-text, #eef0f4); }
-  .cxm-manager-icon-action .cxm-material-icon { width: 17px; height: 17px; max-width: 100%; max-height: 100%; }
+  .cxm-manager-icon-action .cxm-host-icon { width: 17px; height: 17px; max-width: 100%; max-height: 100%; }
   .cxm-plugin-icon {
     position: relative;
     display: grid;
@@ -1106,7 +1107,7 @@ const MANAGER_STYLES = `
   }
   .cxm-marketplace-trust-badge[data-trust-dimension="official"] { color: #c9d9ff; }
   .cxm-marketplace-trust-badge[data-trust-dimension="certified"] { color: #c8f1dc; }
-  .cxm-marketplace-trust-badge .cxm-material-icon { width: 12px; height: 12px; }
+  .cxm-marketplace-trust-badge .cxm-host-icon { width: 12px; height: 12px; }
   .cxm-plugin-description { display: -webkit-box; margin-top: 4px; overflow: hidden; color: #818b9d; font-size: 10px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .cxm-plugin-meta { display: flex; min-width: 0; align-items: center; gap: 6px; margin-top: 4px; color: #7d8798; font-size: 10px; }
   .cxm-plugin-meta-version { flex: none; }
@@ -1166,7 +1167,7 @@ const MANAGER_STYLES = `
   .cxm-marketplace-trust-list { display: grid; gap: 9px; margin-top: 10px; }
   .cxm-marketplace-trust-item { padding: 12px 13px; border: 1px solid rgba(199, 204, 212, .16); border-radius: 10px; background: rgba(199, 204, 212, .045); }
   .cxm-marketplace-trust-title { display: flex; align-items: center; gap: 7px; color: #edf0f4; font-size: 12px; font-weight: 700; }
-  .cxm-marketplace-trust-title .cxm-material-icon { width: 17px; height: 17px; }
+  .cxm-marketplace-trust-title .cxm-host-icon { width: 17px; height: 17px; }
   .cxm-marketplace-trust-copy { margin: 6px 0 0; color: #9da6b6; font-size: 11px; }
   .cxm-marketplace-trust-meta { margin-top: 7px; color: #7f899a; font: 10px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; }
   .cxm-marketplace-trust-evidence { display: inline-flex; margin-top: 8px; }
@@ -1263,7 +1264,7 @@ const MANAGER_STYLES = `
   .cxm-route-machine dt { color: var(--cx-muted); }
   .cxm-route-machine dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--cx-text); font-family: ui-monospace, monospace; user-select: text; }
   .cxm-route-metadata-diagnostic { display: flex; min-width: 0; align-items: center; gap: 5px; margin-top: 7px; color: var(--cx-muted); font-size: 10px; line-height: 1.35; }
-  .cxm-route-metadata-diagnostic .cxm-material-icon { width: 13px; height: 13px; flex: none; }
+  .cxm-route-metadata-diagnostic .cxm-host-icon { width: 13px; height: 13px; flex: none; }
   .cxm-route-state { display: flex; min-width: 0; align-items: center; gap: 5px; margin-top: 7px; color: var(--cx-danger); font-size: 10px; line-height: 1.35; }
   .cxm-usage-list { border-top: 1px solid rgba(255, 255, 255, .08); border-bottom: 1px solid rgba(255, 255, 255, .08); }
   .cxm-usage-item { padding: 12px 2px; }

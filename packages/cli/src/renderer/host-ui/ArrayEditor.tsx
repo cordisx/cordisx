@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Button, Dialog, Input, InputNumber, Switch } from 'tdesign-react'
-import { CopyIcon, DeleteIcon, EditIcon, MoveIcon, AddIcon } from 'tdesign-icons-react'
 import type { CordisXConfigFieldSnapshot, CordisXConfigFormSchemaNode, CordisXJsonValue } from '../../contracts.js'
+import { HostIcon } from './HostIcon.js'
 
 export interface ArrayEditorProps {
   readonly field: CordisXConfigFieldSnapshot
@@ -56,7 +56,7 @@ export function ArrayEditor({ field, value, onChange }: ArrayEditorProps) {
   }
   return (
     <div className="cxf-array-editor" data-host-form-primitive="object-array">
-      <div className="cxf-array-editor-toolbar"><Button size="small" shape="square" variant="text" aria-label="添加" title="添加" data-array-action="add" icon={<AddIcon />} disabled={field.disabled || value.length >= limit} onClick={() => {
+      <div className="cxf-array-editor-toolbar"><Button size="small" shape="square" variant="text" aria-label="添加" title="添加" data-array-action="add" icon={<HostIcon token="add" />} disabled={field.disabled || value.length >= limit} onClick={() => {
         const next = [...value, structuredClone((field.arrayItemDefault ?? {}) as Record<string, unknown>)]
         const nextIds = [...ids, stableId()]
         commit(next, nextIds)
@@ -69,12 +69,12 @@ export function ArrayEditor({ field, value, onChange }: ArrayEditorProps) {
           onDragOver={event => { if (canReorder) event.preventDefault() }}
           onDrop={event => { event.preventDefault(); move(Number(event.dataTransfer.getData('text/x-cordisx-array-index')), index) }}>
           <button type="button" className="cxf-array-row-drag-handle" aria-label="拖拽或使用方向键排序" disabled={!canReorder || field.disabled}
-            onKeyDown={event => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); move(index, index + (event.key === 'ArrowUp' ? -1 : 1)) } }}><MoveIcon /></button>
+            onKeyDown={event => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); move(index, index + (event.key === 'ArrowUp' ? -1 : 1)) } }}><HostIcon token="move" /></button>
           <span className="cxf-array-row-summary">{summary(item, field.arrayItemSchema)}</span>
           <span className="cxf-array-row-actions">
-            <Button shape="square" variant="text" aria-label="编辑" title="编辑" icon={<EditIcon />} disabled={field.disabled} onClick={() => open(index)} />
-            <Button shape="square" variant="text" aria-label="复制" title="复制" icon={<CopyIcon />} disabled={field.disabled || value.length >= limit} onClick={() => { const next = [...value]; next.splice(index + 1, 0, structuredClone(item)); const nextIds = [...ids]; nextIds.splice(index + 1, 0, stableId()); commit(next, nextIds) }} />
-            <Button className="cxf-array-delete" shape="square" variant="text" theme="danger" aria-label="删除" title="删除" icon={<DeleteIcon />} disabled={field.disabled || value.length <= (field.min ?? 0)} onClick={() => commit(value.filter((_, itemIndex) => itemIndex !== index), ids.filter((_, itemIndex) => itemIndex !== index))} />
+            <Button shape="square" variant="text" aria-label="编辑" title="编辑" icon={<HostIcon token="edit" />} disabled={field.disabled} onClick={() => open(index)} />
+            <Button shape="square" variant="text" aria-label="复制" title="复制" icon={<HostIcon token="copy" />} disabled={field.disabled || value.length >= limit} onClick={() => { const next = [...value]; next.splice(index + 1, 0, structuredClone(item)); const nextIds = [...ids]; nextIds.splice(index + 1, 0, stableId()); commit(next, nextIds) }} />
+            <Button className="cxf-array-delete" shape="square" variant="text" theme="danger" aria-label="删除" title="删除" icon={<HostIcon token="delete" />} disabled={field.disabled || value.length <= (field.min ?? 0)} onClick={() => commit(value.filter((_, itemIndex) => itemIndex !== index), ids.filter((_, itemIndex) => itemIndex !== index))} />
           </span>
         </div>
       ))}

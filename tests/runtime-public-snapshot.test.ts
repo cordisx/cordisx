@@ -21,6 +21,11 @@ describe('public runtime snapshot privacy', () => {
       plugins: [{ id: 'fixture', development: { sourcePath: '/private/local-plugin.ts' } }],
       localDevelopment: [{ sourcePath: '/private/local-plugin.ts' }],
       extensionPointControls: { diagnostics: [{ principalHandle: 'principal:diagnostic' }] },
+      iconThemes: {
+        profileId: 'profile-main', profileRevision: 2,
+        selected: { providerId: 'plugin:fixture:icons', namespace: 'icons', protocolVersion: 1, providerVersion: '1.0.0', providerGeneration: 'fixture-2', providerHandle: 'iph_secret' },
+        providers: [{ providerId: 'plugin:fixture:icons', namespace: 'icons', providerVersion: '1.0.0', providerGeneration: 'fixture-2', status: 'active', coverage: 'partial', tupleCount: 1, principalHandle: 'ipp_secret', descriptors: [{ commands: ['secret'] }] }],
+      },
       extensionPoints: {
         schemaVersion: 1,
         points: [{
@@ -36,6 +41,8 @@ describe('public runtime snapshot privacy', () => {
     expect(projected.registrations[0]).not.toHaveProperty('control')
     expect(projected.extensionPoints?.points[0]?.plugins[0]?.registrations[0]).not.toHaveProperty('control')
     expect(JSON.stringify(projected)).not.toMatch(/principalHandle|principal:must-not-leak|principal:diagnostic|sourcePath/)
+    expect(JSON.stringify(projected.iconThemes)).not.toMatch(/providerHandle|principalHandle|descriptors|commands|secret/u)
+    expect(projected.iconThemes?.selected.providerId).toBe('plugin:fixture:icons')
     expect(manager.extensionPoints?.points[0]?.plugins[0]?.registrations[0]).toHaveProperty('control')
   })
 })

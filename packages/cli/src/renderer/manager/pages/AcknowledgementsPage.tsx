@@ -39,15 +39,43 @@ const TOOLS = [
   },
 ] as const
 
+const ICON_ATTRIBUTIONS = [
+  {
+    name: 'Reicon', url: 'https://github.com/dqev/reicon', license: 'MIT',
+    description: {
+      'zh-CN': 'CordisX 默认系统图标。Reicon 的基础图标说明包含 Solar Icons 与 Zappicon 来源。',
+      en: 'Default CordisX system icons. Reicon credits Solar Icons and Zappicon as base-icon sources.',
+    },
+  },
+  {
+    name: 'Zappicon', url: 'https://zappicon.com/license', license: 'Zappicon License',
+    description: {
+      'zh-CN': 'Reicon 标明的基础图标来源；CordisX 按上游许可归因使用。',
+      en: 'A base-icon source credited by Reicon; used by CordisX with upstream license attribution.',
+    },
+  },
+  {
+    name: 'Solar Icons · 480 Design', url: 'https://solar-icons.vercel.app/', license: 'CC BY 4.0',
+    description: {
+      'zh-CN': 'Reicon 标明的基础图标来源，由 480 Design 设计。',
+      en: 'A base-icon source credited by Reicon, designed by 480 Design.',
+    },
+  },
+] as const
+
 const COPY = {
   'zh-CN': {
     projects: '仓库与工具',
+    icons: '图标与许可',
+    iconNotice: '这些图标是上游资产，并非 CordisX 自有的 MIT 图标资产。',
     contributors: '贡献者',
     empty: '当前构建尚未注入贡献者名单。',
     opensInNewWindow: '在新窗口打开',
   },
   en: {
     projects: 'Repositories & tools',
+    icons: 'Icons & licenses',
+    iconNotice: 'These icons are upstream assets, not CordisX-owned MIT icon assets.',
     contributors: 'Contributors',
     empty: 'No contributor list was injected into this build.',
     opensInNewWindow: 'opens in a new window',
@@ -68,6 +96,14 @@ export function AcknowledgementsPage({ locale: localeSource }: { readonly locale
       <ul className="cxr-ack-grid cxr-tool-grid">
         {TOOLS.map(tool => <li key={tool.name}><a className="cxr-tool-icon" href={tool.url} target="_blank" rel="noopener noreferrer" title={tool.name} aria-label={locale === 'zh-CN' ? `${tool.name}（${copy.opensInNewWindow}）` : `${tool.name} (${copy.opensInNewWindow})`}>
           <img src={tool.iconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
+        </a></li>)}
+      </ul>
+    </section>
+    <section className="cxr-ack-section" aria-labelledby="cxr-ack-icons-title">
+      <header><h3 id="cxr-ack-icons-title">{copy.icons}</h3><p>{copy.iconNotice}</p></header>
+      <ul className="cxr-ack-grid cxr-license-grid">
+        {ICON_ATTRIBUTIONS.map(item => <li key={item.name}><a className="cxr-ack-card" href={item.url} target="_blank" rel="noopener noreferrer" aria-label={locale === 'zh-CN' ? `${item.name}（${copy.opensInNewWindow}）` : `${item.name} (${copy.opensInNewWindow})`}>
+          <span className="cxr-ack-card-body"><strong>{item.name}</strong><span>{item.description[locale]}</span><code>{item.license}</code></span><HostIcon token="external-link" />
         </a></li>)}
       </ul>
     </section>

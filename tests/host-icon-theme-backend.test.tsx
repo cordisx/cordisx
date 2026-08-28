@@ -108,14 +108,18 @@ describe('Host Reicon normalized backend', () => {
     }
   })
 
-  it('allows Reicon imports only in the private backend', async () => {
+  it('allows icon-library imports only for Reicon in the private backend', async () => {
     const rendererRoot = path.join(repositoryRoot, 'packages/cli/src/renderer')
     const files = await sourceFiles(rendererRoot)
     const violations: string[] = []
     for (const file of files) {
-      if (file === path.join(rendererRoot, 'reicon-icon-backend.ts')) continue
       const source = await readFile(file, 'utf8')
-      if (/from ['"]reicon(?:\/[^'"]*)?['"]/u.test(source)) violations.push(path.relative(repositoryRoot, file))
+      const relative = path.relative(repositoryRoot, file)
+      if (file === path.join(rendererRoot, 'reicon-icon-backend.ts')) {
+        if (/from ['"](?:tdesign-icons-react|@material-symbols[^'"]*)['"]/u.test(source)) violations.push(relative)
+        continue
+      }
+      if (/from ['"](?:reicon(?:\/[^'"]*)?|tdesign-icons-react|@material-symbols[^'"]*)['"]/u.test(source)) violations.push(relative)
     }
     expect(violations).toEqual([])
   })

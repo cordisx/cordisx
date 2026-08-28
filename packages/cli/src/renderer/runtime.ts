@@ -2171,7 +2171,19 @@ async function start(
     subscribe,
     dispose,
   }
-  const managerModel: ManagerModel = { ...handle, snapshot: managerSnapshot }
+  const managerModel: ManagerModel = {
+    ...handle,
+    snapshot: managerSnapshot,
+    selectIconTheme: async (expectedProfileRevision, candidate) => {
+      const result = iconThemeRegistry.selectProvider(
+        `iconselect_${String(Date.now()).padStart(16, '0')}`,
+        expectedProfileRevision,
+        generation,
+        candidate,
+      )
+      if (result.outcome !== 'applied') throw new Error(`icon theme selection failed: ${result.error?.code ?? result.outcome}`)
+    },
+  }
 
   try {
     i18nFiber = ctx.plugin(CordisXI18nService)
