@@ -741,11 +741,17 @@ New ready ingress revokes and aborts the previous document before serialized
 receiver installation. Delivery races exact-context CDP evaluation against that
 cancellation, so replacement or target close unblocks the new epoch and a late
 old-context result cannot acknowledge, mutate pending state, or affect current
-document accounting. The hub keeps durable winner state separate from each
-document's acknowledged and pending revisions, lets a higher revision supersede
-pending lower work, and allows explicit same-revision retry after each bounded
-attempt window. A durable write response reports document synchronization as
-complete or pending;
+document accounting. Before entering that serialized installation, the
+profile-scoped hub atomically reserves the target/session/document epoch. The
+reservation remains profile-wide pending through receiver registration, winner
+replay, and the exact ready-response acknowledgement; another renderer cannot
+report complete while that document is still booting. Replacement or target
+close cancels the reservation, while a successful exact-epoch acknowledgement
+converts it to synchronized active state. The hub keeps durable winner state
+separate from each document's acknowledged and pending revisions, lets a higher
+revision supersede pending lower work, and allows explicit same-revision retry
+after each bounded attempt window. A durable write response reports document
+synchronization as complete or pending;
 pending delivery never turns a successful atomic write into a renderer rollback.
 CAS conflicts cache and attempt the durable current preference before sending
 the conflict response, so response-triggered navigation cannot open a replay

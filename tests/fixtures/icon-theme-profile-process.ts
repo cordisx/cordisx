@@ -54,11 +54,27 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, label: strin
   }
 }
 
-async function settleDisposedDom(): Promise<void> {
-  // React schedules cleanup microtasks after the Host runtime promise settles.
-  // Flush them before JSDOM detaches window.document during close().
-  await Promise.resolve()
-  await new Promise(resolve => setTimeout(resolve, 25))
+function deferred(): { readonly promise: Promise<void>; resolve(): void } {
+  let resolve!: () => void
+  const promise = new Promise<void>(done => { resolve = done })
+  return { promise, resolve }
+}
+
+class HostPrivateCallbackScope {
+  private accepting = true
+  private readonly tasks = new Set<Promise<void>>()
+
+  run(callback: () => Promise<void>): void {
+    if (!this.accepting) return
+    const task = Promise.resolve().then(callback)
+    this.tasks.add(task)
+    void task.finally(() => this.tasks.delete(task)).catch(() => undefined)
+  }
+
+  stop(): void { this.accepting = false }
+  active(): boolean { return this.accepting }
+  pending(): number { return this.tasks.size }
+  async drain(): Promise<void> { await Promise.allSettled([...this.tasks]) }
 }
 
 async function composition(enabled = true, config: unknown = {}): Promise<ReturnType<typeof loadConfig>> {
@@ -88,7 +104,7 @@ async function boot(
     const snapshot = runtime.snapshot().iconThemes!
     const result = { selected: { ...snapshot.selected }, providers: snapshot.providers.map(provider => ({ ...provider })) }
     await runtime.dispose()
-    await settleDisposedDom()
+    await Promise.resolve()
     return result
   } finally {
     dom.window.close()
@@ -107,6 +123,9 @@ async function processA(): Promise<Record<string, unknown>> {
   })
   const dom = page()
   let wireCandidateKeys: string[] = []
+  const callbacks = new HostPrivateCallbackScope()
+  const releasePersistedResponse = deferred()
+  let lateCallbackTouchedDom = false
   const context: IconThemePreferencePersistenceContext = {
     configPath,
     appId: 'codex',
@@ -115,6 +134,7 @@ async function processA(): Promise<Record<string, unknown>> {
     token,
   }
   Object.defineProperty(dom.window, '__cordisxIconThemePreferenceRequestV1', { configurable: true, value: (payload: string) => {
+    if (!callbacks.active()) return
     const request = JSON.parse(payload) as Record<string, unknown>
     if (request.kind === 'document-ready') {
       ;(dom.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => unknown })
@@ -126,17 +146,22 @@ async function processA(): Promise<Record<string, unknown>> {
       return
     }
     wireCandidateKeys = Object.keys(request.candidate as Record<string, unknown>).sort()
-    queueMicrotask(() => { void (async () => {
+    callbacks.run(async () => {
       try {
         const parsed = parseIconThemePreferenceBindingRequest(request, context)
         const value = await persistIconThemePreference(context, parsed)
+        await releasePersistedResponse.promise
+        if (!callbacks.active()) return
+        lateCallbackTouchedDom = true
         ;(dom.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => void })
           .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
       } catch (error) {
+        if (!callbacks.active()) return
+        lateCallbackTouchedDom = true
         ;(dom.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => void })
           .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: false, ...iconThemePreferenceBridgeError(error) }))
       }
-    })() })
+    })
   } })
   try {
     dom.window.eval(bundle)
@@ -152,16 +177,24 @@ async function processA(): Promise<Record<string, unknown>> {
     await waitFor(async () => (await loadHomeConfig(configPath)).apps.codex?.profiles.default?.iconTheme?.revision === 1, 'process A durable preference')
     const preference = (await loadHomeConfig(configPath)).apps.codex!.profiles.default!.iconTheme!
     const selected = runtime.snapshot().iconThemes!.selected
+    const callbacksPendingAtShutdown = callbacks.pending()
+    callbacks.stop()
     await runtime.dispose()
-    await settleDisposedDom()
+    releasePersistedResponse.resolve()
+    await callbacks.drain()
+    await Promise.resolve()
     return {
       hostGeneration,
       selected,
       preference,
       wireCandidateKeys,
+      teardown: { callbacksPendingAtShutdown, lateCallbackTouchedDom, callbacksDrained: callbacks.pending() === 0 },
       configMode: (await stat(configPath)).mode & 0o777,
     }
   } finally {
+    callbacks.stop()
+    releasePersistedResponse.resolve()
+    await callbacks.drain()
     dom.window.close()
   }
 }

@@ -35,6 +35,11 @@ describe('two-process icon-theme profile persistence', () => {
     expect(processA.wireCandidateKeys).toEqual([
       'namespace', 'providerGeneration', 'providerId', 'providerVersion',
     ])
+    expect(processA.teardown).toEqual({
+      callbacksPendingAtShutdown: 1,
+      lateCallbackTouchedDom: false,
+      callbacksDrained: true,
+    })
     expect(processA.selected).toMatchObject({ providerId: 'plugin:icon-theme-test:aurora' })
     expect(processB.exact).toMatchObject({
       selected: {

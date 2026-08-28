@@ -165,6 +165,39 @@ describe('Host icon-theme preference persistence', () => {
     expect(observedWork).toEqual([])
   })
 
+  it('counts a booting document reservation profile-wide until its exact ready acknowledgement', async () => {
+    const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    const active = await hub.register({
+      targetId: 'target-a', sessionId: 'session-a', documentEpoch: 'document_active', currentRevision: 0,
+      signal: new AbortController().signal,
+      receive: async preference => ({ documentEpoch: 'document_active', currentRevision: preference.revision }),
+    })
+    const controller = new AbortController()
+    const booting = hub.reserve({
+      targetId: 'target-b', sessionId: 'session-b', documentEpoch: 'document_booting', currentRevision: 0,
+      signal: controller.signal,
+    })
+    const winner = { revision: 1, ...candidate }
+    await expect(hub.broadcast(winner)).resolves.toMatchObject({ delivered: 1, pending: 1 })
+
+    const registration = await booting.register({
+      receive: async preference => ({ documentEpoch: 'document_booting', currentRevision: preference.revision }),
+    })
+    expect(registration).toMatchObject({ synchronization: 'complete', currentRevision: 1 })
+    await expect(hub.broadcast(winner)).resolves.toMatchObject({ attempted: 0, pending: 1 })
+    expect(registration.acknowledgeReady({ documentEpoch: 'document_booting', currentRevision: 1 })).toBe(true)
+    await expect(hub.broadcast(winner)).resolves.toMatchObject({ attempted: 0, pending: 0 })
+
+    const replacement = hub.reserve({
+      targetId: 'target-b', sessionId: 'session-b', documentEpoch: 'document_replacing', currentRevision: 0,
+      signal: controller.signal,
+    })
+    await expect(hub.broadcast(winner)).resolves.toMatchObject({ pending: 1 })
+    replacement.cancel()
+    await expect(hub.broadcast(winner)).resolves.toMatchObject({ pending: 0 })
+    active.unregister()
+  })
+
   it('keeps failed delivery pending and re-drives the same winner after the receiver recovers', async () => {
     const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
     await hub.broadcast({ revision: 1, ...candidate })
@@ -183,8 +216,10 @@ describe('Host icon-theme preference persistence', () => {
     expect(registration).toMatchObject({ currentRevision: 0, synchronization: 'pending' })
     expect(hub.current()).toEqual({ revision: 1, ...candidate })
     recovered = true
-    await expect(hub.retryPending()).resolves.toEqual({ attempted: 1, delivered: 1, failed: 0, pending: 0 })
+    await expect(hub.retryPending()).resolves.toEqual({ attempted: 1, delivered: 1, failed: 0, pending: 1 })
     expect(attempts).toBe(3)
+    expect(registration.acknowledgeReady({ documentEpoch: 'document_retry', currentRevision: 1 })).toBe(true)
+    await expect(hub.retryPending()).resolves.toEqual({ attempted: 0, delivered: 0, failed: 0, pending: 0 })
     registration.unregister()
 
     const permanent = await hub.register({

@@ -799,13 +799,29 @@ async function deliverIconThemePreferenceToDocument(
   documentEpoch: string,
   minimumRevision: number,
   executionContextId: number,
+  signal?: AbortSignal,
 ): Promise<{ readonly documentEpoch: string; readonly currentRevision: number }> {
-  const response = await session.send('Runtime.evaluate', iconThemePreferenceDeliveryEvaluation(
+  const evaluation = session.send('Runtime.evaluate', iconThemePreferenceDeliveryEvaluation(
     payload,
     documentEpoch,
     minimumRevision,
     executionContextId,
   ))
+  let response
+  if (signal === undefined) {
+    response = await evaluation
+  } else {
+    let rejectCancelled!: (error: Error) => void
+    const cancelled = new Promise<never>((_resolve, reject) => { rejectCancelled = reject })
+    const onAbort = (): void => rejectCancelled(new Error('icon theme preference document delivery was cancelled'))
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) onAbort()
+    try {
+      response = await Promise.race([evaluation, cancelled])
+    } finally {
+      signal.removeEventListener('abort', onAbort)
+    }
+  }
   const remote = response.result
   const value = remote !== null && typeof remote === 'object'
     ? (remote as { value?: unknown }).value
@@ -936,7 +952,6 @@ async function install(
   let removeIconThemePreferenceBindingListener = (): void => {}
   let unregisterCurrentIconThemeDocument: (() => void) | undefined
   let activeIconThemeDocumentController: AbortController | undefined
-  let iconThemeDocumentPending = true
   let iconThemeDocumentFence = 0
   let iconThemeDocumentQueue = Promise.resolve()
   const iconThemeSessionId = randomUUID()
@@ -947,7 +962,6 @@ async function install(
         iconThemeDocumentFence += 1
         activeIconThemeDocumentController?.abort()
         activeIconThemeDocumentController = undefined
-        iconThemeDocumentPending = true
         unregisterCurrentIconThemeDocument?.()
         unregisterCurrentIconThemeDocument = undefined
       }
@@ -1213,64 +1227,60 @@ async function install(
               documentEpoch = ready.documentEpoch
               if (executionContextId === undefined) throw new Error('icon theme preference document execution context is unavailable')
               if (iconThemePreferenceBroadcast === undefined) throw new Error('icon theme preference broadcast is unavailable')
-              activeIconThemeDocumentController?.abort()
-              unregisterCurrentIconThemeDocument?.()
-              unregisterCurrentIconThemeDocument = undefined
-              iconThemeDocumentPending = true
+              const previousController = activeIconThemeDocumentController
+              const previousUnregister = unregisterCurrentIconThemeDocument
               const documentController = new AbortController()
+              const reservation = iconThemePreferenceBroadcast.reserve({
+                targetId: target.id,
+                sessionId: iconThemeSessionId,
+                documentEpoch: ready.documentEpoch,
+                currentRevision: ready.currentRevision,
+                signal: documentController.signal,
+              })
               activeIconThemeDocumentController = documentController
+              unregisterCurrentIconThemeDocument = reservation.cancel
               const fence = ++iconThemeDocumentFence
+              previousController?.abort()
+              previousUnregister?.()
               iconThemeDocumentQueue = iconThemeDocumentQueue.catch(() => undefined).then(async () => {
                 if (iconThemePreferenceClosed() || documentController.signal.aborted || fence !== iconThemeDocumentFence) {
                   throw new Error('icon theme preference document ready request is stale')
                 }
-                const registration = await iconThemePreferenceBroadcast.register({
-                  targetId: target.id,
-                  sessionId: iconThemeSessionId,
-                  documentEpoch: ready.documentEpoch,
-                  currentRevision: ready.currentRevision,
-                  signal: documentController.signal,
+                const registration = await reservation.register({
                   receive: async preference => await deliverIconThemePreferenceToDocument(
                     session,
                     { kind: 'sync', value: preference },
                     ready.documentEpoch,
                     preference.revision,
                     executionContextId,
+                    documentController.signal,
                   ),
                 })
                 if (iconThemePreferenceClosed() || documentController.signal.aborted || fence !== iconThemeDocumentFence) {
                   registration.unregister()
                   throw new Error('icon theme preference document ready request is stale')
                 }
-                try {
-                  const requiredRevision = iconThemePreferenceBroadcast.current()?.revision ?? ready.currentRevision
-                  const currentRevision = registration.currentRevision
-                  const synchronization = registration.synchronization === 'complete'
-                    && currentRevision >= requiredRevision ? 'complete' : 'pending'
-                  await deliverIconThemePreferenceToDocument(
-                    session,
-                    {
-                      kind: 'document-ready',
-                      requestId: ready.requestId,
-                      ok: true,
-                      documentEpoch: ready.documentEpoch,
-                      synchronization,
-                      requiredRevision,
-                      currentRevision,
-                    },
-                    ready.documentEpoch,
+                const requiredRevision = iconThemePreferenceBroadcast.current()?.revision ?? ready.currentRevision
+                const currentRevision = registration.currentRevision
+                const synchronization = registration.synchronization === 'complete'
+                  && currentRevision >= requiredRevision ? 'complete' : 'pending'
+                const ack = await deliverIconThemePreferenceToDocument(
+                  session,
+                  {
+                    kind: 'document-ready',
+                    requestId: ready.requestId,
+                    ok: true,
+                    documentEpoch: ready.documentEpoch,
+                    synchronization,
+                    requiredRevision,
                     currentRevision,
-                    executionContextId,
-                  )
-                  if (synchronization === 'complete' && !documentController.signal.aborted
-                    && fence === iconThemeDocumentFence) iconThemeDocumentPending = false
-                } catch (error) {
-                  registration.unregister()
-                  throw error
-                }
-                unregisterCurrentIconThemeDocument?.()
-                unregisterCurrentIconThemeDocument = registration.unregister
-                activeIconThemeDocumentController = documentController
+                  },
+                  ready.documentEpoch,
+                  currentRevision,
+                  executionContextId,
+                  documentController.signal,
+                )
+                registration.acknowledgeReady(ack)
               })
               await iconThemeDocumentQueue
               return
@@ -1288,8 +1298,7 @@ async function install(
             }
             const synchronization = iconThemePreferenceBroadcast === undefined
               ? 'pending'
-              : (await iconThemePreferenceBroadcast.broadcast(value)).pending === 0
-                && !iconThemeDocumentPending ? 'complete' : 'pending'
+              : (await iconThemePreferenceBroadcast.broadcast(value)).pending === 0 ? 'complete' : 'pending'
             await sendIconThemePreferenceBindingResponse(session, {
               requestId, ok: true, value, synchronization,
             }, executionContextId)
@@ -1299,8 +1308,7 @@ async function install(
             if (bridgeError.currentPreference !== undefined) {
               synchronization = iconThemePreferenceBroadcast === undefined
                 ? 'pending'
-                : (await iconThemePreferenceBroadcast.broadcast(bridgeError.currentPreference)).pending === 0
-                  && !iconThemeDocumentPending ? 'complete' : 'pending'
+                : (await iconThemePreferenceBroadcast.broadcast(bridgeError.currentPreference)).pending === 0 ? 'complete' : 'pending'
             }
             if (documentEpoch !== undefined && executionContextId !== undefined) {
               await deliverIconThemePreferenceToDocument(session, {
@@ -1554,6 +1562,8 @@ export interface WatchInjectionOptions {
   readonly channelActionsBridge?: ChannelActionsBridgeHandler
   readonly permissionPersistence?: PermissionPersistenceContext
   readonly iconThemePreferencePersistence?: IconThemePreferencePersistenceContext
+  /** Host-private injection seam for profile-wide launcher integration tests. */
+  readonly iconThemePreferenceBroadcastHub?: IconThemePreferenceBroadcastHub
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
   /** Host-private generation plane used by `cordisx dev`; it installs no public lifecycle binding. */
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
@@ -1565,10 +1575,13 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
   const installed = new Map<string, InstalledScript>()
   const iconThemePreferenceBroadcast = options.iconThemePreferencePersistence === undefined
     ? undefined
-    : new IconThemePreferenceBroadcastHub(
-        options.iconThemePreferencePersistence.appId,
-        options.iconThemePreferencePersistence.profileId,
-      )
+    : options.iconThemePreferenceBroadcastHub ?? new IconThemePreferenceBroadcastHub(
+      options.iconThemePreferencePersistence.appId,
+      options.iconThemePreferencePersistence.profileId,
+    )
+  if (iconThemePreferenceBroadcast !== undefined && options.iconThemePreferencePersistence !== undefined) {
+    iconThemePreferenceBroadcast.assertScope(options.iconThemePreferencePersistence)
+  }
   try {
     while (!options.signal.aborted) {
       try {

@@ -40,12 +40,27 @@ export interface IconThemePreferenceDeliveryAck {
 }
 
 export interface IconThemePreferenceDocumentReceiver {
+  readonly receive: (preference: HomeConfigIconThemePreference) => Promise<IconThemePreferenceDeliveryAck>
+}
+
+export interface IconThemePreferenceDocumentIdentity {
   readonly targetId: string
   readonly sessionId: string
   readonly documentEpoch: string
   readonly currentRevision: number
   readonly signal: AbortSignal
-  readonly receive: (preference: HomeConfigIconThemePreference) => Promise<IconThemePreferenceDeliveryAck>
+}
+
+export interface IconThemePreferenceDocumentRegistration {
+  readonly currentRevision: number
+  readonly synchronization: 'complete' | 'pending'
+  acknowledgeReady(ack: IconThemePreferenceDeliveryAck): boolean
+  unregister(): void
+}
+
+export interface IconThemePreferenceDocumentReservation {
+  register(receiver: IconThemePreferenceDocumentReceiver): Promise<IconThemePreferenceDocumentRegistration>
+  cancel(): void
 }
 
 export interface IconThemePreferenceBroadcastResult {
@@ -65,12 +80,14 @@ export interface IconThemePreferencePersistenceContext {
 
 interface IconThemePreferenceDocumentState {
   active: boolean
+  booting: boolean
   tail: Promise<void>
   ackedRevision: number
   pending: HomeConfigIconThemePreference | undefined
   readonly cancellation: AbortController
   removeExternalAbort: (() => void) | undefined
-  readonly receiver: IconThemePreferenceDocumentReceiver
+  readonly identity: IconThemePreferenceDocumentIdentity
+  receiver: IconThemePreferenceDocumentReceiver | undefined
 }
 
 export class IconThemePreferenceConflictError extends Error {
@@ -247,41 +264,42 @@ export class IconThemePreferenceBroadcastHub {
     }
   }
 
-  async register(receiver: IconThemePreferenceDocumentReceiver): Promise<{
-    readonly currentRevision: number
-    readonly synchronization: 'complete' | 'pending'
-    readonly unregister: () => void
-  }> {
-    const key = `${receiver.targetId}\u0000${receiver.sessionId}`
+  reserve(identity: IconThemePreferenceDocumentIdentity): IconThemePreferenceDocumentReservation {
+    const key = `${identity.targetId}\u0000${identity.sessionId}`
     const previous = this.receivers.get(key)
     if (previous !== undefined) this.deactivate(key, previous)
     const cancellation = new AbortController()
     const entry: IconThemePreferenceDocumentState = {
       active: true,
+      booting: true,
       tail: Promise.resolve(),
-      ackedRevision: receiver.currentRevision,
-      pending: undefined,
+      ackedRevision: identity.currentRevision,
+      pending: this.winner !== undefined && identity.currentRevision < this.winner.revision
+        ? { ...this.winner }
+        : undefined,
       cancellation,
       removeExternalAbort: undefined,
-      receiver,
+      identity,
+      receiver: undefined,
     }
     this.receivers.set(key, entry)
     const externalAbort = (): void => this.deactivate(key, entry)
-    receiver.signal.addEventListener('abort', externalAbort, { once: true })
-    entry.removeExternalAbort = () => receiver.signal.removeEventListener('abort', externalAbort)
-    if (receiver.signal.aborted) this.deactivate(key, entry)
-    if (entry.active && this.winner !== undefined && entry.ackedRevision < this.winner.revision) {
-      entry.pending = { ...this.winner }
-      await this.enqueue(entry)
-    }
-    const unregister = (): void => {
-      this.deactivate(key, entry)
-    }
+    identity.signal.addEventListener('abort', externalAbort, { once: true })
+    entry.removeExternalAbort = () => identity.signal.removeEventListener('abort', externalAbort)
+    if (identity.signal.aborted) this.deactivate(key, entry)
     return {
-      get currentRevision() { return entry.ackedRevision },
-      get synchronization() { return entry.pending === undefined ? 'complete' as const : 'pending' as const },
-      unregister,
+      register: async receiver => await this.activate(key, entry, receiver),
+      cancel: () => this.deactivate(key, entry),
     }
+  }
+
+  async register(identity: IconThemePreferenceDocumentIdentity & IconThemePreferenceDocumentReceiver): Promise<IconThemePreferenceDocumentRegistration> {
+    const reservation = this.reserve(identity)
+    const registration = await reservation.register({ receive: identity.receive })
+    if (registration.synchronization === 'complete') {
+      registration.acknowledgeReady({ documentEpoch: identity.documentEpoch, currentRevision: registration.currentRevision })
+    }
+    return registration
   }
 
   async broadcast(preference: HomeConfigIconThemePreference): Promise<IconThemePreferenceBroadcastResult> {
@@ -299,7 +317,8 @@ export class IconThemePreferenceBroadcastHub {
     this.winner = { ...preference }
     const entries = [...this.receivers.values()].filter(entry => entry.active && entry.ackedRevision < preference.revision)
     for (const entry of entries) entry.pending = { ...preference }
-    const results = await Promise.all(entries.map(async entry => await this.enqueue(entry)))
+    const deliverable = entries.filter(entry => entry.receiver !== undefined)
+    const results = await Promise.all(deliverable.map(async entry => await this.enqueue(entry)))
     const attempted = results.filter(result => result !== 'inactive').length
     const delivered = results.filter(result => result === 'delivered').length
     return {
@@ -320,7 +339,35 @@ export class IconThemePreferenceBroadcastHub {
   }
 
   private pendingCount(): number {
-    return [...this.receivers.values()].filter(entry => entry.active && entry.pending !== undefined).length
+    return [...this.receivers.values()].filter(entry => entry.active && (entry.booting || entry.pending !== undefined)).length
+  }
+
+  private async activate(
+    key: string,
+    entry: IconThemePreferenceDocumentState,
+    receiver: IconThemePreferenceDocumentReceiver,
+  ): Promise<IconThemePreferenceDocumentRegistration> {
+    if (!entry.active || this.receivers.get(key) !== entry || entry.receiver !== undefined) {
+      throw new Error('icon theme preference document reservation is stale')
+    }
+    entry.receiver = receiver
+    if (entry.pending !== undefined) await this.enqueue(entry)
+    return {
+      get currentRevision() { return entry.ackedRevision },
+      get synchronization() { return entry.pending === undefined ? 'complete' as const : 'pending' as const },
+      acknowledgeReady: ack => {
+        if (!entry.active || this.receivers.get(key) !== entry
+          || ack.documentEpoch !== entry.identity.documentEpoch
+          || !Number.isSafeInteger(ack.currentRevision)
+          || ack.currentRevision < entry.ackedRevision) return false
+        entry.ackedRevision = Math.max(entry.ackedRevision, ack.currentRevision)
+        if (entry.pending !== undefined && entry.ackedRevision >= entry.pending.revision) entry.pending = undefined
+        const requiredRevision = this.winner?.revision ?? entry.ackedRevision
+        if (entry.pending === undefined && entry.ackedRevision >= requiredRevision) entry.booting = false
+        return !entry.booting
+      },
+      unregister: () => this.deactivate(key, entry),
+    }
   }
 
   private deactivate(key: string, entry: IconThemePreferenceDocumentState): void {
@@ -355,12 +402,14 @@ export class IconThemePreferenceBroadcastHub {
           if (entry.cancellation.signal.aborted) onAbort()
           let ack: IconThemePreferenceDeliveryAck
           try {
-            ack = await Promise.race([entry.receiver.receive({ ...value }), cancelled])
+            const receiver = entry.receiver
+            if (receiver === undefined) return 'failed' as const
+            ack = await Promise.race([receiver.receive({ ...value }), cancelled])
           } finally {
             entry.cancellation.signal.removeEventListener('abort', onAbort)
           }
           if (!entry.active) return 'inactive' as const
-          if (ack.documentEpoch !== entry.receiver.documentEpoch || ack.currentRevision < value.revision) {
+          if (ack.documentEpoch !== entry.identity.documentEpoch || ack.currentRevision < value.revision) {
             throw new Error('icon theme preference delivery acknowledgement is invalid')
           }
           entry.ackedRevision = Math.max(entry.ackedRevision, ack.currentRevision)

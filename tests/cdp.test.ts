@@ -18,7 +18,7 @@ import { PluginPermissionIdentityRegistry } from '../packages/cli/src/launcher/p
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authority.js'
 import { ensureHomeConfig, loadHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
-import { ICON_THEME_PREFERENCE_BINDING } from '../packages/cli/src/launcher/icon-theme-rpc.js'
+import { ICON_THEME_PREFERENCE_BINDING, IconThemePreferenceBroadcastHub } from '../packages/cli/src/launcher/icon-theme-rpc.js'
 import { BrowserIconThemePreferenceBridge } from '../packages/cli/src/renderer/icon-theme-preference-binding.js'
 
 function target(id: string, title: string, url = 'https://example.test/'): CdpTarget {
@@ -108,11 +108,13 @@ describe('icon theme preference document delivery', () => {
     let secondContextFirstRevision: number | undefined
     let secondContextPendingReady: Record<string, unknown> | undefined
     let permanentContextDeliveryAttempts = 0
+    const permanentAttemptsByRevision = new Map<number, number>()
     let permanentContextPendingResponses = 0
     const permanentFirstPending = deferred()
     const permanentHigherWinnerCached = deferred()
+    const permanentHigherDeliveryRound = deferred()
     let permanentHeldReadyRequestId: number | undefined
-    let permanentHeldReadyAck: { documentEpoch: string; currentRevision: number } | undefined
+    let permanentHeldReadyPayload: Record<string, unknown> | undefined
     let syncPhase: 'initial-fail' | 'recovered' | 'conflict-fail' = 'initial-fail'
     const bindingResponses = new Map<string, Record<string, unknown>>()
     const contexts = new Map<number, { epoch: string; revision: number }>([
@@ -199,19 +201,21 @@ describe('icon theme preference document delivery', () => {
           }
           if (contextId === 43 && deliveryPayload?.kind === 'sync' && minimum >= 1) {
             permanentContextDeliveryAttempts += 1
+            permanentAttemptsByRevision.set(minimum, (permanentAttemptsByRevision.get(minimum) ?? 0) + 1)
+            if (minimum === 3 && permanentAttemptsByRevision.get(3) === 2) permanentHigherDeliveryRound.resolve()
             respond({ exceptionDetails: { text: 'permanent document receiver failure' } })
             return
           }
           if (contextId === 43 && deliveryPayload?.kind === 'document-ready'
             && deliveryPayload.synchronization === 'pending') {
             permanentContextPendingResponses += 1
-            const ack = globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify(deliveryPayload))
             if (permanentContextPendingResponses === 1) {
               permanentHeldReadyRequestId = request.id
-              permanentHeldReadyAck = ack
+              permanentHeldReadyPayload = deliveryPayload
               permanentFirstPending.resolve()
               return
             }
+            const ack = globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify(deliveryPayload))
             respond({ result: { value: ack } })
             return
           }
@@ -446,12 +450,18 @@ describe('icon theme preference document delivery', () => {
         },
       }))
       await permanentHigherWinnerCached.promise
+      await permanentHigherDeliveryRound.promise
+      const heldReadyAck = globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify(permanentHeldReadyPayload))
       socket?.send(JSON.stringify({
         id: permanentHeldReadyRequestId,
-        result: { result: { value: permanentHeldReadyAck } },
+        result: { result: { value: heldReadyAck } },
       }))
       await expect(permanentlyPending).rejects.toThrow('remains pending at revision 0; required 3')
-      expect(permanentContextDeliveryAttempts).toBe(8)
+      expect(permanentAttemptsByRevision.get(2)).toBe(2)
+      expect(permanentAttemptsByRevision.get(3)).toBe(6)
+      expect(permanentContextDeliveryAttempts).toBe(
+        [...permanentAttemptsByRevision.values()].reduce((total, attempts) => total + attempts, 0),
+      )
       expect(permanentContextPendingResponses).toBe(3)
     } finally {
       browserBridge?.dispose()
@@ -463,6 +473,158 @@ describe('icon theme preference document delivery', () => {
       globalThis.fetch = originalFetch
       server.close()
       await once(server, 'close')
+    }
+  })
+
+  it('keeps another target profile-pending from ready ingress through register and acknowledgement', async () => {
+    const servers = [new WebSocketServer({ port: 0 }), new WebSocketServer({ port: 0 })] as const
+    await Promise.all(servers.map(async server => await once(server, 'listening')))
+    const addresses = servers.map(server => server.address())
+    if (addresses.some(address => typeof address === 'string')) throw new Error('fixture websocket did not bind TCP ports')
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-icon-theme-cdp-profile-reservation-'))
+    const configPath = path.join(root, '.cordisx', 'config.json')
+    await ensureHomeConfig(configPath)
+    const token = 'r'.repeat(64)
+    const installed = [deferred(), deferred()] as const
+    const readyComplete = [deferred(), deferred()] as const
+    const sockets: Array<import('ws').WebSocket | undefined> = [undefined, undefined]
+    const epochs = ['document_epoch_target_a', 'document_epoch_target_b'] as const
+    const revisions = [0, 0]
+    const selectionResponse = deferred<Record<string, unknown>>()
+    for (const [index, server] of servers.entries()) {
+      server.on('connection', connection => {
+        sockets[index] = connection
+        connection.on('message', data => {
+          const request = JSON.parse(String(data)) as {
+            id: number
+            method: string
+            params?: { expression?: string; contextId?: number }
+          }
+          const respond = (result: Record<string, unknown>): void => connection.send(JSON.stringify({ id: request.id, result }))
+          if (request.method === 'Page.addScriptToEvaluateOnNewDocument') {
+            respond({ identifier: `profile-reservation-${index}` })
+            return
+          }
+          if (request.method !== 'Runtime.evaluate') {
+            respond({})
+            return
+          }
+          const expression = request.params?.expression ?? ''
+          if (expression.includes('await globalThis.__cordisxBoot')) {
+            respond({ result: { value: { ok: true } } })
+            installed[index]!.resolve()
+            return
+          }
+          if (!expression.includes('const receiver = globalThis.__cordisxIconThemePreferenceReceiveV1')) {
+            respond({ result: { value: undefined } })
+            return
+          }
+          const payload = iconThemeReceiverPayload(expression)
+          if (expression.includes('return ack')) {
+            if (payload?.kind === 'sync') revisions[index] = Number((payload.value as { revision?: unknown })?.revision ?? revisions[index])
+            respond({ result: { value: { documentEpoch: epochs[index], currentRevision: revisions[index] } } })
+            if (payload?.kind === 'document-ready') readyComplete[index]!.resolve()
+            return
+          }
+          respond({ result: { value: true } })
+          if (payload?.requestId === 'profile-wide-selection') selectionResponse.resolve(payload)
+        })
+      })
+    }
+    const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    const originalReserve = hub.reserve.bind(hub)
+    const targetBReserved = deferred()
+    const releaseTargetBRegister = deferred()
+    const targetReadyAcknowledged = [deferred(), deferred()] as const
+    vi.spyOn(hub, 'reserve').mockImplementation(identity => {
+      const reservation = originalReserve(identity)
+      const index = identity.targetId === 'target-a' ? 0 : 1
+      if (identity.targetId === 'target-b') targetBReserved.resolve()
+      return {
+        cancel: reservation.cancel,
+        register: async receiver => {
+          if (identity.targetId === 'target-b') await releaseTargetBRegister.promise
+          const registration = await reservation.register(receiver)
+          return {
+            get currentRevision() { return registration.currentRevision },
+            get synchronization() { return registration.synchronization },
+            acknowledgeReady: ack => {
+              const acknowledged = registration.acknowledgeReady(ack)
+              if (acknowledged) targetReadyAcknowledged[index]!.resolve()
+              return acknowledged
+            },
+            unregister: registration.unregister,
+          }
+        },
+      }
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(addresses.map((address, index) => ({
+      id: index === 0 ? 'target-a' : 'target-b',
+      title: `Codex ${index}`,
+      url: 'app://-/index.html',
+      type: 'page',
+      webSocketDebuggerUrl: `ws://127.0.0.1:${(address as { port: number }).port}`,
+    }))), { status: 200 })) as typeof fetch
+    const abort = new AbortController()
+    const watching = watchAndInject({
+      port: (addresses[0] as { port: number }).port,
+      source: 'void 0',
+      signal: abort.signal,
+      iconThemePreferencePersistence: {
+        configPath, appId: 'codex', profileId: 'default', hostGeneration: 'host-profile-reservation', token,
+      },
+      iconThemePreferenceBroadcastHub: hub,
+    })
+    const sendReady = (index: number): void => sockets[index]?.send(JSON.stringify({
+      method: 'Runtime.bindingCalled',
+      params: {
+        name: ICON_THEME_PREFERENCE_BINDING,
+        executionContextId: 70 + index,
+        payload: JSON.stringify({
+          version: 1, kind: 'document-ready', token, requestId: `ready-profile-${index}`,
+          scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-profile-reservation' },
+          documentEpoch: epochs[index], currentRevision: revisions[index],
+        }),
+      },
+    }))
+    try {
+      await Promise.all(installed.map(item => item.promise))
+      sendReady(0)
+      await readyComplete[0].promise
+      await targetReadyAcknowledged[0].promise
+      sendReady(1)
+      await targetBReserved.promise
+      sockets[0]?.send(JSON.stringify({
+        method: 'Runtime.bindingCalled',
+        params: {
+          name: ICON_THEME_PREFERENCE_BINDING,
+          executionContextId: 70,
+          payload: JSON.stringify({
+            version: 1, token, requestId: 'profile-wide-selection',
+            scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-profile-reservation' },
+            expectedPreferenceRevision: 0, expectedProfileRevision: 0, selectedProfileRevision: 1,
+            candidate: {
+              providerId: 'builtin:reicon', namespace: 'reicon', providerVersion: '1.2.1', providerGeneration: 'reicon-1.2.1',
+            },
+          }),
+        },
+      }))
+      expect(await selectionResponse.promise).toMatchObject({
+        ok: true, value: { revision: 1 }, synchronization: 'pending',
+      })
+      expect(hub.current()).toMatchObject({ revision: 1 })
+      releaseTargetBRegister.resolve()
+      await readyComplete[1].promise
+      await targetReadyAcknowledged[1].promise
+      await expect(hub.broadcast(hub.current()!)).resolves.toMatchObject({ pending: 0 })
+    } finally {
+      releaseTargetBRegister.resolve()
+      abort.abort()
+      await watching
+      globalThis.fetch = originalFetch
+      for (const server of servers) server.close()
+      await Promise.all(servers.map(async server => await once(server, 'close')))
     }
   })
 
@@ -560,8 +722,7 @@ describe('icon theme preference document delivery', () => {
         const contextId = request.params?.contextId
         if (payload?.kind === 'sync') {
           if (contextId === 51) {
-            heldOldRequestId = request.id
-            oldDeliveryHeld.resolve()
+            respond({ result: { value: { documentEpoch: epochs.get(51), currentRevision: 2 } } })
             return
           }
           if (contextId === 52) {
@@ -576,6 +737,11 @@ describe('icon theme preference document delivery', () => {
           }
         }
         if (payload?.kind === 'document-ready') {
+          if (contextId === 51) {
+            heldOldRequestId = request.id
+            oldDeliveryHeld.resolve()
+            return
+          }
           const currentRevision = Number(payload.currentRevision ?? 0)
           respond({ result: { value: { documentEpoch: epochs.get(contextId!), currentRevision } } })
           if (contextId === 52 && payload.synchronization === 'complete') {
