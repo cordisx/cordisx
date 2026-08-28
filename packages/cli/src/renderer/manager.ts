@@ -43,7 +43,14 @@ import {
 import { highlightSafeMarkdownCodeBlocks, renderSafeMarkdown } from './markdown.js'
 import type { CommandSnapshot } from './commands.js'
 import { resolveManagerTriggerTarget } from './host-probes.js'
-import { createHostSurfaceIcon, createManagerIcon, type ManagerIconToken } from './icons.js'
+import {
+  MANAGER_ICON_SEMANTICS,
+  createHostSurfaceIcon,
+  createManagerIcon,
+  hostSurfaceIconKey,
+  renderHostIconSvg,
+  type ManagerIconToken,
+} from './icons.js'
 import type {
   ManagedManagerPageMount,
   ManagerContentPresentation,
@@ -5506,7 +5513,7 @@ export function installCordisXManager(
     certifiedFilter.setAttribute('aria-pressed', String(marketplaceCertifiedOnly))
     certifiedFilter.setAttribute('aria-label', marketplaceCertifiedOnly ? copy('marketplace.filter-all') : copy('marketplace.filter-certified'))
     certifiedFilter.append(
-      createManagerIcon(document, 'marketplace-certified'),
+      createManagerIcon(document, 'marketplace-certified', undefined, { state: marketplaceCertifiedOnly ? 'active' : 'default' }),
       create(document, 'span', undefined, copy('marketplace.filter-certified-only')),
     )
     certifiedFilter.addEventListener('click', () => {
@@ -5520,7 +5527,7 @@ export function installCordisXManager(
     officialFilter.setAttribute('aria-pressed', String(marketplaceOfficialOnly))
     officialFilter.setAttribute('aria-label', marketplaceOfficialOnly ? copy('marketplace.filter-all') : copy('marketplace.filter-official'))
     officialFilter.append(
-      createManagerIcon(document, 'marketplace-official'),
+      createManagerIcon(document, 'marketplace-official', undefined, { state: marketplaceOfficialOnly ? 'active' : 'default' }),
       create(document, 'span', undefined, copy('marketplace.filter-official-only')),
     )
     officialFilter.addEventListener('click', () => {
@@ -6656,6 +6663,18 @@ export function installCordisXManager(
       else button.removeAttribute('aria-current')
       button.removeAttribute('aria-selected')
       button.tabIndex = selected ? 0 : -1
+      const icon = button.querySelector<HTMLElement>(':scope > .cordisx-host-icon')
+      const surfaceToken = icon?.dataset.hostIcon
+      const managerToken = icon?.dataset.hostIconKey as ManagerIconToken | undefined
+      const key = surfaceToken === undefined
+        ? managerToken === undefined ? undefined : MANAGER_ICON_SEMANTICS[managerToken]
+        : hostSurfaceIconKey(surfaceToken)
+      if (icon !== null && icon !== undefined && key !== undefined) {
+        icon.replaceChildren(renderHostIconSvg(document, key, {
+          state: selected ? 'active' : 'default',
+          theme: resolveHostTheme(document).theme,
+        }).svg)
+      }
     }
     if (removedActiveManagerContent) queueMicrotask(() => navButtons.get('plugins')?.focus())
     if (routeState.kind === 'permission') return renderPermissionDetail(snapshot, routeState.pluginId, routeState.capability)

@@ -1,8 +1,8 @@
 import type { CordisXIconToken } from '../../contracts.js'
-import { hostSurfaceIconKey } from '../icons.js'
+import { hostSurfaceIconKey, type HostIconState } from '../icons.js'
 import { HostIcon } from './HostIcon.js'
 
 /** Legacy host:* token adapter over the closed Protocol semantic catalog. */
-export function HostSurfaceIcon({ token }: { readonly token: CordisXIconToken }) {
-  return <HostIcon token={hostSurfaceIconKey(token) ?? 'control.minus'} surfaceToken={token} />
+export function HostSurfaceIcon({ token, state }: { readonly token: CordisXIconToken; readonly state?: HostIconState }) {
+  return <HostIcon token={hostSurfaceIconKey(token) ?? 'control.minus'} surfaceToken={token} {...(state === undefined ? {} : { state })} />
 }

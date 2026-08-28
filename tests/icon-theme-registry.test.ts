@@ -26,7 +26,7 @@ describe('descriptor-only icon theme registry', () => {
     const registration = registry.registration(BUILTIN_REICON_PROVIDER_HANDLE)!
     expect(selection).toMatchObject({ profileRevision: 0, outcome: 'default', selectedProvider: { providerId: 'builtin:reicon', providerGeneration: 'reicon-1.2.1' } })
     expect(selection.defaultProvider).toEqual(selection.fallbackProvider)
-    expect(registration.coverage).toMatchObject({ kind: 'complete', proof: { tupleCount: 1176, rawDataExported: false } })
+    expect(registration.coverage).toMatchObject({ kind: 'complete', proof: { tupleCount: 1224, rawDataExported: false } })
     expect(JSON.stringify(registration.coverage)).not.toMatch(/commands|paths|svg|iconData|callback/u)
   })
 

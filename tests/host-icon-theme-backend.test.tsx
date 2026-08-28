@@ -14,6 +14,7 @@ import {
 import { HostIcon } from '../packages/cli/src/renderer/host-ui/HostIcon.js'
 import {
   HOST_ICON_16PX_CSS,
+  MANAGER_ICON_SEMANTICS,
   createManagerIcon,
   hostSurfaceIconKey,
   renderHostIconSvg,
@@ -32,7 +33,7 @@ async function sourceFiles(directory: string): Promise<string[]> {
 }
 
 describe('Host Reicon normalized backend', () => {
-  it('privately compiles and validates all 1,176 formal Protocol tuples', () => {
+  it('privately compiles and validates all 1,224 formal Protocol tuples', () => {
     let tuples = 0
     for (const key of SEMANTIC_ICON_KEYS) for (const variant of ICON_VARIANTS) for (const state of ICON_STATES) {
       let descriptor
@@ -42,7 +43,7 @@ describe('Host Reicon normalized backend', () => {
       expect(isNormalizedVectorDescriptor(descriptor), `${key}/${variant}/${state}`).toBe(true)
       tuples += 1
     }
-    expect(tuples).toBe(1176)
+    expect(tuples).toBe(1224)
   })
 
   it('keeps normal geometry regular and reserves filled geometry for explicit active/favorite state', () => {
@@ -54,6 +55,27 @@ describe('Host Reicon normalized backend', () => {
     expect(favorite.dataset.hostIconVariant).toBe('filled')
     expect(active.dataset.hostIconVariant).toBe('filled')
     expect(normal.innerHTML).not.toBe(favorite.innerHTML)
+    dom.window.close()
+  })
+
+  it('preserves Reicon compound outline holes instead of filling every contour', () => {
+    const compoundOutlineKeys = [
+      'action.copy', 'action.search', 'action.settings', 'content.files', 'content.layers',
+      'navigation.marketplace', 'navigation.plugins', 'navigation.routes', 'status.info',
+    ] as const
+    const dom = new JSDOM('<!doctype html>')
+    for (const key of compoundOutlineKeys) {
+      const descriptor = resolveBuiltinReiconDescriptor(key, 'regular', 'default')
+      const compound = descriptor.paths.find(path => path.paint === 'fill'
+        && path.fillRule === 'evenodd'
+        && path.commands.filter(command => command.op === 'move').length > 1)
+      expect(compound, key).toBeDefined()
+      expect(compound?.commands.filter(command => command.op === 'close'), key).toHaveLength(1)
+      expect(compound?.commands.at(-1)?.op, key).toBe('close')
+      const rendered = renderHostIconSvg(dom.window.document, key).svg.querySelector('path[fill-rule="evenodd"]')
+      expect(rendered?.getAttribute('d')?.match(/M/gu)?.length, key).toBeGreaterThan(1)
+      expect(rendered?.getAttribute('d')?.match(/Z/gu), key).toHaveLength(1)
+    }
     dom.window.close()
   })
 
@@ -88,6 +110,16 @@ describe('Host Reicon normalized backend', () => {
     const tokens = ['analytics', 'back', 'calendar', 'close', 'error', 'files', 'folder', 'history', 'info', 'layers', 'key', 'more', 'open', 'palette', 'refresh', 'reset', 'review', 'settings', 'save', 'clock', 'success', 'warning', 'tags']
     expect(tokens.map(name => hostSurfaceIconKey(`host:${name}`))).not.toContain(undefined)
     expect(hostSurfaceIconKey('host:unknown')).toBeUndefined()
+  })
+
+  it('keeps simultaneous marketplace trust semantics and glyphs distinct', () => {
+    expect(MANAGER_ICON_SEMANTICS['marketplace-certified']).toBe('trust.certified')
+    expect(MANAGER_ICON_SEMANTICS['marketplace-official']).toBe('trust.official')
+    for (const variant of ICON_VARIANTS) {
+      const certified = resolveBuiltinReiconDescriptor('trust.certified', variant, 'default')
+      const official = resolveBuiltinReiconDescriptor('trust.official', variant, 'default')
+      expect(certified, variant).not.toEqual(official)
+    }
   })
 
   it('uses the same normalized geometry for React and imperative DOM', async () => {

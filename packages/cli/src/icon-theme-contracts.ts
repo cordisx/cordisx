@@ -4,7 +4,7 @@
  * exchange serializable data and never receive a renderer or DOM capability.
  */
 export const ICON_THEME_CATALOG_VERSION = 1 as const
-export const ICON_THEME_CATALOG_DIGEST = 'sha256:719bf30def3e84b716cba18b9497bc58f496c2185d5be53a3ad1ea7c44e7d565' as const
+export const ICON_THEME_CATALOG_DIGEST = 'sha256:9ff8e2b85073e7254a83af012258b22da5b1d74429023887f948c1ba4852ba77' as const
 
 export const SEMANTIC_ICON_KEYS = [
   'action.add', 'action.back', 'action.close', 'action.copy', 'action.delete', 'action.edit',
@@ -17,7 +17,7 @@ export const SEMANTIC_ICON_KEYS = [
   'navigation.dashboard', 'navigation.extensions', 'navigation.history', 'navigation.launcher',
   'navigation.marketplace', 'navigation.overview', 'navigation.plugins', 'navigation.routes',
   'navigation.runtime', 'navigation.store', 'status.error', 'status.info', 'status.pending',
-  'status.success', 'status.warning',
+  'status.success', 'status.warning', 'trust.certified', 'trust.official',
 ] as const
 
 export const ICON_VARIANTS = ['regular', 'filled', 'duotone'] as const
@@ -74,10 +74,10 @@ export type IconThemeCoverage =
         readonly providerGeneration: string
         readonly protocolVersion: 1
         readonly descriptorFormatVersion: 1
-        readonly keyCount: 49
+        readonly keyCount: 51
         readonly variantCount: 3
         readonly stateCount: 8
-        readonly tupleCount: 1176
+        readonly tupleCount: 1224
         readonly outcome: 'passed'
         readonly rawDataExported: false
       }

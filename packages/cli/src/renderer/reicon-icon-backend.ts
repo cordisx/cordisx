@@ -10,6 +10,8 @@ import ArrowDown from 'reicon/icons/ArrowDown'
 import ArrowLeft from 'reicon/icons/ArrowLeft'
 import ArrowRight from 'reicon/icons/ArrowRight'
 import ArrowUp from 'reicon/icons/ArrowUp'
+import ArrowUpRightSquare from 'reicon/icons/ArrowUpRightSquare'
+import AlertTriangle from 'reicon/icons/AlertTriangle'
 import Calendar from 'reicon/icons/Calendar'
 import Chart from 'reicon/icons/Chart'
 import Check from 'reicon/icons/Check'
@@ -17,12 +19,12 @@ import CheckCircle from 'reicon/icons/CheckCircle'
 import Clock2 from 'reicon/icons/Clock2'
 import Component from 'reicon/icons/Component'
 import Copy from 'reicon/icons/Copy'
+import Crown from 'reicon/icons/Crown'
 import DocumentText from 'reicon/icons/DocumentText'
 import Edit from 'reicon/icons/Edit'
-import Export from 'reicon/icons/Export'
 import File from 'reicon/icons/File'
+import Floppy from 'reicon/icons/Floppy'
 import Folder from 'reicon/icons/Folder'
-import Help from 'reicon/icons/Help'
 import History from 'reicon/icons/History'
 import InfoCircle from 'reicon/icons/InfoCircle'
 import Key from 'reicon/icons/Key'
@@ -34,7 +36,6 @@ import Puzzle from 'reicon/icons/Puzzle'
 import Refresh from 'reicon/icons/Refresh'
 import Rocket from 'reicon/icons/Rocket'
 import Route from 'reicon/icons/Route'
-import Save from 'reicon/icons/Save'
 import Search from 'reicon/icons/Search'
 import Settings from 'reicon/icons/Settings'
 import Share from 'reicon/icons/Share'
@@ -42,7 +43,8 @@ import Shop from 'reicon/icons/Shop'
 import Sparkles from 'reicon/icons/Sparkles'
 import Tag from 'reicon/icons/Tag'
 import Trash2 from 'reicon/icons/Trash2'
-import Warning from 'reicon/icons/Warning'
+import Verified from 'reicon/icons/Verified'
+import XCircle from 'reicon/icons/XCircle'
 import X from 'reicon/icons/X'
 import {
   isNormalizedVectorDescriptor,
@@ -61,12 +63,12 @@ const REICON_GLYPHS = Object.freeze({
   'action.copy': Copy,
   'action.delete': Trash2,
   'action.edit': Edit,
-  'action.external-link': Export,
+  'action.external-link': ArrowUpRightSquare,
   'action.more': MoreH,
   'action.open': Folder,
   'action.refresh': Refresh,
   'action.reset': Refresh,
-  'action.save': Save,
+  'action.save': Floppy,
   'action.search': Search,
   'action.settings': Settings,
   'action.share': Share,
@@ -99,11 +101,13 @@ const REICON_GLYPHS = Object.freeze({
   'navigation.routes': Route,
   'navigation.runtime': Activity,
   'navigation.store': Shop,
-  'status.error': Warning,
-  'status.info': Help,
+  'status.error': XCircle,
+  'status.info': InfoCircle,
   'status.pending': Clock2,
   'status.success': CheckCircle,
-  'status.warning': Warning,
+  'status.warning': AlertTriangle,
+  'trust.certified': Verified,
+  'trust.official': Crown,
 } as const satisfies Readonly<Record<SemanticIconKey, IconFunction>>)
 
 const numberPattern = '[-+]?(?:\\d*\\.\\d+|\\d+\\.?)(?:[eE][-+]?\\d+)?'
@@ -235,27 +239,41 @@ function splitSubpaths(commands: readonly NormalizedVectorCommand[]): readonly (
   return groups
 }
 
+/*
+ * Protocol v1 deliberately permits only a final close command. Reicon outline
+ * glyphs commonly encode their visible stroke as one evenodd compound fill:
+ * an outer contour followed by one or more inner contours. Splitting those
+ * contours into independent filled paths destroys the holes and makes the
+ * regular glyph look solid. Filled contours are implicitly closed by SVG, so
+ * removing only intermediate close commands preserves both the compound path
+ * and the Protocol invariant without exposing source SVG/path data.
+ */
+function compoundFillCommands(commands: readonly NormalizedVectorCommand[]): readonly NormalizedVectorCommand[] {
+  return commands.filter((command, index) => command.op !== 'close' || index === commands.length - 1)
+}
+
 function compileFragment(fragment: string): NormalizedVectorDescriptor {
   const paths: NormalizedVectorPath[] = []
   for (const match of fragment.matchAll(/<path\b([^>]*)\/?>(?:<\/path>)?/g)) {
     const attrs = attributes(match[1] ?? '')
     if (attrs.d === undefined) throw new Error('Reicon path lacks geometry')
-    for (const commands of splitSubpaths(pathCommands(attrs.d))) {
-      if (attrs.fill !== undefined && attrs.fill !== 'none') {
-        paths.push({
-          paint: 'fill',
-          ...(attrs['fill-rule'] === undefined ? {} : { fillRule: attrs['fill-rule'] as 'nonzero' | 'evenodd' }),
-          ...(attrs.opacity === undefined ? {} : { opacity: Number(attrs.opacity) }),
-          commands,
-        })
-      } else {
+    const commands = pathCommands(attrs.d)
+    if (attrs.fill !== undefined && attrs.fill !== 'none') {
+      paths.push({
+        paint: 'fill',
+        ...(attrs['fill-rule'] === undefined ? {} : { fillRule: attrs['fill-rule'] as 'nonzero' | 'evenodd' }),
+        ...(attrs.opacity === undefined ? {} : { opacity: Number(attrs.opacity) }),
+        commands: compoundFillCommands(commands),
+      })
+    } else {
+      for (const subpath of splitSubpaths(commands)) {
         paths.push({
           paint: 'stroke',
           strokeWidth: Number(attrs['stroke-width'] ?? 1.5),
           lineCap: (attrs['stroke-linecap'] ?? 'butt') as 'butt' | 'round' | 'square',
           lineJoin: (attrs['stroke-linejoin'] ?? 'miter') as 'miter' | 'round' | 'bevel',
           ...(attrs.opacity === undefined ? {} : { opacity: Number(attrs.opacity) }),
-          commands,
+          commands: subpath,
         })
       }
     }

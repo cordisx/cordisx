@@ -123,7 +123,7 @@ export class IconThemeRegistry {
         catalogDigest: ICON_THEME_CATALOG_DIGEST, providerId: BUILTIN_REICON_IDENTITY.providerId,
         namespace: BUILTIN_REICON_IDENTITY.namespace, providerVersion: BUILTIN_REICON_IDENTITY.providerVersion,
         providerGeneration: BUILTIN_GENERATION, protocolVersion: 1, descriptorFormatVersion: 1,
-        keyCount: 49, variantCount: 3, stateCount: 8, tupleCount: 1176, outcome: 'passed', rawDataExported: false,
+        keyCount: 51, variantCount: 3, stateCount: 8, tupleCount: 1224, outcome: 'passed', rawDataExported: false,
       },
     }
     const builtin: ProviderRecord = {
@@ -192,7 +192,7 @@ export class IconThemeRegistry {
       || Object.keys(definition).sort().join(',') !== 'descriptors,namespace,providerVersion,schemaVersion'
       || definition.schemaVersion !== 1 || !namespacePattern.test(definition.namespace)
       || !semverPattern.test(definition.providerVersion) || !Array.isArray(definition.descriptors)
-      || definition.descriptors.length < 1 || definition.descriptors.length > 1176) {
+      || definition.descriptors.length < 1 || definition.descriptors.length > 1224) {
       return { result: this.result(requestId, 'register', 'rejected', { error: { code: 'identity-mismatch' } }) }
     }
     if (this.namespaces.has(definition.namespace)) return { result: this.result(requestId, 'register', 'rejected', { error: { code: 'namespace-conflict' } }) }

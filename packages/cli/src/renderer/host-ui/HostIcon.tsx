@@ -25,6 +25,7 @@ function semanticKey(token: ManagerIconToken | SemanticIconKey): SemanticIconKey
 
 /** React adapter for the exact same Host-owned DOM renderer as imperative chrome. */
 export function HostIcon({ token, className, size, state, surfaceToken }: HostIconProps) {
+  const resolvedState = state ?? (token === 'favorite-active' ? 'favorite' : undefined)
   const ref = useRef<HTMLSpanElement>(null)
   useLayoutEffect(() => {
     const icon = ref.current
@@ -37,7 +38,7 @@ export function HostIcon({ token, className, size, state, surfaceToken }: HostIc
       icon.replaceChildren(renderHostIconSvg(document, semanticKey(token), {
         theme,
         ...(size === undefined ? {} : { size }),
-        ...(state === undefined ? {} : { state }),
+        ...(resolvedState === undefined ? {} : { state: resolvedState }),
       }).svg)
     }
     render()
@@ -48,7 +49,7 @@ export function HostIcon({ token, className, size, state, surfaceToken }: HostIc
     const observer = new Observer(render)
     observer.observe(themeRoot, { attributes: true, attributeFilter: ['class', 'data-cordisx-app-theme', 'data-theme', 'data-color-theme', 'data-color-scheme'] })
     return () => { observer.disconnect(); unsubscribe?.() }
-  }, [size, state, token])
+  }, [resolvedState, size, token])
   return <span ref={ref} className={['cordisx-host-icon', className].filter(Boolean).join(' ')}
     data-host-icon-key={token} {...(surfaceToken === undefined ? {} : { 'data-host-icon': surfaceToken })}
     aria-hidden="true" draggable={false}

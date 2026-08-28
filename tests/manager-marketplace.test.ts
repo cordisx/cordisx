@@ -209,6 +209,9 @@ describe('Manager Marketplace product list', () => {
       expect(tools.querySelector('.cxm-toolbar > [data-marketplace-source-menu]')).not.toBeNull()
       expect(tools.querySelector('.cxm-marketplace-filter-row [data-marketplace-certified-only]')).not.toBeNull()
       expect(tools.querySelector('.cxm-marketplace-filter-row [data-marketplace-official-only]')).not.toBeNull()
+      expect(tools.querySelector('[data-marketplace-certified-only] svg')?.getAttribute('data-host-icon-key')).toBe('trust.certified')
+      expect(tools.querySelector('[data-marketplace-official-only] svg')?.getAttribute('data-host-icon-key')).toBe('trust.official')
+      expect(tools.querySelector('[data-marketplace-certified-only] svg')?.getAttribute('data-host-icon-variant')).toBe('regular')
       expect(results.contains(tools)).toBe(false)
       expect([...dom.window.document.querySelectorAll('a')].some(link => link.textContent?.includes('插件商店文档'))).toBe(false)
       expect(dom.window.document.body.textContent).not.toContain('商店收录、schema 校验和页面展示都不代表')
@@ -324,6 +327,8 @@ describe('Manager Marketplace product list', () => {
       expect(filter.getAttribute('aria-pressed')).toBe('false')
       filter.click()
       expect(dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-certified-only]')?.getAttribute('aria-pressed')).toBe('true')
+      expect(dom.window.document.querySelector('[data-marketplace-certified-only] svg')?.getAttribute('data-host-icon-state')).toBe('active')
+      expect(dom.window.document.querySelector('[data-marketplace-certified-only] svg')?.getAttribute('data-host-icon-variant')).toBe('filled')
       expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-marketplace-plugin]')].map(row => row.dataset.marketplacePlugin)).toEqual(['trusted'])
 
       const filteredSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="marketplace"]')!
