@@ -1269,19 +1269,21 @@ async function install(
                   executionContextId,
                   documentController.signal,
                 )
-                await registration.respondReady(probeAck, async status => await deliverIconThemePreferenceToDocument(
+                await registration.respondReady(probeAck, async (status, lease) => await deliverIconThemePreferenceToDocument(
                   session,
                   {
                     kind: 'document-ready',
                     requestId: ready.requestId,
                     ok: true,
                     documentEpoch: ready.documentEpoch,
+                    readyLeaseToken: lease.token,
+                    readyLeaseRevision: lease.revision,
                     ...status,
                   },
                   ready.documentEpoch,
                   status.currentRevision,
                   executionContextId,
-                  documentController.signal,
+                  lease.signal,
                 ))
               })
               await iconThemeDocumentQueue

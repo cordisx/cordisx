@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
 import {
   updateHomeConfigAtomic,
   type HomeConfigIconThemePreference,
@@ -58,12 +58,22 @@ export interface IconThemePreferenceDocumentSynchronization {
   readonly currentRevision: number
 }
 
+export interface IconThemePreferenceReadyResponseLease {
+  readonly token: string
+  readonly revision: number
+  readonly requiredRevision: number
+  readonly signal: AbortSignal
+}
+
 export interface IconThemePreferenceDocumentRegistration {
   readonly currentRevision: number
   readonly synchronization: 'complete' | 'pending'
   respondReady(
     probeAck: IconThemePreferenceDeliveryAck,
-    respond: (status: IconThemePreferenceDocumentSynchronization) => Promise<IconThemePreferenceDeliveryAck>,
+    respond: (
+      status: IconThemePreferenceDocumentSynchronization,
+      lease: IconThemePreferenceReadyResponseLease,
+    ) => Promise<IconThemePreferenceDeliveryAck>,
   ): Promise<IconThemePreferenceDocumentSynchronization>
   unregister(): void
 }
@@ -98,7 +108,19 @@ interface IconThemePreferenceDocumentState {
   removeExternalAbort: (() => void) | undefined
   readonly identity: IconThemePreferenceDocumentIdentity
   readonly documentKey: string
+  readonly entryGeneration: number
+  readyLease: IconThemePreferenceReadyLease | undefined
   receiver: IconThemePreferenceDocumentReceiver | undefined
+}
+
+interface IconThemePreferenceReadyLease {
+  readonly token: string
+  readonly revision: number
+  readonly requiredRevision: number
+  readonly documentKey: string
+  readonly entryGeneration: number
+  readonly status: IconThemePreferenceDocumentSynchronization
+  readonly cancellation: AbortController
 }
 
 export class IconThemePreferenceConflictError extends Error {
@@ -264,6 +286,9 @@ export class IconThemePreferenceBroadcastHub {
   private readonly receivers = new Map<string, IconThemePreferenceDocumentState>()
   private winner: HomeConfigIconThemePreference | undefined
   private operationTail = Promise.resolve()
+  private operationDepth = 0
+  private nextEntryGeneration = 1
+  private nextReadyLeaseRevision = 1
 
   constructor(
     readonly appId: string,
@@ -297,6 +322,8 @@ export class IconThemePreferenceBroadcastHub {
       removeExternalAbort: undefined,
       identity,
       documentKey,
+      entryGeneration: this.nextEntryGeneration++,
+      readyLease: undefined,
       receiver: undefined,
     }
     this.receivers.set(key, entry)
@@ -321,7 +348,7 @@ export class IconThemePreferenceBroadcastHub {
   }
 
   async broadcast(preference: HomeConfigIconThemePreference): Promise<IconThemePreferenceBroadcastResult> {
-    const entries = await this.serialize(async () => {
+    const entries = await this.serialize(() => {
       if (this.winner !== undefined) {
         if (preference.revision < this.winner.revision) return []
         if (preference.revision === this.winner.revision
@@ -332,6 +359,13 @@ export class IconThemePreferenceBroadcastHub {
       // Durable cache advancement is intentionally independent from delivery.
       // A failed/destroyed document never rolls the winner back.
       this.winner = { ...preference }
+      for (const entry of this.receivers.values()) {
+        const lease = entry.readyLease
+        if (entry.active && lease !== undefined && lease.requiredRevision < preference.revision) {
+          entry.readyLease = undefined
+          lease.cancellation.abort()
+        }
+      }
       const pending = [...this.receivers.values()].filter(entry => entry.active && entry.ackedRevision < preference.revision)
       for (const entry of pending) entry.pending = { ...preference }
       return pending.filter(entry => entry.receiver !== undefined)
@@ -357,8 +391,19 @@ export class IconThemePreferenceBroadcastHub {
     return await this.broadcast(this.winner)
   }
 
-  private async serialize<Value>(operation: () => Promise<Value>): Promise<Value> {
-    const result = this.operationTail.then(operation)
+  private async serialize<Value>(operation: () => Value): Promise<Value> {
+    const result = this.operationTail.then(() => {
+      this.operationDepth += 1
+      try {
+        const value = operation()
+        if (value !== null && typeof value === 'object' && 'then' in value) {
+          throw new Error('icon theme preference profile operation lock cannot await external work')
+        }
+        return value
+      } finally {
+        this.operationDepth -= 1
+      }
+    })
     this.operationTail = result.then(() => undefined, () => undefined)
     return await result
   }
@@ -380,35 +425,36 @@ export class IconThemePreferenceBroadcastHub {
       get currentRevision() { return entry.ackedRevision },
       get synchronization() { return entry.pending === undefined ? 'complete' as const : 'pending' as const },
       respondReady: async (probeAck, respond) => {
-        await this.serializeEntry(entry, async () => await this.serialize(async () => {
+        await this.serializeEntry(entry, async () => await this.serialize(() => {
           this.assertActiveAck(key, entry, probeAck, 0)
           entry.ackedRevision = Math.max(entry.ackedRevision, probeAck.currentRevision)
           this.refreshPending(entry)
         }))
         if (entry.pending !== undefined) await this.enqueue(entry)
-        return await this.serializeEntry(entry, async () => await this.serialize(async () => {
-          this.assertActive(key, entry)
-          this.refreshPending(entry)
-          const requiredRevision = this.winner?.revision ?? entry.ackedRevision
-          const status: IconThemePreferenceDocumentSynchronization = {
-            synchronization: entry.pending === undefined && entry.ackedRevision >= requiredRevision ? 'complete' : 'pending',
-            requiredRevision,
-            currentRevision: entry.ackedRevision,
+        // A ready request normally needs one response. One replacement lease is
+        // allowed when a higher durable winner invalidates an in-flight response.
+        // Browser.ready() owns the bounded outer redrive rounds.
+        for (let responseRound = 0; responseRound < 2; responseRound += 1) {
+          const lease = await this.prepareReadyLease(key, entry)
+          let responseAck: IconThemePreferenceDeliveryAck | undefined
+          let responseError: unknown
+          try {
+            responseAck = await this.respondWithReadyLease(respond, lease)
+          } catch (error) {
+            responseError = error
           }
-          const responseAck = await respond(status)
-          this.assertActiveAck(key, entry, responseAck)
-          entry.ackedRevision = Math.max(entry.ackedRevision, responseAck.currentRevision)
-          this.refreshPending(entry)
-          const finalRequiredRevision = this.winner?.revision ?? entry.ackedRevision
-          const converged = entry.pending === undefined && entry.ackedRevision >= finalRequiredRevision
-          const finalStatus: IconThemePreferenceDocumentSynchronization = {
-            synchronization: status.synchronization === 'complete' && converged ? 'complete' : 'pending',
-            requiredRevision: finalRequiredRevision,
-            currentRevision: entry.ackedRevision,
-          }
-          if (finalStatus.synchronization === 'complete') entry.booting = false
-          return finalStatus
-        }))
+          const finalized = await this.finalizeReadyLease(key, entry, lease, responseAck)
+          if (finalized !== undefined) return finalized
+          if (!entry.active) throw new Error('icon theme preference ready acknowledgement is stale')
+          if (responseError !== undefined && !lease.cancellation.signal.aborted) throw responseError
+          if (entry.pending !== undefined) await this.enqueue(entry)
+        }
+        const requiredRevision = this.winner?.revision ?? entry.ackedRevision
+        return {
+          synchronization: 'pending',
+          requiredRevision,
+          currentRevision: entry.ackedRevision,
+        }
       },
       unregister: () => this.deactivate(key, entry),
     }
@@ -440,14 +486,110 @@ export class IconThemePreferenceBroadcastHub {
     if (this.winner !== undefined && entry.ackedRevision < this.winner.revision) entry.pending = { ...this.winner }
   }
 
+  private async prepareReadyLease(
+    key: string,
+    entry: IconThemePreferenceDocumentState,
+  ): Promise<IconThemePreferenceReadyLease> {
+    return await this.serializeEntry(entry, async () => await this.serialize(() => {
+      this.assertActive(key, entry)
+      this.refreshPending(entry)
+      const requiredRevision = this.winner?.revision ?? entry.ackedRevision
+      const previous = entry.readyLease
+      if (previous !== undefined) previous.cancellation.abort()
+      const lease: IconThemePreferenceReadyLease = {
+        token: `ready_${randomUUID().replaceAll('-', '_')}`,
+        revision: this.nextReadyLeaseRevision++,
+        requiredRevision,
+        documentKey: entry.documentKey,
+        entryGeneration: entry.entryGeneration,
+        status: {
+          synchronization: entry.pending === undefined && entry.ackedRevision >= requiredRevision ? 'complete' : 'pending',
+          requiredRevision,
+          currentRevision: entry.ackedRevision,
+        },
+        cancellation: new AbortController(),
+      }
+      entry.readyLease = lease
+      return lease
+    }))
+  }
+
+  private async respondWithReadyLease(
+    respond: (
+      status: IconThemePreferenceDocumentSynchronization,
+      lease: IconThemePreferenceReadyResponseLease,
+    ) => Promise<IconThemePreferenceDeliveryAck>,
+    lease: IconThemePreferenceReadyLease,
+  ): Promise<IconThemePreferenceDeliveryAck> {
+    this.assertExternalCallUnlocked('ready response')
+    let rejectCancelled!: (error: Error) => void
+    const cancelled = new Promise<never>((_resolve, reject) => { rejectCancelled = reject })
+    const onAbort = (): void => rejectCancelled(new Error('icon theme preference ready response lease was invalidated'))
+    lease.cancellation.signal.addEventListener('abort', onAbort, { once: true })
+    if (lease.cancellation.signal.aborted) onAbort()
+    try {
+      return await Promise.race([
+        respond(lease.status, {
+          token: lease.token,
+          revision: lease.revision,
+          requiredRevision: lease.requiredRevision,
+          signal: lease.cancellation.signal,
+        }),
+        cancelled,
+      ])
+    } finally {
+      lease.cancellation.signal.removeEventListener('abort', onAbort)
+    }
+  }
+
+  private async finalizeReadyLease(
+    key: string,
+    entry: IconThemePreferenceDocumentState,
+    lease: IconThemePreferenceReadyLease,
+    responseAck: IconThemePreferenceDeliveryAck | undefined,
+  ): Promise<IconThemePreferenceDocumentSynchronization | undefined> {
+    return await this.serializeEntry(entry, async () => await this.serialize(() => {
+      this.assertActive(key, entry)
+      const latestRequiredRevision = this.winner?.revision ?? entry.ackedRevision
+      if (entry.readyLease !== lease
+        || lease.cancellation.signal.aborted
+        || lease.documentKey !== entry.documentKey
+        || lease.entryGeneration !== entry.entryGeneration
+        || lease.requiredRevision < latestRequiredRevision
+        || responseAck === undefined) {
+        return undefined
+      }
+      this.assertActiveAck(key, entry, responseAck, lease.status.currentRevision)
+      entry.ackedRevision = Math.max(entry.ackedRevision, responseAck.currentRevision)
+      this.refreshPending(entry)
+      const finalRequiredRevision = this.winner?.revision ?? entry.ackedRevision
+      if (lease.requiredRevision < finalRequiredRevision) return undefined
+      entry.readyLease = undefined
+      const converged = entry.pending === undefined && entry.ackedRevision >= finalRequiredRevision
+      const finalStatus: IconThemePreferenceDocumentSynchronization = {
+        synchronization: lease.status.synchronization === 'complete' && converged ? 'complete' : 'pending',
+        requiredRevision: finalRequiredRevision,
+        currentRevision: entry.ackedRevision,
+      }
+      if (finalStatus.synchronization === 'complete') entry.booting = false
+      return finalStatus
+    }))
+  }
+
   private deactivate(key: string, entry: IconThemePreferenceDocumentState): void {
     if (!entry.active) return
     entry.active = false
     entry.pending = undefined
     entry.removeExternalAbort?.()
     entry.removeExternalAbort = undefined
+    entry.readyLease?.cancellation.abort()
+    entry.readyLease = undefined
     entry.cancellation.abort()
     if (this.receivers.get(key) === entry) this.receivers.delete(key)
+  }
+
+  private assertExternalCallUnlocked(label: string): void {
+    if (this.operationDepth !== 0) throw new Error(`icon theme preference ${label} cannot run under the profile operation lock`)
   }
 
   private async enqueue(
@@ -474,6 +616,7 @@ export class IconThemePreferenceBroadcastHub {
           try {
             const receiver = entry.receiver
             if (receiver === undefined) return 'failed' as const
+            this.assertExternalCallUnlocked('document receiver')
             ack = await Promise.race([receiver.receive({ ...value }), cancelled])
           } finally {
             entry.cancellation.signal.removeEventListener('abort', onAbort)

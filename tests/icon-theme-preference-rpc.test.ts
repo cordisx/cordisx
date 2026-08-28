@@ -241,6 +241,76 @@ describe('Host icon-theme preference persistence', () => {
     registration.unregister()
   })
 
+  it('invalidates a held ready response lease without blocking a higher winner', async () => {
+    const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    await hub.broadcast({ revision: 1, ...candidate })
+    const reservation = hub.reserve({
+      targetId: 'target-lease', sessionId: 'session-lease', documentEpoch: 'document_lease',
+      executionContextId: 13, currentRevision: 1, signal: new AbortController().signal,
+    })
+    const registration = await reservation.register({
+      receive: async preference => ({ documentEpoch: 'document_lease', currentRevision: preference.revision }),
+    })
+    const held = deferred<{ documentEpoch: string; currentRevision: number }>()
+    const firstLeasePrepared = deferred<AbortSignal>()
+    let responses = 0
+    const ready = registration.respondReady(
+      { documentEpoch: 'document_lease', currentRevision: 1 },
+      async (status, lease) => {
+        responses += 1
+        if (responses === 1) {
+          firstLeasePrepared.resolve(lease.signal)
+          return await held.promise
+        }
+        expect(status).toEqual({ synchronization: 'complete', requiredRevision: 2, currentRevision: 2 })
+        return { documentEpoch: 'document_lease', currentRevision: 2 }
+      },
+    )
+    const firstSignal = await firstLeasePrepared.promise
+    expect(firstSignal.aborted).toBe(false)
+    await expect(hub.broadcast({ revision: 2, ...candidate })).resolves.toMatchObject({ delivered: 1, pending: 1 })
+    expect(firstSignal.aborted).toBe(true)
+    await expect(ready).resolves.toEqual({ synchronization: 'complete', requiredRevision: 2, currentRevision: 2 })
+    held.resolve({ documentEpoch: 'document_lease', currentRevision: 1 })
+    await Promise.resolve()
+    expect(responses).toBe(2)
+    await expect(hub.broadcast(hub.current()!)).resolves.toMatchObject({ pending: 0 })
+    registration.unregister()
+  })
+
+  it('allows a ready response that linearizes before the next winner and aborts one on disposal', async () => {
+    const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    await hub.broadcast({ revision: 1, ...candidate })
+    const controller = new AbortController()
+    const reservation = hub.reserve({
+      targetId: 'target-order', sessionId: 'session-order', documentEpoch: 'document_order',
+      executionContextId: 14, currentRevision: 1, signal: controller.signal,
+    })
+    const registration = await reservation.register({
+      receive: async preference => ({ documentEpoch: 'document_order', currentRevision: preference.revision }),
+    })
+    await expect(registration.respondReady(
+      { documentEpoch: 'document_order', currentRevision: 1 },
+      async status => ({ documentEpoch: 'document_order', currentRevision: status.currentRevision }),
+    )).resolves.toEqual({ synchronization: 'complete', requiredRevision: 1, currentRevision: 1 })
+    await expect(hub.broadcast({ revision: 2, ...candidate })).resolves.toMatchObject({ delivered: 1, pending: 0 })
+
+    const held = deferred<{ documentEpoch: string; currentRevision: number }>()
+    const leasePrepared = deferred<AbortSignal>()
+    const disposing = registration.respondReady(
+      { documentEpoch: 'document_order', currentRevision: 2 },
+      async (_status, lease) => {
+        leasePrepared.resolve(lease.signal)
+        return await held.promise
+      },
+    )
+    const signal = await leasePrepared.promise
+    registration.unregister()
+    expect(signal.aborted).toBe(true)
+    await expect(disposing).rejects.toThrow('stale')
+    held.resolve({ documentEpoch: 'document_order', currentRevision: 2 })
+  })
+
   it('keeps failed delivery pending and re-drives the same winner after the receiver recovers', async () => {
     const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
     await hub.broadcast({ revision: 1, ...candidate })

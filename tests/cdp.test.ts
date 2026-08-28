@@ -492,11 +492,15 @@ describe('icon theme preference document delivery', () => {
     const epochs = ['document_epoch_target_a', 'document_epoch_target_b'] as const
     const revisions = [0, 0]
     const selectionResponse = deferred<Record<string, unknown>>()
-    const linearProbeHeld = deferred()
+    const linearOldResponseHeld = deferred()
+    const linearLatestResponseHeld = deferred()
     const linearConflictResponse = deferred<Record<string, unknown>>()
     const linearReadyResponse = deferred<Record<string, unknown>>()
-    let heldLinearProbeRequestId: number | undefined
-    let holdLinearProbe = false
+    const linearReadyFinalized = deferred()
+    let heldLinearOldResponseRequestId: number | undefined
+    let heldLinearLatestResponseRequestId: number | undefined
+    let linearReadyResponseCount = 0
+    let holdLinearReadyResponses = false
     for (const [index, server] of servers.entries()) {
       server.on('connection', connection => {
         sockets[index] = connection
@@ -527,12 +531,22 @@ describe('icon theme preference document delivery', () => {
           }
           const payload = iconThemeReceiverPayload(expression)
           if (expression.includes('return ack')) {
-            if (index === 0 && holdLinearProbe && payload?.kind === 'document-ready-probe') {
-              heldLinearProbeRequestId = request.id
-              linearProbeHeld.resolve()
-              return
-            }
             if (payload?.kind === 'sync') revisions[index] = Number((payload.value as { revision?: unknown })?.revision ?? revisions[index])
+            if (index === 0 && holdLinearReadyResponses && payload?.kind === 'document-ready'
+              && payload.requestId === 'ready-profile-linear') {
+              linearReadyResponseCount += 1
+              if (linearReadyResponseCount === 1) {
+                heldLinearOldResponseRequestId = request.id
+                linearOldResponseHeld.resolve()
+                return
+              }
+              if (linearReadyResponseCount === 2) {
+                heldLinearLatestResponseRequestId = request.id
+                linearReadyResponse.resolve(payload)
+                linearLatestResponseHeld.resolve()
+                return
+              }
+            }
             respond({ result: { value: { documentEpoch: epochs[index], currentRevision: revisions[index] } } })
             if (payload?.kind === 'document-ready') readyComplete[index]!.resolve()
             if (payload?.kind === 'document-ready' && payload.requestId === 'ready-profile-linear') linearReadyResponse.resolve(payload)
@@ -549,6 +563,7 @@ describe('icon theme preference document delivery', () => {
     const targetBReserved = deferred()
     const releaseTargetBRegister = deferred()
     const targetReadyAcknowledged = [deferred(), deferred()] as const
+    let targetACompletedReadyCount = 0
     vi.spyOn(hub, 'reserve').mockImplementation(identity => {
       const reservation = originalReserve(identity)
       const index = identity.targetId === 'target-a' ? 0 : 1
@@ -564,7 +579,13 @@ describe('icon theme preference document delivery', () => {
             get synchronization() { return registration.synchronization },
             respondReady: async (probeAck, respond) => {
               const status = await registration.respondReady(probeAck, respond)
-              if (status.synchronization === 'complete') targetReadyAcknowledged[index]!.resolve()
+              if (status.synchronization === 'complete') {
+                targetReadyAcknowledged[index]!.resolve()
+                if (index === 0) {
+                  targetACompletedReadyCount += 1
+                  if (targetACompletedReadyCount === 2) linearReadyFinalized.resolve()
+                }
+              }
               return status
             },
             unregister: registration.unregister,
@@ -633,7 +654,7 @@ describe('icon theme preference document delivery', () => {
       await targetReadyAcknowledged[1].promise
       await expect(hub.broadcast(hub.current()!)).resolves.toMatchObject({ pending: 0 })
 
-      holdLinearProbe = true
+      holdLinearReadyResponses = true
       sockets[0]?.send(JSON.stringify({
         method: 'Runtime.bindingCalled',
         params: {
@@ -646,7 +667,7 @@ describe('icon theme preference document delivery', () => {
           }),
         },
       }))
-      await linearProbeHeld.promise
+      await linearOldResponseHeld.promise
       await updateHomeConfigAtomic(current => ({
         ...current,
         apps: {
@@ -685,15 +706,23 @@ describe('icon theme preference document delivery', () => {
       expect(await linearConflictResponse.promise).toMatchObject({
         ok: false, code: 'conflict', currentPreference: { revision: 2 }, synchronization: 'pending',
       })
+      expect(hub.current()).toMatchObject({ revision: 2 })
       expect(revisions[0]).toBe(2)
-      holdLinearProbe = false
+      await linearLatestResponseHeld.promise
       sockets[0]?.send(JSON.stringify({
-        id: heldLinearProbeRequestId,
+        id: heldLinearOldResponseRequestId,
         result: { result: { value: { documentEpoch: epochs[0], currentRevision: 1 } } },
+      }))
+      await Promise.resolve()
+      expect(targetACompletedReadyCount).toBe(1)
+      sockets[0]?.send(JSON.stringify({
+        id: heldLinearLatestResponseRequestId,
+        result: { result: { value: { documentEpoch: epochs[0], currentRevision: 2 } } },
       }))
       await expect(linearReadyResponse.promise).resolves.toMatchObject({
         synchronization: 'complete', requiredRevision: 2, currentRevision: 2,
       })
+      await linearReadyFinalized.promise
       await expect(hub.broadcast(hub.current()!)).resolves.toMatchObject({ pending: 0 })
     } finally {
       releaseTargetBRegister.resolve()

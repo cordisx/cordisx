@@ -751,10 +751,17 @@ converts it to synchronized active state. The reservation identity also pins the
 exact CDP execution context; an epoch or context replacement invalidates every
 old probe, retry, and acknowledgement. Ready completion first obtains an
 exact-context probe, then revalidates and, when necessary, delivers the latest
-winner before entering the hub's short serialized ready-response section. A
-higher winner observed while a probe is held therefore becomes the required
-revision; a winner arriving after the final section is ordered after that ready
-completion and is delivered as the next update. The hub keeps durable winner state
+winner. Its final response uses a three-stage Host-private lease: a short
+serialized prepare records the exact entry generation, document/context
+identity, and required winner; the external CDP response runs outside every
+profile/global lock; and a short serialized finalize accepts only the
+still-current lease and an exact-epoch acknowledgement of the latest required
+revision. Advancing the durable winner cache synchronously invalidates older
+prepared leases before delivery begins. A held old response therefore cannot
+block cache advancement or later clear booting, while a response that completes
+first may linearize before the next winner. The browser reads its actual bridge
+revision while processing the leased response and fails a stale lease closed.
+The hub keeps durable winner state
 separate from each document's acknowledged and pending revisions, lets a higher
 revision supersede pending lower work, and allows explicit same-revision retry
 after each bounded attempt window. A durable write response reports document

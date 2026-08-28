@@ -130,6 +130,7 @@ async function processA(): Promise<Record<string, unknown>> {
   const callbacks = new HostPrivateCallbackScope()
   const releasePersistedResponse = deferred()
   let lateCallbackTouchedDom = false
+  let readyLeaseRevision = 0
   const context: IconThemePreferencePersistenceContext = {
     configPath,
     appId: 'codex',
@@ -141,9 +142,12 @@ async function processA(): Promise<Record<string, unknown>> {
     if (!callbacks.active()) return
     const request = JSON.parse(payload) as Record<string, unknown>
     if (request.kind === 'document-ready') {
+      readyLeaseRevision += 1
       ;(dom.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => unknown })
         .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
           kind: 'document-ready', requestId: request.requestId, ok: true,
+          readyLeaseToken: `ready_process_${String(readyLeaseRevision).padStart(8, '0')}`,
+          readyLeaseRevision,
           documentEpoch: request.documentEpoch, synchronization: 'complete',
           requiredRevision: request.currentRevision, currentRevision: request.currentRevision,
         }))

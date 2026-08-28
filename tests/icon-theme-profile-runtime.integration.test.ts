@@ -80,12 +80,20 @@ function receiveIconThemeMessage(page: JSDOM, response: Record<string, unknown>)
   }).__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify(response))
 }
 
+const readyLeaseRevisions = new WeakMap<JSDOM, number>()
+function testReadyLease(page: JSDOM): { readonly readyLeaseToken: string; readonly readyLeaseRevision: number } {
+  const revision = (readyLeaseRevisions.get(page) ?? 0) + 1
+  readyLeaseRevisions.set(page, revision)
+  return { readyLeaseToken: `ready_runtime_${String(revision).padStart(8, '0')}`, readyLeaseRevision: revision }
+}
+
 function acknowledgeDocumentReady(page: JSDOM, request: Record<string, unknown>): boolean {
   if (request.kind !== 'document-ready') return false
   receiveIconThemeMessage(page, {
     kind: 'document-ready',
     requestId: request.requestId,
     ok: true,
+    ...testReadyLease(page),
     documentEpoch: request.documentEpoch,
     synchronization: 'complete',
     requiredRevision: request.currentRevision,
@@ -347,9 +355,11 @@ describe('profile-scoped icon-theme selection runtime', () => {
               },
             })
             const probeAck = receiveIconThemeMessage(page, { kind: 'document-ready-probe' }) as { documentEpoch: string; currentRevision: number }
-            await registration.respondReady(probeAck, async status => receiveIconThemeMessage(page, {
+            await registration.respondReady(probeAck, async (status, lease) => receiveIconThemeMessage(page, {
               kind: 'document-ready', requestId: ready.requestId, ok: true,
-              documentEpoch: ready.documentEpoch, ...status,
+              documentEpoch: ready.documentEpoch,
+              readyLeaseToken: lease.token, readyLeaseRevision: lease.revision,
+              ...status,
             }) as { documentEpoch: string; currentRevision: number })
           } catch (error) {
             receiveIconThemeMessage(page, {
@@ -468,9 +478,11 @@ describe('profile-scoped icon-theme selection runtime', () => {
           })
           unregisterDocuments.push(registration.unregister)
           const probeAck = receive(page, { kind: 'document-ready-probe' }) as { documentEpoch: string; currentRevision: number }
-          await registration.respondReady(probeAck, async status => receive(page, {
+          await registration.respondReady(probeAck, async (status, lease) => receive(page, {
             kind: 'document-ready', requestId: ready.requestId, ok: true,
-            documentEpoch: ready.documentEpoch, ...status,
+            documentEpoch: ready.documentEpoch,
+            readyLeaseToken: lease.token, readyLeaseRevision: lease.revision,
+            ...status,
           }) as { documentEpoch: string; currentRevision: number })
         })()
       },
