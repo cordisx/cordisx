@@ -728,9 +728,14 @@ document epoch, and exact execution context; the renderer must acknowledge the
 same epoch and a current revision at least as new as the winner. Missing,
 throwing, destroyed-context, stale-revision, and malformed acknowledgements do
 not count as convergence. The hub retries a document delivery at most once,
-lets a higher revision supersede pending lower work, and otherwise retains the
-winner for the next ready handshake. CAS conflicts return the durable current
-preference. The browser bridge also retains a winner received before the
+keeps durable winner state separate from each document's acknowledged and
+pending revisions, lets a higher revision supersede pending lower work, and
+allows an explicit same-revision retry after the bounded attempt window. A
+durable write response reports document synchronization as complete or pending;
+pending delivery never turns a successful atomic write into a renderer rollback.
+CAS conflicts cache and attempt the durable current preference before sending
+the conflict response, so response-triggered navigation cannot open a replay
+window. The browser bridge also retains a winner received before the
 runtime subscription exists, and startup reconciles that current value
 immediately after subscribing. Each renderer rebinds the winner to its own live
 handle only after an exact identity, version, artifact generation, and

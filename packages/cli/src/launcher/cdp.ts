@@ -1217,6 +1217,7 @@ async function install(
                   targetId: target.id,
                   sessionId: iconThemeSessionId,
                   documentEpoch: ready.documentEpoch,
+                  currentRevision: ready.currentRevision,
                   receive: async preference => await deliverIconThemePreferenceToDocument(
                     session,
                     { kind: 'sync', value: preference },
@@ -1264,10 +1265,20 @@ async function install(
             } finally {
               activeIconThemePreferenceRequests -= 1
             }
-            await iconThemePreferenceBroadcast?.broadcast(value)
-            await sendIconThemePreferenceBindingResponse(session, { requestId, ok: true, value }, executionContextId)
+            const synchronization = iconThemePreferenceBroadcast === undefined
+              ? 'pending'
+              : (await iconThemePreferenceBroadcast.broadcast(value)).pending === 0 ? 'complete' : 'pending'
+            await sendIconThemePreferenceBindingResponse(session, {
+              requestId, ok: true, value, synchronization,
+            }, executionContextId)
           } catch (error) {
             const bridgeError = iconThemePreferenceBridgeError(error)
+            let synchronization: 'complete' | 'pending' | undefined
+            if (bridgeError.currentPreference !== undefined) {
+              synchronization = iconThemePreferenceBroadcast === undefined
+                ? 'pending'
+                : (await iconThemePreferenceBroadcast.broadcast(bridgeError.currentPreference)).pending === 0 ? 'complete' : 'pending'
+            }
             if (documentEpoch !== undefined && executionContextId !== undefined) {
               await deliverIconThemePreferenceToDocument(session, {
                 kind: 'document-ready',
@@ -1282,10 +1293,8 @@ async function install(
                 requestId,
                 ok: false,
                 ...bridgeError,
+                ...(synchronization === undefined ? {} : { synchronization }),
               }, executionContextId).catch(() => undefined)
-            }
-            if (bridgeError.currentPreference !== undefined) {
-              await iconThemePreferenceBroadcast?.broadcast(bridgeError.currentPreference)
             }
           }
         })()

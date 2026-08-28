@@ -43,6 +43,7 @@ export interface IconThemePreferenceDocumentReceiver {
   readonly targetId: string
   readonly sessionId: string
   readonly documentEpoch: string
+  readonly currentRevision: number
   readonly receive: (preference: HomeConfigIconThemePreference) => Promise<IconThemePreferenceDeliveryAck>
 }
 
@@ -50,6 +51,7 @@ export interface IconThemePreferenceBroadcastResult {
   readonly attempted: number
   readonly delivered: number
   readonly failed: number
+  readonly pending: number
 }
 
 export interface IconThemePreferencePersistenceContext {
@@ -58,6 +60,14 @@ export interface IconThemePreferencePersistenceContext {
   readonly profileId: string
   readonly hostGeneration: string
   readonly token: string
+}
+
+interface IconThemePreferenceDocumentState {
+  active: boolean
+  tail: Promise<void>
+  ackedRevision: number
+  pending: HomeConfigIconThemePreference | undefined
+  readonly receiver: IconThemePreferenceDocumentReceiver
 }
 
 export class IconThemePreferenceConflictError extends Error {
@@ -91,6 +101,14 @@ function sameToken(left: string, right: string): boolean {
 function revision(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error(`${label} is invalid`)
   return value as number
+}
+
+function samePreference(left: HomeConfigIconThemePreference, right: HomeConfigIconThemePreference): boolean {
+  return left.revision === right.revision
+    && left.providerId === right.providerId
+    && left.namespace === right.namespace
+    && left.providerVersion === right.providerVersion
+    && left.providerGeneration === right.providerGeneration
 }
 
 function candidate(value: unknown): IconThemePreferenceCandidate {
@@ -212,12 +230,7 @@ export function iconThemePreferenceBridgeError(error: unknown): {
 
 /** Host-private fan-out for durable preference convergence within one profile. */
 export class IconThemePreferenceBroadcastHub {
-  private readonly receivers = new Map<string, {
-    active: boolean
-    tail: Promise<void>
-    deliveredRevision: number
-    readonly receiver: IconThemePreferenceDocumentReceiver
-  }>()
+  private readonly receivers = new Map<string, IconThemePreferenceDocumentState>()
   private winner: HomeConfigIconThemePreference | undefined
 
   constructor(
@@ -233,65 +246,108 @@ export class IconThemePreferenceBroadcastHub {
 
   async register(receiver: IconThemePreferenceDocumentReceiver): Promise<{
     readonly currentRevision: number
+    readonly synchronization: 'complete' | 'pending'
     readonly unregister: () => void
   }> {
     const key = `${receiver.targetId}\u0000${receiver.sessionId}`
     const previous = this.receivers.get(key)
-    if (previous !== undefined) previous.active = false
-    const entry = { active: true, tail: Promise.resolve(), deliveredRevision: 0, receiver }
+    if (previous !== undefined) {
+      previous.active = false
+      previous.pending = undefined
+    }
+    const entry: IconThemePreferenceDocumentState = {
+      active: true,
+      tail: Promise.resolve(),
+      ackedRevision: receiver.currentRevision,
+      pending: undefined,
+      receiver,
+    }
     this.receivers.set(key, entry)
-    try {
-      if (this.winner !== undefined) await this.enqueue(entry, this.winner)
-    } catch (error) {
-      if (this.receivers.get(key) === entry) this.receivers.delete(key)
-      entry.active = false
-      throw error
+    if (this.winner !== undefined && entry.ackedRevision < this.winner.revision) {
+      entry.pending = { ...this.winner }
+      await this.enqueue(entry)
     }
     const unregister = (): void => {
       entry.active = false
+      entry.pending = undefined
       if (this.receivers.get(key) === entry) this.receivers.delete(key)
     }
-    return { currentRevision: Math.max(entry.deliveredRevision, this.winner?.revision ?? 0), unregister }
+    return {
+      currentRevision: entry.ackedRevision,
+      synchronization: entry.pending === undefined ? 'complete' : 'pending',
+      unregister,
+    }
   }
 
   async broadcast(preference: HomeConfigIconThemePreference): Promise<IconThemePreferenceBroadcastResult> {
-    if (this.winner !== undefined && preference.revision <= this.winner.revision) {
-      return { attempted: 0, delivered: 0, failed: 0 }
+    if (this.winner !== undefined) {
+      if (preference.revision < this.winner.revision) {
+        return { attempted: 0, delivered: 0, failed: 0, pending: this.pendingCount() }
+      }
+      if (preference.revision === this.winner.revision
+        && !samePreference(preference, this.winner)) {
+        throw new Error('icon theme preference winner revision is divergent')
+      }
     }
+    // Durable cache advancement is intentionally independent from delivery.
+    // A failed/destroyed document never rolls the winner back.
     this.winner = { ...preference }
-    const results = await Promise.allSettled([...this.receivers.values()].map(async entry => await this.enqueue(entry, preference)))
-    const delivered = results.filter(result => result.status === 'fulfilled').length
-    return { attempted: results.length, delivered, failed: results.length - delivered }
+    const entries = [...this.receivers.values()].filter(entry => entry.active && entry.ackedRevision < preference.revision)
+    for (const entry of entries) entry.pending = { ...preference }
+    const results = await Promise.all(entries.map(async entry => await this.enqueue(entry)))
+    const delivered = results.filter(result => result === 'delivered').length
+    return {
+      attempted: entries.length,
+      delivered,
+      failed: results.filter(result => result !== 'delivered').length,
+      pending: this.pendingCount(),
+    }
+  }
+
+  current(): HomeConfigIconThemePreference | undefined {
+    return this.winner === undefined ? undefined : { ...this.winner }
+  }
+
+  async retryPending(): Promise<IconThemePreferenceBroadcastResult> {
+    if (this.winner === undefined) return { attempted: 0, delivered: 0, failed: 0, pending: 0 }
+    return await this.broadcast(this.winner)
+  }
+
+  private pendingCount(): number {
+    return [...this.receivers.values()].filter(entry => entry.active && entry.pending !== undefined).length
   }
 
   private async enqueue(
-    entry: { active: boolean; tail: Promise<void>; deliveredRevision: number; readonly receiver: IconThemePreferenceDocumentReceiver },
-    preference: HomeConfigIconThemePreference,
-  ): Promise<void> {
+    entry: IconThemePreferenceDocumentState,
+  ): Promise<'delivered' | 'failed' | 'inactive'> {
     const delivery = entry.tail.then(async () => {
+      let failed = false
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        if (!entry.active) throw new Error('icon theme preference document receiver is disposed')
-        const currentWinner = this.winner
-        const value = currentWinner !== undefined && currentWinner.revision > preference.revision ? currentWinner : preference
-        if (entry.deliveredRevision >= value.revision) return
+        if (!entry.active) return 'inactive' as const
+        const value = entry.pending
+        if (value === undefined || entry.ackedRevision >= value.revision) {
+          entry.pending = undefined
+          return 'delivered' as const
+        }
         try {
           const ack = await entry.receiver.receive({ ...value })
-          if (!entry.active) throw new Error('icon theme preference document receiver is disposed')
+          if (!entry.active) return 'inactive' as const
           if (ack.documentEpoch !== entry.receiver.documentEpoch || ack.currentRevision < value.revision) {
             throw new Error('icon theme preference delivery acknowledgement is invalid')
           }
-          entry.deliveredRevision = Math.max(entry.deliveredRevision, ack.currentRevision)
-          return
-        } catch (error) {
-          if (!entry.active) throw new Error('icon theme preference document receiver is disposed')
-          if (this.winner !== undefined && this.winner.revision > value.revision) continue
-          if (attempt === 1) throw error
+          entry.ackedRevision = Math.max(entry.ackedRevision, ack.currentRevision)
+          if (entry.pending !== undefined && entry.ackedRevision >= entry.pending.revision) entry.pending = undefined
+          return entry.pending === undefined ? 'delivered' as const : 'failed' as const
+        } catch {
+          if (!entry.active) return 'inactive' as const
+          failed = true
         }
       }
+      return failed ? 'failed' as const : 'delivered' as const
     })
-    // Keep the private serialization tail usable after a failed document, but
-    // preserve the original rejection for register()/broadcast() and callers.
+    // Keep serialization usable after failure. The pending state and returned
+    // result make failure observable without losing the durable winner.
     entry.tail = delivery.then(() => undefined, () => undefined)
-    await delivery
+    return await delivery
   }
 }

@@ -68,7 +68,9 @@ describe('browser icon-theme preference bridge', () => {
       'namespace', 'providerGeneration', 'providerId', 'providerVersion',
     ])
     const requestId = request?.requestId
-    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ requestId, ok: true, value: { revision: 1, ...candidate } }))
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      requestId, ok: true, value: { revision: 1, ...candidate }, synchronization: 'pending',
+    }))
     await expect(pending).resolves.toEqual({ revision: 1, ...candidate })
     expect(bridge.revision()).toBe(1)
     globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ requestId, ok: true, value: { revision: 99, ...candidate } }))
@@ -108,7 +110,7 @@ describe('browser icon-theme preference bridge', () => {
       providerGeneration: 'reicon-1.2.1',
     }
     globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
-      requestId, ok: false, code: 'conflict', currentPreference: builtin,
+      requestId, ok: false, code: 'conflict', currentPreference: builtin, synchronization: 'pending',
     }))
     await expect(pending).rejects.toThrow('conflict')
     expect(bridge.current()).toEqual(builtin)

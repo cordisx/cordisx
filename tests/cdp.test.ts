@@ -17,7 +17,7 @@ import type { PluginRuntimeMutation } from '../packages/cli/src/launcher/plugin-
 import { PluginPermissionIdentityRegistry } from '../packages/cli/src/launcher/permission-rpc.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authority.js'
-import { ensureHomeConfig, loadHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { ensureHomeConfig, loadHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
 import { ICON_THEME_PREFERENCE_BINDING } from '../packages/cli/src/launcher/icon-theme-rpc.js'
 
 function target(id: string, title: string, url = 'https://example.test/'): CdpTarget {
@@ -85,12 +85,19 @@ describe('icon theme preference document delivery', () => {
     await ensureHomeConfig(configPath)
     const token = 'c'.repeat(64)
     const firstReady = deferred()
-    const firstWinner = deferred()
+    const pendingSuccessResponse = deferred()
+    const recoveredConflictResponse = deferred()
+    const navigationConflictResponse = deferred()
     const secondWinner = deferred()
     let socket: import('ws').WebSocket | undefined
     let bootRequestId: number | undefined
+    let navigationResponseRequestId: number | undefined
+    let contextOneDeliveryAttempts = 0
     let secondContextDeliveryAttempts = 0
     let destroyedSelectionResponses = 0
+    let secondContextFirstRevision: number | undefined
+    let syncPhase: 'initial-fail' | 'recovered' | 'conflict-fail' = 'initial-fail'
+    const bindingResponses = new Map<string, Record<string, unknown>>()
     const contexts = new Map<number, { epoch: string; revision: number }>([
       [41, { epoch: 'document_epoch_one', revision: 0 }],
       [42, { epoch: 'document_epoch_two', revision: 0 }],
@@ -113,6 +120,11 @@ describe('icon theme preference document delivery', () => {
           }),
         },
       }))
+    }
+    const bindingResponse = (expression: string): Record<string, unknown> | undefined => {
+      const encoded = expression.match(/receiver\(((?:"(?:\\.|[^"\\])*")|(?:'(?:\\.|[^'\\])*'))\)/u)?.[1]
+      if (encoded === undefined) return undefined
+      try { return JSON.parse(JSON.parse(encoded) as string) as Record<string, unknown> } catch { return undefined }
     }
     server.on('connection', connection => {
       socket = connection
@@ -146,10 +158,28 @@ describe('icon theme preference document delivery', () => {
             return
           }
           const minimum = Number(expression.match(/ack\.currentRevision < ([0-9]+)/u)?.[1] ?? 0)
+          if (contextId === 41 && minimum >= 1 && syncPhase !== 'recovered') {
+            contextOneDeliveryAttempts += 1
+            if (contextOneDeliveryAttempts % 2 === 1) {
+              respond({ exceptionDetails: { text: 'icon theme receiver is unavailable' } })
+            } else {
+              respond({ result: { value: null } })
+            }
+            return
+          }
           if (contextId === 42 && minimum >= 1) {
             secondContextDeliveryAttempts += 1
+            if (secondContextFirstRevision === undefined) secondContextFirstRevision = minimum
             if (secondContextDeliveryAttempts === 1) {
               respond({ result: { type: 'object', subtype: 'error', description: 'execution context was destroyed' } })
+              if (navigationResponseRequestId !== undefined) {
+                connection.send(JSON.stringify({
+                  id: navigationResponseRequestId,
+                  result: { exceptionDetails: { text: 'requester context navigated during conflict response' } },
+                }))
+                navigationResponseRequestId = undefined
+                destroyedSelectionResponses += 1
+              }
               return
             }
           }
@@ -159,17 +189,29 @@ describe('icon theme preference document delivery', () => {
             connection.send(JSON.stringify({ id: bootRequestId, result: { result: { value: { ok: true } } } }))
             bootRequestId = undefined
             firstReady.resolve()
-          } else if (contextId === 41 && context.revision >= 1) {
-            firstWinner.resolve()
-          } else if (contextId === 42 && context.revision >= 1) {
+          } else if (contextId === 42 && context.revision >= 2) {
             secondWinner.resolve()
           }
           return
         }
         if (expression.includes('const receiver = globalThis.__cordisxIconThemePreferenceReceiveV1')) {
-          if (request.params?.contextId === 41) {
-            destroyedSelectionResponses += 1
-            respond({ result: { type: 'object', subtype: 'error', description: 'execution context was destroyed' } })
+          const payload = bindingResponse(expression)
+          const responseRequestId = typeof payload?.requestId === 'string' ? payload.requestId : undefined
+          if (responseRequestId !== undefined) bindingResponses.set(responseRequestId, payload!)
+          if (responseRequestId === 'select-winner') {
+            respond({ result: { value: true } })
+            pendingSuccessResponse.resolve()
+            return
+          }
+          if (responseRequestId === 'recover-winner') {
+            respond({ result: { value: true } })
+            recoveredConflictResponse.resolve()
+            return
+          }
+          if (responseRequestId === 'conflict-navigation') {
+            navigationResponseRequestId = request.id
+            sendReady(42)
+            navigationConflictResponse.resolve()
             return
           }
           respond({ result: { value: true } })
@@ -198,7 +240,11 @@ describe('icon theme preference document delivery', () => {
     })
     try {
       await firstReady.promise
-      socket?.send(JSON.stringify({
+      const sendSelection = (
+        requestId: string,
+        expectedPreferenceRevision: number,
+        expectedProfileRevision: number,
+      ): void => socket?.send(JSON.stringify({
         method: 'Runtime.bindingCalled',
         params: {
           name: ICON_THEME_PREFERENCE_BINDING,
@@ -206,23 +252,73 @@ describe('icon theme preference document delivery', () => {
           payload: JSON.stringify({
             version: 1,
             token,
-            requestId: 'select-winner',
+            requestId,
             scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-document-test' },
-            expectedPreferenceRevision: 0,
-            expectedProfileRevision: 0,
-            selectedProfileRevision: 1,
+            expectedPreferenceRevision,
+            expectedProfileRevision,
+            selectedProfileRevision: expectedProfileRevision + 1,
             candidate: {
               providerId: 'builtin:reicon', namespace: 'reicon', providerVersion: '1.2.1', providerGeneration: 'reicon-1.2.1',
             },
           }),
         },
       }))
-      await firstWinner.promise
-      expect((await loadHomeConfig(configPath)).apps.codex?.profiles.default?.iconTheme?.revision).toBe(1)
 
-      sendReady(42)
+      sendSelection('select-winner', 0, 0)
+      await pendingSuccessResponse.promise
+      expect((await loadHomeConfig(configPath)).apps.codex?.profiles.default?.iconTheme?.revision).toBe(1)
+      expect(bindingResponses.get('select-winner')).toMatchObject({
+        ok: true, value: { revision: 1 }, synchronization: 'pending',
+      })
+      expect(contextOneDeliveryAttempts).toBe(2)
+
+      // The same durable revision is an explicit retry trigger for a recovered
+      // receiver; the stale write remains a conflict, but convergence completes.
+      syncPhase = 'recovered'
+      sendSelection('recover-winner', 0, 1)
+      await recoveredConflictResponse.promise
+      expect(bindingResponses.get('recover-winner')).toMatchObject({
+        ok: false, code: 'conflict', currentPreference: { revision: 1 }, synchronization: 'complete',
+      })
+      expect(contexts.get(41)?.revision).toBe(1)
+
+      // Simulate a durable writer that advanced while this process-local hub
+      // was still at revision 1. The real conflict handler must cache revision
+      // 2 before attempting its response. The fake renderer navigates at that
+      // response boundary and reports a fresh execution context immediately.
+      await updateHomeConfigAtomic(current => ({
+        ...current,
+        apps: {
+          ...current.apps,
+          codex: {
+            ...current.apps.codex!,
+            profiles: {
+              ...current.apps.codex!.profiles,
+              default: {
+                ...current.apps.codex!.profiles.default!,
+                iconTheme: {
+                  revision: 2,
+                  providerId: 'plugin:aurora:aurora',
+                  namespace: 'aurora',
+                  providerVersion: '2.1.0',
+                  providerGeneration: 'aurora-3',
+                },
+              },
+            },
+          },
+        },
+      }), configPath)
+      syncPhase = 'conflict-fail'
+      contextOneDeliveryAttempts = 0
+      sendSelection('conflict-navigation', 1, 2)
+      await navigationConflictResponse.promise
       await secondWinner.promise
-      expect(contexts.get(42)).toEqual({ epoch: 'document_epoch_two', revision: 1 })
+
+      expect(bindingResponses.get('conflict-navigation')).toMatchObject({
+        ok: false, code: 'conflict', currentPreference: { revision: 2 }, synchronization: 'pending',
+      })
+      expect(secondContextFirstRevision).toBe(2)
+      expect(contexts.get(42)).toEqual({ epoch: 'document_epoch_two', revision: 2 })
       expect(secondContextDeliveryAttempts).toBe(2)
       expect(destroyedSelectionResponses).toBeGreaterThanOrEqual(1)
     } finally {

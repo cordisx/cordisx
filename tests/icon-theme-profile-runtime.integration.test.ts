@@ -333,6 +333,7 @@ describe('profile-scoped icon-theme selection runtime', () => {
               targetId: 'same-target',
               sessionId: 'same-session',
               documentEpoch: ready.documentEpoch,
+              currentRevision: ready.currentRevision,
               receive: async value => {
                 const ack = receiveIconThemeMessage(page, { kind: 'sync', value })
                 if (ack === null || typeof ack !== 'object') throw new Error('document receiver returned no acknowledgement')
@@ -452,6 +453,7 @@ describe('profile-scoped icon-theme selection runtime', () => {
             targetId: `target-${index}`,
             sessionId: `session-${index}`,
             documentEpoch: ready.documentEpoch,
+            currentRevision: ready.currentRevision,
             receive: async value => receive(page, { kind: 'sync', value }) as { documentEpoch: string; currentRevision: number },
           })
           unregisterDocuments.push(registration.unregister)
@@ -488,8 +490,8 @@ describe('profile-scoped icon-theme selection runtime', () => {
         persistenceContext,
         parseIconThemePreferenceBindingRequest(builtinRequest.value, persistenceContext),
       )
-      receive(builtinRequest.page, { requestId: builtinRequest.value.requestId, ok: true, value: winner })
       await hub.broadcast(winner)
+      receive(builtinRequest.page, { requestId: builtinRequest.value.requestId, ok: true, value: winner, synchronization: 'complete' })
       try {
         await persistIconThemePreference(
           persistenceContext,
@@ -498,8 +500,8 @@ describe('profile-scoped icon-theme selection runtime', () => {
         throw new Error('expected competing preference to conflict')
       } catch (error) {
         const failure = iconThemePreferenceBridgeError(error)
-        receive(losingRequest.page, { requestId: losingRequest.value.requestId, ok: false, ...failure })
         if (failure.currentPreference !== undefined) await hub.broadcast(failure.currentPreference)
+        receive(losingRequest.page, { requestId: losingRequest.value.requestId, ok: false, ...failure, synchronization: 'complete' })
       }
 
       await waitFor(() => runtimes.every(runtime => runtime.snapshot().iconThemes?.selected.providerId === 'builtin:reicon'), 'renderer convergence')
