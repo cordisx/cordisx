@@ -556,13 +556,11 @@ export class ControlledSurfaceCoordinator {
       for (const listener of listeners) {
         try { listener() } catch { /* A plugin observer cannot split Host publication. */ }
       }
-      if (currentSnapshot().state !== 'selected') listeners.clear()
     })
     return Object.freeze({
       snapshot: currentSnapshot,
       subscribe: (listener: () => void): (() => void) => {
         if (!active) throw new Error('controlled surface lease is revoked')
-        if (currentSnapshot().state !== 'selected') throw new Error('controlled surface lease is not selected')
         listeners.add(listener)
         return () => listeners.delete(listener)
       },

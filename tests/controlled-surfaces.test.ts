@@ -473,7 +473,7 @@ describe('controlled extension point runtime', () => {
     contexts.dispose()
   })
 
-  it('revokes a selected lease when point-local policy denies access and restores it on inherit', async () => {
+  it('keeps lifecycle subscription while point-local denial scrubs a selected lease and restores it on inherit', async () => {
     const pointCatalog: CordisXHostExtensionPointControlCatalogV1 = {
       $schema: CORDISX_HOST_EXTENSION_POINT_CONTROL_CATALOG_SCHEMA_V1, schemaVersion: 1,
       points: [{
@@ -490,10 +490,11 @@ describe('controlled extension point runtime', () => {
       }],
     }
     const dispatch = vi.fn(async () => undefined)
+    let pointState: 'pending' | 'active' = 'pending'
     const policies = new ControlledSurfacePolicyBroker()
     const controls = new ControlledSurfaceCoordinator(pointCatalog, {
       'composer.reasoning-intensity': {
-        currentState: () => ({ state: 'active', reason: 'point.mounted' }),
+        currentState: () => ({ state: pointState, reason: pointState === 'active' ? 'point.mounted' : 'point.pending' }),
         readProperty: () => 'high', dispatch,
       },
     }, 'host-1', policies)
@@ -523,9 +524,16 @@ describe('controlled extension point runtime', () => {
       principalHandle: claim.principalHandle,
     })
     const lease = registered.control!
-    expect(lease.snapshot()).toMatchObject({ state: 'selected', properties: { reasoningIntensity: 'high' } })
     const changed = vi.fn()
     lease.subscribe(changed)
+    expect(lease.snapshot()).toMatchObject({ state: 'pending', properties: {}, commands: [], events: [] })
+    pointState = 'active'
+    controls.invalidate()
+    expect(changed).toHaveBeenCalledTimes(1)
+    expect(lease.snapshot()).toMatchObject({ state: 'selected', properties: { reasoningIntensity: 'high' } })
+    controls.publishEvent('composer.reasoning-intensity', 'reasoningIntensityChanged', { value: 'high' })
+    expect(lease.snapshot().events).toEqual([{ id: 'reasoningIntensityChanged', sequence: 1, payload: { value: 'high' } }])
+    expect(changed).toHaveBeenCalledTimes(2)
     const policyRevision = policies.revision()
 
     pointAllowed = false
@@ -533,17 +541,18 @@ describe('controlled extension point runtime', () => {
     expect(policies.revision()).toBe(policyRevision)
     expect(registry.snapshot()[0]).toMatchObject({ authorized: false, effectivePointPolicy: 'deny', control: { authorization: 'denied', state: 'denied', reason: 'point.local-deny' } })
     expect(lease.snapshot()).toMatchObject({ state: 'denied', reason: 'point.local-deny', properties: {}, commands: [], events: [] })
-    expect(() => lease.subscribe(() => undefined)).toThrow(/not selected/)
+    const deniedChanged = vi.fn()
+    expect(() => lease.subscribe(deniedChanged)).not.toThrow()
     await expect(lease.invoke('setReasoningIntensity', { value: 'low' })).resolves.toMatchObject({ outcome: 'rejected', reason: 'claim.not-selected' })
     expect(controls.publishEvent('composer.reasoning-intensity', 'reasoningIntensityChanged', { value: 'low' })).toEqual([])
     expect(dispatch).not.toHaveBeenCalled()
-    expect(changed).toHaveBeenCalledTimes(1)
+    expect(changed).toHaveBeenCalledTimes(3)
 
     pointAllowed = true
     registry.invalidatePointPolicies()
-    expect(changed).toHaveBeenCalledTimes(1)
+    expect(changed).toHaveBeenCalledTimes(4)
+    expect(deniedChanged).toHaveBeenCalledTimes(1)
     expect(lease.snapshot()).toMatchObject({ state: 'selected', properties: { reasoningIntensity: 'high' } })
-    lease.subscribe(changed)
     await expect(lease.invoke('setReasoningIntensity', { value: 'medium' })).resolves.toMatchObject({ outcome: 'accepted' })
     expect(dispatch).toHaveBeenCalledWith('setReasoningIntensity', { value: 'medium' })
     registry.dispose(); contexts.dispose()
