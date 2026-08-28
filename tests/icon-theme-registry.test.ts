@@ -99,9 +99,13 @@ describe('descriptor-only icon theme registry', () => {
 
   it('fails a drifted rollback closed onto the non-provider neutral fallback', () => {
     const registry = new IconThemeRegistry('host-12', 'profile-main')
+    let notifications = 0
+    registry.subscribe(() => { notifications += 1 })
     const registration = registry.registerPlugin('register-1', 0, 'host-12', principal, definition()).registration!
     registry.select('select-1', 1, 'host-12', registration.providerHandle, 'aurora-3')
+    const beforeRollback = notifications
     expect(registry.rollback('rollback-bad', 2, 'host-12', registration.providerHandle, 'aurora-3', BUILTIN_REICON_PROVIDER_HANDLE, 'reicon-drift')).toMatchObject({ outcome: 'rollback-failed', profileRevision: 2 })
+    expect(notifications).toBe(beforeRollback + 1)
     expect(registry.resolve('action.save', 'regular', 'default')).toMatchObject({ provider: { providerId: 'host:neutral' }, fallback: 'neutral' })
   })
 })

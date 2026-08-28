@@ -317,6 +317,7 @@ export class IconThemeRegistry {
       || restore === undefined || restore.providerHandle !== BUILTIN_HANDLE || restore.providerGeneration !== restoreGeneration || restore.status === 'disposed') {
       if (failed !== undefined && failed.providerGeneration === failedGeneration && this.selectedHandle === failedProviderHandle) failed.status = 'failed'
       this.forceNeutralFallback = true
+      this.notify()
       return this.result(requestId, 'rollback', 'rollback-failed', { affectedProviderHandle: failedProviderHandle, error: { code: 'rollback-failed' } })
     }
     failed.status = 'failed'
