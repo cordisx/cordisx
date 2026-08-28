@@ -62,12 +62,18 @@ export class BrowserIconThemePreferenceBridge {
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const expectedRevision = this.preferenceRevision
+    const persistenceCandidate = {
+      providerId: candidate.providerId,
+      namespace: candidate.namespace,
+      providerVersion: candidate.providerVersion,
+      providerGeneration: candidate.providerGeneration,
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId)
         reject(new Error('Icon theme preference persistence request timed out'))
       }, REQUEST_TIMEOUT_MS)
-      this.pending.set(requestId, { expectedRevision, candidate: { ...candidate }, resolve, reject, timer })
+      this.pending.set(requestId, { expectedRevision, candidate: persistenceCandidate, resolve, reject, timer })
       try {
         binding(JSON.stringify({
           version: 1,
@@ -77,7 +83,7 @@ export class BrowserIconThemePreferenceBridge {
           expectedPreferenceRevision: expectedRevision,
           expectedProfileRevision,
           selectedProfileRevision,
-          candidate,
+          candidate: persistenceCandidate,
         }))
       } catch (error) {
         this.pending.delete(requestId)
@@ -120,6 +126,6 @@ export class BrowserIconThemePreferenceBridge {
       return
     }
     this.preferenceRevision = preference.revision
-    pending.resolve(structuredClone(preference))
+    pending.resolve({ ...preference })
   }
 }

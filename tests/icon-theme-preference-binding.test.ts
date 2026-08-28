@@ -18,7 +18,12 @@ describe('browser icon-theme preference bridge', () => {
     let request: Record<string, unknown> | undefined
     globalThis.__cordisxIconThemePreferenceRequestV1 = payload => { request = JSON.parse(payload) as Record<string, unknown> }
     const bridge = new BrowserIconThemePreferenceBridge('token', 'codex', 'default', 'host-12', undefined)
-    const pending = bridge.persist(2, 3, candidate)
+    const pending = bridge.persist(2, 3, {
+      ...candidate,
+      status: 'active',
+      coverage: { kind: 'partial', tuples: ['action.save\u0000regular\u0000default'] },
+      tupleCount: 1,
+    } as typeof candidate)
     expect(request).toMatchObject({
       scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-12' },
       expectedPreferenceRevision: 0,
@@ -26,6 +31,9 @@ describe('browser icon-theme preference bridge', () => {
       selectedProfileRevision: 3,
       candidate,
     })
+    expect(Object.keys(request?.candidate as Record<string, unknown>).sort()).toEqual([
+      'namespace', 'providerGeneration', 'providerId', 'providerVersion',
+    ])
     const requestId = request?.requestId
     globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ requestId, ok: true, value: { revision: 1, ...candidate } }))
     await expect(pending).resolves.toEqual({ revision: 1, ...candidate })

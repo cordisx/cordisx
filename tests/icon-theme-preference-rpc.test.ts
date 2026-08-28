@@ -65,6 +65,7 @@ describe('Host icon-theme preference persistence', () => {
       payload({ scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-11' } }),
       payload({ selectedProfileRevision: 4 }),
       payload({ candidate: { ...candidate, providerHandle: 'iph_private' } }),
+      payload({ candidate: { ...candidate, status: 'active', coverage: { kind: 'complete' }, tupleCount: 1_224 } }),
       payload({ candidate: { ...candidate, providerGeneration: '/tmp/private-provider' } }),
       { ...payload(), principalHandle: 'ipp_private' },
     ]

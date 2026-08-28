@@ -129,6 +129,7 @@ import { IconThemeRegistry } from './icon-theme-registry.js'
 import { CordisXIconThemeService } from './icon-theme-service.js'
 import { bindIconThemeRegistry } from './icons.js'
 import { BrowserIconThemePreferenceBridge } from './icon-theme-preference-binding.js'
+import { selectAndPersistIconTheme } from './icon-theme-selection.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 const MAX_ROLLBACK_RECEIPTS = 64
@@ -2190,42 +2191,13 @@ async function start(
     ...handle,
     snapshot: managerSnapshot,
     iconThemePreferenceWritable: iconThemePreferenceBridge !== undefined,
-    selectIconTheme: async (expectedProfileRevision, candidate) => {
-      const previous = iconThemeRegistry.redactedSnapshot().selected
-      const result = iconThemeRegistry.selectProvider(
-        `iconselect_${String(Date.now()).padStart(16, '0')}`,
-        expectedProfileRevision,
-        generation,
-        candidate,
-      )
-      if (result.outcome !== 'applied') throw new Error(`icon theme selection failed: ${result.error?.code ?? result.outcome}`)
-      if (iconThemePreferenceBridge === undefined) return
-      try {
-        await iconThemePreferenceBridge.persist(expectedProfileRevision, result.profileRevision, candidate)
-      } catch (error) {
-        // Persistence is part of the Host-owned selection transaction. Restore
-        // the exact previous identity only if no later registry event won.
-        const currentRevision = iconThemeRegistry.selection().profileRevision
-        if (currentRevision === result.profileRevision) {
-          const restored = iconThemeRegistry.selectProvider(
-            `iconrevert_${String(Date.now()).padStart(16, '0')}`,
-            currentRevision,
-            generation,
-            previous,
-          )
-          if (restored.outcome !== 'applied') {
-            const builtin = iconThemeRegistry.redactedSnapshot().providers.find(provider => provider.providerId === 'builtin:reicon')
-            if (builtin !== undefined) iconThemeRegistry.selectProvider(
-              `icondefault_${String(Date.now()).padStart(16, '0')}`,
-              iconThemeRegistry.selection().profileRevision,
-              generation,
-              builtin,
-            )
-          }
-        }
-        throw error
-      }
-    },
+    selectIconTheme: (expectedProfileRevision, candidate) => selectAndPersistIconTheme(
+      iconThemeRegistry,
+      iconThemePreferenceBridge,
+      generation,
+      expectedProfileRevision,
+      candidate,
+    ),
   }
 
   try {

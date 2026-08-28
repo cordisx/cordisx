@@ -1,9 +1,18 @@
+import { mkdtemp, stat } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { ensureHomeConfig, loadHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
+import {
+  iconThemePreferenceBridgeError,
+  parseIconThemePreferenceBindingRequest,
+  persistIconThemePreference,
+  type IconThemePreferencePersistenceContext,
+} from '../packages/cli/src/launcher/icon-theme-rpc.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const fixture = path.join(root, 'tests/fixtures/icon-theme-provider-plugin.ts')
@@ -18,14 +27,36 @@ const preference = {
 
 interface Runtime {
   snapshot(): {
-    iconThemes?: { profileRevision: number; selected: { providerId: string; providerGeneration: string } }
+    iconThemes?: {
+      profileRevision: number
+      selected: RuntimeProvider
+      providers: readonly RuntimeProvider[]
+    }
   }
   dispose(): Promise<void>
+}
+
+interface RuntimeProvider {
+  readonly providerId: `builtin:${string}` | `plugin:${string}:${string}`
+  readonly namespace: string
+  readonly providerVersion: string
+  readonly providerGeneration: string
+  readonly status: string
+  readonly coverage: unknown
+  readonly tupleCount: number
 }
 
 async function waitFor(predicate: () => boolean, label: string): Promise<void> {
   const deadline = Date.now() + 3_000
   while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`)
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+}
+
+async function waitForAsync(predicate: () => Promise<boolean>, label: string): Promise<void> {
+  const deadline = Date.now() + 3_000
+  while (!await predicate()) {
     if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`)
     await new Promise(resolve => setTimeout(resolve, 10))
   }
@@ -80,16 +111,55 @@ describe('profile-scoped icon-theme selection runtime', () => {
 
   it('restores an exact provider after registration and exposes a keyboard-native redacted picker', async () => {
     const page = dom()
-    let persistedRequest: Record<string, unknown> | undefined
-    let acceptPersistence = false
+    const configRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-icon-theme-runtime-rpc-'))
+    const configPath = path.join(configRoot, '.cordisx', 'config.json')
+    await ensureHomeConfig(configPath)
+    await updateHomeConfigAtomic(current => ({
+      ...current,
+      apps: {
+        ...current.apps,
+        codex: {
+          ...current.apps.codex!,
+          profiles: {
+            ...current.apps.codex!.profiles,
+            default: { ...current.apps.codex!.profiles.default!, iconTheme: preference },
+          },
+        },
+      },
+    }), configPath)
+    const persistenceContext: IconThemePreferencePersistenceContext = {
+      configPath,
+      appId: 'codex',
+      profileId: 'default',
+      hostGeneration: generation,
+      token: 'b'.repeat(64),
+    }
+    const persistedRequests: Record<string, unknown>[] = []
+    let responseMode: 'reject' | 'persist' | 'hold' = 'reject'
+    const receive = (response: Record<string, unknown>): void => {
+      ;(page.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => void })
+        .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify(response))
+    }
+    const rejectRequest = (request: Record<string, unknown>): void => {
+      receive({ requestId: request.requestId, ok: false, code: 'conflict' })
+    }
+    const persistRequest = async (request: Record<string, unknown>): Promise<void> => {
+      const parsed = parseIconThemePreferenceBindingRequest(request, persistenceContext)
+      const value = await persistIconThemePreference(persistenceContext, parsed)
+      receive({ requestId: request.requestId, ok: true, value })
+    }
     Object.defineProperty(page.window, '__cordisxIconThemePreferenceRequestV1', { configurable: true, value: (payload: string) => {
-      persistedRequest = JSON.parse(payload) as Record<string, unknown>
-      const requestId = persistedRequest.requestId
-      const candidate = persistedRequest.candidate as Record<string, unknown>
-      queueMicrotask(() => (page.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => void })
-        .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify(acceptPersistence
-          ? { requestId, ok: true, value: { revision: 8, ...candidate } }
-          : { requestId, ok: false, code: 'conflict' })))
+      const request = JSON.parse(payload) as Record<string, unknown>
+      persistedRequests.push(request)
+      if (responseMode === 'hold') return
+      queueMicrotask(() => {
+        if (responseMode !== 'persist') return rejectRequest(request)
+        void persistRequest(request).catch(error => receive({
+          requestId: request.requestId,
+          ok: false,
+          ...iconThemePreferenceBridgeError(error),
+        }))
+      })
     } })
     try {
       page.window.eval(exactBundle)
@@ -114,18 +184,33 @@ describe('profile-scoped icon-theme selection runtime', () => {
       picker.dispatchEvent(new page.window.Event('change', { bubbles: true }))
       await waitFor(() => page.window.document.querySelector('[role="alert"]') !== null, 'failed persistence rollback notice')
       expect(runtime.snapshot().iconThemes?.selected.providerId).toBe('plugin:icon-theme-test:aurora')
-      expect(persistedRequest).toMatchObject({ expectedPreferenceRevision: 7, candidate: { providerId: 'builtin:reicon' } })
+      expect(persistedRequests[0]).toMatchObject({ expectedPreferenceRevision: 7, candidate: { providerId: 'builtin:reicon' } })
 
-      acceptPersistence = true
+      responseMode = 'hold'
       picker.value = picker.options[0]!.value
       picker.dispatchEvent(new page.window.Event('change', { bubbles: true }))
       await waitFor(() => runtime.snapshot().iconThemes?.selected.providerId === 'builtin:reicon', 'persisted builtin selection')
-      await waitFor(() => persistedRequest !== undefined, 'preference persistence request')
+      await waitFor(() => persistedRequests.length === 2, 'preference persistence request')
+      const persistedRequest = persistedRequests[1]!
       expect(persistedRequest).toMatchObject({
         expectedPreferenceRevision: 7,
         candidate: { providerId: 'builtin:reicon', providerGeneration: 'reicon-1.2.1' },
       })
+      expect(Object.keys(persistedRequest.candidate as Record<string, unknown>).sort()).toEqual([
+        'namespace', 'providerGeneration', 'providerId', 'providerVersion',
+      ])
       expect(JSON.stringify(persistedRequest)).not.toMatch(/providerHandle|principalHandle|descriptors|commands|paths/u)
+      await persistRequest(persistedRequest)
+      await waitForAsync(async () => (await loadHomeConfig(configPath)).apps.codex?.profiles.default?.iconTheme?.revision === 8, 'durable icon theme preference')
+      expect((await loadHomeConfig(configPath)).apps.codex?.profiles.default?.iconTheme).toEqual({
+        revision: 8,
+        providerId: 'builtin:reicon',
+        namespace: 'reicon',
+        providerVersion: '1.2.1',
+        providerGeneration: 'reicon-1.2.1',
+      })
+      expect((await stat(configPath)).mode & 0o777).toBe(0o600)
+
       await runtime.dispose()
     } finally {
       page.window.close()

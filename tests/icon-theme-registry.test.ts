@@ -5,6 +5,10 @@ import {
   BUILTIN_REICON_PROVIDER_HANDLE,
   IconThemeRegistry,
 } from '../packages/cli/src/renderer/icon-theme-registry.js'
+import {
+  selectAndPersistIconTheme,
+  type IconThemePreferenceWriter,
+} from '../packages/cli/src/renderer/icon-theme-selection.js'
 
 const descriptor: NormalizedVectorDescriptor = {
   format: 'cordisx.normalized-vector', formatVersion: 1,
@@ -107,5 +111,56 @@ describe('descriptor-only icon theme registry', () => {
     expect(registry.rollback('rollback-bad', 2, 'host-12', registration.providerHandle, 'aurora-3', BUILTIN_REICON_PROVIDER_HANDLE, 'reicon-drift')).toMatchObject({ outcome: 'rollback-failed', profileRevision: 2 })
     expect(notifications).toBe(beforeRollback + 1)
     expect(registry.resolve('action.save', 'regular', 'default')).toMatchObject({ provider: { providerId: 'host:neutral' }, fallback: 'neutral' })
+  })
+
+  it('does not let an earlier persistence rejection roll back over a later selection winner', async () => {
+    const registry = new IconThemeRegistry('host-12', 'profile-main')
+    registry.registerPlugin('register-1', 0, 'host-12', principal, definition())
+    const providers = registry.redactedSnapshot().providers
+    const aurora = providers.find(provider => provider.providerId === 'plugin:aurora:aurora')!
+    const builtin = providers.find(provider => provider.providerId === 'builtin:reicon')!
+    const pending: Array<{
+      candidate: Record<string, unknown>
+      resolve: (value: {
+        revision: number
+        providerId: `builtin:${string}` | `plugin:${string}:${string}`
+        namespace: string
+        providerVersion: string
+        providerGeneration: string
+      }) => void
+      reject: (error: Error) => void
+    }> = []
+    const writer: IconThemePreferenceWriter = {
+      persist: (_expected, _selected, candidate) => new Promise((resolve, reject) => {
+        pending.push({ candidate: { ...candidate }, resolve, reject })
+      }),
+    }
+
+    const earlier = selectAndPersistIconTheme(registry, writer, 'host-12', 1, aurora)
+    const earlierObserved = earlier.catch(error => error as Error)
+    expect(registry.selection().profileRevision).toBe(2)
+    const later = selectAndPersistIconTheme(registry, writer, 'host-12', 2, builtin)
+    expect(registry.selection().profileRevision).toBe(3)
+    expect(pending).toHaveLength(2)
+    for (const item of pending) expect(Object.keys(item.candidate).sort()).toEqual([
+      'namespace', 'providerGeneration', 'providerId', 'providerVersion',
+    ])
+
+    pending[1]!.resolve({
+      revision: 1,
+      providerId: 'builtin:reicon',
+      namespace: 'reicon',
+      providerVersion: '1.2.1',
+      providerGeneration: 'reicon-1.2.1',
+    })
+    await expect(later).resolves.toBeUndefined()
+    pending[0]!.reject(new Error('earlier persistence rejected'))
+    const earlierError = await earlierObserved
+    expect(earlierError).toBeInstanceOf(Error)
+    expect(earlierError.message).toBe('earlier persistence rejected')
+    expect(registry.selection()).toMatchObject({
+      profileRevision: 3,
+      selectedProvider: { providerId: 'builtin:reicon' },
+    })
   })
 })
