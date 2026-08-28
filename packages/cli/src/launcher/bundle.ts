@@ -1,8 +1,9 @@
+import { createHash } from 'node:crypto'
 import { access, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
-import type { CordisXConfig } from './config.js'
+import type { CordisXConfig, CordisXConfigPlugin } from './config.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { HomeConfigIconThemePreference } from '../config/home-config.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
@@ -42,6 +43,20 @@ export interface RendererCompositionSource {
   readonly source: string
   /** Files outside the ESM graph which must invalidate the composition. */
   readonly watchFiles: readonly string[]
+}
+
+function bundledArtifactGeneration(plugin: CordisXConfigPlugin, moduleSource: string): string {
+  const digest = createHash('sha256')
+    .update('cordisx.bundled-plugin-artifact.v1\0')
+    .update(plugin.id)
+    .update('\0')
+    .update(moduleSource)
+    .update('\0')
+    .update(JSON.stringify({ config: plugin.config, manifest: plugin.manifest ?? null }))
+    .digest('base64url')
+  // This is an opaque, domain-separated generation token, not the package's
+  // raw digest. Paths and source principals are never embedded or projected.
+  return `artifact_${digest.slice(0, 40)}`
 }
 
 export interface RendererCompositionSourceOptions {
@@ -137,7 +152,10 @@ export async function buildRendererCompositionSource(
       return await readPluginReadmes(plugin.entry)
     })),
     Promise.all(enabled.map(async plugin => {
-      if (plugin.moduleFactorySource !== undefined) return plugin.moduleFactorySource
+      if (plugin.moduleFactorySource !== undefined) return {
+        source: plugin.moduleFactorySource,
+        artifactGeneration: bundledArtifactGeneration(plugin, plugin.moduleFactorySource),
+      }
       const result = await build({
         entryPoints: [plugin.entry],
         bundle: true,
@@ -158,7 +176,10 @@ export async function buildRendererCompositionSource(
       assertNoPrivateReactBundle(result.metafile, `plugin ${plugin.id}`)
       const output = result.outputFiles[0]
       if (output === undefined) throw new Error(`esbuild produced no renderer bundle for plugin ${plugin.id}`)
-      return output.text
+      return {
+        source: output.text,
+        artifactGeneration: bundledArtifactGeneration(plugin, output.text),
+      }
     })),
   ])
 
@@ -179,7 +200,10 @@ export async function buildRendererCompositionSource(
   const enabledIndexes = new Map(enabled.map((plugin, index) => [plugin.id, index]))
   const composition = `[${config.plugins.map((plugin, pluginIndex) => {
     const index = enabledIndexes.get(plugin.id)
-    const moduleField = index === undefined ? '' : `, moduleFactory: (console) => { ${pluginBundles[index]}\nreturn __cordisxPluginModule }`
+    const moduleField = index === undefined ? '' : `, moduleFactory: (console) => { ${pluginBundles[index]!.source}\nreturn __cordisxPluginModule }`
+    const artifactGenerationField = index === undefined || plugin.package !== undefined
+      ? ''
+      : `, artifactGeneration: ${JSON.stringify(pluginBundles[index]!.artifactGeneration)}`
     const readme = readmes[pluginIndex]
     const readmeField = readme?.default === undefined ? '' : `, readme: ${JSON.stringify(readme.default)}`
     const localizedReadmes = readme === undefined ? {} : {
@@ -190,7 +214,7 @@ export async function buildRendererCompositionSource(
     const manifestField = plugin.manifest === undefined ? '' : `, manifest: ${JSON.stringify(plugin.manifest)}`
     const packageField = plugin.package === undefined ? '' : `, package: ${JSON.stringify(plugin.package)}`
     const developmentField = plugin.development === undefined ? '' : `, development: ${JSON.stringify(plugin.development)}`
-    return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${plugin.revision ?? 0}${readmeField}${readmesField}${manifestField}${packageField}${developmentField}${moduleField} }`
+    return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${plugin.revision ?? 0}${readmeField}${readmesField}${manifestField}${packageField}${developmentField}${artifactGenerationField}${moduleField} }`
   }).join(',')}]`
   const providers = config.providers.filter(provider => provider.enabled).map(provider => ({ id: provider.id, displayName: provider.displayName }))
   const permission = options.permission ?? { profileId: options.profileId ?? 'development', policies: [] }

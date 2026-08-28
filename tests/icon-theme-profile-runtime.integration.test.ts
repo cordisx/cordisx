@@ -4,7 +4,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { ensureHomeConfig, loadHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
+import {
+  ensureHomeConfig,
+  loadHomeConfig,
+  updateHomeConfigAtomic,
+  type HomeConfigIconThemePreference,
+} from '../packages/cli/src/config/home-config.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import {
@@ -16,14 +21,8 @@ import {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const fixture = path.join(root, 'tests/fixtures/icon-theme-provider-plugin.ts')
-const generation = 'host-cold-1'
-const preference = {
-  revision: 7,
-  providerId: 'plugin:icon-theme-test:aurora' as const,
-  namespace: 'aurora',
-  providerVersion: '2.1.0',
-  providerGeneration: `${generation}:icon-theme-test:bundled`,
-}
+const generation = 'host-process-b'
+let preference: HomeConfigIconThemePreference
 
 interface Runtime {
   snapshot(): {
@@ -75,12 +74,35 @@ function dom(): JSDOM {
 
 describe('profile-scoped icon-theme selection runtime', () => {
   let exactBundle = ''
-  let staleBundle = ''
+  let changedArtifactBundle = ''
   let unknownBundle = ''
+  let disabledBundle = ''
 
   beforeAll(async () => {
     const base = await loadConfig(path.join(root, 'cordisx.config.example.json'))
     const config = { ...base, plugins: [{ id: 'icon-theme-test', entry: fixture, enabled: true, config: {} }] }
+    const discoveryBundle = await buildRendererBundle(config, {
+      playground: true,
+      profileId: 'default',
+      generation: 'host-process-a',
+    })
+    const discoveryPage = dom()
+    try {
+      discoveryPage.window.eval(discoveryBundle)
+      await waitFor(() => discoveryPage.window.document.documentElement.dataset.cordisxReady === 'true', 'process A runtime readiness')
+      const runtime = (discoveryPage.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
+      const provider = runtime.snapshot().iconThemes!.providers.find(item => item.providerId === 'plugin:icon-theme-test:aurora')!
+      preference = {
+        revision: 7,
+        providerId: provider.providerId,
+        namespace: provider.namespace,
+        providerVersion: provider.providerVersion,
+        providerGeneration: provider.providerGeneration,
+      }
+      await runtime.dispose()
+    } finally {
+      discoveryPage.window.close()
+    }
     exactBundle = await buildRendererBundle(config, {
       playground: true,
       appId: 'codex',
@@ -89,12 +111,15 @@ describe('profile-scoped icon-theme selection runtime', () => {
       iconThemePreference: preference,
       iconThemePreferenceBridgeToken: 'b'.repeat(64),
     })
-    staleBundle = await buildRendererBundle(config, {
+    changedArtifactBundle = await buildRendererBundle({
+      ...config,
+      plugins: config.plugins.map(plugin => ({ ...plugin, config: { artifactRevision: 2 } })),
+    }, {
       playground: true,
       appId: 'codex',
       profileId: 'default',
-      generation,
-      iconThemePreference: { ...preference, providerGeneration: 'stale-provider-generation' },
+      generation: 'host-process-c',
+      iconThemePreference: preference,
     })
     unknownBundle = await buildRendererBundle(config, {
       playground: true,
@@ -106,6 +131,16 @@ describe('profile-scoped icon-theme selection runtime', () => {
         providerId: 'plugin:missing:aurora',
         providerGeneration: 'missing-provider-generation',
       },
+    })
+    disabledBundle = await buildRendererBundle({
+      ...config,
+      plugins: config.plugins.map(plugin => ({ ...plugin, enabled: false })),
+    }, {
+      playground: true,
+      appId: 'codex',
+      profileId: 'default',
+      generation: 'host-process-d',
+      iconThemePreference: preference,
     })
   }, 20_000)
 
@@ -167,7 +202,7 @@ describe('profile-scoped icon-theme selection runtime', () => {
       const runtime = (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
       expect(runtime.snapshot().iconThemes?.selected).toMatchObject({
         providerId: 'plugin:icon-theme-test:aurora',
-        providerGeneration: `${generation}:icon-theme-test:bundled`,
+        providerGeneration: preference.providerGeneration,
       })
       page.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')?.click()
       page.window.document.querySelector<HTMLButtonElement>('[data-tab="about"]')?.click()
@@ -217,13 +252,15 @@ describe('profile-scoped icon-theme selection runtime', () => {
     }
   })
 
-  it('falls back to pinned Reicon when a cold-start preference has a stale provider generation', async () => {
+  it('falls back to pinned Reicon when the same-version provider artifact generation changed', async () => {
     const page = dom()
     try {
-      page.window.eval(staleBundle)
-      await waitFor(() => page.window.document.documentElement.dataset.cordisxReady === 'true', 'stale-preference runtime readiness')
+      page.window.eval(changedArtifactBundle)
+      await waitFor(() => page.window.document.documentElement.dataset.cordisxReady === 'true', 'changed-artifact runtime readiness')
       const runtime = (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
       expect(runtime.snapshot().iconThemes?.selected).toMatchObject({ providerId: 'builtin:reicon', providerGeneration: 'reicon-1.2.1' })
+      expect(runtime.snapshot().iconThemes?.providers.find(provider => provider.providerId === 'plugin:icon-theme-test:aurora')?.providerGeneration)
+        .not.toBe(preference.providerGeneration)
       await runtime.dispose()
     } finally {
       page.window.close()
@@ -237,6 +274,20 @@ describe('profile-scoped icon-theme selection runtime', () => {
       await waitFor(() => page.window.document.documentElement.dataset.cordisxReady === 'true', 'unknown-preference runtime readiness')
       const runtime = (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
       expect(runtime.snapshot().iconThemes?.selected).toMatchObject({ providerId: 'builtin:reicon', providerGeneration: 'reicon-1.2.1' })
+      await runtime.dispose()
+    } finally {
+      page.window.close()
+    }
+  })
+
+  it('falls back to pinned Reicon when the preferred provider is disabled', async () => {
+    const page = dom()
+    try {
+      page.window.eval(disabledBundle)
+      await waitFor(() => page.window.document.documentElement.dataset.cordisxReady === 'true', 'disabled-provider runtime readiness')
+      const runtime = (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
+      expect(runtime.snapshot().iconThemes?.selected).toMatchObject({ providerId: 'builtin:reicon', providerGeneration: 'reicon-1.2.1' })
+      expect(runtime.snapshot().iconThemes?.providers).toHaveLength(1)
       await runtime.dispose()
     } finally {
       page.window.close()

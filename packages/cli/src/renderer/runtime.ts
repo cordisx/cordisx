@@ -165,6 +165,8 @@ interface CordisXRuntimeMetadata {
 }
 
 interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
+  /** Launcher-derived opaque generation for a verified bundled artifact. */
+  readonly artifactGeneration?: string
   readonly development?: CordisXLocalDevelopmentSnapshot
 }
 
@@ -407,7 +409,9 @@ function errorMessage(error: unknown): string {
 function createController(item: RuntimeBrowserPlugin, pluginConsole: PluginConsoleAspect): PluginController {
   const identity = Object.freeze({ source: item.source, id: item.id })
   const activation = 1
-  const pluginGeneration = item.package?.moduleGeneration ?? `${pluginConsole.generation}:${item.id}:bundled`
+  const pluginGeneration = item.package?.moduleGeneration
+    ?? item.artifactGeneration
+    ?? `${pluginConsole.generation}:${item.id}:bundled`
   const principal = pluginConsole.issue(identity, pluginGeneration)
   try {
     const module = item.moduleFactory?.(pluginConsole.consoleFacade(principal)) ?? item.module
@@ -563,7 +567,10 @@ async function start(
     new BrowserPermissionAuthorizationPromptV2(document),
   )
   for (const plugin of plugins) {
-    if (plugin.package === undefined) generationVisibility.bindStable(plugin.id, `${generation}:${plugin.id}:bundled`)
+    if (plugin.package === undefined) generationVisibility.bindStable(
+      plugin.id,
+      plugin.artifactGeneration ?? `${generation}:${plugin.id}:bundled`,
+    )
   }
   ctx = ctx.extend({ [CORDISX_GENERATION_VISIBILITY_COORDINATOR]: generationVisibility })
   const configuration = new PluginConfigurationRegistry(generationVisibility)
@@ -611,7 +618,9 @@ async function start(
   )
   const controllers: PluginController[] = plugins.map(item => createController(item, pluginConsole))
   const moduleGenerationOf = (controller: PluginController): string => (
-    controller.item.package?.moduleGeneration ?? `${generation}:${controller.item.id}:bundled`
+    controller.item.package?.moduleGeneration
+    ?? controller.item.artifactGeneration
+    ?? `${generation}:${controller.item.id}:bundled`
   )
   const projectedControllers = (): PluginController[] => controllers.filter(controller => (
     generationVisibility.projected({

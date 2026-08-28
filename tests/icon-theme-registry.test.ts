@@ -89,6 +89,37 @@ describe('descriptor-only icon theme registry', () => {
     expect(registry.selection()).toMatchObject({ outcome: 'rolled-back', reason: 'invalid-descriptor', selectedProvider: { providerHandle: BUILTIN_REICON_PROVIDER_HANDLE } })
   })
 
+  it('keeps process Host generations and provider handles fresh while rejecting an old-process result', () => {
+    const processA = new IconThemeRegistry('host-process-a', 'profile-main')
+    const processB = new IconThemeRegistry('host-process-b', 'profile-main')
+    const stablePrincipal = { ...principal, providerGeneration: 'artifact_stable_generation_1' }
+    const registrationA = processA.registerPlugin('register-a', 0, 'host-process-a', stablePrincipal, definition()).registration!
+    const registrationB = processB.registerPlugin('register-b', 0, 'host-process-b', stablePrincipal, definition()).registration!
+    expect(processA.hostGeneration).not.toBe(processB.hostGeneration)
+    expect(registrationA.providerGeneration).toBe(registrationB.providerGeneration)
+    expect(registrationA.providerHandle).not.toBe(registrationB.providerHandle)
+
+    processA.select('select-a', 1, 'host-process-a', registrationA.providerHandle, registrationA.providerGeneration)
+    const oldRequest = processA.createResolutionRequest('action.save', 'regular', 'default')
+    processB.select('select-b', 1, 'host-process-b', registrationB.providerHandle, registrationB.providerGeneration)
+    const oldResult: IconThemeResolutionResult = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-resolution-result.v1.schema.json',
+      schemaVersion: 1,
+      requestId: oldRequest.requestId,
+      providerGeneration: oldRequest.providerGeneration,
+      outcome: 'resolved',
+      descriptor,
+    }
+    expect(processB.acceptResolution(oldRequest, oldResult)).toMatchObject({
+      provider: { providerId: 'builtin:reicon' },
+      fallback: 'reicon',
+    })
+    expect(processB.resolve('action.save', 'regular', 'default')).toMatchObject({
+      provider: { providerId: 'plugin:aurora:aurora' },
+      fallback: 'none',
+    })
+  })
+
   it('refuses selected disposal, disposes an exact retired generation, and redacts snapshots', () => {
     const registry = new IconThemeRegistry('host-12', 'profile-main')
     const registration = registry.registerPlugin('register-1', 0, 'host-12', principal, definition()).registration!

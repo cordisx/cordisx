@@ -94,6 +94,13 @@ function cloneDescriptor(descriptor: NormalizedVectorDescriptor): NormalizedVect
   return clone(descriptor)
 }
 
+function providerHandleNonce(): string {
+  const value = typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID().replaceAll('-', '')
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
+  return value.slice(0, 24).padEnd(24, '0')
+}
+
 function reference(record: ProviderRecord): IconThemeProviderReference {
   return {
     providerHandle: record.providerHandle,
@@ -107,6 +114,7 @@ export class IconThemeRegistry {
   private readonly records = new Map<`iph_${string}`, ProviderRecord>()
   private readonly namespaces = new Map<string, `iph_${string}`>()
   private nextHandle = 1
+  private readonly handleNonce = providerHandleNonce()
   private nextRequest = 1
   private profileRevision = 0
   private selectedHandle: `iph_${string}` = BUILTIN_HANDLE
@@ -215,7 +223,7 @@ export class IconThemeRegistry {
     } catch {
       return { result: this.result(requestId, 'register', 'rejected', { error: { code: 'invalid-descriptor' } }) }
     }
-    const providerHandle = `iph_${String(this.nextHandle++).padStart(20, '0')}` as const
+    const providerHandle = `iph_${this.handleNonce}_${String(this.nextHandle++).padStart(8, '0')}` as const
     const identity = Object.freeze({
       providerId: `plugin:${principal.pluginId}:${definition.namespace}`,
       namespace: definition.namespace,
