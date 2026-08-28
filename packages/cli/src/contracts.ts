@@ -3,6 +3,9 @@ import type { ComponentType } from 'react'
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
 import type { CordisXPluginManifestV4 } from './permission-contracts.js'
 import type { CordisXPluginDependencyV1 } from './plugin-lifecycle-contracts.js'
+import type { CordisXExtensionPointControlMode, CordisXExtensionPointControlResultV1 } from './control-contracts.js'
+
+export * from './control-contracts.js'
 
 export * from './platform-contracts.js'
 export * from './permission-contracts.js'
@@ -226,6 +229,17 @@ export const CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-access.v1.schema.json' as const
 export const CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-access.v2.schema.json' as const
+/** Plugin-authored shorthand. Canonical identity and contribution coordinates are Host-stamped. */
+export interface CordisXExtensionPointControlClaimOptions {
+  readonly claimId: string
+  readonly mode: CordisXExtensionPointControlMode
+  readonly priority?: number
+  readonly requestedBindings?: Readonly<{
+    properties?: readonly string[]
+    commands?: readonly string[]
+    events?: readonly string[]
+  }>
+}
 export const CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/surface-invocation-context.v1.schema.json' as const
 
@@ -725,6 +739,7 @@ interface CordisXContributionOptionsBase<Name extends CordisXSurfaceName> {
   readonly order?: number
   readonly when?: CordisXWhen
   readonly disabled?: CordisXDisabledState
+  readonly control?: CordisXExtensionPointControlClaimOptions
 }
 
 export type CordisXManagerSettingsNavigationGroup = 'before-settings' | 'after-settings'
@@ -750,6 +765,24 @@ export interface CordisXContributionHandle<Item> {
   dispose(): void
   update(snapshot: Item): void
   updateOptions(options: CordisXContributionPresentationOptions): void
+  /** Present only for an explicit controlled claim; all values and commands are Host-stamped. */
+  readonly control?: CordisXExtensionPointControlLease
+}
+
+export interface CordisXExtensionPointControlLeaseSnapshot {
+  readonly revision: number
+  readonly state: 'selected' | 'eligible' | 'denied' | 'conflicted' | 'suppressed' | 'pending' | 'revoked'
+  readonly reason: string
+  readonly properties: Readonly<Record<string, CordisXJsonScalar>>
+  readonly commands: readonly Readonly<{ id: string; available: boolean; reason?: string }>[]
+  readonly events: readonly Readonly<{ id: string; sequence: number; payload: Readonly<Record<string, CordisXJsonScalar>> }>[]
+}
+
+/** Claim-scoped safe projection; it never exposes selectors, nodes, native callbacks, or event objects. */
+export interface CordisXExtensionPointControlLease {
+  snapshot(): CordisXExtensionPointControlLeaseSnapshot
+  subscribe(listener: () => void): () => void
+  invoke(commandId: string, arguments_?: Readonly<Record<string, CordisXJsonScalar>>): Promise<CordisXExtensionPointControlResultV1>
 }
 
 /** DSH-style slot service with structured data instead of a DOM component. */

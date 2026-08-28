@@ -6,6 +6,11 @@ import {
   type CordisXContributionHandle,
   type CordisXContributionOptions,
   type CordisXContributionPresentationOptions,
+  type CordisXExtensionPointControlCandidateSnapshotV1,
+  type CordisXExtensionPointControlAuthorizationV1,
+  type CordisXExtensionPointControlClaimOptions,
+  type CordisXExtensionPointControlDeclarationV1,
+  type CordisXExtensionPointControlLease,
   type CordisXDisabledState,
   type CordisXExtensionPointCurrentContextState,
   type CordisXEnvironmentRow,
@@ -28,10 +33,19 @@ import {
   type CordisXToolbarItem,
   type CordisXWhen,
 } from '../contracts.js'
-import { ownerFromContext, qualifyOwnedId } from './ownership.js'
+import { generationFromContext, ownerFromContext, qualifyOwnedId, sourceFromContext } from './ownership.js'
+import {
+  ControlledSurfaceCoordinator,
+  normalizeControlledSurfaceDeclaration,
+  type ControlledSurfaceGroupChoice,
+  type ControlledSurfaceGeneration,
+  type ControlledSurfaceManagerSnapshot,
+  type ControlledSurfaceRegistrationHandle,
+} from './controlled-surfaces.js'
 import {
   generationVisibilityFromContext,
   type GenerationVisibilityCoordinator,
+  type PluginGenerationParticipantTransition,
   type PluginGenerationEffectIdentity,
   type PluginGenerationView,
 } from './generation-visibility.js'
@@ -75,6 +89,10 @@ interface SurfaceRecord {
   readonly generation: PluginGenerationEffectIdentity
   readonly candidateView?: PluginGenerationView
   readonly renderToken: object
+  readonly controlDeclaration?: CordisXExtensionPointControlDeclarationV1
+  readonly controlGeneration?: ControlledSurfaceGeneration
+  readonly controlHandle?: ControlledSurfaceRegistrationHandle
+  readonly controlLease?: CordisXExtensionPointControlLease & { dispose(): void }
   options: CordisXContributionOptions
   item: unknown
   validationError?: string
@@ -103,6 +121,7 @@ export interface SurfaceContributionSnapshot {
   readonly availabilityCode?: string
   readonly availabilityDetail?: string
   readonly currentContext: CordisXExtensionPointCurrentContextState
+  readonly control?: CordisXExtensionPointControlCandidateSnapshotV1
 }
 
 export interface SurfaceAnchorCurrentContext {
@@ -204,6 +223,22 @@ function assertPresentationOptions(
   }
   assertWhenExpression(options.when)
   assertDisabled(options.disabled)
+}
+
+function assertControlOptions(control: CordisXExtensionPointControlClaimOptions | undefined): void {
+  if (control === undefined) return
+  assertKeys(control, ['claimId', 'mode', 'priority', 'requestedBindings'], 'surface control claim')
+  assertLocalId(control.claimId, 'surface control claim id')
+  if (!['compose', 'replace', 'overlay', 'proxy', 'hide-native'].includes(control.mode)) throw new Error('surface control mode is invalid')
+  if (control.priority !== undefined && (!Number.isInteger(control.priority) || control.priority < -100000 || control.priority > 100000)) throw new Error('surface control priority is invalid')
+  if (control.requestedBindings !== undefined) {
+    assertKeys(control.requestedBindings, ['properties', 'commands', 'events'], 'surface control requested bindings')
+    for (const [kind, values] of Object.entries(control.requestedBindings)) {
+      if (!Array.isArray(values) || values.some(value => typeof value !== 'string') || new Set(values).size !== values.length) {
+        throw new Error(`surface control ${kind} bindings are invalid`)
+      }
+    }
+  }
 }
 
 function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
@@ -400,12 +435,56 @@ export class SurfaceRegistry {
   private readonly disconnectVisibility: (() => void) | undefined
   private resolvers: SurfaceResolvers = { command: () => false, route: () => false }
   private access: ExtensionPointAccessResolver | undefined
+  private controls: ControlledSurfaceCoordinator | undefined
+  private disconnectControls: (() => void) | undefined
+  private readonly committedControlTransactions = new Map<string, Readonly<{ moduleGeneration: string; transactionId: string; transactionEpoch: string }>>()
+  private preparedControlTransition: Readonly<{
+    transactionId: string
+    transactionEpoch: string
+    affectedPluginIds: readonly string[]
+    after: PluginGenerationParticipantTransition['after']
+    previous: ReadonlyMap<string, Readonly<{ moduleGeneration: string; transactionId: string; transactionEpoch: string }>>
+    published: boolean
+  }> | undefined
 
   constructor(
     private readonly contexts: HostContextStore,
     private readonly visibility?: GenerationVisibilityCoordinator,
   ) {
-    this.disconnectVisibility = visibility?.connect({ notify: () => this.notify() })
+    this.disconnectVisibility = visibility?.connect({
+      prepare: transition => {
+        this.preparedControlTransition = Object.freeze({
+          transactionId: transition.transactionId,
+          transactionEpoch: transition.transactionEpoch,
+          affectedPluginIds: transition.affectedPluginIds,
+          after: transition.after,
+          previous: new Map(this.committedControlTransactions),
+          published: false,
+        })
+      },
+      notify: () => {
+        const prepared = this.preparedControlTransition
+        const activeTransactionId = visibility.snapshot().transactionId
+        if (prepared !== undefined && activeTransactionId === prepared.transactionId) {
+          for (const pluginId of prepared.affectedPluginIds) {
+            const plugin = prepared.after.plugins.find(item => item.id === pluginId)
+            if (plugin === undefined) this.committedControlTransactions.delete(pluginId)
+            else this.committedControlTransactions.set(pluginId, Object.freeze({
+              moduleGeneration: plugin.moduleGeneration,
+              transactionId: prepared.transactionId,
+              transactionEpoch: prepared.transactionEpoch,
+            }))
+          }
+          this.preparedControlTransition = Object.freeze({ ...prepared, published: true })
+        } else if (prepared?.published === true) {
+          this.committedControlTransactions.clear()
+          for (const [pluginId, transaction] of prepared.previous) this.committedControlTransactions.set(pluginId, transaction)
+          this.preparedControlTransition = undefined
+        }
+        this.controls?.invalidate()
+        this.notify()
+      },
+    })
   }
 
   setResolvers(resolvers: SurfaceResolvers): void {
@@ -415,11 +494,23 @@ export class SurfaceRegistry {
 
   setAccessResolver(access: ExtensionPointAccessResolver): void {
     this.access = access
+    if (this.controls === undefined) this.notify()
+    else this.controls.invalidate()
+  }
+
+  setControlCoordinator(controls: ControlledSurfaceCoordinator): void {
+    if (this.controls !== undefined) throw new Error('controlled surface coordinator is already installed')
+    if (this.records.size > 0) throw new Error('controlled surface coordinator must be installed before plugin registration')
+    this.controls = controls
+    this.disconnectControls = controls.subscribe(() => this.notify())
     this.notify()
   }
 
+  controlCoordinator(): ControlledSurfaceCoordinator | undefined { return this.controls }
+
   invalidatePointPolicies(): void {
-    this.notify()
+    if (this.controls === undefined) this.notify()
+    else this.controls.invalidate()
   }
 
   declareSurface(name: string): () => void {
@@ -483,7 +574,7 @@ export class SurfaceRegistry {
       ? undefined
       : this.visibility?.view(ownerOrContext)
     assertLocalId(owner, 'surface owner')
-    assertKeys(options, ['name', 'id', 'group', 'order', 'when', 'disabled'], 'surface contribution options')
+    assertKeys(options, ['name', 'id', 'group', 'order', 'when', 'disabled', 'control'], 'surface contribution options')
     assertLocalId(options.id, 'surface contribution id')
     assertPresentationOptions(options.name, {
       ...(options.group === undefined ? {} : { group: options.group }),
@@ -491,8 +582,12 @@ export class SurfaceRegistry {
       ...(options.when === undefined ? {} : { when: options.when }),
       ...(options.disabled === undefined ? {} : { disabled: options.disabled }),
     })
+    assertControlOptions(options.control)
+    if (options.control !== undefined && (this.controls === undefined || !this.controls.hasPoint(options.name))) {
+      throw new Error(`controlled surface runtime is unavailable for ${options.name}`)
+    }
     const qualifiedId = qualifyOwnedId(owner, options.id)
-    const key = `${options.name}\u0000${qualifiedId}\u0000${generation.moduleGeneration ?? 'host'}`
+    const key = `${options.name}\u0000${qualifiedId}\u0000${generation.moduleGeneration ?? 'host'}\u0000${generation.transactionId ?? ''}\u0000${generation.transactionEpoch ?? ''}`
     if (this.records.has(key)) throw new Error(`surface contribution ${options.name}/${qualifiedId} is already registered for this generation`)
     let snapshot: unknown
     let validationError: string | undefined
@@ -502,6 +597,41 @@ export class SurfaceRegistry {
       snapshot = undefined
       validationError = error instanceof Error ? error.message : String(error)
     }
+    const source = typeof ownerOrContext === 'string' ? undefined : sourceFromContext(ownerOrContext)
+    const controlOrigin = options.control === undefined ? 'legacy-structured' as const : 'explicit' as const
+    const controlledPoint = this.controls?.hasPoint(options.name) === true
+    const principalHandle = source === undefined || !controlledPoint ? undefined : this.controlPrincipal(source, owner, controlOrigin)
+    const controlDeclaration = this.controls === undefined || source === undefined || !controlledPoint ? undefined : normalizeControlledSurfaceDeclaration({
+      principalHandle: principalHandle!,
+      source,
+      pluginId: owner,
+      pointId: options.name,
+      contributionId: options.id,
+      ...(options.order === undefined ? {} : { order: options.order }),
+      ...(options.control === undefined ? {} : { control: options.control }),
+    })
+    const moduleGeneration = typeof ownerOrContext === 'string' ? undefined : generationFromContext(ownerOrContext)
+    const controlGeneration: ControlledSurfaceGeneration | undefined = controlDeclaration === undefined ? undefined : Object.freeze({
+        principalHandle: principalHandle!,
+        principalOrigin: controlOrigin,
+        source: source!,
+        pluginId: owner,
+        ...(moduleGeneration === undefined ? {} : { moduleGeneration }),
+        ...(generation.transactionId === undefined ? {} : { transactionId: generation.transactionId, transactionEpoch: generation.transactionEpoch }),
+        ...(candidateView === undefined ? {} : { visibilityView: candidateView }),
+      })
+    const controlHandle = controlDeclaration === undefined ? undefined : this.controls!.register({
+      declaration: controlDeclaration,
+      generation: controlGeneration!,
+      presenter: snapshot,
+      hostAccess: () => {
+        const decision = this.access?.decision(owner, options.name, 'surface', candidateView)
+        return decision === undefined
+          ? Object.freeze({ authorized: true })
+          : Object.freeze({ authorized: decision.authorized, ...(decision.reason === undefined ? {} : { reason: decision.reason }) })
+      },
+    })
+    const controlLease = controlDeclaration === undefined || options.control === undefined ? undefined : this.controls!.createLease(controlDeclaration, controlGeneration!)
     const record: SurfaceRecord = {
       sequence: this.nextSequence++,
       owner,
@@ -509,6 +639,10 @@ export class SurfaceRegistry {
       generation,
       ...(candidateView === undefined ? {} : { candidateView }),
       renderToken: Object.freeze({}),
+      ...(controlDeclaration === undefined ? {} : { controlDeclaration }),
+      ...(controlGeneration === undefined ? {} : { controlGeneration }),
+      ...(controlHandle === undefined ? {} : { controlHandle }),
+      ...(controlLease === undefined ? {} : { controlLease }),
       options: immutableSnapshot(options),
       item: snapshot,
       ...(validationError === undefined ? {} : { validationError }),
@@ -520,6 +654,8 @@ export class SurfaceRegistry {
     const dispose = (): void => {
       if (!active) return
       active = false
+      record.controlHandle?.dispose()
+      record.controlLease?.dispose()
       this.records.delete(key)
       if (this.visibility?.visible(generation) !== false) this.notify()
     }
@@ -530,6 +666,7 @@ export class SurfaceRegistry {
       this.visibility?.assertCallable(generation, candidateView)
       try {
         record.item = validateItem(options.name, next)
+        record.controlHandle?.updatePresenter(record.item)
         delete record.validationError
       } catch (error) {
         record.item = undefined
@@ -541,23 +678,24 @@ export class SurfaceRegistry {
       if (!active) throw new Error(`surface contribution ${qualifiedId} is disposed`)
       this.visibility?.assertCallable(generation, candidateView)
       assertPresentationOptions(options.name, next)
-      record.options = immutableSnapshot({ name: options.name, id: options.id, ...next })
+      record.options = immutableSnapshot({ name: options.name, id: options.id, ...(options.control === undefined ? {} : { control: options.control }), ...next })
       if (this.visibility?.visible(generation) !== false) this.notify()
     }
+    if (controlLease !== undefined) Object.defineProperty(handle, 'control', { value: controlLease, enumerable: true })
     return handle
   }
 
   renderToken(surface: string, qualifiedId: string): object | undefined {
     return [...this.records.values()].find(record => record.options.name === surface
       && record.qualifiedId === qualifiedId
-      && (this.visibility?.visible(record.generation) ?? true))?.renderToken
+      && this.recordVisible(record))?.renderToken
   }
 
   markRendered(surface: string, qualifiedId: string, renderToken: object, rendered: boolean): void {
     const record = [...this.records.values()].find(item => item.options.name === surface
       && item.qualifiedId === qualifiedId
       && item.renderToken === renderToken
-      && (this.visibility?.visible(item.generation) ?? true))
+      && this.recordVisible(item))
     if (record === undefined || record.rendered === rendered) return
     record.rendered = rendered
     this.notify()
@@ -568,7 +706,8 @@ export class SurfaceRegistry {
     const knownKeys = new Set(Object.keys(contexts))
     const sections = new Set<string>()
     const rows = new Set<string>()
-    const records = [...this.records.values()].filter(record => this.visibility?.visible(record.generation, view) ?? true)
+    const records = [...this.records.values()].filter(record => this.recordVisible(record, view))
+    const controlSnapshot = this.controls?.snapshot(view)
     const managerNavigationRoutes = new Map<string, string[]>()
     for (const record of records) {
       if (record.options.name === 'environment.panel.sections' && record.item !== undefined) {
@@ -608,6 +747,12 @@ export class SurfaceRegistry {
         }
         const pointAccess = this.access?.decision(record.owner, record.options.name, 'surface', view ?? record.candidateView)
           ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }
+        const control = record.controlDeclaration === undefined ? undefined : controlSnapshot?.points
+          .find(point => point.id === record.controlDeclaration!.identity.pointId)?.candidates
+          .find(candidate => candidate.identity.source === record.controlDeclaration!.identity.source
+            && candidate.identity.pluginId === record.controlDeclaration!.identity.pluginId
+            && candidate.claimId === record.controlDeclaration!.claimId
+            && candidate.mode === record.controlDeclaration!.mode)
         const toolbarItem = item as unknown as CordisXToolbarItem | undefined
         const anchorSupport = toolbarItem !== undefined && (record.options.name === 'workspace.toolbar.items' || record.options.name === 'composer.toolbar.items')
           ? this.access?.surfaceAnchorSupport(record.options.name, toolbarItem.anchor)
@@ -663,7 +808,8 @@ export class SurfaceRegistry {
         const currentAnchor = toolbarItem === undefined ? undefined : currentContext?.anchors?.find(anchor => anchor.id === toolbarItem.anchor)
         if (this.access !== undefined && currentContext !== undefined && currentContext.state !== 'active') pending = true
         if (currentAnchor !== undefined && currentAnchor.state !== 'active') pending = true
-        const authorized = pointAccess.authorized && anchorSupport?.supported !== false
+        const authorized = pointAccess.authorized && anchorSupport?.supported !== false && (control === undefined || control.state === 'selected')
+        if (control?.state === 'pending' || control?.state === 'suppressed') pending = true
         const contextDetail = currentAnchor?.detail ?? currentContext?.detail
         const contextCode = currentAnchor?.code ?? currentContext?.code
         const accessReason = anchorSupport?.reason ?? pointAccess.reason
@@ -685,6 +831,7 @@ export class SurfaceRegistry {
           valid: error === undefined,
           pending,
           currentContext: currentAnchor?.state ?? currentContext?.state ?? 'not-mounted',
+          ...(control === undefined ? {} : { control }),
           rendered: record.rendered,
           ...(error === undefined ? {} : { error }),
           ...(contextCode === undefined ? {} : { availabilityCode: contextCode }),
@@ -702,6 +849,12 @@ export class SurfaceRegistry {
     if (this.disposed) return
     this.disposed = true
     this.disconnectVisibility?.()
+    this.disconnectControls?.()
+    for (const record of this.records.values()) {
+      record.controlHandle?.dispose()
+      record.controlLease?.dispose()
+    }
+    this.controls?.dispose()
     this.records.clear()
     this.listeners.clear()
     this.declared.clear()
@@ -716,6 +869,47 @@ export class SurfaceRegistry {
       } catch {
         // One observer cannot split a published visibility epoch.
       }
+    }
+  }
+
+  private controlPrincipal(source: string, pluginId: string, origin: 'explicit' | 'legacy-structured'): string {
+    if (this.controls === undefined) throw new Error('controlled surface runtime is unavailable')
+    return this.controls.policies.principalHandle(source, pluginId, origin)
+  }
+
+  private recordVisible(record: SurfaceRecord, view?: PluginGenerationView): boolean {
+    return record.controlGeneration === undefined
+      ? this.visibility?.visible(record.generation, view) ?? true
+      : this.controlGenerationVisible(record.controlGeneration, view)
+  }
+
+  controlGenerationVisible(generation: ControlledSurfaceGeneration, view?: PluginGenerationView): boolean {
+    if (this.visibility === undefined) return true
+    if (view?.pluginId === generation.pluginId && view.transactionId !== undefined) {
+      return generation.transactionId === view.transactionId
+        && generation.transactionEpoch === view.transactionEpoch
+        && this.visibility.visible(generation, view)
+    }
+    const committed = this.committedControlTransactions.get(generation.pluginId)
+    if (generation.transactionId !== undefined) {
+      return committed !== undefined
+        && committed.moduleGeneration === generation.moduleGeneration
+        && committed.transactionId === generation.transactionId
+        && committed.transactionEpoch === generation.transactionEpoch
+        && this.visibility.visible(generation)
+    }
+    if (committed?.moduleGeneration === generation.moduleGeneration) return false
+    return this.visibility.visible(generation, view)
+  }
+
+  controlGenerationCallable(generation: ControlledSurfaceGeneration): boolean {
+    if (this.visibility === undefined) return true
+    if (!this.controlGenerationVisible(generation)) return false
+    try {
+      this.visibility.assertCallable(generation, generation.visibilityView)
+      return true
+    } catch {
+      return false
     }
   }
 }
@@ -771,6 +965,7 @@ export class CordisXSlotService extends Service implements CordisXSlots {
     dispose.dispose = dispose
     dispose.update = next => console.runSync(token, 'slots.update', { name: options.name, id: options.id, item: next }, () => handle.update(next))
     dispose.updateOptions = next => console.runSync(token, 'slots.updateOptions', { name: options.name, id: options.id, options: next }, () => handle.updateOptions(next))
+    if (handle.control !== undefined) Object.defineProperty(dispose, 'control', { value: handle.control, enumerable: true })
     this.ctx.effect(() => dispose, `slots.register(${JSON.stringify(options.name)}, ${JSON.stringify(options.id)})`)
     return dispose
   }
@@ -790,6 +985,34 @@ export class CordisXSlotService extends Service implements CordisXSlots {
 
   setAccessResolver(access: ExtensionPointAccessResolver): void {
     this.registry.setAccessResolver(access)
+  }
+
+  setControlCoordinator(controls: ControlledSurfaceCoordinator): void {
+    this.registry.setControlCoordinator(controls)
+  }
+
+  controlGenerationVisible(generation: ControlledSurfaceGeneration, view?: PluginGenerationView): boolean {
+    return this.registry.controlGenerationVisible(generation, view)
+  }
+
+  controlGenerationCallable(generation: ControlledSurfaceGeneration): boolean {
+    return this.registry.controlGenerationCallable(generation)
+  }
+
+  controlManagerSnapshot(): ControlledSurfaceManagerSnapshot | undefined {
+    return this.registry.controlCoordinator()?.managerSnapshot()
+  }
+
+  setControlAuthorization(expectedRevision: number, authorization: CordisXExtensionPointControlAuthorizationV1): number {
+    const controls = this.registry.controlCoordinator()
+    if (controls === undefined) throw new Error('controlled surface runtime is unavailable')
+    return controls.setAuthorization(expectedRevision, authorization)
+  }
+
+  setControlGroupChoice(expectedRevision: number, choice: ControlledSurfaceGroupChoice): number {
+    const controls = this.registry.controlCoordinator()
+    if (controls === undefined) throw new Error('controlled surface runtime is unavailable')
+    return controls.setGroupChoice(expectedRevision, choice)
   }
 
   invalidatePointPolicies(): void {

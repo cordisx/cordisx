@@ -270,6 +270,49 @@ selector, network URL, CSS, HTML, or executable renderer. The backdrop retains
 the last observed stage only for the same active session and is removed on
 session change, contribution withdrawal, or adapter disposal.
 
+`extension-point-control` v1 adds a Host-owned control plane to the existing
+`slots.register()` path; it does not add a second full-declaration API. A
+plugin may add only a local claim id, mode, priority, and requested safe
+bindings. The Host stamps the canonical source/plugin/point/contribution,
+launcher principal, legacy order, and generation. Legacy registrations remain
+`compose` with `priority = -order`; `replace`, `overlay`, `proxy`, and
+`hide-native` default to denied. Exclusive decisions and partial claim grants
+are resolved by the Host policy broker before ordered claims, and every command
+invocation is rechecked against the current principal, generation, grant,
+selection, point state, and allowlisted scalar arguments.
+
+The returned controlled contribution handle exposes only a claim-scoped lease:
+a scalar snapshot, invalidation subscription, and Host-brokered command
+request. It never contains selectors, nodes, CSS, native callbacks, native
+events, or business command results. Claim denial, point-local access denial,
+switching, ancestor suppression, generation replacement, and disposal remove
+its projected properties and commands and reject invocation. Lifecycle
+subscriptions remain attached with a scrubbed state-only snapshot so recovery
+is observable; unloading revokes the lease. Adapter effects are separate from
+this state machine. For `composer.reasoning-intensity`, replace/legacy rendering
+hides and restores the native presentation, overlay retains it, proxy performs
+no DOM effect, and hide-native uses a reversible Host visibility lease.
+
+Manager receives a separate read-only diagnostic projection with candidates,
+exact claim policy, durable user group choices, current group decisions, and
+suppression reason chains. The durable choice drives the selector even while
+the point is not mounted; the current decision separately reports runtime
+effect. Manager writes call the Host policy broker; plugins cannot submit a
+selected winner.
+The projection, opaque principal handles, stored policy, and diagnostics are
+removed from the public runtime snapshot. Policy storage contains only
+principal bindings, exact authorization records, and group choices under a
+profile-qualified local-storage key inside the CordisX Chromium profile; it
+contains no presenter, selector, native value, or generation metadata. A
+missing plugin leaves a dormant policy with no runtime effect, and a later
+generation of the same canonical source/plugin/origin reuses its Host principal.
+
+The generic resolver implements and tests transitive parent/subtree
+suppression and same-generation restoration. The current production Codex
+control catalog binds only `composer.reasoning-intensity`, so real-App evidence
+for a parent control point must not be claimed until such a semantic parent is
+cataloged and adapted.
+
 The host-neutral surface/outlet vocabulary, current Codex adapter availability,
 DeepSeek Harness intent mapping, explicit replacement refusals, contextual
 identity boundary, PR order, and validation matrix are maintained in

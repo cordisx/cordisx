@@ -88,6 +88,10 @@ describe('UI Playground', () => {
       expect(runtime.__cordisxRuntime?.snapshot().plugins.find(plugin => plugin.id === 'cli-proxy-api')?.icon)
         .toMatch(/^data:image\/png;base64,/)
       expect(runtime.__cordisxRuntime?.snapshot().platform.mode).toBe('unavailable')
+      const publicSnapshotJson = JSON.stringify(runtime.__cordisxRuntime?.snapshot())
+      expect(publicSnapshotJson).not.toContain('extensionPointControls')
+      expect(publicSnapshotJson).not.toContain('principalHandle')
+      expect(publicSnapshotJson).not.toContain('principal:')
       const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!
       const reactManager = dom.window.document.querySelector('[data-cordisx-react-manager="true"]')
       expect(reactManager).not.toBeNull()
