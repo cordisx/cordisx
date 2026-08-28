@@ -8,6 +8,14 @@ import {
 } from '../icon-theme-contracts.js'
 import { resolveBuiltinReiconDescriptor } from './reicon-icon-backend.js'
 import { resolveHostTheme, type HostAppTheme } from './host-theme.js'
+import type { IconThemeRegistry } from './icon-theme-registry.js'
+
+const documentRegistries = new WeakMap<Document, IconThemeRegistry>()
+
+export function bindIconThemeRegistry(document: Document, registry: IconThemeRegistry): () => void {
+  documentRegistries.set(document, registry)
+  return () => { if (documentRegistries.get(document) === registry) documentRegistries.delete(document) }
+}
 
 export const MANAGER_ICON_TOKENS = [
   'back', 'capability-fallback', 'close', 'configuration', 'console-clear', 'console-copy',
@@ -189,12 +197,36 @@ export function resolveBuiltinHostIcon(
   }
 }
 
+export function resolveHostIcon(
+  document: Document | undefined,
+  requestedKey: string,
+  options: HostIconRenderOptions = {},
+): { readonly descriptor: NormalizedVectorDescriptor; readonly resolution: HostIconResolution } {
+  if (!isSemanticIconKey(requestedKey)) return resolveBuiltinHostIcon(requestedKey, options)
+  const registry = document === undefined ? undefined : documentRegistries.get(document)
+  if (registry === undefined) return resolveBuiltinHostIcon(requestedKey, options)
+  const state = normalizedState(options.state)
+  const variant = normalizedVariant(options)
+  const result = registry.resolve(requestedKey, variant, state)
+  return {
+    descriptor: result.descriptor,
+    resolution: {
+      key: requestedKey,
+      provider: result.provider.providerId,
+      fallback: result.fallback,
+      state,
+      theme: options.theme ?? 'light',
+      variant,
+    },
+  }
+}
+
 export function renderHostIconSvg(
   document: Document,
   requestedKey: string,
   options: HostIconRenderOptions = {},
 ): { readonly svg: SVGSVGElement; readonly resolution: HostIconResolution } {
-  const result = resolveBuiltinHostIcon(requestedKey, options)
+  const result = resolveHostIcon(document, requestedKey, options)
   return { svg: renderNormalizedIconSvg(document, result.descriptor, result.resolution, options.size), resolution: result.resolution }
 }
 

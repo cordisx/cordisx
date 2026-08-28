@@ -54,6 +54,7 @@ import type {
 } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
 import type { ControlledSurfaceGroupChoice, ControlledSurfaceManagerSnapshot } from './controlled-surfaces.js'
+import type { RedactedIconThemeSnapshot } from './icon-theme-registry.js'
 import type {
   ExtensionPointPluginUsageSnapshot,
   ExtensionPointRuntimeSnapshot,
@@ -192,6 +193,8 @@ export interface ManagerSnapshot {
     readonly runtimeGeneration: string
     readonly operationsAvailable: boolean
   }
+  /** Descriptor geometry, private handles, principals and request ids are never projected. */
+  readonly iconThemes?: RedactedIconThemeSnapshot
 }
 
 export interface ManagerSettingsTabSnapshot {

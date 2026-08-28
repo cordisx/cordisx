@@ -1254,6 +1254,18 @@ export interface CordisXConfigRenderers {
   register(options: CordisXConfigRendererOptions, mount: CordisXConfigRendererMount): Disposable<void>
 }
 
+export type {
+  CordisXIconThemeProviderDefinitionV1,
+  CordisXIconThemeRegistrationHandle,
+  CordisXIconThemes,
+  IconState as CordisXIconState,
+  IconVariant as CordisXIconVariant,
+  NormalizedVectorCommand as CordisXNormalizedVectorCommand,
+  NormalizedVectorDescriptor as CordisXNormalizedVectorDescriptor,
+  NormalizedVectorPath as CordisXNormalizedVectorPath,
+  SemanticIconKey as CordisXSemanticIconKey,
+} from './icon-theme-contracts.js'
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** DSH-style semantic UI slot service backed by Codex DOM adapters. */
@@ -1271,6 +1283,8 @@ declare module '@deepseek-ai/cordis' {
     settings: CordisXPluginSettings
     /** Fiber-owned custom field renderers inside Host-controlled form chrome. */
     configRenderers: CordisXConfigRenderers
+    /** Data-only semantic icon descriptors; Host derives identity and owns rendering. */
+    iconThemes: import('./icon-theme-contracts.js').CordisXIconThemes
   }
 }
 

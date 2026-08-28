@@ -102,6 +102,18 @@ export interface CordisXIconThemeProviderDefinitionV1 {
   readonly descriptors: readonly IconThemeDescriptorEntry[]
 }
 
+export interface CordisXIconThemeRegistrationHandle {
+  readonly providerHandle: `iph_${string}`
+  readonly providerGeneration: string
+  readonly providerId: `plugin:${string}:${string}`
+  dispose(): void
+}
+
+export interface CordisXIconThemes {
+  /** Register bounded static descriptors; identity and generation are Host-derived. */
+  register(definition: CordisXIconThemeProviderDefinitionV1): CordisXIconThemeRegistrationHandle
+}
+
 export interface IconThemeProviderRegistration {
   readonly $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-provider-registration.v1.schema.json'
   readonly schemaVersion: 1
