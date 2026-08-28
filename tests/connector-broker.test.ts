@@ -49,6 +49,26 @@ function connector(): CordisXHostConnector {
   }
 }
 
+function boundClient(broker: CordisXConnectorBroker) {
+  return broker.bind({
+    active: () => true,
+    authorize: async capability => ({ capability, state: 'allowed' as const, code: 'allowed' as const }),
+  })
+}
+
+function acceptedHandle(result: Awaited<ReturnType<ReturnType<typeof boundClient>['subscribe']>>) {
+  if (!('handle' in result)) throw new Error('subscription should be accepted')
+  return result.handle
+}
+
+function pendingPages(handle: ReturnType<typeof acceptedHandle>): unknown[] {
+  // Deliberately inspect the iterator's private queue in this mutation guard:
+  // observable cancellation alone would not detect retained sensitive pages.
+  const stream = handle.pages as unknown as { pending?: unknown[] }
+  if (!Array.isArray(stream.pending)) throw new Error('serialized subscription queue is unavailable to its test guard')
+  return stream.pending
+}
+
 describe('Host Connector broker', () => {
   it('Host-stamps registrations, preserves opaque handles, publishes ordered events, and redacts its snapshot', async () => {
     const broker = new CordisXConnectorBroker({
@@ -238,5 +258,92 @@ describe('Host Connector broker', () => {
     const terminal = await replaced.handle.pages[Symbol.asyncIterator]().next()
     expect(terminal).toMatchObject({ done: false, value: { events: [{ type: 'connector.disposed', disposeReason: 'generation-replaced', sequence: 4 }] } })
     await expect(replaced.handle.pages[Symbol.asyncIterator]().next()).resolves.toMatchObject({ done: true })
+  })
+
+  it('suppresses prequeued replay pages on explicit unsubscribe', async () => {
+    const broker = new CordisXConnectorBroker()
+    const registered = broker.register(connector())
+    if (!registered.ok) throw new Error('registration failed')
+    const client = boundClient(broker)
+    await client.execute(command(registered.value.registration, 'replay-open', { type: 'conversation.open', open: { mode: 'create' } }))
+    const handle = acceptedHandle(await client.subscribe(registered.value.registration, -1))
+    expect(pendingPages(handle)).toHaveLength(2)
+    handle.unsubscribe()
+    expect(pendingPages(handle)).toHaveLength(0)
+    const iterator = handle.pages[Symbol.asyncIterator]()
+    await expect(iterator.next()).resolves.toMatchObject({ done: true })
+    await expect(iterator.next()).resolves.toMatchObject({ done: true })
+  })
+
+  it('suppresses prequeued replay pages on owner client dispose', async () => {
+    const broker = new CordisXConnectorBroker()
+    const registered = broker.register(connector())
+    if (!registered.ok) throw new Error('registration failed')
+    const client = boundClient(broker)
+    await client.execute(command(registered.value.registration, 'replay-owner-open', { type: 'conversation.open', open: { mode: 'create' } }))
+    const handle = acceptedHandle(await client.subscribe(registered.value.registration, -1))
+    expect(pendingPages(handle)).toHaveLength(2)
+    client.dispose()
+    expect(pendingPages(handle)).toHaveLength(0)
+    await expect(handle.pages[Symbol.asyncIterator]().next()).resolves.toMatchObject({ done: true })
+  })
+
+  it('suppresses prequeued live pages on explicit unsubscribe', async () => {
+    const broker = new CordisXConnectorBroker()
+    const registered = broker.register(connector())
+    if (!registered.ok) throw new Error('registration failed')
+    const client = boundClient(broker)
+    await client.execute(command(registered.value.registration, 'live-open', { type: 'conversation.open', open: { mode: 'create' } }))
+    const handle = acceptedHandle(await client.subscribe(registered.value.registration, 1))
+    await client.execute(command(registered.value.registration, 'live-send', {
+      type: 'message.send', conversation: 'conversation-opaque',
+      message: { messageId: 'live-message', direction: 'outbound', parts: [{ kind: 'text', text: 'live' }] },
+    }))
+    expect(pendingPages(handle)).toHaveLength(2)
+    handle.unsubscribe()
+    expect(pendingPages(handle)).toHaveLength(0)
+    await expect(handle.pages[Symbol.asyncIterator]().next()).resolves.toMatchObject({ done: true })
+  })
+
+  it('suppresses prequeued live pages on owner client dispose', async () => {
+    const broker = new CordisXConnectorBroker()
+    const registered = broker.register(connector())
+    if (!registered.ok) throw new Error('registration failed')
+    const client = boundClient(broker)
+    await client.execute(command(registered.value.registration, 'live-owner-open', { type: 'conversation.open', open: { mode: 'create' } }))
+    const handle = acceptedHandle(await client.subscribe(registered.value.registration, 1))
+    await client.execute(command(registered.value.registration, 'live-owner-send', {
+      type: 'message.send', conversation: 'conversation-opaque',
+      message: { messageId: 'live-owner-message', direction: 'outbound', parts: [{ kind: 'text', text: 'live' }] },
+    }))
+    expect(pendingPages(handle)).toHaveLength(2)
+    client.dispose()
+    expect(pendingPages(handle)).toHaveLength(0)
+    await expect(handle.pages[Symbol.asyncIterator]().next()).resolves.toMatchObject({ done: true })
+  })
+
+  it('keeps cancellation a no-op after cleanup and rejects a post-cancel queue mutation', async () => {
+    const broker = new CordisXConnectorBroker()
+    const registered = broker.register(connector())
+    if (!registered.ok) throw new Error('registration failed')
+    const client = boundClient(broker)
+    await client.execute(command(registered.value.registration, 'mutation-open', { type: 'conversation.open', open: { mode: 'create' } }))
+    const handle = acceptedHandle(await client.subscribe(registered.value.registration, -1))
+    const queue = pendingPages(handle)
+    const retained = [...queue]
+    expect(retained).toHaveLength(2)
+    handle.unsubscribe()
+    handle.unsubscribe()
+    expect(queue).toHaveLength(0)
+    // A stale producer/implementation mutation after cancellation cannot make
+    // next() leak a page: the cancellation fence is checked before the queue.
+    queue.push(...retained)
+    await expect(handle.pages[Symbol.asyncIterator]().next()).resolves.toMatchObject({ done: true })
+
+    const waitingHandle = acceptedHandle(await client.subscribe(registered.value.registration, 1))
+    const waiter = waitingHandle.pages[Symbol.asyncIterator]().next()
+    waitingHandle.unsubscribe()
+    await expect(waiter).resolves.toMatchObject({ done: true })
+    await expect(waitingHandle.pages[Symbol.asyncIterator]().next()).resolves.toMatchObject({ done: true })
   })
 })

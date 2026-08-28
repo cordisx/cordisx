@@ -672,6 +672,7 @@ class SerializedConnectorSubscription implements CordisXConnectorSubscription, A
   private cursor: number
   private replayDone = false
   private closed = false
+  private cancelled = false
 
   constructor(readonly subscription: CordisXConnectorEventSubscription, private readonly remove: () => void) {
     this.cursor = subscription.afterSequence
@@ -689,15 +690,13 @@ class SerializedConnectorSubscription implements CordisXConnectorSubscription, A
   }
 
   unsubscribe(): void {
-    if (this.closed) return
-    this.closed = true
-    this.remove()
-    this.flush()
+    this.cancel()
   }
 
   [Symbol.asyncIterator](): AsyncIterator<CordisXConnectorEventPage> { return this }
 
   next(): Promise<IteratorResult<CordisXConnectorEventPage>> {
+    if (this.cancelled) return Promise.resolve({ done: true, value: undefined })
     const page = this.pending.shift()
     if (page !== undefined) return Promise.resolve({ done: false, value: page })
     if (this.closed) return Promise.resolve({ done: true, value: undefined })
@@ -725,6 +724,16 @@ class SerializedConnectorSubscription implements CordisXConnectorSubscription, A
 
   private closeAfterDrain(): void {
     this.closed = true
+    this.remove()
+    this.flush()
+  }
+
+  /** Explicit cancellation never leaks queued replay/live pages. Terminal replacement uses closeAfterDrain(). */
+  private cancel(): void {
+    if (this.cancelled) return
+    this.closed = true
+    this.cancelled = true
+    this.pending.length = 0
     this.remove()
     this.flush()
   }

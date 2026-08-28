@@ -13,7 +13,7 @@ export const manifest = {
   name: 'Connector Public Client Fixture',
   capabilities: [{
     name: 'agent.events.read',
-    required: true,
+    required: false,
     reason: { key: 'connector.events.read', fallback: 'Read Connector discovery and events for this fixture' },
     scope: {},
   }],

@@ -848,6 +848,12 @@ async function start(
         const permissionCapability: CordisXPlatformCapability = capability === 'connector.command.execute'
           ? 'agent.messages.append'
           : 'agent.events.read'
+        // Connector calls never open an implicit permission prompt. A plugin
+        // must have an explicit allow policy before this bound surface can use
+        // the PermissionBroker; ask and deny both fail closed.
+        if (broker.policy(identity, permissionCapability, generationVisibility.view(pluginContext)) !== 'allow') {
+          return { capability, state: 'denied', code: 'policy-denied' }
+        }
         // Conversation handles are opaque and cannot be safely translated into
         // a native Agent session scope. This conservative all-session request
         // therefore never expands a manifest's declared session authority.

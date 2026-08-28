@@ -25,20 +25,26 @@ describe('public Connector client plugin integration', () => {
     }
     const fixture = (dom.window as unknown as {
       __cordisxConnectorPublicClientFixture?: {
-        client: { discover(): Promise<{ status: string; authorization: unknown }> }
+        client: {
+          discover(): Promise<{ status: string; authorization: unknown; snapshot?: { registrations: readonly { registration: { registrationId: string; connectorId: string; generation: number } }[] } }>
+          subscribe(registration: { registrationId: string; connectorId: string; generation: number }, afterSequence: number): Promise<{ result: { status: string }; handle?: unknown }>
+        }
       }
       __cordisxRuntime?: {
         dispose(): Promise<void>
         snapshot(): { plugins: readonly { status: string; error?: string }[] }
-        setPermissionPolicy(id: string, capability: 'agent.events.read', policy: 'allow'): Promise<void>
+        setPermissionPolicy(id: string, capability: 'agent.events.read', policy: 'allow' | 'deny'): Promise<void>
       }
     }).__cordisxConnectorPublicClientFixture
     expect((dom.window as unknown as { __cordisxRuntime?: { snapshot(): { plugins: readonly { status: string; error?: string }[] } } }).__cordisxRuntime?.snapshot().plugins)
       .toMatchObject([{ status: 'active' }])
     expect(dom.window.document.documentElement.dataset.connectorPublicClientMounted).toBe('true')
     const runtime = (dom.window as unknown as {
-      __cordisxRuntime?: { setPermissionPolicy(id: string, capability: 'agent.events.read', policy: 'allow'): Promise<void> }
+      __cordisxRuntime?: { setPermissionPolicy(id: string, capability: 'agent.events.read', policy: 'allow' | 'deny'): Promise<void> }
     }).__cordisxRuntime
+    await expect(fixture?.client.discover()).resolves.toMatchObject({ status: 'denied', authorization: { code: 'policy-denied' } })
+    await runtime?.setPermissionPolicy('connector-public-client', 'agent.events.read', 'deny')
+    await expect(fixture?.client.discover()).resolves.toMatchObject({ status: 'denied', authorization: { code: 'policy-denied' } })
     await runtime?.setPermissionPolicy('connector-public-client', 'agent.events.read', 'allow')
     const discovery = await fixture?.client.discover()
     const registration = discovery?.status === 'accepted' ? discovery.snapshot?.registrations[0]?.registration : undefined
