@@ -296,6 +296,50 @@ describe('Host icon-theme preference persistence', () => {
     registration.unregister()
   })
 
+  it('invalidates a pending ready response when same-winner delivery advances the document revision', async () => {
+    const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    await hub.broadcast({ revision: 2, ...candidate })
+    let recovered = false
+    const reservation = hub.reserve({
+      targetId: 'target-progress', sessionId: 'session-progress', documentEpoch: 'document_progress',
+      executionContextId: 16, currentRevision: 0, signal: new AbortController().signal,
+    })
+    const registration = await reservation.register({
+      receive: async preference => {
+        if (!recovered) throw new Error('document receiver is not installed yet')
+        return { documentEpoch: 'document_progress', currentRevision: preference.revision }
+      },
+    })
+    const held = deferred<IconThemePreferenceReadyResponseAck>()
+    const pendingLeasePrepared = deferred<AbortSignal>()
+    let responses = 0
+    const ready = registration.respondReady(
+      { documentEpoch: 'document_progress', currentRevision: 0 },
+      async (status, lease) => {
+        responses += 1
+        if (responses === 1) {
+          expect(status).toEqual({ synchronization: 'pending', requiredRevision: 2, currentRevision: 0 })
+          pendingLeasePrepared.resolve(lease.signal)
+          return await held.promise
+        }
+        expect(status).toEqual({ synchronization: 'complete', requiredRevision: 2, currentRevision: 2 })
+        return readyAck('document_progress', 2, lease)
+      },
+    )
+    const pendingSignal = await pendingLeasePrepared.promise
+    recovered = true
+    await expect(hub.retryPending()).resolves.toMatchObject({ delivered: 1, pending: 1 })
+    expect(pendingSignal.aborted).toBe(true)
+    await expect(ready).resolves.toEqual({ synchronization: 'complete', requiredRevision: 2, currentRevision: 2 })
+    held.resolve({
+      documentEpoch: 'document_progress', currentRevision: 0,
+      readyLeaseToken: 'ready_late_00000003', readyLeaseRevision: 3,
+    })
+    expect(responses).toBe(2)
+    await expect(hub.broadcast(hub.current()!)).resolves.toMatchObject({ pending: 0 })
+    registration.unregister()
+  })
+
   it('allows a ready response that linearizes before the next winner and aborts one on disposal', async () => {
     const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
     await hub.broadcast({ revision: 1, ...candidate })

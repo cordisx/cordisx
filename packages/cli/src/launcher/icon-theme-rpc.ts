@@ -638,6 +638,11 @@ export class IconThemePreferenceBroadcastHub {
             throw new Error('icon theme preference delivery acknowledgement is invalid')
           }
           entry.ackedRevision = Math.max(entry.ackedRevision, ack.currentRevision)
+          const readyLease = entry.readyLease
+          if (readyLease !== undefined && entry.ackedRevision > readyLease.status.currentRevision) {
+            entry.readyLease = undefined
+            readyLease.cancellation.abort()
+          }
           if (entry.pending !== undefined && entry.ackedRevision >= entry.pending.revision) entry.pending = undefined
           return entry.pending === undefined ? 'delivered' as const : 'failed' as const
         } catch {

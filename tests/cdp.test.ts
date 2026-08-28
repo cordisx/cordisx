@@ -286,6 +286,30 @@ describe('icon theme preference document delivery', () => {
         respond({ result: { value: undefined } })
       })
     })
+    const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    const originalReserve = hub.reserve.bind(hub)
+    const contextTwoReadyFinalized = deferred()
+    vi.spyOn(hub, 'reserve').mockImplementation(identity => {
+      const reservation = originalReserve(identity)
+      return {
+        cancel: reservation.cancel,
+        register: async receiver => {
+          const registration = await reservation.register(receiver)
+          return {
+            get currentRevision() { return registration.currentRevision },
+            get synchronization() { return registration.synchronization },
+            respondReady: async (probeAck, respond) => {
+              const status = await registration.respondReady(probeAck, respond)
+              if (identity.executionContextId === 42 && status.synchronization === 'complete') {
+                contextTwoReadyFinalized.resolve()
+              }
+              return status
+            },
+            unregister: registration.unregister,
+          }
+        },
+      }
+    })
     const originalFetch = globalThis.fetch
     globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([{
       id: 'same-target', title: 'Codex', url: 'app://-/index.html', type: 'page',
@@ -303,6 +327,7 @@ describe('icon theme preference document delivery', () => {
         hostGeneration: 'host-document-test',
         token,
       },
+      iconThemePreferenceBroadcastHub: hub,
     })
     try {
       await firstReady.promise
@@ -391,6 +416,7 @@ describe('icon theme preference document delivery', () => {
       await navigationConflictResponse.promise
       await secondWinner.promise
       await browserDocumentReady.promise
+      await contextTwoReadyFinalized.promise
 
       expect(bindingResponses.get('conflict-navigation')).toMatchObject({
         ok: false, code: 'conflict', currentPreference: { revision: 2 }, synchronization: 'pending',
