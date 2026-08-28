@@ -90,6 +90,92 @@ export interface IconThemeTuple {
   readonly state: IconState
 }
 
+export interface IconThemeDescriptorEntry extends IconThemeTuple {
+  readonly descriptor: NormalizedVectorDescriptor
+}
+
+/** Public data-only registration payload. Host derives identity and generation. */
+export interface CordisXIconThemeProviderDefinitionV1 {
+  readonly schemaVersion: 1
+  readonly namespace: string
+  readonly providerVersion: string
+  readonly descriptors: readonly IconThemeDescriptorEntry[]
+}
+
+export interface IconThemeProviderRegistration {
+  readonly $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-provider-registration.v1.schema.json'
+  readonly schemaVersion: 1
+  readonly authority: 'host'
+  readonly hostGeneration: string
+  readonly revision: number
+  readonly providerHandle: `iph_${string}`
+  readonly principal: { readonly kind: 'host' } | { readonly kind: 'plugin'; readonly principalHandle: `ipp_${string}`; readonly pluginId: string }
+  readonly identity: IconThemeProviderIdentity
+  readonly providerGeneration: string
+  readonly status: 'staged' | 'ready' | 'active' | 'retiring' | 'failed' | 'disposed'
+  readonly coverage: IconThemeCoverage
+  readonly lastGoodGeneration?: string
+  readonly failureCode?: 'prepare-failed' | 'resolution-failed' | 'invalid-descriptor' | 'disposed' | 'generation-replaced'
+}
+
+export interface IconThemeSelection {
+  readonly $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-selection.v1.schema.json'
+  readonly schemaVersion: 1
+  readonly authority: 'host'
+  readonly profileId: string
+  readonly profileRevision: number
+  readonly hostGeneration: string
+  readonly requestedProviderHandle?: `iph_${string}`
+  readonly defaultProvider: PinnedIconThemeProviderReference & { readonly providerId: 'builtin:reicon'; readonly namespace: 'reicon' }
+  readonly selectedProvider: PinnedIconThemeProviderReference
+  readonly fallbackProvider: PinnedIconThemeProviderReference & { readonly providerId: 'builtin:reicon'; readonly namespace: 'reicon' }
+  readonly outcome: 'default' | 'selected' | 'rolled-back'
+  readonly reason: 'user-selection' | 'host-default' | 'provider-unavailable' | 'prepare-failed' | 'resolution-failed' | 'invalid-descriptor'
+}
+
+export interface IconThemeResolutionRequest extends IconThemeTuple {
+  readonly $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-resolution-request.v1.schema.json'
+  readonly schemaVersion: 1
+  readonly requestId: string
+  readonly hostGeneration: string
+  readonly providerHandle: `iph_${string}`
+  readonly providerGeneration: string
+}
+
+export type IconThemeResolutionResult =
+  | {
+      readonly $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-resolution-result.v1.schema.json'
+      readonly schemaVersion: 1
+      readonly requestId: string
+      readonly providerGeneration: string
+      readonly outcome: 'resolved'
+      readonly descriptor: NormalizedVectorDescriptor
+    }
+  | {
+      readonly $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-resolution-result.v1.schema.json'
+      readonly schemaVersion: 1
+      readonly requestId: string
+      readonly providerGeneration: string
+      readonly outcome: 'missing' | 'rejected' | 'stale-generation'
+      readonly reason: 'not-covered' | 'unsupported-variant' | 'unsupported-state' | 'invalid-request' | 'provider-unavailable' | 'generation-mismatch'
+    }
+
+export interface IconThemeLifecycleResult {
+  readonly $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-lifecycle-result.v1.schema.json'
+  readonly schemaVersion: 1
+  readonly authority: 'host'
+  readonly requestId: string
+  readonly profileId: string
+  readonly operation: 'register' | 'select' | 'dispose' | 'rollback'
+  readonly outcome: 'staged' | 'applied' | 'conflict' | 'rejected' | 'rolled-back' | 'rollback-failed'
+  readonly profileRevision: number
+  readonly hostGeneration: string
+  readonly activeProvider: IconThemeProviderReference
+  readonly affectedProviderHandle?: `iph_${string}`
+  readonly disposedGeneration?: string
+  readonly error?: { readonly code: 'stale-revision' | 'stale-host-generation' | 'unknown-provider' | 'stale-provider-generation' | 'provider-selected' | 'identity-mismatch' | 'namespace-conflict' | 'prepare-failed' | 'resolution-failed' | 'invalid-descriptor' | 'dispose-failed' | 'rollback-failed' }
+}
+
 export const BUILTIN_REICON_IDENTITY = Object.freeze({
   providerId: 'builtin:reicon',
   namespace: 'reicon',
