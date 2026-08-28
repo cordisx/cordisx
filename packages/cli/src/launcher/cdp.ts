@@ -935,6 +935,8 @@ async function install(
   let removePermissionBindingListener = (): void => {}
   let removeIconThemePreferenceBindingListener = (): void => {}
   let unregisterCurrentIconThemeDocument: (() => void) | undefined
+  let activeIconThemeDocumentController: AbortController | undefined
+  let iconThemeDocumentPending = true
   let iconThemeDocumentFence = 0
   let iconThemeDocumentQueue = Promise.resolve()
   const iconThemeSessionId = randomUUID()
@@ -943,6 +945,9 @@ async function install(
     ? undefined
     : (): void => {
         iconThemeDocumentFence += 1
+        activeIconThemeDocumentController?.abort()
+        activeIconThemeDocumentController = undefined
+        iconThemeDocumentPending = true
         unregisterCurrentIconThemeDocument?.()
         unregisterCurrentIconThemeDocument = undefined
       }
@@ -1208,9 +1213,15 @@ async function install(
               documentEpoch = ready.documentEpoch
               if (executionContextId === undefined) throw new Error('icon theme preference document execution context is unavailable')
               if (iconThemePreferenceBroadcast === undefined) throw new Error('icon theme preference broadcast is unavailable')
+              activeIconThemeDocumentController?.abort()
+              unregisterCurrentIconThemeDocument?.()
+              unregisterCurrentIconThemeDocument = undefined
+              iconThemeDocumentPending = true
+              const documentController = new AbortController()
+              activeIconThemeDocumentController = documentController
               const fence = ++iconThemeDocumentFence
               iconThemeDocumentQueue = iconThemeDocumentQueue.catch(() => undefined).then(async () => {
-                if (iconThemePreferenceClosed() || fence !== iconThemeDocumentFence) {
+                if (iconThemePreferenceClosed() || documentController.signal.aborted || fence !== iconThemeDocumentFence) {
                   throw new Error('icon theme preference document ready request is stale')
                 }
                 const registration = await iconThemePreferenceBroadcast.register({
@@ -1218,6 +1229,7 @@ async function install(
                   sessionId: iconThemeSessionId,
                   documentEpoch: ready.documentEpoch,
                   currentRevision: ready.currentRevision,
+                  signal: documentController.signal,
                   receive: async preference => await deliverIconThemePreferenceToDocument(
                     session,
                     { kind: 'sync', value: preference },
@@ -1226,11 +1238,15 @@ async function install(
                     executionContextId,
                   ),
                 })
-                if (iconThemePreferenceClosed() || fence !== iconThemeDocumentFence) {
+                if (iconThemePreferenceClosed() || documentController.signal.aborted || fence !== iconThemeDocumentFence) {
                   registration.unregister()
                   throw new Error('icon theme preference document ready request is stale')
                 }
                 try {
+                  const requiredRevision = iconThemePreferenceBroadcast.current()?.revision ?? ready.currentRevision
+                  const currentRevision = registration.currentRevision
+                  const synchronization = registration.synchronization === 'complete'
+                    && currentRevision >= requiredRevision ? 'complete' : 'pending'
                   await deliverIconThemePreferenceToDocument(
                     session,
                     {
@@ -1238,18 +1254,23 @@ async function install(
                       requestId: ready.requestId,
                       ok: true,
                       documentEpoch: ready.documentEpoch,
-                      currentRevision: Math.max(ready.currentRevision, registration.currentRevision),
+                      synchronization,
+                      requiredRevision,
+                      currentRevision,
                     },
                     ready.documentEpoch,
-                    Math.max(ready.currentRevision, registration.currentRevision),
+                    currentRevision,
                     executionContextId,
                   )
+                  if (synchronization === 'complete' && !documentController.signal.aborted
+                    && fence === iconThemeDocumentFence) iconThemeDocumentPending = false
                 } catch (error) {
                   registration.unregister()
                   throw error
                 }
                 unregisterCurrentIconThemeDocument?.()
                 unregisterCurrentIconThemeDocument = registration.unregister
+                activeIconThemeDocumentController = documentController
               })
               await iconThemeDocumentQueue
               return
@@ -1267,7 +1288,8 @@ async function install(
             }
             const synchronization = iconThemePreferenceBroadcast === undefined
               ? 'pending'
-              : (await iconThemePreferenceBroadcast.broadcast(value)).pending === 0 ? 'complete' : 'pending'
+              : (await iconThemePreferenceBroadcast.broadcast(value)).pending === 0
+                && !iconThemeDocumentPending ? 'complete' : 'pending'
             await sendIconThemePreferenceBindingResponse(session, {
               requestId, ok: true, value, synchronization,
             }, executionContextId)
@@ -1277,7 +1299,8 @@ async function install(
             if (bridgeError.currentPreference !== undefined) {
               synchronization = iconThemePreferenceBroadcast === undefined
                 ? 'pending'
-                : (await iconThemePreferenceBroadcast.broadcast(bridgeError.currentPreference)).pending === 0 ? 'complete' : 'pending'
+                : (await iconThemePreferenceBroadcast.broadcast(bridgeError.currentPreference)).pending === 0
+                  && !iconThemeDocumentPending ? 'complete' : 'pending'
             }
             if (documentEpoch !== undefined && executionContextId !== undefined) {
               await deliverIconThemePreferenceToDocument(session, {

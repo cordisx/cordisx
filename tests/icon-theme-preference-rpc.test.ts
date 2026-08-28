@@ -93,6 +93,7 @@ describe('Host icon-theme preference persistence', () => {
     const releaseReplay = deferred()
     const registerFirst = hub.register({
       targetId: 'target-a', sessionId: 'session-a', documentEpoch: 'document_a', currentRevision: 0,
+      signal: new AbortController().signal,
       receive: async preference => {
         first.push(preference)
         replayStarted.resolve()
@@ -111,6 +112,7 @@ describe('Host icon-theme preference persistence', () => {
 
     const secondRegistration = await hub.register({
       targetId: 'target-b', sessionId: 'session-b', documentEpoch: 'document_b', currentRevision: 0,
+      signal: new AbortController().signal,
       receive: async preference => {
         second.push(preference)
         return { documentEpoch: 'document_b', currentRevision: preference.revision }
@@ -140,6 +142,7 @@ describe('Host icon-theme preference persistence', () => {
     await Promise.all([
       defaultHub.register({
         targetId: 'target', sessionId: 'default-session', documentEpoch: 'default_doc', currentRevision: 0,
+        signal: new AbortController().signal,
         receive: async preference => {
           observedDefault.push(preference)
           return { documentEpoch: 'default_doc', currentRevision: preference.revision }
@@ -147,6 +150,7 @@ describe('Host icon-theme preference persistence', () => {
       }),
       workHub.register({
         targetId: 'target', sessionId: 'work-session', documentEpoch: 'work_doc_1', currentRevision: 0,
+        signal: new AbortController().signal,
         receive: async preference => {
           observedWork.push(preference)
           return { documentEpoch: 'work_doc_1', currentRevision: preference.revision }
@@ -168,6 +172,7 @@ describe('Host icon-theme preference persistence', () => {
     let recovered = false
     const registration = await hub.register({
       targetId: 'target', sessionId: 'session', documentEpoch: 'document_retry', currentRevision: 0,
+      signal: new AbortController().signal,
       receive: async preference => {
         attempts += 1
         if (!recovered) throw new Error('receiver missing during document install')
@@ -184,6 +189,7 @@ describe('Host icon-theme preference persistence', () => {
 
     const permanent = await hub.register({
       targetId: 'bad-target', sessionId: 'bad-session', documentEpoch: 'document_bad', currentRevision: 0,
+      signal: new AbortController().signal,
       receive: async preference => ({ documentEpoch: 'wrong_document', currentRevision: preference.revision - 1 }),
     })
     expect(permanent).toMatchObject({ currentRevision: 0, synchronization: 'pending' })
@@ -198,6 +204,7 @@ describe('Host icon-theme preference persistence', () => {
     const observed: number[] = []
     const registration = await hub.register({
       targetId: 'target', sessionId: 'session', documentEpoch: 'document_supersede', currentRevision: 0,
+      signal: new AbortController().signal,
       receive: async preference => {
         observed.push(preference.revision)
         if (preference.revision === 1) {
@@ -222,6 +229,7 @@ describe('Host icon-theme preference persistence', () => {
     registration.unregister()
     const disposed = await disposeHub.register({
       targetId: 'target', sessionId: 'session', documentEpoch: 'document_dispose', currentRevision: 0,
+      signal: new AbortController().signal,
       receive: async preference => {
         deliveryStarted.resolve()
         await releaseDelivery.promise
@@ -232,7 +240,7 @@ describe('Host icon-theme preference persistence', () => {
     await deliveryStarted.promise
     disposed.unregister()
     releaseDelivery.resolve()
-    expect(await late).toEqual({ attempted: 1, delivered: 0, failed: 1, pending: 0 })
+    expect(await late).toEqual({ attempted: 0, delivered: 0, failed: 0, pending: 0 })
   })
 
   it('rejects generation spoofing, malformed transitions, raw/private fields, and hostile identities', async () => {

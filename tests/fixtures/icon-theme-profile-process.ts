@@ -120,7 +120,8 @@ async function processA(): Promise<Record<string, unknown>> {
       ;(dom.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => unknown })
         .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
           kind: 'document-ready', requestId: request.requestId, ok: true,
-          documentEpoch: request.documentEpoch, currentRevision: request.currentRevision,
+          documentEpoch: request.documentEpoch, synchronization: 'complete',
+          requiredRevision: request.currentRevision, currentRevision: request.currentRevision,
         }))
       return
     }

@@ -4,6 +4,7 @@ import type { RedactedIconThemeProvider } from './icon-theme-registry.js'
 const BINDING = '__cordisxIconThemePreferenceRequestV1'
 const RECEIVER = '__cordisxIconThemePreferenceReceiveV1'
 const REQUEST_TIMEOUT_MS = 5_000
+const READY_RETRY_DELAYS_MS = [25, 50] as const
 
 type IconThemePreferenceBinding = (payload: string) => void
 
@@ -22,9 +23,20 @@ interface Pending {
 
 interface ReadyPending {
   readonly expectedRevision: number
-  readonly resolve: () => void
+  readonly resolve: (status: IconThemePreferenceReadyStatus) => void
   readonly reject: (error: Error) => void
   readonly timer: ReturnType<typeof setTimeout>
+}
+
+interface IconThemePreferenceReadyStatus {
+  readonly synchronization: 'complete' | 'pending'
+  readonly requiredRevision: number
+  readonly currentRevision: number
+}
+
+interface ReadyRetryWaiter {
+  readonly timer: ReturnType<typeof setTimeout>
+  readonly reject: (error: Error) => void
 }
 
 declare global {
@@ -47,6 +59,7 @@ function validPreference(value: unknown): value is HomeConfigIconThemePreference
 export class BrowserIconThemePreferenceBridge {
   private readonly pending = new Map<string, Pending>()
   private readonly readyPending = new Map<string, ReadyPending>()
+  private readonly readyRetryWaiters = new Set<ReadyRetryWaiter>()
   private readonly listeners = new Set<(preference: HomeConfigIconThemePreference) => void>()
   private readonly documentEpoch = typeof globalThis.crypto?.randomUUID === 'function'
     ? `doc_${globalThis.crypto.randomUUID().replaceAll('-', '_')}`
@@ -79,14 +92,28 @@ export class BrowserIconThemePreferenceBridge {
     return () => this.listeners.delete(listener)
   }
 
-  ready(): Promise<void> {
+  async ready(): Promise<void> {
+    if (this.closed) return Promise.reject(new Error('Icon theme preference persistence bridge is closed'))
+    let requiredRevision = this.preferenceRevision
+    for (let round = 0; round <= READY_RETRY_DELAYS_MS.length; round += 1) {
+      const status = await this.requestReady(requiredRevision)
+      requiredRevision = Math.max(requiredRevision, status.requiredRevision)
+      if (status.synchronization === 'complete') return
+      if (round === READY_RETRY_DELAYS_MS.length) {
+        throw new Error(`Icon theme preference document remains pending at revision ${status.currentRevision}; required ${requiredRevision}`)
+      }
+      await this.waitForReadyRetry(READY_RETRY_DELAYS_MS[round]!)
+    }
+  }
+
+  private requestReady(requiredRevision: number): Promise<IconThemePreferenceReadyStatus> {
     if (this.closed) return Promise.reject(new Error('Icon theme preference persistence bridge is closed'))
     const binding = globalThis[BINDING]
     if (typeof binding !== 'function') return Promise.reject(new Error('Icon theme preference persistence bridge is unavailable'))
     const requestId = typeof globalThis.crypto?.randomUUID === 'function'
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const expectedRevision = this.preferenceRevision
+    const expectedRevision = Math.max(this.preferenceRevision, requiredRevision)
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.readyPending.delete(requestId)
@@ -101,13 +128,27 @@ export class BrowserIconThemePreferenceBridge {
           requestId,
           scope: { appId: this.appId, profileId: this.profileId, hostGeneration: this.hostGeneration },
           documentEpoch: this.documentEpoch,
-          currentRevision: expectedRevision,
+          currentRevision: this.preferenceRevision,
         }))
       } catch (error) {
         this.readyPending.delete(requestId)
         clearTimeout(timer)
         reject(error)
       }
+    })
+  }
+
+  private waitForReadyRetry(delayMs: number): Promise<void> {
+    if (this.closed) return Promise.reject(new Error('Icon theme preference persistence bridge is closed'))
+    return new Promise((resolve, reject) => {
+      const waiter: ReadyRetryWaiter = {
+        timer: setTimeout(() => {
+          this.readyRetryWaiters.delete(waiter)
+          resolve()
+        }, delayMs),
+        reject,
+      }
+      this.readyRetryWaiters.add(waiter)
     })
   }
 
@@ -168,6 +209,11 @@ export class BrowserIconThemePreferenceBridge {
       pending.reject(new Error('Icon theme preference persistence bridge was disposed'))
     }
     this.readyPending.clear()
+    for (const waiter of this.readyRetryWaiters) {
+      clearTimeout(waiter.timer)
+      waiter.reject(new Error('Icon theme preference persistence bridge was disposed'))
+    }
+    this.readyRetryWaiters.clear()
     this.listeners.clear()
   }
 
@@ -182,6 +228,8 @@ export class BrowserIconThemePreferenceBridge {
       currentPreference?: unknown
       documentEpoch?: unknown
       currentRevision?: unknown
+      requiredRevision?: unknown
+      synchronization?: unknown
     }
     try { response = JSON.parse(payload) as typeof response } catch { throw new Error('icon theme preference response is invalid') }
     if (response.kind === 'sync') {
@@ -193,13 +241,25 @@ export class BrowserIconThemePreferenceBridge {
       if (pending === undefined) return this.deliveryAck()
       this.readyPending.delete(response.requestId)
       clearTimeout(pending.timer)
+      const currentRevision = response.currentRevision
+      const requiredRevision = response.requiredRevision
+      const synchronization = response.synchronization
       if (response.ok !== true || response.documentEpoch !== this.documentEpoch
         || !Number.isSafeInteger(response.currentRevision)
-        || (response.currentRevision as number) < pending.expectedRevision
-        || this.preferenceRevision < (response.currentRevision as number)) {
+        || !Number.isSafeInteger(requiredRevision)
+        || (currentRevision as number) < 0
+        || (requiredRevision as number) < pending.expectedRevision
+        || (synchronization !== 'complete' && synchronization !== 'pending')
+        || (synchronization === 'complete' && ((currentRevision as number) < (requiredRevision as number)
+          || this.preferenceRevision < (requiredRevision as number)))
+        || (synchronization === 'pending' && (currentRevision as number) >= (requiredRevision as number))) {
         pending.reject(new Error('icon theme preference document ready acknowledgement is invalid'))
       } else {
-        pending.resolve()
+        pending.resolve({
+          synchronization,
+          requiredRevision: requiredRevision as number,
+          currentRevision: currentRevision as number,
+        })
       }
       return this.deliveryAck()
     }

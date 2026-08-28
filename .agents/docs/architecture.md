@@ -727,11 +727,25 @@ subscription. Delivery is bound to the app/profile, target, launcher session,
 document epoch, and exact execution context; the renderer must acknowledge the
 same epoch and a current revision at least as new as the winner. Missing,
 throwing, destroyed-context, stale-revision, and malformed acknowledgements do
-not count as convergence. The hub retries a document delivery at most once,
-keeps durable winner state separate from each document's acknowledged and
-pending revisions, lets a higher revision supersede pending lower work, and
-allows an explicit same-revision retry after the bounded attempt window. A
-durable write response reports document synchronization as complete or pending;
+not count as convergence. The private document preference state machine is
+`booting -> ready-pending(requiredRevision) -> synchronized(ackedRevision >=
+requiredRevision) | disposed/replaced`. A pending response carries the
+launcher's required durable revision and the document's acknowledged revision;
+the browser never completes runtime boot from its older embedded revision alone.
+It reissues the same-epoch ready signal over two bounded backoff intervals, with
+two immediate delivery attempts in each round. Exhausted rounds fail boot with
+an explicit pending diagnostic; a later explicit ready signal can open a fresh
+bounded round without losing the cached winner.
+
+New ready ingress revokes and aborts the previous document before serialized
+receiver installation. Delivery races exact-context CDP evaluation against that
+cancellation, so replacement or target close unblocks the new epoch and a late
+old-context result cannot acknowledge, mutate pending state, or affect current
+document accounting. The hub keeps durable winner state separate from each
+document's acknowledged and pending revisions, lets a higher revision supersede
+pending lower work, and allows explicit same-revision retry after each bounded
+attempt window. A durable write response reports document synchronization as
+complete or pending;
 pending delivery never turns a successful atomic write into a renderer rollback.
 CAS conflicts cache and attempt the durable current preference before sending
 the conflict response, so response-triggered navigation cannot open a replay

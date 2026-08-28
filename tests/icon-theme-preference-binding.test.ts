@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HomeConfigIconThemePreference } from '../packages/cli/src/config/home-config.js'
 import { BrowserIconThemePreferenceBridge } from '../packages/cli/src/renderer/icon-theme-preference-binding.js'
 
@@ -10,11 +10,82 @@ const candidate = {
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   Reflect.deleteProperty(globalThis, '__cordisxIconThemePreferenceRequestV1')
   Reflect.deleteProperty(globalThis, '__cordisxIconThemePreferenceReceiveV1')
 })
 
 describe('browser icon-theme preference bridge', () => {
+  it('keeps a pending document booting until a bounded same-epoch redrive acknowledges the required winner', async () => {
+    vi.useFakeTimers()
+    const requests: Record<string, unknown>[] = []
+    globalThis.__cordisxIconThemePreferenceRequestV1 = payload => { requests.push(JSON.parse(payload) as Record<string, unknown>) }
+    const bridge = new BrowserIconThemePreferenceBridge('token', 'codex', 'default', 'host-12', { revision: 1, ...candidate })
+    const ready = bridge.ready()
+    const first = requests[0]!
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      kind: 'document-ready', requestId: first.requestId, ok: true,
+      documentEpoch: first.documentEpoch, synchronization: 'pending', requiredRevision: 2, currentRevision: 1,
+    }))
+    await vi.advanceTimersByTimeAsync(25)
+    expect(requests).toHaveLength(2)
+    expect(requests[1]).toMatchObject({ documentEpoch: first.documentEpoch, currentRevision: 1 })
+
+    const winner = { revision: 2, ...candidate }
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ kind: 'sync', value: winner }))
+    const second = requests[1]!
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      kind: 'document-ready', requestId: second.requestId, ok: true,
+      documentEpoch: second.documentEpoch, synchronization: 'complete', requiredRevision: 2, currentRevision: 2,
+    }))
+    await expect(ready).resolves.toBeUndefined()
+    expect(bridge.current()).toEqual(winner)
+    bridge.dispose()
+  })
+
+  it('bounds permanent pending retries, permits a later explicit ready round, and cancels backoff on dispose', async () => {
+    vi.useFakeTimers()
+    const requests: Record<string, unknown>[] = []
+    globalThis.__cordisxIconThemePreferenceRequestV1 = payload => { requests.push(JSON.parse(payload) as Record<string, unknown>) }
+    const bridge = new BrowserIconThemePreferenceBridge('token', 'codex', 'default', 'host-12', { revision: 1, ...candidate })
+    const respondPending = (index: number): void => {
+      const request = requests[index]!
+      globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+        kind: 'document-ready', requestId: request.requestId, ok: true,
+        documentEpoch: request.documentEpoch, synchronization: 'pending', requiredRevision: 2, currentRevision: 1,
+      }))
+    }
+    const unavailable = bridge.ready()
+    respondPending(0)
+    await vi.advanceTimersByTimeAsync(25)
+    respondPending(1)
+    await vi.advanceTimersByTimeAsync(50)
+    respondPending(2)
+    await expect(unavailable).rejects.toThrow('remains pending at revision 1; required 2')
+    expect(requests).toHaveLength(3)
+
+    const recovered = bridge.ready()
+    const fourth = requests[3]!
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ kind: 'sync', value: { revision: 2, ...candidate } }))
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      kind: 'document-ready', requestId: fourth.requestId, ok: true,
+      documentEpoch: fourth.documentEpoch, synchronization: 'complete', requiredRevision: 2, currentRevision: 2,
+    }))
+    await expect(recovered).resolves.toBeUndefined()
+
+    const pendingDispose = bridge.ready()
+    const fifth = requests[4]!
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      kind: 'document-ready', requestId: fifth.requestId, ok: true,
+      documentEpoch: fifth.documentEpoch, synchronization: 'pending', requiredRevision: 3, currentRevision: 2,
+    }))
+    await Promise.resolve()
+    bridge.dispose()
+    await expect(pendingDispose).rejects.toThrow('disposed')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(requests).toHaveLength(5)
+  })
+
   it('handshakes one document epoch and requires an acknowledged current revision', async () => {
     const requests: Record<string, unknown>[] = []
     globalThis.__cordisxIconThemePreferenceRequestV1 = payload => { requests.push(JSON.parse(payload) as Record<string, unknown>) }
@@ -29,7 +100,7 @@ describe('browser icon-theme preference bridge', () => {
     expect(first.documentEpoch).toMatch(/^doc_[A-Za-z0-9_]+$/u)
     globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
       kind: 'document-ready', requestId: first.requestId, ok: true,
-      documentEpoch: 'doc_wrong_epoch', currentRevision: 4,
+      documentEpoch: 'doc_wrong_epoch', synchronization: 'complete', requiredRevision: 4, currentRevision: 4,
     }))
     await expect(rejected).rejects.toThrow('acknowledgement is invalid')
 
@@ -37,7 +108,7 @@ describe('browser icon-theme preference bridge', () => {
     const second = requests[1]!
     const ack = globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
       kind: 'document-ready', requestId: second.requestId, ok: true,
-      documentEpoch: second.documentEpoch, currentRevision: 4,
+      documentEpoch: second.documentEpoch, synchronization: 'complete', requiredRevision: 4, currentRevision: 4,
     }))
     await expect(accepted).resolves.toBeUndefined()
     expect(ack).toEqual({ documentEpoch: second.documentEpoch, currentRevision: 4 })

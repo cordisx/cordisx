@@ -87,6 +87,8 @@ function acknowledgeDocumentReady(page: JSDOM, request: Record<string, unknown>)
     requestId: request.requestId,
     ok: true,
     documentEpoch: request.documentEpoch,
+    synchronization: 'complete',
+    requiredRevision: request.currentRevision,
     currentRevision: request.currentRevision,
   })
   return true
@@ -334,6 +336,7 @@ describe('profile-scoped icon-theme selection runtime', () => {
               sessionId: 'same-session',
               documentEpoch: ready.documentEpoch,
               currentRevision: ready.currentRevision,
+              signal: new AbortController().signal,
               receive: async value => {
                 const ack = receiveIconThemeMessage(page, { kind: 'sync', value })
                 if (ack === null || typeof ack !== 'object') throw new Error('document receiver returned no acknowledgement')
@@ -343,7 +346,9 @@ describe('profile-scoped icon-theme selection runtime', () => {
             receiveIconThemeMessage(page, {
               kind: 'document-ready', requestId: ready.requestId, ok: true,
               documentEpoch: ready.documentEpoch,
-              currentRevision: Math.max(ready.currentRevision, registration.currentRevision),
+              synchronization: registration.synchronization,
+              requiredRevision: hub.current()?.revision ?? ready.currentRevision,
+              currentRevision: registration.currentRevision,
             })
           } catch (error) {
             receiveIconThemeMessage(page, {
@@ -454,13 +459,16 @@ describe('profile-scoped icon-theme selection runtime', () => {
             sessionId: `session-${index}`,
             documentEpoch: ready.documentEpoch,
             currentRevision: ready.currentRevision,
+            signal: new AbortController().signal,
             receive: async value => receive(page, { kind: 'sync', value }) as { documentEpoch: string; currentRevision: number },
           })
           unregisterDocuments.push(registration.unregister)
           receive(page, {
             kind: 'document-ready', requestId: ready.requestId, ok: true,
             documentEpoch: ready.documentEpoch,
-            currentRevision: Math.max(ready.currentRevision, registration.currentRevision),
+            synchronization: registration.synchronization,
+            requiredRevision: hub.current()?.revision ?? ready.currentRevision,
+            currentRevision: registration.currentRevision,
           })
         })()
       },

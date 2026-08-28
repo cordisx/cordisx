@@ -44,6 +44,7 @@ export interface IconThemePreferenceDocumentReceiver {
   readonly sessionId: string
   readonly documentEpoch: string
   readonly currentRevision: number
+  readonly signal: AbortSignal
   readonly receive: (preference: HomeConfigIconThemePreference) => Promise<IconThemePreferenceDeliveryAck>
 }
 
@@ -67,6 +68,8 @@ interface IconThemePreferenceDocumentState {
   tail: Promise<void>
   ackedRevision: number
   pending: HomeConfigIconThemePreference | undefined
+  readonly cancellation: AbortController
+  removeExternalAbort: (() => void) | undefined
   readonly receiver: IconThemePreferenceDocumentReceiver
 }
 
@@ -251,30 +254,32 @@ export class IconThemePreferenceBroadcastHub {
   }> {
     const key = `${receiver.targetId}\u0000${receiver.sessionId}`
     const previous = this.receivers.get(key)
-    if (previous !== undefined) {
-      previous.active = false
-      previous.pending = undefined
-    }
+    if (previous !== undefined) this.deactivate(key, previous)
+    const cancellation = new AbortController()
     const entry: IconThemePreferenceDocumentState = {
       active: true,
       tail: Promise.resolve(),
       ackedRevision: receiver.currentRevision,
       pending: undefined,
+      cancellation,
+      removeExternalAbort: undefined,
       receiver,
     }
     this.receivers.set(key, entry)
-    if (this.winner !== undefined && entry.ackedRevision < this.winner.revision) {
+    const externalAbort = (): void => this.deactivate(key, entry)
+    receiver.signal.addEventListener('abort', externalAbort, { once: true })
+    entry.removeExternalAbort = () => receiver.signal.removeEventListener('abort', externalAbort)
+    if (receiver.signal.aborted) this.deactivate(key, entry)
+    if (entry.active && this.winner !== undefined && entry.ackedRevision < this.winner.revision) {
       entry.pending = { ...this.winner }
       await this.enqueue(entry)
     }
     const unregister = (): void => {
-      entry.active = false
-      entry.pending = undefined
-      if (this.receivers.get(key) === entry) this.receivers.delete(key)
+      this.deactivate(key, entry)
     }
     return {
-      currentRevision: entry.ackedRevision,
-      synchronization: entry.pending === undefined ? 'complete' : 'pending',
+      get currentRevision() { return entry.ackedRevision },
+      get synchronization() { return entry.pending === undefined ? 'complete' as const : 'pending' as const },
       unregister,
     }
   }
@@ -295,11 +300,12 @@ export class IconThemePreferenceBroadcastHub {
     const entries = [...this.receivers.values()].filter(entry => entry.active && entry.ackedRevision < preference.revision)
     for (const entry of entries) entry.pending = { ...preference }
     const results = await Promise.all(entries.map(async entry => await this.enqueue(entry)))
+    const attempted = results.filter(result => result !== 'inactive').length
     const delivered = results.filter(result => result === 'delivered').length
     return {
-      attempted: entries.length,
+      attempted,
       delivered,
-      failed: results.filter(result => result !== 'delivered').length,
+      failed: results.filter(result => result === 'failed').length,
       pending: this.pendingCount(),
     }
   }
@@ -317,6 +323,16 @@ export class IconThemePreferenceBroadcastHub {
     return [...this.receivers.values()].filter(entry => entry.active && entry.pending !== undefined).length
   }
 
+  private deactivate(key: string, entry: IconThemePreferenceDocumentState): void {
+    if (!entry.active) return
+    entry.active = false
+    entry.pending = undefined
+    entry.removeExternalAbort?.()
+    entry.removeExternalAbort = undefined
+    entry.cancellation.abort()
+    if (this.receivers.get(key) === entry) this.receivers.delete(key)
+  }
+
   private async enqueue(
     entry: IconThemePreferenceDocumentState,
   ): Promise<'delivered' | 'failed' | 'inactive'> {
@@ -330,7 +346,19 @@ export class IconThemePreferenceBroadcastHub {
           return 'delivered' as const
         }
         try {
-          const ack = await entry.receiver.receive({ ...value })
+          let rejectCancelled!: (error: Error) => void
+          const cancelled = new Promise<never>((_resolve, reject) => {
+            rejectCancelled = reject
+          })
+          const onAbort = (): void => rejectCancelled(new Error('icon theme preference document receiver is disposed'))
+          entry.cancellation.signal.addEventListener('abort', onAbort, { once: true })
+          if (entry.cancellation.signal.aborted) onAbort()
+          let ack: IconThemePreferenceDeliveryAck
+          try {
+            ack = await Promise.race([entry.receiver.receive({ ...value }), cancelled])
+          } finally {
+            entry.cancellation.signal.removeEventListener('abort', onAbort)
+          }
           if (!entry.active) return 'inactive' as const
           if (ack.documentEpoch !== entry.receiver.documentEpoch || ack.currentRevision < value.revision) {
             throw new Error('icon theme preference delivery acknowledgement is invalid')
