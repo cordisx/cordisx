@@ -123,6 +123,8 @@ export interface ControlledSurfaceManagerSnapshot {
       readonly selection: 'user' | 'host-priority'
       readonly nativeFallback: boolean
       readonly modes: readonly CordisXExtensionPointControlMode[]
+      /** Durable user intent, independent from whether the point is currently mounted. */
+      readonly policyChoice?: ControlledSurfaceGroupChoice
       /** Current resolved outcome for this exact policy snapshot. */
       readonly decision?: CordisXExtensionPointControlPointSnapshotV1['groupDecisions'][number]
     }[]
@@ -612,11 +614,13 @@ export class ControlledSurfaceCoordinator {
         groupDecisions: point.groupDecisions,
         groups: Object.freeze((this.points.get(point.id)?.exclusiveGroups ?? []).map(group => {
           const decision = point.groupDecisions.find(item => item.groupId === group.id)
+          const policyChoice = group.selection === 'user' ? this.policies.choice(point.id, group.id) : undefined
           return Object.freeze({
             id: group.id,
             selection: group.selection,
             nativeFallback: group.nativeFallback,
             modes: group.modes,
+            ...(policyChoice === undefined ? {} : { policyChoice }),
             ...(decision === undefined ? {} : { decision }),
           })
         })),

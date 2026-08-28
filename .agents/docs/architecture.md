@@ -294,8 +294,11 @@ hides and restores the native presentation, overlay retains it, proxy performs
 no DOM effect, and hide-native uses a reversible Host visibility lease.
 
 Manager receives a separate read-only diagnostic projection with candidates,
-exact claim policy, group decisions, and suppression reason chains. Manager
-writes call the Host policy broker; plugins cannot submit a selected winner.
+exact claim policy, durable user group choices, current group decisions, and
+suppression reason chains. The durable choice drives the selector even while
+the point is not mounted; the current decision separately reports runtime
+effect. Manager writes call the Host policy broker; plugins cannot submit a
+selected winner.
 The projection, opaque principal handles, stored policy, and diagnostics are
 removed from the public runtime snapshot. Policy storage contains only
 principal bindings, exact authorization records, and group choices under a

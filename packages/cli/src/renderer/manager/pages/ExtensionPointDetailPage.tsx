@@ -34,9 +34,8 @@ export function ExtensionPointDetailPage({ model, snapshot, router }: { readonly
       {control === undefined ? null : <section className="cxr-section" data-cordisx-control-point={control.id}><h3>受控渲染</h3><p>{control.state} · {control.reason}</p></section>}
       {control?.groups.filter(group => group.selection === 'user').map(group => {
         const candidates = control.candidates.filter(candidate => candidate.exclusiveGroup === group.id && candidate.authorization === 'allowed')
-        const decision = group.decision
-        const value = decision?.outcome === 'selected' && decision.selectedClaim !== undefined
-          ? stableControlClaimKey(decision.selectedClaim)
+        const value = group.policyChoice?.outcome === 'selected' && group.policyChoice.selectedClaim !== undefined
+          ? stableControlClaimKey(group.policyChoice.selectedClaim)
           : 'native'
         const groupOptions = [
           ...(group.nativeFallback ? [{ label: '原生渲染', value: 'native' }] : []),

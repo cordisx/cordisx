@@ -98,6 +98,7 @@ function activation(revision: number, digestCharacter: string, moduleGeneration 
 
 function setup() {
   let intensity = 'high'
+  let reasoningState: 'active' | 'pending' = 'active'
   const dispatch = vi.fn(async (_id: string, args: Readonly<Record<string, unknown>>) => { intensity = String(args.value) })
   const active = new Set(['outer-v1', 'legacy-v1', 'overlay-v1', 'replace-v1', 'denied-v1'])
   const plugins = ['outer', 'legacy', 'overlay', 'replace', 'denied']
@@ -115,14 +116,14 @@ function setup() {
       dispatch: () => undefined,
     },
     'model.reasoning-intensity': {
-      currentState: () => ({ state: 'active', reason: 'point.mounted' }),
+      currentState: () => ({ state: reasoningState, reason: reasoningState === 'active' ? 'point.mounted' : 'point.pending' }),
       readProperty: id => id === 'reasoningIntensity' ? intensity : null,
       commandAvailability: () => ({ available: true }),
       eventAvailability: () => ({ available: true }),
       dispatch,
     },
   }, 'host-1', policies, item => active.has(item.moduleGeneration ?? ''))
-  return { coordinator, policies, dispatch, active, intensity: () => intensity }
+  return { coordinator, policies, dispatch, active, intensity: () => intensity, setReasoningState: (state: 'active' | 'pending') => { reasoningState = state } }
 }
 
 describe('controlled extension point runtime', () => {
@@ -148,7 +149,7 @@ describe('controlled extension point runtime', () => {
   })
 
   it('resolves exclusive groups first, then selects compatible ordered claims deterministically', () => {
-    const { coordinator, policies } = setup()
+    const { coordinator, policies, setReasoningState } = setup()
     coordinator.register({ declaration: declaration('legacy', 'model.reasoning-intensity', 'legacy', undefined, 10), generation: generation('legacy', 'legacy-v1', 'legacy-structured'), presenter: { kind: 'legacy' } })
     coordinator.register({ declaration: declaration('overlay', 'model.reasoning-intensity', 'overlay', {
       claimId: 'theme', mode: 'overlay', priority: 30, requestedBindings: { properties: ['reasoningIntensity'] },
@@ -171,13 +172,24 @@ describe('controlled extension point runtime', () => {
     expect(point.candidates.find(item => item.identity.pluginId === 'overlay')?.selection).toMatchObject({ authority: 'host-policy', rank: 0 })
     expect(point.candidates.find(item => item.identity.pluginId === 'replace')?.selection).not.toHaveProperty('rank')
     expect(coordinator.selectedPresenters(point.id).map(item => item.presenter)).toEqual([{ kind: 'theme' }, { kind: 'renderer' }])
-    expect(coordinator.managerSnapshot().points.find(item => item.id === point.id)?.groups.find(group => group.id === 'renderer')?.decision).toMatchObject({
+    let managerGroup = coordinator.managerSnapshot().points.find(item => item.id === point.id)?.groups.find(group => group.id === 'renderer')
+    expect(managerGroup?.decision).toMatchObject({
       outcome: 'selected', selectedClaim: { identity: { pluginId: 'replace' }, claimId: 'renderer', mode: 'replace' },
     })
+    expect(managerGroup?.policyChoice).toMatchObject({
+      outcome: 'selected', selectedClaim: { identity: { pluginId: 'replace' }, claimId: 'renderer', mode: 'replace' },
+    })
+    setReasoningState('pending')
+    coordinator.invalidate()
+    managerGroup = coordinator.managerSnapshot().points.find(item => item.id === point.id)?.groups.find(group => group.id === 'renderer')
+    expect(managerGroup?.decision).toMatchObject({ outcome: 'none' })
+    expect(managerGroup?.policyChoice).toMatchObject({ outcome: 'selected', selectedClaim: { claimId: 'renderer' } })
     coordinator.setGroupChoice(coordinator.managerSnapshot().policyRevision, {
       pointId: point.id, groupId: 'renderer', outcome: 'native',
     })
-    expect(coordinator.managerSnapshot().points.find(item => item.id === point.id)?.groups.find(group => group.id === 'renderer')?.decision).toMatchObject({ outcome: 'native' })
+    managerGroup = coordinator.managerSnapshot().points.find(item => item.id === point.id)?.groups.find(group => group.id === 'renderer')
+    expect(managerGroup?.decision).toMatchObject({ outcome: 'native' })
+    expect(managerGroup?.policyChoice).toMatchObject({ outcome: 'native' })
   })
 
   it('keeps equal-priority winner order stable when profile-local principal handles change', () => {

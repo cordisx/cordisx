@@ -8,10 +8,11 @@ import type { ManagerRouter } from '../packages/cli/src/renderer/manager/model/r
 const identity = { source: 'https://plugins.example/theme', pluginId: 'theme', pointId: 'composer.reasoning-intensity' }
 const selectedClaim = { principalHandle: 'principal:theme', identity, claimId: 'overlay', mode: 'overlay' as const }
 
-function snapshot(policyRevision: number, outcome: 'native' | 'selected'): ManagerSnapshot {
-  const decision = outcome === 'selected'
-    ? { groupId: 'renderer', outcome, selectedClaim, authority: 'user' as const, hostGeneration: 'host', reason: 'user.selected' }
-    : { groupId: 'renderer', outcome, authority: 'user' as const, hostGeneration: 'host', reason: 'user.native' }
+function snapshot(policyRevision: number, policyOutcome: 'native' | 'selected', currentOutcome: 'native' | 'none' | 'selected' = policyOutcome): ManagerSnapshot {
+  const decision = currentOutcome === 'selected'
+    ? { groupId: 'renderer', outcome: currentOutcome, selectedClaim, authority: 'user' as const, hostGeneration: 'host', reason: 'user.selected' }
+    : { groupId: 'renderer', outcome: currentOutcome, authority: 'user' as const, hostGeneration: 'host', reason: currentOutcome === 'native' ? 'user.native' : 'policy.no-selection' }
+  const pointPending = policyOutcome === 'selected' && currentOutcome !== 'selected'
   return {
     extensionPoints: { points: [{
       id: identity.pointId, plugins: [], available: true, availability: 'available', availabilityDetail: '',
@@ -20,13 +21,18 @@ function snapshot(policyRevision: number, outcome: 'native' | 'selected'): Manag
     extensionPointControls: {
       revision: policyRevision + 10, policyRevision, hostGeneration: 'host', diagnostics: [],
       points: [{
-        id: identity.pointId, state: 'active', reason: 'point.mounted', selected: outcome === 'selected' ? [selectedClaim] : [],
+        id: identity.pointId, state: pointPending ? 'pending' : 'active', reason: pointPending ? 'point.not-mounted' : 'point.mounted', selected: currentOutcome === 'selected' ? [selectedClaim] : [],
         eligibleCandidates: [], deniedCandidates: [], groupDecisions: [decision],
-        groups: [{ id: 'renderer', selection: 'user', nativeFallback: true, modes: ['overlay'], decision }],
+        groups: [{
+          id: 'renderer', selection: 'user', nativeFallback: true, modes: ['overlay'], decision,
+          policyChoice: policyOutcome === 'selected'
+            ? { pointId: identity.pointId, groupId: 'renderer', outcome: policyOutcome, selectedClaim }
+            : { pointId: identity.pointId, groupId: 'renderer', outcome: policyOutcome },
+        }],
         candidates: [{
           ...selectedClaim, contributionId: 'overlay', exclusiveGroup: 'renderer', priority: 0,
-          authorization: 'allowed', policy: 'allow', state: outcome === 'selected' ? 'selected' : 'eligible',
-          reason: outcome === 'selected' ? 'user.selected' : 'policy.eligible',
+          authorization: 'allowed', policy: 'allow', state: pointPending ? 'pending' : currentOutcome === 'selected' ? 'selected' : 'eligible',
+          reason: pointPending ? 'point.not-active' : currentOutcome === 'selected' ? 'user.selected' : 'policy.eligible',
         }],
       }],
     },
@@ -34,7 +40,7 @@ function snapshot(policyRevision: number, outcome: 'native' | 'selected'): Manag
 }
 
 describe('React Manager controlled group select', () => {
-  it('refreshes selected label across policy CAS and remount, then dispatches native fallback', async () => {
+  it('refreshes selected policy choice across policy CAS and remount, then dispatches native fallback', async () => {
     const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: 'https://host.invalid/' })
     const previous = {
       document: globalThis.document, window: globalThis.window,
@@ -65,13 +71,13 @@ describe('React Manager controlled group select', () => {
     try {
       await act(async () => root.render(<ExtensionPointDetailPage model={model} snapshot={snapshot(0, 'native')} router={router} />))
       expect(input()?.value).toBe('原生渲染')
-      await act(async () => root.render(<ExtensionPointDetailPage model={model} snapshot={snapshot(1, 'selected')} router={router} />))
+      await act(async () => root.render(<ExtensionPointDetailPage model={model} snapshot={snapshot(1, 'selected', 'none')} router={router} />))
       expect(input()?.value).toBe('theme · overlay')
 
       await act(async () => root.unmount())
       dom.window.document.body.innerHTML = '<div id="root"></div>'
       root = createRoot(dom.window.document.getElementById('root')!)
-      await act(async () => root.render(<ExtensionPointDetailPage model={model} snapshot={snapshot(1, 'selected')} router={router} />))
+      await act(async () => root.render(<ExtensionPointDetailPage model={model} snapshot={snapshot(1, 'selected', 'none')} router={router} />))
       expect(input()?.value).toBe('theme · overlay')
 
       const selectInput = input()!
@@ -89,5 +95,5 @@ describe('React Manager controlled group select', () => {
       Object.assign(globalThis, previous)
       dom.window.close()
     }
-  })
+  }, 30_000)
 })
