@@ -11,6 +11,8 @@ import {
   parseIconThemePreferenceDocumentReadyRequest,
   persistIconThemePreference,
   type IconThemePreferencePersistenceContext,
+  type IconThemePreferenceReadyResponseAck,
+  type IconThemePreferenceReadyResponseLease,
 } from '../packages/cli/src/launcher/icon-theme-rpc.js'
 
 const token = 'a'.repeat(64)
@@ -25,6 +27,19 @@ function deferred<Value = void>(): { readonly promise: Promise<Value>; readonly 
   let resolve!: (value: Value) => void
   const promise = new Promise<Value>(done => { resolve = done })
   return { promise, resolve }
+}
+
+function readyAck(
+  documentEpoch: string,
+  currentRevision: number,
+  lease: IconThemePreferenceReadyResponseLease,
+): IconThemePreferenceReadyResponseAck {
+  return {
+    documentEpoch,
+    currentRevision,
+    readyLeaseToken: lease.token,
+    readyLeaseRevision: lease.revision,
+  }
 }
 
 async function context(): Promise<IconThemePreferencePersistenceContext> {
@@ -191,7 +206,7 @@ describe('Host icon-theme preference persistence', () => {
     await expect(hub.broadcast(winner)).resolves.toMatchObject({ attempted: 1, delivered: 1, pending: 1 })
     await expect(registration.respondReady(
       { documentEpoch: 'document_booting', currentRevision: 1 },
-      async status => ({ documentEpoch: 'document_booting', currentRevision: status.currentRevision }),
+      async (status, lease) => readyAck('document_booting', status.currentRevision, lease),
     )).resolves.toEqual({ synchronization: 'complete', requiredRevision: 1, currentRevision: 1 })
     await expect(hub.broadcast(winner)).resolves.toMatchObject({ attempted: 0, pending: 0 })
 
@@ -201,7 +216,7 @@ describe('Host icon-theme preference persistence', () => {
     })
     await expect(registration.respondReady(
       { documentEpoch: 'document_booting', currentRevision: 1 },
-      async status => ({ documentEpoch: 'document_booting', currentRevision: status.currentRevision }),
+      async (status, lease) => readyAck('document_booting', status.currentRevision, lease),
     )).rejects.toThrow('stale')
     await expect(hub.broadcast(winner)).resolves.toMatchObject({ pending: 1 })
     replacement.cancel()
@@ -227,9 +242,9 @@ describe('Host icon-theme preference persistence', () => {
     })
     const heldProbe = deferred<{ documentEpoch: string; currentRevision: number }>()
     const responses: Array<{ synchronization: string; requiredRevision: number; currentRevision: number }> = []
-    const ready = heldProbe.promise.then(async probeAck => await registration.respondReady(probeAck, async status => {
+    const ready = heldProbe.promise.then(async probeAck => await registration.respondReady(probeAck, async (status, lease) => {
       responses.push(status)
-      return { documentEpoch: 'document_linear', currentRevision: status.currentRevision }
+      return readyAck('document_linear', status.currentRevision, lease)
     }))
 
     await expect(hub.broadcast(revisionThree)).resolves.toMatchObject({ delivered: 1, pending: 1 })
@@ -251,7 +266,7 @@ describe('Host icon-theme preference persistence', () => {
     const registration = await reservation.register({
       receive: async preference => ({ documentEpoch: 'document_lease', currentRevision: preference.revision }),
     })
-    const held = deferred<{ documentEpoch: string; currentRevision: number }>()
+    const held = deferred<IconThemePreferenceReadyResponseAck>()
     const firstLeasePrepared = deferred<AbortSignal>()
     let responses = 0
     const ready = registration.respondReady(
@@ -263,7 +278,7 @@ describe('Host icon-theme preference persistence', () => {
           return await held.promise
         }
         expect(status).toEqual({ synchronization: 'complete', requiredRevision: 2, currentRevision: 2 })
-        return { documentEpoch: 'document_lease', currentRevision: 2 }
+        return readyAck('document_lease', 2, lease)
       },
     )
     const firstSignal = await firstLeasePrepared.promise
@@ -271,7 +286,10 @@ describe('Host icon-theme preference persistence', () => {
     await expect(hub.broadcast({ revision: 2, ...candidate })).resolves.toMatchObject({ delivered: 1, pending: 1 })
     expect(firstSignal.aborted).toBe(true)
     await expect(ready).resolves.toEqual({ synchronization: 'complete', requiredRevision: 2, currentRevision: 2 })
-    held.resolve({ documentEpoch: 'document_lease', currentRevision: 1 })
+    held.resolve({
+      documentEpoch: 'document_lease', currentRevision: 1,
+      readyLeaseToken: 'ready_late_00000001', readyLeaseRevision: 1,
+    })
     await Promise.resolve()
     expect(responses).toBe(2)
     await expect(hub.broadcast(hub.current()!)).resolves.toMatchObject({ pending: 0 })
@@ -291,11 +309,11 @@ describe('Host icon-theme preference persistence', () => {
     })
     await expect(registration.respondReady(
       { documentEpoch: 'document_order', currentRevision: 1 },
-      async status => ({ documentEpoch: 'document_order', currentRevision: status.currentRevision }),
+      async (status, lease) => readyAck('document_order', status.currentRevision, lease),
     )).resolves.toEqual({ synchronization: 'complete', requiredRevision: 1, currentRevision: 1 })
     await expect(hub.broadcast({ revision: 2, ...candidate })).resolves.toMatchObject({ delivered: 1, pending: 0 })
 
-    const held = deferred<{ documentEpoch: string; currentRevision: number }>()
+    const held = deferred<IconThemePreferenceReadyResponseAck>()
     const leasePrepared = deferred<AbortSignal>()
     const disposing = registration.respondReady(
       { documentEpoch: 'document_order', currentRevision: 2 },
@@ -308,7 +326,38 @@ describe('Host icon-theme preference persistence', () => {
     registration.unregister()
     expect(signal.aborted).toBe(true)
     await expect(disposing).rejects.toThrow('stale')
-    held.resolve({ documentEpoch: 'document_order', currentRevision: 2 })
+    held.resolve({
+      documentEpoch: 'document_order', currentRevision: 2,
+      readyLeaseToken: 'ready_late_00000002', readyLeaseRevision: 2,
+    })
+  })
+
+  it('does not clear booting from a generic or mismatched ready lease acknowledgement', async () => {
+    const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    await hub.broadcast({ revision: 1, ...candidate })
+    const reservation = hub.reserve({
+      targetId: 'target-mismatch', sessionId: 'session-mismatch', documentEpoch: 'document_mismatch',
+      executionContextId: 15, currentRevision: 1, signal: new AbortController().signal,
+    })
+    const registration = await reservation.register({
+      receive: async preference => ({ documentEpoch: 'document_mismatch', currentRevision: preference.revision }),
+    })
+    await expect(registration.respondReady(
+      { documentEpoch: 'document_mismatch', currentRevision: 1 },
+      async (_status, lease) => ({
+        documentEpoch: 'document_mismatch',
+        currentRevision: 1,
+        readyLeaseToken: `ready_wrong_${lease.revision}`,
+        readyLeaseRevision: lease.revision,
+      }),
+    )).resolves.toEqual({ synchronization: 'pending', requiredRevision: 1, currentRevision: 1 })
+    await expect(hub.broadcast(hub.current()!)).resolves.toMatchObject({ pending: 1 })
+    await expect(registration.respondReady(
+      { documentEpoch: 'document_mismatch', currentRevision: 1 },
+      async (status, lease) => readyAck('document_mismatch', status.currentRevision, lease),
+    )).resolves.toEqual({ synchronization: 'complete', requiredRevision: 1, currentRevision: 1 })
+    await expect(hub.broadcast(hub.current()!)).resolves.toMatchObject({ pending: 0 })
+    registration.unregister()
   })
 
   it('keeps failed delivery pending and re-drives the same winner after the receiver recovers', async () => {
@@ -333,7 +382,7 @@ describe('Host icon-theme preference persistence', () => {
     expect(attempts).toBe(3)
     await expect(registration.respondReady(
       { documentEpoch: 'document_retry', currentRevision: 1 },
-      async status => ({ documentEpoch: 'document_retry', currentRevision: status.currentRevision }),
+      async (status, lease) => readyAck('document_retry', status.currentRevision, lease),
     )).resolves.toEqual({ synchronization: 'complete', requiredRevision: 1, currentRevision: 1 })
     await expect(hub.retryPending()).resolves.toEqual({ attempted: 0, delivered: 0, failed: 0, pending: 0 })
     registration.unregister()

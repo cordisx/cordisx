@@ -39,6 +39,11 @@ export interface IconThemePreferenceDeliveryAck {
   readonly currentRevision: number
 }
 
+export interface IconThemePreferenceReadyResponseAck extends IconThemePreferenceDeliveryAck {
+  readonly readyLeaseToken: string
+  readonly readyLeaseRevision: number
+}
+
 export interface IconThemePreferenceDocumentReceiver {
   readonly receive: (preference: HomeConfigIconThemePreference) => Promise<IconThemePreferenceDeliveryAck>
 }
@@ -73,7 +78,7 @@ export interface IconThemePreferenceDocumentRegistration {
     respond: (
       status: IconThemePreferenceDocumentSynchronization,
       lease: IconThemePreferenceReadyResponseLease,
-    ) => Promise<IconThemePreferenceDeliveryAck>,
+    ) => Promise<IconThemePreferenceReadyResponseAck>,
   ): Promise<IconThemePreferenceDocumentSynchronization>
   unregister(): void
 }
@@ -342,7 +347,12 @@ export class IconThemePreferenceBroadcastHub {
     const registration = await reservation.register({ receive: identity.receive })
     await registration.respondReady(
       { documentEpoch: identity.documentEpoch, currentRevision: registration.currentRevision },
-      async status => ({ documentEpoch: identity.documentEpoch, currentRevision: status.currentRevision }),
+      async (status, lease) => ({
+        documentEpoch: identity.documentEpoch,
+        currentRevision: status.currentRevision,
+        readyLeaseToken: lease.token,
+        readyLeaseRevision: lease.revision,
+      }),
     )
     return registration
   }
@@ -436,7 +446,7 @@ export class IconThemePreferenceBroadcastHub {
         // Browser.ready() owns the bounded outer redrive rounds.
         for (let responseRound = 0; responseRound < 2; responseRound += 1) {
           const lease = await this.prepareReadyLease(key, entry)
-          let responseAck: IconThemePreferenceDeliveryAck | undefined
+          let responseAck: IconThemePreferenceReadyResponseAck | undefined
           let responseError: unknown
           try {
             responseAck = await this.respondWithReadyLease(respond, lease)
@@ -518,9 +528,9 @@ export class IconThemePreferenceBroadcastHub {
     respond: (
       status: IconThemePreferenceDocumentSynchronization,
       lease: IconThemePreferenceReadyResponseLease,
-    ) => Promise<IconThemePreferenceDeliveryAck>,
+    ) => Promise<IconThemePreferenceReadyResponseAck>,
     lease: IconThemePreferenceReadyLease,
-  ): Promise<IconThemePreferenceDeliveryAck> {
+  ): Promise<IconThemePreferenceReadyResponseAck> {
     this.assertExternalCallUnlocked('ready response')
     let rejectCancelled!: (error: Error) => void
     const cancelled = new Promise<never>((_resolve, reject) => { rejectCancelled = reject })
@@ -546,7 +556,7 @@ export class IconThemePreferenceBroadcastHub {
     key: string,
     entry: IconThemePreferenceDocumentState,
     lease: IconThemePreferenceReadyLease,
-    responseAck: IconThemePreferenceDeliveryAck | undefined,
+    responseAck: IconThemePreferenceReadyResponseAck | undefined,
   ): Promise<IconThemePreferenceDocumentSynchronization | undefined> {
     return await this.serializeEntry(entry, async () => await this.serialize(() => {
       this.assertActive(key, entry)
@@ -556,7 +566,9 @@ export class IconThemePreferenceBroadcastHub {
         || lease.documentKey !== entry.documentKey
         || lease.entryGeneration !== entry.entryGeneration
         || lease.requiredRevision < latestRequiredRevision
-        || responseAck === undefined) {
+        || responseAck === undefined
+        || responseAck.readyLeaseToken !== lease.token
+        || responseAck.readyLeaseRevision !== lease.revision) {
         return undefined
       }
       this.assertActiveAck(key, entry, responseAck, lease.status.currentRevision)

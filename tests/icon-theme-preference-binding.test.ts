@@ -112,22 +112,19 @@ describe('browser icon-theme preference bridge', () => {
       currentRevision: 4,
     })
     expect(first.documentEpoch).toMatch(/^doc_[A-Za-z0-9_]+$/u)
-    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+    expect(() => globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
       kind: 'document-ready', requestId: first.requestId, ok: true,
       ...readyLease(),
       documentEpoch: 'doc_wrong_epoch', synchronization: 'complete', requiredRevision: 4, currentRevision: 4,
-    }))
-    await expect(rejected).rejects.toThrow('acknowledgement is invalid')
-
-    const accepted = bridge.ready()
-    const second = requests[1]!
+    }))).toThrow('acknowledgement is invalid')
+    const acceptedLease = readyLease()
     const ack = globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
-      kind: 'document-ready', requestId: second.requestId, ok: true,
-      ...readyLease(),
-      documentEpoch: second.documentEpoch, synchronization: 'complete', requiredRevision: 4, currentRevision: 4,
+      kind: 'document-ready', requestId: first.requestId, ok: true,
+      ...acceptedLease,
+      documentEpoch: first.documentEpoch, synchronization: 'complete', requiredRevision: 4, currentRevision: 4,
     }))
-    await expect(accepted).resolves.toBeUndefined()
-    expect(ack).toEqual({ documentEpoch: second.documentEpoch, currentRevision: 4 })
+    await expect(rejected).resolves.toBeUndefined()
+    expect(ack).toEqual({ documentEpoch: first.documentEpoch, currentRevision: 4, ...acceptedLease })
 
     const disposed = bridge.ready()
     bridge.dispose()
@@ -140,19 +137,80 @@ describe('browser icon-theme preference bridge', () => {
     const bridge = new BrowserIconThemePreferenceBridge('token', 'codex', 'default', 'host-12', { revision: 1, ...candidate })
     const ready = bridge.ready()
     const request = requests[0]!
-    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ kind: 'sync', value: { revision: 2, ...candidate } }))
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ kind: 'sync', value: { revision: 3, ...candidate } }))
+    const oldPendingLease = readyLease()
+    expect(() => globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      kind: 'document-ready', requestId: request.requestId, ok: true,
+      ...oldPendingLease,
+      documentEpoch: request.documentEpoch, synchronization: 'pending', requiredRevision: 3, currentRevision: 2,
+    }))).toThrow('response lease is stale')
+    const invalidReplacement = readyLease()
+    expect(() => globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      kind: 'document-ready', requestId: request.requestId, ok: true,
+      readyLeaseToken: 'not-a-valid-token', readyLeaseRevision: invalidReplacement.readyLeaseRevision,
+      documentEpoch: request.documentEpoch, synchronization: 'complete', requiredRevision: 3, currentRevision: 3,
+    }))).toThrow('response lease is stale')
+    const replacementLease = readyLease()
+    const ack = globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      kind: 'document-ready', requestId: request.requestId, ok: true,
+      ...replacementLease,
+      documentEpoch: request.documentEpoch, synchronization: 'complete', requiredRevision: 3, currentRevision: 3,
+    }))
+    await expect(ready).resolves.toBeUndefined()
+    expect(ack).toEqual({ documentEpoch: request.documentEpoch, currentRevision: 3, ...replacementLease })
+    expect(() => globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      kind: 'document-ready', requestId: request.requestId, ok: true,
+      ...replacementLease,
+      documentEpoch: request.documentEpoch, synchronization: 'complete', requiredRevision: 3, currentRevision: 3,
+    }))).toThrow('unknown or expired')
+    bridge.dispose()
+  })
+
+  it('rejects a late ready response after the exact request expires', async () => {
+    vi.useFakeTimers()
+    const requests: Record<string, unknown>[] = []
+    globalThis.__cordisxIconThemePreferenceRequestV1 = payload => { requests.push(JSON.parse(payload) as Record<string, unknown>) }
+    const bridge = new BrowserIconThemePreferenceBridge('token', 'codex', 'default', 'host-12', { revision: 3, ...candidate })
+    const ready = bridge.ready()
+    const expired = expect(ready).rejects.toThrow('timed out')
+    await vi.advanceTimersByTimeAsync(5_000)
+    await expired
+    const request = requests[0]!
     expect(() => globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
       kind: 'document-ready', requestId: request.requestId, ok: true,
       ...readyLease(),
-      documentEpoch: request.documentEpoch, synchronization: 'complete', requiredRevision: 1, currentRevision: 1,
-    }))).toThrow('response lease is stale')
-    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
-      kind: 'document-ready', requestId: request.requestId, ok: true,
-      ...readyLease(),
-      documentEpoch: request.documentEpoch, synchronization: 'complete', requiredRevision: 2, currentRevision: 2,
-    }))
-    await expect(ready).resolves.toBeUndefined()
+      documentEpoch: request.documentEpoch, synchronization: 'complete', requiredRevision: 3, currentRevision: 3,
+    }))).toThrow('unknown or expired')
     bridge.dispose()
+  })
+
+  it('retains an accepted pending request and requires a strictly newer opaque replacement lease', async () => {
+    const requests: Record<string, unknown>[] = []
+    globalThis.__cordisxIconThemePreferenceRequestV1 = payload => { requests.push(JSON.parse(payload) as Record<string, unknown>) }
+    const bridge = new BrowserIconThemePreferenceBridge('token', 'codex', 'default', 'host-12', { revision: 1, ...candidate })
+    const ready = bridge.ready()
+    const request = requests[0]!
+    const pendingLease = readyLease()
+    const ack = globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      kind: 'document-ready', requestId: request.requestId, ok: true,
+      ...pendingLease,
+      documentEpoch: request.documentEpoch, synchronization: 'pending', requiredRevision: 2, currentRevision: 1,
+    }))
+    expect(ack).toEqual({ documentEpoch: request.documentEpoch, currentRevision: 1, ...pendingLease })
+    expect(() => globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      kind: 'document-ready', requestId: request.requestId, ok: true,
+      ...pendingLease,
+      documentEpoch: request.documentEpoch, synchronization: 'pending', requiredRevision: 2, currentRevision: 1,
+    }))).toThrow('response lease is stale')
+    expect(() => globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      kind: 'document-ready', requestId: request.requestId, ok: true,
+      readyLeaseToken: 'ready_divergent_00000001', readyLeaseRevision: pendingLease.readyLeaseRevision,
+      documentEpoch: request.documentEpoch, synchronization: 'pending', requiredRevision: 2, currentRevision: 1,
+    }))).toThrow('response lease is stale')
+    await Promise.resolve()
+    const disposed = expect(ready).rejects.toThrow('disposed')
+    bridge.dispose()
+    await disposed
   })
 
   it('correlates an exact generation/revision response and ignores a late duplicate', async () => {

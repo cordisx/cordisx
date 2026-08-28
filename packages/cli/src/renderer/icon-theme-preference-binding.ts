@@ -13,6 +13,11 @@ interface IconThemePreferenceDeliveryAck {
   readonly currentRevision: number
 }
 
+interface IconThemePreferenceReadyResponseAck extends IconThemePreferenceDeliveryAck {
+  readonly readyLeaseToken: string
+  readonly readyLeaseRevision: number
+}
+
 interface Pending {
   readonly expectedRevision: number
   readonly candidate: Pick<RedactedIconThemeProvider, 'providerId' | 'namespace' | 'providerVersion' | 'providerGeneration'>
@@ -26,6 +31,8 @@ interface ReadyPending {
   readonly resolve: (status: IconThemePreferenceReadyStatus) => void
   readonly reject: (error: Error) => void
   readonly timer: ReturnType<typeof setTimeout>
+  acceptedLeaseRevision: number
+  acceptedLeaseToken: string | undefined
 }
 
 interface IconThemePreferenceReadyStatus {
@@ -66,6 +73,7 @@ export class BrowserIconThemePreferenceBridge {
     : `doc_${Date.now()}_${Math.random().toString(36).slice(2)}`
   private closed = false
   private readyLeaseRevision = 0
+  private readyLeaseToken: string | undefined
   private preferenceRevision: number
   private preference: HomeConfigIconThemePreference | undefined
 
@@ -120,7 +128,14 @@ export class BrowserIconThemePreferenceBridge {
         this.readyPending.delete(requestId)
         reject(new Error('Icon theme preference document ready request timed out'))
       }, REQUEST_TIMEOUT_MS)
-      this.readyPending.set(requestId, { expectedRevision, resolve, reject, timer })
+      this.readyPending.set(requestId, {
+        expectedRevision,
+        resolve,
+        reject,
+        timer,
+        acceptedLeaseRevision: 0,
+        acceptedLeaseToken: undefined,
+      })
       try {
         binding(JSON.stringify({
           version: 1,
@@ -241,7 +256,7 @@ export class BrowserIconThemePreferenceBridge {
     }
     if (response.kind === 'document-ready' && typeof response.requestId === 'string') {
       const pending = this.readyPending.get(response.requestId)
-      if (pending === undefined) return this.deliveryAck()
+      if (pending === undefined) throw new Error('icon theme preference document ready request is unknown or expired')
       const currentRevision = response.currentRevision
       const requiredRevision = response.requiredRevision
       const synchronization = response.synchronization
@@ -253,34 +268,45 @@ export class BrowserIconThemePreferenceBridge {
       }
       const leaseRevision = response.readyLeaseRevision
       const leaseToken = response.readyLeaseToken
-      const staleLease = !Number.isSafeInteger(leaseRevision) || (leaseRevision as number) <= this.readyLeaseRevision
+      const staleLease = !Number.isSafeInteger(currentRevision)
+        || !Number.isSafeInteger(requiredRevision)
+        || !Number.isSafeInteger(leaseRevision)
+        || (leaseRevision as number) <= this.readyLeaseRevision
+        || (leaseRevision as number) <= pending.acceptedLeaseRevision
         || typeof leaseToken !== 'string' || !/^ready_[A-Za-z0-9_]{8,96}$/.test(leaseToken)
-        || (synchronization === 'complete' && ((currentRevision as number) !== this.preferenceRevision
-          || (requiredRevision as number) < this.preferenceRevision))
+        || leaseToken === this.readyLeaseToken
+        || leaseToken === pending.acceptedLeaseToken
+        || (currentRevision as number) !== this.preferenceRevision
+        || (requiredRevision as number) < (currentRevision as number)
       if (staleLease) throw new Error('icon theme preference document ready response lease is stale')
       if (response.documentEpoch !== this.documentEpoch
-        || !Number.isSafeInteger(response.currentRevision)
-        || !Number.isSafeInteger(requiredRevision)
         || (currentRevision as number) < 0
         || (requiredRevision as number) < pending.expectedRevision
         || (synchronization !== 'complete' && synchronization !== 'pending')
         || (synchronization === 'complete' && ((currentRevision as number) < (requiredRevision as number)
           || this.preferenceRevision < (requiredRevision as number)))
         || (synchronization === 'pending' && (currentRevision as number) >= (requiredRevision as number))) {
-        this.readyPending.delete(response.requestId)
-        clearTimeout(pending.timer)
-        pending.reject(new Error('icon theme preference document ready acknowledgement is invalid'))
-      } else {
-        this.readyPending.delete(response.requestId)
-        clearTimeout(pending.timer)
-        this.readyLeaseRevision = leaseRevision as number
-        pending.resolve({
-          synchronization,
-          requiredRevision: requiredRevision as number,
-          currentRevision: currentRevision as number,
-        })
+        throw new Error('icon theme preference document ready acknowledgement is invalid')
       }
-      return this.deliveryAck()
+      pending.acceptedLeaseRevision = leaseRevision as number
+      pending.acceptedLeaseToken = leaseToken
+      this.readyLeaseRevision = leaseRevision as number
+      this.readyLeaseToken = leaseToken
+      if (synchronization === 'complete') {
+        this.readyPending.delete(response.requestId)
+        clearTimeout(pending.timer)
+      }
+      pending.resolve({
+        synchronization,
+        requiredRevision: requiredRevision as number,
+        currentRevision: currentRevision as number,
+      })
+      const acceptedAck: IconThemePreferenceReadyResponseAck = {
+        ...this.deliveryAck(),
+        readyLeaseToken: leaseToken,
+        readyLeaseRevision: leaseRevision as number,
+      }
+      return acceptedAck
     }
     if (typeof response.requestId !== 'string') return this.deliveryAck()
     const pending = this.pending.get(response.requestId)

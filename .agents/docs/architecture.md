@@ -760,7 +760,12 @@ revision. Advancing the durable winner cache synchronously invalidates older
 prepared leases before delivery begins. A held old response therefore cannot
 block cache advancement or later clear booting, while a response that completes
 first may linearize before the next winner. The browser reads its actual bridge
-revision while processing the leased response and fails a stale lease closed.
+revision while processing every pending or complete leased response, retains the
+exact ready request across pending/replacement delivery, and echoes the accepted
+opaque lease token and monotonic lease revision in its acknowledgement. Unknown,
+expired, completed, duplicate, divergent-token, and actual-revision-mismatched
+responses fail closed. Finalize compares that echoed identity with the current
+lease before it may clear booting.
 The hub keeps durable winner state
 separate from each document's acknowledged and pending revisions, lets a higher
 revision supersede pending lower work, and allows explicit same-revision retry

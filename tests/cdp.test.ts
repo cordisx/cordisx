@@ -40,6 +40,12 @@ function iconThemeReceiverPayload(expression: string): Record<string, unknown> |
   try { return JSON.parse(JSON.parse(encoded) as string) as Record<string, unknown> } catch { return undefined }
 }
 
+function readyLeaseEcho(payload: Record<string, unknown> | undefined): Record<string, unknown> {
+  return payload?.kind === 'document-ready'
+    ? { readyLeaseToken: payload.readyLeaseToken, readyLeaseRevision: payload.readyLeaseRevision }
+    : {}
+}
+
 describe('injectableTargets', () => {
   it('keeps Codex renderer pages and excludes unrelated Electron pages', () => {
     expect(injectableTargets([
@@ -235,7 +241,11 @@ describe('icon theme preference document delivery', () => {
             return
           }
           context.revision = Math.max(context.revision, minimum)
-          respond({ result: { value: { documentEpoch: context.epoch, currentRevision: context.revision } } })
+          respond({ result: { value: {
+            documentEpoch: context.epoch,
+            currentRevision: context.revision,
+            ...readyLeaseEcho(deliveryPayload),
+          } } })
           if (contextId === 41 && context.revision === 0 && bootRequestId !== undefined) {
             connection.send(JSON.stringify({ id: bootRequestId, result: { result: { value: { ok: true } } } }))
             bootRequestId = undefined
@@ -499,6 +509,8 @@ describe('icon theme preference document delivery', () => {
     const linearReadyFinalized = deferred()
     let heldLinearOldResponseRequestId: number | undefined
     let heldLinearLatestResponseRequestId: number | undefined
+    let heldLinearOldResponsePayload: Record<string, unknown> | undefined
+    let heldLinearLatestResponsePayload: Record<string, unknown> | undefined
     let linearReadyResponseCount = 0
     let holdLinearReadyResponses = false
     for (const [index, server] of servers.entries()) {
@@ -537,17 +549,23 @@ describe('icon theme preference document delivery', () => {
               linearReadyResponseCount += 1
               if (linearReadyResponseCount === 1) {
                 heldLinearOldResponseRequestId = request.id
+                heldLinearOldResponsePayload = payload
                 linearOldResponseHeld.resolve()
                 return
               }
               if (linearReadyResponseCount === 2) {
                 heldLinearLatestResponseRequestId = request.id
+                heldLinearLatestResponsePayload = payload
                 linearReadyResponse.resolve(payload)
                 linearLatestResponseHeld.resolve()
                 return
               }
             }
-            respond({ result: { value: { documentEpoch: epochs[index], currentRevision: revisions[index] } } })
+            respond({ result: { value: {
+              documentEpoch: epochs[index],
+              currentRevision: revisions[index],
+              ...readyLeaseEcho(payload),
+            } } })
             if (payload?.kind === 'document-ready') readyComplete[index]!.resolve()
             if (payload?.kind === 'document-ready' && payload.requestId === 'ready-profile-linear') linearReadyResponse.resolve(payload)
             return
@@ -711,13 +729,19 @@ describe('icon theme preference document delivery', () => {
       await linearLatestResponseHeld.promise
       sockets[0]?.send(JSON.stringify({
         id: heldLinearOldResponseRequestId,
-        result: { result: { value: { documentEpoch: epochs[0], currentRevision: 1 } } },
+        result: { result: { value: {
+          documentEpoch: epochs[0], currentRevision: 1,
+          ...readyLeaseEcho(heldLinearOldResponsePayload),
+        } } },
       }))
       await Promise.resolve()
       expect(targetACompletedReadyCount).toBe(1)
       sockets[0]?.send(JSON.stringify({
         id: heldLinearLatestResponseRequestId,
-        result: { result: { value: { documentEpoch: epochs[0], currentRevision: 2 } } },
+        result: { result: { value: {
+          documentEpoch: epochs[0], currentRevision: 2,
+          ...readyLeaseEcho(heldLinearLatestResponsePayload),
+        } } },
       }))
       await expect(linearReadyResponse.promise).resolves.toMatchObject({
         synchronization: 'complete', requiredRevision: 2, currentRevision: 2,
@@ -857,7 +881,9 @@ describe('icon theme preference document delivery', () => {
             return
           }
           const currentRevision = Number(payload.currentRevision ?? 0)
-          respond({ result: { value: { documentEpoch: epochs.get(contextId!), currentRevision } } })
+          respond({ result: { value: {
+            documentEpoch: epochs.get(contextId!), currentRevision, ...readyLeaseEcho(payload),
+          } } })
           if (contextId === 52 && payload.synchronization === 'complete') {
             context52CompleteCount += 1
             if (context52CompleteCount === 1) newDocumentComplete.resolve()

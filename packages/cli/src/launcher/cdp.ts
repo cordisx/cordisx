@@ -94,6 +94,7 @@ import {
   parseIconThemePreferenceDocumentReadyRequest,
   persistIconThemePreference,
   type IconThemePreferencePersistenceContext,
+  type IconThemePreferenceReadyResponseAck,
 } from './icon-theme-rpc.js'
 
 const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
@@ -800,7 +801,12 @@ async function deliverIconThemePreferenceToDocument(
   minimumRevision: number,
   executionContextId: number,
   signal?: AbortSignal,
-): Promise<{ readonly documentEpoch: string; readonly currentRevision: number }> {
+): Promise<{
+  readonly documentEpoch: string
+  readonly currentRevision: number
+  readonly readyLeaseToken?: string
+  readonly readyLeaseRevision?: number
+}> {
   const evaluation = session.send('Runtime.evaluate', iconThemePreferenceDeliveryEvaluation(
     payload,
     documentEpoch,
@@ -827,12 +833,22 @@ async function deliverIconThemePreferenceToDocument(
     ? (remote as { value?: unknown }).value
     : undefined
   if (value === null || typeof value !== 'object') throw new Error('icon theme preference delivery failed')
-  const ack = value as { documentEpoch?: unknown; currentRevision?: unknown }
+  const ack = value as {
+    documentEpoch?: unknown
+    currentRevision?: unknown
+    readyLeaseToken?: unknown
+    readyLeaseRevision?: unknown
+  }
   if (ack.documentEpoch !== documentEpoch || !Number.isSafeInteger(ack.currentRevision)
     || (ack.currentRevision as number) < minimumRevision) {
     throw new Error('icon theme preference delivery acknowledgement is invalid')
   }
-  return { documentEpoch, currentRevision: ack.currentRevision as number }
+  return {
+    documentEpoch,
+    currentRevision: ack.currentRevision as number,
+    ...(typeof ack.readyLeaseToken === 'string' ? { readyLeaseToken: ack.readyLeaseToken } : {}),
+    ...(Number.isSafeInteger(ack.readyLeaseRevision) ? { readyLeaseRevision: ack.readyLeaseRevision as number } : {}),
+  }
 }
 async function sendPublisherGrantBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
   await session.send('Runtime.evaluate', {
@@ -1269,22 +1285,33 @@ async function install(
                   executionContextId,
                   documentController.signal,
                 )
-                await registration.respondReady(probeAck, async (status, lease) => await deliverIconThemePreferenceToDocument(
-                  session,
-                  {
-                    kind: 'document-ready',
-                    requestId: ready.requestId,
-                    ok: true,
-                    documentEpoch: ready.documentEpoch,
-                    readyLeaseToken: lease.token,
-                    readyLeaseRevision: lease.revision,
-                    ...status,
-                  },
-                  ready.documentEpoch,
-                  status.currentRevision,
-                  executionContextId,
-                  lease.signal,
-                ))
+                await registration.respondReady(probeAck, async (status, lease): Promise<IconThemePreferenceReadyResponseAck> => {
+                  const ack = await deliverIconThemePreferenceToDocument(
+                    session,
+                    {
+                      kind: 'document-ready',
+                      requestId: ready.requestId,
+                      ok: true,
+                      documentEpoch: ready.documentEpoch,
+                      readyLeaseToken: lease.token,
+                      readyLeaseRevision: lease.revision,
+                      ...status,
+                    },
+                    ready.documentEpoch,
+                    status.currentRevision,
+                    executionContextId,
+                    lease.signal,
+                  )
+                  if (ack.readyLeaseToken !== lease.token || ack.readyLeaseRevision !== lease.revision) {
+                    throw new Error('icon theme preference ready response lease acknowledgement is invalid')
+                  }
+                  return {
+                    documentEpoch: ack.documentEpoch,
+                    currentRevision: ack.currentRevision,
+                    readyLeaseToken: ack.readyLeaseToken,
+                    readyLeaseRevision: ack.readyLeaseRevision,
+                  }
+                })
               })
               await iconThemeDocumentQueue
               return
