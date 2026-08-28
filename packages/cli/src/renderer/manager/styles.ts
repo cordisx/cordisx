@@ -9,7 +9,7 @@ const scopedTDesignReactCss = tdesignReactCss.replace(
 )
 
 export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
-  .cxr-root { position: relative; z-index: 2147483000; color: var(--cx-text, #edf0f4); font: 13px/1.45 system-ui, sans-serif; }
+  .cxr-root { position: relative; z-index: 2147483500; color: var(--cx-text, #edf0f4); font: 13px/1.45 system-ui, sans-serif; }
   .cxr-root *, .cxr-root *::before, .cxr-root *::after { box-sizing: border-box; }
   .cxr-root .t-popup { z-index: 2147483600 !important; }
   .cxr-brand-mark { display: inline-grid; width: 18px; height: 18px; flex: none; place-items: center; }
@@ -21,7 +21,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
   .cxr-trigger:hover, .cxr-trigger[aria-expanded="true"] { background: var(--cx-hover, color-mix(in srgb,currentColor 9%,transparent)); opacity: 1; }
   .cxr-trigger:focus-visible { outline: 2px solid var(--cx-focus, #c7ccd4); outline-offset: 1px; }
   .cxr-trigger > .cxr-trigger-mark { width: 20px; height: 20px; }
-  .cxr-backdrop { position: fixed; inset: 0; z-index: 2147483000; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 58%); }
+  .cxr-backdrop { position: fixed; inset: 0; z-index: 2147483500; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 58%); }
   .cxr-dialog { display: grid; width: min(1236px, calc(100vw - 40px)); height: min(860px, calc(100vh - 40px)); overflow: hidden; grid-template-columns: 264px minmax(0,1fr); border: 1px solid var(--cx-border, #353a42); border-radius: 18px; background: var(--cx-surface, #17191d); box-shadow: 0 30px 100px rgb(0 0 0 / 50%); }
   .cxr-sidebar { display: flex; min-height: 0; flex-direction: column; padding: 12px; border-right: 1px solid var(--cx-border, #353a42); background: var(--cx-surface-raised, #20242b); }
   .cxr-nav { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 3px; }

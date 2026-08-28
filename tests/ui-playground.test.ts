@@ -126,6 +126,8 @@ describe('UI Playground', () => {
       const managerStyles = dom.window.document.getElementById('cordisx-react-manager-style')?.textContent ?? ''
       expect(managerStyles).toContain('.t-input {')
       expect(managerStyles).toContain('.t-textarea__inner {')
+      expect(managerStyles).toContain('.cxr-root { position: relative; z-index: 2147483500;')
+      expect(managerStyles).toContain('.cxr-backdrop { position: fixed; inset: 0; z-index: 2147483500;')
       expect(managerStyles).toContain('.cxr-tabs { display: flex; min-height: 38px; flex: none;')
       expect(managerStyles).toContain('.cxr-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));')
       expect(managerStyles).toContain('.cxr-plugin-actions { position: absolute; top: 50%;')
