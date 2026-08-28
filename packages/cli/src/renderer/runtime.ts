@@ -158,6 +158,18 @@ interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
   readonly development?: CordisXLocalDevelopmentSnapshot
 }
 
+/**
+ * Internal renderer bootstrap seam. It is intentionally absent from renderer
+ * metadata and has no configuration, CLI, environment, or global input.
+ *
+ * The only supported caller is an in-process Host bootstrap that has already
+ * statically bundled its closure with the renderer. Plugins never receive the
+ * broker passed here.
+ */
+export type CordisXInternalRendererBootstrap = (host: Readonly<{
+  readonly connectors: CordisXConnectorBroker
+}>) => void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>
+
 interface PluginController {
   item: RuntimeBrowserPlugin
   readonly identity: CordisXPluginIdentity
@@ -436,10 +448,12 @@ function writeBlockedPlugins(ids: ReadonlySet<string>): void {
 async function start(
   plugins: readonly RuntimeBrowserPlugin[],
   metadata: CordisXRuntimeMetadata,
+  internalBootstrap?: CordisXInternalRendererBootstrap,
 ): Promise<CordisXRuntimeHandle> {
   await globalThis.__cordisxRuntime?.dispose()
 
   let ctx = new Context()
+  let disposeInternalBootstrap: (() => void | Promise<void>) | undefined
   let sharedReactRuntime: ReturnType<typeof installSharedReactRuntime> | undefined
   const blockedPlugins = readBlockedPlugins()
   const agentAdapter = new UnavailableCodexHostAdapter()
@@ -538,6 +552,11 @@ async function start(
   const connectorBroker = new CordisXConnectorBroker()
   const agentConnector = connectorBroker.register(createCodexAgentConnector(agentAdapter))
   if (!agentConnector.ok) throw new Error(`Host Agent Connector registration failed: ${agentConnector.error.message}`)
+  // The bootstrap closure is selected only by the Host composition before it
+  // is bundled. It runs before controller construction/normal plugin
+  // activation and is never placed in metadata or a renderer global.
+  const bootstrapResult = await internalBootstrap?.(Object.freeze({ connectors: connectorBroker }))
+  if (typeof bootstrapResult === 'function') disposeInternalBootstrap = bootstrapResult
   const historyAdapter = metadata.agentHistoryBridgeToken === undefined
     ? new UnavailableAgentHistoryAdapter()
     : await BindingAgentHistoryAdapter.connect(metadata.agentHistoryBridgeToken).catch(() => new UnavailableAgentHistoryAdapter())
@@ -1949,6 +1968,8 @@ async function start(
   const dispose = async (): Promise<void> => {
     if (disposed) return
     disposed = true
+    await disposeInternalBootstrap?.()
+    disposeInternalBootstrap = undefined
     disposeManager?.()
     disposeManager = undefined
     disposeI18nSubscription?.()
@@ -2288,9 +2309,10 @@ async function start(
 export function installCordisX(
   plugins: readonly RuntimeBrowserPlugin[],
   metadata: CordisXRuntimeMetadata,
+  internalBootstrap?: CordisXInternalRendererBootstrap,
 ): Promise<CordisXRuntimeHandle> {
   const previous = globalThis.__cordisxBoot ?? Promise.resolve(undefined)
-  const next = previous.catch(() => undefined).then(() => start(plugins, metadata))
+  const next = previous.catch(() => undefined).then(() => start(plugins, metadata, internalBootstrap))
   globalThis.__cordisxBoot = next
   return next
 }

@@ -385,6 +385,13 @@ export class CordisXConnectorBroker {
   private readonly authorize: (request: CordisXConnectorPermissionRequest) => Promise<CordisXConnectorResult<true>>
   private readonly now: () => Date
   private readonly nonce: () => string
+  /**
+   * Host-bootstrap-only adversarial probe. It is unset in product launches;
+   * no plugin, wire message, configuration value, or renderer global can
+   * install it. The hook runs after the listener is attached and before the
+   * replay watermark is stamped.
+   */
+  private internalSubscriptionObserver: ((registration: CordisXConnectorRegistrationIdentity) => Promise<void>) | undefined
   private disposed = false
 
   constructor(options: CordisXConnectorBrokerOptions = {}) {
@@ -504,6 +511,11 @@ export class CordisXConnectorBroker {
     for (const record of this.registrations.values()) if (record.state === 'active') this.disposeRecord(record, 'explicit')
   }
 
+  /** @internal Only an in-process Host bootstrap may install this probe. */
+  setInternalSubscriptionObserver(observer: ((registration: CordisXConnectorRegistrationIdentity) => Promise<void>) | undefined): void {
+    this.internalSubscriptionObserver = observer
+  }
+
   /** Creates the only plugin-visible surface; principal binding remains Host-owned. */
   bind(options: CordisXBoundConnectorClientOptions): CordisXBoundConnectorClient {
     return new BoundConnectorClient(this, options)
@@ -569,6 +581,12 @@ export class CordisXConnectorBroker {
     // buffer preserves events produced reentrantly while the stream descriptor
     // is being stamped.
     record.listeners.add(listener)
+    try {
+      await this.internalSubscriptionObserver?.(clone(record.registration.registration))
+    } catch {
+      record.listeners.delete(listener)
+      return failure('adapter-unavailable', 'Host subscription observer did not complete', true)
+    }
     const subscription = freeze({
       $schema: CORDISX_CONNECTOR_EVENT_SUBSCRIPTION_SCHEMA_V1,
       contract: 'cordisx.connector-event-subscription/v1' as const,

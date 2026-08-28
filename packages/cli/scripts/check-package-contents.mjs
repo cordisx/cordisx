@@ -25,6 +25,20 @@ const leaked = files.filter(file => (
 ))
 if (leaked.length > 0) throw new Error(`cordisx package leaked non-allowlisted files: ${leaked.join(', ')}`)
 
+const harnessLeak = files.filter(file => /connector-(?:production|harness)/i.test(file))
+if (harnessLeak.length > 0) throw new Error(`cordisx package leaked Connector smoke harness artifacts: ${harnessLeak.join(', ')}`)
+
+let bundledHarness = ''
+try {
+  bundledHarness = execFileSync(
+    'rg', ['-l', '--glob', '*.js', '--glob', '*.d.ts', 'connector-(?:production|harness)|installConnectorProductionFixture', 'packages/cli/dist'],
+    { cwd: repositoryRoot, encoding: 'utf8' },
+  ).trim()
+} catch (error) {
+  if (error?.status !== 1) throw error
+}
+if (bundledHarness !== '') throw new Error(`cordisx distribution contains a Connector smoke harness enable path: ${bundledHarness}`)
+
 for (const required of [
   'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md',
   'LICENSE',

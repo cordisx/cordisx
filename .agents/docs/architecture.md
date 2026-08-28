@@ -146,6 +146,16 @@ raw bridge, or create a second connection. Until that adapter has an audited
 current-connection command seat, its open, send, stop, and close commands
 remain typed unavailable.
 
+Production-renderer Connector integration tests may statically compose a
+repository-controlled Host bootstrap closure into a temporary isolated smoke
+bundle. The closure runs before ordinary plugin activation, is absent from
+runtime metadata, configuration, CLI inputs, environment variables, renderer
+globals, public snapshots, and release artifacts, and is disposed with the
+runtime. It may drive only redacted Host assertions; normal smoke plugins still
+receive the same principal-bound `connectors` client as product plugins. This
+test seam neither creates a second current connection nor turns a Host-private
+adapter or producer into a plugin API.
+
 The plugin detail development Console, issuance-bound attribution, automatic
 Host capability aspect, scoped console facade and explicit shared-renderer
 blind spots are specified in
