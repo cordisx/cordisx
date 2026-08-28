@@ -39,7 +39,7 @@ export type HostIconKey = SemanticIconKey
 export type HostIconState = 'default' | 'active' | 'favorite'
 
 /** Existing Host chrome terms map explicitly into Protocol v1 semantics. */
-export const MANAGER_ICON_SEMANTICS: Readonly<Record<ManagerIconToken, SemanticIconKey>> = Object.freeze({
+export const MANAGER_ICON_SEMANTICS: Readonly<Partial<Record<ManagerIconToken, SemanticIconKey>>> = Object.freeze({
   add: 'action.add',
   back: 'action.back',
   'capability-fallback': 'status.info',
@@ -48,14 +48,8 @@ export const MANAGER_ICON_SEMANTICS: Readonly<Record<ManagerIconToken, SemanticI
   copy: 'action.copy',
   delete: 'action.delete',
   edit: 'action.edit',
-  move: 'content.layers',
   'console-clear': 'action.delete',
   'console-copy': 'action.copy',
-  'console-export': 'action.open',
-  'console-follow': 'action.open',
-  'console-pause': 'status.pending',
-  'console-resume': 'navigation.runtime',
-  contributions: 'content.panel',
   diagnostics: 'status.error',
   document: 'content.files',
   'external-link': 'action.external-link',
@@ -87,15 +81,35 @@ export const MANAGER_ICON_SEMANTICS: Readonly<Record<ManagerIconToken, SemanticI
   'tasks-content-read': 'content.files',
   'tasks-control': 'action.settings',
   'tasks-create': 'action.add',
+  'authors-source': 'action.external-link',
+  'uninstall-plugin': 'action.delete',
+})
+
+/**
+ * Manager concepts whose normative semantics are not present in the formal
+ * 51-key Protocol catalog. These aliases select only a private Reicon glyph;
+ * they must never become requests to a selected plugin provider.
+ */
+export const PENDING_MANAGER_ICON_TOKENS = Object.freeze([
+  'move', 'console-export', 'console-follow', 'console-pause', 'console-resume',
+  'contributions', 'turns-control', 'turns-submit', 'disable-plugin', 'enable-plugin',
+  'favorite', 'favorite-active', 'import-plugin',
+] as const satisfies readonly ManagerIconToken[])
+
+const MANAGER_BUILTIN_ONLY_GLYPHS: Readonly<Partial<Record<ManagerIconToken, SemanticIconKey>>> = Object.freeze({
+  move: 'content.layers',
+  'console-export': 'action.open',
+  'console-follow': 'action.open',
+  'console-pause': 'status.pending',
+  'console-resume': 'navigation.runtime',
+  contributions: 'content.panel',
   'turns-control': 'status.pending',
   'turns-submit': 'navigation.runtime',
-  'authors-source': 'action.external-link',
   'disable-plugin': 'status.pending',
   'enable-plugin': 'navigation.runtime',
   favorite: 'status.info',
   'favorite-active': 'status.info',
   'import-plugin': 'content.folder',
-  'uninstall-plugin': 'action.delete',
 })
 
 const HOST_SURFACE_ICON_MAP: Readonly<Record<string, SemanticIconKey>> = Object.freeze({
@@ -118,7 +132,7 @@ export interface HostIconRenderOptions {
 }
 
 export interface HostIconResolution {
-  readonly key: SemanticIconKey
+  readonly key: string
   readonly provider: string
   readonly fallback: 'none' | 'reicon' | 'neutral'
   readonly state: IconState
@@ -190,13 +204,13 @@ export function resolveBuiltinHostIcon(
   options: HostIconRenderOptions = {},
 ): { readonly descriptor: NormalizedVectorDescriptor; readonly resolution: HostIconResolution } {
   const known = isSemanticIconKey(requestedKey)
-  const key = known ? requestedKey : 'control.minus'
+  const descriptorKey = known ? requestedKey : 'control.minus'
   const state = normalizedState(options.state)
   const variant = normalizedVariant(options)
   return {
-    descriptor: resolveBuiltinReiconDescriptor(key, variant, state),
+    descriptor: resolveBuiltinReiconDescriptor(descriptorKey, variant, state),
     resolution: {
-      key,
+      key: requestedKey,
       provider: known ? 'builtin:reicon' : 'host:neutral',
       fallback: known ? 'none' : 'neutral',
       state,
@@ -230,12 +244,46 @@ export function resolveHostIcon(
   }
 }
 
+export function resolveManagerIcon(
+  document: Document | undefined,
+  token: ManagerIconToken,
+  options: HostIconRenderOptions = {},
+): { readonly descriptor: NormalizedVectorDescriptor; readonly resolution: HostIconResolution } {
+  const semantic = MANAGER_ICON_SEMANTICS[token]
+  if (semantic !== undefined) return resolveHostIcon(document, semantic, options)
+  const builtinGlyph = MANAGER_BUILTIN_ONLY_GLYPHS[token]
+  if (builtinGlyph === undefined) return resolveBuiltinHostIcon(token, options)
+  const state = normalizedState(options.state ?? (token === 'favorite-active' ? 'favorite' : 'default'))
+  const variant = normalizedVariant({ ...options, state })
+  const fallback = document === undefined ? 'none' : documentRegistries.get(document)?.hostBuiltinFallback() ?? 'none'
+  return {
+    descriptor: resolveBuiltinReiconDescriptor(fallback === 'neutral' ? 'control.minus' : builtinGlyph, variant, state),
+    resolution: {
+      key: token,
+      provider: fallback === 'neutral' ? 'host:neutral' : 'builtin:reicon',
+      fallback,
+      state,
+      theme: options.theme ?? 'light',
+      variant,
+    },
+  }
+}
+
 export function renderHostIconSvg(
   document: Document,
   requestedKey: string,
   options: HostIconRenderOptions = {},
 ): { readonly svg: SVGSVGElement; readonly resolution: HostIconResolution } {
   const result = resolveHostIcon(document, requestedKey, options)
+  return { svg: renderNormalizedIconSvg(document, result.descriptor, result.resolution, options.size), resolution: result.resolution }
+}
+
+export function renderManagerIconSvg(
+  document: Document,
+  token: ManagerIconToken,
+  options: HostIconRenderOptions = {},
+): { readonly svg: SVGSVGElement; readonly resolution: HostIconResolution } {
+  const result = resolveManagerIcon(document, token, options)
   return { svg: renderNormalizedIconSvg(document, result.descriptor, result.resolution, options.size), resolution: result.resolution }
 }
 
@@ -251,7 +299,7 @@ export function createManagerIcon(
   icon.setAttribute('aria-hidden', 'true')
   icon.draggable = false
   const state = options.state ?? (token === 'favorite-active' ? 'favorite' : 'default')
-  icon.append(renderHostIconSvg(document, MANAGER_ICON_SEMANTICS[token], {
+  icon.append(renderManagerIconSvg(document, token, {
     ...options,
     state,
     theme: options.theme ?? resolveHostTheme(document).theme,

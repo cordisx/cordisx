@@ -34,8 +34,10 @@ function validPreference(value: unknown): value is HomeConfigIconThemePreference
 /** Host-private persistence client; only exact redacted identity crosses CDP. */
 export class BrowserIconThemePreferenceBridge {
   private readonly pending = new Map<string, Pending>()
+  private readonly listeners = new Set<(preference: HomeConfigIconThemePreference) => void>()
   private closed = false
   private preferenceRevision: number
+  private preference: HomeConfigIconThemePreference | undefined
 
   constructor(
     private readonly token: string,
@@ -45,10 +47,21 @@ export class BrowserIconThemePreferenceBridge {
     initial: HomeConfigIconThemePreference | undefined,
   ) {
     this.preferenceRevision = initial?.revision ?? 0
+    this.preference = initial === undefined ? undefined : { ...initial }
     globalThis[RECEIVER] = this.receive
   }
 
   revision(): number { return this.preferenceRevision }
+
+  current(): HomeConfigIconThemePreference | undefined {
+    return this.preference === undefined ? undefined : { ...this.preference }
+  }
+
+  subscribe(listener: (preference: HomeConfigIconThemePreference) => void): () => void {
+    if (this.closed) throw new Error('Icon theme preference persistence bridge is closed')
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
 
   persist(
     expectedProfileRevision: number,
@@ -102,17 +115,24 @@ export class BrowserIconThemePreferenceBridge {
       pending.reject(new Error('Icon theme preference persistence bridge was disposed'))
     }
     this.pending.clear()
+    this.listeners.clear()
   }
 
   private readonly receive = (payload: string): void => {
-    let response: { requestId?: unknown; ok?: unknown; value?: unknown; code?: unknown }
+    if (this.closed) return
+    let response: { kind?: unknown; requestId?: unknown; ok?: unknown; value?: unknown; code?: unknown; currentPreference?: unknown }
     try { response = JSON.parse(payload) as typeof response } catch { return }
+    if (response.kind === 'sync') {
+      if (validPreference(response.value)) this.acceptPreference(response.value)
+      return
+    }
     if (typeof response.requestId !== 'string') return
     const pending = this.pending.get(response.requestId)
     if (pending === undefined) return
     this.pending.delete(response.requestId)
     clearTimeout(pending.timer)
     if (response.ok !== true || !validPreference(response.value)) {
+      if (validPreference(response.currentPreference)) this.acceptPreference(response.currentPreference)
       pending.reject(new Error(typeof response.code === 'string' ? response.code : 'icon-theme-persistence-rejected'))
       return
     }
@@ -125,7 +145,18 @@ export class BrowserIconThemePreferenceBridge {
       pending.reject(new Error('Icon theme preference persistence response was mismatched'))
       return
     }
-    this.preferenceRevision = preference.revision
+    this.acceptPreference(preference)
     pending.resolve({ ...preference })
+  }
+
+  private acceptPreference(preference: HomeConfigIconThemePreference): void {
+    if (preference.revision < this.preferenceRevision) return
+    if (preference.revision === this.preferenceRevision && this.preference !== undefined) {
+      if (JSON.stringify(preference) !== JSON.stringify(this.preference)) return
+      return
+    }
+    this.preferenceRevision = preference.revision
+    this.preference = { ...preference }
+    for (const listener of this.listeners) listener({ ...preference })
   }
 }

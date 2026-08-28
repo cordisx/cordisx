@@ -7,7 +7,6 @@ import type {
 import { generationFromContext, ownerFromContext } from './ownership.js'
 import {
   BUILTIN_REICON_PROVIDER_GENERATION,
-  BUILTIN_REICON_PROVIDER_HANDLE,
   IconThemeRegistry,
 } from './icon-theme-registry.js'
 
@@ -52,7 +51,7 @@ export class CordisXIconThemeService extends Service implements CordisXIconTheme
           this.registry.hostGeneration,
           registration.providerHandle,
           registration.providerGeneration,
-          BUILTIN_REICON_PROVIDER_HANDLE,
+          this.registry.builtinProviderHandle,
           BUILTIN_REICON_PROVIDER_GENERATION,
           'provider-unavailable',
         )

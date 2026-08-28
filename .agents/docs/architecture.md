@@ -705,6 +705,27 @@ composite requested session/model targets, policy outcome, and user-visible
 audit state. This reduces accidental binding bypass inside the current trusted
 renderer model; it is not a substitute for a future isolated plugin realm.
 
+### Host icon-theme authority
+
+The Host owns icon DOM, accessibility, sizing, color, pointer policy, and the
+private Reicon fallback. Plugin themes register bounded normalized descriptors
+only. Provider and principal handles, raw geometry, source paths, and callbacks
+do not cross the public Manager snapshot. Manager concepts missing from the
+formal Protocol catalog remain Host-private builtin glyph choices; the Host
+does not route them through an unrelated semantic key to a selected provider.
+
+Every registry creates fresh builtin and plugin provider handles. Exact handles,
+Host generation, provider generation, revision, and request correlation fence
+runtime selection, resolution, rollback, disposal, and late results. Durable
+profile preference stores only the approved provider identity, version, and
+Host-derived artifact generation. A launcher-private same-profile broadcast
+distributes a successful atomic preference revision to active renderers. CAS
+conflicts return the durable current preference, and each renderer rebinds that
+winner to its own live handle only after an exact identity, version, artifact
+generation, and active-status match. Missing, changed, failed, or disposed
+providers remain on pinned Reicon; the broadcast does not add a public Protocol
+surface or weaken per-process fences.
+
 ## Trust and security
 
 Version 0.1 uses a trusted-code model. A plugin is bundled into the renderer and can read or modify anything the renderer can access. Cordis provides lifecycle and dependency composition; it is not a security sandbox.

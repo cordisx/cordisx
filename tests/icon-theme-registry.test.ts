@@ -1,8 +1,19 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { createRequire } from 'node:module'
+import Ajv2020 from 'ajv/dist/2020.js'
+import addFormats from 'ajv-formats'
 import { describe, expect, it } from 'vitest'
-import type { CordisXIconThemeProviderDefinitionV1, IconThemeResolutionResult, NormalizedVectorDescriptor } from '../packages/cli/src/icon-theme-contracts.js'
+import {
+  ICON_STATES,
+  ICON_VARIANTS,
+  SEMANTIC_ICON_KEYS,
+  type CordisXIconThemeProviderDefinitionV1,
+  type IconThemeResolutionResult,
+  type NormalizedVectorDescriptor,
+} from '../packages/cli/src/icon-theme-contracts.js'
 import {
   BUILTIN_REICON_PROVIDER_GENERATION,
-  BUILTIN_REICON_PROVIDER_HANDLE,
   IconThemeRegistry,
 } from '../packages/cli/src/renderer/icon-theme-registry.js'
 import {
@@ -23,15 +34,70 @@ const definition = (value: NormalizedVectorDescriptor = descriptor): CordisXIcon
 
 const principal = { principalHandle: 'ipp_aurora0000000001' as const, pluginId: 'aurora', providerGeneration: 'aurora-3' }
 
+const require = createRequire(import.meta.url)
+const protocolRoot = path.dirname(require.resolve('@cordisx/protocol/package.json'))
+
+async function formalRegistrationValidator() {
+  const schemas = await Promise.all([
+    'ui-common.v1.schema.json',
+    'icon-theme-common.v1.schema.json',
+    'icon-theme-provider-registration.v1.schema.json',
+  ].map(async name => JSON.parse(await readFile(path.join(protocolRoot, 'schemas', name), 'utf8')) as object))
+  const ajv = new Ajv2020({ allErrors: true, strict: true })
+  addFormats(ajv)
+  for (const schema of schemas) ajv.addSchema(schema)
+  return ajv.getSchema('https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-provider-registration.v1.schema.json')!
+}
+
+function fullDefinition(): CordisXIconThemeProviderDefinitionV1 {
+  return {
+    schemaVersion: 1,
+    namespace: 'aurora',
+    providerVersion: '2.1.0',
+    descriptors: SEMANTIC_ICON_KEYS.flatMap(key => ICON_VARIANTS.flatMap(variant => ICON_STATES.map(state => ({
+      key, variant, state, descriptor,
+    })))),
+  }
+}
+
 describe('descriptor-only icon theme registry', () => {
   it('publishes a pinned, complete Reicon default without raw geometry in its proof', () => {
     const registry = new IconThemeRegistry('host-12', 'profile-main')
     const selection = registry.selection()
-    const registration = registry.registration(BUILTIN_REICON_PROVIDER_HANDLE)!
+    const registration = registry.registration(registry.builtinProviderHandle)!
     expect(selection).toMatchObject({ profileRevision: 0, outcome: 'default', selectedProvider: { providerId: 'builtin:reicon', providerGeneration: 'reicon-1.2.1' } })
     expect(selection.defaultProvider).toEqual(selection.fallbackProvider)
     expect(registration.coverage).toMatchObject({ kind: 'complete', proof: { tupleCount: 1224, rawDataExported: false } })
     expect(JSON.stringify(registration.coverage)).not.toMatch(/commands|paths|svg|iconData|callback/u)
+  })
+
+  it('keeps builtin and plugin handles fresh per registry while pins stay exact within one registry', () => {
+    const first = new IconThemeRegistry('host-first', 'profile-main')
+    const second = new IconThemeRegistry('host-second', 'profile-main')
+    expect(first.builtinProviderHandle).not.toBe(second.builtinProviderHandle)
+    expect(first.selection().defaultProvider.providerHandle).toBe(first.builtinProviderHandle)
+    expect(first.selection().fallbackProvider.providerHandle).toBe(first.builtinProviderHandle)
+    expect(first.selection().selectedProvider.providerHandle).toBe(first.builtinProviderHandle)
+    const firstPlugin = first.registerPlugin('register-first', 0, 'host-first', principal, definition()).registration!
+    const secondPlugin = second.registerPlugin('register-second', 0, 'host-second', principal, definition()).registration!
+    expect(firstPlugin.providerHandle).not.toBe(secondPlugin.providerHandle)
+  })
+
+  it('fails closed instead of serializing a schema-invalid 1,224-tuple plugin partial', async () => {
+    const registry = new IconThemeRegistry('host-12', 'profile-main')
+    const complete = fullDefinition()
+    expect(complete.descriptors).toHaveLength(1224)
+    const rejected = registry.registerPlugin('register-complete', 0, 'host-12', principal, complete)
+    expect(rejected).toMatchObject({ result: { outcome: 'rejected', profileRevision: 0 } })
+    expect(rejected.registration).toBeUndefined()
+
+    const accepted = registry.registerPlugin('register-partial', 0, 'host-12', principal, {
+      ...complete,
+      descriptors: complete.descriptors.slice(0, 1223),
+    }).registration!
+    const validate = await formalRegistrationValidator()
+    expect(validate(accepted), JSON.stringify(validate.errors)).toBe(true)
+    expect(accepted.coverage).toMatchObject({ kind: 'partial' })
   })
 
   it('derives plugin identity and serves a partial hit before exact Reicon fallback', () => {
@@ -80,13 +146,13 @@ describe('descriptor-only icon theme registry', () => {
     const registration = registry.registerPlugin('register-1', 0, 'host-12', principal, definition()).registration!
     registry.select('select-1', 1, 'host-12', registration.providerHandle, 'aurora-3')
     const request = registry.createResolutionRequest('action.save', 'regular', 'default')
-    expect(registry.rollback('rollback-1', 2, 'host-12', registration.providerHandle, 'aurora-3', BUILTIN_REICON_PROVIDER_HANDLE, BUILTIN_REICON_PROVIDER_GENERATION, 'invalid-descriptor')).toMatchObject({ outcome: 'rolled-back', profileRevision: 3 })
+    expect(registry.rollback('rollback-1', 2, 'host-12', registration.providerHandle, 'aurora-3', registry.builtinProviderHandle, BUILTIN_REICON_PROVIDER_GENERATION, 'invalid-descriptor')).toMatchObject({ outcome: 'rolled-back', profileRevision: 3 })
     const late: IconThemeResolutionResult = {
       $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-resolution-result.v1.schema.json',
       schemaVersion: 1, requestId: request.requestId, providerGeneration: 'aurora-3', outcome: 'resolved', descriptor,
     }
     expect(registry.acceptResolution(request, late)).toMatchObject({ provider: { providerId: 'builtin:reicon', providerGeneration: 'reicon-1.2.1' }, fallback: 'reicon' })
-    expect(registry.selection()).toMatchObject({ outcome: 'rolled-back', reason: 'invalid-descriptor', selectedProvider: { providerHandle: BUILTIN_REICON_PROVIDER_HANDLE } })
+    expect(registry.selection()).toMatchObject({ outcome: 'rolled-back', reason: 'invalid-descriptor', selectedProvider: { providerHandle: registry.builtinProviderHandle } })
   })
 
   it('keeps process Host generations and provider handles fresh while rejecting an old-process result', () => {
@@ -125,7 +191,7 @@ describe('descriptor-only icon theme registry', () => {
     const registration = registry.registerPlugin('register-1', 0, 'host-12', principal, definition()).registration!
     registry.select('select-1', 1, 'host-12', registration.providerHandle, 'aurora-3')
     expect(registry.disposeProvider('dispose-selected', 2, 'host-12', registration.providerHandle, 'aurora-3')).toMatchObject({ outcome: 'rejected', error: { code: 'provider-selected' } })
-    registry.select('select-default', 2, 'host-12', BUILTIN_REICON_PROVIDER_HANDLE, BUILTIN_REICON_PROVIDER_GENERATION)
+    registry.select('select-default', 2, 'host-12', registry.builtinProviderHandle, BUILTIN_REICON_PROVIDER_GENERATION)
     expect(registry.disposeProvider('dispose-1', 3, 'host-12', registration.providerHandle, 'aurora-3')).toMatchObject({ outcome: 'applied', profileRevision: 4, disposedGeneration: 'aurora-3' })
     const snapshot = JSON.stringify(registry.redactedSnapshot())
     expect(snapshot).not.toMatch(/providerHandle|principalHandle|descriptors|commands|paths|source|requestId|raw/u)
@@ -139,7 +205,7 @@ describe('descriptor-only icon theme registry', () => {
     const registration = registry.registerPlugin('register-1', 0, 'host-12', principal, definition()).registration!
     registry.select('select-1', 1, 'host-12', registration.providerHandle, 'aurora-3')
     const beforeRollback = notifications
-    expect(registry.rollback('rollback-bad', 2, 'host-12', registration.providerHandle, 'aurora-3', BUILTIN_REICON_PROVIDER_HANDLE, 'reicon-drift')).toMatchObject({ outcome: 'rollback-failed', profileRevision: 2 })
+    expect(registry.rollback('rollback-bad', 2, 'host-12', registration.providerHandle, 'aurora-3', registry.builtinProviderHandle, 'reicon-drift')).toMatchObject({ outcome: 'rollback-failed', profileRevision: 2 })
     expect(notifications).toBe(beforeRollback + 1)
     expect(registry.resolve('action.save', 'regular', 'default')).toMatchObject({ provider: { providerId: 'host:neutral' }, fallback: 'neutral' })
   })

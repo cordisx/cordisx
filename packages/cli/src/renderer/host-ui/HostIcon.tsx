@@ -1,8 +1,8 @@
 import { useLayoutEffect, useRef } from 'react'
-import type { SemanticIconKey } from '../../icon-theme-contracts.js'
 import {
-  MANAGER_ICON_SEMANTICS,
+  MANAGER_ICON_TOKENS,
   iconThemeRegistryForDocument,
+  renderManagerIconSvg,
   renderHostIconSvg,
   type HostIconState,
   type ManagerIconToken,
@@ -10,17 +10,15 @@ import {
 import { resolveHostTheme } from '../host-theme.js'
 
 export interface HostIconProps {
-  readonly token: ManagerIconToken | SemanticIconKey
+  readonly token: ManagerIconToken | string
   readonly className?: string
   readonly size?: number | string
   readonly state?: HostIconState
   readonly surfaceToken?: string
 }
 
-function semanticKey(token: ManagerIconToken | SemanticIconKey): SemanticIconKey {
-  return token in MANAGER_ICON_SEMANTICS
-    ? MANAGER_ICON_SEMANTICS[token as ManagerIconToken]
-    : token as SemanticIconKey
+function isManagerIconToken(token: string): token is ManagerIconToken {
+  return (MANAGER_ICON_TOKENS as readonly string[]).includes(token)
 }
 
 /** React adapter for the exact same Host-owned DOM renderer as imperative chrome. */
@@ -35,11 +33,14 @@ export function HostIcon({ token, className, size, state, surfaceToken }: HostIc
       const themeRoot = icon.closest<HTMLElement>('[data-cordisx-app-theme]')
       const projected = themeRoot?.dataset.cordisxAppTheme
       const theme = projected === 'dark' || projected === 'light' ? projected : resolveHostTheme(document).theme
-      icon.replaceChildren(renderHostIconSvg(document, semanticKey(token), {
+      const options = {
         theme,
         ...(size === undefined ? {} : { size }),
         ...(resolvedState === undefined ? {} : { state: resolvedState }),
-      }).svg)
+      }
+      icon.replaceChildren((isManagerIconToken(token)
+        ? renderManagerIconSvg(document, token, options)
+        : renderHostIconSvg(document, token, options)).svg)
     }
     render()
     const unsubscribe = iconThemeRegistryForDocument(document)?.subscribe(render)

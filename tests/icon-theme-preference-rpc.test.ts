@@ -2,8 +2,9 @@ import { mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { ensureHomeConfig, loadHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { ensureHomeConfig, loadHomeConfig, type HomeConfigIconThemePreference } from '../packages/cli/src/config/home-config.js'
 import {
+  IconThemePreferenceBroadcastHub,
   IconThemePreferenceConflictError,
   parseIconThemePreferenceBindingRequest,
   persistIconThemePreference,
@@ -45,7 +46,9 @@ describe('Host icon-theme preference persistence', () => {
     const request = parseIconThemePreferenceBindingRequest(payload(), ctx)
     await expect(persistIconThemePreference(ctx, request)).resolves.toEqual({ revision: 1, ...candidate })
     expect((await loadHomeConfig(ctx.configPath)).apps.codex?.profiles.default?.iconTheme).toEqual({ revision: 1, ...candidate })
-    await expect(persistIconThemePreference(ctx, request)).rejects.toBeInstanceOf(IconThemePreferenceConflictError)
+    const conflict = await persistIconThemePreference(ctx, request).catch(error => error as IconThemePreferenceConflictError)
+    expect(conflict).toBeInstanceOf(IconThemePreferenceConflictError)
+    expect(conflict.currentPreference).toEqual({ revision: 1, ...candidate })
 
     const next = parseIconThemePreferenceBindingRequest(payload({
       requestId: 'icon-preference-2',
@@ -57,6 +60,21 @@ describe('Host icon-theme preference persistence', () => {
       },
     }), ctx)
     await expect(persistIconThemePreference(ctx, next)).resolves.toMatchObject({ revision: 2, providerId: 'builtin:reicon' })
+  })
+
+  it('broadcasts one cloned durable winner only to active same-profile receivers', async () => {
+    const hub = new IconThemePreferenceBroadcastHub()
+    const first: HomeConfigIconThemePreference[] = []
+    const second: HomeConfigIconThemePreference[] = []
+    const removeFirst = hub.register(async preference => { first.push(preference) })
+    hub.register(async preference => { second.push(preference) })
+    const winner = { revision: 1, ...candidate }
+    await hub.broadcast(winner)
+    removeFirst()
+    await hub.broadcast({ ...winner, revision: 2 })
+    expect(first).toEqual([winner])
+    expect(second).toEqual([winner, { ...winner, revision: 2 }])
+    expect(second[0]).not.toBe(winner)
   })
 
   it('rejects generation spoofing, malformed transitions, raw/private fields, and hostile identities', async () => {

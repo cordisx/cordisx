@@ -44,11 +44,11 @@ import { highlightSafeMarkdownCodeBlocks, renderSafeMarkdown } from './markdown.
 import type { CommandSnapshot } from './commands.js'
 import { resolveManagerTriggerTarget } from './host-probes.js'
 import {
-  MANAGER_ICON_SEMANTICS,
   createHostSurfaceIcon,
   createManagerIcon,
   hostSurfaceIconKey,
   renderHostIconSvg,
+  renderManagerIconSvg,
   type ManagerIconToken,
 } from './icons.js'
 import type {
@@ -6668,11 +6668,14 @@ export function installCordisXManager(
       const icon = button.querySelector<HTMLElement>(':scope > .cordisx-host-icon')
       const surfaceToken = icon?.dataset.hostIcon
       const managerToken = icon?.dataset.hostIconKey as ManagerIconToken | undefined
-      const key = surfaceToken === undefined
-        ? managerToken === undefined ? undefined : MANAGER_ICON_SEMANTICS[managerToken]
-        : hostSurfaceIconKey(surfaceToken)
-      if (icon !== null && icon !== undefined && key !== undefined) {
-        icon.replaceChildren(renderHostIconSvg(document, key, {
+      if (icon !== null && icon !== undefined && managerToken !== undefined && surfaceToken === undefined) {
+        icon.replaceChildren(renderManagerIconSvg(document, managerToken, {
+          state: selected ? 'active' : 'default',
+          theme: resolveHostTheme(document).theme,
+        }).svg)
+      } else if (surfaceToken !== undefined) {
+        const key = hostSurfaceIconKey(surfaceToken)
+        if (icon !== null && icon !== undefined && key !== undefined) icon.replaceChildren(renderHostIconSvg(document, key, {
           state: selected ? 'active' : 'default',
           theme: resolveHostTheme(document).theme,
         }).svg)

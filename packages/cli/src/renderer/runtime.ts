@@ -129,7 +129,7 @@ import { IconThemeRegistry } from './icon-theme-registry.js'
 import { CordisXIconThemeService } from './icon-theme-service.js'
 import { bindIconThemeRegistry } from './icons.js'
 import { BrowserIconThemePreferenceBridge } from './icon-theme-preference-binding.js'
-import { selectAndPersistIconTheme } from './icon-theme-selection.js'
+import { reconcileIconThemePreference, selectAndPersistIconTheme } from './icon-theme-selection.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 const MAX_ROLLBACK_RECEIPTS = 64
@@ -490,6 +490,7 @@ async function start(
         generation,
         metadata.iconThemePreference,
       )
+  let disposeIconThemePreferenceSubscription: (() => void) | undefined
   const permissionStore = metadata.permissionBridgeToken === undefined
     ? new BrowserPermissionPolicyStore(metadata.profileId)
     : BindingPermissionPolicyStore.connect(metadata.permissionBridgeToken, metadata.permissionPolicies ?? [])
@@ -2025,6 +2026,8 @@ async function start(
     configBridge?.dispose()
     serviceConfigBridge?.dispose()
     iconThemePreferenceBridge?.dispose()
+    disposeIconThemePreferenceSubscription?.()
+    disposeIconThemePreferenceSubscription = undefined
     lifecycleBridge?.dispose()
     configRenderers.dispose()
     configuration.dispose()
@@ -2351,6 +2354,12 @@ async function start(
         generation,
         metadata.iconThemePreference,
       )
+    }
+    if (iconThemePreferenceBridge !== undefined) {
+      disposeIconThemePreferenceSubscription = iconThemePreferenceBridge.subscribe(preference => {
+        if (disposed) return
+        reconcileIconThemePreference(iconThemeRegistry, generation, preference)
+      })
     }
     disposeManager = installReactCordisXManager(document, managerModel, metadata.hostKind === 'playground'
       ? { triggerTarget: () => document.querySelector<HTMLElement>('[data-cordisx-playground-manager-trigger]') ?? undefined }

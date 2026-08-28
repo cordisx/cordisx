@@ -4,7 +4,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRoot } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
-import { describe, expect, it } from 'vitest'
+import ts from 'typescript'
+import { describe, expect, it, vi } from 'vitest'
 import {
   ICON_STATES,
   ICON_VARIANTS,
@@ -12,9 +13,13 @@ import {
   isNormalizedVectorDescriptor,
 } from '../packages/cli/src/icon-theme-contracts.js'
 import { HostIcon } from '../packages/cli/src/renderer/host-ui/HostIcon.js'
+import { HostSurfaceIcon } from '../packages/cli/src/renderer/host-ui/HostSurfaceIcon.js'
+import { IconThemeRegistry } from '../packages/cli/src/renderer/icon-theme-registry.js'
 import {
   HOST_ICON_16PX_CSS,
   MANAGER_ICON_SEMANTICS,
+  PENDING_MANAGER_ICON_TOKENS,
+  bindIconThemeRegistry,
   createManagerIcon,
   hostSurfaceIconKey,
   renderHostIconSvg,
@@ -30,6 +35,31 @@ async function sourceFiles(directory: string): Promise<string[]> {
     if (entry.isDirectory()) return entry.name === 'vendor' ? [] : sourceFiles(absolute)
     return /\.tsx?$/u.test(entry.name) ? [absolute] : []
   }))).flat()
+}
+
+function importedModules(source: string): string[] {
+  const file = ts.createSourceFile('guard.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const modules: string[] = []
+  const add = (node: ts.Expression | undefined): void => {
+    if (node !== undefined && ts.isStringLiteralLike(node)) modules.push(node.text)
+  }
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node.moduleSpecifier)
+    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) add(node.moduleReference.expression)
+    if (ts.isCallExpression(node)) {
+      const dynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword
+      const commonJsRequire = ts.isIdentifier(node.expression) && node.expression.text === 'require'
+      if (dynamicImport || commonJsRequire) add(node.arguments[0])
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  return modules
+}
+
+function isIconLibrary(moduleName: string): boolean {
+  return moduleName === 'reicon' || moduleName.startsWith('reicon/')
+    || moduleName === 'tdesign-icons-react' || moduleName.startsWith('@material-symbols')
 }
 
 describe('Host Reicon normalized backend', () => {
@@ -101,7 +131,7 @@ describe('Host Reicon normalized backend', () => {
   it('uses a Host neutral descriptor for an unknown key', () => {
     const dom = new JSDOM('<!doctype html>')
     const unknown = renderHostIconSvg(dom.window.document, 'provider.private-key')
-    expect(unknown.resolution).toMatchObject({ key: 'control.minus', provider: 'host:neutral', fallback: 'neutral' })
+    expect(unknown.resolution).toMatchObject({ key: 'provider.private-key', provider: 'host:neutral', fallback: 'neutral' })
     expect(unknown.svg.querySelector('path')).not.toBeNull()
     dom.window.close()
   })
@@ -119,6 +149,46 @@ describe('Host Reicon normalized backend', () => {
       const certified = resolveBuiltinReiconDescriptor('trust.certified', variant, 'default')
       const official = resolveBuiltinReiconDescriptor('trust.official', variant, 'default')
       expect(certified, variant).not.toEqual(official)
+    }
+  })
+
+  it('keeps every pending Manager token on the Host-private builtin path', () => {
+    const dom = new JSDOM('<!doctype html>')
+    const registry = new IconThemeRegistry('host-pending', 'profile-main')
+    const registration = registry.registerPlugin('register', 0, 'host-pending', {
+      principalHandle: 'ipp_pending000000001', pluginId: 'pending', providerGeneration: 'pending-1',
+    }, {
+      schemaVersion: 1,
+      namespace: 'pending',
+      providerVersion: '1.0.0',
+      descriptors: [{
+        key: 'content.layers', variant: 'regular', state: 'default',
+        descriptor: resolveBuiltinReiconDescriptor('content.layers', 'regular', 'default'),
+      }],
+    }).registration!
+    registry.select('select', 1, 'host-pending', registration.providerHandle, registration.providerGeneration)
+    const resolve = vi.spyOn(registry, 'resolve')
+    const unbind = bindIconThemeRegistry(dom.window.document, registry)
+    try {
+      for (const token of PENDING_MANAGER_ICON_TOKENS) {
+        expect(MANAGER_ICON_SEMANTICS[token], token).toBeUndefined()
+        const svg = createManagerIcon(dom.window.document, token).querySelector('svg')!
+        expect(svg.dataset.hostIconProvider, token).toBe('builtin:reicon')
+        expect(svg.dataset.hostIconFallback, token).toBe('reicon')
+        expect(svg.dataset.hostIconKey, token).toBe(token)
+      }
+      expect(resolve).not.toHaveBeenCalled()
+      registry.rollback(
+        'rollback-failed', 2, 'host-pending', registration.providerHandle, registration.providerGeneration,
+        registry.builtinProviderHandle, 'reicon-stale',
+      )
+      const neutral = createManagerIcon(dom.window.document, 'move').querySelector('svg')!
+      expect(neutral.dataset).toMatchObject({ hostIconProvider: 'host:neutral', hostIconFallback: 'neutral' })
+      expect(resolve).not.toHaveBeenCalled()
+    } finally {
+      unbind()
+      registry.dispose()
+      dom.window.close()
     }
   })
 
@@ -140,19 +210,67 @@ describe('Host Reicon normalized backend', () => {
     }
   })
 
+  it('keeps an unknown React surface token neutral and outside provider routing', async () => {
+    const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+    const previous = { document: globalThis.document, window: globalThis.window, MutationObserver: globalThis.MutationObserver, IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT }
+    Object.assign(globalThis, { document: dom.window.document, window: dom.window, MutationObserver: dom.window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true })
+    const registry = new IconThemeRegistry('host-react-unknown', 'profile-main')
+    const resolve = vi.spyOn(registry, 'resolve')
+    const unbind = bindIconThemeRegistry(dom.window.document, registry)
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    try {
+      await act(async () => root.render(<HostSurfaceIcon token={'host:provider-private' as never} />))
+      const span = dom.window.document.querySelector('#root > span')!
+      const svg = span.querySelector('svg')!
+      expect(resolve).not.toHaveBeenCalled()
+      expect(svg.dataset).toMatchObject({ hostIconProvider: 'host:neutral', hostIconFallback: 'neutral' })
+      expect(svg.dataset.hostIconKey).toBe('host:provider-private')
+      expect(span.getAttribute('aria-hidden')).toBe('true')
+      expect(svg.getAttribute('aria-hidden')).toBe('true')
+      expect(svg.getAttribute('focusable')).toBe('false')
+    } finally {
+      await act(async () => root.unmount())
+      unbind()
+      registry.dispose()
+      Object.assign(globalThis, previous)
+      dom.window.close()
+    }
+  })
+
   it('allows icon-library imports only for Reicon in the private backend', async () => {
+    const sourceRoot = path.join(repositoryRoot, 'packages/cli/src')
     const rendererRoot = path.join(repositoryRoot, 'packages/cli/src/renderer')
-    const files = await sourceFiles(rendererRoot)
+    const files = await sourceFiles(sourceRoot)
     const violations: string[] = []
     for (const file of files) {
       const source = await readFile(file, 'utf8')
       const relative = path.relative(repositoryRoot, file)
+      const imports = importedModules(source).filter(isIconLibrary)
       if (file === path.join(rendererRoot, 'reicon-icon-backend.ts')) {
-        if (/from ['"](?:tdesign-icons-react|@material-symbols[^'"]*)['"]/u.test(source)) violations.push(relative)
+        if (imports.some(moduleName => moduleName !== 'reicon' && !moduleName.startsWith('reicon/'))) violations.push(relative)
         continue
       }
-      if (/from ['"](?:reicon(?:\/[^'"]*)?|tdesign-icons-react|@material-symbols[^'"]*)['"]/u.test(source)) violations.push(relative)
+      if (imports.length > 0) violations.push(relative)
     }
     expect(violations).toEqual([])
+  })
+
+  it('discriminates static, dynamic and CommonJS direct icon-library imports', () => {
+    const positives = [
+      `import { iconData } from 'reicon'`,
+      `import\n'reicon/icons'`,
+      `const icons = import ( "reicon" )`,
+      `const icons = require ( 'reicon/private' )`,
+      `import icons = require("reicon")`,
+      `export { iconData } from '@material-symbols/svg-400'`,
+    ]
+    for (const source of positives) expect(importedModules(source).filter(isIconLibrary), source).not.toEqual([])
+    const negatives = [
+      `const note = "import('reicon')"`,
+      `// require('reicon')\nexport const okay = true`,
+      `const requireLater = (name: string) => name; requireLater('reicon')`,
+      `import { resolveBuiltinReiconDescriptor } from './reicon-icon-backend.js'`,
+    ]
+    for (const source of negatives) expect(importedModules(source).filter(isIconLibrary), source).toEqual([])
   })
 })

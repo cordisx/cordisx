@@ -37,7 +37,10 @@ export interface IconThemePreferencePersistenceContext {
 }
 
 export class IconThemePreferenceConflictError extends Error {
-  constructor(readonly actualRevision: number) {
+  constructor(
+    readonly actualRevision: number,
+    readonly currentPreference: HomeConfigIconThemePreference | undefined,
+  ) {
     super(`icon theme preference revision conflict: expected a different revision; actual ${actualRevision}`)
   }
 }
@@ -122,7 +125,9 @@ export async function persistIconThemePreference(
     const profile = app !== undefined && Object.hasOwn(app.profiles, context.profileId) ? app.profiles[context.profileId] : undefined
     if (app === undefined || profile === undefined) throw new Error('icon theme preference profile is unavailable')
     const actualRevision = profile.iconTheme?.revision ?? 0
-    if (actualRevision !== request.expectedPreferenceRevision) throw new IconThemePreferenceConflictError(actualRevision)
+    if (actualRevision !== request.expectedPreferenceRevision) {
+      throw new IconThemePreferenceConflictError(actualRevision, profile.iconTheme)
+    }
     persisted = { revision: actualRevision + 1, ...request.candidate }
     return {
       ...current,
@@ -142,9 +147,31 @@ export async function persistIconThemePreference(
   return persisted
 }
 
-export function iconThemePreferenceBridgeError(error: unknown): { readonly code: string; readonly error: string; readonly actualRevision?: number } {
+export function iconThemePreferenceBridgeError(error: unknown): {
+  readonly code: string
+  readonly error: string
+  readonly actualRevision?: number
+  readonly currentPreference?: HomeConfigIconThemePreference
+} {
   if (error instanceof IconThemePreferenceConflictError) {
-    return { code: 'conflict', error: error.message, actualRevision: error.actualRevision }
+    return {
+      code: 'conflict', error: error.message, actualRevision: error.actualRevision,
+      ...(error.currentPreference === undefined ? {} : { currentPreference: error.currentPreference }),
+    }
   }
   return { code: 'rejected', error: error instanceof Error ? error.message : String(error) }
+}
+
+/** Host-private fan-out for durable preference convergence within one profile. */
+export class IconThemePreferenceBroadcastHub {
+  private readonly receivers = new Set<(preference: HomeConfigIconThemePreference) => Promise<void>>()
+
+  register(receiver: (preference: HomeConfigIconThemePreference) => Promise<void>): () => void {
+    this.receivers.add(receiver)
+    return () => this.receivers.delete(receiver)
+  }
+
+  async broadcast(preference: HomeConfigIconThemePreference): Promise<void> {
+    await Promise.allSettled([...this.receivers].map(async receiver => await receiver({ ...preference })))
+  }
 }

@@ -29,7 +29,6 @@ const SELECTION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-prot
 const REQUEST_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-resolution-request.v1.schema.json' as const
 const RESULT_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-resolution-result.v1.schema.json' as const
 const LIFECYCLE_RESULT_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-lifecycle-result.v1.schema.json' as const
-const BUILTIN_HANDLE = 'iph_builtin_reicon_00000001' as const
 const BUILTIN_GENERATION = 'reicon-1.2.1' as const
 const namespacePattern = /^[a-z0-9][a-z0-9._-]{0,63}$/u
 const pluginIdPattern = /^[a-z0-9][a-z0-9._-]{0,63}$/u
@@ -115,9 +114,11 @@ export class IconThemeRegistry {
   private readonly namespaces = new Map<string, `iph_${string}`>()
   private nextHandle = 1
   private readonly handleNonce = providerHandleNonce()
+  readonly builtinProviderHandle: `iph_${string}`
+  readonly builtinProviderGeneration = BUILTIN_GENERATION
   private nextRequest = 1
   private profileRevision = 0
-  private selectedHandle: `iph_${string}` = BUILTIN_HANDLE
+  private selectedHandle: `iph_${string}`
   private selectionOutcome: IconThemeSelection['outcome'] = 'default'
   private selectionReason: IconThemeSelection['reason'] = 'host-default'
   private requestedProviderHandle: `iph_${string}` | undefined
@@ -127,6 +128,8 @@ export class IconThemeRegistry {
 
   constructor(readonly hostGeneration: string, readonly profileId: string) {
     if (!generationPattern.test(hostGeneration) || profileId.length < 1 || profileId.length > 128) throw new Error('invalid icon-theme Host scope')
+    this.builtinProviderHandle = `iph_${this.handleNonce}_00000000`
+    this.selectedHandle = this.builtinProviderHandle
     for (const key of SEMANTIC_ICON_KEYS) for (const variant of ICON_VARIANTS) for (const state of ICON_STATES) {
       if (!isNormalizedVectorDescriptor(resolveBuiltinReiconDescriptor(key, variant, state))) throw new Error('built-in Reicon conformance failed')
     }
@@ -141,7 +144,7 @@ export class IconThemeRegistry {
       },
     }
     const builtin: ProviderRecord = {
-      providerHandle: BUILTIN_HANDLE,
+      providerHandle: this.builtinProviderHandle,
       principal: { kind: 'host' },
       identity: BUILTIN_REICON_IDENTITY,
       providerGeneration: BUILTIN_GENERATION,
@@ -151,14 +154,21 @@ export class IconThemeRegistry {
       revision: 0,
       lastGoodGeneration: BUILTIN_GENERATION,
     }
-    this.records.set(BUILTIN_HANDLE, builtin)
-    this.namespaces.set('reicon', BUILTIN_HANDLE)
+    this.records.set(this.builtinProviderHandle, builtin)
+    this.namespaces.set('reicon', this.builtinProviderHandle)
   }
 
   subscribe(listener: () => void): () => void {
     this.assertLive()
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /** Host chrome can bypass provider routing while retaining fallback truth. */
+  hostBuiltinFallback(): 'none' | 'reicon' | 'neutral' {
+    this.assertLive()
+    if (this.forceNeutralFallback) return 'neutral'
+    return this.selectedHandle === this.builtinProviderHandle ? 'none' : 'reicon'
   }
 
   private notify(): void { for (const listener of this.listeners) listener() }
@@ -206,7 +216,7 @@ export class IconThemeRegistry {
       || Object.keys(definition).sort().join(',') !== 'descriptors,namespace,providerVersion,schemaVersion'
       || definition.schemaVersion !== 1 || !namespacePattern.test(definition.namespace)
       || !semverPattern.test(definition.providerVersion) || !Array.isArray(definition.descriptors)
-      || definition.descriptors.length < 1 || definition.descriptors.length > 1224) {
+      || definition.descriptors.length < 1 || definition.descriptors.length > 1223) {
       return { result: this.result(requestId, 'register', 'rejected', { error: { code: 'identity-mismatch' } }) }
     }
     if (this.namespaces.has(definition.namespace)) return { result: this.result(requestId, 'register', 'rejected', { error: { code: 'namespace-conflict' } }) }
@@ -263,13 +273,13 @@ export class IconThemeRegistry {
     if (record.providerGeneration !== providerGeneration) return this.result(requestId, 'select', 'rejected', { affectedProviderHandle: providerHandle, error: { code: 'stale-provider-generation' } })
     if (record.status !== 'ready' && record.status !== 'active') return this.result(requestId, 'select', 'rejected', { affectedProviderHandle: providerHandle, error: { code: 'prepare-failed' } })
     const previous = this.active()
-    if (previous.providerHandle !== BUILTIN_HANDLE && previous.providerHandle !== providerHandle) previous.status = 'ready'
+    if (previous.providerHandle !== this.builtinProviderHandle && previous.providerHandle !== providerHandle) previous.status = 'ready'
     record.status = 'active'
     record.lastGoodGeneration = record.providerGeneration
     this.selectedHandle = providerHandle
     this.requestedProviderHandle = providerHandle
-    this.selectionOutcome = providerHandle === BUILTIN_HANDLE ? 'default' : 'selected'
-    this.selectionReason = providerHandle === BUILTIN_HANDLE ? 'host-default' : 'user-selection'
+    this.selectionOutcome = providerHandle === this.builtinProviderHandle ? 'default' : 'selected'
+    this.selectionReason = providerHandle === this.builtinProviderHandle ? 'host-default' : 'user-selection'
     this.forceNeutralFallback = false
     this.profileRevision += 1
     record.revision = this.profileRevision
@@ -328,7 +338,7 @@ export class IconThemeRegistry {
     const failed = this.records.get(failedProviderHandle)
     const restore = this.records.get(restoreProviderHandle)
     if (failed === undefined || failed.providerGeneration !== failedGeneration || this.selectedHandle !== failedProviderHandle
-      || restore === undefined || restore.providerHandle !== BUILTIN_HANDLE || restore.providerGeneration !== restoreGeneration || restore.status === 'disposed') {
+      || restore === undefined || restore.providerHandle !== this.builtinProviderHandle || restore.providerGeneration !== restoreGeneration || restore.status === 'disposed') {
       if (failed !== undefined && failed.providerGeneration === failedGeneration && this.selectedHandle === failedProviderHandle) failed.status = 'failed'
       this.forceNeutralFallback = true
       this.notify()
@@ -337,7 +347,7 @@ export class IconThemeRegistry {
     failed.status = 'failed'
     failed.failureCode = reason === 'provider-unavailable' ? 'resolution-failed' : reason
     restore.status = 'active'
-    this.selectedHandle = BUILTIN_HANDLE
+    this.selectedHandle = this.builtinProviderHandle
     this.requestedProviderHandle = failedProviderHandle
     this.selectionOutcome = 'rolled-back'
     this.selectionReason = reason
@@ -379,7 +389,7 @@ export class IconThemeRegistry {
   resolve(key: SemanticIconKey, variant: IconVariant, state: IconState): IconThemeResolution {
     const request = this.createResolutionRequest(key, variant, state)
     const record = this.active()
-    if (record.providerHandle !== BUILTIN_HANDLE) {
+    if (record.providerHandle !== this.builtinProviderHandle) {
       const descriptor = record.descriptors.get(tupleKey(key, variant, state))
       if (descriptor !== undefined) {
         return this.acceptResolution(request, {
@@ -388,7 +398,7 @@ export class IconThemeRegistry {
         })
       }
     }
-    return this.reiconFallback(request, record.providerHandle === BUILTIN_HANDLE ? 'none' : 'reicon')
+    return this.reiconFallback(request, record.providerHandle === this.builtinProviderHandle ? 'none' : 'reicon')
   }
 
   private reiconFallback(request: IconThemeResolutionRequest, fallback: 'none' | 'reicon' = 'reicon'): IconThemeResolution {
@@ -398,7 +408,7 @@ export class IconThemeRegistry {
         provider: { providerId: 'host:neutral' }, fallback: 'neutral', request,
       }
     }
-    const builtin = this.records.get(BUILTIN_HANDLE)
+    const builtin = this.records.get(this.builtinProviderHandle)
     if (builtin !== undefined && builtin.status !== 'disposed' && builtin.status !== 'failed') {
       return { descriptor: resolveBuiltinReiconDescriptor(request.key, request.variant, request.state), provider: reference(builtin), fallback, request }
     }
@@ -422,7 +432,7 @@ export class IconThemeRegistry {
   }
 
   selection(): IconThemeSelection {
-    const builtin = this.records.get(BUILTIN_HANDLE)!
+    const builtin = this.records.get(this.builtinProviderHandle)!
     const selected = this.active()
     const pin = <T extends ProviderRecord>(record: T) => ({ ...reference(record), profileRevision: this.profileRevision })
     const builtinPin = {
@@ -470,5 +480,4 @@ export class IconThemeRegistry {
   }
 }
 
-export const BUILTIN_REICON_PROVIDER_HANDLE = BUILTIN_HANDLE
 export const BUILTIN_REICON_PROVIDER_GENERATION = BUILTIN_GENERATION

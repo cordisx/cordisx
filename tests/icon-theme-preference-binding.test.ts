@@ -59,4 +59,34 @@ describe('browser icon-theme preference bridge', () => {
     await expect(pending).rejects.toThrow('disposed')
     expect(globalThis.__cordisxIconThemePreferenceReceiveV1).toBeUndefined()
   })
+
+  it('adopts a conflict winner and fences stale sync and post-dispose messages', async () => {
+    let requestId = ''
+    globalThis.__cordisxIconThemePreferenceRequestV1 = payload => { requestId = (JSON.parse(payload) as { requestId: string }).requestId }
+    const bridge = new BrowserIconThemePreferenceBridge('token', 'codex', 'default', 'host-12', { revision: 1, ...candidate })
+    const observed: string[] = []
+    bridge.subscribe(preference => observed.push(`${preference.revision}:${preference.providerId}`))
+    const pending = bridge.persist(4, 5, candidate)
+    const builtin = {
+      revision: 2,
+      providerId: 'builtin:reicon' as const,
+      namespace: 'reicon',
+      providerVersion: '1.2.1',
+      providerGeneration: 'reicon-1.2.1',
+    }
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      requestId, ok: false, code: 'conflict', currentPreference: builtin,
+    }))
+    await expect(pending).rejects.toThrow('conflict')
+    expect(bridge.current()).toEqual(builtin)
+    expect(observed).toEqual(['2:builtin:reicon'])
+
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ kind: 'sync', value: { revision: 1, ...candidate } }))
+    expect(bridge.current()).toEqual(builtin)
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ kind: 'sync', value: { revision: 3, ...candidate } }))
+    expect(bridge.current()).toEqual({ revision: 3, ...candidate })
+    bridge.dispose()
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ kind: 'sync', value: { revision: 4, ...builtin } }))
+    expect(bridge.current()).toEqual({ revision: 3, ...candidate })
+  })
 })

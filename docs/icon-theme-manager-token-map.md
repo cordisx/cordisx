@@ -18,14 +18,14 @@ of the public provider contract and do not export Reicon data or SVG paths.
 | `copy` | `action.copy` | same | `Copy` | accepted |
 | `delete` | `action.delete` | same | `Trash2` | accepted |
 | `edit` | `action.edit` | same | `Edit` | accepted |
-| `move` | blocked: `content.layers` | `action.move` | `Reorder` candidate | wait for formal 64-key API; ArrayEditor reorder action |
+| `move` | none (Host builtin-only) | `action.move` | `Layers` | wait for formal 64-key API; ArrayEditor reorder action; custom providers receive no request |
 | `console-clear` | `action.delete` | same | `Trash2` | accepted destructive clear action |
 | `console-copy` | `action.copy` | same | `Copy` | accepted |
-| `console-export` | blocked: `action.open` | `action.export` | `Export` candidate | wait for formal 64-key API |
-| `console-follow` | blocked: `action.open` | `action.follow` | `Pin` candidate | wait for formal 64-key API; follow latest output |
-| `console-pause` | blocked: `status.pending` | `action.pause` | `Pause` candidate | wait for formal 64-key API |
-| `console-resume` | blocked: `navigation.runtime` | `action.resume` | `Play` candidate | wait for formal 64-key API |
-| `contributions` | blocked: `content.panel` | `content.contributions` | `Users` candidate | wait for formal 64-key API; extension-point/contribution content |
+| `console-export` | none (Host builtin-only) | `action.export` | `Folder` | wait for formal 64-key API; custom providers receive no request |
+| `console-follow` | none (Host builtin-only) | `action.follow` | `Folder` | wait for formal 64-key API; follow latest output; custom providers receive no request |
+| `console-pause` | none (Host builtin-only) | `action.pause` | `Clock2` | wait for formal 64-key API; custom providers receive no request |
+| `console-resume` | none (Host builtin-only) | `action.resume` | `Activity` | wait for formal 64-key API; custom providers receive no request |
+| `contributions` | none (Host builtin-only) | `content.contributions` | `Component` | wait for formal 64-key API; extension-point/contribution content; custom providers receive no request |
 | `acknowledgements` (planned Host token) | absent | `content.acknowledgements` | `HandHeart` candidate | add only after formal 64-key API; About acknowledgements card |
 | `diagnostics` | `status.error` | same | `XCircle` | accepted diagnostic/error seat |
 | `document` | `content.files` | same | `File` | accepted document content |
@@ -58,17 +58,18 @@ of the public provider contract and do not export Reicon data or SVG paths.
 | `tasks-content-read` | `content.files` | same | `File` | accepted task content |
 | `tasks-control` | `action.settings` | same | `Settings` | accepted task-control configuration |
 | `tasks-create` | `action.add` | same | `Add` | accepted create action |
-| `turns-control` | blocked: `status.pending` | `agent.turn-control` | `Command` candidate | wait for formal 64-key API |
-| `turns-submit` | blocked: `navigation.runtime` | `action.submit` | `Send` candidate | wait for formal 64-key API |
+| `turns-control` | none (Host builtin-only) | `agent.turn-control` | `Clock2` | wait for formal 64-key API; custom providers receive no request |
+| `turns-submit` | none (Host builtin-only) | `action.submit` | `Activity` | wait for formal 64-key API; custom providers receive no request |
 | `authors-source` | `action.external-link` | same | `ArrowUpRightSquare` | accepted Host-local audit decision |
-| `disable-plugin` | blocked: `status.pending` | `action.disable` | `ToggleOff` candidate | wait for formal 64-key API |
-| `enable-plugin` | blocked: `navigation.runtime` | `action.enable` | `ToggleOn` candidate | wait for formal 64-key API |
-| `favorite` | blocked: `status.info` | `action.favorite` | `Heart` candidate | wait for formal 64-key API; default state is regular |
-| `favorite-active` | blocked: `status.info` | `action.favorite` | `Heart` candidate | wait for formal 64-key API; Host maps this compatibility token to selected state, never to a new key |
-| `import-plugin` | blocked: `content.folder` | `action.import` | `Import` candidate | wait for formal 64-key API |
+| `disable-plugin` | none (Host builtin-only) | `action.disable` | `Clock2` | wait for formal 64-key API; custom providers receive no request |
+| `enable-plugin` | none (Host builtin-only) | `action.enable` | `Activity` | wait for formal 64-key API; custom providers receive no request |
+| `favorite` | none (Host builtin-only) | `action.favorite` | `InfoCircle` | wait for formal 64-key API; default state is regular; custom providers receive no request |
+| `favorite-active` | none (Host builtin-only) | `action.favorite` | `InfoCircle` | wait for formal 64-key API; Host keeps selected state locally; custom providers receive no request |
+| `import-plugin` | none (Host builtin-only) | `action.import` | `Folder` | wait for formal 64-key API; custom providers receive no request |
 | `uninstall-plugin` | `action.delete` | same | `Trash2` | accepted destructive uninstall action |
 
-The pending glyphs are candidates, not accepted visuals. After the formal
-64-key Protocol merge, Host must compile all 64 keys across 3 variants and 8
-states, regenerate the 1,536-tuple proof, and re-run the light/dark 16/18/24 px
-matrix before marking them accepted.
+The pending rows show the current provisional Host-only Reicon glyph, not a
+semantic alias or an accepted future visual. After the formal 64-key Protocol
+merge, Host must compile all 64 keys across 3 variants and 8 states, regenerate
+the 1,536-tuple proof, and re-run the light/dark 16/18/24 px matrix before
+marking the target semantics and glyphs accepted.

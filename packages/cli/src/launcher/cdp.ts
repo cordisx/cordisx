@@ -86,6 +86,7 @@ import {
 import {
   ICON_THEME_PREFERENCE_BINDING,
   ICON_THEME_PREFERENCE_RECEIVER,
+  IconThemePreferenceBroadcastHub,
   MAX_ICON_THEME_PREFERENCE_REQUEST_BYTES,
   iconThemePreferenceBridgeError,
   parseIconThemePreferenceBindingRequest,
@@ -688,6 +689,7 @@ interface InstalledScript {
   readonly iconThemePreferenceController?: AbortController
   readonly removeIconThemePreferenceBindingListener?: () => void
   readonly iconThemePreferenceBindingInstalled: boolean
+  readonly unregisterIconThemePreferenceBroadcast?: () => void
   readonly lifecycleController?: AbortController
   readonly removeLifecycleBindingListener?: () => void
   readonly lifecycleBindingInstalled: boolean
@@ -832,6 +834,7 @@ async function install(
   actions?: ChannelActionsBridgeHandler,
   permission?: PermissionPersistenceContext,
   iconThemePreference?: IconThemePreferencePersistenceContext,
+  iconThemePreferenceBroadcast?: IconThemePreferenceBroadcastHub,
   lifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime },
   developmentRuntime?: CdpPluginLifecycleRuntime,
   publisherGrant?: PublisherGrantBridgeHandler,
@@ -859,6 +862,9 @@ async function install(
   let removeActionsBindingListener = (): void => {}
   let removePermissionBindingListener = (): void => {}
   let removeIconThemePreferenceBindingListener = (): void => {}
+  const unregisterIconThemePreferenceBroadcast = iconThemePreferenceBroadcast?.register(async preference => {
+    await sendIconThemePreferenceBindingResponse(session, { kind: 'sync', value: preference })
+  })
   let removeLifecycleBindingListener = (): void => {}
   let unregisterLifecycleSession = (): void => {}
   let generationJoin: ReturnType<CdpPluginLifecycleRuntime['beginJoin']> | undefined
@@ -1124,12 +1130,17 @@ async function install(
               activeIconThemePreferenceRequests -= 1
             }
             await sendIconThemePreferenceBindingResponse(session, { requestId, ok: true, value })
+            await iconThemePreferenceBroadcast?.broadcast(value)
           } catch (error) {
+            const bridgeError = iconThemePreferenceBridgeError(error)
             await sendIconThemePreferenceBindingResponse(session, {
               requestId,
               ok: false,
-              ...iconThemePreferenceBridgeError(error),
+              ...bridgeError,
             }).catch(() => undefined)
+            if (bridgeError.currentPreference !== undefined) {
+              await iconThemePreferenceBroadcast?.broadcast(bridgeError.currentPreference)
+            }
           }
         })()
       })
@@ -1238,6 +1249,7 @@ async function install(
       permissionBindingInstalled: permission !== undefined,
       ...(iconThemePreferenceController === undefined ? {} : { iconThemePreferenceController, removeIconThemePreferenceBindingListener }),
       iconThemePreferenceBindingInstalled: iconThemePreference !== undefined,
+      ...(unregisterIconThemePreferenceBroadcast === undefined ? {} : { unregisterIconThemePreferenceBroadcast }),
       ...(lifecycleController === undefined ? {} : { lifecycleController, removeLifecycleBindingListener }),
       lifecycleBindingInstalled: lifecycle !== undefined,
       unregisterLifecycleSession,
@@ -1265,6 +1277,7 @@ async function install(
     removeActionsBindingListener()
     removePermissionBindingListener()
     removeIconThemePreferenceBindingListener()
+    unregisterIconThemePreferenceBroadcast?.()
     removeLifecycleBindingListener()
     generationJoin?.abort()
     unregisterLifecycleSession()
@@ -1295,6 +1308,7 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.removeActionsBindingListener?.()
   installed.removePermissionBindingListener?.()
   installed.removeIconThemePreferenceBindingListener?.()
+  installed.unregisterIconThemePreferenceBroadcast?.()
   installed.removeLifecycleBindingListener?.()
   installed.unregisterLifecycleSession()
   installed.removePublisherGrantBindingListener?.()
@@ -1369,6 +1383,9 @@ export interface WatchInjectionOptions {
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
 export async function watchAndInject(options: WatchInjectionOptions): Promise<void> {
   const installed = new Map<string, InstalledScript>()
+  const iconThemePreferenceBroadcast = options.iconThemePreferencePersistence === undefined
+    ? undefined
+    : new IconThemePreferenceBroadcastHub()
   try {
     while (!options.signal.aborted) {
       try {
@@ -1403,6 +1420,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             options.channelActionsBridge,
             options.permissionPersistence,
             options.iconThemePreferencePersistence,
+            iconThemePreferenceBroadcast,
             options.pluginLifecycle,
             options.developmentRuntime,
             options.publisherGrant,

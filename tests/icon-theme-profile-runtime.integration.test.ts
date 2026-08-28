@@ -267,6 +267,98 @@ describe('profile-scoped icon-theme selection runtime', () => {
     }
   })
 
+  it('converges two active same-profile renderers onto one durable CAS winner without restart', async () => {
+    const pages = [dom(), dom()]
+    const configRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-icon-theme-multi-renderer-'))
+    const configPath = path.join(configRoot, '.cordisx', 'config.json')
+    await ensureHomeConfig(configPath)
+    await updateHomeConfigAtomic(current => ({
+      ...current,
+      apps: {
+        ...current.apps,
+        codex: {
+          ...current.apps.codex!,
+          profiles: {
+            ...current.apps.codex!.profiles,
+            default: { ...current.apps.codex!.profiles.default!, iconTheme: preference },
+          },
+        },
+      },
+    }), configPath)
+    const persistenceContext: IconThemePreferencePersistenceContext = {
+      configPath,
+      appId: 'codex',
+      profileId: 'default',
+      hostGeneration: generation,
+      token: 'b'.repeat(64),
+    }
+    const requests: Array<{ readonly page: JSDOM; readonly value: Record<string, unknown> }> = []
+    const receive = (page: JSDOM, response: Record<string, unknown>): void => {
+      ;(page.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => void })
+        .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify(response))
+    }
+    const sync = (value: HomeConfigIconThemePreference): void => {
+      for (const page of pages) receive(page, { kind: 'sync', value })
+    }
+    for (const page of pages) Object.defineProperty(page.window, '__cordisxIconThemePreferenceRequestV1', {
+      configurable: true,
+      value: (payload: string) => requests.push({ page, value: JSON.parse(payload) as Record<string, unknown> }),
+    })
+    try {
+      for (const page of pages) page.window.eval(exactBundle)
+      await Promise.all(pages.map(async (page, index) => await waitFor(
+        () => page.window.document.documentElement.dataset.cordisxReady === 'true',
+        `multi-renderer ${index} readiness`,
+      )))
+      const runtimes = pages.map(page => (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!)
+      for (const page of pages) {
+        page.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')?.click()
+        page.window.document.querySelector<HTMLButtonElement>('[data-tab="about"]')?.click()
+        await waitFor(() => page.window.document.querySelector('#cxr-icon-theme-provider') !== null, 'multi-renderer picker')
+      }
+      const [pickerA, pickerB] = pages.map(page => page.window.document.querySelector<HTMLSelectElement>('#cxr-icon-theme-provider')!)
+      pickerA.value = [...pickerA.options].find(option => option.textContent?.includes('Reicon'))!.value
+      pickerA.dispatchEvent(new pages[0]!.window.Event('change', { bubbles: true }))
+      pickerB.value = [...pickerB.options].find(option => option.textContent?.includes('Aurora'))!.value
+      pickerB.dispatchEvent(new pages[1]!.window.Event('change', { bubbles: true }))
+      await waitFor(() => requests.length === 2, 'competing preference requests')
+
+      const builtinRequest = requests.find(item => (item.value.candidate as { providerId?: string }).providerId === 'builtin:reicon')!
+      const losingRequest = requests.find(item => item !== builtinRequest)!
+      const winner = await persistIconThemePreference(
+        persistenceContext,
+        parseIconThemePreferenceBindingRequest(builtinRequest.value, persistenceContext),
+      )
+      receive(builtinRequest.page, { requestId: builtinRequest.value.requestId, ok: true, value: winner })
+      sync(winner)
+      try {
+        await persistIconThemePreference(
+          persistenceContext,
+          parseIconThemePreferenceBindingRequest(losingRequest.value, persistenceContext),
+        )
+        throw new Error('expected competing preference to conflict')
+      } catch (error) {
+        const failure = iconThemePreferenceBridgeError(error)
+        receive(losingRequest.page, { requestId: losingRequest.value.requestId, ok: false, ...failure })
+        if (failure.currentPreference !== undefined) sync(failure.currentPreference)
+      }
+
+      await waitFor(() => runtimes.every(runtime => runtime.snapshot().iconThemes?.selected.providerId === 'builtin:reicon'), 'renderer convergence')
+      expect((await loadHomeConfig(configPath)).apps.codex?.profiles.default?.iconTheme).toEqual(winner)
+      expect(winner.revision).toBe(8)
+
+      for (const page of pages) {
+        const picker = page.window.document.querySelector<HTMLSelectElement>('#cxr-icon-theme-provider')!
+        picker.dispatchEvent(new page.window.Event('change', { bubbles: true }))
+      }
+      await waitFor(() => requests.length === 4, 'post-convergence preference revisions')
+      expect(requests.slice(2).map(item => item.value.expectedPreferenceRevision)).toEqual([8, 8])
+      await Promise.all(runtimes.map(async runtime => await runtime.dispose()))
+    } finally {
+      for (const page of pages) page.window.close()
+    }
+  })
+
   it('falls back to pinned Reicon when a cold-start preference names an unknown provider', async () => {
     const page = dom()
     try {
