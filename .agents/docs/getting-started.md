@@ -221,6 +221,43 @@ The template contains no credentials or external provider endpoints. Its
 profile-scoped plugin revisions make the Host configuration writer available,
 so edits can be verified instead of showing a read-only developer projection.
 
+### Local-development checkpoint gate
+
+Run the deterministic local-development gate after a clean install. It builds
+the workspace dependencies first, then exercises generation, rollback/join,
+Manager privacy, Home/profile isolation, and cleanup contracts without opening
+Codex Desktop:
+
+```bash
+npm ci
+npm run checkpoint:local-dev
+```
+
+Before freezing a Host candidate, run the separate slow real-App gate. It
+creates a private checkpoint root, chooses a loopback port, launches a fresh
+isolated profile, and uses a runner-owned fixture. It verifies DEV-1, a syntax
+failure retaining last-good, automatic DEV-2 recovery, a second renderer join
+and close, and a post-close DEV-3 generation. It also asserts public-snapshot
+path privacy, Manager-private source/status projection, `0700` Home/state/new
+profile roots, the `0600` direct publisher grant, no cwd/owning-repository
+state writes, and exact launcher/process/port cleanup:
+
+```bash
+npm run checkpoint:local-dev:app -- \
+  --executable /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
+```
+
+The default command uses the just-built workspace CLI and records that fact as
+`cliMode: workspace-build`. To validate an already packed or installed CLI,
+pass its absolute executable as `--cli-bin`; `--cli` selects a particular
+built `dist/src/cli.js`. `--artifacts` must be a new absolute directory owned
+by the runner. The gate writes one JSON report, launcher log, three screenshots,
+stage hashes, PID/port inventory, and cleanup checklist there, then stops only
+its own launcher process group. It preserves that evidence root for review and
+never deletes a caller-selected directory. The real-App gate is deliberately
+not part of `npm run check`; it requires an installed Codex Desktop executable
+and an interactive desktop environment.
+
 `--online-devtools` additionally permits the official Chrome DevTools frontend
 to connect to the loopback endpoint. That frontend receives full debugging
 authority over the isolated renderer and must not be enabled for a normal
