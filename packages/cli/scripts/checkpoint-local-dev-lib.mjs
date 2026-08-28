@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { access, chmod, mkdir, readdir, stat } from 'node:fs/promises'
+import { access, chmod, lstat, mkdir, readFile, readlink, readdir, stat } from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
 
@@ -60,6 +60,48 @@ export async function findNamed(root, basename) {
   return matches
 }
 
+async function treeRecords(root, target, output) {
+  const relative = path.relative(root, target) || '.'
+  const value = await lstat(target).catch(error => {
+    if (error?.code === 'ENOENT') return undefined
+    throw error
+  })
+  if (value === undefined) {
+    output.push({ path: relative, kind: 'missing' })
+    return
+  }
+  if (value.isSymbolicLink()) {
+    output.push({ path: relative, kind: 'symlink', target: await readlink(target), mode: value.mode & 0o777 })
+    return
+  }
+  if (value.isFile()) {
+    const content = await readFile(target)
+    output.push({ path: relative, kind: 'file', size: content.length, sha256: sha256(content), mode: value.mode & 0o777 })
+    return
+  }
+  if (!value.isDirectory()) {
+    output.push({ path: relative, kind: 'other', mode: value.mode & 0o777 })
+    return
+  }
+  output.push({ path: relative, kind: 'directory', mode: value.mode & 0o777 })
+  const entries = await readdir(target, { withFileTypes: true })
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    await treeRecords(root, path.join(target, entry.name), output)
+  }
+}
+
+/** Exact file-list/content snapshot for the runtime-shaped paths a gate protects. */
+export async function snapshotRuntimePaths(root, targets) {
+  const resolvedRoot = path.resolve(root)
+  const output = []
+  for (const target of [...new Set(targets.map(item => path.resolve(resolvedRoot, item)))].sort()) {
+    const relative = path.relative(resolvedRoot, target)
+    if (relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error(`snapshot target escapes root: ${target}`)
+    await treeRecords(resolvedRoot, target, output)
+  }
+  return { root: resolvedRoot, records: output, sha256: sha256(output) }
+}
+
 export function parseCheckpointArgs(argv, defaults = {}) {
   const values = { ...defaults }
   for (let index = 0; index < argv.length; index += 1) {
@@ -94,5 +136,19 @@ export function invariantProjection(state) {
     activation: state.activation,
     runtimeGeneration: state.runtimeGeneration,
     lifecycleRevision: state.lifecycleRevision,
+  }
+}
+
+export function rendererGenerationProjection(state) {
+  return {
+    digest: state.plugin?.package?.digest ?? null,
+    moduleGeneration: state.plugin?.package?.moduleGeneration ?? null,
+    activationDigest: state.activation?.digest ?? null,
+    activationModuleGeneration: state.activation?.moduleGeneration ?? null,
+    runtimeGeneration: state.runtimeGeneration,
+    lifecycleRevision: state.lifecycleRevision,
+    activationLastGoodRevision: state.activationLastGoodRevision,
+    configRevision: state.configRevision,
+    configLastGoodRevision: state.configLastGoodRevision,
   }
 }

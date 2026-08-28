@@ -237,10 +237,12 @@ Before freezing a Host candidate, run the separate slow real-App gate. It
 creates a private checkpoint root, chooses a loopback port, launches a fresh
 isolated profile, and uses a runner-owned fixture. It verifies DEV-1, a syntax
 failure retaining last-good, automatic DEV-2 recovery, a second renderer join
-and close, and a post-close DEV-3 generation. It also asserts public-snapshot
+with an exact digest/module/runtime/lifecycle/config/last-good match, its close,
+and a post-close DEV-3 generation. It also asserts public-snapshot
 path privacy, Manager-private source/status projection, `0700` Home/state/new
 profile roots, the `0600` direct publisher grant, no cwd/owning-repository
-state writes, and exact launcher/process/port cleanup:
+state writes through exact file-list/content snapshots, and launcher-PGID,
+profile-path, and port cleanup readback:
 
 ```bash
 npm run checkpoint:local-dev:app -- \
@@ -256,7 +258,10 @@ stage hashes, PID/port inventory, and cleanup checklist there, then stops only
 its own launcher process group. It preserves that evidence root for review and
 never deletes a caller-selected directory. The real-App gate is deliberately
 not part of `npm run check`; it requires an installed Codex Desktop executable
-and an interactive desktop environment.
+and an interactive desktop environment. A status projection racing a renderer
+that has already reached WebSocket `CLOSED` remains a non-blocking diagnostic;
+the report counts both all projection failures and this known closed-target
+subset instead of hiding it.
 
 `--online-devtools` additionally permits the official Chrome DevTools frontend
 to connect to the loopback endpoint. That frontend receives full debugging

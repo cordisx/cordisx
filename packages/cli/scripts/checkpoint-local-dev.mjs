@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url'
 import WebSocket from 'ws'
 import {
   REPORT_SCHEMA, ensurePrivateDirectory, findNamed, freeLoopbackPort, invariantProjection,
-  mode, parseCheckpointArgs, pathExists, repositoryStatus, sha256,
+  mode, parseCheckpointArgs, pathExists, rendererGenerationProjection, repositoryStatus,
+  sha256, snapshotRuntimePaths,
 } from './checkpoint-local-dev-lib.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
@@ -63,6 +64,15 @@ const repoStateBefore = repositoryStatus(repoRoot)
 const protectedRepoPaths = ['.cordisx', 'state', 'projects'].map(name => path.join(repoRoot, name))
 const protectedRepoBefore = await Promise.all(protectedRepoPaths.map(async target => ({ target, exists: await pathExists(target) })))
 const cwdStatePath = path.join(checkpointRoot, 'state')
+const repoRuntimeTargets = [
+  '.cordisx', 'state', 'projects', 'artifacts', 'cordisx.config.json',
+  'config/ui-demos/apps', 'config/ui-demos/cache', 'config/ui-demos/state',
+]
+const cwdRuntimeTargets = ['.cordisx', 'state', 'projects', 'cordisx.config.json']
+const runtimeFilesBefore = {
+  repo: await snapshotRuntimePaths(repoRoot, repoRuntimeTargets),
+  cwd: await snapshotRuntimePaths(checkpointRoot, cwdRuntimeTargets),
+}
 const cliEntry = options.cli ?? path.join(repoRoot, 'packages/cli/dist/src/cli.js')
 const invocation = options['cli-bin'] === undefined
   ? { command: process.execPath, args: [cliEntry] }
@@ -93,7 +103,7 @@ const report = {
     executable, cliMode: options['cli-bin'] === undefined ? 'workspace-build' : 'packed-binary',
     cli: options['cli-bin'] ?? cliEntry, checkpointRoot, sourceRoot, entry, cordisxHome, port,
   },
-  processes: { runnerPid: process.pid, launcherPid: launcher.pid ?? null, port },
+  processes: { runner: { pid: process.pid }, launcher: { pid: launcher.pid ?? null }, port },
   stages: {},
   artifacts: {
     report: reportPath, launcherLog: logPath,
@@ -220,6 +230,9 @@ const stateExpression = `(() => {
     activation: activation?.plugins?.find(item => item.id === 'index') ?? null,
     runtimeGeneration: activation?.runtimeGeneration ?? null,
     lifecycleRevision: activation?.revision ?? null,
+    activationLastGoodRevision: activation?.lastGoodRevision ?? null,
+    configRevision: plugin?.configuration?.revision ?? null,
+    configLastGoodRevision: plugin?.configuration?.lastGoodRevision ?? null,
     publicPrivacy: { sourcePathAbsent: !raw.includes(${JSON.stringify(entry)}), localDevelopmentAbsent: !raw.includes('localDevelopment'), developmentOwnProperty: plugin === undefined ? null : Object.hasOwn(plugin, 'development') },
     manager: { detailOpen: detail !== null, sourcePath: privatePath, state: privateState, pathVisible: privatePath === ${JSON.stringify(entry)} && development?.getClientRects().length > 0 },
     dialogs: { permission: document.querySelectorAll('[data-permission-authorization]').length, lifecycle: document.querySelectorAll('.cxm-lifecycle-overlay').length },
@@ -274,6 +287,41 @@ async function applicationPids() {
     .map(match => ({ pid: Number(match[1]), command: match[2] }))
 }
 
+function processTable() {
+  if (process.platform === 'win32') return []
+  return execFileSync('ps', ['-axo', 'pid=,ppid=,pgid=,command='], { encoding: 'utf8' }).split('\n').flatMap(line => {
+    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/)
+    return match === null ? [] : [{ pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]), command: match[4] }]
+  })
+}
+
+function processInventory(profilePath) {
+  const table = processTable()
+  const launcherPid = launcher.pid
+  const descendants = []
+  const included = new Set(launcherPid === undefined ? [] : [launcherPid])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const processRecord of table) {
+      if (!included.has(processRecord.ppid) || included.has(processRecord.pid)) continue
+      included.add(processRecord.pid)
+      descendants.push(processRecord)
+      changed = true
+    }
+  }
+  const launcherRecord = table.find(item => item.pid === launcherPid)
+  const profileProcesses = profilePath === undefined ? [] : table.filter(item => item.command.includes(profilePath))
+  const appProcesses = profileProcesses.filter(item => item.command.includes(`--remote-debugging-port=${port}`))
+  return {
+    launcher: launcherRecord ?? (launcherPid === undefined ? null : { pid: launcherPid, ppid: null, pgid: null, command: null }),
+    descendants,
+    appProcesses,
+    profileProcesses,
+    processGroupIds: [...new Set([launcherRecord?.pgid, ...appProcesses.map(item => item.pgid)].filter(Number.isInteger))].sort((left, right) => left - right),
+  }
+}
+
 let main
 let browser
 let secondary
@@ -309,6 +357,11 @@ try {
   secondary = await waitForTarget(secondaryId)
   const secondaryState = await waitFor(secondary.client, stateExpression, value => value.plugin?.name === 'Checkpoint DEV-2' && value.plugin.status === 'active' && value.publicPrivacy.sourcePathAbsent, 'second renderer generation')
   assertStateSafety(secondaryState, 'second renderer')
+  const primaryDev2Generation = rendererGenerationProjection(dev2)
+  const secondaryDev2Generation = rendererGenerationProjection(secondaryState)
+  if (JSON.stringify(primaryDev2Generation) !== JSON.stringify(secondaryDev2Generation)) {
+    throw new Error(`second renderer generation differs from primary DEV-2: ${JSON.stringify({ primaryDev2Generation, secondaryDev2Generation })}`)
+  }
   await browser.send('Target.closeTarget', { targetId: secondaryId })
   secondary.client.close(); secondary = undefined
   const secondaryGoneDeadline = Date.now() + 5_000
@@ -318,7 +371,11 @@ try {
   await writeFile(entry, fixture('DEV-3'), { mode: 0o600 })
   const dev3 = await waitFor(main.client, stateExpression, value => value.plugin?.name === 'Checkpoint DEV-3' && value.manager.state === 'ready', 'post-secondary DEV-3 generation')
   assertStateSafety(dev3, 'post-secondary DEV-3')
-  report.stages.multiRenderer = { targetId: secondaryId, joined: secondaryState, closed: true, postCloseGeneration: dev3, sha256: sha256({ secondaryState, dev3 }) }
+  report.stages.multiRenderer = {
+    targetId: secondaryId, joined: secondaryState, closed: true,
+    exactDev2GenerationMatch: true, primaryDev2Generation, secondaryDev2Generation,
+    postCloseGeneration: dev3, sha256: sha256({ secondaryState, dev3 }),
+  }
   await capture(main.client, finalScreenshotPath)
 
   const grants = await findNamed(cordisxHome, 'direct-device-bound.v1.json')
@@ -346,7 +403,9 @@ try {
     publisherGrant: { path: grants[0], mode: '0600' }, profile: { path: profiles[0], mode: '0700' },
     cwdStateAbsent: true, repoStatusUnchanged: true, protectedRepoPathsUnchanged: true,
   }
-  report.processes.app = await applicationPids()
+  report.processes.inventory = processInventory(profiles[0])
+  report.processes.launcher.pgid = report.processes.inventory.launcher?.pgid ?? null
+  report.processes.profilePath = profiles[0]
   report.artifacts.initialScreenshotSha256 = sha256(await readFile(initialScreenshotPath))
   report.artifacts.failedScreenshotSha256 = sha256(await readFile(failedScreenshotPath))
   report.artifacts.finalScreenshotSha256 = sha256(await readFile(finalScreenshotPath))
@@ -365,24 +424,50 @@ try {
   let portClosed = false
   try { await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(500) }) } catch { portClosed = true }
   const remaining = await applicationPids().catch(() => [])
+  const profilePath = report.processes.profilePath
+  const beforeInventory = report.processes.inventory
+  const afterTable = processTable()
+  const processGroupsAfter = beforeInventory === undefined ? [] : afterTable.filter(item => beforeInventory.processGroupIds.includes(item.pgid))
+  const profileProcessesAfter = profilePath === undefined ? [] : afterTable.filter(item => item.command.includes(profilePath))
   const finalRepoStatus = repositoryStatus(repoRoot)
   const finalProtectedRepoPaths = await Promise.all(protectedRepoPaths.map(async target => ({ target, exists: await pathExists(target) })))
   const finalCwdStateAbsent = !await pathExists(cwdStatePath)
   const finalRepoUnchanged = finalRepoStatus === repoStateBefore
     && JSON.stringify(finalProtectedRepoPaths) === JSON.stringify(protectedRepoBefore)
+  const runtimeFilesAfter = {
+    repo: await snapshotRuntimePaths(repoRoot, repoRuntimeTargets),
+    cwd: await snapshotRuntimePaths(checkpointRoot, cwdRuntimeTargets),
+  }
+  const runtimeFilesUnchanged = runtimeFilesAfter.repo.sha256 === runtimeFilesBefore.repo.sha256
+    && runtimeFilesAfter.cwd.sha256 === runtimeFilesBefore.cwd.sha256
   report.finishedAt = new Date().toISOString()
   report.cleanup = {
     launcherExited: launcherExit !== undefined, launcherExit: launcherExit ?? null,
     portClosed, remainingAppProcesses: remaining,
+    processGroups: { expected: beforeInventory?.processGroupIds ?? [], remaining: processGroupsAfter },
+    profile: { path: profilePath ?? null, remaining: profileProcessesAfter },
     retainedEvidenceRoot: checkpointRoot,
     manualCleanup: `After inspecting evidence, remove only this managed root: ${checkpointRoot}`,
   }
-  report.artifacts.launcherLogSha256 = sha256(await readFile(logPath))
   report.cleanup.cwdStateAbsent = finalCwdStateAbsent
   report.cleanup.repoStatusUnchanged = finalRepoUnchanged
-  if (!portClosed || remaining.length > 0 || !finalCwdStateAbsent || !finalRepoUnchanged) {
+  report.cleanup.runtimeFiles = {
+    unchanged: runtimeFilesUnchanged,
+    before: runtimeFilesBefore,
+    after: runtimeFilesAfter,
+  }
+  const logText = await readFile(logPath, 'utf8')
+  const projectionFailures = logText.split('\n').filter(line => line.includes('local-dev status projection failed'))
+  report.diagnostics = {
+    statusProjectionFailures: projectionFailures.length,
+    closedStatusProjectionFailures: projectionFailures.filter(line => line.includes('(CLOSED)')).length,
+    nonBlocking: true,
+  }
+  report.artifacts.launcherLogSha256 = sha256(logText)
+  if (!portClosed || remaining.length > 0 || processGroupsAfter.length > 0 || profileProcessesAfter.length > 0
+    || !finalCwdStateAbsent || !finalRepoUnchanged || !runtimeFilesUnchanged) {
     report.result = 'failed'
-    report.error ??= { message: 'checkpoint cleanup left a CDP port, App process, cwd state, or owning-repository change' }
+    report.error ??= { message: 'checkpoint cleanup left a process group, profile process, CDP port, cwd state, or owning-repository file change' }
   }
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 })
   console.log(`checkpoint-report=${reportPath}`)

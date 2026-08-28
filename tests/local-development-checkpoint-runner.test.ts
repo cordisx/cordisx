@@ -51,4 +51,33 @@ describe('local development checkpoint runner', () => {
       ready: true, plugin: { id: 'demo' }, activation: { digest: 'sha256:1' }, runtimeGeneration: 'g', lifecycleRevision: 1,
     })
   })
+
+  it('compares complete renderer generations and snapshots pre-existing runtime paths by content', async () => {
+    const generation = {
+      plugin: { package: { digest: 'sha256:1', moduleGeneration: 'module-1' } },
+      activation: { digest: 'sha256:1', moduleGeneration: 'module-1' },
+      runtimeGeneration: 'runtime-1', lifecycleRevision: 2, activationLastGoodRevision: 2,
+      configRevision: 0, configLastGoodRevision: 0,
+    }
+    expect(helper.rendererGenerationProjection(generation)).toEqual({
+      digest: 'sha256:1', moduleGeneration: 'module-1', activationDigest: 'sha256:1',
+      activationModuleGeneration: 'module-1', runtimeGeneration: 'runtime-1', lifecycleRevision: 2,
+      activationLastGoodRevision: 2, configRevision: 0, configLastGoodRevision: 0,
+    })
+
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-checkpoint-snapshot-'))
+    try {
+      await mkdir(path.join(root, 'state'), { recursive: true })
+      await writeFile(path.join(root, 'state', 'existing.json'), '{"value":1}\n')
+      const before = await helper.snapshotRuntimePaths(root, ['state', 'projects'])
+      const same = await helper.snapshotRuntimePaths(root, ['state', 'projects'])
+      expect(same.sha256).toBe(before.sha256)
+      expect(before.records).toContainEqual(expect.objectContaining({ path: path.join('state', 'existing.json'), kind: 'file' }))
+      await writeFile(path.join(root, 'state', 'existing.json'), '{"value":2}\n')
+      const changed = await helper.snapshotRuntimePaths(root, ['state', 'projects'])
+      expect(changed.sha256).not.toBe(before.sha256)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })
