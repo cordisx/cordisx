@@ -67,6 +67,7 @@ import {
   ExtensionPointPolicyBroker,
   buildExtensionPointRuntimeSnapshot,
 } from './extension-points.js'
+import { projectPublicRuntimeSnapshot } from './public-runtime-snapshot.js'
 import { sortManagerSettingsNavigationItems } from './manager-settings-navigation.js'
 import { BindingPlatformAdapter } from './provider-binding.js'
 import { BindingAgentHistoryAdapter, UnavailableAgentHistoryAdapter } from './agent-history-binding.js'
@@ -1082,21 +1083,7 @@ async function start(
   // The global runtime handle is a plugin-facing/debug surface. Absolute
   // local paths and Host-private build diagnostics are available only to the
   // Manager model installed below.
-  const publicSnapshot = (): ManagerSnapshot => {
-    const {
-      localDevelopment: _localDevelopment,
-      extensionPointControls: _extensionPointControls,
-      ...projected
-    } = managerSnapshot()
-    return {
-      ...projected,
-      registrations: projected.registrations.map(({ control: _control, ...registration }) => registration),
-      plugins: projected.plugins.map(plugin => {
-        const { development: _development, ...publicPlugin } = plugin
-        return publicPlugin
-      }),
-    }
-  }
+  const publicSnapshot = (): ManagerSnapshot => projectPublicRuntimeSnapshot(managerSnapshot())
 
   const setPluginBlocked = (id: string, blocked: boolean): Promise<void> => {
     const task = operation.then(async () => {
@@ -1297,6 +1284,7 @@ async function start(
   }
 
   const setExtensionPointControlAuthorization = (
+    expectedPolicyRevision: number,
     reference: Readonly<{
       principalHandle: string
       source: string
@@ -1310,9 +1298,7 @@ async function start(
     const task = operation.then(async () => {
       if (disposed) throw new Error('CordisX runtime is disposed')
       if (slotService === undefined) throw new Error('controlled surface runtime is unavailable')
-      const revision = slotService.controlManagerSnapshot()?.revision
-      if (revision === undefined) throw new Error('controlled surface runtime is unavailable')
-      slotService.setControlAuthorization(revision, {
+      slotService.setControlAuthorization(expectedPolicyRevision, {
         $schema: CORDISX_EXTENSION_POINT_CONTROL_AUTHORIZATION_SCHEMA_V1,
         schemaVersion: 1,
         principalHandle: reference.principalHandle,
@@ -1327,13 +1313,11 @@ async function start(
     return task
   }
 
-  const setExtensionPointControlGroupChoice = (choice: ControlledSurfaceGroupChoice): Promise<void> => {
+  const setExtensionPointControlGroupChoice = (expectedPolicyRevision: number, choice: ControlledSurfaceGroupChoice): Promise<void> => {
     const task = operation.then(async () => {
       if (disposed) throw new Error('CordisX runtime is disposed')
       if (slotService === undefined) throw new Error('controlled surface runtime is unavailable')
-      const revision = slotService.controlManagerSnapshot()?.revision
-      if (revision === undefined) throw new Error('controlled surface runtime is unavailable')
-      slotService.setControlGroupChoice(revision, choice)
+      slotService.setControlGroupChoice(expectedPolicyRevision, choice)
       notify('controlled-surface-selection')
     })
     operation = task.catch(() => {})

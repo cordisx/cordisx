@@ -254,6 +254,7 @@ export interface ManagerModel {
   requestPluginLifecycle?(operation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1>
   setExtensionPointPolicy?(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
   setExtensionPointControlAuthorization?(
+    expectedPolicyRevision: number,
     reference: Readonly<{
       principalHandle: string
       source: string
@@ -264,7 +265,7 @@ export interface ManagerModel {
     }>,
     policy: 'inherit' | 'allow' | 'deny',
   ): Promise<void>
-  setExtensionPointControlGroupChoice?(choice: ControlledSurfaceGroupChoice): Promise<void>
+  setExtensionPointControlGroupChoice?(expectedPolicyRevision: number, choice: ControlledSurfaceGroupChoice): Promise<void>
   mountSettingsTab?(id: string, panelBody: HTMLElement): Promise<ManagedSettingsPageMount>
   closeSettingsTabContent?(): Promise<void>
   managerContentPresentation?(id: string, reference: CordisXRouteReference): ManagerContentPresentation | undefined

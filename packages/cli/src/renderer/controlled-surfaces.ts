@@ -104,6 +104,8 @@ export class BrowserControlledSurfacePolicyStore implements ControlledSurfacePol
 
 export interface ControlledSurfaceManagerSnapshot {
   readonly revision: number
+  /** CAS revision for durable authorization and selection writes; independent from runtime snapshot invalidations. */
+  readonly policyRevision: number
   readonly hostGeneration: string
   readonly diagnostics: readonly { readonly contributionId: string; readonly message: string }[]
   readonly points: readonly {
@@ -587,6 +589,7 @@ export class ControlledSurfaceCoordinator {
     const snapshot = this.snapshot()
     return Object.freeze({
       revision: snapshot.revision,
+      policyRevision: this.policies.revision(),
       hostGeneration: snapshot.hostGeneration,
       diagnostics: Object.freeze([...this.candidates.values()]
         .filter(item => item.validationError !== undefined)

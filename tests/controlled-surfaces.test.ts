@@ -287,6 +287,21 @@ describe('controlled extension point runtime', () => {
     expect(() => handle.updatePresenter({ late: true })).toThrow(/disposed/)
   })
 
+  it('keeps Manager policy CAS independent from runtime snapshot revisions', () => {
+    const { coordinator } = setup()
+    coordinator.register({ declaration: declaration('overlay', 'model.reasoning-intensity', 'policy', {
+      claimId: 'policy', mode: 'proxy',
+    }), generation: generation('overlay'), presenter: {} })
+    coordinator.invalidate()
+    coordinator.invalidate()
+    const before = coordinator.managerSnapshot()
+    expect(before.revision).toBeGreaterThan(before.policyRevision)
+    expect(before.policyRevision).toBe(0)
+    coordinator.setAuthorization(before.policyRevision, authorization('overlay', 'model.reasoning-intensity', 'policy', 'proxy', 'allow'))
+    expect(coordinator.managerSnapshot().policyRevision).toBe(1)
+    expect(() => coordinator.setAuthorization(before.policyRevision, authorization('overlay', 'model.reasoning-intensity', 'policy', 'proxy', 'deny'))).toThrow(/stale controlled surface policy revision/)
+  })
+
   it('provides a claim-scoped safe lease and revokes it on denial and unload', async () => {
     const { coordinator, dispatch } = setup()
     const normalized = declaration('overlay', 'model.reasoning-intensity', 'lease', {
