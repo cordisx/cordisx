@@ -5,6 +5,22 @@ import cordisxMarkLight from '../../../assets/brand/cordisx-mark-light.svg'
 const darkUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkDark)}`
 const lightUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cordisxMarkLight)}`
 
+/** DOM form for Host primitives that are mounted outside a React root. */
+export function createBrandMarkElement(document: Document, className?: string): HTMLSpanElement {
+  const mark = document.createElement('span')
+  mark.className = ['cxr-brand-mark', className].filter(Boolean).join(' ')
+  mark.setAttribute('aria-hidden', 'true')
+  for (const [appearance, uri] of [['dark', darkUri], ['light', lightUri]] as const) {
+    const image = document.createElement('img')
+    image.className = `cxr-brand-mark-${appearance}`
+    image.src = uri
+    image.alt = ''
+    image.draggable = false
+    mark.append(image)
+  }
+  return mark
+}
+
 type Appearance = 'dark' | 'light'
 type LineData = readonly [number, number, number, number, number, string]
 

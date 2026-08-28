@@ -20,6 +20,7 @@ import {
   type ExtensionPointDescriptorRegistry,
 } from './extension-points.js'
 import { createHostSurfaceIcon } from './icons.js'
+import { createSidebarItem } from './host-ui/SidebarItem.js'
 import { HostTooltipController, type HostTooltipPlacement } from './tooltips.js'
 import { evaluateWhen } from './validation.js'
 import {
@@ -1669,30 +1670,8 @@ class StructuredSurfaceRenderer {
     const navigation = create(this.document, 'div', 'cordisx-navigation')
     for (const snapshot of snapshots) {
       const item = snapshot.item as { label: CordisXLocalizedText; description?: CordisXLocalizedText; icon?: string; command?: { id: string; arguments?: never }; route?: { id: string; params?: never }; actions?: readonly (CordisXStructuredAction & { id: string })[] }
-      const row = create(this.document, 'div', 'cordisx-nav-row')
-      const primary = this.document.createElement('button')
-      primary.type = 'button'
-      primary.className = 'cordisx-nav-primary'
-      primary.dataset.cordisxNoDrag = 'true'
-      primary.style.setProperty('-webkit-app-region', 'no-drag')
-      primary.append(createHostSurfaceIcon(this.document, item.icon))
-      const copy = create(this.document, 'span', 'cordisx-nav-copy')
-      copy.textContent = this.text(snapshot, item.label, 'label', sites)
+      const label = this.text(snapshot, item.label, 'label', sites)
       const description = item.description === undefined ? undefined : this.text(snapshot, item.description, 'description', sites)
-      if (description !== undefined) primary.dataset.cordisxTooltip = description
-      primary.append(copy)
-      if (item.route !== undefined) {
-        const project = (): void => {
-          const routeId = item.route!.id.includes(':') ? item.route!.id : `${snapshot.owner}:${item.route!.id}`
-          const outlet = this.routes.snapshot().outlets.find(candidate => candidate.activeRoute === routeId)
-          const presentation = outlet?.presentation ?? 'inactive'
-          row.dataset.cordisxRouteState = presentation
-          if (presentation === 'presented') primary.setAttribute('aria-current', 'page')
-          else primary.removeAttribute('aria-current')
-        }
-        this.routeProjectors.set(primary, project)
-        project()
-      }
       const activate = (): void => {
         const operation = item.command !== undefined
           ? this.commands.executeFor(snapshot.owner, item.command, `nav:${snapshot.qualifiedId}`, {
@@ -1700,13 +1679,30 @@ class StructuredSurfaceRenderer {
               contributionId: snapshot.qualifiedId,
             })
           : item.route === undefined ? Promise.reject(new Error('navigation item has no activation')) : this.routes.navigateFromSurface(snapshot.owner, item.route, snapshot.surface, snapshot.qualifiedId)
-        void operation.catch(error => { row.dataset.error = error instanceof Error ? error.message : String(error); this.schedule(true) })
+        void operation.catch(error => { control.element.dataset.error = error instanceof Error ? error.message : String(error); this.schedule(true) })
       }
-      primary.addEventListener('click', activate)
-      row.append(primary)
-      const actions = create(this.document, 'span', 'cordisx-nav-actions')
+      const control = createSidebarItem(this.document, {
+        id: snapshot.qualifiedId,
+        label,
+        ...(description === undefined ? {} : { ariaLabel: `${label}：${description}` }),
+        ...(item.icon === undefined ? {} : { icon: item.icon }),
+        onActivate: activate,
+      })
+      const { element: row, primary } = control
+      if (description !== undefined) primary.dataset.cordisxTooltip = description
+      if (item.route !== undefined) {
+        const project = (): void => {
+          const routeId = item.route!.id.includes(':') ? item.route!.id : `${snapshot.owner}:${item.route!.id}`
+          const outlet = this.routes.snapshot().outlets.find(candidate => candidate.activeRoute === routeId)
+          const presentation = outlet?.presentation ?? 'inactive'
+          row.dataset.cordisxRouteState = presentation
+          control.setSelected(presentation === 'presented', true)
+        }
+        this.routeProjectors.set(primary, project)
+        project()
+      }
+      const actions = control.actions
       for (const [index, action] of (item.actions ?? []).entries()) actions.append(this.button(snapshot, action, `actions.${index}`, sites, 'shortcut'))
-      row.append(actions)
       navigation.append(row)
     }
     root.append(navigation)

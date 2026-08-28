@@ -239,6 +239,8 @@ const HOST_SURFACE_ICON_SOURCES: Readonly<Record<string, string>> = {
   'host:layers': layers,
   'host:key': key,
   'host:more': moreHoriz,
+  'host:new': noteAdd,
+  'host:playground': overview,
   'host:open': openInNew,
   'host:palette': palette,
   'host:refresh': refresh,
@@ -265,5 +267,11 @@ export function createHostSurfaceIcon(document: Document, token: string | undefi
   svg?.setAttribute('focusable', 'false')
   svg?.setAttribute('draggable', 'false')
   svg?.classList.add('icon-xs')
+  for (const node of icon.querySelectorAll<SVGElement>('[fill], [stroke]')) {
+    for (const attribute of ['fill', 'stroke'] as const) {
+      const value = node.getAttribute(attribute)?.trim().toLowerCase()
+      if (value !== undefined && value !== 'none') node.setAttribute(attribute, 'currentColor')
+    }
+  }
   return icon
 }

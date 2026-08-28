@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { flushSync } from 'react-dom'
 import { Button, ConfigProvider } from 'tdesign-react'
@@ -7,7 +7,9 @@ import type { MarketplaceModel } from '../marketplace.js'
 import type { ManagerModel, ManagerSnapshot } from '../manager.js'
 import { HostIcon } from '../host-ui/HostIcon.js'
 import { BrandMark } from '../host-ui/BrandMark.js'
+import { createBrandMarkElement } from '../host-ui/BrandMark.js'
 import { HostSurfaceIcon } from '../host-ui/HostSurfaceIcon.js'
+import { createSidebarItem, type SidebarItemControl } from '../host-ui/SidebarItem.js'
 import { productLocale } from '../ui-copy.js'
 import { Navigation } from './components/Navigation.js'
 import { useManagerRouter } from './hooks/useManagerRouter.js'
@@ -140,11 +142,46 @@ export interface ManagerAppProps {
   readonly triggerSeat: HTMLElement
 }
 
+function PlaygroundManagerTrigger({ seat, open, onToggle }: {
+  readonly seat: HTMLElement
+  readonly open: boolean
+  readonly onToggle: () => void
+}) {
+  const control = useRef<SidebarItemControl | undefined>(undefined)
+  const toggle = useRef(onToggle)
+  toggle.current = onToggle
+  useLayoutEffect(() => {
+    const item = createSidebarItem(seat.ownerDocument, {
+      id: 'host.manager',
+      label: 'CordisX',
+      secondary: 'UI Playground',
+      iconElement: createBrandMarkElement(seat.ownerDocument, 'cxsi-brand-mark'),
+      selected: open,
+      onActivate: () => toggle.current(),
+    })
+    item.primary.dataset.cordisxManagerTrigger = 'true'
+    item.primary.setAttribute('aria-label', '管理 CordisX 插件')
+    item.primary.setAttribute('aria-haspopup', 'dialog')
+    item.primary.setAttribute('aria-expanded', String(open))
+    control.current = item
+    seat.replaceChildren(item.element)
+    return () => { item.element.remove(); control.current = undefined }
+  }, [seat])
+  useLayoutEffect(() => {
+    const item = control.current
+    if (item === undefined) return
+    item.setSelected(open)
+    item.primary.setAttribute('aria-expanded', String(open))
+  }, [open])
+  return null
+}
+
 export function ManagerApp({ model, marketplace, triggerSeat }: ManagerAppProps) {
   const snapshot = useManagerSnapshot(model)
   const playgroundStorage = useMemo(() => triggerSeat.ownerDocument.querySelector('[data-cordisx-playground-manager-trigger]') === null ? undefined : triggerSeat.ownerDocument.defaultView?.sessionStorage, [triggerSeat])
   const router = useManagerRouter(playgroundStorage)
   const [open, setOpen] = useState(() => playgroundStorage?.getItem('cordisx.playground.manager.open.v1') === 'true')
+  const previousOpen = useRef(open)
   const dialog = useRef<HTMLElement>(null)
   const heading = useMemo(() => title(router.route, snapshot), [router.route, snapshot])
   useEffect(() => {
@@ -155,6 +192,10 @@ export function ManagerApp({ model, marketplace, triggerSeat }: ManagerAppProps)
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
   useEffect(() => { playgroundStorage?.setItem('cordisx.playground.manager.open.v1', String(open)) }, [open, playgroundStorage])
+  useEffect(() => {
+    if (previousOpen.current && !open) triggerSeat.querySelector<HTMLElement>('[data-cordisx-manager-trigger]')?.focus({ preventScroll: true })
+    previousOpen.current = open
+  }, [open, triggerSeat])
   useEffect(() => {
     const route = router.route
     if (!open || route.kind !== 'manager-content') return
@@ -171,7 +212,9 @@ export function ManagerApp({ model, marketplace, triggerSeat }: ManagerAppProps)
     ? { kind: 'manager-content' as const, id: router.route.id, reference: managerContentParent }
     : undefined
   return <ConfigProvider globalConfig={{ attach }}>
-    {createPortal(<Button className="cxr-trigger" type="button" shape="square" variant="text" data-cordisx-manager-trigger="true" aria-label="管理 CordisX 插件" aria-haspopup="dialog" aria-expanded={open} title="管理 CordisX 插件" icon={<BrandMark className="cxr-trigger-mark" />} onClick={() => flushSync(() => setOpen(true))} />, triggerSeat)}
+    {playgroundStorage === undefined
+      ? createPortal(<Button className="cxr-trigger" type="button" shape="square" variant="text" data-cordisx-manager-trigger="true" aria-label="管理 CordisX 插件" aria-haspopup="dialog" aria-expanded={open} title="管理 CordisX 插件" icon={<BrandMark className="cxr-trigger-mark" />} onClick={() => flushSync(() => setOpen(true))} />, triggerSeat)
+      : <PlaygroundManagerTrigger seat={triggerSeat} open={open} onToggle={() => flushSync(() => setOpen(value => !value))} />}
     {open ? <div className="cxr-backdrop" data-cordisx-manager-modal="true" onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false) }}>
       <section ref={dialog} className="cxr-dialog" role="dialog" aria-modal="true" aria-label="CordisX 插件管理器" tabIndex={-1}>
         <aside className="cxr-sidebar"><Navigation snapshot={snapshot} router={router} /></aside>
