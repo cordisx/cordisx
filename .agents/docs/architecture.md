@@ -131,6 +131,21 @@ Durable adapter history is a separate Node/Host read service specified in
 redacted Agent-v2 pages and opaque cursors without renderer filesystem access
 or mutation of the live Agent ledger.
 
+The Host also owns the Connector broker and injects one principal-bound
+`connectors` client into each plugin context. Plugins cannot supply caller
+identity, authorization, a native bridge, or a transport. The Host binds each
+request to the live principal and PermissionBroker, stamps registrations and
+generations, keeps conversation/run handles opaque and bound, and returns only
+typed accepted, denied, or unavailable results. Subscription wire results are
+serializable descriptors; their runtime page iterator is Host-owned, installs
+its listener before the replay watermark, serializes replay then live delivery,
+and is fenced by unsubscribe, owner disposal, and replacement. Client discovery
+is a redacted snapshot only. The first built-in `agent.connector` is wired only
+to the existing Host Agent adapter; it does not inspect renderer globals, use a
+raw bridge, or create a second connection. Until that adapter has an audited
+current-connection command seat, its open, send, stop, and close commands
+remain typed unavailable.
+
 The plugin detail development Console, issuance-bound attribution, automatic
 Host capability aspect, scoped console facade and explicit shared-renderer
 blind spots are specified in

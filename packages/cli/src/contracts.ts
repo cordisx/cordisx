@@ -11,6 +11,16 @@ export * from './platform-contracts.js'
 export * from './permission-contracts.js'
 export * from './agent-contracts.js'
 export * from './plugin-lifecycle-contracts.js'
+export type {
+  CordisXBoundConnectorClient,
+  CordisXBoundConnectorClientResult,
+  CordisXConnectorAuthorization,
+  CordisXConnectorClientCapability,
+  CordisXConnectorEventPage,
+  CordisXConnectorEventSubscription,
+  CordisXConnectorSubscribeRuntimeResult,
+  CordisXConnectorSubscription,
+} from './renderer/connectors.js'
 
 /** Scalar parameter values accepted by LocalizedText and the protocol. */
 export type CordisXMessageParam = string | number | boolean | null
