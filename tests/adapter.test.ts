@@ -52,8 +52,16 @@ describe('DomOutletController', () => {
     dom.window.close()
   })
 
-  it('honors an explicit body portal and tracks geometry without changing positioned native layout styles', () => {
+  it('honors an explicit body portal and keeps one geometry observer for the same anchor', () => {
     const dom = new JSDOM('<body><main id="anchor" style="position:relative"><div id="native">native</div></main></body>')
+    let notifyResize: (() => void) | undefined
+    const observe = vi.fn()
+    const disconnect = vi.fn()
+    const ResizeObserver = vi.fn(function (callback: () => void) {
+      notifyResize = callback
+      return { observe, disconnect }
+    })
+    Object.defineProperty(dom.window, 'ResizeObserver', { configurable: true, value: ResizeObserver })
     const anchor = dom.window.document.getElementById('anchor')!
     vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue({
       x: 10, y: 20, left: 10, top: 20, right: 310, bottom: 220, width: 300, height: 200, toJSON: () => ({}),
@@ -66,7 +74,13 @@ describe('DomOutletController', () => {
     expect(snapshot.container?.style.cssText).toContain('left: 10px')
     expect(anchor.style.position).toBe('relative')
     expect(anchor.contains(dom.window.document.getElementById('native'))).toBe(true)
+    expect(ResizeObserver).toHaveBeenCalledTimes(1)
+    expect(observe).toHaveBeenCalledTimes(1)
+    notifyResize?.()
+    expect(ResizeObserver).toHaveBeenCalledTimes(1)
+    expect(observe).toHaveBeenCalledTimes(1)
     controller.dispose()
+    expect(disconnect).toHaveBeenCalledTimes(1)
     dom.window.close()
   })
 

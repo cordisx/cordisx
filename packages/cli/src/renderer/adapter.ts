@@ -156,6 +156,7 @@ export class DomOutletController implements OutletController {
   private readonly listeners = new Set<() => void>()
   private readonly observer?: MutationObserver
   private resizeObserver: ResizeObserver | undefined
+  private resizeAnchor: HTMLElement | undefined
   private readonly layer: HTMLElement
   private snapshot: OutletHostSnapshot
   private scheduled = false
@@ -219,7 +220,7 @@ export class DomOutletController implements OutletController {
     if (this.disposed) return
     this.disposed = true
     this.observer?.disconnect()
-    this.resizeObserver?.disconnect()
+    this.clearGeometryObserver()
     this.document.defaultView?.removeEventListener('resize', this.schedule)
     this.document.defaultView?.removeEventListener('scroll', this.schedule, true)
     this.layer.remove()
@@ -240,6 +241,7 @@ export class DomOutletController implements OutletController {
     const resolved = this.resolver()
     if (resolved === undefined || !resolved.anchor.isConnected) {
       this.anchor = undefined
+      this.clearGeometryObserver()
       this.layer.remove()
       this.updateSnapshot({ available: false, placement: this.preferredPlacement, error: 'semantic anchor is unavailable' })
       return
@@ -261,8 +263,7 @@ export class DomOutletController implements OutletController {
       this.installGeometryObserver(resolved.anchor)
       this.projectGeometry(resolved)
     } else {
-      this.resizeObserver?.disconnect()
-      this.resizeObserver = undefined
+      this.clearGeometryObserver()
       if (this.layer.parentElement !== resolved.anchor) resolved.anchor.append(this.layer)
       const insets = normalizedInsets(resolved)
       Object.assign(this.layer.style, {
@@ -287,11 +288,19 @@ export class DomOutletController implements OutletController {
   }
 
   private installGeometryObserver(anchor: HTMLElement): void {
-    this.resizeObserver?.disconnect()
+    if (this.resizeObserver !== undefined && this.resizeAnchor === anchor) return
+    this.clearGeometryObserver()
     const Observer = this.document.defaultView?.ResizeObserver
     if (Observer === undefined) return
+    this.resizeAnchor = anchor
     this.resizeObserver = new Observer(() => this.reconcile())
     this.resizeObserver.observe(anchor)
+  }
+
+  private clearGeometryObserver(): void {
+    this.resizeObserver?.disconnect()
+    this.resizeObserver = undefined
+    this.resizeAnchor = undefined
   }
 
   private projectGeometry(resolved: ResolvedOutletAnchor): void {
