@@ -19,6 +19,12 @@ const candidate = {
   providerGeneration: 'aurora-3',
 }
 
+function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<void>(done => { resolve = done })
+  return { promise, resolve }
+}
+
 async function context(): Promise<IconThemePreferencePersistenceContext> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-icon-theme-preference-'))
   const configPath = path.join(root, '.cordisx', 'config.json')
@@ -62,19 +68,56 @@ describe('Host icon-theme preference persistence', () => {
     await expect(persistIconThemePreference(ctx, next)).resolves.toMatchObject({ revision: 2, providerId: 'builtin:reicon' })
   })
 
-  it('broadcasts one cloned durable winner only to active same-profile receivers', async () => {
-    const hub = new IconThemePreferenceBroadcastHub()
+  it('replays only the highest durable winner to late same-profile receivers in serialized order', async () => {
+    const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
     const first: HomeConfigIconThemePreference[] = []
     const second: HomeConfigIconThemePreference[] = []
-    const removeFirst = hub.register(async preference => { first.push(preference) })
-    hub.register(async preference => { second.push(preference) })
     const winner = { revision: 1, ...candidate }
     await hub.broadcast(winner)
+    const replayStarted = deferred()
+    const releaseReplay = deferred()
+    const registerFirst = hub.register(async preference => {
+      first.push(preference)
+      replayStarted.resolve()
+      await releaseReplay.promise
+    })
+    await replayStarted.promise
+    const next = { ...winner, revision: 2 }
+    const broadcastNext = hub.broadcast(next)
+    await hub.broadcast({ ...winner, revision: 1 })
+    releaseReplay.resolve()
+    const removeFirst = await registerFirst
+    await broadcastNext
+    expect(first).toEqual([winner, next])
+
+    const removeSecond = await hub.register(async preference => { second.push(preference) })
+    expect(second).toEqual([next])
+    await hub.broadcast({ ...next })
+    expect(second).toEqual([next])
     removeFirst()
-    await hub.broadcast({ ...winner, revision: 2 })
-    expect(first).toEqual([winner])
-    expect(second).toEqual([winner, { ...winner, revision: 2 }])
-    expect(second[0]).not.toBe(winner)
+    removeSecond()
+    await hub.broadcast({ ...winner, revision: 3 })
+    expect(first).toEqual([winner, next])
+    expect(second).toEqual([next])
+    expect(first[0]).not.toBe(winner)
+  })
+
+  it('keeps durable winners isolated between profile-scoped hubs', async () => {
+    const defaultHub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    const workHub = new IconThemePreferenceBroadcastHub('codex', 'work')
+    const observedDefault: HomeConfigIconThemePreference[] = []
+    const observedWork: HomeConfigIconThemePreference[] = []
+    await defaultHub.broadcast({ revision: 4, ...candidate })
+    await Promise.all([
+      defaultHub.register(async preference => { observedDefault.push(preference) }),
+      workHub.register(async preference => { observedWork.push(preference) }),
+    ])
+    expect(defaultHub.appId).toBe('codex')
+    expect(defaultHub.profileId).toBe('default')
+    expect(workHub.profileId).toBe('work')
+    expect(() => defaultHub.assertScope({ appId: 'codex', profileId: 'work' })).toThrow('scope is mismatched')
+    expect(observedDefault).toEqual([{ revision: 4, ...candidate }])
+    expect(observedWork).toEqual([])
   })
 
   it('rejects generation spoofing, malformed transitions, raw/private fields, and hostile identities', async () => {

@@ -839,6 +839,10 @@ async function install(
   developmentRuntime?: CdpPluginLifecycleRuntime,
   publisherGrant?: PublisherGrantBridgeHandler,
 ): Promise<InstalledScript> {
+  if (iconThemePreferenceBroadcast !== undefined) {
+    if (iconThemePreference === undefined) throw new Error('icon theme preference broadcast requires persistence context')
+    iconThemePreferenceBroadcast.assertScope(iconThemePreference)
+  }
   const url = target.webSocketDebuggerUrl
   if (url === undefined) throw new Error(`target ${target.id} has no websocket URL`)
   const session = await CdpSession.connect(url)
@@ -862,9 +866,7 @@ async function install(
   let removeActionsBindingListener = (): void => {}
   let removePermissionBindingListener = (): void => {}
   let removeIconThemePreferenceBindingListener = (): void => {}
-  const unregisterIconThemePreferenceBroadcast = iconThemePreferenceBroadcast?.register(async preference => {
-    await sendIconThemePreferenceBindingResponse(session, { kind: 'sync', value: preference })
-  })
+  let unregisterIconThemePreferenceBroadcast: (() => void) | undefined
   let removeLifecycleBindingListener = (): void => {}
   let unregisterLifecycleSession = (): void => {}
   let generationJoin: ReturnType<CdpPluginLifecycleRuntime['beginJoin']> | undefined
@@ -1202,11 +1204,18 @@ async function install(
       },
       CDP_INJECTION_TIMEOUT_MS,
     )
-    if (generationRuntime !== undefined) {
+    if (generationRuntime !== undefined || iconThemePreferenceBroadcast !== undefined) {
       await evaluateRuntimeOperation(session, `(async () => { try {
         await globalThis.__cordisxBoot
         return { ok: globalThis.__cordisxRuntime !== undefined }
       } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)
+    }
+    if (iconThemePreferenceBroadcast !== undefined) {
+      unregisterIconThemePreferenceBroadcast = await iconThemePreferenceBroadcast.register(async preference => {
+        await sendIconThemePreferenceBindingResponse(session, { kind: 'sync', value: preference })
+      })
+    }
+    if (generationRuntime !== undefined) {
       // Reserve this boot-ready renderer before durable recovery. The
       // reservation participates in recovery RPCs while prepare/register stay
       // fenced until all recovered/private projections are synchronized.
@@ -1385,7 +1394,10 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
   const installed = new Map<string, InstalledScript>()
   const iconThemePreferenceBroadcast = options.iconThemePreferencePersistence === undefined
     ? undefined
-    : new IconThemePreferenceBroadcastHub()
+    : new IconThemePreferenceBroadcastHub(
+        options.iconThemePreferencePersistence.appId,
+        options.iconThemePreferencePersistence.profileId,
+      )
   try {
     while (!options.signal.aborted) {
       try {

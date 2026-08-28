@@ -164,14 +164,48 @@ export function iconThemePreferenceBridgeError(error: unknown): {
 
 /** Host-private fan-out for durable preference convergence within one profile. */
 export class IconThemePreferenceBroadcastHub {
-  private readonly receivers = new Set<(preference: HomeConfigIconThemePreference) => Promise<void>>()
+  private readonly receivers = new Set<{
+    active: boolean
+    tail: Promise<void>
+    readonly receive: (preference: HomeConfigIconThemePreference) => Promise<void>
+  }>()
+  private winner: HomeConfigIconThemePreference | undefined
 
-  register(receiver: (preference: HomeConfigIconThemePreference) => Promise<void>): () => void {
-    this.receivers.add(receiver)
-    return () => this.receivers.delete(receiver)
+  constructor(
+    readonly appId: string,
+    readonly profileId: string,
+  ) {}
+
+  assertScope(context: Pick<IconThemePreferencePersistenceContext, 'appId' | 'profileId'>): void {
+    if (context.appId !== this.appId || context.profileId !== this.profileId) {
+      throw new Error('icon theme preference broadcast scope is mismatched')
+    }
+  }
+
+  async register(receiver: (preference: HomeConfigIconThemePreference) => Promise<void>): Promise<() => void> {
+    const entry = { active: true, tail: Promise.resolve(), receive: receiver }
+    this.receivers.add(entry)
+    if (this.winner !== undefined) await this.enqueue(entry, this.winner)
+    return () => {
+      entry.active = false
+      this.receivers.delete(entry)
+    }
   }
 
   async broadcast(preference: HomeConfigIconThemePreference): Promise<void> {
-    await Promise.allSettled([...this.receivers].map(async receiver => await receiver({ ...preference })))
+    if (this.winner !== undefined && preference.revision <= this.winner.revision) return
+    this.winner = { ...preference }
+    await Promise.all([...this.receivers].map(async entry => await this.enqueue(entry, preference)))
+  }
+
+  private async enqueue(
+    entry: { active: boolean; tail: Promise<void>; readonly receive: (preference: HomeConfigIconThemePreference) => Promise<void> },
+    preference: HomeConfigIconThemePreference,
+  ): Promise<void> {
+    entry.tail = entry.tail.then(async () => {
+      if (!entry.active) return
+      await entry.receive({ ...preference })
+    }).catch(() => undefined)
+    await entry.tail
   }
 }

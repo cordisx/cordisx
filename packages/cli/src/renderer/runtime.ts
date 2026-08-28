@@ -2360,6 +2360,10 @@ async function start(
         if (disposed) return
         reconcileIconThemePreference(iconThemeRegistry, generation, preference)
       })
+      const currentPreference = iconThemePreferenceBridge.current()
+      if (currentPreference !== undefined) {
+        reconcileIconThemePreference(iconThemeRegistry, generation, currentPreference)
+      }
     }
     disposeManager = installReactCordisXManager(document, managerModel, metadata.hostKind === 'playground'
       ? { triggerTarget: () => document.querySelector<HTMLElement>('[data-cordisx-playground-manager-trigger]') ?? undefined }

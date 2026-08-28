@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import type { HomeConfigIconThemePreference } from '../packages/cli/src/config/home-config.js'
 import { BrowserIconThemePreferenceBridge } from '../packages/cli/src/renderer/icon-theme-preference-binding.js'
 
 const candidate = {
@@ -88,5 +89,37 @@ describe('browser icon-theme preference bridge', () => {
     bridge.dispose()
     globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ kind: 'sync', value: { revision: 4, ...builtin } }))
     expect(bridge.current()).toEqual({ revision: 3, ...candidate })
+  })
+
+  it('retains success and conflict winners that arrive before a runtime consumer subscribes', async () => {
+    let requestId = ''
+    globalThis.__cordisxIconThemePreferenceRequestV1 = payload => {
+      requestId = (JSON.parse(payload) as { requestId: string }).requestId
+    }
+    const bridge = new BrowserIconThemePreferenceBridge('token', 'codex', 'default', 'host-12', undefined)
+    const builtin = {
+      revision: 1,
+      providerId: 'builtin:reicon' as const,
+      namespace: 'reicon',
+      providerVersion: '1.2.1',
+      providerGeneration: 'reicon-1.2.1',
+    }
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ kind: 'sync', value: builtin }))
+    const observed: HomeConfigIconThemePreference[] = []
+    bridge.subscribe(preference => observed.push(preference))
+    expect(observed).toEqual([])
+    expect(bridge.current()).toEqual(builtin)
+
+    const pending = bridge.persist(9, 10, candidate)
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      requestId,
+      ok: false,
+      code: 'conflict',
+      currentPreference: { revision: 2, ...candidate },
+    }))
+    await expect(pending).rejects.toThrow('conflict')
+    expect(observed).toEqual([{ revision: 2, ...candidate }])
+    expect(bridge.current()).toEqual({ revision: 2, ...candidate })
+    bridge.dispose()
   })
 })

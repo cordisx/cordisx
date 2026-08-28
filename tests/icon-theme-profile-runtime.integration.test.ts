@@ -252,6 +252,38 @@ describe('profile-scoped icon-theme selection runtime', () => {
     }
   })
 
+  it('reconciles a durable winner delivered before the runtime subscribes to the bridge', async () => {
+    const page = dom()
+    const winner: HomeConfigIconThemePreference = {
+      revision: preference.revision + 1,
+      providerId: 'builtin:reicon',
+      namespace: 'reicon',
+      providerVersion: '1.2.1',
+      providerGeneration: 'reicon-1.2.1',
+    }
+    let receiver: ((payload: string) => void) | undefined
+    Object.defineProperty(page.window, '__cordisxIconThemePreferenceReceiveV1', {
+      configurable: true,
+      get: () => receiver,
+      set: (value: ((payload: string) => void) | undefined) => {
+        receiver = value
+        if (value !== undefined) value(JSON.stringify({ kind: 'sync', value: winner }))
+      },
+    })
+    try {
+      page.window.eval(exactBundle)
+      await waitFor(() => page.window.document.documentElement.dataset.cordisxReady === 'true', 'startup-window runtime readiness')
+      const runtime = (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
+      expect(runtime.snapshot().iconThemes?.selected).toMatchObject({
+        providerId: 'builtin:reicon',
+        providerGeneration: 'reicon-1.2.1',
+      })
+      await runtime.dispose()
+    } finally {
+      page.window.close()
+    }
+  })
+
   it('falls back to pinned Reicon when the same-version provider artifact generation changed', async () => {
     const page = dom()
     try {
