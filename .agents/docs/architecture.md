@@ -284,10 +284,11 @@ selection, point state, and allowlisted scalar arguments.
 The returned controlled contribution handle exposes only a claim-scoped lease:
 a scalar snapshot, invalidation subscription, and Host-brokered command
 request. It never contains selectors, nodes, CSS, native callbacks, native
-events, or business command results. Denial, switching, ancestor suppression,
-generation replacement, and disposal remove its projected properties and
-commands; unloading revokes the lease. Adapter effects are separate from this
-state machine. For `composer.reasoning-intensity`, replace/legacy rendering
+events, or business command results. Claim denial, point-local access denial,
+switching, ancestor suppression, generation replacement, and disposal remove
+its projected properties and commands, reject invocation, and detach active
+subscriptions; unloading revokes the lease. Adapter effects are separate from
+this state machine. For `composer.reasoning-intensity`, replace/legacy rendering
 hides and restores the native presentation, overlay retains it, proxy performs
 no DOM effect, and hide-native uses a reversible Host visibility lease.
 

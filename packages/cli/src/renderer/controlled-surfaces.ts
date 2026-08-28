@@ -56,6 +56,8 @@ export interface ControlledSurfaceRegistration {
   readonly declaration: CordisXExtensionPointControlDeclarationV1
   readonly generation: ControlledSurfaceGeneration
   readonly presenter: unknown
+  /** Host-private point access gate. It must not be supplied by plugin input. */
+  readonly hostAccess?: () => Readonly<{ authorized: boolean; reason?: string }>
 }
 
 export interface ControlledSurfaceRegistrationHandle {
@@ -121,6 +123,8 @@ export interface ControlledSurfaceManagerSnapshot {
       readonly selection: 'user' | 'host-priority'
       readonly nativeFallback: boolean
       readonly modes: readonly CordisXExtensionPointControlMode[]
+      /** Current resolved outcome for this exact policy snapshot. */
+      readonly decision?: CordisXExtensionPointControlPointSnapshotV1['groupDecisions'][number]
     }[]
     readonly suppression?: CordisXExtensionPointControlPointSnapshotV1['suppression']
     readonly candidates: readonly {
@@ -144,6 +148,7 @@ interface CandidateRecord {
   readonly sequence: number
   readonly declaration: CordisXExtensionPointControlDeclarationV1
   readonly generation: ControlledSurfaceGeneration
+  readonly hostAccess?: () => Readonly<{ authorized: boolean; reason?: string }>
   presenter?: unknown
   validationError?: string
 }
@@ -459,6 +464,7 @@ export class ControlledSurfaceCoordinator {
       sequence: this.nextSequence++,
       declaration,
       generation: Object.freeze({ ...input.generation }),
+      ...(input.hostAccess === undefined ? {} : { hostAccess: input.hostAccess }),
       ...(presenter === undefined ? {} : { presenter }),
       ...(validationError === undefined ? {} : { validationError }),
     }
@@ -522,11 +528,6 @@ export class ControlledSurfaceCoordinator {
     const key = claimKey(declaration)
     let active = true
     const listeners = new Set<() => void>()
-    const disconnect = this.subscribe(() => {
-      for (const listener of listeners) {
-        try { listener() } catch { /* A plugin observer cannot split Host publication. */ }
-      }
-    })
     const revoked = (): CordisXExtensionPointControlLeaseSnapshot => Object.freeze({
       revision: this.snapshotRevision,
       state: 'revoked',
@@ -535,25 +536,33 @@ export class ControlledSurfaceCoordinator {
       commands: Object.freeze([]),
       events: Object.freeze([]),
     })
+    const currentSnapshot = (): CordisXExtensionPointControlLeaseSnapshot => {
+      if (!active || !this.visibleGeneration(generation)) return revoked()
+      const point = this.snapshot().points.find(item => item.id === declaration.identity.pointId)
+      const candidate = point?.candidates.find(item => claimKey(item) === key)
+      if (candidate === undefined) return revoked()
+      const selected = candidate.state === 'selected' && candidate.authorization === 'allowed'
+      const eventMap = selected ? this.lastEvents.get(key) : undefined
+      return Object.freeze({
+        revision: this.snapshotRevision,
+        state: candidate.state,
+        reason: candidate.reason,
+        properties: selected ? immutableSnapshot(Object.fromEntries((candidate.bindings?.properties ?? []).map(item => [item.id, item.value]))) : Object.freeze({}),
+        commands: selected ? candidate.bindings?.commands ?? Object.freeze([]) : Object.freeze([]),
+        events: selected ? Object.freeze([...(eventMap ?? [])].map(([id, event]) => Object.freeze({ id, sequence: event.sequence, payload: event.payload }))) : Object.freeze([]),
+      })
+    }
+    const disconnect = this.subscribe(() => {
+      for (const listener of listeners) {
+        try { listener() } catch { /* A plugin observer cannot split Host publication. */ }
+      }
+      if (currentSnapshot().state !== 'selected') listeners.clear()
+    })
     return Object.freeze({
-      snapshot: (): CordisXExtensionPointControlLeaseSnapshot => {
-        if (!active || !this.visibleGeneration(generation)) return revoked()
-        const point = this.snapshot().points.find(item => item.id === declaration.identity.pointId)
-        const candidate = point?.candidates.find(item => claimKey(item) === key)
-        if (candidate === undefined) return revoked()
-        const selected = candidate.state === 'selected' && candidate.authorization === 'allowed'
-        const eventMap = selected ? this.lastEvents.get(key) : undefined
-        return Object.freeze({
-          revision: this.snapshotRevision,
-          state: candidate.state,
-          reason: candidate.reason,
-          properties: selected ? immutableSnapshot(Object.fromEntries((candidate.bindings?.properties ?? []).map(item => [item.id, item.value]))) : Object.freeze({}),
-          commands: selected ? candidate.bindings?.commands ?? Object.freeze([]) : Object.freeze([]),
-          events: selected ? Object.freeze([...(eventMap ?? [])].map(([id, event]) => Object.freeze({ id, sequence: event.sequence, payload: event.payload }))) : Object.freeze([]),
-        })
-      },
+      snapshot: currentSnapshot,
       subscribe: (listener: () => void): (() => void) => {
         if (!active) throw new Error('controlled surface lease is revoked')
+        if (currentSnapshot().state !== 'selected') throw new Error('controlled surface lease is not selected')
         listeners.add(listener)
         return () => listeners.delete(listener)
       },
@@ -603,12 +612,16 @@ export class ControlledSurfaceCoordinator {
         eligibleCandidates: Object.freeze(point.candidates.filter(item => item.state === 'eligible').map(claimReference)),
         deniedCandidates: Object.freeze(point.candidates.filter(item => item.authorization === 'denied').map(claimReference)),
         groupDecisions: point.groupDecisions,
-        groups: Object.freeze((this.points.get(point.id)?.exclusiveGroups ?? []).map(group => Object.freeze({
-          id: group.id,
-          selection: group.selection,
-          nativeFallback: group.nativeFallback,
-          modes: group.modes,
-        }))),
+        groups: Object.freeze((this.points.get(point.id)?.exclusiveGroups ?? []).map(group => {
+          const decision = point.groupDecisions.find(item => item.groupId === group.id)
+          return Object.freeze({
+            id: group.id,
+            selection: group.selection,
+            nativeFallback: group.nativeFallback,
+            modes: group.modes,
+            ...(decision === undefined ? {} : { decision }),
+          })
+        })),
         ...(point.suppression === undefined ? {} : { suppression: point.suppression }),
         candidates: Object.freeze(point.candidates.map(item => Object.freeze({
           principalHandle: item.principalHandle,
@@ -787,13 +800,21 @@ export class ControlledSurfaceCoordinator {
       const initial = new Map<string, { state: CordisXExtensionPointControlCandidateSnapshotV1['state']; reason: string; authorization: 'allowed' | 'denied'; bindings?: CordisXExtensionPointControlBindingsProjectionV1 }>()
       for (const record of records) {
         const mode = point.modes.find(item => item.id === record.declaration.mode)
+        let hostAccess: Readonly<{ authorized: boolean; reason?: string }>
+        try { hostAccess = record.hostAccess?.() ?? { authorized: true } } catch { hostAccess = { authorized: false, reason: 'point-policy.failed' } }
         const authorizationRecord = this.policies.authorization(claimReference(record.declaration))
-        const authorization = authorizationRecord?.policy === 'allow'
+        const authorization = !hostAccess.authorized
+          ? 'denied' as const
+          : authorizationRecord?.policy === 'allow'
           ? 'allowed' as const
           : authorizationRecord?.policy === 'deny'
             ? 'denied' as const
             : mode?.defaultAuthorization === 'allow' ? 'allowed' as const : 'denied' as const
-        if (authorization === 'denied') initial.set(record.key, { state: 'denied', reason: 'authorization.denied', authorization })
+        if (authorization === 'denied') initial.set(record.key, {
+          state: 'denied',
+          reason: hostAccess.authorized ? 'authorization.denied' : reason(hostAccess.reason ?? 'point-policy.denied', 'point-policy.denied'),
+          authorization,
+        })
         else if (current.state !== 'active') initial.set(record.key, { state: 'pending', reason: 'point.not-active', authorization })
         else {
           const bindingsProjection = this.projectBindings(point, record)
@@ -886,7 +907,7 @@ export class ControlledSurfaceCoordinator {
     forcedState?: 'suppressed',
     selection?: CordisXExtensionPointControlCandidateSnapshotV1['selection'],
   ): CordisXExtensionPointControlCandidateSnapshotV1 {
-    const auth = authorization ?? this.effectiveAuthorization(record.declaration)
+    const auth = authorization ?? this.effectiveAuthorization(record)
     return Object.freeze({
       principalHandle: record.declaration.principalHandle,
       origin: record.declaration.origin,
@@ -903,7 +924,9 @@ export class ControlledSurfaceCoordinator {
     })
   }
 
-  private effectiveAuthorization(declaration: CordisXExtensionPointControlDeclarationV1): 'allowed' | 'denied' {
+  private effectiveAuthorization(record: CandidateRecord): 'allowed' | 'denied' {
+    try { if (record.hostAccess?.().authorized === false) return 'denied' } catch { return 'denied' }
+    const declaration = record.declaration
     const policy = this.policies.authorization(claimReference(declaration))?.policy
     if (policy === 'allow') return 'allowed'
     if (policy === 'deny') return 'denied'

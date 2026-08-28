@@ -18,6 +18,7 @@ import {
 } from '../packages/cli/src/renderer/controlled-surfaces.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from '../packages/cli/src/renderer/ownership.js'
 import { SurfaceRegistry } from '../packages/cli/src/renderer/surfaces.js'
+import type { ExtensionPointAccessResolver } from '../packages/cli/src/renderer/extension-points.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
 import { HostContextStore } from '../packages/cli/src/renderer/validation.js'
 import {
@@ -170,6 +171,13 @@ describe('controlled extension point runtime', () => {
     expect(point.candidates.find(item => item.identity.pluginId === 'overlay')?.selection).toMatchObject({ authority: 'host-policy', rank: 0 })
     expect(point.candidates.find(item => item.identity.pluginId === 'replace')?.selection).not.toHaveProperty('rank')
     expect(coordinator.selectedPresenters(point.id).map(item => item.presenter)).toEqual([{ kind: 'theme' }, { kind: 'renderer' }])
+    expect(coordinator.managerSnapshot().points.find(item => item.id === point.id)?.groups.find(group => group.id === 'renderer')?.decision).toMatchObject({
+      outcome: 'selected', selectedClaim: { identity: { pluginId: 'replace' }, claimId: 'renderer', mode: 'replace' },
+    })
+    coordinator.setGroupChoice(coordinator.managerSnapshot().policyRevision, {
+      pointId: point.id, groupId: 'renderer', outcome: 'native',
+    })
+    expect(coordinator.managerSnapshot().points.find(item => item.id === point.id)?.groups.find(group => group.id === 'renderer')?.decision).toMatchObject({ outcome: 'native' })
   })
 
   it('keeps equal-priority winner order stable when profile-local principal handles change', () => {
@@ -463,6 +471,82 @@ describe('controlled extension point runtime', () => {
     registry.dispose()
     expect(registered.control?.snapshot()).toMatchObject({ state: 'revoked' })
     contexts.dispose()
+  })
+
+  it('revokes a selected lease when point-local policy denies access and restores it on inherit', async () => {
+    const pointCatalog: CordisXHostExtensionPointControlCatalogV1 = {
+      $schema: CORDISX_HOST_EXTENSION_POINT_CONTROL_CATALOG_SCHEMA_V1, schemaVersion: 1,
+      points: [{
+        id: 'composer.reasoning-intensity',
+        modes: [
+          { id: 'compose', stacking: 'ordered', coexistsWith: ['proxy'], defaultAuthorization: 'allow' },
+          { id: 'proxy', stacking: 'ordered', coexistsWith: ['compose'], defaultAuthorization: 'deny' },
+        ],
+        exclusiveGroups: [],
+        safeProperties: [{ id: 'reasoningIntensity', schema: { type: 'string', enum: ['low', 'medium', 'high'] }, visibility: 'renderer-safe', mutable: false }],
+        safeCommands: [{ id: 'setReasoningIntensity', dispatch: 'host-brokered', arguments: [{ id: 'value', schema: { type: 'string', enum: ['low', 'medium', 'high'] }, required: true }] }],
+        safeEvents: [{ id: 'reasoningIntensityChanged', delivery: 'host-projected', payload: [{ id: 'value', schema: { type: 'string', enum: ['low', 'medium', 'high'] }, required: true }] }],
+        ownership: { scope: 'point', suppressesDescendantsWhenModes: [] },
+      }],
+    }
+    const dispatch = vi.fn(async () => undefined)
+    const policies = new ControlledSurfacePolicyBroker()
+    const controls = new ControlledSurfaceCoordinator(pointCatalog, {
+      'composer.reasoning-intensity': {
+        currentState: () => ({ state: 'active', reason: 'point.mounted' }),
+        readProperty: () => 'high', dispatch,
+      },
+    }, 'host-1', policies)
+    const contexts = new HostContextStore()
+    const registry = new SurfaceRegistry(contexts)
+    registry.setControlCoordinator(controls)
+    let pointAllowed = true
+    registry.setAccessResolver({
+      decision: () => ({ policy: pointAllowed ? 'inherit' : 'deny', effectivePolicy: pointAllowed ? 'allow' : 'deny', authorized: pointAllowed, ...(!pointAllowed ? { reason: 'point.local-deny' } : {}) }),
+    } as unknown as ExtensionPointAccessResolver)
+    const plugin = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'theme', [CORDISX_PLUGIN_SOURCE]: 'https://plugins.example/theme', [CORDISX_PLUGIN_GENERATION]: 'theme-v1',
+    })
+    const registered = registry.register(plugin, {
+      name: 'composer.reasoning-intensity', id: 'theme',
+      control: { claimId: 'presentation', mode: 'proxy', requestedBindings: {
+        properties: ['reasoningIntensity'], commands: ['setReasoningIntensity'], events: ['reasoningIntensityChanged'],
+      } },
+    }, {
+      variant: 'imperium', title: { key: 'title' }, stages: [
+        { label: { key: 'low' }, material: 'plastic' }, { label: { key: 'high' }, material: 'gold' },
+      ],
+    })
+    const claim = registry.snapshot()[0]!.control!
+    policies.setAuthorization(0, {
+      ...authorization('theme', 'composer.reasoning-intensity', 'presentation', 'proxy', 'allow'),
+      principalHandle: claim.principalHandle,
+    })
+    const lease = registered.control!
+    expect(lease.snapshot()).toMatchObject({ state: 'selected', properties: { reasoningIntensity: 'high' } })
+    const changed = vi.fn()
+    lease.subscribe(changed)
+    const policyRevision = policies.revision()
+
+    pointAllowed = false
+    registry.invalidatePointPolicies()
+    expect(policies.revision()).toBe(policyRevision)
+    expect(registry.snapshot()[0]).toMatchObject({ authorized: false, effectivePointPolicy: 'deny', control: { authorization: 'denied', state: 'denied', reason: 'point.local-deny' } })
+    expect(lease.snapshot()).toMatchObject({ state: 'denied', reason: 'point.local-deny', properties: {}, commands: [], events: [] })
+    expect(() => lease.subscribe(() => undefined)).toThrow(/not selected/)
+    await expect(lease.invoke('setReasoningIntensity', { value: 'low' })).resolves.toMatchObject({ outcome: 'rejected', reason: 'claim.not-selected' })
+    expect(controls.publishEvent('composer.reasoning-intensity', 'reasoningIntensityChanged', { value: 'low' })).toEqual([])
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(changed).toHaveBeenCalledTimes(1)
+
+    pointAllowed = true
+    registry.invalidatePointPolicies()
+    expect(changed).toHaveBeenCalledTimes(1)
+    expect(lease.snapshot()).toMatchObject({ state: 'selected', properties: { reasoningIntensity: 'high' } })
+    lease.subscribe(changed)
+    await expect(lease.invoke('setReasoningIntensity', { value: 'medium' })).resolves.toMatchObject({ outcome: 'accepted' })
+    expect(dispatch).toHaveBeenCalledWith('setReasoningIntensity', { value: 'medium' })
+    registry.dispose(); contexts.dispose()
   })
 
   it('projects one exact generation through same-module stage, publish, rollback, and unload', async () => {

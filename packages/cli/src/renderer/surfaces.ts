@@ -494,7 +494,8 @@ export class SurfaceRegistry {
 
   setAccessResolver(access: ExtensionPointAccessResolver): void {
     this.access = access
-    this.notify()
+    if (this.controls === undefined) this.notify()
+    else this.controls.invalidate()
   }
 
   setControlCoordinator(controls: ControlledSurfaceCoordinator): void {
@@ -508,7 +509,8 @@ export class SurfaceRegistry {
   controlCoordinator(): ControlledSurfaceCoordinator | undefined { return this.controls }
 
   invalidatePointPolicies(): void {
-    this.notify()
+    if (this.controls === undefined) this.notify()
+    else this.controls.invalidate()
   }
 
   declareSurface(name: string): () => void {
@@ -622,6 +624,12 @@ export class SurfaceRegistry {
       declaration: controlDeclaration,
       generation: controlGeneration!,
       presenter: snapshot,
+      hostAccess: () => {
+        const decision = this.access?.decision(owner, options.name, 'surface', candidateView)
+        return decision === undefined
+          ? Object.freeze({ authorized: true })
+          : Object.freeze({ authorized: decision.authorized, ...(decision.reason === undefined ? {} : { reason: decision.reason }) })
+      },
     })
     const controlLease = controlDeclaration === undefined || options.control === undefined ? undefined : this.controls!.createLease(controlDeclaration, controlGeneration!)
     const record: SurfaceRecord = {

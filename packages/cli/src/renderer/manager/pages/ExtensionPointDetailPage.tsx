@@ -34,7 +34,7 @@ export function ExtensionPointDetailPage({ model, snapshot, router }: { readonly
       {control === undefined ? null : <section className="cxr-section" data-cordisx-control-point={control.id}><h3>受控渲染</h3><p>{control.state} · {control.reason}</p></section>}
       {control?.groups.filter(group => group.selection === 'user').map(group => {
         const candidates = control.candidates.filter(candidate => candidate.exclusiveGroup === group.id && candidate.authorization === 'allowed')
-        const decision = control.groupDecisions.find(item => item.groupId === group.id)
+        const decision = group.decision
         const value = decision?.outcome === 'selected' && decision.selectedClaim !== undefined
           ? stableControlClaimKey(decision.selectedClaim)
           : 'native'
@@ -43,7 +43,7 @@ export function ExtensionPointDetailPage({ model, snapshot, router }: { readonly
           ...candidates.map(candidate => ({ label: `${candidate.identity.pluginId} · ${candidate.mode}`, value: stableControlClaimKey(candidate) })),
         ]
         const groupKey = `${encodeURIComponent(pointId)}:${encodeURIComponent(group.id)}`
-        return <section className="cxr-card" data-cordisx-control-group={groupKey} key={group.id}><span className="cxr-card-body"><span className="cxr-card-title">渲染模式 · {group.id}</span><span className="cxr-card-description">在互斥候选间切换，选择由 Host 策略保存。</span></span><span data-cordisx-control-group-select={groupKey}><Select className="cxr-policy-select" value={value} options={groupOptions} disabled={model.setExtensionPointControlGroupChoice === undefined} onChange={next => {
+        return <section className="cxr-card" data-cordisx-control-group={groupKey} key={group.id}><span className="cxr-card-body"><span className="cxr-card-title">渲染模式 · {group.id}</span><span className="cxr-card-description">在互斥候选间切换，选择由 Host 策略保存。</span></span><span data-cordisx-control-group-select={groupKey}><Select key={`${groupKey}:${controlSnapshot!.policyRevision}:${value}`} className="cxr-policy-select" value={value} options={groupOptions} disabled={model.setExtensionPointControlGroupChoice === undefined} onChange={next => {
           const selected = candidates.find(candidate => stableControlClaimKey(candidate) === next)
           void model.setExtensionPointControlGroupChoice?.(controlSnapshot!.policyRevision, selected === undefined
             ? { pointId, groupId: group.id, outcome: 'native' }
