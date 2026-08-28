@@ -1,5 +1,5 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
-import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
+import { CORDISX_EXTENSION_POINT_CONTROL_AUTHORIZATION_SCHEMA_V1, CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
   CordisXBrowserPlugin,
   CordisXCommandReference,
@@ -22,6 +22,7 @@ import type {
   CordisXPluginManifestV1,
   CordisXPluginModule,
   CordisXRouteReference,
+  CordisXExtensionPointControlMode,
 } from '../contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
@@ -57,6 +58,7 @@ import {
 } from './platform.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE, CordisXSlotService } from './service.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
+import type { ControlledSurfaceGroupChoice } from './controlled-surfaces.js'
 import {
   BrowserExtensionPointPolicyStore,
   CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
@@ -849,6 +851,7 @@ async function start(
 
   const managerSnapshot = (): ManagerSnapshot => {
     const liveRegistrations = slotService?.snapshot() ?? []
+    const extensionPointControls = slotService?.controlManagerSnapshot()
     const livePluginIds = new Set(liveRegistrations.map(item => item.owner))
     const activeRegistrationKeys = new Set(activeControllers().map(controller => (
       `${controller.item.id}\u0000${moduleGenerationOf(controller)}`
@@ -1072,6 +1075,7 @@ async function start(
         navigation,
         surfaceAvailability: slotService?.registry.availabilitySnapshot() ?? [],
       }),
+      ...(extensionPointControls === undefined ? {} : { extensionPointControls }),
     }
   }
 
@@ -1079,9 +1083,14 @@ async function start(
   // local paths and Host-private build diagnostics are available only to the
   // Manager model installed below.
   const publicSnapshot = (): ManagerSnapshot => {
-    const { localDevelopment: _localDevelopment, ...projected } = managerSnapshot()
+    const {
+      localDevelopment: _localDevelopment,
+      extensionPointControls: _extensionPointControls,
+      ...projected
+    } = managerSnapshot()
     return {
       ...projected,
+      registrations: projected.registrations.map(({ control: _control, ...registration }) => registration),
       plugins: projected.plugins.map(plugin => {
         const { development: _development, ...publicPlugin } = plugin
         return publicPlugin
@@ -1282,6 +1291,50 @@ async function start(
       slotService?.invalidatePointPolicies()
       await routeService?.invalidatePointPolicies()
       notify()
+    })
+    operation = task.catch(() => {})
+    return task
+  }
+
+  const setExtensionPointControlAuthorization = (
+    reference: Readonly<{
+      principalHandle: string
+      source: string
+      pluginId: string
+      pointId: string
+      claimId: string
+      mode: CordisXExtensionPointControlMode
+    }>,
+    policy: 'inherit' | 'allow' | 'deny',
+  ): Promise<void> => {
+    const task = operation.then(async () => {
+      if (disposed) throw new Error('CordisX runtime is disposed')
+      if (slotService === undefined) throw new Error('controlled surface runtime is unavailable')
+      const revision = slotService.controlManagerSnapshot()?.revision
+      if (revision === undefined) throw new Error('controlled surface runtime is unavailable')
+      slotService.setControlAuthorization(revision, {
+        $schema: CORDISX_EXTENSION_POINT_CONTROL_AUTHORIZATION_SCHEMA_V1,
+        schemaVersion: 1,
+        principalHandle: reference.principalHandle,
+        identity: { source: reference.source, pluginId: reference.pluginId, pointId: reference.pointId },
+        claimId: reference.claimId,
+        mode: reference.mode,
+        policy,
+      })
+      notify('controlled-surface-policy')
+    })
+    operation = task.catch(() => {})
+    return task
+  }
+
+  const setExtensionPointControlGroupChoice = (choice: ControlledSurfaceGroupChoice): Promise<void> => {
+    const task = operation.then(async () => {
+      if (disposed) throw new Error('CordisX runtime is disposed')
+      if (slotService === undefined) throw new Error('controlled surface runtime is unavailable')
+      const revision = slotService.controlManagerSnapshot()?.revision
+      if (revision === undefined) throw new Error('controlled surface runtime is unavailable')
+      slotService.setControlGroupChoice(revision, choice)
+      notify('controlled-surface-selection')
     })
     operation = task.catch(() => {})
     return task
@@ -1981,6 +2034,8 @@ async function start(
     },
     subscribePluginConsole: listener => pluginConsole.subscribe(listener),
     setExtensionPointPolicy,
+    setExtensionPointControlAuthorization,
+    setExtensionPointControlGroupChoice,
     permissionAuthorizationPlan,
     authorizePlugin,
     permissionAuthorizationPlanV2,
@@ -2146,10 +2201,11 @@ async function start(
       slotService.subscribeInternal(notifyFrom('surfaces')),
     )
     adapterHandle = metadata.hostKind === 'playground'
-      ? installPlaygroundAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors)
+      ? installPlaygroundAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, { profileId: metadata.profileId })
       : installCodexAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, {
           generation,
           adapterVersion: metadata.version,
+          profileId: metadata.profileId,
         })
     for (const controller of controllers) {
       if (controller.status !== 'active') continue

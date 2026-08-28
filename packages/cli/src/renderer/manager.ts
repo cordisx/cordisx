@@ -53,6 +53,7 @@ import type {
   RouteSnapshot,
 } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
+import type { ControlledSurfaceGroupChoice, ControlledSurfaceManagerSnapshot } from './controlled-surfaces.js'
 import type {
   ExtensionPointPluginUsageSnapshot,
   ExtensionPointRuntimeSnapshot,
@@ -181,6 +182,8 @@ export interface ManagerSnapshot {
   readonly capabilityProviders?: readonly ManagerCapabilityProviderSnapshot[]
   /** Runtime-owned point catalog/policy projection; manager UX consumes it in the following slice. */
   readonly extensionPoints?: ExtensionPointRuntimeSnapshot
+  /** Host-only control-plane projection; presenter values and native state are intentionally absent. */
+  readonly extensionPointControls?: ControlledSurfaceManagerSnapshot
   readonly settingsTabs?: readonly ManagerSettingsTabSnapshot[]
   readonly settingsNavigationItems?: readonly ManagerSettingsNavigationItemSnapshot[]
   readonly pluginLifecycle?: {
@@ -250,6 +253,18 @@ export interface ManagerModel {
   ): Promise<CordisXPluginLifecycleResultV1>
   requestPluginLifecycle?(operation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1>
   setExtensionPointPolicy?(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
+  setExtensionPointControlAuthorization?(
+    reference: Readonly<{
+      principalHandle: string
+      source: string
+      pluginId: string
+      pointId: string
+      claimId: string
+      mode: import('../contracts.js').CordisXExtensionPointControlMode
+    }>,
+    policy: 'inherit' | 'allow' | 'deny',
+  ): Promise<void>
+  setExtensionPointControlGroupChoice?(choice: ControlledSurfaceGroupChoice): Promise<void>
   mountSettingsTab?(id: string, panelBody: HTMLElement): Promise<ManagedSettingsPageMount>
   closeSettingsTabContent?(): Promise<void>
   managerContentPresentation?(id: string, reference: CordisXRouteReference): ManagerContentPresentation | undefined

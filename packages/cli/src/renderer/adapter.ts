@@ -1,5 +1,8 @@
 import {
+  CORDISX_HOST_EXTENSION_POINT_CONTROL_CATALOG_SCHEMA_V1,
   CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1,
+  type CordisXExtensionPointControlMode,
+  type CordisXHostExtensionPointControlCatalogV1,
   type CordisXLocalizedText,
   type CordisXReasoningIntensityPresentation,
   type CordisXSessionBackdropPresentation,
@@ -19,6 +22,12 @@ import {
 import { createHostSurfaceIcon } from './icons.js'
 import { HostTooltipController, type HostTooltipPlacement } from './tooltips.js'
 import { evaluateWhen } from './validation.js'
+import {
+  BrowserControlledSurfacePolicyStore,
+  ControlledSurfaceCoordinator,
+  ControlledSurfacePolicyBroker,
+  type ControlledSurfacePointBinding,
+} from './controlled-surfaces.js'
 
 interface ResolvedOutletAnchor {
   readonly anchor: HTMLElement
@@ -662,6 +671,7 @@ export class ReasoningIntensityProjection {
   private presentation: CordisXReasoningIntensityPresentation | undefined
   private title = ''
   private labels: readonly string[] = []
+  private nativeHidden = true
 
   constructor(private readonly document: Document) {
     this.root = create(document, 'div', 'cordisx-reasoning-intensity')
@@ -690,8 +700,11 @@ export class ReasoningIntensityProjection {
     presentation: CordisXReasoningIntensityPresentation,
     title: string,
     stageLabels: readonly string[],
+    nativeHidden = true,
   ): void {
     if (this.native !== native) this.connect(native)
+    this.nativeHidden = nativeHidden
+    this.applyNativeVisibility()
     this.presentation = presentation
     this.title = title
     this.labels = stageLabels
@@ -747,8 +760,7 @@ export class ReasoningIntensityProjection {
     this.nativeOpacity = native.style.opacity
     this.nativeAccentColor = native.style.accentColor
     native.dataset.cordisxReasoningNative = 'true'
-    native.style.opacity = '0'
-    native.style.accentColor = 'transparent'
+    this.applyNativeVisibility()
     native.addEventListener('input', this.onInput)
     native.addEventListener('change', this.onInput)
     native.addEventListener('pointerdown', this.onPointerDown)
@@ -761,6 +773,12 @@ export class ReasoningIntensityProjection {
     }
     this.document.defaultView?.addEventListener('resize', this.align)
     this.document.defaultView?.addEventListener('scroll', this.align, true)
+  }
+
+  private applyNativeVisibility(): void {
+    if (this.native === undefined) return
+    this.native.style.opacity = this.nativeHidden ? '0' : this.nativeOpacity
+    this.native.style.accentColor = this.nativeHidden ? 'transparent' : this.nativeAccentColor
   }
 
   private disconnect(): void {
@@ -801,6 +819,130 @@ export class ReasoningIntensityProjection {
     const trackInset = 3
     this.thumb.style.left = `${trackInset + thumbWidth / 2 + progress * Math.max(0, width - thumbWidth - trackInset * 2)}px`
   }
+}
+
+/** @internal Host-owned and fully reversible native visibility effect. */
+export class ReasoningIntensityNativeVisibility {
+  private native: HTMLInputElement | undefined
+  private opacity = ''
+  private accentColor = ''
+
+  update(native: HTMLInputElement | undefined, hidden: boolean): void {
+    if (this.native !== native) {
+      this.restore()
+      if (native !== undefined) {
+        this.native = native
+        this.opacity = native.style.opacity
+        this.accentColor = native.style.accentColor
+      }
+    }
+    if (this.native === undefined) return
+    this.native.dataset.cordisxReasoningNative = 'true'
+    this.native.style.opacity = hidden ? '0' : this.opacity
+    this.native.style.accentColor = hidden ? 'transparent' : this.accentColor
+  }
+
+  dispose(): void { this.restore() }
+
+  private restore(): void {
+    if (this.native === undefined) return
+    this.native.style.opacity = this.opacity
+    this.native.style.accentColor = this.accentColor
+    delete this.native.dataset.cordisxReasoningNative
+    reasoningMenuCleanup.get(this.native)?.()
+    this.native = undefined
+  }
+}
+
+const REASONING_CONTROL_POINT = 'composer.reasoning-intensity'
+
+export const CORDISX_CODEX_CONTROL_CATALOG = {
+  $schema: CORDISX_HOST_EXTENSION_POINT_CONTROL_CATALOG_SCHEMA_V1,
+  schemaVersion: 1,
+  points: [{
+    id: REASONING_CONTROL_POINT,
+    modes: [
+      { id: 'compose', stacking: 'ordered', coexistsWith: ['proxy'], defaultAuthorization: 'allow' },
+      { id: 'replace', stacking: 'exclusive', exclusiveGroup: 'renderer', coexistsWith: ['proxy'], defaultAuthorization: 'deny' },
+      { id: 'overlay', stacking: 'exclusive', exclusiveGroup: 'renderer', coexistsWith: ['proxy'], defaultAuthorization: 'deny' },
+      { id: 'proxy', stacking: 'ordered', coexistsWith: ['compose', 'replace', 'overlay', 'hide-native'], defaultAuthorization: 'deny' },
+      { id: 'hide-native', stacking: 'exclusive', exclusiveGroup: 'renderer', coexistsWith: ['proxy'], defaultAuthorization: 'deny' },
+    ],
+    exclusiveGroups: [{
+      id: 'renderer', modes: ['replace', 'overlay', 'hide-native'], cardinality: 'one', selection: 'user', nativeFallback: true,
+    }],
+    safeProperties: [{
+      id: 'reasoningIntensity', schema: { type: 'string' }, visibility: 'renderer-safe', mutable: false,
+    }],
+    safeCommands: [{
+      id: 'setReasoningIntensity', dispatch: 'host-brokered', arguments: [{ id: 'value', schema: { type: 'string' }, required: true }],
+    }],
+    safeEvents: [{
+      id: 'reasoningIntensityChanged', delivery: 'host-projected', payload: [{ id: 'value', schema: { type: 'string' }, required: true }],
+    }],
+    ownership: { scope: 'point', suppressesDescendantsWhenModes: [] },
+  }],
+} as const satisfies CordisXHostExtensionPointControlCatalogV1
+
+class ReasoningIntensityControlBinding implements ControlledSurfacePointBinding {
+  private native: HTMLInputElement | undefined
+  private coordinator: ControlledSurfaceCoordinator | undefined
+  private readonly onValueChange = (): void => {
+    this.coordinator?.invalidate()
+    if (this.native !== undefined) this.coordinator?.publishEvent(REASONING_CONTROL_POINT, 'reasoningIntensityChanged', { value: this.native.value })
+  }
+
+  connect(coordinator: ControlledSurfaceCoordinator): void { this.coordinator = coordinator }
+
+  update(native: HTMLInputElement | undefined): void {
+    if (this.native === native) return
+    this.native?.removeEventListener('input', this.onValueChange)
+    this.native?.removeEventListener('change', this.onValueChange)
+    this.native = native
+    this.native?.addEventListener('input', this.onValueChange)
+    this.native?.addEventListener('change', this.onValueChange)
+    this.coordinator?.invalidate()
+  }
+
+  currentState(): Readonly<{ state: 'active' | 'not-mounted'; reason: string }> {
+    return this.native?.isConnected === true
+      ? { state: 'active', reason: 'point.mounted' }
+      : { state: 'not-mounted', reason: 'point.not-mounted' }
+  }
+
+  readProperty(id: string): string {
+    if (id !== 'reasoningIntensity' || this.native === undefined) throw new Error('reasoning property is unavailable')
+    return this.native.value
+  }
+
+  commandAvailability(id: string): Readonly<{ available: boolean; reason?: string }> {
+    return id === 'setReasoningIntensity' && this.native?.isConnected === true
+      ? { available: true }
+      : { available: false, reason: 'point.not-mounted' }
+  }
+
+  eventAvailability(id: string): Readonly<{ available: boolean; reason?: string }> {
+    return id === 'reasoningIntensityChanged' && this.native?.isConnected === true
+      ? { available: true }
+      : { available: false, reason: 'point.not-mounted' }
+  }
+
+  dispatch(id: string, arguments_: Readonly<Record<string, string | number | boolean | null>>): void {
+    if (id !== 'setReasoningIntensity' || this.native === undefined) throw new Error('reasoning command is unavailable')
+    const value = String(arguments_.value)
+    const numeric = Number(value)
+    const min = Number(this.native.min || 0)
+    const max = Number(this.native.max || 100)
+    if (!Number.isFinite(numeric) || numeric < min || numeric > max) throw new Error('reasoning value is out of range')
+    this.native.value = value
+    const EventClass = this.native.ownerDocument.defaultView?.Event
+    if (EventClass !== undefined) {
+      this.native.dispatchEvent(new EventClass('input', { bubbles: true }))
+      this.native.dispatchEvent(new EventClass('change', { bubbles: true }))
+    }
+  }
+
+  dispose(): void { this.update(undefined); this.coordinator = undefined }
 }
 
 function rangeProgress(native: HTMLInputElement): number {
@@ -948,6 +1090,7 @@ class StructuredSurfaceRenderer {
   private nextContext = 0
   private readonly routeProjectors = new Map<HTMLButtonElement, () => void>()
   private reasoningProjection: ReasoningIntensityProjection | undefined
+  private readonly reasoningNativeVisibility = new ReasoningIntensityNativeVisibility()
   private sessionBackdropProjection: SessionBackdropProjection | undefined
 
   constructor(
@@ -956,6 +1099,7 @@ class StructuredSurfaceRenderer {
     private readonly commands: CordisXCommandService,
     private readonly routes: CordisXRouteService,
     private readonly i18n: CordisXI18nService,
+    private readonly reasoningControl: ReasoningIntensityControlBinding,
     private readonly adapterIdentity: Readonly<{
       generation: string
       adapterVersion: string
@@ -1008,6 +1152,8 @@ class StructuredSurfaceRenderer {
     this.restoreToolbarSlot()
     this.reasoningProjection?.dispose()
     this.reasoningProjection = undefined
+    this.reasoningNativeVisibility.dispose()
+    this.reasoningControl.update(undefined)
     this.sessionBackdropProjection?.dispose()
     this.sessionBackdropProjection = undefined
     this.tooltips.dispose()
@@ -1068,6 +1214,7 @@ class StructuredSurfaceRenderer {
     const sessionHeaderSeat = resolveSessionHeaderSeat(this.document, sessionId)
     const composerSubmitSeat = resolveComposerSubmitSeat(this.document, sessionId)
     const reasoningRange = managerOverlay ? undefined : resolveReasoningIntensityRange(this.document, sessionId)
+    this.reasoningControl.update(reasoningRange)
     const contextValues = {
       'sidebar.visible': sidebarNavigation !== undefined || sidebarFooterControl !== undefined,
       'toolbar.visible': toolbarControl !== undefined,
@@ -1207,21 +1354,34 @@ class StructuredSurfaceRenderer {
     }
     if (reasoningRange !== undefined) {
       availableSurfaces.add('composer.reasoning-intensity')
-      const snapshot = active.find(item => item.surface === 'composer.reasoning-intensity')
+      const reasoningItems = active.filter(item => item.surface === REASONING_CONTROL_POINT)
+      const hideNative = reasoningItems.find(item => item.control?.mode === 'hide-native')
+      const snapshot = reasoningItems.find(item => {
+        const mode: CordisXExtensionPointControlMode = item.control?.mode ?? 'compose'
+        return mode === 'compose' || mode === 'replace' || mode === 'overlay'
+      })
       if (snapshot !== undefined) {
         const presentation = snapshot.item as CordisXReasoningIntensityPresentation
         const title = this.text(snapshot, presentation.title, 'title', nextSites)
         const labels = presentation.stages.map((stage, index) => this.text(snapshot, stage.label, `stages.${index}.label`, nextSites))
         this.reasoningProjection ??= new ReasoningIntensityProjection(this.document)
-        this.reasoningProjection.update(reasoningRange, presentation, title, labels)
+        this.reasoningNativeVisibility.update(undefined, false)
+        this.reasoningProjection.update(reasoningRange, presentation, title, labels, snapshot.control?.mode !== 'overlay')
         renderedReasoningId = snapshot.qualifiedId
+      } else if (hideNative !== undefined) {
+        this.reasoningProjection?.dispose()
+        this.reasoningProjection = undefined
+        this.reasoningNativeVisibility.update(reasoningRange, true)
+        renderedReasoningId = hideNative.qualifiedId
       } else {
         this.reasoningProjection?.dispose()
         this.reasoningProjection = undefined
+        this.reasoningNativeVisibility.update(reasoningRange, false)
       }
     } else {
       this.reasoningProjection?.dispose()
       this.reasoningProjection = undefined
+      this.reasoningNativeVisibility.update(undefined, false)
     }
     if (sessionId !== undefined) {
       availableSurfaces.add('session.backdrop')
@@ -1771,6 +1931,7 @@ export interface CodexAdapterOptions {
   readonly generation?: string
   readonly adapterVersion?: string
   readonly hostId?: string
+  readonly profileId?: string
 }
 
 export function installCodexAdapter(
@@ -1822,7 +1983,15 @@ export function installCodexAdapter(
   const generation = options.generation ?? (typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-  const surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, {
+  const reasoningControl = new ReasoningIntensityControlBinding()
+  const controls = new ControlledSurfaceCoordinator(CORDISX_CODEX_CONTROL_CATALOG, {
+    [REASONING_CONTROL_POINT]: reasoningControl,
+  }, generation, new ControlledSurfacePolicyBroker(new BrowserControlledSurfacePolicyStore(options.profileId ?? 'default')),
+  (candidate, view) => slots.controlGenerationVisible(candidate, view),
+  candidate => slots.controlGenerationCallable(candidate))
+  reasoningControl.connect(controls)
+  slots.setControlCoordinator(controls)
+  const surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, {
     generation,
     adapterVersion: options.adapterVersion ?? 'ui-catalog-v2',
     hostId: options.hostId ?? 'com.openai.codex',
@@ -1830,6 +1999,7 @@ export function installCodexAdapter(
   return {
     dispose() {
       surfaces.dispose()
+      reasoningControl.dispose()
       removeStyles()
       for (const dispose of undeclare.reverse()) dispose()
       session.dispose()
@@ -1849,13 +2019,25 @@ export function installCodexAdapter(
  */
 export function installPlaygroundAdapter(
   document: Document,
-  _slots: CordisXSlotService,
+  slots: CordisXSlotService,
   _commands: CordisXCommandService,
   routes: CordisXRouteService,
   _i18n: CordisXI18nService,
   extensionPoints: ExtensionPointDescriptorRegistry,
+  options: CodexAdapterOptions = {},
 ): CodexAdapterHandle {
   const unregisterExtensionPoints = extensionPoints.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
+  const generation = typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `playground-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const reasoningControl = new ReasoningIntensityControlBinding()
+  const controls = new ControlledSurfaceCoordinator(CORDISX_CODEX_CONTROL_CATALOG, {
+    [REASONING_CONTROL_POINT]: reasoningControl,
+  }, generation, new ControlledSurfacePolicyBroker(new BrowserControlledSurfacePolicyStore(options.profileId ?? 'playground')),
+  (candidate, view) => slots.controlGenerationVisible(candidate, view),
+  candidate => slots.controlGenerationCallable(candidate))
+  reasoningControl.connect(controls)
+  slots.setControlCoordinator(controls)
   const seat = (name: string): HTMLElement | undefined => document.querySelector<HTMLElement>(`[data-cordisx-playground-seat="${name}"]`) ?? undefined
   const controllers = [
     ['app', 'fixed', () => seat('app')],
@@ -1879,6 +2061,7 @@ export function installPlaygroundAdapter(
   })
   return {
     dispose() {
+      reasoningControl.dispose()
       for (const item of declared.reverse()) {
         item.dispose()
         item.controller.dispose()

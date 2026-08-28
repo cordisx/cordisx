@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   DomOutletController,
   ReasoningIntensityProjection,
+  ReasoningIntensityNativeVisibility,
   SessionBackdropProjection,
   resolveReasoningIntensityRange,
 } from '../packages/cli/src/renderer/adapter.js'
@@ -89,6 +90,31 @@ describe('DomOutletController', () => {
 })
 
 describe('ReasoningIntensityProjection', () => {
+  it('keeps native styles for overlay and restores a hide-native lease', () => {
+    const dom = new JSDOM('<body><input id="range" type="range" min="0" max="4" value="2" style="opacity:.7;accent-color:blue"></body>')
+    const range = dom.window.document.getElementById('range') as HTMLInputElement
+    vi.spyOn(range, 'getBoundingClientRect').mockReturnValue({
+      x: 1, y: 2, left: 1, top: 2, right: 201, bottom: 42, width: 200, height: 40, toJSON: () => ({}),
+    })
+    const localized = (key: string) => ({ key, fallback: key })
+    const projection = new ReasoningIntensityProjection(dom.window.document)
+    projection.update(range, {
+      variant: 'imperium', title: localized('Intensity'), stages: [
+        { label: localized('Low'), material: 'plastic' }, { label: localized('High'), material: 'gold' },
+      ],
+    }, 'Intensity', ['Low', 'High'], false)
+    expect(range.style).toMatchObject({ opacity: '0.7', accentColor: 'blue' })
+    projection.dispose()
+
+    const visibility = new ReasoningIntensityNativeVisibility()
+    visibility.update(range, true)
+    expect(range.style).toMatchObject({ opacity: '0', accentColor: 'transparent' })
+    visibility.dispose()
+    expect(range.style).toMatchObject({ opacity: '0.7', accentColor: 'blue' })
+    expect(range.dataset.cordisxReasoningNative).toBeUndefined()
+    dom.window.close()
+  })
+
   it('adapts the current Radix power slider without replacing its native value authority', () => {
     const dom = new JSDOM(`<body><div role="menu"><div data-model-picker-power-slider style="height:40px"><span data-orientation="horizontal"><span role="slider" aria-valuemin="0" aria-valuemax="4" aria-valuenow="1" aria-label="Intensity"></span></span></div></div></body>`)
     const native = dom.window.document.querySelector<HTMLElement>('[role="slider"]')!

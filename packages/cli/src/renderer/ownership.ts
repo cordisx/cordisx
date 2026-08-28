@@ -14,6 +14,10 @@ export function generationFromContext(ctx: Context): string | undefined {
   return (ctx as Context & { [CORDISX_PLUGIN_GENERATION]?: string })[CORDISX_PLUGIN_GENERATION]
 }
 
+export function sourceFromContext(ctx: Context): string | undefined {
+  return (ctx as Context & { [CORDISX_PLUGIN_SOURCE]?: string })[CORDISX_PLUGIN_SOURCE]
+}
+
 export function qualifyOwnedId(owner: string, id: string): string {
   return id.includes(':') ? id : `${owner}:${id}`
 }
