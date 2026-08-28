@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { BrandMark } from '../../renderer/host-ui/BrandMark.js'
 import { FixtureSummary } from './components/FixtureSummary.js'
 import { HostSeats, type PlaygroundFixtureMode } from './components/HostSeats.js'
 import { PlaygroundToolbar } from './components/PlaygroundToolbar.js'
@@ -21,8 +22,10 @@ export function App() {
     <div className="pg-shell" data-pg-fixture-mode={fixtureMode}>
       <aside className="pg-sidebar" aria-label="Playground navigation">
         <div className="pg-brand-row">
-          <span className="pg-brand-mark" aria-hidden="true">Cx</span>
-          <span><strong>CordisX</strong><small>UI Playground</small></span>
+          <span className="pg-manager-anchor" data-cordisx-playground-manager-trigger aria-hidden="true">
+            <BrandMark className="pg-brand-mark" />
+          </span>
+          <span className="pg-brand-copy"><strong>CordisX</strong><small>UI Playground</small></span>
         </div>
         <button className="pg-new-task" type="button" onClick={() => setFixtureMode('empty')}>
           <span aria-hidden="true">＋</span> 新任务
@@ -44,7 +47,6 @@ export function App() {
           <div className="pg-footer-surface" data-cordisx-playground-surface="sidebar.footer.before-control" />
           <button type="button" className="pg-sidebar-control" data-cordisx-playground-template="sidebar.footer" aria-label="Playground tools">•••</button>
           <div className="pg-footer-surface" data-cordisx-playground-surface="sidebar.footer.after-control" />
-          <span className="pg-manager-anchor" data-cordisx-playground-manager-trigger aria-hidden="true" />
         </footer>
       </aside>
 

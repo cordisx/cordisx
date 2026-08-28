@@ -13,6 +13,26 @@ const defaultPluginIds = [
 ]
 
 describe('UI Playground', () => {
+  it('uses the official Host BrandMark in a full-width, grid-aligned brand row', async () => {
+    const [app, styles] = await Promise.all([
+      readFile(path.resolve('packages/cli/src/playground/client/App.tsx'), 'utf8'),
+      readFile(path.resolve('packages/cli/src/playground/client/styles.css'), 'utf8'),
+    ])
+
+    expect(app).toContain("import { BrandMark } from '../../renderer/host-ui/BrandMark.js'")
+    expect(app).toContain('<span className="pg-manager-anchor" data-cordisx-playground-manager-trigger aria-hidden="true">')
+    expect(app).toContain('<BrandMark className="pg-brand-mark" />')
+    expect(app.match(/data-cordisx-playground-manager-trigger/g)).toHaveLength(1)
+    expect(app.indexOf('data-cordisx-playground-manager-trigger')).toBeLessThan(app.indexOf('pg-new-task'))
+    expect(app).not.toContain('>Cx</span>')
+    expect(styles).toContain('margin-inline: calc(0px - var(--pg-sidebar-inline-padding))')
+    expect(styles).toContain('padding-inline: calc(var(--pg-sidebar-inline-padding) + 9px)')
+    expect(styles).toContain('height: 48px')
+    expect(styles).toContain('.pg-brand-row > .cxr-trigger-seat { position: absolute; inset: 0;')
+    expect(styles).not.toContain('.pg-sidebar-footer .cxr-trigger-seat')
+    expect(styles).toContain('html[data-theme="light"] .pg-brand-mark > .cxr-brand-mark-light { display: block; }')
+  })
+
   it('serves a loopback production renderer bundle and removes isolated state on close', async () => {
     const source = await readFile(defaultUiPlaygroundConfig, 'utf8')
     const playground = await startUiPlayground({ configPath: defaultUiPlaygroundConfig })
