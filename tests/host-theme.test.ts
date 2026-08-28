@@ -7,6 +7,21 @@ async function settle(): Promise<void> {
 }
 
 describe('HostThemeProjection', () => {
+  it('reads the current renderer theme when a late portal first attaches', () => {
+    const dom = new JSDOM('<!doctype html><html data-theme="dark"><body></body></html>')
+    const projection = new HostThemeProjection(dom.window.document)
+    const portal = dom.window.document.createElement('div')
+    try {
+      dom.window.document.documentElement.dataset.theme = 'light'
+      projection.attach(portal)
+      expect(portal.dataset.cordisxAppTheme).toBe('light')
+      expect(portal.style.getPropertyValue('--cx-surface')).toBe('#f8fafc')
+    } finally {
+      projection.dispose()
+      dom.window.close()
+    }
+  })
+
   it('prefers the renderer App theme over an opposite system preference, updates open portals, and cleans its projection', async () => {
     const dom = new JSDOM('<!doctype html><html class="electron-dark"><body></body></html>')
     Object.defineProperty(dom.window, 'matchMedia', {

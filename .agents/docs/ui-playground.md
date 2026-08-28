@@ -33,10 +33,18 @@ local to the temporary Playground profile: allowing or denying it neither
 creates a Codex connection nor contacts a provider. Denying it leaves the
 Console and all unavailable diagnostics available for inspection.
 
-The sidebar reports the fixture name, active plugin count, and every current
-plugin status. To select another real composition, start with `--config`; the
-minimal `cordisx.config.example.json` remains a documentation example and is
-not the Playground default. A provided composition file is read once, then
+The default page is a compact Agent Desktop fixture rather than a catalog of
+empty rectangles. Its persistent shell contains a Host-owned sidebar and
+session list, workspace and session headers, a conversation timeline, and a
+composer. `有会话` and `空会话` switch between mounted and absent session
+contexts so developers can verify both contribution states. The floating
+developer tools panel reports the fixture name, active plugin count, every
+current plugin status, theme/locale controls, runtime reload, and reset without
+occupying the product canvas.
+
+To select another real composition, start with `--config`; the minimal
+`cordisx.config.example.json` remains a documentation example and is not the
+Playground default. A provided composition file is read once, then
 materialized below a fresh temporary `CORDISX_HOME`.
 Its plugin entries become absolute paths, while writable configuration,
 candidate state, cache, and reset data stay in that temporary root. Closing the
@@ -52,15 +60,22 @@ clears its temporary state.
   copied Playground-only Manager implementation;
 - Manager pages, plugin details, configuration forms, Host dialogs, theme
   tokens, icons, locale attributes, and explicit `app`/`main`/`session.content`
-  page seats render in a normal browser; and
+  page seats render in a normal browser;
+- existing structured contributions render through the production Host
+  renderer in explicit Playground seats for `sidebar.navigation.items`,
+  `sidebar.footer.before-control`, `sidebar.footer.after-control`,
+  `workspace.toolbar.items`, `session.header.actions`, and
+  `composer.toolbar.items`; and
 - configuration writes use the existing revision-fenced Config bridge, but
   target only the temporary materialized composition.
 
 The Playground adapter is intentionally separate from the Codex adapter. It
 uses only explicit `data-cordisx-playground-*` Host seats and never probes or
 inserts Codex selectors, DOM, native anchors, a current connection, or a raw
-bridge. Missing simulated shell seats remain inspectable/pending in Manager;
-they are not silently replaced with a Codex-shaped fallback.
+bridge. The shell consumes the existing formal page/route/surface catalog; its
+development seats are not new public protocol. Missing shell seats remain
+inspectable/pending in Manager and are not silently replaced with a
+Codex-shaped fallback.
 
 ## What it cannot prove
 

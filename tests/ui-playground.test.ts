@@ -60,7 +60,17 @@ describe('UI Playground', () => {
     expect(config.plugins.map(plugin => plugin.id)).toEqual(defaultPluginIds)
     const bundle = await buildRendererBundle(config, { playground: true, generation: 'playground-test-1', profileId: 'playground' })
     const dom = new JSDOM(`<!doctype html><html data-theme="dark"><head></head><body>
-      <button data-cordisx-playground-manager-trigger>Manager</button>
+      <aside>
+        <nav data-cordisx-playground-surface="sidebar.navigation.items"></nav>
+        <footer><span data-cordisx-playground-surface="sidebar.footer.before-control"></span><button data-cordisx-playground-template="sidebar.footer">Tools</button><span data-cordisx-playground-surface="sidebar.footer.after-control"></span></footer>
+        <button data-cordisx-playground-manager-trigger>Manager</button>
+      </aside>
+      <main data-cordisx-playground-session-id="fixture-session">
+        <header data-cordisx-playground-surface="workspace.toolbar.items"><button data-cordisx-playground-template="workspace.toolbar">Workspace</button></header>
+        <header data-cordisx-playground-surface="session.header.actions"><button data-cordisx-playground-template="session.header">Session</button></header>
+        <div data-cordisx-playground-surface="composer.toolbar.items"><button data-cordisx-playground-template="composer.toolbar">Composer</button></div>
+        <input data-cordisx-playground-reasoning type="range" min="0" max="4" value="2">
+      </main>
       <main data-cordisx-playground-seat="app"></main><main data-cordisx-playground-seat="main"></main><main data-cordisx-playground-seat="session.content"></main>
     </body></html>`, { runScripts: 'dangerously', url: 'http://127.0.0.1/' })
     try {
@@ -68,7 +78,7 @@ describe('UI Playground', () => {
       for (let attempt = 0; attempt < 100 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 10))
       }
-      const runtime = dom.window as unknown as { __cordisxRuntime?: { snapshot(): { plugins: readonly { id: string; name: string; description?: string; icon?: string; status: string }[]; platform: { mode: string } }; dispose(): Promise<void> } }
+      const runtime = dom.window as unknown as { __cordisxRuntime?: { snapshot(): { plugins: readonly { id: string; name: string; description?: string; icon?: string; status: string }[]; platform: { mode: string }; navigation: { outlets: readonly { id: string; activeRoute?: string; presentation: string }[] } }; dispose(): Promise<void> } }
       expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
       expect(runtime.__cordisxRuntime?.snapshot().plugins.map(plugin => ({ id: plugin.id, status: plugin.status })))
         .toEqual(defaultPluginIds.map(id => ({ id, status: 'active' })))
@@ -88,6 +98,24 @@ describe('UI Playground', () => {
       expect(runtime.__cordisxRuntime?.snapshot().plugins.find(plugin => plugin.id === 'cli-proxy-api')?.icon)
         .toMatch(/^data:image\/png;base64,/)
       expect(runtime.__cordisxRuntime?.snapshot().platform.mode).toBe('unavailable')
+      for (let attempt = 0; attempt < 100 && dom.window.document.querySelector('[data-cordisx-playground-surface="sidebar.navigation.items"] [data-cordisx-surface-host]') === null; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      expect(dom.window.document.querySelector('[data-cordisx-playground-surface="sidebar.navigation.items"] [data-cordisx-surface-host]')).not.toBeNull()
+      expect(dom.window.document.querySelector('[data-cordisx-playground-surface="workspace.toolbar.items"] [data-cordisx-surface-host]')).not.toBeNull()
+      expect(dom.window.document.querySelector('[data-cordisx-playground-surface="session.header.actions"] [data-cordisx-surface-host]')).not.toBeNull()
+      expect(dom.window.document.querySelector('[data-cordisx-playground-surface="composer.toolbar.items"] [data-cordisx-surface-host]')).not.toBeNull()
+      const showcaseNavigation = [...dom.window.document.querySelectorAll<HTMLButtonElement>('[data-cordisx-playground-surface="sidebar.navigation.items"] .cordisx-nav-primary')]
+        .find(button => button.textContent?.includes('结构化 UI 演示'))
+      expect(showcaseNavigation).toBeDefined()
+      showcaseNavigation?.click()
+      for (let attempt = 0; attempt < 100 && runtime.__cordisxRuntime?.snapshot().navigation.outlets.find(item => item.id === 'main')?.activeRoute !== 'slot-showcase:main.analytics'; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      expect(runtime.__cordisxRuntime?.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({
+        activeRoute: 'slot-showcase:main.analytics', presentation: 'presented',
+      })
+      expect(dom.window.document.querySelector('[data-cordisx-page-outlet="main"]')?.hidden).toBe(false)
       const publicSnapshotJson = JSON.stringify(runtime.__cordisxRuntime?.snapshot())
       expect(publicSnapshotJson).not.toContain('extensionPointControls')
       expect(publicSnapshotJson).not.toContain('principalHandle')

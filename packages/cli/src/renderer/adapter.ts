@@ -1104,6 +1104,7 @@ class StructuredSurfaceRenderer {
       generation: string
       adapterVersion: string
       hostId: string
+      mode?: 'codex' | 'playground'
     }>,
   ) {
     this.tooltips = new HostTooltipController(document)
@@ -1190,30 +1191,59 @@ class StructuredSurfaceRenderer {
     })
   }
 
+  private playgroundSurface(name: string): HTMLElement | undefined {
+    return this.document.querySelector<HTMLElement>(`[data-cordisx-playground-surface="${name}"]`) ?? undefined
+  }
+
+  private playgroundTemplate(name: string): HTMLButtonElement | undefined {
+    return this.document.querySelector<HTMLButtonElement>(`button[data-cordisx-playground-template="${name}"]`) ?? undefined
+  }
+
+  private playgroundActionSeat(name: string, templateName: string, key: string, className: string): NativeActionSeat | undefined {
+    const parent = this.playgroundSurface(name)
+    const template = this.playgroundTemplate(templateName)
+    if (parent === undefined || template === undefined || template.parentElement !== parent) return undefined
+    return { key, parent, before: template, className, template }
+  }
+
   private render(rebuild: boolean): void {
     const nextSites = new Set<string>()
     if (!rebuild) for (const site of this.sites) nextSites.add(site)
     const usedRoots = new Set<string>()
     const availableSurfaces = new Set<string>()
+    const playground = this.adapterIdentity.mode === 'playground'
     const managerOverlay = [...this.document.querySelectorAll<HTMLElement>('[data-cordisx-manager-modal]')]
       .some(element => !element.hidden)
-    const sidebar = managerOverlay ? undefined : uniqueVisible(this.document, '[data-app-action-sidebar-scroll]')
-    const toolbar = managerOverlay ? undefined : uniqueVisible(this.document, 'header[data-app-shell-application-menu-bar]')
+    const sidebar = managerOverlay || playground ? undefined : uniqueVisible(this.document, '[data-app-action-sidebar-scroll]')
+    const toolbar = managerOverlay || playground ? undefined : uniqueVisible(this.document, 'header[data-app-shell-application-menu-bar]')
     const environmentCandidates = managerOverlay ? [] : [
       ...this.document.querySelectorAll<HTMLElement>('[data-pip-home-surface="thread-summary-panel"], [data-app-shell-focus-area="right-panel"]'),
     ].filter(strictlyVisible)
     const environment = managerOverlay ? undefined
       : uniqueStrictlyVisible(this.document, '[data-pip-home-surface="thread-summary-panel"]')
         ?? uniqueStrictlyVisible(this.document, '[data-app-shell-focus-area="right-panel"]')
-    const sidebarNavigation = sidebar === undefined ? undefined : resolveSidebarNavigationParent(this.document, sidebar)
-    const sidebarFooterControl = sidebar === undefined ? undefined : resolveSidebarFooterControl(this.document, sidebar)
+    const sidebarNavigation = managerOverlay ? undefined : playground
+      ? this.playgroundSurface('sidebar.navigation.items')
+      : sidebar === undefined ? undefined : resolveSidebarNavigationParent(this.document, sidebar)
+    const sidebarFooterControl = managerOverlay ? undefined : playground
+      ? this.playgroundTemplate('sidebar.footer')
+      : sidebar === undefined ? undefined : resolveSidebarFooterControl(this.document, sidebar)
     const accountControl = sidebar === undefined ? undefined : resolveAccountControl(sidebar)
-    const toolbarControl = toolbar === undefined ? undefined : resolveToolbarControl(toolbar)
-    const toolbarMenuControl = toolbar === undefined ? undefined : resolveToolbarMenuControl(toolbar)
-    const sessionId = managerOverlay ? undefined : currentSessionId(this.document)
-    const sessionHeaderSeat = resolveSessionHeaderSeat(this.document, sessionId)
-    const composerSubmitSeat = resolveComposerSubmitSeat(this.document, sessionId)
-    const reasoningRange = managerOverlay ? undefined : resolveReasoningIntensityRange(this.document, sessionId)
+    const toolbarControl = managerOverlay ? undefined : playground
+      ? this.playgroundTemplate('workspace.toolbar')
+      : toolbar === undefined ? undefined : resolveToolbarControl(toolbar)
+    const toolbarMenuControl = playground || toolbar === undefined ? undefined : resolveToolbarMenuControl(toolbar)
+    const fixtureSessionId = this.document.querySelector<HTMLElement>('[data-cordisx-playground-session-id]')?.dataset.cordisxPlaygroundSessionId
+    const sessionId = managerOverlay ? undefined : playground ? fixtureSessionId : currentSessionId(this.document)
+    const sessionHeaderSeat = playground
+      ? sessionId === undefined ? undefined : this.playgroundActionSeat('session.header.actions', 'session.header', 'session.header.actions', 'cordisx-session-header-actions')
+      : resolveSessionHeaderSeat(this.document, sessionId)
+    const composerSubmitSeat = playground
+      ? sessionId === undefined ? undefined : this.playgroundActionSeat('composer.toolbar.items', 'composer.toolbar', 'composer.submit.before', 'cordisx-composer-submit-before')
+      : resolveComposerSubmitSeat(this.document, sessionId)
+    const reasoningRange = managerOverlay ? undefined : playground
+      ? sessionId === undefined ? undefined : this.document.querySelector<HTMLInputElement>('input[data-cordisx-playground-reasoning]') ?? undefined
+      : resolveReasoningIntensityRange(this.document, sessionId)
     this.reasoningControl.update(reasoningRange)
     const contextValues = {
       'sidebar.visible': sidebarNavigation !== undefined || sidebarFooterControl !== undefined,
@@ -1310,7 +1340,8 @@ class StructuredSurfaceRenderer {
       const parent = toolbarAnchor.parentElement
       if (parent === null) return
       availableSurfaces.add('workspace.toolbar.items')
-      const beforeItems = active.filter(item => item.surface === 'workspace.toolbar.items' && (item.item as { placement: string }).placement === 'before')
+      const beforeItems = active.filter(item => item.surface === 'workspace.toolbar.items'
+        && (playground || (item.item as { placement: string }).placement === 'before'))
       if (beforeItems.length > 0) {
         const root = this.placeRoot({
           key: 'toolbar.before', parent, before: toolbarAnchor, className: 'cordisx-toolbar-before',
@@ -1318,7 +1349,7 @@ class StructuredSurfaceRenderer {
         this.configureToolbarIconControlVariant(root, toolbarControl)
         if (rebuild || root.childElementCount === 0) this.renderActions(root, beforeItems, nextSites, 'before', toolbarControl)
       }
-      const afterItems = active.filter(item => item.surface === 'workspace.toolbar.items' && (item.item as { placement: string }).placement === 'after')
+      const afterItems = playground ? [] : active.filter(item => item.surface === 'workspace.toolbar.items' && (item.item as { placement: string }).placement === 'after')
       if (afterItems.length > 0) {
         const root = this.placeRoot({
           key: 'toolbar.after', parent, before: nextNativeSibling(toolbarAnchor), className: 'cordisx-toolbar-after',
@@ -1326,7 +1357,7 @@ class StructuredSurfaceRenderer {
         this.configureToolbarIconControlVariant(root, toolbarControl)
         if (rebuild || root.childElementCount === 0) this.renderActions(root, afterItems, nextSites, 'after', toolbarControl)
       }
-      const menuItems = active.filter(item => item.surface === 'workspace.toolbar.items' && (item.item as { placement: string }).placement === 'menu')
+      const menuItems = playground ? [] : active.filter(item => item.surface === 'workspace.toolbar.items' && (item.item as { placement: string }).placement === 'menu')
       const menu = resolveOpenNativeMenu(this.document, toolbarMenuControl)
       if (menuItems.length > 0 && menu !== undefined && toolbarMenuControl !== undefined) {
         this.projectNativeMenu('toolbar.menu', menu, toolbarMenuControl, menuItems, nextSites, usedRoots, rebuild)
@@ -2013,23 +2044,22 @@ export function installCodexAdapter(
 /**
  * Explicit local-development seats.  Unlike the Codex adapter this path never
  * queries Codex DOM, selectors, sessions, or native controls.  It deliberately
- * exposes only Host-owned page seats; structured shell contributions remain
- * inspectable in Manager when a Playground has not declared a corresponding
- * simulated seat.
+ * exposes only explicit Host-owned development seats. Structured contributions
+ * use the production Host renderer but never query or imitate Codex selectors.
  */
 export function installPlaygroundAdapter(
   document: Document,
   slots: CordisXSlotService,
-  _commands: CordisXCommandService,
+  commands: CordisXCommandService,
   routes: CordisXRouteService,
-  _i18n: CordisXI18nService,
+  i18n: CordisXI18nService,
   extensionPoints: ExtensionPointDescriptorRegistry,
   options: CodexAdapterOptions = {},
 ): CodexAdapterHandle {
   const unregisterExtensionPoints = extensionPoints.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
-  const generation = typeof globalThis.crypto?.randomUUID === 'function'
+  const generation = options.generation ?? (typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
-    : `playground-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    : `playground-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const reasoningControl = new ReasoningIntensityControlBinding()
   const controls = new ControlledSurfaceCoordinator(CORDISX_CODEX_CONTROL_CATALOG, {
     [REASONING_CONTROL_POINT]: reasoningControl,
@@ -2059,8 +2089,15 @@ export function installPlaygroundAdapter(
       contextPolicy: 'generation', presentationGroup: 'primary',
     }, controller, path) }
   })
+  const surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, {
+    generation,
+    adapterVersion: options.adapterVersion ?? 'ui-playground-v1',
+    hostId: options.hostId ?? 'cordisx.playground',
+    mode: 'playground',
+  })
   return {
     dispose() {
+      surfaces.dispose()
       reasoningControl.dispose()
       for (const item of declared.reverse()) {
         item.dispose()
