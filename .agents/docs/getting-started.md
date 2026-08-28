@@ -178,6 +178,16 @@ npm run dev -- dev --config cordisx.config.json
 npm run dev -- dev ./plugins/example.ts --dry-run
 ```
 
+These development commands keep project/config roots separate from Host state.
+With `CORDISX_HOME=/absolute/home`, direct PublisherGrant state is stored below
+`/absolute/home/state/publisher-grants` and the default project-scoped Chromium
+profile below `/absolute/home/projects`; `--profile-dir` overrides only that
+Chromium path. Before non-dry development writes state, the selected Home must
+be a real, current-user-owned private directory; a safe existing `0755`
+explicit Home is tightened to `0700`, while symlinks and non-owned directories
+fail closed. New Chromium profile directories are `0700`. `--dry-run` writes
+neither location.
+
 `cordisx.config.ui-demos.json` is intentionally read-only developer
 composition. For editable configuration and restart/readback testing, use the
 separate `config/ui-demos/config.json` CordisX Home. A normal launch keeps this

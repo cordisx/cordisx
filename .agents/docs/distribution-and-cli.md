@@ -265,6 +265,16 @@ this is not an installed package source, marketplace source, canonical share
 URL, or durable lifecycle record. Phase 1 derives the launcher plugin id from
 the entry basename. The module's runtime manifest must declare that same id;
 an id mismatch is an activation failure and retains the previous generation.
+For both positional-entry and `--config` development launches, the project or
+configuration root resolves source and other project-relative inputs only.
+Host persistence remains in the selected `CORDISX_HOME`: PublisherGrant state
+is under `state/publisher-grants`, and the default project-scoped Chromium
+profile is under `projects/<project-key>/cache/codex-app-profile`. An explicit
+`--profile-dir` still wins without changing the Host state root. A dry-run
+creates neither Host state nor a Chromium profile. Before a non-dry launch can
+write either location, the launcher applies the same real-directory,
+current-owner, and private-Home policy as ordinary configuration writes.
+New default and explicitly selected Chromium profile directories are `0700`.
 Phase 1 is renderer-only: a manifest-v4 entry with Node `services`, or a nearby
 formal package descriptor with non-empty `dependencies`, is unavailable and
 fails the candidate while retaining last-good. Developers must use the formal

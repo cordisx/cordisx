@@ -43,6 +43,14 @@ A user cannot make a new device by copying local state. Reinstall/key loss is a 
 `CORDISX_HOME` values share an authorization only if the eventual Host key
 provider returns the same device key.
 
+The signed-statement store is always rooted at
+`${CORDISX_HOME || ~/.cordisx}/state/publisher-grants`, including `cordisx dev`
+with a direct plugin entry or a project configuration. The development project
+root remains responsible only for resolving source, configuration-relative
+paths, and project-scoped launch defaults; it is never the Host persistence
+root. Running a development command from a repository therefore does not write
+PublisherGrant state into that repository.
+
 ## Threat model and controls
 
 | Threat | Control | Residual boundary |

@@ -1,5 +1,5 @@
 import { constants } from 'node:fs'
-import { access, mkdir, stat } from 'node:fs/promises'
+import { access, chmod, mkdir, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
@@ -10,6 +10,13 @@ export interface IsolatedCodexProfile {
   readonly userDataDir: string
   /** True only for a directory CordisX allocated and can safely sweep on exit. */
   readonly cleanupOwned: boolean
+}
+
+export interface IsolatedCodexProfileOptions {
+  /** Selected CordisX home; project-scoped Chromium state must remain inside it. */
+  readonly cordisxHomeDir: string
+  /** Explicit user override, which always wins and is never broadly swept. */
+  readonly explicitProfileDir?: string
 }
 
 export const ONLINE_DEVTOOLS_ORIGIN = 'https://chrome-devtools-frontend.appspot.com'
@@ -104,11 +111,10 @@ export function projectProfileKey(projectRoot: string): string {
   return `${readable}-${digest}`
 }
 
-/** Resolve the stable Chromium profile used by one project. */
-export function defaultIsolatedProfileDir(projectRoot: string): string {
+/** Resolve the stable, selected-home-scoped Chromium profile used by one project. */
+export function defaultIsolatedProfileDir(projectRoot: string, cordisxHomeDir: string): string {
   return path.join(
-    os.homedir(),
-    '.cordisx',
+    path.resolve(cordisxHomeDir),
     'projects',
     projectProfileKey(projectRoot),
     'cache',
@@ -119,11 +125,14 @@ export function defaultIsolatedProfileDir(projectRoot: string): string {
 /** Prepare only isolated Chromium state; HOME and CODEX_HOME remain shared. */
 export async function prepareIsolatedCodexProfile(
   projectRoot: string,
-  explicitProfileDir?: string,
+  options: IsolatedCodexProfileOptions,
 ): Promise<IsolatedCodexProfile> {
-  const userDataDir = path.resolve(explicitProfileDir ?? defaultIsolatedProfileDir(projectRoot))
-  await mkdir(userDataDir, { recursive: true })
-  return { userDataDir, cleanupOwned: explicitProfileDir === undefined }
+  const userDataDir = path.resolve(
+    options.explicitProfileDir ?? defaultIsolatedProfileDir(projectRoot, options.cordisxHomeDir),
+  )
+  const created = await mkdir(userDataDir, { recursive: true, mode: 0o700 })
+  if (created !== undefined && process.platform !== 'win32') await chmod(userDataDir, 0o700)
+  return { userDataDir, cleanupOwned: options.explicitProfileDir === undefined }
 }
 
 export function codexLaunchArgs(
