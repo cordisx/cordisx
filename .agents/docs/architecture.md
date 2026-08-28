@@ -747,7 +747,14 @@ reservation remains profile-wide pending through receiver registration, winner
 replay, and the exact ready-response acknowledgement; another renderer cannot
 report complete while that document is still booting. Replacement or target
 close cancels the reservation, while a successful exact-epoch acknowledgement
-converts it to synchronized active state. The hub keeps durable winner state
+converts it to synchronized active state. The reservation identity also pins the
+exact CDP execution context; an epoch or context replacement invalidates every
+old probe, retry, and acknowledgement. Ready completion first obtains an
+exact-context probe, then revalidates and, when necessary, delivers the latest
+winner before entering the hub's short serialized ready-response section. A
+higher winner observed while a probe is held therefore becomes the required
+revision; a winner arriving after the final section is ordered after that ready
+completion and is delivered as the next update. The hub keeps durable winner state
 separate from each document's acknowledged and pending revisions, lets a higher
 revision supersede pending lower work, and allows explicit same-revision retry
 after each bounded attempt window. A durable write response reports document

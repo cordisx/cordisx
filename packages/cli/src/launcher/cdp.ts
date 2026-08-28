@@ -1234,6 +1234,7 @@ async function install(
                 targetId: target.id,
                 sessionId: iconThemeSessionId,
                 documentEpoch: ready.documentEpoch,
+                executionContextId,
                 currentRevision: ready.currentRevision,
                 signal: documentController.signal,
               })
@@ -1260,27 +1261,28 @@ async function install(
                   registration.unregister()
                   throw new Error('icon theme preference document ready request is stale')
                 }
-                const requiredRevision = iconThemePreferenceBroadcast.current()?.revision ?? ready.currentRevision
-                const currentRevision = registration.currentRevision
-                const synchronization = registration.synchronization === 'complete'
-                  && currentRevision >= requiredRevision ? 'complete' : 'pending'
-                const ack = await deliverIconThemePreferenceToDocument(
+                const probeAck = await deliverIconThemePreferenceToDocument(
+                  session,
+                  { kind: 'document-ready-probe' },
+                  ready.documentEpoch,
+                  registration.currentRevision,
+                  executionContextId,
+                  documentController.signal,
+                )
+                await registration.respondReady(probeAck, async status => await deliverIconThemePreferenceToDocument(
                   session,
                   {
                     kind: 'document-ready',
                     requestId: ready.requestId,
                     ok: true,
                     documentEpoch: ready.documentEpoch,
-                    synchronization,
-                    requiredRevision,
-                    currentRevision,
+                    ...status,
                   },
                   ready.documentEpoch,
-                  currentRevision,
+                  status.currentRevision,
                   executionContextId,
                   documentController.signal,
-                )
-                registration.acknowledgeReady(ack)
+                ))
               })
               await iconThemeDocumentQueue
               return

@@ -11,7 +11,7 @@ const run = promisify(execFile)
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const fixture = path.join(root, 'tests/fixtures/icon-theme-profile-process.ts')
 
-async function processPhase(phase: 'a' | 'b', configPath: string, hostGeneration: string): Promise<Record<string, unknown>> {
+async function processPhase(phase: 'a' | 'b' | 'drain-error', configPath: string, hostGeneration: string): Promise<Record<string, unknown>> {
   const { stdout } = await run(process.execPath, ['--import', 'tsx', fixture, phase, configPath, hostGeneration], {
     cwd: root,
     timeout: 60_000,
@@ -23,6 +23,12 @@ async function processPhase(phase: 'a' | 'b', configPath: string, hostGeneration
 }
 
 describe('two-process icon-theme profile persistence', () => {
+  it('propagates an unexpected Host-private callback failure through the teardown drain', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cordisx-icon-theme-drain-error-'))
+    await expect(processPhase('drain-error', path.join(home, 'config.json'), 'host-drain-error'))
+      .rejects.toMatchObject({ stderr: expect.stringContaining('discriminating callback failure') })
+  })
+
   it('restores the same approved artifact across a fresh Host process and rejects changed or absent artifacts', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'cordisx-icon-theme-two-process-'))
     const configPath = path.join(home, 'config.json')

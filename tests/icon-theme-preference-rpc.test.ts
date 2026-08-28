@@ -21,9 +21,9 @@ const candidate = {
   providerGeneration: 'aurora-3',
 }
 
-function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
-  let resolve!: () => void
-  const promise = new Promise<void>(done => { resolve = done })
+function deferred<Value = void>(): { readonly promise: Promise<Value>; readonly resolve: (value: Value) => void } {
+  let resolve!: (value: Value) => void
+  const promise = new Promise<Value>(done => { resolve = done })
   return { promise, resolve }
 }
 
@@ -92,7 +92,7 @@ describe('Host icon-theme preference persistence', () => {
     const replayStarted = deferred()
     const releaseReplay = deferred()
     const registerFirst = hub.register({
-      targetId: 'target-a', sessionId: 'session-a', documentEpoch: 'document_a', currentRevision: 0,
+      targetId: 'target-a', sessionId: 'session-a', documentEpoch: 'document_a', executionContextId: 1, currentRevision: 0,
       signal: new AbortController().signal,
       receive: async preference => {
         first.push(preference)
@@ -111,7 +111,7 @@ describe('Host icon-theme preference persistence', () => {
     expect(first).toEqual([winner, next])
 
     const secondRegistration = await hub.register({
-      targetId: 'target-b', sessionId: 'session-b', documentEpoch: 'document_b', currentRevision: 0,
+      targetId: 'target-b', sessionId: 'session-b', documentEpoch: 'document_b', executionContextId: 2, currentRevision: 0,
       signal: new AbortController().signal,
       receive: async preference => {
         second.push(preference)
@@ -141,7 +141,7 @@ describe('Host icon-theme preference persistence', () => {
     await defaultHub.broadcast({ revision: 4, ...candidate })
     await Promise.all([
       defaultHub.register({
-        targetId: 'target', sessionId: 'default-session', documentEpoch: 'default_doc', currentRevision: 0,
+        targetId: 'target', sessionId: 'default-session', documentEpoch: 'default_doc', executionContextId: 3, currentRevision: 0,
         signal: new AbortController().signal,
         receive: async preference => {
           observedDefault.push(preference)
@@ -149,7 +149,7 @@ describe('Host icon-theme preference persistence', () => {
         },
       }),
       workHub.register({
-        targetId: 'target', sessionId: 'work-session', documentEpoch: 'work_doc_1', currentRevision: 0,
+        targetId: 'target', sessionId: 'work-session', documentEpoch: 'work_doc_1', executionContextId: 4, currentRevision: 0,
         signal: new AbortController().signal,
         receive: async preference => {
           observedWork.push(preference)
@@ -167,14 +167,18 @@ describe('Host icon-theme preference persistence', () => {
 
   it('counts a booting document reservation profile-wide until its exact ready acknowledgement', async () => {
     const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    expect(() => hub.reserve({
+      targetId: 'invalid', sessionId: 'invalid', documentEpoch: 'document_invalid', executionContextId: -1,
+      currentRevision: 0, signal: new AbortController().signal,
+    })).toThrow('execution context is invalid')
     const active = await hub.register({
-      targetId: 'target-a', sessionId: 'session-a', documentEpoch: 'document_active', currentRevision: 0,
+      targetId: 'target-a', sessionId: 'session-a', documentEpoch: 'document_active', executionContextId: 5, currentRevision: 0,
       signal: new AbortController().signal,
       receive: async preference => ({ documentEpoch: 'document_active', currentRevision: preference.revision }),
     })
     const controller = new AbortController()
     const booting = hub.reserve({
-      targetId: 'target-b', sessionId: 'session-b', documentEpoch: 'document_booting', currentRevision: 0,
+      targetId: 'target-b', sessionId: 'session-b', documentEpoch: 'document_booting', executionContextId: 6, currentRevision: 0,
       signal: controller.signal,
     })
     const winner = { revision: 1, ...candidate }
@@ -183,19 +187,58 @@ describe('Host icon-theme preference persistence', () => {
     const registration = await booting.register({
       receive: async preference => ({ documentEpoch: 'document_booting', currentRevision: preference.revision }),
     })
-    expect(registration).toMatchObject({ synchronization: 'complete', currentRevision: 1 })
-    await expect(hub.broadcast(winner)).resolves.toMatchObject({ attempted: 0, pending: 1 })
-    expect(registration.acknowledgeReady({ documentEpoch: 'document_booting', currentRevision: 1 })).toBe(true)
+    expect(registration).toMatchObject({ synchronization: 'pending', currentRevision: 0 })
+    await expect(hub.broadcast(winner)).resolves.toMatchObject({ attempted: 1, delivered: 1, pending: 1 })
+    await expect(registration.respondReady(
+      { documentEpoch: 'document_booting', currentRevision: 1 },
+      async status => ({ documentEpoch: 'document_booting', currentRevision: status.currentRevision }),
+    )).resolves.toEqual({ synchronization: 'complete', requiredRevision: 1, currentRevision: 1 })
     await expect(hub.broadcast(winner)).resolves.toMatchObject({ attempted: 0, pending: 0 })
 
     const replacement = hub.reserve({
-      targetId: 'target-b', sessionId: 'session-b', documentEpoch: 'document_replacing', currentRevision: 0,
+      targetId: 'target-b', sessionId: 'session-b', documentEpoch: 'document_booting', executionContextId: 7, currentRevision: 0,
       signal: controller.signal,
     })
+    await expect(registration.respondReady(
+      { documentEpoch: 'document_booting', currentRevision: 1 },
+      async status => ({ documentEpoch: 'document_booting', currentRevision: status.currentRevision }),
+    )).rejects.toThrow('stale')
     await expect(hub.broadcast(winner)).resolves.toMatchObject({ pending: 1 })
     replacement.cancel()
     await expect(hub.broadcast(winner)).resolves.toMatchObject({ pending: 0 })
     active.unregister()
+  })
+
+  it('revalidates a held ready probe against a higher winner before reporting complete', async () => {
+    const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    const revisionTwo = { revision: 2, ...candidate }
+    const revisionThree = { revision: 3, ...candidate }
+    await hub.broadcast(revisionTwo)
+    const observed: number[] = []
+    const reservation = hub.reserve({
+      targetId: 'target-linear', sessionId: 'session-linear', documentEpoch: 'document_linear',
+      executionContextId: 12, currentRevision: 2, signal: new AbortController().signal,
+    })
+    const registration = await reservation.register({
+      receive: async preference => {
+        observed.push(preference.revision)
+        return { documentEpoch: 'document_linear', currentRevision: preference.revision }
+      },
+    })
+    const heldProbe = deferred<{ documentEpoch: string; currentRevision: number }>()
+    const responses: Array<{ synchronization: string; requiredRevision: number; currentRevision: number }> = []
+    const ready = heldProbe.promise.then(async probeAck => await registration.respondReady(probeAck, async status => {
+      responses.push(status)
+      return { documentEpoch: 'document_linear', currentRevision: status.currentRevision }
+    }))
+
+    await expect(hub.broadcast(revisionThree)).resolves.toMatchObject({ delivered: 1, pending: 1 })
+    heldProbe.resolve({ documentEpoch: 'document_linear', currentRevision: 2 })
+    await expect(ready).resolves.toEqual({ synchronization: 'complete', requiredRevision: 3, currentRevision: 3 })
+    expect(responses).toEqual([{ synchronization: 'complete', requiredRevision: 3, currentRevision: 3 }])
+    expect(observed).toEqual([3])
+    await expect(hub.broadcast(revisionThree)).resolves.toMatchObject({ attempted: 0, pending: 0 })
+    registration.unregister()
   })
 
   it('keeps failed delivery pending and re-drives the same winner after the receiver recovers', async () => {
@@ -204,7 +247,7 @@ describe('Host icon-theme preference persistence', () => {
     let attempts = 0
     let recovered = false
     const registration = await hub.register({
-      targetId: 'target', sessionId: 'session', documentEpoch: 'document_retry', currentRevision: 0,
+      targetId: 'target', sessionId: 'session', documentEpoch: 'document_retry', executionContextId: 8, currentRevision: 0,
       signal: new AbortController().signal,
       receive: async preference => {
         attempts += 1
@@ -218,12 +261,15 @@ describe('Host icon-theme preference persistence', () => {
     recovered = true
     await expect(hub.retryPending()).resolves.toEqual({ attempted: 1, delivered: 1, failed: 0, pending: 1 })
     expect(attempts).toBe(3)
-    expect(registration.acknowledgeReady({ documentEpoch: 'document_retry', currentRevision: 1 })).toBe(true)
+    await expect(registration.respondReady(
+      { documentEpoch: 'document_retry', currentRevision: 1 },
+      async status => ({ documentEpoch: 'document_retry', currentRevision: status.currentRevision }),
+    )).resolves.toEqual({ synchronization: 'complete', requiredRevision: 1, currentRevision: 1 })
     await expect(hub.retryPending()).resolves.toEqual({ attempted: 0, delivered: 0, failed: 0, pending: 0 })
     registration.unregister()
 
     const permanent = await hub.register({
-      targetId: 'bad-target', sessionId: 'bad-session', documentEpoch: 'document_bad', currentRevision: 0,
+      targetId: 'bad-target', sessionId: 'bad-session', documentEpoch: 'document_bad', executionContextId: 9, currentRevision: 0,
       signal: new AbortController().signal,
       receive: async preference => ({ documentEpoch: 'wrong_document', currentRevision: preference.revision - 1 }),
     })
@@ -238,7 +284,7 @@ describe('Host icon-theme preference persistence', () => {
     const releaseFirst = deferred()
     const observed: number[] = []
     const registration = await hub.register({
-      targetId: 'target', sessionId: 'session', documentEpoch: 'document_supersede', currentRevision: 0,
+      targetId: 'target', sessionId: 'session', documentEpoch: 'document_supersede', executionContextId: 10, currentRevision: 0,
       signal: new AbortController().signal,
       receive: async preference => {
         observed.push(preference.revision)
@@ -263,7 +309,7 @@ describe('Host icon-theme preference persistence', () => {
     const releaseDelivery = deferred()
     registration.unregister()
     const disposed = await disposeHub.register({
-      targetId: 'target', sessionId: 'session', documentEpoch: 'document_dispose', currentRevision: 0,
+      targetId: 'target', sessionId: 'session', documentEpoch: 'document_dispose', executionContextId: 11, currentRevision: 0,
       signal: new AbortController().signal,
       receive: async preference => {
         deliveryStarted.resolve()

@@ -63,18 +63,22 @@ function deferred(): { readonly promise: Promise<void>; resolve(): void } {
 class HostPrivateCallbackScope {
   private accepting = true
   private readonly tasks = new Set<Promise<void>>()
+  private readonly errors: unknown[] = []
 
   run(callback: () => Promise<void>): void {
     if (!this.accepting) return
-    const task = Promise.resolve().then(callback)
+    const task = Promise.resolve().then(callback).catch(error => { this.errors.push(error) })
     this.tasks.add(task)
-    void task.finally(() => this.tasks.delete(task)).catch(() => undefined)
+    void task.then(() => this.tasks.delete(task))
   }
 
   stop(): void { this.accepting = false }
   active(): boolean { return this.accepting }
   pending(): number { return this.tasks.size }
-  async drain(): Promise<void> { await Promise.allSettled([...this.tasks]) }
+  async drain(): Promise<void> {
+    await Promise.all([...this.tasks])
+    if (this.errors.length > 0) throw new AggregateError(this.errors, 'Host-private callback drain failed')
+  }
 }
 
 async function composition(enabled = true, config: unknown = {}): Promise<ReturnType<typeof loadConfig>> {
@@ -208,9 +212,17 @@ async function processB(): Promise<Record<string, unknown>> {
   return { hostGeneration, preference, exact, changedArtifact, missing, disabled, configMode: (await stat(configPath)).mode & 0o777 }
 }
 
+async function processDrainFailure(): Promise<Record<string, unknown>> {
+  const callbacks = new HostPrivateCallbackScope()
+  callbacks.run(async () => { throw new Error('discriminating callback failure') })
+  callbacks.stop()
+  await callbacks.drain()
+  return { unreachable: true }
+}
+
 async function main(): Promise<void> {
-  if (phase !== 'a' && phase !== 'b') throw new Error('phase must be a or b')
-  const result = phase === 'a' ? await processA() : await processB()
+  if (phase !== 'a' && phase !== 'b' && phase !== 'drain-error') throw new Error('phase must be a, b, or drain-error')
+  const result = phase === 'a' ? await processA() : phase === 'b' ? await processB() : await processDrainFailure()
   process.stdout.write(`CORDISX_ICON_PROCESS_RESULT=${JSON.stringify(result)}\n`)
 }
 

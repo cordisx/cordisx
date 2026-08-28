@@ -199,6 +199,13 @@ describe('icon theme preference document delivery', () => {
               return
             }
           }
+          if (contextId === 43 && deliveryPayload?.kind === 'document-ready-probe'
+            && permanentHeldReadyRequestId === undefined) {
+            permanentHeldReadyRequestId = request.id
+            permanentHeldReadyPayload = deliveryPayload
+            permanentFirstPending.resolve()
+            return
+          }
           if (contextId === 43 && deliveryPayload?.kind === 'sync' && minimum >= 1) {
             permanentContextDeliveryAttempts += 1
             permanentAttemptsByRevision.set(minimum, (permanentAttemptsByRevision.get(minimum) ?? 0) + 1)
@@ -209,12 +216,6 @@ describe('icon theme preference document delivery', () => {
           if (contextId === 43 && deliveryPayload?.kind === 'document-ready'
             && deliveryPayload.synchronization === 'pending') {
             permanentContextPendingResponses += 1
-            if (permanentContextPendingResponses === 1) {
-              permanentHeldReadyRequestId = request.id
-              permanentHeldReadyPayload = deliveryPayload
-              permanentFirstPending.resolve()
-              return
-            }
             const ack = globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify(deliveryPayload))
             respond({ result: { value: ack } })
             return
@@ -457,8 +458,8 @@ describe('icon theme preference document delivery', () => {
         result: { result: { value: heldReadyAck } },
       }))
       await expect(permanentlyPending).rejects.toThrow('remains pending at revision 0; required 3')
-      expect(permanentAttemptsByRevision.get(2)).toBe(2)
-      expect(permanentAttemptsByRevision.get(3)).toBe(6)
+      expect(permanentAttemptsByRevision.get(2)).toBeUndefined()
+      expect(permanentAttemptsByRevision.get(3)).toBe(8)
       expect(permanentContextDeliveryAttempts).toBe(
         [...permanentAttemptsByRevision.values()].reduce((total, attempts) => total + attempts, 0),
       )
@@ -491,6 +492,11 @@ describe('icon theme preference document delivery', () => {
     const epochs = ['document_epoch_target_a', 'document_epoch_target_b'] as const
     const revisions = [0, 0]
     const selectionResponse = deferred<Record<string, unknown>>()
+    const linearProbeHeld = deferred()
+    const linearConflictResponse = deferred<Record<string, unknown>>()
+    const linearReadyResponse = deferred<Record<string, unknown>>()
+    let heldLinearProbeRequestId: number | undefined
+    let holdLinearProbe = false
     for (const [index, server] of servers.entries()) {
       server.on('connection', connection => {
         sockets[index] = connection
@@ -521,13 +527,20 @@ describe('icon theme preference document delivery', () => {
           }
           const payload = iconThemeReceiverPayload(expression)
           if (expression.includes('return ack')) {
+            if (index === 0 && holdLinearProbe && payload?.kind === 'document-ready-probe') {
+              heldLinearProbeRequestId = request.id
+              linearProbeHeld.resolve()
+              return
+            }
             if (payload?.kind === 'sync') revisions[index] = Number((payload.value as { revision?: unknown })?.revision ?? revisions[index])
             respond({ result: { value: { documentEpoch: epochs[index], currentRevision: revisions[index] } } })
             if (payload?.kind === 'document-ready') readyComplete[index]!.resolve()
+            if (payload?.kind === 'document-ready' && payload.requestId === 'ready-profile-linear') linearReadyResponse.resolve(payload)
             return
           }
           respond({ result: { value: true } })
           if (payload?.requestId === 'profile-wide-selection') selectionResponse.resolve(payload)
+          if (payload?.requestId === 'profile-linear-conflict') linearConflictResponse.resolve(payload)
         })
       })
     }
@@ -539,6 +552,7 @@ describe('icon theme preference document delivery', () => {
     vi.spyOn(hub, 'reserve').mockImplementation(identity => {
       const reservation = originalReserve(identity)
       const index = identity.targetId === 'target-a' ? 0 : 1
+      expect(identity.executionContextId).toBe(70 + index)
       if (identity.targetId === 'target-b') targetBReserved.resolve()
       return {
         cancel: reservation.cancel,
@@ -548,10 +562,10 @@ describe('icon theme preference document delivery', () => {
           return {
             get currentRevision() { return registration.currentRevision },
             get synchronization() { return registration.synchronization },
-            acknowledgeReady: ack => {
-              const acknowledged = registration.acknowledgeReady(ack)
-              if (acknowledged) targetReadyAcknowledged[index]!.resolve()
-              return acknowledged
+            respondReady: async (probeAck, respond) => {
+              const status = await registration.respondReady(probeAck, respond)
+              if (status.synchronization === 'complete') targetReadyAcknowledged[index]!.resolve()
+              return status
             },
             unregister: registration.unregister,
           }
@@ -618,6 +632,69 @@ describe('icon theme preference document delivery', () => {
       await readyComplete[1].promise
       await targetReadyAcknowledged[1].promise
       await expect(hub.broadcast(hub.current()!)).resolves.toMatchObject({ pending: 0 })
+
+      holdLinearProbe = true
+      sockets[0]?.send(JSON.stringify({
+        method: 'Runtime.bindingCalled',
+        params: {
+          name: ICON_THEME_PREFERENCE_BINDING,
+          executionContextId: 70,
+          payload: JSON.stringify({
+            version: 1, kind: 'document-ready', token, requestId: 'ready-profile-linear',
+            scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-profile-reservation' },
+            documentEpoch: epochs[0], currentRevision: 1,
+          }),
+        },
+      }))
+      await linearProbeHeld.promise
+      await updateHomeConfigAtomic(current => ({
+        ...current,
+        apps: {
+          ...current.apps,
+          codex: {
+            ...current.apps.codex!,
+            profiles: {
+              ...current.apps.codex!.profiles,
+              default: {
+                ...current.apps.codex!.profiles.default!,
+                iconTheme: {
+                  revision: 2,
+                  providerId: 'plugin:aurora:aurora', namespace: 'aurora',
+                  providerVersion: '2.1.0', providerGeneration: 'aurora-3',
+                },
+              },
+            },
+          },
+        },
+      }), configPath)
+      sockets[0]?.send(JSON.stringify({
+        method: 'Runtime.bindingCalled',
+        params: {
+          name: ICON_THEME_PREFERENCE_BINDING,
+          executionContextId: 70,
+          payload: JSON.stringify({
+            version: 1, token, requestId: 'profile-linear-conflict',
+            scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-profile-reservation' },
+            expectedPreferenceRevision: 1, expectedProfileRevision: 1, selectedProfileRevision: 2,
+            candidate: {
+              providerId: 'builtin:reicon', namespace: 'reicon', providerVersion: '1.2.1', providerGeneration: 'reicon-1.2.1',
+            },
+          }),
+        },
+      }))
+      expect(await linearConflictResponse.promise).toMatchObject({
+        ok: false, code: 'conflict', currentPreference: { revision: 2 }, synchronization: 'pending',
+      })
+      expect(revisions[0]).toBe(2)
+      holdLinearProbe = false
+      sockets[0]?.send(JSON.stringify({
+        id: heldLinearProbeRequestId,
+        result: { result: { value: { documentEpoch: epochs[0], currentRevision: 1 } } },
+      }))
+      await expect(linearReadyResponse.promise).resolves.toMatchObject({
+        synchronization: 'complete', requiredRevision: 2, currentRevision: 2,
+      })
+      await expect(hub.broadcast(hub.current()!)).resolves.toMatchObject({ pending: 0 })
     } finally {
       releaseTargetBRegister.resolve()
       abort.abort()
@@ -670,6 +747,7 @@ describe('icon theme preference document delivery', () => {
     let heldOldRequestId: number | undefined
     let context52SyncCount = 0
     let context52CompleteCount = 0
+    const contextRevisions = new Map<number, number>([[51, 1], [52, 1], [53, 1]])
     const epochs = new Map<number, string>([
       [51, 'document_epoch_old'],
       [52, 'document_epoch_new'],
@@ -721,20 +799,27 @@ describe('icon theme preference document delivery', () => {
         const payload = iconThemeReceiverPayload(expression)
         const contextId = request.params?.contextId
         if (payload?.kind === 'sync') {
+          const revision = Number((payload.value as { revision?: unknown })?.revision ?? 0)
           if (contextId === 51) {
-            respond({ result: { value: { documentEpoch: epochs.get(51), currentRevision: 2 } } })
+            contextRevisions.set(51, revision)
+            respond({ result: { value: { documentEpoch: epochs.get(51), currentRevision: revision } } })
             return
           }
           if (contextId === 52) {
             context52SyncCount += 1
             newReplayStarted.resolve()
-            respond({ result: { value: { documentEpoch: epochs.get(52), currentRevision: 2 } } })
+            contextRevisions.set(52, revision)
+            respond({ result: { value: { documentEpoch: epochs.get(52), currentRevision: revision } } })
             return
           }
           if (contextId === 53) {
             targetCloseDeliveryHeld.resolve()
             return
           }
+        }
+        if (payload?.kind === 'document-ready-probe') {
+          respond({ result: { value: { documentEpoch: epochs.get(contextId!), currentRevision: contextRevisions.get(contextId!) ?? 0 } } })
+          return
         }
         if (payload?.kind === 'document-ready') {
           if (contextId === 51) {

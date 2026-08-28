@@ -331,25 +331,26 @@ describe('profile-scoped icon-theme selection runtime', () => {
           const ready = parseIconThemePreferenceDocumentReadyRequest(request, persistenceContext)
           epochs.push(ready.documentEpoch)
           try {
-            const registration = await hub.register({
+            const reservation = hub.reserve({
               targetId: 'same-target',
               sessionId: 'same-session',
               documentEpoch: ready.documentEpoch,
+              executionContextId: epochs.length,
               currentRevision: ready.currentRevision,
               signal: new AbortController().signal,
+            })
+            const registration = await reservation.register({
               receive: async value => {
                 const ack = receiveIconThemeMessage(page, { kind: 'sync', value })
                 if (ack === null || typeof ack !== 'object') throw new Error('document receiver returned no acknowledgement')
                 return ack as { documentEpoch: string; currentRevision: number }
               },
             })
-            receiveIconThemeMessage(page, {
+            const probeAck = receiveIconThemeMessage(page, { kind: 'document-ready-probe' }) as { documentEpoch: string; currentRevision: number }
+            await registration.respondReady(probeAck, async status => receiveIconThemeMessage(page, {
               kind: 'document-ready', requestId: ready.requestId, ok: true,
-              documentEpoch: ready.documentEpoch,
-              synchronization: registration.synchronization,
-              requiredRevision: hub.current()?.revision ?? ready.currentRevision,
-              currentRevision: registration.currentRevision,
-            })
+              documentEpoch: ready.documentEpoch, ...status,
+            }) as { documentEpoch: string; currentRevision: number })
           } catch (error) {
             receiveIconThemeMessage(page, {
               kind: 'document-ready', requestId: ready.requestId, ok: false,
@@ -454,22 +455,23 @@ describe('profile-scoped icon-theme selection runtime', () => {
         }
         void (async () => {
           const ready = parseIconThemePreferenceDocumentReadyRequest(request, persistenceContext)
-          const registration = await hub.register({
+          const reservation = hub.reserve({
             targetId: `target-${index}`,
             sessionId: `session-${index}`,
             documentEpoch: ready.documentEpoch,
+            executionContextId: index + 1,
             currentRevision: ready.currentRevision,
             signal: new AbortController().signal,
+          })
+          const registration = await reservation.register({
             receive: async value => receive(page, { kind: 'sync', value }) as { documentEpoch: string; currentRevision: number },
           })
           unregisterDocuments.push(registration.unregister)
-          receive(page, {
+          const probeAck = receive(page, { kind: 'document-ready-probe' }) as { documentEpoch: string; currentRevision: number }
+          await registration.respondReady(probeAck, async status => receive(page, {
             kind: 'document-ready', requestId: ready.requestId, ok: true,
-            documentEpoch: ready.documentEpoch,
-            synchronization: registration.synchronization,
-            requiredRevision: hub.current()?.revision ?? ready.currentRevision,
-            currentRevision: registration.currentRevision,
-          })
+            documentEpoch: ready.documentEpoch, ...status,
+          }) as { documentEpoch: string; currentRevision: number })
         })()
       },
     })
