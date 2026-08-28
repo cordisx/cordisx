@@ -13,8 +13,10 @@ import {
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import {
+  IconThemePreferenceBroadcastHub,
   iconThemePreferenceBridgeError,
   parseIconThemePreferenceBindingRequest,
+  parseIconThemePreferenceDocumentReadyRequest,
   persistIconThemePreference,
   type IconThemePreferencePersistenceContext,
 } from '../packages/cli/src/launcher/icon-theme-rpc.js'
@@ -70,6 +72,24 @@ function dom(): JSDOM {
     addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
   }) })
   return page
+}
+
+function receiveIconThemeMessage(page: JSDOM, response: Record<string, unknown>): unknown {
+  return (page.window as unknown as {
+    __cordisxIconThemePreferenceReceiveV1?: (payload: string) => unknown
+  }).__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify(response))
+}
+
+function acknowledgeDocumentReady(page: JSDOM, request: Record<string, unknown>): boolean {
+  if (request.kind !== 'document-ready') return false
+  receiveIconThemeMessage(page, {
+    kind: 'document-ready',
+    requestId: request.requestId,
+    ok: true,
+    documentEpoch: request.documentEpoch,
+    currentRevision: request.currentRevision,
+  })
+  return true
 }
 
 describe('profile-scoped icon-theme selection runtime', () => {
@@ -185,6 +205,7 @@ describe('profile-scoped icon-theme selection runtime', () => {
     }
     Object.defineProperty(page.window, '__cordisxIconThemePreferenceRequestV1', { configurable: true, value: (payload: string) => {
       const request = JSON.parse(payload) as Record<string, unknown>
+      if (acknowledgeDocumentReady(page, request)) return
       persistedRequests.push(request)
       if (responseMode === 'hold') return
       queueMicrotask(() => {
@@ -270,6 +291,10 @@ describe('profile-scoped icon-theme selection runtime', () => {
         if (value !== undefined) value(JSON.stringify({ kind: 'sync', value: winner }))
       },
     })
+    Object.defineProperty(page.window, '__cordisxIconThemePreferenceRequestV1', {
+      configurable: true,
+      value: (payload: string) => { acknowledgeDocumentReady(page, JSON.parse(payload) as Record<string, unknown>) },
+    })
     try {
       page.window.eval(exactBundle)
       await waitFor(() => page.window.document.documentElement.dataset.cordisxReady === 'true', 'startup-window runtime readiness')
@@ -279,6 +304,88 @@ describe('profile-scoped icon-theme selection runtime', () => {
         providerGeneration: 'reicon-1.2.1',
       })
       await runtime.dispose()
+    } finally {
+      page.window.close()
+    }
+  })
+
+  it('replays success and conflict winners when the same target boots a new document epoch', async () => {
+    const page = dom()
+    const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    const persistenceContext: IconThemePreferencePersistenceContext = {
+      configPath: '/host-private/not-used.json',
+      appId: 'codex',
+      profileId: 'default',
+      hostGeneration: generation,
+      token: 'b'.repeat(64),
+    }
+    const epochs: string[] = []
+    Object.defineProperty(page.window, '__cordisxIconThemePreferenceRequestV1', {
+      configurable: true,
+      value: (payload: string) => {
+        const request = JSON.parse(payload) as Record<string, unknown>
+        if (request.kind !== 'document-ready') throw new Error('unexpected persistence request during document replay test')
+        void (async () => {
+          const ready = parseIconThemePreferenceDocumentReadyRequest(request, persistenceContext)
+          epochs.push(ready.documentEpoch)
+          try {
+            const registration = await hub.register({
+              targetId: 'same-target',
+              sessionId: 'same-session',
+              documentEpoch: ready.documentEpoch,
+              receive: async value => {
+                const ack = receiveIconThemeMessage(page, { kind: 'sync', value })
+                if (ack === null || typeof ack !== 'object') throw new Error('document receiver returned no acknowledgement')
+                return ack as { documentEpoch: string; currentRevision: number }
+              },
+            })
+            receiveIconThemeMessage(page, {
+              kind: 'document-ready', requestId: ready.requestId, ok: true,
+              documentEpoch: ready.documentEpoch,
+              currentRevision: Math.max(ready.currentRevision, registration.currentRevision),
+            })
+          } catch (error) {
+            receiveIconThemeMessage(page, {
+              kind: 'document-ready', requestId: ready.requestId, ok: false,
+              documentEpoch: ready.documentEpoch, currentRevision: 0,
+              error: error instanceof Error ? error.message : String(error),
+            })
+          }
+        })()
+      },
+    })
+    try {
+      page.window.eval(exactBundle)
+      await waitFor(() => epochs.length === 1, 'first document ready handshake')
+      const firstRuntime = (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
+      expect(firstRuntime.snapshot().iconThemes?.selected.providerId).toBe('plugin:icon-theme-test:aurora')
+
+      const successWinner: HomeConfigIconThemePreference = {
+        revision: preference.revision + 1,
+        providerId: 'builtin:reicon', namespace: 'reicon', providerVersion: '1.2.1', providerGeneration: 'reicon-1.2.1',
+      }
+      await hub.broadcast(successWinner)
+      expect(firstRuntime.snapshot().iconThemes?.selected.providerId).toBe('builtin:reicon')
+
+      page.window.eval(exactBundle)
+      await waitFor(() => epochs.length === 2
+        && (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime !== firstRuntime, 'reloaded document ready handshake')
+      const secondRuntime = (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
+      expect(epochs[1]).not.toBe(epochs[0])
+      expect(secondRuntime).not.toBe(firstRuntime)
+      expect(secondRuntime.snapshot().iconThemes?.selected.providerId).toBe('builtin:reicon')
+
+      const conflictWinner = { ...preference, revision: successWinner.revision + 1 }
+      await hub.broadcast(conflictWinner)
+      expect(secondRuntime.snapshot().iconThemes?.selected.providerId).toBe('plugin:icon-theme-test:aurora')
+
+      page.window.eval(exactBundle)
+      await waitFor(() => epochs.length === 3
+        && (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime !== secondRuntime, 'conflict-winner document ready handshake')
+      const thirdRuntime = (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
+      expect(epochs[2]).not.toBe(epochs[1])
+      expect(thirdRuntime.snapshot().iconThemes?.selected.providerId).toBe('plugin:icon-theme-test:aurora')
+      await thirdRuntime.dispose()
     } finally {
       page.window.close()
     }
@@ -301,6 +408,7 @@ describe('profile-scoped icon-theme selection runtime', () => {
 
   it('converges two active same-profile renderers onto one durable CAS winner without restart', async () => {
     const pages = [dom(), dom()]
+    const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
     const configRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-icon-theme-multi-renderer-'))
     const configPath = path.join(configRoot, '.cordisx', 'config.json')
     await ensureHomeConfig(configPath)
@@ -325,16 +433,35 @@ describe('profile-scoped icon-theme selection runtime', () => {
       token: 'b'.repeat(64),
     }
     const requests: Array<{ readonly page: JSDOM; readonly value: Record<string, unknown> }> = []
-    const receive = (page: JSDOM, response: Record<string, unknown>): void => {
-      ;(page.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => void })
+    const unregisterDocuments: Array<() => void> = []
+    const receive = (page: JSDOM, response: Record<string, unknown>): unknown => {
+      return (page.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => unknown })
         .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify(response))
     }
-    const sync = (value: HomeConfigIconThemePreference): void => {
-      for (const page of pages) receive(page, { kind: 'sync', value })
-    }
-    for (const page of pages) Object.defineProperty(page.window, '__cordisxIconThemePreferenceRequestV1', {
+    for (const [index, page] of pages.entries()) Object.defineProperty(page.window, '__cordisxIconThemePreferenceRequestV1', {
       configurable: true,
-      value: (payload: string) => requests.push({ page, value: JSON.parse(payload) as Record<string, unknown> }),
+      value: (payload: string) => {
+        const request = JSON.parse(payload) as Record<string, unknown>
+        if (request.kind !== 'document-ready') {
+          requests.push({ page, value: request })
+          return
+        }
+        void (async () => {
+          const ready = parseIconThemePreferenceDocumentReadyRequest(request, persistenceContext)
+          const registration = await hub.register({
+            targetId: `target-${index}`,
+            sessionId: `session-${index}`,
+            documentEpoch: ready.documentEpoch,
+            receive: async value => receive(page, { kind: 'sync', value }) as { documentEpoch: string; currentRevision: number },
+          })
+          unregisterDocuments.push(registration.unregister)
+          receive(page, {
+            kind: 'document-ready', requestId: ready.requestId, ok: true,
+            documentEpoch: ready.documentEpoch,
+            currentRevision: Math.max(ready.currentRevision, registration.currentRevision),
+          })
+        })()
+      },
     })
     try {
       for (const page of pages) page.window.eval(exactBundle)
@@ -362,7 +489,7 @@ describe('profile-scoped icon-theme selection runtime', () => {
         parseIconThemePreferenceBindingRequest(builtinRequest.value, persistenceContext),
       )
       receive(builtinRequest.page, { requestId: builtinRequest.value.requestId, ok: true, value: winner })
-      sync(winner)
+      await hub.broadcast(winner)
       try {
         await persistIconThemePreference(
           persistenceContext,
@@ -372,7 +499,7 @@ describe('profile-scoped icon-theme selection runtime', () => {
       } catch (error) {
         const failure = iconThemePreferenceBridgeError(error)
         receive(losingRequest.page, { requestId: losingRequest.value.requestId, ok: false, ...failure })
-        if (failure.currentPreference !== undefined) sync(failure.currentPreference)
+        if (failure.currentPreference !== undefined) await hub.broadcast(failure.currentPreference)
       }
 
       await waitFor(() => runtimes.every(runtime => runtime.snapshot().iconThemes?.selected.providerId === 'builtin:reicon'), 'renderer convergence')
@@ -387,6 +514,7 @@ describe('profile-scoped icon-theme selection runtime', () => {
       expect(requests.slice(2).map(item => item.value.expectedPreferenceRevision)).toEqual([8, 8])
       await Promise.all(runtimes.map(async runtime => await runtime.dispose()))
     } finally {
+      for (const unregister of unregisterDocuments) unregister()
       for (const page of pages) page.window.close()
     }
   })

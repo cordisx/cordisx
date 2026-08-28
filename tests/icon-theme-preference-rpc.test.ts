@@ -7,6 +7,7 @@ import {
   IconThemePreferenceBroadcastHub,
   IconThemePreferenceConflictError,
   parseIconThemePreferenceBindingRequest,
+  parseIconThemePreferenceDocumentReadyRequest,
   persistIconThemePreference,
   type IconThemePreferencePersistenceContext,
 } from '../packages/cli/src/launcher/icon-theme-rpc.js'
@@ -76,26 +77,36 @@ describe('Host icon-theme preference persistence', () => {
     await hub.broadcast(winner)
     const replayStarted = deferred()
     const releaseReplay = deferred()
-    const registerFirst = hub.register(async preference => {
-      first.push(preference)
-      replayStarted.resolve()
-      await releaseReplay.promise
+    const registerFirst = hub.register({
+      targetId: 'target-a', sessionId: 'session-a', documentEpoch: 'document_a',
+      receive: async preference => {
+        first.push(preference)
+        replayStarted.resolve()
+        await releaseReplay.promise
+        return { documentEpoch: 'document_a', currentRevision: preference.revision }
+      },
     })
     await replayStarted.promise
     const next = { ...winner, revision: 2 }
     const broadcastNext = hub.broadcast(next)
     await hub.broadcast({ ...winner, revision: 1 })
     releaseReplay.resolve()
-    const removeFirst = await registerFirst
+    const firstRegistration = await registerFirst
     await broadcastNext
     expect(first).toEqual([winner, next])
 
-    const removeSecond = await hub.register(async preference => { second.push(preference) })
+    const secondRegistration = await hub.register({
+      targetId: 'target-b', sessionId: 'session-b', documentEpoch: 'document_b',
+      receive: async preference => {
+        second.push(preference)
+        return { documentEpoch: 'document_b', currentRevision: preference.revision }
+      },
+    })
     expect(second).toEqual([next])
     await hub.broadcast({ ...next })
     expect(second).toEqual([next])
-    removeFirst()
-    removeSecond()
+    firstRegistration.unregister()
+    secondRegistration.unregister()
     await hub.broadcast({ ...winner, revision: 3 })
     expect(first).toEqual([winner, next])
     expect(second).toEqual([next])
@@ -109,8 +120,20 @@ describe('Host icon-theme preference persistence', () => {
     const observedWork: HomeConfigIconThemePreference[] = []
     await defaultHub.broadcast({ revision: 4, ...candidate })
     await Promise.all([
-      defaultHub.register(async preference => { observedDefault.push(preference) }),
-      workHub.register(async preference => { observedWork.push(preference) }),
+      defaultHub.register({
+        targetId: 'target', sessionId: 'default-session', documentEpoch: 'default_doc',
+        receive: async preference => {
+          observedDefault.push(preference)
+          return { documentEpoch: 'default_doc', currentRevision: preference.revision }
+        },
+      }),
+      workHub.register({
+        targetId: 'target', sessionId: 'work-session', documentEpoch: 'work_doc_1',
+        receive: async preference => {
+          observedWork.push(preference)
+          return { documentEpoch: 'work_doc_1', currentRevision: preference.revision }
+        },
+      }),
     ])
     expect(defaultHub.appId).toBe('codex')
     expect(defaultHub.profileId).toBe('default')
@@ -118,6 +141,71 @@ describe('Host icon-theme preference persistence', () => {
     expect(() => defaultHub.assertScope({ appId: 'codex', profileId: 'work' })).toThrow('scope is mismatched')
     expect(observedDefault).toEqual([{ revision: 4, ...candidate }])
     expect(observedWork).toEqual([])
+  })
+
+  it('requires an exact document acknowledgement, retries once, and reports delivery failure', async () => {
+    const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    await hub.broadcast({ revision: 1, ...candidate })
+    let attempts = 0
+    const registration = await hub.register({
+      targetId: 'target', sessionId: 'session', documentEpoch: 'document_retry',
+      receive: async preference => {
+        attempts += 1
+        if (attempts === 1) throw new Error('receiver missing during document install')
+        return { documentEpoch: 'document_retry', currentRevision: preference.revision }
+      },
+    })
+    expect(attempts).toBe(2)
+    registration.unregister()
+
+    await expect(hub.register({
+      targetId: 'bad-target', sessionId: 'bad-session', documentEpoch: 'document_bad',
+      receive: async preference => ({ documentEpoch: 'wrong_document', currentRevision: preference.revision - 1 }),
+    })).rejects.toThrow('acknowledgement is invalid')
+  })
+
+  it('supersedes a failed pending revision and cancels delivery after document disposal', async () => {
+    const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    const firstAttempt = deferred()
+    const releaseFirst = deferred()
+    const observed: number[] = []
+    const registration = await hub.register({
+      targetId: 'target', sessionId: 'session', documentEpoch: 'document_supersede',
+      receive: async preference => {
+        observed.push(preference.revision)
+        if (preference.revision === 1) {
+          firstAttempt.resolve()
+          await releaseFirst.promise
+          throw new Error('old context delivery failed')
+        }
+        return { documentEpoch: 'document_supersede', currentRevision: preference.revision }
+      },
+    })
+    const first = hub.broadcast({ revision: 1, ...candidate })
+    await firstAttempt.promise
+    const second = hub.broadcast({ revision: 2, ...candidate })
+    releaseFirst.resolve()
+    expect(await first).toEqual({ attempted: 1, delivered: 1, failed: 0 })
+    expect(await second).toEqual({ attempted: 1, delivered: 1, failed: 0 })
+    expect(observed).toEqual([1, 2])
+
+    const disposeHub = new IconThemePreferenceBroadcastHub('codex', 'default')
+    const deliveryStarted = deferred()
+    const releaseDelivery = deferred()
+    registration.unregister()
+    const disposed = await disposeHub.register({
+      targetId: 'target', sessionId: 'session', documentEpoch: 'document_dispose',
+      receive: async preference => {
+        deliveryStarted.resolve()
+        await releaseDelivery.promise
+        return { documentEpoch: 'document_dispose', currentRevision: preference.revision }
+      },
+    })
+    const late = disposeHub.broadcast({ revision: 3, ...candidate })
+    await deliveryStarted.promise
+    disposed.unregister()
+    releaseDelivery.resolve()
+    expect(await late).toEqual({ attempted: 1, delivered: 0, failed: 1 })
   })
 
   it('rejects generation spoofing, malformed transitions, raw/private fields, and hostile identities', async () => {
@@ -131,5 +219,20 @@ describe('Host icon-theme preference persistence', () => {
       { ...payload(), principalHandle: 'ipp_private' },
     ]
     for (const hostile of cases) expect(() => parseIconThemePreferenceBindingRequest(hostile, ctx)).toThrow()
+
+    const ready = {
+      version: 1,
+      kind: 'document-ready',
+      token,
+      requestId: 'document-ready-1',
+      scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-12' },
+      documentEpoch: 'document_epoch_1',
+      currentRevision: 7,
+    }
+    expect(parseIconThemePreferenceDocumentReadyRequest(ready, ctx)).toEqual({
+      requestId: 'document-ready-1', documentEpoch: 'document_epoch_1', currentRevision: 7,
+    })
+    expect(() => parseIconThemePreferenceDocumentReadyRequest({ ...ready, providerHandle: 'private' }, ctx)).toThrow('shape is invalid')
+    expect(() => parseIconThemePreferenceDocumentReadyRequest({ ...ready, documentEpoch: '../old-document' }, ctx)).toThrow('epoch is invalid')
   })
 })

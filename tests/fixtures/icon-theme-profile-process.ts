@@ -116,6 +116,14 @@ async function processA(): Promise<Record<string, unknown>> {
   }
   Object.defineProperty(dom.window, '__cordisxIconThemePreferenceRequestV1', { configurable: true, value: (payload: string) => {
     const request = JSON.parse(payload) as Record<string, unknown>
+    if (request.kind === 'document-ready') {
+      ;(dom.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => unknown })
+        .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+          kind: 'document-ready', requestId: request.requestId, ok: true,
+          documentEpoch: request.documentEpoch, currentRevision: request.currentRevision,
+        }))
+      return
+    }
     wireCandidateKeys = Object.keys(request.candidate as Record<string, unknown>).sort()
     queueMicrotask(() => { void (async () => {
       try {

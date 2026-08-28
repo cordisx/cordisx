@@ -1,9 +1,13 @@
 import { once } from 'node:events'
+import { mkdtemp } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { WebSocketServer } from 'ws'
 import { describe, expect, it, vi } from 'vitest'
 import {
   CdpLifecycleRequestGate,
   CdpPluginLifecycleRuntime,
+  iconThemePreferenceDeliveryEvaluation,
   injectableTargets,
   serviceConfigResponseEvaluation,
   watchAndInject,
@@ -13,9 +17,20 @@ import type { PluginRuntimeMutation } from '../packages/cli/src/launcher/plugin-
 import { PluginPermissionIdentityRegistry } from '../packages/cli/src/launcher/permission-rpc.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authority.js'
+import { ensureHomeConfig, loadHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { ICON_THEME_PREFERENCE_BINDING } from '../packages/cli/src/launcher/icon-theme-rpc.js'
 
 function target(id: string, title: string, url = 'https://example.test/'): CdpTarget {
   return { id, title, url, type: 'page', webSocketDebuggerUrl: `ws://127.0.0.1/${id}` }
+}
+
+function deferred<Value = void>(): {
+  readonly promise: Promise<Value>
+  readonly resolve: (value: Value) => void
+} {
+  let resolve!: (value: Value) => void
+  const promise = new Promise<Value>(done => { resolve = done })
+  return { promise, resolve }
 }
 
 describe('injectableTargets', () => {
@@ -42,6 +57,181 @@ describe('service config CDP responses', () => {
     expect(params).toMatchObject({ contextId: 73, allowUnsafeEvalBlockedByCSP: true, returnByValue: true })
     expect(params.expression).toContain('__cordisxServiceConfigReceiveV1')
     expect(serviceConfigResponseEvaluation({ requestId: 'request-2', ok: false })).not.toHaveProperty('contextId')
+  })
+})
+
+describe('icon theme preference document delivery', () => {
+  it('requires an exact execution context and acknowledged document revision', () => {
+    const params = iconThemePreferenceDeliveryEvaluation(
+      { kind: 'sync', value: { revision: 9 } },
+      'doc_epoch_9',
+      9,
+      73,
+    )
+    expect(params).toMatchObject({ contextId: 73, allowUnsafeEvalBlockedByCSP: true, returnByValue: true })
+    expect(params.expression).toContain("typeof receiver !== 'function'")
+    expect(params.expression).toContain('ack.documentEpoch')
+    expect(params.expression).toContain('ack.currentRevision < 9')
+    expect(params.expression).not.toContain('?.(')
+  })
+
+  it('replays the cached winner when the same CDP target reports a new document context', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const address = server.address()
+    if (typeof address === 'string') throw new Error('fixture websocket did not bind a TCP port')
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-icon-theme-cdp-document-'))
+    const configPath = path.join(root, '.cordisx', 'config.json')
+    await ensureHomeConfig(configPath)
+    const token = 'c'.repeat(64)
+    const firstReady = deferred()
+    const firstWinner = deferred()
+    const secondWinner = deferred()
+    let socket: import('ws').WebSocket | undefined
+    let bootRequestId: number | undefined
+    let secondContextDeliveryAttempts = 0
+    let destroyedSelectionResponses = 0
+    const contexts = new Map<number, { epoch: string; revision: number }>([
+      [41, { epoch: 'document_epoch_one', revision: 0 }],
+      [42, { epoch: 'document_epoch_two', revision: 0 }],
+    ])
+    const sendReady = (contextId: number): void => {
+      const context = contexts.get(contextId)!
+      socket?.send(JSON.stringify({
+        method: 'Runtime.bindingCalled',
+        params: {
+          name: ICON_THEME_PREFERENCE_BINDING,
+          executionContextId: contextId,
+          payload: JSON.stringify({
+            version: 1,
+            kind: 'document-ready',
+            token,
+            requestId: `ready-${contextId}`,
+            scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-document-test' },
+            documentEpoch: context.epoch,
+            currentRevision: context.revision,
+          }),
+        },
+      }))
+    }
+    server.on('connection', connection => {
+      socket = connection
+      connection.on('message', data => {
+        const request = JSON.parse(String(data)) as {
+          id: number
+          method: string
+          params?: { expression?: string; contextId?: number }
+        }
+        const respond = (result: Record<string, unknown>): void => connection.send(JSON.stringify({ id: request.id, result }))
+        if (request.method === 'Page.addScriptToEvaluateOnNewDocument') {
+          respond({ identifier: 'icon-theme-document-fixture' })
+          return
+        }
+        if (request.method !== 'Runtime.evaluate') {
+          respond({})
+          return
+        }
+        const expression = request.params?.expression ?? ''
+        if (expression.includes('await globalThis.__cordisxBoot')) {
+          bootRequestId = request.id
+          sendReady(41)
+          return
+        }
+        if (expression.includes('const receiver = globalThis.__cordisxIconThemePreferenceReceiveV1')
+          && expression.includes('return ack')) {
+          const contextId = request.params?.contextId
+          const context = contextId === undefined ? undefined : contexts.get(contextId)
+          if (context === undefined) {
+            respond({ exceptionDetails: { text: 'context destroyed' } })
+            return
+          }
+          const minimum = Number(expression.match(/ack\.currentRevision < ([0-9]+)/u)?.[1] ?? 0)
+          if (contextId === 42 && minimum >= 1) {
+            secondContextDeliveryAttempts += 1
+            if (secondContextDeliveryAttempts === 1) {
+              respond({ result: { type: 'object', subtype: 'error', description: 'execution context was destroyed' } })
+              return
+            }
+          }
+          context.revision = Math.max(context.revision, minimum)
+          respond({ result: { value: { documentEpoch: context.epoch, currentRevision: context.revision } } })
+          if (contextId === 41 && context.revision === 0 && bootRequestId !== undefined) {
+            connection.send(JSON.stringify({ id: bootRequestId, result: { result: { value: { ok: true } } } }))
+            bootRequestId = undefined
+            firstReady.resolve()
+          } else if (contextId === 41 && context.revision >= 1) {
+            firstWinner.resolve()
+          } else if (contextId === 42 && context.revision >= 1) {
+            secondWinner.resolve()
+          }
+          return
+        }
+        if (expression.includes('const receiver = globalThis.__cordisxIconThemePreferenceReceiveV1')) {
+          if (request.params?.contextId === 41) {
+            destroyedSelectionResponses += 1
+            respond({ result: { type: 'object', subtype: 'error', description: 'execution context was destroyed' } })
+            return
+          }
+          respond({ result: { value: true } })
+          return
+        }
+        respond({ result: { value: undefined } })
+      })
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([{
+      id: 'same-target', title: 'Codex', url: 'app://-/index.html', type: 'page',
+      webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
+    }]), { status: 200 })) as typeof fetch
+    const abort = new AbortController()
+    const watching = watchAndInject({
+      port: address.port,
+      source: 'void 0',
+      signal: abort.signal,
+      iconThemePreferencePersistence: {
+        configPath,
+        appId: 'codex',
+        profileId: 'default',
+        hostGeneration: 'host-document-test',
+        token,
+      },
+    })
+    try {
+      await firstReady.promise
+      socket?.send(JSON.stringify({
+        method: 'Runtime.bindingCalled',
+        params: {
+          name: ICON_THEME_PREFERENCE_BINDING,
+          executionContextId: 41,
+          payload: JSON.stringify({
+            version: 1,
+            token,
+            requestId: 'select-winner',
+            scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-document-test' },
+            expectedPreferenceRevision: 0,
+            expectedProfileRevision: 0,
+            selectedProfileRevision: 1,
+            candidate: {
+              providerId: 'builtin:reicon', namespace: 'reicon', providerVersion: '1.2.1', providerGeneration: 'reicon-1.2.1',
+            },
+          }),
+        },
+      }))
+      await firstWinner.promise
+      expect((await loadHomeConfig(configPath)).apps.codex?.profiles.default?.iconTheme?.revision).toBe(1)
+
+      sendReady(42)
+      await secondWinner.promise
+      expect(contexts.get(42)).toEqual({ epoch: 'document_epoch_two', revision: 1 })
+      expect(secondContextDeliveryAttempts).toBe(2)
+      expect(destroyedSelectionResponses).toBeGreaterThanOrEqual(1)
+    } finally {
+      abort.abort()
+      await watching
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
   })
 })
 

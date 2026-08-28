@@ -28,6 +28,30 @@ export interface IconThemePreferenceBindingRequest {
   readonly candidate: IconThemePreferenceCandidate
 }
 
+export interface IconThemePreferenceDocumentReadyRequest {
+  readonly requestId: string
+  readonly documentEpoch: string
+  readonly currentRevision: number
+}
+
+export interface IconThemePreferenceDeliveryAck {
+  readonly documentEpoch: string
+  readonly currentRevision: number
+}
+
+export interface IconThemePreferenceDocumentReceiver {
+  readonly targetId: string
+  readonly sessionId: string
+  readonly documentEpoch: string
+  readonly receive: (preference: HomeConfigIconThemePreference) => Promise<IconThemePreferenceDeliveryAck>
+}
+
+export interface IconThemePreferenceBroadcastResult {
+  readonly attempted: number
+  readonly delivered: number
+  readonly failed: number
+}
+
 export interface IconThemePreferencePersistenceContext {
   readonly configPath: string
   readonly appId: string
@@ -115,6 +139,30 @@ export function parseIconThemePreferenceBindingRequest(
   }
 }
 
+export function parseIconThemePreferenceDocumentReadyRequest(
+  value: unknown,
+  context: Omit<IconThemePreferencePersistenceContext, 'configPath'>,
+): IconThemePreferenceDocumentReadyRequest {
+  const request = object(value, 'icon theme preference document ready request')
+  exact(request, ['version', 'kind', 'token', 'requestId', 'scope', 'documentEpoch', 'currentRevision'], 'icon theme preference document ready request')
+  if (request.version !== 1 || request.kind !== 'document-ready') throw new Error('icon theme preference document ready version is invalid')
+  if (typeof request.token !== 'string' || !sameToken(request.token, context.token)) throw new Error('icon theme preference token is invalid')
+  if (typeof request.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(request.requestId)) throw new Error('icon theme preference request id is invalid')
+  const scope = object(request.scope, 'icon theme preference scope')
+  exact(scope, ['appId', 'profileId', 'hostGeneration'], 'icon theme preference scope')
+  if (scope.appId !== context.appId || scope.profileId !== context.profileId || scope.hostGeneration !== context.hostGeneration) {
+    throw new Error('icon theme preference scope is stale or spoofed')
+  }
+  if (typeof request.documentEpoch !== 'string' || !/^[A-Za-z0-9_-]{8,96}$/.test(request.documentEpoch)) {
+    throw new Error('icon theme preference document epoch is invalid')
+  }
+  return {
+    requestId: request.requestId,
+    documentEpoch: request.documentEpoch,
+    currentRevision: revision(request.currentRevision, 'icon theme preference current revision'),
+  }
+}
+
 export async function persistIconThemePreference(
   context: IconThemePreferencePersistenceContext,
   request: IconThemePreferenceBindingRequest,
@@ -164,10 +212,11 @@ export function iconThemePreferenceBridgeError(error: unknown): {
 
 /** Host-private fan-out for durable preference convergence within one profile. */
 export class IconThemePreferenceBroadcastHub {
-  private readonly receivers = new Set<{
+  private readonly receivers = new Map<string, {
     active: boolean
     tail: Promise<void>
-    readonly receive: (preference: HomeConfigIconThemePreference) => Promise<void>
+    deliveredRevision: number
+    readonly receiver: IconThemePreferenceDocumentReceiver
   }>()
   private winner: HomeConfigIconThemePreference | undefined
 
@@ -182,30 +231,67 @@ export class IconThemePreferenceBroadcastHub {
     }
   }
 
-  async register(receiver: (preference: HomeConfigIconThemePreference) => Promise<void>): Promise<() => void> {
-    const entry = { active: true, tail: Promise.resolve(), receive: receiver }
-    this.receivers.add(entry)
-    if (this.winner !== undefined) await this.enqueue(entry, this.winner)
-    return () => {
+  async register(receiver: IconThemePreferenceDocumentReceiver): Promise<{
+    readonly currentRevision: number
+    readonly unregister: () => void
+  }> {
+    const key = `${receiver.targetId}\u0000${receiver.sessionId}`
+    const previous = this.receivers.get(key)
+    if (previous !== undefined) previous.active = false
+    const entry = { active: true, tail: Promise.resolve(), deliveredRevision: 0, receiver }
+    this.receivers.set(key, entry)
+    try {
+      if (this.winner !== undefined) await this.enqueue(entry, this.winner)
+    } catch (error) {
+      if (this.receivers.get(key) === entry) this.receivers.delete(key)
       entry.active = false
-      this.receivers.delete(entry)
+      throw error
     }
+    const unregister = (): void => {
+      entry.active = false
+      if (this.receivers.get(key) === entry) this.receivers.delete(key)
+    }
+    return { currentRevision: Math.max(entry.deliveredRevision, this.winner?.revision ?? 0), unregister }
   }
 
-  async broadcast(preference: HomeConfigIconThemePreference): Promise<void> {
-    if (this.winner !== undefined && preference.revision <= this.winner.revision) return
+  async broadcast(preference: HomeConfigIconThemePreference): Promise<IconThemePreferenceBroadcastResult> {
+    if (this.winner !== undefined && preference.revision <= this.winner.revision) {
+      return { attempted: 0, delivered: 0, failed: 0 }
+    }
     this.winner = { ...preference }
-    await Promise.all([...this.receivers].map(async entry => await this.enqueue(entry, preference)))
+    const results = await Promise.allSettled([...this.receivers.values()].map(async entry => await this.enqueue(entry, preference)))
+    const delivered = results.filter(result => result.status === 'fulfilled').length
+    return { attempted: results.length, delivered, failed: results.length - delivered }
   }
 
   private async enqueue(
-    entry: { active: boolean; tail: Promise<void>; readonly receive: (preference: HomeConfigIconThemePreference) => Promise<void> },
+    entry: { active: boolean; tail: Promise<void>; deliveredRevision: number; readonly receiver: IconThemePreferenceDocumentReceiver },
     preference: HomeConfigIconThemePreference,
   ): Promise<void> {
-    entry.tail = entry.tail.then(async () => {
-      if (!entry.active) return
-      await entry.receive({ ...preference })
-    }).catch(() => undefined)
-    await entry.tail
+    const delivery = entry.tail.then(async () => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (!entry.active) throw new Error('icon theme preference document receiver is disposed')
+        const currentWinner = this.winner
+        const value = currentWinner !== undefined && currentWinner.revision > preference.revision ? currentWinner : preference
+        if (entry.deliveredRevision >= value.revision) return
+        try {
+          const ack = await entry.receiver.receive({ ...value })
+          if (!entry.active) throw new Error('icon theme preference document receiver is disposed')
+          if (ack.documentEpoch !== entry.receiver.documentEpoch || ack.currentRevision < value.revision) {
+            throw new Error('icon theme preference delivery acknowledgement is invalid')
+          }
+          entry.deliveredRevision = Math.max(entry.deliveredRevision, ack.currentRevision)
+          return
+        } catch (error) {
+          if (!entry.active) throw new Error('icon theme preference document receiver is disposed')
+          if (this.winner !== undefined && this.winner.revision > value.revision) continue
+          if (attempt === 1) throw error
+        }
+      }
+    })
+    // Keep the private serialization tail usable after a failed document, but
+    // preserve the original rejection for register()/broadcast() and callers.
+    entry.tail = delivery.then(() => undefined, () => undefined)
+    await delivery
   }
 }

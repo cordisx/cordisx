@@ -1,4 +1,5 @@
 import WebSocket from 'ws'
+import { randomUUID } from 'node:crypto'
 import { fetchMarketplaceFeed } from './marketplace.js'
 import type { ProviderFleet } from '../providers/fleet.js'
 import type {
@@ -90,6 +91,7 @@ import {
   MAX_ICON_THEME_PREFERENCE_REQUEST_BYTES,
   iconThemePreferenceBridgeError,
   parseIconThemePreferenceBindingRequest,
+  parseIconThemePreferenceDocumentReadyRequest,
   persistIconThemePreference,
   type IconThemePreferencePersistenceContext,
 } from './icon-theme-rpc.js'
@@ -744,11 +746,77 @@ async function sendConfigBindingResponse(session: CdpSession, payload: Record<st
   })
 }
 
-async function sendIconThemePreferenceBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
-  await session.send('Runtime.evaluate', {
-    expression: `void globalThis.${ICON_THEME_PREFERENCE_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+async function sendIconThemePreferenceBindingResponse(
+  session: CdpSession,
+  payload: Record<string, unknown>,
+  executionContextId?: number,
+): Promise<void> {
+  const response = await session.send('Runtime.evaluate', {
+    expression: `(() => {
+      const receiver = globalThis.${ICON_THEME_PREFERENCE_RECEIVER}
+      if (typeof receiver !== 'function') throw new Error('icon theme preference receiver is unavailable')
+      receiver(${JSON.stringify(JSON.stringify(payload))})
+      return true
+    })()`,
     allowUnsafeEvalBlockedByCSP: true,
+    returnByValue: true,
+    ...(executionContextId === undefined ? {} : { contextId: executionContextId }),
   })
+  const remote = response.result
+  if (remote === null || typeof remote !== 'object' || (remote as { value?: unknown }).value !== true) {
+    throw new Error('icon theme preference response delivery failed')
+  }
+}
+
+export function iconThemePreferenceDeliveryEvaluation(
+  payload: Record<string, unknown>,
+  documentEpoch: string,
+  minimumRevision: number,
+  executionContextId: number,
+): Record<string, unknown> {
+  return {
+    expression: `(() => {
+      const receiver = globalThis.${ICON_THEME_PREFERENCE_RECEIVER}
+      if (typeof receiver !== 'function') throw new Error('icon theme preference receiver is unavailable')
+      const ack = receiver(${JSON.stringify(JSON.stringify(payload))})
+      if (ack === null || typeof ack !== 'object'
+        || ack.documentEpoch !== ${JSON.stringify(documentEpoch)}
+        || !Number.isSafeInteger(ack.currentRevision)
+        || ack.currentRevision < ${minimumRevision}) {
+        throw new Error('icon theme preference delivery acknowledgement is invalid')
+      }
+      return ack
+    })()`,
+    allowUnsafeEvalBlockedByCSP: true,
+    returnByValue: true,
+    contextId: executionContextId,
+  }
+}
+
+async function deliverIconThemePreferenceToDocument(
+  session: CdpSession,
+  payload: Record<string, unknown>,
+  documentEpoch: string,
+  minimumRevision: number,
+  executionContextId: number,
+): Promise<{ readonly documentEpoch: string; readonly currentRevision: number }> {
+  const response = await session.send('Runtime.evaluate', iconThemePreferenceDeliveryEvaluation(
+    payload,
+    documentEpoch,
+    minimumRevision,
+    executionContextId,
+  ))
+  const remote = response.result
+  const value = remote !== null && typeof remote === 'object'
+    ? (remote as { value?: unknown }).value
+    : undefined
+  if (value === null || typeof value !== 'object') throw new Error('icon theme preference delivery failed')
+  const ack = value as { documentEpoch?: unknown; currentRevision?: unknown }
+  if (ack.documentEpoch !== documentEpoch || !Number.isSafeInteger(ack.currentRevision)
+    || (ack.currentRevision as number) < minimumRevision) {
+    throw new Error('icon theme preference delivery acknowledgement is invalid')
+  }
+  return { documentEpoch, currentRevision: ack.currentRevision as number }
 }
 async function sendPublisherGrantBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
   await session.send('Runtime.evaluate', {
@@ -866,7 +934,18 @@ async function install(
   let removeActionsBindingListener = (): void => {}
   let removePermissionBindingListener = (): void => {}
   let removeIconThemePreferenceBindingListener = (): void => {}
-  let unregisterIconThemePreferenceBroadcast: (() => void) | undefined
+  let unregisterCurrentIconThemeDocument: (() => void) | undefined
+  let iconThemeDocumentFence = 0
+  let iconThemeDocumentQueue = Promise.resolve()
+  const iconThemeSessionId = randomUUID()
+  const iconThemePreferenceClosed = (): boolean => iconThemePreferenceController?.signal.aborted === true
+  const unregisterIconThemePreferenceBroadcast = iconThemePreferenceBroadcast === undefined
+    ? undefined
+    : (): void => {
+        iconThemeDocumentFence += 1
+        unregisterCurrentIconThemeDocument?.()
+        unregisterCurrentIconThemeDocument = undefined
+      }
   let removeLifecycleBindingListener = (): void => {}
   let unregisterLifecycleSession = (): void => {}
   let generationJoin: ReturnType<CdpPluginLifecycleRuntime['beginJoin']> | undefined
@@ -1118,9 +1197,63 @@ async function install(
         const payload = params.payload
         void (async () => {
           let requestId = 'invalid'
+          let documentEpoch: string | undefined
+          const executionContextId = typeof params.executionContextId === 'number' ? params.executionContextId : undefined
           try {
             if (Buffer.byteLength(payload) > MAX_ICON_THEME_PREFERENCE_REQUEST_BYTES) throw new Error('icon theme preference request exceeds maximum size')
-            const request = parseIconThemePreferenceBindingRequest(JSON.parse(payload) as unknown, iconThemePreference)
+            const raw = JSON.parse(payload) as unknown
+            if (raw !== null && typeof raw === 'object' && (raw as { kind?: unknown }).kind === 'document-ready') {
+              const ready = parseIconThemePreferenceDocumentReadyRequest(raw, iconThemePreference)
+              requestId = ready.requestId
+              documentEpoch = ready.documentEpoch
+              if (executionContextId === undefined) throw new Error('icon theme preference document execution context is unavailable')
+              if (iconThemePreferenceBroadcast === undefined) throw new Error('icon theme preference broadcast is unavailable')
+              const fence = ++iconThemeDocumentFence
+              iconThemeDocumentQueue = iconThemeDocumentQueue.catch(() => undefined).then(async () => {
+                if (iconThemePreferenceClosed() || fence !== iconThemeDocumentFence) {
+                  throw new Error('icon theme preference document ready request is stale')
+                }
+                const registration = await iconThemePreferenceBroadcast.register({
+                  targetId: target.id,
+                  sessionId: iconThemeSessionId,
+                  documentEpoch: ready.documentEpoch,
+                  receive: async preference => await deliverIconThemePreferenceToDocument(
+                    session,
+                    { kind: 'sync', value: preference },
+                    ready.documentEpoch,
+                    preference.revision,
+                    executionContextId,
+                  ),
+                })
+                if (iconThemePreferenceClosed() || fence !== iconThemeDocumentFence) {
+                  registration.unregister()
+                  throw new Error('icon theme preference document ready request is stale')
+                }
+                try {
+                  await deliverIconThemePreferenceToDocument(
+                    session,
+                    {
+                      kind: 'document-ready',
+                      requestId: ready.requestId,
+                      ok: true,
+                      documentEpoch: ready.documentEpoch,
+                      currentRevision: Math.max(ready.currentRevision, registration.currentRevision),
+                    },
+                    ready.documentEpoch,
+                    Math.max(ready.currentRevision, registration.currentRevision),
+                    executionContextId,
+                  )
+                } catch (error) {
+                  registration.unregister()
+                  throw error
+                }
+                unregisterCurrentIconThemeDocument?.()
+                unregisterCurrentIconThemeDocument = registration.unregister
+              })
+              await iconThemeDocumentQueue
+              return
+            }
+            const request = parseIconThemePreferenceBindingRequest(raw, iconThemePreference)
             requestId = request.requestId
             if (iconThemePreferenceController?.signal.aborted === true) throw new Error('icon theme preference bridge is closed')
             if (activeIconThemePreferenceRequests >= 1) throw new Error('another icon theme preference request is active')
@@ -1131,15 +1264,26 @@ async function install(
             } finally {
               activeIconThemePreferenceRequests -= 1
             }
-            await sendIconThemePreferenceBindingResponse(session, { requestId, ok: true, value })
             await iconThemePreferenceBroadcast?.broadcast(value)
+            await sendIconThemePreferenceBindingResponse(session, { requestId, ok: true, value }, executionContextId)
           } catch (error) {
             const bridgeError = iconThemePreferenceBridgeError(error)
-            await sendIconThemePreferenceBindingResponse(session, {
-              requestId,
-              ok: false,
-              ...bridgeError,
-            }).catch(() => undefined)
+            if (documentEpoch !== undefined && executionContextId !== undefined) {
+              await deliverIconThemePreferenceToDocument(session, {
+                kind: 'document-ready',
+                requestId,
+                ok: false,
+                documentEpoch,
+                currentRevision: 0,
+                ...bridgeError,
+              }, documentEpoch, 0, executionContextId).catch(() => undefined)
+            } else {
+              await sendIconThemePreferenceBindingResponse(session, {
+                requestId,
+                ok: false,
+                ...bridgeError,
+              }, executionContextId).catch(() => undefined)
+            }
             if (bridgeError.currentPreference !== undefined) {
               await iconThemePreferenceBroadcast?.broadcast(bridgeError.currentPreference)
             }
@@ -1209,11 +1353,6 @@ async function install(
         await globalThis.__cordisxBoot
         return { ok: globalThis.__cordisxRuntime !== undefined }
       } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)
-    }
-    if (iconThemePreferenceBroadcast !== undefined) {
-      unregisterIconThemePreferenceBroadcast = await iconThemePreferenceBroadcast.register(async preference => {
-        await sendIconThemePreferenceBindingResponse(session, { kind: 'sync', value: preference })
-      })
     }
     if (generationRuntime !== undefined) {
       // Reserve this boot-ready renderer before durable recovery. The

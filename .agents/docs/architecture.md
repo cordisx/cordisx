@@ -720,15 +720,24 @@ runtime selection, resolution, rollback, disposal, and late results. Durable
 profile preference stores only the approved provider identity, version, and
 Host-derived artifact generation. A launcher-private same-profile broadcast
 caches only the highest monotonic durable revision, distributes it to active
-renderers, and replays it when a boot-ready renderer registers. CAS conflicts
-return the durable current preference. The browser bridge also retains a
-winner received before the runtime subscription exists, and startup reconciles
-that current value immediately after subscribing. Each renderer rebinds the
-winner to its own live handle only after an exact identity, version, artifact
-generation, and active-status match. Disposed targets stop receiving replay or
-broadcast, and each broadcast hub is bound to exactly one app/profile. Missing,
-changed, failed, or disposed providers remain on pinned Reicon; the broadcast
-does not add a public Protocol surface or weaken per-process fences.
+renderers, and replays it for every boot-ready document rather than treating a
+CDP target as permanently delivered. Each document creates a Host-private
+epoch and completes a launcher handshake after installing its runtime
+subscription. Delivery is bound to the app/profile, target, launcher session,
+document epoch, and exact execution context; the renderer must acknowledge the
+same epoch and a current revision at least as new as the winner. Missing,
+throwing, destroyed-context, stale-revision, and malformed acknowledgements do
+not count as convergence. The hub retries a document delivery at most once,
+lets a higher revision supersede pending lower work, and otherwise retains the
+winner for the next ready handshake. CAS conflicts return the durable current
+preference. The browser bridge also retains a winner received before the
+runtime subscription exists, and startup reconciles that current value
+immediately after subscribing. Each renderer rebinds the winner to its own live
+handle only after an exact identity, version, artifact generation, and
+active-status match. Disposed documents and closed targets cancel pending work,
+and each broadcast hub is bound to exactly one app/profile. Missing, changed,
+failed, or disposed providers remain on pinned Reicon; the broadcast does not
+add a public Protocol surface or weaken per-process fences.
 
 ## Trust and security
 

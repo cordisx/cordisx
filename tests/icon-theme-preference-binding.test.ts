@@ -15,6 +15,38 @@ afterEach(() => {
 })
 
 describe('browser icon-theme preference bridge', () => {
+  it('handshakes one document epoch and requires an acknowledged current revision', async () => {
+    const requests: Record<string, unknown>[] = []
+    globalThis.__cordisxIconThemePreferenceRequestV1 = payload => { requests.push(JSON.parse(payload) as Record<string, unknown>) }
+    const bridge = new BrowserIconThemePreferenceBridge('token', 'codex', 'default', 'host-12', { revision: 4, ...candidate })
+    const rejected = bridge.ready()
+    const first = requests[0]!
+    expect(first).toMatchObject({
+      kind: 'document-ready',
+      scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-12' },
+      currentRevision: 4,
+    })
+    expect(first.documentEpoch).toMatch(/^doc_[A-Za-z0-9_]+$/u)
+    globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      kind: 'document-ready', requestId: first.requestId, ok: true,
+      documentEpoch: 'doc_wrong_epoch', currentRevision: 4,
+    }))
+    await expect(rejected).rejects.toThrow('acknowledgement is invalid')
+
+    const accepted = bridge.ready()
+    const second = requests[1]!
+    const ack = globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+      kind: 'document-ready', requestId: second.requestId, ok: true,
+      documentEpoch: second.documentEpoch, currentRevision: 4,
+    }))
+    await expect(accepted).resolves.toBeUndefined()
+    expect(ack).toEqual({ documentEpoch: second.documentEpoch, currentRevision: 4 })
+
+    const disposed = bridge.ready()
+    bridge.dispose()
+    await expect(disposed).rejects.toThrow('disposed')
+  })
+
   it('correlates an exact generation/revision response and ignores a late duplicate', async () => {
     let request: Record<string, unknown> | undefined
     globalThis.__cordisxIconThemePreferenceRequestV1 = payload => { request = JSON.parse(payload) as Record<string, unknown> }
