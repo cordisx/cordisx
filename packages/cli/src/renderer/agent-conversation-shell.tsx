@@ -28,6 +28,7 @@ import type {
   CordisXPageMount,
   CordisXPageMountContext,
 } from '../contracts.js'
+import { markAgentConversationPageMount } from './agent-conversation-page.js'
 import { CordisXCommandService } from './commands.js'
 import {
   generationVisibilityFromContext,
@@ -43,6 +44,7 @@ import {
   type AgentConversationModel,
 } from './host-ui/conversation/model.js'
 import { CordisXI18nService } from './i18n.js'
+import { HostThemeProjection } from './host-theme.js'
 import { ownerFromContext } from './ownership.js'
 import type { PluginConsoleAspect, PluginPrincipalToken } from './plugin-console.js'
 import { immutableSnapshot, LOCAL_ID_PATTERN, REFERENCE_PATTERN } from './validation.js'
@@ -448,6 +450,7 @@ class MountedConversation {
   private readonly root: Root
   private readonly diagnosticSites = new Set<string>()
   private readonly disconnectLocale: () => void
+  private readonly detachTheme: () => void
   private readonly previousOverflow: string
   private readonly previousMinHeight: string
 
@@ -460,6 +463,7 @@ class MountedConversation {
     private readonly console: PluginConsoleAspect | undefined,
   ) {
     this.root = createRoot(mountContext.container)
+    this.detachTheme = new HostThemeProjection(mountContext.document).attach(mountContext.container)
     this.previousOverflow = mountContext.container.style.overflow
     this.previousMinHeight = mountContext.container.style.minHeight
     mountContext.container.style.overflow = 'hidden'
@@ -480,6 +484,7 @@ class MountedConversation {
     for (const site of this.diagnosticSites) this.i18n.clearDiagnosticSite(this.record.owner, site)
     this.diagnosticSites.clear()
     this.root.unmount()
+    this.detachTheme()
     this.mountContext.container.style.overflow = this.previousOverflow
     this.mountContext.container.style.minHeight = this.previousMinHeight
     this.record.sessions.delete(this)
@@ -508,10 +513,22 @@ class MountedConversation {
       return
     }
     plainObject(subscribed, 'subscribe runtime result')
-    exactKeys(subscribed, 'handle' in subscribed ? ['result', 'handle'] : ['result'], 'subscribe runtime result')
     plainObject(subscribed.result, 'subscribe result')
     if (subscribed.result.type !== 'subscribe') throw new Error('subscribe result type is invalid')
     if (subscribed.result.status !== 'accepted') {
+      if ('handle' in subscribed) {
+        const unexpected = subscribed.handle as unknown
+        if (unexpected !== null && typeof unexpected === 'object'
+          && typeof (unexpected as { unsubscribe?: unknown }).unsubscribe === 'function') {
+          try {
+            ;(unexpected as { unsubscribe(): void }).unsubscribe()
+          } catch (error) {
+            console.error('[cordisx] Agent conversation rejected runtime handle cleanup failed', error)
+          }
+        }
+      }
+      this.releaseSource()
+      exactKeys(subscribed, ['result'], 'subscribe runtime result')
       exactKeys(subscribed.result, ['type', 'status', 'code'], 'subscribe result')
       if (subscribed.result.status === 'denied' && subscribed.result.code !== 'policy-denied') throw new Error('denied subscribe result code is invalid')
       if (subscribed.result.status === 'unavailable' && !['owner-unavailable', 'generation-replaced', 'disposed'].includes(subscribed.result.code)) {
@@ -520,8 +537,13 @@ class MountedConversation {
       this.renderStatus('unavailable')
       return
     }
+    exactKeys(subscribed, ['result', 'handle'], 'subscribe runtime result')
     exactKeys(subscribed.result, ['type', 'status', 'code', 'subscription'], 'subscribe result')
     if (subscribed.result.code !== 'allowed' || !('handle' in subscribed)) throw new Error('accepted subscribe result is missing its runtime handle')
+    plainObject(subscribed.handle, 'subscribe runtime handle')
+    exactKeys(subscribed.handle, ['subscription', 'pages', 'unsubscribe'], 'subscribe runtime handle')
+    if (typeof subscribed.handle.unsubscribe !== 'function') throw new Error('accepted subscribe result has an invalid runtime handle')
+    this.unsubscribe = () => subscribed.handle.unsubscribe()
     assertSubscription(subscribed.result.subscription, 'subscribe result.subscription')
     assertSubscription(subscribed.handle.subscription, 'subscribe handle.subscription')
     if (!sameSubscription(subscribed.result.subscription, subscribed.handle.subscription)) {
@@ -531,14 +553,12 @@ class MountedConversation {
     if (!sameBinding(issued.binding, this.binding) || issued.generation !== initial.generation || issued.afterSequence !== this.cursor) {
       throw new Error('subscribe result crossed its binding, generation, or cursor fence')
     }
-    if (typeof subscribed.handle.unsubscribe !== 'function'
-      || subscribed.handle.pages === null
+    if (subscribed.handle.pages === null
       || typeof subscribed.handle.pages !== 'object'
       || !(Symbol.asyncIterator in subscribed.handle.pages)) {
       throw new Error('accepted subscribe result has an invalid runtime handle')
     }
     this.subscription = immutableSnapshot(issued)
-    this.unsubscribe = () => subscribed.handle.unsubscribe()
     this.render()
     await this.consume(subscribed.handle.pages)
   }
@@ -578,6 +598,9 @@ class MountedConversation {
     for (const [index, update] of page.updates.entries()) {
       this.assertUpdate(update, `subscription page.updates[${index}]`)
       if (update.sequence !== expected) throw new Error('subscription updates are not monotonic')
+      if (page.phase === 'replay' && update.sequence > this.subscription.snapshotSequence) {
+        throw new Error('replay subscription update crossed its snapshot watermark')
+      }
       if (terminal) throw new Error('subscription page contains an update after terminal disposal')
       this.applyUpdate(update)
       terminal = update.kind === 'disposed'
@@ -585,6 +608,12 @@ class MountedConversation {
     }
     const expectedNext = page.updates.length === 0 ? this.cursor : page.updates.at(-1)!.sequence
     if (page.nextAfterSequence !== expectedNext) throw new Error('subscription next cursor is invalid')
+    if (page.phase === 'replay' && page.nextAfterSequence > this.subscription.snapshotSequence) {
+      throw new Error('replay subscription cursor crossed its snapshot watermark')
+    }
+    if (page.phase === 'replay' && page.hasMore && page.nextAfterSequence >= this.subscription.snapshotSequence) {
+      throw new Error('replay subscription cannot continue at its snapshot watermark')
+    }
     if (terminal && page.hasMore) throw new Error('terminal subscription page cannot have more pages')
     if (page.phase === 'replay' && !page.hasMore && page.nextAfterSequence !== this.subscription.snapshotSequence) {
       throw new Error('replay subscription did not reach its snapshot watermark')
@@ -760,7 +789,7 @@ export class AgentConversationShellRegistry {
     }
     this.records.add(record)
     const host = new BoundSourceHost(record, () => `binding-${this.nextBinding++}`)
-    const mount: CordisXPageMount = mountContext => {
+    const mount: CordisXPageMount = markAgentConversationPageMount(mountContext => {
       if (!record.active || this.visibility?.visible(record.effect) === false) {
         throw new Error('Agent conversation shell source generation is unavailable')
       }
@@ -785,7 +814,7 @@ export class AgentConversationShellRegistry {
         mounted = false
         session?.dispose()
       }
-    }
+    })
     let active = true
     return {
       mount,

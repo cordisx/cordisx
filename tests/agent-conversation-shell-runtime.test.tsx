@@ -7,13 +7,14 @@ import type {
 import { Context } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { CordisXCommandContext, CordisXPageMountContext } from '../packages/cli/src/contracts.js'
+import { CORDISX_PAGE_SCHEMA_V3, type CordisXCommandContext, type CordisXPageMountContext } from '../packages/cli/src/contracts.js'
 import {
   AgentConversationShellRegistry,
   CordisXAgentConversationShellService,
 } from '../packages/cli/src/renderer/agent-conversation-shell.js'
 import { CommandRegistry, CordisXCommandService } from '../packages/cli/src/renderer/commands.js'
 import { CordisXI18nService } from '../packages/cli/src/renderer/i18n.js'
+import { CordisXPageService } from '../packages/cli/src/renderer/navigation.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
 
 class PageStream implements AsyncIterableIterator<AgentConversationShellPage> {
@@ -191,27 +192,38 @@ describe('Agent conversation shell public runtime', () => {
     const root = new Context()
     const commands = root.plugin(CordisXCommandService)
     const i18n = root.plugin(CordisXI18nService)
+    const pages = root.plugin(CordisXPageService)
     await commands
     await i18n
+    await pages
     const shell = root.plugin(CordisXAgentConversationShellService)
     await shell
     let registration: ReturnType<Context['agentConversationShell']['registerSource']> | undefined
     const pluginContext = root.extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-1' })
     const plugin = pluginContext.plugin({
-      inject: ['agentConversationShell'],
+      inject: ['agentConversationShell', 'pages'],
       apply(ctx: Context) {
         registration = ctx.agentConversationShell.registerSource(binding => ({
           snapshot: async () => noRoom(binding),
           subscribe: async () => ({ result: { type: 'subscribe', status: 'unavailable', code: 'owner-unavailable' } }),
           dispose() {},
         }))
+        ctx.pages.register({
+          $schema: CORDISX_PAGE_SCHEMA_V3,
+          schemaVersion: 3,
+          id: 'room',
+          title: { key: 'page.room.title', fallback: 'New room' },
+          description: { key: 'page.room.description', fallback: 'Host-rendered conversation.' },
+        }, registration.mount)
       },
     })
     await plugin
     expect(registration?.mount).toBeTypeOf('function')
+    expect((root.pages as CordisXPageService).registry.get('chatroom', 'room')?.presentation).toBe('agent-conversation')
     await plugin.dispose()
     expect(() => registration!.mount(mountContext(dom))).toThrow(/generation is unavailable/)
     await shell.dispose()
+    await pages.dispose()
     await i18n.dispose()
     await commands.dispose()
     await settle()
@@ -274,6 +286,13 @@ describe('Agent conversation shell public runtime', () => {
     expect(dom.window.document.querySelector('[data-agent-conversation-renderer="production"]')).not.toBeNull()
     expect(dom.window.document.querySelectorAll('.cxa-chrome')).toHaveLength(1)
     expect(dom.window.document.querySelector('[data-agent-conversation-view="new-room"]')).not.toBeNull()
+    const hostRoot = dom.window.document.getElementById('page')!
+    expect(hostRoot.dataset.cordisxAppTheme).toBe('light')
+    expect(hostRoot.style.getPropertyValue('--cx-text')).not.toBe('')
+    dom.window.document.documentElement.dataset.theme = 'dark'
+    await settle()
+    expect(hostRoot.dataset.cordisxAppTheme).toBe('dark')
+    expect(hostRoot.style.getPropertyValue('--cx-surface')).toBe('#17191d')
 
     dom.window.document.querySelector<HTMLButtonElement>('.cxa-empty button')!.click()
     await settle()
@@ -322,6 +341,8 @@ describe('Agent conversation shell public runtime', () => {
     expect(dom.window.document.querySelector('.cxa-composer')).toBeNull()
 
     if (typeof unmount === 'function') unmount()
+    expect(hostRoot.hasAttribute('data-cordisx-app-theme')).toBe(false)
+    expect(hostRoot.style.getPropertyValue('--cx-text')).toBe('')
     registration.dispose()
     expect(unsubscribed).toBe(1)
     expect(disposed).toBe(1)
@@ -394,16 +415,16 @@ describe('Agent conversation shell public runtime', () => {
     dom.window.close()
   })
 
-  it('rejects premature live replay and non-monotonic update sequences', async () => {
+  it('rejects premature live replay, non-monotonic updates, and replay watermark overshoot', async () => {
     const dom = installDom()
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const commands = new CommandRegistry()
     const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
     const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-1' })
-    for (const candidate of ['premature-live', 'sequence-gap'] as const) {
+    for (const candidate of ['premature-live', 'sequence-gap', 'watermark-overshoot'] as const) {
       const stream = new PageStream()
       let binding: AgentConversationShellBinding | undefined
-      const watermark = candidate === 'premature-live' ? 2 : 0
+      const watermark = candidate === 'sequence-gap' ? 0 : 2
       const registration = runtime.register(plugin, currentBinding => {
         binding = currentBinding
         const subscription = {
@@ -429,10 +450,18 @@ describe('Agent conversation shell public runtime', () => {
       }
       stream.push(candidate === 'premature-live' ? {
         subscription, afterSequence: 0, phase: 'live', updates: [], nextAfterSequence: 0, hasMore: false,
-      } : {
+      } : candidate === 'sequence-gap' ? {
         subscription, afterSequence: 0, phase: 'live',
         updates: [{ kind: 'disposed', sequence: 2, reason: 'explicit' }],
         nextAfterSequence: 2, hasMore: false,
+      } : {
+        subscription, afterSequence: 0, phase: 'replay',
+        updates: [1, 2, 3].map(sequence => ({
+          kind: 'snapshot-replaced' as const,
+          sequence,
+          snapshot: { ...noRoom(binding!), snapshotSequence: sequence },
+        })),
+        nextAfterSequence: 3, hasMore: true,
       })
       await settle()
       expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="error"]')).not.toBeNull()
@@ -440,6 +469,50 @@ describe('Agent conversation shell public runtime', () => {
       await settle()
       dom.window.document.getElementById('page')!.replaceChildren()
     }
+    runtime.dispose()
+    commands.dispose()
+    await settle()
+    dom.window.close()
+  })
+
+  it('strictly discriminates unavailable subscriptions and releases every non-accepted source', async () => {
+    const dom = installDom()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const commands = new CommandRegistry()
+    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
+    const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-1' })
+
+    let disposed = 0
+    const unavailable = runtime.register(plugin, binding => ({
+      snapshot: async () => noRoom(binding),
+      subscribe: async () => ({ result: { type: 'subscribe', status: 'unavailable', code: 'owner-unavailable' } }),
+      dispose: () => { disposed += 1 },
+    }))
+    unavailable.mount(mountContext(dom))
+    await settle()
+    expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="unavailable"]')).not.toBeNull()
+    expect(disposed).toBe(1)
+    unavailable.dispose()
+    expect(disposed).toBe(1)
+
+    dom.window.document.getElementById('page')!.replaceChildren()
+    let rejectedHandleUnsubscribed = 0
+    const malformed = runtime.register(plugin, binding => ({
+      snapshot: async () => noRoom(binding),
+      subscribe: async () => ({
+        result: { type: 'subscribe', status: 'denied', code: 'policy-denied' },
+        handle: { unsubscribe: () => { rejectedHandleUnsubscribed += 1 } },
+      }) as never,
+      dispose: () => { disposed += 1 },
+    }))
+    malformed.mount(mountContext(dom))
+    await settle()
+    expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="error"]')).not.toBeNull()
+    expect(rejectedHandleUnsubscribed).toBe(1)
+    expect(disposed).toBe(2)
+    malformed.dispose()
+    expect(disposed).toBe(2)
+
     runtime.dispose()
     commands.dispose()
     await settle()

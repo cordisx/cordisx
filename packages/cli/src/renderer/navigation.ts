@@ -27,6 +27,7 @@ import type {
   CordisXRoutes,
 } from '../contracts.js'
 import type { CordisXCommandService } from './commands.js'
+import { isAgentConversationPageMount, markAgentConversationPageMount } from './agent-conversation-page.js'
 import { CordisXI18nService, type LocalizationEffectOwner } from './i18n.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { createHostSurfaceIcon } from './icons.js'
@@ -222,6 +223,7 @@ interface PageRecord {
   readonly candidateView?: PluginGenerationView
   readonly metadata: CordisXPageMetadata
   readonly mount: CordisXPageMount<any>
+  readonly presentation?: 'agent-conversation'
 }
 
 export interface PageSnapshot {
@@ -389,6 +391,11 @@ export class PageRegistry {
       actionIds.add(action.id)
     }
     if (typeof mount !== 'function') throw new Error(`page ${metadata.id} requires a mount callback`)
+    const agentConversation = isAgentConversationPageMount(mount)
+    if (agentConversation
+      && (metadata.breadcrumbs !== undefined || metadata.tabs !== undefined || metadata.headerActions !== undefined)) {
+      throw new Error(`agent conversation page ${metadata.id} cannot declare breadcrumbs, tabs, or header actions`)
+    }
     const qualifiedId = qualifyOwnedId(owner, metadata.id)
     const physicalId = `${qualifiedId}\u0000${generation.moduleGeneration ?? 'host'}`
     if (this.records.has(physicalId)) throw new Error(`page ${qualifiedId} is already registered for this generation`)
@@ -399,6 +406,7 @@ export class PageRegistry {
       ...(candidateView === undefined ? {} : { candidateView }),
       metadata: immutableSnapshot(metadata),
       mount,
+      ...(agentConversation ? { presentation: 'agent-conversation' as const } : {}),
     })
     if (this.visibility?.visible(generation) !== false) this.notify()
     let active = true
@@ -1537,6 +1545,9 @@ export class NavigationRegistry {
     }
     const page = this.pages.get(record.owner, record.definition.page, view)
     if (page === undefined) return `page ${record.definition.page} is not registered by plugin ${record.owner}`
+    if (page.presentation === 'agent-conversation' && record.definition.outlet !== 'main') {
+      return `agent conversation page ${page.qualifiedId} requires the main outlet`
+    }
     if (record.definition.outlet === 'manager.content') {
       if (record.definition.path === '/manager/extensions'
         || record.definition.path === '/manager/extensions/'
@@ -1561,7 +1572,8 @@ export class NavigationRegistry {
       return `page ${page.qualifiedId} must use body-only chrome for manager.settings.content`
     }
     if (
-      page.metadata.chrome === 'body-only'
+      page.presentation !== 'agent-conversation'
+      && page.metadata.chrome === 'body-only'
       && record.definition.outlet !== 'session.content'
       && record.definition.outlet !== 'manager.settings.content'
     ) {
@@ -1673,9 +1685,10 @@ export class NavigationRegistry {
     state.mount = mount
     delete state.error
     try {
+      const agentConversation = page.presentation === 'agent-conversation'
       const bodyOnly = page.metadata.chrome === 'body-only'
-      content.dataset.cordisxPageChromePolicy = bodyOnly ? 'body-only' : 'standard'
-      if (!bodyOnly) {
+      content.dataset.cordisxPageChromePolicy = agentConversation ? 'agent-conversation' : bodyOnly ? 'body-only' : 'standard'
+      if (!bodyOnly && !agentConversation) {
       const chrome = content.ownerDocument.createElement('header')
       chrome.dataset.cordisxPageChrome = 'true'
       chrome.dataset.cordisxDrag = 'true'
@@ -1810,7 +1823,7 @@ export class NavigationRegistry {
         }
         content.append(tabs)
       }
-      } else {
+      } else if (bodyOnly && !agentConversation) {
         const titleSite = `page:${page.qualifiedId}:body.accessible-title`
         localization.effect(() => {
           content.setAttribute('aria-label', this.i18n.resolveFor(page.owner, page.metadata.title, titleSite).text)
@@ -1819,7 +1832,7 @@ export class NavigationRegistry {
       }
       const body = content.ownerDocument.createElement('div')
       body.dataset.cordisxPageBody = 'true'
-      body.style.cssText = 'position:relative;flex:1;min-height:0;overflow:auto'
+      body.style.cssText = `position:relative;flex:1;min-height:0;overflow:${agentConversation ? 'hidden' : 'auto'}`
       content.append(body)
       const controls = new HostPageControls(content.ownerDocument, content)
       effects.push(() => controls.dispose())
@@ -2101,6 +2114,7 @@ export class CordisXPageService extends Service implements CordisXPages {
           { trigger: { kind: 'registration', registrationId: `page:${owner}:${metadata.id}` } },
           () => mount(context),
         ) as ReturnType<CordisXPageMount<Messages>>
+    if (isAgentConversationPageMount(mount)) markAgentConversationPageMount(scopedMount)
     const register = (): ReturnType<CordisXPages['register']> => this.ctx.effect(
       () => this.registry.register(this.ctx, metadata, scopedMount),
       `pages.register(${JSON.stringify(metadata.id)})`,
