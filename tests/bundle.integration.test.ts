@@ -191,7 +191,7 @@ describe('renderer bundle', () => {
     }
     const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
     expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
-    expect(runtime?.version).toBe('0.1.0-beta.1')
+    expect(runtime?.version).toBe('0.1.0-beta.2')
     const snapshot = runtime!.snapshot()
     expect(snapshot.plugins).toEqual([
       expect.objectContaining({
@@ -801,7 +801,7 @@ describe('renderer bundle', () => {
     await settle()
     expect(currentAboutMarks().every(mark => mark.dataset.hostBackground === 'dark')).toBe(true)
     expect(dom.window.document.querySelector('.cxm-about-name')?.textContent).toBe('CordisX')
-    expect(dom.window.document.querySelector('.cxm-about-version')?.textContent).toBe('v0.1.0-beta.1')
+    expect(dom.window.document.querySelector('.cxm-about-version')?.textContent).toBe('v0.1.0-beta.2')
     expect(dom.window.document.querySelector('.cxm-about-identity [data-cordisx-brand-mark]')).not.toBeNull()
     expect([...dom.window.document.querySelector('.cxm-about-identity')?.children ?? []].map(item => item.className)).toEqual([
       'cxm-brand-mark cxm-about-mark', 'cxm-about-identity-copy',

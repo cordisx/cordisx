@@ -26,7 +26,7 @@ describe('npm workspace boundary', () => {
     })
     expect(cli).toMatchObject({
       name: 'cordisx',
-      version: '0.1.0-beta.1',
+      version: '0.1.0-beta.2',
       license: 'AGPL-3.0-or-later',
       files: ['dist', 'README.md', 'LICENSE', 'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md', 'THIRD_PARTY_NOTICES.md', 'third_party'],
       bin: { cordisx: 'dist/src/cli.js' },
@@ -36,7 +36,7 @@ describe('npm workspace boundary', () => {
     expect(cli.private).toBeUndefined()
     expect(creator).toMatchObject({
       name: 'create-cordisx-plugin',
-      version: '0.1.0-beta.1',
+      version: '0.1.0-beta.2',
       license: 'AGPL-3.0-or-later',
       files: ['dist', 'template', 'README.md', 'LICENSE', 'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'],
       bin: { 'create-cordisx-plugin': 'dist/cli.js' },

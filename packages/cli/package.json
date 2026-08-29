@@ -1,6 +1,6 @@
 {
   "name": "cordisx",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "An experimental Cordis-powered UI plugin host for Codex Desktop",
   "type": "module",
   "files": [
@@ -78,7 +78,7 @@
   },
   "dependencies": {
     "@cordisx/protocol": "git+https://github.com/cordisx/cordisx-protocol.git#5ec36fee67fd768cb30b4129c7a89d8d6841ce90",
-    "@cordisx/schemastery-ui": "0.1.0-beta.1",
+    "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@larksuiteoapi/node-sdk": "^1.73.0",
