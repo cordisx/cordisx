@@ -171,8 +171,10 @@ describe('Host Reicon normalized backend', () => {
   })
 
   it('maps every legacy Host surface token to a formal semantic key', () => {
-    const tokens = ['analytics', 'back', 'calendar', 'close', 'error', 'files', 'folder', 'history', 'info', 'layers', 'key', 'more', 'open', 'palette', 'refresh', 'reset', 'review', 'settings', 'save', 'clock', 'success', 'warning', 'tags']
+    const tokens = ['analytics', 'back', 'calendar', 'close', 'error', 'files', 'folder', 'history', 'info', 'layers', 'key', 'more', 'new', 'open', 'palette', 'playground', 'refresh', 'reset', 'review', 'settings', 'save', 'clock', 'success', 'warning', 'tags']
     expect(tokens.map(name => hostSurfaceIconKey(`host:${name}`))).not.toContain(undefined)
+    expect(hostSurfaceIconKey('host:new')).toBe('action.add')
+    expect(hostSurfaceIconKey('host:playground')).toBe('navigation.overview')
     expect(hostSurfaceIconKey('host:unknown')).toBeUndefined()
   })
 
