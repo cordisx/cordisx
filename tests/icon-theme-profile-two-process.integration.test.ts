@@ -45,6 +45,7 @@ describe('two-process icon-theme profile persistence', () => {
       callbacksPendingAtShutdown: 1,
       lateCallbackTouchedDom: false,
       callbacksDrained: true,
+      nestedWindowMicrotasksDrained: true,
     })
     expect(processA.selected).toMatchObject({ providerId: 'plugin:icon-theme-test:aurora' })
     expect(processB.exact).toMatchObject({

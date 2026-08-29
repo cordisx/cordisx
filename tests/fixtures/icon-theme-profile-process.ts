@@ -32,6 +32,42 @@ interface Runtime {
   dispose(): Promise<void>
 }
 
+class HostPrivateWindowMicrotaskScope {
+  private accepting = true
+  private readonly tasks = new Set<Promise<void>>()
+  private readonly errors: unknown[] = []
+
+  queue(callback: VoidFunction): void {
+    if (!this.accepting) return
+    const task = Promise.resolve().then(callback).catch(error => { this.errors.push(error) })
+    this.tasks.add(task)
+    void task.then(() => this.tasks.delete(task))
+  }
+
+  stop(): void { this.accepting = false }
+  pending(): number { return this.tasks.size }
+
+  async drain(): Promise<void> {
+    let stableTurns = 0
+    for (let turn = 0; turn < 64; turn += 1) {
+      await Promise.all([...this.tasks])
+      await Promise.resolve()
+      if (this.tasks.size === 0) {
+        stableTurns += 1
+        if (stableTurns === 2) {
+          if (this.errors.length > 0) throw new AggregateError(this.errors, 'Host-private window microtask drain failed')
+          return
+        }
+      } else {
+        stableTurns = 0
+      }
+    }
+    throw new Error('Host-private window microtasks did not reach a fixed point')
+  }
+}
+
+const windowMicrotasks = new WeakMap<JSDOM, HostPrivateWindowMicrotaskScope>()
+
 function page(): JSDOM {
   const dom = new JSDOM('<!doctype html><html lang="en" class="electron-dark"><head></head><body><button data-cordisx-playground-manager-trigger>Manager</button><main data-cordisx-playground-seat="app"></main></body></html>', {
     runScripts: 'dangerously',
@@ -42,8 +78,22 @@ function page(): JSDOM {
     matches: false, media: '', onchange: null,
     addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
   }) })
+  const microtasks = new HostPrivateWindowMicrotaskScope()
+  Object.defineProperty(dom.window, 'queueMicrotask', {
+    configurable: true,
+    value: (callback: VoidFunction) => microtasks.queue(callback),
+  })
+  windowMicrotasks.set(dom, microtasks)
   dom.window.console.info = () => {}
   return dom
+}
+
+async function closePage(dom: JSDOM): Promise<void> {
+  const microtasks = windowMicrotasks.get(dom)
+  await microtasks?.drain()
+  microtasks?.stop()
+  await microtasks?.drain()
+  dom.window.close()
 }
 
 async function waitFor(predicate: () => boolean | Promise<boolean>, label: string): Promise<void> {
@@ -108,10 +158,9 @@ async function boot(
     const snapshot = runtime.snapshot().iconThemes!
     const result = { selected: { ...snapshot.selected }, providers: snapshot.providers.map(provider => ({ ...provider })) }
     await runtime.dispose()
-    await Promise.resolve()
     return result
   } finally {
-    dom.window.close()
+    await closePage(dom)
   }
 }
 
@@ -190,20 +239,27 @@ async function processA(): Promise<Record<string, unknown>> {
     await runtime.dispose()
     releasePersistedResponse.resolve()
     await callbacks.drain()
-    await Promise.resolve()
+    let nestedWindowMicrotasksDrained = false
+    dom.window.queueMicrotask(() => dom.window.queueMicrotask(() => { nestedWindowMicrotasksDrained = true }))
+    await windowMicrotasks.get(dom)?.drain()
     return {
       hostGeneration,
       selected,
       preference,
       wireCandidateKeys,
-      teardown: { callbacksPendingAtShutdown, lateCallbackTouchedDom, callbacksDrained: callbacks.pending() === 0 },
+      teardown: {
+        callbacksPendingAtShutdown,
+        lateCallbackTouchedDom,
+        callbacksDrained: callbacks.pending() === 0,
+        nestedWindowMicrotasksDrained,
+      },
       configMode: (await stat(configPath)).mode & 0o777,
     }
   } finally {
     callbacks.stop()
     releasePersistedResponse.resolve()
     await callbacks.drain()
-    dom.window.close()
+    await closePage(dom)
   }
 }
 
