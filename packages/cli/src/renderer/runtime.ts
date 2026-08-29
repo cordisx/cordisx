@@ -32,8 +32,16 @@ import type {
 } from '../permission-contracts.js'
 import { installCodexAdapter, installPlaygroundAdapter, type CodexAdapterHandle } from './adapter.js'
 import { UnavailableCodexHostAdapter } from '../adapters/codex-agent.js'
+import { createCodexAgentConnector } from '../adapters/codex-agent-connector.js'
 import { CordisXAgentService, CordisXHostAgentRuntime, CordisXSystemPromptService } from './agent.js'
 import { CordisXAgentEventService } from './agent-events.js'
+import {
+  CordisXConnectorBroker,
+  type CordisXBoundConnectorClient,
+  type CordisXConnectorAuthorization,
+  type CordisXConnectorClientCapability,
+  type CordisXConnectorRegistrationIdentity,
+} from './connectors.js'
 import {
   type ManagerModel,
   type ManagerPluginSnapshot,
@@ -150,6 +158,18 @@ interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
   readonly development?: CordisXLocalDevelopmentSnapshot
 }
 
+/**
+ * Internal renderer bootstrap seam. It is intentionally absent from renderer
+ * metadata and has no configuration, CLI, environment, or global input.
+ *
+ * The only supported caller is an in-process Host bootstrap that has already
+ * statically bundled its closure with the renderer. Plugins never receive the
+ * broker passed here.
+ */
+export type CordisXInternalRendererBootstrap = (host: Readonly<{
+  readonly connectors: CordisXConnectorBroker
+}>) => void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>
+
 interface PluginController {
   item: RuntimeBrowserPlugin
   readonly identity: CordisXPluginIdentity
@@ -159,12 +179,14 @@ interface PluginController {
   principalLive: boolean
   unregisterPermissions?: () => void
   unregisterExtensionPoints?: () => void
+  unregisterConnector?: () => void | Promise<void>
   fiber?: Fiber
   status: ManagerPluginStatus
   error?: string
   blockedReason?: string
   generationContext?: Record<PropertyKey, unknown>
   generationView?: PluginGenerationView
+  connectorClient?: CordisXBoundConnectorClient
 }
 
 function topologicalActivationOrder(
@@ -426,10 +448,12 @@ function writeBlockedPlugins(ids: ReadonlySet<string>): void {
 async function start(
   plugins: readonly RuntimeBrowserPlugin[],
   metadata: CordisXRuntimeMetadata,
+  internalBootstrap?: CordisXInternalRendererBootstrap,
 ): Promise<CordisXRuntimeHandle> {
   await globalThis.__cordisxRuntime?.dispose()
 
   let ctx = new Context()
+  let disposeInternalBootstrap: (() => void | Promise<void>) | undefined
   let sharedReactRuntime: ReturnType<typeof installSharedReactRuntime> | undefined
   const blockedPlugins = readBlockedPlugins()
   const agentAdapter = new UnavailableCodexHostAdapter()
@@ -524,6 +548,15 @@ async function start(
   const configuration = new PluginConfigurationRegistry(generationVisibility)
   const configRenderers = new ConfigRendererRegistry(generationVisibility)
   const agentRuntime = new CordisXHostAgentRuntime({ adapter: agentAdapter, broker, generation })
+  // Host-owned only: no plugin or renderer global receives this broker/adapter.
+  const connectorBroker = new CordisXConnectorBroker()
+  const agentConnector = connectorBroker.register(createCodexAgentConnector(agentAdapter))
+  if (!agentConnector.ok) throw new Error(`Host Agent Connector registration failed: ${agentConnector.error.message}`)
+  // The bootstrap closure is selected only by the Host composition before it
+  // is bundled. It runs before controller construction/normal plugin
+  // activation and is never placed in metadata or a renderer global.
+  const bootstrapResult = await internalBootstrap?.(Object.freeze({ connectors: connectorBroker }))
+  if (typeof bootstrapResult === 'function') disposeInternalBootstrap = bootstrapResult
   const historyAdapter = metadata.agentHistoryBridgeToken === undefined
     ? new UnavailableAgentHistoryAdapter()
     : await BindingAgentHistoryAdapter.connect(metadata.agentHistoryBridgeToken).catch(() => new UnavailableAgentHistoryAdapter())
@@ -784,6 +817,10 @@ async function start(
     } catch (error) {
       failure ??= error
     } finally {
+      controller.connectorClient?.dispose()
+      delete controller.connectorClient
+      await controller.unregisterConnector?.()
+      delete controller.unregisterConnector
       retirePrincipal(controller, `Plugin disposed: ${reason}`)
       delete controller.fiber
     }
@@ -819,13 +856,59 @@ async function start(
       controller.blockedReason = blockedReason
       return
     }
-    const pluginContext = ctx.extend({
+    let pluginContext: Context
+    const connectorAuthorization = async (
+      capability: CordisXConnectorClientCapability,
+      _registration?: CordisXConnectorRegistrationIdentity,
+    ): Promise<CordisXConnectorAuthorization> => {
+      if (!controller.principalLive) return { capability, state: 'unavailable', code: 'principal-unavailable' }
+      try {
+        const identity = pluginConsole.owner(controller.principal)
+        const permissionCapability: CordisXPlatformCapability = capability === 'connector.command.execute'
+          ? 'agent.messages.append'
+          : 'agent.events.read'
+        // Connector calls never open an implicit permission prompt. A plugin
+        // must have an explicit allow policy before this bound surface can use
+        // the PermissionBroker; ask and deny both fail closed.
+        if (broker.policy(identity, permissionCapability, generationVisibility.view(pluginContext)) !== 'allow') {
+          return { capability, state: 'denied', code: 'policy-denied' }
+        }
+        // Conversation handles are opaque and cannot be safely translated into
+        // a native Agent session scope. This conservative all-session request
+        // therefore never expands a manifest's declared session authority.
+        const authorization = await broker.authorize(
+          identity,
+          permissionCapability,
+          { allAgentSessions: true },
+          generationVisibility.view(pluginContext),
+        )
+        if (!authorization.ok) return { capability, state: 'denied', code: 'policy-denied' }
+        return { capability, state: 'allowed', code: 'allowed' }
+      } catch {
+        return { capability, state: 'unavailable', code: 'principal-unavailable' }
+      }
+    }
+    const connectorClient = connectorBroker.bind({
+      active: () => {
+        if (!controller.principalLive) return false
+        try {
+          const identity = pluginConsole.owner(controller.principal)
+          return identity.id === controller.identity.id && identity.source === controller.identity.source
+        } catch {
+          return false
+        }
+      },
+      authorize: connectorAuthorization,
+    })
+    pluginContext = ctx.isolate('connectors').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
       [CORDISX_PLUGIN_PRINCIPAL]: controller.principal,
       ...(controller.generationContext ?? {}),
     })
+    controller.connectorClient = connectorClient
+    controller.unregisterConnector = pluginContext.reflect.provide('connectors', connectorClient)
     pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation started')
     const fiber = pluginContext.plugin(
       pluginFromModule(module),
@@ -845,6 +928,10 @@ async function start(
       pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Plugin activation failed', error)
       await fiber.dispose()
       delete controller.fiber
+      connectorClient.dispose()
+      delete controller.connectorClient
+      await controller.unregisterConnector?.()
+      delete controller.unregisterConnector
       retirePrincipal(controller, 'Plugin disposed after activation failure')
       throw error
     }
@@ -1881,6 +1968,8 @@ async function start(
   const dispose = async (): Promise<void> => {
     if (disposed) return
     disposed = true
+    await disposeInternalBootstrap?.()
+    disposeInternalBootstrap = undefined
     disposeManager?.()
     disposeManager = undefined
     disposeI18nSubscription?.()
@@ -1939,6 +2028,7 @@ async function start(
     agentEventFiber = undefined
     await agentHistoryFiber?.dispose()
     agentHistoryFiber = undefined
+    connectorBroker.disposeAll()
     await agentRuntime.dispose()
     historyAdapter.dispose()
     bindingPlatformAdapter?.dispose()
@@ -2219,9 +2309,10 @@ async function start(
 export function installCordisX(
   plugins: readonly RuntimeBrowserPlugin[],
   metadata: CordisXRuntimeMetadata,
+  internalBootstrap?: CordisXInternalRendererBootstrap,
 ): Promise<CordisXRuntimeHandle> {
   const previous = globalThis.__cordisxBoot ?? Promise.resolve(undefined)
-  const next = previous.catch(() => undefined).then(() => start(plugins, metadata))
+  const next = previous.catch(() => undefined).then(() => start(plugins, metadata, internalBootstrap))
   globalThis.__cordisxBoot = next
   return next
 }

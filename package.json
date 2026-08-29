@@ -26,5 +26,8 @@
   },
   "engines": {
     "node": ">=22.19"
+  },
+  "devDependencies": {
+    "@cordisx/protocol": "git+https://github.com/cordisx/cordisx-protocol.git#49f1223fb7e6a340080de58629280b0f3de9faed"
   }
 }

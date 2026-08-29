@@ -91,6 +91,12 @@ export interface CordisXCliRuntime {
   /** Test/integration seam for the canonical default `~/.cordisx` root. */
   readonly homedir?: string
   readonly stdout?: (line: string) => void
+  /**
+   * Internal-only renderer bundle closure for repository-controlled production
+   * integration tests. It has no CLI/configuration/environment input and is
+   * undefined for every product launch.
+   */
+  readonly internalBuildRendererBundle?: typeof buildRendererBundle
 }
 
 function waitForExit(child: ChildProcess): Promise<void> {
@@ -168,6 +174,7 @@ export async function buildRendererComposition(
     /** Transient, launcher-created tokens. They are published only in the injected runtime metadata. */
     readonly channelCredentialBridgeToken?: string
     readonly channelActionsBridgeToken?: string
+    readonly internalBuildRendererBundle?: typeof buildRendererBundle
   } = {},
 ): Promise<RendererComposition> {
   const providerBridgeToken = (config.providers.some(provider => provider.enabled)
@@ -206,7 +213,8 @@ export async function buildRendererComposition(
       : { initialRegistryEpoch: options.initialRegistryEpoch ?? options.pluginLifecycle!.registryEpoch }),
     ...(options.channelManager === undefined ? {} : { channelManager: options.channelManager }),
   } satisfies NonNullable<Parameters<typeof buildRendererBundle>[1]>
-  const source = await buildRendererBundle(config, bundleOptions)
+  const buildBundle = options.internalBuildRendererBundle ?? buildRendererBundle
+  const source = await buildBundle(config, bundleOptions)
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
   stdout(`[cordisx] bundle ready: ${source.length} bytes, plugins: ${enabled.join(', ') || '(none)'}`)
   return {
@@ -218,7 +226,7 @@ export async function buildRendererComposition(
     generation,
     ...(permissionBridgeToken === undefined ? {} : { permissionBridgeToken }),
     ...(options.pluginLifecycle === undefined ? {} : { pluginLifecycleBridgeToken: options.pluginLifecycle.token }),
-    rebuild: async (nextConfig, pluginActivation, initialRegistryEpoch) => await buildRendererBundle(nextConfig, {
+    rebuild: async (nextConfig, pluginActivation, initialRegistryEpoch) => await buildBundle(nextConfig, {
       ...bundleOptions,
       pluginActivation,
       initialRegistryEpoch,
@@ -760,6 +768,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     ...(channelManager === undefined ? {} : { channelManager }),
     ...(channelCredentialBridgeToken === undefined ? {} : { channelCredentialBridgeToken }),
     ...(channelActionsBridgeToken === undefined ? {} : { channelActionsBridgeToken }),
+    ...(runtime.internalBuildRendererBundle === undefined ? {} : { internalBuildRendererBundle: runtime.internalBuildRendererBundle }),
   })
   const configBridge = rendererComposition.configBridgeToken === undefined
     ? undefined

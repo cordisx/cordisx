@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { npmPackItem } from '../../../scripts/npm-pack-report.mjs'
 
@@ -24,6 +26,24 @@ const leaked = files.filter(file => (
   !allowedRoots.includes(file) && !file.startsWith('dist/') && !file.startsWith('third_party/') && !file.startsWith(bundledSchemasteryUi)
 ))
 if (leaked.length > 0) throw new Error(`cordisx package leaked non-allowlisted files: ${leaked.join(', ')}`)
+
+const harnessLeak = files.filter(file => /connector-(?:production|harness)/i.test(file))
+if (harnessLeak.length > 0) throw new Error(`cordisx package leaked Connector smoke harness artifacts: ${harnessLeak.join(', ')}`)
+
+const harnessPattern = /connector-(?:production|harness)|installConnectorProductionFixture/i
+const bundledHarness = []
+const distRoot = path.join(repositoryRoot, 'packages/cli/dist')
+const scanDistribution = directory => {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name)
+    if (entry.isDirectory()) scanDistribution(target)
+    else if ((entry.name.endsWith('.js') || entry.name.endsWith('.d.ts')) && harnessPattern.test(readFileSync(target, 'utf8'))) {
+      bundledHarness.push(path.relative(repositoryRoot, target))
+    }
+  }
+}
+if (existsSync(distRoot)) scanDistribution(distRoot)
+if (bundledHarness.length > 0) throw new Error(`cordisx distribution contains a Connector smoke harness enable path: ${bundledHarness.join(', ')}`)
 
 for (const required of [
   'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md',
