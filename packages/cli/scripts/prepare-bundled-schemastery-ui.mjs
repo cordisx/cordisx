@@ -6,7 +6,7 @@ const cliRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const source = path.resolve(cliRoot, '../schemastery-ui')
 const target = path.join(cliRoot, 'node_modules/@cordisx/schemastery-ui')
 const manifest = JSON.parse(await readFile(path.join(source, 'package.json'), 'utf8'))
-if (manifest.name !== '@cordisx/schemastery-ui' || manifest.version !== '0.1.0-beta.1') {
+if (manifest.name !== '@cordisx/schemastery-ui' || manifest.version !== '0.1.0-beta.2') {
   throw new Error('refusing to bundle an unexpected @cordisx/schemastery-ui workspace package')
 }
 

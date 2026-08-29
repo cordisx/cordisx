@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const allowPendingLicense = process.argv.includes('--allow-pending-license')
-const expectedVersion = '0.1.0-beta.1'
+const expectedVersion = '0.1.0-beta.2'
 const expectedRepository = 'git+https://github.com/cordisx/cordisx.git'
 
 async function json(relative) {
