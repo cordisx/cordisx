@@ -1,3 +1,4 @@
+import type { AgentConversationShellCommandContext } from '@cordisx/protocol/agent-conversation-shell/v1'
 import type {
   AgentConversationAction,
   AgentConversationBindingReference,
@@ -7,28 +8,7 @@ import type {
 } from './model.js'
 import { immutableSnapshot } from '../../validation.js'
 
-interface AgentConversationCommandContextBase {
-  readonly binding: AgentConversationBindingReference
-  readonly generation: string
-  readonly command: AgentConversationCommandReference
-}
-
-export type AgentConversationCommandContext =
-  | (AgentConversationCommandContextBase & {
-      readonly scope: 'header'
-      readonly itemId?: never
-      readonly submitPayload?: never
-    })
-  | (AgentConversationCommandContextBase & {
-      readonly scope: 'message'
-      readonly itemId: string
-      readonly submitPayload?: never
-    })
-  | (AgentConversationCommandContextBase & {
-      readonly scope: 'composer-submit'
-      readonly itemId?: never
-      readonly submitPayload: string
-    })
+export type AgentConversationCommandContext = AgentConversationShellCommandContext
 
 export interface AgentConversationCommandRequest {
   readonly ownerId: string

@@ -53,6 +53,7 @@ import {
 import { installReactCordisXManager } from './manager/install.js'
 import { selectPluginReadme } from './readme.js'
 import { CordisXCommandService } from './commands.js'
+import { CordisXAgentConversationShellService } from './agent-conversation-shell.js'
 import { CordisXI18nService } from './i18n.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
 import {
@@ -699,6 +700,7 @@ async function start(
   let agentFiber: Fiber | undefined
   let systemPromptFiber: Fiber | undefined
   let commandFiber: Fiber | undefined
+  let agentConversationShellFiber: Fiber | undefined
   let pageFiber: Fiber | undefined
   let routeFiber: Fiber | undefined
   let managerContentFiber: Fiber | undefined
@@ -2014,6 +2016,8 @@ async function start(
     routeFiber = undefined
     await pageFiber?.dispose()
     pageFiber = undefined
+    await agentConversationShellFiber?.dispose()
+    agentConversationShellFiber = undefined
     sharedReactRuntime?.dispose()
     sharedReactRuntime = undefined
     await commandFiber?.dispose()
@@ -2212,6 +2216,8 @@ async function start(
     commandFiber = ctx.plugin(CordisXCommandService, { console: pluginConsole })
     await commandFiber
     commandService = ctx.commands as CordisXCommandService
+    agentConversationShellFiber = ctx.plugin(CordisXAgentConversationShellService, { console: pluginConsole })
+    await agentConversationShellFiber
     pageFiber = ctx.plugin(CordisXPageService, pluginConsole)
     await pageFiber
     pageService = ctx.pages as CordisXPageService

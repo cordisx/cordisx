@@ -58,6 +58,7 @@ export type AgentConversationSelection =
       readonly kind: 'room'
       readonly roomId: string
       readonly title: string
+      readonly secondary?: string
       readonly multiParticipant: boolean
       readonly participantPresentation: 'none' | 'host-initials'
       readonly participants: readonly AgentConversationParticipant[]
@@ -148,9 +149,10 @@ function assertSelection(selection: AgentConversationSelection): void {
     if (selection.newRoomAction.disabled) throw new Error('newRoomAction must be executable')
     return
   }
-  assertKnownKeys(selection, ['kind', 'roomId', 'title', 'multiParticipant', 'participantPresentation', 'participants'], 'selection')
+  assertKnownKeys(selection, ['kind', 'roomId', 'title', 'secondary', 'multiParticipant', 'participantPresentation', 'participants'], 'selection')
   assertOpaque(selection.roomId, 'selection.roomId')
   assertText(selection.title, 'selection.title', 1_000)
+  if (selection.secondary !== undefined) assertText(selection.secondary, 'selection.secondary', 1_000)
   if (!selection.multiParticipant && selection.participantPresentation !== 'none') {
     throw new Error('single-participant rooms cannot request participant initials')
   }

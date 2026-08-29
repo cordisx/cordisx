@@ -1,4 +1,5 @@
 import { Context, Service } from '@deepseek-ai/cordis'
+import type { AgentConversationShellCommandContext } from '@cordisx/protocol/agent-conversation-shell/v1'
 import type {
   CordisXCommandHandler,
   CordisXCommandMetadata,
@@ -126,6 +127,7 @@ export class CommandRegistry {
     invocationKey = 'default',
     origin?: SurfaceCommandOrigin,
     requestingPrincipal?: PluginPrincipalToken,
+    conversationContext?: AgentConversationShellCommandContext,
   ): Promise<unknown> {
     if (this.disposed) throw new Error('CordisX command registry is disposed')
     assertReference(reference.id, 'command reference')
@@ -152,6 +154,17 @@ export class CommandRegistry {
         || origin.context.commandId !== qualifiedId
       )) throw new Error('host invocation context does not match its surface origin')
     }
+    if (origin !== undefined && conversationContext !== undefined) {
+      throw new Error('command cannot have both surface and conversation origins')
+    }
+    if (conversationContext !== undefined) {
+      const context = immutableSnapshot(conversationContext)
+      if (context.command.id !== reference.id
+        || JSON.stringify(context.command.arguments) !== JSON.stringify(reference.arguments)) {
+        throw new Error('host conversation command context does not match its command reference')
+      }
+      conversationContext = context
+    }
     const executionId = `${qualifiedId}\u0000${invocationKey}`
     if (record.running.has(executionId)) throw new Error(`command ${qualifiedId} is already running for ${invocationKey}`)
     const abort = new AbortController()
@@ -165,7 +178,9 @@ export class CommandRegistry {
         arguments: reference.arguments === undefined ? undefined : immutableSnapshot(reference.arguments),
         signal: abort.signal,
         invocationKey,
-        ...(origin?.context === undefined ? {} : { hostContext: immutableSnapshot(origin.context) }),
+        ...(conversationContext !== undefined
+          ? { hostContext: conversationContext }
+          : origin?.context === undefined ? {} : { hostContext: immutableSnapshot(origin.context) }),
       })
       return record.principal === undefined || this.console === undefined
         ? await executeHandler()
@@ -278,6 +293,15 @@ export class CordisXCommandService extends Service implements CordisXCommands {
 
   executeFor(owner: string, reference: CordisXCommandReference, invocationKey?: string, origin?: SurfaceCommandOrigin): Promise<unknown> {
     return this.registry.execute(owner, reference, invocationKey, origin)
+  }
+
+  executeConversationFor(
+    owner: string,
+    reference: CordisXCommandReference,
+    invocationKey: string,
+    context: AgentConversationShellCommandContext,
+  ): Promise<unknown> {
+    return this.registry.execute(owner, reference, invocationKey, undefined, undefined, context)
   }
 
   hasFor(owner: string, reference: CordisXCommandReference, view?: PluginGenerationView): boolean {

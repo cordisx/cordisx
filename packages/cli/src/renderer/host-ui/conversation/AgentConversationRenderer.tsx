@@ -192,7 +192,7 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
   const setCommandError = React.useCallback((value: string | undefined) => setCommandErrorState(value), [])
   const title = model.selection.kind === 'room' ? model.selection.title : copy.newRoomTitle
   const participantSummary = model.selection.kind === 'room'
-    ? model.selection.participants.map(participant => participant.name).join(' · ')
+    ? model.selection.secondary ?? model.selection.participants.map(participant => participant.name).join(' · ')
     : undefined
   const headerActions = model.headerActions
   const onCommandError = React.useCallback((error: unknown) => {

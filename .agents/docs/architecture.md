@@ -270,11 +270,30 @@ and deeply frozen, so caller mutation cannot change the observed command. The
 `new-room` selection discriminator directly contains exactly one enabled
 `newRoomAction`; its projection contains
 no timeline and forbids the separate header-action list. Models contain no callback,
-DOM, CSS, media URL, Connector handle or renderer component. The formal public
-conversation-shell binding/source adapter is intentionally absent until its
-Protocol package is merged. The UI Playground may construct a package-local,
-debug-only private projection and mount this production renderer; production
-renderer modules never import Playground fixtures or selectors.
+DOM, CSS, media URL, Connector handle or renderer component.
+
+The production adapter consumes the exact formal Protocol export
+`@cordisx/protocol/agent-conversation-shell/v1`. A plugin injects
+`agentConversationShell`, calls `registerSource(factory)`, and gives the
+returned Host-owned `mount` to its normal `pages.register` declaration. The
+Host invokes the factory only after it has issued an immutable binding for the
+current page route; the plugin then supplies only the formal
+`snapshot/subscribe/dispose` source. The adapter validates and clones the
+complete snapshot, exact binding and generation, accepted subscription
+descriptor, replay watermark, serialized cursor, monotonic updates and
+terminal disposal before projecting any data. Registration, page unmount,
+generation replacement and terminal source updates all release the runtime
+handle and source.
+
+Conversation commands remain normal owner commands registered through
+`ctx.commands`. The Host verifies the renderer freshness fence and injects the
+formal, deeply frozen `AgentConversationShellCommandContext` as
+`CordisXCommandContext.hostContext`; plugins never create that context. This
+data-provider service does not add a manifest permission capability: its
+Cordis injection name is `agentConversationShell`. The UI Playground may
+construct a package-local, debug-only private projection and mount this
+production renderer; production renderer and adapter modules never import
+Playground fixtures or selectors.
 
 The public plugin surface follows DeepSeek Harness: plugins declare injected
 services and use `ctx.slots.inject/register` for structured shell data. Both
