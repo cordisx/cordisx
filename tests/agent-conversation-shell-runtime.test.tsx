@@ -180,6 +180,12 @@ async function settle(): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, 10))
 }
 
+async function waitForRuntimeState(dom: JSDOM, state: 'loading' | 'unavailable' | 'error'): Promise<void> {
+  await vi.waitFor(() => {
+    expect(dom.window.document.querySelector(`[data-agent-conversation-runtime-state="${state}"]`)).not.toBeNull()
+  }, { timeout: 1_000, interval: 10 })
+}
+
 afterEach(() => {
   for (const [key, value] of globals) Reflect.set(globalThis, key, value)
   globals.clear()
@@ -279,8 +285,7 @@ describe('Agent conversation shell public runtime', () => {
     })
 
     const unmount = registration.mount(mountContext(dom, { roomId: 'room-one' }))
-    await settle()
-    expect(issuedBinding).toBeDefined()
+    await vi.waitFor(() => expect(issuedBinding).toBeDefined(), { timeout: 1_000, interval: 10 })
     expect(Object.isFrozen(issuedBinding)).toBe(true)
     expect(issuedBinding?.routeSelection).toEqual({ scope: 'room-or-new', selectedRoomParam: 'room-one' })
     expect(dom.window.document.querySelector('[data-agent-conversation-renderer="production"]')).not.toBeNull()
@@ -290,18 +295,16 @@ describe('Agent conversation shell public runtime', () => {
     expect(hostRoot.dataset.cordisxAppTheme).toBe('light')
     expect(hostRoot.style.getPropertyValue('--cx-text')).not.toBe('')
     dom.window.document.documentElement.dataset.theme = 'dark'
-    await settle()
-    expect(hostRoot.dataset.cordisxAppTheme).toBe('dark')
+    await vi.waitFor(() => expect(hostRoot.dataset.cordisxAppTheme).toBe('dark'), { timeout: 1_000, interval: 10 })
     expect(hostRoot.style.getPropertyValue('--cx-surface')).toBe('#17191d')
 
     dom.window.document.querySelector<HTMLButtonElement>('.cxa-empty button')!.click()
-    await settle()
-    expect(commandContext?.hostContext).toMatchObject({
+    await vi.waitFor(() => expect(commandContext?.hostContext).toMatchObject({
       binding: { bindingId: issuedBinding!.bindingId, ownerGeneration: issuedBinding!.ownerGeneration },
       generation: 'snapshot-1',
       scope: 'header',
       command: { id: 'create' },
-    })
+    }), { timeout: 1_000, interval: 10 })
     expect(Object.isFrozen(commandContext?.hostContext)).toBe(true)
     expect(Object.isFrozen((commandContext?.hostContext as { binding: object }).binding)).toBe(true)
 
@@ -317,8 +320,9 @@ describe('Agent conversation shell public runtime', () => {
       nextAfterSequence: 1,
       hasMore: false,
     })
-    await settle()
-    expect(dom.window.document.querySelector('.cxa-title')?.textContent).toBe('Release review')
+    await vi.waitFor(() => expect(dom.window.document.querySelector('.cxa-title')?.textContent).toBe('Release review'), {
+      timeout: 1_000, interval: 10,
+    })
     expect(dom.window.document.querySelector('.cxa-participants')?.textContent).toBe('1 participant')
     expect(dom.window.document.querySelectorAll('[data-agent-conversation-scroll-owner="timeline"]')).toHaveLength(1)
     expect(dom.window.document.querySelector('.cxa-avatar')).toBeNull()
@@ -336,9 +340,7 @@ describe('Agent conversation shell public runtime', () => {
       nextAfterSequence: 2,
       hasMore: false,
     })
-    await vi.waitFor(() => {
-      expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="unavailable"]')).not.toBeNull()
-    }, { timeout: 1_000, interval: 10 })
+    await waitForRuntimeState(dom, 'unavailable')
     expect(dom.window.document.querySelector('.cxa-composer')).toBeNull()
 
     if (typeof unmount === 'function') unmount()
@@ -383,8 +385,7 @@ describe('Agent conversation shell public runtime', () => {
       },
       afterSequence: 0, phase: 'live', updates: [], nextAfterSequence: 0, hasMore: false,
     })
-    await settle()
-    expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="error"]')).not.toBeNull()
+    await waitForRuntimeState(dom, 'error')
     expect(error).toHaveBeenCalledWith('[cordisx] Agent conversation source failed', expect.any(Error))
     registration.dispose()
     expect(disposed).toBe(true)
@@ -406,8 +407,7 @@ describe('Agent conversation shell public runtime', () => {
       dispose() {},
     }))
     registration.mount(mountContext(dom))
-    await settle()
-    expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="error"]')).not.toBeNull()
+    await waitForRuntimeState(dom, 'error')
     expect(dom.window.document.querySelector('.cxa-composer')).toBeNull()
     registration.dispose()
     runtime.dispose()
@@ -464,8 +464,7 @@ describe('Agent conversation shell public runtime', () => {
         })),
         nextAfterSequence: 3, hasMore: true,
       })
-      await settle()
-      expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="error"]')).not.toBeNull()
+      await waitForRuntimeState(dom, 'error')
       registration.dispose()
       await settle()
       dom.window.document.getElementById('page')!.replaceChildren()
@@ -510,9 +509,7 @@ describe('Agent conversation shell public runtime', () => {
       updates: [{ kind: 'disposed', sequence: 3, reason: 'explicit' }],
       nextAfterSequence: 3, hasMore: false,
     })
-    await vi.waitFor(() => {
-      expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="unavailable"]')).not.toBeNull()
-    }, { timeout: 1_000, interval: 10 })
+    await waitForRuntimeState(dom, 'unavailable')
     compatible.dispose()
 
     runtime.dispose()
@@ -535,8 +532,7 @@ describe('Agent conversation shell public runtime', () => {
       dispose: () => { disposed += 1 },
     }))
     unavailable.mount(mountContext(dom))
-    await settle()
-    expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="unavailable"]')).not.toBeNull()
+    await waitForRuntimeState(dom, 'unavailable')
     expect(disposed).toBe(1)
     unavailable.dispose()
     expect(disposed).toBe(1)
@@ -552,8 +548,7 @@ describe('Agent conversation shell public runtime', () => {
       dispose: () => { disposed += 1 },
     }))
     malformed.mount(mountContext(dom))
-    await settle()
-    expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="error"]')).not.toBeNull()
+    await waitForRuntimeState(dom, 'error')
     expect(rejectedHandleUnsubscribed).toBe(1)
     expect(disposed).toBe(2)
     malformed.dispose()
@@ -573,8 +568,7 @@ describe('Agent conversation shell public runtime', () => {
         dispose: () => { disposed += 1 },
       }))
       unknownStatus.mount(mountContext(dom))
-      await settle()
-      expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="error"]')).not.toBeNull()
+      await waitForRuntimeState(dom, 'error')
       expect(disposed).toBe(3 + index)
       unknownStatus.dispose()
       expect(disposed).toBe(3 + index)
