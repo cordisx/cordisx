@@ -95,49 +95,29 @@ describe('AgentConversation renderer model', () => {
     })).toThrow('single-participant rooms cannot request participant initials')
   })
 
-  it('requires exactly one executable Host new-room action and forbids every competing header action', () => {
+  it('preserves no-room as an empty timeline with a composer and forbids CTA/header action state', () => {
     const valid = createPlaygroundConversationFixture('empty', 'en')
-    expect(valid.selection.kind).toBe('new-room')
-    const newRoomAction = valid.selection.kind === 'new-room' ? valid.selection.newRoomAction : undefined
-    expect(newRoomAction).toMatchObject({ id: 'new-room', disabled: false })
+    expect(valid.selection).toEqual({ kind: 'no-room' })
+    expect(valid.entries).toHaveLength(0)
     expect(valid.headerActions).toHaveLength(0)
+    expect(valid.composer).toMatchObject({
+      availability: 'available', disabled: false, submit: { id: 'room.create-with-message' },
+    })
     expect(() => createAgentConversationModel({
       ...valid,
-      selection: { kind: 'new-room' } as AgentConversationModel['selection'],
-    })).toThrow('requires newRoomAction')
-    expect(() => createAgentConversationModel({
-      ...valid,
-      selection: { kind: 'new-room', newRoomAction: { ...newRoomAction!, disabled: true, disabledReason: 'Unavailable' } },
-    })).toThrow('must be executable')
-    expect(() => createAgentConversationModel({
-      ...valid,
-      selection: { kind: 'new-room', newRoomAction: { ...newRoomAction!, id: 'settings' } },
-    })).toThrow('must be the Host new-room action')
-    expect(() => createAgentConversationModel({
-      ...valid,
-      headerActions: [newRoomAction!, newRoomAction!],
-    })).toThrow('duplicate action new-room')
+      selection: { kind: 'no-room', newRoomAction: { id: 'new-room' } } as unknown as AgentConversationModel['selection'],
+    })).toThrow('unknown field newRoomAction')
     expect(() => createAgentConversationModel({
       ...valid,
       headerActions: [{ id: 'settings', label: 'Settings', command: { id: 'room.settings' }, disabled: false }],
-    })).toThrow('forbids separate header actions')
-    expect(() => createAgentConversationModel({
-      ...valid,
-      selection: { kind: 'new-room' } as AgentConversationModel['selection'],
-      headerActions: [newRoomAction!],
-    })).toThrow('requires newRoomAction')
-    expect(() => createAgentConversationModel({
-      ...valid,
-      selection: { kind: 'new-room' } as AgentConversationModel['selection'],
-      composer: { ...valid.composer, submit: newRoomAction!.command },
-    })).toThrow('requires newRoomAction')
+    })).toThrow('forbids header actions')
     expect(() => createAgentConversationModel({
       ...valid,
       entries: [{ kind: 'status', itemId: 'wrong-scope-new-room', sequence: 1, label: 'New room', state: 'info', ariaLive: 'off' }],
-    })).toThrow('cannot contain timeline entries')
+    })).toThrow('no-room selection cannot contain timeline entries')
   })
 
-  it('does not write into caller data while validating the new-room discriminator', () => {
+  it('does not write into caller data while validating the no-room discriminator', () => {
     const input = structuredClone(createPlaygroundConversationFixture('empty', 'en'))
     const before = JSON.stringify(input)
     const model = createAgentConversationModel(input)
@@ -296,7 +276,7 @@ describe('AgentConversationRenderer production DOM', () => {
     }
   })
 
-  it('renders no avatar by default and keeps the no-room title/action exactly once without a second page header', async () => {
+  it('renders no avatar by default and presents no-room as one title, an empty timeline, and a usable composer', async () => {
     const base = createPlaygroundConversationFixture('conversation', 'en')
     const room = base.selection as Extract<AgentConversationModel['selection'], { kind: 'room' }>
     const singleParticipant = room.participants[1]!
@@ -318,14 +298,39 @@ describe('AgentConversationRenderer production DOM', () => {
       await roomHarness.close()
     }
     const empty = createPlaygroundConversationFixture('empty', 'zh-CN')
-    const emptyHarness = await render(empty, new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, empty), true)
+    const requests: AgentConversationCommandRequest[] = []
+    const emptyHarness = await render(empty, new AgentConversationCommandController({
+      execute: async request => { requests.push(request) },
+    }, empty), true)
     try {
       const document = emptyHarness.dom.window.document
       expect(document.querySelector('h1')?.textContent).toBe('新建房间')
       expect(document.querySelectorAll('h2')).toHaveLength(0)
-      expect(document.querySelectorAll('.cxa-action')).toHaveLength(1)
-      expect(document.querySelector('.cxa-action')?.textContent).toContain('新建房间')
-      expect(document.querySelectorAll('.cxa-composer')).toHaveLength(0)
+      expect(document.querySelectorAll('.cxa-action')).toHaveLength(0)
+      expect(document.querySelectorAll('[data-agent-conversation-empty],.cxa-empty-mark,.cxa-empty-copy')).toHaveLength(0)
+      expect(document.querySelectorAll('[role="log"]')).toHaveLength(1)
+      expect(document.querySelectorAll('.cxa-timeline-list > *')).toHaveLength(0)
+      expect(document.querySelectorAll('.cxa-composer')).toHaveLength(1)
+      const draft = document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+      const send = document.querySelector<HTMLButtonElement>('.cxa-send')!
+      expect(draft.disabled).toBe(false)
+      expect(send.disabled).toBe(true)
+      const valueSetter = Object.getOwnPropertyDescriptor(emptyHarness.dom.window.HTMLTextAreaElement.prototype, 'value')?.set
+      await act(async () => {
+        valueSetter?.call(draft, '第一条消息')
+        draft.dispatchEvent(new emptyHarness.dom.window.Event('input', { bubbles: true }))
+        await Promise.resolve()
+      })
+      expect(send.disabled).toBe(false)
+      await act(async () => {
+        send.click()
+        await Promise.resolve()
+      })
+      expect(requests[0]).toMatchObject({
+        invocationKey: 'composer-submit',
+        reference: { id: 'room.create-with-message' },
+        context: { scope: 'composer-submit', submitPayload: '第一条消息' },
+      })
     } finally {
       await emptyHarness.close()
     }
@@ -374,9 +379,11 @@ describe('AgentConversationRenderer production DOM', () => {
       readFile(path.resolve('packages/cli/src/renderer/host-ui/conversation/styles.ts'), 'utf8'),
     ])
     expect(renderer).not.toMatch(/playground|HostSeats|\.pg-/i)
+    expect(renderer).not.toContain('EmptyRoom')
     expect(renderer).toContain("event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing")
     expect(renderer).toContain('event.preventDefault()')
     expect(styles).not.toContain('.pg-')
+    expect(styles).not.toContain('.cxa-empty')
     expect(seats).toContain("renderer/host-ui/conversation/AgentConversationRenderer")
     expect(seats).toContain('debugFixture')
     expect(fixture).toContain('playground-snapshot-debug-only')

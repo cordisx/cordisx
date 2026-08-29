@@ -55,18 +55,12 @@ function noRoom(binding: AgentConversationShellBinding): AgentConversationShellS
     selection: { kind: 'no-room' },
     items: [],
     composer: {
-      availability: 'unavailable',
+      availability: 'available',
       placeholder: message('composer.placeholder', 'Write a message…'),
-      disabled: { value: true, reason: message('composer.unavailable', 'Messaging is unavailable.') },
-      submit: { id: 'send' },
-    },
-    headerActions: [{
-      id: 'new-room',
-      label: message('action.new-room', 'New room'),
-      icon: 'host:open',
-      command: { id: 'create' },
       disabled: { value: false },
-    }],
+      submit: { id: 'create-with-message' },
+    },
+    headerActions: [],
   }
 }
 
@@ -240,7 +234,7 @@ describe('Agent conversation shell public runtime', () => {
     const dom = installDom()
     const commands = new CommandRegistry()
     let commandContext: CordisXCommandContext | undefined
-    commands.register('chatroom', { id: 'create', title: { key: 'create', fallback: 'Create' } }, context => {
+    commands.register('chatroom', { id: 'create-with-message', title: { key: 'create-with-message', fallback: 'Create with message' } }, context => {
       commandContext = context
     })
     const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
@@ -284,13 +278,17 @@ describe('Agent conversation shell public runtime', () => {
       return source
     })
 
-    const unmount = registration.mount(mountContext(dom, { roomId: 'room-one' }))
+    const unmount = registration.mount(mountContext(dom))
     await vi.waitFor(() => expect(issuedBinding).toBeDefined(), { timeout: 1_000, interval: 10 })
     expect(Object.isFrozen(issuedBinding)).toBe(true)
     expect(issuedBinding?.routeSelection).toEqual({ scope: 'room-or-new', selectedRoomParam: 'room-one' })
     await vi.waitFor(() => expect(dom.window.document.querySelector('[data-agent-conversation-renderer="production"]')).not.toBeNull(), { timeout: 1_000, interval: 10 })
     expect(dom.window.document.querySelectorAll('.cxa-chrome')).toHaveLength(1)
-    expect(dom.window.document.querySelector('[data-agent-conversation-view="new-room"]')).not.toBeNull()
+    expect(dom.window.document.querySelector('[data-agent-conversation-view="no-room"]')).not.toBeNull()
+    expect(dom.window.document.querySelector('.cxa-title')?.textContent).toBe('New room')
+    expect(dom.window.document.querySelectorAll('[role="log"]')).toHaveLength(1)
+    expect(dom.window.document.querySelectorAll('.cxa-timeline-list > *')).toHaveLength(0)
+    expect(dom.window.document.querySelectorAll('[data-agent-conversation-empty],.cxa-empty-mark,.cxa-empty-copy')).toHaveLength(0)
     const hostRoot = dom.window.document.getElementById('page')!
     expect(hostRoot.dataset.cordisxAppTheme).toBe('light')
     expect(hostRoot.style.getPropertyValue('--cx-text')).not.toBe('')
@@ -298,12 +296,21 @@ describe('Agent conversation shell public runtime', () => {
     await vi.waitFor(() => expect(hostRoot.dataset.cordisxAppTheme).toBe('dark'), { timeout: 1_000, interval: 10 })
     expect(hostRoot.style.getPropertyValue('--cx-surface')).toBe('#17191d')
 
-    dom.window.document.querySelector<HTMLButtonElement>('.cxa-empty button')!.click()
+    const draft = dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+    const send = dom.window.document.querySelector<HTMLButtonElement>('.cxa-send')!
+    expect(draft.disabled).toBe(false)
+    expect(send.disabled).toBe(true)
+    const valueSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')?.set
+    valueSetter?.call(draft, 'first room message')
+    draft.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await vi.waitFor(() => expect(send.disabled).toBe(false), { timeout: 1_000, interval: 10 })
+    send.click()
     await vi.waitFor(() => expect(commandContext?.hostContext).toMatchObject({
       binding: { bindingId: issuedBinding!.bindingId, ownerGeneration: issuedBinding!.ownerGeneration },
       generation: 'snapshot-1',
-      scope: 'header',
-      command: { id: 'create' },
+      scope: 'composer-submit',
+      command: { id: 'create-with-message' },
+      submitPayload: 'first room message',
     }), { timeout: 1_000, interval: 10 })
     expect(Object.isFrozen(commandContext?.hostContext)).toBe(true)
     expect(Object.isFrozen((commandContext?.hostContext as { binding: object }).binding)).toBe(true)
@@ -323,6 +330,7 @@ describe('Agent conversation shell public runtime', () => {
     await vi.waitFor(() => expect(dom.window.document.querySelector('.cxa-title')?.textContent).toBe('Release review'), {
       timeout: 1_000, interval: 10,
     })
+    expect(dom.window.document.querySelector('[data-agent-conversation-view="room"]')?.getAttribute('data-agent-conversation-room-id')).toBe('room-one')
     expect(dom.window.document.querySelector('.cxa-participants')?.textContent).toBe('1 participant')
     expect(dom.window.document.querySelectorAll('[data-agent-conversation-scroll-owner="timeline"]')).toHaveLength(1)
     expect(dom.window.document.querySelector('.cxa-avatar')).toBeNull()
@@ -395,14 +403,20 @@ describe('Agent conversation shell public runtime', () => {
     dom.window.close()
   })
 
-  it('rejects no-room snapshots without exactly one executable new-room action', async () => {
+  it('rejects no-room snapshots that attempt to add a second header action', async () => {
     const dom = installDom()
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const commands = new CommandRegistry()
     const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
     const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-1' })
     const registration = runtime.register(plugin, binding => ({
-      snapshot: async () => ({ ...noRoom(binding), headerActions: [] }),
+      snapshot: async () => ({
+        ...noRoom(binding),
+        headerActions: [{
+          id: 'new-room', label: message('action.new-room', 'New room'),
+          command: { id: 'create' }, disabled: { value: false },
+        }],
+      }),
       subscribe: async () => ({ result: { type: 'subscribe', status: 'unavailable', code: 'owner-unavailable' } }),
       dispose() {},
     }))

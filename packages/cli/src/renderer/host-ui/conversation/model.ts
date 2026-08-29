@@ -53,7 +53,7 @@ export interface AgentConversationStatus {
 export type AgentConversationEntry = AgentConversationMessage | AgentConversationStatus
 
 export type AgentConversationSelection =
-  | { readonly kind: 'new-room'; readonly newRoomAction: AgentConversationAction }
+  | { readonly kind: 'no-room' }
   | {
       readonly kind: 'room'
       readonly roomId: string
@@ -141,12 +141,8 @@ function assertActions(actions: readonly AgentConversationAction[], label: strin
 }
 
 function assertSelection(selection: AgentConversationSelection): void {
-  if (selection.kind === 'new-room') {
-    assertKnownKeys(selection, ['kind', 'newRoomAction'], 'selection')
-    if (selection.newRoomAction === undefined) throw new Error('new-room selection requires newRoomAction')
-    assertAction(selection.newRoomAction, 'selection.newRoomAction')
-    if (selection.newRoomAction.id !== 'new-room') throw new Error('newRoomAction must be the Host new-room action')
-    if (selection.newRoomAction.disabled) throw new Error('newRoomAction must be executable')
+  if (selection.kind === 'no-room') {
+    assertKnownKeys(selection, ['kind'], 'selection')
     return
   }
   assertKnownKeys(selection, ['kind', 'roomId', 'title', 'secondary', 'multiParticipant', 'participantPresentation', 'participants'], 'selection')
@@ -216,9 +212,9 @@ export function createAgentConversationModel(input: AgentConversationModel): Age
   assertSelection(input.selection)
   assertEntries(input.entries, input.selection)
   assertActions(input.headerActions, 'headerActions', 12)
-  if (input.selection.kind === 'new-room') {
-    if (input.entries.length !== 0) throw new Error('new-room selection cannot contain timeline entries')
-    if (input.headerActions.length !== 0) throw new Error('new-room selection forbids separate header actions')
+  if (input.selection.kind === 'no-room') {
+    if (input.entries.length !== 0) throw new Error('no-room selection cannot contain timeline entries')
+    if (input.headerActions.length !== 0) throw new Error('no-room selection forbids header actions')
   }
   assertKnownKeys(input.composer, ['availability', 'placeholder', 'disabled', 'disabledReason', 'submit'], 'composer')
   if (!['available', 'unavailable'].includes(input.composer.availability)) throw new Error('composer.availability is invalid')

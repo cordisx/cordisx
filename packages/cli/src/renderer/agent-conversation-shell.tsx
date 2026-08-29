@@ -327,12 +327,10 @@ function projectSnapshot(
   let selection: AgentConversationModel['selection']
   let headerActions: readonly AgentConversationAction[]
   if (snapshot.selection.kind === 'no-room') {
-    if (snapshot.items.length !== 0 || snapshot.headerActions.length !== 1) {
-      throw new Error('no-room snapshot requires an empty timeline and exactly one new-room action')
+    if (snapshot.items.length !== 0 || snapshot.headerActions.length !== 0) {
+      throw new Error('no-room snapshot requires an empty timeline and no header actions')
     }
-    const action = projectAction(snapshot.headerActions[0]!, localization, 'headerActions.0')
-    if (action.id !== 'new-room' || action.disabled) throw new Error('no-room snapshot requires an executable new-room action')
-    selection = { kind: 'new-room', newRoomAction: action }
+    selection = { kind: 'no-room' }
     headerActions = []
   } else {
     selection = {
@@ -375,7 +373,6 @@ function rendererCopy(locale: string): AgentConversationRendererCopy {
   return chinese ? {
     locale,
     newRoomTitle: '新建房间',
-    newRoomDescription: '创建一个房间以开始协作对话。',
     timelineLabel: '房间对话',
     composerLabel: '消息',
     sendLabel: '发送',
@@ -387,7 +384,6 @@ function rendererCopy(locale: string): AgentConversationRendererCopy {
   } : {
     locale,
     newRoomTitle: 'New room',
-    newRoomDescription: 'Create a room to start a collaborative conversation.',
     timelineLabel: 'Room conversation',
     composerLabel: 'Message',
     sendLabel: 'Send',
@@ -713,7 +709,7 @@ class MountedConversation {
         : chinese ? '无法加载对话。' : 'Could not load conversation.'
     this.root.render(<section className="cxa-root" data-agent-conversation-runtime-state={state} role="status" aria-live="polite">
       <style data-agent-conversation-styles="production">{AGENT_CONVERSATION_STYLES}</style>
-      <div className="cxa-empty"><p className="cxa-empty-copy">{label}</p>{detail === undefined ? null : <p className="cxa-live-region">{detail}</p>}</div>
+      <div className="cxa-runtime-status"><p>{label}</p>{detail === undefined ? null : <p className="cxa-live-region">{detail}</p>}</div>
     </section>)
   }
 
