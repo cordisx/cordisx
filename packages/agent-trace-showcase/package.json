@@ -7,7 +7,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "npm --prefix ../.. run build --workspace=cordisx && tsc -p tsconfig.json && node scripts/copy-readme.mjs",
+    "build": "npm --prefix ../.. run build --workspace=cordisx && npm run build:local",
+    "build:local": "tsc -p tsconfig.json && node scripts/copy-readme.mjs",
     "check": "npm run typecheck",
     "typecheck": "npm --prefix ../.. run build --workspace=cordisx && tsc -p tsconfig.json --noEmit"
   },
