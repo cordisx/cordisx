@@ -494,6 +494,24 @@ rewritten until native navigation reaches it, at which point validation either
 mounts it or replaces its invalid projection. CordisX never queries or clicks
 the native controls and never patches an installed application file.
 
+Sidebar Room history uses the Host public structured-collection lifecycle, not
+plugin DOM and not Playground task fixtures. A plugin registers one
+`sidebar.navigation.items` collection source with a localized group label and
+an atomically replaced, monotonically revised list of route-only descriptors.
+The source orders its Room descriptors latest-first; the Host clones and
+freezes each replacement, validates bounded ids/text/icons/routes, renders the
+group heading and rows with the shared SidebarItem primitive, and derives the
+single selected row from the exact owner-qualified route plus parameters.
+
+Collection subscriptions are owned by the calling Cordis fiber. Plugin block,
+generation replacement, registration disposal, or runtime teardown
+unsubscribes the source, removes the whole group in one published surface
+epoch, and rejects late or same-revision mutation. The collection is a
+projection rather than a Host Room database: after reload, the plugin or its
+provider must restore the complete source snapshot before registration. This
+Host-specific navigation lifecycle does not extend the room-neutral
+Conversation Shell Protocol.
+
 Page-v2 `body-only` is a general structured chrome policy with a host outlet
 gate. The current adapter accepts it only for `session.content`, whose overlay
 begins below the retained native session header. The host does not create a

@@ -19,6 +19,11 @@ import {
   type CordisXEnvironmentSectionAction,
   type CordisXIconToken,
   type CordisXNavigationItem,
+  type CordisXNavigationCollectionItem,
+  type CordisXNavigationCollectionOptions,
+  type CordisXNavigationCollectionRegistration,
+  type CordisXNavigationCollectionSnapshot,
+  type CordisXNavigationCollectionSource,
   type CordisXManagerSettingsContentTabItem,
   type CordisXManagerSettingsNavigationItem,
   type CordisXLocalizedText,
@@ -122,6 +127,15 @@ export interface SurfaceContributionSnapshot {
   readonly availabilityDetail?: string
   readonly currentContext: CordisXExtensionPointCurrentContextState
   readonly control?: CordisXExtensionPointControlCandidateSnapshotV1
+}
+
+export interface NavigationCollectionGroupSnapshot {
+  readonly owner: string
+  readonly id: string
+  readonly qualifiedId: string
+  readonly label: CordisXLocalizedText
+  readonly order: number
+  readonly surfaceGroup: string
 }
 
 export interface SurfaceAnchorCurrentContext {
@@ -431,6 +445,8 @@ export class SurfaceRegistry {
   private readonly surfaceAnchors = new Map<string, Map<string, ReadonlySet<string>>>()
   private readonly currentContext = new Map<string, SurfaceCurrentContextSnapshot>()
   private nextSequence = 0
+  private notificationDepth = 0
+  private notificationPending = false
   private disposed = false
   private readonly disconnectVisibility: (() => void) | undefined
   private resolvers: SurfaceResolvers = { command: () => false, route: () => false }
@@ -845,6 +861,20 @@ export class SurfaceRegistry {
     return () => this.listeners.delete(listener)
   }
 
+  /** Publish a collection replacement as one observable surface epoch. */
+  transaction<Value>(work: () => Value): Value {
+    this.notificationDepth += 1
+    try {
+      return work()
+    } finally {
+      this.notificationDepth -= 1
+      if (this.notificationDepth === 0 && this.notificationPending) {
+        this.notificationPending = false
+        this.notify()
+      }
+    }
+  }
+
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
@@ -863,6 +893,10 @@ export class SurfaceRegistry {
   }
 
   private notify(): void {
+    if (this.notificationDepth > 0) {
+      this.notificationPending = true
+      return
+    }
     for (const listener of this.listeners) {
       try {
         listener()
@@ -918,6 +952,8 @@ export class CordisXSlotService extends Service implements CordisXSlots {
   readonly registry: SurfaceRegistry
   readonly contexts: HostContextStore
   private readonly console: PluginConsoleAspect | undefined
+  private readonly navigationCollectionGroups = new Map<string, NavigationCollectionGroupSnapshot>()
+  private nextNavigationCollection = 1
 
   constructor(ctx: Context, input?: SurfaceRegistry | { readonly registry?: SurfaceRegistry; readonly console: PluginConsoleAspect }) {
     super(ctx, 'slots')
@@ -968,6 +1004,159 @@ export class CordisXSlotService extends Service implements CordisXSlots {
     if (handle.control !== undefined) Object.defineProperty(dispose, 'control', { value: handle.control, enumerable: true })
     this.ctx.effect(() => dispose, `slots.register(${JSON.stringify(options.name)}, ${JSON.stringify(options.id)})`)
     return dispose
+  }
+
+  registerCollection(
+    options: CordisXNavigationCollectionOptions,
+    source: CordisXNavigationCollectionSource,
+  ): CordisXNavigationCollectionRegistration {
+    assertKeys(options, ['name', 'id', 'group'], 'navigation collection options')
+    if (options.name !== 'sidebar.navigation.items') throw new Error('navigation collection requires sidebar.navigation.items')
+    assertLocalId(options.id, 'navigation collection id')
+    if (options.group === null || typeof options.group !== 'object' || Array.isArray(options.group)) {
+      throw new Error('navigation collection group must be an object')
+    }
+    assertKeys(options.group, ['id', 'label', 'order'], 'navigation collection group')
+    assertLocalId(options.group.id, 'navigation collection group id')
+    assertLocalizedText(options.group.label, 'navigation collection group label')
+    if (options.group.order !== undefined
+      && (!Number.isInteger(options.group.order) || options.group.order < -100_000 || options.group.order > 100_000)) {
+      throw new Error('navigation collection group order is invalid')
+    }
+    if (source === null || typeof source !== 'object') throw new Error('navigation collection source must be an object')
+    if (typeof source.snapshot !== 'function' || typeof source.subscribe !== 'function') {
+      throw new Error('navigation collection source requires snapshot and subscribe functions')
+    }
+
+    const owner = ownerFromContext(this.ctx)
+    const collectionSequence = this.nextNavigationCollection++
+    const qualifiedId = qualifyOwnedId(owner, options.id)
+    const surfaceGroup = `navcol.${collectionSequence}`
+    const group: NavigationCollectionGroupSnapshot = Object.freeze({
+      owner,
+      id: options.group.id,
+      qualifiedId: `${qualifiedId}:${options.group.id}`,
+      label: immutableSnapshot(options.group.label),
+      order: options.group.order ?? 0,
+      surfaceGroup,
+    })
+    let active = true
+    let current: CordisXNavigationCollectionSnapshot | undefined
+    let unsubscribe: (() => void) | undefined
+    let nextItemSequence = 1
+    const stableIds = new Map<string, string>()
+    let handles: CordisXContributionHandle<CordisXNavigationItem>[] = []
+
+    const read = (): CordisXNavigationCollectionSnapshot => {
+      const input = source.snapshot()
+      if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+        throw new Error('navigation collection snapshot must be an object')
+      }
+      assertKeys(input, ['revision', 'items'], 'navigation collection snapshot')
+      if (!Number.isSafeInteger(input.revision) || input.revision < 0) {
+        throw new Error('navigation collection snapshot revision is invalid')
+      }
+      if (!Array.isArray(input.items) || input.items.length > 500) {
+        throw new Error('navigation collection snapshot items are invalid')
+      }
+      const ids = new Set<string>()
+      const items = input.items.map((candidate, index): CordisXNavigationCollectionItem => {
+        if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
+          throw new Error(`navigation collection item ${index} must be an object`)
+        }
+        assertKeys(candidate, ['id', 'label', 'description', 'icon', 'route', 'order', 'disabled'], `navigation collection item ${index}`)
+        assertLocalId(candidate.id, `navigation collection item ${index} id`)
+        if (ids.has(candidate.id)) throw new Error(`navigation collection has duplicate item ${candidate.id}`)
+        ids.add(candidate.id)
+        assertLocalizedText(candidate.label, `navigation collection item ${index} label`)
+        if (candidate.description !== undefined) assertLocalizedText(candidate.description, `navigation collection item ${index} description`)
+        assertIcon(candidate.icon, `navigation collection item ${index}`)
+        assertRoute(candidate.route, `navigation collection item ${index}`)
+        if (!Number.isInteger(candidate.order) || candidate.order < -100_000 || candidate.order > 100_000) {
+          throw new Error(`navigation collection item ${index} order is invalid`)
+        }
+        assertDisabled(candidate.disabled)
+        return immutableSnapshot(candidate)
+      })
+      return immutableSnapshot({ revision: input.revision, items })
+    }
+
+    const replace = (next: CordisXNavigationCollectionSnapshot): void => {
+      if (!active) return
+      if (current !== undefined && next.revision < current.revision) {
+        throw new Error('navigation collection snapshot revision moved backwards')
+      }
+      if (current?.revision === next.revision) {
+        if (JSON.stringify(current) !== JSON.stringify(next)) {
+          throw new Error('navigation collection changed without advancing revision')
+        }
+        return
+      }
+      const ordered = [...next.items].sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
+      const nextHandles: CordisXContributionHandle<CordisXNavigationItem>[] = []
+      this.registry.transaction(() => {
+        for (const handle of handles) handle.dispose()
+        for (const item of ordered) {
+          let syntheticId = stableIds.get(item.id)
+          if (syntheticId === undefined) {
+            syntheticId = `navcol.${collectionSequence}.${nextItemSequence++}`
+            stableIds.set(item.id, syntheticId)
+          }
+          nextHandles.push(this.registry.register(this.ctx, {
+            name: 'sidebar.navigation.items',
+            id: syntheticId,
+            group: surfaceGroup,
+            order: item.order,
+            ...(item.disabled === undefined ? {} : { disabled: item.disabled }),
+          }, {
+            label: item.label,
+            ...(item.description === undefined ? {} : { description: item.description }),
+            ...(item.icon === undefined ? {} : { icon: item.icon }),
+            route: item.route,
+          }))
+        }
+        handles = nextHandles
+        current = next
+      })
+    }
+
+    const disposeRegistration = (): void => {
+      if (!active) return
+      active = false
+      unsubscribe?.()
+      unsubscribe = undefined
+      this.navigationCollectionGroups.delete(surfaceGroup)
+      this.registry.transaction(() => {
+        for (const handle of handles) handle.dispose()
+        handles = []
+      })
+      source.dispose?.()
+    }
+
+    let effectDispose: (() => void) | undefined
+    try {
+      this.navigationCollectionGroups.set(surfaceGroup, group)
+      replace(read())
+      unsubscribe = source.subscribe(() => {
+        if (!active) return
+        try {
+          replace(read())
+        } catch (error) {
+          console.error('[cordisx] navigation collection update failed', error)
+        }
+      })
+      if (typeof unsubscribe !== 'function') throw new Error('navigation collection subscribe must return an unsubscribe function')
+      effectDispose = this.ctx.effect(() => disposeRegistration, `slots.registerCollection(${JSON.stringify(options.id)})`)
+    } catch (error) {
+      disposeRegistration()
+      throw error
+    }
+    return { dispose: () => effectDispose?.() }
+  }
+
+  navigationCollectionGroupsSnapshot(): readonly NavigationCollectionGroupSnapshot[] {
+    return [...this.navigationCollectionGroups.values()]
+      .sort((left, right) => left.order - right.order || left.qualifiedId.localeCompare(right.qualifiedId))
   }
 
   snapshot(): readonly SurfaceContributionSnapshot[] {
