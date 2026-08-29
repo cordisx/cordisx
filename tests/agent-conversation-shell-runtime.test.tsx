@@ -336,8 +336,9 @@ describe('Agent conversation shell public runtime', () => {
       nextAfterSequence: 2,
       hasMore: false,
     })
-    await settle()
-    expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="unavailable"]')).not.toBeNull()
+    await vi.waitFor(() => {
+      expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="unavailable"]')).not.toBeNull()
+    }, { timeout: 1_000, interval: 10 })
     expect(dom.window.document.querySelector('.cxa-composer')).toBeNull()
 
     if (typeof unmount === 'function') unmount()
