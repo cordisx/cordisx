@@ -249,6 +249,24 @@ Schemastery configuration remain Host-owned. The public authoring and lifecycle
 contract is specified in
 [`plugin-react-runtime.md`](plugin-react-runtime.md).
 
+The production Agent conversation shell is a separate Host-owned renderer
+kernel under `renderer/host-ui/conversation`. Its immutable render model is a
+private, already-localized projection: it contains only bounded room,
+participant, entry, status, action and composer data. The renderer owns the
+single top chrome, the only timeline scroll container, message grouping,
+conditional Host-generated initials, status announcement, ephemeral draft,
+fixed composer geometry, focus and responsive behavior. Initials are rendered
+only when a multi-participant projection explicitly selects the
+`host-initials` presentation; ordinary task history has no avatar seat.
+
+The associated command controller creates binding- and generation-fenced Host
+contexts and bounded plain-text submit payloads. Models contain no callback,
+DOM, CSS, media URL, Connector handle or renderer component. The formal public
+conversation-shell binding/source adapter is intentionally absent until its
+Protocol package is merged. The UI Playground may construct a package-local,
+debug-only private projection and mount this production renderer; production
+renderer modules never import Playground fixtures or selectors.
+
 The public plugin surface follows DeepSeek Harness: plugins declare injected
 services and use `ctx.slots.inject/register` for structured shell data. Both
 methods install Cordis effects through the service proxy, so the caller's fiber
