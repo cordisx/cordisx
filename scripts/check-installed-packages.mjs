@@ -147,7 +147,7 @@ try {
   const installedSchemasteryUiRoot = path.join(installedCordisXRoot, 'node_modules', '@cordisx', 'schemastery-ui')
   await access(path.join(installedSchemasteryUiRoot, 'dist', 'index.js'))
   const installedSchemasteryUiManifest = JSON.parse(await readFile(path.join(installedSchemasteryUiRoot, 'package.json'), 'utf8'))
-  if (installedSchemasteryUiManifest.name !== '@cordisx/schemastery-ui' || installedSchemasteryUiManifest.version !== '0.1.0-beta.0') {
+  if (installedSchemasteryUiManifest.name !== '@cordisx/schemastery-ui' || installedSchemasteryUiManifest.version !== '0.1.0-beta.1') {
     throw new Error('installed cordisx tarball is missing the pinned @cordisx/schemastery-ui runtime')
   }
   const [{ loadConfig }, { buildRendererBundle }] = await Promise.all([
