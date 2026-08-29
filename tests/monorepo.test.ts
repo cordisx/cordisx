@@ -31,7 +31,7 @@ describe('npm workspace boundary', () => {
       files: ['dist', 'README.md', 'LICENSE', 'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md', 'THIRD_PARTY_NOTICES.md', 'third_party'],
       bin: { cordisx: 'dist/src/cli.js' },
       publishConfig: { access: 'public', tag: 'beta', provenance: true },
-      dependencies: { '@material-symbols/svg-400': '0.46.0' },
+      dependencies: { reicon: '1.2.1' },
     })
     expect(cli.private).toBeUndefined()
     expect(creator).toMatchObject({
@@ -52,9 +52,7 @@ describe('npm workspace boundary', () => {
     await expect(access(path.join(repositoryRoot, 'cordisx.config.hello-toolbar.json'))).resolves.toBeUndefined()
     await expect(access(path.join(repositoryRoot, 'cordisx.config.ui-demos.json'))).resolves.toBeUndefined()
     await expect(access(path.join(repositoryRoot, 'config/ui-demos/config.json'))).resolves.toBeUndefined()
-    expect(iconSource).toContain("from '@material-symbols/svg-400/rounded/extension.svg'")
-    expect(iconSource).toContain("from '@material-symbols/svg-400/rounded/close.svg'")
-    expect(iconSource).not.toContain("from '@material-symbols/svg-400'")
+    expect(iconSource).not.toContain("from 'reicon'")
     expect(managerSource).not.toMatch(/[◫⊞◇⚙◈×›↗●○]/)
   })
 })

@@ -658,13 +658,13 @@ describe('renderer bundle', () => {
     expect(primaryNavigation.map(item => item.dataset.tab)).toEqual(['plugins', 'extension-points', 'routes', 'marketplace', 'about'])
     expect(primaryNavigation.map(item => item.tabIndex)).toEqual([0, -1, -1, -1, -1])
     expect(primaryNavigation.map(item => item.getAttribute('aria-current'))).toEqual(['page', null, null, null, null])
-    expect(primaryNavigation.slice(0, 4).map(item => item.querySelector('[data-material-icon]')?.getAttribute('data-material-icon'))).toEqual([
+    expect(primaryNavigation.slice(0, 4).map(item => item.querySelector('[data-host-icon-key]')?.getAttribute('data-host-icon-key'))).toEqual([
       'plugins', 'contributions', 'routes', 'marketplace',
     ])
     expect(primaryNavigation.at(0)?.textContent).toContain('插件')
     expect(primaryNavigation.at(-1)?.textContent).toContain('关于 CordisX')
-    expect(managerModal?.querySelector('.cxm-close [data-material-icon="close"]')).not.toBeNull()
-    const initialMaterialIcons = [...(managerModal?.querySelectorAll<HTMLElement>('[data-material-icon]') ?? [])]
+    expect(managerModal?.querySelector('.cxm-close [data-host-icon-key="close"]')).not.toBeNull()
+    const initialMaterialIcons = [...(managerModal?.querySelectorAll<HTMLElement>('[data-host-icon-key]') ?? [])]
     expect(initialMaterialIcons.length).toBeGreaterThan(6)
     expect(initialMaterialIcons.every(icon => icon.getAttribute('aria-hidden') === 'true' && icon.draggable === false)).toBe(true)
     expect(initialMaterialIcons.every(icon => icon.querySelector('svg path') !== null)).toBe(true)
@@ -717,7 +717,7 @@ describe('renderer bundle', () => {
     const importButton = managerModal?.querySelector<HTMLButtonElement>('[data-import-local-plugin]')
     expect(importButton?.textContent).toBe('')
     expect(importButton?.getAttribute('aria-label')).toBe('导入本地插件')
-    expect(importButton?.querySelector('[data-material-icon="import-plugin"]')).not.toBeNull()
+    expect(importButton?.querySelector('[data-host-icon-key="import-plugin"]')).not.toBeNull()
     expect(managerStyles).toContain('.cxc-card:hover .cxc-actions')
     expect(managerStyles).toContain('.cxc-card:focus-within .cxc-actions')
     expect(managerStyles).toContain('.cxc-card[data-action-menu-open="true"] .cxc-actions')
@@ -742,7 +742,7 @@ describe('renderer bundle', () => {
     expect(dom.window.getComputedStyle(primaryLeading as HTMLElement).width).toBe('var(--cx-manager-header-leading-seat)')
     expect(dom.window.getComputedStyle(primaryLeading as HTMLElement).borderTopWidth).toBe('0px')
     expect(dom.window.getComputedStyle(primaryLeading as HTMLElement).backgroundColor).toBe('rgba(0, 0, 0, 0)')
-    expect(primaryLeading?.dataset.materialIcon).toBe('plugins')
+    expect(primaryLeading?.dataset.hostIconKey).toBe('plugins')
     expect(primaryLeading?.textContent).toBe('')
     expect(primaryLeading?.querySelector('svg')?.getAttribute('focusable')).toBe('false')
     expect(primaryLeading?.draggable).toBe(false)
@@ -758,7 +758,7 @@ describe('renderer bundle', () => {
     expect(pluginActions.find(action => action.dataset.pluginAction === 'disable')).toMatchObject({ disabled: true })
     expect(pluginActions.find(action => action.dataset.pluginAction === 'reload')).toMatchObject({ disabled: true })
     expect(pluginActions.find(action => action.dataset.pluginAction === 'reload')?.getAttribute('aria-label')).toBe('重载插件：当前不可用')
-    expect(pluginActions.every(action => action.querySelector('[data-material-icon]') !== null)).toBe(true)
+    expect(pluginActions.every(action => action.querySelector('[data-host-icon-key]') !== null)).toBe(true)
     expect(pluginActions.find(action => action.dataset.pluginAction === 'favorite')?.getAttribute('aria-pressed')).toBe('false')
     pluginActions.find(action => action.dataset.pluginAction === 'favorite')?.click()
     expect(managerHeadings()).toEqual(['插件'])
@@ -821,7 +821,7 @@ describe('renderer bundle', () => {
     expect(aboutActions.every(link => link.target === '_blank' && link.rel === 'noopener noreferrer')).toBe(true)
     expect(aboutActions.every(link => link.getAttribute('role') === null)).toBe(true)
     expect(aboutActions.every(link => link.querySelector('.cxm-about-action-arrow')?.getAttribute('aria-hidden') === 'true')).toBe(true)
-    expect(aboutActions.every(link => link.querySelector('.cxm-about-action-arrow')?.getAttribute('data-material-icon') === 'external-link')).toBe(true)
+    expect(aboutActions.every(link => link.querySelector('.cxm-about-action-arrow')?.getAttribute('data-host-icon-key') === 'external-link')).toBe(true)
     expect(aboutActions.every(link => link.children.length === 2
       && link.children[0]?.classList.contains('cxm-about-action-body')
       && link.children[1]?.classList.contains('cxm-about-action-arrow'))).toBe(true)
@@ -860,7 +860,7 @@ describe('renderer bundle', () => {
     expect(managerModal?.querySelector('.cxm-result-count')).toBeNull()
     expect(managerModal?.querySelector('.cxm-feed-summary')).toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="extension-points"]')?.click()
-    expect(dom.window.document.querySelector<HTMLElement>('.cxm-heading-icon')?.dataset.materialIcon).toBe('contributions')
+    expect(dom.window.document.querySelector<HTMLElement>('.cxm-heading-icon')?.dataset.hostIconKey).toBe('contributions')
     expect(managerModal?.textContent).toContain('sidebar.footer.before-control')
     expect(managerModal?.textContent).toContain('侧边栏底部前置操作')
     expect(managerHeadings()).toEqual(['扩展点'])
@@ -877,7 +877,7 @@ describe('renderer bundle', () => {
     expect(breadcrumbLabels()).toEqual(['扩展点', '侧边栏导航', '使用情况'])
     const pointTabs = [...dom.window.document.querySelectorAll<HTMLElement>('[data-extension-point-detail-tab]')]
     expect(pointTabs.map(tab => tab.textContent)).toEqual(['使用情况', '点位信息', '诊断'])
-    expect(pointTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-material-icon'))).toEqual(['plugins', 'point-info', 'diagnostics'])
+    expect(pointTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-host-icon-key'))).toEqual(['plugins', 'point-info', 'diagnostics'])
     expectLocalTabLeadingSeat('[data-extension-point-detail-tab]')
     expect(dom.window.document.querySelector('[data-list-search^="extension-point-usage-"]')).not.toBeNull()
     const navigationContribution = dom.window.document.querySelector<HTMLElement>('[data-contribution-id="main-page"]')
@@ -939,7 +939,7 @@ describe('renderer bundle', () => {
     }
     expect(managerModal?.textContent).toContain('slot-showcase')
     expect(managerModal?.textContent).not.toContain('插件配置')
-    expect(dom.window.document.querySelector<HTMLElement>('.cxm-heading-icon')?.dataset.materialIcon).toBe('plugins')
+    expect(dom.window.document.querySelector<HTMLElement>('.cxm-heading-icon')?.dataset.hostIconKey).toBe('plugins')
     expect(managerHeadings()).toEqual(['插件'])
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="slot-showcase"]')?.click()
@@ -947,7 +947,7 @@ describe('renderer bundle', () => {
     expect(back?.textContent).toBe('')
     expect(back?.getAttribute('aria-label')).toBe('返回')
     expect(back?.classList.contains('cxm-heading-leading')).toBe(true)
-    expect(back?.querySelector('[data-material-icon="back"]')).not.toBeNull()
+    expect(back?.querySelector('[data-host-icon-key="back"]')).not.toBeNull()
     expect(dom.window.getComputedStyle(back as HTMLElement).width).toBe('var(--cx-manager-header-leading-seat)')
     expect(dom.window.getComputedStyle(back as HTMLElement).borderTopWidth).toBe('0px')
     expect(dom.window.getComputedStyle(back as HTMLElement).backgroundColor).toBe('rgba(0, 0, 0, 0)')
@@ -959,7 +959,7 @@ describe('renderer bundle', () => {
     const pluginDetailTabs = [...dom.window.document.querySelectorAll<HTMLElement>('[data-plugin-detail-tab]')]
     expect(pluginDetailTabs.every(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('aria-hidden') === 'true')).toBe(true)
     expect(pluginDetailTabs.every(tab => tab.querySelector('.cxm-tab-icon svg') !== null)).toBe(true)
-    expect(pluginDetailTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-material-icon'))).toEqual([
+    expect(pluginDetailTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-host-icon-key'))).toEqual([
       'document', 'configuration', 'permissions', 'runtime', 'diagnostics', 'outlets', 'routes',
     ])
     expect(pluginDetailTabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1])
@@ -1158,7 +1158,7 @@ describe('renderer bundle', () => {
     dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="marketplace"]')?.click()
-    expect(dom.window.document.querySelector<HTMLElement>('.cxm-heading-icon')?.dataset.materialIcon).toBe('marketplace')
+    expect(dom.window.document.querySelector<HTMLElement>('.cxm-heading-icon')?.dataset.hostIconKey).toBe('marketplace')
     for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-marketplace-plugin="slot-showcase"]') === null; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
@@ -1175,7 +1175,7 @@ describe('renderer bundle', () => {
     expect(managerModal?.textContent).toContain('插件商店层级夹具')
     const marketplaceTabs = [...dom.window.document.querySelectorAll<HTMLElement>('[data-marketplace-detail-tab]')]
     expect(marketplaceTabs.map(tab => tab.textContent)).toEqual(['概览', '作者与来源'])
-    expect(marketplaceTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-material-icon'))).toEqual(['overview', 'authors-source'])
+    expect(marketplaceTabs.map(tab => tab.querySelector('.cxm-tab-icon')?.getAttribute('data-host-icon-key'))).toEqual(['overview', 'authors-source'])
     expect(marketplaceTabs.map(tab => tab.tabIndex)).toEqual([0, -1])
     expectLocalTabLeadingSeat('[data-marketplace-detail-tab]')
     expect(managerModal?.textContent).not.toContain('运行状态')

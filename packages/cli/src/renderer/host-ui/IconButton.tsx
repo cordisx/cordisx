@@ -12,11 +12,12 @@ export interface IconButtonProps extends Omit<ButtonProps, 'children' | 'content
 export const IconButton = forwardRef<HTMLElement, IconButtonProps>(function IconButton(
   { icon, label, description, className, ...props }, ref,
 ) {
+  const selected = props['aria-pressed'] === true
   return (
     <Button {...props} ref={ref} type="button" shape="square" variant="text"
       className={['cxm-manager-icon-action', className].filter(Boolean).join(' ')}
       aria-label={label} aria-description={description}
       title={description === undefined ? label : `${label} · ${description}`}
-      icon={<HostIcon token={icon} />} data-cordisx-no-drag="true" />
+      icon={<HostIcon token={icon} {...(selected ? { state: 'active' as const } : {})} />} data-cordisx-no-drag="true" />
   )
 })

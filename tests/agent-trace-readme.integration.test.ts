@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
@@ -35,13 +35,18 @@ describe('Agent Trace built README projection', () => {
   let builtReadme = ''
   let canonicalLocalizedReadme = ''
   let builtLocalizedReadme = ''
+  let hostSelfExportMtimeBefore = 0
+  let hostSelfExportMtimeAfter = 0
   let dom: JSDOM
   let runtime: RuntimeHandle
 
   beforeAll(async () => {
-    await execFileAsync('npm', ['run', 'build', '--workspace=@cordisx/agent-trace-showcase'], {
+    const hostSelfExport = path.join(projectRoot, 'packages/cli/dist/src/react-jsx-runtime.js')
+    hostSelfExportMtimeBefore = (await stat(hostSelfExport)).mtimeMs
+    await execFileAsync('npm', ['run', 'build:local', '--workspace=@cordisx/agent-trace-showcase'], {
       cwd: projectRoot,
     })
+    hostSelfExportMtimeAfter = (await stat(hostSelfExport)).mtimeMs
     await readFile(path.join(packageRoot, 'dist/entry.js'), 'utf8')
     await readFile(path.join(packageRoot, 'dist/index.js'), 'utf8')
     ;[canonicalReadme, builtReadme, canonicalLocalizedReadme, builtLocalizedReadme] = await Promise.all([
@@ -130,9 +135,12 @@ describe('Agent Trace built README projection', () => {
 
   it('copies the canonical product README beside the built runtime entry', async () => {
     const packageManifest = JSON.parse(await readFile(path.join(packageRoot, 'package.json'), 'utf8')) as {
-      readonly scripts?: { readonly build?: string }
+      readonly scripts?: { readonly build?: string; readonly ['build:local']?: string }
     }
-    expect(packageManifest.scripts?.build).toContain('node scripts/copy-readme.mjs')
+    expect(packageManifest.scripts?.build).toContain('npm run build:local')
+    expect(packageManifest.scripts?.['build:local']).toContain('node scripts/copy-readme.mjs')
+    expect(packageManifest.scripts?.['build:local']).not.toContain('--workspace=cordisx')
+    expect(hostSelfExportMtimeAfter).toBe(hostSelfExportMtimeBefore)
     expect(builtReadme).toBe(canonicalReadme)
     expect(builtReadme).toContain('## Fixture, live, and historical modes')
     expect(builtReadme).toContain('agent.history.read')

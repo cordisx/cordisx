@@ -20,6 +20,7 @@ export interface NavigationProps {
 }
 
 function contributed(item: ManagerSettingsNavigationItemSnapshot, router: ManagerRouter) {
+  const active = router.route.kind === 'manager-content' && router.route.id === item.id
   return (
     <button
       key={item.id}
@@ -27,10 +28,10 @@ function contributed(item: ManagerSettingsNavigationItemSnapshot, router: Manage
       disabled={item.disabled}
       title={item.disabledReason}
       data-settings-navigation-item={item.id}
-      {...(router.route.kind === 'manager-content' && router.route.id === item.id ? { 'aria-current': 'page' as const } : {})}
+      {...(active ? { 'aria-current': 'page' as const } : {})}
       onClick={() => router.navigate({ kind: 'manager-content', id: item.id, reference: item.route })}
     >
-      <HostSurfaceIcon token={item.icon} />
+      <HostSurfaceIcon token={item.icon} state={active ? 'active' : 'default'} />
       <span>{item.title}</span>
     </button>
   )
@@ -44,7 +45,7 @@ export function Navigation({ snapshot, router }: NavigationProps) {
     <nav className="cxr-nav" aria-label={managerCopy(locale, 'manager.navigation')}>
       {core.map(item => (
         <button key={item.page} type="button" data-tab={item.page} {...(primary === item.page ? { 'aria-current': 'page' as const } : {})} onClick={() => router.navigate({ kind: 'primary', page: item.page })}>
-          <HostIcon token={item.icon} />
+          <HostIcon token={item.icon} state={primary === item.page ? 'active' : 'default'} />
           <span>{managerCopy(locale, item.copy)}</span>
         </button>
       ))}

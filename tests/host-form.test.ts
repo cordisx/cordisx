@@ -553,7 +553,7 @@ describe('Host form DOM and accessibility', () => {
     expect(portalStyles).toContain(HOST_ICON_16PX_CSS)
     expect(HOST_FORM_STYLES).toContain(HOST_ICON_16PX_CSS)
     expect(portalStyles).toContain('inline-size: 16px')
-    expect(portalStyles).toContain('fill: currentColor')
+    expect(portalStyles).toContain('color: currentColor')
     expect(portalStyles).toContain('min-inline-size: 160px')
     expect(portalStyles).toContain('padding: 8px 9px')
     expect(portalStyles).toContain('gap: 9px')

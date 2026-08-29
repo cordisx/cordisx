@@ -16,6 +16,12 @@ describe('Manager acknowledgements', () => {
     const zh = renderToStaticMarkup(<AcknowledgementsPage locale="zh-CN" />)
     expect(zh).toContain('仓库与工具')
     expect(zh).toContain('贡献者')
+    expect(zh).toContain('图标与许可')
+    expect(zh).toContain('Reicon')
+    expect(zh).toContain('Zappicon')
+    expect(zh).toContain('Zappicon License')
+    expect(zh).toContain('Solar Icons · 480 Design')
+    expect(zh).toContain('并非 CordisX 自有的 MIT 图标资产')
     expect(zh).toContain('Cordis')
     expect(zh).toContain('TDesign React')
     expect(zh).toContain('https://raw.githubusercontent.com/Tencent/tdesign/main/site/src/assets/logo.png')
@@ -33,7 +39,23 @@ describe('Manager acknowledgements', () => {
     const en = renderToStaticMarkup(<AcknowledgementsPage locale="en-US" />)
     expect(en).toContain('Repositories &amp; tools')
     expect(en).toContain('Contributors')
+    expect(en).toContain('Icons &amp; licenses')
+    expect(en).toContain('not CordisX-owned MIT icon assets')
     expect(en).toContain('Creator &amp; maintainer')
+  })
+
+  it('ships Reicon and upstream icon credits without claiming CordisX ownership', async () => {
+    const [notices, credits, license] = await Promise.all([
+      readFile(path.join(projectRoot, 'packages/cli/THIRD_PARTY_NOTICES.md'), 'utf8'),
+      readFile(path.join(projectRoot, 'packages/cli/third_party/reicon-icon-credits.txt'), 'utf8'),
+      readFile(path.join(projectRoot, 'packages/cli/third_party/reicon-MIT.txt'), 'utf8'),
+    ])
+    expect(notices).toContain('| `reicon` | `1.2.1` | MIT |')
+    expect(notices).toContain('Zappicon under the Zappicon License')
+    expect(notices).toMatch(/does\s+not represent them as CordisX-owned MIT icon assets/u)
+    expect(credits).toContain('https://zappicon.com/license')
+    expect(credits).toContain('https://creativecommons.org/licenses/by/4.0/')
+    expect(license).toContain('Copyright (c) 2025 REICON')
   })
 
   it('provides a validated CI generator for contributor data', async () => {

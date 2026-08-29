@@ -2,7 +2,7 @@ export type HostCollectionLayout = 'cards' | 'rows'
 
 /**
  * Catalogs with dense, host-owned machine metadata use the same icon rhythm as
- * Manager list rows instead of promoting each Material glyph into an avatar.
+ * Manager list rows instead of promoting each semantic glyph into an avatar.
  */
 export type HostCollectionDensity = 'default' | 'compact'
 
@@ -187,7 +187,7 @@ export const HOST_COLLECTION_STYLES = String.raw`
   .cxc-icon-seat[data-icon-kind="artwork"] > :first-child { width: var(--cxc-icon-seat-size); height: var(--cxc-icon-seat-size); }
   /* Host icon wrappers may carry SVG width/height attributes from their source
      asset. Keep the rendered glyph inside the shared seat regardless of token. */
-  .cxc-icon-seat > :first-child > svg { display: block; width: 100% !important; height: 100% !important; fill: currentColor; color: currentColor; }
+  .cxc-icon-seat > :first-child > svg { display: block; width: 100% !important; height: 100% !important; color: currentColor; }
   .cxc-status {
     position: absolute;
     right: -3px;

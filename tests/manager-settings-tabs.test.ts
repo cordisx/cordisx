@@ -38,7 +38,7 @@ describe('Manager settings navigation projection', () => {
     try {
       dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
       expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).toBeNull()
-      expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-icon')?.getAttribute('data-material-icon')).toBe('plugins')
+      expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-icon')?.getAttribute('data-host-icon-key')).toBe('plugins')
       expect(CORDISX_BUILTIN_MANAGER_SETTINGS_TABS).toEqual([])
       expect(dom.window.document.querySelector('[data-tab="settings"],[data-settings-tab],[data-settings-navigation-item]')).toBeNull()
       expect(mounts).toBe(0)
@@ -59,14 +59,23 @@ describe('Manager settings navigation projection', () => {
     const dispose = installCordisXManager(dom.window.document, manager)
     try {
       dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
+      expect(dom.window.document.querySelector('[data-tab="plugins"] svg')?.getAttribute('data-host-icon-state')).toBe('active')
+      expect(dom.window.document.querySelector('[data-tab="plugins"] svg')?.getAttribute('data-host-icon-variant')).toBe('filled')
+      expect(dom.window.document.querySelector('[data-tab="routes"] svg')?.getAttribute('data-host-icon-state')).toBe('default')
+      expect(dom.window.document.querySelector('[data-tab="routes"] svg')?.getAttribute('data-host-icon-variant')).toBe('regular')
       const entry = dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="demo:navigation"]')!
       expect(entry.querySelector('[data-host-icon="host:settings"]')).not.toBeNull(); expect(entry.querySelector('style,section')).toBeNull()
       const styles = dom.window.document.getElementById('cordisx-manager-style')?.textContent ?? ''
       expect(styles).toContain('.cordisx-host-icon svg {')
-      expect(styles).toContain('fill: currentColor;')
+      expect(styles).toContain('color: currentColor;')
       expect(styles).toContain('color: currentColor;')
       entry.click(); await settle()
-      expect(dom.window.document.querySelector('[data-demo-body="demo:navigation"]')).not.toBeNull(); expect(dom.window.document.querySelector('[data-settings-navigation-item="demo:navigation"]')?.getAttribute('aria-current')).toBe('page')
+      const activeEntry = dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="demo:navigation"]')!
+      expect(dom.window.document.querySelector('[data-demo-body="demo:navigation"]')).not.toBeNull(); expect(activeEntry.getAttribute('aria-current')).toBe('page')
+      expect(activeEntry.querySelector('svg')?.getAttribute('data-host-icon-state')).toBe('active')
+      expect(activeEntry.querySelector('svg')?.getAttribute('data-host-icon-variant')).toBe('filled')
+      expect(dom.window.document.querySelector('[data-tab="plugins"] svg')?.getAttribute('data-host-icon-state')).toBe('default')
+      expect(dom.window.document.querySelector('[data-tab="plugins"] svg')?.getAttribute('data-host-icon-variant')).toBe('regular')
       expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).toBeNull()
       expect(dom.window.document.querySelector('.cxm-heading .cxm-breadcrumbs')).toBeNull()
       expect(dom.window.document.querySelector('.cxm-heading .cxm-heading-icon[data-host-icon="host:settings"]')).not.toBeNull()

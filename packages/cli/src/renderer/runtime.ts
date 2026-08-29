@@ -26,6 +26,7 @@ import type {
 } from '../contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import type { HomeConfigIconThemePreference } from '../config/home-config.js'
 import type {
   CordisXPermissionAuthorizationDecisionV2,
   CordisXPermissionAuthorizationPlanV2,
@@ -124,6 +125,11 @@ import {
   type ChannelManagerProjectionV1,
 } from './channel-manager.js'
 import { installSharedReactRuntime } from './react-runtime.js'
+import { IconThemeRegistry } from './icon-theme-registry.js'
+import { CordisXIconThemeService } from './icon-theme-service.js'
+import { bindIconThemeRegistry } from './icons.js'
+import { BrowserIconThemePreferenceBridge } from './icon-theme-preference-binding.js'
+import { reconcileIconThemePreference, selectAndPersistIconTheme } from './icon-theme-selection.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 const MAX_ROLLBACK_RECEIPTS = 64
@@ -138,6 +144,9 @@ interface CordisXRuntimeMetadata {
   readonly version: string
   readonly providers: readonly { readonly id: string; readonly displayName: string }[]
   readonly profileId: string
+  readonly appId?: string
+  readonly iconThemePreference?: HomeConfigIconThemePreference
+  readonly iconThemePreferenceBridgeToken?: string
   readonly permissionPolicies?: readonly CordisXPersistedPermissionPolicyRecord[]
   readonly permissionBridgeToken?: string
   readonly providerBridgeToken?: string
@@ -156,6 +165,8 @@ interface CordisXRuntimeMetadata {
 }
 
 interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
+  /** Launcher-derived opaque generation for a verified bundled artifact. */
+  readonly artifactGeneration?: string
   readonly development?: CordisXLocalDevelopmentSnapshot
 }
 
@@ -398,7 +409,9 @@ function errorMessage(error: unknown): string {
 function createController(item: RuntimeBrowserPlugin, pluginConsole: PluginConsoleAspect): PluginController {
   const identity = Object.freeze({ source: item.source, id: item.id })
   const activation = 1
-  const pluginGeneration = item.package?.moduleGeneration ?? `${pluginConsole.generation}:${item.id}:bundled`
+  const pluginGeneration = item.package?.moduleGeneration
+    ?? item.artifactGeneration
+    ?? `${pluginConsole.generation}:${item.id}:bundled`
   const principal = pluginConsole.issue(identity, pluginGeneration)
   try {
     const module = item.moduleFactory?.(pluginConsole.consoleFacade(principal)) ?? item.module
@@ -466,6 +479,18 @@ async function start(
   const generation = metadata.generation ?? (typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  const iconThemeRegistry = new IconThemeRegistry(generation, metadata.profileId)
+  const unbindIconThemeRegistry = bindIconThemeRegistry(document, iconThemeRegistry)
+  const iconThemePreferenceBridge = metadata.iconThemePreferenceBridgeToken === undefined || metadata.appId === undefined
+    ? undefined
+    : new BrowserIconThemePreferenceBridge(
+        metadata.iconThemePreferenceBridgeToken,
+        metadata.appId,
+        metadata.profileId,
+        generation,
+        metadata.iconThemePreference,
+      )
+  let disposeIconThemePreferenceSubscription: (() => void) | undefined
   const permissionStore = metadata.permissionBridgeToken === undefined
     ? new BrowserPermissionPolicyStore(metadata.profileId)
     : BindingPermissionPolicyStore.connect(metadata.permissionBridgeToken, metadata.permissionPolicies ?? [])
@@ -543,7 +568,10 @@ async function start(
     new BrowserPermissionAuthorizationPromptV2(document),
   )
   for (const plugin of plugins) {
-    if (plugin.package === undefined) generationVisibility.bindStable(plugin.id, `${generation}:${plugin.id}:bundled`)
+    if (plugin.package === undefined) generationVisibility.bindStable(
+      plugin.id,
+      plugin.artifactGeneration ?? `${generation}:${plugin.id}:bundled`,
+    )
   }
   ctx = ctx.extend({ [CORDISX_GENERATION_VISIBILITY_COORDINATOR]: generationVisibility })
   const configuration = new PluginConfigurationRegistry(generationVisibility)
@@ -591,7 +619,9 @@ async function start(
   )
   const controllers: PluginController[] = plugins.map(item => createController(item, pluginConsole))
   const moduleGenerationOf = (controller: PluginController): string => (
-    controller.item.package?.moduleGeneration ?? `${generation}:${controller.item.id}:bundled`
+    controller.item.package?.moduleGeneration
+    ?? controller.item.artifactGeneration
+    ?? `${generation}:${controller.item.id}:bundled`
   )
   const projectedControllers = (): PluginController[] => controllers.filter(controller => (
     generationVisibility.projected({
@@ -707,6 +737,7 @@ async function start(
   let slotFiber: Fiber | undefined
   let settingsFiber: Fiber | undefined
   let configRendererFiber: Fiber | undefined
+  let iconThemeFiber: Fiber | undefined
   let channelManagerFiber: Fiber | undefined
   let disposeManager: (() => void) | undefined
   let undeclareManagerOutlet: (() => void) | undefined
@@ -1116,6 +1147,7 @@ async function start(
         runtimeGeneration: generation,
         operationsAvailable: lifecycleBridge !== undefined,
       },
+      iconThemes: iconThemeRegistry.redactedSnapshot(),
       permissions: broker.snapshots().map((permission: PlatformPermissionSnapshot) => {
         const availability = capabilityAvailability.resolve(permission.capability, permission.scope)
         const site = `permission:${permission.identity.source}:${permission.identity.id}:${permission.capability}`
@@ -1993,9 +2025,13 @@ async function start(
     rollbackReceipts.clear()
     configBridge?.dispose()
     serviceConfigBridge?.dispose()
+    iconThemePreferenceBridge?.dispose()
+    disposeIconThemePreferenceSubscription?.()
+    disposeIconThemePreferenceSubscription = undefined
     lifecycleBridge?.dispose()
     configRenderers.dispose()
     configuration.dispose()
+    unbindIconThemeRegistry()
     adapterHandle?.dispose()
     adapterHandle = undefined
     undeclareManagerContentOutlet?.()
@@ -2006,6 +2042,8 @@ async function start(
     slotFiber = undefined
     await configRendererFiber?.dispose()
     configRendererFiber = undefined
+    await iconThemeFiber?.dispose()
+    iconThemeFiber = undefined
     await channelManagerFiber?.dispose()
     channelManagerFiber = undefined
     await settingsFiber?.dispose()
@@ -2053,6 +2091,7 @@ async function start(
     pluginConsole.dispose()
     extensionPointBroker.dispose()
     extensionPointDescriptors.dispose()
+    iconThemeRegistry.dispose()
     settingsProjectionSites.clear()
     settingsNavigationProjectionSites.clear()
     extensionContributionProjectionSites.clear()
@@ -2160,7 +2199,18 @@ async function start(
     subscribe,
     dispose,
   }
-  const managerModel: ManagerModel = { ...handle, snapshot: managerSnapshot }
+  const managerModel: ManagerModel = {
+    ...handle,
+    snapshot: managerSnapshot,
+    iconThemePreferenceWritable: iconThemePreferenceBridge !== undefined,
+    selectIconTheme: (expectedProfileRevision, candidate) => selectAndPersistIconTheme(
+      iconThemeRegistry,
+      iconThemePreferenceBridge,
+      generation,
+      expectedProfileRevision,
+      candidate,
+    ),
+  }
 
   try {
     i18nFiber = ctx.plugin(CordisXI18nService)
@@ -2179,6 +2229,8 @@ async function start(
     await settingsFiber
     configRendererFiber = ctx.plugin(CordisXConfigRendererService, { registry: configRenderers, console: pluginConsole })
     await configRendererFiber
+    iconThemeFiber = ctx.plugin(CordisXIconThemeService, iconThemeRegistry)
+    await iconThemeFiber
     channelManagerFiber = metadata.channelManager === undefined && serviceConfigBridge === undefined
       ? ctx.plugin(CordisXChannelManagerService)
       : ctx.plugin(CordisXChannelManagerService, {
@@ -2279,6 +2331,7 @@ async function start(
       pageService.registry.subscribe(notifyFrom('pages')),
       routeService.subscribeInternal(notifyFrom('routes')),
       slotService.subscribeInternal(notifyFrom('surfaces')),
+      iconThemeRegistry.subscribe(notifyFrom('icon-themes')),
     )
     adapterHandle = metadata.hostKind === 'playground'
       ? installPlaygroundAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, { profileId: metadata.profileId })
@@ -2290,6 +2343,28 @@ async function start(
     for (const controller of controllers) {
       if (controller.status !== 'active') continue
       await mountPlugin(controller)
+    }
+    if (metadata.iconThemePreference !== undefined) {
+      // Restore only after every provider has had a chance to register. An
+      // unknown, stale, disposed, or version-mismatched identity leaves the
+      // pinned Reicon default active without exposing private registration data.
+      iconThemeRegistry.selectProvider(
+        `iconrestore_${String(Date.now()).padStart(16, '0')}`,
+        iconThemeRegistry.selection().profileRevision,
+        generation,
+        metadata.iconThemePreference,
+      )
+    }
+    if (iconThemePreferenceBridge !== undefined) {
+      disposeIconThemePreferenceSubscription = iconThemePreferenceBridge.subscribe(preference => {
+        if (disposed) return
+        reconcileIconThemePreference(iconThemeRegistry, generation, preference)
+      })
+      const currentPreference = iconThemePreferenceBridge.current()
+      if (currentPreference !== undefined) {
+        reconcileIconThemePreference(iconThemeRegistry, generation, currentPreference)
+      }
+      await iconThemePreferenceBridge.ready()
     }
     disposeManager = installReactCordisXManager(document, managerModel, metadata.hostKind === 'playground'
       ? { triggerTarget: () => document.querySelector<HTMLElement>('[data-cordisx-playground-manager-trigger]') ?? undefined }

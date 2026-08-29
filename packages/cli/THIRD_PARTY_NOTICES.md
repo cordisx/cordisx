@@ -7,13 +7,13 @@ licenses remain with their respective copyright holders:
 | --- | --- | --- |
 | `@deepseek-ai/cordis` | `4.0.1` | MIT |
 | `@deepseek-ai/schemastery` | `3.18.1` | MIT |
-| `@material-symbols/svg-400` | `0.46.0` | Apache-2.0 |
 | `esbuild` | `^0.25.9` | MIT |
 | `intl-messageformat` | `11.2.14` | BSD-3-Clause |
 | `luna-console` | `1.3.6` | MIT |
 | `luna-data-grid` | `1.6.5` | MIT |
 | `luna-dom-viewer` | `1.8.4` | MIT |
 | `luna-object-viewer` | `0.3.2` | MIT |
+| `reicon` | `1.2.1` | MIT |
 | `tar` | `7.5.22` | BlueOak-1.0.0 |
 | `ws` | `^8.18.3` | MIT |
 
@@ -42,9 +42,14 @@ component behavior is reimplemented or represented as a different library.
 The retained notices and MIT terms are at
 `third_party/tdesign-web-components-subset-MIT.txt`.
 
-CordisX copies selected Material Symbols SVG assets into its built output. The
-complete Apache License 2.0 text distributed by that package is included at
-`third_party/material-symbols-APACHE-2.0.txt`.
+CordisX bundles only the selected Reicon glyph modules referenced by its
+Host-private semantic icon catalog. Reicon credits Solar Icons, designed by
+480 Design, under CC BY 4.0 and Zappicon under the Zappicon License as base-icon
+sources. Reicon, Zappicon, and Solar Icons remain upstream assets; CordisX does
+not represent them as CordisX-owned MIT icon assets, export their raw SVG/icon
+dataset, or provide an icon-library redistribution channel. The retained Reicon
+MIT terms and upstream credits are at `third_party/reicon-MIT.txt` and
+`third_party/reicon-icon-credits.txt`.
 
 The exact dependency graph in `package-lock.json` contains MIT, Apache-2.0,
 BSD-3-Clause, BlueOak-1.0.0, and ISC license identifiers for production

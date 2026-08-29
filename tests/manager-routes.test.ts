@@ -97,7 +97,7 @@ describe('Manager route and page catalog', () => {
       dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')!.hidden = false
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="routes"]')!.click()
       const catalog = dom.window.document.querySelector<HTMLElement>('.cxm-content')!
-      expect(dom.window.document.querySelector('.cxm-heading-leading')?.getAttribute('data-material-icon')).toBe('routes')
+      expect(dom.window.document.querySelector('.cxm-heading-leading')?.getAttribute('data-host-icon-key')).toBe('routes')
       expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).toBeNull()
       const visibleCount = (selector: string): number => [...dom.window.document.querySelectorAll<HTMLElement>(selector)]
         .filter(item => !item.closest<HTMLElement>('[data-collection-item]')?.hidden).length
@@ -125,7 +125,7 @@ describe('Manager route and page catalog', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-route-product-row="demo:analytics"]')!.click()
       expect(dom.window.document.querySelector('.cxm-heading .cxm-back')).not.toBeNull()
       const routeDetailIcons = [...dom.window.document.querySelectorAll<HTMLElement>('.cxm-route-card-icon')]
-      expect(routeDetailIcons.map(icon => icon.dataset.materialIcon)).toEqual(['routes', 'document'])
+      expect(routeDetailIcons.map(icon => icon.dataset.hostIconKey)).toEqual(['routes', 'document'])
       expect(routeDetailIcons.every(icon => icon.tagName === 'SPAN' && icon.getAttribute('aria-hidden') === 'true')).toBe(true)
       expect(routeDetailIcons.every(icon => icon.querySelector('button') === null)).toBe(true)
       expect(dom.window.document.querySelectorAll('.cxm-route-card button')).toHaveLength(0)

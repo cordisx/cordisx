@@ -1,6 +1,7 @@
 import { PLUGIN_CONSOLE_REACT_STYLES } from './components/PluginConsolePanel.js'
 import { HOST_FORM_REACT_STYLES } from '../host-ui/HostForm.js'
 import { HOST_COLLECTION_STYLES } from '../host-collection.js'
+import { HOST_ICON_16PX_CSS } from '../icons.js'
 import tdesignReactCss from 'tdesign-react/dist/tdesign.css'
 
 const scopedTDesignReactCss = tdesignReactCss.replace(
@@ -8,7 +9,7 @@ const scopedTDesignReactCss = tdesignReactCss.replace(
   ".cxr-root[data-cordisx-app-theme='dark']",
 )
 
-export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
+export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_CSS}\n${String.raw`
   .cxr-root { position: relative; z-index: 2147483500; color: var(--cx-text, #edf0f4); font: 13px/1.45 system-ui, sans-serif; }
   .cxr-root *, .cxr-root *::before, .cxr-root *::after { box-sizing: border-box; }
   .cxr-root .t-popup { z-index: 2147483600 !important; }
@@ -29,13 +30,13 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
   .cxr-nav button { display: grid; min-height: 40px; grid-template-columns: 28px minmax(0,1fr); align-items: center; gap: 7px; border: 0; border-radius: 9px; padding: 5px 9px; background: transparent; color: var(--cx-muted, #aab2c0); cursor: pointer; text-align: left; font: inherit; }
   .cxr-nav button:hover, .cxr-nav button[aria-current="page"] { background: var(--cx-hover, rgba(255,255,255,.08)); color: var(--cx-text, #edf0f4); }
   .cxr-nav button:focus-visible { outline: 2px solid var(--cx-focus, #8aa8ff); outline-offset: 1px; }
-  .cxr-nav .cxh-icon-seat, .cxr-nav .cxm-material-icon { display: grid; width: 18px; height: 18px; place-items: center; }
+  .cxr-nav .cxh-icon-seat, .cxr-nav .cxm-host-icon { display: grid; width: 18px; height: 18px; place-items: center; }
   .cxr-nav button > :first-child { display: grid; width: 18px; height: 18px; align-self: center; justify-self: center; place-items: center; line-height: 1; }
   .cxr-main { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0,1fr); }
   .cxr-header { display: grid; grid-template-columns: 32px minmax(0,1fr) 32px; align-items: center; gap: 8px; padding: 10px 18px; border-bottom: 1px solid var(--cx-border, #353a42); }
   .cxr-header-seat { display: grid; width: 32px; height: 32px; place-items: center; }
   .cxr-header > .t-button, .cxr-header-seat > .t-button { width: 32px; height: 32px; padding: 0; }
-  .cxr-header-seat > .t-icon, .cxr-header > .t-button .t-icon, .cxr-header-seat > .t-button .t-icon { width: 16px; height: 16px; color: var(--cx-muted, #aab2c0); font-size: 16px !important; }
+  .cxr-header-seat > :is(.t-icon,.cordisx-host-icon), .cxr-header > .t-button :is(.t-icon,.cordisx-host-icon), .cxr-header-seat > .t-button :is(.t-icon,.cordisx-host-icon) { width: 16px; height: 16px; color: var(--cx-muted, #aab2c0); font-size: 16px !important; }
   .cxr-header-seat > .cxr-brand-mark { width: 18px; height: 18px; }
   .cxr-heading { min-width: 0; }
   .cxr-heading h2 { margin: 0; overflow: hidden; color: var(--cx-text, #edf0f4); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
@@ -95,7 +96,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
   .cxr-plugin-row:hover .cxr-plugin-actions, .cxr-plugin-row:focus-within .cxr-plugin-actions { opacity: 1; pointer-events: auto; }
   .cxr-tabs { display: flex; min-height: 38px; flex: none; gap: 2px; overflow-x: auto; margin: -5px 0 12px; border-bottom: 1px solid var(--cx-border,#353a42); }
   .cxr-tabs button { display: inline-flex; height: 38px; flex: none; align-items: center; gap: 6px; border: 0; border-bottom: 2px solid transparent; padding: 0 9px; background: transparent; color: var(--cx-muted,#9ca5b5); cursor: pointer; }
-  .cxr-tabs button .t-icon { font-size: 15px; }
+  .cxr-tabs button :is(.t-icon,.cordisx-host-icon) { width: 15px; height: 15px; font-size: 15px; }
   .cxr-tabs button[aria-selected="true"] { border-bottom-color: var(--cx-primary,#7da2ff); color: var(--cx-text,#edf0f4); }
   .cxr-empty, .cxr-notice { grid-column: 1 / -1; padding: 18px; border: 1px dashed var(--cx-border,#353a42); border-radius: 10px; color: var(--cx-muted,#9ca5b5); text-align: center; }
   .cxr-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
@@ -168,7 +169,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
   .cxr-marketplace-detail-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(260px,100%),1fr)); align-items: stretch; gap: 9px; }
   .cxr-marketplace-detail-grid > .cxr-metric { border-radius: 11px; }
   .cxr-marketplace-source-link { text-decoration: none; }
-  .cxr-marketplace-source-link > .t-icon { flex: none; color: var(--cx-muted,#9ca5b5); }
+  .cxr-marketplace-source-link > :is(.t-icon,.cordisx-host-icon) { flex: none; color: var(--cx-muted,#9ca5b5); }
   .cxr-page[data-plugin-detail]:has(> .cxr-plugin-config-panel) { display: flex; height: 100%; min-height: 0; flex-direction: column; }
   .cxr-plugin-config-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; }
   .cxr-plugin-config-panel .cxf-react-form { min-height: 0; flex: 1; overflow: hidden; }
@@ -190,8 +191,18 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
   .cxr-about-release { margin-top: 12px; }
   .cxr-about-copyright { margin-top: 9px; }
   .cxr-about-links { width: 100%; max-width: none; }
+  .cxr-icon-theme { display: grid; grid-template-columns: minmax(0,1fr) minmax(220px,320px); gap: 8px 18px; align-items: end; width: 100%; margin: 0 0 18px; padding: 16px; border: 1px solid var(--cx-border,#303744); border-radius: 10px; background: var(--cx-panel,#171b22); }
+  .cxr-icon-theme-copy { grid-row: span 2; min-width: 0; }
+  .cxr-icon-theme h3 { margin: 0 0 5px; font-size: 14px; }
+  .cxr-icon-theme p { margin: 0; color: var(--cx-muted,#9ca5b5); font-size: 12px; line-height: 1.5; }
+  .cxr-icon-theme label { font-size: 12px; font-weight: 600; }
+  .cxr-icon-theme select { width: 100%; min-height: 34px; padding: 5px 30px 5px 10px; border: 1px solid var(--cx-border,#303744); border-radius: 7px; color: var(--cx-text,#f5f7fa); background: var(--cx-field,#11151b); font: inherit; }
+  .cxr-icon-theme select:focus-visible { outline: 2px solid var(--cx-accent,#5b8cff); outline-offset: 2px; }
+  .cxr-icon-theme .cxr-icon-theme-note, .cxr-icon-theme .cxr-icon-theme-error { grid-column: 2; }
+  .cxr-icon-theme .cxr-icon-theme-error { color: var(--cx-danger,#ff7c7c); }
+  @media (max-width: 720px) { .cxr-icon-theme { grid-template-columns: 1fr; } .cxr-icon-theme-copy { grid-row: auto; } .cxr-icon-theme .cxr-icon-theme-note, .cxr-icon-theme .cxr-icon-theme-error { grid-column: 1; } }
   .cxr-about-links > a { text-decoration: none; }
-  .cxr-about-links > :is(a,button) > .t-icon { flex: none; color: var(--cx-muted,#9ca5b5); font-size: 15px; }
+  .cxr-about-links > :is(a,button) > :is(.t-icon,.cordisx-host-icon) { flex: none; color: var(--cx-muted,#9ca5b5); font-size: 15px; }
   .cxr-card-arrow { flex: none; color: var(--cx-muted,#9ca5b5); font-size: 22px; line-height: 1; }
   .cxr-acknowledgements { display: grid; gap: 28px; }
   .cxr-ack-section > header h3 { margin: 0; font-size: 16px; }
@@ -205,7 +216,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
   .cxr-tool-icon img { display: block; width: 48px; height: 48px; object-fit: contain; border-radius: 12px; }
   .cxr-ack-card { box-sizing: border-box; display: flex; width: 100%; min-width: 0; min-height: 88px; align-items: center; gap: 12px; border: 1px solid var(--cx-border,#353a42); border-radius: 11px; padding: 12px; background: var(--cx-surface-raised,#20242b); color: inherit; text-decoration: none; }
   a.cxr-ack-card:hover { border-color: color-mix(in srgb, var(--cx-text,#fff) 30%, var(--cx-border,#353a42)); background: var(--cx-hover,rgba(255,255,255,.07)); }
-  .cxr-ack-card > .t-icon { flex: none; color: var(--cx-muted,#9ca5b5); font-size: 15px; }
+  .cxr-ack-card > :is(.t-icon,.cordisx-host-icon) { width: 15px; height: 15px; flex: 0 0 15px; color: var(--cx-muted,#9ca5b5); font-size: 15px; }
   .cxr-ack-avatar { display: grid; width: 44px; height: 44px; flex: none; overflow: hidden; place-items: center; border-radius: 12px; background: var(--cx-hover,rgba(255,255,255,.08)); color: var(--cx-muted,#aab2c0); font-weight: 750; letter-spacing: .02em; }
   .cxr-ack-avatar img { width: 100%; height: 100%; object-fit: cover; }
   .cxr-ack-card-body { display: grid; min-width: 0; flex: 1; gap: 3px; }
@@ -214,6 +225,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${String.raw`
   .cxr-ack-card-body code { color: var(--cx-muted,#7f899a); font: 10px/1.3 ui-monospace,monospace; }
   .cxr-contributor-grid .cxr-ack-card { min-height: 70px; }
   .cxr-contributor-grid .cxr-ack-avatar { border-radius: 50%; }
+  .cxr-license-grid .cxr-ack-card { min-height: 104px; }
   .cxr-ack-empty { margin-top: 12px; }
   @media (max-width: 760px) {
     .cxr-backdrop { padding: 0; }

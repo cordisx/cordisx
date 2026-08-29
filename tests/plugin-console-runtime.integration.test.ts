@@ -263,7 +263,7 @@ describe('plugin DevTools Console runtime', () => {
     expect(latest?.hidden).toBe(false)
     expect(latest?.textContent).toBe('')
     expect(latest?.getAttribute('aria-label')).toBe('Back to latest')
-    expect(latest?.querySelector('[data-material-icon="console-follow"]')).not.toBeNull()
+    expect(latest?.querySelector('[data-host-icon-key="console-follow"]')).not.toBeNull()
     latest?.click()
     expect(scopedFrame!.scrollTop).toBe(800)
 

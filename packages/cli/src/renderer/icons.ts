@@ -1,185 +1,300 @@
-import accountTree from '@material-symbols/svg-400/rounded/account_tree.svg'
-import analytics from '@material-symbols/svg-400/rounded/analytics.svg'
-import arrowBack from '@material-symbols/svg-400/rounded/arrow_back.svg'
-import calendarMonth from '@material-symbols/svg-400/rounded/calendar_month.svg'
-import check from '@material-symbols/svg-400/rounded/check.svg'
-import checkCircle from '@material-symbols/svg-400/rounded/check_circle.svg'
-import chevronLeft from '@material-symbols/svg-400/rounded/chevron_left.svg'
-import close from '@material-symbols/svg-400/rounded/close.svg'
-import contentCopy from '@material-symbols/svg-400/rounded/content_copy.svg'
-import deleteIcon from '@material-symbols/svg-400/rounded/delete.svg'
-import description from '@material-symbols/svg-400/rounded/description.svg'
-import diagnosis from '@material-symbols/svg-400/rounded/diagnosis.svg'
-import domainVerification from '@material-symbols/svg-400/rounded/domain_verification.svg'
-import error from '@material-symbols/svg-400/rounded/error.svg'
-import extension from '@material-symbols/svg-400/rounded/extension.svg'
-import folder from '@material-symbols/svg-400/rounded/folder.svg'
-import help from '@material-symbols/svg-400/rounded/help.svg'
-import history from '@material-symbols/svg-400/rounded/history.svg'
-import hub from '@material-symbols/svg-400/rounded/hub.svg'
-import info from '@material-symbols/svg-400/rounded/info.svg'
-import layers from '@material-symbols/svg-400/rounded/layers.svg'
-import key from '@material-symbols/svg-400/rounded/key.svg'
-import modelTraining from '@material-symbols/svg-400/rounded/model_training.svg'
-import moreHoriz from '@material-symbols/svg-400/rounded/more_horiz.svg'
-import monitorHeart from '@material-symbols/svg-400/rounded/monitor_heart.svg'
-import noteAdd from '@material-symbols/svg-400/rounded/note_add.svg'
-import openInNew from '@material-symbols/svg-400/rounded/open_in_new.svg'
-import overview from '@material-symbols/svg-400/rounded/overview.svg'
-import pause from '@material-symbols/svg-400/rounded/pause.svg'
-import pauseCircle from '@material-symbols/svg-400/rounded/pause_circle.svg'
-import palette from '@material-symbols/svg-400/rounded/palette.svg'
-import person from '@material-symbols/svg-400/rounded/person.svg'
-import rocketLaunch from '@material-symbols/svg-400/rounded/rocket_launch.svg'
-import route from '@material-symbols/svg-400/rounded/route.svg'
-import refresh from '@material-symbols/svg-400/rounded/refresh.svg'
-import restartAlt from '@material-symbols/svg-400/rounded/restart_alt.svg'
-import save from '@material-symbols/svg-400/rounded/save.svg'
-import schedule from '@material-symbols/svg-400/rounded/schedule.svg'
-import search from '@material-symbols/svg-400/rounded/search.svg'
-import send from '@material-symbols/svg-400/rounded/send.svg'
-import settings from '@material-symbols/svg-400/rounded/settings.svg'
-import shield from '@material-symbols/svg-400/rounded/shield.svg'
-import storefront from '@material-symbols/svg-400/rounded/storefront.svg'
-import sell from '@material-symbols/svg-400/rounded/sell.svg'
-import summarize from '@material-symbols/svg-400/rounded/summarize.svg'
-import tune from '@material-symbols/svg-400/rounded/tune.svg'
-import viewList from '@material-symbols/svg-400/rounded/view_list.svg'
-import warning from '@material-symbols/svg-400/rounded/warning.svg'
-import workspacePremium from '@material-symbols/svg-400/rounded/workspace_premium.svg'
-import deleteForever from '@material-symbols/svg-400/rounded/delete_forever.svg'
-import playArrow from '@material-symbols/svg-400/rounded/play_arrow.svg'
-import playCircle from '@material-symbols/svg-400/rounded/play_circle.svg'
-import share from '@material-symbols/svg-400/rounded/share.svg'
-import starFilled from '@material-symbols/svg-400/rounded/star-fill.svg'
-import starOutline from '@material-symbols/svg-400/rounded/star.svg'
-import verticalAlignBottom from '@material-symbols/svg-400/rounded/vertical_align_bottom.svg'
-import verticalAlignTop from '@material-symbols/svg-400/rounded/vertical_align_top.svg'
+import {
+  isSemanticIconKey,
+  type IconState,
+  type IconVariant,
+  type NormalizedVectorCommand,
+  type NormalizedVectorDescriptor,
+  type SemanticIconKey,
+} from '../icon-theme-contracts.js'
+import { resolveBuiltinReiconDescriptor } from './reicon-icon-backend.js'
+import { resolveHostTheme, type HostAppTheme } from './host-theme.js'
+import type { IconThemeRegistry } from './icon-theme-registry.js'
+
+const documentRegistries = new WeakMap<Document, IconThemeRegistry>()
+
+export function bindIconThemeRegistry(document: Document, registry: IconThemeRegistry): () => void {
+  documentRegistries.set(document, registry)
+  return () => { if (documentRegistries.get(document) === registry) documentRegistries.delete(document) }
+}
+
+export function iconThemeRegistryForDocument(document: Document): IconThemeRegistry | undefined {
+  return documentRegistries.get(document)
+}
 
 export const MANAGER_ICON_TOKENS = [
-  'back',
-  'capability-fallback',
-  'close',
-  'configuration',
-  'console-clear',
-  'console-copy',
-  'console-export',
-  'console-follow',
-  'console-pause',
-  'console-resume',
-  'contributions',
-  'diagnostics',
-  'document',
-  'external-link',
-  'launcher',
-  'marketplace',
-  'marketplace-certified',
-  'marketplace-official',
-  'marketplace-source-add',
-  'marketplace-source-copy',
-  'marketplace-source-edit',
-  'marketplace-source-move-down',
-  'marketplace-source-move-up',
-  'models-read',
-  'outlets',
-  'overview',
-  'permissions',
-  'plugins',
-  'point-info',
-  'routes',
-  'runtime',
-  'search',
-  'settings',
-  'tasks-catalog-read',
-  'tasks-content-read',
-  'tasks-control',
-  'tasks-create',
-  'turns-control',
-  'turns-submit',
-  'authors-source',
-  'disable-plugin',
-  'enable-plugin',
-  'favorite',
-  'favorite-active',
-  'import-plugin',
-  'more',
-  'reload-plugin',
-  'reset-configuration',
-  'save-configuration',
-  'share-plugin',
-  'uninstall-plugin',
+  'add', 'back', 'capability-fallback', 'close', 'configuration', 'copy', 'delete', 'edit', 'move', 'console-clear', 'console-copy',
+  'console-export', 'console-follow', 'console-pause', 'console-resume', 'contributions', 'acknowledgements',
+  'diagnostics', 'document', 'external-link', 'launcher', 'marketplace', 'marketplace-certified',
+  'marketplace-official', 'marketplace-source-add', 'marketplace-source-copy',
+  'marketplace-source-edit', 'marketplace-source-move-down', 'marketplace-source-move-up',
+  'models-read', 'outlets', 'overview', 'permissions', 'plugins', 'point-info', 'routes',
+  'runtime', 'search', 'settings', 'tasks-catalog-read', 'tasks-content-read', 'tasks-control',
+  'tasks-create', 'turns-control', 'turns-submit', 'authors-source', 'disable-plugin',
+  'enable-plugin', 'favorite', 'favorite-active', 'import-plugin', 'more', 'reload-plugin',
+  'reset-configuration', 'save-configuration', 'share-plugin', 'uninstall-plugin',
 ] as const
 
 export type ManagerIconToken = typeof MANAGER_ICON_TOKENS[number]
+export type HostIconKey = SemanticIconKey
+export type HostIconState = 'default' | 'active' | 'favorite'
 
-const MANAGER_ICON_SOURCES: Readonly<Record<ManagerIconToken, string>> = {
-  back: chevronLeft,
-  'capability-fallback': help,
-  close,
-  configuration: tune,
-  'console-clear': deleteIcon,
-  'console-copy': contentCopy,
-  'console-export': verticalAlignBottom,
-  'console-follow': verticalAlignBottom,
-  'console-pause': pause,
-  'console-resume': playArrow,
-  contributions: hub,
-  diagnostics: diagnosis,
-  document: description,
-  'external-link': openInNew,
-  launcher: rocketLaunch,
-  marketplace: storefront,
-  'marketplace-certified': workspacePremium,
-  'marketplace-official': domainVerification,
-  'marketplace-source-add': noteAdd,
-  'marketplace-source-copy': contentCopy,
-  'marketplace-source-edit': tune,
-  'marketplace-source-move-down': verticalAlignBottom,
-  'marketplace-source-move-up': verticalAlignTop,
-  'models-read': modelTraining,
-  outlets: accountTree,
-  overview,
-  permissions: shield,
-  plugins: extension,
-  'point-info': info,
-  routes: route,
-  runtime: monitorHeart,
-  search,
-  settings,
-  'tasks-catalog-read': viewList,
-  'tasks-content-read': summarize,
-  'tasks-control': tune,
-  'tasks-create': noteAdd,
-  'turns-control': pauseCircle,
-  'turns-submit': send,
-  'authors-source': person,
-  'disable-plugin': pauseCircle,
-  'enable-plugin': playCircle,
-  favorite: starOutline,
-  'favorite-active': starFilled,
-  'import-plugin': folder,
-  more: moreHoriz,
-  'reload-plugin': refresh,
-  'reset-configuration': restartAlt,
-  'save-configuration': save,
-  'share-plugin': share,
-  'uninstall-plugin': deleteForever,
+/** Existing Host chrome terms map explicitly into Protocol v1 semantics. */
+export const MANAGER_ICON_SEMANTICS: Readonly<Partial<Record<ManagerIconToken, SemanticIconKey>>> = Object.freeze({
+  add: 'action.add',
+  back: 'action.back',
+  'capability-fallback': 'status.info',
+  close: 'action.close',
+  configuration: 'action.settings',
+  copy: 'action.copy',
+  delete: 'action.delete',
+  edit: 'action.edit',
+  move: 'action.move',
+  'console-clear': 'action.delete',
+  'console-copy': 'action.copy',
+  'console-export': 'action.export',
+  'console-follow': 'action.follow',
+  'console-pause': 'action.pause',
+  'console-resume': 'action.resume',
+  contributions: 'content.contributions',
+  acknowledgements: 'content.acknowledgements',
+  diagnostics: 'status.error',
+  document: 'content.files',
+  'external-link': 'action.external-link',
+  launcher: 'navigation.launcher',
+  marketplace: 'navigation.marketplace',
+  'marketplace-certified': 'trust.certified',
+  'marketplace-official': 'trust.official',
+  'marketplace-source-add': 'action.add',
+  'marketplace-source-copy': 'action.copy',
+  'marketplace-source-edit': 'action.edit',
+  'marketplace-source-move-down': 'control.chevron-down',
+  'marketplace-source-move-up': 'control.chevron-up',
+  'models-read': 'agent.reasoning',
+  more: 'action.more',
+  outlets: 'content.layers',
+  overview: 'navigation.overview',
+  permissions: 'content.key',
+  plugins: 'navigation.plugins',
+  'point-info': 'status.info',
+  'reload-plugin': 'action.refresh',
+  'reset-configuration': 'action.reset',
+  routes: 'navigation.routes',
+  runtime: 'navigation.runtime',
+  'save-configuration': 'action.save',
+  search: 'action.search',
+  settings: 'action.settings',
+  'share-plugin': 'action.share',
+  'tasks-catalog-read': 'content.panel',
+  'tasks-content-read': 'content.files',
+  'tasks-control': 'action.settings',
+  'tasks-create': 'action.add',
+  'turns-control': 'agent.turn-control',
+  'turns-submit': 'action.submit',
+  'authors-source': 'action.external-link',
+  'disable-plugin': 'action.disable',
+  'enable-plugin': 'action.enable',
+  favorite: 'action.favorite',
+  'favorite-active': 'action.favorite',
+  'import-plugin': 'action.import',
+  'uninstall-plugin': 'action.delete',
+})
+
+const HOST_SURFACE_ICON_MAP: Readonly<Record<string, SemanticIconKey>> = Object.freeze({
+  'host:analytics': 'navigation.dashboard', 'host:back': 'action.back',
+  'host:calendar': 'content.calendar', 'host:close': 'action.close', 'host:error': 'status.error',
+  'host:files': 'content.files', 'host:folder': 'content.folder', 'host:history': 'navigation.history',
+  'host:info': 'status.info', 'host:layers': 'content.layers', 'host:key': 'content.key',
+  'host:more': 'action.more', 'host:new': 'action.add', 'host:open': 'action.external-link',
+  'host:palette': 'content.palette', 'host:playground': 'navigation.overview',
+  'host:refresh': 'action.refresh', 'host:reset': 'action.reset', 'host:review': 'control.check',
+  'host:settings': 'action.settings', 'host:save': 'action.save', 'host:clock': 'content.clock',
+  'host:success': 'status.success', 'host:warning': 'status.warning', 'host:tags': 'content.tags',
+})
+
+export interface HostIconRenderOptions {
+  readonly theme?: HostAppTheme
+  readonly size?: number | string
+  readonly variant?: IconVariant
+  readonly state?: IconState | HostIconState
 }
 
-function svgMarkup(source: string): string {
-  if (!source.startsWith('data:image/svg+xml,')) return source
-  try {
-    return decodeURIComponent(source.slice('data:image/svg+xml,'.length))
-  } catch {
-    return source
+export interface HostIconResolution {
+  readonly key: string
+  readonly provider: string
+  readonly fallback: 'none' | 'reicon' | 'neutral'
+  readonly state: IconState
+  readonly theme: HostAppTheme
+  readonly variant: IconVariant
+}
+
+function normalizedState(value: HostIconRenderOptions['state']): IconState {
+  if (value === 'favorite') return 'selected'
+  if (value === 'active') return 'active'
+  return value ?? 'default'
+}
+
+function normalizedVariant(options: HostIconRenderOptions): IconVariant {
+  if (options.variant !== undefined) return options.variant
+  const state = normalizedState(options.state)
+  return state === 'active' || state === 'selected' ? 'filled' : 'regular'
+}
+
+export function normalizedVectorCommandData(command: NormalizedVectorCommand): string {
+  if (command.op === 'move') return `M${command.x} ${command.y}`
+  if (command.op === 'line') return `L${command.x} ${command.y}`
+  if (command.op === 'cubic') return `C${command.x1} ${command.y1} ${command.x2} ${command.y2} ${command.x} ${command.y}`
+  if (command.op === 'quadratic') return `Q${command.x1} ${command.y1} ${command.x} ${command.y}`
+  return 'Z'
+}
+
+export function renderNormalizedIconSvg(
+  document: Document,
+  descriptor: NormalizedVectorDescriptor,
+  resolution: HostIconResolution,
+  size: number | string = '100%',
+): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('width', String(size))
+  svg.setAttribute('height', String(size))
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('aria-hidden', 'true')
+  svg.setAttribute('focusable', 'false')
+  svg.setAttribute('draggable', 'false')
+  svg.setAttribute('data-host-icon-key', resolution.key)
+  svg.setAttribute('data-host-icon-provider', resolution.provider)
+  svg.setAttribute('data-host-icon-fallback', resolution.fallback)
+  svg.setAttribute('data-host-icon-theme', resolution.theme)
+  svg.setAttribute('data-host-icon-state', resolution.state)
+  svg.setAttribute('data-host-icon-variant', resolution.variant)
+  for (const vectorPath of descriptor.paths) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    path.setAttribute('d', vectorPath.commands.map(normalizedVectorCommandData).join(' '))
+    if (vectorPath.paint === 'fill') {
+      path.setAttribute('fill', 'currentColor')
+      if (vectorPath.fillRule !== undefined) path.setAttribute('fill-rule', vectorPath.fillRule)
+    } else {
+      path.setAttribute('fill', 'none')
+      path.setAttribute('stroke', 'currentColor')
+      path.setAttribute('stroke-width', String(vectorPath.strokeWidth))
+      path.setAttribute('stroke-linecap', vectorPath.lineCap)
+      path.setAttribute('stroke-linejoin', vectorPath.lineJoin)
+    }
+    if (vectorPath.opacity !== undefined) path.setAttribute('opacity', String(vectorPath.opacity))
+    svg.append(path)
+  }
+  return svg
+}
+
+export function resolveBuiltinHostIcon(
+  requestedKey: string,
+  options: HostIconRenderOptions = {},
+): { readonly descriptor: NormalizedVectorDescriptor; readonly resolution: HostIconResolution } {
+  const known = isSemanticIconKey(requestedKey)
+  const descriptorKey = known ? requestedKey : 'control.minus'
+  const state = normalizedState(options.state)
+  const variant = normalizedVariant(options)
+  return {
+    descriptor: resolveBuiltinReiconDescriptor(descriptorKey, variant, state),
+    resolution: {
+      key: requestedKey,
+      provider: known ? 'builtin:reicon' : 'host:neutral',
+      fallback: known ? 'none' : 'neutral',
+      state,
+      theme: options.theme ?? 'light',
+      variant,
+    },
   }
 }
 
-/**
- * Host icons render inside both ordinary Host chrome and Shadow-DOM portals.
- * Keep the geometry and color inheritance in one rule so a portalled menu
- * cannot fall back to an SVG's intrinsic dimensions or an unrelated fill.
- */
+export function resolveHostIcon(
+  document: Document | undefined,
+  requestedKey: string,
+  options: HostIconRenderOptions = {},
+): { readonly descriptor: NormalizedVectorDescriptor; readonly resolution: HostIconResolution } {
+  if (!isSemanticIconKey(requestedKey)) return resolveBuiltinHostIcon(requestedKey, options)
+  const registry = document === undefined ? undefined : documentRegistries.get(document)
+  if (registry === undefined) return resolveBuiltinHostIcon(requestedKey, options)
+  const state = normalizedState(options.state)
+  const variant = normalizedVariant(options)
+  const result = registry.resolve(requestedKey, variant, state)
+  return {
+    descriptor: result.descriptor,
+    resolution: {
+      key: requestedKey,
+      provider: result.provider.providerId,
+      fallback: result.fallback,
+      state,
+      theme: options.theme ?? 'light',
+      variant,
+    },
+  }
+}
+
+export function resolveManagerIcon(
+  document: Document | undefined,
+  token: ManagerIconToken,
+  options: HostIconRenderOptions = {},
+): { readonly descriptor: NormalizedVectorDescriptor; readonly resolution: HostIconResolution } {
+  const semantic = MANAGER_ICON_SEMANTICS[token]
+  if (semantic !== undefined) return resolveHostIcon(document, semantic, options)
+  return resolveBuiltinHostIcon(token, options)
+}
+
+export function renderHostIconSvg(
+  document: Document,
+  requestedKey: string,
+  options: HostIconRenderOptions = {},
+): { readonly svg: SVGSVGElement; readonly resolution: HostIconResolution } {
+  const result = resolveHostIcon(document, requestedKey, options)
+  return { svg: renderNormalizedIconSvg(document, result.descriptor, result.resolution, options.size), resolution: result.resolution }
+}
+
+export function renderManagerIconSvg(
+  document: Document,
+  token: ManagerIconToken,
+  options: HostIconRenderOptions = {},
+): { readonly svg: SVGSVGElement; readonly resolution: HostIconResolution } {
+  const result = resolveManagerIcon(document, token, options)
+  return { svg: renderNormalizedIconSvg(document, result.descriptor, result.resolution, options.size), resolution: result.resolution }
+}
+
+export function createManagerIcon(
+  document: Document,
+  token: ManagerIconToken,
+  className?: string,
+  options: HostIconRenderOptions = {},
+): HTMLSpanElement {
+  const icon = document.createElement('span')
+  icon.className = ['cordisx-host-icon', 'cxm-host-icon', className].filter(Boolean).join(' ')
+  icon.dataset.hostIconKey = token
+  icon.setAttribute('aria-hidden', 'true')
+  icon.draggable = false
+  const state = options.state ?? (token === 'favorite-active' ? 'favorite' : 'default')
+  icon.append(renderManagerIconSvg(document, token, {
+    ...options,
+    state,
+    theme: options.theme ?? resolveHostTheme(document).theme,
+  }).svg)
+  return icon
+}
+
+export function hostSurfaceIconKey(token: string | undefined): SemanticIconKey | undefined {
+  return HOST_SURFACE_ICON_MAP[token ?? 'host:more']
+}
+
+export function createHostSurfaceIcon(document: Document, token: string | undefined): HTMLSpanElement {
+  const requested = token ?? 'host:more'
+  const key = hostSurfaceIconKey(requested)
+  const icon = document.createElement('span')
+  icon.className = 'cordisx-host-icon'
+  icon.dataset.hostIcon = requested
+  icon.setAttribute('aria-hidden', 'true')
+  icon.draggable = false
+  icon.append(renderHostIconSvg(document, key ?? requested, { theme: resolveHostTheme(document).theme }).svg)
+  return icon
+}
+
 export const HOST_ICON_16PX_CSS = String.raw`
   .cordisx-host-icon {
     display: inline-flex;
@@ -193,85 +308,13 @@ export const HOST_ICON_16PX_CSS = String.raw`
     pointer-events: none;
     user-select: none;
     -webkit-user-select: none;
+    -webkit-user-drag: none;
   }
   .cordisx-host-icon > svg {
     display: block;
     inline-size: 100%;
     block-size: 100%;
-    fill: currentColor;
     color: currentColor;
     pointer-events: none;
   }
-  .cordisx-host-icon > svg :where(path, circle, rect, polygon) {
-    fill: currentColor;
-  }
 `
-
-/** Create one decorative, host-owned icon from a compile-time bundled Material symbol. */
-export function createManagerIcon(
-  document: Document,
-  token: ManagerIconToken,
-  className?: string,
-): HTMLSpanElement {
-  const icon = document.createElement('span')
-  icon.className = className === undefined ? 'cxm-material-icon' : `cxm-material-icon ${className}`
-  icon.dataset.materialIcon = token
-  icon.setAttribute('aria-hidden', 'true')
-  icon.draggable = false
-  icon.innerHTML = svgMarkup(MANAGER_ICON_SOURCES[token])
-  const svg = icon.querySelector('svg')
-  svg?.setAttribute('aria-hidden', 'true')
-  svg?.setAttribute('focusable', 'false')
-  svg?.setAttribute('draggable', 'false')
-  return icon
-}
-
-const HOST_SURFACE_ICON_SOURCES: Readonly<Record<string, string>> = {
-  'host:analytics': analytics,
-  'host:back': arrowBack,
-  'host:calendar': calendarMonth,
-  'host:close': close,
-  'host:error': error,
-  'host:files': folder,
-  'host:folder': folder,
-  'host:history': history,
-  'host:info': info,
-  'host:layers': layers,
-  'host:key': key,
-  'host:more': moreHoriz,
-  'host:new': noteAdd,
-  'host:playground': overview,
-  'host:open': openInNew,
-  'host:palette': palette,
-  'host:refresh': refresh,
-  'host:reset': restartAlt,
-  'host:review': check,
-  'host:settings': settings,
-  'host:save': save,
-  'host:clock': schedule,
-  'host:success': checkCircle,
-  'host:warning': warning,
-  'host:tags': sell,
-}
-
-/** Render a protocol host icon with the same bundled Material geometry as manager chrome. */
-export function createHostSurfaceIcon(document: Document, token: string | undefined): HTMLSpanElement {
-  const icon = document.createElement('span')
-  icon.className = 'cordisx-host-icon'
-  icon.dataset.hostIcon = token ?? 'host:more'
-  icon.setAttribute('aria-hidden', 'true')
-  icon.draggable = false
-  icon.innerHTML = svgMarkup(HOST_SURFACE_ICON_SOURCES[token ?? 'host:more'] ?? moreHoriz)
-  const svg = icon.querySelector('svg')
-  svg?.setAttribute('aria-hidden', 'true')
-  svg?.setAttribute('focusable', 'false')
-  svg?.setAttribute('draggable', 'false')
-  svg?.classList.add('icon-xs')
-  for (const node of icon.querySelectorAll<SVGElement>('[fill], [stroke]')) {
-    for (const attribute of ['fill', 'stroke'] as const) {
-      const value = node.getAttribute(attribute)?.trim().toLowerCase()
-      if (value !== undefined && value !== 'none') node.setAttribute(attribute, 'currentColor')
-    }
-  }
-  return icon
-}
