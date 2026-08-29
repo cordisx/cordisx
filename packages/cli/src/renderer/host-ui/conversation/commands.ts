@@ -5,6 +5,7 @@ import type {
   AgentConversationMessage,
   AgentConversationModel,
 } from './model.js'
+import { immutableSnapshot } from '../../validation.js'
 
 interface AgentConversationCommandContextBase {
   readonly binding: AgentConversationBindingReference
@@ -38,6 +39,7 @@ export interface AgentConversationCommandRequest {
 }
 
 export interface AgentConversationCommandFence {
+  readonly ownerId: string
   readonly shell: 'agent-desktop'
   readonly binding: AgentConversationBindingReference
   readonly generation: string
@@ -55,9 +57,10 @@ export interface AgentConversationCommandExecutor {
 }
 
 export function agentConversationCommandFence(model: AgentConversationModel): AgentConversationCommandFence {
-  return Object.freeze({
+  return immutableSnapshot({
+    ownerId: model.ownerId,
     shell: model.shell,
-    binding: Object.freeze({ ...model.binding }),
+    binding: model.binding,
     generation: model.generation,
     snapshotSequence: model.snapshotSequence,
   })
@@ -112,6 +115,7 @@ export class AgentConversationCommandController {
   }
 
   private assertCurrent(model: AgentConversationModel): void {
+    if (model.ownerId !== this.fence.ownerId) throw new Error('conversation command crossed its owner fence')
     if (model.shell !== this.fence.shell) throw new Error('conversation command crossed its shell fence')
     if (model.binding.bindingId !== this.fence.binding.bindingId) throw new Error('conversation command crossed its binding fence')
     if (model.binding.ownerGeneration !== this.fence.binding.ownerGeneration) {
@@ -130,10 +134,10 @@ export class AgentConversationCommandController {
     if (this.running.has(invocationKey)) throw new Error(`conversation command ${invocationKey} is already running`)
     this.running.add(invocationKey)
     try {
-      const immutableContext = Object.freeze(context)
-      return await this.executor.execute(Object.freeze({
-        ownerId: model.ownerId, shell: model.shell, invocationKey, reference, context: immutableContext,
-      }))
+      const request = immutableSnapshot<AgentConversationCommandRequest>({
+        ownerId: model.ownerId, shell: model.shell, invocationKey, reference, context,
+      })
+      return await this.executor.execute(request)
     } finally {
       this.running.delete(invocationKey)
     }

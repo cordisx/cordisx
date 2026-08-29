@@ -173,6 +173,9 @@ describe('AgentConversation renderer model', () => {
     ])
     expect(Object.isFrozen(requests[0])).toBe(true)
     expect(Object.isFrozen(requests[0]?.context)).toBe(true)
+    expect(Object.isFrozen(requests[0]?.context.binding)).toBe(true)
+    expect(Object.isFrozen(requests[0]?.reference)).toBe(true)
+    expect(Object.isFrozen(requests[0]?.context.command)).toBe(true)
     expect(() => controller.runComposer(model, '')).toThrow('1 to 65536')
     expect(() => controller.runComposer(model, 'a'.repeat(65_537))).toThrow('1 to 65536')
   })
@@ -203,6 +206,8 @@ describe('AgentConversation renderer model', () => {
     expect(() => controller.runHeader(model, canonicalMessageAction)).toThrow('not in the current model')
     expect(() => controller.runMessage(model, canonicalMessage.itemId, model.headerActions[0]!)).toThrow('not in the current model')
     expect(() => controller.runMessage(model, 'not-the-canonical-item', canonicalMessageAction)).toThrow('not in the current model')
+    expect(() => controller.runHeader({ ...model, ownerId: 'other-owner' }, model.headerActions[0]!))
+      .toThrow('owner fence')
     expect(() => controller.runHeader({ ...model, shell: 'wrong-shell' } as unknown as AgentConversationModel, model.headerActions[0]!))
       .toThrow('shell fence')
     expect(() => controller.runHeader({ ...model, binding: { ...model.binding, bindingId: 'other-binding' } }, model.headerActions[0]!))
@@ -213,6 +218,47 @@ describe('AgentConversation renderer model', () => {
       .toThrow('snapshot generation fence')
     expect(() => controller.runHeader({ ...model, snapshotSequence: model.snapshotSequence + 1 }, model.headerActions[0]!))
       .toThrow('stale snapshot')
+  })
+
+  it('deep-clones hostile nested command data before asynchronous executor observation', async () => {
+    const model = createAgentConversationModel({
+      ...createPlaygroundConversationFixture('conversation', 'en'),
+      headerActions: [{
+        id: 'inspect',
+        label: 'Inspect',
+        command: { id: 'room.inspect', arguments: { nested: { value: 'original' } } },
+        disabled: false,
+      }],
+    })
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let observed: AgentConversationCommandRequest | undefined
+    const controller = new AgentConversationCommandController({
+      async execute(request) {
+        await gate
+        observed = request
+      },
+    }, model)
+    const hostile = structuredClone(model)
+    const pending = controller.runHeader(hostile, hostile.headerActions[0]!)
+    ;(hostile.binding as { bindingId: string }).bindingId = 'mutated-after-dispatch'
+    const hostileArguments = hostile.headerActions[0]!.command.arguments as { nested: { value: string } }
+    hostileArguments.nested.value = 'mutated-after-dispatch'
+    release()
+    await pending
+    expect(observed?.context.binding.bindingId).toBe(model.binding.bindingId)
+    expect((observed?.reference.arguments as { nested: { value: string } }).nested.value).toBe('original')
+    expect((observed?.context.command.arguments as { nested: { value: string } }).nested.value).toBe('original')
+    expect(observed?.reference).not.toBe(hostile.headerActions[0]!.command)
+    expect(observed?.context.binding).not.toBe(hostile.binding)
+    expect(Object.isFrozen(observed)).toBe(true)
+    expect(Object.isFrozen(observed?.context)).toBe(true)
+    expect(Object.isFrozen(observed?.context.binding)).toBe(true)
+    expect(Object.isFrozen(observed?.reference)).toBe(true)
+    expect(Object.isFrozen(observed?.reference.arguments)).toBe(true)
+    expect(Object.isFrozen((observed?.reference.arguments as { nested: object }).nested)).toBe(true)
+    expect(Object.isFrozen(observed?.context.command)).toBe(true)
+    expect(Object.isFrozen(observed?.context.command.arguments)).toBe(true)
   })
 })
 

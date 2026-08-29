@@ -259,12 +259,16 @@ fixed composer geometry, focus and responsive behavior. Initials are rendered
 only when a multi-participant projection explicitly selects the
 `host-initials` presentation; ordinary task history has no avatar seat.
 
-The associated command controller preserves the exact `agent-desktop` shell,
-binding id, owner generation, separate snapshot generation, and a Host-private
-snapshot-sequence freshness fence. It creates scope-discriminated Host command
-contexts; only message scope carries canonical `itemId`, while composer submit
-carries a bounded primitive string. The `new-room` selection discriminator
-directly contains exactly one enabled `newRoomAction`; its projection contains
+The associated command controller preserves the exact owner id,
+`agent-desktop` shell, binding id, owner generation, separate snapshot
+generation, and a Host-private snapshot-sequence freshness fence. It creates
+scope-discriminated Host command contexts; only message scope carries canonical
+`itemId`, while composer submit
+carries a bounded primitive string. Before execution, the complete request and
+all nested binding, reference, command arguments and context data are cloned
+and deeply frozen, so caller mutation cannot change the observed command. The
+`new-room` selection discriminator directly contains exactly one enabled
+`newRoomAction`; its projection contains
 no timeline and forbids the separate header-action list. Models contain no callback,
 DOM, CSS, media URL, Connector handle or renderer component. The formal public
 conversation-shell binding/source adapter is intentionally absent until its
