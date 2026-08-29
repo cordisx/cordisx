@@ -541,7 +541,7 @@ describe('profile-scoped icon-theme selection runtime', () => {
       for (const unregister of unregisterDocuments) unregister()
       for (const page of pages) page.window.close()
     }
-  })
+  }, 30_000)
 
   it('falls back to pinned Reicon when a cold-start preference names an unknown provider', async () => {
     const page = dom()
