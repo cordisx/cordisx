@@ -15,7 +15,7 @@ import type {
 } from '@cordisx/protocol/connector-service/v1'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const protocolCommit = '49f1223fb7e6a340080de58629280b0f3de9faed'
+const protocolCommit = '5ec36fee67fd768cb30b4129c7a89d8d6841ce90'
 
 // This tuple is compile-only: it makes the formal public type surface part of
 // the Host test program without copying declarations or importing a checkout.
