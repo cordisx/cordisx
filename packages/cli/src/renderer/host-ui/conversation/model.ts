@@ -29,7 +29,7 @@ export interface AgentConversationParticipant {
 
 export interface AgentConversationMessage {
   readonly kind: 'message'
-  readonly id: string
+  readonly itemId: string
   readonly messageId: string
   readonly sequence: number
   readonly authorId: string
@@ -43,7 +43,7 @@ export interface AgentConversationMessage {
 
 export interface AgentConversationStatus {
   readonly kind: 'status'
-  readonly id: string
+  readonly itemId: string
   readonly sequence: number
   readonly label: string
   readonly state: AgentConversationStatusState
@@ -53,7 +53,7 @@ export interface AgentConversationStatus {
 export type AgentConversationEntry = AgentConversationMessage | AgentConversationStatus
 
 export type AgentConversationSelection =
-  | { readonly kind: 'new-room' }
+  | { readonly kind: 'new-room'; readonly newRoomAction: AgentConversationAction }
   | {
       readonly kind: 'room'
       readonly roomId: string
@@ -71,6 +71,11 @@ export interface AgentConversationComposer {
   readonly submit: AgentConversationCommandReference
 }
 
+export interface AgentConversationBindingReference {
+  readonly bindingId: string
+  readonly ownerGeneration: string
+}
+
 /**
  * Host-private, renderer-ready projection. It is intentionally not the wire
  * protocol: a formal adapter must localize and validate the public snapshot
@@ -78,9 +83,10 @@ export interface AgentConversationComposer {
  */
 export interface AgentConversationModel {
   readonly ownerId: string
-  readonly bindingId: string
-  readonly ownerGeneration: string
-  readonly revision: number
+  readonly shell: 'agent-desktop'
+  readonly binding: AgentConversationBindingReference
+  readonly generation: string
+  readonly snapshotSequence: number
   readonly selection: AgentConversationSelection
   readonly entries: readonly AgentConversationEntry[]
   readonly composer: AgentConversationComposer
@@ -123,9 +129,23 @@ function assertAction(action: AgentConversationAction, label: string): void {
   assertCommand(action.command, `${label}.command`)
 }
 
+function assertActions(actions: readonly AgentConversationAction[], label: string, maximum: number): void {
+  if (actions.length > maximum) throw new Error(`${label} exceeds ${maximum} items`)
+  const ids = new Set<string>()
+  for (const [index, action] of actions.entries()) {
+    assertAction(action, `${label}[${index}]`)
+    if (ids.has(action.id)) throw new Error(`${label} has duplicate action ${action.id}`)
+    ids.add(action.id)
+  }
+}
+
 function assertSelection(selection: AgentConversationSelection): void {
   if (selection.kind === 'new-room') {
-    assertKnownKeys(selection, ['kind'], 'selection')
+    assertKnownKeys(selection, ['kind', 'newRoomAction'], 'selection')
+    if (selection.newRoomAction === undefined) throw new Error('new-room selection requires newRoomAction')
+    assertAction(selection.newRoomAction, 'selection.newRoomAction')
+    if (selection.newRoomAction.id !== 'new-room') throw new Error('newRoomAction must be the Host new-room action')
+    if (selection.newRoomAction.disabled) throw new Error('newRoomAction must be executable')
     return
   }
   assertKnownKeys(selection, ['kind', 'roomId', 'title', 'multiParticipant', 'participantPresentation', 'participants'], 'selection')
@@ -153,11 +173,11 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
   const participantIds = new Set(selection.kind === 'room' ? selection.participants.map(item => item.id) : [])
   for (const [index, entry] of entries.entries()) {
     assertKnownKeys(entry, entry.kind === 'message'
-      ? ['kind', 'id', 'messageId', 'sequence', 'authorId', 'body', 'timestamp', 'deliveryState', 'runState', 'ariaLive', 'actions']
-      : ['kind', 'id', 'sequence', 'label', 'state', 'ariaLive'], `entries[${index}]`)
-    assertOpaque(entry.id, `entries[${index}].id`)
-    if (entryIds.has(entry.id)) throw new Error(`duplicate entry ${entry.id}`)
-    entryIds.add(entry.id)
+      ? ['kind', 'itemId', 'messageId', 'sequence', 'authorId', 'body', 'timestamp', 'deliveryState', 'runState', 'ariaLive', 'actions']
+      : ['kind', 'itemId', 'sequence', 'label', 'state', 'ariaLive'], `entries[${index}]`)
+    assertOpaque(entry.itemId, `entries[${index}].itemId`)
+    if (entryIds.has(entry.itemId)) throw new Error(`duplicate entry ${entry.itemId}`)
+    entryIds.add(entry.itemId)
     if (!Number.isSafeInteger(entry.sequence) || entry.sequence <= previousSequence) {
       throw new Error('entries must have strictly increasing safe integer sequences')
     }
@@ -175,22 +195,29 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
     if (!Number.isFinite(Date.parse(entry.timestamp))) throw new Error(`entries[${index}].timestamp is invalid`)
     if (!DELIVERY_STATES.has(entry.deliveryState)) throw new Error(`entries[${index}].deliveryState is invalid`)
     if (!RUN_STATES.has(entry.runState)) throw new Error(`entries[${index}].runState is invalid`)
-    if (entry.actions.length > 8) throw new Error(`entries[${index}].actions exceeds 8 items`)
-    entry.actions.forEach((action, actionIndex) => assertAction(action, `entries[${index}].actions[${actionIndex}]`))
+    assertActions(entry.actions, `entries[${index}].actions`, 8)
   }
 }
 
 /** Validate, clone and deeply freeze one renderer projection. */
 export function createAgentConversationModel(input: AgentConversationModel): AgentConversationModel {
-  assertKnownKeys(input, ['ownerId', 'bindingId', 'ownerGeneration', 'revision', 'selection', 'entries', 'composer', 'headerActions'], 'model')
+  assertKnownKeys(input, ['ownerId', 'shell', 'binding', 'generation', 'snapshotSequence', 'selection', 'entries', 'composer', 'headerActions'], 'model')
   assertOpaque(input.ownerId, 'ownerId')
-  assertOpaque(input.bindingId, 'bindingId')
-  assertOpaque(input.ownerGeneration, 'ownerGeneration')
-  if (!Number.isSafeInteger(input.revision) || input.revision < 0) throw new Error('revision must be a non-negative safe integer')
+  if (input.shell !== 'agent-desktop') throw new Error('shell must be agent-desktop')
+  assertKnownKeys(input.binding, ['bindingId', 'ownerGeneration'], 'binding')
+  assertOpaque(input.binding.bindingId, 'binding.bindingId')
+  assertOpaque(input.binding.ownerGeneration, 'binding.ownerGeneration')
+  assertOpaque(input.generation, 'generation')
+  if (!Number.isSafeInteger(input.snapshotSequence) || input.snapshotSequence < 0) {
+    throw new Error('snapshotSequence must be a non-negative safe integer')
+  }
   assertSelection(input.selection)
   assertEntries(input.entries, input.selection)
-  if (input.headerActions.length > 12) throw new Error('headerActions exceeds 12 items')
-  input.headerActions.forEach((action, index) => assertAction(action, `headerActions[${index}]`))
+  assertActions(input.headerActions, 'headerActions', 12)
+  if (input.selection.kind === 'new-room') {
+    if (input.entries.length !== 0) throw new Error('new-room selection cannot contain timeline entries')
+    if (input.headerActions.length !== 0) throw new Error('new-room selection forbids separate header actions')
+  }
   assertKnownKeys(input.composer, ['availability', 'placeholder', 'disabled', 'disabledReason', 'submit'], 'composer')
   if (!['available', 'unavailable'].includes(input.composer.availability)) throw new Error('composer.availability is invalid')
   assertText(input.composer.placeholder, 'composer.placeholder', 1_000)

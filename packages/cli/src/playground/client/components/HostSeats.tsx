@@ -1,7 +1,8 @@
+import { useMemo } from 'react'
 import { AgentConversationRenderer } from '../../../renderer/host-ui/conversation/AgentConversationRenderer.js'
 import {
   createPlaygroundConversationFixture,
-  playgroundConversationCommands,
+  createPlaygroundConversationCommands,
   playgroundConversationCopy,
 } from '../fixtures/agent-conversation.js'
 
@@ -14,7 +15,8 @@ export interface HostSeatsProps {
 
 /** Playground placement only; all conversation DOM and interaction are production-owned. */
 export function HostSeats({ mode, locale }: HostSeatsProps) {
-  const model = createPlaygroundConversationFixture(mode, locale)
+  const model = useMemo(() => createPlaygroundConversationFixture(mode, locale), [mode, locale])
+  const commands = useMemo(() => createPlaygroundConversationCommands(model), [model])
   return (
     <main className="pg-main" {...(mode === 'conversation' ? { 'data-cordisx-playground-session-id': 'fixture-session' } : {})}>
       <div className="pg-page-seat pg-app-seat" data-cordisx-playground-seat="app" />
@@ -22,7 +24,7 @@ export function HostSeats({ mode, locale }: HostSeatsProps) {
       <div className="pg-conversation-shell">
         <AgentConversationRenderer
           model={model}
-          commands={playgroundConversationCommands}
+          commands={commands}
           copy={playgroundConversationCopy(locale)}
           debugFixture
         />

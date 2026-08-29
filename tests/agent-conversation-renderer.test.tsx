@@ -95,38 +95,133 @@ describe('AgentConversation renderer model', () => {
     })).toThrow('single-participant rooms cannot request participant initials')
   })
 
+  it('requires exactly one executable Host new-room action and forbids every competing header action', () => {
+    const valid = createPlaygroundConversationFixture('empty', 'en')
+    expect(valid.selection.kind).toBe('new-room')
+    const newRoomAction = valid.selection.kind === 'new-room' ? valid.selection.newRoomAction : undefined
+    expect(newRoomAction).toMatchObject({ id: 'new-room', disabled: false })
+    expect(valid.headerActions).toHaveLength(0)
+    expect(() => createAgentConversationModel({
+      ...valid,
+      selection: { kind: 'new-room' } as AgentConversationModel['selection'],
+    })).toThrow('requires newRoomAction')
+    expect(() => createAgentConversationModel({
+      ...valid,
+      selection: { kind: 'new-room', newRoomAction: { ...newRoomAction!, disabled: true, disabledReason: 'Unavailable' } },
+    })).toThrow('must be executable')
+    expect(() => createAgentConversationModel({
+      ...valid,
+      selection: { kind: 'new-room', newRoomAction: { ...newRoomAction!, id: 'settings' } },
+    })).toThrow('must be the Host new-room action')
+    expect(() => createAgentConversationModel({
+      ...valid,
+      headerActions: [newRoomAction!, newRoomAction!],
+    })).toThrow('duplicate action new-room')
+    expect(() => createAgentConversationModel({
+      ...valid,
+      headerActions: [{ id: 'settings', label: 'Settings', command: { id: 'room.settings' }, disabled: false }],
+    })).toThrow('forbids separate header actions')
+    expect(() => createAgentConversationModel({
+      ...valid,
+      selection: { kind: 'new-room' } as AgentConversationModel['selection'],
+      headerActions: [newRoomAction!],
+    })).toThrow('requires newRoomAction')
+    expect(() => createAgentConversationModel({
+      ...valid,
+      selection: { kind: 'new-room' } as AgentConversationModel['selection'],
+      composer: { ...valid.composer, submit: newRoomAction!.command },
+    })).toThrow('requires newRoomAction')
+    expect(() => createAgentConversationModel({
+      ...valid,
+      entries: [{ kind: 'status', itemId: 'wrong-scope-new-room', sequence: 1, label: 'New room', state: 'info', ariaLive: 'off' }],
+    })).toThrow('cannot contain timeline entries')
+  })
+
+  it('does not write into caller data while validating the new-room discriminator', () => {
+    const input = structuredClone(createPlaygroundConversationFixture('empty', 'en'))
+    const before = JSON.stringify(input)
+    const model = createAgentConversationModel(input)
+    expect(JSON.stringify(input)).toBe(before)
+    expect(model).not.toBe(input)
+    expect(model.binding).not.toBe(input.binding)
+    expect(Object.isFrozen(input)).toBe(false)
+    expect(Object.isFrozen(model)).toBe(true)
+  })
+
   it('generates exact Host command contexts and bounded composer text without putting callbacks in the model', async () => {
     const requests: AgentConversationCommandRequest[] = []
-    const controller = new AgentConversationCommandController({ execute: async request => { requests.push(request) } })
     const model = createAgentConversationModel({
       ...createPlaygroundConversationFixture('conversation', 'en'),
       composer: { availability: 'available', placeholder: 'Message', disabled: false, submit: { id: 'room.send' } },
       headerActions: [{ id: 'refresh', label: 'Refresh', icon: 'host:refresh', command: { id: 'room.refresh' }, disabled: false }],
     })
+    const controller = new AgentConversationCommandController({ execute: async request => { requests.push(request) } }, model)
     await controller.runHeader(model, model.headerActions[0]!)
     await controller.runComposer(model, '  hello room  ')
     expect(requests).toEqual([
       {
-        ownerId: model.ownerId, invocationKey: 'header:refresh', reference: { id: 'room.refresh' },
-        context: { kind: 'header', bindingId: model.bindingId, ownerGeneration: model.ownerGeneration, command: { id: 'room.refresh' } },
+        ownerId: model.ownerId, shell: 'agent-desktop', invocationKey: 'header:refresh', reference: { id: 'room.refresh' },
+        context: { binding: model.binding, generation: model.generation, scope: 'header', command: { id: 'room.refresh' } },
       },
       {
-        ownerId: model.ownerId, invocationKey: 'composer-submit', reference: { id: 'room.send' },
+        ownerId: model.ownerId, shell: 'agent-desktop', invocationKey: 'composer-submit', reference: { id: 'room.send' },
         context: {
-          kind: 'composer-submit', bindingId: model.bindingId, ownerGeneration: model.ownerGeneration,
-          command: { id: 'room.send' }, submitPayload: { text: '  hello room  ' },
+          binding: model.binding, generation: model.generation, scope: 'composer-submit',
+          command: { id: 'room.send' }, submitPayload: '  hello room  ',
         },
       },
     ])
-    expect(() => controller.runComposer(model, ' '.repeat(5))).toThrow('1 to 65536')
+    expect(Object.isFrozen(requests[0])).toBe(true)
+    expect(Object.isFrozen(requests[0]?.context)).toBe(true)
+    expect(() => controller.runComposer(model, '')).toThrow('1 to 65536')
+    expect(() => controller.runComposer(model, 'a'.repeat(65_537))).toThrow('1 to 65536')
+  })
+
+  it('rejects stale, cross-shell, cross-binding, cross-generation, wrong-scope, and non-canonical item commands', async () => {
+    const base = createPlaygroundConversationFixture('conversation', 'en')
+    const firstMessage = base.entries.find(entry => entry.kind === 'message')!
+    const messageAction = { id: 'retry', label: 'Retry', command: { id: 'room.retry' }, disabled: false } as const
+    const model = createAgentConversationModel({
+      ...base,
+      composer: { availability: 'available', placeholder: 'Message', disabled: false, submit: { id: 'room.send' } },
+      headerActions: [{ id: 'refresh', label: 'Refresh', command: { id: 'room.refresh' }, disabled: false }],
+      entries: base.entries.map(entry => entry === firstMessage ? { ...entry, actions: [messageAction] } : entry),
+    })
+    const requests: AgentConversationCommandRequest[] = []
+    const controller = new AgentConversationCommandController({ execute: async request => { requests.push(request) } }, model)
+    const canonicalMessage = model.entries.find(entry => entry.kind === 'message' && entry.itemId === firstMessage.itemId)!
+    const canonicalMessageAction = canonicalMessage.kind === 'message' ? canonicalMessage.actions[0]! : messageAction
+    await controller.runMessage(model, canonicalMessage.itemId, canonicalMessageAction)
+    expect(requests[0]?.context).toEqual({
+      binding: model.binding,
+      generation: model.generation,
+      scope: 'message',
+      itemId: canonicalMessage.itemId,
+      command: canonicalMessageAction.command,
+    })
+    expect('submitPayload' in requests[0]!.context).toBe(false)
+    expect(() => controller.runHeader(model, canonicalMessageAction)).toThrow('not in the current model')
+    expect(() => controller.runMessage(model, canonicalMessage.itemId, model.headerActions[0]!)).toThrow('not in the current model')
+    expect(() => controller.runMessage(model, 'not-the-canonical-item', canonicalMessageAction)).toThrow('not in the current model')
+    expect(() => controller.runHeader({ ...model, shell: 'wrong-shell' } as unknown as AgentConversationModel, model.headerActions[0]!))
+      .toThrow('shell fence')
+    expect(() => controller.runHeader({ ...model, binding: { ...model.binding, bindingId: 'other-binding' } }, model.headerActions[0]!))
+      .toThrow('binding fence')
+    expect(() => controller.runHeader({ ...model, binding: { ...model.binding, ownerGeneration: 'other-owner-generation' } }, model.headerActions[0]!))
+      .toThrow('owner generation fence')
+    expect(() => controller.runHeader({ ...model, generation: 'other-snapshot-generation' }, model.headerActions[0]!))
+      .toThrow('snapshot generation fence')
+    expect(() => controller.runHeader({ ...model, snapshotSequence: model.snapshotSequence + 1 }, model.headerActions[0]!))
+      .toThrow('stale snapshot')
   })
 })
 
 describe('AgentConversationRenderer production DOM', () => {
   it('owns the only title/actions, timeline scroll, statuses, initials opt-in, and unavailable fixed composer', async () => {
+    const model = createPlaygroundConversationFixture('conversation', 'zh-CN')
     const harness = await render(
-      createPlaygroundConversationFixture('conversation', 'zh-CN'),
-      new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }),
+      model,
+      new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model),
       true,
     )
     try {
@@ -169,14 +264,15 @@ describe('AgentConversationRenderer production DOM', () => {
       entries: [message],
       headerActions: [],
     })
-    const controller = new AgentConversationCommandController({ execute: vi.fn(async () => undefined) })
+    const controller = new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, single)
     const roomHarness = await render(single, controller)
     try {
       expect(roomHarness.dom.window.document.querySelectorAll('.cxa-avatar')).toHaveLength(0)
     } finally {
       await roomHarness.close()
     }
-    const emptyHarness = await render(createPlaygroundConversationFixture('empty', 'zh-CN'), controller, true)
+    const empty = createPlaygroundConversationFixture('empty', 'zh-CN')
+    const emptyHarness = await render(empty, new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, empty), true)
     try {
       const document = emptyHarness.dom.window.document
       expect(document.querySelector('h1')?.textContent).toBe('新建房间')
@@ -191,12 +287,12 @@ describe('AgentConversationRenderer production DOM', () => {
 
   it('keeps Host-owned draft state, submit, and focus order outside the immutable model', async () => {
     const requests: AgentConversationCommandRequest[] = []
-    const controller = new AgentConversationCommandController({ execute: async request => { requests.push(request) } })
     const model = createAgentConversationModel({
       ...createPlaygroundConversationFixture('conversation', 'en'),
       composer: { availability: 'available', placeholder: 'Write a message', disabled: false, submit: { id: 'room.send' } },
       headerActions: [{ id: 'refresh', label: 'Refresh', icon: 'host:refresh', command: { id: 'room.refresh' }, disabled: false }],
     })
+    const controller = new AgentConversationCommandController({ execute: async request => { requests.push(request) } }, model)
     const harness = await render(model, controller)
     try {
       const document = harness.dom.window.document
@@ -215,7 +311,7 @@ describe('AgentConversationRenderer production DOM', () => {
         send.click()
         await Promise.resolve()
       })
-      expect(requests[0]?.context).toMatchObject({ kind: 'composer-submit', submitPayload: { text: 'hello from draft' } })
+      expect(requests[0]?.context).toMatchObject({ scope: 'composer-submit', submitPayload: 'hello from draft' })
       expect(draft.value).toBe('')
       const focusOrder = [...document.querySelectorAll<HTMLElement>('.cxa-header-actions button,[role="log"],.cxa-draft,.cxa-send')]
       expect(focusOrder.map(element => element.className)).toEqual(['cxa-action', 'cxa-timeline', 'cxa-draft', 'cxa-send'])
@@ -237,7 +333,7 @@ describe('AgentConversationRenderer production DOM', () => {
     expect(styles).not.toContain('.pg-')
     expect(seats).toContain("renderer/host-ui/conversation/AgentConversationRenderer")
     expect(seats).toContain('debugFixture')
-    expect(fixture).toContain('playground-debug-only')
+    expect(fixture).toContain('playground-snapshot-debug-only')
     expect(fixture).not.toMatch(/ConnectorHandle|callback|avatarUrl|data-chatroom/i)
   })
 })

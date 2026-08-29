@@ -80,7 +80,7 @@ function MessageEntry({
   const state = stateCopy(entry, copy)
   return <article
     className="cxa-entry cxa-message"
-    data-entry-id={entry.id}
+    data-entry-id={entry.itemId}
     data-role={participant.role}
     data-group-start={String(groupStart)}
     data-delivery-state={entry.deliveryState}
@@ -100,7 +100,7 @@ function MessageEntry({
       <div className="cxa-message-body">{entry.body.map((block, index) => <p key={index}>{block}</p>)}</div>
       {entry.actions.length === 0 ? null : <div className="cxa-message-actions">
         {entry.actions.map(action => <ActionButton key={action.id} action={action} run={() => {
-          void commands.runMessage(model, entry.id, action).catch(onCommandError)
+          void commands.runMessage(model, entry.itemId, action).catch(onCommandError)
         }} />)}
       </div>}
     </div>
@@ -110,12 +110,12 @@ function MessageEntry({
 function Timeline({
   model, commands, copy, onCommandError,
 }: Pick<AgentConversationRendererProps, 'model' | 'commands' | 'copy'> & { readonly onCommandError: (error: unknown) => void }) {
-  const follow = useAutoFollow<HTMLDivElement>(`${model.bindingId}:${model.revision}:${model.entries.length}`)
+  const follow = useAutoFollow<HTMLDivElement>(`${model.binding.bindingId}:${model.generation}:${model.snapshotSequence}:${model.entries.length}`)
   return <div ref={follow.ref} onScroll={follow.onScroll} className="cxa-timeline" data-agent-conversation-scroll-owner="timeline" role="log" aria-label={copy.timelineLabel} tabIndex={0}>
     {model.selection.kind === 'new-room' ? null : <div className="cxa-timeline-list">
       {model.entries.map((entry, index) => entry.kind === 'message'
-        ? <MessageEntry key={entry.id} entry={entry} previous={model.entries[index - 1]} model={model} commands={commands} copy={copy} onCommandError={onCommandError} />
-        : <div key={entry.id} className="cxa-entry cxa-status" data-entry-id={entry.id} data-state={entry.state} role="status" aria-live={entry.ariaLive}>
+        ? <MessageEntry key={entry.itemId} entry={entry} previous={model.entries[index - 1]} model={model} commands={commands} copy={copy} onCommandError={onCommandError} />
+        : <div key={entry.itemId} className="cxa-entry cxa-status" data-entry-id={entry.itemId} data-state={entry.state} role="status" aria-live={entry.ariaLive}>
             <span className="cxa-status-dot" aria-hidden="true" /><span>{entry.label}</span>
           </div>)}
     </div>}
@@ -123,13 +123,14 @@ function Timeline({
 }
 
 function EmptyRoom({ model, commands, copy, onCommandError }: Pick<AgentConversationRendererProps, 'model' | 'commands' | 'copy'> & { readonly onCommandError: (error: unknown) => void }) {
-  const newRoomAction = model.headerActions.find(action => action.id === 'new-room')
+  if (model.selection.kind !== 'new-room') return null
+  const newRoomAction = model.selection.newRoomAction
   return <div className="cxa-empty" data-agent-conversation-empty="true">
     <span className="cxa-empty-mark" aria-hidden="true">＋</span>
     <p className="cxa-empty-copy">{copy.newRoomDescription}</p>
-    {newRoomAction === undefined ? null : <ActionButton action={newRoomAction} run={() => {
+    <ActionButton action={newRoomAction} run={() => {
       void commands.runHeader(model, newRoomAction).catch(onCommandError)
-    }} />}
+    }} />
   </div>
 }
 
@@ -142,7 +143,7 @@ function Composer({
   const [draft, setDraft] = React.useState('')
   const [submitting, setSubmitting] = React.useState(false)
   const noticeId = React.useId()
-  React.useEffect(() => { setDraft(''); setCommandError(undefined) }, [model.bindingId, setCommandError])
+  React.useEffect(() => { setDraft(''); setCommandError(undefined) }, [model.binding.bindingId, model.generation, setCommandError])
   const unavailable = model.composer.availability !== 'available'
   const reason = commandError ?? model.composer.disabledReason ?? (unavailable ? copy.unavailable : undefined)
   const disabled = unavailable || model.composer.disabled || submitting || draft.trim() === ''
@@ -167,7 +168,6 @@ function Composer({
         aria-describedby={reason === undefined ? undefined : noticeId}
         placeholder={model.composer.placeholder}
         value={draft}
-        maxLength={65_536}
         rows={2}
         disabled={unavailable}
         onInput={event => setDraft(event.currentTarget.value)}
@@ -194,9 +194,7 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
   const participantSummary = model.selection.kind === 'room'
     ? model.selection.participants.map(participant => participant.name).join(' · ')
     : undefined
-  const headerActions = model.selection.kind === 'new-room'
-    ? model.headerActions.filter(action => action.id !== 'new-room')
-    : model.headerActions
+  const headerActions = model.headerActions
   const onCommandError = React.useCallback((error: unknown) => {
     setCommandError(error instanceof Error ? error.message : String(error))
   }, [])
