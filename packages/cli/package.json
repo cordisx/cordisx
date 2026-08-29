@@ -105,7 +105,7 @@
   },
   "devDependencies": {
     "@cordisx/channel-runtime": "file:../channel-runtime",
-    "@cordisx/protocol": "git+https://github.com/cordisx/cordisx-protocol.git#5c5bf120a3ae02bee934bbef0b40348d2daf7fde",
+    "@cordisx/protocol": "git+https://github.com/cordisx/cordisx-protocol.git#5ec36fee67fd768cb30b4129c7a89d8d6841ce90",
     "@types/node": "^22.18.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",

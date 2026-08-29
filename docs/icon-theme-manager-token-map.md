@@ -1,14 +1,14 @@
 # Manager icon token audit
 
-This is the Host-owned acceptance map for Manager icon seats. `Current semantic`
-is the exact key shipped by the current Host candidate. `Target semantic` is
-used only for rows blocked on the formally merged 64-key Protocol catalog; the
-Host must not substitute a different 51-key semantic while it waits.
+This is the Host-owned acceptance map for Manager icon seats. `Semantic` is the
+exact key from the formally merged 64-key Protocol catalog. Host tokens may
+share a key only when they express the same action and do not collapse distinct
+product meanings.
 
 Reicon glyph names are Host-private implementation choices. They are not part
 of the public provider contract and do not export Reicon data or SVG paths.
 
-| Manager token | Current semantic | Target semantic | Reicon glyph | Status / seat meaning |
+| Manager token | Semantic | Target semantic | Reicon glyph | Status / seat meaning |
 | --- | --- | --- | --- | --- |
 | `add` | `action.add` | same | `Add` | accepted |
 | `back` | `action.back` | same | `ArrowLeft` | accepted |
@@ -18,15 +18,15 @@ of the public provider contract and do not export Reicon data or SVG paths.
 | `copy` | `action.copy` | same | `Copy` | accepted |
 | `delete` | `action.delete` | same | `Trash2` | accepted |
 | `edit` | `action.edit` | same | `Edit` | accepted |
-| `move` | none (Host builtin-only) | `action.move` | `Layers` | wait for formal 64-key API; ArrayEditor reorder action; custom providers receive no request |
+| `move` | `action.move` | same | `ArrangeSquare2` | accepted ArrayEditor reorder action |
 | `console-clear` | `action.delete` | same | `Trash2` | accepted destructive clear action |
 | `console-copy` | `action.copy` | same | `Copy` | accepted |
-| `console-export` | none (Host builtin-only) | `action.export` | `Folder` | wait for formal 64-key API; custom providers receive no request |
-| `console-follow` | none (Host builtin-only) | `action.follow` | `Folder` | wait for formal 64-key API; follow latest output; custom providers receive no request |
-| `console-pause` | none (Host builtin-only) | `action.pause` | `Clock2` | wait for formal 64-key API; custom providers receive no request |
-| `console-resume` | none (Host builtin-only) | `action.resume` | `Activity` | wait for formal 64-key API; custom providers receive no request |
-| `contributions` | none (Host builtin-only) | `content.contributions` | `Component` | wait for formal 64-key API; extension-point/contribution content; custom providers receive no request |
-| `acknowledgements` (planned Host token) | absent | `content.acknowledgements` | `HandHeart` candidate | add only after formal 64-key API; About acknowledgements card |
+| `console-export` | `action.export` | same | `Export` | accepted |
+| `console-follow` | `action.follow` | same | `ArrowDownSquare` | accepted follow-latest action |
+| `console-pause` | `action.pause` | same | `Pause` | accepted |
+| `console-resume` | `action.resume` | same | `Play` | accepted |
+| `contributions` | `content.contributions` | same | `Plug` | accepted extension-point/contribution content |
+| `acknowledgements` | `content.acknowledgements` | same | `HandHeart` | accepted About acknowledgements content |
 | `diagnostics` | `status.error` | same | `XCircle` | accepted diagnostic/error seat |
 | `document` | `content.files` | same | `File` | accepted document content |
 | `external-link` | `action.external-link` | same | `ArrowUpRightSquare` | accepted |
@@ -58,18 +58,16 @@ of the public provider contract and do not export Reicon data or SVG paths.
 | `tasks-content-read` | `content.files` | same | `File` | accepted task content |
 | `tasks-control` | `action.settings` | same | `Settings` | accepted task-control configuration |
 | `tasks-create` | `action.add` | same | `Add` | accepted create action |
-| `turns-control` | none (Host builtin-only) | `agent.turn-control` | `Clock2` | wait for formal 64-key API; custom providers receive no request |
-| `turns-submit` | none (Host builtin-only) | `action.submit` | `Activity` | wait for formal 64-key API; custom providers receive no request |
+| `turns-control` | `agent.turn-control` | same | `CommandSquare` | accepted agent turn control |
+| `turns-submit` | `action.submit` | same | `Send` | accepted submit action |
 | `authors-source` | `action.external-link` | same | `ArrowUpRightSquare` | accepted Host-local audit decision |
-| `disable-plugin` | none (Host builtin-only) | `action.disable` | `Clock2` | wait for formal 64-key API; custom providers receive no request |
-| `enable-plugin` | none (Host builtin-only) | `action.enable` | `Activity` | wait for formal 64-key API; custom providers receive no request |
-| `favorite` | none (Host builtin-only) | `action.favorite` | `InfoCircle` | wait for formal 64-key API; default state is regular; custom providers receive no request |
-| `favorite-active` | none (Host builtin-only) | `action.favorite` | `InfoCircle` | wait for formal 64-key API; Host keeps selected state locally; custom providers receive no request |
-| `import-plugin` | none (Host builtin-only) | `action.import` | `Folder` | wait for formal 64-key API; custom providers receive no request |
+| `disable-plugin` | `action.disable` | same | `PowerOff` | accepted |
+| `enable-plugin` | `action.enable` | same | `Power` | accepted |
+| `favorite` | `action.favorite` | same | `Star` | accepted regular default state |
+| `favorite-active` | `action.favorite` | same | `Star` | accepted Host-selected state |
+| `import-plugin` | `action.import` | same | `Import` | accepted |
 | `uninstall-plugin` | `action.delete` | same | `Trash2` | accepted destructive uninstall action |
 
-The pending rows show the current provisional Host-only Reicon glyph, not a
-semantic alias or an accepted future visual. After the formal 64-key Protocol
-merge, Host must compile all 64 keys across 3 variants and 8 states, regenerate
-the 1,536-tuple proof, and re-run the light/dark 16/18/24 px matrix before
-marking the target semantics and glyphs accepted.
+The Host compiles all 64 keys across 3 variants and 8 states into the 1,536
+tuple proof. The light/dark 16/18/24 px matrix keeps default geometry regular
+and reserves filled geometry for explicit active or selected state.

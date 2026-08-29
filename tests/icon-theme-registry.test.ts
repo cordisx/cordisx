@@ -35,7 +35,7 @@ const definition = (value: NormalizedVectorDescriptor = descriptor): CordisXIcon
 const principal = { principalHandle: 'ipp_aurora0000000001' as const, pluginId: 'aurora', providerGeneration: 'aurora-3' }
 
 const require = createRequire(import.meta.url)
-const protocolRoot = path.dirname(require.resolve('@cordisx/protocol/package.json'))
+const protocolRoot = path.resolve(path.dirname(require.resolve('@cordisx/protocol/connector-service/v1')), '..')
 
 async function formalRegistrationValidator() {
   const schemas = await Promise.all([
@@ -47,6 +47,19 @@ async function formalRegistrationValidator() {
   addFormats(ajv)
   for (const schema of schemas) ajv.addSchema(schema)
   return ajv.getSchema('https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-provider-registration.v1.schema.json')!
+}
+
+async function formalCommonSchema() {
+  return JSON.parse(await readFile(path.join(protocolRoot, 'schemas', 'icon-theme-common.v1.schema.json'), 'utf8')) as {
+    $defs: {
+      semanticIconKey: { enum: string[] }
+      variant: { enum: string[] }
+      state: { enum: string[] }
+      completeCoverageProof: {
+        properties: Record<string, { const: unknown }>
+      }
+    }
+  }
 }
 
 function fullDefinition(): CordisXIconThemeProviderDefinitionV1 {
@@ -61,14 +74,38 @@ function fullDefinition(): CordisXIconThemeProviderDefinitionV1 {
 }
 
 describe('descriptor-only icon theme registry', () => {
-  it('publishes a pinned, complete Reicon default without raw geometry in its proof', () => {
+  it('keeps the Host catalog and complete proof exact with the pinned formal Protocol schema', async () => {
+    const schema = await formalCommonSchema()
+    expect(SEMANTIC_ICON_KEYS).toEqual(schema.$defs.semanticIconKey.enum)
+    expect(ICON_VARIANTS).toEqual(schema.$defs.variant.enum)
+    expect(ICON_STATES).toEqual(schema.$defs.state.enum)
+    expect(schema.$defs.completeCoverageProof.properties).toMatchObject({
+      catalogDigest: { const: 'sha256:fabbf2ac3d7177bc353432e4175240cc3fe10d040321e2b785c1da0f77634771' },
+      keyCount: { const: 64 },
+      variantCount: { const: 3 },
+      stateCount: { const: 8 },
+      tupleCount: { const: 1536 },
+    })
+  })
+
+  it('publishes a pinned, formally valid complete Reicon default without raw geometry in its proof', async () => {
     const registry = new IconThemeRegistry('host-12', 'profile-main')
     const selection = registry.selection()
     const registration = registry.registration(registry.builtinProviderHandle)!
     expect(selection).toMatchObject({ profileRevision: 0, outcome: 'default', selectedProvider: { providerId: 'builtin:reicon', providerGeneration: 'reicon-1.2.1' } })
     expect(selection.defaultProvider).toEqual(selection.fallbackProvider)
-    expect(registration.coverage).toMatchObject({ kind: 'complete', proof: { tupleCount: 1224, rawDataExported: false } })
+    expect(registration.coverage).toMatchObject({
+      kind: 'complete',
+      proof: {
+        catalogDigest: 'sha256:fabbf2ac3d7177bc353432e4175240cc3fe10d040321e2b785c1da0f77634771',
+        keyCount: 64,
+        tupleCount: 1536,
+        rawDataExported: false,
+      },
+    })
     expect(JSON.stringify(registration.coverage)).not.toMatch(/commands|paths|svg|iconData|callback/u)
+    const validate = await formalRegistrationValidator()
+    expect(validate(registration), JSON.stringify(validate.errors)).toBe(true)
   })
 
   it('keeps builtin and plugin handles fresh per registry while pins stay exact within one registry', () => {
@@ -83,17 +120,17 @@ describe('descriptor-only icon theme registry', () => {
     expect(firstPlugin.providerHandle).not.toBe(secondPlugin.providerHandle)
   })
 
-  it('fails closed instead of serializing a schema-invalid 1,224-tuple plugin partial', async () => {
+  it('fails closed instead of serializing a schema-invalid 1,536-tuple plugin partial', async () => {
     const registry = new IconThemeRegistry('host-12', 'profile-main')
     const complete = fullDefinition()
-    expect(complete.descriptors).toHaveLength(1224)
+    expect(complete.descriptors).toHaveLength(1536)
     const rejected = registry.registerPlugin('register-complete', 0, 'host-12', principal, complete)
     expect(rejected).toMatchObject({ result: { outcome: 'rejected', profileRevision: 0 } })
     expect(rejected.registration).toBeUndefined()
 
     const accepted = registry.registerPlugin('register-partial', 0, 'host-12', principal, {
       ...complete,
-      descriptors: complete.descriptors.slice(0, 1223),
+      descriptors: complete.descriptors.slice(0, 1535),
     }).registration!
     const validate = await formalRegistrationValidator()
     expect(validate(accepted), JSON.stringify(validate.errors)).toBe(true)

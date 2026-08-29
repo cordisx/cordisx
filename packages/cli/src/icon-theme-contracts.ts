@@ -4,13 +4,16 @@
  * exchange serializable data and never receive a renderer or DOM capability.
  */
 export const ICON_THEME_CATALOG_VERSION = 1 as const
-export const ICON_THEME_CATALOG_DIGEST = 'sha256:9ff8e2b85073e7254a83af012258b22da5b1d74429023887f948c1ba4852ba77' as const
+export const ICON_THEME_CATALOG_DIGEST = 'sha256:fabbf2ac3d7177bc353432e4175240cc3fe10d040321e2b785c1da0f77634771' as const
 
 export const SEMANTIC_ICON_KEYS = [
-  'action.add', 'action.back', 'action.close', 'action.copy', 'action.delete', 'action.edit',
-  'action.external-link', 'action.more', 'action.open', 'action.refresh', 'action.reset',
-  'action.save', 'action.search', 'action.settings', 'action.share', 'agent.reasoning',
-  'content.calendar', 'content.clock', 'content.files', 'content.folder', 'content.key',
+  'action.add', 'action.back', 'action.close', 'action.copy', 'action.delete', 'action.disable',
+  'action.edit', 'action.enable', 'action.export', 'action.external-link', 'action.favorite',
+  'action.follow', 'action.import', 'action.more', 'action.move', 'action.open', 'action.pause',
+  'action.refresh', 'action.reset', 'action.resume', 'action.save', 'action.search',
+  'action.settings', 'action.share', 'action.submit', 'agent.reasoning', 'agent.turn-control',
+  'content.acknowledgements', 'content.calendar', 'content.clock', 'content.contributions',
+  'content.files', 'content.folder', 'content.key',
   'content.layers', 'content.palette', 'content.panel', 'content.tags', 'control.check',
   'control.chevron-down', 'control.chevron-left', 'control.chevron-right', 'control.chevron-up',
   'control.minus', 'control.plus', 'navigation.about', 'navigation.channels',
@@ -74,10 +77,10 @@ export type IconThemeCoverage =
         readonly providerGeneration: string
         readonly protocolVersion: 1
         readonly descriptorFormatVersion: 1
-        readonly keyCount: 51
+        readonly keyCount: 64
         readonly variantCount: 3
         readonly stateCount: 8
-        readonly tupleCount: 1224
+        readonly tupleCount: 1536
         readonly outcome: 'passed'
         readonly rawDataExported: false
       }

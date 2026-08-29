@@ -6,7 +6,9 @@
 import type { IconFunction, IconWeight } from 'reicon/createIcon'
 import Activity from 'reicon/icons/Activity'
 import Add from 'reicon/icons/Add'
+import ArrangeSquare2 from 'reicon/icons/ArrangeSquare2'
 import ArrowDown from 'reicon/icons/ArrowDown'
+import ArrowDownSquare from 'reicon/icons/ArrowDownSquare'
 import ArrowLeft from 'reicon/icons/ArrowLeft'
 import ArrowRight from 'reicon/icons/ArrowRight'
 import ArrowUp from 'reicon/icons/ArrowUp'
@@ -18,29 +20,40 @@ import Check from 'reicon/icons/Check'
 import CheckCircle from 'reicon/icons/CheckCircle'
 import Clock2 from 'reicon/icons/Clock2'
 import Component from 'reicon/icons/Component'
+import CommandSquare from 'reicon/icons/CommandSquare'
 import Copy from 'reicon/icons/Copy'
 import Crown from 'reicon/icons/Crown'
 import DocumentText from 'reicon/icons/DocumentText'
 import Edit from 'reicon/icons/Edit'
+import Export from 'reicon/icons/Export'
 import File from 'reicon/icons/File'
 import Floppy from 'reicon/icons/Floppy'
 import Folder from 'reicon/icons/Folder'
 import History from 'reicon/icons/History'
+import HandHeart from 'reicon/icons/HandHeart'
 import InfoCircle from 'reicon/icons/InfoCircle'
+import Import from 'reicon/icons/Import'
 import Key from 'reicon/icons/Key'
 import Layers from 'reicon/icons/Layers'
 import MinusCircle from 'reicon/icons/MinusCircle'
 import MoreH from 'reicon/icons/MoreH'
 import Palette from 'reicon/icons/Palette'
+import Pause from 'reicon/icons/Pause'
+import Play from 'reicon/icons/Play'
+import Plug from 'reicon/icons/Plug'
+import Power from 'reicon/icons/Power'
+import PowerOff from 'reicon/icons/PowerOff'
 import Puzzle from 'reicon/icons/Puzzle'
 import Refresh from 'reicon/icons/Refresh'
 import Rocket from 'reicon/icons/Rocket'
 import Route from 'reicon/icons/Route'
 import Search from 'reicon/icons/Search'
+import Send from 'reicon/icons/Send'
 import Settings from 'reicon/icons/Settings'
 import Share from 'reicon/icons/Share'
 import Shop from 'reicon/icons/Shop'
 import Sparkles from 'reicon/icons/Sparkles'
+import Star from 'reicon/icons/Star'
 import Tag from 'reicon/icons/Tag'
 import Trash2 from 'reicon/icons/Trash2'
 import Verified from 'reicon/icons/Verified'
@@ -62,19 +75,32 @@ const REICON_GLYPHS = Object.freeze({
   'action.close': X,
   'action.copy': Copy,
   'action.delete': Trash2,
+  'action.disable': PowerOff,
   'action.edit': Edit,
+  'action.enable': Power,
+  'action.export': Export,
   'action.external-link': ArrowUpRightSquare,
+  'action.favorite': Star,
+  'action.follow': ArrowDownSquare,
+  'action.import': Import,
   'action.more': MoreH,
+  'action.move': ArrangeSquare2,
   'action.open': Folder,
+  'action.pause': Pause,
   'action.refresh': Refresh,
   'action.reset': Refresh,
+  'action.resume': Play,
   'action.save': Floppy,
   'action.search': Search,
   'action.settings': Settings,
   'action.share': Share,
+  'action.submit': Send,
   'agent.reasoning': Sparkles,
+  'agent.turn-control': CommandSquare,
+  'content.acknowledgements': HandHeart,
   'content.calendar': Calendar,
   'content.clock': Clock2,
+  'content.contributions': Plug,
   'content.files': File,
   'content.folder': Folder,
   'content.key': Key,

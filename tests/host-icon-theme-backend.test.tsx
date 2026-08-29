@@ -18,7 +18,6 @@ import { IconThemeRegistry } from '../packages/cli/src/renderer/icon-theme-regis
 import {
   HOST_ICON_16PX_CSS,
   MANAGER_ICON_SEMANTICS,
-  PENDING_MANAGER_ICON_TOKENS,
   bindIconThemeRegistry,
   createManagerIcon,
   hostSurfaceIconKey,
@@ -63,7 +62,7 @@ function isIconLibrary(moduleName: string): boolean {
 }
 
 describe('Host Reicon normalized backend', () => {
-  it('privately compiles and validates all 1,224 formal Protocol tuples', () => {
+  it('privately compiles and validates all 1,536 formal Protocol tuples', () => {
     let tuples = 0
     for (const key of SEMANTIC_ICON_KEYS) for (const variant of ICON_VARIANTS) for (const state of ICON_STATES) {
       let descriptor
@@ -73,7 +72,42 @@ describe('Host Reicon normalized backend', () => {
       expect(isNormalizedVectorDescriptor(descriptor), `${key}/${variant}/${state}`).toBe(true)
       tuples += 1
     }
-    expect(tuples).toBe(1224)
+    expect(tuples).toBe(1536)
+  })
+
+  it('renders the complete regular/filled light/dark 16/18/24 visual DOM matrix', () => {
+    const dom = new JSDOM('<!doctype html>')
+    let rendered = 0
+    for (const theme of ['light', 'dark'] as const) for (const size of [16, 18, 24]) {
+      for (const key of SEMANTIC_ICON_KEYS) for (const [variant, state] of [['regular', 'default'], ['filled', 'active']] as const) {
+        const icon = renderHostIconSvg(dom.window.document, key, { theme, size, variant, state }).svg
+        expect(icon.dataset, `${theme}/${size}/${key}/${variant}`).toMatchObject({
+          hostIconKey: key,
+          hostIconProvider: 'builtin:reicon',
+          hostIconFallback: 'none',
+          hostIconTheme: theme,
+          hostIconState: state,
+          hostIconVariant: variant,
+        })
+        expect(icon.getAttribute('width')).toBe(String(size))
+        expect(icon.getAttribute('height')).toBe(String(size))
+        expect(icon.getAttribute('aria-hidden')).toBe('true')
+        expect(icon.getAttribute('focusable')).toBe('false')
+        expect(icon.querySelectorAll('path').length, key).toBeGreaterThan(0)
+        rendered += 1
+      }
+    }
+    expect(rendered).toBe(64 * 2 * 3 * 2)
+    const newlyFormalKeys = [
+      'action.disable', 'action.enable', 'action.export', 'action.favorite', 'action.follow',
+      'action.import', 'action.move', 'action.pause', 'action.resume', 'action.submit',
+      'agent.turn-control', 'content.acknowledgements', 'content.contributions',
+    ] as const
+    for (const key of newlyFormalKeys) {
+      expect(resolveBuiltinReiconDescriptor(key, 'regular', 'default'), key)
+        .not.toEqual(resolveBuiltinReiconDescriptor(key, 'filled', 'active'))
+    }
+    dom.window.close()
   })
 
   it('keeps normal geometry regular and reserves filled geometry for explicit active/favorite state', () => {
@@ -152,43 +186,77 @@ describe('Host Reicon normalized backend', () => {
     }
   })
 
-  it('keeps every pending Manager token on the Host-private builtin path', () => {
+  it('routes every newly formal Manager semantic to the selected descriptor-only provider', () => {
     const dom = new JSDOM('<!doctype html>')
-    const registry = new IconThemeRegistry('host-pending', 'profile-main')
-    const registration = registry.registerPlugin('register', 0, 'host-pending', {
-      principalHandle: 'ipp_pending000000001', pluginId: 'pending', providerGeneration: 'pending-1',
+    const registry = new IconThemeRegistry('host-formal64', 'profile-main')
+    const rows = [
+      ['move', 'action.move', 'regular', 'default'],
+      ['console-export', 'action.export', 'regular', 'default'],
+      ['console-follow', 'action.follow', 'regular', 'default'],
+      ['console-pause', 'action.pause', 'regular', 'default'],
+      ['console-resume', 'action.resume', 'regular', 'default'],
+      ['contributions', 'content.contributions', 'regular', 'default'],
+      ['acknowledgements', 'content.acknowledgements', 'regular', 'default'],
+      ['turns-control', 'agent.turn-control', 'regular', 'default'],
+      ['turns-submit', 'action.submit', 'regular', 'default'],
+      ['disable-plugin', 'action.disable', 'regular', 'default'],
+      ['enable-plugin', 'action.enable', 'regular', 'default'],
+      ['favorite', 'action.favorite', 'regular', 'default'],
+      ['favorite-active', 'action.favorite', 'filled', 'selected'],
+      ['import-plugin', 'action.import', 'regular', 'default'],
+    ] as const
+    const registration = registry.registerPlugin('register', 0, 'host-formal64', {
+      principalHandle: 'ipp_formal6400000001', pluginId: 'formal64', providerGeneration: 'formal64-1',
     }, {
       schemaVersion: 1,
-      namespace: 'pending',
+      namespace: 'formal64',
       providerVersion: '1.0.0',
-      descriptors: [{
-        key: 'content.layers', variant: 'regular', state: 'default',
-        descriptor: resolveBuiltinReiconDescriptor('content.layers', 'regular', 'default'),
-      }],
+      descriptors: rows.map(([, key, variant, state]) => ({
+        key, variant, state, descriptor: resolveBuiltinReiconDescriptor(key, variant, state),
+      })),
     }).registration!
-    registry.select('select', 1, 'host-pending', registration.providerHandle, registration.providerGeneration)
+    registry.select('select', 1, 'host-formal64', registration.providerHandle, registration.providerGeneration)
     const resolve = vi.spyOn(registry, 'resolve')
     const unbind = bindIconThemeRegistry(dom.window.document, registry)
     try {
-      for (const token of PENDING_MANAGER_ICON_TOKENS) {
-        expect(MANAGER_ICON_SEMANTICS[token], token).toBeUndefined()
+      for (const [token, key, variant, state] of rows) {
+        expect(MANAGER_ICON_SEMANTICS[token], token).toBe(key)
         const svg = createManagerIcon(dom.window.document, token).querySelector('svg')!
-        expect(svg.dataset.hostIconProvider, token).toBe('builtin:reicon')
-        expect(svg.dataset.hostIconFallback, token).toBe('reicon')
-        expect(svg.dataset.hostIconKey, token).toBe(token)
+        expect(svg.dataset, token).toMatchObject({
+          hostIconProvider: 'plugin:formal64:formal64', hostIconFallback: 'none', hostIconKey: key,
+          hostIconVariant: variant, hostIconState: state,
+        })
       }
-      expect(resolve).not.toHaveBeenCalled()
-      registry.rollback(
-        'rollback-failed', 2, 'host-pending', registration.providerHandle, registration.providerGeneration,
-        registry.builtinProviderHandle, 'reicon-stale',
+      expect(resolve).toHaveBeenCalledTimes(rows.length)
+      expect(resolve.mock.calls.map(([key, variant, state]) => [key, variant, state])).toEqual(
+        rows.map(([, key, variant, state]) => [key, variant, state]),
       )
-      const neutral = createManagerIcon(dom.window.document, 'move').querySelector('svg')!
-      expect(neutral.dataset).toMatchObject({ hostIconProvider: 'host:neutral', hostIconFallback: 'neutral' })
-      expect(resolve).not.toHaveBeenCalled()
     } finally {
       unbind()
       registry.dispose()
       dom.window.close()
+    }
+  })
+
+  it('keeps each newly formal semantic glyph distinct from its former provisional alias', () => {
+    const pairs = [
+      ['action.move', 'content.layers'],
+      ['action.export', 'action.open'],
+      ['action.follow', 'action.open'],
+      ['action.pause', 'status.pending'],
+      ['action.resume', 'navigation.runtime'],
+      ['content.contributions', 'content.panel'],
+      ['content.acknowledgements', 'content.contributions'],
+      ['agent.turn-control', 'action.settings'],
+      ['action.submit', 'navigation.runtime'],
+      ['action.disable', 'status.pending'],
+      ['action.enable', 'navigation.runtime'],
+      ['action.favorite', 'status.info'],
+      ['action.import', 'content.folder'],
+    ] as const
+    for (const [semantic, formerAlias] of pairs) {
+      expect(resolveBuiltinReiconDescriptor(semantic, 'regular', 'default'), `${semantic}/${formerAlias}`)
+        .not.toEqual(resolveBuiltinReiconDescriptor(formerAlias, 'regular', 'default'))
     }
   })
 

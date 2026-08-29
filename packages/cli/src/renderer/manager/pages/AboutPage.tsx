@@ -131,7 +131,7 @@ export function AboutPage({ model, snapshot, router }: { readonly model: Manager
     </section>}
     <div className="cxr-list cxr-about-links">
       {copy.links.map(([label, href, icon]) => <a key={href} className="cxr-card" href={href} target="_blank" rel="noopener noreferrer" aria-label={locale === 'zh-CN' ? `${label}（${copy.opensInNewWindow}）` : `${label} (${copy.opensInNewWindow})`}><span className="cxr-card-icon"><HostIcon token={icon} /></span><span className="cxr-card-body"><span className="cxr-card-title">{label}</span></span><HostIcon token="external-link" /></a>)}
-      <button type="button" className="cxr-card" onClick={() => router.navigate({ kind: 'about-acknowledgements' })}><span className="cxr-card-icon"><HostIcon token="contributions" /></span><span className="cxr-card-body"><span className="cxr-card-title">{copy.acknowledgements}</span></span><span className="cxr-card-arrow" aria-hidden="true">›</span></button>
+      <button type="button" className="cxr-card" onClick={() => router.navigate({ kind: 'about-acknowledgements' })}><span className="cxr-card-icon"><HostIcon token="acknowledgements" /></span><span className="cxr-card-body"><span className="cxr-card-title">{copy.acknowledgements}</span></span><span className="cxr-card-arrow" aria-hidden="true">›</span></button>
     </div>
   </section>
 }

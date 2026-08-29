@@ -23,7 +23,7 @@ export function iconThemeRegistryForDocument(document: Document): IconThemeRegis
 
 export const MANAGER_ICON_TOKENS = [
   'add', 'back', 'capability-fallback', 'close', 'configuration', 'copy', 'delete', 'edit', 'move', 'console-clear', 'console-copy',
-  'console-export', 'console-follow', 'console-pause', 'console-resume', 'contributions',
+  'console-export', 'console-follow', 'console-pause', 'console-resume', 'contributions', 'acknowledgements',
   'diagnostics', 'document', 'external-link', 'launcher', 'marketplace', 'marketplace-certified',
   'marketplace-official', 'marketplace-source-add', 'marketplace-source-copy',
   'marketplace-source-edit', 'marketplace-source-move-down', 'marketplace-source-move-up',
@@ -48,8 +48,15 @@ export const MANAGER_ICON_SEMANTICS: Readonly<Partial<Record<ManagerIconToken, S
   copy: 'action.copy',
   delete: 'action.delete',
   edit: 'action.edit',
+  move: 'action.move',
   'console-clear': 'action.delete',
   'console-copy': 'action.copy',
+  'console-export': 'action.export',
+  'console-follow': 'action.follow',
+  'console-pause': 'action.pause',
+  'console-resume': 'action.resume',
+  contributions: 'content.contributions',
+  acknowledgements: 'content.acknowledgements',
   diagnostics: 'status.error',
   document: 'content.files',
   'external-link': 'action.external-link',
@@ -81,35 +88,15 @@ export const MANAGER_ICON_SEMANTICS: Readonly<Partial<Record<ManagerIconToken, S
   'tasks-content-read': 'content.files',
   'tasks-control': 'action.settings',
   'tasks-create': 'action.add',
+  'turns-control': 'agent.turn-control',
+  'turns-submit': 'action.submit',
   'authors-source': 'action.external-link',
+  'disable-plugin': 'action.disable',
+  'enable-plugin': 'action.enable',
+  favorite: 'action.favorite',
+  'favorite-active': 'action.favorite',
+  'import-plugin': 'action.import',
   'uninstall-plugin': 'action.delete',
-})
-
-/**
- * Manager concepts whose normative semantics are not present in the formal
- * 51-key Protocol catalog. These aliases select only a private Reicon glyph;
- * they must never become requests to a selected plugin provider.
- */
-export const PENDING_MANAGER_ICON_TOKENS = Object.freeze([
-  'move', 'console-export', 'console-follow', 'console-pause', 'console-resume',
-  'contributions', 'turns-control', 'turns-submit', 'disable-plugin', 'enable-plugin',
-  'favorite', 'favorite-active', 'import-plugin',
-] as const satisfies readonly ManagerIconToken[])
-
-const MANAGER_BUILTIN_ONLY_GLYPHS: Readonly<Partial<Record<ManagerIconToken, SemanticIconKey>>> = Object.freeze({
-  move: 'content.layers',
-  'console-export': 'action.open',
-  'console-follow': 'action.open',
-  'console-pause': 'status.pending',
-  'console-resume': 'navigation.runtime',
-  contributions: 'content.panel',
-  'turns-control': 'status.pending',
-  'turns-submit': 'navigation.runtime',
-  'disable-plugin': 'status.pending',
-  'enable-plugin': 'navigation.runtime',
-  favorite: 'status.info',
-  'favorite-active': 'status.info',
-  'import-plugin': 'content.folder',
 })
 
 const HOST_SURFACE_ICON_MAP: Readonly<Record<string, SemanticIconKey>> = Object.freeze({
@@ -251,22 +238,7 @@ export function resolveManagerIcon(
 ): { readonly descriptor: NormalizedVectorDescriptor; readonly resolution: HostIconResolution } {
   const semantic = MANAGER_ICON_SEMANTICS[token]
   if (semantic !== undefined) return resolveHostIcon(document, semantic, options)
-  const builtinGlyph = MANAGER_BUILTIN_ONLY_GLYPHS[token]
-  if (builtinGlyph === undefined) return resolveBuiltinHostIcon(token, options)
-  const state = normalizedState(options.state ?? (token === 'favorite-active' ? 'favorite' : 'default'))
-  const variant = normalizedVariant({ ...options, state })
-  const fallback = document === undefined ? 'none' : documentRegistries.get(document)?.hostBuiltinFallback() ?? 'none'
-  return {
-    descriptor: resolveBuiltinReiconDescriptor(fallback === 'neutral' ? 'control.minus' : builtinGlyph, variant, state),
-    resolution: {
-      key: token,
-      provider: fallback === 'neutral' ? 'host:neutral' : 'builtin:reicon',
-      fallback,
-      state,
-      theme: options.theme ?? 'light',
-      variant,
-    },
-  }
+  return resolveBuiltinHostIcon(token, options)
 }
 
 export function renderHostIconSvg(
