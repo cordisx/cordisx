@@ -7,6 +7,7 @@ import {
   type CordisXLocalizationSeat,
 } from '../packages/cli/src/contracts.js'
 import { CommandRegistry } from '../packages/cli/src/renderer/commands.js'
+import { markAgentConversationPageMount } from '../packages/cli/src/renderer/agent-conversation-page.js'
 import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
@@ -99,6 +100,67 @@ async function settle(): Promise<void> {
 }
 
 describe('NavigationRegistry', () => {
+  it('mounts Host-identified conversation pages in main with one dynamic chrome and one scroll owner', async () => {
+    const dom = new JSDOM('<body><main id="main"></main><main id="app"></main></body>')
+    const pages = new PageRegistry()
+    const outlets = new OutletRegistry()
+    outlets.declare({
+      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'portal', contextPolicy: 'semantic', presentationGroup: 'primary',
+    }, new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one'), path => path.startsWith('/main/'))
+    outlets.declare({
+      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation', presentationGroup: 'primary',
+    }, new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer'), path => !path.startsWith('/main/'))
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    const mount = markAgentConversationPageMount(({ container }: { container: HTMLElement }) => {
+      const chrome = container.ownerDocument.createElement('header')
+      chrome.className = 'cxa-chrome'
+      chrome.textContent = 'Dynamic room title'
+      const timeline = container.ownerDocument.createElement('div')
+      timeline.dataset.agentConversationScrollOwner = 'timeline'
+      container.append(chrome, timeline)
+    })
+    pages.register('chatroom', {
+      $schema: CORDISX_PAGE_SCHEMA_V3,
+      schemaVersion: 3,
+      id: 'room',
+      title: { key: 'page.room.title', fallback: 'New room' },
+      description: { key: 'page.room.description', fallback: 'Host-rendered conversation.' },
+    }, mount)
+    navigation.register('chatroom', {
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'room', path: '/main/chatroom', outlet: 'main', page: 'room',
+      title: { key: 'route.room.title', fallback: 'New room' },
+      description: { key: 'route.room.description', fallback: 'Open the Host-rendered conversation.' },
+    })
+    navigation.register('chatroom', {
+      id: 'room-app', path: '/chatroom', outlet: 'app', page: 'room',
+    })
+
+    expect(() => pages.register('chatroom', {
+      id: 'room-with-plugin-chrome',
+      title: { key: 'page.room-with-plugin-chrome.title', fallback: 'Room' },
+      headerActions: [{
+        id: 'duplicate', label: { key: 'action.duplicate', fallback: 'Duplicate action' },
+        command: { id: 'duplicate' },
+      }],
+    }, markAgentConversationPageMount(() => undefined))).toThrow(/cannot declare breadcrumbs, tabs, or header actions/)
+    await expect(navigation.navigate('chatroom', { id: 'room-app' })).rejects.toThrow(/requires the main outlet/)
+
+    await navigation.navigate('chatroom', { id: 'room' })
+    const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="chatroom:room"]')!
+    expect(page.dataset.cordisxPageChromePolicy).toBe('agent-conversation')
+    expect(page.querySelectorAll('[data-cordisx-page-chrome]')).toHaveLength(0)
+    expect(page.querySelectorAll('.cxa-chrome')).toHaveLength(1)
+    expect(page.querySelectorAll('[data-agent-conversation-scroll-owner="timeline"]')).toHaveLength(1)
+    expect(page.querySelector<HTMLElement>('[data-cordisx-page-body]')?.style.overflow).toBe('hidden')
+
+    await navigation.dispose()
+    pages.dispose()
+    outlets.dispose()
+    dom.window.close()
+  })
+
   it('projects localized route/page metadata and diagnoses legacy omissions without inventing purpose', async () => {
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()

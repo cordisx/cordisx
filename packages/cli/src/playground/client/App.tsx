@@ -1,40 +1,117 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { HostMenu, type HostMenuItem } from '../../renderer/host-ui/HostMenu.js'
+import { createSidebarItem, type SidebarItemControl } from '../../renderer/host-ui/SidebarItem.js'
 import { FixtureSummary } from './components/FixtureSummary.js'
-import { HostSeats } from './components/HostSeats.js'
-import { PlaygroundToolbar } from './components/PlaygroundToolbar.js'
+import { HostSeats, type PlaygroundFixtureMode } from './components/HostSeats.js'
+import { playgroundEnvironment, usePlaygroundEnvironment } from './environment.js'
 import { bootRuntime, useRuntimeState } from './runtime-store.js'
+
+interface SidebarItemProps {
+  readonly id: string
+  readonly label: string
+  readonly ariaLabel?: string
+  readonly secondary?: string
+  readonly icon: string
+  readonly selected?: boolean
+  readonly onActivate: () => void
+}
+
+function SidebarItem(props: SidebarItemProps) {
+  const host = useRef<HTMLDivElement>(null)
+  const control = useRef<SidebarItemControl | undefined>(undefined)
+  const activate = useRef(props.onActivate)
+  activate.current = props.onActivate
+
+  useLayoutEffect(() => {
+    const item = createSidebarItem(document, {
+      id: props.id,
+      label: props.label,
+      icon: props.icon,
+      ...(props.ariaLabel === undefined ? {} : { ariaLabel: props.ariaLabel }),
+      ...(props.secondary === undefined ? {} : { secondary: props.secondary }),
+      selected: props.selected === true,
+      onActivate: () => activate.current(),
+    })
+    control.current = item
+    host.current?.replaceChildren(item.element)
+    return () => { item.element.remove(); control.current = undefined }
+  }, [props.id, props.label, props.ariaLabel, props.secondary, props.icon])
+  useLayoutEffect(() => control.current?.setSelected(props.selected === true), [props.selected])
+  return <div ref={host} className="pg-sidebar-item-host" />
+}
 
 export function App() {
   const runtime = useRuntimeState()
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
-  const [locale, setLocale] = useState<'zh-CN' | 'en'>('zh-CN')
+  const environment = usePlaygroundEnvironment()
+  const [fixtureMode, setFixtureMode] = useState<PlaygroundFixtureMode>('conversation')
+  const shell = useRef<HTMLDivElement>(null)
+  const en = environment.locale === 'en'
 
   useEffect(() => { void bootRuntime() }, [])
-  useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
-  useEffect(() => {
-    document.documentElement.lang = locale
-    document.documentElement.dir = 'ltr'
-  }, [locale])
+  useEffect(() => shell.current === null ? undefined : playgroundEnvironment.attachTheme(shell.current), [])
+
+  const reset = async () => {
+    await fetch('/api/reset', { method: 'POST' })
+    localStorage.clear()
+    window.location.reload()
+  }
+  const menuItems: readonly HostMenuItem[] = [
+    { kind: 'heading', id: 'theme-heading', label: en ? 'Appearance' : '外观' },
+    ...(['system', 'light', 'dark'] as const).map(value => ({
+      kind: 'action' as const,
+      id: `theme-${value}`,
+      label: en ? ({ system: 'Follow system', light: 'Light', dark: 'Dark' } as const)[value] : ({ system: '跟随系统', light: '浅色', dark: '深色' } as const)[value],
+      selected: environment.themePreference === value,
+      onSelect: () => playgroundEnvironment.setTheme(value),
+    })),
+    { kind: 'separator', id: 'theme-locale-separator' },
+    { kind: 'heading', id: 'locale-heading', label: en ? 'Language' : '语言' },
+    { kind: 'action', id: 'locale-zh', label: '中文', selected: environment.locale === 'zh-CN', onSelect: () => playgroundEnvironment.setLocale('zh-CN') },
+    { kind: 'action', id: 'locale-en', label: 'English', selected: environment.locale === 'en', onSelect: () => playgroundEnvironment.setLocale('en') },
+    { kind: 'separator', id: 'developer-separator' },
+    { kind: 'heading', id: 'developer-heading', label: en ? 'Developer' : '开发' },
+    { kind: 'action', id: 'fixture-conversation', label: en ? 'Conversation fixture' : '有会话 fixture', selected: fixtureMode === 'conversation', onSelect: () => setFixtureMode('conversation') },
+    { kind: 'action', id: 'fixture-empty', label: en ? 'Empty fixture' : '空会话 fixture', selected: fixtureMode === 'empty', onSelect: () => setFixtureMode('empty') },
+    { kind: 'action', id: 'reload', label: en ? 'Reload plugins' : '重载插件', onSelect: () => window.location.reload() },
+    { kind: 'action', id: 'reset', label: en ? 'Reset fixture' : '重置 fixture', onSelect: () => { void reset() } },
+  ]
 
   return (
-    <div className="pg-shell">
-      <aside className="pg-sidebar">
-        <h1>CordisX UI Playground</h1>
-        <p>Vite + React Fast Refresh · 组件热更新已连接 · 本地 Host 模拟席位，不连接 Codex。</p>
-        <FixtureSummary plugins={runtime.plugins} />
-        <div className="pg-seat pg-manager-seat"><span>Manager</span><span className="pg-manager-anchor" data-cordisx-playground-manager-trigger aria-hidden="true" /></div>
-        <div className="pg-seat">Host-only capability<br /><span data-pg-capability>unavailable · no Codex connection</span></div>
-        <div className="pg-unavailable">这里的标准席位用于预览。Codex native anchor、真实会话与当前连接均不挂载。</div>
+    <div ref={shell} className="pg-shell" data-pg-fixture-mode={fixtureMode} data-pg-locale={environment.locale}>
+      <aside className="pg-sidebar" aria-label={en ? 'Playground navigation' : 'Playground 导航'}>
+        <div className="pg-brand-seat">
+          <span className="pg-manager-anchor" data-cordisx-playground-manager-trigger aria-hidden="true" />
+        </div>
+        <div className="pg-sidebar-stack">
+          <SidebarItem id="action.new" label={en ? 'New task' : '新任务'} icon="host:new" onActivate={() => setFixtureMode('empty')} />
+          <nav className="pg-primary-navigation" aria-label={en ? 'Plugin navigation' : '插件导航'}>
+            <SidebarItem id="host.playground" label="Playground" icon="host:playground" onActivate={() => setFixtureMode('conversation')} />
+            <div className="pg-surface-seat pg-navigation-seat" data-cordisx-playground-surface="sidebar.navigation.items" data-pg-seat-label="sidebar.navigation.items" />
+          </nav>
+        </div>
+        <div className="pg-session-heading"><span>{en ? 'Recent tasks' : '最近任务'}</span><small>fixture</small></div>
+        <div className="pg-session-list">
+          <SidebarItem id="fixture.conversation" label={en ? 'Plugin composition' : '调试插件组合'} secondary={en ? 'Inspect pages and slots' : '验证页面与插槽贡献'} icon="host:history" selected={fixtureMode === 'conversation'} onActivate={() => setFixtureMode('conversation')} />
+          <SidebarItem id="fixture.empty" label={en ? 'Empty session' : '空会话'} secondary={en ? 'Inspect the no-context state' : '检查无上下文状态'} icon="host:new" selected={fixtureMode === 'empty'} onActivate={() => setFixtureMode('empty')} />
+        </div>
+        <footer className="pg-sidebar-footer">
+          <div className="pg-footer-surface" data-cordisx-playground-surface="sidebar.footer.before-control" />
+          <HostMenu
+            label={en ? 'Playground environment and developer tools' : 'Playground 环境与开发工具'}
+            className="pg-sidebar-control"
+            icon={<span className="pg-sidebar-control-icon" aria-hidden="true">•••</span>}
+            copy={<span className="pg-sidebar-control-copy">{en ? 'Environment' : '环境与开发'}</span>}
+            items={menuItems}
+            footer={<>
+              <div className="pg-tool-status"><strong>{en ? 'Isolated Cordis runtime' : '独立 Cordis runtime'}</strong><span className="pg-status" role="status" title={runtime.error}>{runtime.error === undefined ? runtime.status : `${runtime.status} · ${runtime.error}`}</span></div>
+              <FixtureSummary plugins={runtime.plugins} locale={environment.locale} />
+              <p className="pg-capability-note"><span data-pg-capability>Host connection unavailable</span> · {en ? 'This page does not start or connect to Codex.' : '本页不启动或连接真实 Codex。'}</p>
+            </>}
+          />
+          <div className="pg-footer-surface" data-cordisx-playground-surface="sidebar.footer.after-control" />
+        </footer>
       </aside>
-      <main className="pg-main">
-        <PlaygroundToolbar
-          status={runtime.status}
-          {...(runtime.error === undefined ? {} : { error: runtime.error })}
-          onToggleTheme={() => setTheme(value => value === 'dark' ? 'light' : 'dark')}
-          onToggleLocale={() => setLocale(value => value === 'zh-CN' ? 'en' : 'zh-CN')}
-        />
-        <HostSeats />
-      </main>
+      <HostSeats mode={fixtureMode} locale={environment.locale} />
     </div>
   )
 }

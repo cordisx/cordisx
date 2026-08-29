@@ -1,5 +1,7 @@
 import type { Metafile, Plugin } from 'esbuild'
+import { fileURLToPath } from 'node:url'
 
+export const CORDISX_CONTRACTS_MODULE = 'cordisx/contracts'
 export const CORDISX_REACT_MODULE = 'cordisx/react'
 export const CORDISX_REACT_JSX_RUNTIME_MODULE = 'cordisx/react/jsx-runtime'
 export const CORDISX_REACT_JSX_DEV_RUNTIME_MODULE = 'cordisx/react/jsx-dev-runtime'
@@ -51,6 +53,11 @@ const REACT_EXPORTS = [
 
 const UI_EXPORTS = ['Button', 'Card', 'EmptyState', 'Heading', 'Icon', 'Select', 'Stack', 'Text'] as const
 
+const CONTRACTS_MODULE_PATH = fileURLToPath(new URL(
+  import.meta.url.endsWith('.ts') ? '../contracts.ts' : '../contracts.js',
+  import.meta.url,
+))
+
 function runtimePrelude(): string {
   return `const runtime = globalThis.__cordisxSharedReactRuntime;
 if (runtime === undefined) throw new Error('CordisX shared React runtime is unavailable');`
@@ -79,11 +86,12 @@ function uiModule(): string {
 ${UI_EXPORTS.map(name => `export const ${name} = runtime.ui.${name};`).join('\n')}`
 }
 
-/** Resolve the public plugin authoring modules without putting React in plugin artifacts. */
+/** Resolve public plugin authoring modules against this exact Host generation. */
 export function cordisXReactVirtualModules(): Plugin {
   return {
     name: 'cordisx-shared-react',
     setup(build): void {
+      build.onResolve({ filter: /^cordisx\/contracts$/ }, () => ({ path: CONTRACTS_MODULE_PATH }))
       build.onResolve({ filter: /^cordisx\/(react(\/jsx-(dev-)?runtime)?|ui)$/ }, args => ({
         path: args.path,
         namespace: 'cordisx-shared-react',

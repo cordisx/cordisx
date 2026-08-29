@@ -279,10 +279,17 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
       controls: _controls,
       ...props
     } = context as CordisXPageMountContext
+    const ReactivePage = (): React.ReactElement => {
+      React.useSyncExternalStore(
+        listener => props.localization.subscribe(listener),
+        () => props.localization.getSnapshot(),
+      )
+      return React.createElement(component as CordisXReactPageComponent, props)
+    }
     root.render(React.createElement(
       SharedReactErrorBoundary,
       undefined,
-      React.createElement(component as CordisXReactPageComponent, props),
+      React.createElement(ReactivePage),
     ))
     return unmount
   }

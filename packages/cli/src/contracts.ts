@@ -1,4 +1,9 @@
 import type { Context, Disposable, Effect } from '@deepseek-ai/cordis'
+import type {
+  AgentConversationShellBinding,
+  AgentConversationShellCommandContext,
+  AgentConversationShellSource,
+} from '@cordisx/protocol/agent-conversation-shell/v1'
 import type { ComponentType } from 'react'
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
 import type { CordisXPluginManifestV4 } from './permission-contracts.js'
@@ -21,6 +26,25 @@ export type {
   CordisXConnectorSubscribeRuntimeResult,
   CordisXConnectorSubscription,
 } from './renderer/connectors.js'
+export type {
+  AgentConversationAction,
+  AgentConversationItem,
+  AgentConversationParticipant,
+  AgentConversationSelection,
+  AgentConversationShellBinding,
+  AgentConversationShellBindRequest,
+  AgentConversationShellBindResult,
+  AgentConversationShellCommandContext,
+  AgentConversationShellHost,
+  AgentConversationShellPage,
+  AgentConversationShellResult,
+  AgentConversationShellSnapshot,
+  AgentConversationShellSource,
+  AgentConversationShellSubscribeRuntimeResult,
+  AgentConversationShellSubscription,
+  AgentConversationShellSubscriptionHandle,
+  AgentConversationShellUpdate,
+} from '@cordisx/protocol/agent-conversation-shell/v1'
 
 /** Scalar parameter values accepted by LocalizedText and the protocol. */
 export type CordisXMessageParam = string | number | boolean | null
@@ -818,7 +842,7 @@ export interface CordisXCommandContext {
   readonly arguments: CordisXJsonValue | undefined
   readonly signal: AbortSignal
   readonly invocationKey: string
-  readonly hostContext?: CordisXSurfaceInvocationContextV1
+  readonly hostContext?: CordisXSurfaceInvocationContextV1 | AgentConversationShellCommandContext
 }
 
 export interface CordisXSurfaceInvocationContextV1 {
@@ -1035,6 +1059,27 @@ export interface CordisXPages {
   ): Disposable<void | Promise<void>>
 }
 
+/**
+ * A plugin-owned source factory invoked only after the Host issues a fresh,
+ * route-scoped Protocol binding. The returned source remains data-only and is
+ * disposed by the Host when its page mount, registration, or owner generation
+ * ends.
+ */
+export type CordisXAgentConversationShellSourceFactory = (
+  binding: Readonly<AgentConversationShellBinding>,
+) => AgentConversationShellSource | Promise<AgentConversationShellSource>
+
+/** Host-owned page mount paired with one fiber-owned source registration. */
+export interface CordisXAgentConversationShellRegistration {
+  readonly mount: CordisXPageMount
+  dispose(): void
+}
+
+/** Production Agent Desktop conversation shell service. */
+export interface CordisXAgentConversationShell {
+  registerSource(factory: CordisXAgentConversationShellSourceFactory): CordisXAgentConversationShellRegistration
+}
+
 export interface CordisXRouteDefinition<Outlet extends CordisXOutletName = CordisXOutletName> {
   /** Omitted only for the pre-versioned third-party compatibility path. */
   readonly $schema?: typeof CORDISX_ROUTE_SCHEMA_V1 | typeof CORDISX_ROUTE_SCHEMA_V2
@@ -1215,6 +1260,8 @@ declare module '@deepseek-ai/cordis' {
     slots: CordisXSlots
     commands: CordisXCommands
     pages: CordisXPages
+    /** Host-owned Agent Desktop renderer backed by a plugin data source. */
+    agentConversationShell: CordisXAgentConversationShell
     routes: CordisXRoutes
     /** Data-only Manager subroute declarations; the Host renders chrome and controls history. */
     managerContent: CordisXManagerContentNavigation

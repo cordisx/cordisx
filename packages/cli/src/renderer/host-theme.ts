@@ -70,6 +70,10 @@ export class HostThemeProjection {
 
   attach(root: HTMLElement): () => void {
     this.roots.add(root)
+    // A projection may be created before any portal exists. Re-read the Host
+    // when the first late-mounted page/dialog attaches instead of applying the
+    // theme captured during runtime bootstrap.
+    this.snapshot = this.read()
     this.apply(root)
     this.observe()
     return () => {

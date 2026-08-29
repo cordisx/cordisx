@@ -77,6 +77,7 @@
     "provenance": true
   },
   "dependencies": {
+    "@cordisx/protocol": "git+https://github.com/cordisx/cordisx-protocol.git#49f1223fb7e6a340080de58629280b0f3de9faed",
     "@cordisx/schemastery-ui": "0.1.0-beta.1",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",

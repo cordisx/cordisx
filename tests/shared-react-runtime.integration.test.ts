@@ -70,6 +70,10 @@ describe('shared React plugin runtime', () => {
     expect(dom.window.document.querySelector('.cxr-ui-card')).not.toBeNull()
     expect(dom.window.document.querySelector('[data-cordisx-shared-react="true"]')).not.toBeNull()
 
+    dom.window.document.documentElement.lang = 'zh-CN'
+    await waitFor(() => dom.window.document.querySelector('.cxr-ui-heading')?.textContent === '共享 React')
+    expect(dom.window.document.querySelector('.cxr-ui-text')?.textContent).toBe('此插件页面由同一个 React 实例渲染。')
+
     await window.__cordisxRuntime!.dispose()
     await waitFor(() => window.__sharedReactEffectCleanups === 1)
     expect(dom.window.document.querySelector('[data-shared-react-page]')).toBeNull()

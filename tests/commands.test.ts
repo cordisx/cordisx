@@ -8,6 +8,7 @@ import {
   CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1,
   type CordisXCommandContext,
 } from '../packages/cli/src/contracts.js'
+import type { AgentConversationShellCommandContext } from '@cordisx/protocol/agent-conversation-shell/v1'
 import {
   CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
   CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
@@ -168,5 +169,46 @@ describe('CommandRegistry', () => {
     registry.dispose()
     broker.dispose()
     descriptors.dispose()
+  })
+
+  it('delivers only matching deeply immutable formal conversation command context', async () => {
+    const registry = new CommandRegistry()
+    let received: CordisXCommandContext | undefined
+    registry.register('chatroom', { id: 'send', title: { key: 'send' } }, context => { received = context })
+    const conversationContext: AgentConversationShellCommandContext = {
+      binding: { bindingId: 'binding-one', ownerGeneration: 'generation-one' },
+      generation: 'snapshot-one',
+      scope: 'composer-submit',
+      command: { id: 'send', arguments: { roomId: 'room-one' } },
+      submitPayload: 'Hello',
+    }
+    await registry.execute(
+      'chatroom',
+      { id: 'send', arguments: { roomId: 'room-one' } },
+      'conversation:send',
+      undefined,
+      undefined,
+      conversationContext,
+    )
+    ;(conversationContext as { binding: { bindingId: string } }).binding.bindingId = 'mutated'
+    ;(conversationContext.command.arguments as { roomId: string }).roomId = 'mutated'
+    expect(received?.hostContext).toMatchObject({
+      binding: { bindingId: 'binding-one', ownerGeneration: 'generation-one' },
+      generation: 'snapshot-one', scope: 'composer-submit', submitPayload: 'Hello',
+      command: { id: 'send', arguments: { roomId: 'room-one' } },
+    })
+    expect(Object.isFrozen(received?.hostContext)).toBe(true)
+    expect(Object.isFrozen((received?.hostContext as AgentConversationShellCommandContext).binding)).toBe(true)
+    expect(Object.isFrozen((received?.hostContext as AgentConversationShellCommandContext).command.arguments)).toBe(true)
+
+    await expect(registry.execute(
+      'chatroom',
+      { id: 'send', arguments: { roomId: 'room-one' } },
+      'conversation:mismatch',
+      undefined,
+      undefined,
+      { ...conversationContext, command: { id: 'other' } },
+    )).rejects.toThrow(/does not match/)
+    registry.dispose()
   })
 })

@@ -37,7 +37,7 @@ export const manifest = {
       name: 'models.read',
       required: false,
       reason: {
-        namespace: 'showcase',
+        namespace: 'slot-showcase',
         key: 'permission.models',
         fallback: 'Display models available through the Host connection in the Slot Showcase diagnostics view',
       },
@@ -90,7 +90,7 @@ function message<Key extends keyof Messages>(
   ...args: Messages[Key] extends CordisXMessageParams ? [params: Messages[Key]] : [params?: undefined]
 ): CordisXLocalizedText {
   return {
-    namespace: 'showcase',
+    namespace: 'slot-showcase',
     key,
     ...(args[0] === undefined ? {} : { params: args[0] }),
   }
@@ -104,7 +104,7 @@ export const presentation = {
 /** End-to-end demo for every structured shell surface and all three built-in page outlets. */
 export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): void {
   ctx.i18n.define<Messages>({
-    namespace: 'showcase',
+    namespace: 'slot-showcase',
     locale: 'en',
     default: true,
     messages: {
@@ -147,7 +147,7 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     },
   })
   ctx.i18n.define<Messages>({
-    namespace: 'showcase',
+    namespace: 'slot-showcase',
     locale: 'zh-CN',
     messages: {
       'plugin.name': '点位展示',

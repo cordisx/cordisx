@@ -118,6 +118,57 @@ try {
     await access(path.join(packageRoot, 'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'))
   }
 
+  await writeFile(path.join(runnerDirectory, 'conversation-consumer.ts'), `
+import type { Context } from '@deepseek-ai/cordis'
+import type { AgentConversationShellSource } from '@cordisx/protocol/agent-conversation-shell/v1'
+import type { CordisXAgentConversationShellSourceFactory } from 'cordisx/contracts'
+
+declare const ctx: Context
+const factory: CordisXAgentConversationShellSourceFactory = (binding): AgentConversationShellSource => ({
+  snapshot: async () => ({
+    binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration }, generation: 'snapshot-1', snapshotSequence: 0, selection: { kind: 'no-room' }, items: [],
+    composer: { availability: 'unavailable', placeholder: { key: 'placeholder', fallback: 'Message' }, disabled: { value: true }, submit: { id: 'send' } },
+    headerActions: [{ id: 'new-room', label: { key: 'new-room', fallback: 'New room' }, command: { id: 'create' }, disabled: { value: false } }],
+  }),
+  subscribe: async () => ({ result: { type: 'subscribe', status: 'unavailable', code: 'owner-unavailable' } }),
+  dispose() {},
+})
+const registration = ctx.agentConversationShell.registerSource(factory)
+registration.mount satisfies Function
+ctx.commands.register({ id: 'create', title: { key: 'create', fallback: 'Create' } }, command => {
+  if (command.hostContext !== undefined && 'scope' in command.hostContext) command.hostContext.scope satisfies 'header' | 'message' | 'composer-submit'
+})
+`, 'utf8')
+  await writeFile(path.join(runnerDirectory, 'connector-consumer.ts'), `
+import type {
+  ConnectorEventSubscription,
+  ConnectorSubscribeRuntimeResult,
+} from '@cordisx/protocol/connector-service/v1'
+import type {
+  CordisXConnectorEventSubscription,
+  CordisXConnectorSubscribeRuntimeResult,
+} from 'cordisx/contracts'
+
+declare const protocolSubscription: ConnectorEventSubscription
+declare const hostSubscription: CordisXConnectorEventSubscription
+declare const protocolResult: ConnectorSubscribeRuntimeResult
+declare const hostResult: CordisXConnectorSubscribeRuntimeResult
+
+protocolSubscription satisfies CordisXConnectorEventSubscription
+hostSubscription satisfies ConnectorEventSubscription
+if ('handle' in protocolResult) protocolResult.handle.unsubscribe()
+if ('handle' in hostResult) hostResult.handle.unsubscribe()
+`, 'utf8')
+  await writeFile(path.join(runnerDirectory, 'tsconfig.json'), `${JSON.stringify({
+    compilerOptions: {
+      target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true,
+      exactOptionalPropertyTypes: true, noEmit: true, skipLibCheck: false,
+    },
+    include: ['conversation-consumer.ts', 'connector-consumer.ts'],
+  }, null, 2)}\n`, 'utf8')
+  const rootBin = name => path.join(repositoryRoot, 'node_modules', '.bin', process.platform === 'win32' ? `${name}.cmd` : name)
+  await run(rootBin('tsc'), ['-p', 'tsconfig.json'], { cwd: runnerDirectory, env: process.env })
+
   const binDirectory = path.join(runnerDirectory, 'node_modules', '.bin')
   const executable = name => path.join(
     binDirectory,
@@ -203,7 +254,7 @@ try {
   await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
   await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
 
-  console.log('[cordisx] installed tarballs verified: licenses, CLI, built-in README, both creator forms, generated checks, dev dry-run')
+  console.log('[cordisx] installed tarballs verified: licenses, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run')
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }

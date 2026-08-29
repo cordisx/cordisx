@@ -38,4 +38,39 @@ describe('plugin README composition', () => {
     expect(composition.source).toContain('# Package-level README')
     expect(composition.watchFiles).toEqual([entry, readme])
   })
+
+  it('resolves external plugin contracts from the exact Host instead of a shadow package', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-external-contracts-'))
+    temporaryDirectories.push(root)
+    const pluginRoot = path.join(root, 'plugin')
+    const entry = path.join(pluginRoot, 'src', 'index.ts')
+    const shadowPackage = path.join(pluginRoot, 'node_modules', 'cordisx')
+    await mkdir(path.dirname(entry), { recursive: true })
+    await mkdir(shadowPackage, { recursive: true })
+    await Promise.all([
+      writeFile(path.join(pluginRoot, 'package.json'), '{"name":"fixture-plugin","type":"module"}\n'),
+      writeFile(path.join(shadowPackage, 'package.json'), JSON.stringify({
+        name: 'cordisx', type: 'module', exports: { './contracts': './contracts.js' },
+      })),
+      writeFile(path.join(shadowPackage, 'contracts.js'), 'export const SHADOW_CONTRACT = "stale"\n'),
+      writeFile(entry, `
+        import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from 'cordisx/contracts'
+        export const schemas = [CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2]
+        export function apply() {}
+      `),
+    ])
+    const config: CordisXConfig = {
+      version: 1,
+      rootDir: root,
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: [{ id: 'fixture-plugin', entry, enabled: true, config: {} }],
+    }
+
+    const composition = await buildRendererCompositionSource(config, { playground: true })
+
+    expect(composition.source).toContain('page.v3.schema.json')
+    expect(composition.source).toContain('route.v2.schema.json')
+    expect(composition.source).not.toContain('SHADOW_CONTRACT')
+  })
 })
