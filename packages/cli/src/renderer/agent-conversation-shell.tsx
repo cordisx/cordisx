@@ -530,6 +530,9 @@ class MountedConversation {
       this.releaseSource()
       exactKeys(subscribed, ['result'], 'subscribe runtime result')
       exactKeys(subscribed.result, ['type', 'status', 'code'], 'subscribe result')
+      if (subscribed.result.status !== 'denied' && subscribed.result.status !== 'unavailable') {
+        throw new Error('subscribe result status is invalid')
+      }
       if (subscribed.result.status === 'denied' && subscribed.result.code !== 'policy-denied') throw new Error('denied subscribe result code is invalid')
       if (subscribed.result.status === 'unavailable' && !['owner-unavailable', 'generation-replaced', 'disposed'].includes(subscribed.result.code)) {
         throw new Error('unavailable subscribe result code is invalid')
@@ -610,9 +613,6 @@ class MountedConversation {
     if (page.nextAfterSequence !== expectedNext) throw new Error('subscription next cursor is invalid')
     if (page.phase === 'replay' && page.nextAfterSequence > this.subscription.snapshotSequence) {
       throw new Error('replay subscription cursor crossed its snapshot watermark')
-    }
-    if (page.phase === 'replay' && page.hasMore && page.nextAfterSequence >= this.subscription.snapshotSequence) {
-      throw new Error('replay subscription cannot continue at its snapshot watermark')
     }
     if (terminal && page.hasMore) throw new Error('terminal subscription page cannot have more pages')
     if (page.phase === 'replay' && !page.hasMore && page.nextAfterSequence !== this.subscription.snapshotSequence) {

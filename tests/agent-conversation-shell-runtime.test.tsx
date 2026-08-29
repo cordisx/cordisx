@@ -470,6 +470,51 @@ describe('Agent conversation shell public runtime', () => {
       await settle()
       dom.window.document.getElementById('page')!.replaceChildren()
     }
+
+    const compatibleStream = new PageStream()
+    let compatibleBinding: AgentConversationShellBinding | undefined
+    const compatible = runtime.register(plugin, currentBinding => {
+      compatibleBinding = currentBinding
+      const subscription = {
+        subscriptionId: 'subscription-compatible-replay',
+        binding: { bindingId: currentBinding.bindingId, ownerGeneration: currentBinding.ownerGeneration },
+        generation: 'snapshot-1', afterSequence: 0, snapshotSequence: 2,
+      }
+      return {
+        snapshot: async () => noRoom(currentBinding),
+        subscribe: async () => ({
+          result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription },
+          handle: { subscription, pages: compatibleStream, unsubscribe: () => compatibleStream.close() },
+        }),
+        dispose() {},
+      }
+    })
+    compatible.mount(mountContext(dom))
+    await settle()
+    const compatibleSubscription = {
+      subscriptionId: 'subscription-compatible-replay',
+      binding: { bindingId: compatibleBinding!.bindingId, ownerGeneration: compatibleBinding!.ownerGeneration },
+      generation: 'snapshot-1', afterSequence: 0, snapshotSequence: 2,
+    }
+    compatibleStream.push({
+      subscription: compatibleSubscription, afterSequence: 0, phase: 'replay',
+      updates: [1, 2].map(sequence => ({
+        kind: 'snapshot-replaced' as const,
+        sequence,
+        snapshot: { ...noRoom(compatibleBinding!), snapshotSequence: sequence },
+      })),
+      nextAfterSequence: 2, hasMore: true,
+    })
+    compatibleStream.push({
+      subscription: compatibleSubscription, afterSequence: 2, phase: 'live',
+      updates: [{ kind: 'disposed', sequence: 3, reason: 'explicit' }],
+      nextAfterSequence: 3, hasMore: false,
+    })
+    await vi.waitFor(() => {
+      expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="unavailable"]')).not.toBeNull()
+    }, { timeout: 1_000, interval: 10 })
+    compatible.dispose()
+
     runtime.dispose()
     commands.dispose()
     await settle()
@@ -513,6 +558,27 @@ describe('Agent conversation shell public runtime', () => {
     expect(disposed).toBe(2)
     malformed.dispose()
     expect(disposed).toBe(2)
+
+    for (const [index, status] of ['bogus', 42, undefined].entries()) {
+      dom.window.document.getElementById('page')!.replaceChildren()
+      const unknownStatus = runtime.register(plugin, binding => ({
+        snapshot: async () => noRoom(binding),
+        subscribe: async () => ({
+          result: {
+            type: 'subscribe',
+            ...(status === undefined ? {} : { status }),
+            code: 'policy-denied',
+          },
+        }) as never,
+        dispose: () => { disposed += 1 },
+      }))
+      unknownStatus.mount(mountContext(dom))
+      await settle()
+      expect(dom.window.document.querySelector('[data-agent-conversation-runtime-state="error"]')).not.toBeNull()
+      expect(disposed).toBe(3 + index)
+      unknownStatus.dispose()
+      expect(disposed).toBe(3 + index)
+    }
 
     runtime.dispose()
     commands.dispose()
