@@ -5,6 +5,18 @@
  * inside connector adapters. Plugins receive only a Host-bound client.
  */
 
+import type {
+  BoundConnectorClient as ProtocolBoundConnectorClient,
+  BoundConnectorClientResult,
+  ConnectorCommand,
+  ConnectorEvent,
+  ConnectorEventPage,
+  ConnectorRegistrationIdentity,
+  ConnectorServiceDescriptor,
+  ConnectorSubscribeRuntimeResult,
+  ConnectorSubscription,
+} from '@cordisx/protocol/connector-service/v1'
+
 export const CORDISX_CONNECTOR_DESCRIPTOR_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/connector-service-descriptor.v1.schema.json' as const
 export const CORDISX_CONNECTOR_REGISTRATION_SCHEMA_V1 =
@@ -21,6 +33,25 @@ export const CORDISX_CONNECTOR_EVENT_SUBSCRIPTION_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/connector-event-subscription.v1.schema.json' as const
 export const CORDISX_CONNECTOR_EVENT_PAGE_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/connector-event-page.v1.schema.json' as const
+
+/**
+ * Formal Protocol v1 surface consumed by this Host implementation.
+ *
+ * The dependency is source-pinned in package.json; adapters and the broker
+ * still own their private runtime state. This type is intentionally limited
+ * to the serializable/wire and bound-client boundaries exported by Protocol.
+ */
+export interface CordisXConnectorProtocolV1 {
+  readonly descriptor: ConnectorServiceDescriptor
+  readonly registration: ConnectorRegistrationIdentity
+  readonly command: ConnectorCommand
+  readonly event: ConnectorEvent
+  readonly eventPage: ConnectorEventPage
+  readonly subscription: ConnectorSubscription
+  readonly result: BoundConnectorClientResult
+  readonly subscribeRuntimeResult: ConnectorSubscribeRuntimeResult
+  readonly boundClient: ProtocolBoundConnectorClient
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
