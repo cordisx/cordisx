@@ -139,12 +139,32 @@ ctx.commands.register({ id: 'create', title: { key: 'create', fallback: 'Create'
   if (command.hostContext !== undefined && 'scope' in command.hostContext) command.hostContext.scope satisfies 'header' | 'message' | 'composer-submit'
 })
 `, 'utf8')
+  await writeFile(path.join(runnerDirectory, 'connector-consumer.ts'), `
+import type {
+  ConnectorEventSubscription,
+  ConnectorSubscribeRuntimeResult,
+} from '@cordisx/protocol/connector-service/v1'
+import type {
+  CordisXConnectorEventSubscription,
+  CordisXConnectorSubscribeRuntimeResult,
+} from 'cordisx/contracts'
+
+declare const protocolSubscription: ConnectorEventSubscription
+declare const hostSubscription: CordisXConnectorEventSubscription
+declare const protocolResult: ConnectorSubscribeRuntimeResult
+declare const hostResult: CordisXConnectorSubscribeRuntimeResult
+
+protocolSubscription satisfies CordisXConnectorEventSubscription
+hostSubscription satisfies ConnectorEventSubscription
+if ('handle' in protocolResult) protocolResult.handle.unsubscribe()
+if ('handle' in hostResult) hostResult.handle.unsubscribe()
+`, 'utf8')
   await writeFile(path.join(runnerDirectory, 'tsconfig.json'), `${JSON.stringify({
     compilerOptions: {
       target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true,
       exactOptionalPropertyTypes: true, noEmit: true, skipLibCheck: false,
     },
-    include: ['conversation-consumer.ts'],
+    include: ['conversation-consumer.ts', 'connector-consumer.ts'],
   }, null, 2)}\n`, 'utf8')
   const rootBin = name => path.join(repositoryRoot, 'node_modules', '.bin', process.platform === 'win32' ? `${name}.cmd` : name)
   await run(rootBin('tsc'), ['-p', 'tsconfig.json'], { cwd: runnerDirectory, env: process.env })
@@ -234,7 +254,7 @@ ctx.commands.register({ id: 'create', title: { key: 'create', fallback: 'Create'
   await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
   await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
 
-  console.log('[cordisx] installed tarballs verified: licenses, conversation-shell consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run')
+  console.log('[cordisx] installed tarballs verified: licenses, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run')
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }
