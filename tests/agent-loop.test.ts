@@ -248,7 +248,7 @@ describe('Host-bound AgentLoop', () => {
       }),
     ])
     expect(firstSentRetry).toEqual(firstSent)
-    const collision = await client.send({ ...analystSend, content: [{ kind: 'text', text: 'Different payload' }] })
+    const collision = await client.send({ ...analystSend, binding: second.binding, content: [{ kind: 'text', text: 'Different binding and payload' }] })
     expect(collision).toMatchObject({ status: 'unavailable', authorization: { code: 'unsupported' } })
     const [firstSentPage, secondSentPage] = await Promise.all([firstEvents.next(), secondEvents.next()])
     expect(firstSentPage.value).toMatchObject({ subscription: { binding: first.binding.binding }, events: [

@@ -8,6 +8,7 @@ import { npmPackItem } from './npm-pack-report.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined ? undefined : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)
 
 async function run(file, args, options = {}) {
   try {
@@ -98,6 +99,7 @@ try {
     packWorkspace('cordisx', packDirectory),
     packWorkspace('create-cordisx-plugin', packDirectory),
   ])
+  if (protocolTarball !== undefined) await access(protocolTarball)
   await run('npm', [
     'install',
     '--ignore-scripts',
@@ -106,6 +108,7 @@ try {
     '--loglevel=error',
     cordisxTarball,
     creatorTarball,
+    ...(protocolTarball === undefined ? [] : [protocolTarball]),
   ], { cwd: runnerDirectory, env: process.env })
 
   for (const packageName of ['cordisx', 'create-cordisx-plugin']) {
@@ -162,6 +165,12 @@ if ('handle' in hostResult) hostResult.handle.unsubscribe()
   await writeFile(path.join(runnerDirectory, 'agent-loop-collection-consumer.ts'), `
 import type { Context } from '@deepseek-ai/cordis'
 import type {
+  AgentDefinition as ProtocolAgentDefinition,
+  AgentLoopCommand as ProtocolAgentLoopCommand,
+  AgentLoopTaskBinding as ProtocolAgentLoopTaskBinding,
+  BoundAgentLoopClient as ProtocolBoundAgentLoopClient,
+} from '@cordisx/protocol/agent-loop/v1'
+import type {
   AgentDefinition,
   AgentLoopCommand,
   AgentLoopCreateOrBindResult,
@@ -174,6 +183,9 @@ import type {
 
 declare const ctx: Context
 declare const definition: AgentDefinition
+declare const protocolDefinition: ProtocolAgentDefinition
+declare const protocolCommand: ProtocolAgentLoopCommand
+declare const protocolBinding: ProtocolAgentLoopTaskBinding
 declare const created: AgentLoopCreateOrBindResult
 declare const sent: AgentLoopSendResult
 declare const createCommands: readonly [
@@ -184,6 +196,11 @@ declare const snapshot: CordisXNavigationCollectionSnapshot
 declare const source: CordisXNavigationCollectionSource
 
 ctx.agentLoop satisfies BoundAgentLoopClient
+ctx.agentLoop satisfies ProtocolBoundAgentLoopClient
+definition satisfies ProtocolAgentDefinition
+protocolDefinition satisfies AgentDefinition
+protocolCommand satisfies AgentLoopCommand
+protocolBinding satisfies AgentLoopTaskBinding
 definition.promptSections?.map(section => section.kind satisfies 'introduction' | 'personality' | 'role' | 'operations' | 'tools' | 'knowledge' | 'memory-policy' | 'memory' | 'other')
 if (created.status === 'accepted') created.binding.task satisfies string
 else created.authorization.state satisfies 'denied' | 'unavailable'
@@ -311,7 +328,7 @@ ctx.slots.registerCollection({
   await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
   await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
 
-  console.log('[cordisx] installed tarballs verified: licenses, combined multi-binding AgentLoop and navigation collection, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run')
+  console.log(`[cordisx] installed tarballs verified: licenses, combined multi-binding AgentLoop and navigation collection${protocolTarball === undefined ? '' : ', exact local Protocol'}, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run`)
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }
