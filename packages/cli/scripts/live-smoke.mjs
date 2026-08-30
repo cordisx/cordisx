@@ -3852,10 +3852,13 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         const primary = row?.matches('button') === true ? row : row?.querySelector('.cxc-primary')
         primary?.click()
         const detailDeadline = Date.now() + 5_000
-        while (document.querySelector('[data-plugin-detail-tab]') === null && Date.now() < detailDeadline) {
+        const detailTabSelector = ${JSON.stringify(managerTab)} === 'marketplace'
+          ? '[data-marketplace-detail-tab]'
+          : '[data-plugin-detail-tab]'
+        while (document.querySelector(detailTabSelector) === null && Date.now() < detailDeadline) {
           await new Promise(resolve => setTimeout(resolve, 50))
         }
-        if (document.querySelector('[data-plugin-detail-tab]') === null) throw new Error('plugin detail tabs did not mount for ' + pluginId)
+        if (document.querySelector(detailTabSelector) === null) throw new Error('plugin detail tabs did not mount for ' + pluginId)
       }
       const detailTab = ${JSON.stringify(managerDetailTab)}
       if (detailTab !== undefined) {
@@ -4428,6 +4431,8 @@ if (parsed.values['manager-screenshot'] !== undefined) {
             return {
               view: discovery !== null
                 ? 'discovery'
+                : document.querySelector('[data-marketplace-trust-dimension]') !== null
+                  ? 'detail'
                 : sourcePage?.getAttribute('data-marketplace-source-page') === 'index'
                   ? 'sources'
                   : sourcePage?.getAttribute('data-marketplace-source-page') ?? null,
@@ -4784,13 +4789,13 @@ if (parsed.values['manager-screenshot'] !== undefined) {
                 official: row.getAttribute('data-marketplace-official'),
                 certified: row.getAttribute('data-marketplace-certified'),
                 rankingTier: row.getAttribute('data-marketplace-ranking-tier'),
-                rankingTrustBoost: row.getAttribute('data-marketplace-ranking-trust-boost'),
+                rankingOfficialPriority: row.getAttribute('data-marketplace-ranking-official-priority'),
                 rankingExplanation: row.getAttribute('data-marketplace-ranking-explanation'),
                 badges: [...row.querySelectorAll('[data-trust-dimension]')].map(badge => ({
                   dimension: badge.getAttribute('data-trust-dimension'),
                   label: badge.textContent?.trim() ?? null,
                   ariaLabel: badge.getAttribute('aria-label'),
-                  icon: badge.querySelector('[data-material-icon]')?.getAttribute('data-material-icon') ?? null,
+                  icon: badge.querySelector('[data-host-icon-key]')?.getAttribute('data-host-icon-key') ?? null,
                 })),
                 chevron: row.querySelector('.cxm-chevron') !== null,
               }
@@ -4820,17 +4825,43 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   managerReport = managerResult?.state ?? null
   if (managerTab === 'marketplace') {
     const marketplaceState = managerReport?.marketplace
-    const requestedView = managerMarketplaceView ?? 'discovery'
+    const requestedView = managerPlugin === undefined ? (managerMarketplaceView ?? 'discovery') : 'detail'
     if (marketplaceState?.view !== requestedView) {
       throw new Error(`Marketplace smoke opened the wrong view: ${JSON.stringify(marketplaceState)}`)
     }
-    if (requestedView === 'discovery') {
+    if (requestedView === 'detail') {
+      const trustDetail = managerReport?.marketplaceTrustDetail
+      const dimensions = trustDetail?.dimensions ?? []
+      const official = dimensions.find(item => item.dimension === 'official')
+      const certified = dimensions.find(item => item.dimension === 'certified')
+      if (dimensions.length !== 2
+        || official?.evidence === null || certified?.evidence === null
+        || !/PermissionBroker|权限/iu.test(official?.text ?? '')
+        || !/policy|策略/iu.test(certified?.text ?? '')
+        || !/absolute safety|绝对安全/iu.test(certified?.text ?? '')
+        || !/interface capabilities|界面能力/iu.test(certified?.text ?? '')
+        || !/absolute safety|绝对安全/iu.test(trustDetail?.boundary ?? '')) {
+        throw new Error(`Marketplace trust detail assertions failed: ${JSON.stringify(trustDetail)}`)
+      }
+    } else if (requestedView === 'discovery') {
       const discovery = marketplaceState.discovery
       if (discovery?.onlyResultsScroll !== true
         || discovery.filterBelowSearch !== true
         || discovery.documentationPrimaryActionAbsent !== true
         || discovery.fullWidth !== true) {
         throw new Error(`Marketplace discovery IA assertions failed: ${JSON.stringify(discovery)}`)
+      }
+      if (managerMarketplaceFixture !== undefined) {
+        const row = managerReport?.marketplaceCatalog?.rows?.find(item => item.id === 'trusted-smoke')
+        if (row?.official !== 'true'
+          || row.certified !== 'true'
+          || row.rankingOfficialPriority !== '1'
+          || !String(row.rankingExplanation ?? '').includes('认证状态不参与排序')
+          || row.badges?.map(badge => badge.dimension).join(',') !== 'official,certified'
+          || row.badges?.every(badge => typeof badge.ariaLabel === 'string' && badge.ariaLabel.length > 0) !== true
+          || row.badges?.map(badge => badge.icon).join(',') !== 'trust.official,trust.certified') {
+          throw new Error(`Marketplace trust list assertions failed: ${JSON.stringify(row)}`)
+        }
       }
     } else {
       const sources = marketplaceState.sources

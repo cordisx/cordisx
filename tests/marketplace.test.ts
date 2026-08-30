@@ -91,11 +91,14 @@ function localizedFeed(): Record<string, unknown> {
   }
 }
 
-function trustedFeed(certificationStatus: 'active' | 'revoked' = 'active'): Record<string, unknown> {
+function trustedFeed(
+  certificationStatus: 'active' | 'revoked' = 'active',
+  generatedAt = '2026-08-24T12:31:00Z',
+): Record<string, unknown> {
   return {
     $schema: FEED_SCHEMA_V3,
     schemaVersion: 3,
-    generatedAt: '2026-08-24T12:31:00Z',
+    generatedAt,
     trust: {
       authority: 'cordisx.marketplace.codeowners/v1',
       root: OFFICIAL_MARKETPLACE_SOURCE,
@@ -248,6 +251,11 @@ describe('marketplace feed', () => {
     const selfDeclared = structuredClone(trustedFeed())
     ;(selfDeclared.plugins as Record<string, unknown>[])[0]!.official = true
     expect(() => parseMarketplaceFeed(selfDeclared)).toThrow('不支持的字段: official')
+    for (const field of ['certified', 'certification']) {
+      const malicious = structuredClone(trustedFeed())
+      ;(malicious.plugins as Record<string, unknown>[])[0]![field] = true
+      expect(() => parseMarketplaceFeed(malicious)).toThrow(`不支持的字段: ${field}`)
+    }
     expect(parseMarketplaceFeed(TRUST_SMOKE_FIXTURE, {
       feedUrl: OFFICIAL_MARKETPLACE_SOURCE,
       trustedRoots: [OFFICIAL_MARKETPLACE_SOURCE],
@@ -378,6 +386,14 @@ describe('BrowserMarketplaceModel', () => {
     expect(model.snapshot().plugins[0]).toEqual(expect.objectContaining({
       official: expect.objectContaining({ designation: 'cordisx-official' }),
       certification: expect.objectContaining({ level: 'cordisx-certified' }),
+      certifiedPermission: expect.objectContaining({
+        kind: 'cordisx-certified-permission-eligibility',
+        source: TRUST_SOURCE,
+        pluginId: 'trusted',
+        version: '1.2.3',
+        integrity: TRUST_DIGEST,
+        revision: '2026-08-24T12:31:00Z',
+      }),
     }))
 
     currentFeed = trustedFeed('revoked')
@@ -386,6 +402,48 @@ describe('BrowserMarketplaceModel', () => {
       official: expect.objectContaining({ designation: 'cordisx-official' }),
     }))
     expect(model.snapshot().plugins[0]?.certification).toBeUndefined()
+    expect(model.snapshot().plugins[0]?.certifiedPermission).toBeUndefined()
+    model.dispose()
+  })
+
+  it('keeps the later revoked feed when a replacement attempts to roll trust revision backward', async () => {
+    let currentFeed = trustedFeed('active', '2026-08-24T12:31:00Z')
+    const model = new BrowserMarketplaceModel(undefined, async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(currentFeed),
+    }), [OFFICIAL_MARKETPLACE_SOURCE], { retryDelays: [] })
+
+    await model.reload()
+    currentFeed = trustedFeed('revoked', '2026-08-24T12:32:00Z')
+    await model.reload()
+    expect(model.snapshot().plugins[0]?.certifiedPermission).toBeUndefined()
+
+    currentFeed = trustedFeed('active', '2026-08-24T12:31:00Z')
+    await model.reload()
+    expect(model.snapshot().sourceStates[0]?.error).toContain('generatedAt 不能回退')
+    expect(model.snapshot().plugins[0]?.official).toBeDefined()
+    expect(model.snapshot().plugins[0]?.certification).toBeUndefined()
+    expect(model.snapshot().plugins[0]?.certifiedPermission).toBeUndefined()
+    model.dispose()
+  })
+
+  it('drops Certified and its permission projection when a stale last-good feed expires locally', async () => {
+    let now = Date.parse('2026-08-24T13:00:00Z')
+    let offline = false
+    const model = new BrowserMarketplaceModel(undefined, async () => {
+      if (offline) throw new Error('network offline')
+      return { ok: true, status: 200, text: async () => JSON.stringify(trustedFeed()) }
+    }, [OFFICIAL_MARKETPLACE_SOURCE], { now: () => now, retryDelays: [] })
+
+    await model.reload()
+    expect(model.snapshot().plugins[0]?.certifiedPermission).toBeDefined()
+    now = Date.parse('2027-08-20T00:00:01Z')
+    offline = true
+    await model.reload()
+    expect(model.snapshot().plugins[0]?.official).toBeDefined()
+    expect(model.snapshot().plugins[0]?.certification).toBeUndefined()
+    expect(model.snapshot().plugins[0]?.certifiedPermission).toBeUndefined()
     model.dispose()
   })
 
@@ -561,9 +619,7 @@ describe('BrowserMarketplaceModel', () => {
       projection: expect.objectContaining({ name: '受信插件' }),
       ranking: expect.objectContaining({
         textTier: 'exact-name',
-        officialBoost: 1,
-        certificationBoost: 1,
-        boundedTrustBoost: 2,
+        officialPriority: 1,
       }),
     }))
   })

@@ -1,7 +1,10 @@
+import { sha256Hex } from '../permission-model-v2.js'
+
 const TRUST_AUTHORITY = 'cordisx.marketplace.codeowners/v1'
 const TRUST_GRANT_MODEL = 'protected-merge-chain-v1'
 const OFFICIAL_DESIGNATION = 'cordisx-official'
 const CERTIFICATION_LEVEL = 'cordisx-certified'
+const CERTIFIED_PERMISSION_PROJECTION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v1.schema.json'
 const LOCAL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const REFERENCE_PATTERN = /^[a-z0-9][a-z0-9._-]{0,95}(?::[a-z0-9][a-z0-9._-]{0,95})?$/
 const SEMVER_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
@@ -67,9 +70,42 @@ export interface MarketplaceCertificationRecord {
   readonly description: MarketplaceLocalizedText
 }
 
+/**
+ * Host-owned, read-only eligibility input for the PermissionBroker. This is
+ * never an approval, grant, lease, allowlist, or plugin-authored assertion.
+ */
+export interface MarketplaceCertifiedPermissionProjectionV1 {
+  readonly $schema: typeof CERTIFIED_PERMISSION_PROJECTION_SCHEMA
+  readonly schemaVersion: 1
+  readonly kind: 'cordisx-certified-permission-eligibility'
+  readonly status: 'active'
+  readonly source: string
+  readonly pluginId: string
+  readonly version: string
+  readonly integrity: string
+  readonly reviewPolicy: {
+    readonly id: 'cordisx-marketplace-review'
+    readonly version: string
+  }
+  readonly reviewedAt: string
+  readonly expiresAt: string
+  readonly evidence: {
+    readonly kind: 'protected-marketplace-review'
+    readonly reference: string
+  }
+  readonly feed: {
+    readonly generatedAt: string
+    readonly root: string
+    readonly authority: typeof TRUST_AUTHORITY
+  }
+  readonly fingerprint: `sha256:${string}`
+  readonly revision: string
+}
+
 export interface MarketplacePluginTrust {
   readonly official?: MarketplaceOfficialRecord
   readonly certification?: MarketplaceCertificationRecord
+  readonly certifiedPermission?: MarketplaceCertifiedPermissionProjectionV1
 }
 
 export interface MarketplaceTrustEvaluation {
@@ -286,6 +322,40 @@ function certificationIdentity(record: MarketplaceCertificationRecord): string {
   ].join('\u0000')
 }
 
+/**
+ * Project an already validated active certification into the exact artifact
+ * input consumed by permission policy. Property order is part of the v1
+ * fingerprint contract and mirrors Protocol conformance.
+ */
+function createMarketplaceCertifiedPermissionProjection(
+  record: MarketplaceCertificationRecord,
+  feed: { readonly generatedAt: string; readonly root: string; readonly authority: typeof TRUST_AUTHORITY },
+): MarketplaceCertifiedPermissionProjectionV1 {
+  const reviewPolicy = Object.freeze({ id: record.reviewPolicy.id, version: record.reviewPolicy.version })
+  const evidence = Object.freeze({ kind: 'protected-marketplace-review' as const, reference: record.reviewer.evidenceRef })
+  const feedIdentity = Object.freeze({ generatedAt: feed.generatedAt, root: feed.root, authority: feed.authority })
+  const fingerprintPayload = {
+    source: record.identity.canonicalSource,
+    pluginId: record.identity.pluginId,
+    version: record.identity.version,
+    integrity: record.identity.integrity,
+    reviewPolicy,
+    reviewedAt: record.reviewedAt,
+    expiresAt: record.expiresAt,
+    evidence,
+    feed: feedIdentity,
+  }
+  return Object.freeze({
+    $schema: CERTIFIED_PERMISSION_PROJECTION_SCHEMA,
+    schemaVersion: 1,
+    kind: 'cordisx-certified-permission-eligibility',
+    status: 'active',
+    ...fingerprintPayload,
+    fingerprint: `sha256:${sha256Hex(JSON.stringify(fingerprintPayload))}`,
+    revision: feed.generatedAt,
+  })
+}
+
 function compareText(left: string, right: string): number {
   if (left < right) return -1
   if (left > right) return 1
@@ -356,7 +426,17 @@ export function evaluateMarketplaceTrust(
       || plugin.artifact.integrity !== record.identity.integrity) {
       throw new Error(`certification 与当前 exact artifact 不匹配: ${record.identity.pluginId}@${record.identity.version}`)
     }
-    if (trusted && record.status === 'active') projected.set(identity, { ...projected.get(identity), certification: record })
+    if (trusted && record.status === 'active') {
+      projected.set(identity, {
+        ...projected.get(identity),
+        certification: record,
+        certifiedPermission: createMarketplaceCertifiedPermissionProjection(record, {
+          generatedAt: generatedAt.value,
+          root,
+          authority,
+        }),
+      })
+    }
   }
   return { trusted, authority, generatedAt: generatedAt.value, byPluginIdentity: projected }
 }

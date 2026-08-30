@@ -31,9 +31,8 @@ export interface MarketplaceSearchOptions {
 export interface MarketplaceRankingExplanation {
   readonly textTier: MarketplaceTextTier
   readonly textScore: number
-  readonly officialBoost: 0 | 1
-  readonly certificationBoost: 0 | 1
-  readonly boundedTrustBoost: number
+  /** Bounded product priority. Certified is deliberately absent from ranking. */
+  readonly officialPriority: 0 | 1
   readonly scoreWithinTier: number
   readonly stableIdentity: string
 }
@@ -111,7 +110,8 @@ function rankText(candidate: MarketplaceSearchCandidate, normalizedQuery: string
 
 /**
  * Search order is a lexicographic contract, not one unbounded score:
- * eligibility -> text tier -> bounded trust boost inside that tier -> canonical identity.
+ * eligibility -> text tier -> bounded Official priority inside that tier -> canonical identity.
+ * Certified remains a filterable exact-artifact review state and never changes order.
  */
 export function rankMarketplacePlugins<Candidate extends MarketplaceSearchCandidate>(
   candidates: readonly Candidate[],
@@ -127,19 +127,15 @@ export function rankMarketplacePlugins<Candidate extends MarketplaceSearchCandid
 
     const text = rankText(plugin, normalizedQuery)
     if (text === undefined) continue
-    const officialBoost: 0 | 1 = plugin.official ? 1 : 0
-    const certificationBoost: 0 | 1 = plugin.certified ? 1 : 0
-    const boundedTrustBoost = officialBoost + certificationBoost
+    const officialPriority: 0 | 1 = plugin.official ? 1 : 0
     ranked.push({
       plugin,
       tierOrder: text.order,
       ranking: {
         textTier: text.tier,
         textScore: text.score,
-        officialBoost,
-        certificationBoost,
-        boundedTrustBoost,
-        scoreWithinTier: text.score + boundedTrustBoost,
+        officialPriority,
+        scoreWithinTier: text.score + officialPriority,
         stableIdentity: plugin.identity,
       },
     })

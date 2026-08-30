@@ -34,7 +34,7 @@ describe('marketplace ranking', () => {
     expect(result.map(item => item.plugin.id)).toEqual(['visible'])
   })
 
-  it('never lets both trust boosts cross a text relevance tier', () => {
+  it('never lets Official priority cross a text relevance tier', () => {
     const result = rankMarketplacePlugins([
       candidate('trace', { name: 'Trace', official: false, certified: false }),
       candidate('helper', {
@@ -46,11 +46,11 @@ describe('marketplace ranking', () => {
     ], { query: 'trace' })
 
     expect(result.map(item => item.plugin.id)).toEqual(['trace', 'helper'])
-    expect(result[0]?.ranking).toEqual(expect.objectContaining({ textTier: 'exact-identity', boundedTrustBoost: 0 }))
-    expect(result[1]?.ranking).toEqual(expect.objectContaining({ textTier: 'all-catalog-terms', boundedTrustBoost: 2 }))
+    expect(result[0]?.ranking).toEqual(expect.objectContaining({ textTier: 'exact-identity', officialPriority: 0 }))
+    expect(result[1]?.ranking).toEqual(expect.objectContaining({ textTier: 'all-catalog-terms', officialPriority: 1 }))
   })
 
-  it('applies Official and Certified as independent, explainable bounded boosts inside a tier', () => {
+  it('models all four states but gives bounded product priority only to Official', () => {
     const result = rankMarketplacePlugins([
       candidate('plain', { name: 'Plain Tool', description: 'trace integration' }),
       candidate('certified', { name: 'Certified Tool', description: 'trace integration', certified: true }),
@@ -58,12 +58,11 @@ describe('marketplace ranking', () => {
       candidate('both', { name: 'Both Tool', description: 'trace integration', official: true, certified: true }),
     ], { query: 'trace' })
 
-    expect(result.map(item => item.plugin.id)).toEqual(['both', 'certified', 'official', 'plain'])
-    expect(result.map(item => [
-      item.ranking.officialBoost,
-      item.ranking.certificationBoost,
-      item.ranking.boundedTrustBoost,
-    ])).toEqual([[1, 1, 2], [0, 1, 1], [1, 0, 1], [0, 0, 0]])
+    expect(result.map(item => item.plugin.id)).toEqual(['both', 'official', 'certified', 'plain'])
+    expect(result.map(item => [item.ranking.officialPriority, item.ranking.scoreWithinTier]))
+      .toEqual([[1, 41], [1, 41], [0, 40], [0, 40]])
+    expect(result[0]?.ranking).not.toHaveProperty('certificationBoost')
+    expect(result[2]?.ranking).not.toHaveProperty('certificationBoost')
   })
 
   it('supports certified-only filtering without treating Official as Certified', () => {

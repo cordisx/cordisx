@@ -292,13 +292,17 @@ describe('Manager Marketplace product list', () => {
       for (let attempt = 0; attempt < 20 && dom.window.document.querySelectorAll('[data-marketplace-plugin]').length < 4; attempt += 1) await settle()
 
       const rows = [...dom.window.document.querySelectorAll<HTMLElement>('[data-marketplace-plugin]')]
-      expect(rows.map(row => row.dataset.marketplacePlugin)).toEqual(['trusted', 'official-only', 'community-certified', 'exact-match'])
+      expect(rows.map(row => row.dataset.marketplacePlugin)).toEqual(['official-only', 'trusted', 'community-certified', 'exact-match'])
       expect(dom.window.document.querySelector('[data-marketplace-plugin="blocked"]')).toBeNull()
 
       const trusted = dom.window.document.querySelector<HTMLElement>('[data-marketplace-plugin="trusted"]')!
       expect(trusted.dataset.marketplaceOfficial).toBe('true')
       expect(trusted.dataset.marketplaceCertified).toBe('true')
-      expect(trusted.dataset.marketplaceRankingTrustBoost).toBe('2')
+      expect(trusted.dataset.marketplaceRankingOfficialPriority).toBe('1')
+      expect(trusted.dataset.marketplaceRankingTrustBoost).toBeUndefined()
+      expect(trusted.querySelectorAll('[data-trust-dimension]')).toHaveLength(2)
+      expect(trusted.querySelector('[data-trust-dimension="official"]')?.textContent).toContain('Official')
+      expect(trusted.querySelector('[data-trust-dimension="certified"]')?.textContent).toContain('Certified')
       const trustedStatus = trusted.querySelector<HTMLElement>('.cxc-status')!
       expect(trustedStatus.getAttribute('aria-label')).toContain('Official、Certified')
       const trustedPrimary = trusted.querySelector<HTMLButtonElement>('.cxc-primary')!
@@ -321,7 +325,7 @@ describe('Manager Marketplace product list', () => {
       expect(searched.map(row => row.dataset.marketplacePlugin)).toEqual(['exact-match', 'trusted'])
       expect(searched[0]?.dataset.marketplaceRankingTier).toBe('exact-identity')
       expect(searched[1]?.dataset.marketplaceRankingTier).toBe('all-catalog-terms')
-      expect(searched[1]?.dataset.marketplaceRankingExplanation).toContain('信任加权只在同一文本相关性层级内生效')
+      expect(searched[1]?.dataset.marketplaceRankingExplanation).toContain('认证状态不参与排序')
 
       const filter = dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-certified-only]')!
       expect(filter.getAttribute('aria-pressed')).toBe('false')
@@ -338,13 +342,14 @@ describe('Manager Marketplace product list', () => {
       const officialDetail = dom.window.document.querySelector<HTMLElement>('[data-marketplace-trust-dimension="official"]')!
       const certifiedDetail = dom.window.document.querySelector<HTMLElement>('[data-marketplace-trust-dimension="certified"]')!
       expect(officialDetail.textContent).toContain('Created and maintained by CordisX.')
-      expect(officialDetail.textContent).toContain('不等于该发布物已经通过版本认证')
-      expect(officialDetail.textContent).not.toMatch(/policy|canonical source/iu)
+      expect(officialDetail.textContent).toContain('never changes PermissionBroker decisions')
+      expect(officialDetail.textContent).not.toContain('DOM/render')
       expect(certifiedDetail.textContent).not.toContain(DIGEST)
-      expect(certifiedDetail.textContent).toContain('认证不等于安全保障')
+      expect(certifiedDetail.textContent).toContain('interface capabilities')
+      expect(certifiedDetail.textContent).toContain('current scope and runtime instance')
       expect(certifiedDetail.querySelector<HTMLAnchorElement>('a')?.href).toBe(EVIDENCE)
       const boundary = dom.window.document.querySelector<HTMLElement>('[data-marketplace-trust-boundary]')!
-      expect(boundary.textContent).toBe('认证不等于安全保障。')
+      expect(boundary.textContent).toBe('Certification is not an absolute safety guarantee.')
       expect([...dom.window.document.querySelectorAll<HTMLAnchorElement>('a')]
         .some(link => /docs|文档/iu.test(link.textContent ?? ''))).toBe(false)
     } finally {
