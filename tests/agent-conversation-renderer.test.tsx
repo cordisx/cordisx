@@ -476,8 +476,9 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(incomingSurface.paddingTop).toBe('10px')
       const styles = harness.dom.window.document.querySelector<HTMLStyleElement>('style[data-agent-conversation-styles]')!.textContent!
       expect(styles).toContain('.cxa-message-content{width:fit-content;gap:3px}')
+      expect(styles).toContain('.cxa-message[data-role="agent"] .cxa-message-content{justify-items:start}')
       expect(styles).toContain('.cxa-message[data-role="human"] .cxa-message-surface')
-      expect(styles).toContain('max-width:100%;gap:7px;padding:10px 13px')
+      expect(styles).toContain('width:fit-content;max-width:100%;gap:7px;padding:10px 13px')
       expect(styles).toContain('border-radius:15px 15px 15px 4px')
     } finally {
       await harness.close()
@@ -523,7 +524,7 @@ describe('AgentConversationRenderer production DOM', () => {
         if (count === 7) {
           const styles = harness.dom.window.document.querySelector<HTMLStyleElement>('style[data-agent-conversation-styles]')!.textContent!
           expect(styles).toContain('.cxa-room-avatar[data-count="many"] .cxa-room-avatar-cell[data-index="1"]{right:1px;top:0;z-index:4}')
-          expect(styles).toContain('.cxa-room-avatar-more{position:absolute;right:1px;bottom:0;z-index:2')
+          expect(styles).toContain('.cxa-room-avatar-more{appearance:none;position:absolute;right:1px;bottom:0;z-index:2')
         }
         const opener = count >= 4
           ? harness.dom.window.document.querySelector<HTMLButtonElement>('.cxa-room-avatar-more')!
@@ -553,7 +554,11 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(composite.dataset.participantCount).toBe('4')
       expect(composite.dataset.avatarCount).toBe('2')
       expect([...composite.querySelectorAll<HTMLElement>('.cxa-room-avatar-cell')].map(cell => cell.dataset.participantId)).toEqual(['with-b', 'with-d'])
-      expect(mixedHarness.dom.window.document.querySelector('.cxa-room-avatar-more')).toBeNull()
+      const more = mixedHarness.dom.window.document.querySelector<HTMLElement>('.cxa-room-avatar-more')!
+      expect(more.textContent).toBe('+2')
+      expect(mixedHarness.dom.window.getComputedStyle(more).borderTopWidth).toBe('0px')
+      expect(mixedHarness.dom.window.getComputedStyle(more).backgroundColor).toMatch(/transparent|rgba\(0, 0, 0, 0\)/)
+      expect([...composite.querySelectorAll<HTMLElement>('.cxa-room-avatar-cell')].every(cell => mixedHarness.dom.window.getComputedStyle(cell).borderTopWidth === '0px')).toBe(true)
     } finally {
       await mixedHarness.close()
     }
@@ -566,6 +571,37 @@ describe('AgentConversationRenderer production DOM', () => {
     />)).window.document
     expect(compact.querySelector('[data-room-avatar-size="compact"]')).not.toBeNull()
     expect([...compact.querySelectorAll<HTMLElement>('.cxa-room-avatar-cell')].map(cell => cell.dataset.participantId)).toEqual(['with-b', 'with-d'])
+    expect(compact.querySelector('.cxa-room-avatar-more')?.textContent).toBe('+2')
+  })
+
+  it('always renders an explicit Agent avatar outside the incoming bubble while identity actions require an exact presentation', async () => {
+    const base = createPlaygroundConversationFixture('conversation', 'en')
+    const room = base.selection as Extract<AgentConversationModel['selection'], { kind: 'room' }>
+    const agent = room.participants.find(participant => participant.role === 'agent')!
+    const message = base.entries.find(entry => entry.kind === 'message' && entry.authorId === agent.id)!
+    const avatar = createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'explicit-agent-avatar' })
+    const model = createAgentConversationModel({
+      ...base,
+      selection: {
+        ...room,
+        multiParticipant: false,
+        participantPresentation: 'none',
+        participants: [{ ...agent, avatar }],
+      },
+      entries: [message],
+      headerActions: [],
+    })
+    const harness = await render(model, new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model))
+    try {
+      const incoming = harness.dom.window.document.querySelector<HTMLElement>('.cxa-message[data-role="agent"]')!
+      expect(incoming.children[0]?.classList.contains('cxa-avatar')).toBe(true)
+      expect(incoming.children[0]?.getAttribute('data-avatar-kind')).toBe('generated')
+      expect(incoming.querySelector('.cx-agent-identity-avatar-button')).toBeNull()
+      expect(incoming.querySelector('.cxa-message-surface')).not.toBeNull()
+      expect(incoming.querySelector('.cxa-message-surface')?.contains(incoming.children[0]!)).toBe(false)
+    } finally {
+      await harness.close()
+    }
   })
 
   it('keeps Host-owned draft state, submit, and focus order outside the immutable model', async () => {

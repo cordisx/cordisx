@@ -31,6 +31,7 @@ export interface PlaygroundMockCliExecutor {
 
 export interface PlaygroundMockTraceLayer {
   readonly identity: AgentDefinitionIdentity
+  readonly avatar?: AgentDefinition['avatar']
   readonly promptSections: AgentDefinition['promptSections']
   readonly rules: AgentDefinition['rules']
   readonly skills: AgentDefinition['skills']
@@ -51,6 +52,7 @@ export interface PlaygroundMockTaskTrace {
   readonly catalog: readonly AgentDefinition[]
   readonly layers: readonly PlaygroundMockTraceLayer[]
   readonly effective: {
+    readonly avatar: NonNullable<AgentDefinition['avatar']>
     readonly promptSections: AgentDefinition['promptSections']
     readonly rules: AgentDefinition['rules']
     readonly skills: AgentDefinition['skills']
@@ -133,6 +135,7 @@ function sanitized(value: string): string {
 function effectiveLayer(definition: AgentDefinition): PlaygroundMockTraceLayer {
   return clone({
     identity: definition.identity,
+    ...(definition.avatar === undefined ? {} : { avatar: definition.avatar }),
     promptSections: definition.promptSections,
     rules: definition.rules,
     skills: definition.skills,
@@ -219,6 +222,7 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
       catalog: context.definitions,
       layers: definition.sourceDefinitions.map(identity => effectiveLayer(byIdentity.get(JSON.stringify([identity.agentId, identity.revision]))!)),
       effective: {
+        avatar: definition.avatar,
         promptSections: definition.promptSections,
         rules: definition.rules,
         skills: definition.skills,

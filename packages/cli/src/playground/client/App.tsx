@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { flushSync } from 'react-dom'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal, flushSync } from 'react-dom'
 import { HostMenu, type HostMenuItem } from '../../renderer/host-ui/HostMenu.js'
 import { createSidebarItem, type SidebarItemControl } from '../../renderer/host-ui/SidebarItem.js'
+import { HostAgentAvatar } from '../../renderer/host-ui/conversation/AgentAvatar.js'
 import { FixtureSummary } from './components/FixtureSummary.js'
 import { HostSeats, type PlaygroundFixtureMode } from './components/HostSeats.js'
 import { MockAgentTaskPage } from './components/MockAgentTaskPage.js'
@@ -21,7 +22,8 @@ interface SidebarItemProps {
   readonly label: string
   readonly ariaLabel?: string
   readonly secondary?: string
-  readonly icon: string
+  readonly icon?: string
+  readonly iconElement?: ReactNode
   readonly selected?: boolean
   readonly onActivate: () => void
 }
@@ -30,13 +32,17 @@ function SidebarItem(props: SidebarItemProps) {
   const host = useRef<HTMLDivElement>(null)
   const control = useRef<SidebarItemControl | undefined>(undefined)
   const activate = useRef(props.onActivate)
+  const [iconSeat, setIconSeat] = useState<HTMLElement | undefined>()
   activate.current = props.onActivate
 
   useLayoutEffect(() => {
+    const customIcon = props.iconElement === undefined ? undefined : document.createElement('span')
+    if (customIcon !== undefined) customIcon.className = 'pg-sidebar-react-icon'
     const item = createSidebarItem(document, {
       id: props.id,
       label: props.label,
-      icon: props.icon,
+      ...(props.icon === undefined ? {} : { icon: props.icon }),
+      ...(customIcon === undefined ? {} : { iconElement: customIcon }),
       ...(props.ariaLabel === undefined ? {} : { ariaLabel: props.ariaLabel }),
       ...(props.secondary === undefined ? {} : { secondary: props.secondary }),
       selected: props.selected === true,
@@ -44,10 +50,11 @@ function SidebarItem(props: SidebarItemProps) {
     })
     control.current = item
     host.current?.replaceChildren(item.element)
-    return () => { item.element.remove(); control.current = undefined }
-  }, [props.id, props.label, props.ariaLabel, props.secondary, props.icon])
+    setIconSeat(customIcon)
+    return () => { item.dispose(); control.current = undefined }
+  }, [props.id, props.label, props.ariaLabel, props.secondary, props.icon, props.iconElement === undefined])
   useLayoutEffect(() => control.current?.setSelected(props.selected === true), [props.selected])
-  return <div ref={host} className="pg-sidebar-item-host" />
+  return <><div ref={host} className="pg-sidebar-item-host" />{iconSeat === undefined || props.iconElement === undefined ? null : createPortal(props.iconElement, iconSeat)}</>
 }
 
 export function App() {
@@ -141,7 +148,13 @@ export function App() {
                   id={`task.${task.debugTaskId}`}
                   label={task.agentLabel}
                   secondary={`${task.identity.agentId} · ${task.identity.revision} · ${en ? 'Mock' : '模拟'}`}
-                  icon="host:history"
+                  iconElement={<HostAgentAvatar participant={{
+                    id: `task:${task.debugTaskId}`,
+                    role: 'agent',
+                    name: task.agentLabel,
+                    avatar: task.effective.avatar,
+                    agentIdentity: task.identity,
+                  }} />}
                   selected={task.debugTaskId === simulatorTaskId}
                   onActivate={() => openSimulatorTask(task.detailsUrl)}
                 />

@@ -308,10 +308,13 @@ kernel under `renderer/host-ui/conversation`. Its immutable render model is a
 private, already-localized projection: it contains only bounded room,
 participant, entry, status, action and composer data. The renderer owns the
 single top chrome, the only timeline scroll container, message grouping,
-conditional Host-generated initials, status announcement, ephemeral draft,
-fixed composer geometry, focus and responsive behavior. Initials are rendered
-only when a multi-participant projection explicitly selects the
-`host-initials` presentation; ordinary task history has no avatar seat.
+exact participant AvatarRef rendering, conditional Host-generated initials,
+status announcement, ephemeral draft, fixed composer geometry, focus and
+responsive behavior. An explicit participant AvatarRef is rendered on every
+incoming Agent message. The legacy `host-initials` presentation controls only
+descriptor-less initials in a multi-participant projection. Identity actions
+remain gated by an exact AgentDefinition identity presentation rather than a
+display-name guess.
 
 The associated command controller preserves the exact owner id,
 `agent-desktop` shell, binding id, owner generation, separate snapshot
@@ -326,8 +329,9 @@ and deeply frozen, so caller mutation cannot change the observed command. The
 no timeline and forbids the separate header-action list. Models contain no callback,
 DOM, CSS, media URL, Connector handle or renderer component.
 
-The production adapter consumes the exact formal Protocol export
-`@cordisx/protocol/agent-conversation-shell/v1`. A plugin injects
+The production adapter preserves the formal v1 compatibility path and consumes
+the exact formal `@cordisx/protocol/agent-conversation-shell/v2` export for
+Agent identity, active runs, presence, acknowledgement sources and reactions. A plugin injects
 `agentConversationShell`, calls `registerSource(factory)`, and gives the
 returned Host-owned `mount` to its normal `pages.register` declaration. The
 Host invokes the factory only after it has issued an immutable binding for the
@@ -556,6 +560,13 @@ The source orders its Room descriptors latest-first; the Host clones and
 freezes each replacement, validates bounded ids/text/icons/routes, renders the
 group heading and rows with the shared SidebarItem primitive, and derives the
 single selected row from the exact owner-qualified route plus parameters.
+
+The Playground unified Recent tasks list also uses that Host SidebarItem
+primitive, but its leading avatar is a Host-rendered React node backed by the
+effective AgentDefinition AvatarRef captured by the Simulator at create time.
+It never substitutes the generic history glyph or derives an avatar from a task
+label. The SidebarItem owns listener cleanup while React owns the portal node
+lifecycle.
 
 Collection subscriptions are owned by the calling Cordis fiber. Plugin block,
 generation replacement, registration disposal, or runtime teardown

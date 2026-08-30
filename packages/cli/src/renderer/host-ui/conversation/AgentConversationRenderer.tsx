@@ -102,6 +102,8 @@ function MessageEntry({
   const showInitials = model.selection.kind === 'room'
     && model.selection.multiParticipant
     && model.selection.participantPresentation === 'host-initials'
+  const showAgentAvatar = participant.role === 'agent'
+    && (participant.avatar !== undefined || showInitials)
   const groupStart = previous?.kind !== 'message' || previous.authorId !== entry.authorId
   const state = stateCopy(entry, copy)
   const outgoing = participant.role === 'human'
@@ -115,7 +117,7 @@ function MessageEntry({
     {...(outgoing ? { 'aria-label': participant.name } : { 'aria-labelledby': labelId })}
     aria-live={entry.ariaLive}
   >
-    {showInitials && participant.role !== 'human'
+    {showAgentAvatar
       ? identityPresentation === undefined
         ? <HostAgentAvatar participant={participant} />
         : <HostAgentIdentityAvatarButton presentation={identityPresentation} label={`Open ${participant.name}`} onOpen={onOpenIdentity} />

@@ -17,19 +17,22 @@ export interface HostRoomCompositeAvatarProps {
  */
 export function HostRoomCompositeAvatar({ participants, size, label, moreLabel, onOpen }: HostRoomCompositeAvatarProps) {
   const avatarParticipants = participants.filter(participant => participant.avatar !== undefined)
-  const count = avatarParticipants.length
-  const layout = count === 0 ? 'zero' : count === 1 ? 'one' : count === 2 ? 'two' : count === 3 ? 'three' : 'many'
-  const visible = count >= 4 ? avatarParticipants.slice(0, 3) : avatarParticipants
-  const more = Math.max(0, count - 3)
+  const participantCount = participants.length
+  const avatarCount = avatarParticipants.length
+  const layout = participantCount === 0 ? 'zero' : participantCount === 1 ? 'one' : participantCount === 2 ? 'two' : participantCount === 3 ? 'three' : 'many'
+  const visible = avatarParticipants.slice(0, participantCount >= 4 ? 3 : participantCount)
+  // Members without an AvatarRef remain part of the exact Room snapshot. They
+  // are represented by +N instead of synthesizing identity from a name.
+  const more = avatarCount === 0 ? 0 : Math.max(0, participantCount - visible.length)
   return <span className="cxa-room-avatar-seat" data-room-avatar-size={size}>
     <button type="button" className="cxa-room-avatar-button" aria-label={label} onClick={onOpen}>
       <span
         className="cxa-room-avatar"
         data-count={layout}
-        data-participant-count={participants.length}
-        data-avatar-count={count}
+        data-participant-count={participantCount}
+        data-avatar-count={avatarCount}
       >
-        {count === 0
+        {avatarCount === 0
           ? <span className="cxa-room-avatar-fallback"><HostSurfaceIcon token="host:layers" /></span>
           : visible.map((participant, index) => <span key={participant.id} className="cxa-room-avatar-cell" data-index={index} data-participant-id={participant.id}><HostAgentAvatar participant={participant} /></span>)}
       </span>

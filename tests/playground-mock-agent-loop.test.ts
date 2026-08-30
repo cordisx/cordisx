@@ -13,6 +13,7 @@ import {
   type AgentLoopEvent,
   type BoundAgentLoopClient,
 } from '../packages/cli/src/agent-loop-contracts.js'
+import { createGeneratedAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import { buildRendererBundle, buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { createPlaygroundSession } from '../packages/cli/src/playground/session.js'
@@ -96,6 +97,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     const client = broker.bind({ ownerKey: 'chatroom', active: () => true, authorize: allowed })
     const lead = definition('chatroom.generalist', {
       name: 'Chatroom Agent',
+      avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'chatroom-generalist-animal' }),
       promptSections: [
         { sectionId: 'introduction', kind: 'introduction', text: 'Lead introduction' },
         { sectionId: 'personality', kind: 'personality', text: 'Concise' },
@@ -106,6 +108,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     })
     const reviewer = definition('chatroom.reviewer', {
       name: 'Chatroom Reviewer', extends: [lead.identity],
+      avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'chatroom-reviewer-animal' }),
       promptSections: [{ sectionId: 'reviewer-role', kind: 'role', text: 'Review the assigned work.' }],
       rules: ['public-summary-only'],
     })
@@ -160,6 +163,10 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     ])
     expect(snapshot.tasks[1]?.layers.map(layer => layer.identity.agentId)).toEqual(['chatroom.generalist', 'chatroom.reviewer'])
     expect(snapshot.tasks[1]?.effective.promptSections?.map(section => section.kind)).toEqual(['introduction', 'personality', 'memory', 'role'])
+    expect(snapshot.tasks.map(task => task.effective.avatar)).toEqual([lead.avatar, reviewer.avatar])
+    expect(snapshot.tasks[1]?.layers.map(layer => layer.avatar)).toEqual([lead.avatar, reviewer.avatar])
+    expect(Object.isFrozen(snapshot.tasks[1]?.effective.avatar)).toBe(true)
+    expect(Object.isFrozen(snapshot.tasks[1]?.layers[0]?.avatar)).toBe(true)
     expect(snapshot.tasks[0]?.input).toBe('check token=[redacted] [path redacted] [approval]')
     expect(host.activeTaskPresentations().map(task => task.identity.agentId)).toEqual(['chatroom.generalist'])
     expect(snapshot.tasks[0]!.detailsUrl).toEqual({
