@@ -34,6 +34,7 @@ export interface JsonLineRpcClientOptions {
   readonly maxLineBytes?: number
   readonly onProtocolError?: (error: Error) => void
   readonly onNotification?: (method: string, params: unknown) => void
+  readonly onRequest?: (method: string, params: unknown) => unknown | Promise<unknown>
 }
 
 function object(value: unknown): Record<string, unknown> | undefined {
@@ -157,8 +158,16 @@ export class JsonLineRpcClient {
       this.protocolFailure(new JsonLineRpcError('RPC peer sent a non-object message'))
       return
     }
-    if (typeof message.id === 'number' && typeof message.method === 'string') {
-      void this.write({ id: message.id, error: { code: -32601, message: 'Method not found' } }).catch(() => undefined)
+    if ((typeof message.id === 'number' || typeof message.id === 'string') && typeof message.method === 'string') {
+      const handler = this.options.onRequest
+      if (handler === undefined) {
+        void this.write({ id: message.id, error: { code: -32601, message: 'Method not found' } }).catch(() => undefined)
+      } else {
+        void Promise.resolve(handler(message.method, message.params)).then(
+          result => this.write({ id: message.id, result }),
+          error => this.write({ id: message.id, error: { code: -32603, message: error instanceof Error ? error.message : String(error) } }),
+        ).catch(() => undefined)
+      }
       return
     }
     if (typeof message.id !== 'number') {

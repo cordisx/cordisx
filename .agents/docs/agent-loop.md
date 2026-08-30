@@ -74,6 +74,17 @@ Provider task creation and lifecycle reads use a token-bound launcher-private
 RPC. Public `ctx.platform` remains unchanged and does not accept effective
 prompt instructions or expose the lifecycle transport.
 
+An internal local runtime is opt-in through
+`codex.agentLoopBackend: "local-cli"`. The Host launches `codex app-server
+--stdio` against the existing authenticated `CODEX_HOME`, registers the public
+provider identity `codex-local`, and keeps the App Server's `openai` source
+provider id private. Real agent-message delta notifications are accumulated per
+exact task/turn/item and emitted only as sanitized assistant text on the
+matching completed turn. Server-side command/file approval requests are
+observed as pending then resolved-denied and answered `decline`; the local task
+default itself is `approvalPolicy=never` with a read-only sandbox. No raw frame,
+credential, process handle, or approval callback crosses into the renderer.
+
 ## Consumer sequence
 
 An internal Chatroom plugin:

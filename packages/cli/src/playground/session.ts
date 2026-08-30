@@ -25,6 +25,16 @@ import {
   type ServiceConfigBridgeHandler,
 } from '../launcher/service-config-rpc.js'
 import { LauncherKeychainError, LauncherSecretStore, type LauncherKeychainBackend } from '../launcher/secret-store.js'
+import {
+  handleProviderBindingRequest,
+  MAX_PROVIDER_REQUEST_BYTES,
+  MAX_PROVIDER_REQUESTS,
+  parseProviderBindingRequest,
+} from '../launcher/provider-rpc.js'
+import { normalizePermissionPolicyRecord } from '../permissions.js'
+import { resolveLocalCodexProviderConfig } from '../providers/config.js'
+import type { CodexProviderConfig } from '../providers/contracts.js'
+import { ProviderFleet } from '../providers/fleet.js'
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
 
 export interface PlaygroundFixtureInfo {
@@ -41,6 +51,8 @@ interface PlaygroundGeneration {
   readonly credential?: ChannelCredentialBridgeHandler
   readonly channelConfig?: HostServiceConfigNarrowApi
   readonly channelManager?: ChannelManagerProjectionV1
+  readonly providerFleet?: ProviderFleet
+  readonly providerToken?: string
 }
 
 export interface PreparedPlaygroundComposition extends RendererCompositionSource {
@@ -56,6 +68,7 @@ export interface PlaygroundSession {
   handleConfigRequest(raw: string): Promise<unknown>
   handleServiceConfigRequest(raw: string): Promise<unknown>
   handleChannelCredentialRequest(raw: string): Promise<unknown>
+  handleProviderRequest(raw: string): Promise<unknown>
   reset(): Promise<void>
   close(): Promise<void>
 }
@@ -97,6 +110,17 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
   }
 
   const fixture = fixtureInfo(source, sourcePath)
+  const playground = source.playground !== null && typeof source.playground === 'object'
+    ? source.playground as Record<string, unknown>
+    : {}
+  const previewPermissionPolicies = playground.permissionPolicies === undefined
+    ? []
+    : Array.isArray(playground.permissionPolicies)
+      ? playground.permissionPolicies.map((policy, index) => normalizePermissionPolicyRecord(
+        policy,
+        `playground.permissionPolicies[${index}]`,
+      ))
+      : (() => { throw new Error('playground.permissionPolicies must be an array') })()
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cordisx-ui-playground-'))
   const stateRoot = path.join(homeDir, 'state')
   const configPath = path.join(homeDir, 'config', 'playground.config.json')
@@ -122,7 +146,7 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
       defaultApp: 'codex',
       providers: [],
       plugins: materialized.plugins,
-      permissions: [],
+      permissions: previewPermissionPolicies,
       publisherGrantIssuers: [],
       apps: {
         codex: {
@@ -139,14 +163,24 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
   await writeFixture()
 
   let active: PlaygroundGeneration | undefined
+  let activeProviderRequests = 0
   const credentialBackend = new PlaygroundCredentialBackend()
   const nextGeneration = async (): Promise<PlaygroundGeneration> => {
     active?.channelConfig?.dispose()
+    await active?.providerFleet?.close()
     const generation = `playground-${randomBytes(12).toString('hex')}`
     const token = randomBytes(32).toString('hex')
     const serviceConfigToken = randomBytes(32).toString('hex')
     const credentialToken = randomBytes(32).toString('hex')
     const config = await loadConfig(configPath, { profileId: 'playground' })
+    const localProvider = resolveLocalCodexProviderConfig(config.codex, process.env)
+    const providerConfigs: readonly CodexProviderConfig[] = localProvider === undefined
+      ? config.providers
+      : [...config.providers, localProvider]
+    const providerFleet = providerConfigs.some(provider => provider.enabled)
+      ? await ProviderFleet.create(providerConfigs, { appServer: { environment: process.env } })
+      : undefined
+    const providerToken = providerFleet === undefined ? undefined : randomBytes(32).toString('hex')
     const bridge = createConfigBridgeHandler({
       token,
       profileId: 'playground',
@@ -189,6 +223,8 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
       ...(serviceConfig === undefined ? {} : { serviceConfig }),
       ...(credential === undefined ? {} : { credential }),
       ...(channelManager === undefined ? {} : { channelManager }),
+      ...(providerFleet === undefined ? {} : { providerFleet }),
+      ...(providerToken === undefined ? {} : { providerToken }),
     }
     active = next
     return next
@@ -200,7 +236,9 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
     ...(generation.serviceConfig === undefined ? {} : { serviceConfigBridgeToken: generation.serviceConfig.token }),
     ...(generation.credential === undefined ? {} : { channelCredentialBridgeToken: generation.credential.token }),
     ...(generation.channelManager === undefined ? {} : { channelManager: generation.channelManager }),
+    ...(generation.providerToken === undefined ? {} : { providerBridgeToken: generation.providerToken }),
     profileId: 'playground',
+    permission: { profileId: 'playground', policies: previewPermissionPolicies },
   })
 
   return {
@@ -258,8 +296,27 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
         return { requestId, ok: false, code: 'unavailable', error: 'Channel credential capture is unavailable.' }
       }
     },
+    async handleProviderRequest(raw) {
+      if (active?.providerFleet === undefined || active.providerToken === undefined) throw new Error('Playground has no active provider service')
+      let requestId = 'invalid'
+      try {
+        if (Buffer.byteLength(raw) > MAX_PROVIDER_REQUEST_BYTES) throw new Error('provider request exceeds maximum size')
+        if (activeProviderRequests >= MAX_PROVIDER_REQUESTS) throw new Error('too many concurrent provider requests')
+        const request = parseProviderBindingRequest(JSON.parse(raw), active.providerToken)
+        requestId = request.requestId
+        activeProviderRequests += 1
+        try {
+          return { requestId, ok: true, value: await handleProviderBindingRequest(active.providerFleet, request) }
+        } finally {
+          activeProviderRequests -= 1
+        }
+      } catch {
+        return { requestId, ok: false, error: 'Provider request was rejected' }
+      }
+    },
     async reset() {
       active?.channelConfig?.dispose()
+      await active?.providerFleet?.close()
       credentialBackend.clear()
       await writeFixture()
       await rm(stateRoot, { recursive: true, force: true })
@@ -268,6 +325,7 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
     },
     async close() {
       active?.channelConfig?.dispose()
+      await active?.providerFleet?.close()
       credentialBackend.clear()
       active = undefined
       await rm(homeDir, { recursive: true, force: true })

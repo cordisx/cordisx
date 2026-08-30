@@ -101,12 +101,12 @@ on shutdown, removes CDP injections then terminates only that group plus
 helpers fenced by its exact CordisX-managed user-data directory; an explicitly
 user-supplied `--profile-dir` never grants a broad helper-cleanup target.
 
-The second process is a UI development host, not a transparent platform bridge.
-CordisX must not start another app-server to impersonate or replace the original
-connection, and must not create a second AppHost that overwrites WebContents
-registration. Reuse of a controlled existing connection remains experimental.
-Until an official bridge or a safely controlled existing-connection adapter
-exists, plugin-visible platform data is limited to read-only renderer snapshots.
+The second Desktop process is a UI development host, not a transparent platform
+bridge. CordisX must not start another app-server to impersonate or replace the
+Desktop current connection, and must not create a second AppHost that overwrites
+WebContents registration. Reuse of a controlled existing Desktop connection
+remains experimental. An explicitly configured independent Provider Fleet
+connection is a separate plane and never changes these current-connection facts.
 
 The version-1 Platform capability architecture and its honest unavailable
 default are specified in [`platform-capabilities.md`](platform-capabilities.md).
@@ -134,6 +134,12 @@ through the existing Provider Fleet, and proactively projects
 assistant text, observed approvals, and lifecycle. It reuses the existing task
 permissions and prompt runtime, owns no Chatroom data or plugin UI, and returns
 typed unsupported for `image-ref` until a controlled resolver exists.
+For internal development and Playground composition, the explicit
+`codex.agentLoopBackend="local-cli"` option adds `codex-local` to that Provider
+Fleet. Its launcher-owned app-server reuses the authenticated local Codex home,
+publishes only the existing token-bound provider RPC, and starts tasks with a
+read-only sandbox plus `approvalPolicy=never`. It is an independent connection,
+not the Desktop current connection or a raw app-server plugin API.
 
 Durable adapter history is a separate Node/Host read service specified in
 [`agent-history.md`](agent-history.md). It gives plugins permission-scoped,

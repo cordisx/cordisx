@@ -25,7 +25,7 @@ import type {
   CordisXExtensionPointControlMode,
 } from '../contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
-import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import { isPermissionPolicyRecordV2, type CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { HomeConfigIconThemePreference } from '../config/home-config.js'
 import type {
   CordisXPermissionAuthorizationDecisionV2,
@@ -63,6 +63,7 @@ import {
   BrowserPermissionPrompt,
   BrowserPermissionAuthorizationPromptV2,
   CordisXPlatformService,
+  MemoryPermissionPolicyStore,
   PermissionBroker,
   normalizePluginManifest,
   type PlatformPermissionSnapshot,
@@ -506,7 +507,12 @@ async function start(
       )
   let disposeIconThemePreferenceSubscription: (() => void) | undefined
   const permissionStore = metadata.permissionBridgeToken === undefined
-    ? new BrowserPermissionPolicyStore(metadata.profileId)
+    ? metadata.hostKind === 'playground' && metadata.permissionPolicies !== undefined
+      ? new MemoryPermissionPolicyStore(
+          metadata.permissionPolicies.filter(record => !isPermissionPolicyRecordV2(record)),
+          metadata.permissionPolicies.filter(isPermissionPolicyRecordV2),
+        )
+      : new BrowserPermissionPolicyStore(metadata.profileId)
     : BindingPermissionPolicyStore.connect(metadata.permissionBridgeToken, metadata.permissionPolicies ?? [])
   const configBridge = metadata.configBridgeToken === undefined
     ? undefined
@@ -671,7 +677,14 @@ async function start(
         : []
     ))
     const unavailable = capabilityAvailability.unavailableRequired(declarations)
-    if (unavailable.length > 0) return `Required capability unavailable: ${unavailable.join(', ')}`
+    const explicitlyAllowedInPlayground = metadata.hostKind === 'playground'
+      && unavailable.every(capability => broker.snapshots().some(permission => (
+        permission.identity.source === controller.identity.source
+        && permission.identity.id === controller.identity.id
+        && permission.capability === capability
+        && permission.policy === 'allow'
+      )))
+    if (unavailable.length > 0 && !explicitlyAllowedInPlayground) return `Required capability unavailable: ${unavailable.join(', ')}`
     return undefined
   }
   const registerController = (controller: PluginController, registerAuthority = true): void => {

@@ -37,6 +37,22 @@ export interface CliProxyProviderConfig {
   }[]
 }
 
+/** Explicit opt-in provider backed by the user's locally authenticated Codex CLI. */
+export interface LocalCodexProviderConfig {
+  readonly id: string
+  readonly kind: 'local-codex'
+  readonly displayName: string
+  /** App-server provider id. This remains private to the Node adapter. */
+  readonly sourceProviderId: string
+  readonly codexExecutable: string
+  readonly codexHome: string
+  readonly enabled: boolean
+  readonly timeoutMs: number
+  readonly modelMappings?: CliProxyProviderConfig['modelMappings']
+}
+
+export type CodexProviderConfig = CliProxyProviderConfig | LocalCodexProviderConfig
+
 export type ProviderConnectionState = 'idle' | 'starting' | 'ready' | 'draining' | 'unavailable' | 'closed'
 
 export interface ProviderConnectionStatus {
@@ -45,7 +61,7 @@ export interface ProviderConnectionStatus {
   readonly generation: string
   readonly state: ProviderConnectionState
   readonly diagnostic?: CordisXPlatformDiagnostic
-  readonly external: true
+  readonly external: boolean
   readonly nativeCurrentConnection: false
   readonly rawBridgeExposed: false
 }

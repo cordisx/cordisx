@@ -1,5 +1,6 @@
 import path from 'node:path'
-import type { CliProxyProviderConfig } from './contracts.js'
+import os from 'node:os'
+import type { CliProxyProviderConfig, LocalCodexProviderConfig } from './contracts.js'
 
 const PROVIDER_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const ENVIRONMENT_KEY = /^[A-Z_][A-Z0-9_]{0,127}$/
@@ -37,6 +38,29 @@ function endpoint(value: unknown, label: string): string {
 export interface ResolveProviderConfigsOptions {
   readonly rootDir: string
   readonly defaultCodexExecutable?: string
+}
+
+export function resolveLocalCodexProviderConfig(
+  codex: { readonly executable?: string; readonly agentLoopBackend?: 'local-cli' },
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): LocalCodexProviderConfig | undefined {
+  if (codex.agentLoopBackend !== 'local-cli') return undefined
+  const configuredHome = environment.CODEX_HOME
+  const userHome = environment.HOME
+  const codexHome = typeof configuredHome === 'string' && configuredHome.trim() !== ''
+    ? path.resolve(configuredHome)
+    : path.join(typeof userHome === 'string' && userHome.trim() !== '' ? path.resolve(userHome) : os.homedir(), '.codex')
+  return Object.freeze({
+    id: 'codex-local',
+    kind: 'local-codex',
+    displayName: 'Local Codex',
+    sourceProviderId: 'openai',
+    codexExecutable: codex.executable ?? 'codex',
+    codexHome,
+    enabled: true,
+    timeoutMs: 120_000,
+    modelMappings: [],
+  })
 }
 
 /** Validate launcher-owned external provider definitions without reading credentials. */

@@ -79,6 +79,10 @@ export async function startVitePlayground(options: VitePlaygroundOptions): Promi
             sendJson(response, 200, await session.handleChannelCredentialRequest(await requestBody(request)))
             return
           }
+          if (request.method === 'POST' && url.pathname === '/api/provider') {
+            sendJson(response, 200, await session.handleProviderRequest(await requestBody(request)))
+            return
+          }
           if (request.method === 'POST' && url.pathname === '/api/reset') {
             await session.reset()
             const composition = server.moduleGraph.getModuleById(RESOLVED_COMPOSITION_ID)

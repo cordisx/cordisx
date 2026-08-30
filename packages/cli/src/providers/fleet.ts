@@ -24,16 +24,16 @@ import type {
 import type { CordisXPlatformAdapter } from '../renderer/platform.js'
 import type { CordisXExternalProviderAvailabilityStatus } from '../capability-availability-contracts.js'
 import { ProviderAdapterRegistry, ProviderRegistryError } from '../renderer/provider-registry.js'
-import { startCodexAppServer, type CodexAppServerOptions, type CodexAppServerRpc } from './codex-app-server.js'
+import { startCodexAppServer, startLocalCodexAppServer, type CodexAppServerOptions, type CodexAppServerRpc } from './codex-app-server.js'
 import { CliProxyProviderAdapter } from './cli-proxy-adapter.js'
-import type { CliProxyProviderConfig, ProviderConnection, ProviderLifecycleSignal } from './contracts.js'
+import type { CodexProviderConfig, ProviderConnection, ProviderLifecycleSignal } from './contracts.js'
 
 const FLEET_CAPABILITIES: readonly CordisXPlatformCapability[] = Object.freeze([
   'models.read', 'tasks.catalog.read', 'tasks.content.read', 'tasks.create', 'tasks.control', 'turns.submit', 'turns.control',
 ])
 const CURRENT_CONNECTION_UNAVAILABLE: CordisXPlatformDiagnostic = Object.freeze({
   code: 'current-connection-client-unavailable',
-  message: 'The native Codex Desktop current connection remains unavailable; external providers are routed independently',
+  message: 'The native Codex Desktop current connection remains unavailable; Provider Fleet connections are routed independently',
 })
 
 interface ProviderPageState {
@@ -54,7 +54,7 @@ interface FleetCursorState {
 
 export interface ProviderFleetOptions {
   readonly now?: () => number
-  readonly startServer?: (config: CliProxyProviderConfig, options?: CodexAppServerOptions) => Promise<CodexAppServerRpc>
+  readonly startServer?: (config: CodexProviderConfig, options?: CodexAppServerOptions) => Promise<CodexAppServerRpc>
   readonly appServer?: CodexAppServerOptions
 }
 
@@ -109,11 +109,13 @@ export class ProviderFleet implements CordisXPlatformAdapter {
 
   private constructor(options: ProviderFleetOptions) {
     this.now = options.now ?? Date.now
-    this.startServer = options.startServer ?? startCodexAppServer
+    this.startServer = options.startServer ?? (async (config, serverOptions) => config.kind === 'local-codex'
+      ? await startLocalCodexAppServer(config, serverOptions)
+      : await startCodexAppServer(config, serverOptions))
     this.appServer = options.appServer
   }
 
-  static async create(configs: readonly CliProxyProviderConfig[], options: ProviderFleetOptions = {}): Promise<ProviderFleet> {
+  static async create(configs: readonly CodexProviderConfig[], options: ProviderFleetOptions = {}): Promise<ProviderFleet> {
     const fleet = new ProviderFleet(options)
     const start = fleet.startServer
     await Promise.all(configs.filter(config => config.enabled).map(async config => {
@@ -132,7 +134,7 @@ export class ProviderFleet implements CordisXPlatformAdapter {
       } catch {
         fleet.failures.set(config.id, {
           code: 'adapter-unavailable',
-          message: `External provider ${config.id} is unavailable`,
+          message: `${config.kind === 'local-codex' ? 'Local Codex' : 'External provider'} ${config.id} is unavailable`,
           retryable: true,
         })
       }
@@ -144,7 +146,7 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     const active = this.registry.snapshots().filter(item => item.state === 'active')
     return {
       hostId: 'cordisx-provider-fleet',
-      hostName: 'CordisX External Provider Fleet',
+      hostName: 'CordisX Provider Fleet',
       mode: active.length > 0 ? 'read-write' : 'unavailable',
       supportedCapabilities: active.length > 0 ? FLEET_CAPABILITIES : [],
       diagnostics: [CURRENT_CONNECTION_UNAVAILABLE, ...this.failures.values()],
@@ -324,7 +326,7 @@ export class ProviderFleet implements CordisXPlatformAdapter {
    * commits, or `rollback` when it cannot, so callers never observe a
    * half-published Provider Fleet.
    */
-  async reconfigure(configs: readonly CliProxyProviderConfig[]): Promise<{
+  async reconfigure(configs: readonly CodexProviderConfig[]): Promise<{
     readonly generation: string
     rollback(): Promise<void>
     finalize(): Promise<void>

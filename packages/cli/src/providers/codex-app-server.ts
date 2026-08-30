@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
-import type { CliProxyProviderConfig } from './contracts.js'
+import type { CliProxyProviderConfig, LocalCodexProviderConfig } from './contracts.js'
 import { JsonLineRpcClient } from './json-line-rpc.js'
 
 export interface CodexAppServerOptions {
@@ -15,6 +15,7 @@ export interface CodexAppServerRpc {
   readonly generation: string
   request<Result>(method: string, params: unknown, signal?: AbortSignal): Promise<Result>
   subscribeNotifications?(listener: (method: string, params: unknown) => void): () => void
+  subscribeRequests?(listener: (method: string, params: unknown) => unknown | Promise<unknown>): () => void
   close(): Promise<void>
 }
 
@@ -38,11 +39,17 @@ export function codexAppServerArguments(
   ])
 }
 
+/** Local App Server uses the existing Codex login/configuration and receives no injected credential. */
+export function localCodexAppServerArguments(): readonly string[] {
+  return Object.freeze(['app-server', '--stdio', '-c', 'analytics.enabled=false'])
+}
+
 class SpawnedCodexAppServer implements CodexAppServerRpc {
   readonly generation = randomUUID()
   private closed = false
   private readonly rpc: JsonLineRpcClient
   private readonly notifications = new Set<(method: string, params: unknown) => void>()
+  private readonly requests = new Set<(method: string, params: unknown) => unknown | Promise<unknown>>()
 
   constructor(private readonly child: ChildProcessWithoutNullStreams, timeoutMs: number) {
     child.stderr.resume()
@@ -52,6 +59,11 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
       timeoutMs,
       onNotification: (method, params) => {
         for (const listener of this.notifications) listener(method, params)
+      },
+      onRequest: async (method, params) => {
+        const listener = this.requests.values().next().value as ((method: string, params: unknown) => unknown | Promise<unknown>) | undefined
+        if (listener === undefined) throw new Error(`Unsupported App Server request: ${method}`)
+        return await listener(method, params)
       },
     })
     child.once('error', error => this.rpc.close(`Codex app-server process failed: ${error.message}`))
@@ -69,6 +81,11 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
     return () => this.notifications.delete(listener)
   }
 
+  subscribeRequests(listener: (method: string, params: unknown) => unknown | Promise<unknown>): () => void {
+    this.requests.add(listener)
+    return () => this.requests.delete(listener)
+  }
+
   async initialize(): Promise<void> {
     await this.request('initialize', {
       clientInfo: { name: 'cordisx', title: 'CordisX Provider Fleet', version: '0.1.0' },
@@ -82,6 +99,7 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
     this.closed = true
     this.rpc.close()
     this.notifications.clear()
+    this.requests.clear()
     if (this.child.exitCode !== null || this.child.signalCode !== null) return
     const exited = new Promise<void>(resolve => this.child.once('exit', () => resolve()))
     this.child.kill('SIGTERM')
@@ -93,6 +111,30 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
       this.child.kill('SIGKILL')
       await exited
     }
+  }
+}
+
+/** Start one App Server against the already authenticated local Codex home. */
+export async function startLocalCodexAppServer(
+  config: LocalCodexProviderConfig,
+  options: CodexAppServerOptions = {},
+): Promise<CodexAppServerRpc> {
+  const environment = options.environment ?? process.env
+  await mkdir(config.codexHome, { recursive: true, mode: 0o700 })
+  const launch = options.spawnProcess ?? spawn
+  const child = launch(config.codexExecutable, localCodexAppServerArguments(), {
+    cwd: config.codexHome,
+    env: { ...environment, CODEX_HOME: config.codexHome },
+    shell: false,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }) as ChildProcessWithoutNullStreams
+  const server = new SpawnedCodexAppServer(child, config.timeoutMs)
+  try {
+    await server.initialize()
+    return server
+  } catch (error) {
+    await server.close().catch(() => undefined)
+    throw error
   }
 }
 

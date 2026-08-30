@@ -33,4 +33,20 @@ describe('JSON-line RPC client', () => {
     await expect(pending).rejects.toThrow('malformed JSON')
     await expect(client.request('thread/list', {})).rejects.toThrow('closed')
   })
+
+  it('handles one bounded server request through the private adapter callback', async () => {
+    const input = new PassThrough()
+    const output = new PassThrough()
+    const client = new JsonLineRpcClient({
+      input, output, timeoutMs: 1_000,
+      onRequest: async (method, params) => ({ method, approvalId: (params as { approvalId: string }).approvalId, decision: 'decline' }),
+    })
+    const response = line(output)
+    input.write(`${JSON.stringify({ id: 'approval-1', method: 'item/commandExecution/requestApproval', params: { approvalId: 'opaque-1' } })}\n`)
+    await expect(response).resolves.toEqual({
+      id: 'approval-1',
+      result: { method: 'item/commandExecution/requestApproval', approvalId: 'opaque-1', decision: 'decline' },
+    })
+    client.close()
+  })
 })

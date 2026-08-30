@@ -25,6 +25,8 @@ interface PlaygroundRuntime {
 interface Window {
   __cordisxRuntime?: PlaygroundRuntime
   __cordisxConfigRequestV1?: (payload: string) => void
+  __cordisxProviderRequestV1?: (payload: string) => void
+  __cordisxProviderReceiveV1?: (payload: string) => void
   __cordisxConfigReceiveV1?: (payload: string) => void
   __cordisxServiceConfigRequestV1?: (payload: string) => void
   __cordisxServiceConfigReceiveV1?: (payload: string) => void

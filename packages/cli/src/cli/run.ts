@@ -31,6 +31,8 @@ import {
 import { parseCordisXCli, type CordisXDevInvocation, type CordisXLauncherOptions } from './parse.js'
 import { resolveProfileSelection } from './profiles.js'
 import { ProviderFleet } from '../providers/fleet.js'
+import { resolveLocalCodexProviderConfig } from '../providers/config.js'
+import type { CodexProviderConfig } from '../providers/contracts.js'
 import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
 import { createConfigBridgeHandler, type ConfigBridgeHandler } from '../launcher/config-rpc.js'
 import { HostServiceConfigNarrowApi, type HostSecretState } from '../launcher/service-config.js'
@@ -134,6 +136,11 @@ function localDevelopmentHostConfig(cwd: string): CordisXConfig {
   }
 }
 
+function providerConfigs(config: CordisXConfig, environment: NodeJS.ProcessEnv): readonly CodexProviderConfig[] {
+  const local = resolveLocalCodexProviderConfig(config.codex, environment)
+  return local === undefined ? config.providers : [...config.providers, local]
+}
+
 interface RendererComposition {
   readonly source: string
   readonly providerBridgeToken?: string
@@ -182,7 +189,8 @@ export async function buildRendererComposition(
     readonly internalBuildRendererBundle?: typeof buildRendererBundle
   } = {},
 ): Promise<RendererComposition> {
-  const providerBridgeToken = (config.providers.some(provider => provider.enabled)
+  const providerBridgeToken = (config.codex.agentLoopBackend === 'local-cli'
+    || config.providers.some(provider => provider.enabled)
     || config.plugins.some(plugin => plugin.enabled && plugin.id === 'cli-proxy-api'))
     ? randomBytes(32).toString('hex')
     : undefined
@@ -588,7 +596,7 @@ async function runDevelopment(
     agentHistoryHost: agentHistoryHost(environment, homeConfigPath, `development:${config.rootDir}`),
     agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
     ...(composition.providerBridgeToken === undefined ? {} : {
-      providerFleet: await ProviderFleet.create(config.providers, { appServer: { environment } }),
+      providerFleet: await ProviderFleet.create(providerConfigs(config, environment), { appServer: { environment } }),
       providerBridgeToken: composition.providerBridgeToken,
     }),
     ...(executable === undefined ? {} : { executable }),
@@ -815,7 +823,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   } satisfies IconThemePreferencePersistenceContext
   const providerFleet = rendererComposition.providerBridgeToken === undefined
     ? undefined
-    : await ProviderFleet.create(composition.providers, { appServer: { environment: runtime.env ?? process.env } })
+    : await ProviderFleet.create(providerConfigs(composition, runtime.env ?? process.env), { appServer: { environment: runtime.env ?? process.env } })
   const serviceConfigToken = rendererComposition.serviceConfigBridgeToken
   const services: Array<{ readonly pluginId: string; readonly serviceId: string; readonly api: HostServiceConfigNarrowApi }> = []
   let channelConfigApi: HostServiceConfigNarrowApi | undefined
