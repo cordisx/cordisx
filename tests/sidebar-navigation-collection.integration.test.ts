@@ -31,7 +31,10 @@ describe('sidebar navigation collections', () => {
       },
     })
     const dom = new JSDOM(`<!doctype html><html lang="en"><head></head><body>
-      <aside><nav data-cordisx-playground-surface="sidebar.navigation.items"></nav></aside>
+      <aside>
+        <nav data-cordisx-playground-surface="sidebar.navigation.items"></nav>
+        <section data-native-recent-tasks><h2>Recent tasks</h2><button>Existing task</button></section>
+      </aside>
       <main data-cordisx-playground-seat="app"></main>
       <main data-cordisx-playground-seat="main"></main>
       <main data-cordisx-playground-seat="session.content"></main>
@@ -51,10 +54,12 @@ describe('sidebar navigation collections', () => {
         if (count !== 3) throw new Error(JSON.stringify({ count, snapshot: runtime?.snapshot(), errors, warnings, html: dom.window.document.body.innerHTML }))
       }, { timeout: 5_000, interval: 10 })
       const document = dom.window.document
+      const recentTasks = document.querySelector<HTMLElement>('[data-native-recent-tasks]')!
+      const recentTasksMarkup = recentTasks.outerHTML
       const structuredStyles = document.getElementById('cordisx-structured-styles')?.textContent ?? ''
       expect(document.querySelectorAll('#cordisx-structured-styles')).toHaveLength(1)
-      expect(structuredStyles).toContain('.cordisx-room-composite-seat { position: relative;')
-      expect(structuredStyles).toContain('.cxrv-composite { position: absolute;')
+      expect(structuredStyles).toContain('.cordisx-nav-primary > .cordisx-room-composite-seat.cxsi-icon { position: relative;')
+      expect(structuredStyles).toContain('.cordisx-room-composite-seat > .cxrv-composite { position: absolute;')
       expect(structuredStyles).toContain('.cxrv-participant, .cxrv-overflow { position: absolute;')
       expect(document.querySelector('.cordisx-navigation > .cordisx-nav-row')?.textContent).toContain('New room')
       expect(document.querySelector('.cordisx-navigation > .cordisx-nav-row .cordisx-room-composite-seat')).toBeNull()
@@ -72,11 +77,12 @@ describe('sidebar navigation collections', () => {
       expect(dom.window.getComputedStyle(compositeSeat).height).toBe('16px')
       expect(dom.window.getComputedStyle(compositeSeat).padding).toBe('0px')
       expect(dom.window.getComputedStyle(compositeSeat).borderTopWidth).toBe('0px')
-      expect(dom.window.getComputedStyle(compositeSeat).gap).toBe('0')
+      expect(dom.window.getComputedStyle(compositeSeat).gap).toBe('0px')
       expect(dom.window.getComputedStyle(compositeSeat).backgroundColor).toBe('rgba(0, 0, 0, 0)')
       expect(dom.window.getComputedStyle(compositeSeat).boxShadow).toBe('none')
       expect(dom.window.getComputedStyle(composite).position).toBe('absolute')
-      expect(dom.window.getComputedStyle(composite).gap).toBe('0')
+      expect(dom.window.getComputedStyle(composite).overflow).toBe('hidden')
+      expect(dom.window.getComputedStyle(composite).gap).toBe('0px')
       expect(dom.window.getComputedStyle(participant).position).toBe('absolute')
       expect(dom.window.getComputedStyle(participant).borderRadius).toBe('50%')
       document.documentElement.lang = 'zh-CN'
@@ -139,6 +145,8 @@ describe('sidebar navigation collections', () => {
       sameRows[2]!.querySelector<HTMLButtonElement>('.cordisx-nav-primary')!.click()
       await vi.waitFor(() => expect(sameRows[2]!.dataset.selected).toBe('true'))
       expect(sameRows.filter(row => row.dataset.selected === 'true')).toEqual([sameRows[2]])
+      expect(recentTasks.outerHTML).toBe(recentTasksMarkup)
+      expect(recentTasks.querySelector('.cordisx-room-composite-seat, .cxrv-composite, .cxrv-participant')).toBeNull()
       expect(errors).toEqual([])
       expect(warnings).toEqual([])
       await runtime?.dispose()
