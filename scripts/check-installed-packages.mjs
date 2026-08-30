@@ -159,19 +159,23 @@ hostSubscription satisfies ConnectorEventSubscription
 if ('handle' in protocolResult) protocolResult.handle.unsubscribe()
 if ('handle' in hostResult) hostResult.handle.unsubscribe()
 `, 'utf8')
-  await writeFile(path.join(runnerDirectory, 'agent-loop-consumer.ts'), `
+  await writeFile(path.join(runnerDirectory, 'agent-loop-collection-consumer.ts'), `
 import type { Context } from '@deepseek-ai/cordis'
 import type {
   AgentDefinition,
   AgentLoopCreateOrBindResult,
   AgentLoopSendResult,
   BoundAgentLoopClient,
+  CordisXNavigationCollectionSnapshot,
+  CordisXNavigationCollectionSource,
 } from 'cordisx/contracts'
 
 declare const ctx: Context
 declare const definition: AgentDefinition
 declare const created: AgentLoopCreateOrBindResult
 declare const sent: AgentLoopSendResult
+declare const snapshot: CordisXNavigationCollectionSnapshot
+declare const source: CordisXNavigationCollectionSource
 
 ctx.agentLoop satisfies BoundAgentLoopClient
 definition.promptSections?.map(section => section.kind satisfies 'introduction' | 'personality' | 'role' | 'operations' | 'tools' | 'knowledge' | 'memory-policy' | 'memory' | 'other')
@@ -179,13 +183,19 @@ if (created.status === 'accepted') created.binding.task satisfies string
 else created.authorization.state satisfies 'denied' | 'unavailable'
 if (sent.status === 'accepted') sent.messageId satisfies string
 else sent.authorization.state satisfies 'denied' | 'unavailable'
+snapshot.items.map(item => item.route.params?.roomId)
+ctx.slots.registerCollection({
+  name: 'sidebar.navigation.items',
+  id: 'chatroom.rooms',
+  group: { id: 'chatroom', label: { key: 'chatroom.rooms', fallback: 'Rooms' } },
+}, source).dispose()
 `, 'utf8')
   await writeFile(path.join(runnerDirectory, 'tsconfig.json'), `${JSON.stringify({
     compilerOptions: {
       target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true,
       exactOptionalPropertyTypes: true, noEmit: true, skipLibCheck: false,
     },
-    include: ['conversation-consumer.ts', 'connector-consumer.ts', 'agent-loop-consumer.ts'],
+    include: ['conversation-consumer.ts', 'connector-consumer.ts', 'agent-loop-collection-consumer.ts'],
   }, null, 2)}\n`, 'utf8')
   const rootBin = name => path.join(repositoryRoot, 'node_modules', '.bin', process.platform === 'win32' ? `${name}.cmd` : name)
   await run(rootBin('tsc'), ['-p', 'tsconfig.json'], { cwd: runnerDirectory, env: process.env })
@@ -275,7 +285,7 @@ else sent.authorization.state satisfies 'denied' | 'unavailable'
   await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
   await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
 
-  console.log('[cordisx] installed tarballs verified: licenses, AgentLoop, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run')
+  console.log('[cordisx] installed tarballs verified: licenses, combined AgentLoop and navigation collection, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run')
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }
