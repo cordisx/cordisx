@@ -57,7 +57,7 @@ import { CordisXCommandService } from './commands.js'
 import { CordisXAgentConversationShellService } from './agent-conversation-shell.js'
 import { CordisXI18nService } from './i18n.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
-import { BrowserCodexRouteHistoryAdapter } from './codex-router-history.js'
+import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter } from './codex-router-history.js'
 import {
   BrowserPermissionPolicyStore,
   BrowserPermissionPrompt,
@@ -481,7 +481,9 @@ async function start(
     ? globalThis.crypto.randomUUID()
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const iconThemeRegistry = new IconThemeRegistry(generation, metadata.profileId)
-  const routeHistory = new BrowserCodexRouteHistoryAdapter(window, metadata.hostKind === 'playground')
+  const routeHistory = metadata.hostKind === 'playground' || window.location.protocol !== 'app:'
+    ? new BrowserRouteHistoryAdapter(window, true)
+    : new CodexRouterHistoryAdapter(window)
   const unbindIconThemeRegistry = bindIconThemeRegistry(document, iconThemeRegistry)
   const iconThemePreferenceBridge = metadata.iconThemePreferenceBridgeToken === undefined || metadata.appId === undefined
     ? undefined

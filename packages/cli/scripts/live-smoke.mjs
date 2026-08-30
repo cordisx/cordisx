@@ -1404,14 +1404,28 @@ if (parsed.values.exercise) {
     await wait(120)
     const mainPage = document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')
     const back = mainPage?.querySelector('button[aria-label="Back"]')
-    const backEnabled = back !== null && back?.disabled === false
-    const historyLengthAfterPush = history.length
-    const routeKeyAfterPush = history.state?.key ?? null
-    history.back()
-    await wait(250)
+    const pageBackEnabled = back !== null && back?.disabled === false
+    const nativeNavigationButton = label => [...document.querySelectorAll('button')]
+      .filter(visible)
+      .filter(element => element.getAttribute('aria-label') === label)
+      .filter(element => element.closest('[data-browser-sidebar-toolbar]') === null)
+      .find(element => element.closest('[data-test-id="header-shell-slot"]') !== null)
+      ?? [...document.querySelectorAll('button')]
+        .filter(visible)
+        .find(element => element.getAttribute('aria-label') === label
+          && element.closest('[data-browser-sidebar-toolbar]') === null)
+    const nativeBackAfterPush = nativeNavigationButton('返回') ?? nativeNavigationButton('Back')
+    const nativeForwardAfterPush = nativeNavigationButton('前进') ?? nativeNavigationButton('Forward')
+    const nativeBackEnabledAfterPush = nativeBackAfterPush?.disabled === false
+    const nativeForwardEnabledAfterPush = nativeForwardAfterPush?.disabled === false
+    const browserHistoryAfterPush = { length: history.length, state: history.state }
+    nativeBackAfterPush?.click()
+    await wait(350)
     const mainAfterBack = runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'main')
-    history.forward()
-    await wait(250)
+    const nativeForwardAfterBack = nativeNavigationButton('前进') ?? nativeNavigationButton('Forward')
+    const nativeForwardEnabledAfterBack = nativeForwardAfterBack?.disabled === false
+    nativeForwardAfterBack?.click()
+    await wait(350)
     const mainAfterForward = runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'main')
     document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"] button[aria-label="Close"]')?.click()
     await wait(250)
@@ -1495,7 +1509,16 @@ if (parsed.values.exercise) {
       initialNative,
       sidebar: { before: sidebarBefore, collapsed, collapsedMain, expanded, after: sidebarAfter },
       panels: panelResult,
-      history: { backEnabled, historyLengthAfterPush, routeKeyAfterPush, afterBack: mainAfterBack, afterForward: mainAfterForward, afterClose: mainAfterClose },
+      history: {
+        pageBackEnabled,
+        nativeBackEnabledAfterPush,
+        nativeForwardEnabledAfterPush,
+        nativeForwardEnabledAfterBack,
+        browserAfterPush: browserHistoryAfterPush,
+        afterBack: mainAfterBack,
+        afterForward: mainAfterForward,
+        afterClose: mainAfterClose,
+      },
       localization: {
         originalLang, projectedLang,
         changed: originalText !== projectedText,
