@@ -205,6 +205,7 @@ async function fixture(sessionId: string, options: {
     Object.defineProperty(sessionHeader, 'getBoundingClientRect', { value: () => rect(248, 46, 840, 46) })
   }
 
+  dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
   dom.window.eval(bundle)
   for (let attempt = 0; attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
     await new Promise(resolve => setTimeout(resolve, 10))
@@ -509,13 +510,14 @@ describe('Agent Trace Showcase renderer integration', () => {
     entryButton.click()
     await settle(4)
     expect(nativeActivations).toBe(0)
-    const invocationDiagnostics = runtime.snapshot().extensionPoints.accessDiagnostics.slice(-3).map(item => ({
+    const invocationDiagnostics = runtime.snapshot().extensionPoints.accessDiagnostics.slice(-4).map(item => ({
       operation: item.request.operation,
       generation: item.request.generation,
       authorized: item.authorized,
     }))
     expect(invocationDiagnostics).toEqual([
       { operation: 'surface.route.navigate', generation: expect.any(String), authorized: true },
+      { operation: 'outlet.route.navigate', generation: expect.any(String), authorized: true },
       { operation: 'outlet.route.navigate', generation: expect.any(String), authorized: true },
       { operation: 'outlet.page.mount', generation: expect.any(String), authorized: true },
     ])

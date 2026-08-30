@@ -23,7 +23,9 @@ The invariants are:
 5. Complex DOM or framework UI mounts only inside a CordisX-owned page outlet.
 6. Route, page, and outlet are independent registries joined by validated ids.
 7. No CordisX overlay replaces, reparents, removes, hides, or takes ownership of
-   a Codex React node. CordisX never calls the Codex router or browser history.
+   a Codex React node. The private Host adapter projects validated CordisX routes
+   into Codex's existing browser session history; plugins never receive the
+   navigator, history object, native controls, or DOM.
 8. Every registration, observer, page mount, and command execution is fenced by
    the owning plugin fiber and renderer generation.
 9. Host-rendered text is retained as `LocalizedText`/message references in the
@@ -368,10 +370,12 @@ Codex adapter selectors. See
 
 ## Paths and navigation
 
-CordisX keeps its own in-memory route state. Navigation names a route id and
-parameters; contributions never concatenate paths. Route matching supports
-static segments and declared `:parameter` segments with strict encoding and no
-wildcard escape from the registered pattern.
+CordisX does not keep a parallel route-history stack. Navigation names a route
+id and parameters; contributions never concatenate paths. The Host validates
+ownership, policy, parameters, page, outlet, active session, and path before it
+adds a namespaced projection to Codex's current browser session-history entry.
+Route matching supports static segments and declared `:parameter` segments
+with strict encoding and no wildcard escape from the registered pattern.
 
 The initial path/outlet rules are validated in both protocol conformance and
 the runtime:
@@ -388,28 +392,37 @@ files, review, or any other valid session page. For a session route, the
 resolved `sessionId` must equal the currently active native session id. A
 mismatch is rejected; CordisX never switches the native Codex session.
 
-Every outlet owns an internal stack. Open pushes a validated route, back
-returns within that CordisX stack, and close clears the current CordisX page to
-reveal the untouched native content. These operations do not call
-`history.pushState`, change the browser URL, or invoke Codex routing APIs.
+The private Codex history adapter requires the live React Router browser-state
+shape: a non-empty `key` and non-negative integer `idx`. No supported global
+navigator is exposed by the inspected Codex renderer, so CordisX does not retain
+or synchronize a second navigator. When the executable probe passes, a valid
+`ctx.routes.navigate()` preserves Codex's `usr` state and URL, advances `idx`,
+creates a new location `key`, writes one closed `__cordisxRouteV1` projection,
+and emits the browser `popstate` signal consumed by React Router. When the probe
+fails, routes remain unavailable with a diagnostic; there is no in-memory
+history fallback.
 
-Host outlet declarations also assign a presentation group. Outlets in the same
-group occupy intersecting product regions and are coordinated by one runtime
-presentation stack. Their route stacks may remain active at the same time, but
-only the most recently presented outlet is visible and interactive. Older
-members become `suspended`: their mounted page, framework root, and local state
-remain connected, while the host layer is hidden, inert, and removed from the
-accessibility tree. Closing the presented member restores the previous member
-without remounting it. Outlets in different presentation groups may be visible
-at the same time.
+Codex's current location is the source of truth. Native React Router
+`pushState`/`replaceState` calls, browser POP, title-bar back/forward, system
+shortcuts, and trackpad gestures all reproject that location into the current
+CordisX page. CordisX does not change the visible `app://` URL. A new Codex
+route entry normally omits the CordisX projection and therefore closes the
+overlay. A CordisX entry stores owner-qualified route id, outlet, validated
+path, and scalar params; two entries with the same route id and different
+params remain distinct and restore independently.
+
+Only the current session-history entry is mounted. Navigating from one outlet
+to another aborts/unmounts the former page; native Back remounts the former
+entry from its serialized route projection, and Forward remounts the latter.
+Presentation groups still prevent overlapping current projections during
+adapter reconciliation, but they are not history or suspended-page stacks.
 
 The built-in `app`, `main`, and `session.content` outlets share the primary
 presentation group because their rectangles overlap. Runtime and manager
-snapshots distinguish `inactive`, `presented`, and `suspended`, including which
-outlet currently suspends another. Shell navigation selection follows
-`presented`, not merely an active route. Suspending a page also dismisses its
-host tooltip, menu, and focus state. This is presentation coordination only: it
-does not replace native DOM, discard plugin state, or redirect Codex data flow.
+snapshots retain `inactive`, `presented`, and `suspended` for general adapter
+coordination, but ordinary CordisX history projection has only one mounted
+current entry. Shell navigation selection follows `presented`, not merely a
+serialized historical entry.
 
 Host page chrome owns title, icon, close/back controls, breadcrumb rendering,
 declared tabs, and declared header actions. This rule is identical for `app`,
@@ -437,17 +450,17 @@ state, then projected through the host control as `aria-pressed`. Contextual
 plugin arguments. Re-activation closes the route; Escape uses the same close
 path and focus returns to the connected trigger when practical. A session
 change, route close, policy block, plugin disposal, or generation replacement
-clears state without a plugin boolean.
+is resolved from the same Codex history location without a plugin boolean.
 
 The host renders those values through one chrome component and owns layout,
 macOS safe insets, drag/no-drag regions, native button interaction, i18n,
 keyboard/a11y behavior, command dispatch, and current outlet-policy checks.
 The chrome reserves one fixed-width leading position before the title. At the
-outlet root it renders the declared host icon token; when the outlet stack has
-a previous entry, the same position changes to the host-rendered back button.
-Plugins never render or resize that position, so title and breadcrumb text do
-not jump horizontally across navigation. A root page has no redundant back
-button when the close action already reveals native content.
+session-history root it renders the declared host icon token; when Codex's
+current `idx` can return to an earlier entry, the same position changes to the
+host-rendered back button. That button calls the same Codex history authority
+as the native title-bar control. Plugins never render or resize that position,
+so title and breadcrumb text do not jump horizontally across navigation.
 
 Page chrome, page surfaces, and bundled examples use the current host semantic
 background, border, and text tokens. They must not introduce an independent
@@ -521,10 +534,20 @@ not aborted or recreated, preserving DOM/framework state.
 
 If the key changes, the outlet aborts and disposes the old page and all
 context-scoped contribution state before accepting a route in the new context.
-Version 1 does not retain or restore per-context page stacks. Returning to an
-earlier workspace or session starts a fresh page mount. Plugin blocking,
-generation replacement, or renderer shutdown aborts all active pages and
-commands regardless of context.
+Version 1 does not retain per-context page stacks. Returning to a prior Codex
+history entry creates a fresh page mount from its validated projection.
+
+Reload/initial injection reads the current Codex history entry only after Host
+outlets and plugin registrations are ready. A same-owner/same-id plugin
+generation replacement keeps the location key and entry, aborts the old page,
+and remounts the new registered implementation. Blocking, uninstalling, or
+otherwise invalidating the current route replaces that one history entry with
+the native location at the same `idx`; it does not push another entry or walk
+the user backward. Historical entries cannot be mutated while they are not
+current; if native Back/Forward later reaches one whose route is still absent,
+the Host validates it, clears that current projection with REPLACE, and mounts
+nothing. Renderer shutdown aborts mounts but leaves the current session entry
+available for a later compatible reload.
 
 ## Manager diagnostics
 
@@ -591,9 +614,10 @@ Required automated coverage includes:
 - primary command precedence over route and invalid no-activation entries;
 - independent trailing actions that never activate their navigation row;
 - route path matching, parameter encoding, outlet/path mismatch, missing page,
-  current-session enforcement, history/back/close, and no browser-history use;
+  current-session enforcement, exact-param identity, Codex PUSH/REPLACE/POP,
+  native back/forward, close, reload restore, and no parallel history fallback;
 - same-key anchor replacement without page remount, different-key abort, no
-  per-context restore, plugin block/restore, and generation disposal;
+  per-context stack, plugin block/uninstall replacement, and generation rebind;
 - direct absolute overlays, portal geometry tracking, sidebar resize/collapse,
   side/bottom panels, no layout shift, and bounded pointer coverage;
 - assertions that native nodes retain identity/parentage, are never hidden or

@@ -185,6 +185,7 @@ describe('renderer bundle', () => {
     Object.defineProperty(dom.window.document.body, 'getBoundingClientRect', { value: () => rect(0, 0, 1200, 900) })
     let mainRect = rect(240, 0, 960, 900)
     Object.defineProperty(dom.window.document.querySelector('[data-app-shell-main-content-layout]'), 'getBoundingClientRect', { value: () => mainRect })
+    dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
     dom.window.eval(bundle)
     for (let attempt = 0; attempt < 30 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
@@ -444,8 +445,8 @@ describe('renderer bundle', () => {
     expect(mainDemo.classList.contains('cxr-ui-card')).toBe(true)
     expect(mainDemo.getAttribute('style') ?? '').not.toMatch(/#8b5cf6|#c4b5fd|linear-gradient/)
     const mainChrome = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="slot-showcase:main.analytics"] [data-cordisx-page-chrome]')!
-    expect(mainChrome.querySelector('[data-cordisx-page-leading] [data-host-icon="host:analytics"]')).not.toBeNull()
-    expect(mainChrome.querySelector('button[aria-label="Back"]')).toBeNull()
+    expect(mainChrome.querySelector('[data-cordisx-page-leading] [data-host-icon="host:analytics"]')).toBeNull()
+    expect(mainChrome.querySelector('button[aria-label="Back"]')).not.toBeNull()
     const mainHeaderAction = mainChrome.querySelector<HTMLButtonElement>('[data-cordisx-page-header-action="refresh"]')!
     expect(mainHeaderAction.textContent).toBe('')
     expect(mainHeaderAction.getAttribute('aria-label')).toBe('Refresh snapshot')
@@ -463,10 +464,8 @@ describe('renderer bundle', () => {
 
     await runtime!.navigate('slot-showcase', { id: 'app.overview' })
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ activeRoute: 'slot-showcase:app.overview', mounted: true, presentation: 'presented' })
-    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({ activeRoute: 'slot-showcase:main.analytics', mounted: true, presentation: 'suspended', suspendedBy: 'app' })
-    expect(mainPage.isConnected).toBe(true)
-    expect(mainPage.inert).toBe(true)
-    expect(mainPage.getAttribute('aria-hidden')).toBe('true')
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({ mounted: false, presentation: 'inactive' })
+    expect(mainPage.isConnected).toBe(false)
     expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.hidden).toBe(true)
     expect(dom.window.document.querySelector('.cordisx-nav-primary')?.hasAttribute('aria-current')).toBe(false)
     const appOutlet = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="app"]')!
@@ -475,8 +474,8 @@ describe('renderer bundle', () => {
     const appChrome = appOutlet.querySelector<HTMLElement>('[data-cordisx-page-chrome]')!
     expect(appChrome.dataset.cordisxDrag).toBe('true')
     expect(appChrome.style.paddingLeft).toContain('--cordisx-page-chrome-safe-left')
-    expect(appChrome.querySelector('[data-cordisx-page-leading] [data-host-icon="host:layers"]')).not.toBeNull()
-    expect(appChrome.querySelector('button[aria-label="Back"]')).toBeNull()
+    expect(appChrome.querySelector('[data-cordisx-page-leading] [data-host-icon="host:layers"]')).toBeNull()
+    expect(appChrome.querySelector('button[aria-label="Back"]')).not.toBeNull()
     expect(appChrome.querySelectorAll('[data-cordisx-page-header-action="refresh"]')).toHaveLength(1)
     expect(appOutlet.querySelectorAll('[role="tab"] [data-host-icon]')).toHaveLength(2)
     expect(appOutlet.querySelector('[data-cordisx-page-body]')?.closest('header')).toBeNull()
@@ -513,22 +512,25 @@ describe('renderer bundle', () => {
     })
     await runtime!.execute('slot-showcase', { id: 'open-session' })
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({ activeRoute: 'slot-showcase:session.analytics', mounted: true, contextKey: `session:${sessionId}`, presentation: 'presented' })
-    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ presentation: 'suspended', suspendedBy: 'session.content' })
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ mounted: false, presentation: 'inactive' })
     expect(dom.window.document.getElementById('native-thread')?.hasAttribute('data-codex-thread-reference-drop-target')).toBe(true)
     expect(dom.window.document.querySelector('[data-cordisx-page-outlet="session.content"]')?.parentElement?.id).toBe('native-session-content')
     await expect(runtime!.navigate('slot-showcase', { id: 'session.analytics', params: { sessionId: 'stale' } })).rejects.toThrow(/does not match native session/)
     expect(dom.window.location.href).toBe('https://codex.local/native')
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-page="slot-showcase:session.analytics"] button[aria-label="Close"]')!.click()
-    await settle()
+    for (let attempt = 0; attempt < 20 && runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')?.presentation !== 'presented'; attempt += 1) await settle()
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({ presentation: 'presented' })
     expect(appOutlet.hidden).toBe(false)
-    appChrome.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click()
-    await settle()
+    const restoredAppChrome = appOutlet.querySelector<HTMLElement>('[data-cordisx-page-chrome]')!
+    expect(restoredAppChrome).not.toBe(appChrome)
+    restoredAppChrome.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click()
+    for (let attempt = 0; attempt < 20 && runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')?.presentation !== 'presented'; attempt += 1) await settle()
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({ presentation: 'presented' })
-    expect(dom.window.document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')).toBe(mainPage)
-    expect(mainPage.inert).toBe(false)
-    expect(mainPage.hasAttribute('aria-hidden')).toBe(false)
+    const restoredMainPage = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="slot-showcase:main.analytics"]')!
+    expect(restoredMainPage).not.toBe(mainPage)
+    expect(restoredMainPage.inert).toBe(false)
+    expect(restoredMainPage.hasAttribute('aria-hidden')).toBe(false)
     expect(dom.window.document.querySelector('.cordisx-nav-primary')?.getAttribute('aria-current')).toBe('page')
 
     dom.window.document.documentElement.lang = 'zh-CN'
