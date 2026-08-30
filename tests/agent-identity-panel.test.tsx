@@ -28,6 +28,7 @@ import {
   HostAgentTaskDetailsNavigator,
   validateAgentLoopTaskDetailsUrl,
 } from '../packages/cli/src/renderer/host-ui/AgentTaskDetailsNavigator.js'
+import { AGENT_CONVERSATION_STYLES } from '../packages/cli/src/renderer/host-ui/conversation/styles.js'
 
 const copy: HostAgentIdentityPanelCopy = {
   settings: 'Agent settings',
@@ -236,6 +237,18 @@ describe('Host Agent identity panel interaction', () => {
     }
     const harness = await install(<Harness />)
     const trigger = harness.dom.window.document.querySelector<HTMLButtonElement>('.cx-agent-identity-avatar-button')!
+    const style = harness.dom.window.document.createElement('style')
+    style.textContent = AGENT_CONVERSATION_STYLES
+    harness.dom.window.document.head.append(style)
+    const computed = harness.dom.window.getComputedStyle(trigger)
+    expect(trigger.tagName).toBe('BUTTON')
+    expect(trigger.getAttribute('aria-label')).toBe('Open Lead identity')
+    expect(computed.backgroundColor).toMatch(/transparent|rgba\(0, 0, 0, 0\)/)
+    expect(computed.borderTopWidth).toBe('0px')
+    expect(computed.paddingTop).toBe('0px')
+    expect(computed.boxShadow).toBe('none')
+    expect(AGENT_CONVERSATION_STYLES).toContain('.cx-agent-identity-avatar-button:focus:not(:focus-visible)')
+    expect(AGENT_CONVERSATION_STYLES).toContain('.cx-agent-identity-avatar-button:focus-visible')
     await act(async () => trigger.click())
     const panel = harness.dom.window.document.querySelector<HTMLElement>('[role="dialog"]')!
     expect(panel.getAttribute('aria-modal')).toBe('true')

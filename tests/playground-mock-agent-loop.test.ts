@@ -140,9 +140,12 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(leadLifecycle.value?.events).toMatchObject([
       { type: 'approval', approval: { state: 'pending' } },
       { type: 'approval', approval: { state: 'resolved', outcome: 'approved' } },
-      { type: 'message', message: { role: 'assistant', content: [{ text: expect.stringContaining('[Mock / Simulator] chatroom.generalist@r1') }] } },
+      { type: 'message', message: { role: 'assistant', content: [{ text: 'Completed successfully.' }] } },
       { type: 'lifecycle', lifecycle: { phase: 'turn.completed' } },
     ])
+    const assistantBody = leadLifecycle.value?.events.find(event => event.type === 'message')?.message.content[0]?.text ?? ''
+    expect(assistantBody).toBe('Completed successfully.')
+    expect(assistantBody).not.toMatch(/Mock|Simulator|chatroom\.generalist|@r1|processed:/i)
     expect(reviewerLifecycle.value?.subscription.binding).toEqual(reviewerCreate.binding.binding)
     expect(reviewerLifecycle.value?.events).toMatchObject([
       { type: 'lifecycle', lifecycle: { phase: 'turn.failed', failure: { code: 'SIMULATED_CLI_FAILURE' } } },
@@ -404,7 +407,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
       terminalEvents.push(...(page.value?.events ?? []))
     }
     expect(terminalEvents).toMatchObject([
-      { type: 'message', message: { role: 'assistant', content: [{ text: '[Mock / Simulator] chatroom.generalist@r1 processed: bundled hello' }] } },
+      { type: 'message', message: { role: 'assistant', content: [{ text: 'Completed successfully.' }] } },
       { type: 'lifecycle', lifecycle: { phase: 'turn.completed' } },
     ])
     const trace = (dom.window as unknown as { __cordisxRuntime?: { playgroundMockAgentLoop?(): { tasks: readonly { identity: { agentId: string } }[] }; dispose(): Promise<void> } }).__cordisxRuntime?.playgroundMockAgentLoop?.()

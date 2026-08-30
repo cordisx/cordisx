@@ -323,7 +323,7 @@ describe('AgentConversationRenderer production DOM', () => {
     }, empty), true)
     try {
       const document = emptyHarness.dom.window.document
-      expect(document.querySelector('h1')?.textContent).toBe('新建房间')
+      expect(document.querySelector('h1')?.textContent).toBe('空会话测试场景')
       expect(document.querySelectorAll('h2')).toHaveLength(0)
       expect(document.querySelectorAll('.cxa-action')).toHaveLength(0)
       expect(document.querySelectorAll('[data-agent-conversation-empty],.cxa-empty-mark,.cxa-empty-copy')).toHaveLength(0)
@@ -352,6 +352,41 @@ describe('AgentConversationRenderer production DOM', () => {
       })
     } finally {
       await emptyHarness.close()
+    }
+  })
+
+  it('renders every reaction with its exact actor name, value, state, and localized accessible name', async () => {
+    const base = createPlaygroundConversationFixture('conversation', 'zh-CN')
+    const human = base.entries.find(entry => entry.kind === 'message' && entry.authorId === 'human-reviewer')!
+    const model = createAgentConversationModel({
+      ...base,
+      entries: base.entries.map(entry => entry === human ? {
+        ...entry,
+        reactions: [
+          { reactionId: 'reaction-alpha', actorParticipantId: 'agent-alpha', value: { kind: 'emoji', emoji: '✅' }, state: 'completed' },
+          { reactionId: 'reaction-beta', actorParticipantId: 'agent-beta', value: { kind: 'emoji', emoji: '✅' }, state: 'pending' },
+        ],
+      } : entry),
+    })
+    const harness = await render(model, new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model))
+    try {
+      const reactions = [...harness.dom.window.document.querySelectorAll<HTMLElement>('.cxa-message-reaction')]
+      expect(reactions).toHaveLength(2)
+      expect(reactions.map(reaction => reaction.textContent)).toEqual(['Agent Alpha✅', 'Agent Beta✅'])
+      expect(reactions.map(reaction => reaction.getAttribute('aria-label'))).toEqual([
+        'Agent Alpha 的反应：✅，已完成',
+        'Agent Beta 的反应：✅，处理中',
+      ])
+      expect(reactions.map(reaction => reaction.dataset.reactionState)).toEqual(['completed', 'pending'])
+      expect(() => createAgentConversationModel({
+        ...base,
+        entries: base.entries.map(entry => entry === human ? {
+          ...entry,
+          reactions: [{ reactionId: 'reaction-unknown', actorParticipantId: 'unknown-agent', value: { kind: 'emoji', emoji: '✅' }, state: 'completed' }],
+        } : entry),
+      })).toThrow('actor is unknown')
+    } finally {
+      await harness.close()
     }
   })
 

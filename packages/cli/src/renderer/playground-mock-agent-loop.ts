@@ -151,8 +151,7 @@ export class DeterministicPlaygroundMockCliExecutor implements PlaygroundMockCli
     if (/\[cli-fail\]/iu.test(invocation.input)) {
       return clone({ status: 'error', error: { code: 'SIMULATED_CLI_FAILURE', message: 'The debug-only deterministic CLI adapter was asked to fail.' } })
     }
-    const actor = `${invocation.identity.agentId}@${invocation.identity.revision}`
-    return clone({ status: 'ok', stdout: `[Mock / Simulator] ${actor} processed: ${invocation.input}` })
+    return clone({ status: 'ok', stdout: 'Completed successfully.' })
   }
 }
 

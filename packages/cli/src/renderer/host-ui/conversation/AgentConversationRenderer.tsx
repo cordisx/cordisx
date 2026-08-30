@@ -52,6 +52,13 @@ function stateCopy(message: AgentConversationMessage, copy: AgentConversationRen
   return undefined
 }
 
+function reactionStateCopy(state: 'pending' | 'completed' | 'failed', locale: string): string {
+  const chinese = locale.toLowerCase().startsWith('zh')
+  if (state === 'pending') return chinese ? '处理中' : 'pending'
+  if (state === 'completed') return chinese ? '已完成' : 'completed'
+  return chinese ? '失败' : 'failed'
+}
+
 function ActionButton({ action, run }: { readonly action: AgentConversationAction; readonly run: () => void }) {
   const reasonId = React.useId()
   return <>
@@ -113,13 +120,20 @@ function MessageEntry({
         {state === undefined ? null : <span className="cxa-message-state">{state}</span>}
       </div>
       <div className="cxa-message-body">{entry.body.map((block, index) => <p key={index}>{block}</p>)}</div>
-      {(entry.reactions ?? []).length === 0 ? null : <div className="cxa-message-reactions" aria-label="Reactions">
-        {(entry.reactions ?? []).map(reaction => <span
-          key={reaction.reactionId}
-          className="cxa-message-reaction"
-          data-reaction-state={reaction.state}
-          aria-label={`${reaction.value.kind === 'emoji' ? reaction.value.emoji : reaction.value.token} · ${reaction.state}`}
-        >{reaction.value.kind === 'emoji' ? reaction.value.emoji : reaction.value.token}</span>)}
+      {(entry.reactions ?? []).length === 0 ? null : <div className="cxa-message-reactions" role="list" aria-label={copy.locale.toLowerCase().startsWith('zh') ? '消息反应' : 'Message reactions'}>
+        {(entry.reactions ?? []).map(reaction => {
+          const actor = participantFor(model, reaction.actorParticipantId)
+          const actorName = actor?.name ?? (copy.locale.toLowerCase().startsWith('zh') ? '未知参与者' : 'Unknown participant')
+          const value = reaction.value.kind === 'emoji' ? reaction.value.emoji : reaction.value.token
+          const state = reactionStateCopy(reaction.state, copy.locale)
+          return <span
+            key={reaction.reactionId}
+            className="cxa-message-reaction"
+            data-reaction-state={reaction.state}
+            role="listitem"
+            aria-label={copy.locale.toLowerCase().startsWith('zh') ? `${actorName} 的反应：${value}，${state}` : `${actorName}'s reaction: ${value}, ${state}`}
+          ><span className="cxa-message-reaction-actor">{actorName}</span><span className="cxa-message-reaction-value">{value}</span></span>
+        })}
       </div>}
       {entry.actions.length === 0 ? null : <div className="cxa-message-actions">
         {entry.actions.map(action => <ActionButton key={action.id} action={action} run={() => {
