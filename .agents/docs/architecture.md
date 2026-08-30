@@ -465,21 +465,28 @@ session change, plugin block, and generation disposal all converge on the same
 outlet lifecycle. An explicit close restores focus to the still-connected
 host-rendered trigger when practical.
 
-Plugin routes use Codex's current React Router/browser session history as their
-only back/forward authority. The installed renderer does not expose a supported
-navigator object, so the private adapter probes the existing browser-history
-record for React Router's non-empty `key` and non-negative integer `idx`. A
-failed probe makes route navigation unavailable; it never activates a CordisX
-memory-history fallback. A successful `ctx.routes.navigate()` validates the
-complete owner/permission/params/page/outlet/session tuple, preserves Codex's
-URL and `usr` state, then adds a closed namespaced route projection while
-advancing the same session history. The adapter emits the location signal that
-the existing React Router observes and watches native PUSH/REPLACE/POP in the
-opposite direction. Consequently native title-bar buttons, keyboard shortcuts,
-trackpad gestures, page-chrome Back/close, and plugin jumps all traverse one
-history. Same route ids with different params are distinct entries.
+Plugin routes use Codex's current React Router MemoryHistory as their only
+back/forward authority. Executable inspection of Desktop 26.818.61809 shows
+that `window.history` remains length 1 with null state while the native title
+bar can still go back. The private adapter therefore discovers the existing
+React Router Context navigator from the live React root and requires its
+`index`, `location.key`, `push`, `replace`, and `go` seam. It wraps those three
+mutation methods reversibly so native PUSH/REPLACE/POP can be
+reverse-projected, but never calls the navigator's single-listener `listen`
+method or replaces React Router's listener. A failed probe makes route
+navigation unavailable; it never activates a CordisX memory-history fallback.
+A successful `ctx.routes.navigate()` validates the complete
+owner/permission/params/page/outlet/session tuple, preserves Codex's native
+pathname and state, then adds a closed namespaced route projection while
+advancing that same MemoryHistory. Consequently native title-bar buttons,
+keyboard shortcuts, trackpad gestures, page-chrome Back/close, and plugin jumps
+all traverse one history. Same route ids with different params are distinct
+entries.
 
-Initial injection and reload restore only the current validated projection.
+Initial injection and reload restore only the current validated projection. A
+single browser-history record stores that current reload checkpoint, bound to
+the native pathname/search/hash; it is replaced or cleared after every Codex
+navigator transition and is never a back/forward stack.
 Same-id plugin generation replacement rebinds that entry without adding or
 replacing history; an invalidated, blocked, or uninstalled current route is
 removed with REPLACE at the same index. A non-current stale entry cannot be

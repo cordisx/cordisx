@@ -1,7 +1,8 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import {
-  BrowserCodexRouteHistoryAdapter,
+  BrowserRouteHistoryAdapter,
+  CodexRouterHistoryAdapter,
   type CodexRouteHistoryEntry,
 } from '../packages/cli/src/renderer/codex-router-history.js'
 
@@ -16,84 +17,223 @@ function route(roomId: string): CodexRouteHistoryEntry {
   })
 }
 
-describe('BrowserCodexRouteHistoryAdapter', () => {
-  it('fails closed when the Codex React Router key/index seam is absent', () => {
-    const dom = new JSDOM('', { url: 'https://codex.local/native' })
-    const adapter = new BrowserCodexRouteHistoryAdapter(dom.window as unknown as Window)
-    expect(adapter.snapshot()).toMatchObject({ available: false, reason: expect.stringContaining('key and non-negative integer idx') })
-    expect(() => adapter.push(route('one'))).toThrow(/React Router history state is unavailable/)
+interface FakeLocation {
+  readonly pathname: string
+  readonly search: string
+  readonly hash: string
+  readonly state: unknown
+  readonly key: string
+}
+
+class FakeCodexNavigator {
+  readonly entries: FakeLocation[]
+  index = 0
+  action = 'POP'
+  listener: ((update: unknown) => void) | undefined
+  sequence = 0
+
+  constructor(pathname = '/local/thread-one', state: unknown = { native: true }) {
+    this.entries = [{ pathname, search: '', hash: '', state, key: 'native-0' }]
+  }
+
+  get location(): FakeLocation {
+    return this.entries[this.index]!
+  }
+
+  push(to: Pick<FakeLocation, 'pathname' | 'search' | 'hash'>, state?: unknown): void {
+    this.action = 'PUSH'
+    const location = { ...to, state, key: `native-${++this.sequence}` }
+    this.index += 1
+    this.entries.splice(this.index, this.entries.length, location)
+    this.listener?.({ action: this.action, location, delta: 1 })
+  }
+
+  replace(to: Pick<FakeLocation, 'pathname' | 'search' | 'hash'>, state?: unknown): void {
+    this.action = 'REPLACE'
+    const location = { ...to, state, key: `native-${++this.sequence}` }
+    this.entries[this.index] = location
+    this.listener?.({ action: this.action, location, delta: 0 })
+  }
+
+  go(delta: number): void {
+    this.action = 'POP'
+    const next = Math.max(0, Math.min(this.entries.length - 1, this.index + delta))
+    const actualDelta = next - this.index
+    this.index = next
+    this.listener?.({ action: this.action, location: this.location, delta: actualDelta })
+  }
+
+  listen(listener: (update: unknown) => void): () => void {
+    this.listener = listener
+    return () => { if (this.listener === listener) this.listener = undefined }
+  }
+}
+
+function mountNavigator(dom: JSDOM, navigator: FakeCodexNavigator): void {
+  dom.window.document.getElementById('root')?.remove()
+  const root = dom.window.document.createElement('div')
+  root.id = 'root'
+  dom.window.document.body.append(root)
+  Object.defineProperty(root, '__reactContainer$test', {
+    configurable: true,
+    enumerable: true,
+    value: {
+      child: {
+        memoizedProps: { value: { basename: '/', navigator, static: false } },
+      },
+    },
+  })
+}
+
+describe('CodexRouterHistoryAdapter', () => {
+  it('fails closed when the Codex React Router Context navigator is absent', () => {
+    const dom = new JSDOM('<div id="root"></div>', { url: 'https://codex.local/native' })
+    const adapter = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
+    expect(adapter.snapshot()).toMatchObject({ available: false, reason: expect.stringContaining('Context navigator') })
+    expect(() => adapter.push(route('one'))).toThrow(/Context navigator/)
     adapter.dispose()
     dom.window.close()
   })
 
-  it('fails closed when the renderer history methods cannot be observed', () => {
+  it('fails closed when the discovered navigator cannot be observed', () => {
     const dom = new JSDOM('', { url: 'https://codex.local/native' })
-    dom.window.history.replaceState({ usr: null, key: 'native-key', idx: 0 }, '')
-    Object.defineProperty(dom.window.history, 'pushState', {
-      configurable: true,
-      writable: false,
-      value: dom.window.history.pushState,
-    })
-    const adapter = new BrowserCodexRouteHistoryAdapter(dom.window as unknown as Window)
+    const navigator = new FakeCodexNavigator()
+    Object.defineProperty(navigator, 'push', { configurable: true, writable: false, value: navigator.push })
+    mountNavigator(dom, navigator)
+    const adapter = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
     expect(adapter.snapshot()).toMatchObject({ available: false, reason: expect.stringContaining('cannot be observed') })
     adapter.dispose()
     dom.window.close()
   })
 
-  it('projects PUSH/REPLACE into the existing Codex entry without changing its URL or usr state', () => {
-    const dom = new JSDOM('', { url: 'https://codex.local/thread/one?native=true' })
-    dom.window.history.replaceState({ usr: { native: true }, key: 'native-key', idx: 4 }, '')
-    const originalPush = dom.window.history.pushState
-    const originalReplace = dom.window.history.replaceState
-    let popstates = 0
-    dom.window.addEventListener('popstate', () => { popstates += 1 })
-    const adapter = new BrowserCodexRouteHistoryAdapter(dom.window as unknown as Window)
+  it('pushes and replaces in the existing Codex MemoryHistory without taking its React listener', () => {
+    const dom = new JSDOM('', { url: 'https://codex.local/index.html' })
+    const navigator = new FakeCodexNavigator('/local/thread-one', { native: true })
+    mountNavigator(dom, navigator)
+    let reactUpdates = 0
+    const reactListener = () => { reactUpdates += 1 }
+    navigator.listen(reactListener)
+    const originalPush = navigator.push
+    const originalReplace = navigator.replace
+    const originalGo = navigator.go
+    const adapter = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
 
     const pushed = adapter.push(route('one'))
-    expect(pushed).toMatchObject({ available: true, index: 5, entry: { routeId: 'chatroom:room', params: { roomId: 'one' } } })
-    expect(pushed.key).not.toBe('native-key')
-    expect(dom.window.location.href).toBe('https://codex.local/thread/one?native=true')
-    expect(dom.window.history.state.usr).toEqual({ native: true })
-    expect(popstates).toBe(1)
-    const length = dom.window.history.length
+    expect(pushed).toMatchObject({ available: true, index: 1, entry: { routeId: 'chatroom:room', params: { roomId: 'one' } } })
+    expect(navigator.location).toMatchObject({ pathname: '/local/thread-one' })
+    expect(navigator.location.state).toMatchObject({ native: true, __cordisxRouteV1: { params: { roomId: 'one' } } })
+    expect(dom.window.history.length).toBe(1)
+    expect(reactUpdates).toBe(1)
+    expect(navigator.listener).toBe(reactListener)
 
     const replaced = adapter.replace(route('two'))
-    expect(replaced).toMatchObject({ index: 5, entry: { path: '/main/chatroom/two', params: { roomId: 'two' } } })
-    expect(replaced.key).not.toBe(pushed.key)
-    expect(dom.window.history.length).toBe(length)
-    expect(popstates).toBe(2)
+    expect(replaced).toMatchObject({ index: 1, entry: { path: '/main/chatroom/two', params: { roomId: 'two' } } })
+    expect(navigator.entries).toHaveLength(2)
+    expect(reactUpdates).toBe(2)
 
     adapter.replace()
-    expect(adapter.snapshot()).toMatchObject({ available: true, index: 5 })
     expect(adapter.snapshot().entry).toBeUndefined()
+    expect(navigator.location.state).toEqual({ native: true })
     adapter.dispose()
-    expect(dom.window.history.pushState).toBe(originalPush)
-    expect(dom.window.history.replaceState).toBe(originalReplace)
+    expect(navigator.push).toBe(originalPush)
+    expect(navigator.replace).toBe(originalReplace)
+    expect(navigator.go).toBe(originalGo)
+    expect(Object.hasOwn(navigator, 'push')).toBe(false)
+    expect(Object.hasOwn(navigator, 'replace')).toBe(false)
+    expect(Object.hasOwn(navigator, 'go')).toBe(false)
     dom.window.close()
   })
 
-  it('observes native PUSH/REPLACE and restores distinct params through native back/forward', async () => {
-    const dom = new JSDOM('', { url: 'https://codex.local/thread/one' })
-    dom.window.history.replaceState({ usr: null, key: 'native-key', idx: 0 }, '')
-    const adapter = new BrowserCodexRouteHistoryAdapter(dom.window as unknown as Window)
+  it('rolls back the current-only reload checkpoint when a native write fails', () => {
+    const dom = new JSDOM('', { url: 'https://codex.local/index.html' })
+    const navigator = new FakeCodexNavigator()
+    navigator.push = () => { throw new Error('native push failed') }
+    mountNavigator(dom, navigator)
+    const adapter = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
+
+    expect(() => adapter.push(route('one'))).toThrow('native push failed')
+    expect(adapter.snapshot()).toMatchObject({ available: true, index: 0 })
+    expect(adapter.snapshot().entry).toBeUndefined()
+    expect(dom.window.history.state).toBeNull()
+    adapter.dispose()
+    dom.window.close()
+  })
+
+  it('reverse-projects distinct params after native back/forward without owning an entry stack', async () => {
+    const dom = new JSDOM('', { url: 'https://codex.local/index.html' })
+    const navigator = new FakeCodexNavigator()
+    mountNavigator(dom, navigator)
+    navigator.listen(() => {})
+    const adapter = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
     let changes = 0
     adapter.subscribe(() => { changes += 1 })
     adapter.push(route('one'))
     adapter.push(route('two'))
 
-    expect((await adapter.go(-1)).entry?.params).toEqual({ roomId: 'one' })
-    expect((await adapter.go(1)).entry?.params).toEqual({ roomId: 'two' })
-
-    dom.window.history.pushState({ usr: { native: 'next' }, key: 'native-next', idx: 3 }, '', '/thread/two')
+    navigator.go(-1)
     await Promise.resolve()
-    expect(adapter.snapshot()).toMatchObject({ available: true, key: 'native-next', index: 3 })
-    expect(adapter.snapshot().entry).toBeUndefined()
-    expect(changes).toBeGreaterThanOrEqual(3)
-
-    dom.window.history.replaceState({ usr: null, key: 'native-replace', idx: 3 }, '', '/thread/three')
+    expect(adapter.snapshot().entry?.params).toEqual({ roomId: 'one' })
+    navigator.go(1)
     await Promise.resolve()
-    expect(adapter.snapshot()).toMatchObject({ key: 'native-replace' })
+    expect(adapter.snapshot().entry?.params).toEqual({ roomId: 'two' })
+    expect(changes).toBe(2)
+
+    const nativeState = { native: 'next' }
+    navigator.push({ pathname: '/local/thread-two', search: '?native=true', hash: '' }, nativeState)
+    await Promise.resolve()
+    expect(adapter.snapshot()).toMatchObject({ available: true, index: 3 })
     expect(adapter.snapshot().entry).toBeUndefined()
+    expect(navigator.location.state).toBe(nativeState)
+    adapter.dispose()
+    dom.window.close()
+  })
+
+  it('restores only the current route checkpoint on reload and binds it to the native location', async () => {
+    const dom = new JSDOM('', { url: 'https://codex.local/index.html' })
+    const firstNavigator = new FakeCodexNavigator('/local/thread-one')
+    mountNavigator(dom, firstNavigator)
+    firstNavigator.listen(() => {})
+    const first = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
+    first.push(route('one'))
+    first.push(route('two'))
+    expect(dom.window.history.state.__cordisxRouteReloadV1).toMatchObject({
+      pathname: '/local/thread-one',
+      entry: { params: { roomId: 'two' } },
+    })
+    first.dispose()
+
+    const reloadedNavigator = new FakeCodexNavigator('/local/thread-one')
+    mountNavigator(dom, reloadedNavigator)
+    let reactUpdates = 0
+    reloadedNavigator.listen(() => { reactUpdates += 1 })
+    const restored = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
+    expect(restored.snapshot()).toMatchObject({ available: true, index: 0, entry: { params: { roomId: 'two' } } })
+    expect(reloadedNavigator.entries).toHaveLength(1)
+    expect(reactUpdates).toBe(1)
+
+    reloadedNavigator.push({ pathname: '/local/thread-two', search: '', hash: '' }, { native: true })
+    await Promise.resolve()
+    expect(restored.snapshot().entry).toBeUndefined()
+    expect(dom.window.history.state).toBeNull()
+    restored.dispose()
+    dom.window.close()
+  })
+})
+
+describe('BrowserRouteHistoryAdapter', () => {
+  it('initializes browser history only for the standalone Playground', () => {
+    const dom = new JSDOM('', { url: 'https://playground.cordisx.local/' })
+    const adapter = new BrowserRouteHistoryAdapter(dom.window as unknown as Window, true)
+    expect(adapter.snapshot()).toMatchObject({ available: true, key: 'default', index: 0 })
+    expect(adapter.push(route('one'))).toMatchObject({ index: 1, entry: { params: { roomId: 'one' } } })
+    adapter.dispose()
+    dom.window.close()
+  })
+
+  it('fails closed outside Playground when a browser key/index seam is absent', () => {
+    const dom = new JSDOM('', { url: 'https://codex.local/native' })
+    const adapter = new BrowserRouteHistoryAdapter(dom.window as unknown as Window)
+    expect(adapter.snapshot()).toMatchObject({ available: false, reason: expect.stringContaining('key and non-negative integer idx') })
     adapter.dispose()
     dom.window.close()
   })

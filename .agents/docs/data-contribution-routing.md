@@ -24,7 +24,7 @@ The invariants are:
 6. Route, page, and outlet are independent registries joined by validated ids.
 7. No CordisX overlay replaces, reparents, removes, hides, or takes ownership of
    a Codex React node. The private Host adapter projects validated CordisX routes
-   into Codex's existing browser session history; plugins never receive the
+   into Codex's existing React Router MemoryHistory; plugins never receive the
    navigator, history object, native controls, or DOM.
 8. Every registration, observer, page mount, and command execution is fenced by
    the owning plugin fiber and renderer generation.
@@ -373,7 +373,7 @@ Codex adapter selectors. See
 CordisX does not keep a parallel route-history stack. Navigation names a route
 id and parameters; contributions never concatenate paths. The Host validates
 ownership, policy, parameters, page, outlet, active session, and path before it
-adds a namespaced projection to Codex's current browser session-history entry.
+adds a namespaced projection to Codex's current React Router location.
 Route matching supports static segments and declared `:parameter` segments
 with strict encoding and no wildcard escape from the registered pattern.
 
@@ -392,24 +392,28 @@ files, review, or any other valid session page. For a session route, the
 resolved `sessionId` must equal the currently active native session id. A
 mismatch is rejected; CordisX never switches the native Codex session.
 
-The private Codex history adapter requires the live React Router browser-state
-shape: a non-empty `key` and non-negative integer `idx`. No supported global
-navigator is exposed by the inspected Codex renderer, so CordisX does not retain
-or synchronize a second navigator. When the executable probe passes, a valid
-`ctx.routes.navigate()` preserves Codex's `usr` state and URL, advances `idx`,
-creates a new location `key`, writes one closed `__cordisxRouteV1` projection,
-and emits the browser `popstate` signal consumed by React Router. When the probe
-fails, routes remain unavailable with a diagnostic; there is no in-memory
-history fallback.
+Executable inspection of Desktop 26.818.61809 shows that the actionable React
+Router history is MemoryHistory: `window.history.length` remains 1 and
+`window.history.state` remains null while the title-bar Back control is enabled.
+The private adapter discovers the live Context navigator from React's root and
+requires a non-negative `index`, non-empty `location.key`, and callable
+`push`/`replace`/`go`/`listen`. It wraps only the three mutation methods and
+leaves the navigator's single React Router listener intact. CordisX neither
+retains nor synchronizes a second navigator. When the executable probe passes,
+a valid `ctx.routes.navigate()` preserves the native pathname/search/hash and
+opaque state, advances the existing navigator, creates a new location `key`,
+and writes one closed `__cordisxRouteV1` projection. When the probe fails,
+routes remain unavailable with a diagnostic; there is no in-memory history
+fallback.
 
-Codex's current location is the source of truth. Native React Router
-`pushState`/`replaceState` calls, browser POP, title-bar back/forward, system
-shortcuts, and trackpad gestures all reproject that location into the current
-CordisX page. CordisX does not change the visible `app://` URL. A new Codex
-route entry normally omits the CordisX projection and therefore closes the
-overlay. A CordisX entry stores owner-qualified route id, outlet, validated
-path, and scalar params; two entries with the same route id and different
-params remain distinct and restore independently.
+Codex's current MemoryHistory location is the source of truth. Native React
+Router PUSH/REPLACE/POP, title-bar back/forward, system shortcuts, and trackpad
+gestures all reproject that location into the current CordisX page. CordisX
+does not change the visible `app://` URL. A new Codex route entry normally omits
+the CordisX projection and therefore closes the overlay. A CordisX entry stores
+owner-qualified route id, outlet, validated path, and scalar params; two entries
+with the same route id and different params remain distinct and restore
+independently.
 
 Only the current session-history entry is mounted. Navigating from one outlet
 to another aborts/unmounts the former page; native Back remounts the former
@@ -537,17 +541,24 @@ context-scoped contribution state before accepting a route in the new context.
 Version 1 does not retain per-context page stacks. Returning to a prior Codex
 history entry creates a fresh page mount from its validated projection.
 
-Reload/initial injection reads the current Codex history entry only after Host
-outlets and plugin registrations are ready. A same-owner/same-id plugin
-generation replacement keeps the location key and entry, aborts the old page,
-and remounts the new registered implementation. Blocking, uninstalling, or
-otherwise invalidating the current route replaces that one history entry with
-the native location at the same `idx`; it does not push another entry or walk
+Reload cannot preserve an in-memory navigator, so the adapter mirrors only the
+current validated projection into one namespaced browser-history reload
+checkpoint. That checkpoint is bound to the current native
+pathname/search/hash, replaced after each Codex transition, and cleared when
+the current Codex location has no CordisX projection. It never stores an index,
+back entry, or forward entry and is not consulted by Back/Forward. Initial
+injection restores the checkpoint into the fresh current Codex location only
+when the native location matches; Host outlets and plugin registrations then
+perform the usual validation. A same-owner/same-id plugin generation
+replacement keeps the location key and entry, aborts the old page, and remounts
+the new registered implementation. Blocking, uninstalling, or otherwise
+invalidating the current route replaces that one history entry with the native
+location at the same navigator index; it does not push another entry or walk
 the user backward. Historical entries cannot be mutated while they are not
 current; if native Back/Forward later reaches one whose route is still absent,
 the Host validates it, clears that current projection with REPLACE, and mounts
-nothing. Renderer shutdown aborts mounts but leaves the current session entry
-available for a later compatible reload.
+nothing. Renderer shutdown aborts mounts but leaves only that single current
+checkpoint available for a later compatible reload.
 
 ## Manager diagnostics
 
