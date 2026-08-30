@@ -6,6 +6,7 @@ import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from '../packages/cli
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { Config } from '../packages/cli/src/plugins/cli-proxy-api/index.js'
+import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
 
 interface RuntimeHandle {
   navigate(owner: string, reference: { id: string }): Promise<void>
@@ -103,12 +104,22 @@ describe('CLIProxy provider plugin renderer', () => {
     const token = 'integration-provider-token'
     const configToken = 'c'.repeat(64)
     const serviceConfigToken = 'd'.repeat(64)
+    const plugin = config.plugins[0]!
     const bundle = await buildRendererBundle(config, {
       providerBridgeToken: token,
       configBridgeToken: configToken,
       serviceConfigBridgeToken: serviceConfigToken,
       profileId: 'default',
       generation: 'cli-proxy-config-test',
+      permission: {
+        profileId: 'default',
+        bridgeToken: '3'.repeat(64),
+        policies: exactDomPermissionPolicies('default', [{
+          id: plugin.id,
+          entry: plugin.entry,
+          pointIds: ['sidebar.navigation.items', 'main'],
+        }]),
+      },
     })
     const dom = new JSDOM(`
       <html lang="en" class="electron-dark"><head></head><body>
@@ -121,6 +132,7 @@ describe('CLIProxy provider plugin renderer', () => {
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
     Object.defineProperty(dom.window.navigator, 'platform', { value: 'MacIntel', configurable: true })
     Object.defineProperty(dom.window, 'confirm', { value: () => true })
+    installPermissionPolicyBridge(dom.window)
     const requests: { operation: string; input: Record<string, unknown> }[] = []
     const configRequests: { operation: string; config?: unknown }[] = []
     let configCandidate: { revision: number; config: unknown } | undefined

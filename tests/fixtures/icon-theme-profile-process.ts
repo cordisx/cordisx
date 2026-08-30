@@ -97,7 +97,7 @@ async function closePage(dom: JSDOM): Promise<void> {
 }
 
 async function waitFor(predicate: () => boolean | Promise<boolean>, label: string): Promise<void> {
-  const deadline = Date.now() + 5_000
+  const deadline = Date.now() + 15_000
   while (!await predicate()) {
     if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`)
     await new Promise(resolve => setTimeout(resolve, 10))

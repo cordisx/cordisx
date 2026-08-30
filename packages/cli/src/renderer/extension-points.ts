@@ -516,6 +516,22 @@ export interface ExtensionPointAccessResolver {
   authorizeOutletPageCommand(owner: string, pointId: string, routeId: string, pageId: string, actionId: string, commandId: string, view?: PluginGenerationView): ExtensionPointAccessDecision
 }
 
+/** Production authorization seam. Descriptor availability stays owned by this broker; grants stay in PermissionBroker. */
+export interface ExtensionPointAuthorizationAuthority {
+  access(identity: CordisXPluginIdentity, pointId: string, view?: PluginGenerationView): Readonly<{
+    authorized: boolean
+    state: 'allowed' | 'denied' | 'pending'
+    policy: CordisXPointPolicy
+    reason: string
+  }>
+  policy(identity: CordisXPluginIdentity, pointId: string): CordisXPointPolicy
+  policies(): readonly Readonly<{
+    identity: CordisXPluginIdentity
+    pointId: string
+    policy: CordisXPointPolicy
+  }>[]
+}
+
 export interface ExtensionPointAccessDiagnostic {
   readonly request: CordisXExtensionPointAccessV2
   readonly authorized: boolean
@@ -831,6 +847,7 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
     private readonly store: ExtensionPointPolicyStore,
     private readonly generation = 'generation-legacy',
     private readonly visibility?: GenerationVisibilityCoordinator,
+    private readonly authorization?: ExtensionPointAuthorizationAuthority,
   ) {
     for (const record of store.read()) {
       if (!validStoredPolicy(record)) continue
@@ -873,6 +890,9 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
   }
 
   pointPolicy(identity: CordisXExtensionPointIdentity): CordisXPointPolicy {
+    if (this.authorization !== undefined) {
+      return this.authorization.policy({ source: identity.source, id: identity.pluginId }, identity.pointId)
+    }
     const key = extensionPointIdentityKey(identity)
     if (this.duplicatePolicyKeys.has(key)) return 'inherit'
     return this.policies.get(key)?.policy ?? 'inherit'
@@ -889,6 +909,7 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
   }
 
   setPolicy(identity: CordisXPluginIdentity, pointId: string, policy: CordisXPointPolicy): void {
+    if (this.authorization !== undefined) throw new Error('PermissionBroker owns extension point authorization policy')
     const bound = this.identity(identity.id)
     if (bound === undefined || bound.source !== identity.source) throw new Error(`plugin ${identity.id} is not bound to source ${identity.source}`)
     if (this.descriptors.descriptor(pointId) === undefined) throw new Error(`unknown extension point: ${pointId}`)
@@ -921,12 +942,26 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
       authorized: false,
       reason: `extension point ${pointId} is ${descriptor.kind}, expected ${expectedKind}`,
     }
+    // Authorization and adapter availability are independent dimensions. Let
+    // the owning authority record or resolve the exact scope even when the
+    // current Host adapter cannot render it; the final access decision still
+    // requires both dimensions.
+    const access = this.authorization?.access(plugin, pointId, view)
     if (descriptor.adapterSupport !== 'supported') return {
       identity,
-      policy: this.pointPolicy(identity),
+      policy: access?.policy ?? this.pointPolicy(identity),
       effectivePolicy: 'deny',
       authorized: false,
       reason: `extension point ${pointId} adapter support is ${descriptor.adapterSupport}`,
+    }
+    if (access !== undefined) {
+      return {
+        identity,
+        policy: access.policy,
+        effectivePolicy: access.authorized ? 'allow' : 'deny',
+        authorized: access.authorized,
+        ...(access.reason === '' ? {} : { reason: access.reason }),
+      }
     }
     if (this.duplicatePolicyKeys.has(extensionPointIdentityKey(identity))) return {
       identity,
@@ -978,12 +1013,19 @@ export class ExtensionPointPolicyBroker implements ExtensionPointAccessResolver 
   }
 
   policiesSnapshot(): readonly CordisXExtensionPointPolicyRecordV1[] {
+    if (this.authorization !== undefined) return this.authorization.policies().map(entry => Object.freeze({
+      $schema: CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1,
+      schemaVersion: 1,
+      identity: Object.freeze({ source: entry.identity.source, pluginId: entry.identity.id, pointId: entry.pointId }),
+      policy: entry.policy,
+    }))
     return [...this.policies.values()]
       .filter(record => this.descriptors.descriptor(record.identity.pointId) !== undefined)
       .sort((left, right) => extensionPointIdentityKey(left.identity).localeCompare(extensionPointIdentityKey(right.identity)))
   }
 
   policyDiagnostics(): readonly ExtensionPointPolicyDiagnostic[] {
+    if (this.authorization !== undefined) return []
     const duplicates = [...this.duplicatePolicyIdentities.values()].map(identity => ({
       code: 'duplicate-policy' as const,
       message: `duplicate point policy identity: ${extensionPointIdentityKey(identity)}`,

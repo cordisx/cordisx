@@ -6,7 +6,9 @@ import {
 } from '../plugin-lifecycle-contracts.js'
 import type {
   CordisXPermissionAuthorizationDecisionV2,
+  CordisXPermissionAuthorizationDecisionV4,
   CordisXPermissionAuthorizationPlanV2,
+  CordisXPermissionAuthorizationPlanV4,
 } from '../permission-contracts.js'
 
 const BINDING = '__cordisxPluginLifecycleRequestV1'
@@ -81,6 +83,42 @@ export class BrowserPluginLifecycleBridge {
       token: this.token,
       privateRequest: {
         kind: 'permission-review-apply-v2',
+        requestId,
+        profileId: this.profileId,
+        runtimeGeneration: this.generation,
+        expectedRevision,
+        decision,
+      },
+    })
+  }
+
+  permissionReviewPlanV4(
+    expectedRevision: number,
+    target: { readonly kind: 'candidate'; readonly candidateId: string } | { readonly kind: 'enable'; readonly pluginId: string },
+  ): Promise<CordisXPermissionAuthorizationPlanV4 | undefined> {
+    const requestId = this.requestId()
+    return this.send(requestId, {
+      token: this.token,
+      privateRequest: {
+        kind: 'permission-review-plan-v4',
+        requestId,
+        profileId: this.profileId,
+        runtimeGeneration: this.generation,
+        expectedRevision,
+        target,
+      },
+    })
+  }
+
+  applyPermissionReviewV4(
+    expectedRevision: number,
+    decision: CordisXPermissionAuthorizationDecisionV4,
+  ): Promise<CordisXPluginLifecycleResultV1> {
+    const requestId = this.requestId()
+    return this.send(requestId, {
+      token: this.token,
+      privateRequest: {
+        kind: 'permission-review-apply-v4',
         requestId,
         profileId: this.profileId,
         runtimeGeneration: this.generation,

@@ -13,6 +13,10 @@ import {
   JsonPackageManifestV2Resolver,
   PLUGIN_PACKAGE_SCHEMA_V2,
 } from '../packages/cli/src/launcher/packages/manifest.js'
+import {
+  removeStagedPluginPackage,
+  stageResolvedPluginPackage,
+} from '../packages/cli/src/launcher/plugin-package.js'
 
 const temporary = new Set<string>()
 
@@ -91,5 +95,35 @@ describe('permission manifest-v4 package boundary', () => {
       capabilities: [{ name: 'tasks.control', required: true, scope: {} }],
       services: [],
     }, 'permission-package', catalog)).toThrow(/requires an explicit scope/)
+  })
+
+  it.each([
+    ['initial', 'examples/plugins/permission-v2-smoke', '1.0.0'],
+    ['updated', 'examples/plugins/permission-v2-smoke-expanded', '1.1.0'],
+  ] as const)('stages and reads back the %s production permission smoke fixture', async (_label, source, version) => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cordisx-permission-smoke-store-'))
+    temporary.add(homeDir)
+    const sourceDirectory = path.resolve(source)
+    const resolved = await new JsonPackageManifestV2Resolver({
+      runtimeValidators: {
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V4]: (value: unknown) => normalizePluginManifestV4(
+          value,
+          'permission-v2-smoke',
+          catalog,
+        ),
+      },
+    }).resolve(sourceDirectory)
+    const staged = await stageResolvedPluginPackage(homeDir, sourceDirectory, resolved)
+    try {
+      expect(staged.digest).toMatch(/^sha256:[a-f0-9]{64}$/)
+      expect(staged.manifest).toMatchObject({
+        id: 'permission-v2-smoke',
+        version,
+        runtimeManifest: { schemaVersion: 4 },
+      })
+      expect(staged.moduleSource).toContain('data-permission-v3-smoke-page')
+    } finally {
+      await removeStagedPluginPackage(homeDir, staged.digest)
+    }
   })
 })

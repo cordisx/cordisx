@@ -28,6 +28,7 @@ export interface BuildRendererBundleOptions {
   readonly channelActionsBridgeToken?: string
   readonly generation?: string
   readonly pluginLifecycleBridgeToken?: string
+  readonly certifiedPermissionChannelToken?: string
   readonly pluginActivation?: CordisXPluginActivationRecordV1
   readonly initialRegistryEpoch?: number
   readonly channelManager?: ChannelManagerProjectionV1
@@ -57,6 +58,16 @@ function bundledArtifactGeneration(plugin: CordisXConfigPlugin, moduleSource: st
   // This is an opaque, domain-separated generation token, not the package's
   // raw digest. Paths and source principals are never embedded or projected.
   return `artifact_${digest.slice(0, 40)}`
+}
+
+function usesHostDomWorker(plugin: CordisXConfigPlugin): boolean {
+  return plugin.manifest?.schemaVersion === 5 && plugin.manifest.capabilities.some(capability => (
+    capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
+  ))
+}
+
+function isolatedHostDomArtifactSource(source: string): string {
+  return `(() => {\n${source}\nglobalThis.__cordisxHostDomPluginModuleV1 = __cordisxPluginModule\n})()`
 }
 
 export interface RendererCompositionSourceOptions {
@@ -203,7 +214,13 @@ export async function buildRendererCompositionSource(
   const enabledIndexes = new Map(enabled.map((plugin, index) => [plugin.id, index]))
   const composition = `[${config.plugins.map((plugin, pluginIndex) => {
     const index = enabledIndexes.get(plugin.id)
-    const moduleField = index === undefined ? '' : `, moduleFactory: (console) => { ${pluginBundles[index]!.source}\nreturn __cordisxPluginModule }`
+    const isolatedHostDom = index !== undefined && usesHostDomWorker(plugin)
+    const moduleField = index === undefined || isolatedHostDom
+      ? ''
+      : `, moduleFactory: (console) => { ${pluginBundles[index]!.source}\nreturn __cordisxPluginModule }`
+    const isolatedArtifactField = index === undefined || !isolatedHostDom
+      ? ''
+      : `, isolatedArtifactSource: ${JSON.stringify(isolatedHostDomArtifactSource(pluginBundles[index]!.source))}`
     const artifactGenerationField = index === undefined || plugin.package !== undefined
       ? ''
       : `, artifactGeneration: ${JSON.stringify(pluginBundles[index]!.artifactGeneration)}`
@@ -217,14 +234,14 @@ export async function buildRendererCompositionSource(
     const manifestField = plugin.manifest === undefined ? '' : `, manifest: ${JSON.stringify(plugin.manifest)}`
     const packageField = plugin.package === undefined ? '' : `, package: ${JSON.stringify(plugin.package)}`
     const developmentField = plugin.development === undefined ? '' : `, development: ${JSON.stringify(plugin.development)}`
-    return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${plugin.revision ?? 0}${readmeField}${readmesField}${manifestField}${packageField}${developmentField}${artifactGenerationField}${moduleField} }`
+    return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${plugin.revision ?? 0}${readmeField}${readmesField}${manifestField}${packageField}${developmentField}${artifactGenerationField}${moduleField}${isolatedArtifactField} }`
   }).join(',')}]`
   const providers = [
     ...config.providers.filter(provider => provider.enabled).map(provider => ({ id: provider.id, displayName: provider.displayName })),
     ...(config.codex.agentLoopBackend === 'local-cli' ? [{ id: 'codex-local', displayName: 'Local Codex' }] : []),
   ]
   const permission = options.permission ?? { profileId: options.profileId ?? 'development', policies: [] }
-  const metadata = `{ version: ${JSON.stringify(version)}, workspaceCwd: ${JSON.stringify(config.rootDir)}, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(permission.profileId)}, permissionPolicies: ${JSON.stringify(permission.policies)}${options.playground === true ? ', hostKind: "playground"' : ''}${config.codex.agentLoopBackend === 'mock' ? `, agentLoopBackend: "mock"` : ''}${options.appId === undefined ? '' : `, appId: ${JSON.stringify(options.appId)}`}${options.iconThemePreference === undefined ? '' : `, iconThemePreference: ${JSON.stringify(options.iconThemePreference)}`}${options.iconThemePreferenceBridgeToken === undefined ? '' : `, iconThemePreferenceBridgeToken: ${JSON.stringify(options.iconThemePreferenceBridgeToken)}`}${options.generation === undefined ? '' : `, generation: ${JSON.stringify(options.generation)}`}${options.providerBridgeToken === undefined ? '' : `, providerBridgeToken: ${JSON.stringify(options.providerBridgeToken)}`}${options.agentHistoryBridgeToken === undefined ? '' : `, agentHistoryBridgeToken: ${JSON.stringify(options.agentHistoryBridgeToken)}`}${options.configBridgeToken === undefined ? '' : `, configBridgeToken: ${JSON.stringify(options.configBridgeToken)}`}${options.serviceConfigBridgeToken === undefined ? '' : `, serviceConfigBridgeToken: ${JSON.stringify(options.serviceConfigBridgeToken)}`}${options.channelCredentialBridgeToken === undefined ? '' : `, channelCredentialBridgeToken: ${JSON.stringify(options.channelCredentialBridgeToken)}`}${options.channelActionsBridgeToken === undefined ? '' : `, channelActionsBridgeToken: ${JSON.stringify(options.channelActionsBridgeToken)}`}${options.pluginLifecycleBridgeToken === undefined ? '' : `, pluginLifecycleBridgeToken: ${JSON.stringify(options.pluginLifecycleBridgeToken)}`}${options.pluginActivation === undefined ? '' : `, pluginActivation: ${JSON.stringify(options.pluginActivation)}`}${options.initialRegistryEpoch === undefined ? '' : `, initialRegistryEpoch: ${JSON.stringify(options.initialRegistryEpoch)}`}${options.channelManager === undefined ? '' : `, channelManager: ${JSON.stringify(options.channelManager)}`}${permission.bridgeToken === undefined ? '' : `, permissionBridgeToken: ${JSON.stringify(permission.bridgeToken)}`} }`
+  const metadata = `{ version: ${JSON.stringify(version)}, workspaceCwd: ${JSON.stringify(config.rootDir)}, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(permission.profileId)}, permissionPolicies: ${JSON.stringify(permission.policies)}${options.playground === true ? ', hostKind: "playground"' : ''}${config.codex.agentLoopBackend === 'mock' ? `, agentLoopBackend: "mock"` : ''}${options.appId === undefined ? '' : `, appId: ${JSON.stringify(options.appId)}`}${options.iconThemePreference === undefined ? '' : `, iconThemePreference: ${JSON.stringify(options.iconThemePreference)}`}${options.iconThemePreferenceBridgeToken === undefined ? '' : `, iconThemePreferenceBridgeToken: ${JSON.stringify(options.iconThemePreferenceBridgeToken)}`}${options.generation === undefined ? '' : `, generation: ${JSON.stringify(options.generation)}`}${options.providerBridgeToken === undefined ? '' : `, providerBridgeToken: ${JSON.stringify(options.providerBridgeToken)}`}${options.agentHistoryBridgeToken === undefined ? '' : `, agentHistoryBridgeToken: ${JSON.stringify(options.agentHistoryBridgeToken)}`}${options.configBridgeToken === undefined ? '' : `, configBridgeToken: ${JSON.stringify(options.configBridgeToken)}`}${options.serviceConfigBridgeToken === undefined ? '' : `, serviceConfigBridgeToken: ${JSON.stringify(options.serviceConfigBridgeToken)}`}${options.channelCredentialBridgeToken === undefined ? '' : `, channelCredentialBridgeToken: ${JSON.stringify(options.channelCredentialBridgeToken)}`}${options.channelActionsBridgeToken === undefined ? '' : `, channelActionsBridgeToken: ${JSON.stringify(options.channelActionsBridgeToken)}`}${options.pluginLifecycleBridgeToken === undefined ? '' : `, pluginLifecycleBridgeToken: ${JSON.stringify(options.pluginLifecycleBridgeToken)}`}${options.certifiedPermissionChannelToken === undefined ? '' : `, certifiedPermissionChannelToken: ${JSON.stringify(options.certifiedPermissionChannelToken)}`}${options.pluginActivation === undefined ? '' : `, pluginActivation: ${JSON.stringify(options.pluginActivation)}`}${options.initialRegistryEpoch === undefined ? '' : `, initialRegistryEpoch: ${JSON.stringify(options.initialRegistryEpoch)}`}${options.channelManager === undefined ? '' : `, channelManager: ${JSON.stringify(options.channelManager)}`}${permission.bridgeToken === undefined ? '' : `, permissionBridgeToken: ${JSON.stringify(permission.bridgeToken)}`} }`
   const boot = `installCordisX(${composition}, ${metadata})`
   const source = sourceOptions.awaitBoot === true
     ? `${imports.join('\n')}\nexport const runtime = await ${boot}\n`

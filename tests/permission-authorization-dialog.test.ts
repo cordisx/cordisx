@@ -25,17 +25,21 @@ function declaration(
   }
 }
 
-function viewModel(operation: 'install' | 'runtime' = 'install') {
+function viewModel(
+  operation: 'install' | 'runtime' = 'install',
+  suffix = '1',
+  moduleGeneration = 'demo-1',
+) {
   return new PermissionAuthorizationViewModel(buildPermissionAuthorizationPlanV2({
-    planId: `${operation}-permission-plan-1`,
+    planId: `${operation}-permission-plan-${suffix}`,
     operation,
     profileId: 'work',
     identity: { source: 'file:///plugins/demo.js', pluginId: 'demo' },
     binding: {
-      operationId: `${operation}:demo:1`,
+      operationId: `${operation}:demo:${suffix}`,
       runtimeGeneration: 'runtime-1',
-      moduleGeneration: 'demo-1',
-      requestId: 'request-1',
+      moduleGeneration,
+      requestId: `request-${suffix}`,
     },
     declarations: [
       declaration('models.read', true, {}),
@@ -230,6 +234,39 @@ describe('Host-owned permission authorization dialog', () => {
     await expect(third).resolves.toEqual({ status: 'cancelled' })
     expect(instance.window.document.querySelector('[data-permission-authorization]')).toBeNull()
     expect(instance.window.document.querySelector('[data-permission-authorization-style]')).toBeNull()
+    instance.window.close()
+  })
+
+  it('cancels exact active and queued plans without blocking the surviving review', async () => {
+    const instance = dom('light')
+    const dialog = new BrowserPermissionAuthorizationDialog(instance.window.document)
+    const staleActive = viewModel('runtime', 'stale-active', 'module-stale')
+    const surviving = viewModel('install', 'surviving', 'module-current')
+    const staleQueued = viewModel('runtime', 'stale-queued', 'module-stale')
+    const activeResult = dialog.show(staleActive, localizedRequest().request)
+    const survivingResult = dialog.show(surviving, localizedRequest().request)
+    const queuedResult = dialog.show(staleQueued, localizedRequest().request)
+    await mounted()
+    expect(instance.window.document.querySelector<HTMLElement>('[data-permission-authorization]')?.dataset.permissionAuthorization)
+      .toBe(staleActive.plan.planId)
+
+    dialog.cancel(staleQueued.plan.planId, staleQueued.plan.binding)
+    await expect(queuedResult).resolves.toEqual({ status: 'cancelled' })
+    expect(instance.window.document.querySelector<HTMLElement>('[data-permission-authorization]')?.dataset.permissionAuthorization)
+      .toBe(staleActive.plan.planId)
+
+    dialog.cancel(staleActive.plan.planId, { ...staleActive.plan.binding, moduleGeneration: 'module-other' })
+    expect(instance.window.document.querySelector<HTMLElement>('[data-permission-authorization]')?.dataset.permissionAuthorization)
+      .toBe(staleActive.plan.planId)
+    dialog.cancel(staleActive.plan.planId, staleActive.plan.binding)
+    await expect(activeResult).resolves.toEqual({ status: 'cancelled' })
+    await mounted()
+    const overlay = instance.window.document.querySelector<HTMLElement>('[data-permission-authorization]')!
+    expect(overlay.dataset.permissionAuthorization).toBe(surviving.plan.planId)
+    overlay.querySelector<HTMLButtonElement>('[data-permission-action="confirm"]')?.click()
+    await expect(survivingResult).resolves.toMatchObject({ status: 'confirmed' })
+    expect(instance.window.document.querySelector('[data-permission-authorization]')).toBeNull()
+    dialog.dispose()
     instance.window.close()
   })
 

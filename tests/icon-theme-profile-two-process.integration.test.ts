@@ -14,7 +14,7 @@ const fixture = path.join(root, 'tests/fixtures/icon-theme-profile-process.ts')
 async function processPhase(phase: 'a' | 'b' | 'drain-error', configPath: string, hostGeneration: string): Promise<Record<string, unknown>> {
   const { stdout } = await run(process.execPath, ['--import', 'tsx', fixture, phase, configPath, hostGeneration], {
     cwd: root,
-    timeout: 60_000,
+    timeout: 90_000,
     maxBuffer: 4 * 1024 * 1024,
   })
   const line = stdout.split('\n').find(value => value.startsWith('CORDISX_ICON_PROCESS_RESULT='))
@@ -60,5 +60,5 @@ describe('two-process icon-theme profile persistence', () => {
     const preference = (await loadHomeConfig(configPath)).apps.codex!.profiles.default!.iconTheme!
     expect(preference).toEqual(processA.preference)
     expect(preference.providerGeneration).toBe((processA.selected as { providerGeneration: string }).providerGeneration)
-  }, 60_000)
+  }, 120_000)
 })

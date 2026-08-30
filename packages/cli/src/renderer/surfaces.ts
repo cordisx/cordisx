@@ -644,7 +644,11 @@ export class SurfaceRegistry {
         const decision = this.access?.decision(owner, options.name, 'surface', candidateView)
         return decision === undefined
           ? Object.freeze({ authorized: true })
-          : Object.freeze({ authorized: decision.authorized, ...(decision.reason === undefined ? {} : { reason: decision.reason }) })
+          : Object.freeze({
+              authorized: decision.authorized,
+              policy: decision.policy,
+              ...(decision.reason === undefined ? {} : { reason: decision.reason }),
+            })
       },
     })
     const controlLease = controlDeclaration === undefined || options.control === undefined ? undefined : this.controls!.createLease(controlDeclaration, controlGeneration!)
@@ -1190,6 +1194,11 @@ export class CordisXSlotService extends Service implements CordisXSlots {
 
   controlManagerSnapshot(): ControlledSurfaceManagerSnapshot | undefined {
     return this.registry.controlCoordinator()?.managerSnapshot()
+  }
+
+  /** Read-only startup migration input; PermissionBroker owns all live authorization after migration. */
+  controlLegacyAuthorizations(): readonly CordisXExtensionPointControlAuthorizationV1[] {
+    return this.registry.controlCoordinator()?.legacyAuthorizations() ?? []
   }
 
   setControlAuthorization(expectedRevision: number, authorization: CordisXExtensionPointControlAuthorizationV1): number {

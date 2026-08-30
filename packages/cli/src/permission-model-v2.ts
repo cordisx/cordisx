@@ -12,6 +12,8 @@ import {
   type CordisXPermissionAuthorizationDecisionV2,
   type CordisXPermissionAuthorizationPlanV2,
   type CordisXPermissionAuthorizationKeyV2,
+  type CordisXPermissionAuthorizationKeyV3,
+  type CordisXPermissionAuthorizationKeyV4,
   type CordisXPermissionCapabilityV2,
   type CordisXPermissionIdentityV2,
   type CordisXPermissionPolicyRecordV2,
@@ -745,15 +747,20 @@ export function reconcilePermissionPolicyV2(input: {
   return Object.freeze({ policy, source: 'narrowed-scope', migration })
 }
 
-function onceGrantKey(key: CordisXPermissionAuthorizationKeyV2, binding: CordisXPermissionAuthorizationBindingV2): string {
+function onceGrantKey(
+  key: CordisXPermissionAuthorizationKeyV2 | CordisXPermissionAuthorizationKeyV3 | CordisXPermissionAuthorizationKeyV4,
+  binding: CordisXPermissionAuthorizationBindingV2,
+): string {
   const normalizedBinding = normalizePermissionAuthorizationBindingV2(binding)
   return JSON.stringify([
-    permissionRecordKeyV2({
-      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
-      schemaVersion: 2,
-      key,
-      policy: 'ask',
-    }),
+    JSON.stringify([
+      key.profileId,
+      key.identity.source,
+      key.identity.pluginId,
+      key.capability,
+      key.scope,
+      key.securityFingerprint,
+    ]),
     normalizedBinding.operationId,
     normalizedBinding.runtimeGeneration,
     normalizedBinding.moduleGeneration ?? null,
@@ -765,17 +772,17 @@ function onceGrantKey(key: CordisXPermissionAuthorizationKeyV2, binding: CordisX
 export class PermissionOnceGrantLedger {
   readonly #grants = new Set<string>()
 
-  issue(key: CordisXPermissionAuthorizationKeyV2, binding: CordisXPermissionAuthorizationBindingV2): void {
+  issue(key: CordisXPermissionAuthorizationKeyV2 | CordisXPermissionAuthorizationKeyV3 | CordisXPermissionAuthorizationKeyV4, binding: CordisXPermissionAuthorizationBindingV2): void {
     this.#grants.add(onceGrantKey(key, binding))
   }
 
-  consume(key: CordisXPermissionAuthorizationKeyV2, binding: CordisXPermissionAuthorizationBindingV2): boolean {
+  consume(key: CordisXPermissionAuthorizationKeyV2 | CordisXPermissionAuthorizationKeyV3 | CordisXPermissionAuthorizationKeyV4, binding: CordisXPermissionAuthorizationBindingV2): boolean {
     const grant = onceGrantKey(key, binding)
     if (!this.#grants.delete(grant)) return false
     return true
   }
 
-  has(key: CordisXPermissionAuthorizationKeyV2, binding: CordisXPermissionAuthorizationBindingV2): boolean {
+  has(key: CordisXPermissionAuthorizationKeyV2 | CordisXPermissionAuthorizationKeyV3 | CordisXPermissionAuthorizationKeyV4, binding: CordisXPermissionAuthorizationBindingV2): boolean {
     return this.#grants.has(onceGrantKey(key, binding))
   }
 

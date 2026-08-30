@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { describe, expect, it, vi } from 'vitest'
 import { runCordisXCli } from '../packages/cli/src/cli/run.js'
 import { defaultIsolatedProfileDir } from '../packages/cli/src/launcher/process.js'
+import { LauncherMarketplaceCertifiedAuthority } from '../packages/cli/src/launcher/marketplace-certified-authority.js'
 
 const directGrantStatePath = path.join('state', 'publisher-grants', 'direct-device-bound.v1.json')
 
@@ -28,6 +29,31 @@ async function createLocalDevelopmentFixture(root: string): Promise<{
 }
 
 describe('functional CordisX CLI', () => {
+  it('opens one Launcher Certified authority for lifecycle and disposes it after dry-run', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-certified-authority-'))
+    const home = path.join(root, 'home')
+    const dispose = vi.fn(async () => undefined)
+    const open = vi.spyOn(LauncherMarketplaceCertifiedAuthority, 'open').mockResolvedValue({
+      lookup: vi.fn(async () => ({ revision: 0 })),
+      dispose,
+    } as unknown as LauncherMarketplaceCertifiedAuthority)
+    try {
+      await runCordisXCli(['codex', '--dry-run', '--executable', process.execPath], {
+        env: { CORDISX_HOME: home },
+        stdout: () => undefined,
+      })
+      expect(open).toHaveBeenCalledTimes(1)
+      expect(open).toHaveBeenCalledWith({
+        homeDir: home,
+        configPath: path.join(home, 'config.json'),
+        profileId: 'default',
+      })
+      expect(dispose).toHaveBeenCalledTimes(1)
+    } finally {
+      open.mockRestore()
+    }
+  })
+
   it('shares setup with first launch, ignores cwd composition, and reuses an independent shared profile', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))
     const project = path.join(root, 'project')

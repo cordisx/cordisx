@@ -11,4 +11,6 @@ Both commands are useful only in a controlled development fixture. Successful co
 
 ## Current boundary
 
+The package also registers one structured `main` outlet route. Opening that route exercises Permission v3 controlled rendering through the same Host Permission Broker; the plugin receives no raw DOM handle or private bridge.
+
 This package is an explicit-local, unsigned smoke fixture. It is not a user-facing plugin and must not be included in the default CordisX setup.

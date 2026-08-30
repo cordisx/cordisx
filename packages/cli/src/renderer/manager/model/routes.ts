@@ -1,4 +1,5 @@
-import type { CordisXPlatformCapability, CordisXRouteReference } from '../../../contracts.js'
+import type { CordisXRouteReference } from '../../../contracts.js'
+import type { CordisXPermissionCapabilityV4 } from '../../../permission-contracts.js'
 
 export type ManagerPrimaryPage = 'plugins' | 'extension-points' | 'routes' | 'marketplace' | 'about'
 export type PluginDetailPage = 'readme' | 'config' | 'permissions' | 'runtime' | 'logs' | 'extension-points' | 'routes'
@@ -6,7 +7,7 @@ export type PluginDetailPage = 'readme' | 'config' | 'permissions' | 'runtime' |
 export type ManagerRoute =
   | { readonly kind: 'primary'; readonly page: ManagerPrimaryPage }
   | { readonly kind: 'plugin'; readonly pluginId: string; readonly page: PluginDetailPage }
-  | { readonly kind: 'permission'; readonly pluginId: string; readonly capability: CordisXPlatformCapability }
+  | { readonly kind: 'permission'; readonly pluginId: string; readonly capability: CordisXPermissionCapabilityV4; readonly fingerprint: string }
   | { readonly kind: 'extension-point'; readonly pointId: string }
   | { readonly kind: 'route'; readonly qualifiedId: string }
   | { readonly kind: 'page'; readonly qualifiedId: string }

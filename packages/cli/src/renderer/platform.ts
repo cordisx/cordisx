@@ -66,22 +66,46 @@ import {
 import { BrowserPermissionAuthorizationDialog } from './permission-authorization-dialog.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
+  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3,
+  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
   CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+  CORDISX_PERMISSION_POLICY_SCHEMA_V3,
+  CORDISX_PERMISSION_POLICY_SCHEMA_V4,
+  type CordisXCertifiedPermissionProjectionV1,
+  type CordisXCapabilityDeclarationV3,
+  type CordisXCapabilityDeclarationV4,
   type CordisXCapabilityDeclarationV2,
   type CordisXPermissionAuthorizationBindingV2,
   type CordisXPermissionAuthorizationDecisionV2,
+  type CordisXPermissionAuthorizationDecisionV3,
+  type CordisXPermissionAuthorizationDecisionV4,
   type CordisXPermissionAuthorizationKeyV2,
+  type CordisXPermissionAuthorizationKeyV3,
+  type CordisXPermissionAuthorizationKeyV4,
   type CordisXPermissionAuthorizationPlanV2,
+  type CordisXPermissionAuthorizationPlanV3,
+  type CordisXPermissionAuthorizationPlanV4,
   type CordisXPermissionCapabilityV2,
+  type CordisXPermissionCapabilityV3,
+  type CordisXPermissionCapabilityV4,
   type CordisXPermissionDecisionV2,
   type CordisXPermissionPolicyRecordV2,
+  type CordisXPermissionPolicyRecordV3,
+  type CordisXPermissionPolicyRecordV4,
   type CordisXPermissionPolicyV2,
   type CordisXPermissionScopeV2,
+  type CordisXPermissionScopeV3,
+  type CordisXPermissionScopeV4,
   type CordisXPluginManifestV4,
+  type CordisXPluginManifestV5,
 } from '../permission-contracts.js'
 import {
   CapabilityRiskCatalog,
+  buildDomPermissionAuthorizationPlanV3,
+  buildHostDomPermissionAuthorizationPlanV4,
+  buildPermissionAuthorizationPlanV4,
   buildPermissionAuthorizationPlanResultV2,
 } from '../capability-risk-catalog.js'
 import {
@@ -94,9 +118,26 @@ import {
   normalizePermissionScopeV2,
   permissionRecordKeyV2,
   permissionSecurityFingerprint,
+  sha256Hex,
 } from '../permission-model-v2.js'
 import {
+  domPermissionAuthorizationKeyV3,
+  normalizePermissionPolicyRecordV3,
+  permissionRecordKeyV3,
+} from '../permission-model-v3.js'
+import {
+  assertPermissionAuthorizationDecisionV4,
+  hostDomPermissionAuthorizationKeyV4,
+  isHostDomPermissionCapability,
+  normalizeCertifiedPermissionProjectionV1,
+  normalizePermissionPolicyRecordV4,
+  normalizePluginManifestV5,
+  permissionRecordKeyV4,
+} from '../permission-model-v4.js'
+import {
   isPermissionPolicyRecordV2,
+  isPermissionPolicyRecordV3,
+  isPermissionPolicyRecordV4,
   normalizePersistedPermissionPolicyRecord,
   persistedPermissionMigrationKey,
   persistedPermissionRecordKey,
@@ -153,7 +194,7 @@ function normalizedReason(value: unknown, label: string): CordisXLocalizedText {
 export function normalizePluginManifest(
   value: unknown,
   expectedId: string,
-): CordisXPluginManifestV1 | CordisXPluginManifestV4 {
+): CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 {
   if (!ID_PATTERN.test(expectedId)) throw new Error(`launcher plugin id ${expectedId} is invalid`)
   if (value === undefined) {
     return Object.freeze({
@@ -164,6 +205,9 @@ export function normalizePluginManifest(
     })
   }
   const manifest = object(value, `plugin ${expectedId} manifest`)
+  if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 || manifest.schemaVersion === 5) {
+    return normalizePluginManifestV5(manifest, expectedId, new CapabilityRiskCatalog())
+  }
   if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 || manifest.schemaVersion === 4) {
     return normalizePluginManifestV4(manifest, expectedId, new CapabilityRiskCatalog())
   }
@@ -215,6 +259,13 @@ export function platformIdentityKey(identity: CordisXPluginIdentity): string {
   return permissionIdentityKey(identity)
 }
 
+function certifiedArtifactKey(
+  identity: Readonly<{ source: string; pluginId: string }>,
+  artifact: Readonly<{ version: string; integrity: string }>,
+): string {
+  return [identity.source, identity.pluginId, artifact.version, artifact.integrity].join('\u0000')
+}
+
 function declarationFingerprint(declaration: CordisXCapabilityDeclaration): string {
   return permissionScopeFingerprint(declaration.name, declaration.scope)
 }
@@ -231,6 +282,12 @@ export interface PermissionPolicyStore {
   write(records: readonly CordisXPermissionPolicyRecordV1[]): void | Promise<void>
   readV2?(): readonly CordisXPermissionPolicyRecordV2[]
   writeV2?(records: readonly CordisXPermissionPolicyRecordV2[]): void | Promise<void>
+  readV3?(): readonly CordisXPermissionPolicyRecordV3[]
+  writeV3?(records: readonly CordisXPermissionPolicyRecordV3[]): void | Promise<void>
+  readV4?(): readonly CordisXPermissionPolicyRecordV4[]
+  writeV4?(records: readonly CordisXPermissionPolicyRecordV4[]): void | Promise<void>
+  /** One atomic write for mixed-version records in the single profile ledger. */
+  writeAll?(records: readonly CordisXPersistedPermissionPolicyRecord[]): void | Promise<void>
   legacy?(): readonly LegacyStoredPolicy[]
   retireLegacy?(record: LegacyStoredPolicy): void | Promise<void>
 }
@@ -241,16 +298,26 @@ export class MemoryPermissionPolicyStore implements PermissionPolicyStore {
   constructor(
     records: readonly CordisXPermissionPolicyRecordV1[] = [],
     recordsV2: readonly CordisXPermissionPolicyRecordV2[] = [],
+    recordsV3: readonly CordisXPermissionPolicyRecordV3[] = [],
+    recordsV4: readonly CordisXPermissionPolicyRecordV4[] = [],
   ) {
-    this.records = copy([...records, ...recordsV2])
+    this.records = copy([...records, ...recordsV2, ...recordsV3, ...recordsV4])
   }
 
   read(): readonly CordisXPermissionPolicyRecordV1[] {
-    return copy(this.records.filter(record => !isPermissionPolicyRecordV2(record))) as readonly CordisXPermissionPolicyRecordV1[]
+    return copy(this.records.filter(record => !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record))) as readonly CordisXPermissionPolicyRecordV1[]
   }
 
   readV2(): readonly CordisXPermissionPolicyRecordV2[] {
     return copy(this.records.filter(isPermissionPolicyRecordV2))
+  }
+
+  readV3(): readonly CordisXPermissionPolicyRecordV3[] {
+    return copy(this.records.filter(isPermissionPolicyRecordV3))
+  }
+
+  readV4(): readonly CordisXPermissionPolicyRecordV4[] {
+    return copy(this.records.filter(isPermissionPolicyRecordV4))
   }
 
   write(records: readonly CordisXPermissionPolicyRecordV1[]): void {
@@ -258,6 +325,18 @@ export class MemoryPermissionPolicyStore implements PermissionPolicyStore {
   }
 
   writeV2(records: readonly CordisXPermissionPolicyRecordV2[]): void {
+    this.writeRecords(records)
+  }
+
+  writeV3(records: readonly CordisXPermissionPolicyRecordV3[]): void {
+    this.writeRecords(records)
+  }
+
+  writeV4(records: readonly CordisXPermissionPolicyRecordV4[]): void {
+    this.writeRecords(records)
+  }
+
+  writeAll(records: readonly CordisXPersistedPermissionPolicyRecord[]): void {
     this.writeRecords(records)
   }
 
@@ -278,7 +357,7 @@ export class BrowserPermissionPolicyStore implements PermissionPolicyStore {
 
   read(): readonly CordisXPermissionPolicyRecordV1[] {
     return this.readAll().filter((record): record is CordisXPermissionPolicyRecordV1 => (
-      !isPermissionPolicyRecordV2(record) && record.key.profileId === this.profileId
+      !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record) && record.key.profileId === this.profileId
     ))
   }
 
@@ -288,11 +367,35 @@ export class BrowserPermissionPolicyStore implements PermissionPolicyStore {
     ))
   }
 
+  readV3(): readonly CordisXPermissionPolicyRecordV3[] {
+    return this.readAll().filter((record): record is CordisXPermissionPolicyRecordV3 => (
+      isPermissionPolicyRecordV3(record) && record.key.profileId === this.profileId
+    ))
+  }
+
+  readV4(): readonly CordisXPermissionPolicyRecordV4[] {
+    return this.readAll().filter((record): record is CordisXPermissionPolicyRecordV4 => (
+      isPermissionPolicyRecordV4(record) && record.key.profileId === this.profileId
+    ))
+  }
+
   write(nextRecords: readonly CordisXPermissionPolicyRecordV1[]): void {
     this.writeRecords(nextRecords)
   }
 
   writeV2(nextRecords: readonly CordisXPermissionPolicyRecordV2[]): void {
+    this.writeRecords(nextRecords)
+  }
+
+  writeV3(nextRecords: readonly CordisXPermissionPolicyRecordV3[]): void {
+    this.writeRecords(nextRecords)
+  }
+
+  writeV4(nextRecords: readonly CordisXPermissionPolicyRecordV4[]): void {
+    this.writeRecords(nextRecords)
+  }
+
+  writeAll(nextRecords: readonly CordisXPersistedPermissionPolicyRecord[]): void {
     this.writeRecords(nextRecords)
   }
 
@@ -379,6 +482,16 @@ export interface PermissionAuthorizationPromptV2 {
     plan: CordisXPermissionAuthorizationPlanV2,
     identity: CordisXPluginIdentity,
   ): Promise<CordisXPermissionAuthorizationDecisionV2 | undefined>
+  requestV3?(
+    plan: CordisXPermissionAuthorizationPlanV3,
+    identity: CordisXPluginIdentity,
+  ): Promise<CordisXPermissionAuthorizationDecisionV3 | undefined>
+  cancelV3?(planId: string, binding: CordisXPermissionAuthorizationBindingV2): void
+  requestV4?(
+    plan: CordisXPermissionAuthorizationPlanV4,
+    identity: CordisXPluginIdentity,
+  ): Promise<CordisXPermissionAuthorizationDecisionV4 | undefined>
+  cancelV4?(planId: string, binding: CordisXPermissionAuthorizationBindingV2): void
   dispose?(): void
 }
 
@@ -498,7 +611,35 @@ export class BrowserPermissionAuthorizationPromptV2 implements PermissionAuthori
     const result = await this.dialog.show(new PermissionAuthorizationViewModel(plan), {
       project: () => this.project(plan, identity),
     })
-    return result.status === 'confirmed' ? result.decision : undefined
+    return result.status === 'confirmed' && result.decision.schemaVersion === 2 ? result.decision : undefined
+  }
+
+  async requestV3(
+    plan: CordisXPermissionAuthorizationPlanV3,
+    identity: CordisXPluginIdentity,
+  ): Promise<CordisXPermissionAuthorizationDecisionV3 | undefined> {
+    const result = await this.dialog.show(new PermissionAuthorizationViewModel(plan), {
+      project: () => this.project(plan as unknown as CordisXPermissionAuthorizationPlanV2, identity),
+    })
+    return result.status === 'confirmed' && result.decision.schemaVersion === 3 ? result.decision : undefined
+  }
+
+  async requestV4(
+    plan: CordisXPermissionAuthorizationPlanV4,
+    identity: CordisXPluginIdentity,
+  ): Promise<CordisXPermissionAuthorizationDecisionV4 | undefined> {
+    const result = await this.dialog.show(new PermissionAuthorizationViewModel(plan), {
+      project: () => this.project(plan as unknown as CordisXPermissionAuthorizationPlanV2, identity),
+    })
+    return result.status === 'confirmed' && result.decision.schemaVersion === 4 ? result.decision : undefined
+  }
+
+  cancelV3(planId: string, binding: CordisXPermissionAuthorizationBindingV2): void {
+    this.dialog.cancel(planId, binding)
+  }
+
+  cancelV4(planId: string, binding: CordisXPermissionAuthorizationBindingV2): void {
+    this.dialog.cancel(planId, binding)
   }
 
   dispose(): void {
@@ -511,14 +652,17 @@ interface AuditRecord {
   lastDeniedAt?: string
   lastRequested?: RequestedScope
   denialCount: number
+  authorizationOrigin?: 'explicit-user' | 'certified-implicit'
+  authorizationReason?: string
+  certification?: CordisXCertifiedPermissionProjectionV1
 }
 
 export interface PlatformPermissionSnapshot {
   readonly identity: CordisXPluginIdentity
-  readonly capability: CordisXPlatformCapability
+  readonly capability: CordisXPermissionCapabilityV4
   readonly required: boolean
   readonly reason: CordisXLocalizedText
-  readonly scope: CordisXCapabilityScope
+  readonly scope: CordisXPermissionScopeV4
   readonly fingerprint: string
   readonly policy: CordisXPermissionPolicy
   readonly lastRequested?: RequestedScope
@@ -526,26 +670,89 @@ export interface PlatformPermissionSnapshot {
   readonly lastDeniedAt?: string
   readonly denialCount: number
   readonly blockedReason?: string
+  readonly authorizationOrigin?: 'explicit-user' | 'certified-implicit'
+  readonly authorizationReason?: string
+  readonly certification?: CordisXCertifiedPermissionProjectionV1
+}
+
+export interface PermissionArtifactBindingV3 {
+  readonly version: string
+  readonly integrity: `sha256:${string}`
+}
+
+interface RegistrationArtifactBinding extends PermissionArtifactBindingV3 {
+  readonly certification?: CordisXCertifiedPermissionProjectionV1
+}
+
+export interface DomPermissionAccessDecision {
+  readonly authorized: boolean
+  readonly state: 'allowed' | 'denied' | 'pending'
+  readonly reason: string
+  readonly policy: 'inherit' | 'allow' | 'deny'
+  readonly authorizationOrigin?: 'explicit-user' | 'certified-implicit'
+}
+
+export interface DomPermissionPolicyEntry {
+  readonly identity: CordisXPluginIdentity
+  readonly pointId: string
+  readonly policy: 'inherit' | 'allow' | 'deny'
 }
 
 interface Registration {
+  readonly token: object
   readonly identity: CordisXPluginIdentity
-  readonly manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4
+  readonly manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5
   readonly declarations: ReadonlyMap<CordisXPlatformCapability, CordisXCapabilityDeclaration>
   readonly declarationsV2: ReadonlyMap<CordisXPermissionCapabilityV2, CordisXCapabilityDeclarationV2>
+  readonly declarationsV4: ReadonlyMap<'ui.host-dom.read' | 'ui.host-dom.modify', CordisXCapabilityDeclarationV4>
   readonly generation: PluginGenerationEffectIdentity
   readonly candidateView?: PluginGenerationView
+  readonly artifact?: RegistrationArtifactBinding
+}
+
+interface DomPermissionLease {
+  readonly key: CordisXPermissionAuthorizationKeyV3
+  readonly runtimeGeneration: string
+  readonly moduleGeneration?: string
+  readonly authorizationOrigin: 'explicit-user' | 'certified-implicit'
+  readonly certificationFingerprint?: `sha256:${string}`
+  readonly certificationRevision?: string
+}
+
+export interface HostDomPermissionLease {
+  readonly leaseId: string
+  readonly key: CordisXPermissionAuthorizationKeyV4
+  readonly runtimeGeneration: string
+  readonly moduleGeneration?: string
+  readonly authorizationOrigin: 'explicit-user' | 'certified-implicit'
+  readonly certificationFingerprint?: `sha256:${string}`
+  readonly certificationRevision?: string
+}
+
+export interface HostDomPermissionAccessDecision extends DomPermissionAccessDecision {
+  readonly lease?: HostDomPermissionLease
 }
 
 function manifestDeclarationsV2(
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4,
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5,
 ): readonly CordisXCapabilityDeclarationV2[] {
   if (manifest.schemaVersion === 4) return manifest.capabilities
+  if (manifest.schemaVersion === 5) return manifest.capabilities.filter(item => (
+    !isHostDomPermissionCapability(item.name)
+  )) as readonly CordisXCapabilityDeclarationV2[]
   return Object.freeze(manifest.capabilities.map(declaration => Object.freeze({
     name: declaration.name as CordisXPermissionCapabilityV2,
     required: declaration.required,
     scope: declaration.scope as CordisXPermissionScopeV2,
   })))
+}
+
+function manifestHostDomDeclarationsV4(
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5,
+): readonly CordisXCapabilityDeclarationV4[] {
+  return manifest.schemaVersion === 5
+    ? manifest.capabilities.filter(item => isHostDomPermissionCapability(item.name))
+    : Object.freeze([])
 }
 
 interface AuthorizationGrant {
@@ -603,13 +810,38 @@ function isoNow(now: () => Date): string {
 
 export class PermissionBroker {
   private readonly registrations = new Map<string, Registration>()
+  /** Launcher-fed, renderer-ephemeral exact projections; never a feed/root/store authority. */
+  private readonly certifiedProjections = new Map<string, CordisXCertifiedPermissionProjectionV1>()
+  private certifiedProjectionRevision = -1
+  private certifiedProjectionDigest = ''
+  private certifiedProjectionAvailable = false
   /** One profile ledger index for both the retiring v1 records and authoritative v2 records. */
   private readonly policyRecords = new Map<string, CordisXPersistedPermissionPolicyRecord>()
   private readonly audit = new Map<string, AuditRecord>()
   private readonly onceV2 = new PermissionOnceGrantLedger()
+  private readonly domLeases = new Map<string, DomPermissionLease>()
+  private readonly domRequests = new Map<string, Promise<DomPermissionAccessDecision>>()
+  private readonly domPromptPlans = new Map<string, CordisXPermissionAuthorizationPlanV3>()
+  private readonly domPoints = new Map<string, Readonly<{ identity: CordisXPluginIdentity; pointId: string; moduleGeneration?: string }>>()
+  private readonly domCertificationTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private readonly hostDomLeases = new Map<string, HostDomPermissionLease>()
+  private readonly hostDomPromptPlans = new Map<string, Readonly<{
+    plan: CordisXPermissionAuthorizationPlanV4
+    cancel: () => void
+  }>>()
+  private readonly hostDomPolicyRevisions = new Map<string, number>()
+  private hostDomOperationSequence = 0
+  private readonly pendingDomReviews = new Map<string, Readonly<{
+    identity: CordisXPluginIdentity
+    pointId: string
+    moduleGeneration?: string
+    view?: PluginGenerationView
+  }>>()
   private readonly catalog = new CapabilityRiskCatalog()
   private readonly listeners = new Set<() => void>()
   private readonly migrationTasks: Promise<void>[] = []
+  private changeBatchDepth = 0
+  private changePending = false
 
   constructor(
     private readonly store: PermissionPolicyStore,
@@ -628,18 +860,25 @@ export class PermissionBroker {
     for (const record of store.readV2?.() ?? []) {
       if (record.key.profileId === profileId) this.policyRecords.set(persistedPermissionRecordKey(record), record)
     }
+    for (const record of store.readV3?.() ?? []) {
+      if (record.key.profileId === profileId) this.policyRecords.set(persistedPermissionRecordKey(record), record)
+    }
+    for (const record of store.readV4?.() ?? []) {
+      if (record.key.profileId === profileId) this.policyRecords.set(persistedPermissionRecordKey(record), record)
+    }
     visibility?.connect({ notify: () => this.changed() })
   }
 
   register(
     identity: CordisXPluginIdentity,
-    manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4,
+    manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5,
     generation: PluginGenerationEffectIdentity = Object.freeze({ pluginId: identity.id }),
     candidateView?: PluginGenerationView,
+    artifact?: PermissionArtifactBindingV3,
   ): () => void {
     const key = `${platformIdentityKey(identity)}\u0000${generation.moduleGeneration ?? 'host'}`
     const declarations = new Map<CordisXPlatformCapability, CordisXCapabilityDeclaration>(
-      manifest.schemaVersion === 4
+      manifest.schemaVersion === 4 || manifest.schemaVersion === 5
         ? manifest.capabilities.flatMap(item => (
             (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
               ? [[item.name as CordisXPlatformCapability, {
@@ -657,23 +896,55 @@ export class PermissionBroker {
         : manifest.capabilities.map(item => [item.name, item] as const),
     )
     const declarationsV2 = new Map(manifestDeclarationsV2(manifest).map(item => [item.name, item]))
-    const registration = {
-      identity: Object.freeze({ ...identity }), manifest, declarations, declarationsV2, generation,
+    const declarationsV4 = new Map(manifestHostDomDeclarationsV4(manifest).map(item => [
+      item.name as 'ui.host-dom.read' | 'ui.host-dom.modify', item,
+    ]))
+    if (artifact !== undefined && (!/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(artifact.version)
+      || !/^sha256:[a-f0-9]{64}$/u.test(artifact.integrity))) throw new Error(`plugin ${identity.id} permission artifact identity is invalid`)
+    const projectedCertification = artifact === undefined
+      ? undefined
+      : this.certifiedProjections.get(certifiedArtifactKey(
+        { source: identity.source, pluginId: identity.id },
+        artifact,
+      ))
+    const certification = artifact === undefined
+      ? undefined
+      : normalizeCertifiedPermissionProjectionV1(
+        projectedCertification,
+        { source: identity.source, pluginId: identity.id },
+        artifact,
+        this.now(),
+      )
+    const normalizedArtifact: RegistrationArtifactBinding | undefined = artifact === undefined ? undefined : Object.freeze({
+      version: artifact.version,
+      integrity: artifact.integrity,
+      ...(certification === undefined ? {} : { certification }),
+    })
+    const registration: Registration = {
+      token: Object.freeze({}),
+      identity: Object.freeze({ ...identity }), manifest, declarations, declarationsV2, declarationsV4, generation,
       ...(candidateView === undefined ? {} : { candidateView }),
+      ...(normalizedArtifact === undefined ? {} : { artifact: normalizedArtifact }),
     }
     if (this.registrations.has(key) && this.visibility !== undefined) {
       throw new Error(`plugin ${identity.id} permission generation is already registered`)
     }
     this.registrations.set(key, registration)
+    this.scheduleDomCertificationExpiry(key, registration)
     this.migrateLegacy(registration)
     this.migratePolicyRecordsV1(registration)
     if (this.visibility?.visible(generation) !== false) this.changed()
     return () => {
-      if (this.registrations.get(key) !== registration) return
+      if (this.registrations.get(key)?.token !== registration.token) return
       this.registrations.delete(key)
+      this.clearDomCertificationTimer(key)
       const identityKey = platformIdentityKey(identity)
       this.onceV2.clearGeneration(this.generation, generation.moduleGeneration)
-      for (const auditKey of [...this.audit.keys()]) if (auditKey.startsWith(`${identityKey}\u0000`)) this.audit.delete(auditKey)
+      this.clearDomGeneration(generation.moduleGeneration, identity)
+      this.clearHostDomGeneration(generation.moduleGeneration, identity)
+      if (![...this.registrations.values()].some(item => platformIdentityKey(item.identity) === identityKey)) {
+        for (const auditKey of [...this.audit.keys()]) if (auditKey.startsWith(`${identityKey}\u0000`)) this.audit.delete(auditKey)
+      }
       if (this.visibility?.visible(generation) !== false) this.changed()
     }
   }
@@ -683,9 +954,205 @@ export class PermissionBroker {
       && (this.visibility?.visible(item.generation, view) ?? true))
   }
 
+  private isRegistered(registration: Registration): boolean {
+    return [...this.registrations.values()].some(candidate => candidate.token === registration.token)
+  }
+
+  /** Refreshes only the Host-owned trust projection for the already bound exact artifact. */
+  private refreshRegistrationDomCertification(
+    key: string,
+    registration: Registration,
+    certification?: CordisXCertifiedPermissionProjectionV1,
+  ): void {
+    const artifact = registration.artifact
+    if (artifact === undefined || this.registrations.get(key)?.token !== registration.token) return
+    const normalized = normalizeCertifiedPermissionProjectionV1(certification, {
+      source: registration.identity.source,
+      pluginId: registration.identity.id,
+    }, artifact, this.now())
+    const previous = artifact.certification
+    if (previous?.fingerprint === normalized?.fingerprint && previous?.revision === normalized?.revision) {
+      this.scheduleDomCertificationExpiry(key, registration)
+      return
+    }
+    const next = Object.freeze({
+      ...registration,
+      artifact: Object.freeze({
+        version: artifact.version,
+        integrity: artifact.integrity,
+        ...(normalized === undefined ? {} : { certification: normalized }),
+      }),
+    })
+    this.registrations.set(key, next)
+    this.scheduleDomCertificationExpiry(key, next)
+    this.clearCertifiedDomLeases(registration)
+    this.clearCertifiedHostDomLeases(registration)
+    const auditPrefix = this.domAuditPrefix(
+      platformIdentityKey(registration.identity),
+      registration.generation.moduleGeneration,
+    )
+    for (const [key, audit] of this.audit) {
+      if (!key.startsWith(auditPrefix)) continue
+      if (audit.authorizationOrigin !== 'certified-implicit') continue
+      delete audit.authorizationOrigin
+      delete audit.authorizationReason
+      delete audit.certification
+    }
+    this.changed()
+  }
+
+  /**
+   * Atomically replace the Launcher-owned exact projection snapshot. This is
+   * the single runtime trust input: it neither parses feeds nor accepts
+   * Official, policies, scopes, grants, or plugin-supplied assertions.
+   */
+  replaceCertifiedPermissionSnapshot(
+    snapshot: Readonly<{
+      revision: number
+      projections: readonly CordisXCertifiedPermissionProjectionV1[]
+    }>,
+  ): void {
+    if (!Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0) {
+      throw new Error('Certified permission snapshot revision is invalid')
+    }
+    const next = new Map<string, CordisXCertifiedPermissionProjectionV1>()
+    for (const projection of snapshot.projections) {
+      const normalized = normalizeCertifiedPermissionProjectionV1(
+        projection,
+        { source: projection.source, pluginId: projection.pluginId },
+        { version: projection.version, integrity: projection.integrity },
+        this.now(),
+      )
+      if (normalized === undefined) throw new Error('Certified permission snapshot contains an invalid projection')
+      const key = certifiedArtifactKey(
+        { source: normalized.source, pluginId: normalized.pluginId },
+        normalized,
+      )
+      if (next.has(key)) throw new Error('Certified permission snapshot contains a duplicate exact artifact')
+      next.set(key, normalized)
+    }
+    const digest = JSON.stringify([...next.values()])
+    if (snapshot.revision < this.certifiedProjectionRevision) {
+      throw new Error('Certified permission snapshot revision regressed')
+    }
+    if (snapshot.revision === this.certifiedProjectionRevision
+      && this.certifiedProjectionDigest !== '' && digest !== this.certifiedProjectionDigest) {
+      throw new Error('Certified permission snapshot equivocated at one revision')
+    }
+    if (snapshot.revision === this.certifiedProjectionRevision
+      && digest === this.certifiedProjectionDigest && this.certifiedProjectionAvailable) return
+    this.certifiedProjectionRevision = snapshot.revision
+    this.certifiedProjectionDigest = digest
+    this.certifiedProjectionAvailable = true
+    this.applyCertifiedProjectionMap(next)
+  }
+
+  /** Channel loss clears grants without resetting the monotonic replay fence. */
+  clearCertifiedPermissionSnapshot(): void {
+    if (!this.certifiedProjectionAvailable && this.certifiedProjections.size === 0) return
+    this.certifiedProjectionAvailable = false
+    this.applyCertifiedProjectionMap(new Map())
+  }
+
+  private applyCertifiedProjectionMap(
+    next: ReadonlyMap<string, CordisXCertifiedPermissionProjectionV1>,
+  ): void {
+    this.batchChanges(() => {
+      this.certifiedProjections.clear()
+      for (const [key, projection] of next) this.certifiedProjections.set(key, projection)
+      for (const [registrationKey, registration] of [...this.registrations.entries()]) {
+        const artifact = registration.artifact
+        if (artifact === undefined) continue
+        this.refreshRegistrationDomCertification(
+          registrationKey,
+          registration,
+          this.certifiedProjections.get(certifiedArtifactKey(
+            { source: registration.identity.source, pluginId: registration.identity.id },
+            artifact,
+          )),
+        )
+      }
+    })
+  }
+
+  private clearDomCertificationTimer(key: string): void {
+    const timer = this.domCertificationTimers.get(key)
+    if (timer !== undefined) clearTimeout(timer)
+    this.domCertificationTimers.delete(key)
+  }
+
+  private scheduleDomCertificationExpiry(key: string, registration: Registration): void {
+    this.clearDomCertificationTimer(key)
+    const certification = registration.artifact?.certification
+    if (certification === undefined) return
+    const remaining = Date.parse(certification.expiresAt) - this.now().getTime()
+    if (!Number.isFinite(remaining) || remaining <= 0) {
+      queueMicrotask(() => this.expireDomCertification(key, registration.token))
+      return
+    }
+    const timer = setTimeout(
+      () => this.expireDomCertification(key, registration.token),
+      Math.min(remaining, 2_147_483_647),
+    )
+    ;(timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.()
+    this.domCertificationTimers.set(key, timer)
+  }
+
+  private expireDomCertification(key: string, token: object): void {
+    this.domCertificationTimers.delete(key)
+    const registration = this.registrations.get(key)
+    const artifact = registration?.artifact
+    const certification = artifact?.certification
+    if (registration === undefined || registration.token !== token || artifact === undefined || certification === undefined) return
+    if (this.now().getTime() < Date.parse(certification.expiresAt)) {
+      this.scheduleDomCertificationExpiry(key, registration)
+      return
+    }
+    const next = Object.freeze({
+      ...registration,
+      artifact: Object.freeze({ version: artifact.version, integrity: artifact.integrity }),
+    })
+    this.registrations.set(key, next)
+    this.clearCertifiedDomLeases(registration)
+    this.clearCertifiedHostDomLeases(registration)
+    const auditPrefix = this.domAuditPrefix(
+      platformIdentityKey(registration.identity),
+      registration.generation.moduleGeneration,
+    )
+    for (const [auditKey, audit] of this.audit) {
+      if (!auditKey.startsWith(auditPrefix)) continue
+      if (audit.authorizationOrigin !== 'certified-implicit') continue
+      delete audit.authorizationOrigin
+      delete audit.authorizationReason
+      delete audit.certification
+    }
+    this.changed()
+  }
+
   private persistV2(records: readonly CordisXPermissionPolicyRecordV2[]): Promise<void> {
     if (this.store.writeV2 === undefined) return Promise.reject(new Error('permission v2 persistence is unavailable'))
     return Promise.resolve(this.store.writeV2(records))
+  }
+
+  private persistV3(records: readonly CordisXPermissionPolicyRecordV3[]): Promise<void> {
+    if (this.store.writeV3 === undefined) return Promise.reject(new Error('permission v3 persistence is unavailable'))
+    return Promise.resolve(this.store.writeV3(records))
+  }
+
+  private persistV4(records: readonly CordisXPermissionPolicyRecordV4[]): Promise<void> {
+    if (this.store.writeV4 === undefined) return Promise.reject(new Error('permission v4 persistence is unavailable'))
+    return Promise.resolve(this.store.writeV4(records))
+  }
+
+  private persistMixed(records: readonly CordisXPersistedPermissionPolicyRecord[]): Promise<void> {
+    if (records.length === 0) return Promise.resolve()
+    if (this.store.writeAll !== undefined) return Promise.resolve(this.store.writeAll(records))
+    const v2 = records.filter(isPermissionPolicyRecordV2)
+    const v4 = records.filter(isPermissionPolicyRecordV4)
+    if (v2.length !== records.length && v4.length !== records.length) {
+      return Promise.reject(new Error('atomic mixed-version permission persistence is unavailable'))
+    }
+    return v2.length > 0 ? this.persistV2(v2) : this.persistV4(v4)
   }
 
   private binding(
@@ -701,6 +1168,950 @@ export class PermissionBroker {
       }),
       ...(requestId === undefined ? {} : { requestId }),
     })
+  }
+
+  private domPointKey(identity: CordisXPluginIdentity, pointId: string, moduleGeneration?: string): string {
+    return `${this.domGenerationPrefix(identity, moduleGeneration)}${pointId}`
+  }
+
+  private domGenerationPrefix(identity: CordisXPluginIdentity, moduleGeneration?: string): string {
+    return `${platformIdentityKey(identity)}\u0000${moduleGeneration ?? 'host'}\u0000`
+  }
+
+  private domPendingReviewKey(identity: CordisXPluginIdentity, moduleGeneration?: string): string {
+    return `${platformIdentityKey(identity)}\u0000${moduleGeneration ?? 'host'}`
+  }
+
+  private activeCertification(registration: Registration): CordisXCertifiedPermissionProjectionV1 | undefined {
+    const artifact = registration.artifact
+    return artifact === undefined
+      ? undefined
+      : normalizeCertifiedPermissionProjectionV1(artifact.certification, {
+          source: registration.identity.source,
+          pluginId: registration.identity.id,
+        }, artifact, this.now())
+  }
+
+  private domPlan(registration: Registration, pointId: string, operationId: string): CordisXPermissionAuthorizationPlanV3 {
+    const certification = this.activeCertification(registration)
+    return buildDomPermissionAuthorizationPlanV3({
+      planId: operationId,
+      profileId: this.profileId,
+      identity: { source: registration.identity.source, pluginId: registration.identity.id },
+      binding: this.binding(registration, operationId, operationId),
+      declaration: { name: 'ui.extension-points.render', required: false, scope: { extensionPoints: [pointId] } },
+      policies: [...this.policyRecords.values()].filter(isPermissionPolicyRecordV3),
+      ...(certification === undefined ? {} : { certification }),
+    }, this.catalog)
+  }
+
+  private domLeaseKey(key: CordisXPermissionAuthorizationKeyV3): string {
+    return permissionRecordKeyV3({
+      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
+      schemaVersion: 3,
+      key,
+      policy: 'ask',
+    })
+  }
+
+  private validDomLease(registration: Registration, pointId: string): DomPermissionLease | undefined {
+    const key = domPermissionAuthorizationKeyV3({
+      profileId: this.profileId,
+      identity: { source: registration.identity.source, pluginId: registration.identity.id },
+      pointId,
+      catalogVersion: this.catalog.version,
+    })
+    const leaseKey = this.domLeaseKey(key)
+    const lease = this.domLeases.get(leaseKey)
+    if (lease === undefined) return undefined
+    const certification = this.activeCertification(registration)
+    const valid = lease.runtimeGeneration === this.generation
+      && lease.moduleGeneration === registration.generation.moduleGeneration
+      && (lease.authorizationOrigin !== 'certified-implicit' || (
+        certification !== undefined
+        && lease.certificationFingerprint === certification.fingerprint
+        && lease.certificationRevision === certification.revision
+      ))
+    if (valid) return lease
+    this.domLeases.delete(leaseKey)
+    return undefined
+  }
+
+  domPolicy(identity: CordisXPluginIdentity, pointId: string): 'inherit' | 'allow' | 'deny' {
+    const key = domPermissionAuthorizationKeyV3({
+      profileId: this.profileId,
+      identity: { source: identity.source, pluginId: identity.id },
+      pointId,
+      catalogVersion: this.catalog.version,
+    })
+    const record = this.policyRecords.get(this.domLeaseKey(key))
+    if (record === undefined || !isPermissionPolicyRecordV3(record)) return 'inherit'
+    return record.policy === 'allow-persistent' ? 'allow' : record.policy === 'deny-persistent' ? 'deny' : 'inherit'
+  }
+
+  hasDomPolicy(identity: CordisXPluginIdentity, pointId: string): boolean {
+    const key = domPermissionAuthorizationKeyV3({
+      profileId: this.profileId,
+      identity: { source: identity.source, pluginId: identity.id },
+      pointId,
+      catalogVersion: this.catalog.version,
+    })
+    return isPermissionPolicyRecordV3(this.policyRecords.get(this.domLeaseKey(key)))
+  }
+
+  domPolicies(): readonly DomPermissionPolicyEntry[] {
+    return Object.freeze([...this.policyRecords.values()].flatMap(record => {
+      if (!isPermissionPolicyRecordV3(record) || record.key.profileId !== this.profileId) return []
+      const pointId = record.key.scope.extensionPoints?.[0]
+      if (pointId === undefined || record.key.scope.extensionPoints?.length !== 1) return []
+      return [Object.freeze({
+        identity: Object.freeze({ source: record.key.identity.source, id: record.key.identity.pluginId }),
+        pointId,
+        policy: record.policy === 'allow-persistent' ? 'allow' as const : record.policy === 'deny-persistent' ? 'deny' as const : 'inherit' as const,
+      })]
+    }).sort((left, right) => `${left.identity.source}\u0000${left.identity.id}\u0000${left.pointId}`.localeCompare(
+      `${right.identity.source}\u0000${right.identity.id}\u0000${right.pointId}`,
+    )))
+  }
+
+  domAccess(identity: CordisXPluginIdentity, pointId: string, view?: PluginGenerationView): DomPermissionAccessDecision {
+    const registration = this.registration(identity, view)
+    const policy = this.domPolicy(identity, pointId)
+    if (registration === undefined) return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.identity-unavailable', policy })
+    const pointKey = this.domPointKey(identity, pointId, registration.generation.moduleGeneration)
+    this.domPoints.set(pointKey, Object.freeze({ identity: registration.identity, pointId, ...(registration.generation.moduleGeneration === undefined ? {} : { moduleGeneration: registration.generation.moduleGeneration }) }))
+    const lease = this.validDomLease(registration, pointId)
+    if (lease !== undefined) return Object.freeze({
+      authorized: true,
+      state: 'allowed',
+      reason: lease.authorizationOrigin === 'certified-implicit' ? 'permission.certified-implicit' : 'permission.explicit-user',
+      policy,
+      authorizationOrigin: lease.authorizationOrigin,
+    })
+    const request = this.domRequests.get(pointKey)
+    if (request !== undefined) return Object.freeze({ authorized: false, state: 'pending', reason: 'permission.review-pending', policy })
+    if (policy === 'deny') return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.denied-persistent', policy })
+    if (policy === 'allow' || this.activeCertification(registration) !== undefined) {
+      const operationId = `dom:auto:${sha256Hex([
+        this.generation,
+        registration.generation.moduleGeneration ?? 'host',
+        identity.source,
+        identity.id,
+        pointId,
+      ].join('\u0000')).slice(0, 48)}`
+      const plan = this.domPlan(registration, pointId, operationId)
+      const item = plan.declarations[0]!
+      if (item.authorizationMode === 'certified-implicit') {
+        return this.grantDomAccess(registration, pointId, plan, item, 'certified-implicit', true)
+      }
+      if (item.authorizationMode === 'persistent-policy' && item.policy === 'allow-persistent') {
+        return this.grantDomAccess(registration, pointId, plan, item, 'explicit-user', true)
+      }
+    }
+    this.pendingDomReviews.set(this.domPendingReviewKey(identity, registration.generation.moduleGeneration), Object.freeze({
+      identity: registration.identity,
+      pointId,
+      ...(registration.generation.moduleGeneration === undefined ? {} : {
+        moduleGeneration: registration.generation.moduleGeneration,
+      }),
+      ...(view === undefined ? {} : { view }),
+    }))
+    return Object.freeze({ authorized: false, state: 'pending', reason: 'permission.review-pending', policy })
+  }
+
+  requestDomAccess(identity: CordisXPluginIdentity, pointId: string, view?: PluginGenerationView): Promise<DomPermissionAccessDecision> {
+    const registration = this.registration(identity, view)
+    if (registration === undefined) return Promise.resolve(Object.freeze({
+      authorized: false,
+      state: 'denied',
+      reason: 'permission.identity-unavailable',
+      policy: this.domPolicy(identity, pointId),
+    }))
+    const pointKey = this.domPointKey(identity, pointId, registration.generation.moduleGeneration)
+    const pendingKey = this.domPendingReviewKey(identity, registration.generation.moduleGeneration)
+    if (this.pendingDomReviews.get(pendingKey)?.pointId === pointId) this.pendingDomReviews.delete(pendingKey)
+    this.domPoints.set(pointKey, Object.freeze({
+      identity: registration.identity,
+      pointId,
+      ...(registration.generation.moduleGeneration === undefined ? {} : { moduleGeneration: registration.generation.moduleGeneration }),
+    }))
+    const existing = this.domRequests.get(pointKey)
+    if (existing !== undefined) return existing
+    const task = this.resolveDomAccess(registration, pointId).finally(() => {
+      if (this.domRequests.get(pointKey) === task) this.domRequests.delete(pointKey)
+      this.changed()
+    })
+    this.domRequests.set(pointKey, task)
+    this.changed()
+    return task
+  }
+
+  /** Starts or waits for only the exact plugin scope touched by an explicit Host interaction. */
+  async reviewPendingDomAccess(
+    identity: CordisXPluginIdentity,
+    moduleGeneration?: string,
+    view?: PluginGenerationView,
+  ): Promise<readonly DomPermissionAccessDecision[]> {
+    const registration = this.registration(identity, view)
+    if (registration === undefined || registration.generation.moduleGeneration !== moduleGeneration) return Object.freeze([])
+    const prefix = this.domGenerationPrefix(identity, moduleGeneration)
+    const requests = [...this.domRequests.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, request]) => request)
+    if (requests.length > 0) return Object.freeze(await Promise.all(requests))
+    const key = this.domPendingReviewKey(identity, moduleGeneration)
+    const pending = this.pendingDomReviews.get(key)
+    if (pending === undefined) return Object.freeze([])
+    this.pendingDomReviews.delete(key)
+    return Object.freeze([await this.requestDomAccess(pending.identity, pending.pointId, pending.view)])
+  }
+
+  private async resolveDomAccess(registration: Registration, pointId: string): Promise<DomPermissionAccessDecision> {
+    const identity = registration.identity
+    const operationId = `dom:${this.generation}:${registration.generation.moduleGeneration ?? 'host'}:${identity.id}:${pointId}`
+    const plan = this.domPlan(registration, pointId, operationId)
+    const item = plan.declarations[0]!
+    const key: CordisXPermissionAuthorizationKeyV3 = Object.freeze({
+      profileId: plan.profileId,
+      identity: plan.identity,
+      capability: item.capability,
+      scope: item.scope,
+      securityFingerprint: item.securityFingerprint,
+    })
+    if (item.authorizationMode === 'persistent-policy' && item.policy === 'deny-persistent') {
+      this.recordDomAudit(registration, pointId, false, 'explicit-user', 'Persistent user denial')
+      return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.denied-persistent', policy: 'deny' })
+    }
+    let origin: 'explicit-user' | 'certified-implicit'
+    if (item.authorizationMode === 'certified-implicit') {
+      origin = 'certified-implicit'
+    } else if (item.authorizationMode === 'persistent-policy') {
+      origin = 'explicit-user'
+    } else {
+      let decision: CordisXPermissionAuthorizationDecisionV3 | undefined
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const promptKey = this.domPointKey(identity, pointId, registration.generation.moduleGeneration)
+      this.domPromptPlans.set(promptKey, plan)
+      try {
+        decision = await Promise.race([
+          this.promptV2?.requestV3?.(plan, identity) ?? Promise.resolve(undefined),
+          new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), this.promptTimeoutMs) }),
+        ])
+      } catch {
+        decision = undefined
+      } finally {
+        if (timer !== undefined) clearTimeout(timer)
+        if (this.domPromptPlans.get(promptKey) === plan) this.domPromptPlans.delete(promptKey)
+        this.promptV2?.cancelV3?.(plan.planId, plan.binding)
+      }
+      if (!this.isRegistered(registration)) {
+        return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.generation-invalidated', policy: 'inherit' })
+      }
+      if (decision === undefined) {
+        this.recordDomAudit(registration, pointId, false, 'explicit-user', 'Explicit review cancelled or timed out')
+        return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.review-cancelled', policy: 'inherit' })
+      }
+      const selected = await this.commitDomDecision(plan, decision)
+      if (!this.isRegistered(registration)) {
+        return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.generation-invalidated', policy: 'inherit' })
+      }
+      if (selected === 'deny-once' || selected === 'deny-persistent') {
+        this.recordDomAudit(registration, pointId, false, 'explicit-user', 'Explicit user denial')
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.denied-explicit',
+          policy: selected === 'deny-persistent' ? 'deny' : 'inherit',
+        })
+      }
+      if (selected === 'allow-once') {
+        this.onceV2.issue(key, plan.binding)
+        if (!this.onceV2.consume(key, plan.binding)) {
+          this.recordDomAudit(registration, pointId, false, 'explicit-user', 'Exact one-time grant could not be consumed')
+          return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.once-invalid', policy: 'inherit' })
+        }
+      }
+      origin = 'explicit-user'
+    }
+    const granted = this.grantDomAccess(registration, pointId, plan, item, origin)
+    return this.isRegistered(registration)
+      ? granted
+      : Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.generation-invalidated',
+          policy: 'inherit',
+        })
+  }
+
+  private grantDomAccess(
+    registration: Registration,
+    pointId: string,
+    plan: CordisXPermissionAuthorizationPlanV3,
+    item: CordisXPermissionAuthorizationPlanV3['declarations'][number],
+    origin: 'explicit-user' | 'certified-implicit',
+    deferAuditNotification = false,
+  ): DomPermissionAccessDecision {
+    const key: CordisXPermissionAuthorizationKeyV3 = Object.freeze({
+      profileId: plan.profileId,
+      identity: plan.identity,
+      capability: item.capability,
+      scope: item.scope,
+      securityFingerprint: item.securityFingerprint,
+    })
+    const certification = origin === 'certified-implicit' ? item.certification : undefined
+    this.domLeases.set(this.domLeaseKey(key), Object.freeze({
+      key,
+      runtimeGeneration: this.generation,
+      ...(registration.generation.moduleGeneration === undefined ? {} : { moduleGeneration: registration.generation.moduleGeneration }),
+      authorizationOrigin: origin,
+      ...(certification === undefined ? {} : {
+        certificationFingerprint: certification.fingerprint,
+        certificationRevision: certification.revision,
+      }),
+    }))
+    this.recordDomAudit(
+      registration,
+      pointId,
+      true,
+      origin,
+      origin === 'certified-implicit' ? 'Exact Certified artifact auto-approved by the Host catalog' : 'Explicit user approval',
+      certification,
+      deferAuditNotification,
+    )
+    return Object.freeze({
+      authorized: true,
+      state: 'allowed',
+      reason: origin === 'certified-implicit' ? 'permission.certified-implicit' : 'permission.explicit-user',
+      policy: item.policy === 'allow-persistent' ? 'allow' : 'inherit',
+      authorizationOrigin: origin,
+    })
+  }
+
+  private async commitDomDecision(
+    plan: CordisXPermissionAuthorizationPlanV3,
+    decision: CordisXPermissionAuthorizationDecisionV3,
+  ): Promise<CordisXPermissionDecisionV2> {
+    if (decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3
+      || decision.schemaVersion !== 3 || decision.origin !== 'explicit-user'
+      || decision.planId !== plan.planId || decision.operation !== plan.operation
+      || decision.profileId !== plan.profileId || JSON.stringify(decision.identity) !== JSON.stringify(plan.identity)
+      || JSON.stringify(decision.binding) !== JSON.stringify(plan.binding)
+      || decision.decisions.length !== 1) throw new Error('DOM permission decision does not match the Host plan')
+    const item = plan.declarations[0]!
+    const selected = decision.decisions[0]!
+    if (selected.capability !== item.capability
+      || JSON.stringify(selected.scope) !== JSON.stringify(item.scope)
+      || selected.securityFingerprint !== item.securityFingerprint
+      || !item.allowedDecisions.includes(selected.decision)) throw new Error('DOM permission decision is invalid')
+    if (selected.decision === 'allow-persistent' || selected.decision === 'deny-persistent') {
+      const record = normalizePermissionPolicyRecordV3({
+        $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
+        schemaVersion: 3,
+        key: {
+          profileId: plan.profileId,
+          identity: plan.identity,
+          capability: item.capability,
+          scope: item.scope,
+          securityFingerprint: item.securityFingerprint,
+        },
+        policy: selected.decision,
+      })
+      const key = permissionRecordKeyV3(record)
+      const previous = this.policyRecords.get(key)
+      this.policyRecords.set(key, record)
+      try {
+        await this.persistV3([record])
+      } catch (error) {
+        if (previous === undefined) this.policyRecords.delete(key)
+        else this.policyRecords.set(key, previous)
+        throw error
+      }
+    }
+    return selected.decision
+  }
+
+  private recordDomAudit(
+    registration: Registration,
+    pointId: string,
+    allowed: boolean,
+    authorizationOrigin: 'explicit-user' | 'certified-implicit',
+    authorizationReason: string,
+    certification?: CordisXCertifiedPermissionProjectionV1,
+    deferNotification = false,
+  ): void {
+    const key = this.domAuditKey(
+      platformIdentityKey(registration.identity),
+      pointId,
+      registration.generation.moduleGeneration,
+    )
+    const audit = this.audit.get(key) ?? { denialCount: 0 }
+    if (allowed) audit.lastUsedAt = isoNow(this.now)
+    else { audit.lastDeniedAt = isoNow(this.now); audit.denialCount += 1 }
+    audit.authorizationOrigin = authorizationOrigin
+    audit.authorizationReason = authorizationReason
+    if (certification === undefined) delete audit.certification
+    else audit.certification = certification
+    this.audit.set(key, audit)
+    const notify = (): void => {
+      this.consoleObserver?.permission(
+        registration.identity,
+        'ui.extension-points.render',
+        allowed ? 'allow' : 'deny',
+        `${pointId}: ${authorizationReason}`,
+      )
+      this.changed()
+    }
+    if (deferNotification) queueMicrotask(notify)
+    else notify()
+  }
+
+  private clearDomGeneration(moduleGeneration?: string, identity?: CordisXPluginIdentity): void {
+    this.clearDomLeases(moduleGeneration, identity)
+    const identityKey = identity === undefined ? undefined : platformIdentityKey(identity)
+    for (const [key, plan] of this.domPromptPlans) {
+      if ((moduleGeneration === undefined || plan.binding.moduleGeneration === moduleGeneration)
+        && (identity === undefined || (
+          plan.identity.source === identity.source && plan.identity.pluginId === identity.id
+        ))) {
+        this.domPromptPlans.delete(key)
+        this.promptV2?.cancelV3?.(plan.planId, plan.binding)
+      }
+    }
+    for (const [key, point] of this.domPoints) {
+      if ((moduleGeneration === undefined || point.moduleGeneration === moduleGeneration)
+        && (identityKey === undefined || platformIdentityKey(point.identity) === identityKey)) this.domPoints.delete(key)
+    }
+    for (const [key, pending] of this.pendingDomReviews) {
+      if ((moduleGeneration === undefined || pending.moduleGeneration === moduleGeneration)
+        && (identityKey === undefined || platformIdentityKey(pending.identity) === identityKey)) this.pendingDomReviews.delete(key)
+    }
+    const requestPrefix = identity === undefined ? undefined : this.domGenerationPrefix(identity, moduleGeneration)
+    for (const key of [...this.domRequests.keys()]) {
+      if (requestPrefix !== undefined ? key.startsWith(requestPrefix)
+        : moduleGeneration === undefined || key.includes(`\u0000${moduleGeneration}\u0000`)) this.domRequests.delete(key)
+    }
+    if (identityKey !== undefined) {
+      const auditPrefix = moduleGeneration === undefined
+        ? `${identityKey}\u0000ui.extension-points.render\u0000`
+        : this.domAuditPrefix(identityKey, moduleGeneration)
+      for (const key of [...this.audit.keys()]) if (key.startsWith(auditPrefix)) this.audit.delete(key)
+    }
+  }
+
+  private clearDomLeases(moduleGeneration?: string, identity?: CordisXPluginIdentity): void {
+    for (const [key, lease] of this.domLeases) {
+      if (lease.runtimeGeneration === this.generation
+        && (moduleGeneration === undefined || lease.moduleGeneration === moduleGeneration)
+        && (identity === undefined || (
+          lease.key.identity.source === identity.source && lease.key.identity.pluginId === identity.id
+        ))) this.domLeases.delete(key)
+    }
+  }
+
+  private clearCertifiedDomLeases(registration: Registration): void {
+    for (const [key, lease] of this.domLeases) {
+      if (lease.runtimeGeneration !== this.generation
+        || lease.moduleGeneration !== registration.generation.moduleGeneration
+        || lease.authorizationOrigin !== 'certified-implicit'
+        || lease.key.identity.source !== registration.identity.source
+        || lease.key.identity.pluginId !== registration.identity.id) continue
+      this.domLeases.delete(key)
+    }
+  }
+
+  private clearExactDomLease(registration: Registration, pointId: string): void {
+    for (const [key, lease] of this.domLeases) {
+      if (lease.runtimeGeneration !== this.generation
+        || lease.moduleGeneration !== registration.generation.moduleGeneration
+        || lease.key.identity.source !== registration.identity.source
+        || lease.key.identity.pluginId !== registration.identity.id
+        || lease.key.scope.extensionPoints?.length !== 1
+        || lease.key.scope.extensionPoints[0] !== pointId) continue
+      this.domLeases.delete(key)
+    }
+  }
+
+  private domAuditPrefix(identityKey: string, moduleGeneration?: string): string {
+    return `${identityKey}\u0000ui.extension-points.render\u0000${moduleGeneration ?? 'host'}\u0000`
+  }
+
+  private domAuditKey(identityKey: string, pointId: string, moduleGeneration?: string): string {
+    return `${this.domAuditPrefix(identityKey, moduleGeneration)}${pointId}`
+  }
+
+  private hostDomPlan(
+    registration: Registration,
+    capability: 'ui.host-dom.read' | 'ui.host-dom.modify',
+    operationId: string,
+  ): CordisXPermissionAuthorizationPlanV4 {
+    const declaration = registration.declarationsV4.get(capability)
+    if (declaration === undefined) throw new Error(`plugin ${registration.identity.id} does not declare ${capability}`)
+    const certification = this.activeCertification(registration)
+    return buildHostDomPermissionAuthorizationPlanV4({
+      planId: operationId,
+      profileId: this.profileId,
+      identity: { source: registration.identity.source, pluginId: registration.identity.id },
+      binding: this.binding(registration, operationId, operationId),
+      declaration,
+      policies: [...this.policyRecords.values()].filter(isPermissionPolicyRecordV4),
+      ...(certification === undefined ? {} : { certification }),
+    }, this.catalog)
+  }
+
+  private hostDomLeaseKey(key: CordisXPermissionAuthorizationKeyV4): string {
+    return permissionRecordKeyV4({
+      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V4,
+      schemaVersion: 4,
+      key,
+      policy: 'ask',
+    })
+  }
+
+  private hostDomKey(
+    registration: Registration,
+    capability: 'ui.host-dom.read' | 'ui.host-dom.modify',
+  ): CordisXPermissionAuthorizationKeyV4 {
+    const declaration = registration.declarationsV4.get(capability)
+    if (declaration === undefined) throw new Error(`plugin ${registration.identity.id} does not declare ${capability}`)
+    return hostDomPermissionAuthorizationKeyV4({
+      profileId: this.profileId,
+      identity: { source: registration.identity.source, pluginId: registration.identity.id },
+      declaration,
+      catalogVersion: this.catalog.versionV4,
+    })
+  }
+
+  hostDomPolicy(
+    identity: CordisXPluginIdentity,
+    capability: 'ui.host-dom.read' | 'ui.host-dom.modify',
+    view?: PluginGenerationView,
+  ): 'inherit' | 'allow' | 'deny' {
+    const registration = this.registration(identity, view)
+    if (registration?.declarationsV4.has(capability) !== true) return 'inherit'
+    const record = this.policyRecords.get(this.hostDomLeaseKey(this.hostDomKey(registration, capability)))
+    if (!isPermissionPolicyRecordV4(record)) return 'inherit'
+    return record.policy === 'allow-persistent' ? 'allow' : record.policy === 'deny-persistent' ? 'deny' : 'inherit'
+  }
+
+  private hostDomPolicyRevision(registration: Registration, capability: 'ui.host-dom.read' | 'ui.host-dom.modify'): number {
+    return this.hostDomPolicyRevisions.get(this.hostDomLeaseKey(this.hostDomKey(registration, capability))) ?? 0
+  }
+
+  private bumpHostDomPolicyRevision(registration: Registration, capability: 'ui.host-dom.read' | 'ui.host-dom.modify'): number {
+    const key = this.hostDomLeaseKey(this.hostDomKey(registration, capability))
+    const revision = (this.hostDomPolicyRevisions.get(key) ?? 0) + 1
+    this.hostDomPolicyRevisions.set(key, revision)
+    return revision
+  }
+
+  private cancelHostDomPrompts(registration: Registration, capability: 'ui.host-dom.read' | 'ui.host-dom.modify'): void {
+    for (const [key, pending] of this.hostDomPromptPlans) {
+      const plan = pending.plan
+      if (plan.identity.source !== registration.identity.source || plan.identity.pluginId !== registration.identity.id
+        || plan.binding.moduleGeneration !== registration.generation.moduleGeneration
+        || plan.declarations[0]?.capability !== capability) continue
+      this.hostDomPromptPlans.delete(key)
+      pending.cancel()
+      this.promptV2?.cancelV4?.(plan.planId, plan.binding)
+    }
+  }
+
+  async setHostDomPolicy(
+    identity: CordisXPluginIdentity,
+    capability: 'ui.host-dom.read' | 'ui.host-dom.modify',
+    policy: CordisXPermissionPolicyV2,
+    view?: PluginGenerationView,
+  ): Promise<void> {
+    const registration = this.registration(identity, view)
+    if (registration?.declarationsV4.has(capability) !== true) {
+      throw new Error(`plugin ${identity.id} does not declare ${capability}`)
+    }
+    if (capability === 'ui.host-dom.modify' && policy === 'allow-persistent') {
+      throw new Error('ui.host-dom.modify does not permit persistent allow')
+    }
+    const plan = this.hostDomPlan(registration, capability, `policy-v4:${identity.id}:${capability}`)
+    const item = plan.declarations[0]!
+    const record = normalizePermissionPolicyRecordV4({
+      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V4,
+      schemaVersion: 4,
+      key: {
+        profileId: plan.profileId,
+        identity: plan.identity,
+        capability,
+        scope: item.scope,
+        securityFingerprint: item.securityFingerprint,
+      },
+      policy,
+    })
+    const key = permissionRecordKeyV4(record)
+    const previous = this.policyRecords.get(key)
+    this.policyRecords.set(key, record)
+    this.clearExactHostDomLease(registration, capability)
+    this.bumpHostDomPolicyRevision(registration, capability)
+    this.cancelHostDomPrompts(registration, capability)
+    this.changed()
+    try {
+      await this.persistV4([record])
+    } catch (error) {
+      if (previous === undefined) this.policyRecords.delete(key)
+      else this.policyRecords.set(key, previous)
+      this.clearExactHostDomLease(registration, capability)
+      this.bumpHostDomPolicyRevision(registration, capability)
+      this.cancelHostDomPrompts(registration, capability)
+      this.changed()
+      throw error
+    }
+    this.onceV2.clearGeneration(this.generation, registration.generation.moduleGeneration)
+  }
+
+  async authorizeHostDom(
+    identity: CordisXPluginIdentity,
+    capability: 'ui.host-dom.read' | 'ui.host-dom.modify',
+    rootId: string,
+    operations: readonly string[],
+    view?: PluginGenerationView,
+  ): Promise<HostDomPermissionAccessDecision> {
+    const registration = this.registration(identity, view)
+    if (registration === undefined) return Object.freeze({
+      authorized: false, state: 'denied', reason: 'permission.identity-unavailable', policy: 'inherit',
+    })
+    const declaration = registration.declarationsV4.get(capability)
+    if (declaration === undefined) return Object.freeze({
+      authorized: false, state: 'denied', reason: 'permission.undeclared', policy: 'inherit',
+    })
+    const roots = declaration.scope.rootIds ?? []
+    const declaredOperations = declaration.scope.operations ?? []
+    if (!roots.includes(rootId) || operations.length < 1 || new Set(operations).size !== operations.length
+      || operations.some(operation => !declaredOperations.includes(operation as never))) {
+      this.recordHostDomAudit(registration, capability, false, 'explicit-user', 'Requested root or operation exceeds manifest scope')
+      return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.scope-denied', policy: 'inherit' })
+    }
+    const policy = this.hostDomPolicy(identity, capability, view)
+    if (policy === 'deny') {
+      this.clearExactHostDomLease(registration, capability)
+      this.recordHostDomAudit(registration, capability, false, 'explicit-user', 'Persistent user denial')
+      return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.denied-persistent', policy: 'deny' })
+    }
+    const lease = this.validHostDomLease(registration, capability)
+    if (lease !== undefined) return Object.freeze({
+      authorized: true,
+      state: 'allowed',
+      reason: lease.authorizationOrigin === 'certified-implicit' ? 'permission.certified-implicit' : 'permission.explicit-user',
+      policy,
+      authorizationOrigin: lease.authorizationOrigin,
+      lease,
+    })
+    const operationId = `host-dom:${sha256Hex([
+      this.generation,
+      registration.generation.moduleGeneration ?? 'host',
+      identity.source,
+      identity.id,
+      capability,
+      rootId,
+      [...operations].sort().join(','),
+      String(this.now().getTime()),
+      String(++this.hostDomOperationSequence),
+    ].join('\u0000')).slice(0, 48)}`
+    const plan = this.hostDomPlan(registration, capability, operationId)
+    const item = plan.declarations[0]!
+    if (item.authorizationMode === 'persistent-policy' && item.policy === 'deny-persistent') {
+      this.recordHostDomAudit(registration, capability, false, 'explicit-user', 'Persistent user denial')
+      return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.denied-persistent', policy: 'deny' })
+    }
+    let origin: 'explicit-user' | 'certified-implicit'
+    if (item.authorizationMode === 'certified-implicit') origin = 'certified-implicit'
+    else if (item.authorizationMode === 'persistent-policy' && item.policy === 'allow-persistent') origin = 'explicit-user'
+    else {
+      let decision: CordisXPermissionAuthorizationDecisionV4 | undefined
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const policyRevision = this.hostDomPolicyRevision(registration, capability)
+      let cancelPrompt!: () => void
+      const cancelled = new Promise<undefined>(resolve => { cancelPrompt = () => resolve(undefined) })
+      this.hostDomPromptPlans.set(plan.planId, { plan, cancel: cancelPrompt })
+      try {
+        decision = await Promise.race([
+          this.promptV2?.requestV4?.(plan, identity) ?? Promise.resolve(undefined),
+          cancelled,
+          new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), this.promptTimeoutMs) }),
+        ])
+      } catch {
+        decision = undefined
+      } finally {
+        if (timer !== undefined) clearTimeout(timer)
+        this.hostDomPromptPlans.delete(plan.planId)
+        this.promptV2?.cancelV4?.(plan.planId, plan.binding)
+      }
+      if (!this.isRegistered(registration)) return Object.freeze({
+        authorized: false, state: 'denied', reason: 'permission.generation-invalidated', policy: 'inherit',
+      })
+      const currentPolicy = this.hostDomPolicy(identity, capability, view)
+      if (currentPolicy === 'deny') {
+        this.recordHostDomAudit(registration, capability, false, 'explicit-user', 'Persistent user denial')
+        return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.denied-persistent', policy: 'deny' })
+      }
+      if (this.hostDomPolicyRevision(registration, capability) !== policyRevision) return Object.freeze({
+        authorized: false, state: 'denied', reason: 'permission.policy-invalidated', policy: currentPolicy,
+      })
+      if (decision === undefined) {
+        this.recordHostDomAudit(registration, capability, false, 'explicit-user', 'Explicit review cancelled or timed out')
+        return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.review-cancelled', policy: 'inherit' })
+      }
+      const committed = await this.commitHostDomDecision(registration, plan, decision)
+      const selected = committed.decision
+      if (!this.isRegistered(registration)) return Object.freeze({
+        authorized: false, state: 'denied', reason: 'permission.generation-invalidated', policy: 'inherit',
+      })
+      const committedPolicy = this.hostDomPolicy(identity, capability, view)
+      if (this.hostDomPolicyRevision(registration, capability) !== committed.policyRevision || committedPolicy === 'deny' && selected !== 'deny-persistent') {
+        this.clearExactHostDomLease(registration, capability)
+        return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.policy-invalidated', policy: committedPolicy })
+      }
+      if (selected === 'deny-once' || selected === 'deny-persistent') {
+        this.recordHostDomAudit(registration, capability, false, 'explicit-user', 'Explicit user denial')
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.denied-explicit',
+          policy: selected === 'deny-persistent' ? 'deny' : 'inherit',
+        })
+      }
+      const key: CordisXPermissionAuthorizationKeyV4 = Object.freeze({
+        profileId: plan.profileId,
+        identity: plan.identity,
+        capability: item.capability,
+        scope: item.scope,
+        securityFingerprint: item.securityFingerprint,
+      })
+      if (selected === 'allow-once') {
+        this.onceV2.issue(key, plan.binding)
+        if (!this.onceV2.consume(key, plan.binding)) return Object.freeze({
+          authorized: false, state: 'denied', reason: 'permission.once-invalid', policy: 'inherit',
+        })
+      }
+      origin = 'explicit-user'
+    }
+    const granted = this.grantHostDomAccess(registration, plan, item, origin)
+    const activeLease = this.isRegistered(registration)
+      ? this.validHostDomLease(registration, capability)
+      : undefined
+    return activeLease !== undefined && activeLease.leaseId === granted.lease?.leaseId
+      ? granted
+      : Object.freeze({
+          authorized: false, state: 'denied', reason: 'permission.grant-invalidated', policy: 'inherit',
+        })
+  }
+
+  isHostDomLeaseActive(
+    identity: CordisXPluginIdentity,
+    leaseId: string,
+    view?: PluginGenerationView,
+  ): boolean {
+    const registration = this.registration(identity, view)
+    if (registration === undefined) return false
+    const lease = [...this.hostDomLeases.values()].find(candidate => candidate.leaseId === leaseId)
+    return lease !== undefined && this.validHostDomLease(registration, lease.key.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')?.leaseId === leaseId
+  }
+
+  private validHostDomLease(
+    registration: Registration,
+    capability: 'ui.host-dom.read' | 'ui.host-dom.modify',
+  ): HostDomPermissionLease | undefined {
+    if (!registration.declarationsV4.has(capability)) return undefined
+    const key = this.hostDomKey(registration, capability)
+    const leaseKey = this.hostDomLeaseKey(key)
+    const lease = this.hostDomLeases.get(leaseKey)
+    if (lease === undefined) return undefined
+    const policy = this.policyRecords.get(leaseKey)
+    if (isPermissionPolicyRecordV4(policy) && policy.policy === 'deny-persistent') {
+      this.hostDomLeases.delete(leaseKey)
+      return undefined
+    }
+    const certification = this.activeCertification(registration)
+    const valid = lease.runtimeGeneration === this.generation
+      && lease.moduleGeneration === registration.generation.moduleGeneration
+      && lease.key.securityFingerprint === key.securityFingerprint
+      && (lease.authorizationOrigin !== 'certified-implicit' || (
+        certification !== undefined
+        && lease.certificationFingerprint === certification.fingerprint
+        && lease.certificationRevision === certification.revision
+      ))
+    if (valid) return lease
+    this.hostDomLeases.delete(leaseKey)
+    return undefined
+  }
+
+  private grantHostDomAccess(
+    registration: Registration,
+    plan: CordisXPermissionAuthorizationPlanV4,
+    item: CordisXPermissionAuthorizationPlanV4['declarations'][number],
+    origin: 'explicit-user' | 'certified-implicit',
+  ): HostDomPermissionAccessDecision {
+    const key: CordisXPermissionAuthorizationKeyV4 = Object.freeze({
+      profileId: plan.profileId,
+      identity: plan.identity,
+      capability: item.capability,
+      scope: item.scope,
+      securityFingerprint: item.securityFingerprint,
+    })
+    const certification = origin === 'certified-implicit' ? item.certification : undefined
+    const lease: HostDomPermissionLease = Object.freeze({
+      leaseId: `hdl_${sha256Hex([plan.planId, item.capability, item.securityFingerprint, this.now().toISOString()].join('\u0000')).slice(0, 48)}`,
+      key,
+      runtimeGeneration: this.generation,
+      ...(registration.generation.moduleGeneration === undefined ? {} : { moduleGeneration: registration.generation.moduleGeneration }),
+      authorizationOrigin: origin,
+      ...(certification === undefined ? {} : {
+        certificationFingerprint: certification.fingerprint,
+        certificationRevision: certification.revision,
+      }),
+    })
+    this.hostDomLeases.set(this.hostDomLeaseKey(key), lease)
+    this.recordHostDomAudit(
+      registration,
+      item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify',
+      true,
+      origin,
+      origin === 'certified-implicit' ? 'Exact Certified artifact auto-approved by the Host catalog' : 'Explicit user approval',
+      certification,
+    )
+    return Object.freeze({
+      authorized: true,
+      state: 'allowed',
+      reason: origin === 'certified-implicit' ? 'permission.certified-implicit' : 'permission.explicit-user',
+      policy: item.policy === 'allow-persistent' ? 'allow' : 'inherit',
+      authorizationOrigin: origin,
+      lease,
+    })
+  }
+
+  private async commitHostDomDecision(
+    registration: Registration,
+    plan: CordisXPermissionAuthorizationPlanV4,
+    decision: CordisXPermissionAuthorizationDecisionV4,
+  ): Promise<Readonly<{ decision: CordisXPermissionDecisionV2; policyRevision: number }>> {
+    const item = plan.declarations[0]!
+    const selected = decision.decisions[0]
+    if (decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4
+      || decision.schemaVersion !== 4 || decision.origin !== 'explicit-user'
+      || decision.planId !== plan.planId || decision.operation !== plan.operation
+      || decision.profileId !== plan.profileId || JSON.stringify(decision.identity) !== JSON.stringify(plan.identity)
+      || JSON.stringify(decision.binding) !== JSON.stringify(plan.binding)
+      || decision.decisions.length !== 1 || selected === undefined
+      || selected.capability !== item.capability || JSON.stringify(selected.scope) !== JSON.stringify(item.scope)
+      || selected.securityFingerprint !== item.securityFingerprint || !item.allowedDecisions.includes(selected.decision)) {
+      throw new Error('Host DOM permission decision does not match the exact Host plan')
+    }
+    let policyRevision = this.hostDomPolicyRevision(registration, item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')
+    if (selected.decision === 'allow-persistent' || selected.decision === 'deny-persistent') {
+      const record = normalizePermissionPolicyRecordV4({
+        $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V4,
+        schemaVersion: 4,
+        key: {
+          profileId: plan.profileId,
+          identity: plan.identity,
+          capability: item.capability,
+          scope: item.scope,
+          securityFingerprint: item.securityFingerprint,
+        },
+        policy: selected.decision,
+      })
+      const key = permissionRecordKeyV4(record)
+      const previous = this.policyRecords.get(key)
+      this.policyRecords.set(key, record)
+      this.clearExactHostDomLease(registration, item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')
+      policyRevision = this.bumpHostDomPolicyRevision(registration, item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')
+      this.cancelHostDomPrompts(registration, item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')
+      this.changed()
+      try {
+        await this.persistV4([record])
+      } catch (error) {
+        if (previous === undefined) this.policyRecords.delete(key)
+        else this.policyRecords.set(key, previous)
+        this.clearExactHostDomLease(registration, item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')
+        this.bumpHostDomPolicyRevision(registration, item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')
+        this.cancelHostDomPrompts(registration, item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')
+        this.changed()
+        throw error
+      }
+    }
+    return Object.freeze({ decision: selected.decision, policyRevision })
+  }
+
+  private hostDomAuditKey(registration: Registration, capability: 'ui.host-dom.read' | 'ui.host-dom.modify'): string {
+    return `${platformIdentityKey(registration.identity)}\u0000${capability}\u0000${registration.generation.moduleGeneration ?? 'host'}`
+  }
+
+  private recordHostDomAudit(
+    registration: Registration,
+    capability: 'ui.host-dom.read' | 'ui.host-dom.modify',
+    allowed: boolean,
+    authorizationOrigin: 'explicit-user' | 'certified-implicit',
+    authorizationReason: string,
+    certification?: CordisXCertifiedPermissionProjectionV1,
+  ): void {
+    const key = this.hostDomAuditKey(registration, capability)
+    const audit = this.audit.get(key) ?? { denialCount: 0 }
+    if (allowed) audit.lastUsedAt = isoNow(this.now)
+    else { audit.lastDeniedAt = isoNow(this.now); audit.denialCount += 1 }
+    audit.authorizationOrigin = authorizationOrigin
+    audit.authorizationReason = authorizationReason
+    if (certification === undefined) delete audit.certification
+    else audit.certification = certification
+    this.audit.set(key, audit)
+    this.consoleObserver?.permission(registration.identity, capability, allowed ? 'allow' : 'deny', authorizationReason)
+    this.changed()
+  }
+
+  private clearExactHostDomLease(
+    registration: Registration,
+    capability: 'ui.host-dom.read' | 'ui.host-dom.modify',
+  ): void {
+    if (!registration.declarationsV4.has(capability)) return
+    this.hostDomLeases.delete(this.hostDomLeaseKey(this.hostDomKey(registration, capability)))
+  }
+
+  private clearCertifiedHostDomLeases(registration: Registration): void {
+    for (const [key, lease] of this.hostDomLeases) {
+      if (lease.runtimeGeneration === this.generation
+        && lease.moduleGeneration === registration.generation.moduleGeneration
+        && lease.authorizationOrigin === 'certified-implicit'
+        && lease.key.identity.source === registration.identity.source
+        && lease.key.identity.pluginId === registration.identity.id) this.hostDomLeases.delete(key)
+    }
+    for (const capability of registration.declarationsV4.keys()) {
+      const audit = this.audit.get(this.hostDomAuditKey(registration, capability))
+      if (audit?.authorizationOrigin !== 'certified-implicit') continue
+      delete audit.authorizationOrigin
+      delete audit.authorizationReason
+      delete audit.certification
+    }
+  }
+
+  private clearHostDomGeneration(moduleGeneration?: string, identity?: CordisXPluginIdentity): void {
+    for (const [key, lease] of this.hostDomLeases) {
+      if (lease.runtimeGeneration === this.generation
+        && (moduleGeneration === undefined || lease.moduleGeneration === moduleGeneration)
+        && (identity === undefined || (
+          lease.key.identity.source === identity.source && lease.key.identity.pluginId === identity.id
+        ))) this.hostDomLeases.delete(key)
+    }
+    for (const [key, pending] of this.hostDomPromptPlans) {
+      const plan = pending.plan
+      if ((moduleGeneration === undefined || plan.binding.moduleGeneration === moduleGeneration)
+        && (identity === undefined || (plan.identity.source === identity.source && plan.identity.pluginId === identity.id))) {
+        this.hostDomPromptPlans.delete(key)
+        pending.cancel()
+        this.promptV2?.cancelV4?.(plan.planId, plan.binding)
+      }
+    }
+    if (identity !== undefined) {
+      const prefix = `${platformIdentityKey(identity)}\u0000ui.host-dom.`
+      const generationSuffix = moduleGeneration === undefined ? undefined : `\u0000${moduleGeneration}`
+      for (const key of [...this.audit.keys()]) {
+        if (key.startsWith(prefix) && (generationSuffix === undefined || key.endsWith(generationSuffix))) this.audit.delete(key)
+      }
+    }
   }
 
   private legacyAuthorizationKey(
@@ -862,6 +2273,134 @@ export class PermissionBroker {
     )
   }
 
+  authorizationPlanV4(
+    identity: CordisXPluginIdentity,
+    operation: 'install' | 'update' | 'enable' = 'enable',
+    view?: PluginGenerationView,
+    binding?: CordisXPermissionAuthorizationBindingV2,
+  ): CordisXPermissionAuthorizationPlanV4 | undefined {
+    const registration = this.registration(identity, view)
+    if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
+    if (registration.manifest.schemaVersion !== 5) return undefined
+    const operationBinding = binding ?? this.binding(registration, `${this.generation}:${identity.id}`)
+    const certification = this.activeCertification(registration)
+    return buildPermissionAuthorizationPlanV4({
+      planId: `${this.generation}:${identity.id}`,
+      operation,
+      profileId: this.profileId,
+      identity: { source: identity.source, pluginId: identity.id },
+      binding: operationBinding,
+      declarations: registration.manifest.capabilities,
+      policiesV2: [...this.policyRecords.values()].filter(isPermissionPolicyRecordV2),
+      policiesV4: [...this.policyRecords.values()].filter(isPermissionPolicyRecordV4),
+      ...(certification === undefined ? {} : { certification }),
+    }, this.catalog)
+  }
+
+  async authorizeActivationV4(
+    identity: CordisXPluginIdentity,
+    authorization: CordisXPermissionAuthorizationDecisionV4,
+    operation: 'install' | 'update' | 'enable' = 'enable',
+    view?: PluginGenerationView,
+  ): Promise<void> {
+    const registration = this.registration(identity, view)
+    if (registration === undefined || registration.manifest.schemaVersion !== 5) {
+      throw new Error(`plugin ${identity.id} does not use permission v4`)
+    }
+    const plan = this.authorizationPlanV4(identity, operation, view, authorization.binding)!
+    assertPermissionAuthorizationDecisionV4(plan, authorization)
+    if (plan.declarations.some(item => item.required
+      && item.authorizationMode === 'persistent-policy'
+      && item.policy === 'deny-persistent')
+      || authorization.decisions.some(selected => plan.declarations.some(item => (
+        item.capability === selected.capability && item.required && selected.decision.startsWith('deny')
+      )))) {
+      throw new Error(`plugin ${identity.id} denies a required permission v4 capability`)
+    }
+    const oneShotBinding = this.binding(registration, `${this.generation}:${identity.id}`)
+    const persistent: CordisXPersistedPermissionPolicyRecord[] = []
+    for (const selected of authorization.decisions) {
+      if (selected.decision !== 'allow-persistent' && selected.decision !== 'deny-persistent') continue
+      if (isHostDomPermissionCapability(selected.capability)) {
+        persistent.push(normalizePermissionPolicyRecordV4({
+          $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V4,
+          schemaVersion: 4,
+          key: {
+            profileId: plan.profileId,
+            identity: plan.identity,
+            capability: selected.capability,
+            scope: selected.scope,
+            securityFingerprint: selected.securityFingerprint,
+          },
+          policy: selected.decision,
+        }))
+        continue
+      }
+      persistent.push(normalizePermissionPolicyRecordV2({
+        $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+        schemaVersion: 2,
+        key: {
+          profileId: plan.profileId,
+          identity: plan.identity,
+          capability: selected.capability,
+          scope: selected.scope,
+          securityFingerprint: selected.securityFingerprint,
+        },
+        policy: selected.decision,
+      }))
+    }
+    const previous = persistent.map(record => this.policyRecords.get(persistedPermissionRecordKey(record)))
+    for (const record of persistent) this.policyRecords.set(persistedPermissionRecordKey(record), record)
+    try {
+      await this.persistMixed(persistent)
+    } catch (error) {
+      persistent.forEach((record, index) => {
+        const key = persistedPermissionRecordKey(record)
+        const prior = previous[index]
+        if (prior === undefined) this.policyRecords.delete(key)
+        else this.policyRecords.set(key, prior)
+      })
+      this.changed()
+      throw error
+    }
+    this.onceV2.clearOperation(plan.binding.operationId)
+    for (const selected of authorization.decisions) {
+      if (selected.decision !== 'allow-once') continue
+      this.onceV2.issue({
+        profileId: plan.profileId,
+        identity: plan.identity,
+        capability: selected.capability,
+        scope: selected.scope,
+        securityFingerprint: selected.securityFingerprint,
+      }, oneShotBinding)
+    }
+    for (const item of plan.declarations) {
+      if (!isHostDomPermissionCapability(item.capability)) continue
+      const selected = authorization.decisions.find(candidate => candidate.capability === item.capability)?.decision
+      const allowed = item.authorizationMode === 'certified-implicit'
+        || (item.authorizationMode === 'persistent-policy' && item.policy === 'allow-persistent')
+        || selected === 'allow-persistent'
+        || (selected === 'allow-once' && this.onceV2.consume({
+          profileId: plan.profileId,
+          identity: plan.identity,
+          capability: item.capability,
+          scope: item.scope,
+          securityFingerprint: item.securityFingerprint,
+        }, oneShotBinding))
+      if (!allowed) {
+        this.clearExactHostDomLease(registration, item.capability)
+        continue
+      }
+      this.grantHostDomAccess(
+        registration,
+        plan,
+        item,
+        item.authorizationMode === 'certified-implicit' ? 'certified-implicit' : 'explicit-user',
+      )
+    }
+    this.changed()
+  }
+
   private assertDecisionV2(
     plan: CordisXPermissionAuthorizationPlanV2,
     decision: CordisXPermissionAuthorizationDecisionV2,
@@ -922,9 +2461,10 @@ export class PermissionBroker {
   }
 
   private migratePolicyRecordsV1(registration: Registration): void {
-    if (registration.manifest.schemaVersion !== 4) return
+    if (registration.manifest.schemaVersion !== 4 && registration.manifest.schemaVersion !== 5) return
     const legacy = [...this.policyRecords.values()].filter((record): record is CordisXPermissionPolicyRecordV1 => (
       !isPermissionPolicyRecordV2(record)
+      && !isPermissionPolicyRecordV3(record)
       && record.key.profileId === this.profileId
       && record.key.identity.source === registration.identity.source
       && record.key.identity.pluginId === registration.identity.id
@@ -973,7 +2513,9 @@ export class PermissionBroker {
         scope: declaration.scope,
         policy: 'ask',
       })))
-      return record !== undefined && !isPermissionPolicyRecordV2(record) ? record.policy : 'ask'
+      return record !== undefined && !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record)
+        ? record.policy
+        : 'ask'
     }
     const policy = this.policyV2(identity, capability as CordisXPermissionCapabilityV2, view)
     return policy === 'allow-persistent' ? 'allow' : policy === 'deny-persistent' ? 'deny' : 'ask'
@@ -1200,7 +2742,39 @@ export class PermissionBroker {
     const registration = this.registration(identity)
     this.onceV2.clearOperation(`${this.generation}:${identity.id}`)
     this.onceV2.clearGeneration(this.generation, registration?.generation.moduleGeneration)
+    this.clearDomGeneration(registration?.generation.moduleGeneration, identity)
+    this.clearHostDomGeneration(registration?.generation.moduleGeneration, identity)
     this.changed()
+  }
+
+  async setDomPolicy(identity: CordisXPluginIdentity, pointId: string, policy: CordisXPermissionPolicyV2): Promise<void> {
+    const registration = this.registration(identity)
+    if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
+    const key = domPermissionAuthorizationKeyV3({
+      profileId: this.profileId,
+      identity: { source: identity.source, pluginId: identity.id },
+      pointId,
+      catalogVersion: this.catalog.version,
+    })
+    const record = normalizePermissionPolicyRecordV3({
+      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
+      schemaVersion: 3,
+      key,
+      policy,
+    })
+    const recordKey = permissionRecordKeyV3(record)
+    const previous = this.policyRecords.get(recordKey)
+    this.policyRecords.set(recordKey, record)
+    this.clearExactDomLease(registration, pointId)
+    try {
+      await this.persistV3([record])
+    } catch (error) {
+      if (previous === undefined) this.policyRecords.delete(recordKey)
+      else this.policyRecords.set(recordKey, previous)
+      throw error
+    } finally {
+      this.changed()
+    }
   }
 
   async settled(): Promise<void> {
@@ -1407,7 +2981,7 @@ export class PermissionBroker {
     return { ok: true, value: { declaration: legacyDeclaration } }
   }
 
-  requiredDenied(identity: CordisXPluginIdentity, view?: PluginGenerationView): readonly CordisXPermissionCapabilityV2[] {
+  requiredDenied(identity: CordisXPluginIdentity, view?: PluginGenerationView): readonly CordisXPermissionCapabilityV4[] {
     const registration = this.registration(identity, view)
     if (registration === undefined) return []
     if (registration.manifest.schemaVersion === 1) {
@@ -1418,10 +2992,21 @@ export class PermissionBroker {
         .map(item => item.name)
     }
     const plan = this.authorizationPlanV2(identity, 'enable', view)
-    return plan.declarations.filter(item => item.required
+    const denied: CordisXPermissionCapabilityV4[] = plan.declarations.filter(item => item.required
       && item.policy !== 'allow-persistent'
       && !this.onceV2.has(this.authorizationKey(plan, item.capability), plan.binding))
       .map(item => item.capability)
+    if (registration.manifest.schemaVersion === 5) {
+      for (const declaration of registration.declarationsV4.values()) {
+        if (!declaration.required) continue
+        const capability = declaration.name as 'ui.host-dom.read' | 'ui.host-dom.modify'
+        const policy = this.hostDomPolicy(identity, capability, view)
+        if (policy === 'deny' || (policy !== 'allow'
+          && this.validHostDomLease(registration, capability) === undefined
+          && this.activeCertification(registration) === undefined)) denied.push(capability)
+      }
+    }
+    return Object.freeze(denied)
   }
 
   recordScopeDenial(identity: CordisXPluginIdentity, capability: CordisXPlatformCapability, requested: RequestedScope): void {
@@ -1429,35 +3014,128 @@ export class PermissionBroker {
   }
 
   snapshots(): readonly PlatformPermissionSnapshot[] {
-    return [...this.registrations.values()]
+    const platform = [...this.registrations.values()]
       .filter(registration => this.visibility?.visible(registration.generation) ?? true)
-      .flatMap(registration => [...registration.declarations.values()].map(declaration => {
-      const identityKey = platformIdentityKey(registration.identity)
-      const audit = this.audit.get(this.auditKey(identityKey, declaration.name)) ?? { denialCount: 0 }
-      const policy = this.policy(registration.identity, declaration.name)
-      const item = registration.declarationsV2.get(declaration.name as CordisXPermissionCapabilityV2)
-      return {
-        identity: registration.identity,
-        capability: declaration.name,
-        required: declaration.required,
-        reason: declaration.reason,
-        scope: declaration.scope,
-        fingerprint: registration.manifest.schemaVersion === 1 || item === undefined
-          ? declarationFingerprint(declaration)
-          : this.authorizationPlanV2(registration.identity, 'enable').declarations
-              .find(candidate => candidate.capability === item.name)!.securityFingerprint,
+      .flatMap<PlatformPermissionSnapshot>(registration => {
+        const identityKey = platformIdentityKey(registration.identity)
+        if (registration.manifest.schemaVersion === 1) {
+          return [...registration.declarations.values()].map(declaration => {
+            const audit = this.audit.get(this.auditKey(identityKey, declaration.name)) ?? { denialCount: 0 }
+            return {
+              identity: registration.identity,
+              capability: declaration.name,
+              required: declaration.required,
+              reason: declaration.reason,
+              scope: declaration.scope,
+              fingerprint: declarationFingerprint(declaration),
+              policy: this.policy(registration.identity, declaration.name),
+              ...(audit.lastRequested === undefined ? {} : { lastRequested: audit.lastRequested }),
+              ...(audit.lastUsedAt === undefined ? {} : { lastUsedAt: audit.lastUsedAt }),
+              ...(audit.lastDeniedAt === undefined ? {} : { lastDeniedAt: audit.lastDeniedAt }),
+              denialCount: audit.denialCount,
+              ...(this.requiredDenied(registration.identity).includes(declaration.name)
+                ? { blockedReason: `Required capability ${declaration.name} is denied` }
+                : {}),
+            }
+          })
+        }
+        const operationId = `snapshot:${this.generation}:${registration.generation.moduleGeneration ?? 'host'}:${registration.identity.id}`
+        const plan = this.planV2(registration, 'enable', this.binding(registration, operationId))
+        const denied = new Set(this.requiredDenied(registration.identity))
+        return plan.declarations.map(item => {
+          const declaration = registration.declarationsV2.get(item.capability)!
+          const audit = this.audit.get(this.auditKey(identityKey, item.capability as CordisXPlatformCapability)) ?? { denialCount: 0 }
+          return {
+            identity: registration.identity,
+            capability: item.capability,
+            required: item.required,
+            reason: declaration.rationale?.description ?? item.presentation.description,
+            scope: item.scope,
+            fingerprint: item.securityFingerprint,
+            policy: item.policy === 'allow-persistent' ? 'allow' as const : item.policy === 'deny-persistent' ? 'deny' as const : 'ask' as const,
+            ...(audit.lastRequested === undefined ? {} : { lastRequested: audit.lastRequested }),
+            ...(audit.lastUsedAt === undefined ? {} : { lastUsedAt: audit.lastUsedAt }),
+            ...(audit.lastDeniedAt === undefined ? {} : { lastDeniedAt: audit.lastDeniedAt }),
+            denialCount: audit.denialCount,
+            ...(denied.has(item.capability) ? { blockedReason: `Required capability ${item.capability} is not authorized` } : {}),
+          }
+        })
+      })
+    const dom = [...this.domPoints.values()].flatMap(point => {
+      const registration = [...this.registrations.values()].find(item => (
+        platformIdentityKey(item.identity) === platformIdentityKey(point.identity)
+        && item.generation.moduleGeneration === point.moduleGeneration
+        && (this.visibility?.visible(item.generation) ?? true)
+      ))
+      if (registration === undefined) return []
+      const key = domPermissionAuthorizationKeyV3({
+        profileId: this.profileId,
+        identity: { source: point.identity.source, pluginId: point.identity.id },
+        pointId: point.pointId,
+        catalogVersion: this.catalog.version,
+      })
+      const record = this.policyRecords.get(this.domLeaseKey(key))
+      const policy = record !== undefined && isPermissionPolicyRecordV3(record)
+        ? record.policy === 'allow-persistent' ? 'allow' as const : record.policy === 'deny-persistent' ? 'deny' as const : 'ask' as const
+        : 'ask' as const
+      const audit = this.audit.get(this.domAuditKey(
+        platformIdentityKey(point.identity),
+        point.pointId,
+        point.moduleGeneration,
+      )) ?? { denialCount: 0 }
+      return [Object.freeze({
+        identity: point.identity,
+        capability: 'ui.extension-points.render' as const,
+        required: false,
+        reason: Object.freeze({
+          namespace: 'permission',
+          ...this.catalog.get('ui.extension-points.render').presentation.description,
+        }),
+        scope: key.scope,
+        fingerprint: key.securityFingerprint,
         policy,
-        ...(audit.lastRequested === undefined ? {} : { lastRequested: audit.lastRequested }),
         ...(audit.lastUsedAt === undefined ? {} : { lastUsedAt: audit.lastUsedAt }),
         ...(audit.lastDeniedAt === undefined ? {} : { lastDeniedAt: audit.lastDeniedAt }),
         denialCount: audit.denialCount,
-        ...(this.requiredDenied(registration.identity).includes(declaration.name)
-          ? { blockedReason: registration.manifest.schemaVersion === 1
-              ? `Required capability ${declaration.name} is denied`
-              : `Required capability ${declaration.name} is not authorized` }
-          : {}),
-      }
-    }))
+        ...(audit.authorizationOrigin === undefined ? {} : { authorizationOrigin: audit.authorizationOrigin }),
+        ...(audit.authorizationReason === undefined ? {} : { authorizationReason: audit.authorizationReason }),
+        ...(audit.certification === undefined ? {} : { certification: audit.certification }),
+      })]
+    })
+    const hostDom = [...this.registrations.values()].flatMap(registration => {
+      if (this.visibility?.visible(registration.generation) === false) return []
+      return [...registration.declarationsV4.values()].map(declaration => {
+        const capability = declaration.name as 'ui.host-dom.read' | 'ui.host-dom.modify'
+        const key = this.hostDomKey(registration, capability)
+        const record = this.policyRecords.get(this.hostDomLeaseKey(key))
+        const policy = isPermissionPolicyRecordV4(record)
+          ? record.policy === 'allow-persistent' ? 'allow' as const : record.policy === 'deny-persistent' ? 'deny' as const : 'ask' as const
+          : 'ask' as const
+        const audit = this.audit.get(this.hostDomAuditKey(registration, capability)) ?? { denialCount: 0 }
+        return Object.freeze({
+          identity: registration.identity,
+          capability,
+          required: declaration.required,
+          reason: declaration.rationale?.description ?? Object.freeze({
+            namespace: 'permission',
+            ...this.catalog.get(capability).presentation.description,
+          }),
+          scope: key.scope,
+          fingerprint: key.securityFingerprint,
+          policy,
+          ...(audit.lastUsedAt === undefined ? {} : { lastUsedAt: audit.lastUsedAt }),
+          ...(audit.lastDeniedAt === undefined ? {} : { lastDeniedAt: audit.lastDeniedAt }),
+          denialCount: audit.denialCount,
+          ...(audit.authorizationOrigin === undefined ? {} : { authorizationOrigin: audit.authorizationOrigin }),
+          ...(audit.authorizationReason === undefined ? {} : { authorizationReason: audit.authorizationReason }),
+          ...(audit.certification === undefined ? {} : { certification: audit.certification }),
+          ...(declaration.required && policy === 'deny'
+            ? { blockedReason: `Required capability ${capability} is denied` }
+            : {}),
+        })
+      })
+    })
+    return Object.freeze([...platform, ...dom, ...hostDom])
   }
 
   subscribe(listener: () => void): () => void {
@@ -1467,8 +3145,26 @@ export class PermissionBroker {
 
   dispose(): void {
     this.registrations.clear()
+    this.certifiedProjections.clear()
+    this.certifiedProjectionRevision = -1
+    this.certifiedProjectionDigest = ''
+    this.certifiedProjectionAvailable = false
     this.audit.clear()
     this.onceV2.dispose()
+    this.domLeases.clear()
+    this.domRequests.clear()
+    this.domPromptPlans.clear()
+    this.domPoints.clear()
+    this.hostDomLeases.clear()
+    for (const pending of this.hostDomPromptPlans.values()) {
+      pending.cancel()
+      this.promptV2?.cancelV4?.(pending.plan.planId, pending.plan.binding)
+    }
+    this.hostDomPromptPlans.clear()
+    this.hostDomPolicyRevisions.clear()
+    this.pendingDomReviews.clear()
+    for (const timer of this.domCertificationTimers.values()) clearTimeout(timer)
+    this.domCertificationTimers.clear()
     this.promptV2?.dispose?.()
     this.listeners.clear()
   }
@@ -1488,6 +3184,27 @@ export class PermissionBroker {
   }
 
   private changed(): void {
+    if (this.changeBatchDepth > 0) {
+      this.changePending = true
+      return
+    }
+    this.emitChanged()
+  }
+
+  private batchChanges(operation: () => void): void {
+    this.changeBatchDepth += 1
+    try {
+      operation()
+    } finally {
+      this.changeBatchDepth -= 1
+      if (this.changeBatchDepth === 0 && this.changePending) {
+        this.changePending = false
+        this.emitChanged()
+      }
+    }
+  }
+
+  private emitChanged(): void {
     for (const listener of this.listeners) {
       try {
         listener()

@@ -320,7 +320,6 @@ describe('profile-scoped icon-theme selection runtime', () => {
   })
 
   it('replays success and conflict winners when the same target boots a new document epoch', async () => {
-    const page = dom()
     const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
     const persistenceContext: IconThemePreferencePersistenceContext = {
       configPath: '/host-private/not-used.json',
@@ -330,51 +329,63 @@ describe('profile-scoped icon-theme selection runtime', () => {
       token: 'b'.repeat(64),
     }
     const epochs: string[] = []
-    Object.defineProperty(page.window, '__cordisxIconThemePreferenceRequestV1', {
-      configurable: true,
-      value: (payload: string) => {
-        const request = JSON.parse(payload) as Record<string, unknown>
-        if (request.kind !== 'document-ready') throw new Error('unexpected persistence request during document replay test')
-        void (async () => {
-          const ready = parseIconThemePreferenceDocumentReadyRequest(request, persistenceContext)
-          epochs.push(ready.documentEpoch)
-          try {
-            const reservation = hub.reserve({
-              targetId: 'same-target',
-              sessionId: 'same-session',
-              documentEpoch: ready.documentEpoch,
-              executionContextId: epochs.length,
-              currentRevision: ready.currentRevision,
-              signal: new AbortController().signal,
-            })
-            const registration = await reservation.register({
-              receive: async value => {
-                const ack = receiveIconThemeMessage(page, { kind: 'sync', value })
-                if (ack === null || typeof ack !== 'object') throw new Error('document receiver returned no acknowledgement')
-                return ack as { documentEpoch: string; currentRevision: number }
-              },
-            })
-            const probeAck = receiveIconThemeMessage(page, { kind: 'document-ready-probe' }) as { documentEpoch: string; currentRevision: number }
-            await registration.respondReady(probeAck, async (status, lease) => receiveIconThemeMessage(page, {
-              kind: 'document-ready', requestId: ready.requestId, ok: true,
-              documentEpoch: ready.documentEpoch,
-              readyLeaseToken: lease.token, readyLeaseRevision: lease.revision,
-              ...status,
-            }) as { documentEpoch: string; currentRevision: number })
-          } catch (error) {
-            receiveIconThemeMessage(page, {
-              kind: 'document-ready', requestId: ready.requestId, ok: false,
-              documentEpoch: ready.documentEpoch, currentRevision: 0,
-              error: error instanceof Error ? error.message : String(error),
-            })
-          }
-        })()
-      },
-    })
-    try {
+    const pages: JSDOM[] = []
+    const bootDocument = async (): Promise<{ readonly page: JSDOM; readonly runtime: Runtime }> => {
+      const page = dom()
+      pages.push(page)
+      const expectedEpochCount = pages.length
+      Object.defineProperty(page.window, '__cordisxIconThemePreferenceRequestV1', {
+        configurable: true,
+        value: (payload: string) => {
+          const request = JSON.parse(payload) as Record<string, unknown>
+          if (request.kind !== 'document-ready') throw new Error('unexpected persistence request during document replay test')
+          void (async () => {
+            const ready = parseIconThemePreferenceDocumentReadyRequest(request, persistenceContext)
+            epochs.push(ready.documentEpoch)
+            try {
+              const reservation = hub.reserve({
+                targetId: 'same-target',
+                sessionId: 'same-session',
+                documentEpoch: ready.documentEpoch,
+                executionContextId: epochs.length,
+                currentRevision: ready.currentRevision,
+                signal: new AbortController().signal,
+              })
+              const registration = await reservation.register({
+                receive: async value => {
+                  const ack = receiveIconThemeMessage(page, { kind: 'sync', value })
+                  if (ack === null || typeof ack !== 'object') throw new Error('document receiver returned no acknowledgement')
+                  return ack as { documentEpoch: string; currentRevision: number }
+                },
+              })
+              const probeAck = receiveIconThemeMessage(page, { kind: 'document-ready-probe' }) as { documentEpoch: string; currentRevision: number }
+              await registration.respondReady(probeAck, async (status, lease) => receiveIconThemeMessage(page, {
+                kind: 'document-ready', requestId: ready.requestId, ok: true,
+                documentEpoch: ready.documentEpoch,
+                readyLeaseToken: lease.token, readyLeaseRevision: lease.revision,
+                ...status,
+              }) as { documentEpoch: string; currentRevision: number })
+            } catch (error) {
+              receiveIconThemeMessage(page, {
+                kind: 'document-ready', requestId: ready.requestId, ok: false,
+                documentEpoch: ready.documentEpoch, currentRevision: 0,
+                error: error instanceof Error ? error.message : String(error),
+              })
+            }
+          })()
+        },
+      })
       page.window.eval(exactBundle)
-      await waitFor(() => epochs.length === 1, 'first document ready handshake')
-      const firstRuntime = (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
+      await waitFor(() => epochs.length === expectedEpochCount
+        && page.window.document.documentElement.dataset.cordisxReady === 'true', `document ${expectedEpochCount} ready handshake`)
+      return {
+        page,
+        runtime: (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!,
+      }
+    }
+    try {
+      const first = await bootDocument()
+      const firstRuntime = first.runtime
       expect(firstRuntime.snapshot().iconThemes?.selected.providerId).toBe('plugin:icon-theme-test:aurora')
 
       const successWinner: HomeConfigIconThemePreference = {
@@ -384,27 +395,27 @@ describe('profile-scoped icon-theme selection runtime', () => {
       await hub.broadcast(successWinner)
       expect(firstRuntime.snapshot().iconThemes?.selected.providerId).toBe('builtin:reicon')
 
-      page.window.eval(exactBundle)
-      await waitFor(() => epochs.length === 2
-        && (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime !== firstRuntime, 'reloaded document ready handshake')
-      const secondRuntime = (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
+      const second = await bootDocument()
+      const secondRuntime = second.runtime
       expect(epochs[1]).not.toBe(epochs[0])
       expect(secondRuntime).not.toBe(firstRuntime)
       expect(secondRuntime.snapshot().iconThemes?.selected.providerId).toBe('builtin:reicon')
+      await firstRuntime.dispose()
+      first.page.window.close()
 
       const conflictWinner = { ...preference, revision: successWinner.revision + 1 }
       await hub.broadcast(conflictWinner)
       expect(secondRuntime.snapshot().iconThemes?.selected.providerId).toBe('plugin:icon-theme-test:aurora')
 
-      page.window.eval(exactBundle)
-      await waitFor(() => epochs.length === 3
-        && (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime !== secondRuntime, 'conflict-winner document ready handshake')
-      const thirdRuntime = (page.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
+      const third = await bootDocument()
+      const thirdRuntime = third.runtime
       expect(epochs[2]).not.toBe(epochs[1])
       expect(thirdRuntime.snapshot().iconThemes?.selected.providerId).toBe('plugin:icon-theme-test:aurora')
+      await secondRuntime.dispose()
+      second.page.window.close()
       await thirdRuntime.dispose()
     } finally {
-      page.window.close()
+      for (const page of pages) page.window.close()
     }
   })
 

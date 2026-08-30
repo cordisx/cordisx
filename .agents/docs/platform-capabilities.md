@@ -1,9 +1,10 @@
 # Platform capabilities architecture
 
-Status: implemented Host architecture for Platform permission v1 compatibility
-and the formal permission-v2 contract. Normative plugin-visible behavior lives
-in `cordisx-protocol`; the Host consumes the formal permission-v2 merge and not
-the closed experimental lifecycle-schema branch.
+Status: implemented Host architecture for Platform permission v1 compatibility,
+the formal permission-v2 non-DOM contract, permission-v3 controlled structured
+rendering, and the permission-v4 bounded Host DOM contract. Normative
+plugin-visible behavior lives in `cordisx-protocol`; the Host consumes formal
+permission contracts and not closed experimental branches.
 
 ## Evidence and safe landing boundary
 
@@ -119,7 +120,7 @@ One `PermissionBroker` owns one profile ledger index and one policy engine.
 Version-1 manifests enter that Broker through a compatibility adapter; they do
 not create a second broker, registry, ledger, or policy store. The durable Home
 configuration and authenticated `__cordisxPermissionPolicyRequestV1` bridge
-carry both v1 and v2 records in one array. Persistent v2 identity is the exact
+carry v1, v2, v3, and v4 records in one array. Persistent identity is the exact
 profile/source/plugin/capability/normalized-scope/security-fingerprint tuple.
 Security fingerprint includes the catalog version plus the normalized
 declaration security and rationale. Proven narrowing may carry a compatible
@@ -158,6 +159,71 @@ ticket is instead bound to profile, identity, capability, exact scope, and the
 current generation; it is consumed once and cleared by plugin disable,
 identity replacement, or generation disposal.
 
+Permission v3 adds only `ui.extension-points.render`, scoped to one or more
+formal extension-point ids. The Host catalog is the sole authority for its
+`dom-rendering` and `certifiedImplicitApproval` metadata; the original 22
+capabilities remain non-DOM and never receive implicit approval. A valid,
+Host-private exact Certified projection for the current source, plugin id,
+version, and artifact digest may let an `ask` DOM plan skip the visible dialog.
+The same Broker still creates a profile- and scope-bound generation lease and
+records its `certified-implicit` origin, projection fingerprint/revision, review
+policy, evidence, and audit reason. Official state is not present in this API.
+
+The current production Manager projection is not that Host-private authority.
+Its source store and model live in the shared renderer main world where plugin
+code also executes. Production therefore does not pass it to the Broker. This
+keeps Certified implicit approval fail-closed until either Marketplace source
+and trust state are Launcher-owned with monotonic revocation, or plugin code is
+formally isolated from Host globals and storage. Isolated tests inject the exact
+projection only to verify Broker, lease, audit, and revocation mechanics.
+
+The extension-point descriptor registry and adapter probes remain availability
+authorities only. Production route, page, surface, menu, and toolbar access use
+the Permission Broker decision after descriptor validation. The former browser
+extension-point/control policy stores are read-only migration inputs and cannot
+authorize production rendering. Exact artifact or certification changes,
+source-feed revocation, disable/unload, module/runtime generation replacement,
+scope expansion, and expiry remove the implicit lease. User persistent deny
+remains authoritative over certification.
+
+Permission v4 adds `ui.host-dom.read` and `ui.host-dom.modify`; neither is an
+alias for `ui.extension-points.render`. Scope contains only canonical Host root
+ids and closed operation names. The Host returns opaque handles and serialized,
+bounded projections. It never accepts or returns a selector, DOM path, raw
+Node/Event/function, HTML, style/class, script, event handler, `document`,
+`window`, private renderer handle, or raw bridge. Read operations are
+`inspect-structure`, `read-text`, `read-attributes`, and `read-state`; modify
+operations are `set-text`, `set-attribute`, `insert-owned-structured-child`,
+`remove-owned-child`, and `focus`.
+
+The same Host-private exact Certified projection may select
+`certified-implicit` for these two catalog entries. The Broker still creates and
+audits the lease. Persistent deny wins, and `ui.host-dom.modify` never permits
+persistent allow. An eventual Marketplace authority must deliver invalidation
+as a signal only; the consumer must reread its exact snapshot/lookup, then
+remove or replace the projection. Expiry is independently timed inside the
+Broker.
+
+Authorization does not establish safe runtime availability. Production holds
+each manifest-v5 Host DOM artifact as source data, executes it only inside the
+opaque-origin Host DOM worker boundary, and injects the bounded client only
+after that boundary is ready. The bundle and dynamic CDP lifecycle paths never
+evaluate such an artifact in the renderer main realm. The worker receives no
+`document`, `window`, raw node, selector, network API, nested worker, or Host
+client object; its MessagePort RPC is serialized, bounded, generation-fenced,
+and bound to a per-boundary random token. Native DOM and MessagePort primitives
+are captured before any plugin module factory runs and reused by later dynamic
+generations. Startup failure, dispose, disable, uninstall, or generation
+replacement reports the capability unavailable and releases the client.
+
+This is a narrow boundary for the manifest-v5 Host DOM surface, not a claim
+that the complete CordisX renderer is a sandbox. Legacy structured plugins and
+explicit `origin: local-dev` development entries retain the version-0.1 trusted
+renderer model and never receive the bounded Host DOM client. Local development
+file identities cannot satisfy a configured public Marketplace exact-artifact
+Certified lookup. No production code may infer worker availability from
+certification, Official state, a permission grant, or renderer ownership.
+
 ## Activation and manager behavior
 
 At startup the broker registers every bundled manifest. A required declaration
@@ -186,6 +252,19 @@ unchanged. The reviewed v2 decision is then bound to the existing
 same renderer Broker before readiness, and is revoked on abort/rollback by that
 authority. Enable/restore of an already active permission-blocked v4 plugin
 uses the same Broker directly. No parallel installer authority is introduced.
+
+Package-v4 is the only package boundary that may reference manifest-v5. Its v4
+review contains the original 22 non-DOM declarations plus the two Host DOM
+declarations in one plan. Items already satisfied by exact persistent policy,
+or by an exact Certified eligibility returned from the optional Launcher-owned
+lookup, are omitted from the explicit dialog. Production opens the formal
+Launcher authority once per selected profile, and the coordinator rereads its
+exact lookup at plan and apply so revocation between them fails closed. Lookup
+failure requires explicit review; renderer lifecycle envelopes cannot submit a
+projection, Official flag, or attestation payload. Every remaining item is
+reviewed and the complete plan/decision stays bound to the same candidate id,
+package digest, module/runtime generation, lifecycle receipt, rollback, and
+Broker commit.
 
 The decision returns the protocol envelope rather than a bare array. The Broker
 checks its schema version, generation-bound `planId`, operation, profile,
@@ -266,15 +345,12 @@ PR and does not add `ctx.codex`.
 
 ## Security statement
 
-The broker is meaningful policy enforcement for calls made through the
-CordisX Platform API. It does not confine trusted renderer code, which can
-still access Codex DOM and renderer globals. The manager must show that the
-current runtime is not a sandbox.
-
-Marketplace plugins require a structured host-rendered UI surface plus an
-isolated Worker, iframe, or process and capability RPC before these grants can
-be considered a security boundary. Signing, installation, activation, and
-rollback are outside this task.
+The broker is meaningful policy enforcement for calls made through CordisX
+Host APIs. It does not turn legacy trusted renderer plugins into confined code,
+so the Manager must not label the complete runtime a sandbox. For
+`ui.host-dom.read` and `ui.host-dom.modify`, however, the production composition
+adds the required isolated worker plus bounded capability RPC before reporting
+availability; the exact grant/lease remains owned by the same Broker.
 
 ## Dependencies and PR boundaries
 

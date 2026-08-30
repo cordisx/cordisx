@@ -6,9 +6,11 @@ import {
 import type { PluginLifecycleCoordinator } from './plugin-lifecycle.js'
 import type {
   HostPermissionLifecycleApplyV2Request,
+  HostPermissionLifecycleApplyV4Request,
   HostPermissionLifecycleReviewV2Request,
+  HostPermissionLifecycleReviewV4Request,
 } from './plugin-lifecycle.js'
-import type { CordisXPermissionAuthorizationPlanV2 } from '../permission-contracts.js'
+import type { CordisXPermissionAuthorizationPlanV2, CordisXPermissionAuthorizationPlanV4 } from '../permission-contracts.js'
 
 export const PLUGIN_LIFECYCLE_BINDING = '__cordisxPluginLifecycleRequestV1'
 export const PLUGIN_LIFECYCLE_RECEIVER = '__cordisxPluginLifecycleReceiveV1'
@@ -36,6 +38,8 @@ export type PluginLifecycleBindingRequest =
   | { readonly kind: 'protocol-v1'; readonly requestId: string; readonly request: CordisXPluginLifecycleRequestV1 }
   | { readonly kind: 'permission-review-plan-v2'; readonly requestId: string; readonly request: HostPermissionLifecycleReviewV2Request }
   | { readonly kind: 'permission-review-apply-v2'; readonly requestId: string; readonly request: HostPermissionLifecycleApplyV2Request }
+  | { readonly kind: 'permission-review-plan-v4'; readonly requestId: string; readonly request: HostPermissionLifecycleReviewV4Request }
+  | { readonly kind: 'permission-review-apply-v4'; readonly requestId: string; readonly request: HostPermissionLifecycleApplyV4Request }
 
 function requestScope(
   request: Record<string, unknown>,
@@ -72,7 +76,7 @@ export function parsePluginLifecycleBindingRequest(
   if (envelope.privateRequest !== undefined) {
     const request = object(envelope.privateRequest, 'Host-private permission lifecycle request')
     const scope = requestScope(request, handler)
-    if (request.kind === 'permission-review-plan-v2') {
+    if (request.kind === 'permission-review-plan-v2' || request.kind === 'permission-review-plan-v4') {
       exactKeys(request, ['kind', 'requestId', 'profileId', 'runtimeGeneration', 'expectedRevision', 'target'], 'Host-private permission lifecycle request')
       const target = object(request.target, 'Host-private permission lifecycle target')
       if (target.kind === 'candidate' && typeof target.candidateId === 'string' && /^[A-Za-z0-9._:-]{1,160}$/.test(target.candidateId)) {
@@ -93,6 +97,14 @@ export function parsePluginLifecycleBindingRequest(
         request: { ...scope, decision: request.decision as HostPermissionLifecycleApplyV2Request['decision'] },
       }
     }
+    if (request.kind === 'permission-review-apply-v4') {
+      exactKeys(request, ['kind', 'requestId', 'profileId', 'runtimeGeneration', 'expectedRevision', 'decision'], 'Host-private permission lifecycle request')
+      return {
+        kind: request.kind,
+        requestId: scope.requestId,
+        request: { ...scope, decision: request.decision as HostPermissionLifecycleApplyV4Request['decision'] },
+      }
+    }
     throw new Error('Host-private permission lifecycle request is unsupported')
   }
   const request = object(envelope.request, 'plugin lifecycle request')
@@ -110,8 +122,10 @@ export function parsePluginLifecycleBindingRequest(
 export async function handlePluginLifecycleBindingRequest(
   handler: PluginLifecycleBridgeHandler,
   input: PluginLifecycleBindingRequest,
-): Promise<CordisXPluginLifecycleResultV1 | CordisXPermissionAuthorizationPlanV2 | undefined> {
+): Promise<CordisXPluginLifecycleResultV1 | CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4 | undefined> {
   if (input.kind === 'protocol-v1') return await handler.coordinator.handle(input.request)
   if (input.kind === 'permission-review-plan-v2') return await handler.coordinator.permissionReviewPlanV2(input.request)
-  return await handler.coordinator.applyPermissionReviewV2(input.request)
+  if (input.kind === 'permission-review-plan-v4') return await handler.coordinator.permissionReviewPlanV4(input.request)
+  if (input.kind === 'permission-review-apply-v2') return await handler.coordinator.applyPermissionReviewV2(input.request)
+  return await handler.coordinator.applyPermissionReviewV4(input.request)
 }

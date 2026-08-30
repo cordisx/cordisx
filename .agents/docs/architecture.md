@@ -746,11 +746,36 @@ attestations to this authority. PermissionBroker and PackageLifecycleAuthority
 must re-read the private exact lookup at plan/apply and treat absence or any
 fingerprint/revision change as revocation.
 
+The production Launcher-to-Broker handoff does not reuse the display-side
+Marketplace model. A random future-document take key is emitted only in the
+new-document bootstrap. CDP atomically takes one endpoint and keeps its
+RemoteObject in the debugger; the renderer receives no projection-setting
+global or reusable credential. Every authority notification and bounded
+heartbeat performs a fresh Launcher snapshot read, then delivers an exact
+profile/runtime/document-epoch envelope with monotonic sequence and revision.
+Context destruction, target replacement, timeout, replay, equivocation,
+delivery failure, or endpoint close clears Certified eligibility in the same
+PermissionBroker. The current already-running document remains fail-closed.
+
+Manifest-v5 artifacts declaring `ui.host-dom.read` or
+`ui.host-dom.modify` use a separate production execution path. Bundle and CDP
+carry their source only as data; the renderer creates an opaque-origin sandbox
+iframe which owns a locked-down classic Blob worker. The worker receives a
+frozen serialized `{ hostDom, onDispose }` facade and JSON configuration, not
+Cordis context, DOM objects, selectors, raw bridges, or ambient renderer
+globals. The Host captures native DOM/MessagePort primitives before plugin
+activation, binds every RPC envelope to a per-boundary random token, and keeps
+the real `BoundHostDomClient` in the Host renderer. Worker readiness is the
+availability signal; dispose, disable, uninstall, generation replacement, or
+Broker invalidation terminates the transport and rolls back owned DOM effects.
+This narrow boundary does not relabel legacy structured/local-development
+plugins as sandboxed code.
+
 Manifest metadata, dependency graphs, compatibility declarations, immutable
-local packages, and activation transactions are the next staged delivery in
-[`dynamic-plugin-lifecycle.md`](dynamic-plugin-lifecycle.md). Publisher
-signatures, remote marketplace installation, and untrusted-code isolation
-remain later security stages.
+local packages, and activation transactions are described in
+[`dynamic-plugin-lifecycle.md`](dynamic-plugin-lifecycle.md). General-purpose
+untrusted execution isolation for legacy structured plugins remains a later
+stage; the Host DOM worker is deliberately capability-specific.
 
 ### PublisherGrant authorization seam
 
@@ -786,6 +811,17 @@ The Platform slice adds versioned capability declarations, an identity-bound
 Permission Broker, and manager permission projections. These controls govern
 cooperative `ctx.platform` calls only; package installation, signatures,
 untrusted execution isolation, and marketplace activation remain later stages.
+
+The same Broker also owns controlled extension-point rendering authorization.
+Its permission-v3 catalog adds one DOM/rendering capability and keeps every
+existing Platform, Agent, and Channel capability non-DOM. A configured
+Marketplace trust root may provide an exact Certified artifact projection; only
+that projection and only the catalog-designated DOM capability may skip the
+visible confirmation. The Host still issues and audits a profile/scope/security-
+fingerprint/generation-bound lease. Official provenance never enters this
+decision. Extension-point availability probes stay independent, and legacy
+point/control policy stores are migration inputs rather than a second runtime
+authorization authority.
 
 The multi-provider Platform slice routes every model and session operation by
 structured provider-aware identity. Its launcher-private RPC exposes normalized
@@ -879,14 +915,19 @@ add a public Protocol surface or weaken per-process fences.
 
 ## Trust and security
 
-Version 0.1 uses a trusted-code model. A plugin is bundled into the renderer and can read or modify anything the renderer can access. Cordis provides lifecycle and dependency composition; it is not a security sandbox.
+Version 0.1 legacy structured plugins and explicit local-development entries
+use a trusted-code renderer model. Cordis provides lifecycle and dependency
+composition; it is not a general security sandbox. Manifest-v5 Host DOM
+artifacts are the exception: they are not evaluated in the renderer main realm
+and receive only the isolated, bounded Host DOM worker RPC described above.
 
-Before any public marketplace installation, CordisX still needs a separate
-plugin execution realm, publisher signatures and source identity, CSP and
-network policy, and an explicit bridge for host operations. The current
-Permission Broker controls cooperative Host services but does not sandbox
-trusted renderer code. The local-only dynamic package stage must not describe
-content hashing as publisher verification.
+Public marketplace execution outside that narrow Host DOM surface still needs
+a general isolated plugin realm, publisher signatures/source identity, CSP and
+network policy, and capability RPC for every exposed Host service. The current
+Permission Broker controls cooperative Host services and does not sandbox
+legacy trusted renderer code. Local package content hashing must not be
+described as publisher verification; Official and Certified source assertions
+remain independent of execution provenance and never create general authority.
 
 ## Compatibility strategy
 

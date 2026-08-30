@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   PluginLifecycleCoordinator,
   type PluginLifecycleRuntime,
@@ -28,8 +28,14 @@ import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authori
 import type { PackageActivationTuple } from '../packages/cli/src/launcher/packages/types.js'
 import {
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
+  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
+  CORDISX_PERMISSION_POLICY_SCHEMA_V4,
+  CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
   CORDISX_PLUGIN_PACKAGE_SCHEMA_V3,
+  CORDISX_PLUGIN_PACKAGE_SCHEMA_V4,
+  type CordisXCertifiedPermissionProjectionV1,
 } from '../packages/cli/src/permission-contracts.js'
 import { partitionPermissionReviewPlan } from '../packages/cli/src/capability-risk-catalog.js'
 
@@ -298,6 +304,55 @@ async function localPackageV4(root: string): Promise<string> {
   return source
 }
 
+async function localPackageV5(root: string, hostDomRequired = false, includeHostDom = true): Promise<string> {
+  const source = path.join(root, `permission-v5-${Math.random().toString(36).slice(2)}`)
+  await mkdir(path.join(source, 'src'), { recursive: true })
+  const rationale = {
+    title: { key: 'host-dom-title', fallback: 'Read the Host UI' },
+    description: { key: 'host-dom-description', fallback: 'Reads bounded Host UI state.' },
+    feature: { key: 'host-dom-feature', fallback: 'Host UI status' },
+    deniedBehavior: { key: 'host-dom-denied', fallback: 'The Host UI status stays unavailable.' },
+  }
+  const runtime = {
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
+    schemaVersion: 5,
+    id: 'permission-v5',
+    name: 'Permission V5',
+    capabilities: [
+      { name: 'models.read', required: true, scope: { providers: ['codex'] } },
+      ...(includeHostDom ? [{
+        name: 'ui.host-dom.read',
+        required: hostDomRequired,
+        rationale,
+        security: { dataUse: 'ephemeral', retention: 'runtime', externalTransfer: false },
+        scope: { rootIds: ['app.shell'], operations: ['inspect-structure', 'read-text'] },
+      }] as const : []),
+    ],
+    services: [],
+  } as const
+  const runtimeText = `${JSON.stringify(runtime, null, 2)}\n`
+  await Promise.all([
+    writeFile(path.join(source, 'runtime.json'), runtimeText),
+    writeFile(path.join(source, 'src/index.ts'), 'export function apply() {}\n'),
+  ])
+  await writeFile(path.join(source, 'cordisx-package.json'), `${JSON.stringify({
+    $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V4,
+    schemaVersion: 4,
+    id: runtime.id,
+    version: '1.0.0',
+    entry: './src/index.ts',
+    distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
+    compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V5] },
+    dependencies: [],
+    runtimeManifest: {
+      path: './runtime.json',
+      schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
+      digest: `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`,
+    },
+  }, null, 2)}\n`)
+  return source
+}
+
 function request(
   operation: CordisXPluginLifecycleRequestV1['operation'],
   expectedRevision = 0,
@@ -326,6 +381,35 @@ function decision(plan: CordisXPermissionAuthorizationPlanV1, choice: 'allow' | 
   }
 }
 
+function exactCertification(artifact: Readonly<{
+  source: string
+  pluginId: string
+  version: string
+  integrity: `sha256:${string}`
+}>): CordisXCertifiedPermissionProjectionV1 {
+  const payload = {
+    ...artifact,
+    reviewPolicy: { id: 'cordisx-marketplace-review' as const, version: '1.0.0' },
+    reviewedAt: '2026-08-29T00:00:00.000Z',
+    expiresAt: '2026-09-30T00:00:00.000Z',
+    evidence: { kind: 'protected-marketplace-review' as const, reference: 'https://github.com/cordisx/marketplace/pull/63' },
+    feed: {
+      generatedAt: '2026-08-30T00:00:00.000Z',
+      root: 'https://marketplace.example/feed.json',
+      authority: 'cordisx.marketplace.codeowners/v1' as const,
+    },
+  }
+  return {
+    $schema: CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1,
+    schemaVersion: 1,
+    kind: 'cordisx-certified-permission-eligibility',
+    status: 'active',
+    ...payload,
+    fingerprint: `sha256:${createHash('sha256').update(JSON.stringify(payload)).digest('hex')}`,
+    revision: payload.feed.generatedAt,
+  }
+}
+
 async function install(
   coordinator: PluginLifecycleCoordinator,
   sourceDirectory: string,
@@ -343,6 +427,182 @@ async function install(
 }
 
 describe('launcher plugin lifecycle coordinator', () => {
+  it('reviews package-v4/manifest-v5 through V4 on the same lifecycle authority and consumes Host-owned exact certification', async () => {
+    const { root, home } = await workspace()
+    const runtime = new FormalRuntime()
+    let certified = true
+    const lookupArtifacts: Array<Readonly<{
+      source: string
+      pluginId: string
+      version: string
+      integrity: `sha256:${string}`
+    }>> = []
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      certifiedPermissionForArtifact: async artifact => {
+        lookupArtifacts.push(artifact)
+        return certified ? exactCertification(artifact) : undefined
+      },
+      runtime,
+    })
+    const planned = await coordinator.handle(request({ kind: 'inspect-local', sourceDirectory: await localPackageV5(root) }))
+    expect(planned).toMatchObject({ outcome: 'planned', operation: 'install', package: { id: 'permission-v5' } })
+    expect(planned.authorizationPlan).toBeUndefined()
+    expect(await coordinator.permissionReviewPlanV2({
+      requestId: 'v2-probe', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0,
+      target: { kind: 'candidate', candidateId: planned.candidateId! },
+    })).toBeUndefined()
+    const plan = await coordinator.permissionReviewPlanV4({
+      requestId: 'v4-plan',
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      expectedRevision: 0,
+      target: { kind: 'candidate', candidateId: planned.candidateId! },
+    })
+    expect(plan).toMatchObject({ schemaVersion: 4, operation: 'install' })
+    expect(plan?.declarations.find(item => item.capability === 'models.read')).toMatchObject({
+      authorizationMode: 'explicit-user', decisionRequired: true, resourceClass: 'non-dom',
+    })
+    expect(plan?.declarations.find(item => item.capability === 'ui.host-dom.read')).toMatchObject({
+      authorizationMode: 'certified-implicit', decisionRequired: false, resourceClass: 'host-dom',
+      certification: { integrity: expect.stringMatching(/^sha256:/) },
+    })
+    const decision = {
+      $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
+      schemaVersion: 4 as const,
+      origin: 'explicit-user' as const,
+      planId: plan!.planId,
+      operation: plan!.operation,
+      profileId: plan!.profileId,
+      identity: plan!.identity,
+      binding: plan!.binding,
+      decisions: plan!.declarations.filter(item => item.decisionRequired).map(item => ({
+        capability: item.capability,
+        scope: item.scope,
+        securityFingerprint: item.securityFingerprint,
+        decision: 'allow-persistent' as const,
+      })),
+    }
+    certified = false
+    await expect(coordinator.applyPermissionReviewV4({
+      requestId: 'v4-apply-revoked', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0, decision,
+    })).rejects.toThrow('A required plugin capability was not granted')
+    certified = true
+    const applied = await coordinator.applyPermissionReviewV4({
+      requestId: 'v4-apply', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0, decision,
+    })
+    expect(applied).toMatchObject({ outcome: 'applied', operation: 'install', revision: 1 })
+    expect(lookupArtifacts).toHaveLength(3)
+    expect(lookupArtifacts).toEqual([lookupArtifacts[0], lookupArtifacts[0], lookupArtifacts[0]])
+    expect(lookupArtifacts[0]).toMatchObject({
+      source: expect.stringMatching(/^file:\/\/\/cordisx-store\/sha256\/[a-f0-9]{64}\/entry\.js$/),
+      pluginId: 'permission-v5',
+      version: '1.0.0',
+      integrity: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+    })
+    expect(runtime.calls).toEqual(['prepare', 'stage', 'publish', 'complete', 'finalize'])
+    expect(runtime.lastStaged?.authorizationDecision).toEqual(decision)
+  })
+
+  it('queries certification only for catalog DOM capabilities and falls back to explicit review on lookup failure', async () => {
+    const { root, home } = await workspace()
+    const lookup = vi.fn(async () => { throw new Error('trust source offline') })
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      certifiedPermissionForArtifact: lookup,
+      runtime: new FormalRuntime(),
+    })
+    const nonDom = await coordinator.handle(request({
+      kind: 'inspect-local', sourceDirectory: await localPackageV5(root, false, false),
+    }))
+    const nonDomPlan = await coordinator.permissionReviewPlanV4({
+      requestId: 'non-dom-v4-plan', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0,
+      target: { kind: 'candidate', candidateId: nonDom.candidateId! },
+    })
+    expect(nonDomPlan?.declarations).toHaveLength(1)
+    expect(nonDomPlan?.declarations[0]).toMatchObject({
+      capability: 'models.read', authorizationMode: 'explicit-user', decisionRequired: true,
+    })
+    expect(lookup).not.toHaveBeenCalled()
+
+    const hostDom = await coordinator.handle(request({
+      kind: 'inspect-local', sourceDirectory: await localPackageV5(root),
+    }))
+    const hostDomPlan = await coordinator.permissionReviewPlanV4({
+      requestId: 'host-dom-v4-plan', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0,
+      target: { kind: 'candidate', candidateId: hostDom.candidateId! },
+    })
+    expect(hostDomPlan?.declarations.find(item => item.capability === 'ui.host-dom.read')).toMatchObject({
+      authorizationMode: 'explicit-user', decisionRequired: true,
+    })
+    expect(lookup).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses lifecycle activation when an exact persistent policy denies required Host DOM access', async () => {
+    const { root, home } = await workspace()
+    const policies: Array<import('../packages/cli/src/permission-contracts.js').CordisXPermissionPolicyRecordV4> = []
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      loadPermissionPolicies: async () => policies,
+      runtime: new FormalRuntime(),
+    })
+    const staged = await coordinator.handle(request({
+      kind: 'inspect-local', sourceDirectory: await localPackageV5(root, true),
+    }))
+    const first = await coordinator.permissionReviewPlanV4({
+      requestId: 'required-v4-first', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0,
+      target: { kind: 'candidate', candidateId: staged.candidateId! },
+    })
+    const hostDom = first!.declarations.find(item => item.capability === 'ui.host-dom.read')!
+    policies.push({
+      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V4,
+      schemaVersion: 4,
+      key: {
+        profileId: first!.profileId,
+        identity: first!.identity,
+        capability: hostDom.capability,
+        scope: hostDom.scope,
+        securityFingerprint: hostDom.securityFingerprint,
+      },
+      policy: 'deny-persistent',
+    })
+    const deniedPlan = await coordinator.permissionReviewPlanV4({
+      requestId: 'required-v4-denied', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0,
+      target: { kind: 'candidate', candidateId: staged.candidateId! },
+    })
+    expect(deniedPlan?.declarations.find(item => item.capability === 'ui.host-dom.read')).toMatchObject({
+      required: true, policy: 'deny-persistent', authorizationMode: 'persistent-policy', decisionRequired: false,
+    })
+    const decision = {
+      $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
+      schemaVersion: 4 as const,
+      origin: 'explicit-user' as const,
+      planId: deniedPlan!.planId,
+      operation: deniedPlan!.operation,
+      profileId: deniedPlan!.profileId,
+      identity: deniedPlan!.identity,
+      binding: deniedPlan!.binding,
+      decisions: deniedPlan!.declarations.filter(item => item.decisionRequired).map(item => ({
+        capability: item.capability,
+        scope: item.scope,
+        securityFingerprint: item.securityFingerprint,
+        decision: 'allow-once' as const,
+      })),
+    }
+    await expect(coordinator.applyPermissionReviewV4({
+      requestId: 'required-v4-apply', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0, decision,
+    })).rejects.toThrow('A required plugin capability was not granted')
+  })
+
   it('reviews package-v3/manifest-v4 through the Host-private V2 seam and the existing lifecycle authority', async () => {
     const { root, home } = await workspace()
     const runtime = new FormalRuntime()

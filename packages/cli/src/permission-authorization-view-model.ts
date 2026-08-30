@@ -2,11 +2,17 @@ import type { CordisXLocalizedText } from './contracts.js'
 import { CapabilityRiskCatalog } from './capability-risk-catalog.js'
 import {
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
+  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3,
+  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
   type CordisXPermissionAuthorizationDecisionV2,
+  type CordisXPermissionAuthorizationDecisionV3,
+  type CordisXPermissionAuthorizationDecisionV4,
   type CordisXPermissionAuthorizationPlanV2,
-  type CordisXPermissionCapabilityV2,
+  type CordisXPermissionAuthorizationPlanV3,
+  type CordisXPermissionAuthorizationPlanV4,
+  type CordisXPermissionCapabilityV4,
   type CordisXPermissionDecisionV2,
-  type CordisXPermissionScopeV2,
+  type CordisXPermissionScopeV4,
 } from './permission-contracts.js'
 import { CORDISX_PERMISSION_NAMESPACE } from './permission-locales.js'
 
@@ -28,9 +34,9 @@ export interface PermissionItemAvailabilityProjection {
 
 export interface PermissionAuthorizationProjectionInput {
   readonly plugin: PermissionPluginPresentation
-  readonly availability: Readonly<Partial<Record<CordisXPermissionCapabilityV2, PermissionItemAvailabilityProjection>>>
+  readonly availability: Readonly<Partial<Record<CordisXPermissionCapabilityV4, PermissionItemAvailabilityProjection>>>
   readonly resolve: (message: CordisXLocalizedText) => string
-  readonly scope: (scope: CordisXPermissionScopeV2) => string
+  readonly scope: (scope: CordisXPermissionScopeV4) => string
   readonly requestSource?: string
 }
 
@@ -41,7 +47,7 @@ export interface PermissionAuthorizationOptionProjection {
 }
 
 export interface PermissionAuthorizationItemProjection {
-  readonly capability: CordisXPermissionCapabilityV2
+  readonly capability: CordisXPermissionCapabilityV4
   readonly name: string
   readonly requirement: string
   readonly sensitivity: string
@@ -107,7 +113,7 @@ export interface PermissionAuthorizationDialogProjection {
 export type PermissionAuthorizationDialogResult =
   | { readonly status: 'cancelled' }
   | { readonly status: 'manage-permissions' }
-  | { readonly status: 'confirmed'; readonly decision: CordisXPermissionAuthorizationDecisionV2 }
+  | { readonly status: 'confirmed'; readonly decision: CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV3 | CordisXPermissionAuthorizationDecisionV4 }
 
 const UI_FALLBACKS = Object.freeze({
   'dialog.install-title': 'Review permissions before installing',
@@ -162,11 +168,11 @@ const CAPABILITY_CATALOG = new CapabilityRiskCatalog()
 
 /** Stateful decision model; locale/theme reprojection never reconstructs the request. */
 export class PermissionAuthorizationViewModel {
-  readonly #selected = new Map<CordisXPermissionCapabilityV2, CordisXPermissionDecisionV2>()
+  readonly #selected = new Map<CordisXPermissionCapabilityV4, CordisXPermissionDecisionV2>()
   #settled = false
 
-  constructor(readonly plan: CordisXPermissionAuthorizationPlanV2) {
-    const seen = new Set<CordisXPermissionCapabilityV2>()
+  constructor(readonly plan: CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV3 | CordisXPermissionAuthorizationPlanV4) {
+    const seen = new Set<CordisXPermissionCapabilityV4>()
     for (const item of plan.declarations) {
       if (seen.has(item.capability)) throw new Error(`permission plan contains duplicate capability: ${item.capability}`)
       if (!item.allowedDecisions.includes(item.defaultDecision)) {
@@ -183,7 +189,7 @@ export class PermissionAuthorizationViewModel {
     }
   }
 
-  select(capability: CordisXPermissionCapabilityV2, decision: CordisXPermissionDecisionV2): void {
+  select(capability: CordisXPermissionCapabilityV4, decision: CordisXPermissionDecisionV2): void {
     this.assertOpen()
     const item = this.plan.declarations.find(candidate => candidate.capability === capability)
     if (item === undefined || !item.allowedDecisions.includes(decision)) {
@@ -192,13 +198,16 @@ export class PermissionAuthorizationViewModel {
     this.#selected.set(capability, decision)
   }
 
-  selection(capability: CordisXPermissionCapabilityV2): CordisXPermissionDecisionV2 | undefined {
+  selection(capability: CordisXPermissionCapabilityV4): CordisXPermissionDecisionV2 | undefined {
     return this.#selected.get(capability)
   }
 
   project(input: PermissionAuthorizationProjectionInput): PermissionAuthorizationDialogProjection {
     const resolve = input.resolve
-    const items = this.plan.declarations.map(item => {
+    const visibleDeclarations = this.plan.schemaVersion === 4
+      ? this.plan.declarations.filter(item => item.decisionRequired)
+      : this.plan.declarations
+    const items = visibleDeclarations.map(item => {
       const availability = input.availability[item.capability]
       const selected = this.#selected.get(item.capability)
       const providers = availability?.providerIds ?? item.scope.providers ?? []
@@ -294,17 +303,62 @@ export class PermissionAuthorizationViewModel {
   confirm(): PermissionAuthorizationDialogResult {
     this.assertOpen()
     this.#settled = true
+    if (this.plan.schemaVersion === 4) {
+      const plan = this.plan
+      return Object.freeze({
+        status: 'confirmed',
+        decision: Object.freeze({
+          $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
+          schemaVersion: 4,
+          origin: 'explicit-user',
+          planId: plan.planId,
+          operation: plan.operation,
+          profileId: plan.profileId,
+          identity: plan.identity,
+          binding: plan.binding,
+          decisions: Object.freeze(plan.declarations.filter(item => item.decisionRequired).map(item => Object.freeze({
+            capability: item.capability,
+            scope: item.scope,
+            securityFingerprint: item.securityFingerprint,
+            decision: this.#selected.get(item.capability)!,
+          }))),
+        }),
+      })
+    }
+    if (this.plan.schemaVersion === 3) {
+      const plan = this.plan
+      return Object.freeze({
+        status: 'confirmed',
+        decision: Object.freeze({
+          $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3,
+          schemaVersion: 3,
+          origin: 'explicit-user',
+          planId: plan.planId,
+          operation: plan.operation,
+          profileId: plan.profileId,
+          identity: plan.identity,
+          binding: plan.binding,
+          decisions: Object.freeze(plan.declarations.map(item => Object.freeze({
+            capability: item.capability,
+            scope: item.scope,
+            securityFingerprint: item.securityFingerprint,
+            decision: this.#selected.get(item.capability)!,
+          }))),
+        }),
+      })
+    }
+    const plan = this.plan
     return Object.freeze({
       status: 'confirmed',
       decision: Object.freeze({
         $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
         schemaVersion: 2,
-        planId: this.plan.planId,
-        operation: this.plan.operation,
-        profileId: this.plan.profileId,
-        identity: this.plan.identity,
-        binding: this.plan.binding,
-        decisions: Object.freeze(this.plan.declarations.map(item => Object.freeze({
+        planId: plan.planId,
+        operation: plan.operation,
+        profileId: plan.profileId,
+        identity: plan.identity,
+        binding: plan.binding,
+        decisions: Object.freeze(plan.declarations.map(item => Object.freeze({
           capability: item.capability,
           scope: item.scope,
           securityFingerprint: item.securityFingerprint,

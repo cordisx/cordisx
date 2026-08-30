@@ -1,11 +1,14 @@
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { buildRendererComposition } from '../packages/cli/src/cli/run.js'
 import { manifest } from '../packages/cli/src/plugins/channel/index.js'
+import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../packages/cli/src/capability-risk-catalog.js'
+import { CORDISX_PERMISSION_POLICY_SCHEMA_V3 } from '../packages/cli/src/permission-contracts.js'
+import { domPermissionAuthorizationKeyV3 } from '../packages/cli/src/permission-model-v3.js'
 import {
   CordisXChannelManagerService,
   type ChannelManagerProjectionV1,
@@ -41,6 +44,13 @@ function setControl(window: JSDOM['window'], control: HTMLInputElement | HTMLSel
   control.dispatchEvent(new window.Event('change', { bubbles: true }))
 }
 
+function installNoopPermissionBridge(window: JSDOM['window']): void {
+  Object.defineProperty(window, '__cordisxPermissionPolicyRequestV1', {
+    configurable: true,
+    value: () => undefined,
+  })
+}
+
 const projection: ChannelManagerProjectionV1 = {
   contract: 'cordisx.channel-manager-projection/v1',
   schemaVersion: 1,
@@ -73,6 +83,20 @@ const projection: ChannelManagerProjectionV1 = {
   diagnostics: [{ id: 'simulator', status: 'verified', message: 'Local simulator verified without an external account.' }],
 }
 
+function channelDomPolicies(entry: string) {
+  return ['manager.settings.navigation-items', 'manager.content'].map(pointId => ({
+    $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
+    schemaVersion: 3 as const,
+    key: domPermissionAuthorizationKeyV3({
+      profileId: 'work',
+      identity: { source: pathToFileURL(entry).href, pluginId: 'channel' },
+      pointId,
+      catalogVersion: CORDISX_CAPABILITY_CATALOG_VERSION,
+    }),
+    policy: 'allow-persistent' as const,
+  }))
+}
+
 describe('built-in Channel product bundle', () => {
   it('rejects unknown or secret-bearing Manager projection fields before renderer publication', () => {
     const unsafe = structuredClone(projection) as unknown as Record<string, unknown>
@@ -100,7 +124,12 @@ describe('built-in Channel product bundle', () => {
       codex: { debugPort: 9229 },
       providers: [],
       plugins: [{ id: 'channel', entry, enabled: true, config: {} }],
-    }, () => undefined, { profileId: 'work', channelManager: projection, channelActionsBridgeToken: 'a'.repeat(64) })
+    }, () => undefined, {
+      profileId: 'work',
+      permission: { profileId: 'work', policies: channelDomPolicies(entry), persistent: true },
+      channelManager: projection,
+      channelActionsBridgeToken: 'a'.repeat(64),
+    })
     const bundle = rendererComposition.source
     const dom = new JSDOM(`
       <html lang="en" class="electron-dark"><head></head><body>
@@ -109,6 +138,7 @@ describe('built-in Channel product bundle', () => {
     `, { runScripts: 'dangerously', url: 'https://codex.local/native' })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
     Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+    installNoopPermissionBridge(dom.window)
     const actionRequests: unknown[] = []
     Object.defineProperty(dom.window, '__cordisxChannelActionsRequestV1', { configurable: true, value: (payload: string) => {
       const request = JSON.parse(payload) as { requestId: string; token: string }
@@ -179,6 +209,7 @@ describe('built-in Channel product bundle', () => {
       plugins: [{ id: 'channel', entry, enabled: true, config: {} }],
     }, {
       profileId: 'work', generation, serviceConfigBridgeToken: serviceConfigToken,
+      permission: { profileId: 'work', policies: channelDomPolicies(entry), bridgeToken: 'b'.repeat(64) },
       channelManager: { ...projection, service: { ...projection.service, writable: true } },
     })
     const dom = new JSDOM(`
@@ -188,6 +219,7 @@ describe('built-in Channel product bundle', () => {
     `, { runScripts: 'dangerously', url: 'https://codex.local/native' })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
     Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+    installNoopPermissionBridge(dom.window)
     const descriptor = {
       contract: 'cordisx.service-config-descriptor/v1', schemaVersion: 1,
       identity: { source: 'file:///channel', pluginId: 'channel', serviceId: 'runtime' },
@@ -268,6 +300,7 @@ describe('built-in Channel product bundle', () => {
       plugins: [{ id: 'channel', entry, enabled: true, config: {} }],
     }, {
       profileId: 'work', generation, serviceConfigBridgeToken: serviceConfigToken, channelCredentialBridgeToken: credentialToken,
+      permission: { profileId: 'work', policies: channelDomPolicies(entry), bridgeToken: 'd'.repeat(64) },
       channelManager: { ...projection, service: { ...projection.service, writable: true } },
     })
     const dom = new JSDOM('<html lang="en" class="electron-dark"><body><div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div></body></html>', {
@@ -275,6 +308,7 @@ describe('built-in Channel product bundle', () => {
     })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
     Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+    installNoopPermissionBridge(dom.window)
     const descriptor = {
       contract: 'cordisx.service-config-descriptor/v1', schemaVersion: 1,
       identity: { source: 'file:///channel', pluginId: 'channel', serviceId: 'runtime' },

@@ -383,7 +383,7 @@ than being dropped; optional declarations degrade only without fallback
 authority.
 
 Public lifecycle v1 schemas stay frozen. The authenticated renderer binding
-has a Host-private review-plan/apply envelope for v2; its plan and decision are
+has Host-private review-plan/apply envelopes for v2 and v4; their plans and decisions are
 revalidated by the launcher and then attached to the existing
 `PackageLifecycleAuthority` permission receipt. The authority and Generation
 Runtime carry that same decision into the single renderer `PermissionBroker`

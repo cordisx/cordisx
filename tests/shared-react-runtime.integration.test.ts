@@ -59,7 +59,21 @@ describe('shared React plugin runtime', () => {
     const window = dom.window as unknown as TestWindow
     expect(window.__sharedReactPluginReact).toBe(window.__cordisxSharedReactRuntime?.React)
 
-    await window.__cordisxRuntime!.navigate('shared-react', { id: 'overview' })
+    let navigationSettled = false
+    const navigation = window.__cordisxRuntime!.navigate('shared-react', { id: 'overview' })
+      .finally(() => { navigationSettled = true })
+    for (let attempt = 0; attempt < 3 && !navigationSettled; attempt += 1) {
+      await waitFor(() => dom.window.document.querySelector('[data-permission-authorization]') !== null || navigationSettled)
+      const dialog = dom.window.document.querySelector<HTMLElement>('[data-permission-authorization]')
+      if (dialog !== null) {
+        dialog.querySelector<HTMLElement>(
+          '[data-permission-capability="ui.extension-points.render"] [data-permission-decision="allow-persistent"]',
+        )?.click()
+        dialog.querySelector<HTMLButtonElement>('[data-permission-action="confirm"]')?.click()
+        await waitFor(() => dom.window.document.querySelector('[data-permission-authorization]') === null)
+      }
+    }
+    await navigation
     await waitFor(() => dom.window.document.querySelector('[data-shared-react-page="mounted"]') !== null)
     await waitFor(() => window.__sharedReactEffectMounts === 1)
     expect(window.__sharedReactEffectMounts).toBe(1)

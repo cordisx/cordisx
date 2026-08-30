@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 } from '../packages/cli/src/permission-contracts.js'
 
 const temporaryDirectories: string[] = []
 
@@ -72,5 +73,52 @@ describe('plugin README composition', () => {
     expect(composition.source).toContain('page.v3.schema.json')
     expect(composition.source).toContain('route.v2.schema.json')
     expect(composition.source).not.toContain('SHADOW_CONTRACT')
+  })
+
+  it('holds manifest-v5 Host DOM code as worker source instead of a renderer module factory', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-host-dom-worker-bundle-'))
+    temporaryDirectories.push(root)
+    const entry = path.join(root, 'host-dom-plugin.ts')
+    await writeFile(entry, `
+      globalThis.__hostDomRendererExecutionWouldBeABug = true
+      export function apply() {}
+    `)
+    const config: CordisXConfig = {
+      version: 1,
+      rootDir: root,
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: [{
+        id: 'host-dom-plugin',
+        entry,
+        enabled: true,
+        config: {},
+        manifest: {
+          $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
+          schemaVersion: 5,
+          id: 'host-dom-plugin',
+          capabilities: [{
+            name: 'ui.host-dom.read',
+            required: false,
+            rationale: {
+              title: { key: 'host-dom-title', fallback: 'Read the Host UI' },
+              description: { key: 'host-dom-description', fallback: 'Reads bounded Host UI state.' },
+              feature: { key: 'host-dom-feature', fallback: 'Host UI status' },
+              deniedBehavior: { key: 'host-dom-denied', fallback: 'Host UI status stays unavailable.' },
+            },
+            security: { dataUse: 'ephemeral', retention: 'runtime', externalTransfer: false },
+            scope: { rootIds: ['app.shell'], operations: ['read-text'] },
+          }],
+          services: [],
+        },
+      }],
+    }
+
+    const composition = await buildRendererCompositionSource(config, { playground: true })
+
+    expect(composition.source).toContain('isolatedArtifactSource:')
+    expect(composition.source).toContain('__cordisxHostDomPluginModuleV1')
+    expect(composition.source).toContain('__hostDomRendererExecutionWouldBeABug')
+    expect(composition.source).not.toContain('moduleFactory: (console)')
   })
 })

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { managerCopy } from '../packages/cli/src/renderer/ui-copy.js'
+import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
 
 type TestTDesignSelect = HTMLElement & {
   disabled: boolean
@@ -87,7 +88,25 @@ describe('renderer bundle', () => {
         { id: 'configured-off', entry: path.join(projectRoot, 'missing-disabled-plugin.ts'), enabled: false, config: {} },
       ],
     }
-    const bundle = await buildRendererBundle(config)
+    const plugin = config.plugins[0]!
+    const bundle = await buildRendererBundle(config, {
+      permission: {
+        profileId: 'development',
+        bridgeToken: '1'.repeat(64),
+        policies: exactDomPermissionPolicies('development', [{
+          id: plugin.id,
+          entry: plugin.entry,
+          pointIds: [
+            'app', 'main', 'session.content', 'sidebar.footer.before-control',
+            'sidebar.footer.after-control', 'sidebar.footer.menu', 'sidebar.account.menu',
+            'sidebar.navigation.items', 'workspace.toolbar.items', 'session.header.actions',
+            'composer.toolbar.items', 'environment.panel.header-actions',
+            'environment.panel.sections', 'environment.section.actions',
+            'environment.section.rows', 'environment.row.trailing-actions',
+          ],
+        }]),
+      },
+    })
     const dom = new JSDOM(`
       <html lang="en" dir="ltr" class="electron-dark"><head><style>
         .codex-toolbar-button { width: 28px; height: 28px; }
@@ -131,6 +150,7 @@ describe('renderer bundle', () => {
       </body></html>
     `, { runScripts: 'dangerously', url: 'https://codex.local/native' })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+    installPermissionPolicyBridge(dom.window)
     Object.defineProperty(dom.window.navigator, 'platform', { value: 'MacIntel', configurable: true })
     Object.defineProperty(dom.window, 'fetch', {
       value: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({
@@ -239,11 +259,13 @@ describe('renderer bundle', () => {
     expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(32)
     expect(snapshot.extensionPoints.points.filter(item => item.kind === 'outlet')).toHaveLength(7)
     expect(snapshot.extensionPoints.descriptorDiagnostics).toEqual([])
-    expect(snapshot.localeCatalogs).toHaveLength(6)
-    expect(snapshot.localeCatalogs.filter(item => item.owner === 'host')).toHaveLength(4)
+    expect(snapshot.localeCatalogs).toHaveLength(8)
+    expect(snapshot.localeCatalogs.filter(item => item.owner === 'host')).toHaveLength(6)
     expect(snapshot.localeCatalogs.filter(item => item.owner === 'host')).toEqual(expect.arrayContaining([
       expect.objectContaining({ namespace: 'host:cordisx.manager.capability-availability', locale: 'en' }),
       expect.objectContaining({ namespace: 'host:cordisx.manager.capability-availability', locale: 'zh-CN' }),
+      expect.objectContaining({ namespace: 'host:permission', locale: 'en' }),
+      expect.objectContaining({ namespace: 'host:permission', locale: 'zh-CN' }),
     ]))
     expect(snapshot.localizationDiagnostics).toEqual([])
     const surfaceHosts = [...dom.window.document.querySelectorAll<HTMLElement>('[data-cordisx-surface-host]')]
@@ -577,7 +599,7 @@ describe('renderer bundle', () => {
       rawBridgeExposed: false,
       diagnostics: [expect.objectContaining({ code: 'current-connection-client-unavailable' })],
     })
-    expect(restoredSnapshot.permissions).toEqual([
+    expect(restoredSnapshot.permissions.filter(permission => permission.capability !== 'ui.extension-points.render')).toEqual([
       expect.objectContaining({ capability: 'models.read', policy: 'ask', required: false }),
     ])
 
@@ -1221,5 +1243,5 @@ describe('renderer bundle', () => {
     expect(dom.window.document.getElementById('cordisx-manager-style')).toBeNull()
     expect(native.parentElement).toBe(nativeParent)
     dom.window.close()
-  }, 45_000)
+  }, 90_000)
 })

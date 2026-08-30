@@ -60,7 +60,9 @@ import {
 } from '../launcher/channel-service.js'
 import type { CordisXPluginIdentity } from '../platform-contracts.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import type { CordisXCertifiedPermissionProjectionV1 } from '../permission-contracts.js'
 import { PluginPermissionIdentityRegistry, type PermissionPersistenceContext } from '../launcher/permission-rpc.js'
+import { LauncherMarketplaceCertifiedAuthority } from '../launcher/marketplace-certified-authority.js'
 import type { IconThemePreferencePersistenceContext } from '../launcher/icon-theme-rpc.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { loadActivatedPluginComposition, loadPluginComposition } from '../launcher/plugin-composition.js'
@@ -143,6 +145,7 @@ function providerConfigs(config: CordisXConfig, environment: NodeJS.ProcessEnv):
 
 interface RendererComposition {
   readonly source: string
+  readonly newDocumentSource?: string
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken: string
   readonly configBridgeToken?: string
@@ -180,6 +183,7 @@ export async function buildRendererComposition(
       readonly activation: CordisXPluginActivationRecordV1
       readonly registryEpoch?: number
     }
+    readonly certifiedPermissionChannelToken?: string
     readonly pluginActivation?: CordisXPluginActivationRecordV1
     readonly initialRegistryEpoch?: number
     readonly channelManager?: ChannelManagerBundleProjection
@@ -234,10 +238,17 @@ export async function buildRendererComposition(
   } satisfies NonNullable<Parameters<typeof buildRendererBundle>[1]>
   const buildBundle = options.internalBuildRendererBundle ?? buildRendererBundle
   const source = await buildBundle(config, bundleOptions)
+  const newDocumentSource = options.certifiedPermissionChannelToken === undefined
+    ? undefined
+    : await buildBundle(config, {
+        ...bundleOptions,
+        certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
+      })
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
   stdout(`[cordisx] bundle ready: ${source.length} bytes, plugins: ${enabled.join(', ') || '(none)'}`)
   return {
     source,
+    ...(newDocumentSource === undefined ? {} : { newDocumentSource }),
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
@@ -361,6 +372,7 @@ export async function waitForHostExitAfterReadiness(input: {
 
 async function runInjectedHost(input: {
   readonly source: string | (() => string)
+  readonly newDocumentSource?: string | (() => string)
   readonly providerFleet?: ProviderFleet
   readonly providerBridgeToken?: string
   readonly agentHistoryHost: CodexAgentHistoryHost
@@ -374,6 +386,12 @@ async function runInjectedHost(input: {
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
   readonly publisherGrant?: PublisherGrantBridgeHandler
+  readonly certifiedPermission?: Readonly<{
+    authority: LauncherMarketplaceCertifiedAuthority
+    token: string
+    profileId: string
+    runtimeGeneration: string
+  }>
   readonly executable?: string
   readonly debugPort: number
   readonly hostArgs: readonly string[]
@@ -393,6 +411,7 @@ async function runInjectedHost(input: {
   const watcher = watchAndInject({
     port: input.debugPort,
     source: input.source,
+    ...(input.newDocumentSource === undefined ? {} : { newDocumentSource: input.newDocumentSource }),
     signal: controller.signal,
     ...(input.providerFleet === undefined || input.providerBridgeToken === undefined ? {} : {
       providerFleet: input.providerFleet,
@@ -409,6 +428,7 @@ async function runInjectedHost(input: {
     ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
     ...(input.developmentRuntime === undefined ? {} : { developmentRuntime: input.developmentRuntime }),
     ...(input.publisherGrant === undefined ? {} : { publisherGrant: input.publisherGrant }),
+    ...(input.certifiedPermission === undefined ? {} : { certifiedPermission: input.certifiedPermission }),
     onReady: () => {
       if (reportedReady) return
       reportedReady = true
@@ -693,6 +713,18 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     return
   }
 
+  const certifiedPermissionAuthority = await LauncherMarketplaceCertifiedAuthority.open({
+    homeDir: rootFromConfigPath(configPath),
+    configPath,
+    profileId: selection.profileId,
+  }).catch(error => {
+    stdout(`[cordisx] Certified permission authority unavailable; explicit review remains required: ${String(error)}`)
+    return undefined
+  })
+  const certifiedPermissionChannelToken = certifiedPermissionAuthority === undefined
+    ? undefined
+    : randomBytes(32).toString('hex')
+  try {
   const configuredComposition = await loadConfig(configPath, { profileId: selection.profileId })
   const currentHomeConfig = await loadHomeConfig(configPath)
   const publisherGrant = createPublisherGrantBridgeHandler(new DirectPublisherGrantAuthority(
@@ -714,6 +746,25 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       .filter(policy => policy.key.profileId === selection.profileId),
     runtime: lifecycleRuntime,
     reservedPluginIds: [...configuredIds],
+    ...(certifiedPermissionAuthority === undefined ? {} : {
+      certifiedPermissionForArtifact: async (artifact: Readonly<{
+        source: string
+        pluginId: string
+        version: string
+        integrity: `sha256:${string}`
+      }>) => {
+        try {
+          // The formal Marketplace projection validates sha256 integrity at its
+          // Launcher boundary; its public type is intentionally wider (`string`).
+          return (await certifiedPermissionAuthority.lookup(artifact)).projection as
+            | CordisXCertifiedPermissionProjectionV1
+            | undefined
+        } catch (error) {
+          stdout(`[cordisx] Certified permission lookup unavailable; explicit review remains required: ${String(error)}`)
+          return undefined
+        }
+      },
+    }),
   })
   const recoveryPlans = await pluginLifecycleCoordinator.prepareRecovery()
   if (recoveryPlans.length > 1) throw new Error('multiple shared registry rollback recoveries require separate launcher runs')
@@ -789,6 +840,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       activation: initialActivation ?? await lifecycleStore.loadActive(),
       ...(recoveryPlan === undefined ? {} : { registryEpoch: recoveryPlan.rollbackRegistryEpoch }),
     },
+    ...(certifiedPermissionChannelToken === undefined ? {} : { certifiedPermissionChannelToken }),
     ...(channelManager === undefined ? {} : { channelManager }),
     ...(channelCredentialBridgeToken === undefined ? {} : { channelCredentialBridgeToken }),
     ...(channelActionsBridgeToken === undefined ? {} : { channelActionsBridgeToken }),
@@ -879,6 +931,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     try {
       await runInjectedHost({
       source: rendererComposition.source,
+      ...(rendererComposition.newDocumentSource === undefined ? {} : {
+        newDocumentSource: rendererComposition.newDocumentSource,
+      }),
       agentHistoryHost: agentHistoryHost(runtime.env ?? process.env, configPath, `${appId}:${selection.profileId}:attach`),
       agentHistoryBridgeToken: rendererComposition.agentHistoryBridgeToken,
       ...(rendererComposition.providerBridgeToken === undefined ? {} : {
@@ -892,6 +947,14 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
       ...(iconThemePreferencePersistence === undefined ? {} : { iconThemePreferencePersistence }),
       pluginLifecycle,
+      ...(certifiedPermissionAuthority === undefined || certifiedPermissionChannelToken === undefined ? {} : {
+        certifiedPermission: {
+          authority: certifiedPermissionAuthority,
+          token: certifiedPermissionChannelToken,
+          profileId: selection.profileId,
+          runtimeGeneration: lifecycleGeneration,
+        },
+      }),
       debugPort,
       hostArgs: invocation.hostArgs,
       launcher: invocation.options,
@@ -942,6 +1005,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   try {
     await runInjectedHost({
     source: rendererComposition.source,
+    ...(rendererComposition.newDocumentSource === undefined ? {} : {
+      newDocumentSource: rendererComposition.newDocumentSource,
+    }),
     agentHistoryHost: agentHistoryHost(
       { ...(runtime.env ?? process.env), ...plan.environment },
       configPath,
@@ -959,6 +1025,14 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
     ...(iconThemePreferencePersistence === undefined ? {} : { iconThemePreferencePersistence }),
     pluginLifecycle,
+    ...(certifiedPermissionAuthority === undefined || certifiedPermissionChannelToken === undefined ? {} : {
+      certifiedPermission: {
+        authority: certifiedPermissionAuthority,
+        token: certifiedPermissionChannelToken,
+        profileId: selection.profileId,
+        runtimeGeneration: lifecycleGeneration,
+      },
+    }),
     publisherGrant,
     executable: plan.executable,
     debugPort,
@@ -971,5 +1045,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   } finally {
     await channelService?.dispose()
     await providerFleet?.close()
+  }
+  } finally {
+    await certifiedPermissionAuthority?.dispose()
   }
 }
