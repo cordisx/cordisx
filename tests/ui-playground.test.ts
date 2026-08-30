@@ -1,6 +1,7 @@
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
@@ -9,6 +10,7 @@ import { defaultUiPlaygroundConfig } from '../packages/cli/src/playground/defaul
 import { startUiPlayground } from '../packages/cli/src/playground/server.js'
 import { createPlaygroundSession } from '../packages/cli/src/playground/session.js'
 import { activatePlaygroundReviewNavigation } from '../packages/cli/src/playground/client/review-navigation.js'
+import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { createSidebarItem } from '../packages/cli/src/renderer/host-ui/SidebarItem.js'
 
 const defaultPluginIds = [
@@ -198,6 +200,50 @@ describe('UI Playground', () => {
       const home = playground.homeDir
       await playground.close()
       await expect(access(home)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  }, 30_000)
+
+  it('applies explicit narrow preview permissions without claiming an AgentLoop backend', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-playground-permissions-'))
+    const entry = path.resolve('tests/fixtures/agent-loop-runtime-plugin.ts')
+    const identity = { source: pathToFileURL(entry).href, id: 'agent-loop-runtime' }
+    const policies = (['tasks.create', 'tasks.content.read', 'turns.submit'] as const).map(capability => createPermissionPolicyRecord({
+      profileId: 'playground', identity, capability, scope: { providers: ['gateway-a'] }, policy: 'allow',
+    }))
+    const configPath = path.join(root, 'cordisx.config.json')
+    await writeFile(configPath, `${JSON.stringify({
+      version: 1,
+      plugins: [{ id: identity.id, entry, enabled: true, config: {} }],
+      playground: { permissionPolicies: policies },
+    })}\n`)
+    const playground = await startUiPlayground({ configPath })
+    try {
+      const bundle = await fetch(`${playground.url}api/bundle`).then(response => response.text())
+      const dom = new JSDOM('<!doctype html><html><body><nav data-cordisx-playground-surface="sidebar.navigation.items"></nav></body></html>', {
+        runScripts: 'dangerously', url: playground.url,
+      })
+      try {
+        Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+        Object.defineProperty(dom.window, 'structuredClone', { value: globalThis.structuredClone })
+        dom.window.eval(bundle)
+        await (dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
+        const snapshot = (dom.window as unknown as {
+          __cordisxRuntime?: { snapshot(): {
+            plugins: readonly { id: string; status: string; blockedReason?: string }[]
+            permissions: readonly { capability: string; policy: string; availability: { status: string } }[]
+          }; dispose(): Promise<void> }
+        }).__cordisxRuntime?.snapshot()
+        expect(snapshot?.plugins).toEqual([expect.objectContaining({ id: identity.id, status: 'active' })])
+        expect(snapshot?.permissions.map(item => ({ capability: item.capability, policy: item.policy, availability: item.availability.status }))).toEqual([
+          { capability: 'tasks.create', policy: 'allow', availability: 'unavailable' },
+          { capability: 'tasks.content.read', policy: 'allow', availability: 'unavailable' },
+          { capability: 'turns.submit', policy: 'allow', availability: 'unavailable' },
+        ])
+        await (dom.window as unknown as { __cordisxRuntime?: { dispose(): Promise<void> } }).__cordisxRuntime?.dispose()
+      } finally { dom.window.close() }
+    } finally {
+      await playground.close()
+      await rm(root, { recursive: true, force: true })
     }
   }, 30_000)
 
