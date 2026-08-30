@@ -1,6 +1,13 @@
 import type { CordisXJsonScalar } from '../contracts.js'
 
 const CORDISX_ROUTE_STATE_KEY = '__cordisxRouteV1'
+
+/** Host-private task/detail surfaces must not inherit a plugin route selection. */
+export function withoutCordisXRouteHistoryEntry(state: unknown): Record<string, unknown> {
+  const next: Record<string, unknown> = isRecord(state) ? { ...state } : {}
+  delete next[CORDISX_ROUTE_STATE_KEY]
+  return next
+}
 const CORDISX_NATIVE_STATE_KEY = '__cordisxNativeStateV1'
 const CORDISX_ROUTE_RELOAD_KEY = '__cordisxRouteReloadV1'
 const CORDISX_BROWSER_STATE_KEY = '__cordisxBrowserStateV1'
@@ -524,7 +531,7 @@ export class BrowserRouteHistoryAdapter implements CodexRouteHistoryAdapter {
       idx: current.index! + 1,
       [CORDISX_ROUTE_STATE_KEY]: entry,
     }
-    this.write(() => this.originalPushState.call(this.view.history, next, ''))
+    this.write(() => this.originalPushState.call(this.view.history, next, '', '/'))
     return this.snapshot()
   }
 

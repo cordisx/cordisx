@@ -222,10 +222,11 @@ describe('CodexRouterHistoryAdapter', () => {
 
 describe('BrowserRouteHistoryAdapter', () => {
   it('initializes browser history only for the standalone Playground', () => {
-    const dom = new JSDOM('', { url: 'https://playground.cordisx.local/' })
+    const dom = new JSDOM('', { url: 'https://playground.cordisx.local/playground/simulator/tasks/task-1' })
     const adapter = new BrowserRouteHistoryAdapter(dom.window as unknown as Window, true)
     expect(adapter.snapshot()).toMatchObject({ available: true, key: 'default', index: 0 })
     expect(adapter.push(route('one'))).toMatchObject({ index: 1, entry: { params: { roomId: 'one' } } })
+    expect(dom.window.location.pathname).toBe('/')
     adapter.dispose()
     dom.window.close()
   })

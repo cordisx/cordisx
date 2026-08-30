@@ -3,6 +3,7 @@ import {
   HostAgentTaskDetailsNavigator,
   validateAgentLoopTaskDetailsUrl,
 } from '../../renderer/host-ui/AgentTaskDetailsNavigator.js'
+import { withoutCordisXRouteHistoryEntry } from '../../renderer/codex-router-history.js'
 
 export interface PlaygroundTaskNavigationTarget {
   readonly kind: 'host' | 'external'
@@ -47,7 +48,7 @@ export function navigateTaskDetails(
   if (target === undefined) return false
   try {
     const navigator = new HostAgentTaskDetailsNavigator({
-      navigateHost: () => view.history.pushState(view.history.state, '', target.historyUrl!),
+      navigateHost: () => view.history.pushState(withoutCordisXRouteHistoryEntry(view.history.state), '', target.historyUrl!),
       navigateExternal: () => {
         if (openExternal === undefined) throw new Error('External task navigation is unavailable')
         openExternal(target.url)

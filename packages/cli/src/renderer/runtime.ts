@@ -71,7 +71,7 @@ import {
 } from './host-ui/AgentTaskDetailsNavigator.js'
 import { CordisXI18nService } from './i18n.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
-import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter } from './codex-router-history.js'
+import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter, withoutCordisXRouteHistoryEntry } from './codex-router-history.js'
 import {
   BrowserPermissionPolicyStore,
   BrowserPermissionPrompt,
@@ -2759,7 +2759,7 @@ async function start(
       navigateHost: value => {
         const target = new URL(value)
         if (target.protocol !== 'app:' || target.hostname !== '-') throw new Error('Host task details URL is unavailable')
-        window.history.pushState(window.history.state, '', target.pathname)
+        window.history.pushState(withoutCordisXRouteHistoryEntry(window.history.state), '', target.pathname)
         window.setTimeout(() => window.dispatchEvent(new Event(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT)), 0)
       },
       navigateExternal: value => {
@@ -2774,7 +2774,7 @@ async function start(
         navigator: taskDetailsNavigator,
         onSettings: value => {
           const path = `/playground/simulator/agents/${encodeURIComponent(`${value.agentId}@${value.revision}`)}`
-          window.history.pushState(window.history.state, '', path)
+          window.history.pushState(withoutCordisXRouteHistoryEntry(window.history.state), '', path)
           window.setTimeout(() => window.dispatchEvent(new Event(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT)), 0)
         },
       },

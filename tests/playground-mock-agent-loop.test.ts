@@ -178,11 +178,16 @@ describe('Playground deterministic AgentLoop Simulator', () => {
 
   it('navigates create-time task URLs through history and rejects unapproved URL schemes', async () => {
     const dom = new JSDOM('<!doctype html>', { url: 'http://127.0.0.1/' })
+    dom.window.history.replaceState({
+      key: 'room-entry', idx: 1,
+      __cordisxRouteV1: { schemaVersion: 1, owner: 'chatroom', routeId: 'room', outlet: 'main', path: '/main/chatroom/:roomId', params: { roomId: 'room-1' } },
+    }, '', '/')
     expect(navigateTaskDetails(dom.window, {
       url: 'app://-/playground/simulator/tasks/Simulator%20Task%201',
       target: 'host',
     })).toBe(true)
     expect(dom.window.location.pathname).toBe('/playground/simulator/tasks/Simulator%20Task%201')
+    expect(dom.window.history.state).not.toHaveProperty('__cordisxRouteV1')
     expect(simulatorTaskIdFromPath(dom.window.location.pathname)).toBe('Simulator Task 1')
     dom.window.history.back()
     await new Promise(resolve => dom.window.addEventListener('popstate', resolve, { once: true }))
