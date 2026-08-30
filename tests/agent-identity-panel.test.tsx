@@ -249,8 +249,10 @@ describe('Host Agent identity panel interaction', () => {
     expect(computed.boxShadow).toBe('none')
     expect(AGENT_CONVERSATION_STYLES).toContain('.cx-agent-identity-avatar-button:focus:not(:focus-visible)')
     expect(AGENT_CONVERSATION_STYLES).toContain('.cx-agent-identity-avatar-button:focus-visible')
+    expect(AGENT_CONVERSATION_STYLES).toContain('border-radius:50%')
     await act(async () => trigger.click())
     const panel = harness.dom.window.document.querySelector<HTMLElement>('[role="dialog"]')!
+    expect(panel.closest('[data-host-conversation-inspector="true"]')).not.toBeNull()
     expect(panel.getAttribute('aria-modal')).toBe('true')
     expect(panel.textContent).toContain('Lead')
     expect(panel.textContent).toContain('Coordinates the room and delegates focused work.')
@@ -293,8 +295,8 @@ describe('Host Agent identity panel interaction', () => {
     expect(harness.dom.window.document.activeElement).toBe(trigger)
 
     await act(async () => trigger.click())
-    const overlay = harness.dom.window.document.querySelector<HTMLElement>('.cx-agent-identity-overlay')!
-    await act(async () => overlay.dispatchEvent(new harness.dom.window.MouseEvent('pointerdown', { bubbles: true })))
+    const scrim = harness.dom.window.document.querySelector<HTMLButtonElement>('.cx-conversation-inspector-scrim')!
+    await act(async () => scrim.click())
     expect(harness.dom.window.document.querySelector('[role="dialog"]')).toBeNull()
     expect(harness.dom.window.document.activeElement).toBe(trigger)
     await harness.close()

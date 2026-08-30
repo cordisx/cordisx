@@ -208,6 +208,7 @@ describe('UI Playground', () => {
       readFile(path.resolve('packages/cli/src/playground/vite/server.ts'), 'utf8'),
     ])
     expect(app.match(/id="pg-recent-task-list-title"/g)).toHaveLength(1)
+    expect(styles).toContain('.pg-recent-task-list > [data-recent-task-row] .cxsi-icon { border-radius: 50%; }')
     expect(app).toContain("en ? 'Recent tasks' : '最近任务'")
     expect(app).toContain("en ? 'No recent tasks.' : '暂无最近任务。'")
     expect(app).toContain("en ? 'Mock' : '模拟'")

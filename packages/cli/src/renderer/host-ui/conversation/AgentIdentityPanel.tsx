@@ -12,6 +12,7 @@ import {
   validateAgentLoopTaskDetailsUrl,
 } from '../AgentTaskDetailsNavigator.js'
 import { HostAgentAvatar } from './AgentAvatar.js'
+import { HostConversationRightInspector } from './RightInspector.js'
 
 export type HostAgentIdentitySessionLifecycle = AgentConversationActiveRunDescriptor['lifecycle']['phase']
 export type HostAgentDefinitionIdentityPresentation = Readonly<AgentDefinitionIdentity>
@@ -74,18 +75,14 @@ export interface HostAgentIdentityAvatarButtonProps {
 const HANDLE_PATTERN = /^[^\u0000-\u001f\u007f]{1,512}$/u
 const AGENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const PANEL_STYLES = `
-.cx-agent-identity-overlay{position:fixed;inset:0;z-index:2147481800;display:flex;align-items:stretch;justify-content:flex-end;background:color-mix(in srgb,#000 32%,transparent)}
-.cx-agent-identity-panel{display:grid;width:min(390px,calc(100vw - 24px));min-width:0;grid-template-rows:auto minmax(0,1fr);overflow:hidden;border-left:1px solid var(--cx-border);background:var(--cx-surface);color:var(--cx-text);box-shadow:-18px 0 48px color-mix(in srgb,#000 22%,transparent)}
-.cx-agent-identity-header{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:12px;padding:18px;border-bottom:1px solid var(--cx-border)}
-.cx-agent-identity-avatar-seat{display:grid;width:52px;height:52px;overflow:hidden;place-items:center;border-radius:14px;background:var(--cx-hover)}
-.cx-agent-identity-avatar-seat .cxa-avatar{display:inline-grid;width:52px;height:52px;overflow:hidden;place-items:center;border:1px solid color-mix(in srgb,var(--cx-primary) 30%,var(--cx-border));border-radius:14px;background:color-mix(in srgb,var(--cx-primary) 10%,var(--cx-surface));font:700 13px/1 inherit}
+.cx-agent-identity-avatar-seat{display:grid;width:44px;height:44px;overflow:hidden;place-items:center;border-radius:50%;background:var(--cx-hover)}
+.cx-agent-identity-avatar-seat .cxa-avatar{display:inline-grid;width:44px;height:44px;overflow:hidden;place-items:center;border:1px solid color-mix(in srgb,var(--cx-primary) 30%,var(--cx-border));border-radius:50%;background:color-mix(in srgb,var(--cx-primary) 10%,var(--cx-surface));font:700 13px/1 inherit}
 .cx-agent-identity-avatar-seat .cxa-avatar-initials{display:inline-grid;width:100%;height:100%;place-items:center}.cx-agent-identity-avatar-seat .cxa-avatar-renderer{width:100%;height:100%}
-.cx-agent-identity-name{min-width:0;margin:0;overflow:hidden;font-size:17px;line-height:24px;text-overflow:ellipsis;white-space:nowrap}
-.cx-agent-identity-icon-action{display:inline-grid;width:34px;height:34px;padding:0;place-items:center;border:0;border-radius:9px;background:transparent;color:var(--cx-muted);cursor:pointer}.cx-agent-identity-icon-action:hover,.cx-agent-identity-icon-action:focus-visible{background:var(--cx-hover);color:var(--cx-text);outline:none}.cx-agent-identity-icon-action:focus-visible{box-shadow:0 0 0 2px var(--cx-primary)}
-.cx-agent-identity-body{min-height:0;overflow:auto;padding:18px}.cx-agent-identity-section+.cx-agent-identity-section{margin-top:24px}.cx-agent-identity-section h3{margin:0 0 10px;font-size:12px;line-height:18px;color:var(--cx-muted);letter-spacing:.02em}.cx-agent-identity-introduction{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55}
+.cx-agent-identity-body{min-height:0}.cx-agent-identity-section+.cx-agent-identity-section{margin-top:24px}.cx-agent-identity-section h3{margin:0 0 10px;font-size:12px;line-height:18px;color:var(--cx-muted);letter-spacing:.02em}.cx-agent-identity-introduction{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55}
 .cx-agent-identity-sessions{display:grid;gap:8px;margin:0;padding:0;list-style:none}.cx-agent-identity-session{display:grid;width:100%;min-width:0;grid-template-columns:minmax(0,1fr) auto;gap:5px 12px;padding:11px 12px;text-align:left;border:1px solid var(--cx-border);border-radius:11px;background:var(--cx-surface-raised,var(--cx-surface));color:var(--cx-text);cursor:pointer}.cx-agent-identity-session:hover,.cx-agent-identity-session:focus-visible{border-color:color-mix(in srgb,var(--cx-primary) 60%,var(--cx-border));background:var(--cx-hover);outline:none}.cx-agent-identity-session:focus-visible{box-shadow:0 0 0 2px var(--cx-primary)}.cx-agent-identity-session[disabled]{cursor:progress;opacity:.7}.cx-agent-identity-room,.cx-agent-identity-task{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cx-agent-identity-room{font-weight:650}.cx-agent-identity-task{grid-column:1;color:var(--cx-muted);font-size:11px}.cx-agent-identity-lifecycle{grid-column:2;grid-row:1/3;align-self:center;color:var(--cx-muted);font-size:11px}.cx-agent-identity-empty{margin:0;color:var(--cx-muted);font-size:12px}.cx-agent-identity-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 .cx-agent-identity-avatar-button{appearance:none;display:inline-grid;width:27px;height:27px;flex:none;align-self:flex-start;margin:0;padding:0;border:0;border-radius:8px;outline:0;background:transparent;box-shadow:none;color:inherit;font:inherit;line-height:0;cursor:pointer}.cx-agent-identity-avatar-button:hover{filter:brightness(1.04)}.cx-agent-identity-avatar-button:focus:not(:focus-visible){outline:0;box-shadow:none}.cx-agent-identity-avatar-button:focus-visible{outline:2px solid var(--cx-focus,var(--cx-primary));outline-offset:2px;box-shadow:none}
-@media (prefers-reduced-motion:reduce){.cx-agent-identity-overlay,.cx-agent-identity-panel,.cx-agent-identity-panel *{animation:none!important;transition:none!important}}
+.cx-agent-identity-avatar-button{border-radius:50%}
+@media (prefers-reduced-motion:reduce){.cx-agent-identity-body,.cx-agent-identity-body *{animation:none!important;transition:none!important}}
 `
 
 function boundedText(value: unknown, label: string, maximum: number, allowEmpty = false): string {
@@ -205,11 +202,6 @@ export function HostAgentIdentityAvatarButton({ presentation: input, label, onOp
   return <button type="button" className="cx-agent-identity-avatar-button" aria-label={label} onClick={onOpen}>{avatar}</button>
 }
 
-function focusable(panel: HTMLElement): HTMLElement[] {
-  return [...panel.querySelectorAll<HTMLElement>('button:not([disabled]),[href],[tabindex]:not([tabindex="-1"])')]
-    .filter(item => item.getAttribute('aria-hidden') !== 'true' && !item.hasAttribute('inert'))
-}
-
 export function HostAgentIdentityPanel({
   open,
   presentation: input,
@@ -221,41 +213,11 @@ export function HostAgentIdentityPanel({
 }: HostAgentIdentityPanelProps) {
   const presentation = React.useMemo(() => input === undefined ? undefined : createHostAgentIdentityPresentation(input), [input])
   const interactive = canOpenHostAgentIdentity(presentation)
-  const panelRef = React.useRef<HTMLElement>(null)
-  const returnFocusRef = React.useRef<HTMLElement | null>(null)
   const [pendingSession, setPendingSession] = React.useState<string | undefined>()
-  const titleId = React.useId()
   const introductionId = React.useId()
 
   React.useEffect(() => {
     if (open && !interactive) onOpenChange(false)
-  }, [interactive, onOpenChange, open])
-
-  React.useEffect(() => {
-    if (!open || !interactive) return
-    const panel = panelRef.current
-    if (panel === null) return
-    returnFocusRef.current = panel.ownerDocument.activeElement instanceof panel.ownerDocument.defaultView!.HTMLElement
-      ? panel.ownerDocument.activeElement
-      : null
-    focusable(panel)[0]?.focus()
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') { event.preventDefault(); onOpenChange(false); return }
-      if (event.key !== 'Tab') return
-      const items = focusable(panel)
-      if (items.length === 0) { event.preventDefault(); panel.focus(); return }
-      const first = items[0]!
-      const last = items.at(-1)!
-      if (event.shiftKey && panel.ownerDocument.activeElement === first) { event.preventDefault(); last.focus() }
-      else if (!event.shiftKey && panel.ownerDocument.activeElement === last) { event.preventDefault(); first.focus() }
-    }
-    panel.ownerDocument.addEventListener('keydown', onKeyDown, true)
-    return () => {
-      panel.ownerDocument.removeEventListener('keydown', onKeyDown, true)
-      const target = returnFocusRef.current
-      returnFocusRef.current = null
-      if (target?.isConnected) target.focus()
-    }
   }, [interactive, onOpenChange, open])
 
   if (!open || !interactive || presentation === undefined) return null
@@ -277,32 +239,22 @@ export function HostAgentIdentityPanel({
     name: presentation.name,
     ...(presentation.participant.avatar === undefined ? {} : { avatar: presentation.participant.avatar }),
   } as const
-  return <div
-    className="cx-agent-identity-overlay"
-    data-host-agent-identity-overlay="true"
-    onPointerDown={event => { if (event.target === event.currentTarget) onOpenChange(false) }}
-  >
+  return <>
     <style data-host-agent-identity-styles="true">{PANEL_STYLES}</style>
-    <aside
-      ref={panelRef}
-      className="cx-agent-identity-panel"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      aria-describedby={introductionId}
-      tabIndex={-1}
+    <HostConversationRightInspector
+      open={open}
+      title={presentation.name}
+      closeLabel={copy.close}
+      describedBy={introductionId}
+      onOpenChange={onOpenChange}
+      leading={<span className="cx-agent-identity-avatar-seat"><HostAgentAvatar participant={participant} /></span>}
+      actions={<button type="button" className="cx-conversation-inspector-icon-action" aria-label={copy.settings} onClick={() => {
+        void Promise.resolve()
+          .then(() => onSettings(presentation.participant.agentIdentity!))
+          .then(() => onOpenChange(false))
+          .catch(error => onNavigationError?.(error))
+      }}><HostSurfaceIcon token="host:settings" /></button>}
     >
-      <header className="cx-agent-identity-header">
-        <span className="cx-agent-identity-avatar-seat"><HostAgentAvatar participant={participant} /></span>
-        <h2 id={titleId} className="cx-agent-identity-name">{presentation.name}</h2>
-        <button type="button" className="cx-agent-identity-icon-action" aria-label={copy.settings} onClick={() => {
-          void Promise.resolve()
-            .then(() => onSettings(presentation.participant.agentIdentity!))
-            .then(() => onOpenChange(false))
-            .catch(error => onNavigationError?.(error))
-        }}><HostSurfaceIcon token="host:settings" /></button>
-        <button type="button" className="cx-agent-identity-icon-action" aria-label={copy.close} onClick={() => onOpenChange(false)}><HostSurfaceIcon token="host:close" /></button>
-      </header>
       <div className="cx-agent-identity-body">
         <section className="cx-agent-identity-section" aria-labelledby={`${introductionId}-heading`}>
           <h3 id={`${introductionId}-heading`}>{copy.introduction}</h3>
@@ -330,6 +282,6 @@ export function HostAgentIdentityPanel({
             })}</ul>}
         </section>
       </div>
-    </aside>
-  </div>
+    </HostConversationRightInspector>
+  </>
 }

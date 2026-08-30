@@ -18,6 +18,8 @@ import {
   HostAgentIdentityPanel,
   type HostAgentIdentityPresentation,
 } from './AgentIdentityPanel.js'
+import { HostConversationRightInspector } from './RightInspector.js'
+import { HostRoomCompositeAvatar } from './RoomCompositeAvatar.js'
 
 export interface AgentConversationRendererCopy {
   readonly locale: string
@@ -78,6 +80,10 @@ function ActionButton({ action, run }: { readonly action: AgentConversationActio
   </>
 }
 
+type ConversationInspector =
+  | Readonly<{ kind: 'members' | 'settings' | 'more' }>
+  | Readonly<{ kind: 'identity'; participantId: string }>
+
 function MessageEntry({
   entry, previous, model, commands, onCommandError, copy, identityPresentation, onOpenIdentity,
 }: {
@@ -98,6 +104,7 @@ function MessageEntry({
     && model.selection.participantPresentation === 'host-initials'
   const groupStart = previous?.kind !== 'message' || previous.authorId !== entry.authorId
   const state = stateCopy(entry, copy)
+  const outgoing = participant.role === 'human'
   return <article
     className="cxa-entry cxa-message"
     data-entry-id={entry.itemId}
@@ -105,7 +112,7 @@ function MessageEntry({
     data-group-start={String(groupStart)}
     data-delivery-state={entry.deliveryState}
     data-run-state={entry.runState}
-    aria-labelledby={labelId}
+    {...(outgoing ? { 'aria-label': participant.name } : { 'aria-labelledby': labelId })}
     aria-live={entry.ariaLive}
   >
     {showInitials && participant.role !== 'human'
@@ -114,36 +121,39 @@ function MessageEntry({
         : <HostAgentIdentityAvatarButton presentation={identityPresentation} label={`Open ${participant.name}`} onOpen={onOpenIdentity} />
       : null}
     <div className="cxa-message-content">
-      <div className="cxa-message-meta" id={labelId}>
-        <span className="cxa-author">{participant.name}</span>
-        <time dateTime={entry.timestamp}>{new Date(entry.timestamp).toLocaleTimeString(copy.locale, { hour: '2-digit', minute: '2-digit' })}</time>
-        {state === undefined ? null : <span className="cxa-message-state">{state}</span>}
+      {outgoing ? null : <div className="cxa-message-meta" id={labelId}>
+          <span className="cxa-author">{participant.name}</span>
+          <time dateTime={entry.timestamp}>{new Date(entry.timestamp).toLocaleTimeString(copy.locale, { hour: '2-digit', minute: '2-digit' })}</time>
+          {state === undefined ? null : <span className="cxa-message-state">{state}</span>}
+        </div>}
+      <div className="cxa-message-surface">
+        <div className="cxa-message-body">{entry.body.map((block, index) => <p key={index}>{block}</p>)}</div>
+        {!outgoing || entry.deliveryState !== 'failed' ? null : <span className="cxa-outgoing-error" role="status">{copy.failed}</span>}
+        {(entry.reactions ?? []).length === 0 ? null : <div className="cxa-message-reactions" role="list" aria-label={copy.locale.toLowerCase().startsWith('zh') ? '消息反应' : 'Message reactions'}>
+          {(entry.reactions ?? []).map(reaction => {
+            const actor = participantFor(model, reaction.actorParticipantId)
+            const actorName = actor?.name ?? (copy.locale.toLowerCase().startsWith('zh') ? '未知参与者' : 'Unknown participant')
+            const value = reaction.value.kind === 'emoji' ? reaction.value.emoji : reaction.value.token
+            const state = reactionStateCopy(reaction.state, copy.locale)
+            return <span
+              key={reaction.reactionId}
+              className="cxa-message-reaction"
+              data-reaction-state={reaction.state}
+              role="listitem"
+              aria-label={copy.locale.toLowerCase().startsWith('zh') ? `${actorName} 的反应：${value}，${state}` : `${actorName}'s reaction: ${value}, ${state}`}
+            >
+              {actor === undefined ? null : <span className="cxa-message-reaction-avatar"><HostAgentAvatar participant={actor} /></span>}
+              <span className="cxa-message-reaction-actor">{actorName}</span>
+              <span className="cxa-message-reaction-value">{value}</span>
+            </span>
+          })}
+        </div>}
+        {entry.actions.length === 0 ? null : <div className="cxa-message-actions">
+          {entry.actions.map(action => <ActionButton key={action.id} action={action} run={() => {
+            void commands.runMessage(model, entry.itemId, action).catch(onCommandError)
+          }} />)}
+        </div>}
       </div>
-      <div className="cxa-message-body">{entry.body.map((block, index) => <p key={index}>{block}</p>)}</div>
-      {(entry.reactions ?? []).length === 0 ? null : <div className="cxa-message-reactions" role="list" aria-label={copy.locale.toLowerCase().startsWith('zh') ? '消息反应' : 'Message reactions'}>
-        {(entry.reactions ?? []).map(reaction => {
-          const actor = participantFor(model, reaction.actorParticipantId)
-          const actorName = actor?.name ?? (copy.locale.toLowerCase().startsWith('zh') ? '未知参与者' : 'Unknown participant')
-          const value = reaction.value.kind === 'emoji' ? reaction.value.emoji : reaction.value.token
-          const state = reactionStateCopy(reaction.state, copy.locale)
-          return <span
-            key={reaction.reactionId}
-            className="cxa-message-reaction"
-            data-reaction-state={reaction.state}
-            role="listitem"
-            aria-label={copy.locale.toLowerCase().startsWith('zh') ? `${actorName} 的反应：${value}，${state}` : `${actorName}'s reaction: ${value}, ${state}`}
-          >
-            {actor === undefined ? null : <span className="cxa-message-reaction-avatar"><HostAgentAvatar participant={actor} /></span>}
-            <span className="cxa-message-reaction-actor">{actorName}</span>
-            <span className="cxa-message-reaction-value">{value}</span>
-          </span>
-        })}
-      </div>}
-      {entry.actions.length === 0 ? null : <div className="cxa-message-actions">
-        {entry.actions.map(action => <ActionButton key={action.id} action={action} run={() => {
-          void commands.runMessage(model, entry.itemId, action).catch(onCommandError)
-        }} />)}
-      </div>}
     </div>
   </article>
 }
@@ -245,12 +255,12 @@ function Composer({
 export function AgentConversationRenderer({ model, commands, copy, debugFixture = false, identity }: AgentConversationRendererProps) {
   const titleId = React.useId()
   const [commandError, setCommandErrorState] = React.useState<string | undefined>(undefined)
-  const [openIdentity, setOpenIdentity] = React.useState<string | undefined>()
+  const [inspector, setInspector] = React.useState<ConversationInspector | undefined>()
   const setCommandError = React.useCallback((value: string | undefined) => setCommandErrorState(value), [])
   const title = model.selection.kind === 'room' ? model.selection.title : copy.newRoomTitle
-  const participantSummary = model.selection.kind === 'room'
-    ? model.selection.secondary ?? model.selection.participants.map(participant => participant.name).join(' · ')
-    : undefined
+  // Shell v2 does not yet expose a Room description/update capability. Never
+  // substitute participant names or a fixture subtitle for product data.
+  const description: string | undefined = undefined
   const headerActions = model.headerActions
   const onCommandError = React.useCallback((error: unknown) => {
     setCommandError(error instanceof Error ? error.message : String(error))
@@ -285,10 +295,20 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
     return output
   }, [copy.locale, identity, model.selection])
   React.useEffect(() => {
-    if (openIdentity !== undefined && !identityPresentations.has(openIdentity)) setOpenIdentity(undefined)
-  }, [identityPresentations, openIdentity])
-  const selectedIdentity = openIdentity === undefined ? undefined : identityPresentations.get(openIdentity)
+    if (inspector?.kind === 'identity' && !identityPresentations.has(inspector.participantId)) setInspector(undefined)
+  }, [identityPresentations, inspector])
+  const selectedIdentity = inspector?.kind === 'identity' ? identityPresentations.get(inspector.participantId) : undefined
   const chinese = copy.locale.toLowerCase().startsWith('zh')
+  const participants = model.selection.kind === 'room' ? model.selection.participants : []
+  const activeRuns = model.selection.kind === 'room' ? model.selection.activeRuns ?? [] : []
+  const closeInspector = (): void => setInspector(undefined)
+  const lifecycleFor = (participantId: string): string | undefined => {
+    const phase = activeRuns.find(run => run.participantId === participantId)?.lifecycle.phase
+    if (phase === undefined) return undefined
+    return chinese
+      ? ({ active: '可用', running: '运行中', waiting: '等待中', attention: '需处理' } as const)[phase]
+      : ({ active: 'Available', running: 'Running', waiting: 'Waiting', attention: 'Needs attention' } as const)[phase]
+  }
   return <section
     className="cxa-root"
     data-agent-conversation-renderer="production"
@@ -300,26 +320,35 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
     <style data-agent-conversation-styles="production">{AGENT_CONVERSATION_STYLES}</style>
     <header className="cxa-chrome" data-agent-conversation-chrome="true">
       <div className="cxa-chrome-inner">
+        {model.selection.kind === 'room' ? <HostRoomCompositeAvatar
+          participants={participants}
+          size="header"
+          label={chinese ? '打开群成员' : 'Open room members'}
+          moreLabel={count => chinese ? `查看其余 ${count} 位群成员` : `View ${count} more room members`}
+          onOpen={() => setInspector({ kind: 'members' })}
+        /> : <span className="cxa-room-avatar" data-count="zero"><span className="cxa-room-avatar-fallback"><HostSurfaceIcon token="host:layers" /></span></span>}
         <div className="cxa-title-block">
           <h1 id={titleId} className="cxa-title">{title}</h1>
-          {participantSummary === undefined || participantSummary === '' ? null : <span className="cxa-participants">{participantSummary}</span>}
+          {model.selection.kind !== 'room' ? null : <button type="button" className="cxa-description-action" onClick={() => setInspector({ kind: 'settings' })}>
+            {description ?? (chinese ? '添加群聊介绍' : 'Add a room description')}
+          </button>}
         </div>
-        {headerActions.length === 0 ? null : <div className="cxa-header-actions">
-          {headerActions.map(action => <ActionButton key={action.id} action={action} run={() => {
-            void commands.runHeader(model, action).catch(onCommandError)
-          }} />)}
+        {model.selection.kind !== 'room' ? null : <div className="cxa-header-actions">
+          <button type="button" className="cxa-header-icon-action" aria-label={chinese ? '群成员' : 'Members'} onClick={() => setInspector({ kind: 'members' })}><HostSurfaceIcon token="host:layers" /></button>
+          <button type="button" className="cxa-header-icon-action" aria-label={chinese ? '设置' : 'Settings'} onClick={() => setInspector({ kind: 'settings' })}><HostSurfaceIcon token="host:settings" /></button>
+          <button type="button" className="cxa-header-icon-action" aria-label={chinese ? '更多' : 'More'} onClick={() => setInspector({ kind: 'more' })}><HostSurfaceIcon token="host:more" /></button>
         </div>}
       </div>
     </header>
     <div className="cxa-body">
-      <Timeline model={model} commands={commands} copy={copy} onCommandError={onCommandError} identityPresentations={identityPresentations} onOpenIdentity={setOpenIdentity} />
+      <Timeline model={model} commands={commands} copy={copy} onCommandError={onCommandError} identityPresentations={identityPresentations} onOpenIdentity={participantId => setInspector({ kind: 'identity', participantId })} />
       <Composer model={model} commands={commands} copy={copy} commandError={commandError} setCommandError={setCommandError} />
     </div>
     {identity === undefined ? null : <HostAgentIdentityPanel
       open={selectedIdentity !== undefined}
       {...(selectedIdentity === undefined ? {} : { presentation: selectedIdentity })}
       navigator={identity.navigator}
-      onOpenChange={open => { if (!open) setOpenIdentity(undefined) }}
+      onOpenChange={open => { if (!open) closeInspector() }}
       onSettings={identity.onSettings}
       onNavigationError={onCommandError}
       copy={{
@@ -335,6 +364,48 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
         },
       }}
     />}
+    {inspector?.kind !== 'members' ? null : <HostConversationRightInspector
+      open={true}
+      title={chinese ? '群成员' : 'Members'}
+      closeLabel={chinese ? '关闭群成员' : 'Close members'}
+      onOpenChange={open => { if (!open) closeInspector() }}
+    >
+      <ul className="cxa-members-list">{participants.map(participant => {
+        const presentation = identityPresentations.get(participant.id)
+        const role = participant.role === 'agent'
+          ? (chinese ? 'Agent' : 'Agent')
+          : participant.role === 'human' ? (chinese ? '成员' : 'Member') : (chinese ? '系统' : 'System')
+        return <li key={participant.id}><button
+          type="button"
+          className="cxa-member-button"
+          disabled={presentation === undefined}
+          onClick={() => { if (presentation !== undefined) setInspector({ kind: 'identity', participantId: participant.id }) }}
+        >
+          <HostAgentAvatar participant={participant} />
+          <span className="cxa-member-copy"><span className="cxa-member-name">{participant.name}</span><span className="cxa-member-role">{role}</span></span>
+          {lifecycleFor(participant.id) === undefined ? null : <span className="cxa-member-status">{lifecycleFor(participant.id)}</span>}
+        </button></li>
+      })}</ul>
+    </HostConversationRightInspector>}
+    {inspector?.kind !== 'settings' ? null : <HostConversationRightInspector
+      open={true}
+      title={chinese ? '群聊设置' : 'Room settings'}
+      closeLabel={chinese ? '关闭群聊设置' : 'Close room settings'}
+      onOpenChange={open => { if (!open) closeInspector() }}
+    >
+      <dl className="cxa-inspector-readonly"><dt>{chinese ? '群聊名称' : 'Room name'}</dt><dd>{title}</dd><dt>{chinese ? '群聊介绍' : 'Description'}</dt><dd>{description ?? (chinese ? '尚未添加' : 'Not added')}</dd></dl>
+      <p className="cxa-inspector-note">{chinese ? '当前 Conversation Shell 尚未提供群聊介绍的结构化更新能力。' : 'The Conversation Shell does not yet expose a structured room-description update capability.'}</p>
+    </HostConversationRightInspector>}
+    {inspector?.kind !== 'more' ? null : <HostConversationRightInspector
+      open={true}
+      title={chinese ? '更多' : 'More'}
+      closeLabel={chinese ? '关闭更多操作' : 'Close more actions'}
+      onOpenChange={open => { if (!open) closeInspector() }}
+    >
+      {headerActions.length === 0 ? null : <div className="cxa-inspector-actions">{headerActions.map(action => <ActionButton key={action.id} action={action} run={() => {
+        void commands.runHeader(model, action).then(closeInspector).catch(onCommandError)
+      }} />)}</div>}
+    </HostConversationRightInspector>}
     <div className="cxa-live-region" role="status" aria-live="polite">{commandError ?? ''}</div>
   </section>
 }
