@@ -9,6 +9,18 @@ export function activatePlaygroundReviewNavigation(
   let active = true
   let observer: MutationObserver | undefined
 
+  const view = document.defaultView
+  const state = view?.history.state
+  const route = state !== null && typeof state === 'object'
+    ? (state as { readonly __cordisxRouteV1?: unknown }).__cordisxRouteV1
+    : undefined
+  // Review mode supplies a default only for a genuinely blank first entry.
+  // Refreshing an existing plugin route or Host task URL must preserve the
+  // one native history stack instead of being redirected to New room.
+  if (view !== null && view !== undefined && (view.location.pathname !== '/' || route !== undefined)) {
+    return () => undefined
+  }
+
   const activate = (): boolean => {
     if (!active) return false
     const row = [...document.querySelectorAll<HTMLElement>('[data-sidebar-item]')]

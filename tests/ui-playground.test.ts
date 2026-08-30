@@ -51,6 +51,29 @@ describe('UI Playground', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  it('preserves existing plugin and Host task history entries during review boot', () => {
+    const plugin = new JSDOM('<!doctype html><body><nav><div data-sidebar-item="chatroom:chatroom"><button class="cxsi-primary">New room</button></div></nav></body>', { url: 'http://127.0.0.1/' })
+    plugin.window.history.replaceState({
+      __cordisxRouteV1: { schemaVersion: 1, owner: 'chatroom', routeId: 'chatroom:room', outlet: 'main', params: { roomId: 'room-2' } },
+    }, '', '/')
+    let pluginActivations = 0
+    plugin.window.document.querySelector('button')?.addEventListener('click', () => { pluginActivations += 1 })
+    activatePlaygroundReviewNavigation(plugin.window.document, 'chatroom:chatroom')
+    expect(pluginActivations).toBe(0)
+    expect(plugin.window.history.state.__cordisxRouteV1.params.roomId).toBe('room-2')
+    plugin.window.close()
+
+    const task = new JSDOM('<!doctype html><body><nav><div data-sidebar-item="chatroom:chatroom"><button class="cxsi-primary">New room</button></div></nav></body>', {
+      url: 'http://127.0.0.1/playground/simulator/tasks/Simulator%20Task%201',
+    })
+    let taskActivations = 0
+    task.window.document.querySelector('button')?.addEventListener('click', () => { taskActivations += 1 })
+    activatePlaygroundReviewNavigation(task.window.document, 'chatroom:chatroom')
+    expect(taskActivations).toBe(0)
+    expect(task.window.location.pathname).toBe('/playground/simulator/tasks/Simulator%20Task%201')
+    task.window.close()
+  })
+
   it('rejects a non-qualified Playground review navigation target', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-review-navigation-invalid-'))
     const configPath = path.join(root, 'cordisx.config.json')
