@@ -1,6 +1,8 @@
 import type { PlaygroundMockTaskDetailsUrl } from '../../renderer/playground-mock-agent-loop.js'
-
-const EXTERNAL_SCHEMES = new Set(['https:', 'codex:', 'claude:'])
+import {
+  HostAgentTaskDetailsNavigator,
+  validateAgentLoopTaskDetailsUrl,
+} from '../../renderer/host-ui/AgentTaskDetailsNavigator.js'
 
 export interface PlaygroundTaskNavigationTarget {
   readonly kind: 'host' | 'external'
@@ -9,17 +11,18 @@ export interface PlaygroundTaskNavigationTarget {
 }
 
 export function taskNavigationTarget(detailsUrl: PlaygroundMockTaskDetailsUrl): PlaygroundTaskNavigationTarget | undefined {
+  let validated: PlaygroundMockTaskDetailsUrl
   let parsed: URL
   try {
-    parsed = new URL(detailsUrl.url)
+    validated = validateAgentLoopTaskDetailsUrl(detailsUrl)
+    parsed = new URL(validated.url)
   } catch {
     return undefined
   }
-  if (detailsUrl.target === 'host') {
+  if (validated.target === 'host') {
     if (parsed.protocol !== 'app:' || parsed.hostname !== '-') return undefined
-    return { kind: 'host', url: parsed, historyUrl: `${parsed.pathname}${parsed.search}${parsed.hash}` }
+    return { kind: 'host', url: parsed, historyUrl: parsed.pathname }
   }
-  if (!EXTERNAL_SCHEMES.has(parsed.protocol)) return undefined
   return { kind: 'external', url: parsed }
 }
 
@@ -42,10 +45,17 @@ export function navigateTaskDetails(
 ): boolean {
   const target = taskNavigationTarget(detailsUrl)
   if (target === undefined) return false
-  if (target.kind === 'host') view.history.pushState(view.history.state, '', target.historyUrl)
-  else {
-    if (openExternal === undefined) return false
-    openExternal(target.url)
+  try {
+    const navigator = new HostAgentTaskDetailsNavigator({
+      navigateHost: () => view.history.pushState(view.history.state, '', target.historyUrl!),
+      navigateExternal: () => {
+        if (openExternal === undefined) throw new Error('External task navigation is unavailable')
+        openExternal(target.url)
+      },
+    })
+    navigator.navigate(detailsUrl)
+    return true
+  } catch {
+    return false
   }
-  return true
 }

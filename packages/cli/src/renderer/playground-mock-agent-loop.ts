@@ -1,4 +1,5 @@
 import type { AgentDefinition, AgentDefinitionIdentity, AgentLoopContentPart } from '../agent-loop-contracts.js'
+import type { AgentLoopTaskDetailsUrl } from '@cordisx/protocol/agent-loop/v2'
 import type { CordisXPlatformResult, CordisXPlatformSessionRef } from '../platform-contracts.js'
 import type {
   CordisXAgentLoopCreateContext,
@@ -38,10 +39,7 @@ export interface PlaygroundMockTraceLayer {
   readonly runtimeDefaults: AgentDefinition['runtimeDefaults']
 }
 
-export interface PlaygroundMockTaskDetailsUrl {
-  readonly url: string
-  readonly target: 'host' | 'external'
-}
+export type PlaygroundMockTaskDetailsUrl = AgentLoopTaskDetailsUrl
 
 export interface PlaygroundMockTaskTrace {
   readonly debugTaskId: string
