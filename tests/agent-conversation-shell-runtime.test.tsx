@@ -288,7 +288,7 @@ describe('Agent conversation shell public runtime', () => {
     await vi.waitFor(() => expect(issuedBinding).toBeDefined(), { timeout: 1_000, interval: 10 })
     expect(Object.isFrozen(issuedBinding)).toBe(true)
     expect(issuedBinding?.routeSelection).toEqual({ scope: 'room-or-new', selectedRoomParam: 'room-one' })
-    expect(dom.window.document.querySelector('[data-agent-conversation-renderer="production"]')).not.toBeNull()
+    await vi.waitFor(() => expect(dom.window.document.querySelector('[data-agent-conversation-renderer="production"]')).not.toBeNull(), { timeout: 1_000, interval: 10 })
     expect(dom.window.document.querySelectorAll('.cxa-chrome')).toHaveLength(1)
     expect(dom.window.document.querySelector('[data-agent-conversation-view="new-room"]')).not.toBeNull()
     const hostRoot = dom.window.document.getElementById('page')!

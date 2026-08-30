@@ -57,6 +57,7 @@ import { CordisXCommandService } from './commands.js'
 import { CordisXAgentConversationShellService } from './agent-conversation-shell.js'
 import { CordisXI18nService } from './i18n.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
+import { BrowserCodexRouteHistoryAdapter } from './codex-router-history.js'
 import {
   BrowserPermissionPolicyStore,
   BrowserPermissionPrompt,
@@ -480,6 +481,7 @@ async function start(
     ? globalThis.crypto.randomUUID()
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const iconThemeRegistry = new IconThemeRegistry(generation, metadata.profileId)
+  const routeHistory = new BrowserCodexRouteHistoryAdapter(window, metadata.hostKind === 'playground')
   const unbindIconThemeRegistry = bindIconThemeRegistry(document, iconThemeRegistry)
   const iconThemePreferenceBridge = metadata.iconThemePreferenceBridgeToken === undefined || metadata.appId === undefined
     ? undefined
@@ -2052,6 +2054,7 @@ async function start(
     managerContentFiber = undefined
     await routeFiber?.dispose()
     routeFiber = undefined
+    routeHistory.dispose()
     await pageFiber?.dispose()
     pageFiber = undefined
     await agentConversationShellFiber?.dispose()
@@ -2273,7 +2276,7 @@ async function start(
     pageFiber = ctx.plugin(CordisXPageService, pluginConsole)
     await pageFiber
     pageService = ctx.pages as CordisXPageService
-    routeFiber = ctx.plugin(CordisXRouteService, pluginConsole)
+    routeFiber = ctx.plugin(CordisXRouteService, { history: routeHistory, console: pluginConsole })
     await routeFiber
     routeService = ctx.routes as CordisXRouteService
     managerContentFiber = ctx.plugin(CordisXManagerContentNavigationService)
@@ -2344,6 +2347,7 @@ async function start(
       if (controller.status !== 'active') continue
       await mountPlugin(controller)
     }
+    await routeService.registry.startHistoryProjection()
     if (metadata.iconThemePreference !== undefined) {
       // Restore only after every provider has had a chance to register. An
       // unknown, stale, disposed, or version-mismatched identity leaves the
@@ -2380,6 +2384,7 @@ async function start(
   console.info(`[cordisx] mounted ${activeIds.length} plugin(s): ${activeIds.join(', ')}`)
   return handle
   } catch (error) {
+    routeHistory.dispose()
     sharedReactRuntime?.dispose()
     sharedReactRuntime = undefined
     throw error

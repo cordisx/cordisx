@@ -115,6 +115,7 @@ describe('built-in Channel product bundle', () => {
       actionRequests.push(request)
       queueMicrotask(() => (dom.window as unknown as { __cordisxChannelActionsReceiveV1?: (response: string) => void }).__cordisxChannelActionsReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value: { status: 'applied' } })))
     } })
+    dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
     dom.window.eval(bundle)
     await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true')
     const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime!
@@ -222,6 +223,7 @@ describe('built-in Channel product bundle', () => {
         })
       },
     })
+    dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
     dom.window.eval(bundle)
     await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true')
     const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime!
@@ -300,6 +302,7 @@ describe('built-in Channel product bundle', () => {
         requestId: request.requestId, ok: true, value: { contract: 'cordisx.service-config-result/v1', schemaVersion: 1, identity: descriptor.identity, scope: descriptor.scope, revision: 5, status: 'applied', configApplies: 'service-restart', serviceGeneration: 'next' },
       })))
     } })
+    dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
     dom.window.eval(bundle)
     await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true')
     const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime!

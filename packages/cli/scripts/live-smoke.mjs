@@ -1405,11 +1405,16 @@ if (parsed.values.exercise) {
     const mainPage = document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')
     const back = mainPage?.querySelector('button[aria-label="Back"]')
     const backEnabled = back !== null && back?.disabled === false
-    back?.click()
-    await wait(120)
+    const historyLengthAfterPush = history.length
+    const routeKeyAfterPush = history.state?.key ?? null
+    history.back()
+    await wait(250)
     const mainAfterBack = runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'main')
-    mainPage?.querySelector('button[aria-label="Close"]')?.click()
-    await wait(120)
+    history.forward()
+    await wait(250)
+    const mainAfterForward = runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'main')
+    document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"] button[aria-label="Close"]')?.click()
+    await wait(250)
     const mainAfterClose = runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'main')
 
     await runtime.navigate('slot-showcase', { id: 'app.overview' })
@@ -1490,7 +1495,7 @@ if (parsed.values.exercise) {
       initialNative,
       sidebar: { before: sidebarBefore, collapsed, collapsedMain, expanded, after: sidebarAfter },
       panels: panelResult,
-      history: { backEnabled, afterBack: mainAfterBack, afterClose: mainAfterClose },
+      history: { backEnabled, historyLengthAfterPush, routeKeyAfterPush, afterBack: mainAfterBack, afterForward: mainAfterForward, afterClose: mainAfterClose },
       localization: {
         originalLang, projectedLang,
         changed: originalText !== projectedText,
@@ -1504,7 +1509,7 @@ if (parsed.values.exercise) {
       blocked,
       restored,
       finalNavigate,
-      browserHistoryUnchanged: location.href === 'app://-/index.html',
+      browserUrlUnchanged: location.href === 'app://-/index.html',
       finalOutlet: runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'main'),
     }
   })()`, true)

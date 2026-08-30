@@ -27,6 +27,7 @@ import {
   ExtensionPointPolicyBroker,
   MemoryExtensionPointPolicyStore,
 } from '../packages/cli/src/renderer/extension-points.js'
+import { TestCodexRouteHistory } from './helpers/codex-route-history.js'
 
 declare module '../packages/cli/src/contracts.js' {
   interface CordisXOutletMap {
@@ -110,7 +111,7 @@ describe('NavigationRegistry', () => {
     outlets.declare({
       schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation', presentationGroup: 'primary',
     }, new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer'), path => !path.startsWith('/main/'))
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     const mount = markAgentConversationPageMount(({ container }: { container: HTMLElement }) => {
       const chrome = container.ownerDocument.createElement('header')
       chrome.className = 'cxa-chrome'
@@ -164,7 +165,7 @@ describe('NavigationRegistry', () => {
   it('projects localized route/page metadata and diagnoses legacy omissions without inventing purpose', async () => {
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     pages.register('demo', {
       $schema: CORDISX_PAGE_SCHEMA_V3,
       schemaVersion: 3,
@@ -232,7 +233,7 @@ describe('NavigationRegistry', () => {
     outlets.dispose()
   })
 
-  it('allows same-path page/route generations while projecting one coherent view', () => {
+  it('rebinds the current Codex history entry across a same-route generation replacement', async () => {
     const activation = (revision: number, generation: string): CordisXPluginActivationRecordV1 => ({
       $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, schemaVersion: 1,
       recordKind: revision === 1 ? 'active' : 'candidate',
@@ -245,27 +246,84 @@ describe('NavigationRegistry', () => {
     const visibility = new GenerationVisibilityCoordinator(previous)
     const pages = new PageRegistry(visibility)
     const outlets = new OutletRegistry()
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    const dom = new JSDOM('<body><main id="app"></main></body>')
+    outlets.declare({
+      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
+    }, new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer'), path => path === '/settings')
+    const history = new TestCodexRouteHistory()
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), history)
     const oldContext = new Context().extend({ [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-1' })
-    pages.register(oldContext, { id: 'settings', title: { key: 'old' } }, () => undefined)
+    pages.register(oldContext, { id: 'settings', title: { key: 'old' } }, ({ container }) => { container.textContent = 'old' })
     navigation.register(oldContext, { id: 'settings', path: '/settings', outlet: 'app', page: 'settings' })
+    await navigation.navigate('demo', { id: 'settings' })
+    const currentHistory = history.snapshot()
 
     const handle = visibility.begin('update-demo', previous, candidate)
     const candidateContext = new Context().extend({
       [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-2', ...visibility.context(handle, 'demo'),
     })
-    pages.register(candidateContext, { id: 'settings', title: { key: 'new' } }, () => undefined)
+    pages.register(candidateContext, { id: 'settings', title: { key: 'new' } }, ({ container }) => { container.textContent = 'new' })
     navigation.register(candidateContext, { id: 'settings', path: '/settings', outlet: 'app', page: 'settings' })
     expect(navigation.snapshot().pages[0]?.metadata.title).toEqual({ key: 'old' })
     expect(navigation.snapshot(visibility.view(candidateContext)).pages[0]?.metadata.title).toEqual({ key: 'new' })
     expect(navigation.snapshot(visibility.view(candidateContext)).routes).toHaveLength(1)
 
     visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
+    await navigation.settled()
     expect(navigation.snapshot().pages[0]?.metadata.title).toEqual({ key: 'new' })
     expect(navigation.snapshot().routes).toHaveLength(1)
-    void navigation.dispose()
+    expect(history.snapshot()).toMatchObject({ key: currentHistory.key, index: currentHistory.index, entry: currentHistory.entry })
+    expect(dom.window.document.querySelector('[data-cordisx-page="demo:settings"]')?.textContent).toContain('new')
+    await navigation.dispose()
     pages.dispose()
     outlets.dispose()
+    dom.window.close()
+  })
+
+  it('restores from Codex location, distinguishes params, follows native forward, and replaces an uninstalled current route', async () => {
+    const dom = new JSDOM('<body><main id="main"></main></body>')
+    const pages = new PageRegistry()
+    const outlets = new OutletRegistry()
+    outlets.declare({
+      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'portal', contextPolicy: 'semantic',
+    }, new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one'), path => path.startsWith('/main/'))
+    const history = new TestCodexRouteHistory()
+    history.push(Object.freeze({
+      schemaVersion: 1, owner: 'chatroom', routeId: 'chatroom:room', outlet: 'main',
+      path: '/main/rooms/one', params: Object.freeze({ roomId: 'one' }),
+    }))
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), history)
+    const mounted: string[] = []
+    pages.register('chatroom', { id: 'room', title: { key: 'room' } }, ({ container, params }) => {
+      mounted.push(String(params.roomId))
+      container.textContent = String(params.roomId)
+    })
+    const unregisterRoute = navigation.register('chatroom', { id: 'room', path: '/main/rooms/:roomId', outlet: 'main', page: 'room' })
+
+    await navigation.startHistoryProjection()
+    expect(navigation.snapshot().outlets[0]).toMatchObject({ activeRoute: 'chatroom:room', mounted: true })
+    expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')?.textContent).toContain('one')
+
+    await navigation.navigate('chatroom', { id: 'room', params: { roomId: 'two' } })
+    expect(history.snapshot()).toMatchObject({ index: 2, entry: { routeId: 'chatroom:room', params: { roomId: 'two' } } })
+    await navigation.back('chatroom', 'main')
+    expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')?.textContent).toContain('one')
+    await history.nativeForward()
+    await navigation.settled()
+    expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')?.textContent).toContain('two')
+    expect(mounted).toEqual(['one', 'two', 'one', 'two'])
+
+    const indexBeforeUnload = history.snapshot().index
+    unregisterRoute()
+    await navigation.settled()
+    expect(history.snapshot()).toMatchObject({ index: indexBeforeUnload })
+    expect(history.snapshot().entry).toBeUndefined()
+    expect(navigation.snapshot().outlets[0]).toMatchObject({ mounted: false, presentation: 'inactive' })
+
+    await navigation.dispose()
+    pages.dispose()
+    outlets.dispose()
+    dom.window.close()
   })
 
   it('moves one mounted page across same-key anchor replacement and disposes on context switch', async () => {
@@ -276,7 +334,7 @@ describe('NavigationRegistry', () => {
     outlets.declare({
       schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'absolute', contextPolicy: 'semantic',
     }, controller, path => path.startsWith('/main/'))
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     let mounts = 0
     let cleanups = 0
     let aborted = false
@@ -315,7 +373,7 @@ describe('NavigationRegistry', () => {
     dom.window.close()
   })
 
-  it('supports internal back/close without browser history and rejects stale session routes', async () => {
+  it('uses Codex session history for back/close without changing the native URL and rejects stale session routes', async () => {
     const dom = new JSDOM('<body><main id="app"></main><main id="session"></main></body>', { url: 'https://example.test/native' })
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
@@ -327,7 +385,7 @@ describe('NavigationRegistry', () => {
     outlets.declare({
       schemaVersion: 1, id: 'session.content', authority: 'host-adapter', scope: 'session', preferredPlacement: 'absolute', contextPolicy: 'semantic',
     }, session, path => path.startsWith('/sessions/:sessionId/'))
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     pages.register('demo', { id: 'first', title: { key: 'first' }, icon: 'host:info' }, () => undefined)
     pages.register('demo', { id: 'second', title: { key: 'second' }, icon: 'host:analytics' }, () => undefined)
     pages.register('demo', { id: 'session', title: { key: 'session' } }, () => undefined)
@@ -336,8 +394,8 @@ describe('NavigationRegistry', () => {
     navigation.register('demo', { id: 'session', path: '/sessions/:sessionId/files', outlet: 'session.content', page: 'session' })
 
     await navigation.navigate('demo', { id: 'first' })
-    expect(dom.window.document.querySelector('[data-cordisx-page-leading] [data-host-icon="host:info"]')).not.toBeNull()
-    expect(dom.window.document.querySelector('[data-cordisx-page-chrome] button[aria-label="Back"]')).toBeNull()
+    expect(dom.window.document.querySelector('[data-cordisx-page-leading] [data-host-icon="host:info"]')).toBeNull()
+    expect(dom.window.document.querySelector('[data-cordisx-page-chrome] button[aria-label="Back"]')).not.toBeNull()
     await navigation.navigate('demo', { id: 'second' })
     const back = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-page-leading] button[aria-label="Back"]')!
     expect(back).not.toBeNull()
@@ -370,7 +428,7 @@ describe('NavigationRegistry', () => {
     outlets.declare({
       schemaVersion: 1, id: 'session.content', authority: 'host-adapter', scope: 'session', preferredPlacement: 'absolute', contextPolicy: 'semantic',
     }, controller, path => path.startsWith('/sessions/:sessionId/'))
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     pages.register('demo', {
       id: 'trace', title: { key: 'trace', fallback: 'Agent Trace' }, icon: 'host:history', chrome: 'body-only',
     }, ({ container }) => {
@@ -447,7 +505,7 @@ describe('NavigationRegistry', () => {
     const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore(), 'generation-one')
     const identity = { source: 'file:///plugins/demo/index.ts', id: 'demo' }
     broker.register(identity)
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     navigation.setAccessResolver(broker)
     const events: string[] = []
     pages.register('demo', {
@@ -496,7 +554,7 @@ describe('NavigationRegistry', () => {
     const dom = new JSDOM('<body><main id="logical"></main><div id="panel"></div></body>')
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     navigation.register('demo', {
       id: 'pending', path: '/manager/settings/pending', outlet: 'manager.settings.content', page: 'pending',
     })
@@ -542,7 +600,7 @@ describe('NavigationRegistry', () => {
     dom.window.close()
   })
 
-  it('suspends an overlapping outlet without remounting and restores it after close', async () => {
+  it('keeps one Codex-history route current and restores the previous outlet after close', async () => {
     const dom = new JSDOM('<body><main id="main"></main><main id="app"></main></body>')
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
@@ -554,7 +612,7 @@ describe('NavigationRegistry', () => {
     outlets.declare({
       schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation', presentationGroup: 'primary',
     }, app, path => !path.startsWith('/main/'))
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     pages.register('demo', { id: 'main', title: { key: 'main' } }, ({ container }) => {
       const input = container.ownerDocument.createElement('input')
       input.value = 'preserved'
@@ -568,19 +626,18 @@ describe('NavigationRegistry', () => {
     const mainPage = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="demo:main"]')!
     await navigation.navigate('demo', { id: 'app' })
     expect(navigation.snapshot().outlets.find(item => item.id === 'main')).toMatchObject({
-      mounted: true, presentation: 'suspended', suspendedBy: 'app',
+      mounted: false, presentation: 'inactive',
     })
     expect(navigation.snapshot().outlets.find(item => item.id === 'app')).toMatchObject({ presentation: 'presented' })
-    expect(mainPage.isConnected).toBe(true)
-    expect(mainPage.inert).toBe(true)
-    expect(mainPage.getAttribute('aria-hidden')).toBe('true')
+    expect(mainPage.isConnected).toBe(false)
 
     await navigation.close('demo', 'app')
     expect(navigation.snapshot().outlets.find(item => item.id === 'main')).toMatchObject({ presentation: 'presented' })
-    expect(dom.window.document.querySelector('[data-cordisx-page="demo:main"]')).toBe(mainPage)
-    expect(mainPage.querySelector('input')?.value).toBe('preserved')
-    expect(mainPage.inert).toBe(false)
-    expect(mainPage.hasAttribute('aria-hidden')).toBe(false)
+    const restoredMainPage = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="demo:main"]')!
+    expect(restoredMainPage).not.toBe(mainPage)
+    expect(restoredMainPage.querySelector('input')?.value).toBe('preserved')
+    expect(restoredMainPage.inert).toBe(false)
+    expect(restoredMainPage.hasAttribute('aria-hidden')).toBe(false)
 
     await navigation.dispose()
     pages.dispose()
@@ -612,7 +669,7 @@ describe('NavigationRegistry', () => {
     outlets.declare({
       schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
     }, controller, path => !path.startsWith('/main/') && !path.startsWith('/sessions/'))
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), undefined, broker, commands)
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory(), undefined, broker, commands)
     let executions = 0
     commandRegistry.register('demo', { id: 'refresh', title: { key: 'refresh', fallback: 'Refresh' } }, () => { executions += 1 })
     let bodyContainer: HTMLElement | undefined
@@ -635,8 +692,8 @@ describe('NavigationRegistry', () => {
     const chrome = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-chrome]')!
     const title = chrome.querySelector<HTMLElement>('[data-cordisx-page-title]')!
     const action = chrome.querySelector<HTMLButtonElement>('[data-cordisx-page-header-action="refresh"]')!
-    expect(chrome.querySelector('[data-cordisx-page-leading] [data-host-icon="host:layers"]')).not.toBeNull()
-    expect(chrome.querySelector('button[aria-label="Back"]')).toBeNull()
+    expect(chrome.querySelector('[data-cordisx-page-leading] [data-host-icon="host:layers"]')).toBeNull()
+    expect(chrome.querySelector('button[aria-label="Back"]')).not.toBeNull()
     expect(title.textContent).toBe('Overview')
     expect(action.classList.contains('native-icon-button')).toBe(true)
     expect(action.textContent).toBe('')
@@ -713,7 +770,7 @@ describe('NavigationRegistry', () => {
     outlets.declare({
       schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
     }, new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer'), path => path === '/trace')
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     pages.register('demo', { id: 'trace', title: { key: 'trace' }, chrome: 'body-only' }, () => undefined)
     navigation.register('demo', { id: 'trace', path: '/trace', outlet: 'app', page: 'trace' })
     expect(navigation.snapshot().routes[0]).toMatchObject({
@@ -733,7 +790,7 @@ describe('NavigationRegistry', () => {
     outlets.declare({
       schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
     }, new FakeOutlet(dom.window.document.querySelector('main')!), () => true)
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n())
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     pages.register('one', { id: 'page', title: { key: 'page' } }, () => undefined)
     pages.register('two', { id: 'page', title: { key: 'page' } }, () => undefined)
     navigation.register('one', { id: 'route', path: '/conflict', outlet: 'app', page: 'page' })
@@ -776,7 +833,7 @@ describe('NavigationRegistry', () => {
     const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
     const identity = { source: 'https://plugins.example/demo', id: 'demo' }
     broker.register(identity)
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), undefined, broker)
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory(), undefined, broker)
     let aborted = false
     let disposed = 0
     pages.register('demo', { id: 'page', title: { key: 'page' } }, ({ signal }) => {
@@ -804,7 +861,7 @@ describe('NavigationRegistry', () => {
     expect(controller.hides).toBe(hidesBeforeOutletDeny + 1)
     expect(navigation.snapshot().routes[0]).toMatchObject({ valid: true, authorized: false, pointPolicy: 'deny' })
     expect(broker.accessDiagnostics()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ request: expect.objectContaining({ operation: 'outlet.page.mount' }), authorized: false }),
+      expect.objectContaining({ request: expect.objectContaining({ operation: 'outlet.route.navigate' }), authorized: false }),
     ]))
     expect(navigation.match('app', '/demo')).toBeUndefined()
     const shows = controller.shows

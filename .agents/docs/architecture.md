@@ -465,6 +465,28 @@ session change, plugin block, and generation disposal all converge on the same
 outlet lifecycle. An explicit close restores focus to the still-connected
 host-rendered trigger when practical.
 
+Plugin routes use Codex's current React Router/browser session history as their
+only back/forward authority. The installed renderer does not expose a supported
+navigator object, so the private adapter probes the existing browser-history
+record for React Router's non-empty `key` and non-negative integer `idx`. A
+failed probe makes route navigation unavailable; it never activates a CordisX
+memory-history fallback. A successful `ctx.routes.navigate()` validates the
+complete owner/permission/params/page/outlet/session tuple, preserves Codex's
+URL and `usr` state, then adds a closed namespaced route projection while
+advancing the same session history. The adapter emits the location signal that
+the existing React Router observes and watches native PUSH/REPLACE/POP in the
+opposite direction. Consequently native title-bar buttons, keyboard shortcuts,
+trackpad gestures, page-chrome Back/close, and plugin jumps all traverse one
+history. Same route ids with different params are distinct entries.
+
+Initial injection and reload restore only the current validated projection.
+Same-id plugin generation replacement rebinds that entry without adding or
+replacing history; an invalidated, blocked, or uninstalled current route is
+removed with REPLACE at the same index. A non-current stale entry cannot be
+rewritten until native navigation reaches it, at which point validation either
+mounts it or replaces its invalid projection. CordisX never queries or clicks
+the native controls and never patches an installed application file.
+
 Page-v2 `body-only` is a general structured chrome policy with a host outlet
 gate. The current adapter accepts it only for `session.content`, whose overlay
 begins below the retained native session header. The host does not create a

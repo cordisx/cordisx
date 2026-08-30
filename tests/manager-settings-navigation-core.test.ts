@@ -18,6 +18,7 @@ import {
   type OutletController,
   type OutletHostSnapshot,
 } from '../packages/cli/src/renderer/navigation.js'
+import { TestCodexRouteHistory } from './helpers/codex-route-history.js'
 import { SurfaceRegistry } from '../packages/cli/src/renderer/surfaces.js'
 import { HostContextStore } from '../packages/cli/src/renderer/validation.js'
 
@@ -152,7 +153,7 @@ describe('Manager Settings navigation core', () => {
     contexts.replace({ enabled: false })
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), contexts)
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory(), contexts)
 
     navigation.register('demo', {
       $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2,

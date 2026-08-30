@@ -237,6 +237,7 @@ describe('CLIProxy provider plugin renderer', () => {
         })
       },
     })
+    dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
     dom.window.eval(bundle)
     for (let attempt = 0; attempt < 100 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))

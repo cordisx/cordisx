@@ -42,6 +42,11 @@ import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
 import { dismissHostTooltips, HostTooltipController } from './tooltips.js'
 import { HostPageControls } from './page-controls.js'
 import type { PluginConsoleAspect } from './plugin-console.js'
+import type {
+  CodexRouteHistoryAdapter,
+  CodexRouteHistoryEntry,
+  CodexRouteHistorySnapshot,
+} from './codex-router-history.js'
 import {
   ICON_TOKEN_PATTERN,
   HostContextStore,
@@ -507,7 +512,7 @@ interface ManagedManagerPageMountRecord extends ManagedManagerPageMount {
 }
 
 interface OutletNavigationState {
-  stack: RouteEntry[]
+  current?: RouteEntry
   mount?: MountedPage
   contextKey?: string
   returnFocus?: HTMLElement
@@ -783,14 +788,17 @@ export class NavigationRegistry {
   private readonly unsubscribePages: () => void
   private readonly unsubscribeOutlets: () => void
   private readonly unsubscribeManagerContent: () => void
+  private readonly unsubscribeHistory: () => void
   private operation = Promise.resolve()
   private disposed = false
+  private historyProjectionStarted = false
   private readonly disconnectVisibility: (() => void) | undefined
 
   constructor(
     private readonly pages: PageRegistry,
     private readonly outlets: OutletRegistry,
     private readonly i18n: CordisXI18nService,
+    private readonly history: CodexRouteHistoryAdapter,
     readonly contexts: HostContextStore = new HostContextStore(),
     private access?: ExtensionPointAccessResolver,
     private readonly commands?: Pick<CordisXCommandService, 'hasFor' | 'executeFor' | 'subscribeInternal'>,
@@ -798,9 +806,18 @@ export class NavigationRegistry {
     this.unsubscribePages = pages.subscribe(() => { void this.enqueue(() => this.reconcileDependencies()) })
     this.unsubscribeOutlets = outlets.subscribe(() => { void this.enqueue(() => this.reconcileDependencies()) })
     this.unsubscribeManagerContent = this.managerContent.subscribe(() => this.notify())
+    this.unsubscribeHistory = history.subscribe(() => {
+      if (this.historyProjectionStarted) void this.enqueue(() => this.applyHistorySnapshot(history.snapshot()))
+    })
     this.disconnectVisibility = pages.visibility?.connect({ notify: () => {
       void this.enqueue(() => this.reconcileGeneration())
     } })
+  }
+
+  /** Begin reverse projection only after Host outlets and plugin routes are registered. */
+  startHistoryProjection(): Promise<void> {
+    this.historyProjectionStarted = true
+    return this.enqueue(() => this.applyHistorySnapshot(this.history.snapshot()))
   }
 
   managerContentPresentation(
@@ -1293,7 +1310,7 @@ export class NavigationRegistry {
       return { active: false, presented: false, outlet: record.definition.outlet }
     }
     const state = this.states.get(record.definition.outlet)
-    const current = state?.stack.at(-1)
+    const current = state?.current
     const active = current?.record === record && sameRouteParams(current.params, params) && state?.mount !== undefined
     return {
       active,
@@ -1317,7 +1334,7 @@ export class NavigationRegistry {
       }
       if (this.routeProjection(requestingOwner, reference).active) {
         const record = this.visibleRecords().find(item => item.qualifiedId === routeId)
-        if (record !== undefined) await this.closeNow(record.definition.outlet, true)
+        if (record !== undefined) await this.goBackOrClear(record.definition.outlet, true)
         this.notify()
         return
       }
@@ -1330,14 +1347,8 @@ export class NavigationRegistry {
       const name = outlet ?? this.currentOutletFor(requestingOwner)
       if (name === undefined) throw new Error(`plugin ${requestingOwner} has no open route`)
       const state = this.states.get(name)
-      if (state === undefined || state.stack.length < 2) {
-        await this.closeNow(name, true)
-        return
-      }
-      await this.unmount(state)
-      state.stack.pop()
-      await this.mountCurrent(name, state)
-      await this.reconcilePresentation()
+      if (state?.current?.record.owner !== requestingOwner) throw new Error(`plugin ${requestingOwner} has no open route`)
+      await this.goBackOrClear(name, true)
       this.notify()
     })
   }
@@ -1346,7 +1357,9 @@ export class NavigationRegistry {
     return this.enqueue(async () => {
       const name = outlet ?? this.currentOutletFor(requestingOwner)
       if (name === undefined) return
-      await this.closeNow(name, true)
+      const state = this.states.get(name)
+      if (state?.current?.record.owner !== requestingOwner) return
+      await this.goBackOrClear(name, true)
       this.notify()
     })
   }
@@ -1419,7 +1432,7 @@ export class NavigationRegistry {
         ...(state?.suspendedBy === undefined ? {} : { suspendedBy: state.suspendedBy }),
         ...(managerMount !== undefined
           ? { activeRoute: managerMount.routeId }
-          : state?.stack.at(-1) === undefined ? {} : { activeRoute: state.stack.at(-1)!.record.qualifiedId }),
+          : state?.current === undefined ? {} : { activeRoute: state.current.record.qualifiedId }),
         ...(state?.error === undefined ? {} : { error: state.error }),
       }
     })
@@ -1441,6 +1454,7 @@ export class NavigationRegistry {
     this.unsubscribePages()
     this.unsubscribeOutlets()
     this.unsubscribeManagerContent()
+    this.unsubscribeHistory()
     await this.operation.catch(() => {})
     await this.unmountManagerSettings()
     await this.unmountManagerContent()
@@ -1451,6 +1465,7 @@ export class NavigationRegistry {
     this.presentationOrder = []
     this.listeners.clear()
     this.disconnectVisibility?.()
+    this.history.dispose()
     for (const [site, owner] of this.metadataProjectionSites) this.i18n.clearDiagnosticSite(owner, site)
     this.metadataProjectionSites.clear()
   }
@@ -1510,30 +1525,12 @@ export class NavigationRegistry {
   private async reconcileGeneration(): Promise<void> {
     if (this.managerSettingsMount !== undefined) await this.unmountManagerSettings()
     if (this.managerContentMount !== undefined) await this.unmountManagerContent()
-    for (const [name, state] of this.states) {
-      let changed = false
-      const replacement: RouteEntry[] = []
-      for (const entry of state.stack) {
-        const active = this.findRecord(entry.record.owner, entry.record.definition.id)
-        if (active === undefined) continue
-        changed ||= active !== entry.record
-        replacement.push({ ...entry, record: active })
-      }
-      if (replacement.length !== state.stack.length) changed = true
-      if (!changed) continue
-      await this.unmount(state)
-      state.stack = replacement
-      if (replacement.length === 0) {
-        await this.closeNow(name)
-      } else {
-        await this.mountCurrent(name, state)
-      }
-    }
-    await this.reconcilePresentation()
-    this.notify()
+    if (this.historyProjectionStarted) await this.applyHistorySnapshot(this.history.snapshot())
   }
 
   private routeError(record: RouteRecord): string | undefined {
+    const history = this.history.snapshot()
+    if (!history.available) return history.reason ?? 'Codex session history is unavailable'
     const view = record.candidateView
     const conflict = this.visibleRecords(view).find(other => other !== record
       && other.definition.outlet === record.definition.outlet
@@ -1585,7 +1582,109 @@ export class NavigationRegistry {
     if (!evaluateWhen(record.definition.when, values)) return 'route when condition is not satisfied'
   }
 
+  private async applyHistorySnapshot(snapshot: CodexRouteHistorySnapshot, returnFocus?: HTMLElement): Promise<void> {
+    const projected = snapshot.entry
+    if (!snapshot.available || projected === undefined) {
+      for (const [name, state] of this.states) {
+        if (state.current !== undefined || state.mount !== undefined) await this.closeNow(name)
+      }
+      this.notify()
+      return
+    }
+    const record = this.visibleRecords().find(candidate => candidate.owner === projected.owner
+      && candidate.qualifiedId === projected.routeId)
+    if (record === undefined) {
+      this.history.replace()
+      await this.applyHistorySnapshot(this.history.snapshot())
+      return
+    }
+    let path: string
+    try {
+      path = buildPath(record, projected.params)
+    } catch {
+      this.history.replace()
+      await this.applyHistorySnapshot(this.history.snapshot())
+      return
+    }
+    const routeAccess = this.access?.authorizeOutletRoute(
+      record.owner,
+      record.definition.outlet,
+      record.qualifiedId,
+      qualifyOwnedId(record.owner, record.definition.page),
+      record.candidateView,
+    )
+    if (this.routeError(record) !== undefined
+      || routeAccess?.authorized === false
+      || projected.outlet !== record.definition.outlet
+      || projected.path !== path) {
+      this.history.replace()
+      await this.applyHistorySnapshot(this.history.snapshot())
+      return
+    }
+    for (const [name, state] of this.states) {
+      if (name !== record.definition.outlet && (state.current !== undefined || state.mount !== undefined)) await this.closeNow(name)
+    }
+    const outlet = this.outlets.get(record.definition.outlet)!
+    await outlet.controller.show()
+    const host = outlet.controller.getSnapshot()
+    const state = this.states.get(record.definition.outlet) ?? {}
+    this.states.set(record.definition.outlet, state)
+    const entry: RouteEntry = { record, params: projected.params, path }
+    if (returnFocus !== undefined) state.returnFocus = returnFocus
+    if (!host.available || host.container === undefined || host.contextKey === undefined) {
+      await this.unmount(state)
+      state.current = entry
+      delete state.contextKey
+      this.presentationOrder = this.presentationOrder.filter(name => name !== record.definition.outlet)
+      this.notify()
+      return
+    }
+    if (state.contextKey !== undefined && state.contextKey !== host.contextKey) {
+      this.history.replace()
+      await this.applyHistorySnapshot(this.history.snapshot())
+      return
+    }
+    if (record.definition.outlet === 'session.content' && String(projected.params.sessionId) !== host.nativeSessionId) {
+      this.history.replace()
+      await this.applyHistorySnapshot(this.history.snapshot())
+      return
+    }
+    const sameEntry = state.current?.record === record
+      && state.current.path === path
+      && sameRouteParams(state.current.params, projected.params)
+    const sameMount = sameEntry
+      && state.mount !== undefined
+      && state.mount.contextKey === host.contextKey
+    if (sameMount && state.mount!.content.parentElement !== host.container) host.container.append(state.mount!.content)
+    state.current = entry
+    state.contextKey = host.contextKey
+    if (!sameMount) {
+      await this.unmount(state)
+      await this.mountCurrent(record.definition.outlet, state)
+    }
+    this.presentationOrder = this.presentationOrder.filter(name => name !== record.definition.outlet)
+    this.presentationOrder.push(record.definition.outlet)
+    await this.reconcilePresentation()
+    this.notify()
+  }
+
+  private async goBackOrClear(name: string, restoreFocus: boolean): Promise<void> {
+    const snapshot = this.history.snapshot()
+    if (!snapshot.available) throw new Error(snapshot.reason)
+    const focus = restoreFocus ? this.states.get(name)?.returnFocus : undefined
+    if ((snapshot.index ?? 0) > 0) {
+      const next = await this.history.go(-1)
+      await this.applyHistorySnapshot(next)
+      if (next.entry === undefined && focus?.isConnected === true && !focus.matches(':disabled')) focus.focus()
+      return
+    }
+    const next = this.history.replace()
+    await this.applyHistorySnapshot(next)
+    if (focus?.isConnected === true && !focus.matches(':disabled')) focus.focus()
+  }
+
   private async navigateNow(requestingOwner: string, reference: CordisXRouteReference, returnFocus?: HTMLElement): Promise<void> {
+    this.historyProjectionStarted = true
     assertKeys(reference, ['id', 'params'], 'route reference')
     assertReference(reference.id, 'route reference')
     const record = this.findRecord(requestingOwner, reference.id)
@@ -1604,6 +1703,8 @@ export class NavigationRegistry {
     }
     const params = immutableSnapshot(reference.params ?? {})
     const path = buildPath(record, params)
+    const historySnapshot = this.history.snapshot()
+    if (!historySnapshot.available) throw new Error(historySnapshot.reason)
     const outletRecord = this.outlets.get(record.definition.outlet)!
     await outletRecord.controller.show()
     const host = outletRecord.controller.getSnapshot()
@@ -1613,26 +1714,19 @@ export class NavigationRegistry {
     if (record.definition.outlet === 'session.content' && String(params.sessionId) !== host.nativeSessionId) {
       throw new Error(`session route ${record.qualifiedId} does not match native session ${host.nativeSessionId ?? '<none>'}`)
     }
-    const state = this.states.get(record.definition.outlet) ?? { stack: [] }
-    this.states.set(record.definition.outlet, state)
-    if (state.contextKey !== undefined && state.contextKey !== host.contextKey) {
-      await this.unmount(state)
-      state.stack = []
-      delete state.returnFocus
-    }
-    state.contextKey = host.contextKey
-    if (returnFocus !== undefined) state.returnFocus = returnFocus
-    await this.unmount(state)
-    state.stack.push({ record, params, path })
-    await this.mountCurrent(record.definition.outlet, state)
-    this.presentationOrder = this.presentationOrder.filter(name => name !== record.definition.outlet)
-    this.presentationOrder.push(record.definition.outlet)
-    await this.reconcilePresentation()
-    this.notify()
+    const next = this.history.push(Object.freeze({
+      schemaVersion: 1,
+      owner: record.owner,
+      routeId: record.qualifiedId,
+      outlet: record.definition.outlet,
+      path,
+      params,
+    }))
+    await this.applyHistorySnapshot(next, returnFocus)
   }
 
   private async mountCurrent(name: string, state: OutletNavigationState): Promise<void> {
-    const entry = state.stack.at(-1)
+    const entry = state.current
     if (entry === undefined) return
     const outlet = this.outlets.get(name)
     const page = this.pages.get(entry.record.owner, entry.record.definition.page, entry.record.candidateView)
@@ -1702,7 +1796,7 @@ export class NavigationRegistry {
       const leading = content.ownerDocument.createElement('div')
       leading.dataset.cordisxPageLeading = 'true'
       leading.style.cssText = 'display:flex;width:28px;height:28px;flex:0 0 28px;align-items:center;justify-content:center'
-      if (state.stack.length >= 2) {
+      if ((this.history.snapshot().index ?? 0) > 0) {
         const back = pageChromeButton(content.ownerDocument, 'Back', 'host:back')
         back.addEventListener('click', () => { void this.back(page.owner, name as CordisXOutletName) })
         leading.append(back)
@@ -1896,7 +1990,7 @@ export class NavigationRegistry {
     const returnFocus = restoreFocus ? state?.returnFocus : undefined
     if (state !== undefined) {
       await this.unmount(state)
-      state.stack = []
+      delete state.current
       delete state.contextKey
       delete state.returnFocus
       delete state.presentation
@@ -1910,7 +2004,7 @@ export class NavigationRegistry {
 
   private currentOutletFor(owner: string): CordisXOutletName | undefined {
     return [...this.presentationOrder].reverse()
-      .find(name => this.states.get(name)?.stack.at(-1)?.record.owner === owner) as CordisXOutletName | undefined
+      .find(name => this.states.get(name)?.current?.record.owner === owner) as CordisXOutletName | undefined
   }
 
   private async reconcileDependencies(): Promise<void> {
@@ -1950,42 +2044,14 @@ export class NavigationRegistry {
         await this.unmountManagerContent()
       }
     }
-    for (const [name, state] of this.states) {
-      const current = state.stack.at(-1)
-      const outlet = this.outlets.get(name)
-      if (current === undefined) continue
-      if (outlet === undefined || this.routeError(current.record) !== undefined) {
-        await this.closeNow(name)
-        continue
-      }
-      const retentionAccess = this.access?.authorizeOutletPage(
-        current.record.owner,
-        name,
-        current.record.qualifiedId,
-        qualifyOwnedId(current.record.owner, current.record.definition.page),
-      )
-      if (retentionAccess !== undefined && !retentionAccess.authorized) {
-        await this.closeNow(name)
-        continue
-      }
-      const host = outlet.controller.getSnapshot()
-      if (!host.available || host.container === undefined || host.contextKey === undefined
-        || (state.contextKey !== undefined && state.contextKey !== host.contextKey)
-        || (name === 'session.content' && String(current.params.sessionId) !== host.nativeSessionId)) {
-        await this.closeNow(name)
-        continue
-      }
-      if (state.mount !== undefined && state.mount.content.parentElement !== host.container) {
-        host.container.append(state.mount.content)
-      }
-    }
+    if (this.historyProjectionStarted) await this.applyHistorySnapshot(this.history.snapshot())
     await this.reconcilePresentation()
     this.notify()
   }
 
   private async reconcilePresentation(): Promise<void> {
     const active = new Set([...this.states.entries()]
-      .filter(([, state]) => state.mount !== undefined && state.stack.length > 0)
+      .filter(([, state]) => state.mount !== undefined && state.current !== undefined)
       .map(([name]) => name))
     this.presentationOrder = this.presentationOrder.filter(name => active.has(name))
     for (const name of active) if (!this.presentationOrder.includes(name)) this.presentationOrder.push(name)
@@ -2135,16 +2201,16 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
   readonly contexts = new HostContextStore()
   private readonly console: PluginConsoleAspect | undefined
 
-  constructor(ctx: Context, console?: PluginConsoleAspect) {
+  constructor(ctx: Context, options: { readonly history: CodexRouteHistoryAdapter; readonly console?: PluginConsoleAspect }) {
     super(ctx, 'routes')
-    this.console = console
+    this.console = options.console
     const pages = ctx.pages as CordisXPageService
     const i18n = ctx.i18n as CordisXI18nService
     const commands = ctx.commands as CordisXCommandService
     if (pages?.registry === undefined || i18n === undefined || commands === undefined) {
       throw new Error('CordisX routes require pages, i18n, and commands services')
     }
-    this.registry = new NavigationRegistry(pages.registry, this.outlets, i18n, this.contexts, undefined, commands)
+    this.registry = new NavigationRegistry(pages.registry, this.outlets, i18n, options.history, this.contexts, undefined, commands)
     ctx.effect(() => async () => {
       await this.registry.dispose()
       this.outlets.dispose()

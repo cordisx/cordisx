@@ -38,6 +38,7 @@ describe('settings navigation demo bundle', () => {
     })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
     Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+    dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
     dom.window.eval(bundle)
     await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true')
     const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime!
