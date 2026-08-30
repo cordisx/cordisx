@@ -127,8 +127,8 @@ declare const ctx: Context
 const factory: CordisXAgentConversationShellSourceFactory = (binding): AgentConversationShellSource => ({
   snapshot: async () => ({
     binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration }, generation: 'snapshot-1', snapshotSequence: 0, selection: { kind: 'no-room' }, items: [],
-    composer: { availability: 'unavailable', placeholder: { key: 'placeholder', fallback: 'Message' }, disabled: { value: true }, submit: { id: 'send' } },
-    headerActions: [{ id: 'new-room', label: { key: 'new-room', fallback: 'New room' }, command: { id: 'create' }, disabled: { value: false } }],
+    composer: { availability: 'available', placeholder: { key: 'placeholder', fallback: 'Message' }, disabled: { value: false }, submit: { id: 'create-with-message' } },
+    headerActions: [],
   }),
   subscribe: async () => ({ result: { type: 'subscribe', status: 'unavailable', code: 'owner-unavailable' } }),
   dispose() {},
