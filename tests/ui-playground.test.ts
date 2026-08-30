@@ -272,6 +272,32 @@ describe('UI Playground', () => {
     }
   }, 30_000)
 
+  it('materializes exact v3 DOM review permissions without downgrading them', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-playground-dom-permissions-'))
+    const entry = path.resolve('tests/fixtures/agent-loop-runtime-plugin.ts')
+    const policies = exactDomPermissionPolicies('playground', [{
+      id: 'agent-loop-runtime',
+      entry,
+      pointIds: ['sidebar.navigation.items', 'main'],
+    }])
+    const configPath = path.join(root, 'cordisx.config.json')
+    await writeFile(configPath, `${JSON.stringify({
+      version: 1,
+      plugins: [{ id: 'agent-loop-runtime', entry, enabled: true, config: {} }],
+      playground: { permissionPolicies: policies },
+    })}\n`)
+    const session = await createPlaygroundSession(configPath)
+    try {
+      const materialized = JSON.parse(await readFile(path.join(session.homeDir, 'config', 'playground.home.json'), 'utf8')) as {
+        permissions: readonly unknown[]
+      }
+      expect(materialized.permissions).toEqual(policies)
+    } finally {
+      await session.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('boots, reloads, and disposes the comprehensive real plugin runtime with explicit Playground seats only', async () => {
     const config = await loadConfig(defaultUiPlaygroundConfig, { profileId: 'playground' })
     expect(config.plugins.map(plugin => plugin.id)).toEqual(defaultPluginIds)

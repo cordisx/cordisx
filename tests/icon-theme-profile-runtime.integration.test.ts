@@ -174,7 +174,7 @@ describe('profile-scoped icon-theme selection runtime', () => {
     })
   }, 20_000)
 
-  it('restores an exact provider after registration and exposes a keyboard-native redacted picker', async () => {
+  it('restores an exact provider after registration without exposing an About-page selector', async () => {
     const page = dom()
     const configRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-icon-theme-runtime-rpc-'))
     const configPath = path.join(configRoot, '.cordisx', 'config.json')
@@ -237,45 +237,9 @@ describe('profile-scoped icon-theme selection runtime', () => {
       })
       page.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')?.click()
       page.window.document.querySelector<HTMLButtonElement>('[data-tab="about"]')?.click()
-      await waitFor(() => page.window.document.querySelector('[data-host-icon-theme-picker]') !== null, 'visible icon theme picker')
-      const picker = page.window.document.querySelector<HTMLSelectElement>('#cxr-icon-theme-provider')!
-      expect(picker.labels[0]?.textContent).toBe('图标主题提供方')
-      expect(picker.options).toHaveLength(2)
-      expect(picker.selectedOptions[0]?.textContent).toContain('Aurora · v2.1.0 · 使用中')
-      expect(picker.parentElement?.textContent).not.toMatch(/plugin:|providerHandle|principal|descriptor|\/tmp\//u)
-      picker.focus()
-      expect(page.window.document.activeElement).toBe(picker)
-
-      picker.value = picker.options[0]!.value
-      picker.dispatchEvent(new page.window.Event('change', { bubbles: true }))
-      await waitFor(() => page.window.document.querySelector('[role="alert"]') !== null, 'failed persistence rollback notice')
-      expect(runtime.snapshot().iconThemes?.selected.providerId).toBe('plugin:icon-theme-test:aurora')
-      expect(persistedRequests[0]).toMatchObject({ expectedPreferenceRevision: 7, candidate: { providerId: 'builtin:reicon' } })
-
-      responseMode = 'hold'
-      picker.value = picker.options[0]!.value
-      picker.dispatchEvent(new page.window.Event('change', { bubbles: true }))
-      await waitFor(() => runtime.snapshot().iconThemes?.selected.providerId === 'builtin:reicon', 'persisted builtin selection')
-      await waitFor(() => persistedRequests.length === 2, 'preference persistence request')
-      const persistedRequest = persistedRequests[1]!
-      expect(persistedRequest).toMatchObject({
-        expectedPreferenceRevision: 7,
-        candidate: { providerId: 'builtin:reicon', providerGeneration: 'reicon-1.2.1' },
-      })
-      expect(Object.keys(persistedRequest.candidate as Record<string, unknown>).sort()).toEqual([
-        'namespace', 'providerGeneration', 'providerId', 'providerVersion',
-      ])
-      expect(JSON.stringify(persistedRequest)).not.toMatch(/providerHandle|principalHandle|descriptors|commands|paths/u)
-      await persistRequest(persistedRequest)
-      await waitForAsync(async () => (await loadHomeConfig(configPath)).apps.codex?.profiles.default?.iconTheme?.revision === 8, 'durable icon theme preference')
-      expect((await loadHomeConfig(configPath)).apps.codex?.profiles.default?.iconTheme).toEqual({
-        revision: 8,
-        providerId: 'builtin:reicon',
-        namespace: 'reicon',
-        providerVersion: '1.2.1',
-        providerGeneration: 'reicon-1.2.1',
-      })
-      expect((await stat(configPath)).mode & 0o777).toBe(0o600)
+      expect(page.window.document.querySelector('[data-host-icon-theme-picker]')).toBeNull()
+      expect(page.window.document.querySelector('#cxr-icon-theme-provider')).toBeNull()
+      expect(page.window.document.body.textContent).not.toMatch(/图标主题|当前运行环境不支持保存/u)
 
       await runtime.dispose()
     } finally {
@@ -434,7 +398,7 @@ describe('profile-scoped icon-theme selection runtime', () => {
     }
   })
 
-  it('converges two active same-profile renderers onto one durable CAS winner without restart', async () => {
+  it('keeps the About icon-theme configuration surface absent across active renderers', async () => {
     const pages = [dom(), dom()]
     const hub = new IconThemePreferenceBroadcastHub('codex', 'default')
     const configRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-icon-theme-multi-renderer-'))
@@ -508,45 +472,10 @@ describe('profile-scoped icon-theme selection runtime', () => {
       for (const page of pages) {
         page.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')?.click()
         page.window.document.querySelector<HTMLButtonElement>('[data-tab="about"]')?.click()
-        await waitFor(() => page.window.document.querySelector('#cxr-icon-theme-provider') !== null, 'multi-renderer picker')
+        expect(page.window.document.querySelector('#cxr-icon-theme-provider')).toBeNull()
+        expect(page.window.document.querySelector('[data-host-icon-theme-picker]')).toBeNull()
       }
-      const [pickerA, pickerB] = pages.map(page => page.window.document.querySelector<HTMLSelectElement>('#cxr-icon-theme-provider')!)
-      pickerA.value = [...pickerA.options].find(option => option.textContent?.includes('Reicon'))!.value
-      pickerA.dispatchEvent(new pages[0]!.window.Event('change', { bubbles: true }))
-      pickerB.value = [...pickerB.options].find(option => option.textContent?.includes('Aurora'))!.value
-      pickerB.dispatchEvent(new pages[1]!.window.Event('change', { bubbles: true }))
-      await waitFor(() => requests.length === 2, 'competing preference requests')
-
-      const builtinRequest = requests.find(item => (item.value.candidate as { providerId?: string }).providerId === 'builtin:reicon')!
-      const losingRequest = requests.find(item => item !== builtinRequest)!
-      const winner = await persistIconThemePreference(
-        persistenceContext,
-        parseIconThemePreferenceBindingRequest(builtinRequest.value, persistenceContext),
-      )
-      await hub.broadcast(winner)
-      receive(builtinRequest.page, { requestId: builtinRequest.value.requestId, ok: true, value: winner, synchronization: 'complete' })
-      try {
-        await persistIconThemePreference(
-          persistenceContext,
-          parseIconThemePreferenceBindingRequest(losingRequest.value, persistenceContext),
-        )
-        throw new Error('expected competing preference to conflict')
-      } catch (error) {
-        const failure = iconThemePreferenceBridgeError(error)
-        if (failure.currentPreference !== undefined) await hub.broadcast(failure.currentPreference)
-        receive(losingRequest.page, { requestId: losingRequest.value.requestId, ok: false, ...failure, synchronization: 'complete' })
-      }
-
-      await waitFor(() => runtimes.every(runtime => runtime.snapshot().iconThemes?.selected.providerId === 'builtin:reicon'), 'renderer convergence')
-      expect((await loadHomeConfig(configPath)).apps.codex?.profiles.default?.iconTheme).toEqual(winner)
-      expect(winner.revision).toBe(8)
-
-      for (const page of pages) {
-        const picker = page.window.document.querySelector<HTMLSelectElement>('#cxr-icon-theme-provider')!
-        picker.dispatchEvent(new page.window.Event('change', { bubbles: true }))
-      }
-      await waitFor(() => requests.length === 4, 'post-convergence preference revisions')
-      expect(requests.slice(2).map(item => item.value.expectedPreferenceRevision)).toEqual([8, 8])
+      expect(runtimes.every(runtime => runtime.snapshot().iconThemes?.providers.length === 2)).toBe(true)
       await Promise.all(runtimes.map(async runtime => await runtime.dispose()))
     } finally {
       for (const unregister of unregisterDocuments) unregister()

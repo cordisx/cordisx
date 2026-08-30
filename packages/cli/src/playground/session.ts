@@ -31,7 +31,7 @@ import {
   MAX_PROVIDER_REQUESTS,
   parseProviderBindingRequest,
 } from '../launcher/provider-rpc.js'
-import { normalizePermissionPolicyRecord } from '../permissions.js'
+import { normalizePersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import { resolveLocalCodexProviderConfig } from '../providers/config.js'
 import type { CodexProviderConfig } from '../providers/contracts.js'
 import { ProviderFleet } from '../providers/fleet.js'
@@ -136,7 +136,7 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
   const previewPermissionPolicies = playground.permissionPolicies === undefined
     ? []
     : Array.isArray(playground.permissionPolicies)
-      ? playground.permissionPolicies.map((policy, index) => normalizePermissionPolicyRecord(
+      ? playground.permissionPolicies.map((policy, index) => normalizePersistedPermissionPolicyRecord(
         policy,
         `playground.permissionPolicies[${index}]`,
       ))
