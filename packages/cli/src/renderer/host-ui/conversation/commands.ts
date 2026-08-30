@@ -60,8 +60,7 @@ export class AgentConversationCommandController {
 
   runHeader(model: AgentConversationModel, action: AgentConversationAction): Promise<unknown> {
     this.assertCurrent(model)
-    const isNewRoomAction = model.selection.kind === 'new-room' && model.selection.newRoomAction === action
-    if (!isNewRoomAction && !model.headerActions.includes(action)) {
+    if (!model.headerActions.includes(action)) {
       throw new Error(`header action ${action.id} is not in the current model`)
     }
     if (action.disabled) throw new Error(action.disabledReason ?? `action ${action.id} is disabled`)

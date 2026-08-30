@@ -15,7 +15,6 @@ import { AGENT_CONVERSATION_STYLES } from './styles.js'
 export interface AgentConversationRendererCopy {
   readonly locale: string
   readonly newRoomTitle: string
-  readonly newRoomDescription: string
   readonly timelineLabel: string
   readonly composerLabel: string
   readonly sendLabel: string
@@ -112,25 +111,13 @@ function Timeline({
 }: Pick<AgentConversationRendererProps, 'model' | 'commands' | 'copy'> & { readonly onCommandError: (error: unknown) => void }) {
   const follow = useAutoFollow<HTMLDivElement>(`${model.binding.bindingId}:${model.generation}:${model.snapshotSequence}:${model.entries.length}`)
   return <div ref={follow.ref} onScroll={follow.onScroll} className="cxa-timeline" data-agent-conversation-scroll-owner="timeline" role="log" aria-label={copy.timelineLabel} tabIndex={0}>
-    {model.selection.kind === 'new-room' ? null : <div className="cxa-timeline-list">
+    <div className="cxa-timeline-list">
       {model.entries.map((entry, index) => entry.kind === 'message'
         ? <MessageEntry key={entry.itemId} entry={entry} previous={model.entries[index - 1]} model={model} commands={commands} copy={copy} onCommandError={onCommandError} />
         : <div key={entry.itemId} className="cxa-entry cxa-status" data-entry-id={entry.itemId} data-state={entry.state} role="status" aria-live={entry.ariaLive}>
             <span className="cxa-status-dot" aria-hidden="true" /><span>{entry.label}</span>
           </div>)}
-    </div>}
-  </div>
-}
-
-function EmptyRoom({ model, commands, copy, onCommandError }: Pick<AgentConversationRendererProps, 'model' | 'commands' | 'copy'> & { readonly onCommandError: (error: unknown) => void }) {
-  if (model.selection.kind !== 'new-room') return null
-  const newRoomAction = model.selection.newRoomAction
-  return <div className="cxa-empty" data-agent-conversation-empty="true">
-    <span className="cxa-empty-mark" aria-hidden="true">＋</span>
-    <p className="cxa-empty-copy">{copy.newRoomDescription}</p>
-    <ActionButton action={newRoomAction} run={() => {
-      void commands.runHeader(model, newRoomAction).catch(onCommandError)
-    }} />
+    </div>
   </div>
 }
 
@@ -202,6 +189,7 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
     className="cxa-root"
     data-agent-conversation-renderer="production"
     data-agent-conversation-view={model.selection.kind}
+    {...(model.selection.kind === 'room' ? { 'data-agent-conversation-room-id': model.selection.roomId } : {})}
     {...(debugFixture ? { 'data-agent-conversation-fixture': 'debug-only' } : {})}
     aria-labelledby={titleId}
   >
@@ -218,12 +206,8 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
       </div>}
     </header>
     <div className="cxa-body">
-      {model.selection.kind === 'new-room'
-        ? <EmptyRoom model={model} commands={commands} copy={copy} onCommandError={onCommandError} />
-        : <>
-            <Timeline model={model} commands={commands} copy={copy} onCommandError={onCommandError} />
-            <Composer model={model} commands={commands} copy={copy} commandError={commandError} setCommandError={setCommandError} />
-          </>}
+      <Timeline model={model} commands={commands} copy={copy} onCommandError={onCommandError} />
+      <Composer model={model} commands={commands} copy={copy} commandError={commandError} setCommandError={setCommandError} />
     </div>
     <div className="cxa-live-region" role="status" aria-live="polite">{commandError ?? ''}</div>
   </section>

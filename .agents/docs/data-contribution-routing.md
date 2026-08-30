@@ -280,6 +280,16 @@ toolbar actions around the declared toolbar anchor, and environment
 sections/actions/rows into the native environment panel layout. These probes
 are private adapter details and may vary by verified Codex version.
 
+Dynamic Room history uses `ctx.slots.registerCollection()` on
+`sidebar.navigation.items`. Its public source exposes `snapshot()` and
+`subscribe()` only. Every snapshot has a monotonic revision and a bounded,
+ordered array of route-only items; one localized collection group is rendered
+below ordinary navigation rows. The Host replaces the array atomically and
+computes selection with the exact route parameters, so several Room rows may
+share one `:roomId` route without becoming selected together. The Host does not
+persist this collection: a plugin or provider that needs reload continuity
+rehydrates its source before registration.
+
 Environment sections and rows use snapshot/update handles for dynamic values.
 Rows contain text, host-token status, and command references only. Section and
 row targeting is validated, so an orphan action or row is diagnosed rather

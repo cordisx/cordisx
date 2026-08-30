@@ -15,10 +15,10 @@ import type {
 } from '@cordisx/protocol/connector-service/v1'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const protocolCommit = 'c81c4fa4819d6e8e2fe976f063f00b213abacc14'
-const protocolSource = `git+https://github.com/cordisx/cordisx-protocol.git#${protocolCommit}`
+const protocolCommit = 'bbd8a8372f6732e094653f5a683d9478f1e50bad'
+const protocolSource = `github:cordisx/cordisx-protocol#${protocolCommit}`
 const protocolResolvedSource = `git+ssh://git@github.com/cordisx/cordisx-protocol.git#${protocolCommit}`
-const staleProtocolCommit = '49f1223fb7e6a340080de58629280b0f3de9faed'
+const staleProtocolCommit = 'c81c4fa4819d6e8e2fe976f063f00b213abacc14'
 
 interface PackageManifest {
   readonly dependencies?: Readonly<Record<string, string>>

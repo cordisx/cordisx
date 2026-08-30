@@ -8,6 +8,7 @@ import { npmPackItem } from './npm-pack-report.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined ? undefined : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)
 
 async function run(file, args, options = {}) {
   try {
@@ -98,6 +99,7 @@ try {
     packWorkspace('cordisx', packDirectory),
     packWorkspace('create-cordisx-plugin', packDirectory),
   ])
+  if (protocolTarball !== undefined) await access(protocolTarball)
   await run('npm', [
     'install',
     '--ignore-scripts',
@@ -106,6 +108,7 @@ try {
     '--loglevel=error',
     cordisxTarball,
     creatorTarball,
+    ...(protocolTarball === undefined ? [] : [protocolTarball]),
   ], { cwd: runnerDirectory, env: process.env })
 
   for (const packageName of ['cordisx', 'create-cordisx-plugin']) {
@@ -127,8 +130,8 @@ declare const ctx: Context
 const factory: CordisXAgentConversationShellSourceFactory = (binding): AgentConversationShellSource => ({
   snapshot: async () => ({
     binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration }, generation: 'snapshot-1', snapshotSequence: 0, selection: { kind: 'no-room' }, items: [],
-    composer: { availability: 'unavailable', placeholder: { key: 'placeholder', fallback: 'Message' }, disabled: { value: true }, submit: { id: 'send' } },
-    headerActions: [{ id: 'new-room', label: { key: 'new-room', fallback: 'New room' }, command: { id: 'create' }, disabled: { value: false } }],
+    composer: { availability: 'available', placeholder: { key: 'placeholder', fallback: 'Message' }, disabled: { value: false }, submit: { id: 'create-with-message' } },
+    headerActions: [],
   }),
   subscribe: async () => ({ result: { type: 'subscribe', status: 'unavailable', code: 'owner-unavailable' } }),
   dispose() {},
@@ -159,12 +162,83 @@ hostSubscription satisfies ConnectorEventSubscription
 if ('handle' in protocolResult) protocolResult.handle.unsubscribe()
 if ('handle' in hostResult) hostResult.handle.unsubscribe()
 `, 'utf8')
+  await writeFile(path.join(runnerDirectory, 'agent-loop-collection-consumer.ts'), `
+import type { Context } from '@deepseek-ai/cordis'
+import type {
+  AgentDefinition as ProtocolAgentDefinition,
+  AgentLoopCommand as ProtocolAgentLoopCommand,
+  AgentLoopTaskBinding as ProtocolAgentLoopTaskBinding,
+  BoundAgentLoopClient as ProtocolBoundAgentLoopClient,
+} from '@cordisx/protocol/agent-loop/v1'
+import type {
+  AgentDefinition,
+  AgentLoopCommand,
+  AgentLoopCreateOrBindResult,
+  AgentLoopSendResult,
+  AgentLoopTaskBinding,
+  BoundAgentLoopClient,
+  CordisXNavigationCollectionSnapshot,
+  CordisXNavigationCollectionSource,
+} from 'cordisx/contracts'
+
+declare const ctx: Context
+declare const definition: AgentDefinition
+declare const protocolDefinition: ProtocolAgentDefinition
+declare const protocolCommand: ProtocolAgentLoopCommand
+declare const protocolBinding: ProtocolAgentLoopTaskBinding
+declare const created: AgentLoopCreateOrBindResult
+declare const sent: AgentLoopSendResult
+declare const createCommands: readonly [
+  Extract<AgentLoopCommand, { type: 'create-or-bind' }>,
+  Extract<AgentLoopCommand, { type: 'create-or-bind' }>,
+]
+declare const snapshot: CordisXNavigationCollectionSnapshot
+declare const source: CordisXNavigationCollectionSource
+
+ctx.agentLoop satisfies BoundAgentLoopClient
+ctx.agentLoop satisfies ProtocolBoundAgentLoopClient
+definition satisfies ProtocolAgentDefinition
+protocolDefinition satisfies AgentDefinition
+protocolCommand satisfies AgentLoopCommand
+protocolBinding satisfies AgentLoopTaskBinding
+definition.promptSections?.map(section => section.kind satisfies 'introduction' | 'personality' | 'role' | 'operations' | 'tools' | 'knowledge' | 'memory-policy' | 'memory' | 'other')
+if (created.status === 'accepted') created.binding.task satisfies string
+else created.authorization.state satisfies 'denied' | 'unavailable'
+if (sent.status === 'accepted') sent.messageId satisfies string
+else sent.authorization.state satisfies 'denied' | 'unavailable'
+async function manageMultipleBindings(): Promise<Map<string, { binding: AgentLoopTaskBinding; cursor: number }>> {
+  const results = await Promise.all(createCommands.map(command => ctx.agentLoop.createOrBind(command)))
+  const bindings = results.flatMap(result => result.status === 'accepted' ? [result.binding] : [])
+  const subscriptions = await Promise.all(bindings.map(binding => ctx.agentLoop.subscribe(binding, -1)))
+  const byBinding = new Map<string, { binding: AgentLoopTaskBinding; cursor: number }>()
+  for (const result of subscriptions) {
+    if (result.status !== 'accepted') continue
+    byBinding.set(result.handle.subscription.binding.bindingId, {
+      binding: bindings.find(binding => binding.binding.bindingId === result.handle.subscription.binding.bindingId)!,
+      cursor: result.handle.subscription.afterSequence,
+    })
+  }
+  if (bindings[0] !== undefined) {
+    await ctx.agentLoop.createOrBind({
+      ...createCommands[0], commandId: 'bind-existing-task', target: { mode: 'bind', task: bindings[0].task },
+    })
+  }
+  return byBinding
+}
+manageMultipleBindings satisfies () => Promise<Map<string, { binding: AgentLoopTaskBinding; cursor: number }>>
+snapshot.items.map(item => item.route.params?.roomId)
+ctx.slots.registerCollection({
+  name: 'sidebar.navigation.items',
+  id: 'chatroom.rooms',
+  group: { id: 'chatroom', label: { key: 'chatroom.rooms', fallback: 'Rooms' } },
+}, source).dispose()
+`, 'utf8')
   await writeFile(path.join(runnerDirectory, 'tsconfig.json'), `${JSON.stringify({
     compilerOptions: {
       target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true,
       exactOptionalPropertyTypes: true, noEmit: true, skipLibCheck: false,
     },
-    include: ['conversation-consumer.ts', 'connector-consumer.ts'],
+    include: ['conversation-consumer.ts', 'connector-consumer.ts', 'agent-loop-collection-consumer.ts'],
   }, null, 2)}\n`, 'utf8')
   const rootBin = name => path.join(repositoryRoot, 'node_modules', '.bin', process.platform === 'win32' ? `${name}.cmd` : name)
   await run(rootBin('tsc'), ['-p', 'tsconfig.json'], { cwd: runnerDirectory, env: process.env })
@@ -208,6 +282,21 @@ if ('handle' in hostResult) hostResult.handle.unsubscribe()
   const installedBundle = await buildRendererBundle(await loadConfig(configPath))
   if (!installedBundle.includes('# CLIProxy Providers') || !installedBundle.includes('External providers and the native connection')) {
     throw new Error('installed built-in CLIProxy plugin bundle is missing its product README')
+  }
+  const localAgentLoopConfigPath = path.join(runnerDirectory, 'local-agent-loop.config.json')
+  await writeFile(localAgentLoopConfigPath, `${JSON.stringify({
+    version: 1,
+    codex: { debugPort: 9229, agentLoopBackend: 'local-cli' },
+    providers: [],
+    plugins: [],
+  }, null, 2)}\n`, 'utf8')
+  const localAgentLoopBundle = await buildRendererBundle(await loadConfig(localAgentLoopConfigPath), {
+    playground: true,
+    profileId: 'playground',
+    providerBridgeToken: 'installed-local-agent-loop-token',
+  })
+  if (!localAgentLoopBundle.includes('codex-local') || !localAgentLoopBundle.includes('installed-local-agent-loop-token')) {
+    throw new Error('installed cordisx tarball does not compose the explicit local AgentLoop provider bridge')
   }
 
   const config = await run(executable('cordisx'), ['config'], {
@@ -254,7 +343,7 @@ if ('handle' in hostResult) hostResult.handle.unsubscribe()
   await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
   await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
 
-  console.log('[cordisx] installed tarballs verified: licenses, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run')
+  console.log(`[cordisx] installed tarballs verified: licenses, combined multi-binding AgentLoop and navigation collection${protocolTarball === undefined ? '' : ', exact local Protocol'}, local AgentLoop provider composition, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run`)
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }

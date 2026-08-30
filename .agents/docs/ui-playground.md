@@ -5,8 +5,12 @@ plugin developers. The page uses React Fast Refresh and native ESM HMR for the
 Host shell and React component tree. It runs an independent Cordis renderer
 generation and composes the configured plugin modules with the same runtime,
 Manager, HostForm, theme projection, icon, dialog, and lifecycle source used by
-the production renderer. It does not start Codex Desktop, Chromium, a ChatGPT
-profile, or an app-server, and it does not need an authenticated session.
+the production renderer. It does not start Codex Desktop, Chromium, or a
+ChatGPT browser profile. By default it starts no app-server and needs no
+authenticated session. A composition may explicitly set
+`codex.agentLoopBackend` to `local-cli`; that opt-in starts an independent,
+launcher-owned app-server using the existing Codex CLI login solely behind the
+normal provider/AgentLoop bridge.
 
 Vite is a development transport, not a second renderer implementation. The
 production `app://` path still uses `buildRendererBundle` and an injected,
@@ -52,6 +56,11 @@ process closes the loopback server and removes the root. The source composition
 is never written. `重置 fixture` restores the materialized composition and
 clears its temporary state.
 
+Fixture metadata may contain `playground.permissionPolicies`. The Playground
+strictly normalizes those records and uses them only in its temporary in-memory
+permission store. This is the narrow preview mechanism for an explicitly
+authorized internal composition; absent records remain denied/unavailable.
+
 ## What it proves
 
 - configured local plugin modules bundle, load, activate, dispose, and rebuild
@@ -79,8 +88,9 @@ Codex-shaped fallback.
 
 ## What it cannot prove
 
-The page deliberately reports current connection, live Codex session, native
-anchor resolution, and any native Host bridge as unavailable. It cannot prove
+The page deliberately reports the Desktop current connection, native Codex
+session, native anchor resolution, and any native Host bridge as unavailable.
+An opted-in local Provider Fleet task does not upgrade those facts. It cannot prove
 the actual Codex theme extraction path, native-anchor placement, CDP injection,
 or Host session data flow. Those require the existing isolated real `app://`
 smoke after the owning change is merged.

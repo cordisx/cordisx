@@ -122,4 +122,43 @@ describe('Provider Fleet', () => {
     expect(JSON.stringify(events)).not.toContain('rawEvent')
     await fleet.close()
   })
+
+  it('keeps distinct approvals for one turn while deduplicating exact notification replays', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-fleet-'))
+    let notify: ((method: string, params: unknown) => void) | undefined
+    const fleet = await ProviderFleet.create([config(root, 'alpha')], {
+      startServer: async provider => {
+        const base = server(provider.id, [])
+        return {
+          ...base,
+          subscribeNotifications(listener) { notify = listener; return () => { notify = undefined } },
+        }
+      },
+    })
+    if (notify === undefined) throw new Error('provider lifecycle subscription was not registered')
+    const session = { providerId: 'alpha', remoteSessionId: 'shared-session' }
+    const approval = (method: 'approval/requested' | 'approval/resolved', approvalId: string) => ({
+      threadId: session.remoteSessionId,
+      turnId: 'turn-with-two-approvals',
+      approvalId,
+      approval: { kind: 'command', ...(method === 'approval.resolved' ? { outcome: 'approved' } : {}) },
+    })
+    for (const approvalId of ['approval-1', 'approval-2']) {
+      notify('approval/requested', approval('approval/requested', approvalId))
+      notify('approval/resolved', approval('approval/resolved', approvalId))
+    }
+    notify('approval/requested', approval('approval/requested', 'approval-2'))
+    notify('approval/resolved', approval('approval/resolved', 'approval-2'))
+    notify('turn/completed', { threadId: session.remoteSessionId, turn: { id: 'turn-with-two-approvals', status: 'completed' } })
+    notify('turn/completed', { threadId: session.remoteSessionId, turn: { id: 'turn-with-two-approvals', status: 'failed' } })
+
+    expect(fleet.readLifecycle(session).events.map(event => [event.type, event.approval?.approvalId])).toEqual([
+      ['approval.required', 'approval-1'],
+      ['approval.resolved', 'approval-1'],
+      ['approval.required', 'approval-2'],
+      ['approval.resolved', 'approval-2'],
+      ['turn.completed', undefined],
+    ])
+    await fleet.close()
+  })
 })

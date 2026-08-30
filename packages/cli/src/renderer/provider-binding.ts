@@ -19,6 +19,22 @@ import type {
 import type { CordisXPlatformAdapter } from './platform.js'
 import type { CordisXExternalProviderAvailabilityStatus } from '../capability-availability-contracts.js'
 
+export interface CordisXAgentLoopLifecycleEvent {
+  readonly sequence: number
+  readonly session: CordisXTaskReadInput['session']
+  readonly turnId: string
+  readonly type: 'turn.started' | 'turn.completed' | 'turn.failed' | 'approval.required' | 'approval.resolved'
+  readonly output?: readonly { readonly type: 'text'; readonly text: string }[]
+  readonly failure?: { readonly code: string; readonly retryable: boolean }
+  readonly approval?: { readonly approvalId: string; readonly kind: 'command' | 'file-change' | 'external-action' | 'other'; readonly state: 'pending' | 'resolved'; readonly outcome?: 'approved' | 'denied' | 'expired' | 'cancelled' }
+}
+
+export interface CordisXAgentLoopLifecycleRange {
+  readonly afterSequence: number
+  readonly nextAfterSequence: number
+  readonly events: readonly CordisXAgentLoopLifecycleEvent[]
+}
+
 const PROVIDER_BINDING = '__cordisxProviderRequestV1'
 const PROVIDER_RECEIVER = '__cordisxProviderReceiveV1'
 const REQUEST_TIMEOUT_MS = 35_000
@@ -123,6 +139,22 @@ export class BindingPlatformAdapter implements CordisXPlatformAdapter {
 
   async controlTurn(input: CordisXTurnControlInput): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>> {
     return await this.result('turns.control', input)
+  }
+
+  async createAgentLoopTask(input: {
+    readonly model: CordisXTaskCreateInput['model']
+    readonly cwd: string
+    readonly developerInstructions?: string
+    readonly effort?: 'low' | 'medium' | 'high' | 'xhigh'
+  }): Promise<CordisXPlatformResult<CordisXSessionSummary>> {
+    return await this.result('agent-loop.create', input)
+  }
+
+  async readAgentLoopLifecycle(
+    session: CordisXTaskReadInput['session'],
+    afterSequence: number,
+  ): Promise<CordisXAgentLoopLifecycleRange> {
+    return await this.request<CordisXAgentLoopLifecycleRange>('agent-loop.lifecycle.read', { session, afterSequence })
   }
 
   dispose(): void {

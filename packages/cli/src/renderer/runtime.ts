@@ -25,7 +25,7 @@ import type {
   CordisXExtensionPointControlMode,
 } from '../contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
-import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import { isPermissionPolicyRecordV2, type CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { HomeConfigIconThemePreference } from '../config/home-config.js'
 import type {
   CordisXPermissionAuthorizationDecisionV2,
@@ -63,6 +63,7 @@ import {
   BrowserPermissionPrompt,
   BrowserPermissionAuthorizationPromptV2,
   CordisXPlatformService,
+  MemoryPermissionPolicyStore,
   PermissionBroker,
   normalizePluginManifest,
   type PlatformPermissionSnapshot,
@@ -81,6 +82,13 @@ import {
 import { projectPublicRuntimeSnapshot } from './public-runtime-snapshot.js'
 import { sortManagerSettingsNavigationItems } from './manager-settings-navigation.js'
 import { BindingPlatformAdapter } from './provider-binding.js'
+import {
+  BindingAgentLoopHost,
+  CordisXAgentLoopBroker,
+  UnavailableAgentLoopHost,
+  type CordisXAgentLoopAuthorizationRequest,
+} from './agent-loop.js'
+import type { BoundAgentLoopClient } from '../agent-loop-contracts.js'
 import { BindingAgentHistoryAdapter, UnavailableAgentHistoryAdapter } from './agent-history-binding.js'
 import { CordisXAgentHistoryService } from './agent-history.js'
 import {
@@ -143,6 +151,7 @@ function cloneRendererValue<Value>(value: Value): Value {
 
 interface CordisXRuntimeMetadata {
   readonly version: string
+  readonly workspaceCwd: string
   readonly providers: readonly { readonly id: string; readonly displayName: string }[]
   readonly profileId: string
   readonly appId?: string
@@ -193,6 +202,7 @@ interface PluginController {
   unregisterPermissions?: () => void
   unregisterExtensionPoints?: () => void
   unregisterConnector?: () => void | Promise<void>
+  unregisterAgentLoop?: () => void | Promise<void>
   fiber?: Fiber
   status: ManagerPluginStatus
   error?: string
@@ -200,6 +210,7 @@ interface PluginController {
   generationContext?: Record<PropertyKey, unknown>
   generationView?: PluginGenerationView
   connectorClient?: CordisXBoundConnectorClient
+  agentLoopClient?: BoundAgentLoopClient
 }
 
 function topologicalActivationOrder(
@@ -496,7 +507,12 @@ async function start(
       )
   let disposeIconThemePreferenceSubscription: (() => void) | undefined
   const permissionStore = metadata.permissionBridgeToken === undefined
-    ? new BrowserPermissionPolicyStore(metadata.profileId)
+    ? metadata.hostKind === 'playground' && metadata.permissionPolicies !== undefined
+      ? new MemoryPermissionPolicyStore(
+          metadata.permissionPolicies.filter(record => !isPermissionPolicyRecordV2(record)),
+          metadata.permissionPolicies.filter(isPermissionPolicyRecordV2),
+        )
+      : new BrowserPermissionPolicyStore(metadata.profileId)
     : BindingPermissionPolicyStore.connect(metadata.permissionBridgeToken, metadata.permissionPolicies ?? [])
   const configBridge = metadata.configBridgeToken === undefined
     ? undefined
@@ -581,6 +597,9 @@ async function start(
   const configuration = new PluginConfigurationRegistry(generationVisibility)
   const configRenderers = new ConfigRendererRegistry(generationVisibility)
   const agentRuntime = new CordisXHostAgentRuntime({ adapter: agentAdapter, broker, generation })
+  const agentLoopBroker = new CordisXAgentLoopBroker(bindingPlatformAdapter === undefined
+    ? new UnavailableAgentLoopHost()
+    : new BindingAgentLoopHost(bindingPlatformAdapter, metadata.workspaceCwd))
   // Host-owned only: no plugin or renderer global receives this broker/adapter.
   const connectorBroker = new CordisXConnectorBroker()
   const agentConnector = connectorBroker.register(createCodexAgentConnector(agentAdapter))
@@ -658,7 +677,14 @@ async function start(
         : []
     ))
     const unavailable = capabilityAvailability.unavailableRequired(declarations)
-    if (unavailable.length > 0) return `Required capability unavailable: ${unavailable.join(', ')}`
+    const explicitlyAllowedInPlayground = metadata.hostKind === 'playground'
+      && unavailable.every(capability => broker.snapshots().some(permission => (
+        permission.identity.source === controller.identity.source
+        && permission.identity.id === controller.identity.id
+        && permission.capability === capability
+        && permission.policy === 'allow'
+      )))
+    if (unavailable.length > 0 && !explicitlyAllowedInPlayground) return `Required capability unavailable: ${unavailable.join(', ')}`
     return undefined
   }
   const registerController = (controller: PluginController, registerAuthority = true): void => {
@@ -854,6 +880,10 @@ async function start(
     } catch (error) {
       failure ??= error
     } finally {
+      controller.agentLoopClient?.dispose()
+      delete controller.agentLoopClient
+      await controller.unregisterAgentLoop?.()
+      delete controller.unregisterAgentLoop
       controller.connectorClient?.dispose()
       delete controller.connectorClient
       await controller.unregisterConnector?.()
@@ -937,7 +967,52 @@ async function start(
       },
       authorize: connectorAuthorization,
     })
-    pluginContext = ctx.isolate('connectors').extend({
+    const agentLoopAuthorization = async (
+      request: CordisXAgentLoopAuthorizationRequest,
+    ) => {
+      if (!controller.principalLive) return { capability: request.capability, state: 'unavailable' as const, code: 'host-unavailable' as const }
+      try {
+        const identity = pluginConsole.owner(controller.principal)
+        const authorization = await broker.authorize(identity, request.capability, {
+          ...(request.model === undefined ? {} : { providerId: request.model.providerId, model: request.model }),
+          ...(request.session === undefined ? {} : { providerId: request.session.providerId, session: request.session }),
+          ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
+        }, generationVisibility.view(pluginContext))
+        if (authorization.ok) return { capability: request.capability, state: 'allowed' as const, code: 'allowed' as const }
+        if (authorization.error.code === 'permission-denied') return { capability: request.capability, state: 'denied' as const, code: 'user-denied' as const }
+        if (authorization.error.code === 'permission-undeclared' || authorization.error.code === 'permission-scope-denied' || authorization.error.code === 'timeout') {
+          return { capability: request.capability, state: 'denied' as const, code: 'policy-denied' as const }
+        }
+        return { capability: request.capability, state: 'unavailable' as const, code: 'host-unavailable' as const }
+      } catch {
+        return { capability: request.capability, state: 'unavailable' as const, code: 'host-unavailable' as const }
+      }
+    }
+    const agentLoopClient = agentLoopBroker.bind({
+      ownerKey: JSON.stringify([controller.identity.source, controller.identity.id, moduleGenerationOf(controller)]),
+      active: () => {
+        if (!controller.principalLive) return false
+        try {
+          const identity = pluginConsole.owner(controller.principal)
+          return identity.id === controller.identity.id && identity.source === controller.identity.source
+        } catch {
+          return false
+        }
+      },
+      authorize: agentLoopAuthorization,
+      registerPrompt: (sessionId, definition) => (definition.promptSections ?? []).map((section, order) => agentRuntime.registerPrompt(
+        controller.identity,
+        'section',
+        {
+          sessionId,
+          id: `agent-definition:${definition.identity.agentId}:${definition.identity.revision}:${section.sectionId}`,
+          content: section.text,
+          order,
+        },
+        moduleGenerationOf(controller),
+      )),
+    })
+    pluginContext = ctx.isolate('connectors').isolate('agentLoop').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
@@ -946,6 +1021,8 @@ async function start(
     })
     controller.connectorClient = connectorClient
     controller.unregisterConnector = pluginContext.reflect.provide('connectors', connectorClient)
+    controller.agentLoopClient = agentLoopClient
+    controller.unregisterAgentLoop = pluginContext.reflect.provide('agentLoop', agentLoopClient)
     pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation started')
     const fiber = pluginContext.plugin(
       pluginFromModule(module),
@@ -965,6 +1042,10 @@ async function start(
       pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Plugin activation failed', error)
       await fiber.dispose()
       delete controller.fiber
+      agentLoopClient.dispose()
+      delete controller.agentLoopClient
+      await controller.unregisterAgentLoop?.()
+      delete controller.unregisterAgentLoop
       connectorClient.dispose()
       delete controller.connectorClient
       await controller.unregisterConnector?.()
@@ -2019,6 +2100,10 @@ async function start(
     for (const unsubscribe of registrySubscriptions.splice(0)) unsubscribe()
     await operation
     for (const controller of [...controllers].reverse()) {
+      controller.agentLoopClient?.dispose()
+      delete controller.agentLoopClient
+      await controller.unregisterAgentLoop?.()
+      delete controller.unregisterAgentLoop
       agentRuntime.releaseOwner(controller.identity, 'generation-replaced', moduleGenerationOf(controller))
       await controller.fiber?.dispose()
       retirePrincipal(controller, 'Plugin disposed with runtime generation')
@@ -2076,6 +2161,7 @@ async function start(
     await agentHistoryFiber?.dispose()
     agentHistoryFiber = undefined
     connectorBroker.disposeAll()
+    agentLoopBroker.dispose()
     await agentRuntime.dispose()
     historyAdapter.dispose()
     bindingPlatformAdapter?.dispose()

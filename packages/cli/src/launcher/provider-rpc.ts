@@ -15,6 +15,8 @@ export type ProviderRpcOperation =
   | 'tasks.control'
   | 'turns.submit'
   | 'turns.control'
+  | 'agent-loop.create'
+  | 'agent-loop.lifecycle.read'
 
 export interface ProviderBindingRequest {
   readonly requestId: string
@@ -25,6 +27,7 @@ export interface ProviderBindingRequest {
 
 const OPERATIONS: readonly ProviderRpcOperation[] = [
   'status', 'availability', 'models.list', 'tasks.list', 'tasks.read', 'tasks.create', 'tasks.control', 'turns.submit', 'turns.control',
+  'agent-loop.create', 'agent-loop.lifecycle.read',
 ]
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -94,6 +97,20 @@ function validateInput(operation: ProviderRpcOperation, value: unknown): void {
     text(input.cwd, 'input.cwd')
     return
   }
+  if (operation === 'agent-loop.create') {
+    const input = exact(value, ['model', 'cwd', 'developerInstructions', 'effort'], 'input')
+    modelRef(input.model)
+    text(input.cwd, 'input.cwd')
+    if (input.developerInstructions !== undefined) text(input.developerInstructions, 'input.developerInstructions', 1_000_000)
+    if (input.effort !== undefined && !['low', 'medium', 'high', 'xhigh'].includes(String(input.effort))) throw new Error('input.effort is invalid')
+    return
+  }
+  if (operation === 'agent-loop.lifecycle.read') {
+    const input = exact(value, ['session', 'afterSequence'], 'input')
+    sessionRef(input.session)
+    if (!Number.isInteger(input.afterSequence) || (input.afterSequence as number) < 0) throw new Error('input.afterSequence is invalid')
+    return
+  }
   if (operation === 'tasks.control') {
     const input = exact(value, ['action', 'session'], 'input')
     if (!['continue', 'fork', 'archive', 'restore', 'delete'].includes(String(input.action))) throw new Error('input.action is invalid')
@@ -139,5 +156,10 @@ export async function handleProviderBindingRequest(fleet: ProviderFleet, request
     case 'tasks.control': return await fleet.controlTask(request.input as Parameters<ProviderFleet['controlTask']>[0])
     case 'turns.submit': return await fleet.submitTurn(request.input as Parameters<ProviderFleet['submitTurn']>[0])
     case 'turns.control': return await fleet.controlTurn(request.input as Parameters<ProviderFleet['controlTurn']>[0])
+    case 'agent-loop.create': return await fleet.createAgentLoopTask(request.input as Parameters<ProviderFleet['createAgentLoopTask']>[0])
+    case 'agent-loop.lifecycle.read': {
+      const input = request.input as { session: Parameters<ProviderFleet['readLifecycle']>[0]; afterSequence: number }
+      return fleet.readLifecycle(input.session, input.afterSequence)
+    }
   }
 }

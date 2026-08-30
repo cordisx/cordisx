@@ -21,7 +21,6 @@ export function playgroundConversationCopy(locale: 'zh-CN' | 'en'): AgentConvers
   return Object.freeze(en ? {
     locale: 'en',
     newRoomTitle: 'New room',
-    newRoomDescription: 'Choose New task when a structured conversation source is available.',
     timelineLabel: 'Conversation timeline',
     composerLabel: 'Message draft',
     sendLabel: 'Send message',
@@ -33,7 +32,6 @@ export function playgroundConversationCopy(locale: 'zh-CN' | 'en'): AgentConvers
   } : {
     locale: 'zh-CN',
     newRoomTitle: '新建房间',
-    newRoomDescription: '结构化会话来源可用后，可通过“新任务”创建房间。',
     timelineLabel: '会话时间线',
     composerLabel: '消息草稿',
     sendLabel: '发送消息',
@@ -65,17 +63,17 @@ export function createPlaygroundConversationFixture(mode: PlaygroundFixtureMode,
       submit: { id: 'room.send' },
     },
   }
-  if (mode === 'empty') {
+  if (mode !== 'conversation') {
     return createAgentConversationModel({
       ...common,
-      selection: {
-        kind: 'new-room',
-        newRoomAction: {
-          id: 'new-room', label: en ? 'New room' : '新建房间', icon: 'host:open', command: { id: 'room.create' },
-          disabled: false,
-        },
-      },
+      selection: { kind: 'no-room' },
       entries: [],
+      composer: {
+        availability: 'available',
+        placeholder: en ? 'Start a room with your first message' : '输入第一条消息以新建房间',
+        disabled: false,
+        submit: { id: 'room.create-with-message' },
+      },
       headerActions: [],
     })
   }

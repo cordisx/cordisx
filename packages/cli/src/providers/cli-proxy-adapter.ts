@@ -15,7 +15,7 @@ import type {
   CordisXTurnStart,
 } from '../contracts.js'
 import type { CodexAppServerRpc } from './codex-app-server.js'
-import type { CliProxyProviderConfig, ProviderConnection, ProviderConnectionStatus, ProviderLifecycleSignal } from './contracts.js'
+import type { CodexProviderConfig, ProviderConnection, ProviderConnectionStatus, ProviderLifecycleSignal } from './contracts.js'
 import { JsonLineRpcError } from './json-line-rpc.js'
 
 interface AppServerModel {
@@ -44,6 +44,9 @@ interface ModelIndexData {
   readonly version: 1
   readonly sessions: Readonly<Record<string, string>>
 }
+
+const MAX_ASSISTANT_ITEMS_PER_TURN = 64
+const MAX_ASSISTANT_TEXT_LENGTH = 1_000_000
 
 function failure(code: CordisXPlatformDiagnostic['code'], message: string, retryable = false): CordisXPlatformResult<never> {
   return { ok: false, error: { code, message, ...(retryable ? { retryable: true } : {}) } }
@@ -172,15 +175,18 @@ export class CliProxyProviderAdapter implements ProviderConnection {
   private state: ProviderConnectionStatus['state'] = 'ready'
   private readonly lifecycleListeners = new Set<(event: ProviderLifecycleSignal) => void>()
   private readonly unsubscribeNotifications: (() => void) | undefined
+  private readonly unsubscribeRequests: (() => void) | undefined
+  private readonly assistantText = new Map<string, Map<string, string>>()
 
   constructor(
-    private readonly config: CliProxyProviderConfig,
+    private readonly config: CodexProviderConfig,
     private readonly rpc: CodexAppServerRpc,
   ) {
     this.providerId = config.id
     this.generation = rpc.generation
     this.modelIndex = new SessionModelIndex(config.codexHome)
     this.unsubscribeNotifications = rpc.subscribeNotifications?.((method, params) => this.receiveNotification(method, params))
+    this.unsubscribeRequests = rpc.subscribeRequests?.((method, params) => this.receiveRequest(method, params))
   }
 
   status(): ProviderConnectionStatus {
@@ -189,7 +195,7 @@ export class CliProxyProviderAdapter implements ProviderConnection {
       displayName: this.config.displayName,
       generation: this.generation,
       state: this.state,
-      external: true,
+      external: this.config.kind === 'cli-proxy-api',
       nativeCurrentConnection: false,
       rawBridgeExposed: false,
     }
@@ -240,7 +246,7 @@ export class CliProxyProviderAdapter implements ProviderConnection {
         limit: input.limit ?? 100,
         sortKey: 'updated_at',
         sortDirection: 'desc',
-        modelProviders: [this.providerId],
+        modelProviders: [this.sourceProviderId()],
         archived: false,
         ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
         ...(input.searchTerm === undefined ? {} : { searchTerm: input.searchTerm }),
@@ -276,8 +282,11 @@ export class CliProxyProviderAdapter implements ProviderConnection {
     try {
       const response = await this.rpc.request<{ thread?: unknown; model?: unknown }>('thread/start', {
         model: sourceModelId,
-        modelProvider: this.providerId,
+        modelProvider: this.sourceProviderId(),
         cwd: input.cwd,
+        ...(this.config.kind === 'local-codex' ? { approvalPolicy: 'never', sandbox: 'read-only' } : {}),
+        ...(input.developerInstructions === undefined ? {} : { developerInstructions: input.developerInstructions }),
+        ...(input.effort === undefined ? {} : { effort: input.effort }),
       })
       const thread = response.thread as AppServerThread
       const id = string(thread?.id)
@@ -365,7 +374,9 @@ export class CliProxyProviderAdapter implements ProviderConnection {
     if (this.state === 'closed') return
     this.state = 'draining'
     this.unsubscribeNotifications?.()
+    this.unsubscribeRequests?.()
     this.lifecycleListeners.clear()
+    this.assistantText.clear()
     await this.rpc.close()
     this.state = 'closed'
   }
@@ -377,19 +388,49 @@ export class CliProxyProviderAdapter implements ProviderConnection {
 
   /** Normalize known id-less App Server notifications inside the provider adapter. */
   private receiveNotification(method: string, params: unknown): void {
+    const value = object(params)
+    const threadId = string(value?.threadId) ?? string(object(value?.thread)?.id)
+    const turnId = string(value?.turnId) ?? string(object(value?.turn)?.id)
+    if (method === 'item/agentMessage/delta' && threadId !== undefined && turnId !== undefined) {
+      const itemId = string(value?.itemId)
+      const delta = typeof value?.delta === 'string' ? value.delta : undefined
+      if (itemId !== undefined && delta !== undefined) {
+        const items = this.assistantText.get(this.turnKey(threadId, turnId)) ?? new Map<string, string>()
+        if (!items.has(itemId) && items.size >= MAX_ASSISTANT_ITEMS_PER_TURN) return
+        items.set(itemId, `${items.get(itemId) ?? ''}${delta}`.slice(0, MAX_ASSISTANT_TEXT_LENGTH))
+        this.assistantText.set(this.turnKey(threadId, turnId), items)
+      }
+      return
+    }
+    if (method === 'item/completed' && threadId !== undefined && turnId !== undefined) {
+      const item = object(value?.item)
+      if (item?.type === 'agentMessage') {
+        const itemId = string(item.id)
+        const text = typeof item.text === 'string' ? item.text : undefined
+        if (itemId !== undefined && text !== undefined) {
+          const items = this.assistantText.get(this.turnKey(threadId, turnId)) ?? new Map<string, string>()
+          if (!items.has(itemId) && items.size >= MAX_ASSISTANT_ITEMS_PER_TURN) return
+          items.set(itemId, text.slice(0, MAX_ASSISTANT_TEXT_LENGTH))
+          this.assistantText.set(this.turnKey(threadId, turnId), items)
+        }
+      }
+      return
+    }
+    const completedStatus = object(value?.turn)?.status
     const kind = method === 'turn/started' ? 'turn.started'
-      : method === 'turn/completed' ? 'turn.completed'
+      : method === 'turn/completed' && (completedStatus === 'failed' || completedStatus === 'interrupted') ? 'turn.failed'
+        : method === 'turn/completed' ? 'turn.completed'
         : method === 'turn/failed' ? 'turn.failed'
           : method === 'approval/requested' ? 'approval.required'
             : method === 'approval/resolved' ? 'approval.resolved'
               : undefined
     if (kind === undefined) return
-    const value = object(params)
-    const threadId = string(value?.threadId) ?? string(object(value?.thread)?.id)
-    const turnId = string(value?.turnId) ?? string(object(value?.turn)?.id)
     if (threadId === undefined || turnId === undefined) return
-    const outputText = typeof value?.text === 'string' && value.text.trim() !== '' ? value.text : undefined
-    const failureCode = string(object(value?.error)?.code) ?? string(value?.errorCode)
+    const streamedText = [...(this.assistantText.get(this.turnKey(threadId, turnId))?.values() ?? [])]
+      .filter(text => text.trim() !== '').join('\n\n')
+    const outputText = typeof value?.text === 'string' && value.text.trim() !== '' ? value.text
+      : streamedText === '' ? undefined : streamedText
+    const failureCode = string(object(value?.error)?.code) ?? string(object(object(value?.turn)?.error)?.code) ?? string(value?.errorCode)
     const approvalId = string(value?.approvalId) ?? string(object(value?.approval)?.id)
     const approvalKind = object(value?.approval)?.kind
     const outcome = object(value?.approval)?.outcome
@@ -400,9 +441,34 @@ export class CliProxyProviderAdapter implements ProviderConnection {
       ...(kind === 'approval.required' && approvalId !== undefined ? { approval: { approvalId, kind: approvalKind === 'file-change' || approvalKind === 'external-action' || approvalKind === 'other' ? approvalKind : 'command', state: 'pending' as const } } : {}),
       ...(kind === 'approval.resolved' && approvalId !== undefined ? { approval: { approvalId, kind: approvalKind === 'file-change' || approvalKind === 'external-action' || approvalKind === 'other' ? approvalKind : 'command', state: 'resolved' as const, outcome: outcome === 'denied' || outcome === 'expired' || outcome === 'cancelled' ? outcome : 'approved' as const } } : {}),
     }
-    if ((kind === 'turn.completed' && event.output === undefined) || (kind.startsWith('approval.') && event.approval === undefined)) return
+    if (kind.startsWith('approval.') && event.approval === undefined) return
+    if (kind === 'turn.completed' || kind === 'turn.failed') this.assistantText.delete(this.turnKey(threadId, turnId))
     for (const listener of this.lifecycleListeners) listener(event)
   }
+
+  private receiveRequest(method: string, params: unknown): unknown {
+    if (method !== 'item/commandExecution/requestApproval' && method !== 'item/fileChange/requestApproval') {
+      throw new Error(`Unsupported App Server request: ${method}`)
+    }
+    const value = object(params)
+    const threadId = string(value?.threadId)
+    const turnId = string(value?.turnId)
+    const itemId = string(value?.itemId)
+    const approvalId = string(value?.approvalId) ?? itemId
+    if (threadId === undefined || turnId === undefined || approvalId === undefined) throw new Error('Invalid App Server approval request')
+    const approvalKind = method === 'item/fileChange/requestApproval' ? 'file-change' as const : 'command' as const
+    this.publish({ session: { providerId: this.providerId, remoteSessionId: threadId }, turnId, type: 'approval.required', approval: { approvalId, kind: approvalKind, state: 'pending' } })
+    this.publish({ session: { providerId: this.providerId, remoteSessionId: threadId }, turnId, type: 'approval.resolved', approval: { approvalId, kind: approvalKind, state: 'resolved', outcome: 'denied' } })
+    return { decision: 'decline' }
+  }
+
+  private publish(event: ProviderLifecycleSignal): void {
+    for (const listener of this.lifecycleListeners) listener(event)
+  }
+
+  private turnKey(threadId: string, turnId: string): string { return `${threadId}\u0000${turnId}` }
+
+  private sourceProviderId(): string { return this.config.kind === 'local-codex' ? this.config.sourceProviderId : this.config.id }
 
   private checkRef(ref: CordisXPlatformSessionRef): CordisXPlatformResult<never> | undefined {
     return ref.providerId !== this.providerId
@@ -420,7 +486,7 @@ export class CliProxyProviderAdapter implements ProviderConnection {
   private async summary(thread: AppServerThread): Promise<CordisXSessionSummary | undefined> {
     const id = string(thread?.id)
     const cwd = string(thread?.cwd)
-    if (id === undefined || cwd === undefined || thread.modelProvider !== this.providerId) return undefined
+    if (id === undefined || cwd === undefined || thread.modelProvider !== this.sourceProviderId()) return undefined
     const modelId = await this.modelIndex.get(id) ?? 'unknown'
     const title = string(thread.name) ?? string(thread.preview)
     const createdAt = iso(thread.createdAt)

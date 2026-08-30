@@ -101,12 +101,12 @@ on shutdown, removes CDP injections then terminates only that group plus
 helpers fenced by its exact CordisX-managed user-data directory; an explicitly
 user-supplied `--profile-dir` never grants a broad helper-cleanup target.
 
-The second process is a UI development host, not a transparent platform bridge.
-CordisX must not start another app-server to impersonate or replace the original
-connection, and must not create a second AppHost that overwrites WebContents
-registration. Reuse of a controlled existing connection remains experimental.
-Until an official bridge or a safely controlled existing-connection adapter
-exists, plugin-visible platform data is limited to read-only renderer snapshots.
+The second Desktop process is a UI development host, not a transparent platform
+bridge. CordisX must not start another app-server to impersonate or replace the
+Desktop current connection, and must not create a second AppHost that overwrites
+WebContents registration. Reuse of a controlled existing Desktop connection
+remains experimental. An explicitly configured independent Provider Fleet
+connection is a separate plane and never changes these current-connection facts.
 
 The version-1 Platform capability architecture and its honest unavailable
 default are specified in [`platform-capabilities.md`](platform-capabilities.md).
@@ -125,6 +125,21 @@ chain, and private Codex event adapter are specified in
 [`agent-events.md`](agent-events.md). They share the Platform broker and host
 adapter generation, retain only stable projection identities, and define no
 Timeline, session header, DOM surface, or outlet.
+
+The internal text AgentLoop bridge is specified in
+[`agent-loop.md`](agent-loop.md). It injects one principal-bound
+`ctx.agentLoop` client per plugin fiber, resolves the Protocol AgentDefinition
+catalog, creates a fresh binding or binds one explicit opaque task, wakes it
+through the existing Provider Fleet, and proactively projects
+assistant text, observed approvals, and lifecycle. It reuses the existing task
+permissions and prompt runtime, owns no Chatroom data or plugin UI, and returns
+typed unsupported for `image-ref` until a controlled resolver exists.
+For internal development and Playground composition, the explicit
+`codex.agentLoopBackend="local-cli"` option adds `codex-local` to that Provider
+Fleet. Its launcher-owned app-server reuses the authenticated local Codex home,
+publishes only the existing token-bound provider RPC, and starts tasks with a
+read-only sandbox plus `approvalPolicy=never`. It is an independent connection,
+not the Desktop current connection or a raw app-server plugin API.
 
 Durable adapter history is a separate Node/Host read service specified in
 [`agent-history.md`](agent-history.md). It gives plugins permission-scoped,
@@ -493,6 +508,24 @@ removed with REPLACE at the same index. A non-current stale entry cannot be
 rewritten until native navigation reaches it, at which point validation either
 mounts it or replaces its invalid projection. CordisX never queries or clicks
 the native controls and never patches an installed application file.
+
+Sidebar Room history uses the Host public structured-collection lifecycle, not
+plugin DOM and not Playground task fixtures. A plugin registers one
+`sidebar.navigation.items` collection source with a localized group label and
+an atomically replaced, monotonically revised list of route-only descriptors.
+The source orders its Room descriptors latest-first; the Host clones and
+freezes each replacement, validates bounded ids/text/icons/routes, renders the
+group heading and rows with the shared SidebarItem primitive, and derives the
+single selected row from the exact owner-qualified route plus parameters.
+
+Collection subscriptions are owned by the calling Cordis fiber. Plugin block,
+generation replacement, registration disposal, or runtime teardown
+unsubscribes the source, removes the whole group in one published surface
+epoch, and rejects late or same-revision mutation. The collection is a
+projection rather than a Host Room database: after reload, the plugin or its
+provider must restore the complete source snapshot before registration. This
+Host-specific navigation lifecycle does not extend the room-neutral
+Conversation Shell Protocol.
 
 Page-v2 `body-only` is a general structured chrome policy with a host outlet
 gate. The current adapter accepts it only for `session.content`, whose overlay

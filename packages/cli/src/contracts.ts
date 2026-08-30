@@ -15,6 +15,7 @@ export * from './control-contracts.js'
 export * from './platform-contracts.js'
 export * from './permission-contracts.js'
 export * from './agent-contracts.js'
+export * from './agent-loop-contracts.js'
 export * from './plugin-lifecycle-contracts.js'
 export type {
   CordisXBoundConnectorClient,
@@ -564,6 +565,49 @@ export interface CordisXNavigationItem {
   readonly actions?: readonly CordisXNavigationAction[]
 }
 
+/** One route-only row in a Host-rendered sidebar navigation collection. */
+export interface CordisXNavigationCollectionItem {
+  readonly id: string
+  readonly label: CordisXLocalizedText
+  readonly description?: CordisXLocalizedText
+  readonly icon?: CordisXIconToken
+  readonly route: CordisXRouteReference
+  /** Lower values render first. A Room provider uses this for latest-first ordering. */
+  readonly order: number
+  readonly disabled?: CordisXDisabledState
+}
+
+/** Atomic, monotonically revised replacement for one sidebar collection. */
+export interface CordisXNavigationCollectionSnapshot {
+  readonly revision: number
+  readonly items: readonly CordisXNavigationCollectionItem[]
+}
+
+/**
+ * Data-only collection source. The Host calls snapshot after each signal and
+ * owns validation, immutable replacement, rendering, route selection, and
+ * generation cleanup.
+ */
+export interface CordisXNavigationCollectionSource {
+  snapshot(): CordisXNavigationCollectionSnapshot
+  subscribe(listener: () => void): () => void
+  dispose?(): void
+}
+
+export interface CordisXNavigationCollectionOptions {
+  readonly name: 'sidebar.navigation.items'
+  readonly id: string
+  readonly group: Readonly<{
+    readonly id: string
+    readonly label: CordisXLocalizedText
+    readonly order?: number
+  }>
+}
+
+export interface CordisXNavigationCollectionRegistration {
+  dispose(): void
+}
+
 export interface CordisXToolbarItem extends CordisXStructuredAction {
   readonly anchor: string
   readonly placement: 'before' | 'after' | 'menu'
@@ -826,6 +870,10 @@ export interface CordisXSlots {
     options: CordisXContributionOptions<Name>,
     item: CordisXSurfaceMap[Name],
   ): CordisXContributionHandle<CordisXSurfaceMap[Name]>
+  registerCollection(
+    options: CordisXNavigationCollectionOptions,
+    source: CordisXNavigationCollectionSource,
+  ): CordisXNavigationCollectionRegistration
 }
 
 export interface CordisXCommandMetadata {

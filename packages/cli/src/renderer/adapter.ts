@@ -1534,6 +1534,12 @@ class StructuredSurfaceRenderer {
     return this.i18n.resolveFor(snapshot.owner, value, site).text
   }
 
+  private navigationGroupText(owner: string, qualifiedId: string, value: CordisXLocalizedText, nextSites: Set<string>): string {
+    const site = `surface:sidebar.navigation.items:${qualifiedId}:group.label`
+    nextSites.add(`${owner}\u0000${site}`)
+    return this.i18n.resolveFor(owner, value, site).text
+  }
+
   private invocationContext(
     snapshot: SurfaceContributionSnapshot,
     action: CordisXStructuredAction,
@@ -1668,42 +1674,59 @@ class StructuredSurfaceRenderer {
   private renderNavigation(root: HTMLElement, snapshots: readonly SurfaceContributionSnapshot[], sites: Set<string>, _nativeTemplate?: HTMLButtonElement): void {
     root.replaceChildren()
     const navigation = create(this.document, 'div', 'cordisx-navigation')
-    for (const snapshot of snapshots) {
-      const item = snapshot.item as { label: CordisXLocalizedText; description?: CordisXLocalizedText; icon?: string; command?: { id: string; arguments?: never }; route?: { id: string; params?: never }; actions?: readonly (CordisXStructuredAction & { id: string })[] }
-      const label = this.text(snapshot, item.label, 'label', sites)
-      const description = item.description === undefined ? undefined : this.text(snapshot, item.description, 'description', sites)
-      const activate = (): void => {
-        const operation = item.command !== undefined
-          ? this.commands.executeFor(snapshot.owner, item.command, `nav:${snapshot.qualifiedId}`, {
-              pointId: snapshot.surface,
-              contributionId: snapshot.qualifiedId,
-            })
-          : item.route === undefined ? Promise.reject(new Error('navigation item has no activation')) : this.routes.navigateFromSurface(snapshot.owner, item.route, snapshot.surface, snapshot.qualifiedId)
-        void operation.catch(error => { control.element.dataset.error = error instanceof Error ? error.message : String(error); this.schedule(true) })
-      }
-      const control = createSidebarItem(this.document, {
-        id: snapshot.qualifiedId,
-        label,
-        ...(description === undefined ? {} : { ariaLabel: `${label}：${description}` }),
-        ...(item.icon === undefined ? {} : { icon: item.icon }),
-        onActivate: activate,
-      })
-      const { element: row, primary } = control
-      if (description !== undefined) primary.dataset.cordisxTooltip = description
-      if (item.route !== undefined) {
-        const project = (): void => {
-          const routeId = item.route!.id.includes(':') ? item.route!.id : `${snapshot.owner}:${item.route!.id}`
-          const outlet = this.routes.snapshot().outlets.find(candidate => candidate.activeRoute === routeId)
-          const presentation = outlet?.presentation ?? 'inactive'
-          row.dataset.cordisxRouteState = presentation
-          control.setSelected(presentation === 'presented', true)
+    const groups = this.slots.navigationCollectionGroupsSnapshot()
+    const collectionGroupIds = new Set(groups.map(group => group.surfaceGroup))
+    const renderRows = (items: readonly SurfaceContributionSnapshot[], parent: HTMLElement): void => {
+      for (const snapshot of items) {
+        const item = snapshot.item as { label: CordisXLocalizedText; description?: CordisXLocalizedText; icon?: string; command?: { id: string; arguments?: never }; route?: { id: string; params?: never }; actions?: readonly (CordisXStructuredAction & { id: string })[] }
+        const label = this.text(snapshot, item.label, 'label', sites)
+        const description = item.description === undefined ? undefined : this.text(snapshot, item.description, 'description', sites)
+        const activate = (): void => {
+          const operation = item.command !== undefined
+            ? this.commands.executeFor(snapshot.owner, item.command, `nav:${snapshot.qualifiedId}`, {
+                pointId: snapshot.surface,
+                contributionId: snapshot.qualifiedId,
+              })
+            : item.route === undefined ? Promise.reject(new Error('navigation item has no activation')) : this.routes.navigateFromSurface(snapshot.owner, item.route, snapshot.surface, snapshot.qualifiedId)
+          void operation.catch(error => { control.element.dataset.error = error instanceof Error ? error.message : String(error); this.schedule(true) })
         }
-        this.routeProjectors.set(primary, project)
-        project()
+        const control = createSidebarItem(this.document, {
+          id: snapshot.qualifiedId,
+          label,
+          ...(description === undefined ? {} : { ariaLabel: `${label}：${description}` }),
+          ...(item.icon === undefined ? {} : { icon: item.icon }),
+          onActivate: activate,
+        })
+        const { element: row, primary } = control
+        if (description !== undefined) primary.dataset.cordisxTooltip = description
+        if (item.route !== undefined) {
+          const project = (): void => {
+            const projection = this.routes.routeProjection(snapshot.owner, item.route!)
+            const presentation = projection.presented ? 'presented' : projection.active ? 'active' : 'inactive'
+            row.dataset.cordisxRouteState = presentation
+            control.setSelected(presentation === 'presented', true)
+          }
+          this.routeProjectors.set(primary, project)
+          project()
+        }
+        const actions = control.actions
+        for (const [index, action] of (item.actions ?? []).entries()) actions.append(this.button(snapshot, action, `actions.${index}`, sites, 'shortcut'))
+        parent.append(row)
       }
-      const actions = control.actions
-      for (const [index, action] of (item.actions ?? []).entries()) actions.append(this.button(snapshot, action, `actions.${index}`, sites, 'shortcut'))
-      navigation.append(row)
+    }
+    renderRows(snapshots.filter(snapshot => !collectionGroupIds.has(snapshot.group)), navigation)
+    for (const group of groups) {
+      const items = snapshots.filter(snapshot => snapshot.group === group.surfaceGroup)
+      if (items.length === 0) continue
+      const section = create(this.document, 'section', 'cordisx-navigation-group')
+      section.dataset.navigationGroup = group.qualifiedId
+      const heading = create(this.document, 'div', 'cordisx-navigation-group-heading')
+      heading.setAttribute('role', 'heading')
+      heading.setAttribute('aria-level', '2')
+      heading.textContent = this.navigationGroupText(group.owner, group.qualifiedId, group.label, sites)
+      section.append(heading)
+      renderRows(items, section)
+      navigation.append(section)
     }
     root.append(navigation)
   }
@@ -1892,13 +1915,16 @@ function installStyles(document: Document): () => void {
     .cordisx-session-backdrop[data-peak="true"] .cordisx-session-backdrop-architecture { animation:cordisx-backdrop-crown 8s linear infinite; }
     @keyframes cordisx-backdrop-crown { to { transform:translateY(44%) rotate(366deg); } }
     @media (prefers-reduced-motion:reduce) { .cordisx-reasoning-intensity *,.cordisx-session-backdrop * { animation:none!important; transition-duration:0ms!important; } }
-    .cordisx-sidebar-navigation { display: block; width: 100%; min-width: 0; }
+    .cordisx-sidebar-navigation { display: block; width: 100%; min-width: 0; container-type: inline-size; }
     .cordisx-sidebar-footer-before, .cordisx-sidebar-footer-after { display: flex; flex: 0 0 auto; height: 32px; align-items: center; gap: 4px; min-width: 0; }
     .cordisx-toolbar-before, .cordisx-toolbar-after, .cordisx-session-header-actions { --cordisx-toolbar-action-target-size: 28px; --cordisx-toolbar-action-corner-radius: 8px; --cordisx-toolbar-action-idle-background: transparent; --cordisx-toolbar-action-hover-background: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); --cordisx-toolbar-action-focus-ring: var(--color-ring,rgba(131,195,255,.76)); --cordisx-toolbar-action-disabled-opacity: .4; --cordisx-toolbar-action-pressed-background: color-mix(in oklab,var(--color-text,currentColor) 5%,transparent); --cordisx-toolbar-action-pressed-hover-background: color-mix(in oklab,var(--color-text,currentColor) 10%,transparent); --cordisx-toolbar-action-pressed-foreground: var(--color-text,currentColor); --cordisx-toolbar-action-gap: 6px; display: flex; flex: 0 0 auto; height: var(--cordisx-toolbar-action-target-size); align-items: center; gap: var(--cordisx-toolbar-action-gap); min-width: 0; }
     .cordisx-session-header-actions { --cordisx-toolbar-outer-group-gap: 6px; margin-inline-end: var(--cordisx-toolbar-outer-group-gap); }
     .cordisx-composer-submit-before { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: 8px; min-width: 0; }
     .cordisx-environment { display: block; width: 100%; min-width: 0; padding: 6px; }
-    .cordisx-navigation, .cordisx-env-section { display: grid; gap: 1px; }
+    .cordisx-navigation, .cordisx-env-section, .cordisx-navigation-group { display: grid; gap: 1px; }
+    .cordisx-navigation-group { min-width: 0; margin-top: 12px; }
+    .cordisx-navigation-group-heading { min-width: 0; padding: 0 8px 4px; overflow: hidden; color: var(--color-text-secondary,var(--color-text-tertiary,currentColor)); font: 500 11px/16px system-ui,sans-serif; text-overflow: ellipsis; white-space: nowrap; }
+    @container (max-width: 80px) { .cordisx-navigation-group { margin-top: 6px; } .cordisx-navigation-group-heading { display: none; } }
     .cordisx-nav-row { display: grid; grid-template-columns: minmax(0,1fr) max-content; align-items: center; height: var(--height-token-row,30px); padding: 0 8px; border-radius: var(--radius-lg,10px); -webkit-app-region: no-drag; }
     .cordisx-nav-row:hover { background: var(--color-background-primary-ghost-hover,rgba(255,255,255,.078)); }
     .cordisx-nav-row[data-cordisx-route-state="presented"] { background: var(--color-background-primary-ghost-hover,rgba(255,255,255,.078)); }

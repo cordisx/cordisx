@@ -37,6 +37,22 @@ export interface CliProxyProviderConfig {
   }[]
 }
 
+/** Explicit opt-in provider backed by the user's locally authenticated Codex CLI. */
+export interface LocalCodexProviderConfig {
+  readonly id: string
+  readonly kind: 'local-codex'
+  readonly displayName: string
+  /** App-server provider id. This remains private to the Node adapter. */
+  readonly sourceProviderId: string
+  readonly codexExecutable: string
+  readonly codexHome: string
+  readonly enabled: boolean
+  readonly timeoutMs: number
+  readonly modelMappings?: CliProxyProviderConfig['modelMappings']
+}
+
+export type CodexProviderConfig = CliProxyProviderConfig | LocalCodexProviderConfig
+
 export type ProviderConnectionState = 'idle' | 'starting' | 'ready' | 'draining' | 'unavailable' | 'closed'
 
 export interface ProviderConnectionStatus {
@@ -45,7 +61,7 @@ export interface ProviderConnectionStatus {
   readonly generation: string
   readonly state: ProviderConnectionState
   readonly diagnostic?: CordisXPlatformDiagnostic
-  readonly external: true
+  readonly external: boolean
   readonly nativeCurrentConnection: false
   readonly rawBridgeExposed: false
 }
@@ -61,7 +77,13 @@ export interface ProviderConnection {
     readonly nextCursor?: string
   }>>
   readSession(ref: CordisXPlatformSessionRef): Promise<CordisXPlatformResult<CordisXSessionProjection>>
-  createSession(input: { readonly model: CordisXPlatformModelRef; readonly cwd: string }): Promise<CordisXPlatformResult<CordisXSessionSummary>>
+  createSession(input: {
+    readonly model: CordisXPlatformModelRef
+    readonly cwd: string
+    /** Host-private AgentLoop projection; never accepted by ctx.platform. */
+    readonly developerInstructions?: string
+    readonly effort?: 'low' | 'medium' | 'high' | 'xhigh'
+  }): Promise<CordisXPlatformResult<CordisXSessionSummary>>
   controlSession(input: CordisXTaskControlInput): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>>
   submitTurn(input: { readonly session: CordisXPlatformSessionRef; readonly message: string }): Promise<CordisXPlatformResult<CordisXTurnStart>>
   controlTurn(input: CordisXTurnControlInput): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>>
