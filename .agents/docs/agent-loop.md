@@ -89,6 +89,29 @@ observed as pending then resolved-denied and answered `decline`; the local task
 default itself is `approvalPolicy=never` with a read-only sandbox. No raw frame,
 credential, process handle, or approval callback crosses into the renderer.
 
+The UI Playground also accepts the explicit debug-only
+`codex.agentLoopBackend: "mock"` value. It selects a deterministic in-memory
+Host behind the same `ctx.agentLoop` broker; it does not register a provider,
+start a model, App Server, Codex task, external process, network request, or
+login flow. Create/bind/send/subscribe/dispose, command idempotency, binding
+fences, cursors, assistant/approval/lifecycle projection, and `image-ref`
+unsupported behavior remain the normal AgentLoop implementation. Only the
+Host-private backend changes.
+
+The Simulator records a redacted, debug-only trace of the exact create input,
+ordered definition catalog, resolved inheritance layers, effective prompt,
+structured deterministic CLI invocation, result, and lifecycle. A distinct
+Playground Host task list opens those traces. It never places prompt or trace
+data in Chatroom, a plugin snapshot, the public runtime snapshot, the native
+Agent ledger, or `agent-trace-showcase`. The debug namespace is
+`debug:agent-loop/mock/v1`; it is not a Protocol or durable CLI contract.
+Each Simulator task receives its canonical
+`detailsUrl: { url: "app:…", target: "host" }` when it is created. Rebinding
+the same private task preserves that URL; closed trace history keeps it while
+the active list drops the run. Playground navigation consumes the snapshotted
+URL through Host browser history. The plugin does not resolve, cache, or build
+task URLs.
+
 ## Consumer sequence
 
 An internal Chatroom plugin:

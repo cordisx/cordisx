@@ -184,10 +184,16 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
     const serviceConfigToken = randomBytes(32).toString('hex')
     const credentialToken = randomBytes(32).toString('hex')
     const config = await loadConfig(configPath, { profileId: 'playground' })
-    const localProvider = resolveLocalCodexProviderConfig(config.codex, process.env)
-    const providerConfigs: readonly CodexProviderConfig[] = localProvider === undefined
-      ? config.providers
-      : [...config.providers, localProvider]
+    const mockAgentLoop = config.codex.agentLoopBackend === 'mock'
+    const localProvider = mockAgentLoop ? undefined : resolveLocalCodexProviderConfig(config.codex, process.env)
+    // The deterministic Simulator is a complete Playground AgentLoop backend.
+    // It must not create a Provider Fleet even when the reviewed composition
+    // still contains enabled real-provider configuration.
+    const providerConfigs: readonly CodexProviderConfig[] = mockAgentLoop
+      ? []
+      : localProvider === undefined
+        ? config.providers
+        : [...config.providers, localProvider]
     const providerFleet = providerConfigs.some(provider => provider.enabled)
       ? await ProviderFleet.create(providerConfigs, { appServer: { environment: process.env } })
       : undefined

@@ -47,6 +47,7 @@ function createCommand(definitions: readonly [CordisXAgentDefinition, ...CordisX
 
 class FakeHost implements CordisXAgentLoopHost {
   readonly created: CordisXResolvedAgentDefinition[] = []
+  readonly bound: string[] = []
   readonly sent: unknown[] = []
   readonly lifecycleByTask = new Map<string, CordisXAgentLoopLifecycleEvent[]>()
   readonly lifecycleReads: [task: string, afterSequence: number][] = []
@@ -61,7 +62,10 @@ class FakeHost implements CordisXAgentLoopHost {
     const sequence = this.created.length
     return { ok: true as const, value: { task: `opaque-task-${sequence}`, session: { providerId: 'alpha', remoteSessionId: `session-${sequence}` } } }
   }
-  async bind(task: string) { return { ok: true as const, value: { task, session: { providerId: 'alpha', remoteSessionId: 'session-1' } } } }
+  async bind(task: string) {
+    this.bound.push(task)
+    return { ok: true as const, value: { task, session: { providerId: 'alpha', remoteSessionId: 'session-1' } } }
+  }
   async send(task: { readonly task: string }, content: unknown) {
     this.sent.push(content)
     return { ok: true as const, value: { messageId: `message:${task.task}`, turn: `turn:${task.task}` } }
@@ -252,6 +256,7 @@ describe('Host-bound AgentLoop', () => {
       target: { mode: 'bind', task: first.binding.task },
     })
     expect(rebound).toMatchObject({ status: 'accepted', binding: first.binding })
+    expect(host.bound).toEqual([])
 
     const [firstSubscription, secondSubscription] = await Promise.all([
       client.subscribe(first.binding, -1),

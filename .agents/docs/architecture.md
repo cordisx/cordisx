@@ -140,6 +140,12 @@ Fleet. Its launcher-owned app-server reuses the authenticated local Codex home,
 publishes only the existing token-bound provider RPC, and starts tasks with a
 read-only sandbox plus `approvalPolicy=never`. It is an independent connection,
 not the Desktop current connection or a raw app-server plugin API.
+The alternative `codex.agentLoopBackend="mock"` is fenced to the explicit UI
+Playground and substitutes only a Host-private deterministic in-memory
+AgentLoop host. It uses the same broker and public client but creates no
+provider, model, App Server, Codex task, process, connection, or login state.
+Its `debug:agent-loop/mock/v1` task registry and trace page are development
+diagnostics, not public runtime state or a permanent CLI contract.
 
 Durable adapter history is a separate Node/Host read service specified in
 [`agent-history.md`](agent-history.md). It gives plugins permission-scoped,

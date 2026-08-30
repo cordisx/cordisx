@@ -105,6 +105,23 @@ body > [data-cordisx-page-outlet] svg.icon-xs { width: 16px !important; height: 
 .pg-plugin-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .pg-plugin { padding: 2px 6px; border: 1px solid var(--pg-border); border-radius: 999px; color: var(--pg-muted); font: 9px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .pg-capability-note { margin: 10px 0 0; font-size: 10px; }
+.pg-simulator-task-list { display: grid; gap: 5px; margin: 10px 0; }
+.pg-simulator-task-list > p { margin: 0; color: var(--pg-muted); font-size: 10px; }
+.pg-simulator-task-list > button { display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; width: 100%; padding: 7px 8px; border: 1px solid var(--pg-border-soft); border-radius: 7px; background: transparent; color: var(--pg-text); text-align: left; cursor: pointer; }
+.pg-simulator-task-list > button[data-selected="true"] { background: var(--pg-hover); border-color: var(--pg-border); }
+.pg-simulator-task-list > button span { color: var(--pg-muted); font-size: 10px; }
+.pg-simulator-task-list > button small { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--pg-muted); }
+.pg-simulator-task-page { min-height: 100vh; padding: 28px; overflow: auto; background: var(--pg-bg); color: var(--pg-text); }
+.pg-simulator-task-page > header { margin-bottom: 18px; }
+.pg-simulator-task-page h1 { margin: 6px 0 2px; font-size: 22px; }
+.pg-simulator-task-page h2 { margin: 0 0 7px; font-size: 13px; }
+.pg-simulator-task-page section { max-width: 920px; margin: 10px 0; padding: 12px; border: 1px solid var(--pg-border-soft); border-radius: 9px; }
+.pg-simulator-task-page pre { max-height: 280px; margin: 0; overflow: auto; color: var(--pg-text); white-space: pre-wrap; word-break: break-word; font: 11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+.pg-simulator-badge { display: inline-flex; padding: 2px 7px; border: 1px solid var(--pg-border); border-radius: 999px; color: var(--pg-muted); font-size: 10px; }
+.pg-simulator-input { white-space: pre-wrap; word-break: break-word; }
+.pg-simulator-events { display: grid; gap: 7px; margin: 0; padding-left: 20px; }
+.pg-simulator-events li { padding-left: 4px; }
+.pg-simulator-events span { display: block; color: var(--pg-muted); font-size: 11px; }
 
 /* Production structured renderer roots remain Host-owned; these rules only place them in the fixture shell. */
 .pg-surface-seat > [data-cordisx-surface-host], .pg-footer-surface > [data-cordisx-surface-host] { position: static !important; display: flex; align-items: center; gap: 5px; }

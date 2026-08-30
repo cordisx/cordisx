@@ -88,6 +88,10 @@ import {
   UnavailableAgentLoopHost,
   type CordisXAgentLoopAuthorizationRequest,
 } from './agent-loop.js'
+import {
+  PlaygroundMockAgentLoopHost,
+  type PlaygroundMockAgentLoopSnapshot,
+} from './playground-mock-agent-loop.js'
 import type { BoundAgentLoopClient } from '../agent-loop-contracts.js'
 import { BindingAgentHistoryAdapter, UnavailableAgentHistoryAdapter } from './agent-history-binding.js'
 import { CordisXAgentHistoryService } from './agent-history.js'
@@ -172,6 +176,8 @@ interface CordisXRuntimeMetadata {
   readonly channelManager?: ChannelManagerProjectionV1
   /** Development-only host with explicit semantic seats and no Codex DOM probes. */
   readonly hostKind?: 'codex' | 'playground'
+  /** Debug-only deterministic service; accepted only by the explicit Playground host. */
+  readonly agentLoopBackend?: 'mock'
 }
 
 interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
@@ -321,6 +327,8 @@ interface CordisXRuntimeHandle extends ManagerModel {
   abortPluginMutation(transactionId: string): Promise<void>
   reloadPluginGeneration(pluginId: string, moduleGeneration: string, runtimeGeneration: string): Promise<void>
   updateLocalDevelopmentStatus(status: CordisXLocalDevelopmentSnapshot): boolean
+  /** Host-private debug projection. Plugins and public runtime snapshots cannot access it. */
+  playgroundMockAgentLoop?(): PlaygroundMockAgentLoopSnapshot
   dispose(): Promise<void>
 }
 
@@ -597,9 +605,16 @@ async function start(
   const configuration = new PluginConfigurationRegistry(generationVisibility)
   const configRenderers = new ConfigRendererRegistry(generationVisibility)
   const agentRuntime = new CordisXHostAgentRuntime({ adapter: agentAdapter, broker, generation })
-  const agentLoopBroker = new CordisXAgentLoopBroker(bindingPlatformAdapter === undefined
-    ? new UnavailableAgentLoopHost()
-    : new BindingAgentLoopHost(bindingPlatformAdapter, metadata.workspaceCwd))
+  if (metadata.agentLoopBackend === 'mock' && metadata.hostKind !== 'playground') {
+    throw new Error('The deterministic AgentLoop Simulator is available only in the explicit Playground host')
+  }
+  const playgroundMockAgentLoop = metadata.agentLoopBackend === 'mock'
+    ? new PlaygroundMockAgentLoopHost()
+    : undefined
+  const agentLoopBroker = new CordisXAgentLoopBroker(playgroundMockAgentLoop
+    ?? (bindingPlatformAdapter === undefined
+      ? new UnavailableAgentLoopHost()
+      : new BindingAgentLoopHost(bindingPlatformAdapter, metadata.workspaceCwd)))
   // Host-owned only: no plugin or renderer global receives this broker/adapter.
   const connectorBroker = new CordisXConnectorBroker()
   const agentConnector = connectorBroker.register(createCodexAgentConnector(agentAdapter))
@@ -2274,6 +2289,9 @@ async function start(
     abortPluginMutation,
     reloadPluginGeneration,
     updateLocalDevelopmentStatus,
+    ...(playgroundMockAgentLoop === undefined ? {} : {
+      playgroundMockAgentLoop: () => playgroundMockAgentLoop.snapshot(),
+    }),
     snapshot: publicSnapshot,
     setPluginBlocked,
     updatePluginConfig,
