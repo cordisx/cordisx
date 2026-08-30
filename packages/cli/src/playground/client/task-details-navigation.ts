@@ -1,9 +1,12 @@
 import type { PlaygroundMockTaskDetailsUrl } from '../../renderer/playground-mock-agent-loop.js'
 import {
+  CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT,
   HostAgentTaskDetailsNavigator,
   validateAgentLoopTaskDetailsUrl,
 } from '../../renderer/host-ui/AgentTaskDetailsNavigator.js'
 import { withoutCordisXRouteHistoryEntry } from '../../renderer/codex-router-history.js'
+
+export const PLAYGROUND_SIMULATOR_SESSION_PREFIX = 'cordisx.playground.simulator/v1:'
 
 export interface PlaygroundTaskNavigationTarget {
   readonly kind: 'host' | 'external'
@@ -37,6 +40,34 @@ export function simulatorTaskIdFromPath(pathname: string): string | undefined {
   } catch {
     return undefined
   }
+}
+
+/**
+ * Restores the Playground page shell in the capture phase so the production
+ * route projection observes a mounted Host outlet during the same popstate.
+ */
+export function subscribePlaygroundTaskLocation(
+  view: Window,
+  listener: (taskId: string | undefined, synchronous: boolean) => void,
+): () => void {
+  const onPopState = () => listener(simulatorTaskIdFromPath(view.location.pathname), true)
+  const onTaskNavigation = () => listener(simulatorTaskIdFromPath(view.location.pathname), true)
+  view.addEventListener('popstate', onPopState, { capture: true })
+  view.addEventListener(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT, onTaskNavigation)
+  return () => {
+    view.removeEventListener('popstate', onPopState, { capture: true })
+    view.removeEventListener(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT, onTaskNavigation)
+  }
+}
+
+/** Removes only the Host-private Simulator registry for this browser session. */
+export function clearPlaygroundSimulatorSessionRegistry(storage: Storage): void {
+  const matching: string[] = []
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index)
+    if (key?.startsWith(PLAYGROUND_SIMULATOR_SESSION_PREFIX)) matching.push(key)
+  }
+  for (const key of matching) storage.removeItem(key)
 }
 
 export function navigateTaskDetails(

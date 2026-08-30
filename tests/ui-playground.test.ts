@@ -10,6 +10,10 @@ import { defaultUiPlaygroundConfig } from '../packages/cli/src/playground/defaul
 import { startUiPlayground } from '../packages/cli/src/playground/server.js'
 import { createPlaygroundSession } from '../packages/cli/src/playground/session.js'
 import { activatePlaygroundReviewNavigation } from '../packages/cli/src/playground/client/review-navigation.js'
+import {
+  clearPlaygroundSimulatorSessionRegistry,
+  subscribePlaygroundTaskLocation,
+} from '../packages/cli/src/playground/client/task-details-navigation.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { createSidebarItem } from '../packages/cli/src/renderer/host-ui/SidebarItem.js'
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
@@ -20,6 +24,57 @@ const defaultPluginIds = [
 ]
 
 describe('UI Playground', () => {
+  it('restores the Host outlet before a Room route projects during Task history back and forward', async () => {
+    const dom = new JSDOM('<!doctype html><body><div id="root"><main data-host-seats><div data-cordisx-playground-seat="main"></div></main></div></body>', {
+      url: 'http://127.0.0.1/',
+    })
+    const roomEntry = {
+      key: 'room', idx: 1,
+      __cordisxRouteV1: { schemaVersion: 1, owner: 'chatroom', routeId: 'chatroom:room', outlet: 'main', params: { roomId: 'room-1' } },
+    }
+    dom.window.history.replaceState(roomEntry, '', '/')
+    const root = dom.window.document.getElementById('root')!
+    const dispose = subscribePlaygroundTaskLocation(dom.window, taskId => {
+      root.innerHTML = taskId === undefined
+        ? '<main data-host-seats><div data-cordisx-playground-seat="main"></div></main>'
+        : `<main data-playground-simulator="true">${taskId}</main>`
+    })
+    dom.window.addEventListener('popstate', () => {
+      const route = dom.window.history.state?.__cordisxRouteV1
+      const outlet = dom.window.document.querySelector('[data-cordisx-playground-seat="main"]')
+      if (route?.params?.roomId === 'room-1' && outlet !== null) outlet.innerHTML = '<article data-room-page="room-1">Room one</article>'
+    })
+
+    dom.window.history.pushState({ key: 'task', idx: 2 }, '', '/playground/simulator/tasks/Lead')
+    dom.window.dispatchEvent(new dom.window.Event('cordisx:host-task-details-navigation'))
+    expect(dom.window.document.querySelector('[data-playground-simulator]')?.textContent).toBe('Lead')
+
+    dom.window.history.back()
+    await new Promise(resolve => dom.window.addEventListener('popstate', resolve, { once: true }))
+    expect(dom.window.document.querySelector('[data-room-page="room-1"]')?.textContent).toBe('Room one')
+    dom.window.history.forward()
+    await new Promise(resolve => dom.window.addEventListener('popstate', resolve, { once: true }))
+    expect(dom.window.document.querySelector('[data-playground-simulator]')?.textContent).toBe('Lead')
+    dom.window.history.back()
+    await new Promise(resolve => dom.window.addEventListener('popstate', resolve, { once: true }))
+    expect(dom.window.document.querySelectorAll('[data-room-page="room-1"]')).toHaveLength(1)
+
+    dispose()
+    dom.window.close()
+  })
+
+  it('resets only namespaced Simulator session registries', () => {
+    const dom = new JSDOM('', { url: 'http://127.0.0.1/' })
+    dom.window.sessionStorage.setItem('cordisx.playground.simulator/v1:playground:chatroom', '{"tasks":[1]}')
+    dom.window.sessionStorage.setItem('cordisx.playground.simulator/v1:other:plugin', '{"tasks":[2]}')
+    dom.window.sessionStorage.setItem('cordisx.unrelated.session', 'keep')
+    clearPlaygroundSimulatorSessionRegistry(dom.window.sessionStorage)
+    expect(dom.window.sessionStorage.getItem('cordisx.playground.simulator/v1:playground:chatroom')).toBeNull()
+    expect(dom.window.sessionStorage.getItem('cordisx.playground.simulator/v1:other:plugin')).toBeNull()
+    expect(dom.window.sessionStorage.getItem('cordisx.unrelated.session')).toBe('keep')
+    dom.window.close()
+  })
+
   it('enters an exact configured review navigation row without selecting a debug fixture', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-review-navigation-'))
     const configPath = path.join(root, 'cordisx.config.json')
@@ -159,6 +214,10 @@ describe('UI Playground', () => {
     expect(app).toContain('data-recent-task-row')
     expect(app).toContain('onClickCapture={preparePluginNavigation}')
     expect(app).toContain('flushSync(() => setSimulatorTaskId(undefined))')
+    expect(app).toContain('subscribePlaygroundTaskLocation(window')
+    expect(app).toContain('clearPlaygroundSimulatorSessionRegistry(sessionStorage)')
+    expect(app).toContain('playgroundEnvironment.resetPreferences()')
+    expect(app).not.toContain('localStorage.clear()')
     expect(app).toContain('fixture.reviewNavigationItem === undefined')
     expect(app).toContain("en ? 'Playground fixtures' : 'Playground 测试场景'")
     expect(app).not.toContain('Simulator tasks')

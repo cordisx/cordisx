@@ -5,12 +5,16 @@ import { createSidebarItem, type SidebarItemControl } from '../../renderer/host-
 import { FixtureSummary } from './components/FixtureSummary.js'
 import { HostSeats, type PlaygroundFixtureMode } from './components/HostSeats.js'
 import { MockAgentTaskPage } from './components/MockAgentTaskPage.js'
-import { CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT } from '../../renderer/host-ui/AgentTaskDetailsNavigator.js'
 import { playgroundEnvironment, usePlaygroundEnvironment } from './environment.js'
 import fixture from 'virtual:cordisx-playground-fixture'
 import { activatePlaygroundReviewNavigation } from './review-navigation.js'
 import { bootRuntime, useRuntimeState } from './runtime-store.js'
-import { navigateTaskDetails, simulatorTaskIdFromPath } from './task-details-navigation.js'
+import {
+  clearPlaygroundSimulatorSessionRegistry,
+  navigateTaskDetails,
+  simulatorTaskIdFromPath,
+  subscribePlaygroundTaskLocation,
+} from './task-details-navigation.js'
 
 interface SidebarItemProps {
   readonly id: string
@@ -50,7 +54,7 @@ export function App() {
   const runtime = useRuntimeState()
   const environment = usePlaygroundEnvironment()
   const [fixtureMode, setFixtureMode] = useState<PlaygroundFixtureMode>(fixture.reviewNavigationItem === undefined ? 'conversation' : 'review')
-  const [simulatorTaskId, setSimulatorTaskId] = useState<string | undefined>(undefined)
+  const [simulatorTaskId, setSimulatorTaskId] = useState<string | undefined>(() => simulatorTaskIdFromPath(window.location.pathname))
   const shell = useRef<HTMLDivElement>(null)
   const en = environment.locale === 'en'
 
@@ -63,14 +67,10 @@ export function App() {
   const recentTasks = [...(runtime.simulator?.tasks ?? [])].reverse()
   const simulatorTask = recentTasks.find(task => task.debugTaskId === simulatorTaskId)
   useEffect(() => {
-    const sync = () => setSimulatorTaskId(simulatorTaskIdFromPath(window.location.pathname))
-    sync()
-    window.addEventListener('popstate', sync)
-    window.addEventListener(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT, sync)
-    return () => {
-      window.removeEventListener('popstate', sync)
-      window.removeEventListener(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT, sync)
-    }
+    return subscribePlaygroundTaskLocation(window, (taskId, synchronous) => {
+      if (synchronous) flushSync(() => setSimulatorTaskId(taskId))
+      else setSimulatorTaskId(taskId)
+    })
   }, [])
 
   const openSimulatorTask = (debugTaskId: string, detailsUrl: (typeof recentTasks)[number]['detailsUrl']) => {
@@ -87,7 +87,8 @@ export function App() {
 
   const reset = async () => {
     await fetch('/api/reset', { method: 'POST' })
-    localStorage.clear()
+    try { clearPlaygroundSimulatorSessionRegistry(sessionStorage) } catch { /* browser session storage is optional */ }
+    playgroundEnvironment.resetPreferences()
     window.location.reload()
   }
   const menuItems: readonly HostMenuItem[] = [
