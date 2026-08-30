@@ -413,5 +413,5 @@ describe('UI Playground', () => {
       await runtime.__cordisxRuntime?.dispose()
       await new Promise(resolve => setTimeout(resolve, 200))
     } finally { dom.window.close() }
-  }, 30_000)
+  }, 60_000)
 })

@@ -60,6 +60,16 @@ function bundledArtifactGeneration(plugin: CordisXConfigPlugin, moduleSource: st
   return `artifact_${digest.slice(0, 40)}`
 }
 
+function usesHostDomWorker(plugin: CordisXConfigPlugin): boolean {
+  return plugin.manifest?.schemaVersion === 5 && plugin.manifest.capabilities.some(capability => (
+    capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
+  ))
+}
+
+function isolatedHostDomArtifactSource(source: string): string {
+  return `(() => {\n${source}\nglobalThis.__cordisxHostDomPluginModuleV1 = __cordisxPluginModule\n})()`
+}
+
 export interface RendererCompositionSourceOptions {
   /** Override the runtime import for development transports such as Vite. */
   readonly runtimeImport?: string
@@ -204,7 +214,13 @@ export async function buildRendererCompositionSource(
   const enabledIndexes = new Map(enabled.map((plugin, index) => [plugin.id, index]))
   const composition = `[${config.plugins.map((plugin, pluginIndex) => {
     const index = enabledIndexes.get(plugin.id)
-    const moduleField = index === undefined ? '' : `, moduleFactory: (console) => { ${pluginBundles[index]!.source}\nreturn __cordisxPluginModule }`
+    const isolatedHostDom = index !== undefined && usesHostDomWorker(plugin)
+    const moduleField = index === undefined || isolatedHostDom
+      ? ''
+      : `, moduleFactory: (console) => { ${pluginBundles[index]!.source}\nreturn __cordisxPluginModule }`
+    const isolatedArtifactField = index === undefined || !isolatedHostDom
+      ? ''
+      : `, isolatedArtifactSource: ${JSON.stringify(isolatedHostDomArtifactSource(pluginBundles[index]!.source))}`
     const artifactGenerationField = index === undefined || plugin.package !== undefined
       ? ''
       : `, artifactGeneration: ${JSON.stringify(pluginBundles[index]!.artifactGeneration)}`
@@ -218,7 +234,7 @@ export async function buildRendererCompositionSource(
     const manifestField = plugin.manifest === undefined ? '' : `, manifest: ${JSON.stringify(plugin.manifest)}`
     const packageField = plugin.package === undefined ? '' : `, package: ${JSON.stringify(plugin.package)}`
     const developmentField = plugin.development === undefined ? '' : `, development: ${JSON.stringify(plugin.development)}`
-    return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${plugin.revision ?? 0}${readmeField}${readmesField}${manifestField}${packageField}${developmentField}${artifactGenerationField}${moduleField} }`
+    return `{ id: ${JSON.stringify(plugin.id)}, source: ${JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)}, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${plugin.revision ?? 0}${readmeField}${readmesField}${manifestField}${packageField}${developmentField}${artifactGenerationField}${moduleField}${isolatedArtifactField} }`
   }).join(',')}]`
   const providers = [
     ...config.providers.filter(provider => provider.enabled).map(provider => ({ id: provider.id, displayName: provider.displayName })),

@@ -5,16 +5,31 @@ import { describe, expect, it, vi } from 'vitest'
 import type { CordisXNavigationCollectionSnapshot } from '../packages/cli/src/contracts.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
+import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
 
 describe('sidebar navigation collections', () => {
   it('renders a Host-owned group, atomically inserts rows, and selects exact route params', async () => {
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const baseConfig = await loadConfig(path.join(projectRoot, 'cordisx.config.example.json'))
     const entry = path.join(projectRoot, 'tests/fixtures/navigation-collection-plugin.ts')
-    const bundle = await buildRendererBundle({
+    const config = {
       ...baseConfig,
       plugins: [{ id: 'navigation-collection', entry, enabled: true, config: {} }],
-    }, { playground: true, generation: 'navigation-collection-test', profileId: 'playground' })
+    }
+    const bundle = await buildRendererBundle(config, {
+      playground: true,
+      generation: 'navigation-collection-test',
+      profileId: 'playground',
+      permission: {
+        profileId: 'playground',
+        bridgeToken: '6'.repeat(64),
+        policies: exactDomPermissionPolicies('playground', [{
+          id: 'navigation-collection',
+          entry,
+          pointIds: ['sidebar.navigation.items', 'main'],
+        }]),
+      },
+    })
     const dom = new JSDOM(`<!doctype html><html lang="en"><head></head><body>
       <aside><nav data-cordisx-playground-surface="sidebar.navigation.items"></nav></aside>
       <main data-cordisx-playground-seat="app"></main>
@@ -25,6 +40,7 @@ describe('sidebar navigation collections', () => {
     const warnings: unknown[][] = []
     dom.window.console.error = (...values: unknown[]) => { errors.push(values) }
     dom.window.console.warn = (...values: unknown[]) => { warnings.push(values) }
+    installPermissionPolicyBridge(dom.window)
     let runtime: { snapshot(): unknown; dispose(): Promise<void> } | undefined
     try {
       dom.window.eval(bundle)

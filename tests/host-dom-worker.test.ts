@@ -7,6 +7,7 @@ import type {
   HostDomRootCatalog,
 } from '@cordisx/protocol/host-dom/v1'
 import {
+  createBrowserHostDomWorkerEnvironment,
   createHostDomWorkerBoundary,
   HOST_DOM_WORKER_IFRAME_CSP,
   type HostDomWorkerEnvironment,
@@ -80,8 +81,12 @@ function client() {
   }
 }
 
-function status(status: 'ready' | 'disposed') {
-  return { contract: WORKER_MESSAGE, type: 'status', status }
+function status(environment: FakeEnvironment, state: 'ready' | 'disposed') {
+  return { contract: WORKER_MESSAGE, token: environment.input?.token, type: 'status', status: state }
+}
+
+function fromWorker(environment: FakeEnvironment, message: Record<string, unknown>) {
+  return { contract: WORKER_MESSAGE, token: environment.input?.token, ...message }
 }
 
 async function waitForPosted(transport: FakeTransport, count: number): Promise<void> {
@@ -93,7 +98,7 @@ describe('Host DOM worker boundary', () => {
     const dom = new JSDOM('<body></body>')
     const environment = new FakeEnvironment()
     const hostDom = client()
-    const artifact = `globalThis.__cordisxPluginModule = { apply({ hostDom, onDispose }, config) {
+    const artifact = `globalThis.__cordisxHostDomPluginModuleV1 = { apply({ hostDom, onDispose }, config) {
       onDispose(async () => {}); return hostDom.catalog().then(() => undefined)
     } }`
     const statuses: string[] = []
@@ -128,17 +133,22 @@ describe('Host DOM worker boundary', () => {
     expect(bootstrap).toContain("['require', 'process', 'module', 'document', 'window']")
     expect(bootstrap).toContain('nativeImportScripts(event.data.artifactUrl)')
     expect(bootstrap).toContain('const portPost = port.postMessage.bind(port)')
+    expect(bootstrap).toContain('message.token !== boundaryToken')
     expect(bootstrap).toContain('applyFunction(pluginModule.apply, pluginModule, [freeze({ hostDom, onDispose }), config])')
     expect(bootstrap).toContain("plugin apply must return void or Promise<void>")
 
-    environment.transport.emit(status('ready'))
+    environment.transport.emit(status(environment, 'ready'))
     await boundary.ready
     expect(boundary.status()).toEqual({ status: 'ready' })
     expect(statuses).toEqual(['starting', 'ready'])
 
     const disposal = boundary.dispose()
-    expect(environment.transport.posted).toContainEqual({ contract: WORKER_MESSAGE, type: 'dispose' })
-    environment.transport.emit(status('disposed'))
+    expect(environment.transport.posted).toContainEqual({
+      contract: WORKER_MESSAGE,
+      token: environment.input?.token,
+      type: 'dispose',
+    })
+    environment.transport.emit(status(environment, 'disposed'))
     await disposal
     expect(boundary.status()).toEqual({ status: 'disposed' })
     expect(environment.transport.terminated).toBe(true)
@@ -153,24 +163,24 @@ describe('Host DOM worker boundary', () => {
     const hostDom = client()
     const boundary = createHostDomWorkerBoundary({
       document: dom.window.document,
-      artifactSource: 'globalThis.__cordisxPluginModule = { apply() {} }',
+      artifactSource: 'globalThis.__cordisxHostDomPluginModuleV1 = { apply() {} }',
       hostDom,
       environment,
     })
-    environment.transport.emit(status('ready'))
+    environment.transport.emit(status(environment, 'ready'))
     await boundary.ready
 
-    environment.transport.emit({
-      contract: WORKER_MESSAGE,
+    environment.transport.emit(fromWorker(environment, {
       type: 'rpc',
       sequence: 1,
       requestId: 'rpc-catalog-1',
       method: 'catalog',
-    })
+    }))
     await waitForPosted(environment.transport, 1)
     expect(hostDom.catalog).toHaveBeenCalledTimes(1)
     expect(environment.transport.posted[0]).toEqual({
       contract: WORKER_MESSAGE,
+      token: environment.input?.token,
       type: 'rpc-result',
       sequence: 1,
       requestId: 'rpc-catalog-1',
@@ -186,18 +196,18 @@ describe('Host DOM worker boundary', () => {
       type: 'release',
       handle: 'hdh_0123456789abcdef',
     }
-    environment.transport.emit({
-      contract: WORKER_MESSAGE,
+    environment.transport.emit(fromWorker(environment, {
       type: 'rpc',
       sequence: 2,
       requestId: request.requestId,
       method: 'request',
       payload: request,
-    })
+    }))
     await waitForPosted(environment.transport, 2)
     expect(hostDom.request).toHaveBeenCalledWith(request)
     expect(environment.transport.posted[1]).toEqual({
       contract: WORKER_MESSAGE,
+      token: environment.input?.token,
       type: 'rpc-result',
       sequence: 2,
       requestId: request.requestId,
@@ -205,17 +215,17 @@ describe('Host DOM worker boundary', () => {
       value: released(request.requestId),
     })
 
-    environment.transport.emit({
-      contract: WORKER_MESSAGE,
+    environment.transport.emit(fromWorker(environment, {
       type: 'rpc',
       sequence: 3,
       requestId: 'rpc-dispose-3',
       method: 'dispose',
-    })
+    }))
     await waitForPosted(environment.transport, 3)
     expect(hostDom.dispose).toHaveBeenCalledTimes(1)
     expect(environment.transport.posted[2]).toEqual({
       contract: WORKER_MESSAGE,
+      token: environment.input?.token,
       type: 'rpc-result',
       sequence: 3,
       requestId: 'rpc-dispose-3',
@@ -224,7 +234,7 @@ describe('Host DOM worker boundary', () => {
     })
 
     const disposal = boundary.dispose()
-    environment.transport.emit(status('disposed'))
+    environment.transport.emit(status(environment, 'disposed'))
     await disposal
     expect(hostDom.dispose).toHaveBeenCalledTimes(1)
     dom.window.close()
@@ -237,20 +247,19 @@ describe('Host DOM worker boundary', () => {
     const statuses: string[] = []
     const boundary = createHostDomWorkerBoundary({
       document: dom.window.document,
-      artifactSource: 'globalThis.__cordisxPluginModule = { apply() {} }',
+      artifactSource: 'globalThis.__cordisxHostDomPluginModuleV1 = { apply() {} }',
       hostDom,
       environment,
       onStatus: value => statuses.push(value.status),
     })
-    environment.transport.emit(status('ready'))
+    environment.transport.emit(status(environment, 'ready'))
     await boundary.ready
-    environment.transport.emit({
-      contract: WORKER_MESSAGE,
+    environment.transport.emit(fromWorker(environment, {
       type: 'rpc',
       sequence: 2,
       requestId: 'out-of-order',
       method: 'catalog',
-    })
+    }))
 
     await vi.waitFor(() => expect(boundary.status().status).toBe('error'))
     expect(boundary.status()).toMatchObject({ status: 'error', error: expect.stringContaining('sequence') })
@@ -271,14 +280,13 @@ describe('Host DOM worker boundary', () => {
     const hostDom = client()
     const boundary = createHostDomWorkerBoundary({
       document: dom.window.document,
-      artifactSource: 'globalThis.__cordisxPluginModule = { apply() {} }',
+      artifactSource: 'globalThis.__cordisxHostDomPluginModuleV1 = { apply() {} }',
       hostDom,
       environment,
     })
-    environment.transport.emit(status('ready'))
+    environment.transport.emit(status(environment, 'ready'))
     await boundary.ready
-    environment.transport.emit({
-      contract: WORKER_MESSAGE,
+    environment.transport.emit(fromWorker(environment, {
       type: 'rpc',
       sequence: 1,
       requestId: 'envelope-request-1',
@@ -291,11 +299,12 @@ describe('Host DOM worker boundary', () => {
         type: 'release',
         handle: 'hdh_0123456789abcdef',
       },
-    })
+    }))
     await waitForPosted(environment.transport, 1)
     expect(hostDom.request).not.toHaveBeenCalled()
     expect(environment.transport.posted[0]).toMatchObject({
       contract: WORKER_MESSAGE,
+      token: environment.input?.token,
       type: 'rpc-result',
       sequence: 1,
       requestId: 'envelope-request-1',
@@ -304,9 +313,70 @@ describe('Host DOM worker boundary', () => {
     })
     expect(boundary.status()).toEqual({ status: 'ready' })
     const disposal = boundary.dispose()
-    environment.transport.emit(status('disposed'))
+    environment.transport.emit(status(environment, 'disposed'))
     await disposal
     dom.window.close()
+  })
+
+  it('rejects a forged boundary token before status or Host RPC dispatch', async () => {
+    const dom = new JSDOM('<body></body>')
+    const environment = new FakeEnvironment()
+    const hostDom = client()
+    const boundary = createHostDomWorkerBoundary({
+      document: dom.window.document,
+      artifactSource: 'globalThis.__cordisxHostDomPluginModuleV1 = { apply() {} }',
+      hostDom,
+      environment,
+    })
+
+    environment.transport.emit({
+      contract: WORKER_MESSAGE,
+      token: 'b'.repeat(32),
+      type: 'status',
+      status: 'ready',
+    })
+
+    await expect(boundary.ready).rejects.toThrow('invalid envelope')
+    expect(boundary.status()).toMatchObject({ status: 'error' })
+    expect(hostDom.catalog).not.toHaveBeenCalled()
+    expect(hostDom.request).not.toHaveBeenCalled()
+    expect(hostDom.dispose).toHaveBeenCalledOnce()
+    await boundary.dispose()
+    dom.window.close()
+  })
+
+  it('reuses browser primitives captured before renderer globals and DOM prototypes are tampered', () => {
+    const dom = new JSDOM('<body></body>')
+    const environment = createBrowserHostDomWorkerEnvironment(dom.window.document)
+    const createElement = vi.spyOn(dom.window.document, 'createElement').mockImplementation(() => {
+      throw new Error('tampered document.createElement')
+    })
+    const setAttribute = vi.spyOn(dom.window.Element.prototype, 'setAttribute').mockImplementation(() => {
+      throw new Error('tampered Element.setAttribute')
+    })
+    const OriginalChannel = globalThis.MessageChannel
+    vi.stubGlobal('MessageChannel', class {
+      constructor() { throw new Error('tampered MessageChannel') }
+    })
+    try {
+      const transport = environment.start({
+        document: dom.window.document,
+        token: 'a'.repeat(32),
+        iframeSandbox: 'allow-scripts',
+        iframeSrcdoc: '<!doctype html><html></html>',
+        bootstrapSource: 'void 0',
+        artifactSource: 'void 0',
+        config: null,
+      })
+      expect(dom.window.document.querySelector('iframe[sandbox="allow-scripts"]')).not.toBeNull()
+      transport.destroy()
+      expect(dom.window.document.querySelector('iframe[sandbox="allow-scripts"]')).toBeNull()
+    } finally {
+      createElement.mockRestore()
+      setAttribute.mockRestore()
+      vi.stubGlobal('MessageChannel', OriginalChannel)
+      dom.window.close()
+    }
   })
 
   it('rejects non-JSON configuration and oversized artifacts before creating a frame', () => {
@@ -315,7 +385,7 @@ describe('Host DOM worker boundary', () => {
     const hostDom = client()
     expect(() => createHostDomWorkerBoundary({
       document: dom.window.document,
-      artifactSource: 'globalThis.__cordisxPluginModule = { apply() {} }',
+      artifactSource: 'globalThis.__cordisxHostDomPluginModuleV1 = { apply() {} }',
       config: { callback: () => {} },
       hostDom,
       environment,
@@ -324,10 +394,10 @@ describe('Host DOM worker boundary', () => {
 
     expect(() => createHostDomWorkerBoundary({
       document: dom.window.document,
-      artifactSource: 'x'.repeat(1024 * 1024 + 1),
+      artifactSource: 'x'.repeat(8 * 1024 * 1024 + 1),
       hostDom,
       environment,
-    })).toThrow('1 MiB')
+    })).toThrow('8 MiB')
     expect(environment.input).toBeUndefined()
     dom.window.close()
   })

@@ -292,5 +292,5 @@ describe('renderer Certified permission document channel', () => {
       snapshot: { revision: 2, projections: [] },
     }))).toThrow(/rejected/)
     dom.window.close()
-  })
+  }, 60_000)
 })

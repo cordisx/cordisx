@@ -7,13 +7,14 @@ import type {
 
 const FRAME_MESSAGE = 'cordisx.host-dom-worker-frame/v1'
 const WORKER_MESSAGE = 'cordisx.host-dom-worker/v1'
-const MAX_ARTIFACT_BYTES = 1024 * 1024
+const MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
 const MAX_CONFIG_BYTES = 64 * 1024
 const MAX_RPC_BYTES = 128 * 1024
 const MAX_INFLIGHT = 16
 const MAX_REQUESTS = 4096
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000
 const DEFAULT_DISPOSE_TIMEOUT_MS = 1_000
+const TOKEN = /^[a-f0-9]{32}$/u
 
 export const HOST_DOM_WORKER_IFRAME_CSP = [
   "default-src 'none'",
@@ -63,7 +64,8 @@ export interface HostDomWorkerBoundaryOptions {
   readonly config?: unknown
   /** This client remains in the Host renderer and is never transferred to the worker. */
   readonly hostDom: BoundHostDomClient
-  readonly environment?: HostDomWorkerEnvironment
+  /** Captured before plugin activation; activation-time global lookup is forbidden. */
+  readonly environment: HostDomWorkerEnvironment
   readonly startupTimeoutMs?: number
   readonly disposeTimeoutMs?: number
   readonly onStatus?: (status: HostDomWorkerStatus) => void
@@ -160,11 +162,12 @@ function iframeSource(): string {
       artifactUrl = URL.createObjectURL(new Blob([data.artifactSource], { type: 'text/javascript' }))
       worker = new Worker(bootstrapUrl, { type: 'classic', name: 'cordisx-host-dom-plugin' })
       worker.addEventListener('message', (workerEvent) => {
-        if (workerEvent.data?.contract === '${WORKER_MESSAGE}' && workerEvent.data.type === 'artifact-loaded') {
+        if (workerEvent.data?.contract === '${WORKER_MESSAGE}' && workerEvent.data.token === activeToken
+          && workerEvent.data.type === 'artifact-loaded') {
           clearUrl(artifactUrl); artifactUrl = undefined
         }
       })
-      worker.postMessage({ contract: '${WORKER_MESSAGE}', type: 'initialize', artifactUrl, config: data.config }, event.ports)
+      worker.postMessage({ contract: '${WORKER_MESSAGE}', token: activeToken, type: 'initialize', artifactUrl, config: data.config }, event.ports)
       clearUrl(bootstrapUrl); bootstrapUrl = undefined
     })
     addEventListener('unload', terminate, { once: true })
@@ -202,8 +205,17 @@ function workerBootstrapSource(): string {
     const promiseReject = globalThis.Promise.reject.bind(globalThis.Promise)
     const promiseResolve = globalThis.Promise.resolve.bind(globalThis.Promise)
     const promiseThen = globalThis.Promise.prototype.then
+    const consoleFacade = freeze({
+      debug: globalThis.console.debug.bind(globalThis.console),
+      log: globalThis.console.log.bind(globalThis.console),
+      info: globalThis.console.info.bind(globalThis.console),
+      warn: globalThis.console.warn.bind(globalThis.console),
+      error: globalThis.console.error.bind(globalThis.console),
+    })
     const requestIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
+    const tokenPattern = /^[a-f0-9]{32}$/
     const requestIdTest = requestIdPattern.test.bind(requestIdPattern)
+    const tokenTest = tokenPattern.test.bind(tokenPattern)
     let initialized = false
     const size = (value) => encode(jsonStringify(value)).byteLength
     const snapshot = (value) => {
@@ -233,7 +245,7 @@ function workerBootstrapSource(): string {
     const lockdown = () => {
       const denied = () => { throw new NativeError('ambient worker capability is unavailable') }
       const blockedFunctions = ['fetch', 'importScripts', 'postMessage', 'addEventListener', 'removeEventListener', 'dispatchEvent', 'eval', 'close']
-      const blockedConstructors = ['Worker', 'SharedWorker', 'WebSocket', 'EventSource', 'XMLHttpRequest', 'WebTransport', 'BroadcastChannel', 'MessageChannel', 'MessagePort', 'Function']
+      const blockedConstructors = ['Worker', 'SharedWorker', 'WebSocket', 'EventSource', 'XMLHttpRequest', 'WebTransport', 'RTCPeerConnection', 'BroadcastChannel', 'MessageChannel', 'MessagePort', 'Function']
       const lockValue = (target, name, value) => {
         defineProperty(target, name, { configurable: false, enumerable: false, writable: false, value })
         if (objectDescriptor(target, name)?.value !== value) throw new NativeError('worker lockdown failed for ' + name)
@@ -260,15 +272,18 @@ function workerBootstrapSource(): string {
     }
     globalThis.onmessage = (event) => {
       if (initialized || !event.data || event.data.contract !== CONTRACT || event.data.type !== 'initialize'
+        || typeof event.data.token !== 'string' || !tokenTest(event.data.token)
         || typeof event.data.artifactUrl !== 'string' || event.ports.length !== 1) return
       initialized = true
+      const boundaryToken = event.data.token
       const port = event.ports[0]
       const portPost = port.postMessage.bind(port)
       const portClose = port.close.bind(port)
       const portStart = port.start?.bind(port)
       const post = (message) => {
-        if (size(message) > MAX_RPC_BYTES) throw new NativeError('RPC envelope exceeds byte limit')
-        portPost(message)
+        const envelope = { ...message, token: boundaryToken }
+        if (size(envelope) > MAX_RPC_BYTES) throw new NativeError('RPC envelope exceeds byte limit')
+        portPost(envelope)
       }
       let sequence = 0
       let accepting = true
@@ -300,7 +315,7 @@ function workerBootstrapSource(): string {
       }
       port.onmessage = (portEvent) => {
         const message = portEvent.data
-        if (!message || message.contract !== CONTRACT) return
+        if (!message || message.contract !== CONTRACT || message.token !== boundaryToken) return
         if (message.type === 'rpc-result') {
           const item = pendingGet(message.sequence)
           if (!item || item.requestId !== message.requestId) return
@@ -324,16 +339,25 @@ function workerBootstrapSource(): string {
       portStart?.()
       lockdown()
       try {
-        defineProperty(globalThis, '__cordisxPluginModule', { configurable: true, enumerable: false, writable: true, value: undefined })
+        const moduleKeys = ['__cordisxHostDomPluginModuleV1', '__cordisxPendingPluginModuleV1', '__cordisxPendingPluginModuleFactoryV1']
+        for (const key of moduleKeys) defineProperty(globalThis, key, { configurable: true, enumerable: false, writable: true, value: undefined })
         nativeImportScripts(event.data.artifactUrl)
-        notifyOwner({ contract: CONTRACT, type: 'artifact-loaded' })
-        const descriptor = objectDescriptor(globalThis, '__cordisxPluginModule')
-        const pluginModule = descriptor?.value
-        if (!descriptor?.configurable || !pluginModule || typeof pluginModule !== 'object' || typeof pluginModule.apply !== 'function') {
-          throw new Error('artifact must provide configurable globalThis.__cordisxPluginModule.apply')
+        notifyOwner({ contract: CONTRACT, token: boundaryToken, type: 'artifact-loaded' })
+        const direct = objectDescriptor(globalThis, '__cordisxHostDomPluginModuleV1')
+        const pending = objectDescriptor(globalThis, '__cordisxPendingPluginModuleV1')
+        const factory = objectDescriptor(globalThis, '__cordisxPendingPluginModuleFactoryV1')
+        if (moduleKeys.some(key => objectDescriptor(globalThis, key)?.configurable !== true)) {
+          throw new Error('artifact module globals must remain Host-configurable')
         }
-        delete globalThis.__cordisxPluginModule
-        defineProperty(globalThis, '__cordisxPluginModule', { configurable: false, enumerable: false, writable: false, value: undefined })
+        const pluginModule = direct?.value ?? pending?.value
+          ?? (typeof factory?.value === 'function' ? applyFunction(factory.value, undefined, [consoleFacade]) : undefined)
+        for (const key of moduleKeys) {
+          delete globalThis[key]
+          defineProperty(globalThis, key, { configurable: false, enumerable: false, writable: false, value: undefined })
+        }
+        if (!pluginModule || typeof pluginModule !== 'object' || typeof pluginModule.apply !== 'function') {
+          throw new Error('artifact must provide one Host-recognized plugin module with apply')
+        }
         const hostDom = freeze({
           catalog: () => rpc('catalog'),
           request: (request) => rpc('request', request, request?.requestId),
@@ -354,49 +378,102 @@ function workerBootstrapSource(): string {
   })()`
 }
 
-function browserEnvironment(): HostDomWorkerEnvironment {
+/**
+ * Capture the browser transport primitives before any plugin artifact runs.
+ * Dynamic plugin generations reuse this environment instead of reading
+ * renderer globals or mutable DOM prototypes at activation time.
+ */
+export function createBrowserHostDomWorkerEnvironment(document: Document): HostDomWorkerEnvironment {
+  const apply = Reflect.apply.bind(Reflect)
+  const createElement = document.createElement
+  const sampleFrame = apply(createElement, document, ['iframe']) as HTMLIFrameElement
+  const setAttribute = sampleFrame.setAttribute
+  const addEventListener = sampleFrame.addEventListener
+  const removeEventListener = sampleFrame.removeEventListener
+  const appendChild = document.documentElement.appendChild
+  const removeChild = document.documentElement.removeChild
+  const parentNodeDescriptor = (() => {
+    for (let prototype: object | null = sampleFrame; prototype !== null; prototype = Object.getPrototypeOf(prototype)) {
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, 'parentNode')
+      if (descriptor?.get !== undefined) return descriptor.get
+    }
+    return undefined
+  })()
+  const contentWindowDescriptor = (() => {
+    for (let prototype: object | null = sampleFrame; prototype !== null; prototype = Object.getPrototypeOf(prototype)) {
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, 'contentWindow')
+      if (descriptor?.get !== undefined) return descriptor.get
+    }
+    return undefined
+  })()
+  const Channel = globalThis.MessageChannel
+  const view = document.defaultView
+  if (typeof Channel !== 'function' || view === null || typeof view.postMessage !== 'function'
+    || parentNodeDescriptor === undefined || contentWindowDescriptor === undefined) {
+    throw new Error('native browser primitives are required for Host DOM worker isolation')
+  }
+  const windowPostMessage = view.postMessage
+  const sampleChannel = new Channel()
+  const portPostMessage = sampleChannel.port1.postMessage
+  const portAddEventListener = sampleChannel.port1.addEventListener
+  const portRemoveEventListener = sampleChannel.port1.removeEventListener
+  const portStart = sampleChannel.port1.start
+  const portClose = sampleChannel.port1.close
+  apply(portClose, sampleChannel.port1, [])
+  apply(portClose, sampleChannel.port2, [])
+
   return {
     start(input) {
-      const frame = input.document.createElement('iframe')
-      frame.hidden = true
-      frame.setAttribute('aria-hidden', 'true')
-      frame.setAttribute('tabindex', '-1')
-      frame.setAttribute('sandbox', input.iframeSandbox)
-      frame.srcdoc = input.iframeSrcdoc
-      const Channel = globalThis.MessageChannel
-      if (typeof Channel !== 'function') throw new Error('MessageChannel is required for Host DOM worker isolation')
+      if (input.document !== document || !TOKEN.test(input.token)) {
+        throw new Error('Host DOM worker environment scope is invalid')
+      }
+      const frame = apply(createElement, document, ['iframe']) as HTMLIFrameElement
+      apply(setAttribute, frame, ['hidden', ''])
+      apply(setAttribute, frame, ['aria-hidden', 'true'])
+      apply(setAttribute, frame, ['tabindex', '-1'])
+      apply(setAttribute, frame, ['sandbox', input.iframeSandbox])
+      apply(setAttribute, frame, ['srcdoc', input.iframeSrcdoc])
       const channel = new Channel()
+      const listeners = new Set<(message: unknown) => void>()
+      const receive = (event: MessageEvent): void => {
+        for (const listener of listeners) listener(event.data)
+      }
+      apply(portAddEventListener, channel.port1, ['message', receive])
+      apply(portStart, channel.port1, [])
       let started = false
       let destroyed = false
       const start = () => {
-        if (started || destroyed || frame.contentWindow === null) return
+        const contentWindow = apply(contentWindowDescriptor, frame, []) as Window | null
+        if (started || destroyed || contentWindow === null) return
         started = true
-        frame.contentWindow.postMessage({
+        apply(windowPostMessage, contentWindow, [{
           contract: FRAME_MESSAGE,
           type: 'start',
           token: input.token,
           bootstrapSource: input.bootstrapSource,
           artifactSource: input.artifactSource,
           config: input.config,
-        }, '*', [channel.port2])
+        }, '*', [channel.port2]])
       }
-      frame.addEventListener('load', start, { once: true })
-      ;(input.document.body ?? input.document.documentElement).append(frame)
-      const listeners = new Set<(message: unknown) => void>()
-      channel.port1.onmessage = event => { for (const listener of listeners) listener(event.data) }
-      channel.port1.start()
+      apply(addEventListener, frame, ['load', start, { once: true }])
+      apply(appendChild, input.document.body ?? input.document.documentElement, [frame])
       return {
-        post: message => channel.port1.postMessage(message),
+        post: message => { apply(portPostMessage, channel.port1, [message]) },
         subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) },
-        terminate: () => frame.contentWindow?.postMessage({ contract: FRAME_MESSAGE, type: 'terminate', token: input.token }, '*'),
+        terminate: () => {
+          const contentWindow = apply(contentWindowDescriptor, frame, []) as Window | null
+          if (contentWindow !== null) apply(windowPostMessage, contentWindow, [{ contract: FRAME_MESSAGE, type: 'terminate', token: input.token }, '*'])
+        },
         destroy: () => {
           if (destroyed) return
           destroyed = true
-          frame.removeEventListener('load', start)
+          apply(removeEventListener, frame, ['load', start])
+          apply(portRemoveEventListener, channel.port1, ['message', receive])
           listeners.clear()
-          channel.port1.close()
-          try { channel.port2.close() } catch {}
-          frame.remove()
+          apply(portClose, channel.port1, [])
+          try { apply(portClose, channel.port2, []) } catch {}
+          const parent = apply(parentNodeDescriptor, frame, []) as Node | null
+          if (parent !== null) apply(removeChild, parent, [frame])
         },
       }
     },
@@ -405,6 +482,7 @@ function browserEnvironment(): HostDomWorkerEnvironment {
 
 export class HostDomWorkerBoundary {
   readonly ready: Promise<void>
+  private readonly boundaryToken: string
   private currentStatus: HostDomWorkerStatus = Object.freeze({ status: 'starting' })
   private readonly listeners = new Set<(status: HostDomWorkerStatus) => void>()
   private readonly transport: HostDomWorkerTransport
@@ -422,13 +500,14 @@ export class HostDomWorkerBoundary {
 
   constructor(private readonly options: HostDomWorkerBoundaryOptions) {
     if (typeof options.artifactSource !== 'string' || byteSize(options.artifactSource) > MAX_ARTIFACT_BYTES) {
-      throw new Error('Host DOM worker artifact exceeds the 1 MiB source limit')
+      throw new Error('Host DOM worker artifact exceeds the 8 MiB source limit')
     }
     const config = jsonSnapshot(options.config ?? null, MAX_CONFIG_BYTES)
+    this.boundaryToken = token()
     this.ready = new Promise<void>((resolve, reject) => { this.resolveReady = resolve; this.rejectReady = reject })
-    this.transport = (options.environment ?? browserEnvironment()).start({
+    this.transport = options.environment.start({
       document: options.document,
-      token: token(),
+      token: this.boundaryToken,
       iframeSandbox: 'allow-scripts',
       iframeSrcdoc: iframeSource(),
       bootstrapSource: workerBootstrapSource(),
@@ -467,22 +546,23 @@ export class HostDomWorkerBoundary {
     } catch {
       message = undefined
     }
-    if (message === undefined || message.contract !== WORKER_MESSAGE || typeof message.type !== 'string') {
+    if (message === undefined || message.contract !== WORKER_MESSAGE
+      || message.token !== this.boundaryToken || typeof message.type !== 'string') {
       this.fail('Host DOM worker sent an invalid envelope')
       return
     }
     if (message.type === 'status') {
-      if (message.status === 'ready' && exact(message, ['contract', 'type', 'status']) && this.currentStatus.status === 'starting') {
+      if (message.status === 'ready' && exact(message, ['contract', 'token', 'type', 'status']) && this.currentStatus.status === 'starting') {
         this.clearStartupTimer()
         this.setStatus({ status: 'ready' })
         this.resolveReady()
         return
       }
-      if (message.status === 'error' && exact(message, ['contract', 'type', 'status', 'error']) && typeof message.error === 'string') {
+      if (message.status === 'error' && exact(message, ['contract', 'token', 'type', 'status', 'error']) && typeof message.error === 'string') {
         this.fail(message.error)
         return
       }
-      if (message.status === 'disposed' && exact(message, ['contract', 'type', 'status'])) {
+      if (message.status === 'disposed' && exact(message, ['contract', 'token', 'type', 'status'])) {
         this.disposedSignal?.()
         return
       }
@@ -498,7 +578,9 @@ export class HostDomWorkerBoundary {
 
   private async rpc(message: Record<string, unknown>): Promise<void> {
     const method = message.method
-    const keys = method === 'request' ? ['contract', 'type', 'sequence', 'requestId', 'method', 'payload'] : ['contract', 'type', 'sequence', 'requestId', 'method']
+    const keys = method === 'request'
+      ? ['contract', 'token', 'type', 'sequence', 'requestId', 'method', 'payload']
+      : ['contract', 'token', 'type', 'sequence', 'requestId', 'method']
     if (!exact(message, keys)
       || !Number.isSafeInteger(message.sequence) || message.sequence !== this.expectedSequence
       || !boundedRequestId(message.requestId) || this.seenRequestIds.has(message.requestId)
@@ -524,9 +606,9 @@ export class HostDomWorkerBoundary {
         this.disposeClient()
         result = null
       }
-      this.respond({ contract: WORKER_MESSAGE, type: 'rpc-result', sequence, requestId, ok: true, value: jsonSnapshot(result, MAX_RPC_BYTES) })
+      this.respond({ contract: WORKER_MESSAGE, token: this.boundaryToken, type: 'rpc-result', sequence, requestId, ok: true, value: jsonSnapshot(result, MAX_RPC_BYTES) })
     } catch (error) {
-      this.respond({ contract: WORKER_MESSAGE, type: 'rpc-result', sequence, requestId, ok: false, error: boundedError(error) })
+      this.respond({ contract: WORKER_MESSAGE, token: this.boundaryToken, type: 'rpc-result', sequence, requestId, ok: false, error: boundedError(error) })
     } finally {
       this.inflight -= 1
     }
@@ -553,7 +635,7 @@ export class HostDomWorkerBoundary {
     if (this.currentStatus.status === 'starting') this.rejectReady(new Error('Host DOM worker disposed before becoming ready'))
     if (!this.resourcesDestroyed) {
       const disposed = new Promise<void>(resolve => { this.disposedSignal = resolve })
-      try { this.transport.post({ contract: WORKER_MESSAGE, type: 'dispose' }) } catch {}
+      try { this.transport.post({ contract: WORKER_MESSAGE, token: this.boundaryToken, type: 'dispose' }) } catch {}
       const timeout = this.options.disposeTimeoutMs ?? DEFAULT_DISPOSE_TIMEOUT_MS
       await Promise.race([disposed, new Promise<void>(resolve => setTimeout(resolve, timeout))])
     }

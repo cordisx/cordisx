@@ -204,13 +204,25 @@ as a signal only; the consumer must reread its exact snapshot/lookup, then
 remove or replace the projection. Expiry is independently timed inside the
 Broker.
 
-Authorization does not establish safe runtime availability. The current plugin
-runtime shares the application renderer and gives plugin code ambient DOM
-access outside the bounded bridge. `HostDomAuthority` therefore requires an
-explicit isolated-plugin-boundary signal, while current production App
-composition reports both Host DOM capabilities as `unavailable/unsupported`.
-No production code may infer isolation from certification, Official state, a
-permission grant, or renderer ownership.
+Authorization does not establish safe runtime availability. Production holds
+each manifest-v5 Host DOM artifact as source data, executes it only inside the
+opaque-origin Host DOM worker boundary, and injects the bounded client only
+after that boundary is ready. The bundle and dynamic CDP lifecycle paths never
+evaluate such an artifact in the renderer main realm. The worker receives no
+`document`, `window`, raw node, selector, network API, nested worker, or Host
+client object; its MessagePort RPC is serialized, bounded, generation-fenced,
+and bound to a per-boundary random token. Native DOM and MessagePort primitives
+are captured before any plugin module factory runs and reused by later dynamic
+generations. Startup failure, dispose, disable, uninstall, or generation
+replacement reports the capability unavailable and releases the client.
+
+This is a narrow boundary for the manifest-v5 Host DOM surface, not a claim
+that the complete CordisX renderer is a sandbox. Legacy structured plugins and
+explicit `origin: local-dev` development entries retain the version-0.1 trusted
+renderer model and never receive the bounded Host DOM client. Local development
+file identities cannot satisfy a configured public Marketplace exact-artifact
+Certified lookup. No production code may infer worker availability from
+certification, Official state, a permission grant, or renderer ownership.
 
 ## Activation and manager behavior
 
@@ -333,15 +345,12 @@ PR and does not add `ctx.codex`.
 
 ## Security statement
 
-The broker is meaningful policy enforcement for calls made through the
-CordisX Platform API. It does not confine trusted renderer code, which can
-still access Codex DOM and renderer globals. The manager must show that the
-current runtime is not a sandbox.
-
-Marketplace plugins require a structured host-rendered UI surface plus an
-isolated Worker, iframe, or process and capability RPC before these grants can
-be considered a security boundary. Signing, installation, activation, and
-rollback are outside this task.
+The broker is meaningful policy enforcement for calls made through CordisX
+Host APIs. It does not turn legacy trusted renderer plugins into confined code,
+so the Manager must not label the complete runtime a sandbox. For
+`ui.host-dom.read` and `ui.host-dom.modify`, however, the production composition
+adds the required isolated worker plus bounded capability RPC before reporting
+availability; the exact grant/lease remains owned by the same Broker.
 
 ## Dependencies and PR boundaries
 

@@ -26,7 +26,12 @@ import type {
   CordisXExtensionPointControlMode,
 } from '../contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
-import { isPermissionPolicyRecordV2, type CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import {
+  isPermissionPolicyRecordV2,
+  isPermissionPolicyRecordV3,
+  isPermissionPolicyRecordV4,
+  type CordisXPersistedPermissionPolicyRecord,
+} from '../permission-persistence.js'
 import type { HomeConfigIconThemePreference } from '../config/home-config.js'
 import type {
   CordisXPermissionAuthorizationDecisionV2,
@@ -154,6 +159,16 @@ import {
   createCertifiedPermissionDocumentChannel,
   type CertifiedPermissionDocumentChannel,
 } from './certified-permission-channel.js'
+import {
+  HostDomAuthority,
+  createCordisXHostDomRootDefinitions,
+} from './host-dom.js'
+import {
+  createBrowserHostDomWorkerEnvironment,
+  createHostDomWorkerBoundary,
+  type HostDomWorkerBoundary,
+  type HostDomWorkerEnvironment,
+} from './host-dom-worker.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 const MAX_ROLLBACK_RECEIPTS = 64
@@ -196,6 +211,8 @@ interface CordisXRuntimeMetadata {
 interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
   /** Launcher-derived opaque generation for a verified bundled artifact. */
   readonly artifactGeneration?: string
+  /** Source data for one manifest-v5 plugin isolated from the Host renderer. */
+  readonly isolatedArtifactSource?: string
   readonly development?: CordisXLocalDevelopmentSnapshot
 }
 
@@ -230,6 +247,7 @@ interface PluginController {
   generationView?: PluginGenerationView
   connectorClient?: CordisXBoundConnectorClient
   agentLoopClient?: BoundAgentLoopClient
+  hostDomWorker?: HostDomWorkerBoundary
 }
 
 function topologicalActivationOrder(
@@ -302,6 +320,8 @@ export interface RendererPluginMutation {
     readonly readme?: string
     readonly development: CordisXLocalDevelopmentSnapshot
   }
+  /** Host-only source held as data and executed solely in the isolated Host DOM worker. */
+  readonly isolatedArtifactSource?: string
   readonly authorizationDecision?: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4
 }
 
@@ -445,6 +465,18 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function manifestUsesHostDom(
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5,
+): manifest is CordisXPluginManifestV5 {
+  return manifest.schemaVersion === 5 && manifest.capabilities.some(capability => (
+    capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
+  ))
+}
+
+function controllerHasRuntimeModule(controller: PluginController): boolean {
+  return controller.item.module !== undefined || controller.item.isolatedArtifactSource !== undefined
+}
+
 function createController(item: RuntimeBrowserPlugin, pluginConsole: PluginConsoleAspect): PluginController {
   const identity = Object.freeze({ source: item.source, id: item.id })
   const activation = 1
@@ -453,16 +485,21 @@ function createController(item: RuntimeBrowserPlugin, pluginConsole: PluginConso
     ?? `${pluginConsole.generation}:${item.id}:bundled`
   const principal = pluginConsole.issue(identity, pluginGeneration)
   try {
-    const module = item.moduleFactory?.(pluginConsole.consoleFacade(principal)) ?? item.module
+    const isolated = item.isolatedArtifactSource !== undefined
+    const module = isolated ? undefined : item.moduleFactory?.(pluginConsole.consoleFacade(principal)) ?? item.module
     const boundItem: RuntimeBrowserPlugin = module === undefined || module === item.module ? item : { ...item, module }
+    const manifest = normalizePluginManifest(item.manifest ?? module?.manifest, item.id)
+    if (isolated && (item.manifest === undefined || !manifestUsesHostDom(manifest))) {
+      throw new Error('isolated Host DOM artifact requires an authoritative manifest-v5 declaration')
+    }
     return {
       item: boundItem,
       identity,
       principal,
       activation,
       principalLive: true,
-      manifest: normalizePluginManifest(item.manifest ?? module?.manifest, item.id),
-      status: !item.enabled || module === undefined ? 'configured-disabled' : 'active',
+      manifest,
+      status: !item.enabled || (!isolated && module === undefined) ? 'configured-disabled' : 'active',
     }
   } catch (error) {
     return {
@@ -536,8 +573,11 @@ async function start(
   const permissionStore = metadata.permissionBridgeToken === undefined
     ? metadata.hostKind === 'playground' && metadata.permissionPolicies !== undefined
       ? new MemoryPermissionPolicyStore(
-          metadata.permissionPolicies.filter(record => !isPermissionPolicyRecordV2(record)),
+          metadata.permissionPolicies.filter(record => !isPermissionPolicyRecordV2(record)
+            && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record)),
           metadata.permissionPolicies.filter(isPermissionPolicyRecordV2),
+          metadata.permissionPolicies.filter(isPermissionPolicyRecordV3),
+          metadata.permissionPolicies.filter(isPermissionPolicyRecordV4),
         )
       : new BrowserPermissionPolicyStore(metadata.profileId)
     : BindingPermissionPolicyStore.connect(metadata.permissionBridgeToken, metadata.permissionPolicies ?? [])
@@ -623,6 +663,19 @@ async function start(
       sink: broker,
     })
     await certifiedPermissionChannel.ready
+  }
+  const hostDomAuthority = new HostDomAuthority({
+    hostGeneration: generation,
+    isolatedPluginBoundary: true,
+    roots: createCordisXHostDomRootDefinitions(document),
+  })
+  // Capture native browser/MessagePort primitives before any plugin module
+  // factory runs, then reuse the sealed environment for dynamic generations.
+  let hostDomWorkerEnvironment: HostDomWorkerEnvironment | undefined
+  try {
+    hostDomWorkerEnvironment = createBrowserHostDomWorkerEnvironment(document)
+  } catch (error) {
+    if (plugins.some(plugin => plugin.isolatedArtifactSource !== undefined)) throw error
   }
   for (const plugin of plugins) {
     if (plugin.package === undefined) generationVisibility.bindStable(
@@ -726,6 +779,8 @@ async function start(
           }]
         : []
     ))
+    const isolatedHostDom = controller.item.isolatedArtifactSource !== undefined
+      && manifestUsesHostDom(controller.manifest)
     const unavailable = capabilityAvailability.unavailableRequired(declarations)
     const explicitlyAllowedInPlayground = metadata.hostKind === 'playground'
       && unavailable.every(capability => broker.snapshots().some(permission => (
@@ -740,7 +795,9 @@ async function start(
           item.required && (item.name === 'ui.host-dom.read' || item.name === 'ui.host-dom.modify')
         ))
       : undefined
-    if (requiredHostDom !== undefined) return `Required capability unavailable: ${requiredHostDom.name}`
+    if (requiredHostDom !== undefined && !isolatedHostDom) {
+      return `Required capability unavailable: ${requiredHostDom.name}`
+    }
     return undefined
   }
   const registerController = (controller: PluginController, registerAuthority = true): void => {
@@ -767,7 +824,9 @@ async function start(
       }, controller.generationView)
     }
     const configSchema = moduleConfigSchema(controller.item.module)
-    const configApplies = moduleConfigApplies(controller.item.module)
+    const configApplies = controller.item.isolatedArtifactSource === undefined
+      ? moduleConfigApplies(controller.item.module)
+      : 'plugin-restart' as const
     configuration.register({
       identity: controller.identity,
       moduleGeneration: moduleGenerationOf(controller),
@@ -778,7 +837,7 @@ async function start(
       revision: controller.item.revision,
       writable: configBridge !== undefined
         && controller.item.enabled
-        && controller.item.module !== undefined
+        && controllerHasRuntimeModule(controller)
         && configApplies !== 'service-restart',
     })
   }
@@ -931,6 +990,7 @@ async function start(
     agentRuntime.releaseOwner(controller.identity, reason, moduleGenerationOf(controller))
     let failure: unknown
     try {
+      await controller.hostDomWorker?.dispose()
       await controller.fiber?.dispose()
     } catch (error) {
       failure = error
@@ -949,6 +1009,7 @@ async function start(
       await controller.unregisterConnector?.()
       delete controller.unregisterConnector
       retirePrincipal(controller, `Plugin disposed: ${reason}`)
+      delete controller.hostDomWorker
       delete controller.fiber
     }
     if (failure !== undefined) throw failure
@@ -962,7 +1023,9 @@ async function start(
       moduleGenerationOf(controller),
     )
     controller.principalLive = true
-    const module = controller.item.moduleFactory?.(pluginConsole.consoleFacade(controller.principal)) ?? controller.item.module
+    const module = controller.item.isolatedArtifactSource === undefined
+      ? controller.item.moduleFactory?.(pluginConsole.consoleFacade(controller.principal)) ?? controller.item.module
+      : undefined
     controller.item = module === undefined || module === controller.item.module ? controller.item : { ...controller.item, module }
     controller.manifest = normalizePluginManifest(controller.item.manifest ?? module?.manifest, controller.item.id)
   }
@@ -976,13 +1039,84 @@ async function start(
   const mountPlugin = async (controller: PluginController): Promise<void> => {
     renewPrincipal(controller)
     const module = controller.item.module
-    if (module === undefined) throw new Error(`plugin ${controller.item.id} is not bundled because it is disabled in configuration`)
+    const isolatedArtifactSource = controller.item.isolatedArtifactSource
+    if (module === undefined && isolatedArtifactSource === undefined) {
+      throw new Error(`plugin ${controller.item.id} is not bundled because it is disabled in configuration`)
+    }
     const blockedReason = requiredBlockReason(controller)
     if (blockedReason !== undefined) {
       controller.status = 'permission-blocked'
       controller.blockedReason = blockedReason
       return
     }
+    if (isolatedArtifactSource !== undefined) {
+      if (hostDomWorkerEnvironment === undefined) {
+        throw new Error('native browser primitives are unavailable for Host DOM worker isolation')
+      }
+      const hostDom = hostDomAuthority.bind({
+        ownerKey: JSON.stringify([
+          metadata.profileId,
+          controller.identity.source,
+          controller.identity.id,
+          generation,
+          moduleGenerationOf(controller),
+        ]),
+        profileId: metadata.profileId,
+        identity: { source: controller.identity.source, pluginId: controller.identity.id },
+        runtimeGeneration: generation,
+        moduleGeneration: moduleGenerationOf(controller),
+        state: () => !controllers.includes(controller) ? 'uninstalled'
+          : !controller.principalLive ? 'generation-replaced'
+            : !controller.item.enabled ? 'disabled' : 'active',
+        authorize: async (capability, rootId, operations) => await broker.authorizeHostDom(
+          controller.identity,
+          capability,
+          rootId,
+          operations,
+          controller.generationView,
+        ),
+        leaseActive: leaseId => broker.isHostDomLeaseActive(
+          controller.identity,
+          leaseId,
+          controller.generationView,
+        ),
+        subscribeInvalidation: listener => broker.subscribe(listener),
+      })
+      let boundary: HostDomWorkerBoundary | undefined
+      try {
+        pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Isolated Host DOM plugin activation started')
+        boundary = createHostDomWorkerBoundary({
+          document,
+          artifactSource: isolatedArtifactSource,
+          config: configuration.get(controller.item.id, controller.generationView),
+          hostDom,
+          environment: hostDomWorkerEnvironment,
+          onStatus: status => {
+            if (status.status !== 'error' || controller.hostDomWorker !== boundary) return
+            controller.status = 'failed'
+            controller.error = status.error
+            notify('host-dom-worker')
+          },
+        })
+        controller.hostDomWorker = boundary
+        await boundary.ready
+        controller.status = 'active'
+        delete controller.error
+        delete controller.blockedReason
+        pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Isolated Host DOM plugin activation completed')
+        return
+      } catch (error) {
+        await boundary?.dispose().catch(() => undefined)
+        hostDom.dispose()
+        delete controller.hostDomWorker
+        controller.status = 'failed'
+        controller.error = errorMessage(error)
+        pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Isolated Host DOM plugin activation failed', error)
+        retirePrincipal(controller, 'Plugin disposed after isolated activation failure')
+        throw error
+      }
+    }
+    if (module === undefined) throw new Error(`plugin ${controller.item.id} has no renderer module`)
     let pluginContext: Context
     const connectorAuthorization = async (
       capability: CordisXConnectorClientCapability,
@@ -1298,8 +1432,38 @@ async function start(
           ? permission.scope.extensionPoints?.[0]
           : undefined
         const descriptor = pointId === undefined ? undefined : extensionPointDescriptors.descriptor(pointId)
+        const hostDomController = permission.capability === 'ui.host-dom.read' || permission.capability === 'ui.host-dom.modify'
+          ? activeController(permission.identity.id, permission.identity.source)
+          : undefined
+        const isolatedHostDomReady = hostDomController?.item.isolatedArtifactSource !== undefined
+          && hostDomController.hostDomWorker?.status().status === 'ready'
         const availability = permission.capability === 'ui.host-dom.read' || permission.capability === 'ui.host-dom.modify'
-          ? {
+          ? isolatedHostDomReady ? {
+              status: 'supported' as const,
+              reason: Object.freeze({
+                namespace: 'cordisx.permission.host',
+                key: 'availability.host-dom-worker-ready',
+                fallback: 'Host DOM access is available through the isolated CordisX worker boundary.',
+              }),
+              providers: [{
+                providerId: 'host-dom-worker',
+                providerName: Object.freeze({
+                  namespace: 'cordisx.permission.host',
+                  key: 'provider.host-dom-worker.name',
+                  fallback: 'CordisX isolated Host DOM worker',
+                }),
+                kind: 'host-local' as const,
+                family: 'ui-rendering' as const,
+                status: 'supported' as const,
+                reason: Object.freeze({
+                  namespace: 'cordisx.permission.host',
+                  key: 'provider.host-dom-worker.ready',
+                  fallback: 'Plugin code has no ambient renderer DOM and uses bounded opaque handles.',
+                }),
+                generation,
+                scope: permission.scope,
+              }],
+            } : {
               status: 'unavailable' as const,
               reason: Object.freeze({
                 namespace: 'cordisx.permission.host',
@@ -1403,7 +1567,7 @@ async function start(
       if (disposed) throw new Error('CordisX runtime is disposed')
       const controller = activeController(id)
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
-      if (!controller.item.enabled || controller.item.module === undefined) {
+      if (!controller.item.enabled || !controllerHasRuntimeModule(controller)) {
         throw new Error(`plugin ${id} is disabled in cordisx.config.json and is not bundled`)
       }
 
@@ -1411,12 +1575,7 @@ async function start(
         blockedPlugins.add(id)
         writeBlockedPlugins(blockedPlugins)
         broker.clearOnce(controller.identity)
-        rememberRegistrations(id)
-        agentRuntime.releaseOwner(controller.identity, 'plugin-blocked', moduleGenerationOf(controller))
-        await controller.fiber?.dispose()
-        await routeService?.settled()
-        retirePrincipal(controller, 'Plugin blocked')
-        delete controller.fiber
+        await disposeControllerFiber(controller, 'owner-disposed')
         controller.status = 'blocked'
         delete controller.error
         notify()
@@ -1449,19 +1608,12 @@ async function start(
 
   const remountLastGood = async (controller: PluginController): Promise<void> => {
     configuration.abort(controller.item.id)
-    await controller.fiber?.dispose()
-    retirePrincipal(controller, 'Plugin disposed for configuration rollback')
-    delete controller.fiber
+    await disposeControllerFiber(controller, 'owner-disposed')
     await mountPlugin(controller)
   }
 
   const applyRestartCandidate = async (controller: PluginController, candidate: ConfigCandidate): Promise<void> => {
-    rememberRegistrations(controller.item.id)
-    agentRuntime.releaseOwner(controller.identity, 'owner-disposed', moduleGenerationOf(controller))
-    await controller.fiber?.dispose()
-    await routeService?.settled()
-    retirePrincipal(controller, 'Plugin disposed for configuration restart')
-    delete controller.fiber
+    await disposeControllerFiber(controller, 'owner-disposed')
     configuration.begin(controller.item.id, candidate)
     await mountPlugin(controller)
   }
@@ -1485,7 +1637,7 @@ async function start(
       let candidateMounted = false
       try {
         const mayMount = controller.item.enabled
-          && controller.item.module !== undefined
+          && controllerHasRuntimeModule(controller)
           && !blockedPlugins.has(id)
           && requiredBlockReason(controller) === undefined
         if (descriptor.applies === 'plugin-restart' && mayMount) {
@@ -1569,12 +1721,7 @@ async function start(
       }
       const blockedReason = requiredBlockReason(controller)
       if (blockedReason !== undefined) {
-        rememberRegistrations(id)
-        agentRuntime.releaseOwner(controller.identity, 'permission-blocked', moduleGenerationOf(controller))
-        await controller.fiber?.dispose()
-        await routeService?.settled()
-        retirePrincipal(controller, 'Plugin disposed after required permission denial')
-        delete controller.fiber
+        await disposeControllerFiber(controller, 'owner-disposed')
         controller.status = 'permission-blocked'
         controller.blockedReason = blockedReason
         notify()
@@ -1584,7 +1731,7 @@ async function start(
         delete controller.blockedReason
         if (blockedPlugins.has(id)) {
           controller.status = 'blocked'
-        } else if (controller.item.enabled && controller.item.module !== undefined) {
+        } else if (controller.item.enabled && controllerHasRuntimeModule(controller)) {
           await mountPlugin(controller)
         } else {
           controller.status = 'configured-disabled'
@@ -1686,7 +1833,7 @@ async function start(
       if (disposed) throw new Error('CordisX runtime is disposed')
       const controller = activeController(id)
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
-      if (!controller.item.enabled || controller.item.module === undefined) {
+      if (!controller.item.enabled || !controllerHasRuntimeModule(controller)) {
         throw new Error(`plugin ${id} is disabled in cordisx.config.json and is not bundled`)
       }
       await authorize(controller)
@@ -1694,18 +1841,13 @@ async function start(
       writeBlockedPlugins(blockedPlugins)
       const blockedReason = requiredBlockReason(controller)
       if (blockedReason !== undefined) {
-        rememberRegistrations(id)
-        agentRuntime.releaseOwner(controller.identity, 'permission-blocked', moduleGenerationOf(controller))
-        await controller.fiber?.dispose()
-        await routeService?.settled()
-        retirePrincipal(controller, 'Plugin disposed after activation authorization denial')
-        delete controller.fiber
+        await disposeControllerFiber(controller, 'owner-disposed')
         controller.status = 'permission-blocked'
         controller.blockedReason = blockedReason
         notify()
         return
       }
-      if (controller.fiber === undefined) await mountPlugin(controller)
+      if (controller.fiber === undefined && controller.hostDomWorker === undefined) await mountPlugin(controller)
       notify()
     })
     operation = task.catch(() => {})
@@ -1751,7 +1893,8 @@ async function start(
     const replacementId = mutation.package?.manifest.id ?? mutation.developmentPackage?.id
     const replacementVersion = mutation.package?.manifest.version ?? mutation.developmentPackage?.version
     if (!replacesTarget && existing === undefined) throw new Error(`affected plugin ${pluginId} is not active`)
-    if (replacesTarget && (replacementPackage === undefined || (module === undefined && moduleFactory === undefined))) {
+    if (replacesTarget && (replacementPackage === undefined
+      || (module === undefined && moduleFactory === undefined && mutation.isolatedArtifactSource === undefined))) {
       throw new Error('candidate package module is unavailable')
     }
     if (replacesTarget && (replacementId !== pluginId
@@ -1764,6 +1907,9 @@ async function start(
       : configuration.descriptor(pluginId, i18nService?.getSnapshot().locale ?? 'en')
     const candidateModule = replacesTarget ? module : existing!.item.module
     const candidateModuleFactory = replacesTarget ? moduleFactory : existing!.item.moduleFactory
+    const candidateIsolatedArtifactSource = replacesTarget
+      ? mutation.isolatedArtifactSource
+      : existing!.item.isolatedArtifactSource
     const candidateManifest = replacesTarget ? mutation.package?.manifest.runtimeManifest : existing!.item.manifest
     const item: RuntimeBrowserPlugin = {
       id: pluginId,
@@ -1771,6 +1917,7 @@ async function start(
       enabled: activation.enabled,
       ...(candidateModule === undefined ? {} : { module: candidateModule }),
       ...(candidateModuleFactory === undefined ? {} : { moduleFactory: candidateModuleFactory }),
+      ...(candidateIsolatedArtifactSource === undefined ? {} : { isolatedArtifactSource: candidateIsolatedArtifactSource }),
       config: descriptor?.value ?? {},
       revision: descriptor?.revision ?? 0,
       ...(candidateManifest === undefined ? {} : { manifest: candidateManifest }),
@@ -2209,7 +2356,7 @@ async function start(
       if (controller === undefined || controller.item.package?.moduleGeneration !== moduleGeneration) {
         throw new Error('stale plugin module generation')
       }
-      if (!controller.item.enabled || controller.item.module === undefined) throw new Error('plugin is disabled')
+      if (!controller.item.enabled || !controllerHasRuntimeModule(controller)) throw new Error('plugin is disabled')
       await disposeControllerFiber(controller, 'owner-disposed')
       try {
         await mountPlugin(controller)
@@ -2253,6 +2400,8 @@ async function start(
     for (const unsubscribe of registrySubscriptions.splice(0)) unsubscribe()
     await operation
     for (const controller of [...controllers].reverse()) {
+      await controller.hostDomWorker?.dispose()
+      delete controller.hostDomWorker
       controller.agentLoopClient?.dispose()
       delete controller.agentLoopClient
       await controller.unregisterAgentLoop?.()
@@ -2328,6 +2477,7 @@ async function start(
     listeners.clear()
     for (const controller of controllers) controller.unregisterPermissions?.()
     for (const controller of controllers) controller.unregisterExtensionPoints?.()
+    hostDomAuthority.dispose()
     broker.dispose()
     window.removeEventListener('error', recordUnknownError)
     window.removeEventListener('unhandledrejection', recordUnknownError)

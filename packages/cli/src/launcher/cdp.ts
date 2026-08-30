@@ -389,8 +389,17 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     // concurrent target close can prune it, including the final participant.
     this.staged.set(mutation.transactionId, sessions)
     const { runtimeArtifactSource, ...projectedMutation } = mutation
+    const runtimePackage = mutation.package
+    const runtimeManifest = runtimePackage?.manifest?.runtimeManifest
+    const isolatedArtifactSource = runtimePackage !== undefined && runtimeManifest?.schemaVersion === 5
+      && runtimeManifest.capabilities.some(capability => (
+        capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
+      ))
+      ? runtimeArtifactSource ?? runtimePackage.artifactSource
+      : undefined
     const rendererMutation = {
       ...projectedMutation,
+      ...(isolatedArtifactSource === undefined ? {} : { isolatedArtifactSource }),
       ...(mutation.package === undefined ? {} : {
         package: {
           manifest: mutation.package.manifest,
@@ -417,11 +426,13 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
               expression: 'delete globalThis.__cordisxPendingPluginModuleV1; delete globalThis.__cordisxPendingPluginModuleFactoryV1',
               allowUnsafeEvalBlockedByCSP: true,
             })
-            const artifact = await session.send('Runtime.evaluate', {
-              expression: runtimeArtifactSource ?? mutation.package!.artifactSource,
-              allowUnsafeEvalBlockedByCSP: true,
-            })
-            if (artifact.exceptionDetails !== undefined) artifactFailure = new Error('plugin artifact evaluation failed')
+            if (isolatedArtifactSource === undefined) {
+              const artifact = await session.send('Runtime.evaluate', {
+                expression: runtimeArtifactSource ?? mutation.package!.artifactSource,
+                allowUnsafeEvalBlockedByCSP: true,
+              })
+              if (artifact.exceptionDetails !== undefined) artifactFailure = new Error('plugin artifact evaluation failed')
+            }
           } catch (error) {
             artifactFailure = error
           }

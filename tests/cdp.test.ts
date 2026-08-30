@@ -1203,6 +1203,63 @@ function activation(revision: number, generation: string): CordisXPluginActivati
 }
 
 describe('CdpPluginLifecycleRuntime', () => {
+  it('keeps Host DOM package artifacts as renderer data and never evaluates their code in the main realm', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const expressions: string[] = []
+    const session = {
+      async send(method: string, params: Record<string, unknown>) {
+        if (method !== 'Runtime.evaluate') return {}
+        const expression = String(params.expression ?? '')
+        expressions.push(expression)
+        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
+        } } } }
+        return { result: { value: { ok: true, result: true } } }
+      },
+    }
+    const unregister = runtime.register(session as never)
+    const previous = activation(0, 'demo-old')
+    const candidate = activation(1, 'demo-new')
+    const fence = runtime.prepare('tx')
+    const transactionEpoch = fence.transactionEpoch
+    const artifactSource = 'globalThis.__mainRealmHostDomExecutionWouldBeABug = true'
+    await runtime.stage({
+      transactionId: 'tx',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'update',
+      previous,
+      candidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
+      package: {
+        manifest: {
+          id: 'demo',
+          version: '1.0.0',
+          runtimeManifest: {
+            schemaVersion: 5,
+            capabilities: [{ name: 'ui.host-dom.read' }],
+          },
+        },
+        digest: `sha256:${'a'.repeat(64)}`,
+        moduleSource: '',
+        artifactSource,
+        serviceModules: [],
+        identitySource: 'file:///demo-host-dom.js',
+      } as never,
+    })
+
+    expect(expressions).toHaveLength(2)
+    expect(expressions).not.toContain(artifactSource)
+    expect(expressions[0]).toContain('delete globalThis.__cordisxPendingPluginModuleV1')
+    expect(expressions[1]).toContain('stagePluginMutation')
+    expect(expressions[1]).toContain('isolatedArtifactSource')
+    expect(expressions[1]).toContain('__mainRealmHostDomExecutionWouldBeABug')
+
+    await runtime.commit('tx')
+    unregister()
+  })
+
   it('replays a newer local-development state before atomically committing a joining renderer', async () => {
     const runtime = new CdpPluginLifecycleRuntime()
     const sourcePath = '/absolute/plugin/join-state.ts'

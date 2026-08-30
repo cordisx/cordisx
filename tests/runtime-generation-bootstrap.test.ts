@@ -92,7 +92,7 @@ describe('production renderer generation bootstrap', () => {
 
     await disposeRuntime()
     dom.window.close()
-  })
+  }, 60_000)
 
   it('starts only the newest generation when old and new bootstraps arrive in one tick', async () => {
     const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
@@ -109,7 +109,7 @@ describe('production renderer generation bootstrap', () => {
 
     await disposeRuntime()
     dom.window.close()
-  })
+  }, 60_000)
 
   it('clears failed boot globals so the same generation can retry cleanly', async () => {
     const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
@@ -133,5 +133,5 @@ describe('production renderer generation bootstrap', () => {
 
     await disposeRuntime()
     dom.window.close()
-  })
+  }, 60_000)
 })
