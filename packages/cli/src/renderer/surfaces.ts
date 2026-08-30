@@ -1,5 +1,7 @@
 import { Context, Service, type Effect } from '@deepseek-ai/cordis'
+import { cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import {
+  CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS,
   CORDISX_IMPLEMENTED_SURFACE_NAMES,
   CORDISX_SURFACE_NAMES,
   type CordisXCommandReference,
@@ -20,6 +22,7 @@ import {
   type CordisXIconToken,
   type CordisXNavigationItem,
   type CordisXNavigationCollectionItem,
+  type CordisXNavigationCollectionLeadingVisual,
   type CordisXNavigationCollectionOptions,
   type CordisXNavigationCollectionRegistration,
   type CordisXNavigationCollectionSnapshot,
@@ -191,6 +194,43 @@ function assertRoute(reference: { readonly id: string; readonly params?: Readonl
   if (reference === null || typeof reference !== 'object') throw new Error(`${label} requires a route reference`)
   assertReference(reference.id, `${label} route id`)
   assertKeys(reference, ['id', 'params'], `${label} route`)
+}
+
+const NAVIGATION_COLLECTION_PARTICIPANT_ID_PATTERN = /^[A-Za-z0-9._~-]{1,512}$/u
+
+function cloneNavigationCollectionLeadingVisual(
+  input: CordisXNavigationCollectionLeadingVisual | undefined,
+  label: string,
+): CordisXNavigationCollectionLeadingVisual | undefined {
+  if (input === undefined) return undefined
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error(`${label} must be an object`)
+  }
+  assertKeys(input, ['kind', 'participants'], label)
+  if (input.kind !== 'room-composite-avatar') throw new Error(`${label}.kind is invalid`)
+  if (!Array.isArray(input.participants)
+    || input.participants.length > CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS) {
+    throw new Error(`${label}.participants is invalid`)
+  }
+  const ids = new Set<string>()
+  const participants = input.participants.map((participant, index) => {
+    const participantLabel = `${label}.participants[${index}]`
+    if (participant === null || typeof participant !== 'object' || Array.isArray(participant)) {
+      throw new Error(`${participantLabel} must be an object`)
+    }
+    assertKeys(participant, ['participantId', 'avatar'], participantLabel)
+    if (!NAVIGATION_COLLECTION_PARTICIPANT_ID_PATTERN.test(participant.participantId)) {
+      throw new Error(`${participantLabel}.participantId must be an opaque identifier`)
+    }
+    if (ids.has(participant.participantId)) throw new Error(`${label}.participants has a duplicate participantId`)
+    ids.add(participant.participantId)
+    const avatar = participant.avatar === undefined ? undefined : cloneAgentAvatarRef(participant.avatar)
+    return Object.freeze({
+      participantId: participant.participantId,
+      ...(avatar === undefined ? {} : { avatar }),
+    })
+  })
+  return Object.freeze({ kind: 'room-composite-avatar', participants: Object.freeze(participants) })
 }
 
 function assertAction(action: CordisXStructuredAction, label: string): void {
@@ -957,6 +997,7 @@ export class CordisXSlotService extends Service implements CordisXSlots {
   readonly contexts: HostContextStore
   private readonly console: PluginConsoleAspect | undefined
   private readonly navigationCollectionGroups = new Map<string, NavigationCollectionGroupSnapshot>()
+  private readonly navigationCollectionLeadingVisuals = new Map<string, CordisXNavigationCollectionLeadingVisual>()
   private nextNavigationCollection = 1
 
   constructor(ctx: Context, input?: SurfaceRegistry | { readonly registry?: SurfaceRegistry; readonly console: PluginConsoleAspect }) {
@@ -1050,6 +1091,7 @@ export class CordisXSlotService extends Service implements CordisXSlots {
     let nextItemSequence = 1
     const stableIds = new Map<string, string>()
     let handles: CordisXContributionHandle<CordisXNavigationItem>[] = []
+    let leadingVisualIds = new Set<string>()
 
     const read = (): CordisXNavigationCollectionSnapshot => {
       const input = source.snapshot()
@@ -1068,19 +1110,29 @@ export class CordisXSlotService extends Service implements CordisXSlots {
         if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
           throw new Error(`navigation collection item ${index} must be an object`)
         }
-        assertKeys(candidate, ['id', 'label', 'description', 'icon', 'route', 'order', 'disabled'], `navigation collection item ${index}`)
+        assertKeys(candidate, ['id', 'label', 'description', 'icon', 'leadingVisual', 'route', 'order', 'disabled'], `navigation collection item ${index}`)
         assertLocalId(candidate.id, `navigation collection item ${index} id`)
         if (ids.has(candidate.id)) throw new Error(`navigation collection has duplicate item ${candidate.id}`)
         ids.add(candidate.id)
         assertLocalizedText(candidate.label, `navigation collection item ${index} label`)
         if (candidate.description !== undefined) assertLocalizedText(candidate.description, `navigation collection item ${index} description`)
         assertIcon(candidate.icon, `navigation collection item ${index}`)
+        if (candidate.icon !== undefined && candidate.leadingVisual !== undefined) {
+          throw new Error(`navigation collection item ${index} cannot combine icon and leadingVisual`)
+        }
+        const leadingVisual = cloneNavigationCollectionLeadingVisual(
+          candidate.leadingVisual,
+          `navigation collection item ${index} leadingVisual`,
+        )
         assertRoute(candidate.route, `navigation collection item ${index}`)
         if (!Number.isInteger(candidate.order) || candidate.order < -100_000 || candidate.order > 100_000) {
           throw new Error(`navigation collection item ${index} order is invalid`)
         }
         assertDisabled(candidate.disabled)
-        return immutableSnapshot(candidate)
+        return immutableSnapshot({
+          ...candidate,
+          ...(leadingVisual === undefined ? {} : { leadingVisual }),
+        })
       })
       return immutableSnapshot({ revision: input.revision, items })
     }
@@ -1098,8 +1150,10 @@ export class CordisXSlotService extends Service implements CordisXSlots {
       }
       const ordered = [...next.items].sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
       const nextHandles: CordisXContributionHandle<CordisXNavigationItem>[] = []
+      const nextLeadingVisuals = new Map<string, CordisXNavigationCollectionLeadingVisual>()
       this.registry.transaction(() => {
         for (const handle of handles) handle.dispose()
+        for (const qualifiedItemId of leadingVisualIds) this.navigationCollectionLeadingVisuals.delete(qualifiedItemId)
         for (const item of ordered) {
           let syntheticId = stableIds.get(item.id)
           if (syntheticId === undefined) {
@@ -1118,7 +1172,14 @@ export class CordisXSlotService extends Service implements CordisXSlots {
             ...(item.icon === undefined ? {} : { icon: item.icon }),
             route: item.route,
           }))
+          if (item.leadingVisual !== undefined) {
+            nextLeadingVisuals.set(qualifyOwnedId(owner, syntheticId), item.leadingVisual)
+          }
         }
+        for (const [qualifiedItemId, leadingVisual] of nextLeadingVisuals) {
+          this.navigationCollectionLeadingVisuals.set(qualifiedItemId, leadingVisual)
+        }
+        leadingVisualIds = new Set(nextLeadingVisuals.keys())
         handles = nextHandles
         current = next
       })
@@ -1130,6 +1191,8 @@ export class CordisXSlotService extends Service implements CordisXSlots {
       unsubscribe?.()
       unsubscribe = undefined
       this.navigationCollectionGroups.delete(surfaceGroup)
+      for (const qualifiedItemId of leadingVisualIds) this.navigationCollectionLeadingVisuals.delete(qualifiedItemId)
+      leadingVisualIds.clear()
       this.registry.transaction(() => {
         for (const handle of handles) handle.dispose()
         handles = []
@@ -1161,6 +1224,10 @@ export class CordisXSlotService extends Service implements CordisXSlots {
   navigationCollectionGroupsSnapshot(): readonly NavigationCollectionGroupSnapshot[] {
     return [...this.navigationCollectionGroups.values()]
       .sort((left, right) => left.order - right.order || left.qualifiedId.localeCompare(right.qualifiedId))
+  }
+
+  navigationCollectionLeadingVisual(qualifiedItemId: string): CordisXNavigationCollectionLeadingVisual | undefined {
+    return this.navigationCollectionLeadingVisuals.get(qualifiedItemId)
   }
 
   snapshot(): readonly SurfaceContributionSnapshot[] {
