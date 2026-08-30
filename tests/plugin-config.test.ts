@@ -279,6 +279,53 @@ describe('plugin config registry', () => {
     registry.dispose()
   })
 
+  it('deeply resolves object-array defaults and removes sensitive descendants from every row', () => {
+    const defaultsRegistry = new PluginConfigurationRegistry()
+    defaultsRegistry.register({
+      identity: { id: 'nested-defaults', source: 'file:///nested-defaults.ts' },
+      schema: Schema.object({
+        rules: Schema.array(Schema.object({
+          settings: Schema.object({
+            name: Schema.string(),
+            enabled: Schema.boolean().default(true),
+          }).default({ name: 'parent-name' }),
+          children: Schema.array(Schema.object({
+            name: Schema.string().default('child-name'),
+            enabled: Schema.boolean().default(true),
+          })).default([{}]),
+        })).default([]),
+      }),
+      applies: 'live', raw: {}, revision: 1, writable: true,
+    })
+    expect(defaultsRegistry.descriptor('nested-defaults', 'en').fields[0]?.arrayItemDefault).toEqual({
+      settings: { name: 'parent-name', enabled: true },
+      children: [{ name: 'child-name', enabled: true }],
+    })
+
+    const secretsRegistry = new PluginConfigurationRegistry()
+    secretsRegistry.register({
+      identity: { id: 'nested-secrets', source: 'file:///nested-secrets.ts' },
+      schema: Schema.object({
+        rules: Schema.array(Schema.object({
+          '0': Schema.string().role('secret'),
+          tokens: Schema.array(Schema.string().role('secret')),
+          name: Schema.string(),
+        })).default([]),
+      }),
+      applies: 'live',
+      raw: { rules: [{ '0': 'numeric-secret', tokens: ['alpha', 'beta'], name: 'public' }] },
+      revision: 1,
+      writable: true,
+    })
+    const descriptor = secretsRegistry.descriptor('nested-secrets', 'en')
+    expect(descriptor.value).toEqual({ rules: [{ name: 'public' }] })
+    expect(descriptor.fields[0]?.value).toEqual([{ name: 'public' }])
+    expect(JSON.stringify(descriptor)).not.toContain('numeric-secret')
+    expect(JSON.stringify(descriptor)).not.toContain('alpha')
+    defaultsRegistry.dispose()
+    secretsRegistry.dispose()
+  })
+
   it('rejects asynchronous Standard Schema validators', () => {
     const registry = new PluginConfigurationRegistry()
     expect(() => registry.register({
@@ -301,6 +348,27 @@ describe('plugin config registry', () => {
       revision: 0,
       writable: true,
     })).toThrow('must not declare a JSON default')
+    expect(() => registry.register({
+      identity: { id: 'ancestor-secret-default', source: 'file:///ancestor-secret.ts' },
+      schema: Schema.object({
+        rules: Schema.array(Schema.object({
+          name: Schema.string(),
+          token: Schema.string().role('secret'),
+        })).default([{ name: 'fixture', token: 'fixture-secret' }]),
+      }),
+      applies: 'plugin-restart',
+      raw: {},
+      revision: 0,
+      writable: true,
+    })).toThrow('secret config field rules.0.token must not declare a JSON default')
+    expect(() => registry.register({
+      identity: { id: 'non-json-default', source: 'file:///non-json.ts' },
+      schema: Schema.object({ value: Schema.any().default(new Date('2026-01-01T00:00:00.000Z')) }),
+      applies: 'plugin-restart',
+      raw: {},
+      revision: 0,
+      writable: true,
+    })).toThrow('must be a plain JSON object')
     expect(() => registry.register({
       identity: { id: 'lazy', source: 'file:///lazy.ts' },
       schema: Schema.lazy(() => Schema.object({ value: Schema.string() })),

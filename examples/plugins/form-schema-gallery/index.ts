@@ -108,14 +108,14 @@ const fields = {
     .description('Choose the bounded on/off delivery channels for this workspace.')
     .i18n(description('Choose the bounded on/off delivery channels for this workspace.', '选择此工作区可用的有限开关投递渠道。')),
   notificationRules: Schema.array(Schema.object({
-    destination: Schema.string().min(3).max(80),
+    destination: Schema.string().required().min(3).max(80),
     enabled: Schema.boolean().default(true),
   })).default([{ destination: 'Daily summary', enabled: true }]).min(1).max(4)
-    .extra('extra', label('Notification rules', '通知规则', { presenter: { version: 1, kind: 'array.object-dialog', options: { allowReorder: true } }, ...group('delivery', 'Delivery', '投递', 'host:info') }))
-    .description('Repeatable delivery rules open in the shared Host editor dialog.')
-    .i18n(description('Repeatable delivery rules open in the shared Host editor dialog.', '可重复的投递规则在共享 Host 编辑对话框中打开。')),
+    .extra('extra', label('Notification rules', '通知规则', { presenter: { version: 1, kind: 'array.object-page', options: { allowReorder: true } }, ...group('delivery', 'Delivery', '投递', 'host:info') }))
+    .description('Repeatable delivery rules open in the shared Host editor page.')
+    .i18n(description('Repeatable delivery rules open in the shared Host editor page.', '可重复的投递规则在共享 Host 编辑子页面中打开。')),
   escalationRules: Schema.array(Schema.object({
-    owner: Schema.string().min(3).max(48),
+    owner: Schema.string().required().min(3).max(48),
     enabled: Schema.boolean().default(true),
   })).default([{ owner: 'Operations owner', enabled: true }]).min(1).max(4)
     .extra('extra', label('Escalation rules', '升级规则', { presenter: { version: 1, kind: 'array.object-page', options: { allowReorder: true } }, ...group('delivery', 'Delivery', '投递', 'host:info') }))

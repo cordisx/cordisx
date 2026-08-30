@@ -146,7 +146,31 @@ describe('renderer bundle', () => {
             </div>
           </section>
         </main>
-        <aside data-pip-home-surface="thread-summary-panel" style="position:relative"></aside>
+        <aside id="native-summary-frame" style="position:relative">
+          <div
+            id="native-summary-obstacle"
+            data-pip-home-surface="thread-summary-panel"
+            data-pip-obstacle="thread-summary-panel"
+            aria-hidden="true"
+            style="position:absolute"
+          ></div>
+          <div id="native-summary-motion-shell">
+            <div id="native-summary-column" style="display:flex;flex-direction:column;gap:12px;width:300px">
+              <div id="native-summary-card" style="display:flex;flex-direction:column;overflow:hidden">
+                <div id="native-summary-scrollport" style="display:flex;flex-direction:column;overflow-y:auto">
+                  <div id="native-summary-section-stack" style="display:flex;flex-direction:column;gap:12px">
+                    <section id="native-background-processes" role="presentation">
+                      <header><button aria-expanded="true"><span>Background processes</span><span>1</span></button></header>
+                      <div data-slot="thread-summary-panel-item">
+                        <button data-slot="thread-summary-panel-item-trigger">sleep 999</button>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
       </body></html>
     `, { runScripts: 'dangerously', url: 'https://codex.local/native' })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
@@ -194,6 +218,11 @@ describe('renderer bundle', () => {
         if (this.dataset.cordisxSurfaceHost === 'toolbar.before' || this.dataset.cordisxSurfaceHost === 'toolbar.after') {
           return rect(0, 0, 28, 28)
         }
+        if (this.classList.contains('cordisx-env-section')) {
+          return this.parentElement?.parentElement?.id === 'native-summary-section-stack'
+            ? rect(960, 162, 300, 180)
+            : rect(960, 140, 300, 180)
+        }
         return getBoundingClientRect.call(this)
       },
     })
@@ -201,7 +230,14 @@ describe('renderer bundle', () => {
     Object.defineProperty(dom.window.document.querySelector('[data-testid="app-shell-header-context-menu-surface"]'), 'getBoundingClientRect', { value: () => rect(240, 0, 960, 46) })
     Object.defineProperty(dom.window.document.querySelector('[data-codex-composer-root]'), 'getBoundingClientRect', { value: () => rect(420, 700, 600, 120) })
     Object.defineProperty(dom.window.document.querySelector('[data-composer-footer-responsive]'), 'getBoundingClientRect', { value: () => rect(440, 760, 560, 40) })
-    Object.defineProperty(dom.window.document.querySelector('[data-pip-home-surface="thread-summary-panel"]'), 'getBoundingClientRect', { value: () => rect(960, 46, 240, 654) })
+    Object.defineProperty(dom.window.document.getElementById('native-summary-obstacle'), 'getBoundingClientRect', { value: () => rect(960, 46, 300, 654) })
+    Object.defineProperty(dom.window.document.getElementById('native-summary-motion-shell'), 'getBoundingClientRect', { value: () => rect(960, 46, 300, 654) })
+    Object.defineProperty(dom.window.document.getElementById('native-summary-column'), 'getBoundingClientRect', { value: () => rect(960, 46, 300, 654) })
+    Object.defineProperty(dom.window.document.getElementById('native-summary-card'), 'getBoundingClientRect', { value: () => rect(960, 46, 300, 654) })
+    Object.defineProperty(dom.window.document.getElementById('native-summary-scrollport'), 'getBoundingClientRect', { value: () => rect(960, 46, 300, 654) })
+    Object.defineProperty(dom.window.document.getElementById('native-summary-section-stack'), 'getBoundingClientRect', { value: () => rect(960, 46, 300, 654) })
+    let nativeBackgroundProcessesRect = rect(960, 56, 300, 94)
+    Object.defineProperty(dom.window.document.getElementById('native-background-processes'), 'getBoundingClientRect', { value: () => nativeBackgroundProcessesRect })
     Object.defineProperty(dom.window.document.body, 'getBoundingClientRect', { value: () => rect(0, 0, 1200, 900) })
     let mainRect = rect(240, 0, 960, 900)
     Object.defineProperty(dom.window.document.querySelector('[data-app-shell-main-content-layout]'), 'getBoundingClientRect', { value: () => mainRect })
@@ -246,7 +282,12 @@ describe('renderer bundle', () => {
     expect(snapshot.navigation.pages).toHaveLength(3)
     expect(snapshot.navigation.routes.find(item => item.qualifiedId === 'slot-showcase:main.analytics')?.productMetadata).toEqual({
       title: 'Workspace analytics',
-      description: 'Open workspace analytics from showcase navigation, the workspace toolbar, or a session action.',
+      description: 'Open workspace analytics from showcase navigation or the workspace toolbar.',
+      diagnostics: [],
+    })
+    expect(snapshot.navigation.routes.find(item => item.qualifiedId === 'slot-showcase:session.analytics')?.productMetadata).toEqual({
+      title: 'Session analytics',
+      description: 'Toggle analytics for the current session from its header, or open the configured session from showcase navigation.',
       diagnostics: [],
     })
     expect(snapshot.navigation.pages.find(item => item.qualifiedId === 'slot-showcase:session.analytics')?.productMetadata).toEqual({
@@ -285,6 +326,127 @@ describe('renderer bundle', () => {
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"]')?.parentElement?.id).toBe('native-session-actions')
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="composer.submit.before"]')?.nextElementSibling?.id).toBe('native-submit')
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="composer.submit.before"]')?.parentElement?.id).toBe('native-composer-actions')
+    const environmentSeat = dom.window.document.querySelector<HTMLElement>('[data-cordisx-surface-host="environment"]')!
+    const environmentSection = environmentSeat.querySelector<HTMLElement>('.cordisx-env-section')!
+    const environmentHeader = environmentSection.querySelector<HTMLElement>(':scope > .cordisx-env-header')!
+    const environmentContent = environmentSection.querySelector<HTMLElement>(':scope > .cordisx-env-content')!
+    const environmentRow = environmentContent.querySelector<HTMLElement>('.cordisx-env-row')!
+    expect(environmentSeat.children).toHaveLength(1)
+    expect(environmentSection.getAttribute('role')).toBe('presentation')
+    expect(environmentHeader.querySelector('.cordisx-env-title')?.textContent).toBe('CordisX runtime')
+    expect([...environmentHeader.querySelectorAll<HTMLButtonElement>('button')].map(button => button.getAttribute('aria-label')))
+      .toEqual(['Refresh snapshot', 'Showcase settings'])
+    expect(environmentContent.querySelector(':scope > .cordisx-shortcut-action')).toBeNull()
+    expect(environmentContent.querySelector('.cordisx-env-description')?.textContent).toBe('Current runtime status.')
+    const environmentLeading = environmentRow.querySelector<HTMLElement>('.cordisx-env-row-leading')!
+    const environmentLabel = environmentRow.querySelector<HTMLElement>('.cordisx-env-row-label')!
+    const environmentValue = environmentRow.querySelector<HTMLElement>('.cordisx-env-row-value')!
+    const environmentRowAction = environmentRow.querySelector<HTMLButtonElement>('.cordisx-env-row-actions .cordisx-shortcut-action')!
+    const environmentHeaderAction = environmentHeader.querySelector<HTMLButtonElement>('.cordisx-env-header-actions .cordisx-shortcut-action')!
+    expect(environmentRow.firstElementChild).toBe(environmentLeading)
+    expect(environmentLeading.querySelector('.cordisx-host-icon')).not.toBeNull()
+    expect(environmentLabel.querySelector('.cordisx-host-icon')).toBeNull()
+    expect(environmentRow.querySelector('.cordisx-env-row-copy')?.textContent).toBe('Snapshot revision')
+    expect(environmentValue.tagName).toBe('SPAN')
+    expect(environmentValue.textContent).toBe('1')
+    expect(dom.window.getComputedStyle(environmentSeat).display).toBe('contents')
+    expect(dom.window.getComputedStyle(environmentSection).display).toBe('flex')
+    expect(dom.window.getComputedStyle(environmentSection).paddingBottom).toBe('0px')
+    expect(dom.window.getComputedStyle(environmentHeader).height).toBe('28px')
+    expect(dom.window.getComputedStyle(environmentHeader).justifyContent).toBe('flex-start')
+    expect(dom.window.getComputedStyle(environmentContent).paddingLeft).toBe('14px')
+    expect(dom.window.getComputedStyle(environmentRow).paddingTop).toBe('4px')
+    expect(dom.window.getComputedStyle(environmentRow).gap).toBe('4px')
+    expect(dom.window.getComputedStyle(environmentLeading).width).toBe('18px')
+    expect(dom.window.getComputedStyle(environmentLeading).marginInlineEnd).toBe('8px')
+    expect(dom.window.getComputedStyle(environmentLeading.querySelector('svg')!).width).toBe('18px')
+    expect(dom.window.getComputedStyle(environmentValue).maxWidth).toBe('50%')
+    expect(dom.window.getComputedStyle(environmentRowAction).width).toBe('24px')
+    expect(dom.window.getComputedStyle(environmentRowAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('16px')
+    expect(dom.window.getComputedStyle(environmentHeaderAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('18px')
+    const nativeBackgroundProcesses = dom.window.document.getElementById('native-background-processes')!
+    expect(environmentSeat.parentElement?.id).toBe('native-summary-section-stack')
+    expect(nativeBackgroundProcesses.nextElementSibling).toBe(environmentSeat)
+    expect(dom.window.document.getElementById('native-summary-obstacle')?.childElementCount).toBe(0)
+    expect(environmentSection.getBoundingClientRect().top - nativeBackgroundProcesses.getBoundingClientRect().bottom).toBeGreaterThanOrEqual(12)
+    nativeBackgroundProcessesRect = rect(960, -200, 300, 94)
+    nativeBackgroundProcesses.dataset.state = 'scrolled-out-of-view'
+    await settle()
+    await settle()
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="environment"]')).toBe(environmentSeat)
+    nativeBackgroundProcessesRect = rect(960, 56, 300, 94)
+
+    const environmentMarker = dom.window.document.getElementById('native-summary-obstacle')!
+    environmentMarker.removeAttribute('data-pip-home-surface')
+    environmentMarker.removeAttribute('data-pip-obstacle')
+    await settle()
+    await settle()
+    expect(environmentSeat.isConnected).toBe(false)
+    environmentMarker.dataset.pipHomeSurface = 'thread-summary-panel'
+    environmentMarker.dataset.pipObstacle = 'thread-summary-panel'
+    await settle()
+    await settle()
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="environment"]')).toBe(environmentSeat)
+
+    const ambiguousMotionShell = dom.window.document.createElement('div')
+    ambiguousMotionShell.id = 'ambiguous-summary-motion-shell'
+    Object.defineProperty(ambiguousMotionShell, 'getBoundingClientRect', { value: () => rect(960, 46, 300, 654) })
+    dom.window.document.getElementById('native-summary-frame')?.append(ambiguousMotionShell)
+    await settle()
+    await settle()
+    expect(environmentSeat.isConnected).toBe(false)
+    expect(runtime!.snapshot().registrations
+      .filter(item => item.surface.startsWith('environment.'))
+      .every(item => !item.rendered)).toBe(true)
+    ambiguousMotionShell.remove()
+    await settle()
+    await settle()
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="environment"]')).toBe(environmentSeat)
+
+    const transitioningMotionShell = dom.window.document.createElement('div')
+    transitioningMotionShell.id = 'transitioning-summary-motion-shell'
+    Object.defineProperty(transitioningMotionShell, 'getBoundingClientRect', { value: () => rect(960, 46, 300, 654) })
+    dom.window.document.getElementById('native-summary-frame')?.append(transitioningMotionShell)
+    await settle()
+    await settle()
+    expect(environmentSeat.isConnected).toBe(false)
+    await new Promise(resolve => setTimeout(resolve, 650))
+    expect(environmentSeat.isConnected).toBe(false)
+    transitioningMotionShell.style.display = 'none'
+    for (let attempt = 0; attempt < 20 && !environmentSeat.isConnected; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="environment"]')).toBe(environmentSeat)
+    transitioningMotionShell.remove()
+
+    const replacementMotionShell = dom.window.document.createElement('div')
+    replacementMotionShell.id = 'native-summary-motion-shell-rerendered'
+    replacementMotionShell.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:12px;width:300px">
+        <div style="display:flex;flex-direction:column;overflow:hidden">
+          <div style="display:flex;flex-direction:column;overflow-y:auto">
+            <div id="native-summary-section-stack-rerendered" style="display:flex;flex-direction:column;gap:12px">
+              <section id="native-background-processes-rerendered" role="presentation">
+                <header><button aria-expanded="true"><span>后台进程</span><span>1</span></button></header>
+                <div data-slot="thread-summary-panel-item"><button data-slot="thread-summary-panel-item-trigger">sleep 999</button></div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    `
+    Object.defineProperty(replacementMotionShell, 'getBoundingClientRect', { value: () => rect(960, 46, 300, 654) })
+    Object.defineProperty(replacementMotionShell.querySelector('#native-summary-section-stack-rerendered'), 'getBoundingClientRect', { value: () => rect(960, 46, 300, 654) })
+    Object.defineProperty(replacementMotionShell.querySelector('#native-background-processes-rerendered'), 'getBoundingClientRect', { value: () => rect(960, 56, 300, 94) })
+    dom.window.document.getElementById('native-summary-motion-shell')?.replaceWith(replacementMotionShell)
+    await settle()
+    await settle()
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="environment"]')).toBe(environmentSeat)
+    expect(environmentSeat.parentElement?.id).toBe('native-summary-section-stack-rerendered')
+    expect(dom.window.document.getElementById('native-background-processes-rerendered')?.nextElementSibling).toBe(environmentSeat)
+    expect(runtime!.snapshot().registrations
+      .filter(item => item.surface.startsWith('environment.'))
+      .every(item => item.rendered)).toBe(true)
     expect(dom.window.document.getElementById('native-session-tooltip-trigger')?.querySelector('[data-cordisx-surface-host]')).toBeNull()
     expect(dom.window.document.getElementById('native-session-menu')?.parentElement?.id).toBe('native-session-tooltip-trigger')
     expect(dom.window.document.getElementById('native-submit')?.parentElement?.id).toBe('native-composer-actions')
@@ -330,9 +492,32 @@ describe('renderer bundle', () => {
     expect(dom.window.getComputedStyle(sessionHeaderAction).width).toBe('var(--cordisx-toolbar-action-target-size)')
     expect(dom.window.getComputedStyle(sessionHeaderAction).height).toBe('var(--cordisx-toolbar-action-target-size)')
     expect(dom.window.getComputedStyle(sessionHeaderAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('16px')
-    expect(sessionHeaderAction.getAttribute('aria-label')).toBe('Open main page')
-    expect(sessionHeaderAction.dataset.cordisxTooltip).toBe('Open main page')
+    expect(sessionHeaderAction.getAttribute('aria-label')).toBe('Toggle session analytics')
+    expect(sessionHeaderAction.dataset.cordisxTooltip).toBe('Toggle session analytics')
+    expect(sessionHeaderAction.querySelector('[data-host-icon="host:analytics"] svg')).not.toBeNull()
+    expect(sessionHeaderAction.getAttribute('aria-pressed')).toBe('false')
+    expect(sessionHeaderAction.dataset.cordisxRouteState).toBe('inactive')
     expect(sessionHeaderAction.draggable).toBe(false)
+    sessionHeaderAction.click()
+    for (let attempt = 0; attempt < 20 && runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')?.presentation !== 'presented'; attempt += 1) await settle()
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({
+      activeRoute: 'slot-showcase:session.analytics',
+      contextKey: `session:${sessionId}`,
+      mounted: true,
+      presentation: 'presented',
+    })
+    const presentedSessionHeaderAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="session.header.actions"] button')!
+    expect(presentedSessionHeaderAction.getAttribute('aria-pressed')).toBe('true')
+    expect(presentedSessionHeaderAction.dataset.cordisxRouteState).toBe('presented')
+    for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-cordisx-demo-marker="session.content"]') === null; attempt += 1) await settle()
+    expect(dom.window.document.querySelector('[data-cordisx-demo-marker="session.content"]')?.textContent)
+      .toContain(`Session content page for native session ${sessionId}.`)
+    presentedSessionHeaderAction.click()
+    for (let attempt = 0; attempt < 20 && runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')?.presentation !== 'inactive'; attempt += 1) await settle()
+    expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({ mounted: false, presentation: 'inactive' })
+    const restoredSessionHeaderAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="session.header.actions"] button')!
+    expect(restoredSessionHeaderAction.getAttribute('aria-pressed')).toBe('false')
+    expect(restoredSessionHeaderAction.dataset.cordisxRouteState).toBe('inactive')
     const composerAction = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-surface-host="composer.submit.before"] button')!
     expect(composerAction.className).toContain('cordisx-composer-action')
     expect(composerAction.className).not.toContain('codex-composer-button')
@@ -447,7 +632,9 @@ describe('renderer bundle', () => {
     expect(dom.window.getComputedStyle(trailing.querySelector('.cordisx-host-icon')!).width).toBe('16px')
     const environmentAction = dom.window.document.querySelector<HTMLButtonElement>('.cordisx-env-header button')!
     expect(environmentAction.className).toContain('cordisx-icon-only-control')
-    expect(dom.window.getComputedStyle(environmentAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('12px')
+    expect(dom.window.getComputedStyle(environmentAction).width).toBe('24px')
+    expect(dom.window.getComputedStyle(environmentAction).height).toBe('24px')
+    expect(dom.window.getComputedStyle(environmentAction).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('18px')
     trailing.click()
     await settle()
     expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')?.activeRoute).toBeUndefined()
@@ -561,7 +748,12 @@ describe('renderer bundle', () => {
     expect(runtime!.snapshot().localization.locale).toBe('zh-CN')
     expect(runtime!.snapshot().navigation.routes.find(item => item.qualifiedId === 'slot-showcase:main.analytics')?.productMetadata).toEqual({
       title: '工作区分析',
-      description: '从演示导航、工作区工具栏或会话操作打开工作区分析。',
+      description: '从演示导航或工作区工具栏打开工作区分析。',
+      diagnostics: [],
+    })
+    expect(runtime!.snapshot().navigation.routes.find(item => item.qualifiedId === 'slot-showcase:session.analytics')?.productMetadata).toEqual({
+      title: '会话分析',
+      description: '从会话页头切换当前会话分析，或从演示导航打开已配置会话的分析内容。',
       diagnostics: [],
     })
     expect(runtime!.snapshot().navigation.pages.find(item => item.qualifiedId === 'slot-showcase:session.analytics')?.productMetadata).toEqual({
@@ -570,6 +762,7 @@ describe('renderer bundle', () => {
       diagnostics: [],
     })
     expect(runtime!.snapshot().extensionPoints.points.find(item => item.id === 'sidebar.navigation.items')?.titleProjection.text).toBe('侧边栏导航')
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"] button')?.getAttribute('aria-label')).toBe('切换会话分析')
     expect(dom.window.document.querySelector('[data-cordisx-page="slot-showcase:main.analytics"]')?.textContent).toContain('工作区分析')
 
     expect(native.parentElement).toBe(nativeParent)
@@ -937,7 +1130,7 @@ describe('renderer bundle', () => {
     expect(managerModal?.textContent).not.toContain('/main/showcase')
     expect(managerModal?.querySelector('[data-route-product-row="slot-showcase:main.analytics"] .cxc-title')?.textContent).toBe('工作区分析')
     expect(managerModal?.querySelector('[data-route-product-row="slot-showcase:main.analytics"] .cxc-description')?.textContent)
-      .toContain('从演示导航、工作区工具栏或会话操作打开工作区分析')
+      .toContain('从演示导航或工作区工具栏打开工作区分析')
     expect(managerModal?.querySelector('[data-route-product-row="slot-showcase:session.analytics"] .cxc-machine-id')?.textContent).toBe('slot-showcase:session.analytics')
     expect(managerModal?.querySelector('.cxm-kind-badge')).toBeNull()
     const catalogRouteSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="routes"]')!
@@ -998,7 +1191,7 @@ describe('renderer bundle', () => {
     const sessionField = configPanel?.querySelector<HTMLElement>('[data-config-path="sessionId"]')
     expect(sessionField?.querySelector('.cxf-label')?.textContent).toBe('原生会话 ID')
     expect(sessionField?.querySelector('.cxf-help')?.textContent)
-      .toBe('可选会话分析操作使用的当前原生会话 ID；留空时隐藏该操作。')
+      .toBe('可选导航快捷操作使用的原生会话 ID；留空时隐藏该快捷操作。')
     expect(sessionField?.querySelector<HTMLElement & { value: string }>('t-input')?.value).toBe(sessionId)
     expect(configPanel?.querySelector('t-button[data-variant="primary"]')).toBeNull()
     expect(configPanel?.textContent).not.toContain('此插件未提供可编辑设置。')

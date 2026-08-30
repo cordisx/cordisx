@@ -88,14 +88,14 @@ describe('UI demo Config Schemas', () => {
       expect.objectContaining({
         path: ['sessionId'],
         label: 'Native session ID',
-        description: 'Selected native session ID used by the optional session analytics action. Leave empty to hide it.',
+        description: 'Selected native session ID used by the optional navigation shortcut. Leave empty to hide that shortcut.',
         value: '',
         max: 128,
       }),
     ])
     expect(zh.fields[0]).toMatchObject({
       label: '原生会话 ID',
-      description: '可选会话分析操作使用的当前原生会话 ID；留空时隐藏该操作。',
+      description: '可选导航快捷操作使用的原生会话 ID；留空时隐藏该快捷操作。',
     })
   })
 
@@ -181,15 +181,15 @@ describe('UI demo Config Schemas', () => {
       ],
     })
     // The gallery deliberately contains an inline scalar/set-like collection
-    // alongside object-array dialogs; it is not an object-array-only sample.
+    // alongside object-array pages; it is not an object-array-only sample.
     expect(enField('quickLabels')).toMatchObject({
       label: 'Quick labels', type: 'array', arrayItemType: 'string', max: 6,
       presenter: { version: 1, kind: 'array.scalar-tags' }, value: ['weekly', 'planning'],
     })
     expect(enField('reminderChannels')).toMatchObject({ label: 'Reminder channels', type: 'array', arrayItemType: 'boolean', presenter: { version: 1, kind: 'array.scalar-rows' } })
     expect(enField('notificationRules')).toMatchObject({ label: 'Notification rules', type: 'array', min: 1, max: 4 })
-    expect(enField('notificationRules')).toMatchObject({ presenter: { version: 1, kind: 'array.object-dialog' }, arrayItemSchema: { type: 'object' } })
-    expect(enField('escalationRules')).toMatchObject({ presenter: { version: 1, kind: 'array.object-page' }, arrayItemSchema: { type: 'object' } })
+    expect(enField('notificationRules')).toMatchObject({ presenter: { version: 1, kind: 'array.object-page' }, arrayItemSchema: { type: 'object' }, arrayItemDefault: { enabled: true } })
+    expect(enField('escalationRules')).toMatchObject({ presenter: { version: 1, kind: 'array.object-page' }, arrayItemSchema: { type: 'object' }, arrayItemDefault: { enabled: true } })
     expect(enField('appearance.density')).toMatchObject({ label: 'Display density' })
     expect(enField('appearance.showActivity')).toMatchObject({ label: 'Show recent activity' })
     expect(enField('referenceCode')).toMatchObject({ label: 'Reference code', disabled: true })

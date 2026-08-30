@@ -79,7 +79,7 @@ export interface PresenterResolution {
 }
 
 export interface FormIssue {
-  readonly code: 'required' | 'choice' | 'number' | 'range' | 'step' | 'array'
+  readonly code: 'required' | 'choice' | 'number' | 'range' | 'step' | 'length' | 'array'
 }
 
 const presenterKinds = new Set<FormPresenterKind>([
@@ -241,6 +241,7 @@ export function resolveFormPresenter(field: FormDescriptor): PresenterResolution
 export function validateFormValue(field: FormDescriptor, value: unknown): readonly FormIssue[] {
   const issues: FormIssue[] = []
   if (field.required && (value === undefined || value === null || value === '')) issues.push({ code: 'required' })
+  if (typeof value === 'string' && (field.min !== undefined && value.length < field.min || field.max !== undefined && value.length > field.max)) issues.push({ code: 'length' })
   if (field.type !== 'array' && field.choices !== undefined && value !== undefined && !field.choices.some(choice => Object.is(choice.value, value))) issues.push({ code: 'choice' })
   if ((field.type === 'number' || field.type === 'natural') && value !== undefined) {
     if (typeof value !== 'number' || !Number.isFinite(value)) issues.push({ code: 'number' })

@@ -66,11 +66,19 @@ function uniqueVisible(document: Document, selector: string): HTMLElement | unde
 }
 
 function strictlyVisible(element: Element): element is HTMLElement {
+  if (!renderedBox(element)) return false
+  const rect = element.getBoundingClientRect()
+  const view = element.ownerDocument.defaultView
+  if (view === null) return false
+  if (rect.right <= 0 || rect.bottom <= 0 || rect.left >= view.innerWidth || rect.top >= view.innerHeight) return false
+  return true
+}
+
+function renderedBox(element: Element): element is HTMLElement {
   if (!visible(element)) return false
   const rect = element.getBoundingClientRect()
   const view = element.ownerDocument.defaultView
   if (rect.width <= 0 || rect.height <= 0 || view === null) return false
-  if (rect.right <= 0 || rect.bottom <= 0 || rect.left >= view.innerWidth || rect.top >= view.innerHeight) return false
   const style = view.getComputedStyle(element)
   return style.display !== 'none' && style.visibility !== 'hidden'
 }
@@ -461,6 +469,60 @@ interface NativeActionSeat extends NativeSurfaceSeat {
 }
 
 type NativeActionPattern = 'toolbar' | 'footer' | 'shortcut' | 'composer'
+
+function horizontallyAligned(left: DOMRect, right: DOMRect): boolean {
+  const overlap = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left))
+  return overlap >= Math.min(left.width, right.width) * .75
+}
+
+function resolveEnvironmentSeat(document: Document): NativeSurfaceSeat | undefined {
+  // Codex exposes this node as an absolute geometry obstacle. The actual
+  // environment content lives in the native motion sibling's section flow.
+  const marker = uniqueStrictlyVisible(
+    document,
+    '[data-pip-home-surface="thread-summary-panel"][data-pip-obstacle="thread-summary-panel"][aria-hidden="true"]',
+  )
+  const view = document.defaultView
+  if (marker === undefined || view === null || view.getComputedStyle(marker).position !== 'absolute') return undefined
+  const layout = marker.parentElement
+  if (layout === null || view.getComputedStyle(layout).position === 'static') return undefined
+  const markerRect = marker.getBoundingClientRect()
+  const motionCandidates = [...layout.children]
+    .filter((element): element is HTMLElement => strictlyVisible(element))
+    .filter(element => element !== marker && element.closest(CORDISX_SURFACE_HOST_SELECTOR) === null)
+    .filter(element => horizontallyAligned(markerRect, element.getBoundingClientRect()))
+  if (motionCandidates.length !== 1) return undefined
+  const motion = motionCandidates[0]!
+
+  const candidateParents = new Set<HTMLElement>()
+  for (const section of motion.querySelectorAll<HTMLElement>('section[role="presentation"]')) {
+    if (!renderedBox(section) || section.closest(CORDISX_SURFACE_HOST_SELECTOR) !== null) continue
+    if (section.parentElement !== null) candidateParents.add(section.parentElement)
+  }
+  const stacks = [...candidateParents].filter((stack) => {
+    const nativeChildren = [...stack.children]
+      .filter(child => child.closest(CORDISX_SURFACE_HOST_SELECTOR) === null)
+    if (nativeChildren.length === 0 || nativeChildren.some(child => !child.matches('section[role="presentation"]'))) return false
+    if (!nativeChildren.some(section => (
+      section.querySelector(':scope > header button[aria-expanded]') !== null
+      || section.querySelector('[data-slot^="thread-summary-panel-"]') !== null
+    ))) return false
+    if (!strictlyVisible(stack)) return false
+    const stackStyle = view.getComputedStyle(stack)
+    if (stackStyle.display !== 'flex' || stackStyle.flexDirection !== 'column') return false
+    const scrollport = stack.parentElement
+    if (scrollport === null || !motion.contains(scrollport)) return false
+    const overflowY = view.getComputedStyle(scrollport).overflowY
+    if (overflowY !== 'auto' && overflowY !== 'scroll') return false
+    return horizontallyAligned(markerRect, stack.getBoundingClientRect())
+  })
+  return stacks.length === 1 ? {
+    key: 'environment',
+    parent: stacks[0]!,
+    before: null,
+    className: 'cordisx-environment',
+  } : undefined
+}
 
 export function partitionDirectActions<Item>(items: readonly Item[], directLimit: number): Readonly<{
   direct: readonly Item[]
@@ -1095,6 +1157,8 @@ class StructuredSurfaceRenderer {
   private toolbarSlot: { element: HTMLElement; width: string; minWidth: string } | undefined
   private scheduled = false
   private scheduledFrame: number | undefined
+  private environmentRetryTimer: number | undefined
+  private environmentRetryAttempts = 0
   private rebuildScheduled = false
   private disposed = false
   private nextContext = 0
@@ -1135,6 +1199,7 @@ class StructuredSurfaceRenderer {
           return target?.closest('[data-cordisx-surface-host], [data-cordisx-page-outlet], [data-cordisx-manager-modal]') === null
         })
         if (nativeMutation) {
+          this.resetEnvironmentRetry()
           this.schedule(false)
           this.scheduleAfterNativeMutation()
         }
@@ -1148,6 +1213,8 @@ class StructuredSurfaceRenderer {
           'aria-expanded',
           'data-state',
           'data-app-action-sidebar-thread-selected',
+          'data-pip-home-surface',
+          'data-pip-obstacle',
         ],
         subtree: true,
       })
@@ -1160,6 +1227,7 @@ class StructuredSurfaceRenderer {
     this.disposed = true
     this.observer?.disconnect()
     if (this.scheduledFrame !== undefined) this.document.defaultView?.cancelAnimationFrame(this.scheduledFrame)
+    if (this.environmentRetryTimer !== undefined) this.document.defaultView?.clearTimeout(this.environmentRetryTimer)
     this.restoreToolbarSlot()
     this.reasoningProjection?.dispose()
     this.reasoningProjection = undefined
@@ -1201,6 +1269,30 @@ class StructuredSurfaceRenderer {
     })
   }
 
+  private resetEnvironmentRetry(): void {
+    if (this.environmentRetryTimer !== undefined) this.document.defaultView?.clearTimeout(this.environmentRetryTimer)
+    this.environmentRetryTimer = undefined
+    this.environmentRetryAttempts = 0
+  }
+
+  private reconcileEnvironmentRetry(pending: boolean): void {
+    const view = this.document.defaultView
+    if (!pending || view === null || this.disposed) {
+      this.resetEnvironmentRetry()
+      return
+    }
+    if (this.environmentRetryTimer !== undefined || this.environmentRetryAttempts >= 3) return
+    // Thread switches temporarily expose both summary motion shells. The outgoing
+    // shell is later hidden through an inline `style` update, which is intentionally
+    // not observed because Host motion writes it every frame. Retry a bounded number
+    // of times while the semantic marker exists, preserving fail-closed behavior.
+    this.environmentRetryTimer = view.setTimeout(() => {
+      this.environmentRetryTimer = undefined
+      this.environmentRetryAttempts += 1
+      this.schedule(false)
+    }, 400)
+  }
+
   private playgroundSurface(name: string): HTMLElement | undefined {
     return this.document.querySelector<HTMLElement>(`[data-cordisx-playground-surface="${name}"]`) ?? undefined
   }
@@ -1226,12 +1318,13 @@ class StructuredSurfaceRenderer {
       .some(element => !element.hidden)
     const sidebar = managerOverlay || playground ? undefined : uniqueVisible(this.document, '[data-app-action-sidebar-scroll]')
     const toolbar = managerOverlay || playground ? undefined : uniqueVisible(this.document, 'header[data-app-shell-application-menu-bar]')
-    const environmentCandidates = managerOverlay ? [] : [
-      ...this.document.querySelectorAll<HTMLElement>('[data-pip-home-surface="thread-summary-panel"], [data-app-shell-focus-area="right-panel"]'),
+    const environmentCandidates = managerOverlay || playground ? [] : [
+      ...this.document.querySelectorAll<HTMLElement>(
+        '[data-pip-home-surface="thread-summary-panel"][data-pip-obstacle="thread-summary-panel"][aria-hidden="true"]',
+      ),
     ].filter(strictlyVisible)
-    const environment = managerOverlay ? undefined
-      : uniqueStrictlyVisible(this.document, '[data-pip-home-surface="thread-summary-panel"]')
-        ?? uniqueStrictlyVisible(this.document, '[data-app-shell-focus-area="right-panel"]')
+    const environmentSeat = managerOverlay || playground ? undefined : resolveEnvironmentSeat(this.document)
+    this.reconcileEnvironmentRetry(environmentCandidates.length > 0 && environmentSeat === undefined)
     const sidebarNavigation = managerOverlay ? undefined : playground
       ? this.playgroundSurface('sidebar.navigation.items')
       : sidebar === undefined ? undefined : resolveSidebarNavigationParent(this.document, sidebar)
@@ -1258,7 +1351,7 @@ class StructuredSurfaceRenderer {
     const contextValues = {
       'sidebar.visible': sidebarNavigation !== undefined || sidebarFooterControl !== undefined,
       'toolbar.visible': toolbarControl !== undefined,
-      'environment.visible': environment !== undefined,
+      'environment.visible': environmentSeat !== undefined,
       ...(sessionId === undefined ? {} : { 'session.active': sessionId }),
     }
     this.slots.contexts.replace(contextValues)
@@ -1272,7 +1365,7 @@ class StructuredSurfaceRenderer {
     const shellDetail = (key: string, label: string) => managerOverlay
       ? contextDetail(`${key}.not-mounted`, `The ${label} context is not mounted while CordisX Manager is open.`)
       : contextDetail(`${key}.unresolved`, `The ${label} anchor could not be resolved uniquely.`)
-    const environmentState = environment !== undefined ? 'active' as const
+    const environmentState = environmentSeat !== undefined ? 'active' as const
       : environmentCandidates.length > 0 ? 'inactive' as const : 'not-mounted' as const
     this.slots.registry.setCurrentContext([
       { surface: 'sidebar.navigation.items', state: sidebarNavigation === undefined ? shellContextState : 'active', ...(sidebarNavigation === undefined ? { code: shellContextCode, detail: shellDetail('sidebar-navigation', 'sidebar navigation') } : {}) },
@@ -1294,7 +1387,7 @@ class StructuredSurfaceRenderer {
       { surface: 'composer.reasoning-intensity', state: reasoningRange === undefined ? sessionContextState : 'active', ...(reasoningRange === undefined ? { code: sessionId === undefined ? 'session.not-mounted' : 'anchor.unresolved', detail: contextDetail(sessionId === undefined ? 'reasoning-intensity.not-mounted' : 'reasoning-intensity.unresolved', sessionId === undefined ? 'The native reasoning control is not mounted in the current page.' : 'The native reasoning range could not be resolved uniquely.') } : {}) },
       { surface: 'session.backdrop', state: sessionId === undefined ? 'not-mounted' : 'active', ...(sessionId === undefined ? { code: 'session.not-mounted', detail: contextDetail('session-backdrop.not-mounted', 'The session backdrop is not mounted without an active session.') } : {}) },
       ...(['environment.panel.header-actions', 'environment.panel.sections', 'environment.section.actions', 'environment.section.rows', 'environment.row.trailing-actions'] as const)
-        .map(surface => ({ surface, state: environmentState, ...(environment === undefined
+        .map(surface => ({ surface, state: environmentState, ...(environmentSeat === undefined
           ? environmentCandidates.length > 0
             ? { code: 'anchor.unresolved', detail: contextDetail('environment.unresolved', 'The environment panel anchor could not be resolved uniquely.') }
             : { code: 'context.not-mounted', detail: contextDetail('environment.not-mounted', 'The environment panel context is not mounted.') }
@@ -1441,16 +1534,14 @@ class StructuredSurfaceRenderer {
       this.sessionBackdropProjection?.dispose()
       this.sessionBackdropProjection = undefined
     }
-    if (environment !== undefined) {
+    if (environmentSeat !== undefined) {
       for (const surface of [
         'environment.panel.header-actions', 'environment.panel.sections', 'environment.section.actions',
         'environment.section.rows', 'environment.row.trailing-actions',
       ] as const) availableSurfaces.add(surface)
       const items = active.filter(item => item.surface.startsWith('environment.'))
       if (items.length > 0) {
-        const root = this.placeRoot({
-          key: 'environment', parent: environment, before: null, className: 'cordisx-environment',
-        }, usedRoots)
+        const root = this.placeRoot(environmentSeat, usedRoots)
         if (rebuild || root.childElementCount === 0) this.renderEnvironment(root, items, nextSites)
       }
     }
@@ -1828,46 +1919,79 @@ class StructuredSurfaceRenderer {
 
   private renderEnvironment(root: HTMLElement, snapshots: readonly SurfaceContributionSnapshot[], sites: Set<string>): void {
     root.replaceChildren()
-    const header = create(this.document, 'div', 'cordisx-env-header')
-    header.append(create(this.document, 'strong'))
-    header.firstElementChild!.textContent = 'CordisX'
-    for (const snapshot of snapshots.filter(item => item.surface === 'environment.panel.header-actions')) header.append(this.button(snapshot, snapshot.item as CordisXStructuredAction, 'header', sites, 'shortcut'))
-    root.append(header)
-    for (const sectionSnapshot of snapshots.filter(item => item.surface === 'environment.panel.sections')) {
+    const panelActions = snapshots.filter(item => item.surface === 'environment.panel.header-actions')
+    const sections = snapshots.filter(item => item.surface === 'environment.panel.sections')
+    const appendHeader = (
+      panel: HTMLElement,
+      titleText: string,
+      actions: readonly { snapshot: SurfaceContributionSnapshot; path: string }[],
+    ): void => {
+      const header = create(this.document, 'header', 'cordisx-env-header')
+      const title = create(this.document, 'span', 'cordisx-env-title')
+      title.textContent = titleText
+      header.append(title)
+      if (actions.length > 0) {
+        const actionGroup = create(this.document, 'div', 'cordisx-env-header-actions')
+        for (const { snapshot, path } of actions) {
+          actionGroup.append(this.button(snapshot, snapshot.item as CordisXStructuredAction, path, sites, 'shortcut'))
+        }
+        header.append(actionGroup)
+      }
+      panel.append(header)
+    }
+    if (sections.length === 0 && panelActions.length > 0) {
+      const panel = create(this.document, 'section', 'cordisx-env-section')
+      panel.setAttribute('role', 'presentation')
+      appendHeader(panel, 'CordisX', panelActions.map(snapshot => ({ snapshot, path: 'header' })))
+      root.append(panel)
+      return
+    }
+    for (const [sectionIndex, sectionSnapshot] of sections.entries()) {
       const section = sectionSnapshot.item as { sectionId: string; title: CordisXLocalizedText; description?: CordisXLocalizedText }
       const panel = create(this.document, 'section', 'cordisx-env-section')
-      const title = create(this.document, 'strong')
-      title.textContent = this.text(sectionSnapshot, section.title, 'title', sites)
-      panel.append(title)
+      panel.setAttribute('role', 'presentation')
+      const sectionActions = snapshots.filter(item => item.surface === 'environment.section.actions' && (item.item as { sectionId: string }).sectionId === section.sectionId)
+      appendHeader(panel, this.text(sectionSnapshot, section.title, 'title', sites), [
+        ...(sectionIndex === 0 ? panelActions.map(snapshot => ({ snapshot, path: 'header' })) : []),
+        ...sectionActions.map(snapshot => ({ snapshot, path: 'section-action' })),
+      ])
+      const content = create(this.document, 'div', 'cordisx-env-content')
       if (section.description !== undefined) {
-        const description = create(this.document, 'p')
+        const description = create(this.document, 'p', 'cordisx-env-description')
         description.textContent = this.text(sectionSnapshot, section.description, 'description', sites)
-        panel.append(description)
-      }
-      for (const snapshot of snapshots.filter(item => item.surface === 'environment.section.actions' && (item.item as { sectionId: string }).sectionId === section.sectionId)) {
-        panel.append(this.button(snapshot, snapshot.item as CordisXStructuredAction, 'section-action', sites, 'shortcut'))
+        content.append(description)
       }
       for (const rowSnapshot of snapshots.filter(item => item.surface === 'environment.section.rows' && (item.item as { sectionId: string }).sectionId === section.sectionId)) {
         const rowData = rowSnapshot.item as { rowId: string; label: CordisXLocalizedText; value?: CordisXLocalizedText | string | number | boolean | null; status?: string }
         const row = create(this.document, 'div', 'cordisx-env-row')
-        const label = create(this.document, 'span')
-        if (rowData.status !== undefined) label.append(createHostSurfaceIcon(this.document, rowData.status))
-        const labelCopy = create(this.document, 'span')
+        if (rowData.status !== undefined) {
+          const leading = create(this.document, 'span', 'cordisx-env-row-leading')
+          leading.append(createHostSurfaceIcon(this.document, rowData.status))
+          row.append(leading)
+        }
+        const label = create(this.document, 'span', 'cordisx-env-row-label')
+        const labelCopy = create(this.document, 'span', 'cordisx-env-row-copy')
         labelCopy.textContent = this.text(rowSnapshot, rowData.label, 'label', sites)
         label.append(labelCopy)
         row.append(label)
         if (rowData.value !== undefined) {
-          const value = create(this.document, 'code')
+          const value = create(this.document, 'span', 'cordisx-env-row-value')
           value.textContent = typeof rowData.value === 'object' && rowData.value !== null
             ? this.text(rowSnapshot, rowData.value, 'value', sites)
             : String(rowData.value)
           row.append(value)
         }
-        for (const actionSnapshot of snapshots.filter(item => item.surface === 'environment.row.trailing-actions' && (item.item as { rowId: string }).rowId === rowData.rowId)) {
-          row.append(this.button(actionSnapshot, actionSnapshot.item as CordisXStructuredAction, 'trailing', sites, 'shortcut'))
+        const rowActions = snapshots.filter(item => item.surface === 'environment.row.trailing-actions' && (item.item as { rowId: string }).rowId === rowData.rowId)
+        if (rowActions.length > 0) {
+          const actionGroup = create(this.document, 'div', 'cordisx-env-row-actions')
+          for (const actionSnapshot of rowActions) {
+            actionGroup.append(this.button(actionSnapshot, actionSnapshot.item as CordisXStructuredAction, 'trailing', sites, 'shortcut'))
+          }
+          row.append(actionGroup)
         }
-        panel.append(row)
+        content.append(row)
       }
+      panel.append(content)
       root.append(panel)
     }
   }
@@ -1920,8 +2044,8 @@ function installStyles(document: Document): () => void {
     .cordisx-toolbar-before, .cordisx-toolbar-after, .cordisx-session-header-actions { --cordisx-toolbar-action-target-size: 28px; --cordisx-toolbar-action-corner-radius: 8px; --cordisx-toolbar-action-idle-background: transparent; --cordisx-toolbar-action-hover-background: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); --cordisx-toolbar-action-focus-ring: var(--color-ring,rgba(131,195,255,.76)); --cordisx-toolbar-action-disabled-opacity: .4; --cordisx-toolbar-action-pressed-background: color-mix(in oklab,var(--color-text,currentColor) 5%,transparent); --cordisx-toolbar-action-pressed-hover-background: color-mix(in oklab,var(--color-text,currentColor) 10%,transparent); --cordisx-toolbar-action-pressed-foreground: var(--color-text,currentColor); --cordisx-toolbar-action-gap: 6px; display: flex; flex: 0 0 auto; height: var(--cordisx-toolbar-action-target-size); align-items: center; gap: var(--cordisx-toolbar-action-gap); min-width: 0; }
     .cordisx-session-header-actions { --cordisx-toolbar-outer-group-gap: 6px; margin-inline-end: var(--cordisx-toolbar-outer-group-gap); }
     .cordisx-composer-submit-before { display: flex; flex: 0 0 auto; height: 28px; align-items: center; gap: 8px; min-width: 0; }
-    .cordisx-environment { display: block; width: 100%; min-width: 0; padding: 6px; }
-    .cordisx-navigation, .cordisx-env-section, .cordisx-navigation-group { display: grid; gap: 1px; }
+    .cordisx-environment { display: contents; }
+    .cordisx-navigation, .cordisx-navigation-group { display: grid; gap: 1px; }
     .cordisx-navigation-group { min-width: 0; margin-top: 12px; }
     .cordisx-navigation-group-heading { min-width: 0; padding: 0 8px 4px; overflow: hidden; color: var(--color-text-secondary,var(--color-text-tertiary,currentColor)); font: 500 11px/16px system-ui,sans-serif; text-overflow: ellipsis; white-space: nowrap; }
     @container (max-width: 80px) { .cordisx-navigation-group { margin-top: 6px; } .cordisx-navigation-group-heading { display: none; } }
@@ -1932,8 +2056,22 @@ function installStyles(document: Document): () => void {
     .cordisx-nav-primary:focus-visible { outline: 2px solid var(--color-ring,rgba(131,195,255,.76)); outline-offset: -2px; border-radius: var(--radius-lg,10px); }
     .cordisx-nav-copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .cordisx-nav-actions { display: flex; align-items: center; gap: 2px; }
-    .cordisx-env-row, .cordisx-env-header { display: flex; align-items: center; gap: 5px; }
-    .cordisx-env-header { justify-content: flex-end; }
+    .cordisx-env-section { position: relative; z-index: 0; display: flex; width: 100%; min-width: 0; box-sizing: border-box; flex-direction: column; padding: 0 0 12px; background: transparent; color: inherit; }
+    .cordisx-env-section:last-child { padding-bottom: 0; }
+    .cordisx-env-section:not(:last-child)::after { content: ""; position: absolute; right: 14px; bottom: 0; left: 14px; height: .5px; background: var(--color-border,rgba(127,127,127,.18)); }
+    .cordisx-env-header { position: sticky; top: 10px; z-index: 10; display: flex; width: 100%; min-width: 0; height: 28px; box-sizing: border-box; align-items: center; justify-content: flex-start; gap: 8px; padding: 0 10px 2px 14px; background: var(--color-surface-elevated-secondary,var(--color-background-elevated-secondary,inherit)); color: var(--color-text-tertiary,rgba(255,255,255,.5)); }
+    .cordisx-env-header::before { content: ""; position: absolute; right: 0; bottom: 100%; left: 0; height: 10px; background: inherit; pointer-events: none; }
+    .cordisx-env-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 400; line-height: 21px; }
+    .cordisx-env-header-actions, .cordisx-env-row-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
+    .cordisx-env-header-actions { margin-inline-start: auto; }
+    .cordisx-env-row-actions { height: 20px; }
+    .cordisx-env-content { display: flex; min-width: 0; box-sizing: border-box; flex-direction: column; gap: 2px; padding: 0 14px; }
+    .cordisx-env-description { margin: 2px 0 4px; color: var(--color-text-tertiary,rgba(255,255,255,.5)); font-size: 13px; font-weight: 400; line-height: 18px; }
+    .cordisx-env-row { display: flex; width: 100%; min-width: 0; min-height: 28px; box-sizing: border-box; align-items: center; gap: 4px; padding: 4px 0; font-size: 14px; line-height: 21px; }
+    .cordisx-env-row-leading { display: inline-flex; width: 18px; height: 18px; flex: 0 0 18px; align-items: center; justify-content: flex-start; margin-inline-end: 8px; color: var(--color-text-secondary,currentColor); }
+    .cordisx-env-row-label { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; color: inherit; }
+    .cordisx-env-row-copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cordisx-env-row-value { max-width: 50%; flex: 0 1 auto; overflow: hidden; color: var(--color-text-tertiary,rgba(255,255,255,.5)); font: inherit; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
     .cordisx-action:not(.cordisx-native-icon-action) { display: inline-flex; align-items: center; gap: 6px; min-height: 27px; border: 1px solid transparent; border-radius: var(--radius-lg,10px); background: transparent; color: inherit; cursor: default; padding: 4px 7px; font: inherit; white-space: nowrap; user-select: none; -webkit-user-select: none; -webkit-app-region: no-drag; }
     .cordisx-native-icon-action { flex: 0 0 auto; -webkit-app-region: no-drag; }
     .cordisx-toolbar-before > .cordisx-toolbar-action, .cordisx-toolbar-after > .cordisx-toolbar-action, .cordisx-session-header-actions > .cordisx-toolbar-action { display: inline-flex; flex: 0 0 auto; width: var(--cordisx-toolbar-action-target-size); min-width: var(--cordisx-toolbar-action-target-size); height: var(--cordisx-toolbar-action-target-size); min-height: var(--cordisx-toolbar-action-target-size); align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: var(--cordisx-toolbar-action-corner-radius); background-color: var(--cordisx-toolbar-action-idle-background); color: var(--color-text-tertiary,rgba(127,127,127,.78)); opacity: 1; cursor: default; white-space: nowrap; user-select: none; -webkit-user-select: none; }
@@ -1977,9 +2115,10 @@ function installStyles(document: Document): () => void {
     .cordisx-composer-submit-before > .cordisx-surface-overflow > summary .cordisx-host-icon, .cordisx-composer-submit-before > .cordisx-surface-overflow > summary .cordisx-host-icon svg { width: 16px; height: 16px; }
     .cordisx-surface-overflow-menu { position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; display: grid; min-width: 160px; padding: 4px; border: 1px solid var(--color-border,rgba(255,255,255,.084)); border-radius: var(--radius-lg,10px); background: var(--color-background-elevated-secondary,#242424); box-shadow: 0 8px 28px rgba(0,0,0,.28); }
     .cordisx-surface-overflow:not([open]) > .cordisx-surface-overflow-menu { display: none; }
-    .cordisx-env-section { margin-top: 6px; padding: 7px; border-radius: 8px; background: rgba(255,255,255,.04); }
-    .cordisx-env-section p { margin: 3px 0; opacity: .68; font-size: 10px; }
-    .cordisx-env-row { justify-content: space-between; }
+    .cordisx-env-header .cordisx-shortcut-action { --cordisx-icon-only-glyph-size: 18px; }
+    .cordisx-env-header .cordisx-shortcut-action .cordisx-host-icon { width: 18px; height: 18px; }
+    .cordisx-env-row-leading > .cordisx-host-icon, .cordisx-env-row-leading > .cordisx-host-icon svg { width: 18px; height: 18px; }
+    .cordisx-env-row-actions .cordisx-shortcut-action { --cordisx-icon-only-glyph-size: 16px; }
   `
   ;(document.head ?? document.documentElement).append(style)
   return () => style.remove()

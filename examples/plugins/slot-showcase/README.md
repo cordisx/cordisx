@@ -26,9 +26,10 @@ accessibility, and cleanup.
 Manager groups the three route and page families in **Routes** and projects
 their descriptions using the active Host locale. `app.overview` opens the
 application overview from the sidebar footer or demo settings entry;
-`main.analytics` opens workspace analytics from the navigation row, toolbar,
-or session header; and `session.analytics` opens analysis in the active
-conversation after a native session ID is configured. The plugin declares only
+`main.analytics` opens workspace analytics from the navigation row or toolbar;
+and the session-header action toggles `session.analytics` for the active
+conversation without configuration. An optional navigation shortcut can open
+that page for a configured session. The plugin declares only
 structured `LocalizedText`; the Host owns list DOM, search, diagnostics, and
 accessibility.
 
@@ -40,9 +41,10 @@ accessibility.
 
 The plugin exports Schemastery `Config` with
 `configApplies = 'plugin-restart'`. `sessionId` accepts at most 128 characters.
-When empty, the session-analysis shortcut remains hidden. When it matches the
-selected native session, that action navigates to the controlled
-`session.content` page. Saving configuration rebuilds only this plugin fiber.
+When empty, the navigation shortcut remains hidden; the contextual session-header
+action remains available. When the configured ID matches the selected native
+session, the shortcut navigates to the controlled `session.content` page. Saving
+configuration rebuilds only this plugin fiber.
 
 Blocking the plugin disposes the current Cordis fiber, revokes its
 contributions, and aborts/disposes active pages. Restoring it creates a new

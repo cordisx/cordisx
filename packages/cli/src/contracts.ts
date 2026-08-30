@@ -1231,6 +1231,10 @@ export interface CordisXConfigFormSchemaNode {
   readonly role?: string
   readonly label?: string
   readonly description?: string
+  /** Whether this nested schema node declares a safe explicit default. */
+  readonly hasDefault?: boolean
+  /** Renderer-safe nested default; omitted for sensitive roles. */
+  readonly defaultValue?: CordisXJsonValue
   readonly disabled: boolean
   readonly required: boolean
   readonly min?: number

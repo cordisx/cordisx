@@ -28,6 +28,7 @@ import {
   type PluginGenerationView,
 } from './generation-visibility.js'
 import { assertLocalId } from './validation.js'
+import { formSchemaDefaultValue } from './form-schema-defaults.js'
 import type { PluginConsoleAspect } from './plugin-console.js'
 
 const CONFIG_BINDING = '__cordisxConfigRequestV1'
@@ -226,6 +227,10 @@ function jsonCompatible(value: unknown, label: string, seen = new Set<object>())
       value.forEach((entry, index) => jsonCompatible(entry, `${label}[${index}]`, seen))
       return
     }
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error(`${label} must be a plain JSON object`)
+    }
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
       jsonCompatible(entry, `${label}.${key}`, seen)
     }
@@ -234,22 +239,76 @@ function jsonCompatible(value: unknown, label: string, seen = new Set<object>())
   }
 }
 
+function sensitiveDefaultPath(
+  schema: SchemaNode,
+  value: unknown,
+  path: CordisXConfigFieldPath = [],
+): CordisXConfigFieldPath | undefined {
+  if (schema.meta?.role !== undefined && RESERVED_ROLES.has(schema.meta.role)) return path
+  if (schema.type === 'object' && schema.dict !== undefined && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [key, child] of Object.entries(schema.dict)) {
+      if (!Object.hasOwn(value, key)) continue
+      const nested = sensitiveDefaultPath(child, (value as Record<string, unknown>)[key], [...path, key])
+      if (nested !== undefined) return nested
+    }
+  }
+  if (schema.type === 'array' && schema.inner !== undefined && Array.isArray(value)) {
+    for (const [index, item] of value.entries()) {
+      const nested = sensitiveDefaultPath(schema.inner, item, [...path, String(index)])
+      if (nested !== undefined) return nested
+    }
+  } else if (schema.inner !== undefined) {
+    const nested = sensitiveDefaultPath(schema.inner, value, path)
+    if (nested !== undefined) return nested
+  }
+  for (const child of schema.list ?? []) {
+    const nested = sensitiveDefaultPath(child, value, path)
+    if (nested !== undefined) return nested
+  }
+  return undefined
+}
+
+function validateSchemaDefaults(
+  schema: SchemaNode | undefined,
+  path: CordisXConfigFieldPath = [],
+  seen = new Set<SchemaNode>(),
+): void {
+  if (schema === undefined || seen.has(schema)) return
+  seen.add(schema)
+  if (Object.hasOwn(schema.meta ?? {}, 'default')) {
+    const value = schema.meta?.default
+    jsonCompatible(value, `config schema default ${path.join('.') || '<root>'}`)
+    const sensitivePath = sensitiveDefaultPath(schema, value)
+    if (sensitivePath !== undefined) {
+      throw new Error(`secret config field ${[...path, ...sensitivePath].join('.') || '<root>'} must not declare a JSON default`)
+    }
+  }
+  if (schema.type === 'object' && schema.dict !== undefined) {
+    for (const [key, child] of Object.entries(schema.dict)) validateSchemaDefaults(child, [...path, key], seen)
+  }
+  if (schema.inner !== undefined) validateSchemaDefaults(schema.inner, path, seen)
+  for (const child of schema.list ?? []) validateSchemaDefaults(child, path, seen)
+}
+
 function removePaths(value: unknown, paths: readonly CordisXConfigFieldPath[]): unknown {
-  let result = clone(value)
+  const result = clone(value)
+  const removePath = (current: unknown, path: CordisXConfigFieldPath, index: number): void => {
+    if (current === null || typeof current !== 'object' || index >= path.length) return
+    if (Array.isArray(current)) {
+      for (const item of current) removePath(item, path, index)
+      return
+    }
+    const segment = path[index]!
+    const record = current as Record<string, unknown>
+    if (index === path.length - 1) {
+      delete record[segment]
+      return
+    }
+    removePath(record[segment], path, index + 1)
+  }
   for (const path of paths) {
     if (path.length === 0) return undefined
-    if (result === null || typeof result !== 'object') continue
-    let current = result as Record<PropertyKey, unknown>
-    for (let index = 0; index < path.length - 1; index += 1) {
-      const next = current[path[index]!]
-      if (next === null || typeof next !== 'object') {
-        current = Object.create(null) as Record<PropertyKey, unknown>
-        break
-      }
-      current = next as Record<PropertyKey, unknown>
-    }
-    const last = path[path.length - 1]
-    if (last !== undefined) delete current[last]
+    removePath(result, path, 0)
   }
   return result
 }
@@ -328,6 +387,8 @@ function formPresenter(schema: SchemaNode): CordisXConfigFormPresenter | undefin
 
 function formSchemaNode(schema: SchemaNode, locale: string): CordisXConfigFormSchemaNode {
   const role = schema.meta?.role
+  const sensitive = role !== undefined && RESERVED_ROLES.has(role)
+  const hasDefault = Object.hasOwn(schema.meta ?? {}, 'default') && !sensitive
   const label = localizedText(schema.meta?.extra?.label, locale)
   const description = localizedText(schema.meta?.description, locale)
   const fieldChoices = choices(schema)
@@ -344,6 +405,7 @@ function formSchemaNode(schema: SchemaNode, locale: string): CordisXConfigFormSc
     ...(role === undefined ? {} : { role }),
     ...(label === undefined ? {} : { label }),
     ...(description === undefined ? {} : { description }),
+    ...(hasDefault ? { hasDefault: true, defaultValue: immutable(schema.meta?.default) as CordisXJsonValue } : {}),
     disabled: schema.meta?.disabled === true,
     required: schema.meta?.required === true,
     ...(schema.meta?.min === undefined ? {} : { min: schema.meta.min }),
@@ -384,6 +446,7 @@ function fields(
   const group = formGroup(schema, locale)
   const presenter = formPresenter(schema)
   const arrayItemSchema = schema.type === 'array' && schema.inner?.type === 'object' ? formSchemaNode(schema.inner, locale) : undefined
+  const arrayItemDefault = arrayItemSchema === undefined ? undefined : formSchemaDefaultValue(arrayItemSchema)
   const hasDefault = Object.hasOwn(schema.meta ?? {}, 'default')
   const defaultValue = hasDefault && !sensitive ? immutable(ownValue(resolved, path)) : undefined
   return [{
@@ -405,6 +468,7 @@ function fields(
     ...(arrayItemType === undefined ? {} : { arrayItemType }),
     ...(presenter === undefined ? {} : { presenter }),
     ...(arrayItemSchema === undefined ? {} : { arrayItemSchema }),
+    ...(arrayItemDefault === undefined ? {} : { arrayItemDefault }),
     ...(icon === undefined ? {} : { icon }),
     ...(group === undefined ? {} : { group }),
   }]
@@ -443,11 +507,7 @@ export class PluginConfigurationRegistry {
     const schema = input.schema as (CordisXStandardSchema & SchemaNode) | undefined
     const sensitive = sensitiveNodes(schema)
     const secrets = [...new Map(sensitive.map(item => [JSON.stringify(item.path), item.path])).values()]
-    for (const item of sensitive) {
-      if (item.node.meta !== undefined && Object.hasOwn(item.node.meta, 'default')) {
-        throw new Error(`secret config field ${item.path.join('.')} must not declare a JSON default`)
-      }
-    }
+    validateSchemaDefaults(schema)
     const raw = removePaths(input.raw, secrets)
     const value = validate(schema, raw)
     const generation: PluginGenerationEffectIdentity = Object.freeze({
