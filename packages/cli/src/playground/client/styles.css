@@ -120,6 +120,34 @@ body > [data-cordisx-page-outlet] svg.icon-xs { width: 16px !important; height: 
 .pg-simulator-events li { padding-left: 4px; }
 .pg-simulator-events span { display: block; color: var(--pg-muted); font-size: 11px; }
 
+.pg-scenario-lab { min-width: 0; min-height: 100vh; padding: 28px; overflow: auto; background: var(--pg-bg); color: var(--pg-text); }
+.pg-scenario-lab > header { display: flex; max-width: 1080px; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.pg-scenario-lab h1 { margin: 6px 0 4px; font-size: 22px; }
+.pg-scenario-lab h2 { margin: 0 0 7px; font-size: 13px; }
+.pg-scenario-lab p { margin: 4px 0; color: var(--pg-muted); }
+.pg-scenario-controls, .pg-scenario-summary, .pg-scenario-columns > section { max-width: 1080px; margin-top: 14px; padding: 14px; border: 1px solid var(--pg-border-soft); border-radius: 10px; background: var(--pg-panel); }
+.pg-scenario-controls { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
+.pg-scenario-controls label { display: grid; min-width: min(360px, 100%); gap: 5px; color: var(--pg-muted); font-size: 11px; }
+.pg-scenario-controls select { min-height: 34px; padding: 5px 9px; border: 1px solid var(--pg-border); border-radius: 7px; background: var(--pg-panel-raised); color: var(--pg-text); }
+.pg-scenario-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.pg-scenario-actions button, .pg-scenario-secondary { min-height: 32px; padding: 5px 10px; border: 1px solid var(--pg-border); border-radius: 7px; background: var(--pg-panel-raised); color: var(--pg-text); cursor: pointer; }
+.pg-scenario-actions button:focus-visible, .pg-scenario-secondary:focus-visible, .pg-scenario-controls select:focus-visible { outline: 2px solid var(--pg-accent); outline-offset: 2px; }
+.pg-scenario-actions button:disabled { cursor: not-allowed; opacity: .45; }
+.pg-scenario-unavailable { display: grid; gap: 4px; margin-top: 10px; padding: 10px; border-inline-start: 3px solid var(--pg-muted); background: var(--pg-bg); }
+.pg-scenario-unavailable span { color: var(--pg-muted); }
+.pg-scenario-columns { display: grid; max-width: 1080px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.pg-scenario-columns > section { min-width: 0; margin-top: 14px; }
+.pg-scenario-columns ol, .pg-scenario-columns ul { display: grid; gap: 7px; margin: 0; padding-left: 22px; }
+.pg-scenario-columns li { min-width: 0; }
+.pg-scenario-columns li > span { display: block; color: var(--pg-muted); font-size: 10px; }
+.pg-scenario-columns code { display: block; overflow-wrap: anywhere; color: var(--pg-text); font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+@media (max-width: 780px) {
+  .pg-scenario-lab { padding: 18px; }
+  .pg-scenario-controls, .pg-scenario-lab > header { align-items: stretch; flex-direction: column; }
+  .pg-scenario-columns { grid-template-columns: 1fr; }
+}
+
 /* Production structured renderer roots remain Host-owned; these rules only place them in the fixture shell. */
 .pg-surface-seat > [data-cordisx-surface-host], .pg-footer-surface > [data-cordisx-surface-host] { position: static !important; display: flex; align-items: center; gap: 5px; }
 .pg-surface-seat .cordisx-native-icon-action, .pg-footer-surface .cordisx-native-icon-action { display: inline-grid !important; width: 28px !important; min-width: 28px !important; height: 28px !important; min-height: 28px !important; place-items: center; padding: 0 !important; border: 0 !important; border-radius: 7px !important; background: transparent !important; }
