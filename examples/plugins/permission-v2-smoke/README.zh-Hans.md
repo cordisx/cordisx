@@ -11,4 +11,6 @@ Permission V2 Smoke 是仅用于开发的 Host 权限代理探针。它注册两
 
 ## 当前边界
 
+该包还注册一个结构化 `main` outlet route。打开该 route 会通过同一个 Host Permission Broker 验证 Permission v3 受控渲染；插件拿不到 raw DOM handle 或私有 bridge。
+
 该包是显式本地加载、未签名的 smoke fixture，不是面向用户的插件，也不能进入 CordisX 默认配置。

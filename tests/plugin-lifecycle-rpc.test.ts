@@ -37,6 +37,17 @@ describe('Host-private permission lifecycle binding', () => {
         target: { kind: 'candidate', candidateId: 'plugin-candidate-1' },
       },
     })
+    expect(parsePluginLifecycleBindingRequest(privatePlan({ kind: 'permission-review-plan-v4' }), handler)).toEqual({
+      kind: 'permission-review-plan-v4',
+      requestId: 'request-1',
+      request: {
+        requestId: 'request-1',
+        profileId: 'work',
+        runtimeGeneration: 'runtime-1',
+        expectedRevision: 3,
+        target: { kind: 'candidate', candidateId: 'plugin-candidate-1' },
+      },
+    })
   })
 
   it('rejects token/profile/generation confusion and extra private fields', () => {
@@ -44,6 +55,12 @@ describe('Host-private permission lifecycle binding', () => {
     expect(() => parsePluginLifecycleBindingRequest(privatePlan({ profileId: 'other' }), handler)).toThrow(/scope is stale/)
     expect(() => parsePluginLifecycleBindingRequest(privatePlan({ runtimeGeneration: 'runtime-old' }), handler)).toThrow(/scope is stale/)
     expect(() => parsePluginLifecycleBindingRequest(privatePlan({ pluginDecision: {} }), handler)).toThrow(/unsupported/)
+    expect(() => parsePluginLifecycleBindingRequest(privatePlan({
+      kind: 'permission-review-plan-v4', certification: { status: 'active' },
+    }), handler)).toThrow(/unsupported/)
+    expect(() => parsePluginLifecycleBindingRequest(privatePlan({
+      kind: 'permission-review-plan-v4', official: true,
+    }), handler)).toThrow(/unsupported/)
   })
 
   it('rejects mixed public/private envelopes and forged target shapes', () => {

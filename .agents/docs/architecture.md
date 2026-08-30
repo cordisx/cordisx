@@ -787,6 +787,17 @@ Permission Broker, and manager permission projections. These controls govern
 cooperative `ctx.platform` calls only; package installation, signatures,
 untrusted execution isolation, and marketplace activation remain later stages.
 
+The same Broker also owns controlled extension-point rendering authorization.
+Its permission-v3 catalog adds one DOM/rendering capability and keeps every
+existing Platform, Agent, and Channel capability non-DOM. A configured
+Marketplace trust root may provide an exact Certified artifact projection; only
+that projection and only the catalog-designated DOM capability may skip the
+visible confirmation. The Host still issues and audits a profile/scope/security-
+fingerprint/generation-bound lease. Official provenance never enters this
+decision. Extension-point availability probes stay independent, and legacy
+point/control policy stores are migration inputs rather than a second runtime
+authorization authority.
+
 The multi-provider Platform slice routes every model and session operation by
 structured provider-aware identity. Its launcher-private RPC exposes normalized
 operations only; credentials, child processes, app-server messages, and raw

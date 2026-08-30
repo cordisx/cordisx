@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
+import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
 
 interface RuntimeSnapshot {
   plugins: readonly { id: string; source: string; status: string; configuration: { applies: string } }[]
@@ -32,13 +33,25 @@ describe('settings navigation demo bundle', () => {
   it('projects a first-level Host-owned navigation entry, mounts its controlled body, and cleans it up', async () => {
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const config = await loadConfig(path.join(projectRoot, 'cordisx.config.settings-demo.json'))
-    const bundle = await buildRendererBundle(config)
+    const plugin = config.plugins[0]!
+    const bundle = await buildRendererBundle(config, {
+      permission: {
+        profileId: 'development',
+        bridgeToken: '2'.repeat(64),
+        policies: exactDomPermissionPolicies('development', [{
+          id: plugin.id,
+          entry: plugin.entry,
+          pointIds: ['manager.settings.navigation-items', 'manager.content'],
+        }]),
+      },
+    })
     const dom = new JSDOM('<html lang="en" dir="ltr" class="electron-dark"><body><div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div></body></html>', {
       runScripts: 'dangerously', url: 'https://codex.local/native',
     })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
     Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
     dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
+    installPermissionPolicyBridge(dom.window)
     dom.window.eval(bundle)
     await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true')
     const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime!

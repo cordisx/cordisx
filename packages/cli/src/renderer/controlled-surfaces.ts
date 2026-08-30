@@ -57,7 +57,7 @@ export interface ControlledSurfaceRegistration {
   readonly generation: ControlledSurfaceGeneration
   readonly presenter: unknown
   /** Host-private point access gate. It must not be supplied by plugin input. */
-  readonly hostAccess?: () => Readonly<{ authorized: boolean; reason?: string }>
+  readonly hostAccess?: () => Readonly<{ authorized: boolean; reason?: string; policy?: 'inherit' | 'allow' | 'deny' }>
 }
 
 export interface ControlledSurfaceRegistrationHandle {
@@ -150,7 +150,7 @@ interface CandidateRecord {
   readonly sequence: number
   readonly declaration: CordisXExtensionPointControlDeclarationV1
   readonly generation: ControlledSurfaceGeneration
-  readonly hostAccess?: () => Readonly<{ authorized: boolean; reason?: string }>
+  readonly hostAccess?: () => Readonly<{ authorized: boolean; reason?: string; policy?: 'inherit' | 'allow' | 'deny' }>
   presenter?: unknown
   validationError?: string
 }
@@ -327,6 +327,12 @@ export class ControlledSurfacePolicyBroker {
   authorization(reference: CordisXExtensionPointControlClaimReferenceV1): CordisXExtensionPointControlAuthorizationV1 | undefined {
     this.assertLive()
     return this.authorizations.get(claimKey(reference))
+  }
+
+  /** Read-only migration input; runtime authorization never consults these claim-scoped records. */
+  legacyAuthorizations(): readonly CordisXExtensionPointControlAuthorizationV1[] {
+    this.assertLive()
+    return Object.freeze([...this.authorizations.values()].map(immutableSnapshot))
   }
 
   choice(pointId: string, groupId: string): ControlledSurfaceGroupChoice | undefined {
@@ -513,6 +519,11 @@ export class ControlledSurfaceCoordinator {
     return this.policies.setAuthorization(expectedRevision, authorization)
   }
 
+  legacyAuthorizations(): readonly CordisXExtensionPointControlAuthorizationV1[] {
+    this.assertLive()
+    return this.policies.legacyAuthorizations()
+  }
+
   setGroupChoice(expectedRevision: number, choice: ControlledSurfaceGroupChoice): number {
     this.assertLive()
     const group = this.points.get(choice.pointId)?.exclusiveGroups.find(item => item.id === choice.groupId)
@@ -636,7 +647,7 @@ export class ControlledSurfaceCoordinator {
           }),
           priority: item.priority,
           authorization: item.authorization,
-          policy: this.policies.authorization(claimReference(item))?.policy ?? 'inherit',
+          policy: this.effectivePolicy(item),
           state: item.state,
           reason: item.reason,
         }))),
@@ -801,17 +812,11 @@ export class ControlledSurfaceCoordinator {
 
       const initial = new Map<string, { state: CordisXExtensionPointControlCandidateSnapshotV1['state']; reason: string; authorization: 'allowed' | 'denied'; bindings?: CordisXExtensionPointControlBindingsProjectionV1 }>()
       for (const record of records) {
-        const mode = point.modes.find(item => item.id === record.declaration.mode)
-        let hostAccess: Readonly<{ authorized: boolean; reason?: string }>
+        let hostAccess: Readonly<{ authorized: boolean; reason?: string; policy?: 'inherit' | 'allow' | 'deny' }>
         try { hostAccess = record.hostAccess?.() ?? { authorized: true } } catch { hostAccess = { authorized: false, reason: 'point-policy.failed' } }
-        const authorizationRecord = this.policies.authorization(claimReference(record.declaration))
         const authorization = !hostAccess.authorized
           ? 'denied' as const
-          : authorizationRecord?.policy === 'allow'
-          ? 'allowed' as const
-          : authorizationRecord?.policy === 'deny'
-            ? 'denied' as const
-            : mode?.defaultAuthorization === 'allow' ? 'allowed' as const : 'denied' as const
+          : 'allowed' as const
         if (authorization === 'denied') initial.set(record.key, {
           state: 'denied',
           reason: hostAccess.authorized ? 'authorization.denied' : reason(hostAccess.reason ?? 'point-policy.denied', 'point-policy.denied'),
@@ -928,12 +933,12 @@ export class ControlledSurfaceCoordinator {
 
   private effectiveAuthorization(record: CandidateRecord): 'allowed' | 'denied' {
     try { if (record.hostAccess?.().authorized === false) return 'denied' } catch { return 'denied' }
-    const declaration = record.declaration
-    const policy = this.policies.authorization(claimReference(declaration))?.policy
-    if (policy === 'allow') return 'allowed'
-    if (policy === 'deny') return 'denied'
-    return this.points.get(declaration.identity.pointId)?.modes.find(item => item.id === declaration.mode)?.defaultAuthorization === 'allow'
-      ? 'allowed' : 'denied'
+    return 'allowed'
+  }
+
+  private effectivePolicy(reference: CordisXExtensionPointControlClaimReferenceV1): 'inherit' | 'allow' | 'deny' {
+    const record = [...this.candidates.values()].find(candidate => sameClaim(candidate.declaration, reference))
+    try { return record?.hostAccess?.().policy ?? 'inherit' } catch { return 'inherit' }
   }
 
   private projectBindings(point: CordisXHostExtensionPointControlPointV1, record: CandidateRecord): CordisXExtensionPointControlBindingsProjectionV1 | undefined {

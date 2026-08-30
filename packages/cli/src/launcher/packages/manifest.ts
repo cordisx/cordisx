@@ -14,13 +14,18 @@ export const PLUGIN_PACKAGE_SCHEMA_V2 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v2.schema.json'
 export const PLUGIN_PACKAGE_SCHEMA_V3 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v3.schema.json'
+export const PLUGIN_PACKAGE_SCHEMA_V4 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v4.schema.json'
 export const PLUGIN_RUNTIME_MANIFEST_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v4.schema.json'
+export const PLUGIN_RUNTIME_MANIFEST_SCHEMA_V5 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v5.schema.json'
 export const PLUGIN_RUNTIME_MANIFEST_SCHEMAS = [
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v1.schema.json',
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v2.schema.json',
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v3.schema.json',
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V4,
+  PLUGIN_RUNTIME_MANIFEST_SCHEMA_V5,
 ] as const
 
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
@@ -122,7 +127,7 @@ function assertNoLauncherValues(value: unknown, trail = 'runtimeManifest'): void
 }
 
 /**
- * Resolves package-v2/v3 documents and their separately digested runtime
+ * Resolves package-v2/v3/v4 documents and their separately digested runtime
  * manifest. Formal runtime-schema validators are injected by the owning Host.
  */
 export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
@@ -145,9 +150,11 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
       ? 2
       : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V3 && manifest.schemaVersion === 3
         ? 3
-        : undefined
+        : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V4 && manifest.schemaVersion === 4
+          ? 4
+          : undefined
     if (packageVersion === undefined) {
-      throw new PackageLifecycleError('invalid-package-manifest', 'package manifest must use plugin-package.v2 or plugin-package.v3')
+      throw new PackageLifecycleError('invalid-package-manifest', 'package manifest must use plugin-package.v2, plugin-package.v3, or plugin-package.v4')
     }
     const pluginId = string(manifest.id, 'package manifest id')
     if (!LOCAL_ID.test(pluginId)) throw new PackageLifecycleError('invalid-package-manifest', 'package manifest id is invalid')
@@ -177,6 +184,7 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     const runtimeDigest = string(runtimeReference.digest, 'runtime manifest digest')
     if (!PLUGIN_RUNTIME_MANIFEST_SCHEMAS.includes(runtimeSchema as typeof PLUGIN_RUNTIME_MANIFEST_SCHEMAS[number])
       || (packageVersion === 2 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V4)
+      || (packageVersion !== 4 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V5)
       || !DIGEST.test(runtimeDigest)
       || !(compatibility.protocolSchemas as readonly unknown[]).includes(runtimeSchema)) {
       throw new PackageLifecycleError('incompatible-runtime', 'runtime manifest reference is unsupported or not declared compatible')

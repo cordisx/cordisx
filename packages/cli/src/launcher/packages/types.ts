@@ -26,7 +26,7 @@ export interface PackageIdentity {
 
 export type PackageDependency = CordisXPluginDependencyV1
 
-/** Package-v2/v3 metadata. The referenced runtime manifest is a distinct object. */
+/** Package-v2/v3/v4 metadata. The referenced runtime manifest is a distinct object. */
 export interface HostPackageManifest {
   readonly pluginId: string
   readonly version: string
@@ -63,7 +63,7 @@ export interface HostRuntimeServiceDeclaration {
 
 export interface HostResolvedRuntimeManifest {
   readonly $schema: string
-  readonly schemaVersion: 1 | 2 | 3 | 4
+  readonly schemaVersion: 1 | 2 | 3 | 4 | 5
   readonly id: string
   readonly name?: string
   readonly capabilities: readonly unknown[]

@@ -20,9 +20,14 @@ import {
 } from '../contracts.js'
 import type { LocaleCatalogSnapshot } from './i18n.js'
 import type {
+  CordisXCertifiedPermissionProjectionV1,
   CordisXPermissionAuthorizationDecisionV2,
+  CordisXPermissionAuthorizationDecisionV4,
   CordisXPermissionAuthorizationPlanV2,
+  CordisXPermissionAuthorizationPlanV4,
   CordisXPermissionCapabilityV2,
+  CordisXPermissionCapabilityV4,
+  CordisXPermissionScopeV4,
 } from '../permission-contracts.js'
 import { PermissionAuthorizationViewModel } from '../permission-authorization-view-model.js'
 import {
@@ -143,17 +148,21 @@ export interface ManagerPluginSnapshot {
 
 export interface ManagerPermissionSnapshot {
   readonly identity: CordisXPluginIdentity
-  readonly capability: CordisXPlatformCapability
+  readonly capability: CordisXPermissionCapabilityV4
   readonly required: boolean
   readonly reason: CordisXLocalizedText
   readonly reasonText: string
-  readonly scope: CordisXCapabilityScope
+  readonly scope: CordisXPermissionScopeV4
+  readonly fingerprint: string
   readonly policy: CordisXPermissionPolicy
   readonly lastRequested?: RequestedScope
   readonly lastUsedAt?: string
   readonly lastDeniedAt?: string
   readonly denialCount: number
   readonly blockedReason?: string
+  readonly authorizationOrigin?: 'explicit-user' | 'certified-implicit'
+  readonly authorizationReason?: string
+  readonly certification?: CordisXCertifiedPermissionProjectionV1
   readonly availability: ManagerCapabilityAvailabilitySnapshot
 }
 
@@ -165,7 +174,7 @@ export interface ManagerCapabilityProviderSnapshot {
   readonly status: CordisXCapabilityAvailabilityState
   readonly reasonText: string
   readonly generation?: string
-  readonly scope?: CordisXCapabilityScope
+  readonly scope?: CordisXPermissionScopeV4
 }
 
 export interface ManagerCapabilityAvailabilitySnapshot {
@@ -249,7 +258,12 @@ export interface ManagerModel {
     container: HTMLElement,
     setDraft: (value: unknown) => void,
   ): Promise<ConfigRendererMountHandle>
-  setPermissionPolicy(id: string, capability: CordisXPlatformCapability, policy: CordisXPermissionPolicy): Promise<void>
+  setPermissionPolicy(
+    id: string,
+    capability: CordisXPermissionCapabilityV4,
+    policy: CordisXPermissionPolicy,
+    scope?: CordisXPermissionScopeV4,
+  ): Promise<void>
   /** Optional Host policy projection. Ranking always removes ineligible entries before text/trust scoring. */
   marketplaceEligibility?(plugin: MarketplaceCatalogPlugin): MarketplaceCatalogEligibility
   permissionAuthorizationPlan?(id: string): CordisXPermissionAuthorizationPlanV1
@@ -261,6 +275,12 @@ export interface ManagerModel {
   ): Promise<CordisXPermissionAuthorizationPlanV2 | undefined>
   applyPermissionLifecycleReviewV2?(
     decision: CordisXPermissionAuthorizationDecisionV2,
+  ): Promise<CordisXPluginLifecycleResultV1>
+  permissionLifecycleReviewPlanV4?(
+    target: { readonly kind: 'candidate'; readonly candidateId: string } | { readonly kind: 'enable'; readonly pluginId: string },
+  ): Promise<CordisXPermissionAuthorizationPlanV4 | undefined>
+  applyPermissionLifecycleReviewV4?(
+    decision: CordisXPermissionAuthorizationDecisionV4,
   ): Promise<CordisXPluginLifecycleResultV1>
   requestPluginLifecycle?(operation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1>
   setExtensionPointPolicy?(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
@@ -303,7 +323,7 @@ type LocalTabIcon = ManagerIconToken
 type ManagerRouteState =
   | { readonly kind: 'primary'; readonly primary: ManagerTab }
   | { readonly kind: 'plugin'; readonly pluginId: string; readonly facet: PluginDetailTab }
-  | { readonly kind: 'permission'; readonly pluginId: string; readonly capability: CordisXPlatformCapability }
+  | { readonly kind: 'permission'; readonly pluginId: string; readonly capability: CordisXPermissionCapabilityV4; readonly fingerprint: string }
   | { readonly kind: 'marketplace'; readonly identity: string; readonly facet: MarketplaceDetailTab }
   | { readonly kind: 'marketplace-source'; readonly page: MarketplaceSourcePage; readonly url?: string }
   | { readonly kind: 'extension-point'; readonly pointId: string; readonly facet: ExtensionPointDetailTab }
@@ -1541,8 +1561,8 @@ function summarizePluginConsole(page: CordisXPluginConsolePageV1): PluginConsole
   }
 }
 
-function capabilityPresentation(capability: CordisXPlatformCapability): CapabilityPresentation {
-  const known = CAPABILITY_PRESENTATIONS[capability]
+function capabilityPresentation(capability: CordisXPermissionCapabilityV4): CapabilityPresentation {
+  const known = (CAPABILITY_PRESENTATIONS as Readonly<Partial<Record<CordisXPermissionCapabilityV4, CapabilityPresentation>>>)[capability]
   if (known !== undefined) return known
   const group = String(capability).split('.')[0]
   return {
@@ -1557,7 +1577,7 @@ function capabilityPresentation(capability: CordisXPlatformCapability): Capabili
   }
 }
 
-function createCapabilityIcon(document: Document, capability: CordisXPlatformCapability): HTMLSpanElement {
+function createCapabilityIcon(document: Document, capability: CordisXPermissionCapabilityV4): HTMLSpanElement {
   return createManagerIcon(document, capabilityPresentation(capability).icon, 'cxm-capability-icon')
 }
 
@@ -1574,16 +1594,12 @@ function createPermissionPolicySelect(
   permission: ManagerPermissionSnapshot,
   onChange: (policy: CordisXPermissionPolicy, control: TDesignSelectElement<CordisXPermissionPolicy>) => Promise<void>,
 ): TDesignSelectElement<CordisXPermissionPolicy> {
-  const unavailable = permission.availability.status === 'unavailable'
   let policy: TDesignSelectElement<CordisXPermissionPolicy>
   policy = forms.select(
     `${capabilityPresentation(permission.capability).name}的权限策略`,
-    unavailable
-      ? [{ value: permission.policy, label: capabilityAvailabilityLabel(permission.availability.status) }]
-      : (['ask', 'allow', 'deny'] as const).map(value => ({ value, label: POLICY_LABELS[value] })),
+    (['ask', 'allow', 'deny'] as const).map(value => ({ value, label: POLICY_LABELS[value] })),
     permission.policy,
     value => { if (value !== undefined) void onChange(value, policy) },
-    { disabled: unavailable },
   )
   policy.classList.add('cxm-permission-policy-select')
   policy.dataset.hostFormPrimitive = 'select'
@@ -1734,7 +1750,7 @@ export async function requestPluginAuthorizationV2(
 ): Promise<CordisXPermissionAuthorizationDecisionV2 | undefined> {
   if (plan.declarations.length === 0) {
     const result = new PermissionAuthorizationViewModel(plan).confirm()
-    return result.status === 'confirmed' ? result.decision : undefined
+    return result.status === 'confirmed' && result.decision.schemaVersion === 2 ? result.decision : undefined
   }
   const availability = Object.fromEntries(plan.declarations.flatMap(declaration => {
     const permission = permissions.find(item => item.capability === declaration.capability)
@@ -1764,7 +1780,47 @@ export async function requestPluginAuthorizationV2(
         requestSource: plugin.source,
       }),
     })
-    return result.status === 'confirmed' ? result.decision : undefined
+    return result.status === 'confirmed' && result.decision.schemaVersion === 2 ? result.decision : undefined
+  } finally {
+    dialog.dispose()
+  }
+}
+
+export async function requestPluginAuthorizationV4(
+  document: Document,
+  plugin: Pick<ManagerPluginSnapshot, 'id' | 'source' | 'name'>,
+  plan: CordisXPermissionAuthorizationPlanV4,
+  permissions: readonly ManagerPermissionSnapshot[],
+): Promise<CordisXPermissionAuthorizationDecisionV4 | undefined> {
+  if (!plan.declarations.some(item => item.decisionRequired)) {
+    const result = new PermissionAuthorizationViewModel(plan).confirm()
+    return result.status === 'confirmed' && result.decision.schemaVersion === 4 ? result.decision : undefined
+  }
+  const availability = Object.fromEntries(plan.declarations.flatMap(declaration => {
+    const permission = permissions.find(item => item.capability === declaration.capability)
+    if (permission === undefined) return []
+    return [[declaration.capability, Object.freeze({
+      status: permission.availability.status,
+      reason: Object.freeze({
+        namespace: 'cordisx.permission.host',
+        key: `availability.${declaration.capability}`,
+        fallback: permission.availability.reasonText,
+      }),
+      providerIds: Object.freeze(permission.availability.providers.map(provider => provider.providerId)),
+    })]]
+  }))
+  const dialog = new BrowserPermissionAuthorizationDialog(document)
+  try {
+    const result = await dialog.show(new PermissionAuthorizationViewModel(plan), {
+      project: () => ({
+        plugin: { name: plugin.name, source: plugin.source, trust: 'configured' },
+        availability,
+        resolve: message => message.fallback ?? `[[${message.namespace ?? 'permission'}:${message.key}]]`,
+        scope: scope => Object.keys(scope).length === 0 ? 'Host default scope' : JSON.stringify(scope),
+        requestSource: plugin.source,
+      }),
+    })
+    return result.status === 'confirmed' && result.decision.schemaVersion === 4 ? result.decision : undefined
   } finally {
     dialog.dispose()
   }
@@ -2692,12 +2748,30 @@ export function installCordisXManager(
       packageId = inspection.package.id
       lifecycleBusy.set(packageId, inspection.operation === 'install' ? 'installing' : 'updating')
       renderContent()
-      const planV2 = await model.permissionLifecycleReviewPlanV2?.({
+      const reviewTarget = {
         kind: 'candidate',
         candidateId: inspection.candidateId,
-      })
+      } as const
+      const planV4 = await model.permissionLifecycleReviewPlanV4?.(reviewTarget)
+      const planV2 = planV4 === undefined ? await model.permissionLifecycleReviewPlanV2?.(reviewTarget) : undefined
       let applied: CordisXPluginLifecycleResultV1
-      if (planV2 !== undefined) {
+      if (planV4 !== undefined) {
+        if (model.applyPermissionLifecycleReviewV4 === undefined) throw new Error('安装权限 V4 服务不可用')
+        const decision = await requestPluginAuthorizationV4(
+          document,
+          {
+            id: inspection.package.id,
+            source: planV4.identity.source,
+            name: inspection.package.name ?? inspection.package.id,
+          },
+          planV4,
+          model.snapshot().permissions.filter(item => (
+            item.identity.id === inspection.package!.id && item.identity.source === planV4.identity.source
+          )),
+        )
+        if (decision === undefined) return
+        applied = await model.applyPermissionLifecycleReviewV4(decision)
+      } else if (planV2 !== undefined) {
         if (model.applyPermissionLifecycleReviewV2 === undefined) throw new Error('安装权限 V2 服务不可用')
         const decision = await requestPluginAuthorizationV2(
           document,
@@ -2767,9 +2841,21 @@ export function installCordisXManager(
         const plan = await requestLifecycle({ kind: 'enable', pluginId: plugin.id })
         if (plan.outcome === 'applied') return
         if (plan.outcome !== 'planned') throw new Error('插件启用计划不可用')
-        const planV2 = await model.permissionLifecycleReviewPlanV2?.({ kind: 'enable', pluginId: plugin.id })
+        const reviewTarget = { kind: 'enable', pluginId: plugin.id } as const
+        const planV4 = await model.permissionLifecycleReviewPlanV4?.(reviewTarget)
+        const planV2 = planV4 === undefined ? await model.permissionLifecycleReviewPlanV2?.(reviewTarget) : undefined
         let result: CordisXPluginLifecycleResultV1
-        if (planV2 !== undefined) {
+        if (planV4 !== undefined) {
+          if (model.applyPermissionLifecycleReviewV4 === undefined) throw new Error('启用权限 V4 服务不可用')
+          const decision = await requestPluginAuthorizationV4(
+            document,
+            plugin,
+            planV4,
+            snapshot.permissions.filter(item => item.identity.id === plugin.id && item.identity.source === plugin.source),
+          )
+          if (decision === undefined) return
+          result = await model.applyPermissionLifecycleReviewV4(decision)
+        } else if (planV2 !== undefined) {
           if (model.applyPermissionLifecycleReviewV2 === undefined) throw new Error('启用权限 V2 服务不可用')
           const decision = await requestPluginAuthorizationV2(
             document,
@@ -2934,13 +3020,13 @@ export function installCordisXManager(
     if (route.kind === 'permission') {
       const plugin = snapshot.plugins.find(item => item.id === route.pluginId)
       return {
-        id: `plugin:${route.pluginId}:permission:${route.capability}`,
+        id: `plugin:${route.pluginId}:permission:${route.fingerprint}`,
         primary,
         segments: [
           root('plugins'),
           { id: `plugin:${route.pluginId}`, label: plugin?.name ?? route.pluginId, target: { kind: 'plugin', pluginId: route.pluginId, facet: 'readme' } },
           { id: `plugin:${route.pluginId}:facet:permissions`, label: pluginFacet('permissions').label, target: { kind: 'plugin', pluginId: route.pluginId, facet: 'permissions' } },
-          { id: `plugin:${route.pluginId}:permission:${route.capability}`, label: capabilityPresentation(route.capability).name },
+          { id: `plugin:${route.pluginId}:permission:${route.fingerprint}`, label: capabilityPresentation(route.capability).name },
         ],
       }
     }
@@ -4207,7 +4293,7 @@ export function installCordisXManager(
     operationError = undefined
     control.setBusy(true)
     try {
-      await model.setPermissionPolicy(pluginId, permission.capability, policy)
+      await model.setPermissionPolicy(pluginId, permission.capability, policy, permission.scope)
     } catch (error) {
       operationError = error instanceof Error ? error.message : String(error)
     } finally {
@@ -4218,13 +4304,15 @@ export function installCordisXManager(
   const renderPermissionDetail = (
     snapshot: ManagerSnapshot,
     pluginId: string,
-    capability: CordisXPlatformCapability,
+    capability: CordisXPermissionCapabilityV4,
+    fingerprint: string,
   ): void => {
     const plugin = snapshot.plugins.find(item => item.id === pluginId)
     const permission = snapshot.permissions.find(item => (
       item.identity.id === pluginId
       && item.identity.source === plugin?.source
       && item.capability === capability
+      && item.fingerprint === fingerprint
     ))
     const presentation = capabilityPresentation(capability)
     setHeading(plugin === undefined ? '插件权限详情' : `${plugin.name} 申请的权限`, snapshot)
@@ -4252,6 +4340,31 @@ export function installCordisXManager(
       info.content.append(row)
     }
     detail.append(info.root)
+
+    if (permission.authorizationOrigin !== undefined) {
+      const authorization = forms.section(
+        permission.authorizationOrigin === 'certified-implicit' ? '认证自动批准的 DOM 权限' : '最近授权来源',
+        permission.authorizationReason ?? (permission.authorizationOrigin === 'certified-implicit'
+          ? 'Host 根据精确制品认证投影自动批准；权限仍由 PermissionBroker 签发并审计。'
+          : '由用户显式确认。'),
+      )
+      authorization.root.dataset.permissionAuthorizationOrigin = permission.authorizationOrigin
+      if (permission.certification !== undefined) {
+        for (const [label, value] of [
+          ['制品', `${permission.certification.pluginId}@${permission.certification.version}`],
+          ['完整性', permission.certification.integrity],
+          ['审核策略', `${permission.certification.reviewPolicy.id}@${permission.certification.reviewPolicy.version}`],
+          ['证据', permission.certification.evidence.reference],
+          ['投影 revision', permission.certification.revision],
+          ['投影 fingerprint', permission.certification.fingerprint],
+        ]) {
+          const row = create(document, 'div', 'cxm-settings-info-row')
+          row.append(create(document, 'div', 'cxm-settings-info-label', label), create(document, 'div', 'cxm-settings-info-value', value))
+          authorization.content.append(row)
+        }
+      }
+      detail.append(authorization.root)
+    }
 
     const policySection = forms.section('访问策略', '选择每次询问、始终允许或始终拒绝；策略由 Host 保存并执行。')
     const policyItem = forms.item({
@@ -4990,7 +5103,7 @@ export function installCordisXManager(
         open.append(createCapabilityIcon(document, permission.capability), copy)
         activateManagerListRow(open, () => {
           operationError = undefined
-          void navigateRoute({ kind: 'permission', pluginId: plugin.id, capability: permission.capability })
+          void navigateRoute({ kind: 'permission', pluginId: plugin.id, capability: permission.capability, fingerprint: permission.fingerprint })
         })
         const control = create(document, 'div', 'cxm-permission-control')
         control.append(
@@ -6731,7 +6844,7 @@ export function installCordisXManager(
       }
     }
     if (removedActiveManagerContent) queueMicrotask(() => navButtons.get('plugins')?.focus())
-    if (routeState.kind === 'permission') return renderPermissionDetail(snapshot, routeState.pluginId, routeState.capability)
+    if (routeState.kind === 'permission') return renderPermissionDetail(snapshot, routeState.pluginId, routeState.capability, routeState.fingerprint)
     if (routeState.kind === 'plugin') return renderPluginDetail(snapshot, routeState.pluginId)
     if (routeState.kind === 'marketplace') return renderMarketplaceDetail(snapshot, routeState.identity)
     if (routeState.kind === 'marketplace-source') return renderMarketplaceSourcePage(snapshot, routeState)

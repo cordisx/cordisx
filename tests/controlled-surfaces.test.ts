@@ -222,7 +222,7 @@ describe('controlled extension point runtime', () => {
     expect(resolveOrder(['principal:aaa', 'principal:zzz'])).toEqual(['alpha', 'beta'])
   })
 
-  it('keeps exact partial denial separate from another claim at the same point', () => {
+  it('retains legacy claim records only as migration input and never as a second runtime authorization', () => {
     const { coordinator, policies } = setup()
     coordinator.register({ declaration: declaration('overlay', 'model.reasoning-intensity', 'one', { claimId: 'one', mode: 'overlay' }), generation: generation('overlay'), presenter: {} })
     coordinator.register({ declaration: declaration('overlay', 'model.reasoning-intensity', 'two', { claimId: 'two', mode: 'overlay' }), generation: generation('overlay'), presenter: {} })
@@ -230,8 +230,9 @@ describe('controlled extension point runtime', () => {
     policies.setAuthorization(revision, authorization('overlay', 'model.reasoning-intensity', 'two', 'overlay', 'deny'))
     const states = coordinator.snapshot().points.find(item => item.id === 'model.reasoning-intensity')!.candidates
     expect(states.map(item => [item.claimId, item.authorization, item.state])).toEqual([
-      ['one', 'allowed', 'selected'], ['two', 'denied', 'denied'],
+      ['one', 'allowed', 'selected'], ['two', 'allowed', 'selected'],
     ])
+    expect(policies.legacyAuthorizations()).toHaveLength(2)
   })
 
   it('suppresses the complete descendant closure while preserving denial and reevaluates on restore', () => {
@@ -246,11 +247,11 @@ describe('controlled extension point runtime', () => {
     })
     let child = coordinator.snapshot().points.find(item => item.id === 'model.reasoning-intensity')!
     expect(child).toMatchObject({ state: 'suppressed', suppression: { ancestorPointId: 'model.overlay', path: ['model.overlay', 'model.reasoning-intensity'] } })
-    expect(child.candidates[0]).toMatchObject({ authorization: 'denied', state: 'suppressed' })
+    expect(child.candidates[0]).toMatchObject({ authorization: 'allowed', state: 'suppressed' })
 
     policies.setGroupChoice(policies.revision(), { pointId: 'model.overlay', groupId: 'ownership', outcome: 'native' })
     child = coordinator.snapshot().points.find(item => item.id === 'model.reasoning-intensity')!
-    expect(child.candidates[0]).toMatchObject({ authorization: 'denied', state: 'denied' })
+    expect(child.candidates[0]).toMatchObject({ authorization: 'allowed', state: 'selected' })
   })
 
   it('projects allowlisted scalars and dispatches only current selected claim with no-data result', async () => {
@@ -330,7 +331,13 @@ describe('controlled extension point runtime', () => {
       },
     })
     const owner = generation('overlay')
-    const registration = coordinator.register({ declaration: normalized, generation: owner, presenter: { kind: 'safe' } })
+    let hostAuthorized = true
+    const registration = coordinator.register({
+      declaration: normalized,
+      generation: owner,
+      presenter: { kind: 'safe' },
+      hostAccess: () => ({ authorized: hostAuthorized, policy: hostAuthorized ? 'allow' : 'deny' }),
+    })
     const lease = coordinator.createLease(normalized, owner)
     coordinator.setAuthorization(0, authorization('overlay', 'model.reasoning-intensity', 'lease', 'proxy', 'allow'))
     expect(lease.snapshot()).toMatchObject({ state: 'selected', properties: { reasoningIntensity: 'high' } })
@@ -341,7 +348,8 @@ describe('controlled extension point runtime', () => {
     expect(lease.snapshot().events).toEqual([{ id: 'reasoningIntensityChanged', sequence: 1, payload: { value: 'medium' } }])
     await expect(lease.invoke('setReasoningIntensity', { value: 'medium' })).resolves.toMatchObject({ outcome: 'accepted' })
     expect(dispatch).toHaveBeenCalled()
-    coordinator.setAuthorization(coordinator.policies.revision(), authorization('overlay', 'model.reasoning-intensity', 'lease', 'proxy', 'deny'))
+    hostAuthorized = false
+    coordinator.invalidate()
     expect(lease.snapshot()).toMatchObject({ state: 'denied', properties: {}, commands: [], events: [] })
     await expect(lease.invoke('setReasoningIntensity', { value: 'low' })).resolves.toMatchObject({ outcome: 'rejected', reason: 'claim.not-selected' })
     registration.dispose(); lease.dispose()
@@ -463,8 +471,8 @@ describe('controlled extension point runtime', () => {
         { label: { key: 'low' }, material: 'plastic' }, { label: { key: 'high' }, material: 'gold' },
       ],
     })
-    expect(registry.snapshot()[0]).toMatchObject({ authorized: false, control: { state: 'denied', identity: { pluginId: 'theme' } } })
-    expect(registered.control?.snapshot()).toMatchObject({ state: 'denied', properties: {} })
+    expect(registry.snapshot()[0]).toMatchObject({ authorized: true, control: { state: 'selected', identity: { pluginId: 'theme' } } })
+    expect(registered.control?.snapshot()).toMatchObject({ state: 'selected', properties: {} })
     const controlled = registry.snapshot()[0]!.control!
     policies.setAuthorization(0, {
       ...authorization('theme', 'composer.reasoning-intensity', 'presentation', 'overlay', 'allow'),

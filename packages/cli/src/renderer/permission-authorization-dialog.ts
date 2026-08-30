@@ -5,7 +5,11 @@ import {
   type PermissionAuthorizationProjectionInput,
   PermissionAuthorizationViewModel,
 } from '../permission-authorization-view-model.js'
-import type { CordisXPermissionCapabilityV2, CordisXPermissionDecisionV2 } from '../permission-contracts.js'
+import type {
+  CordisXPermissionAuthorizationBindingV2,
+  CordisXPermissionCapabilityV4,
+  CordisXPermissionDecisionV2,
+} from '../permission-contracts.js'
 import { HOST_FORM_STYLES, HostFormAdapter } from './host-form.js'
 import {
   createTDesignElement,
@@ -24,7 +28,7 @@ export interface PermissionAuthorizationDialogRequest {
 }
 
 interface MountedItem {
-  readonly capability: CordisXPermissionCapabilityV2
+  readonly capability: CordisXPermissionCapabilityV4
   readonly name: HTMLElement
   readonly requirement: HTMLElement
   readonly sensitivity: HTMLElement
@@ -63,7 +67,26 @@ interface MountedItem {
 }
 
 interface ActiveDialog {
+  readonly requestKey: string
   readonly finish: (result: PermissionAuthorizationDialogResult) => void
+}
+
+interface QueuedDialog {
+  readonly requestKey: string
+  readonly viewModel: PermissionAuthorizationViewModel
+  readonly request: PermissionAuthorizationDialogRequest
+  readonly resolve: (result: PermissionAuthorizationDialogResult) => void
+  readonly reject: (reason?: unknown) => void
+}
+
+function dialogRequestKey(planId: string, binding: CordisXPermissionAuthorizationBindingV2): string {
+  return [
+    planId,
+    binding.operationId,
+    binding.runtimeGeneration,
+    binding.moduleGeneration ?? '',
+    binding.requestId ?? '',
+  ].join('\u0000')
 }
 
 const STYLE = `${HOST_FORM_STYLES}
@@ -151,7 +174,7 @@ function focusable(root: HTMLElement): readonly HTMLElement[] {
 export class BrowserPermissionAuthorizationDialog {
   private readonly theme: HostThemeProjection
   private readonly ownsTheme: boolean
-  private queue: Promise<void> = Promise.resolve()
+  private readonly queue: QueuedDialog[] = []
   private active: ActiveDialog | undefined
   private disposed = false
 
@@ -165,21 +188,54 @@ export class BrowserPermissionAuthorizationDialog {
     request: PermissionAuthorizationDialogRequest,
   ): Promise<PermissionAuthorizationDialogResult> {
     if (this.disposed) return Promise.resolve(Object.freeze({ status: 'cancelled' }))
-    const result = this.queue.then(async () => await this.open(viewModel, request))
-    this.queue = result.then(() => undefined, () => undefined)
-    return result
+    return new Promise((resolve, reject) => {
+      this.queue.push({
+        requestKey: dialogRequestKey(viewModel.plan.planId, viewModel.plan.binding),
+        viewModel,
+        request,
+        resolve,
+        reject,
+      })
+      this.pump()
+    })
+  }
+
+  /** Cancels only the exact Host plan/binding, whether active or still queued. */
+  cancel(planId: string, binding: CordisXPermissionAuthorizationBindingV2): void {
+    const requestKey = dialogRequestKey(planId, binding)
+    const cancelled = Object.freeze({ status: 'cancelled' as const })
+    for (let index = this.queue.length - 1; index >= 0; index -= 1) {
+      const queued = this.queue[index]
+      if (queued?.requestKey !== requestKey) continue
+      this.queue.splice(index, 1)
+      queued.resolve(cancelled)
+    }
+    if (this.active?.requestKey === requestKey) this.active.finish(cancelled)
   }
 
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    const cancelled = Object.freeze({ status: 'cancelled' as const })
+    for (const queued of this.queue.splice(0)) queued.resolve(cancelled)
     this.active?.finish(Object.freeze({ status: 'cancelled' }))
     if (this.ownsTheme) this.theme.dispose()
+  }
+
+  private pump(): void {
+    if (this.disposed || this.active !== undefined) return
+    const queued = this.queue.shift()
+    if (queued === undefined) return
+    void this.open(queued.viewModel, queued.request, queued.requestKey).then(
+      queued.resolve,
+      queued.reject,
+    ).finally(() => this.pump())
   }
 
   private open(
     viewModel: PermissionAuthorizationViewModel,
     request: PermissionAuthorizationDialogRequest,
+    requestKey: string,
   ): Promise<PermissionAuthorizationDialogResult> {
     if (this.disposed) return Promise.resolve(Object.freeze({ status: 'cancelled' }))
     return new Promise(resolve => {
@@ -220,7 +276,7 @@ export class BrowserPermissionAuthorizationDialog {
 
       const list = element(this.document, 'div', 'cxp-list')
       list.setAttribute('role', 'list')
-      const mounted = new Map<CordisXPermissionCapabilityV2, MountedItem>()
+      const mounted = new Map<CordisXPermissionCapabilityV4, MountedItem>()
       for (const projected of initial.items) {
         const item = this.mountItem(viewModel, projected)
         mounted.set(projected.capability, item.mounted)
@@ -254,7 +310,7 @@ export class BrowserPermissionAuthorizationDialog {
         if (previousFocus?.isConnected) previousFocus.focus()
         resolve(result)
       }
-      this.active = { finish }
+      this.active = { requestKey, finish }
       manage.addEventListener('click', () => finish(viewModel.managePermissions()), { once: true })
       cancel.addEventListener('click', () => finish(viewModel.cancel()), { once: true })
       confirm.addEventListener('click', () => finish(viewModel.confirm()), { once: true })
@@ -450,7 +506,7 @@ export class BrowserPermissionAuthorizationDialog {
       readonly sourceValue: HTMLElement
       readonly trustLabel: HTMLElement
       readonly trustValue: HTMLElement
-      readonly mounted: ReadonlyMap<CordisXPermissionCapabilityV2, MountedItem>
+      readonly mounted: ReadonlyMap<CordisXPermissionCapabilityV4, MountedItem>
       readonly manage: TDesignButtonElement
       readonly cancel: TDesignButtonElement
       readonly confirm: TDesignButtonElement

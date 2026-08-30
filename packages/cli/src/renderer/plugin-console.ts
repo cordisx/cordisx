@@ -11,8 +11,8 @@ import type {
   CordisXPluginConsoleStatus,
   CordisXPluginConsoleValueSummaryV1,
   CordisXPluginIdentity,
-  CordisXPlatformCapability,
 } from '../contracts.js'
+import type { CordisXPermissionCapabilityV4 } from '../permission-contracts.js'
 
 const MAX_MESSAGE = 4096
 const MAX_PREVIEW = 2048
@@ -244,7 +244,7 @@ export interface PluginConsolePendingInvocation {
   cancel(reason?: unknown): void
 }
 export interface PluginConsolePermissionObserver {
-  permission(identity: CordisXPluginIdentity, capability: CordisXPlatformCapability, phase: 'ask' | 'allow' | 'deny', message: string): void
+  permission(identity: CordisXPluginIdentity, capability: CordisXPermissionCapabilityV4, phase: 'ask' | 'allow' | 'deny', message: string): void
 }
 
 interface EntryDraft {
@@ -549,7 +549,7 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     return (...args) => this.runInPluginContext(token, { trigger: { kind: 'registration', registrationId } }, () => callback(...args))
   }
 
-  permission(identity: CordisXPluginIdentity, capability: CordisXPlatformCapability, phase: 'ask' | 'allow' | 'deny', message: string): void {
+  permission(identity: CordisXPluginIdentity, capability: CordisXPermissionCapabilityV4, phase: 'ask' | 'allow' | 'deny', message: string): void {
     const frame = this.current(identity)
     if (frame?.correlationId === undefined) return
     let record: PluginPrincipalRecord

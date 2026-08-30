@@ -8,6 +8,7 @@ This development-only package is the version `1.1.0` update fixture for Permissi
 - the Host recomputes permissions for the new package generation;
 - stale module-generation authority cannot survive the update;
 - the Agent-event and task-catalog probes still pass through the public brokers.
+- the structured `main` outlet route is rebuilt under the new module generation so its Permission v3 lease cannot survive the update.
 
 An installed or active state does not prove that either requested capability was granted. Review the Manager permission and runtime diagnostics for the current generation.
 

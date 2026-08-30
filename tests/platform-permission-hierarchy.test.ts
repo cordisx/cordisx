@@ -31,6 +31,7 @@ function permission(
     reason: { key: `permission.${capability}`, fallback: `Reason for ${capability}` },
     reasonText: '申请使用对应的宿主功能',
     scope: {},
+    fingerprint: `sha256:${'a'.repeat(64)}`,
     policy: 'ask',
     denialCount: 0,
     availability: {
@@ -246,7 +247,7 @@ describe('Platform permission presentation hierarchy', () => {
     dom.window.close()
   })
 
-  it('renders a concise flat list with host-owned names and unavailable policy selects', () => {
+  it('renders a concise flat list with host-owned names and keeps policy independent from availability', () => {
     const { dom, dispose } = install(snapshot())
     try {
       const content = openPluginTab(dom.window.document, 'demo', 'permissions')
@@ -265,8 +266,8 @@ describe('Platform permission presentation hierarchy', () => {
       expect(content.querySelectorAll('[data-permission-availability]')).toHaveLength(0)
       expect(content.querySelectorAll('[data-permission-capability]')).toHaveLength(7)
       const unavailablePolicies = [...content.querySelectorAll<TestTDesignSelect>('t-select[data-permission-capability]')]
-      expect(unavailablePolicies.every(policy => policy.disabled)).toBe(true)
-      expect(unavailablePolicies.every(policy => policy.options.map(option => option.label).join() === '不可用')).toBe(true)
+      expect(unavailablePolicies.every(policy => !policy.disabled)).toBe(true)
+      expect(unavailablePolicies.every(policy => policy.options.map(option => option.label).join() === '每次询问,始终允许,始终拒绝')).toBe(true)
       expect(content.querySelector('.cxm-slot-card')).toBeNull()
       expect([...content.querySelectorAll('h3')].map(item => item.textContent)).not.toContain('权限策略')
 
@@ -282,7 +283,7 @@ describe('Platform permission presentation hierarchy', () => {
     }
   })
 
-  it('makes unavailable capabilities honestly non-editable without offering inactive policies', async () => {
+  it('keeps unavailable capabilities honestly labeled while preserving editable authorization policy', async () => {
     const state = snapshot(['models.read', 'tasks.create'])
     const { dom, dispose, policies } = install(state)
     try {
@@ -291,10 +292,10 @@ describe('Platform permission presentation hierarchy', () => {
       const createTask = content.querySelector<TestTDesignSelect>('t-select[data-permission-capability="tasks.create"]')
       expect(models).not.toBeNull()
       expect(createTask).not.toBeNull()
-      expect(models!.options.map(option => [option.value, option.label])).toEqual([['ask', '不可用']])
-      expect(createTask!.options.map(option => [option.value, option.label])).toEqual([['deny', '不可用']])
-      expect(models!.disabled).toBe(true)
-      expect(createTask!.disabled).toBe(true)
+      expect(models!.options.map(option => [option.value, option.label])).toEqual([['ask', '每次询问'], ['allow', '始终允许'], ['deny', '始终拒绝']])
+      expect(createTask!.options.map(option => [option.value, option.label])).toEqual([['ask', '每次询问'], ['allow', '始终允许'], ['deny', '始终拒绝']])
+      expect(models!.disabled).toBe(false)
+      expect(createTask!.disabled).toBe(false)
       expect(content.querySelector('[data-permission-capability="tasks.catalog.read"]')).not.toBeNull()
       await new Promise(resolve => setTimeout(resolve, 0))
       expect(policies).toEqual([])
@@ -304,7 +305,7 @@ describe('Platform permission presentation hierarchy', () => {
     }
   })
 
-  it('opens a third-level permission detail with an honest unavailable policy and returns to the permission tab', async () => {
+  it('opens a third-level permission detail with orthogonal availability and authorization controls', async () => {
     const state = snapshot()
     const { dom, dispose, policies } = install(state)
     try {
@@ -331,14 +332,71 @@ describe('Platform permission presentation hierarchy', () => {
       expect(detail?.textContent).not.toContain('current-connection-client-unavailable')
 
       const policy = detail?.querySelector<TestTDesignSelect>('t-select[data-permission-capability="tasks.create"]')
-      expect(policy!.options.map(option => option.label)).toEqual(['不可用'])
-      expect(policy!.disabled).toBe(true)
+      expect(policy!.options.map(option => option.label)).toEqual(['每次询问', '始终允许', '始终拒绝'])
+      expect(policy!.disabled).toBe(false)
       await new Promise(resolve => setTimeout(resolve, 0))
       expect(policies).toEqual([])
       dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
       expect(dom.window.document.querySelector('[data-permission-detail]')).toBeNull()
       expect(dom.window.document.querySelector('[data-plugin-detail-tab="permissions"]')?.getAttribute('aria-selected')).toBe('true')
       expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="权限"]')).not.toBeNull()
+    } finally {
+      dispose()
+      dom.window.close()
+    }
+  })
+
+  it('shows the exact trace for a Certified auto-approved DOM permission', () => {
+    const certification = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v1.schema.json' as const,
+      schemaVersion: 1 as const,
+      kind: 'cordisx-certified-permission-eligibility' as const,
+      status: 'active' as const,
+      source: identity.source,
+      pluginId: identity.id,
+      version: '1.2.3',
+      integrity: `sha256:${'b'.repeat(64)}` as const,
+      reviewPolicy: { id: 'cordisx-marketplace-review' as const, version: '1.0.0' },
+      reviewedAt: '2026-08-29T00:00:00.000Z',
+      expiresAt: '2026-09-30T00:00:00.000Z',
+      evidence: { kind: 'protected-marketplace-review' as const, reference: 'https://github.com/cordisx/marketplace/pull/123' },
+      feed: { generatedAt: '2026-08-30T00:00:00.000Z', root: 'https://marketplace.example/feed.json', authority: 'cordisx.marketplace.codeowners/v1' as const },
+      fingerprint: `sha256:${'c'.repeat(64)}` as const,
+      revision: '2026-08-30T00:00:00.000Z',
+    }
+    const state = {
+      ...snapshot(),
+      permissions: [permission('ui.extension-points.render', {
+        scope: { extensionPoints: ['workspace.toolbar.items'] },
+        fingerprint: `sha256:${'d'.repeat(64)}`,
+        authorizationOrigin: 'certified-implicit',
+        authorizationReason: 'Exact Certified artifact auto-approved by the Host catalog',
+        certification,
+        availability: {
+          status: 'supported',
+          reasonText: 'Host extension point adapter is available',
+          providers: [{
+            providerId: 'host-extension-point:workspace.toolbar.items',
+            providerNameText: 'Workspace toolbar',
+            kind: 'host-local',
+            family: 'ui-rendering',
+            status: 'supported',
+            reasonText: 'Available',
+            scope: { extensionPoints: ['workspace.toolbar.items'] },
+          }],
+        },
+      })],
+    }
+    const { dom, dispose } = install(state)
+    try {
+      openPluginTab(dom.window.document, 'demo', 'permissions')
+      dom.window.document.querySelector<HTMLButtonElement>('[data-permission-open="ui.extension-points.render"]')?.click()
+      const trace = dom.window.document.querySelector<HTMLElement>('[data-permission-authorization-origin="certified-implicit"]')
+      expect(trace?.textContent).toContain('认证自动批准的 DOM 权限')
+      expect(trace?.textContent).toContain('demo@1.2.3')
+      expect(trace?.textContent).toContain('https://github.com/cordisx/marketplace/pull/123')
+      expect(trace?.textContent).toContain(certification.fingerprint)
+      expect(dom.window.document.body.textContent).not.toContain('official')
     } finally {
       dispose()
       dom.window.close()

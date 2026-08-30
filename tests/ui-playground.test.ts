@@ -12,6 +12,7 @@ import { createPlaygroundSession } from '../packages/cli/src/playground/session.
 import { activatePlaygroundReviewNavigation } from '../packages/cli/src/playground/client/review-navigation.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { createSidebarItem } from '../packages/cli/src/renderer/host-ui/SidebarItem.js'
+import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
 
 const defaultPluginIds = [
   'slot-showcase', 'hello-toolbar', 'form-schema-gallery', 'settings-tab-demo',
@@ -250,7 +251,30 @@ describe('UI Playground', () => {
   it('boots, reloads, and disposes the comprehensive real plugin runtime with explicit Playground seats only', async () => {
     const config = await loadConfig(defaultUiPlaygroundConfig, { profileId: 'playground' })
     expect(config.plugins.map(plugin => plugin.id)).toEqual(defaultPluginIds)
-    const bundle = await buildRendererBundle(config, { playground: true, generation: 'playground-test-1', profileId: 'playground' })
+    const pointIdsByPlugin = new Map<string, readonly string[]>([
+      ['slot-showcase', [
+        'app', 'main', 'session.content', 'sidebar.footer.before-control',
+        'sidebar.footer.after-control', 'sidebar.footer.menu', 'sidebar.account.menu',
+        'sidebar.navigation.items', 'workspace.toolbar.items', 'session.header.actions',
+        'composer.toolbar.items', 'environment.panel.header-actions',
+        'environment.panel.sections', 'environment.section.actions',
+        'environment.section.rows', 'environment.row.trailing-actions',
+      ]],
+      ['hello-toolbar', ['workspace.toolbar.items']],
+      ['settings-tab-demo', ['manager.settings.navigation-items', 'manager.content']],
+      ['channel', ['manager.settings.navigation-items', 'manager.content']],
+      ['cli-proxy-api', ['sidebar.navigation.items', 'main']],
+    ])
+    const permissionPolicies = exactDomPermissionPolicies('playground', config.plugins.flatMap(plugin => {
+      const pointIds = pointIdsByPlugin.get(plugin.id)
+      return pointIds === undefined ? [] : [{ id: plugin.id, entry: plugin.entry, pointIds }]
+    }))
+    const bundle = await buildRendererBundle(config, {
+      playground: true,
+      generation: 'playground-test-1',
+      profileId: 'playground',
+      permission: { profileId: 'playground', bridgeToken: '5'.repeat(64), policies: permissionPolicies },
+    })
     const dom = new JSDOM(`<!doctype html><html data-theme="dark"><head></head><body>
       <aside>
         <nav data-cordisx-playground-surface="sidebar.navigation.items"></nav>
@@ -265,6 +289,7 @@ describe('UI Playground', () => {
       <main data-cordisx-playground-seat="app"></main><main data-cordisx-playground-seat="main"></main><main data-cordisx-playground-seat="session.content"></main>
     </body></html>`, { runScripts: 'dangerously', url: 'http://127.0.0.1/' })
     try {
+      installPermissionPolicyBridge(dom.window)
       dom.window.eval(bundle)
       for (let attempt = 0; attempt < 100 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 10))
@@ -370,7 +395,12 @@ describe('UI Playground', () => {
       let disposed = false
       const dispose = firstRuntime.dispose.bind(firstRuntime)
       firstRuntime.dispose = async () => { disposed = true; await dispose() }
-      const reload = await buildRendererBundle(config, { playground: true, generation: 'playground-test-2', profileId: 'playground' })
+      const reload = await buildRendererBundle(config, {
+        playground: true,
+        generation: 'playground-test-2',
+        profileId: 'playground',
+        permission: { profileId: 'playground', bridgeToken: '5'.repeat(64), policies: permissionPolicies },
+      })
       dom.window.eval(reload)
       for (let attempt = 0; attempt < 100 && runtime.__cordisxRuntime === firstRuntime; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 10))

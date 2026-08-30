@@ -8,6 +8,7 @@
 - Host 会为新的包 generation 重新计算权限；
 - 旧 module generation 的权限不能穿透更新继续生效；
 - Agent 事件与任务目录探针仍通过公开 broker 执行。
+- 结构化 `main` outlet route 会在新 module generation 下重建，因此 Permission v3 lease 不能穿透更新。
 
 “已安装”或“已激活”不代表请求的能力已经获准。当前 generation 的真实结果应以 Manager 的权限与运行诊断为准。
 

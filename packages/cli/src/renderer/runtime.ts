@@ -1,5 +1,5 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
-import { CORDISX_EXTENSION_POINT_CONTROL_AUTHORIZATION_SCHEMA_V1, CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
+import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
   CordisXBrowserPlugin,
   CordisXCommandReference,
@@ -9,6 +9,7 @@ import type {
   CordisXPermissionPolicy,
   CordisXPermissionAuthorizationPlanV1,
   CordisXPluginManifestV4,
+  CordisXPluginManifestV5,
   CordisXPointPolicy,
   CordisXPlatformCapability,
   CordisXCapabilityScope,
@@ -29,7 +30,11 @@ import { isPermissionPolicyRecordV2, type CordisXPersistedPermissionPolicyRecord
 import type { HomeConfigIconThemePreference } from '../config/home-config.js'
 import type {
   CordisXPermissionAuthorizationDecisionV2,
+  CordisXPermissionAuthorizationDecisionV4,
   CordisXPermissionAuthorizationPlanV2,
+  CordisXPermissionAuthorizationPlanV4,
+  CordisXPermissionCapabilityV4,
+  CordisXPermissionScopeV4,
 } from '../permission-contracts.js'
 import { installCodexAdapter, installPlaygroundAdapter, type CodexAdapterHandle } from './adapter.js'
 import { UnavailableCodexHostAdapter } from '../adapters/codex-agent.js'
@@ -77,6 +82,7 @@ import {
   CORDISX_MANAGER_EXTENSION_POINT_CATALOG,
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
+  MemoryExtensionPointPolicyStore,
   buildExtensionPointRuntimeSnapshot,
 } from './extension-points.js'
 import { projectPublicRuntimeSnapshot } from './public-runtime-snapshot.js'
@@ -111,6 +117,7 @@ import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
 import type { HostServiceConfigDescriptor, HostServiceConfigMutation, HostServiceConfigMutationResult } from '../launcher/service-config.js'
 import { BindingPermissionPolicyStore } from './permission-binding.js'
+import { CORDISX_PERMISSION_LOCALE_CATALOGS } from '../permission-locales.js'
 import { pluginBrandIconDataUrl } from './plugin-branding.js'
 import { BrowserPluginLifecycleBridge } from './plugin-lifecycle-binding.js'
 import {
@@ -143,6 +150,10 @@ import { CordisXIconThemeService } from './icon-theme-service.js'
 import { bindIconThemeRegistry } from './icons.js'
 import { BrowserIconThemePreferenceBridge } from './icon-theme-preference-binding.js'
 import { reconcileIconThemePreference, selectAndPersistIconTheme } from './icon-theme-selection.js'
+import {
+  createCertifiedPermissionDocumentChannel,
+  type CertifiedPermissionDocumentChannel,
+} from './certified-permission-channel.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 const MAX_ROLLBACK_RECEIPTS = 64
@@ -170,6 +181,8 @@ interface CordisXRuntimeMetadata {
   readonly channelCredentialBridgeToken?: string
   readonly channelActionsBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
+  /** Launcher-only RemoteObject handoff nonce; never an authorization payload. */
+  readonly certifiedPermissionChannelToken?: string
   readonly pluginActivation?: CordisXPluginActivationRecordV1
   readonly initialRegistryEpoch?: number
   readonly generation?: string
@@ -201,7 +214,7 @@ export type CordisXInternalRendererBootstrap = (host: Readonly<{
 interface PluginController {
   item: RuntimeBrowserPlugin
   readonly identity: CordisXPluginIdentity
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5
   principal: PluginPrincipalToken
   activation: number
   principalLive: boolean
@@ -289,7 +302,7 @@ export interface RendererPluginMutation {
     readonly readme?: string
     readonly development: CordisXLocalDevelopmentSnapshot
   }
-  readonly authorizationDecision?: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2
+  readonly authorizationDecision?: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4
 }
 
 interface CordisXRuntimeHandle extends ManagerModel {
@@ -302,6 +315,8 @@ interface CordisXRuntimeHandle extends ManagerModel {
   authorizePlugin(id: string, decision: CordisXPermissionAuthorizationDecisionV1): Promise<void>
   permissionAuthorizationPlanV2(id: string): CordisXPermissionAuthorizationPlanV2 | undefined
   authorizePluginV2(id: string, decision: CordisXPermissionAuthorizationDecisionV2): Promise<void>
+  permissionAuthorizationPlanV4(id: string): CordisXPermissionAuthorizationPlanV4 | undefined
+  authorizePluginV4(id: string, decision: CordisXPermissionAuthorizationDecisionV4): Promise<void>
   /** Host-private readback of the registry authority; never used as renderer lifecycle input. */
   activePluginGeneration(): CordisXPluginActivationRecordV1
   /** Host-private bounded evidence for cross-registry batch notification assertions. */
@@ -345,6 +360,10 @@ declare global {
   var __cordisxRuntime: CordisXRuntimeHandle | undefined
   // eslint-disable-next-line no-var
   var __cordisxBoot: Promise<CordisXRuntimeHandle> | undefined
+  // eslint-disable-next-line no-var
+  var __cordisxBootGeneration: string | undefined
+  // eslint-disable-next-line no-var
+  var __cordisxRequestedGeneration: string | undefined
   // eslint-disable-next-line no-var
   var __cordisxPendingPluginModuleV1: CordisXPluginModule | undefined
   // eslint-disable-next-line no-var
@@ -554,6 +573,7 @@ async function start(
     throw new Error('plugin activation metadata does not match the renderer scope')
   }
   sharedReactRuntime = installSharedReactRuntime(document)
+  let certifiedPermissionChannel: CertifiedPermissionDocumentChannel | undefined
   try {
   const generationVisibility = new GenerationVisibilityCoordinator(currentActivation, metadata.initialRegistryEpoch)
   const pluginConsole = new PluginConsoleAspect(generation, 2000, () => Date.now(), generationVisibility)
@@ -595,6 +615,15 @@ async function start(
     pluginConsole,
     new BrowserPermissionAuthorizationPromptV2(document),
   )
+  if (metadata.certifiedPermissionChannelToken !== undefined && window.top === window) {
+    certifiedPermissionChannel = createCertifiedPermissionDocumentChannel({
+      token: metadata.certifiedPermissionChannelToken,
+      profileId: metadata.profileId,
+      runtimeGeneration: generation,
+      sink: broker,
+    })
+    await certifiedPermissionChannel.ready
+  }
   for (const plugin of plugins) {
     if (plugin.package === undefined) generationVisibility.bindStable(
       plugin.id,
@@ -649,11 +678,17 @@ async function start(
     }),
   ])
   const extensionPointDescriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
+  const legacyExtensionPointPolicies = new BrowserExtensionPointPolicyStore().read()
   const extensionPointBroker = new ExtensionPointPolicyBroker(
     extensionPointDescriptors,
-    new BrowserExtensionPointPolicyStore(),
+    new MemoryExtensionPointPolicyStore(),
     generation,
     generationVisibility,
+    {
+      access: (identity, pointId, view) => broker.domAccess(identity, pointId, view),
+      policy: (identity, pointId) => broker.domPolicy(identity, pointId),
+      policies: () => broker.domPolicies(),
+    },
   )
   const controllers: PluginController[] = plugins.map(item => createController(item, pluginConsole))
   const moduleGenerationOf = (controller: PluginController): string => (
@@ -700,10 +735,20 @@ async function start(
         && permission.policy === 'allow'
       )))
     if (unavailable.length > 0 && !explicitlyAllowedInPlayground) return `Required capability unavailable: ${unavailable.join(', ')}`
+    const requiredHostDom = controller.manifest.schemaVersion === 5
+      ? controller.manifest.capabilities.find(item => (
+          item.required && (item.name === 'ui.host-dom.read' || item.name === 'ui.host-dom.modify')
+        ))
+      : undefined
+    if (requiredHostDom !== undefined) return `Required capability unavailable: ${requiredHostDom.name}`
     return undefined
   }
   const registerController = (controller: PluginController, registerAuthority = true): void => {
     if (registerAuthority) {
+      const artifact = controller.item.package === undefined ? undefined : {
+        version: controller.item.package.version,
+        integrity: controller.item.package.digest,
+      }
       controller.unregisterPermissions = broker.register(controller.identity, controller.manifest, {
         pluginId: controller.item.id,
         moduleGeneration: moduleGenerationOf(controller),
@@ -711,7 +756,7 @@ async function start(
           transactionId: controller.generationView.transactionId,
           transactionEpoch: controller.generationView.transactionEpoch,
         }),
-      }, controller.generationView)
+      }, controller.generationView, artifact)
       controller.unregisterExtensionPoints = extensionPointBroker.register(controller.identity, {
         pluginId: controller.item.id,
         moduleGeneration: moduleGenerationOf(controller),
@@ -1249,23 +1294,70 @@ async function start(
       },
       iconThemes: iconThemeRegistry.redactedSnapshot(),
       permissions: broker.snapshots().map((permission: PlatformPermissionSnapshot) => {
-        const availability = capabilityAvailability.resolve(permission.capability, permission.scope)
-        const site = `permission:${permission.identity.source}:${permission.identity.id}:${permission.capability}`
+        const pointId = permission.capability === 'ui.extension-points.render'
+          ? permission.scope.extensionPoints?.[0]
+          : undefined
+        const descriptor = pointId === undefined ? undefined : extensionPointDescriptors.descriptor(pointId)
+        const availability = permission.capability === 'ui.host-dom.read' || permission.capability === 'ui.host-dom.modify'
+          ? {
+              status: 'unavailable' as const,
+              reason: Object.freeze({
+                namespace: 'cordisx.permission.host',
+                key: 'availability.host-dom-isolation-unavailable',
+                fallback: 'Host DOM access is unavailable until plugins run without ambient renderer DOM access.',
+              }),
+              providers: [],
+            }
+          : permission.capability === 'ui.extension-points.render'
+          ? {
+              status: descriptor?.adapterSupport === 'supported'
+                ? 'supported' as const
+                : descriptor?.adapterSupport === 'unverified' ? 'degraded' as const : 'unavailable' as const,
+              reason: descriptor?.diagnostic ?? descriptor?.description ?? Object.freeze({
+                namespace: 'cordisx.manager.extension-points',
+                key: 'permission.point-unavailable',
+                fallback: 'The declared Host extension point is unavailable.',
+              }),
+              providers: descriptor === undefined ? [] : [{
+                providerId: `host-extension-point:${descriptor.id}`,
+                providerName: descriptor.title,
+                kind: 'host-local' as const,
+                family: 'ui-rendering' as const,
+                status: descriptor.adapterSupport === 'supported'
+                  ? 'supported' as const
+                  : descriptor.adapterSupport === 'unverified' ? 'degraded' as const : 'unavailable' as const,
+                reason: descriptor.diagnostic ?? descriptor.description,
+                scope: permission.scope,
+              }],
+            }
+          : capabilityAvailability.resolve(
+              permission.capability as CordisXPlatformCapability,
+              permission.scope as CordisXCapabilityScope,
+            )
+        const site = `permission:${permission.identity.source}:${permission.identity.id}:${permission.capability}:${permission.fingerprint}`
         return {
           identity: permission.identity,
           capability: permission.capability,
           required: permission.required,
           reason: permission.reason,
-          reasonText: i18nService?.resolveFor(permission.identity.id, permission.reason, site).text
+          reasonText: i18nService?.resolveFor(
+            permission.capability === 'ui.extension-points.render' ? 'host' : permission.identity.id,
+            permission.reason,
+            site,
+          ).text
             ?? permission.reason.fallback
             ?? `[[${permission.identity.id}:${permission.reason.key}]]`,
           scope: permission.scope,
+          fingerprint: permission.fingerprint,
           policy: permission.policy,
           ...(permission.lastRequested === undefined ? {} : { lastRequested: permission.lastRequested }),
           ...(permission.lastUsedAt === undefined ? {} : { lastUsedAt: permission.lastUsedAt }),
           ...(permission.lastDeniedAt === undefined ? {} : { lastDeniedAt: permission.lastDeniedAt }),
           denialCount: permission.denialCount,
           ...(permission.blockedReason === undefined ? {} : { blockedReason: permission.blockedReason }),
+          ...(permission.authorizationOrigin === undefined ? {} : { authorizationOrigin: permission.authorizationOrigin }),
+          ...(permission.authorizationReason === undefined ? {} : { authorizationReason: permission.authorizationReason }),
+          ...(permission.certification === undefined ? {} : { certification: permission.certification }),
           availability: {
             status: availability.status,
             reasonText: hostText(availability.reason, `${site}:availability`),
@@ -1276,7 +1368,7 @@ async function start(
               family: provider.family,
               status: provider.status,
               reasonText: hostText(provider.reason, `${site}:provider:${provider.providerId}:reason`),
-              ...(provider.generation === undefined ? {} : { generation: provider.generation }),
+              ...(!('generation' in provider) || provider.generation === undefined ? {} : { generation: provider.generation }),
               scope: provider.scope,
             })),
           },
@@ -1443,14 +1535,38 @@ async function start(
 
   const setPermissionPolicy = (
     id: string,
-    capability: CordisXPlatformCapability,
+    capability: CordisXPermissionCapabilityV4,
     policy: CordisXPermissionPolicy,
+    scope?: CordisXPermissionScopeV4,
   ): Promise<void> => {
     const task = operation.then(async () => {
       if (disposed) throw new Error('CordisX runtime is disposed')
       const controller = activeController(id)
       if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
-      await broker.setPolicy(controller.identity, capability, policy)
+      if (capability === 'ui.extension-points.render') {
+        const points = scope?.extensionPoints
+        if (points === undefined || points.length !== 1) throw new Error('DOM permission policy requires one exact extension point scope')
+        await broker.setDomPolicy(
+          controller.identity,
+          points[0]!,
+          policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
+        )
+      } else if (capability === 'ui.host-dom.read' || capability === 'ui.host-dom.modify') {
+        await broker.setHostDomPolicy(
+          controller.identity,
+          capability,
+          policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
+          controller.generationView,
+        )
+      } else if (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5) {
+        await broker.setPolicyV2(
+          controller.identity,
+          capability,
+          policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
+        )
+      } else {
+        await broker.setPolicy(controller.identity, capability as CordisXPlatformCapability, policy)
+      }
       const blockedReason = requiredBlockReason(controller)
       if (blockedReason !== undefined) {
         rememberRegistrations(id)
@@ -1495,7 +1611,11 @@ async function start(
       if (disposed) throw new Error('CordisX runtime is disposed')
       const controller = activeController(pluginId, source)
       if (controller === undefined) throw new Error(`unknown CordisX plugin identity: ${source} / ${pluginId}`)
-      extensionPointBroker.setPolicy(controller.identity, pointId, policy)
+      await broker.setDomPolicy(
+        controller.identity,
+        pointId,
+        policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
+      )
       slotService?.invalidatePointPolicies()
       await routeService?.invalidatePointPolicies()
       notify()
@@ -1505,7 +1625,7 @@ async function start(
   }
 
   const setExtensionPointControlAuthorization = (
-    expectedPolicyRevision: number,
+    _expectedPolicyRevision: number,
     reference: Readonly<{
       principalHandle: string
       source: string
@@ -1518,16 +1638,15 @@ async function start(
   ): Promise<void> => {
     const task = operation.then(async () => {
       if (disposed) throw new Error('CordisX runtime is disposed')
-      if (slotService === undefined) throw new Error('controlled surface runtime is unavailable')
-      slotService.setControlAuthorization(expectedPolicyRevision, {
-        $schema: CORDISX_EXTENSION_POINT_CONTROL_AUTHORIZATION_SCHEMA_V1,
-        schemaVersion: 1,
-        principalHandle: reference.principalHandle,
-        identity: { source: reference.source, pluginId: reference.pluginId, pointId: reference.pointId },
-        claimId: reference.claimId,
-        mode: reference.mode,
-        policy,
-      })
+      const controller = activeController(reference.pluginId, reference.source)
+      if (controller === undefined) throw new Error(`unknown CordisX plugin identity: ${reference.source} / ${reference.pluginId}`)
+      await broker.setDomPolicy(
+        controller.identity,
+        reference.pointId,
+        policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
+      )
+      slotService?.invalidatePointPolicies()
+      await routeService?.invalidatePointPolicies()
       notify('controlled-surface-policy')
     })
     operation = task.catch(() => {})
@@ -1608,6 +1727,14 @@ async function start(
     await broker.authorizeActivationV2(controller.identity, decision, 'enable', controller.generationView)
   })
 
+  const authorizePluginV4 = (
+    id: string,
+    decision: CordisXPermissionAuthorizationDecisionV4,
+  ): Promise<void> => authorizePluginWith(id, async controller => {
+    if (controller.manifest.schemaVersion !== 5) throw new Error(`plugin ${id} does not use permission v4`)
+    await broker.authorizeActivationV4(controller.identity, decision, 'enable', controller.generationView)
+  })
+
   const candidateController = (
     handle: PluginGenerationTransitionHandle,
     mutation: RendererPluginMutation,
@@ -1664,7 +1791,8 @@ async function start(
       throw new Error(`local development candidate ${pluginId} is invalid: ${controller.error ?? 'module initialization failed'}`)
     }
     if (replacesTarget && mutation.developmentPackage !== undefined
-      && controller.manifest.schemaVersion === 4 && controller.manifest.services.length > 0) {
+      && (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5)
+      && controller.manifest.services.length > 0) {
       throw new Error('local development phase 1 is renderer-only; manifest services are unavailable')
     }
     controller.generationContext = generationVisibility.context(handle, pluginId)
@@ -1791,7 +1919,15 @@ async function start(
           if (candidate.controller.item.id === mutation.targetId
             && mutation.authorizationDecision !== undefined
             && (mutation.operation === 'install' || mutation.operation === 'update' || mutation.operation === 'enable')) {
-            if (mutation.authorizationDecision.schemaVersion === 2) {
+            if (mutation.authorizationDecision.schemaVersion === 4) {
+              if (candidate.controller.manifest.schemaVersion !== 5) throw new Error('permission v4 decision requires manifest-v5')
+              await broker.authorizeActivationV4(
+                candidate.controller.identity,
+                mutation.authorizationDecision,
+                mutation.operation as 'install' | 'update' | 'enable',
+                candidate.controller.generationView,
+              )
+            } else if (mutation.authorizationDecision.schemaVersion === 2) {
               if (candidate.controller.manifest.schemaVersion !== 4) throw new Error('permission v2 decision requires manifest-v4')
               await broker.authorizeActivationV2(
                 candidate.controller.identity,
@@ -2102,6 +2238,8 @@ async function start(
   const dispose = async (): Promise<void> => {
     if (disposed) return
     disposed = true
+    certifiedPermissionChannel?.dispose()
+    certifiedPermissionChannel = undefined
     await disposeInternalBootstrap?.()
     disposeInternalBootstrap = undefined
     disposeManager?.()
@@ -2212,9 +2350,26 @@ async function start(
       if (commandService === undefined) return Promise.reject(new Error('CordisX commands are not ready'))
       return commandService.executeFor(owner, reference, invocationKey)
     },
-    navigate: (owner, reference) => {
+    navigate: async (owner, reference) => {
       if (routeService === undefined) return Promise.reject(new Error('CordisX routes are not ready'))
-      return routeService.navigateFor(owner, reference)
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        try {
+          return await routeService.navigateFor(owner, reference)
+        } catch (error) {
+          if (!(error instanceof Error) || error.message !== 'permission.review-pending') throw error
+          const controller = activeControllers().find(candidate => candidate.item.id === owner)
+          if (controller === undefined) throw error
+          const decisions = await broker.reviewPendingDomAccess(
+            controller.identity,
+            moduleGenerationOf(controller),
+            controller.generationView,
+          )
+          if (decisions.length === 0) throw error
+          const denied = decisions.find(decision => !decision.authorized)
+          if (denied !== undefined) throw new Error(denied.reason)
+        }
+      }
+      throw new Error('permission.review-retry-exhausted')
     },
     mountSettingsTab: (id, panelBody) => {
       if (routeService === undefined || slotService === undefined) return Promise.reject(new Error('CordisX manager settings are not ready'))
@@ -2263,6 +2418,11 @@ async function start(
     authorizePlugin,
     permissionAuthorizationPlanV2,
     authorizePluginV2,
+    permissionAuthorizationPlanV4: id => {
+      const controller = activeController(id)
+      return controller === undefined ? undefined : broker.authorizationPlanV4(controller.identity, 'enable', controller.generationView)
+    },
+    authorizePluginV4,
     activePluginGeneration: () => structuredClone(currentActivation),
     generationNotificationTrace: () => generationNotificationTrace.map(item => ({ ...item })),
     settleRegistryProjection,
@@ -2277,6 +2437,14 @@ async function start(
     applyPermissionLifecycleReviewV2: decision => {
       if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
       return lifecycleBridge.applyPermissionReviewV2(currentActivation.revision, decision)
+    },
+    permissionLifecycleReviewPlanV4: target => {
+      if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
+      return lifecycleBridge.permissionReviewPlanV4(currentActivation.revision, target)
+    },
+    applyPermissionLifecycleReviewV4: decision => {
+      if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
+      return lifecycleBridge.applyPermissionReviewV4(currentActivation.revision, decision)
     },
     stagePluginMutation,
     publishPluginMutation,
@@ -2331,8 +2499,15 @@ async function start(
     for (const catalog of CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS) {
       disposeExtensionPointCatalogs.push(i18nService.define(catalog))
     }
+    for (const catalog of CORDISX_PERMISSION_LOCALE_CATALOGS) {
+      disposeExtensionPointCatalogs.push(i18nService.define(catalog))
+    }
     disposeI18nSubscription = i18nService.subscribeInternal(notifyFrom('i18n'))
-    disposePermissionSubscription = broker.subscribe(notifyFrom('permissions'))
+    disposePermissionSubscription = broker.subscribe(() => {
+      slotService?.invalidatePointPolicies()
+      void routeService?.invalidatePointPolicies()
+      notify('permissions')
+    })
     disposeExtensionPointSubscription = extensionPointBroker.subscribe(notifyFrom('extension-policy'))
     settingsFiber = ctx.plugin(CordisXPluginSettingsService, { registry: configuration, console: pluginConsole })
     await settingsFiber
@@ -2449,6 +2624,36 @@ async function start(
           adapterVersion: metadata.version,
           profileId: metadata.profileId,
         })
+    const legacyAuthorizationGroups = new Map<string, {
+      readonly source: string
+      readonly pluginId: string
+      readonly pointId: string
+      readonly policies: Set<'allow' | 'deny'>
+    }>()
+    for (const record of [
+      ...legacyExtensionPointPolicies.map(item => ({ identity: item.identity, policy: item.policy })),
+      ...slotService.controlLegacyAuthorizations().map(item => ({ identity: item.identity, policy: item.policy })),
+    ]) {
+      if (record.policy === 'inherit' || extensionPointDescriptors.descriptor(record.identity.pointId) === undefined) continue
+      const key = `${record.identity.source}\u0000${record.identity.pluginId}\u0000${record.identity.pointId}`
+      const group = legacyAuthorizationGroups.get(key) ?? {
+        source: record.identity.source,
+        pluginId: record.identity.pluginId,
+        pointId: record.identity.pointId,
+        policies: new Set<'allow' | 'deny'>(),
+      }
+      group.policies.add(record.policy)
+      legacyAuthorizationGroups.set(key, group)
+    }
+    for (const group of legacyAuthorizationGroups.values()) {
+      const controller = activeController(group.pluginId, group.source)
+      if (controller === undefined || group.policies.size !== 1 || broker.hasDomPolicy(controller.identity, group.pointId)) continue
+      await broker.setDomPolicy(
+        controller.identity,
+        group.pointId,
+        group.policies.has('allow') ? 'allow-persistent' : 'deny-persistent',
+      )
+    }
     for (const controller of controllers) {
       if (controller.status !== 'active') continue
       await mountPlugin(controller)
@@ -2476,9 +2681,11 @@ async function start(
       }
       await iconThemePreferenceBridge.ready()
     }
-    disposeManager = installReactCordisXManager(document, managerModel, metadata.hostKind === 'playground'
-      ? { triggerTarget: () => document.querySelector<HTMLElement>('[data-cordisx-playground-manager-trigger]') ?? undefined }
-      : {})
+    disposeManager = installReactCordisXManager(document, managerModel, {
+      ...(metadata.hostKind === 'playground'
+        ? { triggerTarget: () => document.querySelector<HTMLElement>('[data-cordisx-playground-manager-trigger]') ?? undefined }
+        : {}),
+    })
   } catch (error) {
     await dispose()
     throw error
@@ -2490,6 +2697,8 @@ async function start(
   console.info(`[cordisx] mounted ${activeIds.length} plugin(s): ${activeIds.join(', ')}`)
   return handle
   } catch (error) {
+    certifiedPermissionChannel?.dispose()
+    certifiedPermissionChannel = undefined
     routeHistory.dispose()
     sharedReactRuntime?.dispose()
     sharedReactRuntime = undefined
@@ -2503,8 +2712,31 @@ export function installCordisX(
   metadata: CordisXRuntimeMetadata,
   internalBootstrap?: CordisXInternalRendererBootstrap,
 ): Promise<CordisXRuntimeHandle> {
+  if (metadata.generation !== undefined
+    && globalThis.__cordisxBootGeneration === metadata.generation
+    && globalThis.__cordisxBoot !== undefined) return globalThis.__cordisxBoot
+  globalThis.__cordisxRequestedGeneration = metadata.generation
   const previous = globalThis.__cordisxBoot ?? Promise.resolve(undefined)
-  const next = previous.catch(() => undefined).then(() => start(plugins, metadata, internalBootstrap))
+  const next = previous.catch(() => undefined).then(async () => {
+    // All scripts registered for this new document get one task to publish
+    // their requested generation. A stale CDP registration therefore cannot
+    // activate old plugin code before the newest registration supersedes it.
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+    if (metadata.generation !== undefined
+      && globalThis.__cordisxRequestedGeneration !== metadata.generation) {
+      throw new Error('CordisX bootstrap generation was superseded')
+    }
+    return await start(plugins, metadata, internalBootstrap)
+  })
+  globalThis.__cordisxBootGeneration = metadata.generation
   globalThis.__cordisxBoot = next
+  void next.catch(() => {
+    if (globalThis.__cordisxBoot !== next) return
+    globalThis.__cordisxBoot = undefined
+    globalThis.__cordisxBootGeneration = undefined
+    if (globalThis.__cordisxRequestedGeneration === metadata.generation) {
+      globalThis.__cordisxRequestedGeneration = undefined
+    }
+  })
   return next
 }

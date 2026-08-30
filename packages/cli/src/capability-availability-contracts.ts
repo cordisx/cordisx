@@ -18,6 +18,7 @@ export type CordisXCapabilityProviderFamily =
   | 'agent-input'
   | 'configuration'
   | 'console'
+  | 'ui-rendering'
   | 'package-lifecycle'
 
 export interface CordisXCapabilityProviderRoute {

@@ -96,6 +96,10 @@ import {
   type IconThemePreferencePersistenceContext,
   type IconThemePreferenceReadyResponseAck,
 } from './icon-theme-rpc.js'
+import {
+  CdpCertifiedPermissionChannel,
+} from './certified-permission-cdp.js'
+import type { LauncherMarketplaceCertifiedAuthority } from './marketplace-certified-authority.js'
 
 const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
 const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
@@ -121,6 +125,7 @@ interface CdpResponse {
 
 class CdpSession {
   private nextId = 1
+  private closed = false
   private readonly pending = new Map<number, {
     readonly resolve: (value: Record<string, unknown>) => void
     readonly reject: (error: Error) => void
@@ -141,6 +146,7 @@ class CdpSession {
       else callback.resolve(message.result ?? {})
     })
     socket.on('close', () => {
+      this.closed = true
       for (const callback of this.pending.values()) callback.reject(new Error('CDP connection closed'))
       this.pending.clear()
     })
@@ -160,6 +166,9 @@ class CdpSession {
     params: Record<string, unknown> = {},
     timeoutMs = CDP_REQUEST_TIMEOUT_MS,
   ): Promise<Record<string, unknown>> {
+    if (this.closed || this.socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('CDP connection is closed'))
+    }
     const id = this.nextId++
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -197,7 +206,12 @@ class CdpSession {
   }
 
   close(): void {
+    this.closed = true
     this.socket.close()
+  }
+
+  isClosed(): boolean {
+    return this.closed || this.socket.readyState !== WebSocket.OPEN
   }
 }
 
@@ -700,6 +714,23 @@ interface InstalledScript {
   readonly publisherGrantController?: AbortController
   readonly removePublisherGrantBindingListener?: () => void
   readonly publisherGrantBindingInstalled: boolean
+  readonly certifiedPermissionChannel?: CdpCertifiedPermissionChannel
+}
+
+function installedBindingNames(installed: InstalledScript): readonly string[] {
+  return [
+    MARKETPLACE_BINDING,
+    ...(installed.providerBindingInstalled ? [PROVIDER_BINDING] : []),
+    ...(installed.historyBindingInstalled ? [AGENT_HISTORY_BINDING] : []),
+    ...(installed.configBindingInstalled ? [CONFIG_BINDING] : []),
+    ...(installed.serviceConfigBindingInstalled ? [SERVICE_CONFIG_BINDING] : []),
+    ...(installed.credentialBindingInstalled ? [CHANNEL_CREDENTIAL_BINDING] : []),
+    ...(installed.actionsBindingInstalled ? [CHANNEL_ACTIONS_BINDING] : []),
+    ...(installed.permissionBindingInstalled ? [PERMISSION_BINDING] : []),
+    ...(installed.iconThemePreferenceBindingInstalled ? [ICON_THEME_PREFERENCE_BINDING] : []),
+    ...(installed.lifecycleBindingInstalled ? [PLUGIN_LIFECYCLE_BINDING] : []),
+    ...(installed.publisherGrantBindingInstalled ? [PUBLISHER_GRANT_BINDING] : []),
+  ]
 }
 
 interface MarketplaceBindingRequest {
@@ -938,6 +969,14 @@ async function install(
   lifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime },
   developmentRuntime?: CdpPluginLifecycleRuntime,
   publisherGrant?: PublisherGrantBridgeHandler,
+  certifiedPermission?: Readonly<{
+    authority: LauncherMarketplaceCertifiedAuthority
+    token: string
+    profileId: string
+    runtimeGeneration: string
+  }>,
+  newDocumentSource?: string,
+  stale?: InstalledScript,
 ): Promise<InstalledScript> {
   if (iconThemePreferenceBroadcast !== undefined) {
     if (iconThemePreference === undefined) throw new Error('icon theme preference broadcast requires persistence context')
@@ -985,9 +1024,24 @@ async function install(
   let unregisterLifecycleSession = (): void => {}
   let generationJoin: ReturnType<CdpPluginLifecycleRuntime['beginJoin']> | undefined
   let removePublisherGrantBindingListener = (): void => {}
+  let certifiedPermissionChannel: CdpCertifiedPermissionChannel | undefined
   try {
+    if (certifiedPermission !== undefined) {
+      certifiedPermissionChannel = new CdpCertifiedPermissionChannel(session, {
+        ...certifiedPermission,
+        targetId: target.id,
+      })
+    }
     await session.send('Runtime.enable')
     await session.send('Page.enable')
+    if (stale !== undefined) {
+      await session.send('Page.removeScriptToEvaluateOnNewDocument', {
+        identifier: stale.identifier,
+      }).catch(() => undefined)
+      await Promise.allSettled(installedBindingNames(stale).map(async name => {
+        await session.send('Runtime.removeBinding', { name })
+      }))
+    }
     await session.send('Runtime.addBinding', { name: MARKETPLACE_BINDING })
     if (provider !== undefined) await session.send('Runtime.addBinding', { name: PROVIDER_BINDING })
     if (history !== undefined) await session.send('Runtime.addBinding', { name: AGENT_HISTORY_BINDING })
@@ -1406,7 +1460,7 @@ async function install(
     const generationRuntime = lifecycle?.runtime ?? developmentRuntime
     const added = await session.send(
       'Page.addScriptToEvaluateOnNewDocument',
-      { source },
+      { source: newDocumentSource ?? source },
       CDP_INJECTION_TIMEOUT_MS,
     )
     const identifier = added.identifier
@@ -1474,6 +1528,7 @@ async function install(
       unregisterLifecycleSession,
       ...(publisherGrantController === undefined ? {} : { publisherGrantController, removePublisherGrantBindingListener }),
       publisherGrantBindingInstalled: publisherGrant !== undefined,
+      ...(certifiedPermissionChannel === undefined ? {} : { certifiedPermissionChannel }),
     }
   } catch (error) {
     marketplaceController.abort()
@@ -1501,6 +1556,7 @@ async function install(
     generationJoin?.abort()
     unregisterLifecycleSession()
     removePublisherGrantBindingListener()
+    await certifiedPermissionChannel?.dispose()
     session.close()
     throw error
   }
@@ -1531,6 +1587,7 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.removeLifecycleBindingListener?.()
   installed.unregisterLifecycleSession()
   installed.removePublisherGrantBindingListener?.()
+  await installed.certifiedPermissionChannel?.dispose()
   try {
     await Promise.allSettled([
       installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }),
@@ -1579,6 +1636,8 @@ export interface WatchInjectionOptions {
   readonly port: number
   /** Latest immutable bootstrap. Existing renderers are never reinjected when it changes. */
   readonly source: string | (() => string)
+  /** Bootstrap for future fresh documents; current live documents use `source`. */
+  readonly newDocumentSource?: string | (() => string)
   readonly signal: AbortSignal
   readonly onStatus?: (message: string) => void
   /** Called after the first renderer accepts the CordisX bootstrap. */
@@ -1599,6 +1658,12 @@ export interface WatchInjectionOptions {
   /** Host-private generation plane used by `cordisx dev`; it installs no public lifecycle binding. */
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
   readonly publisherGrant?: PublisherGrantBridgeHandler
+  readonly certifiedPermission?: Readonly<{
+    authority: LauncherMarketplaceCertifiedAuthority
+    token: string
+    profileId: string
+    runtimeGeneration: string
+  }>
 }
 
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
@@ -1625,10 +1690,14 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
         }
         for (const target of targets) {
           const current = installed.get(target.id)
-          if (current?.target.webSocketDebuggerUrl === target.webSocketDebuggerUrl) continue
+          if (current !== undefined
+            && current.target.webSocketDebuggerUrl === target.webSocketDebuggerUrl
+            && !current.session.isClosed()) continue
+          let stale: InstalledScript | undefined
           if (current !== undefined) {
             await uninstall(current).catch(() => undefined)
             installed.delete(target.id)
+            stale = current
           }
           const provider = options.providerFleet === undefined || options.providerBridgeToken === undefined
             ? undefined
@@ -1651,6 +1720,13 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             options.pluginLifecycle,
             options.developmentRuntime,
             options.publisherGrant,
+            options.certifiedPermission,
+            options.newDocumentSource === undefined
+              ? undefined
+              : typeof options.newDocumentSource === 'string'
+                ? options.newDocumentSource
+                : options.newDocumentSource(),
+            stale,
           )
           installed.set(target.id, record)
           options.onReady?.()

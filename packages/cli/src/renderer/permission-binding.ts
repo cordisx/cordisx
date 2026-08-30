@@ -2,9 +2,11 @@ import {
   CORDISX_PLATFORM_CAPABILITIES,
   type CordisXPermissionPolicyRecordV1,
 } from '../platform-contracts.js'
-import type { CordisXPermissionPolicyRecordV2 } from '../permission-contracts.js'
+import type { CordisXPermissionPolicyRecordV2, CordisXPermissionPolicyRecordV3, CordisXPermissionPolicyRecordV4 } from '../permission-contracts.js'
 import {
   isPermissionPolicyRecordV2,
+  isPermissionPolicyRecordV3,
+  isPermissionPolicyRecordV4,
   normalizePersistedPermissionPolicyRecord,
   persistedPermissionMigrationKey,
   persistedPermissionRecordKey,
@@ -70,11 +72,19 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
   }
 
   read(): readonly CordisXPermissionPolicyRecordV1[] {
-    return clone([...this.records.values()].filter(record => !isPermissionPolicyRecordV2(record)))
+    return clone([...this.records.values()].filter(record => !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record)))
   }
 
   readV2(): readonly CordisXPermissionPolicyRecordV2[] {
     return clone([...this.records.values()].filter(isPermissionPolicyRecordV2))
+  }
+
+  readV3(): readonly CordisXPermissionPolicyRecordV3[] {
+    return clone([...this.records.values()].filter(isPermissionPolicyRecordV3))
+  }
+
+  readV4(): readonly CordisXPermissionPolicyRecordV4[] {
+    return clone([...this.records.values()].filter(isPermissionPolicyRecordV4))
   }
 
   async write(records: readonly CordisXPermissionPolicyRecordV1[]): Promise<void> {
@@ -82,6 +92,18 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
   }
 
   async writeV2(records: readonly CordisXPermissionPolicyRecordV2[]): Promise<void> {
+    await this.writeRecords(records)
+  }
+
+  async writeV3(records: readonly CordisXPermissionPolicyRecordV3[]): Promise<void> {
+    await this.writeRecords(records)
+  }
+
+  async writeV4(records: readonly CordisXPermissionPolicyRecordV4[]): Promise<void> {
+    await this.writeRecords(records)
+  }
+
+  async writeAll(records: readonly CordisXPersistedPermissionPolicyRecord[]): Promise<void> {
     await this.writeRecords(records)
   }
 

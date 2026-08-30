@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from '../packages/cli/src/contracts.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
+import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
 
 interface RuntimeSnapshot {
   readonly plugins: readonly {
@@ -146,7 +147,17 @@ async function fixture(sessionId: string, options: {
       }] : []),
     ],
   }
-  const bundle = await buildRendererBundle(config)
+  const bundle = await buildRendererBundle(config, {
+    permission: {
+      profileId: 'development',
+      bridgeToken: '4'.repeat(64),
+      policies: exactDomPermissionPolicies('development', config.plugins.map(plugin => ({
+        id: plugin.id,
+        entry: plugin.entry,
+        pointIds: ['session.header.actions', 'session.content'],
+      }))),
+    },
+  })
   const dom = new JSDOM(`
     <html lang="zh-CN" class="electron-dark"><head><style>
       .codex-toolbar-button { width: 28px; height: 28px; border-radius: 6px; }
@@ -186,6 +197,7 @@ async function fixture(sessionId: string, options: {
     </body></html>
   `, { runScripts: 'dangerously', url: 'https://codex.local/native' })
   Object.defineProperty(dom.window, 'structuredClone', { configurable: true, value: structuredClone })
+  installPermissionPolicyBridge(dom.window)
   Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', {
     configurable: true,
     value: () => ({ length: 1 }),

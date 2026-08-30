@@ -10,6 +10,7 @@ import {
 } from '../packages/cli/src/capability-risk-catalog.js'
 import {
   CORDISX_PERMISSION_CAPABILITIES_V2,
+  CORDISX_PERMISSION_CAPABILITIES_V4,
   CORDISX_PERMISSION_POLICY_SCHEMA_V2,
   type CordisXCapabilityDeclarationV2,
   type CordisXPermissionAuthorizationKeyV2,
@@ -75,7 +76,18 @@ function policy(
 describe('permission capability risk catalog', () => {
   it('is exhaustive and fails closed when any accepted capability lacks metadata', () => {
     const catalog = new CapabilityRiskCatalog()
-    expect(catalog.snapshot().map(item => item.capability)).toEqual(CORDISX_PERMISSION_CAPABILITIES_V2)
+    expect(catalog.snapshot().map(item => item.capability)).toEqual(CORDISX_PERMISSION_CAPABILITIES_V4)
+    expect(catalog.snapshot().filter(item => item.resourceClass === 'non-dom')).toHaveLength(CORDISX_PERMISSION_CAPABILITIES_V2.length)
+    expect(catalog.get('ui.extension-points.render')).toMatchObject({
+      resourceClass: 'dom-rendering',
+      certifiedImplicitApproval: true,
+    })
+    expect(catalog.get('ui.host-dom.read')).toMatchObject({
+      resourceClass: 'host-dom', sensitivity: 'sensitive', certifiedImplicitApproval: true,
+    })
+    expect(catalog.get('ui.host-dom.modify')).toMatchObject({
+      resourceClass: 'host-dom', sensitivity: 'high-risk', certifiedImplicitApproval: true, persistentAllow: false,
+    })
     expect(() => new CapabilityRiskCatalog(HOST_CAPABILITY_RISK_ENTRIES.slice(1))).toThrow(/metadata missing: models\.read/)
     expect(() => new CapabilityRiskCatalog([
       ...HOST_CAPABILITY_RISK_ENTRIES,

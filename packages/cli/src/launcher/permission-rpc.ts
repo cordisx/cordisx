@@ -13,7 +13,7 @@ export const PERMISSION_BINDING = '__cordisxPermissionPolicyRequestV1'
 export const PERMISSION_RECEIVER = '__cordisxPermissionPolicyReceiveV1'
 export const MAX_PERMISSION_REQUEST_BYTES = 32 * 1024
 export const MAX_PERMISSION_REQUESTS = 4
-export const MAX_PERMISSION_POLICY_BATCH = 22
+export const MAX_PERMISSION_POLICY_BATCH = 23
 
 export interface PermissionBindingRequest {
   readonly requestId: string

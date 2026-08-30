@@ -1,6 +1,6 @@
 import type { CordisXLocaleCatalog } from './contracts.js'
 import { HOST_CAPABILITY_RISK_ENTRIES } from './capability-risk-catalog.js'
-import type { CordisXPermissionCapabilityV2 } from './permission-contracts.js'
+import type { CordisXPermissionCapabilityV4 } from './permission-contracts.js'
 
 export const CORDISX_PERMISSION_NAMESPACE = 'permission'
 
@@ -185,6 +185,18 @@ const ZH_PREFIXED_CAPABILITY_MESSAGES: Readonly<Record<string, string>> = Object
   'permission.channel.attachments.read.description': '读取允许 Channel 会话中的附件。',
   'permission.channel.attachments.read.risk': '附件可能包含私密文件或敏感数据。',
   'permission.channel.attachments.read.limitation': '只能读取宿主获取且在声明范围内的内容。',
+  'permission.ui.extension-points.render.name': '渲染受控界面贡献',
+  'permission.ui.extension-points.render.description': '在允许的宿主扩展点渲染结构化贡献。',
+  'permission.ui.extension-points.render.risk': '贡献会改变宿主界面中的可见内容。',
+  'permission.ui.extension-points.render.limitation': '不能访问原始 DOM selector、节点、脚本、样式或 bridge。',
+  'permission.ui.host-dom.read.name': '读取受控宿主界面',
+  'permission.ui.host-dom.read.description': '从允许的宿主界面根读取限量且脱敏的状态。',
+  'permission.ui.host-dom.read.risk': '可能暴露可见的用户文本与界面状态。',
+  'permission.ui.host-dom.read.limitation': '仅提供目录根、封闭操作、限量投影和不透明节点引用。',
+  'permission.ui.host-dom.modify.name': '修改受控宿主界面',
+  'permission.ui.host-dom.modify.description': '通过封闭且可回收的操作修改允许的宿主界面根。',
+  'permission.ui.host-dom.modify.risk': '可能改变可见内容、安全属性、自有子项或焦点。',
+  'permission.ui.host-dom.modify.limitation': '不提供原始 HTML、selector、样式、脚本、事件处理器、节点、回调或私有 bridge。',
 })
 
 const ZH_CAPABILITY_MESSAGES = Object.freeze(Object.fromEntries(HOST_CAPABILITY_RISK_ENTRIES.flatMap(entry => (
@@ -216,7 +228,7 @@ export const CORDISX_PERMISSION_LOCALE_CATALOGS: readonly CordisXLocaleCatalog[]
 ])
 
 /** Resolve the Host-owned capability name from the same catalogs used by permission review. */
-export function projectPermissionCapabilityName(capability: CordisXPermissionCapabilityV2, locale: string): string {
+export function projectPermissionCapabilityName(capability: CordisXPermissionCapabilityV4, locale: string): string {
   const presentation = HOST_CAPABILITY_RISK_ENTRIES.find(entry => entry.capability === capability)?.presentation.name
   if (presentation === undefined) return capability
   const messages = new Intl.Locale(locale).language === 'zh' ? ZH_CAPABILITY_MESSAGES : EN_CAPABILITY_MESSAGES

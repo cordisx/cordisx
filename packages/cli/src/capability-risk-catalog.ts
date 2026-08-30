@@ -1,16 +1,32 @@
 import {
   CORDISX_PERMISSION_CAPABILITIES_V2,
+  CORDISX_PERMISSION_CAPABILITIES_V3,
+  CORDISX_PERMISSION_CAPABILITIES_V4,
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V2,
+  CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V3,
+  CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V4,
+  type CordisXCertifiedPermissionProjectionV1,
+  type CordisXCapabilityDeclarationV3,
+  type CordisXCapabilityDeclarationV4,
   type CordisXPermissionCapabilityV2,
+  type CordisXPermissionCapabilityV3,
+  type CordisXPermissionCapabilityV4,
   type CordisXCapabilityDeclarationV2,
   type CordisXPermissionAuthorizationBindingV2,
   type CordisXPermissionDecisionV2,
   type CordisXPermissionHostPresentationV2,
   type CordisXPermissionAuthorizationPlanV2,
+  type CordisXPermissionAuthorizationPlanV3,
+  type CordisXPermissionAuthorizationPlanV4,
   type CordisXPermissionIdentityV2,
   type CordisXPermissionPolicyRecordV2,
+  type CordisXPermissionPolicyRecordV3,
+  type CordisXPermissionPolicyRecordV4,
   type CordisXPermissionPolicyV2,
   type CordisXPermissionScopeV2,
+  type CordisXPermissionScopeV3,
+  type CordisXPermissionScopeV4,
+  type CordisXPermissionResourceClassV4,
   type CordisXPermissionSensitivity,
 } from './permission-contracts.js'
 import {
@@ -20,18 +36,36 @@ import {
   normalizePermissionLocalIdV2,
   normalizePermissionOperationIdV2,
   normalizePermissionPolicyRecordV2,
+  permissionRecordKeyV2,
   permissionSecurityFingerprint,
   reconcilePermissionPolicyV2,
 } from './permission-model-v2.js'
+import {
+  normalizeDomCapabilityDeclarationV3,
+  normalizePermissionPolicyRecordV3,
+  permissionRecordKeyV3,
+  permissionSecurityFingerprintV3,
+} from './permission-model-v3.js'
+import {
+  normalizeCapabilityDeclarationV4,
+  normalizePermissionPolicyRecordV4,
+  permissionRecordKeyV4,
+  permissionSecurityFingerprintV4,
+} from './permission-model-v4.js'
 
+// Extending the catalog with a disjoint DOM capability must not invalidate the
+// exact fingerprints and durable policies of the original 22 non-DOM entries.
 export const CORDISX_CAPABILITY_CATALOG_VERSION = '2026-08-24'
+export const CORDISX_CAPABILITY_CATALOG_VERSION_V4 = '2026-08-30'
 
-export type CordisXPermissionProviderFamily = 'platform' | 'agent' | 'channel'
-export type CordisXPermissionScopeDimension = keyof CordisXPermissionScopeV2
+export type CordisXPermissionProviderFamily = 'platform' | 'agent' | 'channel' | 'ui'
+export type CordisXPermissionScopeDimension = keyof CordisXPermissionScopeV4
 
 export interface CordisXCapabilityRiskCatalogEntry {
-  readonly capability: CordisXPermissionCapabilityV2
+  readonly capability: CordisXPermissionCapabilityV4
   readonly providerFamily: CordisXPermissionProviderFamily
+  readonly resourceClass: CordisXPermissionResourceClassV4
+  readonly certifiedImplicitApproval: boolean
   readonly sensitivity: CordisXPermissionSensitivity
   readonly recommendedPolicy: CordisXPermissionPolicyV2
   readonly persistentAllow: boolean
@@ -50,7 +84,7 @@ export interface PermissionDecisionContext {
   readonly operation: 'install' | 'update' | 'enable' | 'runtime'
   readonly providerKind: 'current-connection' | 'external-provider' | 'host-local'
   readonly providerTrust: 'native' | 'configured' | 'unverified'
-  readonly scope: CordisXPermissionScopeV2
+  readonly scope: CordisXPermissionScopeV4
   readonly policy: CordisXPermissionPolicyV2
   readonly availability: 'supported' | 'degraded' | 'unavailable'
   readonly required: boolean
@@ -61,31 +95,42 @@ export interface PermissionDecisionRecommendation {
   readonly defaultDecision: CordisXPermissionDecisionV2
 }
 
-function text(capability: CordisXPermissionCapabilityV2, field: string, fallback: string) {
+function text(capability: CordisXPermissionCapabilityV4, field: string, fallback: string) {
   return Object.freeze({ key: `${capability}.${field}`, fallback })
 }
 
 function entry(
-  capability: CordisXPermissionCapabilityV2,
+  capability: CordisXPermissionCapabilityV4,
   providerFamily: CordisXPermissionProviderFamily,
   sensitivity: CordisXPermissionSensitivity,
   dimensions: readonly CordisXPermissionScopeDimension[],
   unscopedAllowed: boolean,
   copy: readonly [name: string, description: string, risk: string, limitation: string],
+  resource: Readonly<{
+    resourceClass: CordisXPermissionResourceClassV4
+    certifiedImplicitApproval: boolean
+    recommendedPolicy?: CordisXPermissionPolicyV2
+    persistentAllow?: boolean
+    scopeUpgrade?: 'any-change' | 'strict-expansion'
+    installPrompt?: 'batch-eligible' | 'explicit'
+    runtimePrompt?: 'first-use' | 'dynamic-scope' | 'always'
+  }> = Object.freeze({ resourceClass: 'non-dom', certifiedImplicitApproval: false }),
 ): CordisXCapabilityRiskCatalogEntry {
   const highRisk = sensitivity === 'high-risk'
   const explicit = sensitivity === 'sensitive' || highRisk
   return Object.freeze({
     capability,
     providerFamily,
+    resourceClass: resource.resourceClass,
+    certifiedImplicitApproval: resource.certifiedImplicitApproval,
     sensitivity,
-    recommendedPolicy: sensitivity === 'low' || sensitivity === 'general' ? 'allow-persistent' : 'ask',
-    persistentAllow: !highRisk,
+    recommendedPolicy: resource.recommendedPolicy ?? (sensitivity === 'low' || sensitivity === 'general' ? 'allow-persistent' : 'ask'),
+    persistentAllow: resource.persistentAllow ?? !highRisk,
     persistentDeny: true,
     maximumScope: Object.freeze({ allowedDimensions: Object.freeze([...dimensions]), unscopedAllowed }),
-    scopeUpgrade: highRisk ? 'any-change' : 'strict-expansion',
-    installPrompt: explicit ? 'explicit' : 'batch-eligible',
-    runtimePrompt: highRisk ? 'always' : explicit ? 'dynamic-scope' : 'first-use',
+    scopeUpgrade: resource.scopeUpgrade ?? (highRisk ? 'any-change' : 'strict-expansion'),
+    installPrompt: resource.installPrompt ?? (explicit ? 'explicit' : 'batch-eligible'),
+    runtimePrompt: resource.runtimePrompt ?? (highRisk ? 'always' : explicit ? 'dynamic-scope' : 'first-use'),
     presentation: Object.freeze({
       name: text(capability, 'name', copy[0]),
       description: text(capability, 'description', copy[1]),
@@ -184,15 +229,34 @@ export const HOST_CAPABILITY_RISK_ENTRIES = Object.freeze([
     'Read Channel attachments', 'Read attachments from allowed Channel conversations.',
     'Attachments may contain private files or sensitive data.', 'Only Host-fetched content within declared scope is available.',
   ]),
+  entry('ui.extension-points.render', 'ui', 'general', ['extensionPoints'], false, [
+    'Render controlled interface contributions', 'Render structured contributions at allowed Host extension points.',
+    'The contribution changes visible Host interface content.', 'Raw DOM selectors, nodes, scripts, styles, and bridges remain unavailable.',
+  ], {
+    resourceClass: 'dom-rendering', certifiedImplicitApproval: true, recommendedPolicy: 'ask',
+    installPrompt: 'explicit', runtimePrompt: 'dynamic-scope',
+  }),
+  entry('ui.host-dom.read', 'ui', 'sensitive', ['rootIds', 'operations'], false, [
+    'Read bounded Host interface state', 'Read bounded, redacted state from allowed Host interface roots.',
+    'Visible user text and interface state may be exposed.', 'Only catalog roots, closed operations, bounded projections, and opaque node references are available.',
+  ], { resourceClass: 'host-dom', certifiedImplicitApproval: true }),
+  entry('ui.host-dom.modify', 'ui', 'high-risk', ['rootIds', 'operations'], false, [
+    'Modify bounded Host interface state', 'Modify allowed Host interface roots through closed reversible operations.',
+    'Visible content, safe attributes, owned children, or focus may change.', 'No raw HTML, selector, style, script, event handler, node, callback, or private bridge is available.',
+  ], {
+    resourceClass: 'host-dom', certifiedImplicitApproval: true, persistentAllow: false,
+    scopeUpgrade: 'strict-expansion', installPrompt: 'explicit', runtimePrompt: 'always',
+  }),
 ] satisfies readonly CordisXCapabilityRiskCatalogEntry[])
 
 export class CapabilityRiskCatalog {
   readonly version = CORDISX_CAPABILITY_CATALOG_VERSION
-  readonly #entries = new Map<CordisXPermissionCapabilityV2, CordisXCapabilityRiskCatalogEntry>()
+  readonly versionV4 = CORDISX_CAPABILITY_CATALOG_VERSION_V4
+  readonly #entries = new Map<CordisXPermissionCapabilityV4, CordisXCapabilityRiskCatalogEntry>()
 
   constructor(
     entries: readonly CordisXCapabilityRiskCatalogEntry[] = HOST_CAPABILITY_RISK_ENTRIES,
-    accepted: readonly CordisXPermissionCapabilityV2[] = CORDISX_PERMISSION_CAPABILITIES_V2,
+    accepted: readonly CordisXPermissionCapabilityV4[] = CORDISX_PERMISSION_CAPABILITIES_V4,
   ) {
     for (const item of entries) {
       if (this.#entries.has(item.capability)) throw new Error(`duplicate capability catalog entry: ${item.capability}`)
@@ -201,6 +265,24 @@ export class CapabilityRiskCatalog {
       }
       if (item.sensitivity === 'high-risk' && item.persistentAllow) {
         throw new Error(`high-risk capability cannot allow persistent grants: ${item.capability}`)
+      }
+      if (item.capability === 'ui.extension-points.render') {
+        if (item.providerFamily !== 'ui' || item.resourceClass !== 'dom-rendering' || !item.certifiedImplicitApproval) {
+          throw new Error('ui.extension-points.render must be the catalog-owned certified DOM capability')
+        }
+      } else if (item.capability === 'ui.host-dom.read' || item.capability === 'ui.host-dom.modify') {
+        if (item.providerFamily !== 'ui' || item.resourceClass !== 'host-dom' || !item.certifiedImplicitApproval
+          || item.maximumScope.allowedDimensions.join(',') !== 'rootIds,operations' || item.maximumScope.unscopedAllowed) {
+          throw new Error(`${item.capability} must be the catalog-owned bounded Host DOM capability`)
+        }
+        if (item.capability === 'ui.host-dom.read' && item.sensitivity !== 'sensitive') {
+          throw new Error('ui.host-dom.read must remain sensitive')
+        }
+        if (item.capability === 'ui.host-dom.modify' && (item.sensitivity !== 'high-risk' || item.persistentAllow)) {
+          throw new Error('ui.host-dom.modify must remain high-risk without persistent allow')
+        }
+      } else if (item.resourceClass !== 'non-dom' || item.certifiedImplicitApproval) {
+        throw new Error(`non-DOM capability cannot use certified implicit approval: ${item.capability}`)
       }
       this.#entries.set(item.capability, Object.freeze(item))
     }
@@ -212,17 +294,17 @@ export class CapabilityRiskCatalog {
     }
   }
 
-  get(capability: CordisXPermissionCapabilityV2): CordisXCapabilityRiskCatalogEntry {
+  get(capability: CordisXPermissionCapabilityV4): CordisXCapabilityRiskCatalogEntry {
     const item = this.#entries.get(capability)
     if (item === undefined) throw new Error(`capability catalog metadata missing: ${capability}`)
     return item
   }
 
   snapshot(): readonly CordisXCapabilityRiskCatalogEntry[] {
-    return Object.freeze(CORDISX_PERMISSION_CAPABILITIES_V2.map(capability => this.get(capability)))
+    return Object.freeze(CORDISX_PERMISSION_CAPABILITIES_V4.map(capability => this.get(capability)))
   }
 
-  assertScope(capability: CordisXPermissionCapabilityV2, scope: CordisXPermissionScopeV2): void {
+  assertScope(capability: CordisXPermissionCapabilityV4, scope: CordisXPermissionScopeV4): void {
     const item = this.get(capability)
     const dimensions = Object.entries(scope).filter(([, value]) => value !== undefined).map(([key]) => key)
     const unknown = dimensions.find(key => !item.maximumScope.allowedDimensions.includes(key as CordisXPermissionScopeDimension))
@@ -237,7 +319,7 @@ export class PermissionDecisionEngine {
   constructor(private readonly catalog: CapabilityRiskCatalog = new CapabilityRiskCatalog()) {}
 
   recommend(
-    capability: CordisXPermissionCapabilityV2,
+    capability: CordisXPermissionCapabilityV4,
     context: PermissionDecisionContext,
   ): PermissionDecisionRecommendation {
     const item = this.catalog.get(capability)
@@ -362,6 +444,283 @@ export function buildPermissionAuthorizationPlanV2(
   engine = new PermissionDecisionEngine(catalog),
 ): CordisXPermissionAuthorizationPlanV2 {
   return buildPermissionAuthorizationPlanResultV2(input, catalog, engine).plan
+}
+
+export interface DomPermissionAuthorizationPlanInputV3 {
+  readonly planId: string
+  readonly profileId: string
+  readonly identity: CordisXPermissionIdentityV2
+  readonly binding: CordisXPermissionAuthorizationBindingV2
+  readonly declaration: CordisXCapabilityDeclarationV3
+  readonly policies: readonly CordisXPermissionPolicyRecordV3[]
+  readonly certification?: CordisXCertifiedPermissionProjectionV1
+}
+
+/** Builds a runtime controlled-render plan through the same catalog and policy engine as v2. */
+export function buildDomPermissionAuthorizationPlanV3(
+  input: DomPermissionAuthorizationPlanInputV3,
+  catalog = new CapabilityRiskCatalog(),
+  engine = new PermissionDecisionEngine(catalog),
+): CordisXPermissionAuthorizationPlanV3 {
+  const planId = normalizePermissionOperationIdV2(input.planId, 'DOM permission plan id')
+  const profileId = normalizePermissionLocalIdV2(input.profileId, 'DOM permission profile id')
+  const identity = normalizePermissionIdentityV2(input.identity, 'DOM permission identity')
+  const binding = normalizePermissionAuthorizationBindingV2(input.binding)
+  const declaration = normalizeDomCapabilityDeclarationV3(input.declaration)
+  catalog.assertScope(declaration.name, declaration.scope)
+  const metadata = catalog.get(declaration.name)
+  const securityFingerprint = permissionSecurityFingerprintV3(catalog.version, declaration)
+  const target = normalizePermissionPolicyRecordV3({
+    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v3.schema.json',
+    schemaVersion: 3,
+    key: { profileId, identity, capability: declaration.name, scope: declaration.scope, securityFingerprint },
+    policy: 'ask',
+  })
+  const exactKey = permissionRecordKeyV3(target)
+  const policy = input.policies.map(item => normalizePermissionPolicyRecordV3(item))
+    .find(item => permissionRecordKeyV3(item) === exactKey)?.policy ?? 'ask'
+  const certification = input.certification !== undefined
+    && input.certification.source === identity.source
+    && input.certification.pluginId === identity.pluginId
+    ? input.certification
+    : undefined
+  const certifiedImplicitEligible = metadata.resourceClass === 'dom-rendering'
+    && metadata.certifiedImplicitApproval
+  const authorizationMode = policy === 'ask'
+    ? certification === undefined || !certifiedImplicitEligible ? 'explicit-user' as const : 'certified-implicit' as const
+    : 'persistent-policy' as const
+  const recommendation = engine.recommend(declaration.name, {
+    operation: 'runtime',
+    providerKind: 'host-local',
+    providerTrust: 'configured',
+    scope: declaration.scope,
+    policy,
+    availability: 'supported',
+    required: declaration.required,
+  })
+  return Object.freeze({
+    $schema: CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V3,
+    schemaVersion: 3,
+    planId,
+    operation: 'runtime',
+    profileId,
+    identity,
+    catalogVersion: catalog.version,
+    binding,
+    declarations: Object.freeze([Object.freeze({
+      capability: declaration.name,
+      required: declaration.required,
+      scope: declaration.scope,
+      securityFingerprint,
+      policy,
+      decisionRequired: authorizationMode === 'explicit-user',
+      authorizationMode,
+      resourceClass: 'dom-rendering' as const,
+      certifiedImplicitApproval: metadata.certifiedImplicitApproval,
+      ...(authorizationMode === 'certified-implicit' && certification !== undefined ? { certification } : {}),
+      sensitivity: metadata.sensitivity,
+      persistentAllow: metadata.persistentAllow,
+      persistentDeny: metadata.persistentDeny,
+      allowedDecisions: recommendation.allowedDecisions,
+      defaultDecision: recommendation.defaultDecision,
+      presentation: metadata.presentation,
+    })]),
+  })
+}
+
+export interface HostDomPermissionAuthorizationPlanInputV4 {
+  readonly planId: string
+  readonly profileId: string
+  readonly identity: CordisXPermissionIdentityV2
+  readonly binding: CordisXPermissionAuthorizationBindingV2
+  readonly declaration: CordisXCapabilityDeclarationV4
+  readonly policies: readonly CordisXPermissionPolicyRecordV4[]
+  readonly certification?: CordisXCertifiedPermissionProjectionV1
+}
+
+/** Builds one bounded Host DOM plan through the same catalog and policy engine as every other permission. */
+export function buildHostDomPermissionAuthorizationPlanV4(
+  input: HostDomPermissionAuthorizationPlanInputV4,
+  catalog = new CapabilityRiskCatalog(),
+  engine = new PermissionDecisionEngine(catalog),
+): CordisXPermissionAuthorizationPlanV4 {
+  const planId = normalizePermissionOperationIdV2(input.planId, 'Host DOM permission plan id')
+  const profileId = normalizePermissionLocalIdV2(input.profileId, 'Host DOM permission profile id')
+  const identity = normalizePermissionIdentityV2(input.identity, 'Host DOM permission identity')
+  const binding = normalizePermissionAuthorizationBindingV2(input.binding)
+  const declaration = normalizeCapabilityDeclarationV4(input.declaration)
+  if (declaration.name !== 'ui.host-dom.read' && declaration.name !== 'ui.host-dom.modify') {
+    throw new Error('Host DOM permission plan requires a Host DOM capability')
+  }
+  catalog.assertScope(declaration.name, declaration.scope)
+  const metadata = catalog.get(declaration.name)
+  const securityFingerprint = permissionSecurityFingerprintV4(catalog.versionV4, declaration)
+  const target = normalizePermissionPolicyRecordV4({
+    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v4.schema.json',
+    schemaVersion: 4,
+    key: { profileId, identity, capability: declaration.name, scope: declaration.scope, securityFingerprint },
+    policy: 'ask',
+  })
+  const exactKey = permissionRecordKeyV4(target)
+  const policy = input.policies.map(item => normalizePermissionPolicyRecordV4(item))
+    .find(item => permissionRecordKeyV4(item) === exactKey)?.policy ?? 'ask'
+  const certification = input.certification !== undefined
+    && input.certification.source === identity.source
+    && input.certification.pluginId === identity.pluginId
+    ? input.certification
+    : undefined
+  const certifiedImplicitEligible = metadata.resourceClass === 'host-dom' && metadata.certifiedImplicitApproval
+  const authorizationMode = policy === 'ask'
+    ? certification === undefined || !certifiedImplicitEligible ? 'explicit-user' as const : 'certified-implicit' as const
+    : 'persistent-policy' as const
+  const recommendation = engine.recommend(declaration.name, {
+    operation: 'runtime',
+    providerKind: 'host-local',
+    providerTrust: 'configured',
+    scope: declaration.scope,
+    policy,
+    availability: 'supported',
+    required: declaration.required,
+  })
+  return Object.freeze({
+    $schema: CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V4,
+    schemaVersion: 4,
+    planId,
+    operation: 'runtime',
+    profileId,
+    identity,
+    catalogVersion: catalog.versionV4,
+    binding,
+    declarations: Object.freeze([Object.freeze({
+      capability: declaration.name,
+      required: declaration.required,
+      ...(declaration.rationale === undefined ? {} : { rationale: declaration.rationale }),
+      ...(declaration.security === undefined ? {} : { security: declaration.security }),
+      scope: declaration.scope,
+      securityFingerprint,
+      policy,
+      decisionRequired: authorizationMode === 'explicit-user',
+      authorizationMode,
+      resourceClass: metadata.resourceClass,
+      certifiedImplicitApproval: metadata.certifiedImplicitApproval,
+      ...(authorizationMode === 'certified-implicit' && certification !== undefined ? { certification } : {}),
+      sensitivity: metadata.sensitivity,
+      persistentAllow: metadata.persistentAllow,
+      persistentDeny: metadata.persistentDeny,
+      allowedDecisions: recommendation.allowedDecisions,
+      defaultDecision: recommendation.defaultDecision,
+      presentation: metadata.presentation,
+    })]),
+  })
+}
+
+export interface PermissionAuthorizationPlanInputV4 {
+  readonly planId: string
+  readonly operation: CordisXPermissionAuthorizationPlanV4['operation']
+  readonly profileId: string
+  readonly identity: CordisXPermissionIdentityV2
+  readonly binding: CordisXPermissionAuthorizationBindingV2
+  readonly declarations: readonly CordisXCapabilityDeclarationV4[]
+  readonly policiesV2: readonly CordisXPermissionPolicyRecordV2[]
+  readonly policiesV4: readonly CordisXPermissionPolicyRecordV4[]
+  readonly certification?: CordisXCertifiedPermissionProjectionV1
+}
+
+/** Builds one manifest-v5 review while retaining v2 ledger keys for the original 22 capabilities. */
+export function buildPermissionAuthorizationPlanV4(
+  input: PermissionAuthorizationPlanInputV4,
+  catalog = new CapabilityRiskCatalog(),
+  engine = new PermissionDecisionEngine(catalog),
+): CordisXPermissionAuthorizationPlanV4 {
+  const planId = normalizePermissionOperationIdV2(input.planId, 'permission v4 plan id')
+  const profileId = normalizePermissionLocalIdV2(input.profileId, 'permission v4 profile id')
+  const identity = normalizePermissionIdentityV2(input.identity, 'permission v4 identity')
+  const binding = normalizePermissionAuthorizationBindingV2(input.binding)
+  const certification = input.certification !== undefined
+    && input.certification.source === identity.source && input.certification.pluginId === identity.pluginId
+    ? input.certification
+    : undefined
+  const seen = new Set<CordisXPermissionCapabilityV4>()
+  const declarations = input.declarations.map((candidate, index) => {
+    const declaration = normalizeCapabilityDeclarationV4(candidate, `capabilities[${index}]`)
+    if (seen.has(declaration.name)) throw new Error(`duplicate capability declaration: ${declaration.name}`)
+    seen.add(declaration.name)
+    catalog.assertScope(declaration.name, declaration.scope)
+    const metadata = catalog.get(declaration.name)
+    const hostDom = declaration.name === 'ui.host-dom.read' || declaration.name === 'ui.host-dom.modify'
+    let securityFingerprint: `sha256:${string}`
+    let policy: CordisXPermissionPolicyV2
+    if (hostDom) {
+      securityFingerprint = permissionSecurityFingerprintV4(catalog.versionV4, declaration)
+      const target = normalizePermissionPolicyRecordV4({
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v4.schema.json',
+        schemaVersion: 4,
+        key: { profileId, identity, capability: declaration.name, scope: declaration.scope, securityFingerprint },
+        policy: 'ask',
+      })
+      const key = permissionRecordKeyV4(target)
+      policy = input.policiesV4.map(record => normalizePermissionPolicyRecordV4(record))
+        .find(record => permissionRecordKeyV4(record) === key)?.policy ?? 'ask'
+    } else {
+      const legacy = normalizeCapabilityDeclarationV2(declaration)
+      securityFingerprint = permissionSecurityFingerprint(catalog.version, legacy)
+      const target = normalizePermissionPolicyRecordV2({
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v2.schema.json',
+        schemaVersion: 2,
+        key: { profileId, identity, capability: legacy.name, scope: legacy.scope, securityFingerprint },
+        policy: 'ask',
+      })
+      const key = permissionRecordKeyV2(target)
+      policy = input.policiesV2.map(record => normalizePermissionPolicyRecordV2(record))
+        .find(record => permissionRecordKeyV2(record) === key)?.policy ?? 'ask'
+    }
+    const certified = hostDom && metadata.resourceClass === 'host-dom' && metadata.certifiedImplicitApproval
+      ? certification
+      : undefined
+    const authorizationMode = policy === 'ask'
+      ? certified === undefined ? 'explicit-user' as const : 'certified-implicit' as const
+      : 'persistent-policy' as const
+    const recommendation = engine.recommend(declaration.name, {
+      operation: input.operation,
+      providerKind: metadata.providerFamily === 'platform' ? 'current-connection' : 'host-local',
+      providerTrust: 'configured',
+      scope: declaration.scope,
+      policy,
+      availability: 'supported',
+      required: declaration.required,
+    })
+    return Object.freeze({
+      capability: declaration.name,
+      required: declaration.required,
+      ...(declaration.rationale === undefined ? {} : { rationale: declaration.rationale }),
+      ...(declaration.security === undefined ? {} : { security: declaration.security }),
+      scope: declaration.scope,
+      securityFingerprint,
+      policy,
+      decisionRequired: authorizationMode === 'explicit-user',
+      authorizationMode,
+      resourceClass: metadata.resourceClass,
+      certifiedImplicitApproval: metadata.certifiedImplicitApproval,
+      ...(authorizationMode === 'certified-implicit' && certified !== undefined ? { certification: certified } : {}),
+      sensitivity: metadata.sensitivity,
+      persistentAllow: metadata.persistentAllow,
+      persistentDeny: metadata.persistentDeny,
+      allowedDecisions: recommendation.allowedDecisions,
+      defaultDecision: recommendation.defaultDecision,
+      presentation: metadata.presentation,
+    })
+  })
+  return Object.freeze({
+    $schema: CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V4,
+    schemaVersion: 4,
+    planId,
+    operation: input.operation,
+    profileId,
+    identity,
+    catalogVersion: catalog.versionV4,
+    binding,
+    declarations: Object.freeze(declarations),
+  })
 }
 
 export function partitionPermissionReviewPlan(
