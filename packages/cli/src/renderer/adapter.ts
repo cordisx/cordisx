@@ -21,6 +21,10 @@ import {
 } from './extension-points.js'
 import { createHostSurfaceIcon } from './icons.js'
 import { createSidebarItem } from './host-ui/SidebarItem.js'
+import {
+  HOST_ROOM_COMPOSITE_AVATAR_STYLES,
+  mountHostRoomCompositeAvatar,
+} from './host-ui/RoomCompositeAvatar.js'
 import { HostTooltipController, type HostTooltipPlacement } from './tooltips.js'
 import { evaluateWhen } from './validation.js'
 import {
@@ -1163,6 +1167,7 @@ class StructuredSurfaceRenderer {
   private disposed = false
   private nextContext = 0
   private readonly routeProjectors = new Map<HTMLButtonElement, () => void>()
+  private navigationLeadingVisualDisposers: (() => void)[] = []
   private reasoningProjection: ReasoningIntensityProjection | undefined
   private readonly reasoningNativeVisibility = new ReasoningIntensityNativeVisibility()
   private sessionBackdropProjection: SessionBackdropProjection | undefined
@@ -1236,6 +1241,7 @@ class StructuredSurfaceRenderer {
     this.sessionBackdropProjection?.dispose()
     this.sessionBackdropProjection = undefined
     this.tooltips.dispose()
+    this.disposeNavigationLeadingVisuals()
     for (const unsubscribe of this.unsubscribers) unsubscribe()
     for (const root of this.roots.values()) root.remove()
     this.roots.clear()
@@ -1555,6 +1561,7 @@ class StructuredSurfaceRenderer {
       }
       project()
     }
+    if (!usedRoots.has('sidebar.navigation')) this.disposeNavigationLeadingVisuals()
     for (const snapshot of snapshots) {
       const rendered = snapshot.visible && snapshot.authorized && snapshot.valid && !snapshot.pending
         && availableSurfaces.has(snapshot.surface)
@@ -1763,6 +1770,7 @@ class StructuredSurfaceRenderer {
   }
 
   private renderNavigation(root: HTMLElement, snapshots: readonly SurfaceContributionSnapshot[], sites: Set<string>, _nativeTemplate?: HTMLButtonElement): void {
+    this.disposeNavigationLeadingVisuals()
     root.replaceChildren()
     const navigation = create(this.document, 'div', 'cordisx-navigation')
     const groups = this.slots.navigationCollectionGroupsSnapshot()
@@ -1772,6 +1780,13 @@ class StructuredSurfaceRenderer {
         const item = snapshot.item as { label: CordisXLocalizedText; description?: CordisXLocalizedText; icon?: string; command?: { id: string; arguments?: never }; route?: { id: string; params?: never }; actions?: readonly (CordisXStructuredAction & { id: string })[] }
         const label = this.text(snapshot, item.label, 'label', sites)
         const description = item.description === undefined ? undefined : this.text(snapshot, item.description, 'description', sites)
+        const leadingVisual = this.slots.navigationCollectionLeadingVisual(snapshot.qualifiedId)
+        let iconElement: HTMLElement | undefined
+        if (leadingVisual !== undefined) {
+          iconElement = this.document.createElement('span')
+          iconElement.className = 'cordisx-room-composite-seat'
+          this.navigationLeadingVisualDisposers.push(mountHostRoomCompositeAvatar(iconElement, leadingVisual))
+        }
         const activate = (): void => {
           const operation = item.command !== undefined
             ? this.commands.executeFor(snapshot.owner, item.command, `nav:${snapshot.qualifiedId}`, {
@@ -1785,6 +1800,7 @@ class StructuredSurfaceRenderer {
           id: snapshot.qualifiedId,
           label,
           ...(description === undefined ? {} : { ariaLabel: `${label}：${description}` }),
+          ...(iconElement === undefined ? {} : { iconElement }),
           ...(item.icon === undefined ? {} : { icon: item.icon }),
           onActivate: activate,
         })
@@ -1820,6 +1836,10 @@ class StructuredSurfaceRenderer {
       navigation.append(section)
     }
     root.append(navigation)
+  }
+
+  private disposeNavigationLeadingVisuals(): void {
+    for (const dispose of this.navigationLeadingVisualDisposers.splice(0)) dispose()
   }
 
   private renderActions(
@@ -2001,6 +2021,7 @@ function installStyles(document: Document): () => void {
   const style = document.createElement('style')
   style.id = 'cordisx-structured-styles'
   style.textContent = `
+    ${HOST_ROOM_COMPOSITE_AVATAR_STYLES}
     [data-cordisx-no-drag="true"], [data-cordisx-no-drag="true"] * { -webkit-app-region: no-drag !important; }
     .cordisx-native-seat { box-sizing: border-box; color: inherit; font: inherit; pointer-events: auto; -webkit-app-region: no-drag; }
     .cordisx-native-seat[hidden] { display: none !important; }

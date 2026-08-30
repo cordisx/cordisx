@@ -202,6 +202,7 @@ import type {
 } from '@cordisx/protocol/agent-loop/v1'
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type {
+  CordisXNavigationCollectionLeadingVisual,
   AgentDefinition,
   AgentLoopCommand,
   AgentLoopCreateOrBindResult,
@@ -211,6 +212,7 @@ import type {
   CordisXNavigationCollectionSnapshot,
   CordisXNavigationCollectionSource,
 } from 'cordisx/contracts'
+import { CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS } from 'cordisx/contracts'
 
 declare const ctx: Context
 declare const definition: AgentDefinition
@@ -225,6 +227,23 @@ declare const createCommands: readonly [
 ]
 declare const snapshot: CordisXNavigationCollectionSnapshot
 declare const source: CordisXNavigationCollectionSource
+declare const avatar: AgentAvatarRef
+
+const roomLeadingVisual = {
+  kind: 'room-composite-avatar',
+  participants: [{ participantId: 'lead', avatar }],
+} satisfies CordisXNavigationCollectionLeadingVisual
+const projectedRooms = {
+  revision: 1,
+  items: [{
+    id: 'room-one',
+    label: { key: 'room.one', fallback: 'Room one' },
+    leadingVisual: roomLeadingVisual,
+    route: { id: 'room', params: { roomId: 'room-one' } },
+    order: 0,
+  }],
+} satisfies CordisXNavigationCollectionSnapshot
+CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS satisfies 16
 
 ctx.agentLoop satisfies BoundAgentLoopClient
 ctx.agentLoop satisfies ProtocolBoundAgentLoopClient
@@ -259,6 +278,8 @@ async function manageMultipleBindings(): Promise<Map<string, { binding: AgentLoo
 }
 manageMultipleBindings satisfies () => Promise<Map<string, { binding: AgentLoopTaskBinding; cursor: number }>>
 snapshot.items.map(item => item.route.params?.roomId)
+roomLeadingVisual.participants.map(participant => participant.participantId)
+projectedRooms.items.map(item => item.leadingVisual.participants.length)
 ctx.slots.registerCollection({
   name: 'sidebar.navigation.items',
   id: 'chatroom.rooms',

@@ -52,23 +52,29 @@ describe('sidebar navigation collections', () => {
       }, { timeout: 5_000, interval: 10 })
       const document = dom.window.document
       expect(document.querySelector('.cordisx-navigation > .cordisx-nav-row')?.textContent).toContain('New room')
+      expect(document.querySelector('.cordisx-navigation > .cordisx-nav-row .cordisx-room-composite-seat')).toBeNull()
+      expect(document.querySelector('.cordisx-navigation > .cordisx-nav-row .cordisx-host-icon')).not.toBeNull()
       const group = document.querySelector<HTMLElement>('[data-navigation-group="navigation-collection:rooms:rooms"]')!
       expect(group.querySelector('[role="heading"]')?.textContent).toBe('Rooms')
-      expect([...group.querySelectorAll('.cordisx-nav-row')].map(row => row.textContent)).toEqual(['Latest room', 'Older room'])
+      expect([...group.querySelectorAll('.cordisx-nav-row')].map(row => row.querySelector('.cxsi-title')?.textContent)).toEqual(['Latest room', 'Older room'])
+      expect([...group.querySelectorAll<HTMLElement>('.cxrv-composite')].map(visual => visual.dataset.roomCompositeCategory)).toEqual(['1', '2'])
+      expect([...group.querySelectorAll<HTMLElement>('.cxrv-composite')].map(visual => visual.textContent)).toEqual(['LE', 'REWR'])
       document.documentElement.lang = 'zh-CN'
       await vi.waitFor(() => expect(document.querySelector('[data-navigation-group] [role="heading"]')?.textContent).toBe('房间'))
       document.documentElement.lang = 'en'
       await vi.waitFor(() => expect(document.querySelector('[data-navigation-group] [role="heading"]')?.textContent).toBe('Rooms'))
 
       const older = [...document.querySelectorAll<HTMLButtonElement>('[data-navigation-group] .cordisx-nav-primary')]
-        .find(button => button.textContent === 'Older room')!
+        .find(button => button.querySelector('.cxsi-title')?.textContent === 'Older room')!
       older.click()
       await vi.waitFor(() => {
-        const row = [...document.querySelectorAll<HTMLElement>('.cordisx-nav-row')].find(candidate => candidate.textContent === 'Older room')
+        const row = [...document.querySelectorAll<HTMLElement>('.cordisx-nav-row')]
+          .find(candidate => candidate.querySelector('.cxsi-title')?.textContent === 'Older room')
         expect(row?.dataset.selected).toBe('true')
       })
       expect([...document.querySelectorAll<HTMLElement>('[data-navigation-group] .cordisx-nav-row')].filter(row => row.dataset.selected === 'true')).toHaveLength(1)
-      expect([...document.querySelectorAll<HTMLElement>('.cordisx-nav-row')].find(row => row.textContent === 'Latest room')?.dataset.selected).toBe('false')
+      expect([...document.querySelectorAll<HTMLElement>('.cordisx-nav-row')]
+        .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')?.dataset.selected).toBe('false')
 
       const fixture = (dom.window as unknown as {
         __cordisxNavigationCollectionFixture: { replace(next: CordisXNavigationCollectionSnapshot): void }
@@ -76,28 +82,50 @@ describe('sidebar navigation collections', () => {
       fixture.replace({
         revision: 2,
         items: [
-          { id: 'created', label: { key: 'created', fallback: 'Created room' }, route: { id: 'room', params: { roomId: 'created' } }, order: -10 },
-          { id: 'latest', label: { key: 'latest', fallback: 'Latest room' }, route: { id: 'room', params: { roomId: 'latest' } }, order: 0 },
-          { id: 'older', label: { key: 'older', fallback: 'Older room' }, route: { id: 'room', params: { roomId: 'older' } }, order: 10 },
+          { id: 'created', label: { key: 'created', fallback: 'Created room' }, leadingVisual: { kind: 'room-composite-avatar', participants: [] }, route: { id: 'room', params: { roomId: 'created' } }, order: -10 },
+          { id: 'latest', label: { key: 'latest', fallback: 'Latest room' }, leadingVisual: { kind: 'room-composite-avatar', participants: [{ participantId: 'lead' }] }, route: { id: 'room', params: { roomId: 'latest' } }, order: 0 },
+          { id: 'older', label: { key: 'older', fallback: 'Older room' }, leadingVisual: { kind: 'room-composite-avatar', participants: [{ participantId: 'reviewer' }, { participantId: 'writer' }] }, route: { id: 'room', params: { roomId: 'older' } }, order: 10 },
         ],
       })
       await vi.waitFor(() => {
-        expect([...document.querySelectorAll('[data-navigation-group] .cordisx-nav-row')].map(row => row.textContent))
+        expect([...document.querySelectorAll('[data-navigation-group] .cordisx-nav-row')].map(row => row.querySelector('.cxsi-title')?.textContent))
           .toEqual(['Created room', 'Latest room', 'Older room'])
       })
       const created = [...document.querySelectorAll<HTMLButtonElement>('[data-navigation-group] .cordisx-nav-primary')]
-        .find(button => button.textContent === 'Created room')!
+        .find(button => button.querySelector('.cxsi-title')?.textContent === 'Created room')!
       created.click()
       await vi.waitFor(() => expect(
-        [...document.querySelectorAll<HTMLElement>('.cordisx-nav-row')].find(row => row.textContent === 'Created room')?.dataset.selected,
+        [...document.querySelectorAll<HTMLElement>('.cordisx-nav-row')]
+          .find(row => row.querySelector('.cxsi-title')?.textContent === 'Created room')?.dataset.selected,
       ).toBe('true'))
       expect([...document.querySelectorAll<HTMLElement>('[data-navigation-group] .cordisx-nav-row')]
         .filter(row => row.dataset.selected === 'true')).toHaveLength(1)
+
+      fixture.replace({
+        revision: 3,
+        items: [
+          { id: 'room-0', label: { key: 'same', fallback: 'Same room' }, leadingVisual: { kind: 'room-composite-avatar', participants: [] }, route: { id: 'room', params: { roomId: 'room-0' } }, order: 0 },
+          { id: 'room-1', label: { key: 'same', fallback: 'Same room' }, leadingVisual: { kind: 'room-composite-avatar', participants: [{ participantId: 'alpha' }] }, route: { id: 'room', params: { roomId: 'room-1' } }, order: 1 },
+          { id: 'room-2', label: { key: 'same', fallback: 'Same room' }, leadingVisual: { kind: 'room-composite-avatar', participants: [{ participantId: 'bravo' }, { participantId: 'charlie' }] }, route: { id: 'room', params: { roomId: 'room-2' } }, order: 2 },
+          { id: 'room-3', label: { key: 'same', fallback: 'Same room' }, leadingVisual: { kind: 'room-composite-avatar', participants: [{ participantId: 'delta' }, { participantId: 'echo' }, { participantId: 'foxtrot' }] }, route: { id: 'room', params: { roomId: 'room-3' } }, order: 3 },
+          { id: 'room-4', label: { key: 'same', fallback: 'Same room' }, leadingVisual: { kind: 'room-composite-avatar', participants: [{ participantId: 'golf' }, { participantId: 'hotel' }, { participantId: 'india' }, { participantId: 'juliet' }, { participantId: 'kilo' }] }, route: { id: 'room', params: { roomId: 'room-4' } }, order: 4 },
+        ],
+      })
+      await vi.waitFor(() => expect([...document.querySelectorAll<HTMLElement>('[data-navigation-group] .cxrv-composite')]
+        .map(visual => visual.dataset.roomCompositeCategory)).toEqual(['0', '1', '2', '3', '4+']))
+      const sameRows = [...document.querySelectorAll<HTMLElement>('[data-navigation-group] .cordisx-nav-row')]
+      expect(sameRows.map(row => row.querySelector('.cxsi-title')?.textContent)).toEqual(Array(5).fill('Same room'))
+      expect(sameRows.map(row => row.querySelector('.cxrv-composite')?.textContent)).toEqual(['', 'AL', 'BRCH', 'DEECFO', 'GOHOIN+2'])
+      sameRows[2]!.querySelector<HTMLButtonElement>('.cordisx-nav-primary')!.click()
+      await vi.waitFor(() => expect(sameRows[2]!.dataset.selected).toBe('true'))
+      expect(sameRows.filter(row => row.dataset.selected === 'true')).toEqual([sameRows[2]])
       expect(errors).toEqual([])
       expect(warnings).toEqual([])
       await runtime?.dispose()
       runtime = undefined
       expect(document.querySelector('[data-navigation-group]')).toBeNull()
+      expect(document.querySelector('.cordisx-room-composite-seat')).toBeNull()
+      expect(document.querySelector('style[data-cordisx-agent-avatar-style]')).toBeNull()
       expect((dom.window as unknown as { __cordisxNavigationCollectionFixture?: unknown }).__cordisxNavigationCollectionFixture).toBeUndefined()
     } finally {
       await runtime?.dispose()

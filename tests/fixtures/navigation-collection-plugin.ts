@@ -1,13 +1,21 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2, type CordisXNavigationCollectionSnapshot } from 'cordisx/contracts'
 
 const message = (key: string, fallback: string) => ({ namespace: 'navigation-collection', key, fallback } as const)
+const roomVisual = (...participantIds: string[]) => ({
+  kind: 'room-composite-avatar' as const,
+  participants: participantIds.map(participantId => ({
+    participantId,
+    avatar: cloneAgentAvatarRef({ kind: 'asset', ref: `room-avatar:${participantId}` }),
+  })),
+})
 
 let snapshot: CordisXNavigationCollectionSnapshot = {
   revision: 1,
   items: [
-    { id: 'latest', label: message('room.latest', 'Latest room'), route: { id: 'room', params: { roomId: 'latest' } }, order: 0 },
-    { id: 'older', label: message('room.older', 'Older room'), route: { id: 'room', params: { roomId: 'older' } }, order: 10 },
+    { id: 'latest', label: message('room.latest', 'Latest room'), leadingVisual: roomVisual('lead'), route: { id: 'room', params: { roomId: 'latest' } }, order: 0 },
+    { id: 'older', label: message('room.older', 'Older room'), leadingVisual: roomVisual('reviewer', 'writer'), route: { id: 'room', params: { roomId: 'older' } }, order: 10 },
   ],
 }
 const listeners = new Set<() => void>()

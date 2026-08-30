@@ -290,6 +290,18 @@ share one `:roomId` route without becoming selected together. The Host does not
 persist this collection: a plugin or provider that needs reload continuity
 rehydrates its source before registration.
 
+One collection item may replace its icon with the additive structured
+`leadingVisual: { kind: 'room-composite-avatar', participants }` projection.
+Participants are an ordered, duplicate-free list of at most 16 stable opaque
+participant ids and optional controlled `AgentAvatarRef` values. The Host
+validates, detaches, freezes, and renders the exact row snapshot as the common
+0/1/2/3/4+ Room composite; it never derives participants from the current
+route, Room title, conversation selection, or another row. Invalid refs, raw
+URLs/paths/data, oversized lists, duplicate ids, and `icon` plus
+`leadingVisual` fail closed without replacing the prior revision. Ordinary
+navigation entries such as New room keep their semantic Host icon. Native
+Recent tasks remain outside this collection contract and renderer.
+
 Environment sections and rows use snapshot/update handles for dynamic values.
 Rows contain text, host-token status, and command references only. Section and
 row targeting is validated, so an orphan action or row is diagnosed rather

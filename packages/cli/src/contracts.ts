@@ -4,6 +4,7 @@ import type {
   AgentConversationShellCommandContext,
   AgentConversationShellSource,
 } from '@cordisx/protocol/agent-conversation-shell/v1'
+import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { ComponentType } from 'react'
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
 import type { CordisXPluginManifestV4, CordisXPluginManifestV5 } from './permission-contracts.js'
@@ -571,11 +572,34 @@ export interface CordisXNavigationCollectionItem {
   readonly label: CordisXLocalizedText
   readonly description?: CordisXLocalizedText
   readonly icon?: CordisXIconToken
+  /** Host-rendered structured visual. It is mutually exclusive with icon. */
+  readonly leadingVisual?: CordisXNavigationCollectionLeadingVisual
   readonly route: CordisXRouteReference
   /** Lower values render first. A Room provider uses this for latest-first ordering. */
   readonly order: number
   readonly disabled?: CordisXDisabledState
 }
+
+/** Maximum participant identities retained by one Room collection row. */
+export const CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS = 16
+
+export interface CordisXRoomCompositeAvatarParticipant {
+  /** Stable opaque identity used only inside this exact collection row. */
+  readonly participantId: string
+  /** Controlled Agent Avatar reference; raw URLs, paths and binary data are invalid. */
+  readonly avatar?: AgentAvatarRef
+}
+
+/**
+ * Ordered Room participant projection rendered by the Host as 0, 1, 2, 3,
+ * or 4+ participants. The Host never derives it from selection or title.
+ */
+export interface CordisXRoomCompositeAvatarLeadingVisual {
+  readonly kind: 'room-composite-avatar'
+  readonly participants: readonly CordisXRoomCompositeAvatarParticipant[]
+}
+
+export type CordisXNavigationCollectionLeadingVisual = CordisXRoomCompositeAvatarLeadingVisual
 
 /** Atomic, monotonically revised replacement for one sidebar collection. */
 export interface CordisXNavigationCollectionSnapshot {
