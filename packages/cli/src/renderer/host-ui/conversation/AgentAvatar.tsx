@@ -34,13 +34,25 @@ if (avatarVendorCss !== '' && !vendorAvatarRules.includes('.cxa-avatar .oneworks
   throw new Error('OneWorks Avatar RC.8 style export is incompatible with the Host renderer')
 }
 
-function ensureAgentAvatarStyles(document: Document): void {
-  if (vendorAvatarRules === '') return
-  if (document.querySelector(`style[data-cordisx-agent-avatar-style="${AVATAR_STYLE_MARKER}"]`) !== null) return
-  const style = document.createElement('style')
-  style.dataset.cordisxAgentAvatarStyle = AVATAR_STYLE_MARKER
-  style.textContent = vendorAvatarRules
-  ;(document.head ?? document.documentElement).append(style)
+function acquireAgentAvatarStyles(document: Document): () => void {
+  if (vendorAvatarRules === '') return () => undefined
+  let style = document.querySelector<HTMLStyleElement>(`style[data-cordisx-agent-avatar-style="${AVATAR_STYLE_MARKER}"]`)
+  if (style === null) {
+    style = document.createElement('style')
+    style.dataset.cordisxAgentAvatarStyle = AVATAR_STYLE_MARKER
+    style.textContent = vendorAvatarRules
+    ;(document.head ?? document.documentElement).append(style)
+  }
+  const count = Number.parseInt(style.dataset.cordisxAgentAvatarStyleUsers ?? '0', 10)
+  style.dataset.cordisxAgentAvatarStyleUsers = String(Number.isSafeInteger(count) && count >= 0 ? count + 1 : 1)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const current = Number.parseInt(style.dataset.cordisxAgentAvatarStyleUsers ?? '1', 10)
+    if (!Number.isSafeInteger(current) || current <= 1) style.remove()
+    else style.dataset.cordisxAgentAvatarStyleUsers = String(current - 1)
+  }
 }
 
 /** Host-private, bounded LRU. No plugin-provided ref is interpreted as a URL or path. */
@@ -129,15 +141,15 @@ export function HostAgentAvatar({ participant, resolver = defaultHostAgentAvatar
     if (wrapper === null) return
     const root = wrapper.closest<HTMLElement>('[data-cordisx-app-theme]')
     if (root === undefined || root === null) return
-    ensureAgentAvatarStyles(wrapper.ownerDocument)
+    const releaseStyles = acquireAgentAvatarStyles(wrapper.ownerDocument)
     const update = (): void => setTheme(root.dataset.cordisxAppTheme === 'dark' ? 'dark' : 'light')
     update()
     setClientReady(true)
     const Observer = root.ownerDocument.defaultView?.MutationObserver
-    if (Observer === undefined) return
+    if (Observer === undefined) return releaseStyles
     const observer = new Observer(update)
     observer.observe(root, { attributes: true, attributeFilter: ['data-cordisx-app-theme'] })
-    return () => observer.disconnect()
+    return () => { observer.disconnect(); releaseStyles() }
   }, [])
   const initials = <span className="cxa-avatar-initials">{participantInitials(participant.name)}</span>
   const resolved = resolution?.status === 'resolved' && clientReady && !renderFailed

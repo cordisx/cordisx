@@ -70,7 +70,7 @@ describe('Host Agent avatar resolver', () => {
       readFile('packages/cli/src/renderer/host-ui/conversation/AgentAvatar.tsx', 'utf8'),
       readFile('packages/cli/src/renderer/host-ui/conversation/styles.ts', 'utf8'),
     ])
-    const protocol = 'github:cordisx/cordisx-protocol#bbd8a8372f6732e094653f5a683d9478f1e50bad'
+    const protocol = 'github:cordisx/cordisx-protocol#fe449688c0ac320ed7e5cf63bffc07e71ad8b664'
     expect(rootPackage.devDependencies['@cordisx/protocol']).toBe(protocol)
     expect(cliPackage.dependencies).toMatchObject({
       '@cordisx/protocol': protocol,
@@ -191,7 +191,7 @@ describe('Host Agent avatar renderer', () => {
     dom.window.close()
   })
 
-  it('injects the scoped upstream style marker once per document', async () => {
+  it('reference-counts one scoped upstream style marker and removes it when the Host root unmounts', async () => {
     const dom = installDom()
     const root = createRoot(dom.window.document.getElementById('root')!)
     const lead = createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'lead' })
@@ -204,7 +204,9 @@ describe('Host Agent avatar renderer', () => {
     expect(styles).toHaveLength(1)
     expect(styles[0]!.textContent).toContain('.cxa-avatar .oneworks-avatar>.interactive-avatar')
     expect(styles[0]!.textContent).not.toContain('.oneworks-avatar-editor')
+    expect(styles[0]!.dataset.cordisxAgentAvatarStyleUsers).toBe('2')
     await act(async () => root.unmount())
+    expect(dom.window.document.querySelectorAll('style[data-cordisx-agent-avatar-style]')).toHaveLength(0)
     dom.window.close()
   })
 
