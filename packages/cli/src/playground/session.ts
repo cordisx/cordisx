@@ -40,6 +40,7 @@ import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
 export interface PlaygroundFixtureInfo {
   readonly name: string
   readonly source: string
+  readonly reviewNavigationItem?: string
 }
 
 interface PlaygroundGeneration {
@@ -90,12 +91,22 @@ class PlaygroundCredentialBackend implements LauncherKeychainBackend {
 
 function fixtureInfo(source: Record<string, unknown>, sourcePath: string): PlaygroundFixtureInfo {
   const playground = source.playground
-  const name = playground !== null
-    && typeof playground === 'object'
-    && typeof (playground as Record<string, unknown>).name === 'string'
-    ? (playground as Record<string, unknown>).name as string
+  const metadata = playground !== null && typeof playground === 'object'
+    ? playground as Record<string, unknown>
+    : undefined
+  const name = typeof metadata?.name === 'string'
+    ? metadata.name
     : path.basename(sourcePath)
-  return { name, source: path.basename(sourcePath) }
+  const reviewNavigationItem = metadata?.reviewNavigationItem
+  if (reviewNavigationItem !== undefined
+    && (typeof reviewNavigationItem !== 'string' || !/^[a-z][a-z0-9-]{0,63}:[a-z][a-z0-9-]{0,63}$/.test(reviewNavigationItem))) {
+    throw new Error('playground.reviewNavigationItem must be an exact owner-qualified contribution id')
+  }
+  return {
+    name,
+    source: path.basename(sourcePath),
+    ...(reviewNavigationItem === undefined ? {} : { reviewNavigationItem }),
+  }
 }
 
 /**

@@ -63,7 +63,7 @@ export function createPlaygroundConversationFixture(mode: PlaygroundFixtureMode,
       submit: { id: 'room.send' },
     },
   }
-  if (mode === 'empty') {
+  if (mode !== 'conversation') {
     return createAgentConversationModel({
       ...common,
       selection: { kind: 'no-room' },

@@ -6,7 +6,7 @@ import {
   playgroundConversationCopy,
 } from '../fixtures/agent-conversation.js'
 
-export type PlaygroundFixtureMode = 'conversation' | 'empty'
+export type PlaygroundFixtureMode = 'conversation' | 'empty' | 'review'
 
 export interface HostSeatsProps {
   readonly mode: PlaygroundFixtureMode

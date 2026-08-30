@@ -5,7 +5,11 @@ declare module 'virtual:cordisx-composition' {
 }
 
 declare module 'virtual:cordisx-playground-fixture' {
-  const fixture: { readonly name: string; readonly source: string }
+  const fixture: {
+    readonly name: string
+    readonly source: string
+    readonly reviewNavigationItem?: string
+  }
   export default fixture
 }
 

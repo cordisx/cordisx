@@ -1,4 +1,5 @@
-import { access, readFile, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
@@ -6,6 +7,8 @@ import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { defaultUiPlaygroundConfig } from '../packages/cli/src/playground/defaults.js'
 import { startUiPlayground } from '../packages/cli/src/playground/server.js'
+import { createPlaygroundSession } from '../packages/cli/src/playground/session.js'
+import { activatePlaygroundReviewNavigation } from '../packages/cli/src/playground/client/review-navigation.js'
 import { createSidebarItem } from '../packages/cli/src/renderer/host-ui/SidebarItem.js'
 
 const defaultPluginIds = [
@@ -14,6 +17,51 @@ const defaultPluginIds = [
 ]
 
 describe('UI Playground', () => {
+  it('enters an exact configured review navigation row without selecting a debug fixture', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-review-navigation-'))
+    const configPath = path.join(root, 'cordisx.config.json')
+    await writeFile(configPath, JSON.stringify({
+      version: 1,
+      playground: { name: 'External review', reviewNavigationItem: 'chatroom:chatroom' },
+      plugins: [],
+    }))
+    const session = await createPlaygroundSession(configPath)
+    expect(session.fixture).toEqual({
+      name: 'External review',
+      source: 'cordisx.config.json',
+      reviewNavigationItem: 'chatroom:chatroom',
+    })
+
+    const dom = new JSDOM('<!doctype html><body><nav data-cordisx-playground-surface="sidebar.navigation.items"></nav></body>', { url: 'http://127.0.0.1/' })
+    let exactActivations = 0
+    let adjacentActivations = 0
+    const dispose = activatePlaygroundReviewNavigation(dom.window.document, session.fixture.reviewNavigationItem!)
+    const adjacent = createSidebarItem(dom.window.document, { id: 'chatroom:other', label: 'Other', onActivate: () => { adjacentActivations += 1 } })
+    const exact = createSidebarItem(dom.window.document, { id: 'chatroom:chatroom', label: 'New room', onActivate: () => { exactActivations += 1 } })
+    dom.window.document.querySelector('nav')?.append(adjacent.element, exact.element)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(exactActivations).toBe(1)
+    expect(adjacentActivations).toBe(0)
+    dispose()
+    dom.window.close()
+    await session.close()
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it('rejects a non-qualified Playground review navigation target', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-review-navigation-invalid-'))
+    const configPath = path.join(root, 'cordisx.config.json')
+    await writeFile(configPath, JSON.stringify({
+      version: 1,
+      playground: { reviewNavigationItem: 'chatroom' },
+      plugins: [],
+    }))
+    await expect(createPlaygroundSession(configPath)).rejects.toThrow(
+      'playground.reviewNavigationItem must be an exact owner-qualified contribution id',
+    )
+    await rm(root, { recursive: true, force: true })
+  })
+
   it('renders the official Manager BrandMark through the same Host SidebarItem primitive', async () => {
     const [app, manager, styles] = await Promise.all([
       readFile(path.resolve('packages/cli/src/playground/client/App.tsx'), 'utf8'),

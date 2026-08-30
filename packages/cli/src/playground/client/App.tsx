@@ -4,6 +4,8 @@ import { createSidebarItem, type SidebarItemControl } from '../../renderer/host-
 import { FixtureSummary } from './components/FixtureSummary.js'
 import { HostSeats, type PlaygroundFixtureMode } from './components/HostSeats.js'
 import { playgroundEnvironment, usePlaygroundEnvironment } from './environment.js'
+import fixture from 'virtual:cordisx-playground-fixture'
+import { activatePlaygroundReviewNavigation } from './review-navigation.js'
 import { bootRuntime, useRuntimeState } from './runtime-store.js'
 
 interface SidebarItemProps {
@@ -43,12 +45,16 @@ function SidebarItem(props: SidebarItemProps) {
 export function App() {
   const runtime = useRuntimeState()
   const environment = usePlaygroundEnvironment()
-  const [fixtureMode, setFixtureMode] = useState<PlaygroundFixtureMode>('conversation')
+  const [fixtureMode, setFixtureMode] = useState<PlaygroundFixtureMode>(fixture.reviewNavigationItem === undefined ? 'conversation' : 'review')
   const shell = useRef<HTMLDivElement>(null)
   const en = environment.locale === 'en'
 
   useEffect(() => { void bootRuntime() }, [])
   useEffect(() => shell.current === null ? undefined : playgroundEnvironment.attachTheme(shell.current), [])
+  useEffect(() => {
+    if (runtime.status !== 'active' || fixture.reviewNavigationItem === undefined) return undefined
+    return activatePlaygroundReviewNavigation(document, fixture.reviewNavigationItem)
+  }, [runtime.status])
 
   const reset = async () => {
     await fetch('/api/reset', { method: 'POST' })
