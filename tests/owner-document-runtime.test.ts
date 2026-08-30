@@ -68,6 +68,46 @@ describe('owner document renderer client', () => {
     broker.dispose()
   })
 
+  it('fences authority retirement at commit but never rewrites a completed commit to stale', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cordisx-owner-document-fence-')); roots.push(home)
+    let allowed = true
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    class DelayedStore extends OwnerDocumentStore {
+      override async replace(input: Parameters<OwnerDocumentStore['replace']>[0]) { await gate; return await super.replace(input) }
+    }
+    const delayed = new DelayedStore(home)
+    const handler = createOwnerDocumentBridgeHandler({
+      secret: 'f'.repeat(64), profileId: 'work', generation: 'generation-one', store: delayed,
+      identityAllowed: candidate => allowed && candidate.source === identity.source && candidate.pluginId === identity.id,
+    })
+    const binding = handler.issue({ source: identity.source, pluginId: identity.id })
+    const request = parseOwnerDocumentBindingRequest({
+      version: 1, requestId: 'retire-before-commit', token: binding.token, operation: 'replace',
+      documentId: 'rooms', expectedRevision: 0, schemaVersion: 1, value: { state: 'planned' },
+    })
+    const pending = handler.replace(request)
+    allowed = false; release()
+    await expect(pending).resolves.toMatchObject({ status: 'unavailable', code: 'stale-generation' })
+    await expect(delayed.load({ profileId: 'work', identity: { source: identity.source, pluginId: identity.id } }, 'rooms'))
+      .resolves.toEqual({ status: 'missing', revision: 0 })
+
+    allowed = true
+    class RetireAfterCommitStore extends OwnerDocumentStore {
+      override async replace(input: Parameters<OwnerDocumentStore['replace']>[0]) {
+        const result = await super.replace(input); allowed = false; return result
+      }
+    }
+    const committing = new RetireAfterCommitStore(home)
+    const committedHandler = createOwnerDocumentBridgeHandler({
+      secret: 'a'.repeat(64), profileId: 'work', generation: 'generation-two', store: committing,
+      identityAllowed: candidate => allowed && candidate.source === identity.source && candidate.pluginId === identity.id,
+    })
+    const committedBinding = committedHandler.issue({ source: identity.source, pluginId: identity.id })
+    const committedRequest = parseOwnerDocumentBindingRequest({ ...request, requestId: 'retire-after-commit', token: committedBinding.token })
+    await expect(committedHandler.replace(committedRequest)).resolves.toMatchObject({ status: 'accepted', snapshot: { revision: 1 } })
+  })
+
   it('shares one polling watch per document and fences unsubscribe/dispose with zero late delivery', async () => {
     const { store, broker } = await setup()
     const client = broker.bind({ identity, active: () => true })
