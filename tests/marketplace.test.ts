@@ -406,6 +406,52 @@ describe('BrowserMarketplaceModel', () => {
     model.dispose()
   })
 
+  it('publishes Certified projection replacement and removal through snapshot invalidation', async () => {
+    let currentFeed = trustedFeed('active', '2026-08-24T12:31:00Z')
+    const model = new BrowserMarketplaceModel(undefined, async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(currentFeed),
+    }), [OFFICIAL_MARKETPLACE_SOURCE], { retryDelays: [] })
+    const observed: string[] = []
+    let previous: string | undefined
+    const readProjection = (): void => {
+      const projection = model.snapshot().plugins.find(plugin => plugin.identity === `${TRUST_SOURCE}\u0000trusted`)?.certifiedPermission
+      const current = projection === undefined ? 'absent' : `${projection.revision}\u0000${projection.fingerprint}`
+      if (current !== previous) observed.push(current)
+      previous = current
+    }
+    const unsubscribe = model.subscribe(readProjection)
+    readProjection()
+
+    await model.reload()
+    const first = observed.at(-1)
+    expect(first).toMatch(/^2026-08-24T12:31:00Z\u0000sha256:[a-f0-9]{64}$/)
+
+    currentFeed = trustedFeed('active', '2026-08-24T12:32:00Z')
+    await model.reload()
+    const replacement = observed.at(-1)
+    expect(replacement).toMatch(/^2026-08-24T12:32:00Z\u0000sha256:[a-f0-9]{64}$/)
+    expect(replacement).not.toBe(first)
+
+    await model.setSourceEnabled(OFFICIAL_MARKETPLACE_SOURCE, false)
+    expect(observed.at(-1)).toBe('absent')
+    await model.setSourceEnabled(OFFICIAL_MARKETPLACE_SOURCE, true)
+    expect(observed.at(-1)).toBe(replacement)
+
+    currentFeed = trustedFeed('revoked', '2026-08-24T12:33:00Z')
+    await model.reload()
+    expect(observed.at(-1)).toBe('absent')
+    expect(observed).toEqual(['absent', first, replacement, 'absent', replacement, 'absent'])
+
+    unsubscribe()
+    const observedAfterUnsubscribe = observed.length
+    currentFeed = trustedFeed('active', '2026-08-24T12:34:00Z')
+    await model.reload()
+    expect(observed).toHaveLength(observedAfterUnsubscribe)
+    model.dispose()
+  })
+
   it('keeps the later revoked feed when a replacement attempts to roll trust revision backward', async () => {
     let currentFeed = trustedFeed('active', '2026-08-24T12:31:00Z')
     const model = new BrowserMarketplaceModel(undefined, async () => ({

@@ -60,6 +60,25 @@ cannot preserve an already expired badge. `feed.generatedAt` is the projection
 revision: a replacement older than the last-good trusted feed is rejected, so
 an older active record cannot replay over a later revocation.
 
+Permission consumers use the existing Host-owned Marketplace model as an
+invalidation stream, not as an authorization event payload:
+
+```ts
+MarketplaceModel.snapshot(): MarketplaceSnapshot
+MarketplaceModel.subscribe(listener: () => void): () => void
+MarketplaceCatalogPlugin.certifiedPermission?: MarketplaceCertifiedPermissionProjectionV1
+```
+
+After every subscription callback, the consumer re-reads `snapshot()` and
+selects the current plugin by canonical `identity`. A missing
+`certifiedPermission` is an immediate removal of the eligibility input. A
+changed `fingerprint` or `revision` replaces the prior input. Feed reload,
+source enable/disable/removal, trust revocation, and last-good expiry all pass
+through this same snapshot invalidation path. The callback deliberately carries
+no projection or grant payload, so a consumer cannot retain an event object
+after the Marketplace model has advanced. The projection's `expiresAt` remains
+an independent local deadline even when no network refresh occurs.
+
 ## Search contract
 
 Search uses a lexicographic contract rather than one unbounded popularity
