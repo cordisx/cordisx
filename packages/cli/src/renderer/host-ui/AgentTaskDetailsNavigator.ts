@@ -1,5 +1,8 @@
 import type { AgentLoopTaskDetailsUrl } from '@cordisx/protocol/agent-loop/v2'
 
+/** Host-private notification for same-document task URL pushes. */
+export const CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT = 'cordisx:host-task-details-navigation'
+
 export interface HostAgentTaskDetailsNavigationPort {
   /** Enters the Host-owned native history without interpreting the provider URL here. */
   navigateHost(url: string): void | Promise<void>

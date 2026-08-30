@@ -65,7 +65,10 @@ import { installReactCordisXManager } from './manager/install.js'
 import { selectPluginReadme } from './readme.js'
 import { CordisXCommandService } from './commands.js'
 import { CordisXAgentConversationShellService } from './agent-conversation-shell.js'
-import { HostAgentTaskDetailsNavigator } from './host-ui/AgentTaskDetailsNavigator.js'
+import {
+  CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT,
+  HostAgentTaskDetailsNavigator,
+} from './host-ui/AgentTaskDetailsNavigator.js'
 import { CordisXI18nService } from './i18n.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
 import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter } from './codex-router-history.js'
@@ -2719,7 +2722,7 @@ async function start(
         const target = new URL(value)
         if (target.protocol !== 'app:' || target.hostname !== '-') throw new Error('Host task details URL is unavailable')
         window.history.pushState(window.history.state, '', target.pathname)
-        window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }))
+        window.setTimeout(() => window.dispatchEvent(new Event(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT)), 0)
       },
       navigateExternal: value => {
         const opened = window.open(value, '_blank', 'noopener,noreferrer')
@@ -2734,7 +2737,7 @@ async function start(
         onSettings: value => {
           const path = `/playground/simulator/agents/${encodeURIComponent(`${value.agentId}@${value.revision}`)}`
           window.history.pushState(window.history.state, '', path)
-          window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }))
+          window.setTimeout(() => window.dispatchEvent(new Event(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT)), 0)
         },
       },
     })

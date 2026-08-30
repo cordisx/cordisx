@@ -4,6 +4,7 @@ import { createSidebarItem, type SidebarItemControl } from '../../renderer/host-
 import { FixtureSummary } from './components/FixtureSummary.js'
 import { HostSeats, type PlaygroundFixtureMode } from './components/HostSeats.js'
 import { MockAgentTaskPage } from './components/MockAgentTaskPage.js'
+import { CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT } from '../../renderer/host-ui/AgentTaskDetailsNavigator.js'
 import { playgroundEnvironment, usePlaygroundEnvironment } from './environment.js'
 import fixture from 'virtual:cordisx-playground-fixture'
 import { activatePlaygroundReviewNavigation } from './review-navigation.js'
@@ -64,11 +65,12 @@ export function App() {
     const sync = () => setSimulatorTaskId(simulatorTaskIdFromPath(window.location.pathname))
     sync()
     window.addEventListener('popstate', sync)
-    return () => window.removeEventListener('popstate', sync)
+    window.addEventListener(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT, sync)
+    return () => {
+      window.removeEventListener('popstate', sync)
+      window.removeEventListener(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT, sync)
+    }
   }, [])
-  useEffect(() => {
-    if (simulatorTaskId !== undefined && simulatorTask === undefined && runtime.simulator !== undefined) setSimulatorTaskId(undefined)
-  }, [runtime.simulator, simulatorTask, simulatorTaskId])
 
   const openSimulatorTask = (debugTaskId: string, detailsUrl: (typeof simulatorTasks)[number]['detailsUrl']) => {
     if (!navigateTaskDetails(window, detailsUrl)) return
