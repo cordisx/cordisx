@@ -5,8 +5,9 @@
 The renderer Host implements an experimental, plugin-facing `ctx.agentLoop`
 service against the local `@cordisx/protocol/agent-loop/v1` candidate. The
 Protocol remains room-neutral and data-only. Chatroom owns its room data and
-plugin UI; the Host owns Agent task identity, provider routing, permission
-decisions, prompt projection, proactive event delivery, and cleanup.
+structured state/commands; the Host owns the conversation UI, Agent task
+identity, provider routing, permission decisions, prompt projection, proactive
+event delivery, and cleanup.
 
 This slice targets the internal text path only. It does not add an external
 channel, a general security system, a Chatroom store, or plugin-owned Host UI.
@@ -28,8 +29,9 @@ definition is projected into provider task creation and its prompt sections are
 registered through the same Host prompt runtime behind `ctx.systemPrompt`.
 
 Every `target.mode=create` call creates a new task and binding, even when the
-same plugin owner and immutable AgentDefinition identity are used by multiple
-Chatroom Rooms. Only `target.mode=bind` may reuse an active binding for its
+same plugin owner and immutable AgentDefinition identity are used repeatedly.
+One bound client may concurrently manage multiple definitions, tasks, bindings,
+and subscriptions. Only `target.mode=bind` may reuse an active binding for its
 explicit opaque task. Host task handles are random opaque values backed by a
 private generation-local session map; serialized bindings are correlation data
 and never authorize access.
@@ -42,9 +44,16 @@ AgentLoop pages:
 - observed approval pending and resolved states;
 - binding created/bound/closed and turn started/completed/failed lifecycle.
 
-Subscriptions install their live listener after a fixed replay snapshot and
+Each subscription installs its live listener after a fixed replay snapshot and
+maintains its own cursor. Subscription descriptors, pages, and every projected
+message, approval, and lifecycle event carry the exact binding identity. They
 are fenced by binding generation, plugin owner, unsubscribe, fiber disposal,
 and runtime disposal.
+
+The Host does not define or retain Room, member, leader, or consumer run-list
+state, and it does not aggregate a Room timeline. A consumer may map one opaque
+task binding to its own run record and use an event's optional `turn` only to
+correlate one submitted turn. That mapping remains consumer-owned.
 
 ## Existing authority reused
 
@@ -65,12 +74,13 @@ An internal Chatroom plugin:
 
 1. declares the existing task create/read/turn submit capabilities;
 2. injects `agentLoop` and submits a complete AgentDefinition catalog;
-3. retains the returned active `AgentLoopTaskBinding` as opaque correlation
-   state alongside that exact Room, and does not call create again for it;
-4. subscribes from `-1` (or its last processed sequence), then sends text with
-   the Room's saved binding;
-5. projects message, approval, and lifecycle events into its own data/UI;
+3. retains every returned active `AgentLoopTaskBinding` as opaque correlation
+   state in its own domain model;
+4. subscribes to each binding from `-1` (or that binding's last processed
+   sequence), then sends text with the exact saved binding;
+5. maps each exact-binding message, approval, and lifecycle event into its own
+   data/UI;
 6. unsubscribes and disposes with its fiber.
 
-Chatroom must not infer provider sessions from `binding.task`, move room data
-into Host state, or ask the Host to render plugin UI.
+Chatroom must not infer provider sessions from `binding.task`, move room,
+member, run-list, or leader state into AgentLoop, or provide conversation DOM.

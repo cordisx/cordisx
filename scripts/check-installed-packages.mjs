@@ -163,8 +163,10 @@ if ('handle' in hostResult) hostResult.handle.unsubscribe()
 import type { Context } from '@deepseek-ai/cordis'
 import type {
   AgentDefinition,
+  AgentLoopCommand,
   AgentLoopCreateOrBindResult,
   AgentLoopSendResult,
+  AgentLoopTaskBinding,
   BoundAgentLoopClient,
   CordisXNavigationCollectionSnapshot,
   CordisXNavigationCollectionSource,
@@ -174,6 +176,10 @@ declare const ctx: Context
 declare const definition: AgentDefinition
 declare const created: AgentLoopCreateOrBindResult
 declare const sent: AgentLoopSendResult
+declare const createCommands: readonly [
+  Extract<AgentLoopCommand, { type: 'create-or-bind' }>,
+  Extract<AgentLoopCommand, { type: 'create-or-bind' }>,
+]
 declare const snapshot: CordisXNavigationCollectionSnapshot
 declare const source: CordisXNavigationCollectionSource
 
@@ -183,6 +189,26 @@ if (created.status === 'accepted') created.binding.task satisfies string
 else created.authorization.state satisfies 'denied' | 'unavailable'
 if (sent.status === 'accepted') sent.messageId satisfies string
 else sent.authorization.state satisfies 'denied' | 'unavailable'
+async function manageMultipleBindings(): Promise<Map<string, { binding: AgentLoopTaskBinding; cursor: number }>> {
+  const results = await Promise.all(createCommands.map(command => ctx.agentLoop.createOrBind(command)))
+  const bindings = results.flatMap(result => result.status === 'accepted' ? [result.binding] : [])
+  const subscriptions = await Promise.all(bindings.map(binding => ctx.agentLoop.subscribe(binding, -1)))
+  const byBinding = new Map<string, { binding: AgentLoopTaskBinding; cursor: number }>()
+  for (const result of subscriptions) {
+    if (result.status !== 'accepted') continue
+    byBinding.set(result.handle.subscription.binding.bindingId, {
+      binding: bindings.find(binding => binding.binding.bindingId === result.handle.subscription.binding.bindingId)!,
+      cursor: result.handle.subscription.afterSequence,
+    })
+  }
+  if (bindings[0] !== undefined) {
+    await ctx.agentLoop.createOrBind({
+      ...createCommands[0], commandId: 'bind-existing-task', target: { mode: 'bind', task: bindings[0].task },
+    })
+  }
+  return byBinding
+}
+manageMultipleBindings satisfies () => Promise<Map<string, { binding: AgentLoopTaskBinding; cursor: number }>>
 snapshot.items.map(item => item.route.params?.roomId)
 ctx.slots.registerCollection({
   name: 'sidebar.navigation.items',
@@ -285,7 +311,7 @@ ctx.slots.registerCollection({
   await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
   await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
 
-  console.log('[cordisx] installed tarballs verified: licenses, combined AgentLoop and navigation collection, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run')
+  console.log('[cordisx] installed tarballs verified: licenses, combined multi-binding AgentLoop and navigation collection, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run')
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }

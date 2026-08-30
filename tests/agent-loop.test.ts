@@ -47,6 +47,8 @@ function createCommand(definitions: readonly [CordisXAgentDefinition, ...CordisX
 class FakeHost implements CordisXAgentLoopHost {
   readonly created: CordisXResolvedAgentDefinition[] = []
   readonly sent: unknown[] = []
+  readonly lifecycleByTask = new Map<string, CordisXAgentLoopLifecycleEvent[]>()
+  readonly lifecycleReads: [task: string, afterSequence: number][] = []
   lifecycleEvents: CordisXAgentLoopLifecycleEvent[] = []
 
   async prepare() { return { ok: true as const, value: { model: { providerId: 'alpha', modelId: 'model-1' }, cwd: '/workspace' } } }
@@ -60,8 +62,9 @@ class FakeHost implements CordisXAgentLoopHost {
     this.sent.push(content)
     return { ok: true as const, value: { messageId: `message:${task.task}`, turn: `turn:${task.task}` } }
   }
-  async lifecycle(_task: unknown, afterSequence: number) {
-    const events = this.lifecycleEvents.filter(event => event.sequence > afterSequence)
+  async lifecycle(task: { readonly task: string }, afterSequence: number) {
+    this.lifecycleReads.push([task.task, afterSequence])
+    const events = (this.lifecycleByTask.get(task.task) ?? this.lifecycleEvents).filter(event => event.sequence > afterSequence)
     return { nextAfterSequence: events.at(-1)?.sequence ?? afterSequence, events }
   }
 }
@@ -182,49 +185,103 @@ describe('Host-bound AgentLoop', () => {
     broker.dispose()
   })
 
-  it('creates isolated tasks for two Rooms using the same owner and AgentDefinition', async () => {
+  it('concurrently manages multiple definitions, task bindings, subscriptions, and per-binding cursors', async () => {
+    vi.useFakeTimers()
     const host = new FakeHost()
     const broker = new CordisXAgentLoopBroker(host)
     const client = broker.bind({ ownerKey: 'chatroom-plugin', active: () => true, authorize: allowed() })
-    const command = createCommand([definition('shared-room-assistant')])
-    const first = await client.createOrBind(command)
-    const second = await client.createOrBind({ ...command, commandId: 'create-room-2' })
-    if (first.status !== 'accepted' || second.status !== 'accepted') throw new Error('Room bindings were not accepted')
+    const analystCommand = createCommand([definition('analyst')])
+    const reviewerCommand = { ...createCommand([definition('reviewer')]), commandId: 'create-reviewer' }
+    const [first, second] = await Promise.all([
+      client.createOrBind(analystCommand),
+      client.createOrBind(reviewerCommand),
+    ])
+    if (first.status !== 'accepted' || second.status !== 'accepted') throw new Error('Agent bindings were not accepted')
     expect(first.binding.binding.bindingId).not.toBe(second.binding.binding.bindingId)
     expect(first.binding.task).not.toBe(second.binding.task)
+    expect(first.binding.definition).toEqual({ agentId: 'analyst', revision: 'r1' })
+    expect(second.binding.definition).toEqual({ agentId: 'reviewer', revision: 'r1' })
     expect(host.created).toHaveLength(2)
 
-    const firstSubscription = await client.subscribe(first.binding, -1)
-    const secondSubscription = await client.subscribe(second.binding, -1)
-    if (firstSubscription.status !== 'accepted' || secondSubscription.status !== 'accepted') throw new Error('Room subscriptions were not accepted')
+    const rebound = await client.createOrBind({
+      ...analystCommand,
+      commandId: 'bind-analyst-task',
+      target: { mode: 'bind', task: first.binding.task },
+    })
+    expect(rebound).toMatchObject({ status: 'accepted', binding: first.binding })
+
+    const [firstSubscription, secondSubscription] = await Promise.all([
+      client.subscribe(first.binding, -1),
+      client.subscribe(second.binding, -1),
+    ])
+    if (firstSubscription.status !== 'accepted' || secondSubscription.status !== 'accepted') throw new Error('Agent subscriptions were not accepted')
     const firstEvents = firstSubscription.handle.pages[Symbol.asyncIterator]()
     const secondEvents = secondSubscription.handle.pages[Symbol.asyncIterator]()
-    await firstEvents.next()
-    await secondEvents.next()
+    const [firstReplay, secondReplay] = await Promise.all([firstEvents.next(), secondEvents.next()])
+    expect(firstReplay.value?.subscription.binding).toEqual(first.binding.binding)
+    expect(secondReplay.value?.subscription.binding).toEqual(second.binding.binding)
+    expect(firstReplay.value?.events.every(event => JSON.stringify(event.binding) === JSON.stringify(first.binding.binding))).toBe(true)
+    expect(secondReplay.value?.events.every(event => JSON.stringify(event.binding) === JSON.stringify(second.binding.binding))).toBe(true)
 
-    await client.send({
-      $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V1, contract: 'cordisx.agent-loop-command/v1', schemaVersion: 1,
-      commandId: 'send-room-1', type: 'send', binding: first.binding, content: [{ kind: 'text', text: 'Room one' }],
-    })
-    expect((await firstEvents.next()).value?.events).toMatchObject([{ type: 'message', message: { content: [{ text: 'Room one' }] } }])
-    await firstEvents.next()
-    const pendingSecondRoom = secondEvents.next()
-    const crossed = await Promise.race([
-      pendingSecondRoom.then(() => true),
-      new Promise<false>(resolve => setTimeout(() => resolve(false), 25)),
+    await Promise.all([
+      client.send({
+        $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V1, contract: 'cordisx.agent-loop-command/v1', schemaVersion: 1,
+        commandId: 'send-analyst', type: 'send', binding: first.binding, content: [{ kind: 'text', text: 'Analyze' }],
+      }),
+      client.send({
+        $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V1, contract: 'cordisx.agent-loop-command/v1', schemaVersion: 1,
+        commandId: 'send-reviewer', type: 'send', binding: second.binding, content: [{ kind: 'text', text: 'Review' }],
+      }),
     ])
-    expect(crossed).toBe(false)
-
-    await client.send({
-      $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V1, contract: 'cordisx.agent-loop-command/v1', schemaVersion: 1,
-      commandId: 'send-room-2', type: 'send', binding: second.binding, content: [{ kind: 'text', text: 'Room two' }],
-    })
-    expect((await pendingSecondRoom).value?.events).toMatchObject([{ type: 'message', message: { content: [{ text: 'Room two' }] } }])
+    const [firstMessage, secondMessage] = await Promise.all([firstEvents.next(), secondEvents.next()])
+    const [firstStarted, secondStarted] = await Promise.all([firstEvents.next(), secondEvents.next()])
+    expect(firstMessage.value).toMatchObject({ subscription: { binding: first.binding.binding }, events: [{ binding: first.binding.binding, type: 'message', message: { content: [{ text: 'Analyze' }] } }] })
+    expect(secondMessage.value).toMatchObject({ subscription: { binding: second.binding.binding }, events: [{ binding: second.binding.binding, type: 'message', message: { content: [{ text: 'Review' }] } }] })
+    expect(firstStarted.value).toMatchObject({ events: [{ binding: first.binding.binding, type: 'lifecycle', lifecycle: { phase: 'turn.started' } }] })
+    expect(secondStarted.value).toMatchObject({ events: [{ binding: second.binding.binding, type: 'lifecycle', lifecycle: { phase: 'turn.started' } }] })
     expect(host.sent).toEqual([
-      [{ kind: 'text', text: 'Room one' }],
-      [{ kind: 'text', text: 'Room two' }],
+      [{ kind: 'text', text: 'Analyze' }],
+      [{ kind: 'text', text: 'Review' }],
     ])
+
+    host.lifecycleByTask.set(first.binding.task, [{
+      sequence: 1, session: { providerId: 'alpha', remoteSessionId: 'session-1' }, turnId: 'turn:analyst', type: 'approval.required',
+      approval: { approvalId: 'approval-analyst', kind: 'command', state: 'pending' },
+    }])
+    host.lifecycleByTask.set(second.binding.task, [{
+      sequence: 1, session: { providerId: 'alpha', remoteSessionId: 'session-2' }, turnId: 'turn:reviewer', type: 'turn.completed',
+      output: [{ type: 'text', text: 'Reviewer reply' }],
+    }])
+    await vi.advanceTimersByTimeAsync(250)
+    const analystApproval = await firstEvents.next()
+    const reviewerReply = await secondEvents.next()
+    const reviewerCompleted = await secondEvents.next()
+    expect(analystApproval.value).toMatchObject({ events: [{ binding: first.binding.binding, type: 'approval', approval: { approvalId: 'approval-analyst', state: 'pending' } }] })
+    expect(reviewerReply.value).toMatchObject({ events: [{ binding: second.binding.binding, type: 'message', message: { role: 'assistant', content: [{ text: 'Reviewer reply' }] } }] })
+    expect(reviewerCompleted.value).toMatchObject({ events: [{ binding: second.binding.binding, type: 'lifecycle', lifecycle: { phase: 'turn.completed' } }] })
+
+    host.lifecycleByTask.set(first.binding.task, [
+      ...host.lifecycleByTask.get(first.binding.task)!,
+      { sequence: 2, session: { providerId: 'alpha', remoteSessionId: 'session-1' }, turnId: 'turn:analyst', type: 'approval.resolved', approval: { approvalId: 'approval-analyst', kind: 'command', state: 'resolved', outcome: 'approved' } },
+    ])
+    host.lifecycleByTask.set(second.binding.task, [
+      ...host.lifecycleByTask.get(second.binding.task)!,
+      { sequence: 2, session: { providerId: 'alpha', remoteSessionId: 'session-2' }, turnId: 'turn:reviewer-2', type: 'turn.failed', failure: { code: 'REVIEW_FAILED', retryable: true } },
+    ])
+    await vi.advanceTimersByTimeAsync(250)
+    expect((await firstEvents.next()).value).toMatchObject({ events: [{ binding: first.binding.binding, type: 'approval', approval: { state: 'resolved', outcome: 'approved' } }] })
+    expect((await secondEvents.next()).value).toMatchObject({ events: [{ binding: second.binding.binding, type: 'lifecycle', lifecycle: { phase: 'turn.failed' } }] })
+    expect(host.lifecycleReads).toContainEqual([first.binding.task, 1])
+    expect(host.lifecycleReads).toContainEqual([second.binding.task, 1])
+
+    const stale = await client.subscribe({
+      ...first.binding,
+      binding: { ...first.binding.binding, generation: first.binding.binding.generation + 1 },
+    }, -1)
+    expect(stale).toMatchObject({ status: 'unavailable', authorization: { code: 'task-unavailable' } })
     client.dispose()
+    expect((await firstEvents.next()).value).toMatchObject({ events: [{ binding: first.binding.binding, type: 'lifecycle', lifecycle: { phase: 'binding.closed' } }] })
+    expect((await secondEvents.next()).value).toMatchObject({ events: [{ binding: second.binding.binding, type: 'lifecycle', lifecycle: { phase: 'binding.closed' } }] })
     broker.dispose()
   })
 
