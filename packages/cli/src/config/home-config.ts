@@ -110,6 +110,12 @@ export interface HomeConfigPublisherGrantIssuer {
   readonly publicKeySpki: string
 }
 
+/** Launcher-owned Marketplace trust root. Renderer storage is never authoritative. */
+export interface HomeConfigMarketplaceTrustSource {
+  readonly url: string
+  readonly enabled: boolean
+}
+
 export interface HomeConfig {
   readonly version: 1
   readonly defaultApp: string
@@ -117,6 +123,7 @@ export interface HomeConfig {
   readonly plugins: readonly HomeConfigPlugin[]
   readonly permissions: readonly CordisXPersistedPermissionPolicyRecord[]
   readonly publisherGrantIssuers: readonly HomeConfigPublisherGrantIssuer[]
+  readonly marketplaceTrustSources: readonly HomeConfigMarketplaceTrustSource[]
   readonly apps: Readonly<Record<string, HomeConfigApp>>
 }
 
@@ -148,6 +155,8 @@ const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9
 const DEFAULT_LOCK_TIMEOUT_MS = 2_000
 const DEFAULT_LOCK_RETRY_MS = 25
 const DEFAULT_LOCK_STALE_MS = 30_000
+const MAX_MARKETPLACE_TRUST_SOURCES = 8
+export const DEFAULT_MARKETPLACE_TRUST_SOURCE = 'https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json'
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -447,10 +456,31 @@ function parsePublisherGrantIssuer(value: unknown, index: number): HomeConfigPub
   return { id, keyId, environment: issuer.environment, publicKeySpki }
 }
 
+function parseMarketplaceTrustSource(value: unknown, index: number): HomeConfigMarketplaceTrustSource {
+  const label = `config.marketplaceTrustSources[${index}]`
+  const source = record(value, label)
+  rejectUnknownKeys(source, ['url', 'enabled'], label)
+  const text = nonEmptyString(source.url, `${label}.url`)
+  const url = new URL(text)
+  if (
+    url.protocol !== 'https:'
+    || url.username !== ''
+    || url.password !== ''
+    || url.search !== ''
+    || url.hash !== ''
+  ) {
+    throw new Error(`${label}.url must be an HTTPS URL without credentials, query, or fragment`)
+  }
+  if (url.pathname !== '/') url.pathname = url.pathname.replace(/\/+$/, '')
+  if (url.href !== text) throw new Error(`${label}.url must be canonical`)
+  if (typeof source.enabled !== 'boolean') throw new Error(`${label}.enabled must be a boolean`)
+  return { url: text, enabled: source.enabled }
+}
+
 /** Strictly validate and normalize a version-1 CordisX home configuration. */
 export function parseHomeConfig(value: unknown): HomeConfig {
   const config = record(value, 'config')
-  rejectUnknownKeys(config, ['version', 'defaultApp', 'providers', 'plugins', 'permissions', 'publisherGrantIssuers', 'apps'], 'config')
+  rejectUnknownKeys(config, ['version', 'defaultApp', 'providers', 'plugins', 'permissions', 'publisherGrantIssuers', 'marketplaceTrustSources', 'apps'], 'config')
   if (config.version !== 1) throw new Error('config.version must be 1')
   const defaultApp = portableId(config.defaultApp, 'config.defaultApp')
   if (config.providers !== undefined && !Array.isArray(config.providers)) throw new Error('config.providers must be an array')
@@ -486,6 +516,21 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     if (seenIssuerKeys.has(key)) throw new Error(`duplicate PublisherGrant issuer key: ${key}`)
     seenIssuerKeys.add(key)
   }
+  if (config.marketplaceTrustSources !== undefined && !Array.isArray(config.marketplaceTrustSources)) {
+    throw new Error('config.marketplaceTrustSources must be an array')
+  }
+  const marketplaceTrustSources = (config.marketplaceTrustSources ?? [{
+    url: DEFAULT_MARKETPLACE_TRUST_SOURCE,
+    enabled: true,
+  }]).map(parseMarketplaceTrustSource)
+  if (marketplaceTrustSources.length > MAX_MARKETPLACE_TRUST_SOURCES) {
+    throw new Error(`config.marketplaceTrustSources must contain at most ${MAX_MARKETPLACE_TRUST_SOURCES} sources`)
+  }
+  const seenMarketplaceTrustSources = new Set<string>()
+  for (const source of marketplaceTrustSources) {
+    if (seenMarketplaceTrustSources.has(source.url)) throw new Error(`duplicate Marketplace trust source: ${source.url}`)
+    seenMarketplaceTrustSources.add(source.url)
+  }
   const rawApps = record(config.apps, 'config.apps')
   const apps: Record<string, HomeConfigApp> = Object.create(null) as Record<string, HomeConfigApp>
   for (const [appId, rawApp] of Object.entries(rawApps)) {
@@ -493,7 +538,7 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     apps[appId] = parseApp(rawApp, `config.apps.${appId}`)
   }
   if (!Object.hasOwn(apps, defaultApp)) throw new Error(`config.defaultApp references missing app: ${defaultApp}`)
-  return { version: 1, defaultApp, providers, plugins, permissions, publisherGrantIssuers, apps }
+  return { version: 1, defaultApp, providers, plugins, permissions, publisherGrantIssuers, marketplaceTrustSources, apps }
 }
 
 /** Return a new deterministic configuration for first launch or non-interactive setup. */
@@ -505,6 +550,7 @@ export function createDefaultHomeConfig(): HomeConfig {
     plugins: [],
     permissions: [],
     publisherGrantIssuers: [],
+    marketplaceTrustSources: [{ url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true }],
     apps: {
       codex: {
         defaultProfile: 'default',

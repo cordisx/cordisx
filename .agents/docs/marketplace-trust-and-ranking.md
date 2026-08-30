@@ -35,8 +35,23 @@ dimension changes sandbox, lifecycle, or installation review.
 
 ## Trust root and revocation
 
-The Host accepts discovery metadata from configured HTTPS feeds, but projects
-Official or Certified state only when all of these conditions hold:
+The renderer accepts discovery metadata from its configured HTTPS feeds for
+display. That renderer source list, its `localStorage`, Marketplace model,
+bridge, globals, and primordials are not authorization inputs: bundled plugins
+share the current renderer realm and can mutate them.
+
+Certified permission eligibility instead comes from the Launcher-private
+`LauncherMarketplaceCertifiedAuthority`. Its enabled roots live in the
+Host-owned `config.json` `marketplaceTrustSources` field and its last-good feed,
+digest, monotonic `generatedAt` watermark, divergence tombstone, projection
+revision, and expiry state live under
+`CORDISX_HOME/state/marketplace-certified/<profile>.v1.json`. Both directories
+and files use the existing real-path/private-mode/atomic-write policy. No CDP
+binding accepts a root, feed, projection, attestation, Official designation, or
+certification payload for this authority.
+
+The private authority projects Certified state only when all of these
+conditions hold:
 
 1. the fetched URL is in the Host's configured trust-root set;
 2. `trust.root` is exactly the fetched canonical URL;
@@ -52,32 +67,48 @@ records, future review times, and invalid active/revoked/expired intervals make
 the feed invalid. Plugin manifest fields named `official`, `certified`, or
 similar remain unknown manifest fields and cannot establish trust.
 
-Each reload evaluates a fresh feed snapshot. Revoked and expired records are
-validated but not projected. An updated feed can therefore remove the
-Certified marker without changing an independent Official marker. The Host
-also compares active certification expiry with local time so a stale feed
-cannot preserve an already expired badge. `feed.generatedAt` is the projection
-revision: a replacement older than the last-good trusted feed is rejected, so
-an older active record cannot replay over a later revocation.
+Each refresh re-reads Host config and evaluates fresh feeds with at most eight
+roots, two concurrent fetches by default, a ten-second timeout, and the existing
+two-MiB public-HTTPS/SSRF boundary. Redirecting to an unconfigured final URL is
+not accepted. A newer valid feed atomically replaces the last-good snapshot;
+revoked, removed, mismatched, and expired records are not projected. An older
+feed cannot cross the durable `generatedAt` fence. Two different bodies at one
+revision tombstone the root and require a strictly newer valid feed. A
+successful malformed, self-asserted, identity-mismatched, or oversized response
+also tombstones the current projection; a transport failure may retain the
+last-good feed only until its independent local expiry. Source disable/removal
+tombstones it immediately while retaining the rollback watermark, and re-enable
+requires a successful fresh fetch. The persistent source history is bounded;
+exhaustion fails closed rather than forgetting a rollback fence.
 
-Permission consumers use the existing Host-owned Marketplace model as an
-invalidation stream, not as an authorization event payload:
+Permission and package-lifecycle consumers use this Launcher API, not the
+renderer Marketplace model:
 
 ```ts
-MarketplaceModel.snapshot(): MarketplaceSnapshot
-MarketplaceModel.subscribe(listener: () => void): () => void
-MarketplaceCatalogPlugin.certifiedPermission?: MarketplaceCertifiedPermissionProjectionV1
+LauncherMarketplaceCertifiedAuthority.open(options): Promise<LauncherMarketplaceCertifiedAuthority>
+authority.lookup({ source, pluginId, version, integrity }): Promise<{
+  revision: number
+  projection?: MarketplaceCertifiedPermissionProjectionV1
+}>
+authority.snapshot(): { revision: number; projections: readonly MarketplaceCertifiedPermissionProjectionV1[] }
+authority.subscribe(listener: (revision: number) => void): () => void
+authority.refresh(): Promise<LauncherMarketplaceCertifiedSnapshot>
 ```
 
-After every subscription callback, the consumer re-reads `snapshot()` and
-selects the current plugin by canonical `identity`. A missing
-`certifiedPermission` is an immediate removal of the eligibility input. A
-changed `fingerprint` or `revision` replaces the prior input. Feed reload,
-source enable/disable/removal, trust revocation, and last-good expiry all pass
-through this same snapshot invalidation path. The callback deliberately carries
-no projection or grant payload, so a consumer cannot retain an event object
-after the Marketplace model has advanced. The projection's `expiresAt` remains
-an independent local deadline even when no network refresh occurs.
+`lookup()` strictly rejects unknown keys such as `official`, `certification`,
+or `attestation`, refreshes private config/feed state, and matches canonical
+`source + pluginId + version + sha256 integrity`. Plan and apply therefore each
+re-read exact state. After every subscription callback, a consumer re-reads
+`snapshot()` or `lookup()`; the callback carries only the monotonically
+increasing authority revision, never a projection or grant payload. Source
+config watching, explicit refresh, valid feed replacement, revocation,
+identity/digest mismatch, equal-revision divergence, and the local expiry timer
+all use that revision-only invalidation path. Missing projection, changed
+projection `fingerprint`/`revision`, or elapsed `expiresAt` removes eligibility.
+
+The renderer `MarketplaceModel.snapshot()/subscribe()` remains the UI discovery
+and badge/filter invalidation seam only. It must never be wired into
+PermissionBroker or PackageLifecycleAuthority decisions.
 
 ## Search contract
 

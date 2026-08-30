@@ -681,6 +681,32 @@ so the public-HTTPS, address, redirect, concurrency, timeout, and size limits
 are damage-reduction boundaries rather than isolation from a malicious bundled
 plugin.
 
+That renderer bridge and the renderer Marketplace model are display-only trust
+projections. They are not permission or lifecycle authorities because a bundled
+plugin shares the renderer realm and may mutate `localStorage`, bridge/global
+objects, or primordials before Manager initialization. Exact Certified
+eligibility is instead evaluated by
+`launcher/marketplace-certified-authority.ts`. It loads at most eight enabled
+roots from Host-owned home config, fetches and parses feeds in the Launcher
+realm with bounded public-HTTPS requests, and exposes only strict
+`source + pluginId + version + sha256 integrity` lookup plus revision-only
+subscription. Official identity never enters this API.
+
+The authority persists the last valid feed body/digest, a non-decreasing
+`generatedAt` fence, equal-revision divergence state, projection revision, and
+local expiry under the selected profile in
+`CORDISX_HOME/state/marketplace-certified`. State is private, bounded,
+symlink-rejecting, and atomically replaced. A source disable/removal clears its
+projection while retaining the rollback fence; a newer revocation replaces an
+older active feed; an older replay cannot restore it; and an active
+certification disappears at `expiresAt` even without network activity. A
+successful malformed or identity-mismatched feed fails closed. Transport
+failure may retain only a still-unexpired last-good projection. No renderer RPC
+can submit roots, feed bodies, Official/Certified assertions, projections, or
+attestations to this authority. PermissionBroker and PackageLifecycleAuthority
+must re-read the private exact lookup at plan/apply and treat absence or any
+fingerprint/revision change as revocation.
+
 Manifest metadata, dependency graphs, compatibility declarations, immutable
 local packages, and activation transactions are the next staged delivery in
 [`dynamic-plugin-lifecycle.md`](dynamic-plugin-lifecycle.md). Publisher
