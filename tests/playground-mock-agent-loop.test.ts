@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { TextDecoder, TextEncoder } from 'node:util'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -329,13 +330,15 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     </body></html>`, { runScripts: 'dangerously', url: 'http://127.0.0.1/' })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
     Object.defineProperty(dom.window, 'structuredClone', { value: globalThis.structuredClone })
+    Object.defineProperty(dom.window, 'TextEncoder', { value: TextEncoder })
+    Object.defineProperty(dom.window, 'TextDecoder', { value: TextDecoder })
     dom.window.eval(bundle)
     await (dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
     const fixture = (dom.window as unknown as { __cordisxAgentLoopRuntimeFixture?: { client: BoundAgentLoopClient } }).__cordisxAgentLoopRuntimeFixture
     if (fixture === undefined) throw new Error('ctx.agentLoop fixture did not mount')
-    const lead = definition('lead', { promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Lead prompt' }] })
+    const lead = definition('chatroom.generalist', { promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Lead prompt' }] })
     const created = await fixture.client.createOrBind(createCommand('bundle-create', lead, [lead]))
-    if (created.status !== 'accepted') throw new Error('bundled Simulator create was not accepted')
+    if (created.status !== 'accepted') throw new Error(`bundled Simulator create was not accepted: ${JSON.stringify(created)}`)
     const subscribed = await fixture.client.subscribe(created.binding, -1)
     if (subscribed.status !== 'accepted') throw new Error('bundled Simulator subscribe was not accepted')
     const pages = subscribed.handle.pages[Symbol.asyncIterator]()
@@ -355,7 +358,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
       { type: 'lifecycle', lifecycle: { phase: 'turn.completed' } },
     ])
     const trace = (dom.window as unknown as { __cordisxRuntime?: { playgroundMockAgentLoop?(): { tasks: readonly { identity: { agentId: string } }[] }; dispose(): Promise<void> } }).__cordisxRuntime?.playgroundMockAgentLoop?.()
-    expect(trace?.tasks).toMatchObject([{ identity: { agentId: 'lead' } }])
+    expect(trace?.tasks).toMatchObject([{ identity: { agentId: 'chatroom.generalist' } }])
     expect((dom.window as unknown as { __cordisxProviderRequestV1?: unknown }).__cordisxProviderRequestV1).toBeUndefined()
     await (dom.window as unknown as { __cordisxRuntime?: { dispose(): Promise<void> } }).__cordisxRuntime?.dispose()
     dom.window.close()
