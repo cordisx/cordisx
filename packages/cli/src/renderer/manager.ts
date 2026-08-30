@@ -40,6 +40,7 @@ import {
   type MarketplaceSourceSnapshot,
   type MarketplaceStorage,
 } from './marketplace.js'
+import type { MarketplaceCertificationRecord } from './marketplace-trust.js'
 import { highlightSafeMarkdownCodeBlocks, renderSafeMarkdown } from './markdown.js'
 import type { CommandSnapshot } from './commands.js'
 import { resolveManagerTriggerTarget } from './host-probes.js'
@@ -1100,6 +1101,8 @@ const MANAGER_STYLES = `
   .cxm-plugin-name-row { display: flex; min-width: 0; align-items: center; gap: 6px; }
   .cxm-plugin-name-row > .cxm-plugin-name { min-width: 0; }
   .cxm-marketplace-trust-badges { display: inline-flex; flex: none; align-items: center; gap: 4px; }
+  .cxm-marketplace-title-row { display: flex; min-width: 0; align-items: center; gap: 6px; }
+  .cxm-marketplace-title-row > .cxc-title { min-width: 0; }
   .cxm-marketplace-trust-badge {
     display: inline-flex;
     align-items: center;
@@ -1925,7 +1928,26 @@ function marketplaceTextTierLabel(tier: MarketplaceRankingExplanation['textTier'
 }
 
 function marketplaceRankingDescription(ranking: MarketplaceRankingExplanation): string {
-  return `排序依据：${marketplaceTextTierLabel(ranking.textTier)}；官方身份加权 +${ranking.officialBoost}；认证状态加权 +${ranking.certificationBoost}。信任加权只在同一文本相关性层级内生效。`
+  return `排序依据：${marketplaceTextTierLabel(ranking.textTier)}；官方产品优先级 +${ranking.officialPriority}。官方优先级只在同一文本相关性层级内生效；认证状态不参与排序。`
+}
+
+function marketplaceCertifiedDetailCopy(
+  certification: MarketplaceCertificationRecord,
+  version: string,
+  chinese: boolean,
+): readonly [string, string, string] {
+  const policy = `${certification.reviewPolicy.id} ${certification.reviewPolicy.version}`
+  return chinese
+    ? [
+        `CordisX 已按策略 ${policy} 审核当前 ${version} 版本的明确制品，并认定其代码符合该版本策略。新版本或制品变化后必须重新认证。`,
+        '认证不是绝对安全保证，也不放宽沙箱、生命周期或安装审核。仅权限目录明确标记的界面能力可免去显式确认；Host 仍会按当前范围和运行实例创建可撤销、可审计的授权，其他权限照常确认。',
+        'v1 信任根是受保护的 Marketplace 合入链；当前不声称存在制品密码学签名。',
+      ]
+    : [
+        `CordisX reviewed the exact artifact for version ${version} under policy ${policy} and determined that its code conforms to that policy version. A new version or changed artifact requires a new certification.`,
+        'Certification is not an absolute safety guarantee and does not relax sandbox, lifecycle, or installation review. Only interface capabilities explicitly marked in the permission catalog may omit explicit confirmation. The Host still creates a revocable, audited authorization for the current scope and runtime instance; every other permission prompts normally.',
+        'The v1 trust root is the protected Marketplace merge chain; no cryptographic artifact signature is claimed.',
+      ]
 }
 
 function activateManagerListRow(row: HTMLButtonElement, action: () => void): void {
@@ -5609,8 +5631,29 @@ export function installCordisXManager(
         item.dataset.marketplaceOfficial = String(plugin.official !== undefined)
         item.dataset.marketplaceCertified = String(plugin.certification !== undefined)
         item.dataset.marketplaceRankingTier = ranking.textTier
-        item.dataset.marketplaceRankingTrustBoost = String(ranking.boundedTrustBoost)
+        item.dataset.marketplaceRankingOfficialPriority = String(ranking.officialPriority)
         item.dataset.marketplaceRankingExplanation = marketplaceRankingDescription(ranking)
+        const title = item.querySelector<HTMLElement>('.cxc-title')
+        if (title !== null && (plugin.official !== undefined || plugin.certification !== undefined)) {
+          const titleRow = create(document, 'span', 'cxm-marketplace-title-row')
+          const badges = create(document, 'span', 'cxm-marketplace-trust-badges')
+          if (plugin.official !== undefined) badges.append(createMarketplaceTrustBadge(
+            'official',
+            copy('marketplace.official'),
+            productLocale(managerSnapshot.localization.locale) === 'zh-CN'
+              ? 'CordisX 官方发布者身份；只影响 Marketplace 身份、筛选与排序，不改变权限。'
+              : 'CordisX Official publisher identity. It affects Marketplace identity, filtering, and ordering only, never permissions.',
+          ))
+          if (plugin.certification !== undefined) badges.append(createMarketplaceTrustBadge(
+            'certified',
+            copy('marketplace.certified'),
+            productLocale(managerSnapshot.localization.locale) === 'zh-CN'
+              ? 'CordisX 已审核当前版本的明确制品；不参与排序，也不代表绝对安全。'
+              : 'CordisX reviewed this exact versioned artifact. It does not affect ordering or guarantee absolute safety.',
+          ))
+          title.replaceWith(titleRow)
+          titleRow.append(title, badges)
+        }
       }
     })
     const search = view.element.querySelector<HTMLElement>('.cxc-search')
@@ -5632,6 +5675,7 @@ export function installCordisXManager(
       return
     }
     const metadata = projectMarketplacePlugin(plugin, managerSnapshot.localization.locale)
+    const chinese = productLocale(managerSnapshot.localization.locale) === 'zh-CN'
     const activeFacet = routeState.kind === 'marketplace' ? routeState.facet : 'overview'
     content.append(createLocalTabs(document, localizeTabs(MARKETPLACE_DETAIL_TABS), activeFacet, 'data-marketplace-detail-tab', (tab) => {
       void navigateRoute({ kind: 'marketplace', identity: identityValue, facet: tab as MarketplaceDetailTab })
@@ -5653,11 +5697,11 @@ export function installCordisXManager(
       }
       panel.append(fields)
       if (plugin.official !== undefined || plugin.certification !== undefined) {
-        panel.append(createSectionTitle(document, 'Marketplace 信任信息'))
+        panel.append(createSectionTitle(document, chinese ? 'Marketplace 身份与审核信息' : 'Marketplace identity and review information'))
         const trustList = create(document, 'div', 'cxm-marketplace-trust-list')
         const appendEvidence = (target: HTMLElement, href: string): void => {
           const evidence = configureExternalLink(create(document, 'a', 'cxm-action cxm-marketplace-trust-evidence'), href)
-          evidence.append(create(document, 'span', undefined, '查看审核证据'), createManagerIcon(document, 'external-link', 'cxm-action-icon'))
+          evidence.append(create(document, 'span', undefined, chinese ? '查看受保护审核证据' : 'View protected review evidence'), createManagerIcon(document, 'external-link', 'cxm-action-icon'))
           target.append(evidence)
         }
         if (plugin.official !== undefined) {
@@ -5665,31 +5709,36 @@ export function installCordisXManager(
           const item = create(document, 'section', 'cxm-marketplace-trust-item')
           item.dataset.marketplaceTrustDimension = 'official'
           const title = create(document, 'div', 'cxm-marketplace-trust-title')
-          title.append(createManagerIcon(document, 'marketplace-official'), create(document, 'span', undefined, '官方'))
+          title.append(createManagerIcon(document, 'marketplace-official'), create(document, 'span', undefined, chinese ? '官方' : 'Official'))
           item.append(
             title,
             create(document, 'p', 'cxm-marketplace-trust-copy', `${official.label.fallback}。${official.description.fallback}`),
-            create(document, 'p', 'cxm-marketplace-trust-copy', '“官方”表示由 CordisX 团队创建并持续维护的发布者身份；它不等于该发布物已经通过版本认证。'),
+            create(document, 'p', 'cxm-marketplace-trust-copy', chinese
+              ? '“官方”表示该插件由 CordisX 团队通过受信任发布者、源码仓库与包命名空间创建并持续维护。它只影响 Marketplace 身份、筛选和同等相关性内的产品排序；不会改变 PermissionBroker 决策，也不自动等于“已认证”。'
+              : 'Official means CordisX creates and maintains this plugin through a trusted publisher, source repository, and package namespace. It affects Marketplace identity, filters, and ordering among equally relevant results only. It never changes PermissionBroker decisions or automatically means Certified.'),
           )
           appendEvidence(item, official.reviewer.evidenceRef)
           trustList.append(item)
         }
         if (plugin.certification !== undefined) {
           const certification = plugin.certification
+          const [reviewSummary, permissionBoundary, trustRootBoundary] = marketplaceCertifiedDetailCopy(certification, plugin.version, chinese)
           const item = create(document, 'section', 'cxm-marketplace-trust-item')
           item.dataset.marketplaceTrustDimension = 'certified'
           const title = create(document, 'div', 'cxm-marketplace-trust-title')
-          title.append(createManagerIcon(document, 'marketplace-certified'), create(document, 'span', undefined, '已认证'))
+          title.append(createManagerIcon(document, 'marketplace-certified'), create(document, 'span', undefined, chinese ? '已认证' : 'Certified'))
           item.append(
             title,
             create(document, 'p', 'cxm-marketplace-trust-copy', `${certification.label.fallback}。${certification.description.fallback}`),
-            create(document, 'p', 'cxm-marketplace-trust-copy', '认证仅适用于当前版本；新版本需重新审核。认证不等于安全保障。'),
+            create(document, 'p', 'cxm-marketplace-trust-copy', reviewSummary),
+            create(document, 'p', 'cxm-marketplace-trust-copy', permissionBoundary),
+            create(document, 'p', 'cxm-marketplace-trust-copy', trustRootBoundary),
           )
           appendEvidence(item, certification.reviewer.evidenceRef)
           trustList.append(item)
         }
         panel.append(trustList)
-        const boundary = create(document, 'div', 'cxm-notice', '认证不等于安全保障。')
+        const boundary = create(document, 'div', 'cxm-notice', chinese ? '认证不是绝对安全保证。' : 'Certification is not an absolute safety guarantee.')
         boundary.dataset.marketplaceTrustBoundary = 'true'
         panel.append(boundary)
       }

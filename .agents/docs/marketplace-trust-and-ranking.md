@@ -21,11 +21,17 @@ records owned by `cordisx-protocol` and the protected catalog owned by
   has no certification until it receives its own record. Third-party artifacts
   can be Certified; an Official artifact is not Certified automatically.
 
-Neither dimension grants plugin permissions, lowers sensitivity, bypasses the
-Permission Broker, changes sandbox or lifecycle gates, or replaces install
-review. Both are provenance shown by the Host. Certification means that the
-exact artifact was reviewed under the named policy; it is not an absolute
-safety guarantee.
+Official never changes plugin permissions. Certification means that the exact
+artifact was reviewed under the named policy and its code conforms to that
+policy version; it is not an absolute safety guarantee. A separate Host-owned
+`MarketplaceCertifiedPermissionProjectionV1` exposes the verified exact
+artifact as a read-only PermissionBroker eligibility input. Only DOM/render
+capabilities explicitly marked `certifiedImplicitApproval` in the permission
+catalog may omit explicit confirmation. The PermissionBroker still owns and
+audits the resulting grant/lease, fences it by scope, profile, generation, and
+certification fingerprint, and revokes it when the projection disappears or
+changes. All other capabilities follow the normal confirmation path. Neither
+dimension changes sandbox, lifecycle, or installation review.
 
 ## Trust root and revocation
 
@@ -50,7 +56,28 @@ Each reload evaluates a fresh feed snapshot. Revoked and expired records are
 validated but not projected. An updated feed can therefore remove the
 Certified marker without changing an independent Official marker. The Host
 also compares active certification expiry with local time so a stale feed
-cannot preserve an already expired badge.
+cannot preserve an already expired badge. `feed.generatedAt` is the projection
+revision: a replacement older than the last-good trusted feed is rejected, so
+an older active record cannot replay over a later revocation.
+
+Permission consumers use the existing Host-owned Marketplace model as an
+invalidation stream, not as an authorization event payload:
+
+```ts
+MarketplaceModel.snapshot(): MarketplaceSnapshot
+MarketplaceModel.subscribe(listener: () => void): () => void
+MarketplaceCatalogPlugin.certifiedPermission?: MarketplaceCertifiedPermissionProjectionV1
+```
+
+After every subscription callback, the consumer re-reads `snapshot()` and
+selects the current plugin by canonical `identity`. A missing
+`certifiedPermission` is an immediate removal of the eligibility input. A
+changed `fingerprint` or `revision` replaces the prior input. Feed reload,
+source enable/disable/removal, trust revocation, and last-good expiry all pass
+through this same snapshot invalidation path. The callback deliberately carries
+no projection or grant payload, so a consumer cannot retain an event object
+after the Marketplace model has advanced. The projection's `expiresAt` remains
+an independent local deadline even when no network refresh occurs.
 
 ## Search contract
 
@@ -61,14 +88,15 @@ score:
 2. apply the optional `Certified only` filter;
 3. assign a text tier: exact identity, exact name, primary prefix, all primary
    terms, all catalog terms, partial catalog, or unqueried browse;
-4. inside that same tier add one bounded point for active Official and one
-   separately reported bounded point for active Certified; and
+4. inside that same tier add one bounded product-priority point for active
+   Official; Certified never changes ordering; and
 5. break any remaining tie by canonical plugin identity.
 
-Trust can move a result by at most two points inside one text tier. It cannot
+Official can move a result by at most one point inside one text tier. It cannot
 move a description-only match ahead of an exact id/name result. The Host keeps
-the text tier, text score, both individual boosts, bounded total, and stable
-identity as a machine-readable explanation used by tests and diagnostics.
+the text tier, text score, Official priority, and stable identity as a
+machine-readable explanation used by tests and diagnostics. Certified remains
+an independent display dimension and `Certified only` filter.
 
 ## Manager projection
 
@@ -81,9 +109,9 @@ descriptions retain `LocalizedText` keys and required fallbacks; ordinary feed
 names and descriptions use Marketplace locale fallback independently.
 
 The browse toolbar exposes one Host-owned `仅看已认证` pressed-state filter.
-Each rendered result retains the text tier, separate Official and Certified
-boosts, bounded total, and human-readable explanation in structured Host data
-attributes. The standard plugin card accessible name includes the two active
+Each rendered result retains the text tier, Official priority, and a
+human-readable explanation that explicitly says Certified does not rank, in
+structured Host data attributes. The standard plugin card accessible name includes the two active
 dimensions independently. The detail projection links the protected evidence
 reference and states the exact policy/version, reviewed version, digest,
 timestamps, protected-merge trust root, and absence of cryptographic
@@ -91,11 +119,11 @@ attestation. A `ManagerModel.marketplaceEligibility` projection is evaluated
 before search scoring so compatibility, visibility, and policy authority stay
 Host-owned instead of becoming feed-controlled ranking inputs.
 
-The consumer does not change installation or activation authority. If package
-installation is added to this browse-only Manager later, it may include the two
-records as provenance in its review screen, but the existing Package Store,
-generation fence, Permission Broker, sandbox boundary, and lifecycle gates
-remain authoritative.
+The Marketplace consumer does not contain a permission allowlist and never
+creates a grant. It publishes only the exact, immutable Certified projection;
+the permission catalog and PermissionBroker remain the sole policy and grant
+authorities. Package Store, generation fences, sandbox, lifecycle, and install
+review remain authoritative.
 
 The real-renderer smoke may project
 `tests/fixtures/marketplace-trust-v3.json` into the existing Marketplace

@@ -1,3 +1,9 @@
+import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import path from 'node:path'
+import Ajv2020 from 'ajv/dist/2020.js'
+import addFormats from 'ajv-formats'
 import { describe, expect, it } from 'vitest'
 import {
   evaluateMarketplaceTrust,
@@ -9,6 +15,20 @@ const SOURCE = 'https://github.com/cordisx/example'
 const DIGEST = `sha256:${'a'.repeat(64)}`
 const OTHER_DIGEST = `sha256:${'b'.repeat(64)}`
 const EVIDENCE = `https://github.com/cordisx/marketplace/commit/${'c'.repeat(40)}`
+const require = createRequire(import.meta.url)
+const protocolRoot = path.resolve(path.dirname(require.resolve('@cordisx/protocol/connector-service/v1')), '..')
+
+async function certifiedProjectionValidator() {
+  const schemas = await Promise.all([
+    'ui-common.v1.schema.json',
+    'plugin-lifecycle-common.v1.schema.json',
+    'marketplace-certified-permission-projection.v1.schema.json',
+  ].map(async name => JSON.parse(await readFile(path.join(protocolRoot, 'schemas', name), 'utf8')) as object))
+  const ajv = new Ajv2020({ allErrors: true, strict: true })
+  addFormats(ajv)
+  for (const schema of schemas) ajv.addSchema(schema)
+  return ajv.getSchema('https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v1.schema.json')!
+}
 
 function plugin(overrides: Partial<MarketplaceTrustPlugin> = {}): MarketplaceTrustPlugin {
   return {
@@ -69,9 +89,14 @@ function certification(
   }
 }
 
-function feed(officialRecords: unknown[], certificationRecords: unknown[], trustRoot = ROOT): Record<string, unknown> {
+function feed(
+  officialRecords: unknown[],
+  certificationRecords: unknown[],
+  trustRoot = ROOT,
+  generatedAt = '2026-08-24T00:00:00Z',
+): Record<string, unknown> {
   return {
-    generatedAt: '2026-08-24T00:00:00Z',
+    generatedAt,
     trust: {
       authority: 'cordisx.marketplace.codeowners/v1',
       root: trustRoot,
@@ -89,6 +114,7 @@ describe('marketplace trust evaluator', () => {
   it('projects Official and Certified independently from the configured trust root', () => {
     const both = evaluateMarketplaceTrust(feed([official()], [certification()]), [plugin()], OPTIONS)
     const officialOnly = evaluateMarketplaceTrust(feed([official()], []), [plugin()], OPTIONS)
+    const ordinary = evaluateMarketplaceTrust(feed([], []), [plugin()], OPTIONS)
     const thirdPartyCertified = evaluateMarketplaceTrust(
       feed([], [certification()]),
       [plugin({ artifact: { ...plugin().artifact!, publisherIdentity: 'npm:@third-party', packageNamespace: '@third-party', packageName: '@third-party/example' } })],
@@ -102,9 +128,43 @@ describe('marketplace trust evaluator', () => {
     expect(officialOnly.byPluginIdentity.get(`${SOURCE}\u0000example`)).toEqual({
       official: expect.objectContaining({ designation: 'cordisx-official' }),
     })
+    expect(ordinary.byPluginIdentity.get(`${SOURCE}\u0000example`)).toBeUndefined()
     expect(thirdPartyCertified.byPluginIdentity.get(`${SOURCE}\u0000example`)).toEqual({
       certification: expect.objectContaining({ level: 'cordisx-certified' }),
+      certifiedPermission: expect.objectContaining({ kind: 'cordisx-certified-permission-eligibility' }),
     })
+  })
+
+  it('projects a formally valid exact immutable permission eligibility input without Official or grant policy', async () => {
+    const result = evaluateMarketplaceTrust(feed([official()], [certification()]), [plugin()], OPTIONS)
+    const projection = result.byPluginIdentity.get(`${SOURCE}\u0000example`)?.certifiedPermission
+    const payload = {
+      source: SOURCE,
+      pluginId: 'example',
+      version: '1.2.3',
+      integrity: DIGEST,
+      reviewPolicy: { id: 'cordisx-marketplace-review', version: '1.0.0' },
+      reviewedAt: '2026-08-20T00:00:00Z',
+      expiresAt: '2027-08-20T00:00:00Z',
+      evidence: { kind: 'protected-marketplace-review', reference: EVIDENCE },
+      feed: { generatedAt: '2026-08-24T00:00:00Z', root: ROOT, authority: 'cordisx.marketplace.codeowners/v1' },
+    }
+
+    expect(projection).toEqual({
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v1.schema.json',
+      schemaVersion: 1,
+      kind: 'cordisx-certified-permission-eligibility',
+      status: 'active',
+      ...payload,
+      fingerprint: `sha256:${createHash('sha256').update(JSON.stringify(payload)).digest('hex')}`,
+      revision: '2026-08-24T00:00:00Z',
+    })
+    expect(projection).not.toHaveProperty('official')
+    expect(projection).not.toHaveProperty('capabilities')
+    expect(projection).not.toHaveProperty('grant')
+    expect(Object.isFrozen(projection)).toBe(true)
+    const validate = await certifiedProjectionValidator()
+    expect(validate(projection), JSON.stringify(validate.errors)).toBe(true)
   })
 
   it('validates but does not project records from an unconfigured root', () => {
@@ -153,5 +213,19 @@ describe('marketplace trust evaluator', () => {
     expect(before.byPluginIdentity.get(`${SOURCE}\u0000example`)?.certification).toBeDefined()
     expect(after.byPluginIdentity.get(`${SOURCE}\u0000example`)?.official).toBeDefined()
     expect(after.byPluginIdentity.get(`${SOURCE}\u0000example`)?.certification).toBeUndefined()
+    expect(after.byPluginIdentity.get(`${SOURCE}\u0000example`)?.certifiedPermission).toBeUndefined()
+  })
+
+  it('changes projection revision and fingerprint on a later feed replacement', () => {
+    const before = evaluateMarketplaceTrust(feed([], [certification()]), [plugin()], OPTIONS)
+      .byPluginIdentity.get(`${SOURCE}\u0000example`)?.certifiedPermission
+    const after = evaluateMarketplaceTrust(
+      feed([], [certification()], ROOT, '2026-08-24T00:30:00Z'),
+      [plugin()],
+      { ...OPTIONS, now: '2026-08-24T01:00:00Z' },
+    ).byPluginIdentity.get(`${SOURCE}\u0000example`)?.certifiedPermission
+
+    expect(after?.revision).toBe('2026-08-24T00:30:00Z')
+    expect(after?.fingerprint).not.toBe(before?.fingerprint)
   })
 })

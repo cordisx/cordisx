@@ -6,6 +6,7 @@ import {
 import {
   evaluateMarketplaceTrust,
   type MarketplaceCertificationRecord,
+  type MarketplaceCertifiedPermissionProjectionV1,
   type MarketplaceOfficialRecord,
   type MarketplaceTrustEvaluation,
 } from './marketplace-trust.js'
@@ -112,6 +113,7 @@ export interface MarketplaceCatalogPlugin extends MarketplacePlugin {
   readonly feedHomepage: string
   readonly official?: MarketplaceOfficialRecord
   readonly certification?: MarketplaceCertificationRecord
+  readonly certifiedPermission?: MarketplaceCertifiedPermissionProjectionV1
 }
 
 export interface MarketplacePluginProjection {
@@ -967,6 +969,12 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
       attempts = index + 1
       try {
         const loaded = await this.loadOnce(source.url, signal)
+        const previousTrustRevision = previous?.feed?.trust?.generatedAt
+        const nextTrustRevision = loaded.feed.trust?.generatedAt
+        if (previousTrustRevision !== undefined && nextTrustRevision !== undefined
+          && Date.parse(nextTrustRevision) < Date.parse(previousTrustRevision)) {
+          throw new MarketplaceLoadError('Marketplace trust feed generatedAt 不能回退', false)
+        }
         const storedAt = this.now()
         this.cache.set({ url: source.url, text: loaded.text, storedAt })
         return { state: this.feedState(source, loaded.feed, 'fresh', attempts, storedAt), feed: loaded.feed }
@@ -1030,6 +1038,11 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
       for (const plugin of result.feed.plugins) {
         const identity = marketplacePluginIdentity(plugin.source, plugin.id)
         const pluginTrust = result.feed.trust?.byPluginIdentity.get(identity)
+        const activeCertification = pluginTrust?.certification !== undefined
+          && Date.parse(pluginTrust.certification.expiresAt) > this.now()
+          ? pluginTrust.certification
+          : undefined
+        const activeCertifiedPermission = activeCertification === undefined ? undefined : pluginTrust?.certifiedPermission
         const winner = winners.get(identity)
         if (winner !== undefined) {
           duplicates.push({ identity, winnerFeedUrl: winner.feedUrl, duplicateFeedUrl: source.url })
@@ -1044,7 +1057,8 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
           feedLocalizations: result.feed.localizations,
           feedHomepage: result.feed.homepage,
           ...(pluginTrust?.official === undefined ? {} : { official: pluginTrust.official }),
-          ...(pluginTrust?.certification === undefined ? {} : { certification: pluginTrust.certification }),
+          ...(activeCertification === undefined ? {} : { certification: activeCertification }),
+          ...(activeCertifiedPermission === undefined ? {} : { certifiedPermission: activeCertifiedPermission }),
         })
       }
     }
