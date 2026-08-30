@@ -382,7 +382,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     dom.window.close()
   }, 30_000)
 
-  it('keeps an independent Host-owned exact Simulator Task page outside Chatroom and Recent tasks', async () => {
+  it('projects Simulator tasks into the one Host-owned Recent tasks list and exact Task page', async () => {
     const [page, app, host] = await Promise.all([
       readFile(path.resolve('packages/cli/src/playground/client/components/MockAgentTaskPage.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/App.tsx'), 'utf8'),
@@ -393,10 +393,14 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(page).toContain('Ordered definition catalog')
     expect(page).toContain('task.execution')
     expect(page).not.toContain('cxloop-binding')
-    expect(app).toContain('pg-simulator-task-list')
-    expect(app).toContain('data-simulator-task-row')
+    expect(app.match(/id="pg-recent-task-list-title"/g)).toHaveLength(1)
+    expect(app).toContain('data-playground-recent-tasks')
+    expect(app).toContain('data-recent-task-row')
+    expect(app).not.toContain('pg-simulator-task-list')
+    expect(app).not.toContain('Simulator tasks')
     expect(app).toContain('task.detailsUrl')
-    expect(app.indexOf('pg-session-list')).toBeLessThan(app.indexOf('pg-simulator-task-list'))
+    expect(app).toContain("fixture.reviewNavigationItem === undefined")
+    expect(app.indexOf('pg-recent-task-list')).toBeLessThan(app.indexOf('pg-playground-fixtures'))
     expect(`${host}\n${app}\n${page}`).not.toMatch(/roomLabel|memberLabel|runLabel|Room 1|Leader|Reviewer/u)
   })
 })

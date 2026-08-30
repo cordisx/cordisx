@@ -121,6 +121,20 @@ describe('UI Playground', () => {
     expect(environment).toContain('new DocumentLocaleAdapter(document)')
   })
 
+  it('keeps review tasks in one Recent tasks section and excludes Playground fixtures', async () => {
+    const app = await readFile(path.resolve('packages/cli/src/playground/client/App.tsx'), 'utf8')
+    expect(app.match(/id="pg-recent-task-list-title"/g)).toHaveLength(1)
+    expect(app).toContain("en ? 'Recent tasks' : '最近任务'")
+    expect(app).toContain("en ? 'No recent tasks.' : '暂无最近任务。'")
+    expect(app).toContain("en ? 'Mock' : '模拟'")
+    expect(app).toContain('data-recent-task-row')
+    expect(app).toContain('fixture.reviewNavigationItem === undefined')
+    expect(app).toContain("en ? 'Playground fixtures' : 'Playground 测试场景'")
+    expect(app).not.toContain('Simulator tasks')
+    expect(app).not.toContain('Simulator 任务')
+    expect(app).not.toContain('pg-simulator-task-list')
+  })
+
   it('renders brand, built-in, contributed, and recent rows with one readable semantic primitive', async () => {
     const styles = await readFile(path.resolve('packages/cli/src/playground/client/styles.css'), 'utf8')
     const dom = new JSDOM(`<!doctype html><html data-theme="dark"><head><style>${styles}</style></head><body><aside class="pg-sidebar"></aside></body></html>`, { url: 'http://127.0.0.1/' })

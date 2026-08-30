@@ -105,12 +105,9 @@ body > [data-cordisx-page-outlet] svg.icon-xs { width: 16px !important; height: 
 .pg-plugin-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .pg-plugin { padding: 2px 6px; border: 1px solid var(--pg-border); border-radius: 999px; color: var(--pg-muted); font: 9px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .pg-capability-note { margin: 10px 0 0; font-size: 10px; }
-.pg-simulator-task-list { display: grid; gap: 5px; margin: 10px 0; }
-.pg-simulator-task-list > p { margin: 0; color: var(--pg-muted); font-size: 10px; }
-.pg-simulator-task-list > button { display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; width: 100%; padding: 7px 8px; border: 1px solid var(--pg-border-soft); border-radius: 7px; background: transparent; color: var(--pg-text); text-align: left; cursor: pointer; }
-.pg-simulator-task-list > button[data-selected="true"] { background: var(--pg-hover); border-color: var(--pg-border); }
-.pg-simulator-task-list > button span { color: var(--pg-muted); font-size: 10px; }
-.pg-simulator-task-list > button small { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--pg-muted); }
+.pg-recent-task-list, .pg-playground-fixtures { display: grid; gap: 2px; }
+.pg-recent-task-list > p { margin: 0 8px; color: var(--pg-muted); font-size: 10px; }
+.pg-recent-task-list > [data-recent-task-row] { display: contents; }
 .pg-simulator-task-page { min-height: 100vh; padding: 28px; overflow: auto; background: var(--pg-bg); color: var(--pg-text); }
 .pg-simulator-task-page > header { margin-bottom: 18px; }
 .pg-simulator-task-page h1 { margin: 6px 0 2px; font-size: 22px; }

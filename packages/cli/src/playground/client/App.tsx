@@ -59,8 +59,8 @@ export function App() {
     if (runtime.status !== 'active' || fixture.reviewNavigationItem === undefined) return undefined
     return activatePlaygroundReviewNavigation(document, fixture.reviewNavigationItem)
   }, [runtime.status])
-  const simulatorTasks = runtime.simulator?.tasks ?? []
-  const simulatorTask = simulatorTasks.find(task => task.debugTaskId === simulatorTaskId)
+  const recentTasks = [...(runtime.simulator?.tasks ?? [])].reverse()
+  const simulatorTask = recentTasks.find(task => task.debugTaskId === simulatorTaskId)
   useEffect(() => {
     const sync = () => setSimulatorTaskId(simulatorTaskIdFromPath(window.location.pathname))
     sync()
@@ -72,7 +72,7 @@ export function App() {
     }
   }, [])
 
-  const openSimulatorTask = (debugTaskId: string, detailsUrl: (typeof simulatorTasks)[number]['detailsUrl']) => {
+  const openSimulatorTask = (debugTaskId: string, detailsUrl: (typeof recentTasks)[number]['detailsUrl']) => {
     if (!navigateTaskDetails(window, detailsUrl)) return
     setSimulatorTaskId(debugTaskId)
   }
@@ -120,27 +120,28 @@ export function App() {
             <div className="pg-surface-seat pg-navigation-seat" data-cordisx-playground-surface="sidebar.navigation.items" data-pg-seat-label="sidebar.navigation.items" />
           </nav>
         </div>
-        <div className="pg-session-heading"><span>{en ? 'Recent tasks' : '最近任务'}</span><small>fixture</small></div>
-        <div className="pg-session-list">
-          <SidebarItem id="fixture.conversation" label={en ? 'Plugin composition' : '调试插件组合'} secondary={en ? 'Inspect pages and slots' : '验证页面与插槽贡献'} icon="host:history" selected={simulatorTask === undefined && fixtureMode === 'conversation'} onActivate={() => { closeSimulatorTask(); setFixtureMode('conversation') }} />
-          <SidebarItem id="fixture.empty" label={en ? 'Empty session' : '空会话'} secondary={en ? 'Inspect the no-context state' : '检查无上下文状态'} icon="host:new" selected={simulatorTask === undefined && fixtureMode === 'empty'} onActivate={() => { closeSimulatorTask(); setFixtureMode('empty') }} />
-        </div>
-        {runtime.simulator === undefined ? null : <section className="pg-simulator-task-list" aria-labelledby="pg-simulator-task-list-title">
-          <div className="pg-session-heading"><span id="pg-simulator-task-list-title">{en ? 'Simulator tasks' : 'Simulator 任务'}</span><small>Mock</small></div>
-          {simulatorTasks.length === 0
-            ? <p>{en ? 'Send an AgentLoop message to create a simulated task.' : '发送 AgentLoop 消息后会创建模拟任务。'}</p>
-            : simulatorTasks.map(task => <button
-                type="button"
-                key={task.debugTaskId}
-                data-simulator-task-row={task.debugTaskId}
-                data-selected={String(task.debugTaskId === simulatorTaskId)}
-                onClick={() => openSimulatorTask(task.debugTaskId, task.detailsUrl)}
-              >
-                <strong>{task.agentLabel}</strong>
-                <span>{task.identity.agentId} · {task.identity.revision}</span>
-                <small>{task.status}</small>
-              </button>)}
-        </section>}
+        <section className="pg-recent-task-list" aria-labelledby="pg-recent-task-list-title" data-playground-recent-tasks>
+          <div className="pg-session-heading"><span id="pg-recent-task-list-title">{en ? 'Recent tasks' : '最近任务'}</span></div>
+          {recentTasks.length === 0
+            ? <p>{en ? 'No recent tasks.' : '暂无最近任务。'}</p>
+            : recentTasks.map(task => <div key={task.debugTaskId} data-recent-task-row={task.debugTaskId}>
+                <SidebarItem
+                  id={`task.${task.debugTaskId}`}
+                  label={task.agentLabel}
+                  secondary={`${task.identity.agentId} · ${task.identity.revision} · ${en ? 'Mock' : '模拟'}`}
+                  icon="host:history"
+                  selected={task.debugTaskId === simulatorTaskId}
+                  onActivate={() => openSimulatorTask(task.debugTaskId, task.detailsUrl)}
+                />
+              </div>)}
+        </section>
+        {fixture.reviewNavigationItem === undefined ? <section className="pg-playground-fixtures" aria-labelledby="pg-playground-fixtures-title">
+          <div className="pg-session-heading"><span id="pg-playground-fixtures-title">{en ? 'Playground fixtures' : 'Playground 测试场景'}</span><small>Debug</small></div>
+          <div className="pg-session-list">
+            <SidebarItem id="fixture.conversation" label={en ? 'Plugin composition' : '调试插件组合'} secondary={en ? 'Inspect pages and slots' : '验证页面与插槽贡献'} icon="host:playground" selected={simulatorTask === undefined && fixtureMode === 'conversation'} onActivate={() => { closeSimulatorTask(); setFixtureMode('conversation') }} />
+            <SidebarItem id="fixture.empty" label={en ? 'Empty conversation' : '空会话'} secondary={en ? 'Inspect the no-context state' : '检查无上下文状态'} icon="host:new" selected={simulatorTask === undefined && fixtureMode === 'empty'} onActivate={() => { closeSimulatorTask(); setFixtureMode('empty') }} />
+          </div>
+        </section> : null}
         <footer className="pg-sidebar-footer">
           <div className="pg-footer-surface" data-cordisx-playground-surface="sidebar.footer.before-control" />
           <HostMenu
