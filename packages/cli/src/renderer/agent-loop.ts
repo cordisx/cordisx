@@ -22,6 +22,7 @@ import {
   type AgentLoopSubscribeRuntimeResult as CordisXAgentLoopSubscribeRuntimeResult,
   type AgentLoopSubscription as CordisXAgentLoopSubscription,
   type AgentLoopTaskBinding as CordisXAgentLoopTaskBinding,
+  type AgentLoopTaskDetailsUrl,
   type BoundAgentLoopClient as CordisXBoundAgentLoopClient,
 } from '../agent-loop-contracts.js'
 import type { CordisXPlatformCapability, CordisXPlatformModelRef, CordisXPlatformResult, CordisXPlatformSessionRef } from '../platform-contracts.js'
@@ -55,7 +56,11 @@ export interface CordisXBoundAgentLoopClientOptions {
   readonly registerPrompt?: (sessionId: string, definition: CordisXResolvedAgentDefinition) => readonly Disposable<void>[]
 }
 
-interface HostTask { readonly task: string; readonly session: CordisXPlatformSessionRef }
+export interface HostTask {
+  readonly task: string
+  readonly session: CordisXPlatformSessionRef
+  readonly detailsUrl?: AgentLoopTaskDetailsUrl
+}
 interface HostSend { readonly messageId: string; readonly turn: string }
 
 export interface CordisXAgentLoopCreateContext {
@@ -241,7 +246,7 @@ export function renderAgentDeveloperInstructions(definition: CordisXResolvedAgen
 }
 
 export class BindingAgentLoopHost implements CordisXAgentLoopHost {
-  private readonly tasks = new Map<string, CordisXPlatformSessionRef>()
+  private readonly tasks = new Map<string, HostTask>()
   constructor(private readonly platform: BindingPlatformAdapter, private readonly workspaceCwd: string) {}
   async prepare(definition: CordisXResolvedAgentDefinition) {
     const requested = definition.runtimeDefaults?.model
@@ -261,14 +266,22 @@ export class BindingAgentLoopHost implements CordisXAgentLoopHost {
     const created = await this.platform.createAgentLoopTask({ model: prepared.model, cwd: prepared.cwd, ...(developerInstructions === undefined ? {} : { developerInstructions }), ...(definition.runtimeDefaults?.effort === undefined ? {} : { effort: definition.runtimeDefaults.effort }) })
     if (!created.ok) return created
     const task = `cxloop-task:${crypto.randomUUID()}`
-    this.tasks.set(task, clone(created.value.ref))
-    return { ok: true as const, value: { task, session: created.value.ref } }
+    const value = clone({
+      task,
+      session: created.value.ref,
+      detailsUrl: {
+        url: `codex:task/${encodeURIComponent(created.value.ref.remoteSessionId)}` as const,
+        target: 'external' as const,
+      },
+    })
+    this.tasks.set(task, value)
+    return { ok: true as const, value }
   }
   async bind(task: string) {
-    const session = this.tasks.get(task)
-    if (session === undefined) return { ok: false as const, error: { code: 'task-not-found' as const, message: 'AgentLoop task handle is unavailable' } }
-    const read = await this.platform.readTask({ session })
-    return read.ok ? { ok: true as const, value: { task, session } } : read
+    const value = this.tasks.get(task)
+    if (value === undefined) return { ok: false as const, error: { code: 'task-not-found' as const, message: 'AgentLoop task handle is unavailable' } }
+    const read = await this.platform.readTask({ session: value.session })
+    return read.ok ? { ok: true as const, value: clone(value) } : read
   }
   async send(task: HostTask, content: readonly [CordisXAgentLoopContentPart, ...CordisXAgentLoopContentPart[]]) {
     if (content.some(part => part.kind === 'image-ref')) return { ok: false as const, error: { code: 'adapter-unavailable' as const, message: 'No controlled image-ref resolver is available for this provider' } }

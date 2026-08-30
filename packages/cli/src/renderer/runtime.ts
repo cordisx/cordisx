@@ -98,12 +98,14 @@ import {
   CordisXAgentLoopBroker,
   UnavailableAgentLoopHost,
   type CordisXAgentLoopAuthorizationRequest,
+  type CordisXBoundAgentLoopClientOptions,
 } from './agent-loop.js'
+import { combineAgentLoopClients, CordisXAgentLoopBrokerV2 } from './agent-loop-v2.js'
 import {
   PlaygroundMockAgentLoopHost,
   type PlaygroundMockAgentLoopSnapshot,
 } from './playground-mock-agent-loop.js'
-import type { BoundAgentLoopClient } from '../agent-loop-contracts.js'
+import type { CompatibleBoundAgentLoopClient } from '../agent-loop-contracts.js'
 import { BindingAgentHistoryAdapter, UnavailableAgentHistoryAdapter } from './agent-history-binding.js'
 import { CordisXAgentHistoryService } from './agent-history.js'
 import {
@@ -246,7 +248,7 @@ interface PluginController {
   generationContext?: Record<PropertyKey, unknown>
   generationView?: PluginGenerationView
   connectorClient?: CordisXBoundConnectorClient
-  agentLoopClient?: BoundAgentLoopClient
+  agentLoopClient?: CompatibleBoundAgentLoopClient
   hostDomWorker?: HostDomWorkerBoundary
 }
 
@@ -693,10 +695,12 @@ async function start(
   const playgroundMockAgentLoop = metadata.agentLoopBackend === 'mock'
     ? new PlaygroundMockAgentLoopHost()
     : undefined
-  const agentLoopBroker = new CordisXAgentLoopBroker(playgroundMockAgentLoop
+  const agentLoopHost = playgroundMockAgentLoop
     ?? (bindingPlatformAdapter === undefined
       ? new UnavailableAgentLoopHost()
-      : new BindingAgentLoopHost(bindingPlatformAdapter, metadata.workspaceCwd)))
+      : new BindingAgentLoopHost(bindingPlatformAdapter, metadata.workspaceCwd))
+  const agentLoopBroker = new CordisXAgentLoopBroker(agentLoopHost)
+  const agentLoopBrokerV2 = new CordisXAgentLoopBrokerV2(agentLoopHost)
   // Host-owned only: no plugin or renderer global receives this broker/adapter.
   const connectorBroker = new CordisXConnectorBroker()
   const agentConnector = connectorBroker.register(createCodexAgentConnector(agentAdapter))
@@ -1182,8 +1186,10 @@ async function start(
         return { capability: request.capability, state: 'unavailable' as const, code: 'host-unavailable' as const }
       }
     }
-    const agentLoopClient = agentLoopBroker.bind({
-      ownerKey: JSON.stringify([controller.identity.source, controller.identity.id, moduleGenerationOf(controller)]),
+    const agentLoopOptions: CordisXBoundAgentLoopClientOptions = {
+      // v2 operation identities survive client generations for this exact
+      // source-owned plugin principal. Provider affinity is broker-fenced.
+      ownerKey: JSON.stringify([controller.identity.source, controller.identity.id]),
       active: () => {
         if (!controller.principalLive) return false
         try {
@@ -1205,7 +1211,11 @@ async function start(
         },
         moduleGenerationOf(controller),
       )),
-    })
+    }
+    const agentLoopClient = combineAgentLoopClients(
+      agentLoopBroker.bind(agentLoopOptions),
+      agentLoopBrokerV2.bind(agentLoopOptions),
+    )
     pluginContext = ctx.isolate('connectors').isolate('agentLoop').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
@@ -2464,6 +2474,7 @@ async function start(
     agentHistoryFiber = undefined
     connectorBroker.disposeAll()
     agentLoopBroker.dispose()
+    agentLoopBrokerV2.dispose()
     await agentRuntime.dispose()
     historyAdapter.dispose()
     bindingPlatformAdapter?.dispose()

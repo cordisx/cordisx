@@ -192,11 +192,15 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
     const hostTask = clone({
       task: `${PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE}:task:${ordinal}`,
       session: { providerId: PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE, remoteSessionId: `simulated-session-${ordinal}` },
+      detailsUrl: {
+        url: `app://-/playground/simulator/tasks/${encodeURIComponent(`Simulator Task ${ordinal}`)}` as const,
+        target: 'host' as const,
+      },
     })
     const byIdentity = new Map(context.definitions.map(item => [JSON.stringify([item.identity.agentId, item.identity.revision]), item]))
     const trace = clone({
       debugTaskId: `Simulator Task ${ordinal}`,
-      detailsUrl: { url: `app://-/playground/simulator/tasks/${encodeURIComponent(`Simulator Task ${ordinal}`)}`, target: 'host' as const },
+      detailsUrl: hostTask.detailsUrl,
       agentLabel: definition.name ?? definition.identity.agentId,
       status: 'created' as const,
       active: true,
