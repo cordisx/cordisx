@@ -70,7 +70,7 @@ describe('Host Agent avatar resolver', () => {
       readFile('packages/cli/src/renderer/host-ui/conversation/AgentAvatar.tsx', 'utf8'),
       readFile('packages/cli/src/renderer/host-ui/conversation/styles.ts', 'utf8'),
     ])
-    const protocol = 'github:cordisx/cordisx-protocol#fe449688c0ac320ed7e5cf63bffc07e71ad8b664'
+    const protocol = 'github:cordisx/cordisx-protocol#c8b7b24be8bec982a80d88a5dd95dc314af865f9'
     expect(rootPackage.devDependencies['@cordisx/protocol']).toBe(protocol)
     expect(cliPackage.dependencies).toMatchObject({
       '@cordisx/protocol': protocol,
