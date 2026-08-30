@@ -29,6 +29,7 @@ import {
   simulatorTaskIdFromPath,
   taskNavigationTarget,
 } from '../packages/cli/src/playground/client/task-details-navigation.js'
+import { CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT } from '../packages/cli/src/renderer/host-ui/AgentTaskDetailsNavigator.js'
 
 const inherit: AgentDefinition['inherit'] = {
   promptSections: 'append', rules: 'append', skills: 'append', tools: 'merge', mcpServers: 'merge', runtimeDefaults: 'merge',
@@ -181,6 +182,8 @@ describe('Playground deterministic AgentLoop Simulator', () => {
 
   it('navigates create-time task URLs through history and rejects unapproved URL schemes', async () => {
     const dom = new JSDOM('<!doctype html>', { url: 'http://127.0.0.1/' })
+    const hostNavigations: string[] = []
+    dom.window.addEventListener(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT, () => hostNavigations.push(dom.window.location.pathname))
     dom.window.history.replaceState({
       key: 'room-entry', idx: 1,
       __cordisxRouteV1: { schemaVersion: 1, owner: 'chatroom', routeId: 'room', outlet: 'main', path: '/main/chatroom/:roomId', params: { roomId: 'room-1' } },
@@ -190,6 +193,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
       target: 'host',
     })).toBe(true)
     expect(dom.window.location.pathname).toBe('/playground/simulator/tasks/Simulator%20Task%201')
+    expect(hostNavigations).toEqual(['/playground/simulator/tasks/Simulator%20Task%201'])
     expect(dom.window.history.state).not.toHaveProperty('__cordisxRouteV1')
     expect(simulatorTaskIdFromPath(dom.window.location.pathname)).toBe('Simulator Task 1')
     dom.window.history.back()

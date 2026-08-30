@@ -68,6 +68,7 @@ import { CordisXAgentConversationShellService } from './agent-conversation-shell
 import {
   CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT,
   HostAgentTaskDetailsNavigator,
+  navigateHostTaskDetailsSameDocument,
 } from './host-ui/AgentTaskDetailsNavigator.js'
 import { CordisXI18nService } from './i18n.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
@@ -2776,12 +2777,7 @@ async function start(
     await commandFiber
     commandService = ctx.commands as CordisXCommandService
     const taskDetailsNavigator = new HostAgentTaskDetailsNavigator({
-      navigateHost: value => {
-        const target = new URL(value)
-        if (target.protocol !== 'app:' || target.hostname !== '-') throw new Error('Host task details URL is unavailable')
-        window.history.pushState(withoutCordisXRouteHistoryEntry(window.history.state), '', target.pathname)
-        window.setTimeout(() => window.dispatchEvent(new Event(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT)), 0)
-      },
+      navigateHost: value => navigateHostTaskDetailsSameDocument(window, value),
       navigateExternal: value => {
         const opened = window.open(value, '_blank', 'noopener,noreferrer')
         if (opened === null) throw new Error('External task navigation is unavailable')

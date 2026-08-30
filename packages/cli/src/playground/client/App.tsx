@@ -73,9 +73,8 @@ export function App() {
     })
   }, [])
 
-  const openSimulatorTask = (debugTaskId: string, detailsUrl: (typeof recentTasks)[number]['detailsUrl']) => {
-    if (!navigateTaskDetails(window, detailsUrl)) return
-    setSimulatorTaskId(debugTaskId)
+  const openSimulatorTask = (detailsUrl: (typeof recentTasks)[number]['detailsUrl']) => {
+    navigateTaskDetails(window, detailsUrl)
   }
   const preparePluginNavigation = () => {
     if (simulatorTaskId !== undefined) flushSync(() => setSimulatorTaskId(undefined))
@@ -144,7 +143,7 @@ export function App() {
                   secondary={`${task.identity.agentId} · ${task.identity.revision} · ${en ? 'Mock' : '模拟'}`}
                   icon="host:history"
                   selected={task.debugTaskId === simulatorTaskId}
-                  onActivate={() => openSimulatorTask(task.debugTaskId, task.detailsUrl)}
+                  onActivate={() => openSimulatorTask(task.detailsUrl)}
                 />
               </div>)}
         </section>

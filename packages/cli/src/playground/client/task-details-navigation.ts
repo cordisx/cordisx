@@ -2,9 +2,9 @@ import type { PlaygroundMockTaskDetailsUrl } from '../../renderer/playground-moc
 import {
   CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT,
   HostAgentTaskDetailsNavigator,
+  navigateHostTaskDetailsSameDocument,
   validateAgentLoopTaskDetailsUrl,
 } from '../../renderer/host-ui/AgentTaskDetailsNavigator.js'
-import { withoutCordisXRouteHistoryEntry } from '../../renderer/codex-router-history.js'
 
 export const PLAYGROUND_SIMULATOR_SESSION_PREFIX = 'cordisx.playground.simulator/v1:'
 
@@ -71,7 +71,7 @@ export function clearPlaygroundSimulatorSessionRegistry(storage: Storage): void 
 }
 
 export function navigateTaskDetails(
-  view: Pick<Window, 'history'>,
+  view: Pick<Window, 'history' | 'dispatchEvent'>,
   detailsUrl: PlaygroundMockTaskDetailsUrl,
   openExternal?: (url: URL) => void,
 ): boolean {
@@ -79,7 +79,7 @@ export function navigateTaskDetails(
   if (target === undefined) return false
   try {
     const navigator = new HostAgentTaskDetailsNavigator({
-      navigateHost: () => view.history.pushState(withoutCordisXRouteHistoryEntry(view.history.state), '', target.historyUrl!),
+      navigateHost: () => navigateHostTaskDetailsSameDocument(view, detailsUrl.url),
       navigateExternal: () => {
         if (openExternal === undefined) throw new Error('External task navigation is unavailable')
         openExternal(target.url)

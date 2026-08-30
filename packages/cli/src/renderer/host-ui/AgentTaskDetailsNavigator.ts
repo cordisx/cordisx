@@ -1,7 +1,13 @@
 import type { AgentLoopTaskDetailsUrl } from '@cordisx/protocol/agent-loop/v2'
+import { withoutCordisXRouteHistoryEntry } from '../codex-router-history.js'
 
 /** Host-private notification for same-document task URL pushes. */
 export const CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT = 'cordisx:host-task-details-navigation'
+
+export interface HostTaskDetailsSameDocumentView {
+  readonly history: Pick<History, 'state' | 'pushState'>
+  dispatchEvent(event: Event): boolean
+}
 
 export interface HostAgentTaskDetailsNavigationPort {
   /** Enters the Host-owned native history without interpreting the provider URL here. */
@@ -47,4 +53,15 @@ export class HostAgentTaskDetailsNavigator {
       ? this.port.navigateHost(location.url)
       : this.port.navigateExternal(location.url)
   }
+}
+
+/** Commits one Host-owned app: task URL and notifies the same native history adapter synchronously. */
+export function navigateHostTaskDetailsSameDocument(view: HostTaskDetailsSameDocumentView, value: string): void {
+  const target = new URL(value)
+  if (target.protocol !== 'app:' || target.hostname !== '-' || target.search !== '' || target.hash !== '') {
+    throw new Error('Host task details URL is unavailable')
+  }
+  view.history.pushState(withoutCordisXRouteHistoryEntry(view.history.state), '', target.pathname)
+  const EventConstructor = (view as HostTaskDetailsSameDocumentView & { readonly Event?: typeof Event }).Event ?? Event
+  view.dispatchEvent(new EventConstructor(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT))
 }
