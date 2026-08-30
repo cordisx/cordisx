@@ -72,9 +72,11 @@ function presentation(overrides: Partial<HostAgentIdentityPresentation> = {}): H
 const previousGlobals = new Map<string, unknown>()
 
 interface DomHarness { readonly dom: JSDOM; readonly root: Root; close(): Promise<void> }
+interface InstallOptions { readonly configureWindow?: (window: JSDOM['window']) => void }
 
-async function install(element: React.ReactNode): Promise<DomHarness> {
+async function install(element: React.ReactNode, options: InstallOptions = {}): Promise<DomHarness> {
   const dom = new JSDOM('<!doctype html><html><body><div data-cordisx-app-theme="dark"><button id="before">Before</button><div id="root"></div></div></body></html>', { url: 'app://-/index.html' })
+  options.configureWindow?.(dom.window)
   for (const [key, value] of Object.entries({
     document: dom.window.document,
     window: dom.window,
@@ -297,6 +299,75 @@ describe('Host Agent identity panel interaction', () => {
     await act(async () => trigger.click())
     const scrim = harness.dom.window.document.querySelector<HTMLButtonElement>('.cx-conversation-inspector-scrim')!
     await act(async () => scrim.click())
+    expect(harness.dom.window.document.querySelector('[role="dialog"]')).toBeNull()
+    expect(harness.dom.window.document.activeElement).toBe(trigger)
+    await harness.close()
+  })
+
+  it('captures focus only on open and preserves it across callback rerenders and drawer mode changes', async () => {
+    const navigator = new HostAgentTaskDetailsNavigator({ navigateHost: vi.fn(), navigateExternal: vi.fn() })
+    let updateCallbackVersion: React.Dispatch<React.SetStateAction<number>> = () => undefined
+    let resize: (() => void) | undefined
+    let rootWidth = 1_080
+    const closeVersions: number[] = []
+    function Harness() {
+      const [open, setOpen] = useState(false)
+      const [callbackVersion, setCallbackVersion] = useState(0)
+      updateCallbackVersion = setCallbackVersion
+      return <div className="cxa-root">
+        <HostAgentIdentityAvatarButton presentation={presentation()} label="Open Lead identity" onOpen={() => setOpen(true)} />
+        <HostAgentIdentityPanel
+          open={open}
+          presentation={presentation()}
+          copy={copy}
+          navigator={navigator}
+          onOpenChange={next => {
+            if (!next) closeVersions.push(callbackVersion)
+            setOpen(next)
+          }}
+          onSettings={vi.fn()}
+        />
+      </div>
+    }
+    const harness = await install(<Harness />, {
+      configureWindow(window) {
+        window.HTMLElement.prototype.getBoundingClientRect = function () {
+          return {
+            x: 0, y: 0, top: 0, left: 0, right: rootWidth, bottom: 720,
+            width: rootWidth, height: 720, toJSON: () => ({}),
+          }
+        }
+        class TestResizeObserver {
+          readonly #callback: ResizeObserverCallback
+          constructor(callback: ResizeObserverCallback) {
+            this.#callback = callback
+            resize = () => this.#callback([], this as unknown as ResizeObserver)
+          }
+          observe(): void {}
+          unobserve(): void {}
+          disconnect(): void {}
+        }
+        Reflect.set(window, 'ResizeObserver', TestResizeObserver)
+      },
+    })
+    const trigger = harness.dom.window.document.querySelector<HTMLButtonElement>('.cx-agent-identity-avatar-button')!
+    trigger.focus()
+    await act(async () => trigger.click())
+    const layer = harness.dom.window.document.querySelector<HTMLElement>('[data-host-conversation-inspector="true"]')!
+    expect(layer.dataset.hostConversationInspectorMode).toBe('split')
+    const session = harness.dom.window.document.querySelector<HTMLButtonElement>('.cx-agent-identity-session')!
+    session.focus()
+
+    await act(async () => updateCallbackVersion(1))
+    expect(harness.dom.window.document.activeElement).toBe(session)
+
+    rootWidth = 720
+    await act(async () => resize?.())
+    expect(layer.dataset.hostConversationInspectorMode).toBe('drawer')
+    expect(harness.dom.window.document.activeElement).toBe(session)
+
+    await act(async () => session.dispatchEvent(new harness.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(closeVersions).toEqual([1])
     expect(harness.dom.window.document.querySelector('[role="dialog"]')).toBeNull()
     expect(harness.dom.window.document.activeElement).toBe(trigger)
     await harness.close()

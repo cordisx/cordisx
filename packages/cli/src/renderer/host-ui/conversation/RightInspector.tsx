@@ -36,8 +36,13 @@ export function HostConversationRightInspector({
   const generatedTitleId = React.useId()
   const panelRef = React.useRef<HTMLElement>(null)
   const returnFocusRef = React.useRef<HTMLElement | null>(null)
+  const onOpenChangeRef = React.useRef(onOpenChange)
   const [drawer, setDrawer] = React.useState(true)
   const titleId = labelledBy ?? generatedTitleId
+
+  React.useLayoutEffect(() => {
+    onOpenChangeRef.current = onOpenChange
+  }, [onOpenChange])
 
   React.useLayoutEffect(() => {
     if (!open) return
@@ -56,7 +61,7 @@ export function HostConversationRightInspector({
     return () => observer.disconnect()
   }, [open])
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!open) return
     const panel = panelRef.current
     if (panel === null) return
@@ -64,8 +69,19 @@ export function HostConversationRightInspector({
       ? panel.ownerDocument.activeElement
       : null
     focusable(panel)[0]?.focus()
+    return () => {
+      const target = returnFocusRef.current
+      returnFocusRef.current = null
+      if (target?.isConnected) target.focus()
+    }
+  }, [open])
+
+  React.useEffect(() => {
+    if (!open) return
+    const panel = panelRef.current
+    if (panel === null) return
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') { event.preventDefault(); onOpenChange(false); return }
+      if (event.key === 'Escape') { event.preventDefault(); onOpenChangeRef.current(false); return }
       if (!drawer || event.key !== 'Tab') return
       const items = focusable(panel)
       if (items.length === 0) { event.preventDefault(); panel.focus(); return }
@@ -75,13 +91,10 @@ export function HostConversationRightInspector({
       else if (!event.shiftKey && panel.ownerDocument.activeElement === last) { event.preventDefault(); first.focus() }
     }
     panel.ownerDocument.addEventListener('keydown', onKeyDown, true)
-    return () => {
-      panel.ownerDocument.removeEventListener('keydown', onKeyDown, true)
-      const target = returnFocusRef.current
-      returnFocusRef.current = null
-      if (target?.isConnected) target.focus()
-    }
-  }, [drawer, onOpenChange, open])
+    return () => panel.ownerDocument.removeEventListener('keydown', onKeyDown, true)
+  }, [drawer, open])
+
+  const close = React.useCallback(() => onOpenChangeRef.current(false), [])
 
   if (!open) return null
   return <div
@@ -94,7 +107,7 @@ export function HostConversationRightInspector({
       className="cx-conversation-inspector-scrim"
       aria-label={closeLabel}
       tabIndex={-1}
-      onClick={() => onOpenChange(false)}
+      onClick={close}
     />
     <aside
       ref={panelRef}
@@ -109,7 +122,7 @@ export function HostConversationRightInspector({
         {leading === undefined ? null : <span className="cx-conversation-inspector-leading">{leading}</span>}
         <h2 id={titleId} className="cx-conversation-inspector-title">{title}</h2>
         {actions === undefined ? null : <span className="cx-conversation-inspector-actions">{actions}</span>}
-        <button type="button" className="cx-conversation-inspector-icon-action" aria-label={closeLabel} onClick={() => onOpenChange(false)}><HostSurfaceIcon token="host:close" /></button>
+        <button type="button" className="cx-conversation-inspector-icon-action" aria-label={closeLabel} onClick={close}><HostSurfaceIcon token="host:close" /></button>
       </header>
       <div className="cx-conversation-inspector-body">{children}</div>
     </aside>
