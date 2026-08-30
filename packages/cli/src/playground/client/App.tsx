@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { HostMenu, type HostMenuItem } from '../../renderer/host-ui/HostMenu.js'
 import { createSidebarItem, type SidebarItemControl } from '../../renderer/host-ui/SidebarItem.js'
 import { FixtureSummary } from './components/FixtureSummary.js'
@@ -76,6 +77,9 @@ export function App() {
     if (!navigateTaskDetails(window, detailsUrl)) return
     setSimulatorTaskId(debugTaskId)
   }
+  const preparePluginNavigation = () => {
+    if (simulatorTaskId !== undefined) flushSync(() => setSimulatorTaskId(undefined))
+  }
   const closeSimulatorTask = () => {
     setSimulatorTaskId(undefined)
     if (window.location.pathname.startsWith('/playground/simulator/tasks/')) window.history.pushState(window.history.state, '', '/')
@@ -121,7 +125,7 @@ export function App() {
           {fixture.reviewNavigationItem === undefined
             ? <SidebarItem id="action.new" label={en ? 'New task' : '新任务'} icon="host:new" onActivate={() => { closeSimulatorTask(); setFixtureMode('empty') }} />
             : null}
-          <nav className="pg-primary-navigation" aria-label={en ? 'Plugin navigation' : '插件导航'}>
+          <nav className="pg-primary-navigation" aria-label={en ? 'Plugin navigation' : '插件导航'} onClickCapture={preparePluginNavigation}>
             {fixture.reviewNavigationItem === undefined
               ? <SidebarItem id="host.playground" label="Playground" icon="host:playground" onActivate={() => { closeSimulatorTask(); setFixtureMode('conversation') }} />
               : null}

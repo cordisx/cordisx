@@ -133,6 +133,8 @@ describe('UI Playground', () => {
     expect(app).toContain("en ? 'No recent tasks.' : '暂无最近任务。'")
     expect(app).toContain("en ? 'Mock' : '模拟'")
     expect(app).toContain('data-recent-task-row')
+    expect(app).toContain('onClickCapture={preparePluginNavigation}')
+    expect(app).toContain('flushSync(() => setSimulatorTaskId(undefined))')
     expect(app).toContain('fixture.reviewNavigationItem === undefined')
     expect(app).toContain("en ? 'Playground fixtures' : 'Playground 测试场景'")
     expect(app).not.toContain('Simulator tasks')
