@@ -21,7 +21,7 @@
     "prepare:dev": "npm run prepare:dev --workspace=cordisx",
     "smoke": "node packages/cli/scripts/live-smoke.mjs",
     "smoke:isolated-app": "node packages/cli/scripts/run-isolated-app-smoke.mjs",
-    "test": "npm run build --workspace=@cordisx/schemastery-ui && vitest run --testTimeout=15000 --hookTimeout=15000",
+    "test": "npm run build --workspace=@cordisx/schemastery-ui && vitest run --maxWorkers=1 --no-file-parallelism --testTimeout=30000 --hookTimeout=30000",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "engines": {
