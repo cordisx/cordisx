@@ -4,6 +4,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   createDefaultHomeConfig,
+  DEFAULT_MARKETPLACE_TRUST_SOURCE,
   ensureHomeConfig,
   loadHomeConfig,
   parseHomeConfig,
@@ -34,6 +35,7 @@ describe('CordisX home configuration', () => {
     const config = await ensureHomeConfig(configPath)
     expect(config).toEqual(createDefaultHomeConfig())
     expect(config.plugins).toEqual([])
+    expect(config.marketplaceTrustSources).toEqual([{ url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true }])
     expect(config.apps.codex?.profiles.default?.dataMode).toBe('shared')
     expect((await stat(path.dirname(configPath))).mode & 0o777).toBe(0o700)
     expect((await stat(configPath)).mode & 0o777).toBe(0o600)
@@ -145,6 +147,38 @@ describe('CordisX home configuration', () => {
         policy: 'allow-once',
       }],
     })).toThrow('policy is unsupported')
+    expect(() => parseHomeConfig({
+      ...createDefaultHomeConfig(),
+      marketplaceTrustSources: [{ url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true, certified: true }],
+    })).toThrow('certified is not supported')
+    expect(() => parseHomeConfig({
+      ...createDefaultHomeConfig(),
+      marketplaceTrustSources: [{ url: 'http://marketplace.example/feed.json', enabled: true }],
+    })).toThrow('must be an HTTPS URL')
+    expect(() => parseHomeConfig({
+      ...createDefaultHomeConfig(),
+      marketplaceTrustSources: [
+        { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true },
+        { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: false },
+      ],
+    })).toThrow('duplicate Marketplace trust source')
+    expect(() => parseHomeConfig({
+      ...createDefaultHomeConfig(),
+      marketplaceTrustSources: Array.from({ length: 9 }, (_, index) => ({
+        url: `https://marketplace.example/${index}.json`,
+        enabled: true,
+      })),
+    })).toThrow('at most 8 sources')
+  })
+
+  it('migrates a legacy config to the Launcher-owned official trust root without consulting renderer state', () => {
+    const legacy = { ...createDefaultHomeConfig() } as Record<string, unknown>
+    delete legacy.marketplaceTrustSources
+    expect(parseHomeConfig(legacy).marketplaceTrustSources).toEqual([{
+      url: DEFAULT_MARKETPLACE_TRUST_SOURCE,
+      enabled: true,
+    }])
+    expect(parseHomeConfig({ ...legacy, marketplaceTrustSources: [] }).marketplaceTrustSources).toEqual([])
   })
 
   it('keeps persistent policies separated by profile, identity, capability, and exact scope', async () => {
