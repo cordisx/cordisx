@@ -449,8 +449,11 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   private appendLifecycle(input: Omit<ChannelTaskLifecycleEvent, 'contract' | 'schemaVersion' | 'eventId' | 'sequence'>): void {
     const key = lifecycleKey(input.session)
     const current = this.lifecycle.get(key) ?? []
-    if (current.some(event => event.turnId === input.turnId && event.type === input.type && (input.type !== 'turn.completed' && input.type !== 'turn.failed' || event.type === input.type))) return
-    if ((input.type === 'turn.completed' || input.type === 'turn.failed') && current.some(event => event.turnId === input.turnId && (event.type === 'turn.completed' || event.type === 'turn.failed'))) return
+    if (input.type === 'turn.completed' || input.type === 'turn.failed') {
+      if (current.some(event => event.turnId === input.turnId && (event.type === 'turn.completed' || event.type === 'turn.failed'))) return
+    } else if (input.type === 'approval.required' || input.type === 'approval.resolved') {
+      if (current.some(event => event.turnId === input.turnId && event.type === input.type && event.approval?.approvalId === input.approval?.approvalId)) return
+    } else if (current.some(event => event.turnId === input.turnId && event.type === input.type)) return
     const event: ChannelTaskLifecycleEvent = { contract: 'cordisx.platform-task-lifecycle-event/v1', schemaVersion: 1, eventId: `lifecycle:${randomUUID()}`, sequence: current.length + 1, ...input }
     this.lifecycle.set(key, [...current, event])
     for (const listener of this.lifecycleListeners) listener(structuredClone(event))

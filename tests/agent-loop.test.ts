@@ -383,4 +383,21 @@ describe('Host-bound AgentLoop', () => {
     expect(host.sent).toHaveLength(0)
     broker.dispose()
   })
+
+  it('reports the target-specific capability when an inactive client refuses create or bind', async () => {
+    const broker = new CordisXAgentLoopBroker(new FakeHost())
+    const client = broker.bind({ ownerKey: 'inactive-plugin', active: () => false, authorize: allowed() })
+    const create = createCommand([definition('inactive-assistant')])
+    await expect(client.createOrBind(create)).resolves.toMatchObject({
+      status: 'unavailable', authorization: { capability: 'tasks.create', code: 'host-unavailable' },
+    })
+    await expect(client.createOrBind({
+      ...create,
+      commandId: 'inactive-bind',
+      target: { mode: 'bind', task: 'opaque-existing-task' },
+    })).resolves.toMatchObject({
+      status: 'unavailable', authorization: { capability: 'tasks.content.read', code: 'host-unavailable' },
+    })
+    broker.dispose()
+  })
 })

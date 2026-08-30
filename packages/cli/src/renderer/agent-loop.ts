@@ -294,7 +294,7 @@ export class CordisXAgentLoopBroker {
       createOrBind: (command: CreateCommand): Promise<CordisXAgentLoopCreateOrBindResult> => idempotent(command,
         () => this.refusal(command, command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read', 'unavailable', 'unsupported'),
         async () => {
-        if (!live()) return this.refusal(command, 'tasks.create', 'unavailable', 'host-unavailable')
+        if (!live()) return this.refusal(command, command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read', 'unavailable', 'host-unavailable')
         let definition: CordisXResolvedAgentDefinition
         try { definition = resolveAgentDefinition(command) } catch { return this.refusal(command, command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read', 'unavailable', 'unsupported') }
         let task: HostTask
