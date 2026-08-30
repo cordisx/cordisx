@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
 import {
   DomOutletController,
+  installPlaygroundAdapter,
   ReasoningIntensityProjection,
   ReasoningIntensityNativeVisibility,
   SessionBackdropProjection,
@@ -13,6 +14,41 @@ async function settle(): Promise<void> {
 }
 
 describe('DomOutletController', () => {
+  it('rolls back Playground styles and observers before publishing controls when outlet declaration fails', () => {
+    const dom = new JSDOM(`<!doctype html><html><head></head><body>
+      <main data-cordisx-playground-seat="app"></main>
+      <main data-cordisx-playground-seat="main"></main>
+      <main data-cordisx-playground-seat="session.content"></main>
+    </body></html>`)
+    const disconnect = vi.spyOn(dom.window.MutationObserver.prototype, 'disconnect')
+    const unregister = vi.fn()
+    const setControlCoordinator = vi.fn()
+    const slots = {
+      controlGenerationVisible: () => true,
+      controlGenerationCallable: () => true,
+      setControlCoordinator,
+    }
+    const routes = {
+      outlets: { declare: vi.fn(() => { throw new Error('outlet collision') }) },
+    }
+    const extensionPoints = { registerCatalog: vi.fn(() => unregister) }
+
+    expect(() => installPlaygroundAdapter(
+      dom.window.document,
+      slots as never,
+      {} as never,
+      routes as never,
+      {} as never,
+      extensionPoints as never,
+    )).toThrow('outlet collision')
+    expect(setControlCoordinator).not.toHaveBeenCalled()
+    expect(disconnect).toHaveBeenCalledOnce()
+    expect(unregister).toHaveBeenCalledOnce()
+    expect(dom.window.document.getElementById('cordisx-structured-styles')).toBeNull()
+    expect(dom.window.document.querySelector('[data-cordisx-page-outlet]')).toBeNull()
+    dom.window.close()
+  })
+
   it('re-inserts the same CordisX layer after a same-context React anchor replacement', async () => {
     const dom = new JSDOM('<body><main id="anchor" style="position:relative"><div id="native">native</div></main></body>')
     let contextKey = 'main:project'

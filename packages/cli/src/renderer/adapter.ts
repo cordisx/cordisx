@@ -2027,7 +2027,11 @@ const structuredStyleOwnership = new WeakMap<Document, StructuredStyleOwnership>
 function assertStructuredStyleOwnership(document: Document): void {
   const shared = structuredStyleOwnership.get(document)
   if (shared !== undefined) {
-    if (!shared.element.isConnected || document.getElementById('cordisx-structured-styles') !== shared.element) {
+    if (
+      !shared.element.isConnected
+      || document.getElementById('cordisx-structured-styles') !== shared.element
+      || document.querySelectorAll('#cordisx-structured-styles').length !== 1
+    ) {
       throw new Error('CordisX structured style ownership is stale')
     }
     return
@@ -2315,7 +2319,6 @@ export function installPlaygroundAdapter(
   let surfaces: StructuredSurfaceRenderer | undefined
   try {
     removeStyles = installStyles(document)
-    slots.setControlCoordinator(controls)
     for (const [id, placement, resolve] of controllers) {
       const controller = new DomOutletController(document, id, placement, () => {
         const anchor = resolve()
@@ -2326,10 +2329,16 @@ export function installPlaygroundAdapter(
         : id === 'main'
           ? (value: string) => value.startsWith('/main/') && value.length > '/main/'.length
           : (value: string) => value.startsWith('/sessions/:sessionId/') && value.length > '/sessions/:sessionId/'.length
-      declared.push({ controller, dispose: routes.outlets.declare({
-        schemaVersion: 1, id, authority: 'host-adapter', scope: 'playground', preferredPlacement: placement,
-        contextPolicy: 'generation', presentationGroup: 'primary',
-      }, controller, path) })
+      try {
+        const dispose = routes.outlets.declare({
+          schemaVersion: 1, id, authority: 'host-adapter', scope: 'playground', preferredPlacement: placement,
+          contextPolicy: 'generation', presentationGroup: 'primary',
+        }, controller, path)
+        declared.push({ controller, dispose })
+      } catch (error) {
+        controller.dispose()
+        throw error
+      }
     }
     surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, {
       generation,
@@ -2337,6 +2346,7 @@ export function installPlaygroundAdapter(
       hostId: options.hostId ?? 'cordisx.playground',
       mode: 'playground',
     })
+    slots.setControlCoordinator(controls)
     return {
       dispose() {
         surfaces?.dispose()
