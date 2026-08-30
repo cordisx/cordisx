@@ -478,6 +478,8 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(styles).toContain('justify-content:flex-start;gap:var(--cxa-layout-space);margin:0 auto;padding:0')
       expect(styles).toContain('.cxa-entry{min-width:0;margin:0}')
       expect(styles).toContain('.cxa-composer{display:grid;width:min(100%,var(--cxa-content-max))')
+      expect(styles).toContain('.cxa-message[data-group-start="false"]>.cxa-avatar,.cxa-message[data-group-start="false"]>.cx-agent-identity-avatar-button{visibility:hidden}')
+      expect(styles).not.toContain('.cxa-message[data-group-start="false"] .cxa-avatar')
       expect(styles).not.toContain('margin-top:-14px')
       expect(styles).not.toMatch(/\.cxa-timeline-list\{[^}]*space-(?:between|around)/u)
       expect(styles).not.toMatch(/\.cxa-timeline-list\{[^}]*flex-grow/u)
