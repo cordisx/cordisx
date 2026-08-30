@@ -99,10 +99,14 @@ export function App() {
     { kind: 'heading', id: 'locale-heading', label: en ? 'Language' : '语言' },
     { kind: 'action', id: 'locale-zh', label: '中文', selected: environment.locale === 'zh-CN', onSelect: () => playgroundEnvironment.setLocale('zh-CN') },
     { kind: 'action', id: 'locale-en', label: 'English', selected: environment.locale === 'en', onSelect: () => playgroundEnvironment.setLocale('en') },
-    { kind: 'separator', id: 'developer-separator' },
-    { kind: 'heading', id: 'developer-heading', label: en ? 'Developer' : '开发' },
-    { kind: 'action', id: 'fixture-conversation', label: en ? 'Conversation fixture' : '有会话 fixture', selected: fixtureMode === 'conversation', onSelect: () => { closeSimulatorTask(); setFixtureMode('conversation') } },
-    { kind: 'action', id: 'fixture-empty', label: en ? 'Empty fixture' : '空会话 fixture', selected: fixtureMode === 'empty', onSelect: () => { closeSimulatorTask(); setFixtureMode('empty') } },
+    ...(fixture.reviewNavigationItem === undefined ? [
+      { kind: 'separator' as const, id: 'developer-separator' },
+      { kind: 'heading' as const, id: 'developer-heading', label: en ? 'Developer' : '开发' },
+      { kind: 'action' as const, id: 'fixture-conversation', label: en ? 'Conversation fixture' : '有会话 fixture', selected: fixtureMode === 'conversation', onSelect: () => { closeSimulatorTask(); setFixtureMode('conversation') } },
+      { kind: 'action' as const, id: 'fixture-empty', label: en ? 'Empty fixture' : '空会话 fixture', selected: fixtureMode === 'empty', onSelect: () => { closeSimulatorTask(); setFixtureMode('empty') } },
+    ] : []),
+    { kind: 'separator', id: 'runtime-separator' },
+    { kind: 'heading', id: 'runtime-heading', label: en ? 'Runtime' : '运行时' },
     { kind: 'action', id: 'reload', label: en ? 'Reload plugins' : '重载插件', onSelect: () => window.location.reload() },
     { kind: 'action', id: 'reset', label: en ? 'Reset fixture' : '重置 fixture', onSelect: () => { void reset() } },
   ]
@@ -114,9 +118,13 @@ export function App() {
           <span className="pg-manager-anchor" data-cordisx-playground-manager-trigger aria-hidden="true" />
         </div>
         <div className="pg-sidebar-stack">
-          <SidebarItem id="action.new" label={en ? 'New task' : '新任务'} icon="host:new" onActivate={() => { closeSimulatorTask(); setFixtureMode('empty') }} />
+          {fixture.reviewNavigationItem === undefined
+            ? <SidebarItem id="action.new" label={en ? 'New task' : '新任务'} icon="host:new" onActivate={() => { closeSimulatorTask(); setFixtureMode('empty') }} />
+            : null}
           <nav className="pg-primary-navigation" aria-label={en ? 'Plugin navigation' : '插件导航'}>
-            <SidebarItem id="host.playground" label="Playground" icon="host:playground" onActivate={() => { closeSimulatorTask(); setFixtureMode('conversation') }} />
+            {fixture.reviewNavigationItem === undefined
+              ? <SidebarItem id="host.playground" label="Playground" icon="host:playground" onActivate={() => { closeSimulatorTask(); setFixtureMode('conversation') }} />
+              : null}
             <div className="pg-surface-seat pg-navigation-seat" data-cordisx-playground-surface="sidebar.navigation.items" data-pg-seat-label="sidebar.navigation.items" />
           </nav>
         </div>

@@ -77,7 +77,6 @@ html[data-theme="light"] .pg-sidebar .cxsi-brand-mark > .cxr-brand-mark-light { 
 .pg-sidebar .cxsi-title { line-height: 18px; }
 .pg-sidebar .cxsi-secondary { color: inherit; font-size: 10px; line-height: 14px; opacity: .82; }
 .pg-sidebar .cxsi-actions { display: flex; align-items: center; gap: 2px; }
-.pg-navigation-seat:empty::before { display: block; padding: 7px 9px; color: var(--pg-subtle); content: "插件导航贡献会显示在这里"; font-size: 11px; }
 .pg-session-heading { display: flex; align-items: center; justify-content: space-between; margin: 18px 8px 5px; color: var(--pg-muted); font-size: 11px; }
 .pg-session-heading small { color: var(--pg-subtle); font-size: 9px; text-transform: uppercase; }
 .pg-session-list { min-height: 0; overflow: auto; }

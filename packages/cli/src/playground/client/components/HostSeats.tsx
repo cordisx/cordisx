@@ -21,14 +21,14 @@ export function HostSeats({ mode, locale }: HostSeatsProps) {
     <main className="pg-main" {...(mode === 'conversation' ? { 'data-cordisx-playground-session-id': 'fixture-session' } : {})}>
       <div className="pg-page-seat pg-app-seat" data-cordisx-playground-seat="app" />
       <div className="pg-page-seat pg-main-seat" data-cordisx-playground-seat="main" />
-      <div className="pg-conversation-shell">
+      {mode === 'review' ? null : <div className="pg-conversation-shell">
         <AgentConversationRenderer
           model={model}
           commands={commands}
           copy={playgroundConversationCopy(locale)}
           debugFixture
         />
-      </div>
+      </div>}
     </main>
   )
 }
