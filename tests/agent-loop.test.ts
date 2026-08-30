@@ -50,6 +50,9 @@ class FakeHost implements CordisXAgentLoopHost {
   readonly lifecycleByTask = new Map<string, CordisXAgentLoopLifecycleEvent[]>()
   readonly lifecycleReads: [task: string, afterSequence: number][] = []
   lifecycleEvents: CordisXAgentLoopLifecycleEvent[] = []
+  lifecycleGate: Promise<void> | undefined
+  lifecycleInFlight = 0
+  maxLifecycleInFlight = 0
 
   async prepare() { return { ok: true as const, value: { model: { providerId: 'alpha', modelId: 'model-1' }, cwd: '/workspace' } } }
   async create(value: CordisXResolvedAgentDefinition) {
@@ -63,9 +66,16 @@ class FakeHost implements CordisXAgentLoopHost {
     return { ok: true as const, value: { messageId: `message:${task.task}`, turn: `turn:${task.task}` } }
   }
   async lifecycle(task: { readonly task: string }, afterSequence: number) {
-    this.lifecycleReads.push([task.task, afterSequence])
-    const events = (this.lifecycleByTask.get(task.task) ?? this.lifecycleEvents).filter(event => event.sequence > afterSequence)
-    return { nextAfterSequence: events.at(-1)?.sequence ?? afterSequence, events }
+    this.lifecycleInFlight += 1
+    this.maxLifecycleInFlight = Math.max(this.maxLifecycleInFlight, this.lifecycleInFlight)
+    try {
+      await this.lifecycleGate
+      this.lifecycleReads.push([task.task, afterSequence])
+      const events = (this.lifecycleByTask.get(task.task) ?? this.lifecycleEvents).filter(event => event.sequence > afterSequence)
+      return { nextAfterSequence: events.at(-1)?.sequence ?? afterSequence, events }
+    } finally {
+      this.lifecycleInFlight -= 1
+    }
   }
 }
 
@@ -161,9 +171,10 @@ describe('Host-bound AgentLoop', () => {
     expect(send.status).toBe('accepted')
     expect(host.sent).toEqual([[{ kind: 'text', text: 'Hello' }]])
     const sentPage = await iterator.next()
-    expect(sentPage.value?.events.map(event => event.type)).toEqual(['message'])
-    const startedPage = await iterator.next()
-    expect(startedPage.value?.events).toMatchObject([{ type: 'lifecycle', lifecycle: { phase: 'turn.started' } }])
+    expect(sentPage.value?.events).toMatchObject([
+      { type: 'message' },
+      { type: 'lifecycle', lifecycle: { phase: 'turn.started' } },
+    ])
 
     host.lifecycleEvents = [
       { sequence: 1, session: { providerId: 'alpha', remoteSessionId: 'session-1' }, turnId: 'turn:opaque-task-1', type: 'approval.required', approval: { approvalId: 'approval-1', kind: 'command', state: 'pending' } },
@@ -171,14 +182,13 @@ describe('Host-bound AgentLoop', () => {
       { sequence: 3, session: { providerId: 'alpha', remoteSessionId: 'session-1' }, turnId: 'turn:opaque-task-1', type: 'turn.completed', output: [{ type: 'text', text: 'Hi from AgentLoop' }] },
     ]
     await vi.advanceTimersByTimeAsync(250)
-    const approvalPending = await iterator.next()
-    const approvalResolved = await iterator.next()
-    const assistant = await iterator.next()
-    const completed = await iterator.next()
-    expect(approvalPending.value?.events).toMatchObject([{ type: 'approval', approval: { state: 'pending' } }])
-    expect(approvalResolved.value?.events).toMatchObject([{ type: 'approval', approval: { state: 'resolved', outcome: 'approved' } }])
-    expect(assistant.value?.events).toMatchObject([{ type: 'message', message: { role: 'assistant', content: [{ kind: 'text', text: 'Hi from AgentLoop' }] } }])
-    expect(completed.value?.events).toMatchObject([{ type: 'lifecycle', lifecycle: { phase: 'turn.completed' } }])
+    const lifecycle = await iterator.next()
+    expect(lifecycle.value?.events).toMatchObject([
+      { type: 'approval', approval: { state: 'pending' } },
+      { type: 'approval', approval: { state: 'resolved', outcome: 'approved' } },
+      { type: 'message', message: { role: 'assistant', content: [{ kind: 'text', text: 'Hi from AgentLoop' }] } },
+      { type: 'lifecycle', lifecycle: { phase: 'turn.completed' } },
+    ])
     client.dispose()
     expect((await iterator.next()).value?.events).toMatchObject([{ type: 'lifecycle', lifecycle: { phase: 'binding.closed' } }])
     expect(await iterator.next()).toEqual({ value: undefined, done: true })
@@ -192,11 +202,13 @@ describe('Host-bound AgentLoop', () => {
     const client = broker.bind({ ownerKey: 'chatroom-plugin', active: () => true, authorize: allowed() })
     const analystCommand = createCommand([definition('analyst')])
     const reviewerCommand = { ...createCommand([definition('reviewer')]), commandId: 'create-reviewer' }
-    const [first, second] = await Promise.all([
+    const [first, firstRetry, second] = await Promise.all([
+      client.createOrBind(analystCommand),
       client.createOrBind(analystCommand),
       client.createOrBind(reviewerCommand),
     ])
-    if (first.status !== 'accepted' || second.status !== 'accepted') throw new Error('Agent bindings were not accepted')
+    if (first.status !== 'accepted' || firstRetry.status !== 'accepted' || second.status !== 'accepted') throw new Error('Agent bindings were not accepted')
+    expect(firstRetry.binding).toEqual(first.binding)
     expect(first.binding.binding.bindingId).not.toBe(second.binding.binding.bindingId)
     expect(first.binding.task).not.toBe(second.binding.task)
     expect(first.binding.definition).toEqual({ agentId: 'analyst', revision: 'r1' })
@@ -223,22 +235,30 @@ describe('Host-bound AgentLoop', () => {
     expect(firstReplay.value?.events.every(event => JSON.stringify(event.binding) === JSON.stringify(first.binding.binding))).toBe(true)
     expect(secondReplay.value?.events.every(event => JSON.stringify(event.binding) === JSON.stringify(second.binding.binding))).toBe(true)
 
-    await Promise.all([
-      client.send({
-        $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V1, contract: 'cordisx.agent-loop-command/v1', schemaVersion: 1,
-        commandId: 'send-analyst', type: 'send', binding: first.binding, content: [{ kind: 'text', text: 'Analyze' }],
-      }),
+    const analystSend = {
+      $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V1, contract: 'cordisx.agent-loop-command/v1' as const, schemaVersion: 1 as const,
+      commandId: 'send-analyst', type: 'send' as const, binding: first.binding, content: [{ kind: 'text' as const, text: 'Analyze' }] as const,
+    }
+    const [firstSent, firstSentRetry] = await Promise.all([
+      client.send(analystSend),
+      client.send(analystSend),
       client.send({
         $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V1, contract: 'cordisx.agent-loop-command/v1', schemaVersion: 1,
         commandId: 'send-reviewer', type: 'send', binding: second.binding, content: [{ kind: 'text', text: 'Review' }],
       }),
     ])
-    const [firstMessage, secondMessage] = await Promise.all([firstEvents.next(), secondEvents.next()])
-    const [firstStarted, secondStarted] = await Promise.all([firstEvents.next(), secondEvents.next()])
-    expect(firstMessage.value).toMatchObject({ subscription: { binding: first.binding.binding }, events: [{ binding: first.binding.binding, type: 'message', message: { content: [{ text: 'Analyze' }] } }] })
-    expect(secondMessage.value).toMatchObject({ subscription: { binding: second.binding.binding }, events: [{ binding: second.binding.binding, type: 'message', message: { content: [{ text: 'Review' }] } }] })
-    expect(firstStarted.value).toMatchObject({ events: [{ binding: first.binding.binding, type: 'lifecycle', lifecycle: { phase: 'turn.started' } }] })
-    expect(secondStarted.value).toMatchObject({ events: [{ binding: second.binding.binding, type: 'lifecycle', lifecycle: { phase: 'turn.started' } }] })
+    expect(firstSentRetry).toEqual(firstSent)
+    const collision = await client.send({ ...analystSend, content: [{ kind: 'text', text: 'Different payload' }] })
+    expect(collision).toMatchObject({ status: 'unavailable', authorization: { code: 'unsupported' } })
+    const [firstSentPage, secondSentPage] = await Promise.all([firstEvents.next(), secondEvents.next()])
+    expect(firstSentPage.value).toMatchObject({ subscription: { binding: first.binding.binding }, events: [
+      { binding: first.binding.binding, type: 'message', message: { content: [{ text: 'Analyze' }] } },
+      { binding: first.binding.binding, type: 'lifecycle', lifecycle: { phase: 'turn.started' } },
+    ] })
+    expect(secondSentPage.value).toMatchObject({ subscription: { binding: second.binding.binding }, events: [
+      { binding: second.binding.binding, type: 'message', message: { content: [{ text: 'Review' }] } },
+      { binding: second.binding.binding, type: 'lifecycle', lifecycle: { phase: 'turn.started' } },
+    ] })
     expect(host.sent).toEqual([
       [{ kind: 'text', text: 'Analyze' }],
       [{ kind: 'text', text: 'Review' }],
@@ -254,11 +274,12 @@ describe('Host-bound AgentLoop', () => {
     }])
     await vi.advanceTimersByTimeAsync(250)
     const analystApproval = await firstEvents.next()
-    const reviewerReply = await secondEvents.next()
-    const reviewerCompleted = await secondEvents.next()
+    const reviewerLifecycle = await secondEvents.next()
     expect(analystApproval.value).toMatchObject({ events: [{ binding: first.binding.binding, type: 'approval', approval: { approvalId: 'approval-analyst', state: 'pending' } }] })
-    expect(reviewerReply.value).toMatchObject({ events: [{ binding: second.binding.binding, type: 'message', message: { role: 'assistant', content: [{ text: 'Reviewer reply' }] } }] })
-    expect(reviewerCompleted.value).toMatchObject({ events: [{ binding: second.binding.binding, type: 'lifecycle', lifecycle: { phase: 'turn.completed' } }] })
+    expect(reviewerLifecycle.value).toMatchObject({ events: [
+      { binding: second.binding.binding, type: 'message', message: { role: 'assistant', content: [{ text: 'Reviewer reply' }] } },
+      { binding: second.binding.binding, type: 'lifecycle', lifecycle: { phase: 'turn.completed' } },
+    ] })
 
     host.lifecycleByTask.set(first.binding.task, [
       ...host.lifecycleByTask.get(first.binding.task)!,
@@ -282,6 +303,44 @@ describe('Host-bound AgentLoop', () => {
     client.dispose()
     expect((await firstEvents.next()).value).toMatchObject({ events: [{ binding: first.binding.binding, type: 'lifecycle', lifecycle: { phase: 'binding.closed' } }] })
     expect((await secondEvents.next()).value).toMatchObject({ events: [{ binding: second.binding.binding, type: 'lifecycle', lifecycle: { phase: 'binding.closed' } }] })
+    broker.dispose()
+  })
+
+  it('bounds slow-subscriber buffering with pull pages and cleans pending consumers', async () => {
+    vi.useFakeTimers()
+    const host = new FakeHost()
+    let releaseLifecycle!: () => void
+    host.lifecycleGate = new Promise(resolve => { releaseLifecycle = resolve })
+    const broker = new CordisXAgentLoopBroker(host)
+    const client = broker.bind({ ownerKey: 'chatroom-plugin', active: () => true, authorize: allowed() })
+    const created = await client.createOrBind(createCommand([definition('fanout-member')]))
+    if (created.status !== 'accepted') throw new Error('Agent binding was not accepted')
+    const subscription = await client.subscribe(created.binding, -1)
+    if (subscription.status !== 'accepted') throw new Error('Agent subscription was not accepted')
+    const events = subscription.handle.pages[Symbol.asyncIterator]()
+    expect((await events.next()).value?.events).toHaveLength(1)
+
+    await Promise.all(Array.from({ length: 40 }, (_, index) => client.send({
+      $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V1, contract: 'cordisx.agent-loop-command/v1', schemaVersion: 1,
+      commandId: `fanout-${index}`, type: 'send', binding: created.binding, content: [{ kind: 'text', text: `Message ${index}` }],
+    })))
+    expect(host.maxLifecycleInFlight).toBe(1)
+    const first = await events.next()
+    const second = await events.next()
+    expect(first.value).toMatchObject({ phase: 'live', afterSequence: 0, nextAfterSequence: 64, hasMore: true })
+    expect(first.value?.events).toHaveLength(64)
+    expect(second.value).toMatchObject({ phase: 'live', afterSequence: 64, nextAfterSequence: 80, hasMore: false })
+    expect(second.value?.events).toHaveLength(16)
+    expect([...first.value!.events, ...second.value!.events].every(event => event.binding.bindingId === created.binding.binding.bindingId)).toBe(true)
+
+    const pending = events.next()
+    subscription.handle.unsubscribe()
+    expect(await pending).toEqual({ value: undefined, done: true })
+    client.dispose()
+    releaseLifecycle()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(vi.getTimerCount()).toBe(0)
     broker.dispose()
   })
 

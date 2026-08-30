@@ -136,7 +136,7 @@ describe('AgentLoop renderer injection', () => {
     }), new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error(`AgentLoop send timeout: ${JSON.stringify(requests)}`)), 2_000))])
     expect(sent.status).toBe('accepted')
     const observed = []
-    for (let index = 0; index < 6; index += 1) observed.push(...((await nextPage()).value?.events ?? []))
+    while (observed.length < 6) observed.push(...((await nextPage()).value?.events ?? []))
     expect(observed).toMatchObject([
       { type: 'message', message: { role: 'user', content: [{ kind: 'text', text: 'Hello AgentLoop' }] } },
       { type: 'lifecycle', lifecycle: { phase: 'turn.started' } },

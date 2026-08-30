@@ -30,6 +30,10 @@ registered through the same Host prompt runtime behind `ctx.systemPrompt`.
 
 Every `target.mode=create` call creates a new task and binding, even when the
 same plugin owner and immutable AgentDefinition identity are used repeatedly.
+Here, "call" means a new `commandId`: retries of the same canonical command are
+single-flight and return the cached result without repeating task creation or
+turn submission. Reusing a `commandId` with a different command is rejected as
+`unsupported`.
 One bound client may concurrently manage multiple definitions, tasks, bindings,
 and subscriptions. Only `target.mode=bind` may reuse an active binding for its
 explicit opaque task. Host task handles are random opaque values backed by a
@@ -45,10 +49,12 @@ AgentLoop pages:
 - binding created/bound/closed and turn started/completed/failed lifecycle.
 
 Each subscription installs its live listener after a fixed replay snapshot and
-maintains its own cursor. Subscription descriptors, pages, and every projected
-message, approval, and lifecycle event carry the exact binding identity. They
-are fenced by binding generation, plugin owner, unsubscribe, fiber disposal,
-and runtime disposal.
+maintains its own cursor. Event delivery is pull-based and limited to 64 events
+per page, so a slow consumer does not accumulate a separate unbounded page
+queue; `hasMore` directs immediate draining. Subscription descriptors, pages,
+and every projected message, approval, and lifecycle event carry the exact
+binding identity. They are fenced by binding generation, plugin owner,
+unsubscribe, fiber disposal, and runtime disposal.
 
 The Host does not define or retain Room, member, leader, or consumer run-list
 state, and it does not aggregate a Room timeline. A consumer may map one opaque
@@ -77,10 +83,12 @@ An internal Chatroom plugin:
 3. retains every returned active `AgentLoopTaskBinding` as opaque correlation
    state in its own domain model;
 4. subscribes to each binding from `-1` (or that binding's last processed
-   sequence), then sends text with the exact saved binding;
+   sequence), then fans one consumer-selected message out as separate sends
+   with stable per-command IDs and each exact saved binding;
 5. maps each exact-binding message, approval, and lifecycle event into its own
    data/UI;
 6. unsubscribes and disposes with its fiber.
 
 Chatroom must not infer provider sessions from `binding.task`, move room,
-member, run-list, or leader state into AgentLoop, or provide conversation DOM.
+member, run-list, leader, recipient selection, mention, organization tree, or
+Channel scope into AgentLoop, or provide conversation DOM.

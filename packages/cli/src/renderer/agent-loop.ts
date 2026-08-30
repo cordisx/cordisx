@@ -69,6 +69,15 @@ function clone<Value>(value: Value): Value {
   return freeze(result)
 }
 
+function commandFingerprint(value: unknown): string {
+  const canonical = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(canonical)
+    if (input === null || typeof input !== 'object') return input
+    return Object.fromEntries(Object.entries(input as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, child]) => [key, canonical(child)]))
+  }
+  return JSON.stringify(canonical(value))
+}
+
 function freeze<Value>(value: Value): Value {
   if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value
   for (const child of Object.values(value as Record<string, unknown>)) freeze(child)
@@ -255,7 +264,7 @@ export class UnavailableAgentLoopHost implements CordisXAgentLoopHost {
   async lifecycle(_task: HostTask, afterSequence: number) { return { nextAfterSequence: afterSequence, events: [] } }
 }
 
-interface BindingRecord { readonly ownerKey: string; readonly definition: CordisXResolvedAgentDefinition; readonly task: HostTask; binding: CordisXAgentLoopTaskBinding; readonly events: CordisXAgentLoopEvent[]; readonly listeners: Set<(events: readonly CordisXAgentLoopEvent[]) => void>; readonly subscriptions: Set<CordisXAgentLoopSubscription>; lifecycleCursor: number; poll: ReturnType<typeof setTimeout> | undefined; promptDisposers: readonly Disposable<void>[] }
+interface BindingRecord { readonly ownerKey: string; readonly definition: CordisXResolvedAgentDefinition; readonly task: HostTask; binding: CordisXAgentLoopTaskBinding; readonly events: CordisXAgentLoopEvent[]; readonly listeners: Set<(events: readonly CordisXAgentLoopEvent[]) => void>; readonly subscriptions: Set<CordisXAgentLoopSubscription>; lifecycleCursor: number; polling: boolean; poll: ReturnType<typeof setTimeout> | undefined; promptDisposers: readonly Disposable<void>[] }
 
 export class CordisXAgentLoopBroker {
   private readonly records = new Map<string, BindingRecord>()
@@ -268,11 +277,23 @@ export class CordisXAgentLoopBroker {
   bind(options: CordisXBoundAgentLoopClientOptions): CordisXBoundAgentLoopClient {
     const owned = new Set<string>()
     const subscriptions = new Set<CordisXAgentLoopSubscription>()
+    const commands = new Map<string, { readonly fingerprint: string; readonly result: Promise<unknown> }>()
     let disposed = false
     const live = () => !disposed && !this.disposed && options.active()
+    const idempotent = <Result>(command: CreateCommand | SendCommand, conflict: () => Result, execute: () => Promise<Result>): Promise<Result> => {
+      const fingerprint = commandFingerprint(command)
+      const existing = commands.get(command.commandId)
+      if (existing !== undefined) return existing.fingerprint === fingerprint ? existing.result as Promise<Result> : Promise.resolve(conflict())
+      const result = execute()
+      commands.set(command.commandId, { fingerprint, result })
+      void result.catch(() => { if (commands.get(command.commandId)?.result === result) commands.delete(command.commandId) })
+      return result
+    }
     const client: CordisXBoundAgentLoopClient = Object.freeze({
       $schema: CORDISX_BOUND_AGENT_LOOP_CLIENT_SCHEMA_V1, contract: 'cordisx.bound-agent-loop-client/v1', schemaVersion: 1,
-      createOrBind: async (command: CreateCommand): Promise<CordisXAgentLoopCreateOrBindResult> => {
+      createOrBind: (command: CreateCommand): Promise<CordisXAgentLoopCreateOrBindResult> => idempotent(command,
+        () => this.refusal(command, command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read', 'unavailable', 'unsupported'),
+        async () => {
         if (!live()) return this.refusal(command, 'tasks.create', 'unavailable', 'host-unavailable')
         let definition: CordisXResolvedAgentDefinition
         try { definition = resolveAgentDefinition(command) } catch { return this.refusal(command, command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read', 'unavailable', 'unsupported') }
@@ -302,12 +323,14 @@ export class CordisXAgentLoopBroker {
           }
         }
         const binding = clone({ $schema: CORDISX_AGENT_LOOP_TASK_BINDING_SCHEMA_V1, contract: 'cordisx.agent-loop-task-binding/v1' as const, schemaVersion: 1 as const, binding: { bindingId: `cxloop-binding:${this.nextBinding++}`, generation: 1 }, definition: definition.identity, task: task.task, state: 'active' as const })
-        const record: BindingRecord = { ownerKey: options.ownerKey, definition, task, binding, events: [], listeners: new Set(), subscriptions: new Set(), lifecycleCursor: 0, poll: undefined, promptDisposers: options.registerPrompt?.(task.session.remoteSessionId, definition) ?? [] }
+        const record: BindingRecord = { ownerKey: options.ownerKey, definition, task, binding, events: [], listeners: new Set(), subscriptions: new Set(), lifecycleCursor: 0, polling: false, poll: undefined, promptDisposers: options.registerPrompt?.(task.session.remoteSessionId, definition) ?? [] }
         this.records.set(binding.binding.bindingId, record); this.boundTasks.set(this.taskKey(options.ownerKey, task.task), record); owned.add(binding.binding.bindingId)
         this.append(record, { type: 'lifecycle', lifecycle: { phase: command.target.mode === 'create' ? 'binding.created' : 'binding.bound' } })
         return this.acceptCreate(command, binding)
-      },
-      send: async (command: SendCommand): Promise<CordisXAgentLoopSendResult> => {
+      }),
+      send: (command: SendCommand): Promise<CordisXAgentLoopSendResult> => idempotent(command,
+        () => this.refusal(command, 'turns.submit', 'unavailable', 'unsupported'),
+        async () => {
         const record = this.owned(options.ownerKey, command.binding)
         if (!live() || record === undefined) return this.refusal(command, 'turns.submit', 'unavailable', 'task-unavailable')
         const authorization = await options.authorize({ capability: 'turns.submit', session: record.task.session })
@@ -318,7 +341,7 @@ export class CordisXAgentLoopBroker {
         this.append(record, { type: 'lifecycle', turn: sent.value.turn, lifecycle: { phase: 'turn.started' } })
         this.startPolling(record)
         return clone({ $schema: CORDISX_AGENT_LOOP_RESULT_SCHEMA_V1, contract: 'cordisx.agent-loop-result/v1', schemaVersion: 1, commandId: command.commandId, type: 'send', status: 'accepted', authorization, binding: record.binding, messageId: sent.value.messageId })
-      },
+      }),
       subscribe: async (binding: CordisXAgentLoopTaskBinding, afterSequence: number): Promise<CordisXAgentLoopSubscribeRuntimeResult> => {
         const record = this.owned(options.ownerKey, binding)
         if (!live() || record === undefined || !Number.isInteger(afterSequence) || afterSequence < -1) return { status: 'unavailable', authorization: { capability: 'tasks.content.read', state: 'unavailable', code: 'task-unavailable' } }
@@ -334,6 +357,7 @@ export class CordisXAgentLoopBroker {
         disposed = true
         for (const bindingId of owned) this.close(this.records.get(bindingId))
         for (const subscription of subscriptions) subscription.unsubscribe()
+        commands.clear()
       },
     })
     return client
@@ -353,15 +377,18 @@ export class CordisXAgentLoopBroker {
   }
 
   private startPolling(record: BindingRecord): void {
-    if (record.poll !== undefined || record.binding.state !== 'active') return
+    if (record.polling || record.poll !== undefined || record.binding.state !== 'active') return
+    record.polling = true
     const poll = async () => {
-      if (record.binding.state !== 'active' || this.disposed) return
+      if (record.binding.state !== 'active' || this.disposed) { record.polling = false; return }
       try {
         const range = await this.host.lifecycle(record.task, record.lifecycleCursor)
+        if (record.binding.state !== 'active' || this.disposed) return
         record.lifecycleCursor = range.nextAfterSequence
         for (const event of range.events) this.projectLifecycle(record, event)
       } catch { /* transient provider gaps remain retryable and do not fabricate events */ }
-      if (record.binding.state === 'active' && !this.disposed) record.poll = setTimeout(() => { record.poll = undefined; void poll() }, 250)
+      finally { record.polling = false }
+      if (record.binding.state === 'active' && !this.disposed) record.poll = setTimeout(() => { record.poll = undefined; this.startPolling(record) }, 250)
     }
     void poll()
   }
@@ -380,24 +407,33 @@ export class CordisXAgentLoopBroker {
   private subscription(record: BindingRecord, afterSequence: number): CordisXAgentLoopSubscription {
     const snapshotSequence = Math.max(0, record.events.length - 1)
     const descriptor: CordisXAgentLoopEventSubscription = clone({ $schema: CORDISX_AGENT_LOOP_EVENT_SUBSCRIPTION_SCHEMA_V1, contract: 'cordisx.agent-loop-event-subscription/v1', schemaVersion: 1, subscriptionId: `cxloop-subscription:${this.nextSubscription++}`, binding: record.binding.binding, afterSequence, snapshotSequence })
-    const queue: CordisXAgentLoopEventPage[] = []
+    const pageSize = 64
     const waiters: ((result: IteratorResult<CordisXAgentLoopEventPage>) => void)[] = []
     let closed = false
     let cursor = afterSequence
-    const publish = (events: readonly CordisXAgentLoopEvent[], phase: 'replay' | 'live') => {
-      const selected = events.filter(event => event.sequence > cursor)
-      if (selected.length === 0) return
-      const page: CordisXAgentLoopEventPage = clone({ $schema: CORDISX_AGENT_LOOP_EVENT_PAGE_SCHEMA_V1, contract: 'cordisx.agent-loop-event-page/v1', schemaVersion: 1, subscription: descriptor, afterSequence: cursor, phase, events: selected, nextAfterSequence: selected.at(-1)!.sequence, hasMore: false })
+    const nextPage = (): CordisXAgentLoopEventPage | undefined => {
+      const phase = cursor < snapshotSequence ? 'replay' : 'live'
+      const endSequence = phase === 'replay' ? snapshotSequence : record.events.length - 1
+      const selected = record.events.filter(event => event.sequence > cursor && event.sequence <= endSequence).slice(0, pageSize)
+      if (selected.length === 0) return undefined
+      const page: CordisXAgentLoopEventPage = clone({ $schema: CORDISX_AGENT_LOOP_EVENT_PAGE_SCHEMA_V1, contract: 'cordisx.agent-loop-event-page/v1', schemaVersion: 1, subscription: descriptor, afterSequence: cursor, phase, events: selected, nextAfterSequence: selected.at(-1)!.sequence, hasMore: selected.at(-1)!.sequence < record.events.length - 1 })
       cursor = page.nextAfterSequence
-      const waiter = waiters.shift(); if (waiter === undefined) queue.push(page); else waiter({ value: page, done: false })
+      return page
     }
-    publish(record.events.filter(event => event.sequence <= snapshotSequence), 'replay')
-    const listener = (events: readonly CordisXAgentLoopEvent[]) => publish(events, 'live')
+    const drain = () => {
+      while (waiters.length > 0) {
+        const page = nextPage()
+        if (page !== undefined) waiters.shift()!({ value: page, done: false })
+        else if (closed) waiters.shift()!({ value: undefined, done: true })
+        else break
+      }
+    }
+    const listener = () => drain()
     record.listeners.add(listener)
     const handle: CordisXAgentLoopSubscription = {
       subscription: descriptor,
-      pages: { [Symbol.asyncIterator]: () => ({ next: async () => { const page = queue.shift(); if (page !== undefined) return { value: page, done: false }; if (closed) return { value: undefined, done: true }; return await new Promise(resolve => waiters.push(resolve)) } }) },
-      unsubscribe: () => { if (closed) return; closed = true; record.listeners.delete(listener); record.subscriptions.delete(handle); for (const waiter of waiters.splice(0)) waiter({ value: undefined, done: true }) },
+      pages: { [Symbol.asyncIterator]: () => ({ next: async () => { const page = nextPage(); if (page !== undefined) return { value: page, done: false }; if (closed) return { value: undefined, done: true }; return await new Promise(resolve => waiters.push(resolve)) } }) },
+      unsubscribe: () => { if (closed) return; closed = true; record.listeners.delete(listener); record.subscriptions.delete(handle); drain() },
     }
     record.subscriptions.add(handle)
     return handle
@@ -407,6 +443,7 @@ export class CordisXAgentLoopBroker {
     if (record === undefined || record.binding.state === 'closed') return
     this.append(record, { type: 'lifecycle', lifecycle: { phase: 'binding.closed' } })
     record.binding = clone({ ...record.binding, state: 'closed' }); if (record.poll !== undefined) clearTimeout(record.poll)
+    record.poll = undefined
     for (const dispose of record.promptDisposers) dispose()
     for (const subscription of [...record.subscriptions]) subscription.unsubscribe()
     record.listeners.clear()
