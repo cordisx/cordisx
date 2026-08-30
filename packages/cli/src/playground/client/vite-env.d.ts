@@ -24,6 +24,7 @@ interface PlaygroundRuntimeSnapshot {
 
 interface PlaygroundRuntime {
   snapshot(): PlaygroundRuntimeSnapshot
+  playgroundMockAgentLoop?(): import('../../renderer/playground-mock-agent-loop.js').PlaygroundMockAgentLoopSnapshot
 }
 
 interface Window {

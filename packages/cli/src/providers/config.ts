@@ -41,7 +41,7 @@ export interface ResolveProviderConfigsOptions {
 }
 
 export function resolveLocalCodexProviderConfig(
-  codex: { readonly executable?: string; readonly agentLoopBackend?: 'local-cli' },
+  codex: { readonly executable?: string; readonly agentLoopBackend?: 'local-cli' | 'mock' },
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): LocalCodexProviderConfig | undefined {
   if (codex.agentLoopBackend !== 'local-cli') return undefined

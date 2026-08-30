@@ -12,6 +12,15 @@ authenticated session. A composition may explicitly set
 launcher-owned app-server using the existing Codex CLI login solely behind the
 normal provider/AgentLoop bridge.
 
+For deterministic consumer development, a composition may instead set
+`codex.agentLoopBackend` to `mock`. This is accepted only when the renderer is
+built as the explicit UI Playground. The visible `Mock / Simulator` task list
+and exact task detail page are Host-owned debug surfaces, separate from Recent
+tasks and plugin content. They show redacted structured execution evidence and
+never expose opaque bindings, provider handles, paths, credentials, or tokens.
+Reset creates a new in-memory Simulator generation with deterministic counters.
+Production bundle construction rejects this backend.
+
 Vite is a development transport, not a second renderer implementation. The
 production `app://` path still uses `buildRendererBundle` and an injected,
 self-contained IIFE. Vite HMR is not claimed for that injected bundle: real

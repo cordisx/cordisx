@@ -1,9 +1,11 @@
 import { useSyncExternalStore } from 'react'
+import type { PlaygroundMockAgentLoopSnapshot } from '../../renderer/playground-mock-agent-loop.js'
 
 interface RuntimeState {
   readonly status: 'starting' | 'active' | 'failed'
   readonly plugins: readonly PlaygroundPluginSnapshot[]
   readonly error?: string
+  readonly simulator?: PlaygroundMockAgentLoopSnapshot
 }
 
 let state: RuntimeState = { status: 'starting', plugins: [] }
@@ -16,7 +18,8 @@ function publish(next: RuntimeState): void {
       const previous = state.plugins[index]
       return previous?.id === plugin.id && previous.status === plugin.status
     })
-  if (next.status === state.status && next.error === state.error && samePlugins) return
+  const sameSimulator = JSON.stringify(next.simulator) === JSON.stringify(state.simulator)
+  if (next.status === state.status && next.error === state.error && samePlugins && sameSimulator) return
   state = next
   for (const listener of listeners) listener()
 }
@@ -24,7 +27,8 @@ function publish(next: RuntimeState): void {
 function refresh(): void {
   const runtime = window.__cordisxRuntime
   if (runtime === undefined) return
-  publish({ status: 'active', plugins: runtime.snapshot().plugins })
+  const simulator = runtime.playgroundMockAgentLoop?.()
+  publish({ status: 'active', plugins: runtime.snapshot().plugins, ...(simulator === undefined ? {} : { simulator }) })
 }
 
 export async function bootRuntime(): Promise<void> {

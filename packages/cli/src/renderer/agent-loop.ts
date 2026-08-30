@@ -58,12 +58,24 @@ export interface CordisXBoundAgentLoopClientOptions {
 interface HostTask { readonly task: string; readonly session: CordisXPlatformSessionRef }
 interface HostSend { readonly messageId: string; readonly turn: string }
 
+export interface CordisXAgentLoopCreateContext {
+  readonly target: CordisXAgentDefinitionIdentity
+  readonly definitions: readonly [CordisXAgentDefinition, ...CordisXAgentDefinition[]]
+}
+
+export interface CordisXAgentLoopPrepared {
+  readonly model?: CordisXPlatformModelRef
+  readonly cwd?: string
+}
+
 export interface CordisXAgentLoopHost {
-  prepare(definition: CordisXResolvedAgentDefinition): Promise<CordisXPlatformResult<{ readonly model: CordisXPlatformModelRef; readonly cwd: string }>>
-  create(definition: CordisXResolvedAgentDefinition, prepared: { readonly model: CordisXPlatformModelRef; readonly cwd: string }): Promise<CordisXPlatformResult<HostTask>>
+  prepare(definition: CordisXResolvedAgentDefinition): Promise<CordisXPlatformResult<CordisXAgentLoopPrepared>>
+  create(definition: CordisXResolvedAgentDefinition, prepared: CordisXAgentLoopPrepared, context: CordisXAgentLoopCreateContext): Promise<CordisXPlatformResult<HostTask>>
   bind(task: string): Promise<CordisXPlatformResult<HostTask>>
   send(task: HostTask, content: readonly [CordisXAgentLoopContentPart, ...CordisXAgentLoopContentPart[]]): Promise<CordisXPlatformResult<HostSend>>
   lifecycle(task: HostTask, afterSequence: number): Promise<{ readonly nextAfterSequence: number; readonly events: readonly CordisXAgentLoopLifecycleEvent[] }>
+  /** Optional Host-private release signal; it never changes the public task handle contract. */
+  release?(task: HostTask): void
 }
 
 function clone<Value>(value: Value): Value {
@@ -241,9 +253,12 @@ export class BindingAgentLoopHost implements CordisXAgentLoopHost {
       ? { ok: false as const, error: { code: 'adapter-unavailable' as const, message: 'AgentLoop has no available model', retryable: true } }
       : { ok: true as const, value: { model: clone(model), cwd: this.workspaceCwd } }
   }
-  async create(definition: CordisXResolvedAgentDefinition, prepared: { readonly model: CordisXPlatformModelRef; readonly cwd: string }) {
+  async create(definition: CordisXResolvedAgentDefinition, prepared: CordisXAgentLoopPrepared) {
+    if (prepared.model === undefined || prepared.cwd === undefined) {
+      return { ok: false as const, error: { code: 'invalid-request' as const, message: 'Platform AgentLoop preparation is incomplete' } }
+    }
     const developerInstructions = renderAgentDeveloperInstructions(definition)
-    const created = await this.platform.createAgentLoopTask({ ...prepared, ...(developerInstructions === undefined ? {} : { developerInstructions }), ...(definition.runtimeDefaults?.effort === undefined ? {} : { effort: definition.runtimeDefaults.effort }) })
+    const created = await this.platform.createAgentLoopTask({ model: prepared.model, cwd: prepared.cwd, ...(developerInstructions === undefined ? {} : { developerInstructions }), ...(definition.runtimeDefaults?.effort === undefined ? {} : { effort: definition.runtimeDefaults.effort }) })
     if (!created.ok) return created
     const task = `cxloop-task:${crypto.randomUUID()}`
     this.tasks.set(task, clone(created.value.ref))
@@ -266,7 +281,7 @@ export class BindingAgentLoopHost implements CordisXAgentLoopHost {
 }
 
 export class UnavailableAgentLoopHost implements CordisXAgentLoopHost {
-  async prepare(): Promise<CordisXPlatformResult<{ readonly model: CordisXPlatformModelRef; readonly cwd: string }>> { return { ok: false, error: { code: 'adapter-unavailable', message: 'AgentLoop provider bridge is unavailable', retryable: true } } }
+  async prepare(): Promise<CordisXPlatformResult<CordisXAgentLoopPrepared>> { return { ok: false, error: { code: 'adapter-unavailable', message: 'AgentLoop provider bridge is unavailable', retryable: true } } }
   async create(): Promise<CordisXPlatformResult<HostTask>> { return { ok: false, error: { code: 'adapter-unavailable', message: 'AgentLoop provider bridge is unavailable', retryable: true } } }
   async bind(): Promise<CordisXPlatformResult<HostTask>> { return { ok: false, error: { code: 'adapter-unavailable', message: 'AgentLoop provider bridge is unavailable', retryable: true } } }
   async send(): Promise<CordisXPlatformResult<HostSend>> { return { ok: false, error: { code: 'adapter-unavailable', message: 'AgentLoop provider bridge is unavailable', retryable: true } } }
@@ -312,9 +327,9 @@ export class CordisXAgentLoopBroker {
           capability = 'tasks.create'
           const prepared = await this.host.prepare(definition)
           if (!prepared.ok) return this.refusal(command, capability, 'unavailable', 'host-unavailable')
-          const authorization = await options.authorize({ capability, model: prepared.value.model, cwd: prepared.value.cwd })
+          const authorization = await options.authorize({ capability, ...(prepared.value.model === undefined ? {} : { model: prepared.value.model }), ...(prepared.value.cwd === undefined ? {} : { cwd: prepared.value.cwd }) })
           if (authorization.state !== 'allowed') return this.refusalFrom(command, authorization)
-          const created = await this.host.create(definition, prepared.value)
+          const created = await this.host.create(definition, prepared.value, clone({ target: command.definition, definitions: command.definitions }))
           if (!created.ok) return this.refusal(command, capability, 'unavailable', 'host-unavailable')
           task = created.value
         } else {
@@ -454,6 +469,7 @@ export class CordisXAgentLoopBroker {
     record.binding = clone({ ...record.binding, state: 'closed' }); if (record.poll !== undefined) clearTimeout(record.poll)
     record.poll = undefined
     for (const dispose of record.promptDisposers) dispose()
+    this.host.release?.(record.task)
     for (const subscription of [...record.subscriptions]) subscription.unsubscribe()
     record.listeners.clear()
     const key = this.taskKey(record.ownerKey, record.task.task); if (this.boundTasks.get(key) === record) this.boundTasks.delete(key)
