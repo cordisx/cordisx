@@ -229,6 +229,33 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(reset.snapshot().tasks[0]?.debugTaskId).toBe('Simulator Task 1')
   })
 
+  it('restores the Host-private task registry across one browser session without changing bind semantics', async () => {
+    let stored: string | undefined
+    const persistence = { read: () => stored, write: (value: string) => { stored = value } }
+    const agent = definition('session.agent', {
+      promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Persisted session prompt' }],
+    })
+    const first = new PlaygroundMockAgentLoopHost(undefined, persistence)
+    const prepared = await first.prepare()
+    if (!prepared.ok) throw new Error('Simulator preparation failed')
+    const created = await first.create({ ...agent, sourceDefinitions: [agent.identity] }, prepared.value, {
+      target: agent.identity, definitions: [agent],
+    })
+    if (!created.ok) throw new Error('Simulator create failed')
+    await first.send(created.value, [{ kind: 'text', text: 'persist this trace' }])
+
+    const restored = new PlaygroundMockAgentLoopHost(undefined, persistence)
+    expect(restored.snapshot().tasks).toMatchObject([{
+      debugTaskId: 'Simulator Task 1', input: 'persist this trace', identity: { agentId: 'session.agent' },
+    }])
+    const rebound = await restored.bind(created.value.task)
+    expect(rebound).toMatchObject({ ok: true, value: { detailsUrl: created.value.detailsUrl } })
+    expect(restored.snapshot().tasks[0]).toMatchObject({ active: true })
+
+    const separateSession = new PlaygroundMockAgentLoopHost()
+    expect(separateSession.snapshot().tasks).toEqual([])
+  })
+
   it('is an explicit Playground-only backend with no provider bridge or codex-local registration', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-agent-loop-simulator-'))
     const configPath = path.join(root, 'cordisx.config.json')

@@ -705,8 +705,17 @@ async function start(
   if (metadata.agentLoopBackend === 'mock' && metadata.hostKind !== 'playground') {
     throw new Error('The deterministic AgentLoop Simulator is available only in the explicit Playground host')
   }
+  const simulatorSessionKey = `cordisx.playground.simulator/v1:${metadata.profileId}:${plugins.map(plugin => `${plugin.id}@${plugin.source}`).join('|')}`
+  const simulatorPersistence = {
+    read: () => {
+      try { return document.defaultView?.sessionStorage.getItem(simulatorSessionKey) ?? undefined } catch { return undefined }
+    },
+    write: (value: string) => {
+      try { document.defaultView?.sessionStorage.setItem(simulatorSessionKey, value) } catch { /* unavailable browser storage */ }
+    },
+  }
   const playgroundMockAgentLoop = metadata.agentLoopBackend === 'mock'
-    ? new PlaygroundMockAgentLoopHost()
+    ? new PlaygroundMockAgentLoopHost(undefined, simulatorPersistence)
     : undefined
   const agentLoopHost = playgroundMockAgentLoop
     ?? (bindingPlatformAdapter === undefined

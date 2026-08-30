@@ -93,6 +93,17 @@ interface TaskRecord {
   activeBindings: number
 }
 
+export interface PlaygroundMockAgentLoopPersistence {
+  read(): string | undefined
+  write(value: string): void
+}
+
+interface PlaygroundMockAgentLoopPersistedState {
+  readonly version: 1
+  readonly nextTask: number
+  readonly tasks: readonly { readonly task: string; readonly record: TaskRecord }[]
+}
+
 function freeze<Value>(value: Value): Value {
   if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value
   for (const child of Object.values(value as Record<string, unknown>)) freeze(child)
@@ -154,7 +165,10 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
   private readonly tasks = new Map<string, TaskRecord>()
   private nextTask = 1
 
-  constructor(private readonly executor: PlaygroundMockCliExecutor = new DeterministicPlaygroundMockCliExecutor()) {}
+  constructor(
+    private readonly executor: PlaygroundMockCliExecutor = new DeterministicPlaygroundMockCliExecutor(),
+    private readonly persistence?: PlaygroundMockAgentLoopPersistence,
+  ) { this.restore() }
 
   snapshot(): PlaygroundMockAgentLoopSnapshot {
     return redactedClone({
@@ -218,6 +232,7 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
     this.tasks.set(hostTask.task, {
       hostTask, definition: clone(definition), context: clone(context), trace, lifecycle: [], nextTurn: 1, activeBindings: 1,
     })
+    this.persist()
     return { ok: true, value: hostTask }
   }
 
@@ -234,6 +249,7 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
         events: [...record.trace.events, { sequence, type: 'task.bound', detail: 'The Simulator task was explicitly rebound.' }],
       })
     }
+    this.persist()
     return { ok: true, value: clone(record.hostTask) }
   }
 
@@ -277,6 +293,7 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
       this.updateTrace(record, 'completed', input, execution, [{ type: 'execution.completed', detail: 'The deterministic CLI adapter returned a simulated result.' }])
       this.appendLifecycle(record, { turnId, type: 'turn.completed', output: [{ type: 'text', text: result.stdout! }] })
     }
+    this.persist()
     return { ok: true as const, value: { messageId: `simulated-message-${turnId}`, turn: turnId } }
   }
 
@@ -297,6 +314,54 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
       status: record.trace.status === 'error' ? 'error' : 'closed',
       events: [...record.trace.events, { sequence, type: 'task.closed', detail: 'The bound Simulator run was disposed.' }],
     })
+    this.persist()
+  }
+
+  private restore(): void {
+    try {
+      const raw = this.persistence?.read()
+      if (raw === undefined) return
+      const value = JSON.parse(raw) as Partial<PlaygroundMockAgentLoopPersistedState>
+      if (value.version !== 1 || !Number.isSafeInteger(value.nextTask) || (value.nextTask ?? 0) < 1 || !Array.isArray(value.tasks)) return
+      const restored = new Map<string, TaskRecord>()
+      for (const entry of value.tasks) {
+        if (entry === null || typeof entry !== 'object' || typeof entry.task !== 'string' || entry.task === '') return
+        const record = entry.record as TaskRecord | undefined
+        if (record === undefined || record.hostTask?.task !== entry.task || typeof record.trace?.debugTaskId !== 'string'
+          || !Number.isSafeInteger(record.nextTurn) || record.nextTurn < 1
+          || !Number.isSafeInteger(record.activeBindings) || record.activeBindings < 0
+          || !Array.isArray(record.lifecycle) || !Array.isArray(record.trace.events)) return
+        restored.set(entry.task, {
+          hostTask: clone(record.hostTask),
+          definition: clone(record.definition),
+          context: clone(record.context),
+          trace: clone({ ...record.trace, active: false }),
+          lifecycle: record.lifecycle.map(event => clone(event)),
+          nextTurn: record.nextTurn,
+          // A renderer reload ends every prior in-memory binding. The plugin
+          // must explicitly bind its durable task again in the new runtime.
+          activeBindings: 0,
+        })
+      }
+      this.nextTask = value.nextTask as number
+      for (const [task, record] of restored) this.tasks.set(task, record)
+    } catch {
+      // Corrupt debug-only session state fails closed to a deterministic empty registry.
+    }
+  }
+
+  private persist(): void {
+    if (this.persistence === undefined) return
+    try {
+      const value: PlaygroundMockAgentLoopPersistedState = {
+        version: 1,
+        nextTask: this.nextTask,
+        tasks: [...this.tasks].map(([task, record]) => ({ task, record })),
+      }
+      this.persistence.write(JSON.stringify(value))
+    } catch {
+      // The Simulator remains usable when the browser denies session storage.
+    }
   }
 
   private updateTrace(
