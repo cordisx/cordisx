@@ -122,11 +122,12 @@ describe('UI Playground', () => {
   })
 
   it('keeps review tasks in one Recent tasks section and excludes Playground fixtures', async () => {
-    const [app, seats, fixtureSource, styles] = await Promise.all([
+    const [app, seats, fixtureSource, styles, viteServer] = await Promise.all([
       readFile(path.resolve('packages/cli/src/playground/client/App.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/components/HostSeats.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/fixtures/agent-conversation.ts'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/styles.css'), 'utf8'),
+      readFile(path.resolve('packages/cli/src/playground/vite/server.ts'), 'utf8'),
     ])
     expect(app.match(/id="pg-recent-task-list-title"/g)).toHaveLength(1)
     expect(app).toContain("en ? 'Recent tasks' : '最近任务'")
@@ -145,6 +146,8 @@ describe('UI Playground', () => {
     expect(fixtureSource).toContain("newRoomTitle: 'Empty conversation fixture'")
     expect(fixtureSource).toContain("newRoomTitle: '空会话测试场景'")
     expect(styles).not.toContain('插件导航贡献会显示在这里')
+    expect(viteServer).toContain("url.pathname === '/api/documents'")
+    expect(viteServer).toContain('session.handleOwnerDocumentRequest(await requestBody(request))')
   })
 
   it('renders brand, built-in, contributed, and recent rows with one readable semantic primitive', async () => {
