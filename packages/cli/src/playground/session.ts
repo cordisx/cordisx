@@ -220,7 +220,7 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
       plugin.source ?? pathToFileURL(plugin.entry).href,
     ]))
     const documents = createOwnerDocumentBridgeHandler({
-      token: randomBytes(32).toString('hex'),
+      secret: randomBytes(32).toString('hex'),
       profileId: 'playground',
       generation,
       store: ownerDocumentStore,
@@ -271,7 +271,10 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
     playground: true as const,
     generation: generation.generation,
     configBridgeToken: generation.token,
-    ownerDocumentBridgeToken: generation.documents.token,
+    ownerDocumentBindings: generation.config.plugins.map(plugin => generation.documents.issue({
+      pluginId: plugin.id,
+      source: plugin.source ?? pathToFileURL(plugin.entry).href,
+    })),
     ...(generation.serviceConfig === undefined ? {} : { serviceConfigBridgeToken: generation.serviceConfig.token }),
     ...(generation.credential === undefined ? {} : { channelCredentialBridgeToken: generation.credential.token }),
     ...(generation.channelManager === undefined ? {} : { channelManager: generation.channelManager }),
@@ -318,9 +321,7 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
       if (active === undefined) throw new Error('Playground has no active generation')
       let requestId = 'invalid'
       try {
-        const parsed = parseOwnerDocumentBindingRequest(
-          JSON.parse(raw), active.documents.token, active.documents.profileId, active.documents.generation,
-        )
+        const parsed = parseOwnerDocumentBindingRequest(JSON.parse(raw))
         requestId = parsed.requestId
         const value = parsed.operation === 'load'
           ? await active.documents.load(parsed)

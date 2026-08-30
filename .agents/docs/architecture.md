@@ -158,16 +158,24 @@ owner and cannot inherit it. Ordinary disposal never purges state, and v1
 exposes no purge operation.
 
 The launcher, rather than plugin code or renderer local storage, owns the JSON
-document files and serializes load and compare-and-swap replacement. Each
-snapshot carries a monotonic revision plus a consumer-owned schema version;
-consumer migration is an explicit CAS replacement. Invalid JSON, unsupported
-Host envelope versions, and quota violations fail closed without overwriting
-the recoverable original. Renderer subscriptions emit full snapshot
-replacements, poll the same launcher authority with bounded frequency for
-cross-window changes, and stop before late delivery when their subscription,
-principal generation, fiber, or runtime is disposed. Playground uses the same
-request parser and store through a narrow HTTP bridge; only its explicit Reset
-operation clears the isolated Playground Home.
+document files. A per-owner atomic lock with dead-process recovery serializes
+compare-and-swap across launcher instances and processes, so one expected
+revision has at most one winner. The Host issues one authenticated token per
+exact profile, source, plugin id, and runtime generation; the wire never accepts
+a caller-selected owner. The authority repeats its generation/principal fence
+at the commit linearization point: retirement before that point has no side
+effect, while a completed commit always returns its accepted snapshot.
+
+Each snapshot carries a monotonic revision plus a consumer-owned schema
+version; consumer migration is an explicit CAS replacement. Invalid JSON,
+unsupported Host envelope versions, and quota violations fail closed without
+overwriting the recoverable original. Renderer subscriptions emit full snapshot
+replacements and share one single-flight poll per bound owner/document, with
+global request and per-client watch/listener bounds. Unsubscribe, principal
+generation retirement, fiber disposal, and runtime disposal prevent late
+delivery. Playground and installed consumers use the same public
+`ctx.documents` browser bridge and launcher authority; only Playground's
+explicit Reset operation clears its isolated Home.
 
 Durable adapter history is a separate Node/Host read service specified in
 [`agent-history.md`](agent-history.md). It gives plugins permission-scoped,

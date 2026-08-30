@@ -28,18 +28,19 @@ describe('owner documents production renderer composition', () => {
     const source = pathToFileURL(entry).href
     const home = await mkdtemp(path.join(os.tmpdir(), 'cordisx-owner-documents-integration-'))
     temporary.push(home)
-    const token = 'owner-documents-production-token'
+    const secret = 'owner-documents-production-secret'
     const generation = 'owner-documents-generation-1'
     const store = new OwnerDocumentStore(home)
     const handler = createOwnerDocumentBridgeHandler({
-      token, profileId: 'work', generation, store,
+      secret, profileId: 'work', generation, store,
       identityAllowed: identity => identity.source === source && identity.pluginId === 'owner-documents-runtime',
     })
     const config: CordisXConfig = {
       version: 1, rootDir: root, codex: { debugPort: 9229 }, providers: [],
       plugins: [{ id: 'owner-documents-runtime', entry, enabled: true, config: { pluginRevision: 1 } }],
     }
-    const bundle = await buildRendererBundle(config, { profileId: 'work', generation, ownerDocumentBridgeToken: token })
+    const binding = handler.issue({ source, pluginId: 'owner-documents-runtime' })
+    const bundle = await buildRendererBundle(config, { profileId: 'work', generation, ownerDocumentBindings: [binding] })
 
     const boot = async (): Promise<{ dom: JSDOM; client: CordisXOwnerDocumentsV1 }> => {
       const dom = new JSDOM('<html lang="en"><head></head><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>', {
@@ -53,7 +54,7 @@ describe('owner documents production renderer composition', () => {
         configurable: true,
         value: (payload: string) => {
           void (async () => {
-            const request = parseOwnerDocumentBindingRequest(JSON.parse(payload), token, 'work', generation)
+            const request = parseOwnerDocumentBindingRequest(JSON.parse(payload))
             const value = request.operation === 'load' ? await handler.load(request) : await handler.replace(request)
             queueMicrotask(() => (dom.window as unknown as { __cordisxOwnerDocumentReceiveV1?: (response: string) => void })
               .__cordisxOwnerDocumentReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value })))
@@ -98,7 +99,7 @@ describe('owner documents production renderer composition', () => {
     const replacementBundle = await buildRendererBundle({
       ...config,
       plugins: [{ ...config.plugins[0]!, config: { pluginRevision: 2 } }],
-    }, { profileId: 'work', generation, ownerDocumentBridgeToken: token })
+    }, { profileId: 'work', generation, ownerDocumentBindings: [binding] })
     right.dom.window.eval(replacementBundle)
     await (right.dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
     const replacement = (right.dom.window as unknown as { __cordisxOwnerDocumentsFixture?: { client: CordisXOwnerDocumentsV1 } })
@@ -109,12 +110,12 @@ describe('owner documents production renderer composition', () => {
     const disabledBundle = await buildRendererBundle({
       ...config,
       plugins: [{ ...config.plugins[0]!, enabled: false }],
-    }, { profileId: 'work', generation, ownerDocumentBridgeToken: token })
+    }, { profileId: 'work', generation, ownerDocumentBindings: [binding] })
     right.dom.window.eval(disabledBundle)
     await (right.dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
     expect((right.dom.window as unknown as { __cordisxOwnerDocumentsFixture?: unknown }).__cordisxOwnerDocumentsFixture).toBeUndefined()
     const uninstalledBundle = await buildRendererBundle({ ...config, plugins: [] }, {
-      profileId: 'work', generation, ownerDocumentBridgeToken: token,
+      profileId: 'work', generation, ownerDocumentBindings: [binding],
     })
     right.dom.window.eval(uninstalledBundle)
     await (right.dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
@@ -122,7 +123,7 @@ describe('owner documents production renderer composition', () => {
     const reenabledBundle = await buildRendererBundle({
       ...config,
       plugins: [{ ...config.plugins[0]!, config: { pluginRevision: 3 } }],
-    }, { profileId: 'work', generation, ownerDocumentBridgeToken: token })
+    }, { profileId: 'work', generation, ownerDocumentBindings: [binding] })
     right.dom.window.eval(reenabledBundle)
     await (right.dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
     const reenabled = (right.dom.window as unknown as { __cordisxOwnerDocumentsFixture?: { client: CordisXOwnerDocumentsV1 } })

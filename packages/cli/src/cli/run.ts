@@ -74,7 +74,12 @@ import {
 } from '../plugin-lifecycle-contracts.js'
 import type { RollbackPlan } from '../launcher/packages/authority.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
-import { createOwnerDocumentBridgeHandler, type OwnerDocumentBridgeHandler } from '../launcher/owner-document-rpc.js'
+import {
+  createOwnerDocumentBridgeHandler,
+  issueOwnerDocumentPrincipalToken,
+  type OwnerDocumentBridgeHandler,
+  type OwnerDocumentPrincipalBinding,
+} from '../launcher/owner-document-rpc.js'
 
 const HELP = `Usage:
   cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-arguments...]
@@ -151,7 +156,7 @@ interface RendererComposition {
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken: string
   readonly configBridgeToken?: string
-  readonly ownerDocumentBridgeToken: string
+  readonly ownerDocumentSecret: string
   readonly serviceConfigBridgeToken?: string
   readonly generation: string
   readonly permissionBridgeToken?: string
@@ -203,18 +208,26 @@ export async function buildRendererComposition(
     : undefined
   const agentHistoryBridgeToken = randomBytes(32).toString('hex')
   const configBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
-  const ownerDocumentBridgeToken = randomBytes(32).toString('hex')
+  const ownerDocumentSecret = randomBytes(32).toString('hex')
   const serviceConfigBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
   const permissionBridgeToken = options.permission?.persistent === true ? randomBytes(32).toString('hex') : undefined
   const iconThemePreferenceBridgeToken = options.writable === true && options.appId !== undefined
     ? randomBytes(32).toString('hex')
     : undefined
   const generation = options.generation ?? randomBytes(16).toString('hex')
+  const profileId = options.permission?.profileId ?? options.profileId ?? 'development'
+  const ownerDocumentBindings = (candidate: CordisXConfig): readonly OwnerDocumentPrincipalBinding[] => pluginIdentities(candidate).map(identity => ({
+    source: identity.source,
+    pluginId: identity.id,
+    token: issueOwnerDocumentPrincipalToken(ownerDocumentSecret, {
+      profileId, generation, identity: { source: identity.source, pluginId: identity.id },
+    }),
+  }))
   const bundleOptions = {
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
-    ownerDocumentBridgeToken,
+    ownerDocumentBindings: ownerDocumentBindings(config),
     ...(serviceConfigBridgeToken === undefined ? {} : { serviceConfigBridgeToken }),
     ...(options.appId === undefined ? {} : { appId: options.appId }),
     ...(options.iconThemePreference === undefined ? {} : { iconThemePreference: options.iconThemePreference }),
@@ -257,7 +270,7 @@ export async function buildRendererComposition(
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
-    ownerDocumentBridgeToken,
+    ownerDocumentSecret,
     ...(serviceConfigBridgeToken === undefined ? {} : { serviceConfigBridgeToken }),
     generation,
     ...(permissionBridgeToken === undefined ? {} : { permissionBridgeToken }),
@@ -265,6 +278,7 @@ export async function buildRendererComposition(
     ...(options.pluginLifecycle === undefined ? {} : { pluginLifecycleBridgeToken: options.pluginLifecycle.token }),
     rebuild: async (nextConfig, pluginActivation, initialRegistryEpoch) => await buildBundle(nextConfig, {
       ...bundleOptions,
+      ownerDocumentBindings: ownerDocumentBindings(nextConfig),
       pluginActivation,
       initialRegistryEpoch,
     }),
@@ -539,7 +553,7 @@ async function runDevelopment(
     })
     const initialDevelopmentPlugin = await localDevelopmentPluginIdentity(entry)
     const ownerDocuments = createOwnerDocumentBridgeHandler({
-      token: composition.ownerDocumentBridgeToken,
+      secret: composition.ownerDocumentSecret,
       profileId: 'development',
       generation: composition.generation,
       store: new OwnerDocumentStore(cordisxHomeDir),
@@ -631,7 +645,7 @@ async function runDevelopment(
       })
   const developmentIdentities = new Map(pluginIdentities(config).map(identity => [identity.id, identity.source]))
   const ownerDocuments = createOwnerDocumentBridgeHandler({
-    token: composition.ownerDocumentBridgeToken,
+    secret: composition.ownerDocumentSecret,
     profileId: 'development',
     generation: composition.generation,
     store: new OwnerDocumentStore(cordisxHomeDir),
@@ -887,7 +901,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         },
       })
   const ownerDocuments = createOwnerDocumentBridgeHandler({
-    token: rendererComposition.ownerDocumentBridgeToken,
+    secret: rendererComposition.ownerDocumentSecret,
     profileId: selection.profileId,
     generation: rendererComposition.generation,
     store: new OwnerDocumentStore(rootFromConfigPath(configPath)),

@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -58,6 +59,31 @@ describe('OwnerDocumentStore', () => {
     ])
     expect([winner.status, loser.status].sort()).toEqual(['accepted', 'conflict'])
     expect([winner, loser].find(result => result.status === 'conflict')).toEqual({ status: 'conflict', actualRevision: 2 })
+  })
+
+  it('linearizes the same expected revision across independent Node processes', async () => {
+    const home = await root()
+    await new OwnerDocumentStore(home).replace({ scope, documentId: 'room-registry', expectedRevision: 0, schemaVersion: 3, value: { state: 'planned' } })
+    const gate = path.join(home, 'start')
+    const fixture = path.resolve('tests/fixtures/owner-document-cas-process.ts')
+    const run = (state: string) => new Promise<Record<string, unknown>>((resolve, reject) => {
+      const child = spawn(process.execPath, ['--import', 'tsx', fixture, home, gate, state], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] })
+      let stdout = ''; let stderr = ''
+      child.stdout.on('data', chunk => { stdout += String(chunk) }); child.stderr.on('data', chunk => { stderr += String(chunk) })
+      child.once('error', reject); child.once('close', code => code === 0 ? resolve(JSON.parse(stdout.trim()) as Record<string, unknown>) : reject(new Error(stderr)))
+    })
+    const first = run('sending-unknown'); const second = run('committed')
+    await writeFile(gate, 'go')
+    const results = await Promise.all([first, second])
+    expect(results.map(item => item.status).sort()).toEqual(['accepted', 'conflict'])
+    await expect(new OwnerDocumentStore(home).load(scope, 'room-registry')).resolves.toMatchObject({ status: 'loaded', snapshot: { revision: 2 } })
+  })
+
+  it('checks the generation fence at the commit point and leaves no side effect when retired', async () => {
+    const home = await root(); const store = new OwnerDocumentStore(home)
+    await expect(store.replace({ scope, documentId: 'rooms', expectedRevision: 0, schemaVersion: 1, value: { no: 'commit' }, commitAllowed: () => false }))
+      .resolves.toMatchObject({ status: 'unavailable', code: 'stale-generation' })
+    await expect(store.load(scope, 'rooms')).resolves.toEqual({ status: 'missing', revision: 0 })
   })
 
   it('isolates profile, source, and plugin id while ignoring runtime/module generations by construction', async () => {

@@ -200,7 +200,7 @@ interface CordisXRuntimeMetadata {
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
   readonly configBridgeToken?: string
-  readonly ownerDocumentBridgeToken?: string
+  readonly ownerDocumentBindings?: readonly { readonly source: string; readonly pluginId: string; readonly token: string }[]
   readonly serviceConfigBridgeToken?: string
   readonly channelCredentialBridgeToken?: string
   readonly channelActionsBridgeToken?: string
@@ -595,10 +595,8 @@ async function start(
   const configBridge = metadata.configBridgeToken === undefined
     ? undefined
     : new BrowserConfigBridge(metadata.configBridgeToken, metadata.profileId, generation)
-  const ownerDocumentBridge = metadata.ownerDocumentBridgeToken === undefined
-    ? undefined
-    : new BrowserOwnerDocumentBridge(metadata.ownerDocumentBridgeToken, metadata.profileId, generation)
-  const ownerDocumentBroker = new CordisXOwnerDocumentBroker(ownerDocumentBridge)
+  const ownerDocumentBridge = metadata.ownerDocumentBindings === undefined ? undefined : new BrowserOwnerDocumentBridge()
+  const ownerDocumentBroker = new CordisXOwnerDocumentBroker(ownerDocumentBridge, metadata.ownerDocumentBindings)
   const serviceConfigBridge = metadata.serviceConfigBridgeToken === undefined
     ? undefined
     : BrowserServiceConfigBridge.connect(metadata.serviceConfigBridgeToken, metadata.profileId, generation)

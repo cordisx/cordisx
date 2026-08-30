@@ -361,10 +361,12 @@ ctx.slots.registerCollection({
   if (installedSchemasteryUiManifest.name !== '@cordisx/schemastery-ui' || installedSchemasteryUiManifest.version !== '0.1.0-beta.2') {
     throw new Error('installed cordisx tarball is missing the pinned @cordisx/schemastery-ui runtime')
   }
-  const [{ loadConfig }, { buildRendererBundle }, { OwnerDocumentStore }] = await Promise.all([
+  const [{ loadConfig }, { buildRendererBundle }, { OwnerDocumentStore }, { createOwnerDocumentBridgeHandler, parseOwnerDocumentBindingRequest }, { JSDOM }] = await Promise.all([
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/config.js')).href),
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/bundle.js')).href),
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/owner-document-store.js')).href),
+    import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/owner-document-rpc.js')).href),
+    import('jsdom'),
   ])
   const ownerDocumentScope = {
     profileId: 'installed',
@@ -383,6 +385,55 @@ ctx.slots.registerCollection({
   const durableReload = await new OwnerDocumentStore(cordisxHome).load(ownerDocumentScope, 'room-registry')
   if (durableReload.status !== 'loaded' || durableReload.snapshot.value.operationId !== durableOperation.operationId) {
     throw new Error('installed owner document store did not reload the exact outbox operation')
+  }
+  // Installed public consumer proof: plugin ctx.documents -> browser binding ->
+  // launcher authority. The direct store reload above is intentionally not the
+  // only durability evidence.
+  const durablePluginEntry = path.join(runnerDirectory, 'durable-plugin.mjs')
+  await writeFile(durablePluginEntry, `export const inject = ['documents']\nexport function apply(ctx) { globalThis.__installedDurableClient = ctx.documents }\n`, 'utf8')
+  const durableSource = pathToFileURL(durablePluginEntry).href
+  const durableGeneration = 'installed-owner-documents-generation'
+  const durableHandler = createOwnerDocumentBridgeHandler({
+    secret: 'installed-owner-documents-secret', profileId: 'installed', generation: durableGeneration,
+    store: new OwnerDocumentStore(cordisxHome),
+    identityAllowed: identity => identity.source === durableSource && identity.pluginId === 'durable-plugin',
+  })
+  const durableBinding = durableHandler.issue({ source: durableSource, pluginId: 'durable-plugin' })
+  const durableBundle = await buildRendererBundle({
+    version: 1, rootDir: runnerDirectory, codex: { debugPort: 9229 }, providers: [],
+    plugins: [{ id: 'durable-plugin', entry: durablePluginEntry, source: durableSource, enabled: true, config: {} }],
+  }, { profileId: 'installed', generation: durableGeneration, ownerDocumentBindings: [durableBinding] })
+  const durableDom = new JSDOM('<html lang="en"><head></head><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>', {
+    runScripts: 'dangerously', url: 'https://codex.local/',
+  })
+  Object.defineProperty(durableDom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+  Object.defineProperty(durableDom.window, 'structuredClone', { value: globalThis.structuredClone })
+  Object.defineProperty(durableDom.window, 'TextEncoder', { value: globalThis.TextEncoder })
+  Object.defineProperty(durableDom.window, 'TextDecoder', { value: globalThis.TextDecoder })
+  Object.defineProperty(durableDom.window, '__cordisxOwnerDocumentRequestV1', {
+    configurable: true,
+    value: payload => { void (async () => {
+      const request = parseOwnerDocumentBindingRequest(JSON.parse(payload))
+      const value = request.operation === 'load' ? await durableHandler.load(request) : await durableHandler.replace(request)
+      durableDom.window.__cordisxOwnerDocumentReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
+    })() },
+  })
+  durableDom.window.eval(durableBundle)
+  await durableDom.window.__cordisxBoot
+  const durableClient = durableDom.window.__installedDurableClient
+  if (durableClient === undefined || Object.keys(durableClient).length !== 0) throw new Error('installed public ctx.documents client is missing or leaks binding state')
+  const bridgeAccepted = await durableClient.replace({
+    contract: 'cordisx.owner-documents/v1', documentId: 'room-outbox', expectedRevision: 0, schemaVersion: 1,
+    value: { operationId: 'installed-public-bridge-operation', state: 'planned' },
+  })
+  if (bridgeAccepted.status !== 'accepted') throw new Error('installed public ctx.documents bridge did not commit')
+  await durableDom.window.__cordisxRuntime?.dispose()
+  durableDom.window.close()
+  const bridgeReload = await new OwnerDocumentStore(cordisxHome).load({
+    profileId: 'installed', identity: { source: durableSource, pluginId: 'durable-plugin' },
+  }, 'room-outbox')
+  if (bridgeReload.status !== 'loaded' || bridgeReload.snapshot.value.operationId !== 'installed-public-bridge-operation') {
+    throw new Error('installed public ctx.documents bridge did not survive launcher store reload')
   }
   const installedBundle = await buildRendererBundle(await loadConfig(configPath))
   if (!installedBundle.includes('# CLIProxy Providers') || !installedBundle.includes('External providers and the native connection')) {

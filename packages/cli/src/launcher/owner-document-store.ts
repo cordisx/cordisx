@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import {
@@ -13,6 +13,8 @@ export const OWNER_DOCUMENT_MAX_DOCUMENT_BYTES = 524_288
 export const OWNER_DOCUMENT_MAX_OWNER_BYTES = 4_194_304
 export const OWNER_DOCUMENT_MAX_DOCUMENTS = 64
 const STORE_SCHEMA_VERSION = 1
+const LOCK_STALE_MS = 15_000
+const LOCK_TIMEOUT_MS = 5_000
 
 export interface OwnerDocumentIdentity {
   readonly source: string
@@ -153,6 +155,55 @@ export class OwnerDocumentStore {
     try { return await operation() } finally { release() }
   }
 
+  private async locked<Value>(scope: OwnerDocumentStoreScope, operation: () => Promise<Value>): Promise<Value> {
+    const file = this.ownerPath(scope)
+    const lock = `${file}.lock`
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 })
+    const started = Date.now()
+    while (true) {
+      try {
+        await mkdir(lock, { mode: 0o700 })
+        await writeFile(path.join(lock, 'owner'), `${process.pid}\n${Date.now()}\n`, { mode: 0o600 })
+        break
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        const metadata = await stat(lock).catch(() => undefined)
+        if (metadata !== undefined && Date.now() - metadata.mtimeMs > LOCK_STALE_MS) {
+          const recovery = `${lock}.recovery`
+          let recoveryOwned = false
+          try {
+            await mkdir(recovery, { mode: 0o700 })
+            recoveryOwned = true
+            await writeFile(path.join(recovery, 'owner'), `${process.pid}\n${Date.now()}\n`, { mode: 0o600 })
+            // Re-read only after exclusively owning recovery. This prevents two
+            // cleaners from deleting a newly reacquired live lock.
+            const current = await stat(lock).catch(() => undefined)
+            if (current !== undefined && Date.now() - current.mtimeMs > LOCK_STALE_MS
+              && !await this.lockOwnerLive(lock)) await rm(lock, { recursive: true, force: true })
+          } catch (recoveryError) {
+            if ((recoveryError as NodeJS.ErrnoException).code !== 'EEXIST') throw recoveryError
+            const recoveryMetadata = await stat(recovery).catch(() => undefined)
+            if (recoveryMetadata !== undefined && Date.now() - recoveryMetadata.mtimeMs > LOCK_STALE_MS
+              && !await this.lockOwnerLive(recovery)) await rm(recovery, { recursive: true, force: true })
+          } finally {
+            if (recoveryOwned) await rm(recovery, { recursive: true, force: true })
+          }
+          continue
+        }
+        if (Date.now() - started >= LOCK_TIMEOUT_MS) throw new Error('owner document store lock timed out')
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+    }
+    try { return await operation() } finally { await rm(lock, { recursive: true, force: true }) }
+  }
+
+  private async lockOwnerLive(lock: string): Promise<boolean> {
+    const owner = await readFile(path.join(lock, 'owner'), 'utf8').catch(() => '')
+    const pid = Number.parseInt(owner.split('\n')[0] ?? '', 10)
+    if (!Number.isSafeInteger(pid) || pid <= 0) return false
+    try { process.kill(pid, 0); return true } catch (probe) { return (probe as NodeJS.ErrnoException).code === 'EPERM' }
+  }
+
   private async read(scope: OwnerDocumentStoreScope): Promise<StoreRead> {
     const file = this.ownerPath(scope)
     let raw: string
@@ -231,8 +282,12 @@ export class OwnerDocumentStore {
     readonly expectedRevision: number
     readonly schemaVersion: number
     readonly value: unknown
+    /** Synchronous authority fence checked at the commit linearization point. */
+    readonly commitAllowed?: () => boolean
   }): Promise<CordisXOwnerDocumentReplaceResultV1> {
     return await this.serialized(async () => {
+      try {
+        return await this.locked(input.scope, async () => {
       try {
         assertDocumentId(input.documentId)
         if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) throw new Error('expectedRevision is invalid')
@@ -257,6 +312,9 @@ export class OwnerDocumentStore {
             [input.documentId]: { revision, schemaVersion: input.schemaVersion, value },
           },
         }
+        if (input.commitAllowed?.() === false) {
+          return unavailable('stale-generation', 'plugin owner is stale', true)
+        }
         try { await this.write(input.scope, next) } catch (error) {
           if (error instanceof Error && error.message.includes('quota')) {
             return unavailable('quota-exceeded', error.message, false)
@@ -274,6 +332,10 @@ export class OwnerDocumentStore {
         }
       } catch (error) {
         return unavailable('invalid-request', error instanceof Error ? error.message : 'request is invalid', false)
+      }
+        })
+      } catch {
+        return unavailable('host-unavailable', 'owner document store lock could not be acquired')
       }
     })
   }

@@ -1218,12 +1218,7 @@ async function install(
           let requestId = 'invalid'
           try {
             if (Buffer.byteLength(payload) > MAX_OWNER_DOCUMENT_REQUEST_BYTES) throw new Error('owner document request exceeds maximum size')
-            const request = parseOwnerDocumentBindingRequest(
-              JSON.parse(payload) as unknown,
-              ownerDocuments.token,
-              ownerDocuments.profileId,
-              ownerDocuments.generation,
-            )
+            const request = parseOwnerDocumentBindingRequest(JSON.parse(payload) as unknown)
             requestId = request.requestId
             if (ownerDocumentController?.signal.aborted === true) throw new Error('owner document bridge is closed')
             if (activeOwnerDocumentRequests >= MAX_OWNER_DOCUMENT_REQUESTS) throw new Error('too many owner document requests')
