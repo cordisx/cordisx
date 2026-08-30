@@ -126,10 +126,10 @@ function MessageEntry({
       {outgoing ? null : <div className="cxa-message-meta" id={labelId}>
           <span className="cxa-author">{participant.name}</span>
           <time dateTime={entry.timestamp}>{new Date(entry.timestamp).toLocaleTimeString(copy.locale, { hour: '2-digit', minute: '2-digit' })}</time>
-          {state === undefined ? null : <span className="cxa-message-state">{state}</span>}
         </div>}
       <div className="cxa-message-surface">
         <div className="cxa-message-body">{entry.body.map((block, index) => <p key={index}>{block}</p>)}</div>
+        {outgoing || state === undefined ? null : <span className="cxa-message-state">{state}</span>}
         {!outgoing || entry.deliveryState !== 'failed' ? null : <span className="cxa-outgoing-error" role="status">{copy.failed}</span>}
         {(entry.reactions ?? []).length === 0 ? null : <div className="cxa-message-reactions" role="list" aria-label={copy.locale.toLowerCase().startsWith('zh') ? '消息反应' : 'Message reactions'}>
           {(entry.reactions ?? []).map(reaction => {

@@ -353,6 +353,18 @@ construct a package-local, debug-only private projection and mount this
 production renderer; production renderer and adapter modules never import
 Playground fixtures or selectors.
 
+The renderer also owns one fixed-height Room header and one reusable
+`HostConversationRightInspector`. The header projects the Room title and
+description, members/settings/more actions, and a raw composite of the exact
+ordered participant AvatarRefs; it does not infer membership from names or
+decorate the composite with another badge surface. Members, settings, more,
+and Agent identity content all share the same inspector. At sufficient
+container width it is a split pane which compresses the conversation; below
+the container breakpoint it is a drawer with a scrim, focus trap, Escape and
+outside-close behavior, and exact focus return. Resize and snapshot
+replacement preserve the active inspector and focused control. Inspector state
+is local presentation state and does not add native-history entries.
+
 The public plugin surface follows DeepSeek Harness: plugins declare injected
 services and use `ctx.slots.inject/register` for structured shell data. Both
 methods install Cordis effects through the service proxy, so the caller's fiber
@@ -566,6 +578,15 @@ primitive and keeps a task/history semantic icon. Agent identity Avatars belong
 to conversation participant surfaces, not to generic task navigation. A future
 per-Room composite leading visual must come from an exact row-scoped collection
 contract; the Host must not infer it from the current Room selection or title.
+
+AgentLoop v2 commands are accepted only when the Host can provide the formal
+owner/provider durable-ledger semantics. The explicit Playground mock uses
+session-scoped persistence for disposable simulator state. A real/local-cli
+renderer without the launcher-owned durable RPC fails v2 create/send closed as
+`reconciliation-required`; it must not advertise an accepted operation backed
+only by renderer memory or localStorage. Real provider task recovery across a
+Host restart remains unavailable until the launcher-owned, generation-fenced
+ledger and provider reconciliation service is delivered.
 
 Collection subscriptions are owned by the calling Cordis fiber. Plugin block,
 generation replacement, registration disposal, or runtime teardown

@@ -46,10 +46,15 @@ const allowed = async (request: { capability: 'tasks.create' | 'tasks.content.re
   capability: request.capability, state: 'allowed' as const, code: 'allowed' as const,
 })
 
+function memoryLedgerPersistence(providerKey = 'debug:agent-loop/mock/v1') {
+  let value: string | undefined
+  return { providerKey, read: () => value, write: (next: string) => { value = next } }
+}
+
 describe('durable AgentLoop v2 broker', () => {
   it('executes and replays exact create/send operations while preserving details, ids, and event causation', async () => {
     const host = new PlaygroundMockAgentLoopHost()
-    const broker = new CordisXAgentLoopBrokerV2(host, () => new Date('2026-08-31T00:00:00.000Z'))
+    const broker = new CordisXAgentLoopBrokerV2(host, () => new Date('2026-08-31T00:00:00.000Z'), memoryLedgerPersistence())
     const client = broker.bind({ ownerKey: 'chatroom', active: () => true, authorize: allowed })
     const lead = definition('lead')
     const createLead = create('create-lead', lead)
@@ -83,7 +88,7 @@ describe('durable AgentLoop v2 broker', () => {
 
   it('rejects structural operation reuse before side effects and isolates the same id by owner', async () => {
     const host = new PlaygroundMockAgentLoopHost()
-    const broker = new CordisXAgentLoopBrokerV2(host)
+    const broker = new CordisXAgentLoopBrokerV2(host, undefined, memoryLedgerPersistence())
     const first = broker.bind({ ownerKey: 'one', active: () => true, authorize: allowed })
     const second = broker.bind({ ownerKey: 'two', active: () => true, authorize: allowed })
     const lead = definition('lead')
@@ -97,7 +102,7 @@ describe('durable AgentLoop v2 broker', () => {
 
   it('reconciles an exact create operation after client dispose with one logical task and a new generation', async () => {
     const host = new PlaygroundMockAgentLoopHost()
-    const broker = new CordisXAgentLoopBrokerV2(host)
+    const broker = new CordisXAgentLoopBrokerV2(host, undefined, memoryLedgerPersistence())
     const lead = definition('lead')
     const command = create('durable-create', lead)
     const first = broker.bind({ ownerKey: 'chatroom', active: () => true, authorize: allowed })
@@ -168,6 +173,15 @@ describe('durable AgentLoop v2 broker', () => {
     const conflicting = await second.createOrBind(create('restart-create', definition('reviewer')))
     expect(conflicting).toMatchObject({ status: 'unavailable', code: 'operation-conflict' })
     expect(secondHost.snapshot().tasks).toHaveLength(1)
+  })
+
+  it('fails closed before provider side effects when no durable ledger implementation exists', async () => {
+    const host = new PlaygroundMockAgentLoopHost()
+    const broker = new CordisXAgentLoopBrokerV2(host)
+    const client = broker.bind({ ownerKey: 'chatroom', active: () => true, authorize: allowed })
+    const result = await client.createOrBind(create('non-durable-create', definition('lead')))
+    expect(result).toMatchObject({ status: 'unavailable', code: 'reconciliation-required' })
+    expect(host.snapshot().tasks).toHaveLength(0)
   })
 
   it('validates canonical Host and external task URLs', () => {

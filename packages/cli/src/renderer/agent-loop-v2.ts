@@ -224,6 +224,11 @@ export class CordisXAgentLoopBrokerV2 {
       }),
       createOrBind: (command: CreateCommand) => {
         if (!live()) return Promise.resolve(this.refusal(command, command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read', 'unavailable', 'host-unavailable'))
+        if (this.persistence === undefined) return Promise.resolve(this.unavailable(
+          command,
+          command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read',
+          'reconciliation-required',
+        ))
         return this.executeDurable<AgentLoopCreateOrBindResult>(options, command,
           () => this.unavailable(command, command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read', 'operation-conflict'),
           async () => await this.createOrBind(options, owned, command, live)).then(result => {
@@ -233,6 +238,7 @@ export class CordisXAgentLoopBrokerV2 {
       },
       send: (command: SendCommand) => {
         if (!live()) return Promise.resolve(this.refusal(command, 'turns.submit', 'unavailable', 'host-unavailable'))
+        if (this.persistence === undefined) return Promise.resolve(this.unavailable(command, 'turns.submit', 'reconciliation-required'))
         return this.executeDurable<AgentLoopSendResult>(options, command,
           () => this.unavailable(command, 'turns.submit', 'operation-conflict'),
           async () => await this.send(options, command, live))

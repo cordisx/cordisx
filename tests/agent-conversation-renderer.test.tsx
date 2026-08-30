@@ -470,6 +470,9 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(agent.children[0]?.classList.contains('cxa-avatar')).toBe(true)
       expect(agent.querySelector('.cxa-message-content > .cxa-message-meta + .cxa-message-surface')).not.toBeNull()
       expect(agent.querySelector('.cxa-message-surface')?.textContent).toContain('A long second line')
+      for (const state of agent.querySelectorAll('.cxa-message-state')) {
+        expect(state.closest('.cxa-message-surface')).not.toBeNull()
+      }
       expect(outgoing.querySelector('.cxa-message-content > .cxa-message-surface')).not.toBeNull()
       expect(harness.dom.window.getComputedStyle(agent).backgroundColor).toMatch(/transparent|rgba\(0, 0, 0, 0\)/)
       const incomingSurface = harness.dom.window.getComputedStyle(agent.querySelector<HTMLElement>('.cxa-message-surface')!)
