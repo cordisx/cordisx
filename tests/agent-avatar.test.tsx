@@ -90,7 +90,9 @@ describe('Host Agent avatar resolver', () => {
     expect(avatarSource).toContain('data-cordisx-agent-avatar-style')
     expect(avatarSource).not.toContain('process.env')
     expect(styles).not.toContain('.cxa-avatar .oneworks-avatar *')
-    expect(styles).toContain('.cxa-avatar *{animation:none!important;transition:none!important}')
+    const reducedMotionRule = styles.match(/@media \(prefers-reduced-motion:reduce\)\{[^\n]+/)?.[0] ?? ''
+    expect(reducedMotionRule).toContain('.cxa-avatar *')
+    expect(reducedMotionRule).toContain('animation:none!important;transition:none!important')
   })
 
   it('creates deterministic OneWorks definitions and keeps a bounded LRU cache', () => {

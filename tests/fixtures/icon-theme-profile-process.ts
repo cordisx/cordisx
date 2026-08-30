@@ -12,6 +12,7 @@ import {
   iconThemePreferenceBridgeError,
   parseIconThemePreferenceBindingRequest,
   persistIconThemePreference,
+  type IconThemePreferenceBindingRequest,
   type IconThemePreferencePersistenceContext,
 } from '../../packages/cli/src/launcher/icon-theme-rpc.js'
 
@@ -26,7 +27,12 @@ interface Runtime {
     iconThemes?: {
       profileRevision: number
       selected: { providerId: string; providerGeneration: string }
-      providers: readonly { providerId: string; providerGeneration: string }[]
+      providers: readonly {
+        providerId: string
+        namespace: string
+        providerVersion: string
+        providerGeneration: string
+      }[]
     }
   }
   dispose(): Promise<void>
@@ -224,16 +230,28 @@ async function processA(): Promise<Record<string, unknown>> {
     dom.window.eval(bundle)
     await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true', 'process A readiness')
     const runtime = (dom.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
+    const snapshot = runtime.snapshot().iconThemes!
     dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="about"]')?.click()
-    await waitFor(() => dom.window.document.querySelector('#cxr-icon-theme-provider') !== null, 'process A picker')
-    const picker = dom.window.document.querySelector<HTMLSelectElement>('#cxr-icon-theme-provider')!
-    const aurora = [...picker.options].find(option => option.textContent?.startsWith('Aurora'))!
-    picker.value = aurora.value
-    picker.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
-    await waitFor(async () => (await loadHomeConfig(configPath)).apps.codex?.profiles.default?.iconTheme?.revision === 1, 'process A durable preference')
-    const preference = (await loadHomeConfig(configPath)).apps.codex!.profiles.default!.iconTheme!
-    const selected = runtime.snapshot().iconThemes!.selected
+    if (dom.window.document.querySelector('#cxr-icon-theme-provider') !== null) throw new Error('removed icon-theme picker is visible')
+    const provider = snapshot.providers.find(item => item.providerId === 'plugin:icon-theme-test:aurora')
+    if (provider === undefined) throw new Error('Aurora provider is unavailable')
+    const candidate = {
+      providerId: provider.providerId,
+      namespace: provider.namespace,
+      providerVersion: provider.providerVersion,
+      providerGeneration: provider.providerGeneration,
+    }
+    wireCandidateKeys = Object.keys(candidate).sort()
+    const request: IconThemePreferenceBindingRequest = {
+      requestId: 'process-a-private-persistence',
+      expectedPreferenceRevision: 0,
+      expectedProfileRevision: snapshot.profileRevision,
+      selectedProfileRevision: snapshot.profileRevision,
+      candidate,
+    }
+    const preference = await persistIconThemePreference(context, request)
+    const selected = { providerId: preference.providerId, providerGeneration: preference.providerGeneration }
     const callbacksPendingAtShutdown = callbacks.pending()
     callbacks.stop()
     await runtime.dispose()

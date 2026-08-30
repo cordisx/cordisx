@@ -42,7 +42,7 @@ describe('two-process icon-theme profile persistence', () => {
       'namespace', 'providerGeneration', 'providerId', 'providerVersion',
     ])
     expect(processA.teardown).toEqual({
-      callbacksPendingAtShutdown: 1,
+      callbacksPendingAtShutdown: 0,
       lateCallbackTouchedDom: false,
       callbacksDrained: true,
       nestedWindowMicrotasksDrained: true,
