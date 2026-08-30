@@ -96,10 +96,17 @@ import {
   type IconThemePreferencePersistenceContext,
   type IconThemePreferenceReadyResponseAck,
 } from './icon-theme-rpc.js'
-import {
-  CdpCertifiedPermissionChannel,
-} from './certified-permission-cdp.js'
+import { CdpCertifiedPermissionChannel } from './certified-permission-cdp.js'
 import type { LauncherMarketplaceCertifiedAuthority } from './marketplace-certified-authority.js'
+import {
+  MAX_OWNER_DOCUMENT_REQUEST_BYTES,
+  MAX_OWNER_DOCUMENT_REQUESTS,
+  OWNER_DOCUMENT_BINDING,
+  OWNER_DOCUMENT_RECEIVER,
+  ownerDocumentBridgeError,
+  parseOwnerDocumentBindingRequest,
+  type OwnerDocumentBridgeHandler,
+} from './owner-document-rpc.js'
 
 const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
 const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
@@ -702,6 +709,9 @@ interface InstalledScript {
   readonly configController?: AbortController
   readonly removeConfigBindingListener?: () => void
   readonly configBindingInstalled: boolean
+  readonly ownerDocumentController?: AbortController
+  readonly removeOwnerDocumentBindingListener?: () => void
+  readonly ownerDocumentBindingInstalled: boolean
   readonly serviceConfigController?: AbortController
   readonly removeServiceConfigBindingListener?: () => void
   readonly serviceConfigBindingInstalled: boolean
@@ -734,6 +744,7 @@ function installedBindingNames(installed: InstalledScript): readonly string[] {
     ...(installed.providerBindingInstalled ? [PROVIDER_BINDING] : []),
     ...(installed.historyBindingInstalled ? [AGENT_HISTORY_BINDING] : []),
     ...(installed.configBindingInstalled ? [CONFIG_BINDING] : []),
+    ...(installed.ownerDocumentBindingInstalled ? [OWNER_DOCUMENT_BINDING] : []),
     ...(installed.serviceConfigBindingInstalled ? [SERVICE_CONFIG_BINDING] : []),
     ...(installed.credentialBindingInstalled ? [CHANNEL_CREDENTIAL_BINDING] : []),
     ...(installed.actionsBindingInstalled ? [CHANNEL_ACTIONS_BINDING] : []),
@@ -785,6 +796,13 @@ async function sendAgentHistoryBindingResponse(session: CdpSession, payload: Rec
 async function sendConfigBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
   await session.send('Runtime.evaluate', {
     expression: `void globalThis.${CONFIG_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    allowUnsafeEvalBlockedByCSP: true,
+  })
+}
+
+async function sendOwnerDocumentBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
+  await session.send('Runtime.evaluate', {
+    expression: `void globalThis.${OWNER_DOCUMENT_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
     allowUnsafeEvalBlockedByCSP: true,
   })
 }
@@ -971,6 +989,7 @@ async function install(
   provider?: { readonly fleet: ProviderFleet; readonly token: string },
   history?: { readonly host: CodexAgentHistoryHost; readonly token: string },
   config?: ConfigBridgeHandler,
+  ownerDocuments?: OwnerDocumentBridgeHandler,
   serviceConfig?: ServiceConfigBridgeHandler,
   credential?: ChannelCredentialBridgeHandler,
   actions?: ChannelActionsBridgeHandler,
@@ -1000,6 +1019,7 @@ async function install(
   const providerController = provider === undefined ? undefined : new AbortController()
   const historyController = history === undefined ? undefined : new AbortController()
   const configController = config === undefined ? undefined : new AbortController()
+  const ownerDocumentController = ownerDocuments === undefined ? undefined : new AbortController()
   const serviceConfigController = serviceConfig === undefined ? undefined : new AbortController()
   const credentialController = credential === undefined ? undefined : new AbortController()
   const actionsController = actions === undefined ? undefined : new AbortController()
@@ -1011,6 +1031,7 @@ async function install(
   let removeProviderBindingListener = (): void => {}
   let removeHistoryBindingListener = (): void => {}
   let removeConfigBindingListener = (): void => {}
+  let removeOwnerDocumentBindingListener = (): void => {}
   let removeServiceConfigBindingListener = (): void => {}
   let removeCredentialBindingListener = (): void => {}
   let removeActionsBindingListener = (): void => {}
@@ -1057,6 +1078,7 @@ async function install(
     if (provider !== undefined) await session.send('Runtime.addBinding', { name: PROVIDER_BINDING })
     if (history !== undefined) await session.send('Runtime.addBinding', { name: AGENT_HISTORY_BINDING })
     if (config !== undefined) await session.send('Runtime.addBinding', { name: CONFIG_BINDING })
+    if (ownerDocuments !== undefined) await session.send('Runtime.addBinding', { name: OWNER_DOCUMENT_BINDING })
     if (serviceConfig !== undefined) await session.send('Runtime.addBinding', { name: SERVICE_CONFIG_BINDING })
     if (credential !== undefined) await session.send('Runtime.addBinding', { name: CHANNEL_CREDENTIAL_BINDING })
     if (actions !== undefined) await session.send('Runtime.addBinding', { name: CHANNEL_ACTIONS_BINDING })
@@ -1182,6 +1204,43 @@ async function install(
               requestId,
               ok: false,
               ...configBridgeError(error),
+            }).catch(() => undefined)
+          }
+        })()
+      })
+    }
+    let activeOwnerDocumentRequests = 0
+    if (ownerDocuments !== undefined) {
+      removeOwnerDocumentBindingListener = session.onEvent('Runtime.bindingCalled', params => {
+        if (params.name !== OWNER_DOCUMENT_BINDING || typeof params.payload !== 'string') return
+        const payload = params.payload
+        void (async () => {
+          let requestId = 'invalid'
+          try {
+            if (Buffer.byteLength(payload) > MAX_OWNER_DOCUMENT_REQUEST_BYTES) throw new Error('owner document request exceeds maximum size')
+            const request = parseOwnerDocumentBindingRequest(
+              JSON.parse(payload) as unknown,
+              ownerDocuments.token,
+              ownerDocuments.profileId,
+              ownerDocuments.generation,
+            )
+            requestId = request.requestId
+            if (ownerDocumentController?.signal.aborted === true) throw new Error('owner document bridge is closed')
+            if (activeOwnerDocumentRequests >= MAX_OWNER_DOCUMENT_REQUESTS) throw new Error('too many owner document requests')
+            activeOwnerDocumentRequests += 1
+            try {
+              const value = request.operation === 'load'
+                ? await ownerDocuments.load(request)
+                : await ownerDocuments.replace(request)
+              await sendOwnerDocumentBindingResponse(session, { requestId, ok: true, value })
+            } finally {
+              activeOwnerDocumentRequests -= 1
+            }
+          } catch {
+            await sendOwnerDocumentBindingResponse(session, {
+              requestId,
+              ok: true,
+              value: ownerDocumentBridgeError(),
             }).catch(() => undefined)
           }
         })()
@@ -1523,6 +1582,8 @@ async function install(
       historyBindingInstalled: history !== undefined,
       ...(configController === undefined ? {} : { configController, removeConfigBindingListener }),
       configBindingInstalled: config !== undefined,
+      ...(ownerDocumentController === undefined ? {} : { ownerDocumentController, removeOwnerDocumentBindingListener }),
+      ownerDocumentBindingInstalled: ownerDocuments !== undefined,
       ...(serviceConfigController === undefined ? {} : { serviceConfigController, removeServiceConfigBindingListener }),
       serviceConfigBindingInstalled: serviceConfig !== undefined,
       ...(credentialController === undefined ? {} : { credentialController, removeCredentialBindingListener }),
@@ -1546,6 +1607,7 @@ async function install(
     providerController?.abort()
     historyController?.abort()
     configController?.abort()
+    ownerDocumentController?.abort()
     serviceConfigController?.abort()
     credentialController?.abort()
     actionsController?.abort()
@@ -1557,6 +1619,7 @@ async function install(
     removeProviderBindingListener()
     removeHistoryBindingListener()
     removeConfigBindingListener()
+    removeOwnerDocumentBindingListener()
     removeServiceConfigBindingListener()
     removeCredentialBindingListener()
     removeActionsBindingListener()
@@ -1578,6 +1641,7 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.providerController?.abort()
   installed.historyController?.abort()
   installed.configController?.abort()
+  installed.ownerDocumentController?.abort()
   installed.serviceConfigController?.abort()
   installed.credentialController?.abort()
   installed.actionsController?.abort()
@@ -1589,6 +1653,7 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.removeProviderBindingListener?.()
   installed.removeHistoryBindingListener?.()
   installed.removeConfigBindingListener?.()
+  installed.removeOwnerDocumentBindingListener?.()
   installed.removeServiceConfigBindingListener?.()
   installed.removeCredentialBindingListener?.()
   installed.removeActionsBindingListener?.()
@@ -1615,6 +1680,9 @@ async function uninstall(installed: InstalledScript): Promise<void> {
         : []),
       ...(installed.configBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: CONFIG_BINDING })]
+        : []),
+      ...(installed.ownerDocumentBindingInstalled
+        ? [installed.session.send('Runtime.removeBinding', { name: OWNER_DOCUMENT_BINDING })]
         : []),
       ...(installed.serviceConfigBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: SERVICE_CONFIG_BINDING })]
@@ -1658,6 +1726,7 @@ export interface WatchInjectionOptions {
   readonly agentHistoryHost?: CodexAgentHistoryHost
   readonly agentHistoryBridgeToken?: string
   readonly configBridge?: ConfigBridgeHandler
+  readonly ownerDocuments?: OwnerDocumentBridgeHandler
   readonly serviceConfigBridge?: ServiceConfigBridgeHandler
   readonly channelCredentialBridge?: ChannelCredentialBridgeHandler
   readonly channelActionsBridge?: ChannelActionsBridgeHandler
@@ -1722,6 +1791,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             provider,
             history,
             options.configBridge,
+            options.ownerDocuments,
             options.serviceConfigBridge,
             options.channelCredentialBridge,
             options.channelActionsBridge,

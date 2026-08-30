@@ -76,6 +76,7 @@ function installBridge(
 
 function installHostBridges(): void {
   window.__cordisxConfigRequestV1 = installBridge('/api/config', value => window.__cordisxConfigReceiveV1?.(value))
+  window.__cordisxOwnerDocumentRequestV1 = installBridge('/api/documents', value => window.__cordisxOwnerDocumentReceiveV1?.(value))
   window.__cordisxServiceConfigRequestV1 = installBridge('/api/service-config', value => window.__cordisxServiceConfigReceiveV1?.(value))
   window.__cordisxChannelCredentialRequestV1 = installBridge('/api/channel-credential', value => window.__cordisxChannelCredentialReceiveV1?.(value))
   window.__cordisxProviderRequestV1 = installBridge('/api/provider', value => window.__cordisxProviderReceiveV1?.(value))

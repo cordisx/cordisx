@@ -147,6 +147,28 @@ provider, model, App Server, Codex task, process, connection, or login state.
 Its `debug:agent-loop/mock/v1` task registry and trace page are development
 diagnostics, not public runtime state or a permanent CLI contract.
 
+Small plugin-owned durable state uses the Host public
+`cordisx.owner-documents/v1` service at `ctx.documents`. The renderer receives
+one client bound to the Host-issued plugin principal; callers cannot choose a
+profile, source, plugin id, or runtime generation. The launcher keys the store
+by exact profile, source, and plugin id while deliberately excluding module
+generation, so normal reload, disable, uninstall/re-enable, and upgrades from
+the same stable source retain the owner's data. A source replacement is a new
+owner and cannot inherit it. Ordinary disposal never purges state, and v1
+exposes no purge operation.
+
+The launcher, rather than plugin code or renderer local storage, owns the JSON
+document files and serializes load and compare-and-swap replacement. Each
+snapshot carries a monotonic revision plus a consumer-owned schema version;
+consumer migration is an explicit CAS replacement. Invalid JSON, unsupported
+Host envelope versions, and quota violations fail closed without overwriting
+the recoverable original. Renderer subscriptions emit full snapshot
+replacements, poll the same launcher authority with bounded frequency for
+cross-window changes, and stop before late delivery when their subscription,
+principal generation, fiber, or runtime is disposed. Playground uses the same
+request parser and store through a narrow HTTP bridge; only its explicit Reset
+operation clears the isolated Playground Home.
+
 Durable adapter history is a separate Node/Host read service specified in
 [`agent-history.md`](agent-history.md). It gives plugins permission-scoped,
 redacted Agent-v2 pages and opaque cursors without renderer filesystem access

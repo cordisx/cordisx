@@ -93,6 +93,12 @@ async function resolveLocalDevelopmentEntry(rawEntry: string): Promise<LocalDeve
   }
 }
 
+/** Host-private stable owner identity without compiling the local plugin candidate. */
+export async function localDevelopmentPluginIdentity(rawEntry: string): Promise<{ readonly id: string; readonly source: string }> {
+  const resolved = await resolveLocalDevelopmentEntry(rawEntry)
+  return { id: pluginId(resolved.entry), source: resolved.identitySource }
+}
+
 async function readReadme(root: string): Promise<{ readonly text?: string; readonly files: readonly string[] }> {
   const names = await readdir(root).catch(() => [])
   const files = names

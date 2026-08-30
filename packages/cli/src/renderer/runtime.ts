@@ -175,6 +175,8 @@ import {
   type HostDomWorkerBoundary,
   type HostDomWorkerEnvironment,
 } from './host-dom-worker.js'
+import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from './owner-documents.js'
+import type { CordisXOwnerDocumentsV1 } from '../durable-document-contracts.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 const MAX_ROLLBACK_RECEIPTS = 64
@@ -198,6 +200,7 @@ interface CordisXRuntimeMetadata {
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
   readonly configBridgeToken?: string
+  readonly ownerDocumentBridgeToken?: string
   readonly serviceConfigBridgeToken?: string
   readonly channelCredentialBridgeToken?: string
   readonly channelActionsBridgeToken?: string
@@ -245,6 +248,7 @@ interface PluginController {
   unregisterExtensionPoints?: () => void
   unregisterConnector?: () => void | Promise<void>
   unregisterAgentLoop?: () => void | Promise<void>
+  unregisterDocuments?: () => void | Promise<void>
   fiber?: Fiber
   status: ManagerPluginStatus
   error?: string
@@ -254,6 +258,7 @@ interface PluginController {
   connectorClient?: CordisXBoundConnectorClient
   agentLoopClient?: CompatibleBoundAgentLoopClient
   hostDomWorker?: HostDomWorkerBoundary
+  documentsClient?: CordisXOwnerDocumentsV1 & { dispose(): void }
 }
 
 function topologicalActivationOrder(
@@ -590,6 +595,10 @@ async function start(
   const configBridge = metadata.configBridgeToken === undefined
     ? undefined
     : new BrowserConfigBridge(metadata.configBridgeToken, metadata.profileId, generation)
+  const ownerDocumentBridge = metadata.ownerDocumentBridgeToken === undefined
+    ? undefined
+    : new BrowserOwnerDocumentBridge(metadata.ownerDocumentBridgeToken, metadata.profileId, generation)
+  const ownerDocumentBroker = new CordisXOwnerDocumentBroker(ownerDocumentBridge)
   const serviceConfigBridge = metadata.serviceConfigBridgeToken === undefined
     ? undefined
     : BrowserServiceConfigBridge.connect(metadata.serviceConfigBridgeToken, metadata.profileId, generation)
@@ -1012,6 +1021,10 @@ async function start(
       delete controller.agentLoopClient
       await controller.unregisterAgentLoop?.()
       delete controller.unregisterAgentLoop
+      controller.documentsClient?.dispose()
+      delete controller.documentsClient
+      await controller.unregisterDocuments?.()
+      delete controller.unregisterDocuments
       controller.connectorClient?.dispose()
       delete controller.connectorClient
       await controller.unregisterConnector?.()
@@ -1220,7 +1233,19 @@ async function start(
       agentLoopBroker.bind(agentLoopOptions),
       agentLoopBrokerV2.bind(agentLoopOptions),
     )
-    pluginContext = ctx.isolate('connectors').isolate('agentLoop').extend({
+    const documentsClient = ownerDocumentBroker.bind({
+      identity: controller.identity,
+      active: () => {
+        if (!controller.principalLive) return false
+        try {
+          const identity = pluginConsole.owner(controller.principal)
+          return identity.id === controller.identity.id && identity.source === controller.identity.source
+        } catch {
+          return false
+        }
+      },
+    })
+    pluginContext = ctx.isolate('connectors').isolate('agentLoop').isolate('documents').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
@@ -1231,6 +1256,8 @@ async function start(
     controller.unregisterConnector = pluginContext.reflect.provide('connectors', connectorClient)
     controller.agentLoopClient = agentLoopClient
     controller.unregisterAgentLoop = pluginContext.reflect.provide('agentLoop', agentLoopClient)
+    controller.documentsClient = documentsClient
+    controller.unregisterDocuments = pluginContext.reflect.provide('documents', documentsClient)
     pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation started')
     const fiber = pluginContext.plugin(
       pluginFromModule(module),
@@ -1254,6 +1281,10 @@ async function start(
       delete controller.agentLoopClient
       await controller.unregisterAgentLoop?.()
       delete controller.unregisterAgentLoop
+      documentsClient.dispose()
+      delete controller.documentsClient
+      await controller.unregisterDocuments?.()
+      delete controller.unregisterDocuments
       connectorClient.dispose()
       delete controller.connectorClient
       await controller.unregisterConnector?.()
@@ -2420,6 +2451,10 @@ async function start(
       delete controller.agentLoopClient
       await controller.unregisterAgentLoop?.()
       delete controller.unregisterAgentLoop
+      controller.documentsClient?.dispose()
+      delete controller.documentsClient
+      await controller.unregisterDocuments?.()
+      delete controller.unregisterDocuments
       agentRuntime.releaseOwner(controller.identity, 'generation-replaced', moduleGenerationOf(controller))
       await controller.fiber?.dispose()
       retirePrincipal(controller, 'Plugin disposed with runtime generation')
@@ -2479,6 +2514,7 @@ async function start(
     connectorBroker.disposeAll()
     agentLoopBroker.dispose()
     agentLoopBrokerV2.dispose()
+    ownerDocumentBroker.dispose()
     await agentRuntime.dispose()
     historyAdapter.dispose()
     bindingPlatformAdapter?.dispose()
