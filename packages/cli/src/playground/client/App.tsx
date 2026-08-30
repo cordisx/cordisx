@@ -126,7 +126,7 @@ export function App() {
         {runtime.simulator === undefined ? null : <section className="pg-simulator-task-list" aria-labelledby="pg-simulator-task-list-title">
           <div className="pg-session-heading"><span id="pg-simulator-task-list-title">{en ? 'Simulator tasks' : 'Simulator 任务'}</span><small>Mock</small></div>
           {simulatorTasks.length === 0
-            ? <p>{en ? 'Send a Chatroom message to create a simulated task.' : '在 Chatroom 中发送消息后会创建模拟任务。'}</p>
+            ? <p>{en ? 'Send an AgentLoop message to create a simulated task.' : '发送 AgentLoop 消息后会创建模拟任务。'}</p>
             : simulatorTasks.map(task => <button
                 type="button"
                 key={task.debugTaskId}

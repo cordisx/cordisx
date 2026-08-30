@@ -14,9 +14,11 @@ import {
 } from '../packages/cli/src/agent-loop-contracts.js'
 import { buildRendererBundle, buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
+import { createPlaygroundSession } from '../packages/cli/src/playground/session.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../packages/cli/src/platform-contracts.js'
 import { CordisXAgentLoopBroker } from '../packages/cli/src/renderer/agent-loop.js'
+import { ProviderFleet } from '../packages/cli/src/providers/fleet.js'
 import {
   DeterministicPlaygroundMockCliExecutor,
   PlaygroundMockAgentLoopHost,
@@ -239,6 +241,62 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it('never creates a Provider Fleet for a mock Playground generation even when local-cli config is enabled', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-agent-loop-simulator-provider-'))
+    const configPath = path.join(root, 'cordisx.config.json')
+    await writeFile(configPath, JSON.stringify({
+      version: 1,
+      codex: { agentLoopBackend: 'mock', executable: '/must-not-start/codex' },
+      providers: [],
+      plugins: [],
+    }))
+    const createFleet = vi.spyOn(ProviderFleet, 'create')
+    const session = await createPlaygroundSession(configPath)
+    try {
+      const composition = await session.buildComposition('/runtime.ts')
+      expect(composition.source).toContain('agentLoopBackend: "mock"')
+      expect(composition.source).not.toContain('providerBridgeToken')
+      expect(createFleet).not.toHaveBeenCalled()
+    } finally {
+      await session.close()
+      createFleet.mockRestore()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('recovers a failed trace on retry/rebind and closes only after the final binding is released', async () => {
+    const host = new PlaygroundMockAgentLoopHost()
+    const lead = definition('lead')
+    const prepared = await host.prepare()
+    if (!prepared.ok) throw new Error('Simulator preparation failed')
+    const created = await host.create({ ...lead, sourceDefinitions: [lead.identity] }, prepared.value, {
+      target: lead.identity, definitions: [lead],
+    })
+    if (!created.ok) throw new Error('Simulator create failed')
+
+    await host.send(created.value, [{ kind: 'text', text: '[cli-fail]' }])
+    expect(host.activeTaskPresentations()).toEqual([])
+    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'error', active: false })
+
+    await host.send(created.value, [{ kind: 'text', text: 'retry succeeds' }])
+    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'completed', active: true })
+    expect(host.activeTaskPresentations()).toHaveLength(1)
+
+    const rebound = await host.bind(created.value.task)
+    if (!rebound.ok) throw new Error('Simulator rebind failed')
+    host.release(created.value)
+    expect(host.activeTaskPresentations()).toHaveLength(1)
+    host.release(rebound.value)
+    expect(host.activeTaskPresentations()).toEqual([])
+    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'closed', active: false })
+
+    const reopened = await host.bind(created.value.task)
+    if (!reopened.ok) throw new Error('Simulator reopen failed')
+    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'created', active: true })
+    expect(host.snapshot().tasks[0]?.events.at(-1)?.type).toBe('task.bound')
+    host.release(reopened.value)
   })
 
   it('boots the same bundled ctx.agentLoop client without a provider bridge and returns only normal public events', async () => {

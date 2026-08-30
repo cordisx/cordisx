@@ -70,7 +70,7 @@ export interface PlaygroundMockTaskTrace {
   }
   readonly events: readonly {
     readonly sequence: number
-    readonly type: 'task.created' | 'input.accepted' | 'execution.started' | 'approval.required' | 'execution.completed' | 'execution.failed' | 'task.closed'
+    readonly type: 'task.created' | 'task.bound' | 'input.accepted' | 'execution.started' | 'approval.required' | 'execution.completed' | 'execution.failed' | 'task.closed'
     readonly detail: string
   }[]
 }
@@ -93,6 +93,7 @@ interface TaskRecord {
   trace: PlaygroundMockTaskTrace
   lifecycle: CordisXAgentLoopLifecycleEvent[]
   nextTurn: number
+  activeBindings: number
 }
 
 function freeze<Value>(value: Value): Value {
@@ -225,15 +226,26 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
       },
       events: [{ sequence: 0, type: 'task.created' as const, detail: `${label} prompt resolved from ${definition.sourceDefinitions.length} layer(s).` }],
     })
-    this.tasks.set(hostTask.task, { hostTask, definition: clone(definition), context: clone(context), trace, lifecycle: [], nextTurn: 1 })
+    this.tasks.set(hostTask.task, {
+      hostTask, definition: clone(definition), context: clone(context), trace, lifecycle: [], nextTurn: 1, activeBindings: 1,
+    })
     return { ok: true, value: hostTask }
   }
 
   async bind(task: string): Promise<CordisXPlatformResult<HostTask>> {
     const record = this.tasks.get(task)
-    return record === undefined
-      ? { ok: false, error: { code: 'task-not-found', message: 'The simulated task is unavailable.' } }
-      : { ok: true, value: clone(record.hostTask) }
+    if (record === undefined) return { ok: false, error: { code: 'task-not-found', message: 'The simulated task is unavailable.' } }
+    record.activeBindings += 1
+    if (!record.trace.active) {
+      const sequence = record.trace.events.length
+      record.trace = clone({
+        ...record.trace,
+        active: true,
+        status: 'created',
+        events: [...record.trace.events, { sequence, type: 'task.bound', detail: 'The Simulator task was explicitly rebound.' }],
+      })
+    }
+    return { ok: true, value: clone(record.hostTask) }
   }
 
   async send(task: HostTask, content: readonly [AgentLoopContentPart, ...AgentLoopContentPart[]]) {
@@ -285,7 +297,9 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
 
   release(task: HostTask): void {
     const record = this.tasks.get(task.task)
-    if (record === undefined || record.trace.status === 'closed') return
+    if (record === undefined || record.activeBindings === 0) return
+    record.activeBindings -= 1
+    if (record.activeBindings > 0) return
     const sequence = record.trace.events.length
     record.trace = clone({
       ...record.trace,
@@ -305,6 +319,7 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
     const offset = record.trace.events.length
     record.trace = clone({
       ...record.trace,
+      active: status !== 'error' && record.activeBindings > 0,
       status,
       input,
       ...(execution === undefined ? {} : { execution }),
