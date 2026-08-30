@@ -6,6 +6,7 @@ import type {
 } from '@cordisx/protocol/agent-conversation-shell/v1'
 import { Context } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
+import { createGeneratedAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CORDISX_PAGE_SCHEMA_V3, type CordisXCommandContext, type CordisXPageMountContext } from '../packages/cli/src/contracts.js'
 import {
@@ -69,6 +70,7 @@ function room(binding: AgentConversationShellBinding): AgentConversationShellSna
     participantId: 'agent-one',
     role: 'agent' as const,
     displayName: message('participant.agent-one', 'Agent One'),
+    avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'agent-one' }),
   }
   return {
     binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration },

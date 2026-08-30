@@ -4,6 +4,7 @@ import React, { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createGeneratedAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import { AgentConversationRenderer } from '../packages/cli/src/renderer/host-ui/conversation/AgentConversationRenderer.js'
 import {
   AgentConversationCommandController,
@@ -85,6 +86,24 @@ describe('AgentConversation renderer model', () => {
       } as AgentConversationModel['selection'],
       entries: [],
     })).toThrow('unknown field avatarUrl')
+    const generated = createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'renderer-agent' })
+    const withAvatar = createAgentConversationModel({
+      ...input,
+      selection: {
+        ...(input.selection as Extract<AgentConversationModel['selection'], { kind: 'room' }>),
+        participants: [{ id: 'agent', role: 'agent', name: 'Agent', avatar: generated }],
+      },
+      entries: [],
+    })
+    expect(withAvatar.selection.kind === 'room' ? withAvatar.selection.participants[0]?.avatar : undefined).toEqual(generated)
+    expect(() => createAgentConversationModel({
+      ...input,
+      selection: {
+        ...(input.selection as Extract<AgentConversationModel['selection'], { kind: 'room' }>),
+        participants: [{ id: 'agent', role: 'agent', name: 'Agent', avatar: { kind: 'asset', ref: 'https://unsafe.invalid/avatar.png' } as never }],
+      },
+      entries: [],
+    })).toThrow('qualified opaque ref')
     expect(() => createAgentConversationModel({
       ...input,
       selection: {

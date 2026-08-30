@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { TextDecoder, TextEncoder } from 'node:util'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import {
@@ -40,6 +41,8 @@ describe('AgentLoop renderer injection', () => {
     })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
     Object.defineProperty(dom.window, 'structuredClone', { value: globalThis.structuredClone })
+    Object.defineProperty(dom.window, 'TextEncoder', { value: TextEncoder })
+    Object.defineProperty(dom.window, 'TextDecoder', { value: TextDecoder })
     Object.defineProperty(dom.window, '__cordisxPermissionPolicyRequestV1', {
       configurable: true,
       value: (payload: string) => {
