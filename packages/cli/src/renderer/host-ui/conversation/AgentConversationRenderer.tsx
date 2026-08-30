@@ -132,7 +132,11 @@ function MessageEntry({
             data-reaction-state={reaction.state}
             role="listitem"
             aria-label={copy.locale.toLowerCase().startsWith('zh') ? `${actorName} 的反应：${value}，${state}` : `${actorName}'s reaction: ${value}, ${state}`}
-          ><span className="cxa-message-reaction-actor">{actorName}</span><span className="cxa-message-reaction-value">{value}</span></span>
+          >
+            {actor === undefined ? null : <span className="cxa-message-reaction-avatar"><HostAgentAvatar participant={actor} /></span>}
+            <span className="cxa-message-reaction-actor">{actorName}</span>
+            <span className="cxa-message-reaction-value">{value}</span>
+          </span>
         })}
       </div>}
       {entry.actions.length === 0 ? null : <div className="cxa-message-actions">
@@ -295,15 +299,17 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
   >
     <style data-agent-conversation-styles="production">{AGENT_CONVERSATION_STYLES}</style>
     <header className="cxa-chrome" data-agent-conversation-chrome="true">
-      <div className="cxa-title-block">
-        <h1 id={titleId} className="cxa-title">{title}</h1>
-        {participantSummary === undefined || participantSummary === '' ? null : <span className="cxa-participants">{participantSummary}</span>}
+      <div className="cxa-chrome-inner">
+        <div className="cxa-title-block">
+          <h1 id={titleId} className="cxa-title">{title}</h1>
+          {participantSummary === undefined || participantSummary === '' ? null : <span className="cxa-participants">{participantSummary}</span>}
+        </div>
+        {headerActions.length === 0 ? null : <div className="cxa-header-actions">
+          {headerActions.map(action => <ActionButton key={action.id} action={action} run={() => {
+            void commands.runHeader(model, action).catch(onCommandError)
+          }} />)}
+        </div>}
       </div>
-      {headerActions.length === 0 ? null : <div className="cxa-header-actions">
-        {headerActions.map(action => <ActionButton key={action.id} action={action} run={() => {
-          void commands.runHeader(model, action).catch(onCommandError)
-        }} />)}
-      </div>}
     </header>
     <div className="cxa-body">
       <Timeline model={model} commands={commands} copy={copy} onCommandError={onCommandError} identityPresentations={identityPresentations} onOpenIdentity={setOpenIdentity} />

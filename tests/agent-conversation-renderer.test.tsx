@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import React, { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { renderToString } from 'react-dom/server'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createGeneratedAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
@@ -358,8 +359,17 @@ describe('AgentConversationRenderer production DOM', () => {
   it('renders every reaction with its exact actor name, value, state, and localized accessible name', async () => {
     const base = createPlaygroundConversationFixture('conversation', 'zh-CN')
     const human = base.entries.find(entry => entry.kind === 'message' && entry.authorId === 'human-reviewer')!
+    const generated = createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'agent-alpha' })
     const model = createAgentConversationModel({
       ...base,
+      selection: base.selection.kind !== 'room' ? base.selection : {
+        ...base.selection,
+        participants: base.selection.participants.map(participant => participant.id === 'agent-alpha'
+          ? { ...participant, avatar: generated }
+          : participant.id === 'agent-beta'
+            ? { ...participant, avatar: { kind: 'definition' as const, ref: 'avatar-definitions:agent-beta', schema: 'oneworks.avatar', definitionVersion: 1 } }
+            : participant),
+      },
       entries: base.entries.map(entry => entry === human ? {
         ...entry,
         reactions: [
@@ -372,12 +382,35 @@ describe('AgentConversationRenderer production DOM', () => {
     try {
       const reactions = [...harness.dom.window.document.querySelectorAll<HTMLElement>('.cxa-message-reaction')]
       expect(reactions).toHaveLength(2)
-      expect(reactions.map(reaction => reaction.textContent)).toEqual(['Agent Alpha✅', 'Agent Beta✅'])
+      expect(reactions.map(reaction => reaction.querySelector('.cxa-message-reaction-actor')?.textContent)).toEqual(['Agent Alpha', 'Agent Beta'])
+      expect(reactions.map(reaction => reaction.querySelector('.cxa-message-reaction-value')?.textContent)).toEqual(['✅', '✅'])
       expect(reactions.map(reaction => reaction.getAttribute('aria-label'))).toEqual([
         'Agent Alpha 的反应：✅，已完成',
         'Agent Beta 的反应：✅，处理中',
       ])
       expect(reactions.map(reaction => reaction.dataset.reactionState)).toEqual(['completed', 'pending'])
+      expect(reactions.map(reaction => [...reaction.children].map(child => child.className))).toEqual([
+        ['cxa-message-reaction-avatar', 'cxa-message-reaction-actor', 'cxa-message-reaction-value'],
+        ['cxa-message-reaction-avatar', 'cxa-message-reaction-actor', 'cxa-message-reaction-value'],
+      ])
+      const avatars = reactions.map(reaction => reaction.querySelector<HTMLElement>('.cxa-avatar')!)
+      expect(avatars.map(avatar => avatar.getAttribute('aria-hidden'))).toEqual(['true', 'true'])
+      expect(avatars.map(avatar => avatar.dataset.avatarKind)).toEqual(['generated', 'definition'])
+      expect(avatars.map(avatar => avatar.dataset.avatarState)).toEqual(['fallback', 'fallback'])
+      expect(avatars[1]).toMatchObject({ textContent: 'AB' })
+      expect(avatars[1]?.dataset.avatarCode).toBe('reference-unavailable')
+      expect(reactions.flatMap(reaction => [...reaction.querySelectorAll('button')])).toHaveLength(0)
+
+      const markup = renderToString(<AgentConversationRenderer
+        model={model}
+        commands={new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model)}
+        copy={playgroundConversationCopy('zh-CN')}
+      />)
+      const server = new JSDOM(markup).window.document
+      const serverReactions = [...server.querySelectorAll('.cxa-message-reaction')]
+      expect(serverReactions).toHaveLength(2)
+      expect(serverReactions.map(reaction => reaction.querySelector('.cxa-message-reaction-avatar')?.nextElementSibling?.textContent)).toEqual(['Agent Alpha', 'Agent Beta'])
+      expect(serverReactions.flatMap(reaction => [...reaction.querySelectorAll('button')])).toHaveLength(0)
       expect(() => createAgentConversationModel({
         ...base,
         entries: base.entries.map(entry => entry === human ? {
@@ -420,6 +453,61 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(draft.value).toBe('')
       const focusOrder = [...document.querySelectorAll<HTMLElement>('.cxa-header-actions button,[role="log"],.cxa-draft,.cxa-send')]
       expect(focusOrder.map(element => element.className)).toEqual(['cxa-action', 'cxa-timeline', 'cxa-draft', 'cxa-send'])
+    } finally {
+      await harness.close()
+    }
+  })
+
+  it('shares one content bound and spacing token across header, timeline, entries, and fixed composer', async () => {
+    const model = createPlaygroundConversationFixture('conversation', 'en')
+    const harness = await render(model, new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model))
+    try {
+      const document = harness.dom.window.document
+      expect(document.querySelector('.cxa-chrome > .cxa-chrome-inner')).not.toBeNull()
+      expect(document.querySelector('.cxa-timeline > .cxa-timeline-list')).not.toBeNull()
+      expect(document.querySelector('.cxa-composer-region > .cxa-composer')).not.toBeNull()
+      expect(document.querySelectorAll('.cxa-timeline')).toHaveLength(1)
+      expect(document.querySelectorAll('.cxa-timeline-list > .cxa-entry')).toHaveLength(model.entries.length)
+
+      const styles = document.querySelector<HTMLStyleElement>('style[data-agent-conversation-styles="production"]')!.textContent!
+      expect(styles).toContain('--cxa-content-max:780px;--cxa-layout-space:var(--cx-space-6,24px)')
+      expect(styles).toContain('.cxa-chrome-inner{display:flex;width:min(100%,var(--cxa-content-max))')
+      expect(styles).toContain('.cxa-timeline{min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;')
+      expect(styles).toContain('padding:var(--cxa-layout-space)')
+      expect(styles).toContain('.cxa-timeline-list{display:flex;width:min(100%,var(--cxa-content-max))')
+      expect(styles).toContain('justify-content:flex-start;gap:var(--cxa-layout-space);margin:0 auto;padding:0')
+      expect(styles).toContain('.cxa-entry{min-width:0;margin:0}')
+      expect(styles).toContain('.cxa-composer{display:grid;width:min(100%,var(--cxa-content-max))')
+      expect(styles).not.toContain('margin-top:-14px')
+      expect(styles).not.toMatch(/\.cxa-timeline-list\{[^}]*space-(?:between|around)/u)
+      expect(styles).not.toMatch(/\.cxa-timeline-list\{[^}]*flex-grow/u)
+
+      const contentBounds = (viewportWidth: number): { left: number; right: number; width: number } => {
+        const gutter = 24
+        const width = Math.min(780, viewportWidth - (2 * gutter))
+        const left = (viewportWidth - width) / 2
+        return { left, right: viewportWidth - left, width }
+      }
+      for (const viewportWidth of [998, 1_079, 1_371]) {
+        for (const panelOpen of [false, true]) {
+          const header = contentBounds(viewportWidth)
+          const timeline = contentBounds(viewportWidth)
+          const composer = contentBounds(viewportWidth)
+          expect(panelOpen ? timeline : header).toEqual(header)
+          expect(Math.abs(header.left - timeline.left)).toBeLessThanOrEqual(1)
+          expect(Math.abs(header.right - composer.right)).toBeLessThanOrEqual(1)
+        }
+      }
+
+      for (const itemCount of [1, 2, model.entries.length]) {
+        const heights = Array.from({ length: itemCount }, (_, index) => 28 + index)
+        const tops = heights.map((_, index) => index === 0
+          ? 24
+          : 24 + heights.slice(0, index).reduce((sum, height) => sum + height, 0) + (24 * index))
+        for (let index = 0; index < itemCount - 1; index += 1) {
+          expect(Math.abs(tops[index + 1]! - (tops[index]! + heights[index]!) - 24)).toBeLessThanOrEqual(1)
+        }
+      }
     } finally {
       await harness.close()
     }
