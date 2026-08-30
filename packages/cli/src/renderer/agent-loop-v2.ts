@@ -67,10 +67,40 @@ interface LedgerEntry<Result extends AgentLoopCreateOrBindResult | AgentLoopSend
   readonly fingerprint: string
   readonly firstObservedAt: string
   readonly result: Promise<Result>
+  settledResult?: Result
   task?: HostTask
   definition?: CordisXResolvedAgentDefinition
+  providerId?: string
   bindingGeneration?: number
   closedAt?: string
+}
+
+export interface CordisXAgentLoopBrokerV2Persistence {
+  /** Stable Host-private provider affinity for this ledger snapshot. */
+  readonly providerKey: string
+  read(): string | undefined
+  write(value: string): void
+}
+
+interface PersistedLedgerEntry {
+  readonly key: string
+  readonly ownerKey: string
+  readonly fingerprint: string
+  readonly firstObservedAt: string
+  readonly result: AgentLoopCreateOrBindResult | AgentLoopSendResult
+  readonly task?: HostTask
+  readonly definition?: CordisXResolvedAgentDefinition
+  readonly providerId?: string
+  readonly bindingGeneration?: number
+  readonly closedAt?: string
+}
+
+interface PersistedBrokerState {
+  readonly version: 1
+  readonly providerKey: string
+  readonly nextBinding: number
+  readonly taskGenerations: readonly (readonly [string, number])[]
+  readonly ledger: readonly PersistedLedgerEntry[]
 }
 
 function clone<Value>(value: Value): Value {
@@ -144,11 +174,16 @@ export class CordisXAgentLoopBrokerV2 {
   private readonly records = new Map<string, RecordState>()
   private readonly boundTasks = new Map<string, RecordState>()
   private readonly ledger = new Map<string, LedgerEntry>()
+  private readonly taskGenerations = new Map<string, number>()
   private nextBinding = 0
   private nextSubscription = 0
   private disposed = false
 
-  constructor(private readonly host: CordisXAgentLoopHost, private readonly now: () => Date = () => new Date()) {}
+  constructor(
+    private readonly host: CordisXAgentLoopHost,
+    private readonly now: () => Date = () => new Date(),
+    private readonly persistence?: CordisXAgentLoopBrokerV2Persistence,
+  ) { this.restore() }
 
   definitionPresentation(identity: { readonly agentId: string; readonly revision: string }): {
     readonly identity: { readonly agentId: string; readonly revision: string }
@@ -231,7 +266,7 @@ export class CordisXAgentLoopBrokerV2 {
     for (const record of this.records.values()) this.close(record)
     this.records.clear()
     this.boundTasks.clear()
-    this.ledger.clear()
+    this.persist()
   }
 
   private executeDurable<Result extends AgentLoopCreateOrBindResult | AgentLoopSendResult>(
@@ -255,15 +290,22 @@ export class CordisXAgentLoopBrokerV2 {
       command.type === 'send' ? 'turns.submit' : command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read',
       'reconciliation-required',
     ) as Result)
-    this.ledger.set(key, { ownerKey: options.ownerKey, fingerprint: structural, firstObservedAt: this.now().toISOString(), result })
+    const entry: LedgerEntry<Result> = { ownerKey: options.ownerKey, fingerprint: structural, firstObservedAt: this.now().toISOString(), result }
+    this.ledger.set(key, entry)
     void result.then(value => {
-      const entry = this.ledger.get(key)
-      if (entry === undefined || value.type !== 'create-or-bind' || value.status !== 'accepted') return
-      const record = this.records.get(value.binding.binding.bindingId)
-      if (record === undefined) return
-      entry.task = clone(record.task)
-      entry.definition = clone(record.definition)
-      entry.bindingGeneration = record.binding.binding.generation
+      const current = this.ledger.get(key)
+      if (current === undefined) return
+      current.settledResult = clone(value)
+      if (value.status === 'accepted') {
+        const record = this.records.get(value.binding.binding.bindingId)
+        if (record !== undefined) {
+          current.task = clone(record.task)
+          current.definition = clone(record.definition)
+          current.providerId = record.task.session.providerId
+          current.bindingGeneration = record.binding.binding.generation
+        }
+      }
+      this.persist()
     })
     return result
   }
@@ -287,6 +329,9 @@ export class CordisXAgentLoopBrokerV2 {
       if (!sameDefinition(current.definition.identity, entry.definition.identity)) {
         return this.unavailable(command, 'tasks.content.read', 'operation-conflict')
       }
+      if (entry.providerId !== undefined && current.task.session.providerId !== entry.providerId) {
+        return this.unavailable(command, 'tasks.content.read', 'provider-replaced')
+      }
       const currentAuthorization = await options.authorize({ capability: 'tasks.content.read', session: current.task.session })
       if (currentAuthorization.state !== 'allowed') return this.refusalFrom(command, currentAuthorization)
       return clone({
@@ -300,21 +345,31 @@ export class CordisXAgentLoopBrokerV2 {
     const capability = 'tasks.content.read' as const
     const bound = await this.host.bind(entry.task.task)
     if (!bound.ok) return this.unavailable(command, capability, 'reconciliation-required')
+    if (entry.providerId !== undefined && bound.value.session.providerId !== entry.providerId) {
+      this.host.release?.(bound.value)
+      return this.unavailable(command, capability, 'provider-replaced')
+    }
     const authorization = await options.authorize({ capability, session: bound.value.session })
     if (authorization.state !== 'allowed') { this.host.release?.(bound.value); return this.refusalFrom(command, authorization) }
     const detailsUrl = canonicalAgentLoopTaskDetailsUrl(bound.value.detailsUrl ?? entry.task.detailsUrl)
     if (detailsUrl === undefined) { this.host.release?.(bound.value); return this.unavailable(command, capability, 'details-unavailable') }
-    const record = this.record(options, entry.definition, { ...bound.value, detailsUrl }, detailsUrl, (entry.bindingGeneration ?? 0) + 1, command.commandId, 'binding.bound')
+    const record = this.record(options, entry.definition, { ...bound.value, detailsUrl }, detailsUrl,
+      this.nextTaskGeneration(options.ownerKey, bound.value.task, (entry.bindingGeneration ?? 0) + 1),
+      command.commandId, 'binding.bound')
     entry.task = clone(record.task)
+    entry.providerId = record.task.session.providerId
     entry.bindingGeneration = record.binding.binding.generation
     const acceptedAuthorization: AllowedCreateAuthorization = { capability, state: 'allowed', code: 'allowed' }
-    return clone({
+    const result = clone({
       ...previous,
       authorization: acceptedAuthorization,
       binding: record.binding,
       detailsUrl,
       delivery: { disposition: 'reconciled' as const },
     })
+    entry.settledResult = result
+    this.persist()
+    return result
   }
 
   private async createOrBind(
@@ -356,7 +411,9 @@ export class CordisXAgentLoopBrokerV2 {
     }
     const detailsUrl = canonicalAgentLoopTaskDetailsUrl(task.detailsUrl)
     if (detailsUrl === undefined) { this.host.release?.(task); return this.unavailable(command, capability, 'details-unavailable') }
-    const record = this.record(options, definition, { ...task, detailsUrl }, detailsUrl, 1, command.commandId, command.target.mode === 'create' ? 'binding.created' : 'binding.bound')
+    const record = this.record(options, definition, { ...task, detailsUrl }, detailsUrl,
+      this.nextTaskGeneration(options.ownerKey, task.task, 1),
+      command.commandId, command.target.mode === 'create' ? 'binding.created' : 'binding.bound')
     owned.add(record.binding.binding.bindingId)
     return this.acceptCreate(command, authorization, record, 'executed')
   }
@@ -471,6 +528,13 @@ export class CordisXAgentLoopBrokerV2 {
   }
 
   private taskKey(ownerKey: string, task: string): string { return `${ownerKey}\0${task}` }
+
+  private nextTaskGeneration(ownerKey: string, task: string, minimum: number): number {
+    const key = this.taskKey(ownerKey, task)
+    const generation = Math.max((this.taskGenerations.get(key) ?? 0) + 1, minimum)
+    this.taskGenerations.set(key, generation)
+    return generation
+  }
 
   private append(record: RecordState, payload: EventPayload): void {
     const event = clone({
@@ -596,6 +660,81 @@ export class CordisXAgentLoopBrokerV2 {
     this.boundTasks.delete(this.taskKey(record.ownerKey, record.task.task))
     for (const entry of this.ledger.values()) {
       if (entry.task?.task === record.task.task && entry.ownerKey === record.ownerKey) entry.closedAt = this.now().toISOString()
+    }
+    this.persist()
+  }
+
+  private restore(): void {
+    try {
+      const raw = this.persistence?.read()
+      if (raw === undefined) return
+      const state = JSON.parse(raw) as Partial<PersistedBrokerState>
+      if (state.version !== 1 || state.providerKey !== this.persistence?.providerKey
+        || !Number.isSafeInteger(state.nextBinding) || (state.nextBinding ?? -1) < 0
+        || !Array.isArray(state.taskGenerations) || !Array.isArray(state.ledger)) return
+      const generations = new Map<string, number>()
+      for (const pair of state.taskGenerations) {
+        if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== 'string'
+          || !Number.isSafeInteger(pair[1]) || pair[1] < 1) return
+        generations.set(pair[0], pair[1])
+      }
+      const ledger = new Map<string, LedgerEntry>()
+      for (const persisted of state.ledger) {
+        if (persisted === null || typeof persisted !== 'object'
+          || typeof persisted.key !== 'string' || typeof persisted.ownerKey !== 'string'
+          || typeof persisted.fingerprint !== 'string' || typeof persisted.firstObservedAt !== 'string'
+          || persisted.result === null || typeof persisted.result !== 'object') return
+        const result = clone(persisted.result)
+        ledger.set(persisted.key, {
+          ownerKey: persisted.ownerKey,
+          fingerprint: persisted.fingerprint,
+          firstObservedAt: persisted.firstObservedAt,
+          result: Promise.resolve(result),
+          settledResult: result,
+          ...(persisted.task === undefined ? {} : { task: clone(persisted.task) }),
+          ...(persisted.definition === undefined ? {} : { definition: clone(persisted.definition) }),
+          ...(persisted.providerId === undefined ? {} : { providerId: persisted.providerId }),
+          ...(persisted.bindingGeneration === undefined ? {} : { bindingGeneration: persisted.bindingGeneration }),
+          ...(persisted.closedAt === undefined ? {} : { closedAt: persisted.closedAt }),
+        })
+      }
+      this.nextBinding = state.nextBinding as number
+      for (const [key, value] of generations) this.taskGenerations.set(key, value)
+      for (const [key, value] of ledger) this.ledger.set(key, value)
+    } catch {
+      // Corrupt Host-private recovery data fails closed to a fresh ledger.
+    }
+  }
+
+  private persist(): void {
+    if (this.persistence === undefined) return
+    try {
+      const ledger: PersistedLedgerEntry[] = []
+      for (const [key, entry] of this.ledger) {
+        if (entry.settledResult === undefined) continue
+        ledger.push({
+          key,
+          ownerKey: entry.ownerKey,
+          fingerprint: entry.fingerprint,
+          firstObservedAt: entry.firstObservedAt,
+          result: entry.settledResult,
+          ...(entry.task === undefined ? {} : { task: entry.task }),
+          ...(entry.definition === undefined ? {} : { definition: entry.definition }),
+          ...(entry.providerId === undefined ? {} : { providerId: entry.providerId }),
+          ...(entry.bindingGeneration === undefined ? {} : { bindingGeneration: entry.bindingGeneration }),
+          ...(entry.closedAt === undefined ? {} : { closedAt: entry.closedAt }),
+        })
+      }
+      const state: PersistedBrokerState = {
+        version: 1,
+        providerKey: this.persistence.providerKey,
+        nextBinding: this.nextBinding,
+        taskGenerations: [...this.taskGenerations],
+        ledger,
+      }
+      this.persistence.write(JSON.stringify(state))
+    } catch {
+      // Runtime operation semantics remain available when Host recovery storage is unavailable.
     }
   }
 }

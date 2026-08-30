@@ -118,6 +118,58 @@ describe('durable AgentLoop v2 broker', () => {
     expect(host.snapshot().tasks[0]?.active).toBe(false)
   })
 
+  it('restores the provider-scoped ledger across a renderer restart without repeating side effects or aliasing bindings', async () => {
+    let hostState: string | undefined
+    let ledgerState: string | undefined
+    const hostPersistence = { read: () => hostState, write: (value: string) => { hostState = value } }
+    const ledgerPersistence = {
+      providerKey: 'debug:agent-loop/mock/v1',
+      read: () => ledgerState,
+      write: (value: string) => { ledgerState = value },
+    }
+    const lead = definition('lead')
+    const createLead = create('restart-create', lead)
+    const firstHost = new PlaygroundMockAgentLoopHost(undefined, hostPersistence)
+    const firstBroker = new CordisXAgentLoopBrokerV2(firstHost, undefined, ledgerPersistence)
+    const first = firstBroker.bind({ ownerKey: 'chatroom', active: () => true, authorize: allowed })
+    const created = await first.createOrBind(createLead)
+    if (created.status !== 'accepted') throw new Error('create unavailable')
+    const sendLead = send('restart-send', created.binding, 'exact input')
+    const sent = await first.send(sendLead)
+    if (sent.status !== 'accepted') throw new Error('send unavailable')
+    first.dispose()
+    firstBroker.dispose()
+
+    const secondHost = new PlaygroundMockAgentLoopHost(undefined, hostPersistence)
+    const secondBroker = new CordisXAgentLoopBrokerV2(secondHost, undefined, ledgerPersistence)
+    const second = secondBroker.bind({ ownerKey: 'chatroom', active: () => true, authorize: allowed })
+    const reconciled = await second.createOrBind(createLead)
+    expect(reconciled.status).toBe('accepted')
+    if (reconciled.status !== 'accepted') throw new Error('reconcile unavailable')
+    expect(reconciled).toMatchObject({
+      binding: { task: created.binding.task, binding: { generation: created.binding.binding.generation + 1 } },
+      delivery: { disposition: 'reconciled' },
+    })
+    expect(created.binding.binding.bindingId).toBe('cxloop-v2-binding:0')
+    expect(reconciled.binding.binding.bindingId).toBe('cxloop-v2-binding:1')
+
+    const replayedSend = await second.send(sendLead)
+    expect(replayedSend).toMatchObject({
+      status: 'accepted', messageId: sent.messageId, turn: sent.turn, delivery: { disposition: 'replayed' },
+    })
+    expect(secondHost.snapshot().tasks).toHaveLength(1)
+    expect(secondHost.snapshot().tasks[0]?.events.filter(event => event.type === 'input.accepted')).toHaveLength(1)
+
+    expect((await second.send(send('fresh-send-on-stale-binding', created.binding, 'must not execute'))).status).toBe('unavailable')
+    const fresh = await second.send(send('fresh-send', reconciled.binding, 'new input'))
+    expect(fresh.status).toBe('accepted')
+    expect(secondHost.snapshot().tasks[0]?.events.filter(event => event.type === 'input.accepted')).toHaveLength(2)
+
+    const conflicting = await second.createOrBind(create('restart-create', definition('reviewer')))
+    expect(conflicting).toMatchObject({ status: 'unavailable', code: 'operation-conflict' })
+    expect(secondHost.snapshot().tasks).toHaveLength(1)
+  })
+
   it('validates canonical Host and external task URLs', () => {
     expect(canonicalAgentLoopTaskDetailsUrl({ url: 'app://-/playground/simulator/tasks/1', target: 'host' })).toBeDefined()
     expect(canonicalAgentLoopTaskDetailsUrl({ url: 'codex:task/1', target: 'external' })).toBeDefined()

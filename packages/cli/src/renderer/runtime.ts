@@ -106,6 +106,7 @@ import {
 } from './agent-loop.js'
 import { combineAgentLoopClients, CordisXAgentLoopBrokerV2 } from './agent-loop-v2.js'
 import {
+  PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE,
   PlaygroundMockAgentLoopHost,
   type PlaygroundMockAgentLoopSnapshot,
 } from './playground-mock-agent-loop.js'
@@ -722,7 +723,17 @@ async function start(
       ? new UnavailableAgentLoopHost()
       : new BindingAgentLoopHost(bindingPlatformAdapter, metadata.workspaceCwd))
   const agentLoopBroker = new CordisXAgentLoopBroker(agentLoopHost)
-  const agentLoopBrokerV2 = new CordisXAgentLoopBrokerV2(agentLoopHost)
+  const agentLoopBrokerV2 = new CordisXAgentLoopBrokerV2(agentLoopHost, undefined, metadata.agentLoopBackend === 'mock'
+    ? {
+        providerKey: PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE,
+        read: () => {
+          try { return document.defaultView?.sessionStorage.getItem(`${simulatorSessionKey}:agent-loop-v2-ledger`) ?? undefined } catch { return undefined }
+        },
+        write: (value: string) => {
+          try { document.defaultView?.sessionStorage.setItem(`${simulatorSessionKey}:agent-loop-v2-ledger`, value) } catch { /* unavailable browser storage */ }
+        },
+      }
+    : undefined)
   // Host-owned only: no plugin or renderer global receives this broker/adapter.
   const connectorBroker = new CordisXConnectorBroker()
   const agentConnector = connectorBroker.register(createCodexAgentConnector(agentAdapter))
