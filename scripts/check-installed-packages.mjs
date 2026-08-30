@@ -200,6 +200,11 @@ import type {
   AgentLoopTaskBinding as ProtocolAgentLoopTaskBinding,
   BoundAgentLoopClient as ProtocolBoundAgentLoopClient,
 } from '@cordisx/protocol/agent-loop/v1'
+import type {
+  AgentLoopCommand as ProtocolAgentLoopCommandV2,
+  AgentLoopTaskBinding as ProtocolAgentLoopTaskBindingV2,
+  BoundAgentLoopClient as ProtocolBoundAgentLoopClientV2,
+} from '@cordisx/protocol/agent-loop/v2'
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type {
   CordisXNavigationCollectionLeadingVisual,
@@ -247,11 +252,23 @@ CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS satisfies 16
 
 ctx.agentLoop satisfies BoundAgentLoopClient
 ctx.agentLoop satisfies ProtocolBoundAgentLoopClient
+ctx.agentLoop satisfies ProtocolBoundAgentLoopClientV2
 definition satisfies ProtocolAgentDefinition
 protocolDefinition satisfies AgentDefinition
 definition.avatar satisfies AgentAvatarRef | undefined
 protocolCommand satisfies AgentLoopCommand
 protocolBinding satisfies AgentLoopTaskBinding
+declare const protocolCommandV2: ProtocolAgentLoopCommandV2
+declare const protocolBindingV2: ProtocolAgentLoopTaskBindingV2
+if (protocolCommandV2.type === 'create-or-bind') {
+  ctx.agentLoop.createOrBind(protocolCommandV2).then(result => {
+    if (result.status === 'accepted') {
+      result.detailsUrl.target satisfies 'host' | 'external'
+      result.delivery.disposition satisfies 'executed' | 'replayed' | 'reconciled'
+    }
+  })
+}
+ctx.agentLoop.subscribe(protocolBindingV2, -1)
 definition.promptSections?.map(section => section.kind satisfies 'introduction' | 'personality' | 'role' | 'operations' | 'tools' | 'knowledge' | 'memory-policy' | 'memory' | 'other')
 if (created.status === 'accepted') created.binding.task satisfies string
 else created.authorization.state satisfies 'denied' | 'unavailable'

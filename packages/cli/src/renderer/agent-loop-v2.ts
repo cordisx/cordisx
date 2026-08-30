@@ -32,6 +32,7 @@ import {
   type HostTask,
 } from './agent-loop.js'
 import type { CordisXAgentLoopLifecycleEvent } from './provider-binding.js'
+import { validateAgentLoopTaskDetailsUrl } from './host-ui/AgentTaskDetailsNavigator.js'
 
 type CreateCommand = Parameters<BoundAgentLoopClient['createOrBind']>[0]
 type SendCommand = Parameters<BoundAgentLoopClient['send']>[0]
@@ -102,16 +103,7 @@ function sameDefinition(left: AgentLoopTaskBinding['definition'], right: AgentLo
 
 export function canonicalAgentLoopTaskDetailsUrl(value: AgentLoopTaskDetailsUrl | undefined): AgentLoopTaskDetailsUrl | undefined {
   if (value === undefined) return undefined
-  let parsed: URL
-  try { parsed = new URL(value.url) } catch { return undefined }
-  if (parsed.username !== '' || parsed.password !== '') return undefined
-  if (value.target === 'host') {
-    if (parsed.protocol !== 'app:') return undefined
-  } else if (!['https:', 'codex:', 'claude:'].includes(parsed.protocol)) return undefined
-  if (['http:', 'file:', 'data:', 'javascript:', 'blob:'].includes(parsed.protocol)) return undefined
-  return value.target === 'host'
-    ? clone({ url: value.url as `app:${string}`, target: 'host' })
-    : clone({ url: value.url as `https:${string}` | `codex:${string}` | `claude:${string}`, target: 'external' })
+  try { return validateAgentLoopTaskDetailsUrl(value) } catch { return undefined }
 }
 
 export function combineAgentLoopClients(
@@ -158,6 +150,25 @@ export class CordisXAgentLoopBrokerV2 {
 
   constructor(private readonly host: CordisXAgentLoopHost, private readonly now: () => Date = () => new Date()) {}
 
+  definitionPresentation(identity: { readonly agentId: string; readonly revision: string }): {
+    readonly identity: { readonly agentId: string; readonly revision: string }
+    readonly name: string
+    readonly introduction: string
+  } | undefined {
+    const definition = [...this.records.values()].map(record => record.definition).find(item => sameDefinition(item.identity, identity))
+      ?? [...this.ledger.values()].map(entry => entry.definition).find(item => item !== undefined && sameDefinition(item.identity, identity))
+    if (definition === undefined) return undefined
+    return clone({
+      identity: definition.identity,
+      name: definition.name ?? definition.identity.agentId,
+      introduction: (definition.promptSections ?? [])
+        .filter(section => section.kind === 'introduction')
+        .map(section => section.text.trim())
+        .filter(Boolean)
+        .join('\n\n'),
+    })
+  }
+
   bind(options: CordisXBoundAgentLoopClientOptions): BoundAgentLoopClient {
     const owned = new Set<string>()
     const subscriptions = new Set<AgentLoopSubscription>()
@@ -176,15 +187,21 @@ export class CordisXAgentLoopBrokerV2 {
         payloadMatch: 'structural-exact' as const,
         retention: Object.freeze({ active: 'logical-task-lifetime' as const, recoveryDays: 30 as const }),
       }),
-      createOrBind: (command: CreateCommand) => this.executeDurable<AgentLoopCreateOrBindResult>(options, command,
-        () => this.unavailable(command, command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read', 'operation-conflict'),
-        async () => await this.createOrBind(options, owned, command, live)).then(result => {
-          if (result.status === 'accepted') owned.add(result.binding.binding.bindingId)
-          return result
-        }),
-      send: (command: SendCommand) => this.executeDurable<AgentLoopSendResult>(options, command,
-        () => this.unavailable(command, 'turns.submit', 'operation-conflict'),
-        async () => await this.send(options, command, live)),
+      createOrBind: (command: CreateCommand) => {
+        if (!live()) return Promise.resolve(this.refusal(command, command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read', 'unavailable', 'host-unavailable'))
+        return this.executeDurable<AgentLoopCreateOrBindResult>(options, command,
+          () => this.unavailable(command, command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read', 'operation-conflict'),
+          async () => await this.createOrBind(options, owned, command, live)).then(result => {
+            if (result.status === 'accepted') owned.add(result.binding.binding.bindingId)
+            return result
+          })
+      },
+      send: (command: SendCommand) => {
+        if (!live()) return Promise.resolve(this.refusal(command, 'turns.submit', 'unavailable', 'host-unavailable'))
+        return this.executeDurable<AgentLoopSendResult>(options, command,
+          () => this.unavailable(command, 'turns.submit', 'operation-conflict'),
+          async () => await this.send(options, command, live))
+      },
       subscribe: async (binding: AgentLoopTaskBinding, afterSequence: number) => {
         const record = this.owned(options.ownerKey, binding)
         if (!live() || record === undefined || !Number.isInteger(afterSequence) || afterSequence < -1) {
@@ -264,6 +281,21 @@ export class CordisXAgentLoopBrokerV2 {
     }
     if (entry.task === undefined || entry.definition === undefined) {
       return this.unavailable(command, command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read', 'reconciliation-required')
+    }
+    const current = this.boundTasks.get(this.taskKey(options.ownerKey, entry.task.task))
+    if (current !== undefined && current.binding.state === 'active') {
+      if (!sameDefinition(current.definition.identity, entry.definition.identity)) {
+        return this.unavailable(command, 'tasks.content.read', 'operation-conflict')
+      }
+      const currentAuthorization = await options.authorize({ capability: 'tasks.content.read', session: current.task.session })
+      if (currentAuthorization.state !== 'allowed') return this.refusalFrom(command, currentAuthorization)
+      return clone({
+        ...previous,
+        authorization: { capability: 'tasks.content.read', state: 'allowed', code: 'allowed' },
+        binding: current.binding,
+        detailsUrl: current.detailsUrl,
+        delivery: { disposition: 'reconciled' as const },
+      })
     }
     const capability = 'tasks.content.read' as const
     const bound = await this.host.bind(entry.task.task)

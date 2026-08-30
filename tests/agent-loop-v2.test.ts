@@ -104,6 +104,7 @@ describe('durable AgentLoop v2 broker', () => {
     const created = await first.createOrBind(command)
     if (created.status !== 'accepted') throw new Error('create unavailable')
     first.dispose()
+    expect((await first.createOrBind(command)).status).toBe('unavailable')
     const second = broker.bind({ ownerKey: 'chatroom', active: () => true, authorize: allowed })
     const reconciled = await second.createOrBind(command)
     expect(reconciled.status).toBe('accepted')

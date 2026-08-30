@@ -5,6 +5,10 @@ import type {
   AgentConversationShellSource,
 } from '@cordisx/protocol/agent-conversation-shell/v1'
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
+import type {
+  AgentConversationShellBinding as AgentConversationShellBindingV2,
+  AgentConversationShellSource as AgentConversationShellSourceV2,
+} from '@cordisx/protocol/agent-conversation-shell/v2'
 import type { ComponentType } from 'react'
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
 import type { CordisXPluginManifestV4, CordisXPluginManifestV5 } from './permission-contracts.js'
@@ -1141,6 +1145,10 @@ export type CordisXAgentConversationShellSourceFactory = (
   binding: Readonly<AgentConversationShellBinding>,
 ) => AgentConversationShellSource | Promise<AgentConversationShellSource>
 
+export type CordisXAgentConversationShellSourceFactoryV2 = (
+  binding: Readonly<AgentConversationShellBindingV2>,
+) => AgentConversationShellSourceV2 | Promise<AgentConversationShellSourceV2>
+
 /** Host-owned page mount paired with one fiber-owned source registration. */
 export interface CordisXAgentConversationShellRegistration {
   readonly mount: CordisXPageMount
@@ -1150,6 +1158,7 @@ export interface CordisXAgentConversationShellRegistration {
 /** Production Agent Desktop conversation shell service. */
 export interface CordisXAgentConversationShell {
   registerSource(factory: CordisXAgentConversationShellSourceFactory): CordisXAgentConversationShellRegistration
+  registerSource(factory: CordisXAgentConversationShellSourceFactoryV2): CordisXAgentConversationShellRegistration
 }
 
 export interface CordisXRouteDefinition<Outlet extends CordisXOutletName = CordisXOutletName> {

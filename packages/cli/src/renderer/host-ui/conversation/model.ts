@@ -1,7 +1,9 @@
 import type { CordisXIconToken, CordisXJsonValue } from '../../../contracts.js'
 import { cloneAgentAvatarRef, type AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
+import type { AgentDefinitionIdentity, AgentLoopTaskDetailsUrl } from '@cordisx/protocol/agent-loop/v2'
 import { CORDISX_HOST_ICON_TOKENS } from '../../surfaces.js'
 import { immutableSnapshot, LOCAL_ID_PATTERN, REFERENCE_PATTERN } from '../../validation.js'
+import { validateAgentLoopTaskDetailsUrl } from '../AgentTaskDetailsNavigator.js'
 
 export type AgentConversationParticipantRole = 'human' | 'agent' | 'system'
 export type AgentConversationDeliveryState = 'pending' | 'sent' | 'delivered' | 'failed'
@@ -27,6 +29,22 @@ export interface AgentConversationParticipant {
   readonly role: AgentConversationParticipantRole
   readonly name: string
   readonly avatar?: AgentAvatarRef
+  readonly agentIdentity?: AgentDefinitionIdentity
+}
+
+export interface AgentConversationActiveRun {
+  readonly participantId: string
+  readonly memberId: string
+  readonly runId: string
+  readonly lifecycle: { readonly phase: 'active' | 'running' | 'waiting' | 'attention'; readonly updatedAt?: string }
+  readonly detailsUrl: AgentLoopTaskDetailsUrl
+}
+
+export interface AgentConversationReaction {
+  readonly reactionId: string
+  readonly actorParticipantId: string
+  readonly value: { readonly kind: 'emoji'; readonly emoji: string } | { readonly kind: 'semantic'; readonly token: string }
+  readonly state: 'pending' | 'completed' | 'failed'
 }
 
 export interface AgentConversationMessage {
@@ -41,6 +59,8 @@ export interface AgentConversationMessage {
   readonly runState: AgentConversationRunState
   readonly ariaLive: 'off' | 'polite'
   readonly actions: readonly AgentConversationAction[]
+  readonly source?: 'agent-loop' | 'chatroom-acknowledgement'
+  readonly reactions?: readonly AgentConversationReaction[]
 }
 
 export interface AgentConversationStatus {
@@ -52,7 +72,20 @@ export interface AgentConversationStatus {
   readonly ariaLive: 'off' | 'polite'
 }
 
-export type AgentConversationEntry = AgentConversationMessage | AgentConversationStatus
+export interface AgentConversationMemberPresence {
+  readonly kind: 'member-presence'
+  readonly itemId: string
+  readonly sequence: number
+  readonly participantId: string
+  readonly memberId: string
+  readonly runId: string
+  readonly state: 'inviting' | 'creating' | 'joined' | 'ready' | 'failed'
+  readonly retryable: boolean
+  readonly diagnostic?: string
+  readonly retry?: AgentConversationCommandReference
+}
+
+export type AgentConversationEntry = AgentConversationMessage | AgentConversationStatus | AgentConversationMemberPresence
 
 export type AgentConversationSelection =
   | { readonly kind: 'no-room' }
@@ -64,6 +97,7 @@ export type AgentConversationSelection =
       readonly multiParticipant: boolean
       readonly participantPresentation: 'none' | 'host-initials'
       readonly participants: readonly AgentConversationParticipant[]
+      readonly activeRuns?: readonly AgentConversationActiveRun[]
     }
 
 export interface AgentConversationComposer {
@@ -147,7 +181,7 @@ function assertSelection(selection: AgentConversationSelection): void {
     assertKnownKeys(selection, ['kind'], 'selection')
     return
   }
-  assertKnownKeys(selection, ['kind', 'roomId', 'title', 'secondary', 'multiParticipant', 'participantPresentation', 'participants'], 'selection')
+  assertKnownKeys(selection, ['kind', 'roomId', 'title', 'secondary', 'multiParticipant', 'participantPresentation', 'participants', 'activeRuns'], 'selection')
   assertOpaque(selection.roomId, 'selection.roomId')
   assertText(selection.title, 'selection.title', 1_000)
   if (selection.secondary !== undefined) assertText(selection.secondary, 'selection.secondary', 1_000)
@@ -157,13 +191,33 @@ function assertSelection(selection: AgentConversationSelection): void {
   if (selection.participants.length > 64) throw new Error('selection.participants exceeds 64 items')
   const participantIds = new Set<string>()
   for (const [index, participant] of selection.participants.entries()) {
-    assertKnownKeys(participant, ['id', 'role', 'name', 'avatar'], `selection.participants[${index}]`)
+    assertKnownKeys(participant, ['id', 'role', 'name', 'avatar', 'agentIdentity'], `selection.participants[${index}]`)
     assertOpaque(participant.id, `selection.participants[${index}].id`)
     if (participantIds.has(participant.id)) throw new Error(`duplicate participant ${participant.id}`)
     participantIds.add(participant.id)
     if (!['human', 'agent', 'system'].includes(participant.role)) throw new Error(`selection.participants[${index}].role is invalid`)
     assertText(participant.name, `selection.participants[${index}].name`, 400)
     if (participant.avatar !== undefined) cloneAgentAvatarRef(participant.avatar)
+    if (participant.agentIdentity !== undefined) {
+      if (participant.role !== 'agent') throw new Error(`selection.participants[${index}].agentIdentity requires agent role`)
+      assertOpaque(participant.agentIdentity.agentId, `selection.participants[${index}].agentIdentity.agentId`)
+      assertOpaque(participant.agentIdentity.revision, `selection.participants[${index}].agentIdentity.revision`)
+    }
+  }
+  const activeRuns = selection.activeRuns ?? []
+  if (activeRuns.length > 256) throw new Error('selection.activeRuns exceeds 256 items')
+  const runKeys = new Set<string>()
+  for (const [index, run] of activeRuns.entries()) {
+    assertOpaque(run.participantId, `selection.activeRuns[${index}].participantId`)
+    assertOpaque(run.memberId, `selection.activeRuns[${index}].memberId`)
+    assertOpaque(run.runId, `selection.activeRuns[${index}].runId`)
+    if (!participantIds.has(run.participantId)) throw new Error(`selection.activeRuns[${index}] references an unknown participant`)
+    if (run.memberId !== run.participantId) throw new Error(`selection.activeRuns[${index}] memberId must equal participantId`)
+    if (!['active', 'running', 'waiting', 'attention'].includes(run.lifecycle.phase)) throw new Error(`selection.activeRuns[${index}].lifecycle is invalid`)
+    validateAgentLoopTaskDetailsUrl(run.detailsUrl)
+    const key = JSON.stringify([run.participantId, run.memberId, run.runId])
+    if (runKeys.has(key)) throw new Error('selection.activeRuns contains a duplicate association')
+    runKeys.add(key)
   }
 }
 
@@ -174,8 +228,10 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
   const participantIds = new Set(selection.kind === 'room' ? selection.participants.map(item => item.id) : [])
   for (const [index, entry] of entries.entries()) {
     assertKnownKeys(entry, entry.kind === 'message'
-      ? ['kind', 'itemId', 'messageId', 'sequence', 'authorId', 'body', 'timestamp', 'deliveryState', 'runState', 'ariaLive', 'actions']
-      : ['kind', 'itemId', 'sequence', 'label', 'state', 'ariaLive'], `entries[${index}]`)
+      ? ['kind', 'itemId', 'messageId', 'sequence', 'authorId', 'body', 'timestamp', 'deliveryState', 'runState', 'ariaLive', 'actions', 'source', 'reactions']
+      : entry.kind === 'member-presence'
+        ? ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'state', 'retryable', 'diagnostic', 'retry']
+        : ['kind', 'itemId', 'sequence', 'label', 'state', 'ariaLive'], `entries[${index}]`)
     assertOpaque(entry.itemId, `entries[${index}].itemId`)
     if (entryIds.has(entry.itemId)) throw new Error(`duplicate entry ${entry.itemId}`)
     entryIds.add(entry.itemId)
@@ -188,6 +244,15 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
       if (!STATUS_STATES.has(entry.state)) throw new Error(`entries[${index}].state is invalid`)
       continue
     }
+    if (entry.kind === 'member-presence') {
+      assertOpaque(entry.participantId, `entries[${index}].participantId`)
+      assertOpaque(entry.memberId, `entries[${index}].memberId`)
+      assertOpaque(entry.runId, `entries[${index}].runId`)
+      if (!participantIds.has(entry.participantId) || entry.memberId !== entry.participantId) throw new Error(`entries[${index}] presence association is invalid`)
+      if (!['inviting', 'creating', 'joined', 'ready', 'failed'].includes(entry.state)) throw new Error(`entries[${index}].state is invalid`)
+      if (entry.retry !== undefined) assertCommand(entry.retry, `entries[${index}].retry`)
+      continue
+    }
     assertOpaque(entry.messageId, `entries[${index}].messageId`)
     assertOpaque(entry.authorId, `entries[${index}].authorId`)
     if (!participantIds.has(entry.authorId)) throw new Error(`entries[${index}] references an unknown participant`)
@@ -197,6 +262,15 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
     if (!DELIVERY_STATES.has(entry.deliveryState)) throw new Error(`entries[${index}].deliveryState is invalid`)
     if (!RUN_STATES.has(entry.runState)) throw new Error(`entries[${index}].runState is invalid`)
     assertActions(entry.actions, `entries[${index}].actions`, 8)
+    if (entry.source !== undefined && !['agent-loop', 'chatroom-acknowledgement'].includes(entry.source)) throw new Error(`entries[${index}].source is invalid`)
+    const reactionIds = new Set<string>()
+    for (const [reactionIndex, reaction] of (entry.reactions ?? []).entries()) {
+      assertOpaque(reaction.reactionId, `entries[${index}].reactions[${reactionIndex}].reactionId`)
+      assertOpaque(reaction.actorParticipantId, `entries[${index}].reactions[${reactionIndex}].actorParticipantId`)
+      if (!participantIds.has(reaction.actorParticipantId)) throw new Error(`entries[${index}].reactions[${reactionIndex}] actor is unknown`)
+      if (reactionIds.has(reaction.reactionId)) throw new Error(`entries[${index}] has duplicate reaction`)
+      reactionIds.add(reaction.reactionId)
+    }
   }
 }
 

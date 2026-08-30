@@ -11,6 +11,13 @@ import {
 } from './model.js'
 import { AGENT_CONVERSATION_STYLES } from './styles.js'
 import { HostAgentAvatar } from './AgentAvatar.js'
+import type { HostAgentTaskDetailsNavigator } from '../AgentTaskDetailsNavigator.js'
+import {
+  createHostAgentIdentityPresentation,
+  HostAgentIdentityAvatarButton,
+  HostAgentIdentityPanel,
+  type HostAgentIdentityPresentation,
+} from './AgentIdentityPanel.js'
 
 export interface AgentConversationRendererCopy {
   readonly locale: string
@@ -30,6 +37,11 @@ export interface AgentConversationRendererProps {
   readonly commands: AgentConversationCommandController
   readonly copy: AgentConversationRendererCopy
   readonly debugFixture?: boolean
+  readonly identity?: {
+    readonly resolve: (identity: { readonly agentId: string; readonly revision: string }) => { readonly identity: { readonly agentId: string; readonly revision: string }; readonly name: string; readonly introduction: string } | undefined
+    readonly navigator: HostAgentTaskDetailsNavigator
+    readonly onSettings: (identity: { readonly agentId: string; readonly revision: string }) => void | Promise<void>
+  }
 }
 
 function stateCopy(message: AgentConversationMessage, copy: AgentConversationRendererCopy): string | undefined {
@@ -60,7 +72,7 @@ function ActionButton({ action, run }: { readonly action: AgentConversationActio
 }
 
 function MessageEntry({
-  entry, previous, model, commands, onCommandError, copy,
+  entry, previous, model, commands, onCommandError, copy, identityPresentation, onOpenIdentity,
 }: {
   readonly entry: AgentConversationMessage
   readonly previous: AgentConversationEntry | undefined
@@ -68,6 +80,8 @@ function MessageEntry({
   readonly commands: AgentConversationCommandController
   readonly onCommandError: (error: unknown) => void
   readonly copy: AgentConversationRendererCopy
+  readonly identityPresentation?: HostAgentIdentityPresentation
+  readonly onOpenIdentity: () => void
 }) {
   const labelId = React.useId()
   const participant = participantFor(model, entry.authorId)
@@ -88,7 +102,9 @@ function MessageEntry({
     aria-live={entry.ariaLive}
   >
     {showInitials && participant.role !== 'human'
-      ? <HostAgentAvatar participant={participant} />
+      ? identityPresentation === undefined
+        ? <HostAgentAvatar participant={participant} />
+        : <HostAgentIdentityAvatarButton presentation={identityPresentation} label={`Open ${participant.name}`} onOpen={onOpenIdentity} />
       : null}
     <div className="cxa-message-content">
       <div className="cxa-message-meta" id={labelId}>
@@ -97,6 +113,14 @@ function MessageEntry({
         {state === undefined ? null : <span className="cxa-message-state">{state}</span>}
       </div>
       <div className="cxa-message-body">{entry.body.map((block, index) => <p key={index}>{block}</p>)}</div>
+      {(entry.reactions ?? []).length === 0 ? null : <div className="cxa-message-reactions" aria-label="Reactions">
+        {(entry.reactions ?? []).map(reaction => <span
+          key={reaction.reactionId}
+          className="cxa-message-reaction"
+          data-reaction-state={reaction.state}
+          aria-label={`${reaction.value.kind === 'emoji' ? reaction.value.emoji : reaction.value.token} · ${reaction.state}`}
+        >{reaction.value.kind === 'emoji' ? reaction.value.emoji : reaction.value.token}</span>)}
+      </div>}
       {entry.actions.length === 0 ? null : <div className="cxa-message-actions">
         {entry.actions.map(action => <ActionButton key={action.id} action={action} run={() => {
           void commands.runMessage(model, entry.itemId, action).catch(onCommandError)
@@ -107,14 +131,41 @@ function MessageEntry({
 }
 
 function Timeline({
-  model, commands, copy, onCommandError,
-}: Pick<AgentConversationRendererProps, 'model' | 'commands' | 'copy'> & { readonly onCommandError: (error: unknown) => void }) {
+  model, commands, copy, onCommandError, identityPresentations, onOpenIdentity,
+}: Pick<AgentConversationRendererProps, 'model' | 'commands' | 'copy'> & {
+  readonly onCommandError: (error: unknown) => void
+  readonly identityPresentations: ReadonlyMap<string, HostAgentIdentityPresentation>
+  readonly onOpenIdentity: (participantId: string) => void
+}) {
   const follow = useAutoFollow<HTMLDivElement>(`${model.binding.bindingId}:${model.generation}:${model.snapshotSequence}:${model.entries.length}`)
+  const presence = (entry: Extract<AgentConversationEntry, { kind: 'member-presence' }>): string => {
+    const name = participantFor(model, entry.participantId)?.name ?? entry.participantId
+    const chinese = copy.locale.toLowerCase().startsWith('zh')
+    if (entry.state === 'inviting') return chinese ? `正在邀请 ${name} 加入…` : `Inviting ${name}…`
+    if (entry.state === 'creating') return chinese ? `正在为 ${name} 创建会话…` : `Creating a session for ${name}…`
+    if (entry.state === 'joined') return chinese ? `${name} 已加入群聊` : `${name} joined the room`
+    if (entry.state === 'ready') return chinese ? `${name} 已准备好` : `${name} is ready`
+    return chinese ? `${name} 加入失败` : `${name} failed to join`
+  }
   return <div ref={follow.ref} onScroll={follow.onScroll} className="cxa-timeline" data-agent-conversation-scroll-owner="timeline" role="log" aria-label={copy.timelineLabel} tabIndex={0}>
     <div className="cxa-timeline-list">
       {model.entries.map((entry, index) => entry.kind === 'message'
-        ? <MessageEntry key={entry.itemId} entry={entry} previous={model.entries[index - 1]} model={model} commands={commands} copy={copy} onCommandError={onCommandError} />
-        : <div key={entry.itemId} className="cxa-entry cxa-status" data-entry-id={entry.itemId} data-state={entry.state} role="status" aria-live={entry.ariaLive}>
+        ? <MessageEntry
+            key={entry.itemId}
+            entry={entry}
+            previous={model.entries[index - 1]}
+            model={model}
+            commands={commands}
+            copy={copy}
+            onCommandError={onCommandError}
+            {...(identityPresentations.get(entry.authorId) === undefined ? {} : { identityPresentation: identityPresentations.get(entry.authorId)! })}
+            onOpenIdentity={() => onOpenIdentity(entry.authorId)}
+          />
+        : entry.kind === 'member-presence'
+          ? <div key={entry.itemId} className="cxa-entry cxa-status" data-entry-id={entry.itemId} data-state={entry.state} role="status" aria-live="polite">
+              <span className="cxa-status-dot" aria-hidden="true" /><span>{presence(entry)}</span>
+            </div>
+          : <div key={entry.itemId} className="cxa-entry cxa-status" data-entry-id={entry.itemId} data-state={entry.state} role="status" aria-live={entry.ariaLive}>
             <span className="cxa-status-dot" aria-hidden="true" /><span>{entry.label}</span>
           </div>)}
     </div>
@@ -173,9 +224,10 @@ function Composer({
 }
 
 /** Production Host-owned conversation shell. It has no fixture dependency. */
-export function AgentConversationRenderer({ model, commands, copy, debugFixture = false }: AgentConversationRendererProps) {
+export function AgentConversationRenderer({ model, commands, copy, debugFixture = false, identity }: AgentConversationRendererProps) {
   const titleId = React.useId()
   const [commandError, setCommandErrorState] = React.useState<string | undefined>(undefined)
+  const [openIdentity, setOpenIdentity] = React.useState<string | undefined>()
   const setCommandError = React.useCallback((value: string | undefined) => setCommandErrorState(value), [])
   const title = model.selection.kind === 'room' ? model.selection.title : copy.newRoomTitle
   const participantSummary = model.selection.kind === 'room'
@@ -185,6 +237,40 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
   const onCommandError = React.useCallback((error: unknown) => {
     setCommandError(error instanceof Error ? error.message : String(error))
   }, [])
+  const identityPresentations = React.useMemo(() => {
+    const output = new Map<string, HostAgentIdentityPresentation>()
+    if (identity === undefined || model.selection.kind !== 'room') return output
+    const roomTitle = model.selection.title
+    for (const participant of model.selection.participants) {
+      if (participant.role !== 'agent' || participant.agentIdentity === undefined) continue
+      const effective = identity.resolve(participant.agentIdentity)
+      if (effective === undefined) continue
+      output.set(participant.id, createHostAgentIdentityPresentation({
+        participant: {
+          participantId: participant.id,
+          role: 'agent',
+          displayName: { key: 'host.agent.identity.name', fallback: participant.name },
+          ...(participant.avatar === undefined ? {} : { avatar: participant.avatar }),
+          agentIdentity: participant.agentIdentity,
+        },
+        name: effective.name,
+        introduction: effective.introduction,
+        activeSessions: (model.selection.activeRuns ?? [])
+          .filter(run => run.participantId === participant.id)
+          .map(run => ({
+            run,
+            roomLabel: roomTitle,
+            taskLabel: `${copy.locale.toLowerCase().startsWith('zh') ? 'Agent 任务' : 'Agent task'} · ${run.lifecycle.phase}`,
+          })),
+      }))
+    }
+    return output
+  }, [copy.locale, identity, model.selection])
+  React.useEffect(() => {
+    if (openIdentity !== undefined && !identityPresentations.has(openIdentity)) setOpenIdentity(undefined)
+  }, [identityPresentations, openIdentity])
+  const selectedIdentity = openIdentity === undefined ? undefined : identityPresentations.get(openIdentity)
+  const chinese = copy.locale.toLowerCase().startsWith('zh')
   return <section
     className="cxa-root"
     data-agent-conversation-renderer="production"
@@ -206,9 +292,29 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
       </div>}
     </header>
     <div className="cxa-body">
-      <Timeline model={model} commands={commands} copy={copy} onCommandError={onCommandError} />
+      <Timeline model={model} commands={commands} copy={copy} onCommandError={onCommandError} identityPresentations={identityPresentations} onOpenIdentity={setOpenIdentity} />
       <Composer model={model} commands={commands} copy={copy} commandError={commandError} setCommandError={setCommandError} />
     </div>
+    {identity === undefined ? null : <HostAgentIdentityPanel
+      open={selectedIdentity !== undefined}
+      {...(selectedIdentity === undefined ? {} : { presentation: selectedIdentity })}
+      navigator={identity.navigator}
+      onOpenChange={open => { if (!open) setOpenIdentity(undefined) }}
+      onSettings={identity.onSettings}
+      onNavigationError={onCommandError}
+      copy={{
+        settings: chinese ? '设置' : 'Settings',
+        close: chinese ? '关闭' : 'Close',
+        introduction: chinese ? '介绍' : 'Introduction',
+        activeSessions: chinese ? '当前激活的会话' : 'Active sessions',
+        noActiveSessions: chinese ? '当前没有激活会话' : 'No active sessions',
+        sessionCount: count => chinese ? `${count} 个激活会话` : `${count} active session${count === 1 ? '' : 's'}`,
+        lifecycle: {
+          active: chinese ? '激活' : 'Active', running: chinese ? '运行中' : 'Running',
+          waiting: chinese ? '等待中' : 'Waiting', attention: chinese ? '需处理' : 'Attention',
+        },
+      }}
+    />}
     <div className="cxa-live-region" role="status" aria-live="polite">{commandError ?? ''}</div>
   </section>
 }
