@@ -200,7 +200,7 @@ interface CordisXRuntimeMetadata {
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
   readonly configBridgeToken?: string
-  readonly ownerDocumentBindings?: readonly { readonly source: string; readonly pluginId: string; readonly token: string }[]
+  readonly ownerDocumentBindings?: readonly { readonly source: string; readonly pluginId: string; readonly moduleGeneration: string; readonly token: string }[]
   readonly serviceConfigBridgeToken?: string
   readonly channelCredentialBridgeToken?: string
   readonly channelActionsBridgeToken?: string
@@ -334,6 +334,8 @@ export interface RendererPluginMutation {
   /** Host-only source held as data and executed solely in the isolated Host DOM worker. */
   readonly isolatedArtifactSource?: string
   readonly authorizationDecision?: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4
+  /** Host-private activation lease; never projected to plugins. */
+  readonly ownerDocumentBindings?: readonly { readonly source: string; readonly pluginId: string; readonly moduleGeneration: string; readonly token: string }[]
 }
 
 interface CordisXRuntimeHandle extends ManagerModel {
@@ -1233,6 +1235,7 @@ async function start(
     )
     const documentsClient = ownerDocumentBroker.bind({
       identity: controller.identity,
+      moduleGeneration: moduleGenerationOf(controller),
       active: () => {
         if (!controller.principalLive) return false
         try {
@@ -2096,6 +2099,7 @@ async function start(
         throw new Error('affected plugin set does not match the Host dependency closure')
       }
       const affected = new Set(handle.affectedPluginIds)
+      ownerDocumentBroker.registerBindings(mutation.ownerDocumentBindings ?? [])
       const previous = activeControllers().filter(controller => affected.has(controller.item.id))
       const candidates: PluginController[] = []
       notificationsSuppressed = true

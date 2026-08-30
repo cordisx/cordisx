@@ -12,10 +12,48 @@ export const MAX_OWNER_DOCUMENT_REQUESTS = 64
 export interface OwnerDocumentPrincipal {
   readonly profileId: string
   readonly generation: string
+  readonly moduleGeneration: string
   readonly identity: OwnerDocumentIdentity
 }
 
-export interface OwnerDocumentPrincipalBinding extends OwnerDocumentIdentity { readonly token: string }
+export interface OwnerDocumentPrincipalBinding extends OwnerDocumentIdentity {
+  readonly moduleGeneration: string
+  readonly token: string
+}
+
+export interface OwnerDocumentLease extends OwnerDocumentIdentity { readonly moduleGeneration: string }
+
+/** Host lifecycle fence. Stable launcher plugins and package activation leases are distinct. */
+export class OwnerDocumentLeaseRegistry {
+  private readonly stable = new Map<string, string>()
+  private current = new Map<string, OwnerDocumentLease>()
+  private readonly previous = new Map<string, Map<string, OwnerDocumentLease>>()
+
+  constructor(input: { readonly stable?: readonly OwnerDocumentIdentity[]; readonly active?: readonly OwnerDocumentLease[] } = {}) {
+    for (const identity of input.stable ?? []) this.stable.set(identity.pluginId, identity.source)
+    this.current = new Map((input.active ?? []).map(lease => [lease.pluginId, lease]))
+  }
+
+  allowed(principal: OwnerDocumentPrincipal): boolean {
+    if (this.stable.get(principal.identity.pluginId) === principal.identity.source) return true
+    const lease = this.current.get(principal.identity.pluginId)
+    return lease?.source === principal.identity.source && lease.moduleGeneration === principal.moduleGeneration
+  }
+
+  source(pluginId: string): string | undefined { return this.current.get(pluginId)?.source ?? this.stable.get(pluginId) }
+
+  stage(transactionId: string, leases: readonly OwnerDocumentLease[]): void {
+    if (this.previous.has(transactionId)) throw new Error('owner document lease transaction already exists')
+    this.previous.set(transactionId, new Map(this.current))
+    this.current = new Map(leases.map(lease => [lease.pluginId, lease]))
+  }
+
+  commit(transactionId: string): void { this.previous.delete(transactionId) }
+  abort(transactionId: string): void {
+    const previous = this.previous.get(transactionId); if (previous === undefined) return
+    this.current = previous; this.previous.delete(transactionId)
+  }
+}
 
 interface RequestBase {
   readonly version: 1
@@ -61,7 +99,7 @@ function jsonValue(value: unknown, label: string, seen = new Set<object>()): Cor
 function principalPayload(principal: OwnerDocumentPrincipal): string {
   return Buffer.from(JSON.stringify({
     v: 1, profileId: principal.profileId, generation: principal.generation,
-    source: principal.identity.source, pluginId: principal.identity.pluginId,
+    moduleGeneration: principal.moduleGeneration, source: principal.identity.source, pluginId: principal.identity.pluginId,
   }), 'utf8').toString('base64url')
 }
 
@@ -81,10 +119,10 @@ function verifyPrincipalToken(secret: string, token: string): OwnerDocumentPrinc
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return undefined
   try {
     const value = record(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')), 'owner document principal')
-    exactKeys(value, ['v', 'profileId', 'generation', 'source', 'pluginId'], 'owner document principal')
+    exactKeys(value, ['v', 'profileId', 'generation', 'moduleGeneration', 'source', 'pluginId'], 'owner document principal')
     if (value.v !== 1 || typeof value.profileId !== 'string' || typeof value.generation !== 'string'
-      || typeof value.source !== 'string' || typeof value.pluginId !== 'string') return undefined
-    return { profileId: value.profileId, generation: value.generation, identity: { source: value.source, pluginId: value.pluginId } }
+      || typeof value.moduleGeneration !== 'string' || typeof value.source !== 'string' || typeof value.pluginId !== 'string') return undefined
+    return { profileId: value.profileId, generation: value.generation, moduleGeneration: value.moduleGeneration, identity: { source: value.source, pluginId: value.pluginId } }
   } catch { return undefined }
 }
 
@@ -105,7 +143,7 @@ export function parseOwnerDocumentBindingRequest(value: unknown): OwnerDocumentB
 }
 
 export interface OwnerDocumentBridgeHandler {
-  issue(identity: OwnerDocumentIdentity): OwnerDocumentPrincipalBinding
+  issue(identity: OwnerDocumentIdentity, moduleGeneration: string): OwnerDocumentPrincipalBinding
   load(request: OwnerDocumentBindingRequest): Promise<CordisXOwnerDocumentLoadResultV1>
   replace(request: OwnerDocumentBindingRequest): Promise<CordisXOwnerDocumentReplaceResultV1>
 }
@@ -115,8 +153,8 @@ export function createOwnerDocumentBridgeHandler(input: {
   readonly profileId: string
   readonly generation: string
   readonly store: OwnerDocumentStore
-  /** Synchronous Host principal registry check, repeated at commit. */
-  readonly identityAllowed: (identity: OwnerDocumentIdentity) => boolean
+  /** Synchronous Host principal lease check, repeated at commit. */
+  readonly principalAllowed: (principal: OwnerDocumentPrincipal) => boolean
 }): OwnerDocumentBridgeHandler {
   let activeRequests = 0
   const bounded = async <Value>(operation: () => Promise<Value>): Promise<Value> => {
@@ -127,13 +165,13 @@ export function createOwnerDocumentBridgeHandler(input: {
   const resolve = (request: OwnerDocumentBindingRequest): OwnerDocumentPrincipal | undefined => {
     const principal = verifyPrincipalToken(input.secret, request.token)
     if (principal === undefined || principal.profileId !== input.profileId || principal.generation !== input.generation) return undefined
-    if (!input.identityAllowed(principal.identity)) return undefined
+    if (!input.principalAllowed(principal)) return undefined
     return principal
   }
   return {
-    issue(identity) {
-      const principal = { profileId: input.profileId, generation: input.generation, identity }
-      return { ...identity, token: issueOwnerDocumentPrincipalToken(input.secret, principal) }
+    issue(identity, moduleGeneration) {
+      const principal = { profileId: input.profileId, generation: input.generation, moduleGeneration, identity }
+      return { ...identity, moduleGeneration, token: issueOwnerDocumentPrincipalToken(input.secret, principal) }
     },
     async load(request) {
       return await bounded(async () => {

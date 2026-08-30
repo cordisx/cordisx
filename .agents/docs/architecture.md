@@ -161,10 +161,13 @@ The launcher, rather than plugin code or renderer local storage, owns the JSON
 document files. A per-owner atomic lock with dead-process recovery serializes
 compare-and-swap across launcher instances and processes, so one expected
 revision has at most one winner. The Host issues one authenticated token per
-exact profile, source, plugin id, and runtime generation; the wire never accepts
-a caller-selected owner. The authority repeats its generation/principal fence
-at the commit linearization point: retirement before that point has no side
-effect, while a completed commit always returns its accepted snapshot.
+exact profile, source, plugin id, runtime generation, and module activation
+generation; the wire never accepts a caller-selected owner. Package reload,
+disable, rollback, and replacement update the launcher lease registry and
+renderer binding in the same lifecycle transaction. The authority repeats its
+principal lease fence under the owner lock immediately before atomic rename,
+after temporary bytes are written and synced: retirement before that point has
+no side effect, while a completed rename always returns its accepted snapshot.
 
 Each snapshot carries a monotonic revision plus a consumer-owned schema
 version; consumer migration is an explicit CAS replacement. Invalid JSON,

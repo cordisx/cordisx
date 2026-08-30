@@ -32,7 +32,7 @@ interface DocumentWatch {
   lastKey?: string
 }
 
-export interface OwnerDocumentPrincipalBinding { readonly source: string; readonly pluginId: string; readonly token: string }
+export interface OwnerDocumentPrincipalBinding { readonly source: string; readonly pluginId: string; readonly moduleGeneration: string; readonly token: string }
 
 function clone<Value>(value: Value): Value { return typeof globalThis.structuredClone === 'function' ? globalThis.structuredClone(value) : JSON.parse(JSON.stringify(value)) as Value }
 function deepFreeze<Value>(value: Value, seen = new Set<object>()): Value {
@@ -67,7 +67,9 @@ function resultKey(result: CordisXOwnerDocumentLoadResultV1): string {
   if (result.status === 'missing') return 'missing:0'
   return `unavailable:${result.code}:${result.diagnostic}`
 }
-function identityKey(identity: { readonly source: string; readonly id?: string; readonly pluginId?: string }): string { return JSON.stringify([identity.source, identity.id ?? identity.pluginId]) }
+function identityKey(identity: { readonly source: string; readonly id?: string; readonly pluginId?: string }, moduleGeneration: string): string {
+  return JSON.stringify([identity.source, identity.id ?? identity.pluginId, moduleGeneration])
+}
 
 /** One renderer transport. Principal tokens are supplied only by bound clients. */
 export class BrowserOwnerDocumentBridge {
@@ -158,7 +160,7 @@ export class BrowserOwnerDocumentBridge {
   }
 }
 
-interface BoundOwnerDocumentInput { readonly identity: CordisXPluginIdentity; readonly active: () => boolean }
+interface BoundOwnerDocumentInput { readonly identity: CordisXPluginIdentity; readonly moduleGeneration: string; readonly active: () => boolean }
 
 class BoundOwnerDocuments implements CordisXOwnerDocumentsV1 {
   #disposed = false
@@ -222,16 +224,20 @@ class BoundOwnerDocuments implements CordisXOwnerDocumentsV1 {
 export class CordisXOwnerDocumentBroker {
   #clients = new Set<BoundOwnerDocuments>()
   #bridge: BrowserOwnerDocumentBridge | undefined
-  #bindings: ReadonlyMap<string, string>
+  #bindings = new Map<string, string>()
 
   constructor(bridge?: BrowserOwnerDocumentBridge, bindings: readonly OwnerDocumentPrincipalBinding[] = []) {
     this.#bridge = bridge
-    this.#bindings = new Map(bindings.map(binding => [identityKey(binding), binding.token]))
+    this.registerBindings(bindings)
+  }
+
+  registerBindings(bindings: readonly OwnerDocumentPrincipalBinding[]): void {
+    for (const binding of bindings) this.#bindings.set(identityKey(binding, binding.moduleGeneration), binding.token)
   }
 
   bind(input: BoundOwnerDocumentInput): CordisXOwnerDocumentsV1 & { dispose(): void } {
     let client!: BoundOwnerDocuments
-    client = new BoundOwnerDocuments(this.#bridge, this.#bindings.get(identityKey(input.identity)), input.active, () => this.#clients.delete(client))
+    client = new BoundOwnerDocuments(this.#bridge, this.#bindings.get(identityKey(input.identity, input.moduleGeneration)), input.active, () => this.#clients.delete(client))
     this.#clients.add(client)
     return client
   }

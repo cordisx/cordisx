@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { CORDISX_OWNER_DOCUMENT_SERVICE_V1 } from '../packages/cli/src/durable-document-contracts.js'
 import { OwnerDocumentStore } from '../packages/cli/src/launcher/owner-document-store.js'
-import { createOwnerDocumentBridgeHandler, parseOwnerDocumentBindingRequest } from '../packages/cli/src/launcher/owner-document-rpc.js'
+import { createOwnerDocumentBridgeHandler, OwnerDocumentLeaseRegistry, parseOwnerDocumentBindingRequest } from '../packages/cli/src/launcher/owner-document-rpc.js'
 import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from '../packages/cli/src/renderer/owner-documents.js'
 
 const roots: string[] = []
@@ -18,7 +18,7 @@ async function setup(generation = 'runtime-1') {
   let live = true
   const handler = createOwnerDocumentBridgeHandler({
     secret, profileId: 'work', generation, store,
-    identityAllowed: candidate => live && ((candidate.source === identity.source && candidate.pluginId === identity.id) || (candidate.source === other.source && candidate.pluginId === other.id)),
+    principalAllowed: principal => live && ((principal.identity.source === identity.source && principal.identity.pluginId === identity.id) || (principal.identity.source === other.source && principal.identity.pluginId === other.id)),
   })
   globalThis.__cordisxOwnerDocumentRequestV1 = payload => {
     void (async () => {
@@ -28,7 +28,7 @@ async function setup(generation = 'runtime-1') {
     })()
   }
   const bridge = new BrowserOwnerDocumentBridge()
-  const broker = new CordisXOwnerDocumentBroker(bridge, [handler.issue({ source: identity.source, pluginId: identity.id }), handler.issue({ source: other.source, pluginId: other.id })])
+  const broker = new CordisXOwnerDocumentBroker(bridge, [handler.issue({ source: identity.source, pluginId: identity.id }, 'module-one'), handler.issue({ source: other.source, pluginId: other.id }, 'module-other')])
   return { home, store, broker, handler, retire: () => { live = false } }
 }
 
@@ -40,7 +40,7 @@ afterEach(async () => {
 describe('owner document renderer client', () => {
   it('binds a narrow principal token and wire callers cannot choose owner identity or scope', async () => {
     const { broker } = await setup('runtime-fence')
-    const client = broker.bind({ identity, active: () => true })
+    const client = broker.bind({ identity, moduleGeneration: 'module-one', active: () => true })
     expect(Object.keys(client)).toEqual([])
     expect(JSON.stringify(client)).toBe('{}')
     expect(() => parseOwnerDocumentBindingRequest({
@@ -49,15 +49,39 @@ describe('owner document renderer client', () => {
     })).toThrow('identity is not supported')
     const accepted = await client.replace({ contract: CORDISX_OWNER_DOCUMENT_SERVICE_V1, documentId: 'rooms', expectedRevision: 0, schemaVersion: 1, value: { owner: 'chatroom' } })
     expect(accepted.status).toBe('accepted')
-    const otherClient = broker.bind({ identity: other, active: () => true })
+    const otherClient = broker.bind({ identity: other, moduleGeneration: 'module-other', active: () => true })
     await expect(otherClient.load('rooms')).resolves.toEqual({ status: 'missing', revision: 0 })
     broker.dispose()
+  })
+
+  it('revokes exact module leases on reload and disable while rollback restores the predecessor', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cordisx-owner-document-lease-')); roots.push(home)
+    const leaseIdentity = { source: identity.source, pluginId: identity.id }
+    const leases = new OwnerDocumentLeaseRegistry({ active: [{ ...leaseIdentity, moduleGeneration: 'module-one' }] })
+    const handler = createOwnerDocumentBridgeHandler({
+      secret: 'l'.repeat(64), profileId: 'work', generation: 'runtime', store: new OwnerDocumentStore(home),
+      principalAllowed: principal => leases.allowed(principal),
+    })
+    const request = (token: string, requestId: string) => parseOwnerDocumentBindingRequest({
+      version: 1, requestId, token, operation: 'load', documentId: 'rooms',
+    })
+    const first = handler.issue(leaseIdentity, 'module-one')
+    await expect(handler.load(request(first.token, 'first-live'))).resolves.toEqual({ status: 'missing', revision: 0 })
+    leases.stage('reload', [{ ...leaseIdentity, moduleGeneration: 'module-two' }])
+    await expect(handler.load(request(first.token, 'first-retired'))).resolves.toMatchObject({ status: 'unavailable', code: 'stale-generation' })
+    const second = handler.issue(leaseIdentity, 'module-two')
+    await expect(handler.load(request(second.token, 'second-live'))).resolves.toEqual({ status: 'missing', revision: 0 })
+    leases.abort('reload')
+    await expect(handler.load(request(first.token, 'first-restored'))).resolves.toEqual({ status: 'missing', revision: 0 })
+    await expect(handler.load(request(second.token, 'second-aborted'))).resolves.toMatchObject({ status: 'unavailable', code: 'stale-generation' })
+    leases.stage('disable', []); leases.commit('disable')
+    await expect(handler.load(request(first.token, 'disabled'))).resolves.toMatchObject({ status: 'unavailable', code: 'stale-generation' })
   })
 
   it('deep-freezes snapshots and preserves accepted after renderer retirement races the response', async () => {
     const { broker } = await setup()
     let active = true
-    const client = broker.bind({ identity, active: () => active })
+    const client = broker.bind({ identity, moduleGeneration: 'module-one', active: () => active })
     const pending = client.transaction({ contract: CORDISX_OWNER_DOCUMENT_SERVICE_V1, documentId: 'rooms', expectedRevision: 0, schemaVersion: 2, value: { rooms: [{ id: 'room-1' }] } })
     // Authority already owns linearization; renderer activity after dispatch
     // cannot turn a committed result into stale.
@@ -79,9 +103,9 @@ describe('owner document renderer client', () => {
     const delayed = new DelayedStore(home)
     const handler = createOwnerDocumentBridgeHandler({
       secret: 'f'.repeat(64), profileId: 'work', generation: 'generation-one', store: delayed,
-      identityAllowed: candidate => allowed && candidate.source === identity.source && candidate.pluginId === identity.id,
+      principalAllowed: principal => allowed && principal.identity.source === identity.source && principal.identity.pluginId === identity.id,
     })
-    const binding = handler.issue({ source: identity.source, pluginId: identity.id })
+    const binding = handler.issue({ source: identity.source, pluginId: identity.id }, 'module-one')
     const request = parseOwnerDocumentBindingRequest({
       version: 1, requestId: 'retire-before-commit', token: binding.token, operation: 'replace',
       documentId: 'rooms', expectedRevision: 0, schemaVersion: 1, value: { state: 'planned' },
@@ -101,16 +125,16 @@ describe('owner document renderer client', () => {
     const committing = new RetireAfterCommitStore(home)
     const committedHandler = createOwnerDocumentBridgeHandler({
       secret: 'a'.repeat(64), profileId: 'work', generation: 'generation-two', store: committing,
-      identityAllowed: candidate => allowed && candidate.source === identity.source && candidate.pluginId === identity.id,
+      principalAllowed: principal => allowed && principal.identity.source === identity.source && principal.identity.pluginId === identity.id,
     })
-    const committedBinding = committedHandler.issue({ source: identity.source, pluginId: identity.id })
+    const committedBinding = committedHandler.issue({ source: identity.source, pluginId: identity.id }, 'module-two')
     const committedRequest = parseOwnerDocumentBindingRequest({ ...request, requestId: 'retire-after-commit', token: committedBinding.token })
     await expect(committedHandler.replace(committedRequest)).resolves.toMatchObject({ status: 'accepted', snapshot: { revision: 1 } })
   })
 
   it('shares one polling watch per document and fences unsubscribe/dispose with zero late delivery', async () => {
     const { store, broker } = await setup()
-    const client = broker.bind({ identity, active: () => true })
+    const client = broker.bind({ identity, moduleGeneration: 'module-one', active: () => true })
     const first: string[] = []; const second: string[] = []
     const a = client.subscribe('rooms', result => first.push(result.status)); const b = client.subscribe('rooms', result => second.push(result.status))
     await new Promise(resolve => setTimeout(resolve, 30))
@@ -125,7 +149,7 @@ describe('owner document renderer client', () => {
 
   it('returns typed unavailable when bridge or principal binding is absent', async () => {
     const broker = new CordisXOwnerDocumentBroker()
-    const client = broker.bind({ identity, active: () => true })
+    const client = broker.bind({ identity, moduleGeneration: 'module-one', active: () => true })
     await expect(client.load('rooms')).resolves.toMatchObject({ status: 'unavailable', code: 'bridge-unavailable' })
     broker.dispose()
   })
@@ -134,9 +158,9 @@ describe('owner document renderer client', () => {
     let requests = 0
     globalThis.__cordisxOwnerDocumentRequestV1 = () => { requests += 1 }
     const bridge = new BrowserOwnerDocumentBridge()
-    const broker = new CordisXOwnerDocumentBroker(bridge, [{ source: identity.source, pluginId: identity.id, token: 'slow-token'.repeat(8) }])
-    const firstClient = broker.bind({ identity, active: () => true })
-    const secondClient = broker.bind({ identity, active: () => true })
+    const broker = new CordisXOwnerDocumentBroker(bridge, [{ source: identity.source, pluginId: identity.id, moduleGeneration: 'module-one', token: 'slow-token'.repeat(8) }])
+    const firstClient = broker.bind({ identity, moduleGeneration: 'module-one', active: () => true })
+    const secondClient = broker.bind({ identity, moduleGeneration: 'module-one', active: () => true })
     const a = firstClient.subscribe('rooms', () => undefined); const b = secondClient.subscribe('rooms', () => undefined)
     await new Promise(resolve => setTimeout(resolve, 700)); expect(requests).toBe(1)
     a(); b(); broker.dispose()

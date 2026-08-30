@@ -39,6 +39,7 @@ import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
 import {
   createOwnerDocumentBridgeHandler,
+  OwnerDocumentLeaseRegistry,
   ownerDocumentBridgeError,
   parseOwnerDocumentBindingRequest,
   type OwnerDocumentBridgeHandler,
@@ -56,6 +57,7 @@ interface PlaygroundGeneration {
   readonly config: CordisXConfig
   readonly bridge: ConfigBridgeHandler
   readonly documents: OwnerDocumentBridgeHandler
+  readonly documentSecret: string
   readonly serviceConfig?: ServiceConfigBridgeHandler
   readonly credential?: ChannelCredentialBridgeHandler
   readonly channelConfig?: HostServiceConfigNarrowApi
@@ -219,12 +221,16 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
       plugin.id,
       plugin.source ?? pathToFileURL(plugin.entry).href,
     ]))
+    const documentSecret = randomBytes(32).toString('hex')
+    const documentLeases = new OwnerDocumentLeaseRegistry({
+      stable: [...identities].map(([pluginId, source]) => ({ pluginId, source })),
+    })
     const documents = createOwnerDocumentBridgeHandler({
-      secret: randomBytes(32).toString('hex'),
+      secret: documentSecret,
       profileId: 'playground',
       generation,
       store: ownerDocumentStore,
-      identityAllowed: identity => identities.get(identity.pluginId) === identity.source,
+      principalAllowed: principal => documentLeases.allowed(principal),
     })
     const channelPlugin = config.plugins.find(plugin => plugin.id === 'channel')
     const channelConfig = channelPlugin === undefined ? undefined : new HostServiceConfigNarrowApi({
@@ -256,7 +262,7 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
       writable: channelDescriptor.writable,
     })
     const next: PlaygroundGeneration = {
-      generation, token, config, bridge, documents,
+      generation, token, config, bridge, documents, documentSecret,
       ...(channelConfig === undefined ? {} : { channelConfig }),
       ...(serviceConfig === undefined ? {} : { serviceConfig }),
       ...(credential === undefined ? {} : { credential }),
@@ -271,10 +277,11 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
     playground: true as const,
     generation: generation.generation,
     configBridgeToken: generation.token,
-    ownerDocumentBindings: generation.config.plugins.map(plugin => generation.documents.issue({
-      pluginId: plugin.id,
-      source: plugin.source ?? pathToFileURL(plugin.entry).href,
-    })),
+    ownerDocumentAuthority: {
+      secret: generation.documentSecret,
+      profileId: 'playground',
+      generation: generation.generation,
+    },
     ...(generation.serviceConfig === undefined ? {} : { serviceConfigBridgeToken: generation.serviceConfig.token }),
     ...(generation.credential === undefined ? {} : { channelCredentialBridgeToken: generation.credential.token }),
     ...(generation.channelManager === undefined ? {} : { channelManager: generation.channelManager }),

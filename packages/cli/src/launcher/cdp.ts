@@ -105,6 +105,8 @@ import {
   OWNER_DOCUMENT_RECEIVER,
   ownerDocumentBridgeError,
   parseOwnerDocumentBindingRequest,
+  type OwnerDocumentLeaseRegistry,
+  type OwnerDocumentPrincipalBinding,
   type OwnerDocumentBridgeHandler,
 } from './owner-document-rpc.js'
 
@@ -256,6 +258,10 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private readonly fences = new Map<string, RuntimeGenerationFence>()
   private registryEpoch = 0
   private permissionIdentities: PluginPermissionIdentityRegistry | undefined
+  private ownerDocumentAuthority: {
+    readonly leases: OwnerDocumentLeaseRegistry
+    readonly issue: (identity: { readonly source: string; readonly pluginId: string }, moduleGeneration: string) => OwnerDocumentPrincipalBinding
+  } | undefined
   private recoveredActivation: CordisXPluginActivationRecordV1 | undefined
   private readonly recoveredSessions = new WeakSet<CdpSession>()
   private readonly developmentStates = new Map<string, CordisXLocalDevelopmentSnapshot>()
@@ -270,6 +276,13 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       throw new Error('cannot replace permission identities during a generation transaction')
     }
     this.permissionIdentities = permissionIdentities
+  }
+
+  setOwnerDocumentAuthority(authority: NonNullable<CdpPluginLifecycleRuntime['ownerDocumentAuthority']>): void {
+    if (this.joining.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.fences.size !== 0) {
+      throw new Error('cannot replace owner document authority during a generation transaction')
+    }
+    this.ownerDocumentAuthority = authority
   }
 
   currentRegistryEpoch(): number {
@@ -352,6 +365,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     this.stagedMutations.delete(transactionId)
     this.fences.delete(transactionId)
     this.permissionIdentities?.[permission](transactionId)
+    this.ownerDocumentAuthority?.leases[permission](transactionId)
   }
 
   private async projectDevelopmentState(
@@ -404,6 +418,13 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       ))
       ? runtimeArtifactSource ?? runtimePackage.artifactSource
       : undefined
+    const candidateLeases = mutation.candidate.plugins.flatMap(item => {
+      if (!item.enabled) return []
+      const source = item.id === mutation.targetId && mutation.package?.identitySource !== undefined
+        ? mutation.package.identitySource
+        : this.ownerDocumentAuthority?.leases.source(item.id)
+      return source === undefined ? [] : [{ source, pluginId: item.id, moduleGeneration: item.moduleGeneration }]
+    })
     const rendererMutation = {
       ...projectedMutation,
       ...(isolatedArtifactSource === undefined ? {} : { isolatedArtifactSource }),
@@ -415,6 +436,11 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
           ...(mutation.package.readme === undefined ? {} : { readme: mutation.package.readme }),
         },
       }),
+      ...(this.ownerDocumentAuthority === undefined ? {} : {
+        ownerDocumentBindings: candidateLeases
+          .filter(lease => mutation.affectedPluginIds.includes(lease.pluginId))
+          .map(lease => this.ownerDocumentAuthority!.issue(lease, lease.moduleGeneration)),
+      }),
     }
     const receipts: RuntimeReadinessObservation[] = []
     try {
@@ -425,6 +451,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         mutation.affectedPluginIds,
         mutation.package?.identitySource,
       )
+      this.ownerDocumentAuthority?.leases.stage(mutation.transactionId, candidateLeases)
       const results = await Promise.allSettled(sessions.map(async session => {
         let artifactFailure: unknown
         if (mutation.package !== undefined || runtimeArtifactSource !== undefined) {

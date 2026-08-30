@@ -20,6 +20,7 @@ import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authori
 import { ensureHomeConfig, loadHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
 import { ICON_THEME_PREFERENCE_BINDING, IconThemePreferenceBroadcastHub } from '../packages/cli/src/launcher/icon-theme-rpc.js'
 import { BrowserIconThemePreferenceBridge } from '../packages/cli/src/renderer/icon-theme-preference-binding.js'
+import { OwnerDocumentLeaseRegistry } from '../packages/cli/src/launcher/owner-document-rpc.js'
 
 function target(id: string, title: string, url = 'https://example.test/'): CdpTarget {
   return { id, title, url, type: 'page', webSocketDebuggerUrl: `ws://127.0.0.1/${id}` }
@@ -1257,6 +1258,47 @@ describe('CdpPluginLifecycleRuntime', () => {
     expect(expressions[1]).toContain('__mainRealmHostDomExecutionWouldBeABug')
 
     await runtime.commit('tx')
+    unregister()
+  })
+
+  it('projects exact document lease tokens with package generation stage and restores them on rollback', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const leases = new OwnerDocumentLeaseRegistry({ active: [{ source: 'file:///demo-old.js', pluginId: 'demo', moduleGeneration: 'demo-old' }] })
+    runtime.setOwnerDocumentAuthority({
+      leases,
+      issue: (identity, moduleGeneration) => ({ ...identity, moduleGeneration, token: `signed-${moduleGeneration}` }),
+    })
+    const previous = activation(0, 'demo-old')
+    const candidateBase = activation(1, 'demo-new')
+    const candidate = { ...candidateBase, plugins: candidateBase.plugins.map(item => ({ ...item, enabled: true })) }
+    let transactionEpoch = ''; let stagedExpression = ''
+    const unregister = runtime.register({
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        if (expression.includes('stagePluginMutation')) {
+          stagedExpression = expression
+          return { result: { value: { ok: true, result: { transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1 } } } }
+        }
+        if (expression.includes('rollbackPluginMutation')) return { result: { value: { ok: true, result: {
+          transactionId: 'tx', transactionEpoch, registryEpoch: 2, active: previous, disposedAfter: candidate,
+        } } } }
+        return { result: { value: undefined } }
+      },
+    } as never)
+    const fence = runtime.prepare('tx'); transactionEpoch = fence.transactionEpoch
+    await runtime.stage({
+      transactionId: 'tx', ...fence, afterRegistryEpoch: 1, operation: 'update', previous, candidate,
+      targetId: 'demo', affectedPluginIds: ['demo'],
+      package: {
+        manifest: { id: 'demo' }, digest: `sha256:${'b'.repeat(64)}`, moduleSource: '', artifactSource: 'void 0',
+        serviceModules: [], identitySource: 'file:///demo-new.js',
+      } as never,
+    })
+    expect(stagedExpression).toContain('signed-demo-new')
+    expect(leases.allowed({ profileId: 'work', generation: 'runtime-1', moduleGeneration: 'demo-new', identity: { source: 'file:///demo-new.js', pluginId: 'demo' } })).toBe(true)
+    expect(leases.allowed({ profileId: 'work', generation: 'runtime-1', moduleGeneration: 'demo-old', identity: { source: 'file:///demo-old.js', pluginId: 'demo' } })).toBe(false)
+    await runtime.rollback('tx')
+    expect(leases.allowed({ profileId: 'work', generation: 'runtime-1', moduleGeneration: 'demo-old', identity: { source: 'file:///demo-old.js', pluginId: 'demo' } })).toBe(true)
     unregister()
   })
 

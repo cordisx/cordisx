@@ -396,13 +396,15 @@ ctx.slots.registerCollection({
   const durableHandler = createOwnerDocumentBridgeHandler({
     secret: 'installed-owner-documents-secret', profileId: 'installed', generation: durableGeneration,
     store: new OwnerDocumentStore(cordisxHome),
-    identityAllowed: identity => identity.source === durableSource && identity.pluginId === 'durable-plugin',
+    principalAllowed: principal => principal.identity.source === durableSource && principal.identity.pluginId === 'durable-plugin',
   })
-  const durableBinding = durableHandler.issue({ source: durableSource, pluginId: 'durable-plugin' })
   const durableBundle = await buildRendererBundle({
     version: 1, rootDir: runnerDirectory, codex: { debugPort: 9229 }, providers: [],
     plugins: [{ id: 'durable-plugin', entry: durablePluginEntry, source: durableSource, enabled: true, config: {} }],
-  }, { profileId: 'installed', generation: durableGeneration, ownerDocumentBindings: [durableBinding] })
+  }, {
+    profileId: 'installed', generation: durableGeneration,
+    ownerDocumentAuthority: { secret: 'installed-owner-documents-secret', profileId: 'installed', generation: durableGeneration },
+  })
   const durableDom = new JSDOM('<html lang="en"><head></head><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>', {
     runScripts: 'dangerously', url: 'https://codex.local/',
   })

@@ -80,9 +80,17 @@ describe('OwnerDocumentStore', () => {
   })
 
   it('checks the generation fence at the commit point and leaves no side effect when retired', async () => {
-    const home = await root(); const store = new OwnerDocumentStore(home)
-    await expect(store.replace({ scope, documentId: 'rooms', expectedRevision: 0, schemaVersion: 1, value: { no: 'commit' }, commitAllowed: () => false }))
-      .resolves.toMatchObject({ status: 'unavailable', code: 'stale-generation' })
+    const home = await root()
+    let allowed = true; let reached!: () => void; let release!: () => void
+    const atCommit = new Promise<void>(resolve => { reached = resolve })
+    const resume = new Promise<void>(resolve => { release = resolve })
+    const store = new OwnerDocumentStore(home, { beforeCommit: async () => { reached(); await resume } })
+    const pending = store.replace({ scope, documentId: 'rooms', expectedRevision: 0, schemaVersion: 1, value: { no: 'commit' }, commitAllowed: () => allowed })
+    await atCommit
+    // Temporary bytes have already been written and fsynced. Revocation here
+    // must prevent the immediately following atomic rename.
+    allowed = false; release()
+    await expect(pending).resolves.toMatchObject({ status: 'unavailable', code: 'stale-generation' })
     await expect(store.load(scope, 'rooms')).resolves.toEqual({ status: 'missing', revision: 0 })
   })
 
@@ -131,6 +139,31 @@ describe('OwnerDocumentStore', () => {
     await expect(store.replace({ scope, documentId: 'rooms', expectedRevision: 2, schemaVersion: 3, value: { no: 'overwrite' } }))
       .resolves.toMatchObject({ status: 'unavailable', code: 'unsupported-store-schema', recoverable: true })
     await expect(readFile(file, 'utf8')).resolves.toBe(unsupported)
+  })
+
+  it('rejects unknown envelope, identity, and document fields without overwriting original bytes', async () => {
+    const home = await root(); const store = new OwnerDocumentStore(home)
+    await store.replace({ scope, documentId: 'rooms', expectedRevision: 0, schemaVersion: 1, value: { ok: true } })
+    const file = await storedFile(home)
+    const original = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    const candidates = [
+      { ...original, unexpected: true },
+      { ...original, identity: { ...(original.identity as Record<string, unknown>), unexpected: true } },
+      {
+        ...original,
+        documents: {
+          ...(original.documents as Record<string, unknown>),
+          rooms: { ...((original.documents as Record<string, Record<string, unknown>>).rooms), unexpected: true },
+        },
+      },
+    ]
+    for (const candidate of candidates) {
+      const raw = `${JSON.stringify(candidate)}\n`; await writeFile(file, raw)
+      await expect(store.load(scope, 'rooms')).resolves.toMatchObject({ status: 'unavailable', code: 'corrupt-store', recoverable: true })
+      await expect(store.replace({ scope, documentId: 'rooms', expectedRevision: 1, schemaVersion: 2, value: { migrated: true } }))
+        .resolves.toMatchObject({ status: 'unavailable', code: 'corrupt-store', recoverable: true })
+      await expect(readFile(file, 'utf8')).resolves.toBe(raw)
+    }
   })
 
   it('returns typed quota and invalid JSON errors without writing', async () => {

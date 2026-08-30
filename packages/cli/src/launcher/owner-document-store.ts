@@ -64,6 +64,11 @@ function assertScope(scope: OwnerDocumentStoreScope): void {
   if (scope.identity.source.length === 0 || byteLength(scope.identity.source) > 4096) throw new Error('plugin source is invalid')
 }
 
+function assertExactKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  const unknown = Object.keys(value).find(key => !allowed.includes(key))
+  if (unknown !== undefined) throw new Error(`${label} contains unknown field ${unknown}`)
+}
+
 function jsonValue(value: unknown, label: string, seen = new Set<object>()): CordisXJsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
   if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -86,6 +91,7 @@ function jsonValue(value: unknown, label: string, seen = new Set<object>()): Cor
 function parseStored(value: unknown, scope: OwnerDocumentStoreScope): StoredOwnerDocuments {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('store root is invalid')
   const root = value as Record<string, unknown>
+  assertExactKeys(root, ['contract', 'storeSchemaVersion', 'profileId', 'identity', 'documents'], 'store root')
   if (root.contract !== CORDISX_OWNER_DOCUMENT_SERVICE_V1 || root.storeSchemaVersion !== STORE_SCHEMA_VERSION) {
     throw new Error('store schema is unsupported')
   }
@@ -93,6 +99,7 @@ function parseStored(value: unknown, scope: OwnerDocumentStoreScope): StoredOwne
   const identity = root.identity
   if (identity === null || typeof identity !== 'object' || Array.isArray(identity)) throw new Error('store owner identity is invalid')
   const owner = identity as Record<string, unknown>
+  assertExactKeys(owner, ['source', 'pluginId'], 'store owner identity')
   if (owner.source !== scope.identity.source || owner.pluginId !== scope.identity.pluginId) throw new Error('store owner identity is invalid')
   if (root.documents === null || typeof root.documents !== 'object' || Array.isArray(root.documents)) throw new Error('store documents are invalid')
   const entries = Object.entries(root.documents as Record<string, unknown>)
@@ -102,6 +109,7 @@ function parseStored(value: unknown, scope: OwnerDocumentStoreScope): StoredOwne
     assertDocumentId(documentId)
     if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) throw new Error('stored document is invalid')
     const item = candidate as Record<string, unknown>
+    assertExactKeys(item, ['revision', 'schemaVersion', 'value'], `stored document ${documentId}`)
     if (!Number.isSafeInteger(item.revision) || (item.revision as number) < 1) throw new Error('stored document revision is invalid')
     if (!Number.isSafeInteger(item.schemaVersion) || (item.schemaVersion as number) < 1) throw new Error('stored document schemaVersion is invalid')
     const normalized = jsonValue(item.value, `documents.${documentId}.value`)
@@ -135,7 +143,10 @@ function emptyStore(scope: OwnerDocumentStoreScope): StoredOwnerDocuments {
 export class OwnerDocumentStore {
   private queue: Promise<void> = Promise.resolve()
 
-  constructor(private readonly homeDir: string) {}
+  constructor(
+    private readonly homeDir: string,
+    private readonly hooks: { readonly beforeCommit?: () => void | Promise<void> } = {},
+  ) {}
 
   private ownerPath(scope: OwnerDocumentStoreScope): string {
     assertScope(scope)
@@ -236,7 +247,7 @@ export class OwnerDocumentStore {
     }
   }
 
-  private async write(scope: OwnerDocumentStoreScope, value: StoredOwnerDocuments): Promise<void> {
+  private async write(scope: OwnerDocumentStoreScope, value: StoredOwnerDocuments, commitAllowed?: () => boolean): Promise<boolean> {
     const output = `${JSON.stringify(value)}\n`
     if (byteLength(output) > OWNER_DOCUMENT_MAX_OWNER_BYTES) throw new Error('owner document store exceeds quota')
     const file = this.ownerPath(scope)
@@ -247,7 +258,12 @@ export class OwnerDocumentStore {
       await handle.writeFile(output, 'utf8')
       await handle.sync()
       await handle.close()
+      await this.hooks.beforeCommit?.()
+      // This is the CAS linearization fence: it runs under the same owner lock
+      // immediately before atomic rename, after all temporary bytes are synced.
+      if (commitAllowed?.() === false) return false
       await rename(temporary, file)
+      return true
     } finally {
       await handle.close().catch(() => undefined)
       await unlink(temporary).catch(() => undefined)
@@ -288,51 +304,50 @@ export class OwnerDocumentStore {
     return await this.serialized(async () => {
       try {
         return await this.locked(input.scope, async () => {
-      try {
-        assertDocumentId(input.documentId)
-        if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) throw new Error('expectedRevision is invalid')
-        if (!Number.isSafeInteger(input.schemaVersion) || input.schemaVersion < 1) throw new Error('schemaVersion is invalid')
-        const value = jsonValue(input.value, 'value')
-        if (byteLength(JSON.stringify(value)) > OWNER_DOCUMENT_MAX_DOCUMENT_BYTES) {
-          return unavailable('quota-exceeded', 'document exceeds quota', false)
-        }
-        const read = await this.read(input.scope)
-        if (read.status === 'unavailable') return read.result
-        const actualRevision = read.value.documents[input.documentId]?.revision ?? 0
-        if (actualRevision !== input.expectedRevision) return { status: 'conflict', actualRevision }
-        if (read.value.documents[input.documentId] === undefined
-          && Object.keys(read.value.documents).length >= OWNER_DOCUMENT_MAX_DOCUMENTS) {
-          return unavailable('quota-exceeded', 'owner document count exceeds quota', false)
-        }
-        const revision = actualRevision + 1
-        const next: StoredOwnerDocuments = {
-          ...read.value,
-          documents: {
-            ...read.value.documents,
-            [input.documentId]: { revision, schemaVersion: input.schemaVersion, value },
-          },
-        }
-        if (input.commitAllowed?.() === false) {
-          return unavailable('stale-generation', 'plugin owner is stale', true)
-        }
-        try { await this.write(input.scope, next) } catch (error) {
-          if (error instanceof Error && error.message.includes('quota')) {
-            return unavailable('quota-exceeded', error.message, false)
+          try {
+            assertDocumentId(input.documentId)
+            if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) throw new Error('expectedRevision is invalid')
+            if (!Number.isSafeInteger(input.schemaVersion) || input.schemaVersion < 1) throw new Error('schemaVersion is invalid')
+            const value = jsonValue(input.value, 'value')
+            if (byteLength(JSON.stringify(value)) > OWNER_DOCUMENT_MAX_DOCUMENT_BYTES) {
+              return unavailable('quota-exceeded', 'document exceeds quota', false)
+            }
+            const read = await this.read(input.scope)
+            if (read.status === 'unavailable') return read.result
+            const actualRevision = read.value.documents[input.documentId]?.revision ?? 0
+            if (actualRevision !== input.expectedRevision) return { status: 'conflict', actualRevision }
+            if (read.value.documents[input.documentId] === undefined
+              && Object.keys(read.value.documents).length >= OWNER_DOCUMENT_MAX_DOCUMENTS) {
+              return unavailable('quota-exceeded', 'owner document count exceeds quota', false)
+            }
+            const revision = actualRevision + 1
+            const next: StoredOwnerDocuments = {
+              ...read.value,
+              documents: {
+                ...read.value.documents,
+                [input.documentId]: { revision, schemaVersion: input.schemaVersion, value },
+              },
+            }
+            try {
+              if (!await this.write(input.scope, next, input.commitAllowed)) {
+                return unavailable('stale-generation', 'plugin owner is stale', true)
+              }
+            } catch (error) {
+              if (error instanceof Error && error.message.includes('quota')) return unavailable('quota-exceeded', error.message, false)
+              return unavailable('host-unavailable', 'owner document store could not be committed')
+            }
+            return {
+              status: 'accepted',
+              snapshot: {
+                contract: CORDISX_OWNER_DOCUMENT_SERVICE_V1,
+                revision,
+                schemaVersion: input.schemaVersion,
+                value,
+              },
+            }
+          } catch (error) {
+            return unavailable('invalid-request', error instanceof Error ? error.message : 'request is invalid', false)
           }
-          return unavailable('host-unavailable', 'owner document store could not be committed')
-        }
-        return {
-          status: 'accepted',
-          snapshot: {
-            contract: CORDISX_OWNER_DOCUMENT_SERVICE_V1,
-            revision,
-            schemaVersion: input.schemaVersion,
-            value,
-          },
-        }
-      } catch (error) {
-        return unavailable('invalid-request', error instanceof Error ? error.message : 'request is invalid', false)
-      }
         })
       } catch {
         return unavailable('host-unavailable', 'owner document store lock could not be acquired')
