@@ -12,7 +12,7 @@ const scopedTDesignReactCss = tdesignReactCss.replace(
 export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_CSS}\n${String.raw`
   .cxr-root { position: relative; z-index: 2147483500; color: var(--cx-text, #edf0f4); font: 13px/1.45 system-ui, sans-serif; }
   .cxr-root *, .cxr-root *::before, .cxr-root *::after { box-sizing: border-box; }
-  .cxr-root .t-popup { z-index: 2147483600 !important; }
+  .cxr-root :is(.t-popup,.t-dialog__ctx) { z-index: 2147483600 !important; }
   .cxr-brand-mark { display: inline-grid; width: 18px; height: 18px; flex: none; place-items: center; }
   .cxr-brand-mark > img, .cxr-brand-mark > svg { display: block; grid-area: 1 / 1; width: 100%; height: 100%; border: 0; background: transparent; object-fit: contain; pointer-events: none; }
   .cxr-brand-mark > .cxr-brand-mark-light { display: none; }
@@ -41,7 +41,6 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-heading { min-width: 0; }
   .cxr-heading h2 { margin: 0; overflow: hidden; color: var(--cx-text, #edf0f4); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
   .cxr-breadcrumbs { display: flex; min-width: 0; align-items: center; gap: 7px; overflow: hidden; color: var(--cx-muted, #9ca5b5); font-size: 14px; white-space: nowrap; }
-  .cxr-breadcrumb-segment { display: flex; min-width: 0; align-items: center; gap: 7px; }
   .cxr-breadcrumbs button { min-width: 0; overflow: hidden; border: 0; padding: 0; background: transparent; color: inherit; cursor: pointer; text-overflow: ellipsis; white-space: nowrap; }
   .cxr-breadcrumbs button:hover { color: var(--cx-text, #edf0f4); }
   .cxr-breadcrumbs [aria-current="page"] { min-width: 0; overflow: hidden; color: var(--cx-text, #edf0f4); font-weight: 650; text-overflow: ellipsis; }
@@ -188,6 +187,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-marketplace-source-link > :is(.t-icon,.cordisx-host-icon) { flex: none; color: var(--cx-muted,#9ca5b5); }
   .cxr-page[data-plugin-detail]:has(> .cxr-plugin-config-panel) { display: flex; height: 100%; min-height: 0; flex-direction: column; }
   .cxr-plugin-config-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+  .cxr-plugin-config-panel > .cxf-react-form-shell { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
   .cxr-plugin-config-panel .cxf-react-form { min-height: 0; flex: 1; overflow: hidden; }
   .cxr-plugin-config-panel .cxf-form-body { min-height: 0; flex: 1; overflow: auto; }
   .cxr-plugin-config-panel .cxf-form-actions { flex: none; margin: 0 -22px; border-top: 1px solid var(--cx-border,#353a42); padding: 12px 22px; background: var(--cx-surface,#17191d); }

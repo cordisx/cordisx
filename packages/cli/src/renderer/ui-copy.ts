@@ -358,6 +358,8 @@ type CopyKey =
   | 'form.choice-invalid'
   | 'form.number-invalid'
   | 'form.natural-invalid'
+  | 'form.string-length-invalid'
+  | 'form.array-invalid'
   | 'form.json-invalid'
   | 'form.sensitive-unavailable'
   | 'form.unsupported'
@@ -390,6 +392,15 @@ type CopyKey =
   | 'form.move-item-down'
   | 'form.reorder-handle'
   | 'form.array-item'
+  | 'form.breadcrumbs'
+  | 'form.back'
+  | 'form.cancel'
+  | 'form.create-array-item'
+  | 'form.edit-array-item-position'
+  | 'form.create-item'
+  | 'form.save-item'
+  | 'form.item-draft-hint'
+  | 'form.fix-invalid-fields'
   | 'form.close'
 
 const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, string>>>> = Object.freeze({
@@ -744,6 +755,8 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'form.choice-invalid': { en: 'Choose a value from the list', 'zh-CN': '请选择列表中的有效值' },
   'form.number-invalid': { en: 'Enter a valid number', 'zh-CN': '请输入有效数字' },
   'form.natural-invalid': { en: 'Enter a non-negative integer', 'zh-CN': '请输入非负整数' },
+  'form.string-length-invalid': { en: 'Enter text within the allowed length', 'zh-CN': '请输入符合长度要求的文本' },
+  'form.array-invalid': { en: 'Check the number and values of items', 'zh-CN': '请检查条目数量和值' },
   'form.json-invalid': { en: 'Enter valid JSON', 'zh-CN': '请输入有效 JSON' },
   'form.sensitive-unavailable': { en: 'Managed by Host credentials; unavailable here.', 'zh-CN': '敏感字段由 Host 凭据边界管理；此处不可编辑。' },
   'form.unsupported': { en: 'This setting cannot be edited safely.', 'zh-CN': '此设置的结构当前无法安全编辑。' },
@@ -776,6 +789,15 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'form.move-item-down': { en: 'Move item down', 'zh-CN': '下移条目' },
   'form.reorder-handle': { en: 'Reorder with the move controls', 'zh-CN': '使用上下移动操作调整顺序' },
   'form.array-item': { en: 'Array item', 'zh-CN': '数组条目' },
+  'form.breadcrumbs': { en: 'Breadcrumbs', 'zh-CN': '面包屑' },
+  'form.back': { en: 'Back', 'zh-CN': '返回' },
+  'form.cancel': { en: 'Cancel', 'zh-CN': '取消' },
+  'form.create-array-item': { en: 'Create array item', 'zh-CN': '创建数组项' },
+  'form.edit-array-item-position': { en: 'Edit item {position}', 'zh-CN': '编辑第 {position} 项' },
+  'form.create-item': { en: 'Create', 'zh-CN': '创建' },
+  'form.save-item': { en: 'Save', 'zh-CN': '保存' },
+  'form.item-draft-hint': { en: 'Confirm to add this item to the configuration draft', 'zh-CN': '确认后写入配置草稿' },
+  'form.fix-invalid-fields': { en: 'Fix the highlighted fields before continuing', 'zh-CN': '请先修正标出的字段' },
   'form.close': { en: 'Close', 'zh-CN': '关闭' },
 })
 

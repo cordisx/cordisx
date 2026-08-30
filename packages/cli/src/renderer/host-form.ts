@@ -152,8 +152,8 @@ export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${HOST_ICON_16PX_C
   .cxf-label { color: var(--td-text-color-primary); font-weight: 600; overflow-wrap: anywhere; }
   .cxf-required { color: var(--td-error-color); font-weight: 700; }
   .cxf-control-seat { grid-area: control; min-inline-size: 0; justify-self: stretch; }
-  .cxf-item[data-control-layout="compact"] .cxf-control-seat { box-sizing: border-box; inline-size: auto; max-inline-size: 100%; padding-inline-end: var(--td-comp-paddingLR-s); justify-self: end; }
-  .cxf-item[data-primitive="slider"] .cxf-control-seat { inline-size: auto; padding-inline-end: var(--td-comp-paddingLR-s); justify-self: stretch; }
+  .cxf-item[data-control-layout="compact"] .cxf-control-seat { box-sizing: border-box; inline-size: auto; max-inline-size: 100%; justify-self: end; }
+  .cxf-item[data-primitive="slider"] .cxf-control-seat { inline-size: auto; justify-self: stretch; }
   .cxf-item[data-control-layout="compact"] .cxf-tdesign-control { inline-size: auto; max-inline-size: 100%; }
   .cxf-item[data-control-layout="compact"] t-input-number.cxf-tdesign-control { inline-size: 7.25rem; }
   .cxf-item[data-control-layout="compact"] t-checkbox-group.cxf-tdesign-control,

@@ -8,6 +8,7 @@ import type { ManagerModel, ManagerSnapshot } from '../manager.js'
 import { HostIcon } from '../host-ui/HostIcon.js'
 import { BrandMark } from '../host-ui/BrandMark.js'
 import { createBrandMarkElement } from '../host-ui/BrandMark.js'
+import { HostBreadcrumbs, type HostBreadcrumbSegment } from '../host-ui/HostBreadcrumbs.js'
 import { HostSurfaceIcon } from '../host-ui/HostSurfaceIcon.js'
 import { createSidebarItem, type SidebarItemControl } from '../host-ui/SidebarItem.js'
 import { productLocale } from '../ui-copy.js'
@@ -79,31 +80,25 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
       presentation: reference => model.managerContentPresentation?.(route.id, reference),
     })
     if (segments.length <= 1) return <h2>{heading}</h2>
-    return <nav className="cxr-breadcrumbs" aria-label="面包屑">
-      {segments.map((segment, index) => index === segments.length - 1
-        ? <span key={`${segment.reference.id}:${index}`} aria-current="page">{segment.label}</span>
-        : <span key={`${segment.reference.id}:${index}`} className="cxr-breadcrumb-segment">
-          <button type="button" onClick={() => navigate({ kind: 'manager-content', id: route.id, reference: segment.reference })}>{segment.label}</button>
-          <span aria-hidden="true">/</span>
-        </span>)}
-    </nav>
+    return <HostBreadcrumbs segments={segments.map((segment, index): HostBreadcrumbSegment => ({
+      key: `${segment.reference.id}:${index}`,
+      label: segment.label,
+      ...(index === segments.length - 1 ? {} : { onActivate: () => navigate({ kind: 'manager-content', id: route.id, reference: segment.reference }) }),
+    }))} />
   }
   if (route.kind === 'plugin') {
-    return <nav className="cxr-breadcrumbs" aria-label="面包屑">
-      <button type="button" onClick={() => navigate({ kind: 'primary', page: 'plugins' })}>插件</button>
-      <span aria-hidden="true">/</span>
-      <button type="button" onClick={() => navigate({ kind: 'plugin', pluginId: route.pluginId, page: 'readme' })}>{heading}</button>
-      <span aria-hidden="true">/</span>
-      <span aria-current="page">{PLUGIN_FACET_LABELS[route.page]}</span>
-    </nav>
+    return <HostBreadcrumbs segments={[
+      { key: 'plugins', label: '插件', onActivate: () => navigate({ kind: 'primary', page: 'plugins' }) },
+      { key: route.pluginId, label: heading, onActivate: () => navigate({ kind: 'plugin', pluginId: route.pluginId, page: 'readme' }) },
+      { key: route.page, label: PLUGIN_FACET_LABELS[route.page] },
+    ]} />
   }
   if (route.kind === 'about-acknowledgements') {
     const about = productLocale(snapshot.localization.locale) === 'zh-CN' ? '关于 CordisX' : 'About CordisX'
-    return <nav className="cxr-breadcrumbs" aria-label="面包屑">
-      <button type="button" onClick={() => navigate({ kind: 'primary', page: 'about' })}>{about}</button>
-      <span aria-hidden="true">/</span>
-      <span aria-current="page">{heading}</span>
-    </nav>
+    return <HostBreadcrumbs segments={[
+      { key: 'about', label: about, onActivate: () => navigate({ kind: 'primary', page: 'about' }) },
+      { key: 'acknowledgements', label: heading },
+    ]} />
   }
   const parent = route.kind === 'extension-point'
     ? { label: '扩展点', page: 'extension-points' as const }
@@ -112,11 +107,10 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
       : route.kind === 'marketplace-plugin' || route.kind === 'marketplace-sources'
         ? { label: '插件商店', page: 'marketplace' as const }
         : { label: '插件', page: 'plugins' as const }
-  return <nav className="cxr-breadcrumbs" aria-label="面包屑">
-    <button type="button" onClick={() => navigate({ kind: 'primary', page: parent.page })}>{parent.label}</button>
-    <span aria-hidden="true">/</span>
-    <span aria-current="page">{heading}</span>
-  </nav>
+  return <HostBreadcrumbs segments={[
+    { key: parent.page, label: parent.label, onActivate: () => navigate({ kind: 'primary', page: parent.page }) },
+    { key: heading, label: heading },
+  ]} />
 }
 
 function Content({ model, marketplace, snapshot, route }: { readonly model: ManagerModel; readonly marketplace: MarketplaceModel; readonly snapshot: ManagerSnapshot; readonly route: ReturnType<typeof useManagerRouter> }) {

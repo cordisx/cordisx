@@ -19,10 +19,10 @@ export const inject = ['i18n', 'commands', 'slots', 'pages', 'routes']
 export const Config = Schema.object({
   sessionId: Schema.string().default('').max(128).pattern(/^(?:|[A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/u)
     .extra('extra', { label: { en: 'Native session ID', 'zh-CN': '原生会话 ID' } })
-    .description('Selected native session ID used by the optional session analytics action. Leave empty to hide it.')
+    .description('Selected native session ID used by the optional navigation shortcut. Leave empty to hide that shortcut.')
     .i18n({
-      en: 'Selected native session ID used by the optional session analytics action. Leave empty to hide it.',
-      'zh-CN': '可选会话分析操作使用的当前原生会话 ID；留空时隐藏该操作。',
+      en: 'Selected native session ID used by the optional navigation shortcut. Leave empty to hide that shortcut.',
+      'zh-CN': '可选导航快捷操作使用的原生会话 ID；留空时隐藏该快捷操作。',
     }),
 })
 export type SlotShowcaseConfig = Schemastery.TypeT<typeof Config>
@@ -53,6 +53,7 @@ interface Messages {
   'action.open-main': undefined
   'action.quick': undefined
   'action.refresh': undefined
+  'action.session-analytics': undefined
   'action.settings': undefined
   'command.open-app': undefined
   'command.open-main': undefined
@@ -62,7 +63,7 @@ interface Messages {
   'command.settings': undefined
   'environment.description': undefined
   'environment.section': undefined
-  'environment.status': { readonly count: number }
+  'environment.status': undefined
   'navigation.description': undefined
   'navigation.title': undefined
   'page.app.body': undefined
@@ -114,6 +115,7 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'action.open-main': 'Open main page',
       'action.quick': 'Quick action',
       'action.refresh': 'Refresh snapshot',
+      'action.session-analytics': 'Toggle session analytics',
       'action.settings': 'Showcase settings',
       'command.open-app': 'Open the full-app showcase',
       'command.open-main': 'Open the main-area showcase',
@@ -123,7 +125,7 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'command.settings': 'Open showcase settings',
       'environment.description': 'Current runtime status.',
       'environment.section': 'CordisX runtime',
-      'environment.status': 'Snapshot revision {count}',
+      'environment.status': 'Snapshot revision',
       'navigation.description': 'Open showcase pages.',
       'navigation.title': 'Structured UI showcase',
       'page.app.body': 'Showcase page for the application area.',
@@ -140,9 +142,9 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'permission.models': 'Display models available through the Host connection in the Slot Showcase diagnostics view',
       'route.app.description': 'Open the application overview from the sidebar footer or showcase settings.',
       'route.app.title': 'Application overview',
-      'route.main.description': 'Open workspace analytics from showcase navigation, the workspace toolbar, or a session action.',
+      'route.main.description': 'Open workspace analytics from showcase navigation or the workspace toolbar.',
       'route.main.title': 'Workspace analytics',
-      'route.session.description': 'Open analytics for the configured session from showcase navigation.',
+      'route.session.description': 'Toggle analytics for the current session from its header, or open the configured session from showcase navigation.',
       'route.session.title': 'Session analytics',
     },
   })
@@ -156,10 +158,11 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'action.open-main': '打开主区域页',
       'action.quick': '独立快捷操作',
       'action.refresh': '刷新快照',
+      'action.session-analytics': '切换会话分析',
       'action.settings': '演示设置',
       'environment.description': '当前运行状态。',
       'environment.section': 'CordisX 运行时',
-      'environment.status': '快照修订 {count}',
+      'environment.status': '快照修订',
       'navigation.description': '打开演示页面。',
       'navigation.title': '结构化 UI 演示',
       'page.app.body': '应用区域的演示页面。',
@@ -177,9 +180,9 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'command.open-session': '打开已配置原生会话的分析页',
       'route.app.description': '从侧栏底部或演示设置打开应用概览。',
       'route.app.title': '应用概览',
-      'route.main.description': '从演示导航、工作区工具栏或会话操作打开工作区分析。',
+      'route.main.description': '从演示导航或工作区工具栏打开工作区分析。',
       'route.main.title': '工作区分析',
-      'route.session.description': '从演示导航打开已配置会话的分析内容。',
+      'route.session.description': '从会话页头切换当前会话分析，或从演示导航打开已配置会话的分析内容。',
       'route.session.title': '会话分析',
     },
   })
@@ -273,7 +276,7 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     const row: CordisXEnvironmentRow = {
       sectionId: 'runtime',
       rowId: 'revision',
-      label: message('environment.status', { count: revision }),
+      label: message('environment.status'),
       value: revision,
       status: 'host:success',
     }
@@ -313,8 +316,13 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
   ctx.slots.register({ name: 'workspace.toolbar.items', id: 'menu', order: 30 }, {
     anchor: 'workspace.primary', placement: 'menu', ...action(message('action.settings'), 'settings', 'host:settings'),
   })
-  ctx.slots.register({ name: 'session.header.actions', id: 'trace', group: 'action', order: 10 },
-    action(message('action.open-main'), 'open-main', 'host:open'))
+  ctx.slots.register({ name: 'session.header.actions', id: 'trace', group: 'action', order: 10 }, {
+    label: message('action.session-analytics'),
+    ariaLabel: message('action.session-analytics'),
+    icon: 'host:analytics',
+    route: { id: 'session.analytics' },
+    routeBehavior: 'toggle',
+  })
   ctx.slots.register({ name: 'composer.toolbar.items', id: 'submit-before', group: 'action', order: 10 }, {
     anchor: 'submit', placement: 'before', ...action(message('action.refresh'), 'refresh', 'host:refresh'),
   })
@@ -326,7 +334,7 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     sectionId: 'runtime', ...action(message('action.settings'), 'settings', 'host:settings'),
   })
   rowHandle = ctx.slots.register({ name: 'environment.section.rows', id: 'revision', order: 10 }, {
-    sectionId: 'runtime', rowId: 'revision', label: message('environment.status', { count: revision }), value: revision, status: 'host:success',
+    sectionId: 'runtime', rowId: 'revision', label: message('environment.status'), value: revision, status: 'host:success',
   })
   ctx.slots.register({ name: 'environment.row.trailing-actions', id: 'refresh', order: 10 }, {
     rowId: 'revision', ...action(message('action.refresh'), 'refresh', 'host:refresh'),

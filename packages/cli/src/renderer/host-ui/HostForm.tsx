@@ -13,12 +13,20 @@ import type { CordisXConfigFieldSnapshot, CordisXJsonValue } from '../../contrac
 import type { ManagerModel, ManagerPluginSnapshot } from '../manager.js'
 import type { ConfigMutationOperation } from '../configuration.js'
 import { managerCopy } from '../ui-copy.js'
-import { ArrayEditor } from './ArrayEditor.js'
+import { ArrayEditor, type ArrayEditorFieldRowRenderProps } from './ArrayEditor.js'
+import { HostFormPageStack } from './HostFormPages.js'
 import { HostSurfaceIcon } from './HostSurfaceIcon.js'
 
 export const HOST_FORM_REACT_STYLES = String.raw`
-  .cxf-react-form { display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; margin: 0; }
+  .cxf-react-form { --cxf-number-input-width: 116px; display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; margin: 0; }
+  .cxf-form-page-stack, .cxf-form-page-root, .cxf-form-page-layer, .cxf-form-subpage { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
+  :is(.cxf-form-page-root,.cxf-form-page-layer)[hidden] { display: none; }
   .cxf-form-body { display: grid; min-width: 0; align-content: start; grid-auto-rows: max-content; gap: 1.35rem; padding: 4px 0 16px; }
+  .cxf-form-subpage-header { display: grid; min-width: 0; grid-template-columns: 32px minmax(0,1fr); flex: none; align-items: center; gap: 8px; border-bottom: 1px solid var(--cx-border,#353a42); padding: 4px 0 12px; }
+  .cxf-form-subpage-header-seat { display: grid; width: 32px; height: 32px; place-items: center; }
+  .cxf-form-subpage-header-seat > .t-button { width: 32px; height: 32px; padding: 0; }
+  .cxf-form-subpage-header-seat > .t-button :is(.t-icon,.cordisx-host-icon) { width: 16px; height: 16px; color: var(--cx-muted,#9ca5b5); font-size: 16px !important; }
+  .cxf-form-subpage-body { min-width: 0; min-height: 0; flex: 1; overflow: auto; padding: 16px 0; }
   .cxf-section { display: grid; min-width: 0; gap: 9px; }
   .cxf-section-heading { padding: 0 4px; }
   .cxf-section-heading h3 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 650; }
@@ -33,18 +41,19 @@ export const HOST_FORM_REACT_STYLES = String.raw`
   .cxf-required { order: 2; color: var(--td-error-color,var(--cx-danger,#e34d59)); font-weight: 700; line-height: 24px; }
   .cxf-field-menu-trigger.t-button { width: 24px; height: 24px; flex: none; margin-left: -4px; padding: 0; color: var(--cx-muted,#9ca5b5); vertical-align: middle; }
   .cxf-field-menu-trigger.t-button:hover, .cxf-field-menu-trigger.t-button[aria-expanded="true"] { background: transparent; color: var(--cx-text,#edf0f4); }
-  .cxf-field-menu-trigger :is(.t-icon,.cordisx-host-icon) { display: block; width: 15px; height: 15px; font-size: 15px; }
+  .cxf-field-icon { display: inline-grid; width: 24px; height: 24px; flex: none; margin-left: -4px; place-items: center; color: var(--cx-muted,#9ca5b5); }
+  :is(.cxf-field-menu-trigger,.cxf-field-icon) :is(.t-icon,.cordisx-host-icon) { display: block; width: 15px; height: 15px; font-size: 15px; }
   .cxf-control-seat { grid-area: control; min-width: 0; justify-self: stretch; }
-  .cxf-item[data-control-layout="compact"] .cxf-control-seat { width: auto; max-width: 100%; padding-right: 10px; justify-self: end; }
+  .cxf-item[data-control-layout="compact"] .cxf-control-seat { width: auto; max-width: 100%; justify-self: end; }
   .cxf-item[data-control-layout="fill"] .cxf-control-seat > :not(.cxf-custom-seat) { width: 100%; }
   .cxf-item[data-primitive="date-picker"] .cxf-control-seat .t-date-picker,
   .cxf-item[data-primitive="time-picker"] .cxf-control-seat .t-time-picker,
   .cxf-item[data-primitive="color-picker"] .cxf-control-seat .t-color-picker__trigger,
   .cxf-item[data-primitive="color-picker"] .cxf-control-seat .t-color-picker__trigger--default,
   .cxf-item[data-primitive="color-picker"] .cxf-control-seat .t-input__wrap { width: 100%; }
-  .cxf-item[data-primitive="slider"] .cxf-control-seat { width: auto; padding-right: 10px; justify-self: stretch; }
+  .cxf-item[data-primitive="slider"] .cxf-control-seat { width: auto; justify-self: stretch; }
   .cxf-item[data-primitive="slider"] .cxf-control-seat > :not(.cxf-custom-seat) { width: 100%; }
-  .cxf-item[data-control-layout="compact"] .t-input-number { width: 116px; }
+  .cxf-item[data-control-layout="compact"] .t-input-number { width: var(--cxf-number-input-width); }
   .cxf-item[data-control-layout="compact"] .t-radio-group { width: fit-content; max-width: 100%; }
   .cxf-help, .cxf-error { margin: 0; overflow-wrap: anywhere; font-size: 11px; line-height: 1.45; }
   .cxf-help { grid-area: help; color: var(--cx-muted,#9ca5b5); }
@@ -52,7 +61,7 @@ export const HOST_FORM_REACT_STYLES = String.raw`
   .cxf-control-seat .t-input-number, .cxf-control-seat .t-input-number__input, .cxf-control-seat .t-input-number .t-input { min-width: 0; max-width: 100%; }
   .cxf-textarea textarea { min-height: 104px !important; resize: vertical; }
   .cxf-json textarea { font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 12px; }
-  .cxf-slider-control { display: grid; width: 100%; grid-template-columns: minmax(0,1fr) 104px; align-items: center; gap: 10px; }
+  .cxf-slider-control { display: grid; width: 100%; grid-template-columns: minmax(0,1fr) var(--cxf-number-input-width); align-items: center; gap: 10px; }
   .cxf-segmented .t-radio-button { min-height: 32px; }
   .cxf-array-editor { display: grid; gap: 7px; width: 100%; }
   .cxf-item[data-primitive="object-array"] { position: relative; }
@@ -66,14 +75,16 @@ export const HOST_FORM_REACT_STYLES = String.raw`
   .cxf-array-row:hover .cxf-array-row-actions, .cxf-array-row:focus-within .cxf-array-row-actions { opacity: 1; pointer-events: auto; }
   .cxf-array-row-actions .t-button { width: 30px; height: 30px; }
   .cxf-array-delete { color: var(--td-error-color,#e34d59); }
-  .cxf-array-dialog-fields { display: grid; gap: 12px; }
-  .cxf-array-dialog-fields label { display: grid; gap: 5px; }
+  .cxf-array-item-dialog.t-dialog { --cxf-manager-dialog-gap: .85rem; --cxf-manager-dialog-padding: 1rem; padding: var(--cxf-manager-dialog-padding); }
+  .cxf-array-item-dialog .t-dialog__body { padding: var(--cxf-manager-dialog-gap) 0; }
+  .cxf-array-item-dialog .t-dialog__footer { padding: 0; }
+  .cxf-array-item-fields { gap: 0; }
   .cxf-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .cxf-status { min-width: 0; flex: 1; color: var(--cx-muted,#9ca5b5); font-size: 11px; }
   .cxf-form-action-buttons { display: flex; flex: none; gap: 8px; }
   @media (max-width: 760px) {
     .cxf-item, .cxf-item[data-full-width="true"] { grid-template-columns: minmax(0,1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; gap: 5px; }
-    .cxf-item[data-control-layout="compact"] .cxf-control-seat { padding-right: 0; justify-self: start; }
+    .cxf-item[data-control-layout="compact"] .cxf-control-seat { justify-self: start; }
   }
 `
 
@@ -126,6 +137,16 @@ function numericProps(field: Pick<CordisXConfigFieldSnapshot, 'min' | 'max' | 's
   }
 }
 
+function validationIssueText(field: CordisXConfigFieldSnapshot, value: unknown, locale: string): string | undefined {
+  const issue = validateFormValue(descriptor(field), value)[0]
+  if (issue?.code === 'required') return managerCopy(locale, 'form.required')
+  if (issue?.code === 'choice') return managerCopy(locale, 'form.choice-invalid')
+  if (issue?.code === 'length') return managerCopy(locale, 'form.string-length-invalid')
+  if (issue?.code === 'array') return managerCopy(locale, 'form.array-invalid')
+  if (issue?.code === 'number' || issue?.code === 'range' || issue?.code === 'step') return managerCopy(locale, field.type === 'natural' ? 'form.natural-invalid' : 'form.number-invalid')
+  return undefined
+}
+
 function Control({ field, resolved, value, onChange, controlId, locale, transientSecret }: {
   readonly field: CordisXConfigFieldSnapshot
   readonly resolved: ReturnType<typeof primitive>
@@ -138,7 +159,7 @@ function Control({ field, resolved, value, onChange, controlId, locale, transien
   const choices = field.choices?.flatMap(choice => choice.value === null ? [] : [{ label: choice.label, value: choice.value }]) ?? []
   if (resolved === 'sensitive-unavailable') return <div className="cxr-notice cxf-alert" role="note">{managerCopy(locale, 'form.sensitive-unavailable')}</div>
   if (resolved === 'unsupported') return <div className="cxr-notice">当前 Schemastery 字段无法安全编辑</div>
-  if (resolved === 'object-array') return <ArrayEditor field={field} value={Array.isArray(value) ? value as Record<string, unknown>[] : []} onChange={onChange} />
+  if (resolved === 'object-array') return <ArrayEditor field={field} value={Array.isArray(value) ? value as Record<string, unknown>[] : []} onChange={onChange} locale={locale} validateField={candidate => validationIssueText(candidate, candidate.value, locale)} renderFieldRow={props => <ArrayItemFieldRow {...props} locale={locale} />} />
   if (resolved === 'textarea') return <Textarea className="cxf-textarea" value={typeof value === 'string' ? value : ''} autosize={{ minRows: 5, maxRows: 14 }} disabled={field.disabled} onChange={onChange} />
   if (resolved === 'json-textarea') return <Textarea className="cxf-textarea cxf-json" value={typeof value === 'string' ? value : JSON.stringify(value, null, 2)} autosize={{ minRows: 5, maxRows: 18 }} disabled={field.disabled} onChange={text => { try { onChange(JSON.parse(text)) } catch { /* retain the last valid value */ } }} />
   if (resolved === 'checkbox') return <Checkbox checked={value === true} disabled={field.disabled} onChange={onChange} />
@@ -153,6 +174,20 @@ function Control({ field, resolved, value, onChange, controlId, locale, transien
   if (resolved === 'time-picker') return <TimePicker value={typeof value === 'string' ? value : ''} disabled={field.disabled} onChange={onChange} />
   if (resolved === 'color-picker') return <ColorPicker value={typeof value === 'string' ? value : ''} disabled={field.disabled} onChange={onChange} />
   return <Input {...(controlId === undefined ? {} : { id: controlId })} type={field.role === 'url' ? 'url' : field.role === 'password' ? 'password' : 'text'} value={typeof value === 'string' ? value : ''} disabled={field.disabled} {...(field.role === 'password' ? { autocomplete: 'new-password' } : {})} {...(transientSecret === true ? { 'data-channel-credential-capture': 'true' } : {})} onChange={onChange} />
+}
+
+function ArrayItemFieldRow({ field, controlId, issueText, onChange, locale }: ArrayEditorFieldRowRenderProps & { readonly locale: string }) {
+  return <HostFieldRow
+    field={field}
+    value={field.value}
+    changed={false}
+    locale={locale}
+    idPrefix={`array-item-${controlId}`}
+    controlId={controlId}
+    {...(issueText === undefined ? {} : { issueText })}
+    fieldActions="static"
+    onChange={onChange}
+  />
 }
 
 function ConfigControl({ model, pluginId, field, value, resolved, onChange, controlId, locale }: {
@@ -196,14 +231,26 @@ function ConfigControl({ model, pluginId, field, value, resolved, onChange, cont
   </>
 }
 
-function FieldLabel({ field, changed, locale, onUseDefault, onRollback, onCopyPath }: {
-  readonly field: CordisXConfigFieldSnapshot
-  readonly changed: boolean
-  readonly locale: string
-  readonly onUseDefault: () => void
-  readonly onRollback: () => void
-  readonly onCopyPath: () => void
-}) {
+type FieldLabelProps = { readonly field: CordisXConfigFieldSnapshot } & (
+  | { readonly mode: 'static' }
+  | {
+    readonly mode: 'menu'
+    readonly changed: boolean
+    readonly locale: string
+    readonly onUseDefault: () => void
+    readonly onRollback: () => void
+    readonly onCopyPath: () => void
+  }
+)
+
+function FieldLabel(props: FieldLabelProps) {
+  const { field } = props
+  if (props.mode === 'static') return <span className="cxf-field-label">
+    {field.icon === undefined ? null : <span className="cxf-field-icon" aria-hidden="true"><HostSurfaceIcon token={field.icon} /></span>}
+    <span className="cxf-field-label-text cxf-label">{field.label ?? humanizeFieldName(field.path.at(-1))}</span>
+  </span>
+  const icon = <HostSurfaceIcon token={field.icon ?? 'host:settings'} />
+  const { changed, locale, onUseDefault, onRollback, onCopyPath } = props
   const options: DropdownOption[] = [
     { value: 'default', content: managerCopy(locale, 'form.use-default'), prefixIcon: <HostSurfaceIcon token="host:reset" />, disabled: field.hasDefault !== true },
     { value: 'rollback', content: managerCopy(locale, 'form.rollback-field'), prefixIcon: <HostSurfaceIcon token="host:reset" />, disabled: !changed },
@@ -215,13 +262,13 @@ function FieldLabel({ field, changed, locale, onUseDefault, onRollback, onCopyPa
       else if (item.value === 'rollback') onRollback()
       else if (item.value === 'copy') onCopyPath()
     }}>
-      <Button type="button" shape="square" variant="text" className="cxf-field-menu-trigger" aria-label={managerCopy(locale, 'form.field-actions')} aria-haspopup="menu" data-host-form-action="field-actions" data-host-form-action-icon={field.icon ?? 'host:settings'} icon={<HostSurfaceIcon token={field.icon ?? 'host:settings'} />} />
+      <Button type="button" shape="square" variant="text" className="cxf-field-menu-trigger" aria-label={managerCopy(locale, 'form.field-actions')} aria-haspopup="menu" data-host-form-action="field-actions" data-host-form-action-icon={field.icon ?? 'host:settings'} icon={icon} />
     </Dropdown>
     <span className="cxf-field-label-text cxf-label">{field.label ?? humanizeFieldName(field.path.at(-1))}</span>
   </span>
 }
 
-export interface HostFieldRowProps {
+interface HostFieldRowBaseProps {
   readonly field: CordisXConfigFieldSnapshot
   readonly value: unknown
   readonly changed: boolean
@@ -233,20 +280,31 @@ export interface HostFieldRowProps {
   readonly transientSecret?: boolean
   readonly customControl?: { readonly model: ManagerModel; readonly pluginId: string }
   readonly onChange: (value: unknown) => void
-  readonly onUseDefault: () => void
-  readonly onRollback: () => void
-  readonly onCopyPath: () => void
 }
 
+type HostFieldRowActions =
+  | {
+    readonly fieldActions?: 'menu'
+    readonly onUseDefault: () => void
+    readonly onRollback: () => void
+    readonly onCopyPath: () => void
+  }
+  | { readonly fieldActions: 'static' }
+
+export type HostFieldRowProps = HostFieldRowBaseProps & HostFieldRowActions
+
 /** Shared React field row used by plugin configuration and Host-owned draft forms. */
-export function HostFieldRow({ field, value, changed, locale, idPrefix, issueText, forceFullWidth, controlId, transientSecret, customControl, onChange, onUseDefault, onRollback, onCopyPath }: HostFieldRowProps) {
+export function HostFieldRow(props: HostFieldRowProps) {
+  const { field, value, changed, locale, idPrefix, issueText, forceFullWidth, controlId, transientSecret, customControl, onChange } = props
   const resolved = primitive(field)
   const resolution = resolveFormPresenter(descriptor(field))
   const labelId = `cxf-label-${encodeURIComponent(idPrefix)}-${field.path.map(encodeURIComponent).join('-')}`
   const resolvedControlId = controlId ?? `cxm-config-${idPrefix}-${field.path.join('-')}`
   return <div className="cxf-item" data-config-path={field.path.join('.')} data-host-form-primitive={resolved} data-full-width={String(forceFullWidth === true || fullWidth(resolved))} data-control-layout={resolution.layout} data-primitive={resolved} data-presenter={field.presenter?.kind ?? 'auto'} data-invalid={String(issueText !== undefined)}>
     <div className="cxf-label-row" id={labelId}>
-      <FieldLabel field={field} changed={changed} locale={locale} onUseDefault={onUseDefault} onRollback={onRollback} onCopyPath={onCopyPath} />
+      {props.fieldActions === 'static'
+        ? <FieldLabel field={field} mode="static" />
+        : <FieldLabel field={field} mode="menu" changed={changed} locale={locale} onUseDefault={props.onUseDefault} onRollback={props.onRollback} onCopyPath={props.onCopyPath} />}
       {field.required ? <span className="cxf-required" aria-label={managerCopy(locale, 'form.required')}>*</span> : null}
     </div>
     <div className="cxf-control-seat" role="group" aria-labelledby={labelId}>{customControl === undefined || resolved === 'sensitive-unavailable'
@@ -300,17 +358,13 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
       .then(() => { setFormState('saved'); setMessage(managerCopy(locale, 'form.configuration-saved')) })
       .catch(error => { const text = error instanceof Error ? error.message : String(error); const conflict = /conflict|revision/iu.test(text); setFormState(conflict ? 'conflict' : 'error'); setMessage(conflict ? managerCopy(locale, 'form.conflict-retained') : text) })
       .finally(() => setSaving(false))
-  }}>
+  }}><HostFormPageStack key={`${plugin.id}:${plugin.configuration.revision}`} resetKey={plugin.configuration.revision}>
     <div className="cxf-form-body">{groups.map(([id, group]) => <section key={id} className="cxf-section">
       {group.title === undefined && group.description === undefined ? null : <header className="cxf-section-heading">{group.title === undefined ? null : <h3>{group.title}</h3>}{group.description === undefined ? null : <p>{group.description}</p>}</header>}
       <div className="cxf-form-grid">{group.fields.map((field, fieldIndex) => {
         const value = formDraft.value(field.path, field.defaultValue)
         const changed = formDraft.isDirty(field.path)
-        const issue = validateFormValue(descriptor(field), value)[0]
-        const issueText = issue?.code === 'required' ? managerCopy(locale, 'form.required')
-          : issue?.code === 'choice' ? managerCopy(locale, 'form.choice-invalid')
-            : issue?.code === 'number' ? managerCopy(locale, field.type === 'natural' ? 'form.natural-invalid' : 'form.number-invalid')
-              : undefined
+        const issueText = validationIssueText(field, value, locale)
         return <HostFieldRow key={pathKey(field)} field={field} value={value} changed={changed} locale={locale} idPrefix={plugin.id} controlId={`cxm-config-${plugin.id}-${fieldIndex}`} customControl={{ model, pluginId: plugin.id }} {...(issueText === undefined ? {} : { issueText })} onUseDefault={() => { if (field.hasDefault === true) change(field, { op: 'unset', path: field.path }) }} onRollback={() => rollback(field)} onCopyPath={() => {
               const clipboard = window.navigator.clipboard
               if (typeof clipboard?.writeText !== 'function') { setMessage(managerCopy(locale, 'form.path-copy-unavailable')); return }
@@ -324,5 +378,5 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
       <div className="cxf-status" data-state={formState} role="status">{operations.length === 0 ? '' : formState === 'saving' ? managerCopy(locale, 'form.saving') : `${managerCopy(locale, 'form.dirty-prefix')} · ${managerCopy(locale, 'form.apply-live')}`}</div>
       <div className="cxf-form-action-buttons"><Button type="reset" variant="outline" icon={<HostSurfaceIcon token="host:reset" />} disabled={saving || operations.length === 0} onClick={() => { setDraftOperations(new Map()); setFormState('pristine'); setMessage(undefined) }}>重置</Button><Button type="submit" theme="primary" icon={<HostSurfaceIcon token="host:save" />} loading={saving} disabled={!plugin.configuration.writable || operations.length === 0}>保存</Button></div>
     </div>
-  </Form></div>
+  </HostFormPageStack></Form></div>
 }

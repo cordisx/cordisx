@@ -18,8 +18,9 @@ shell DOM、交互、排序、无障碍与清理。
 
 Manager 的“路由”详情会将三类 route 与 page 分组展示，并使用当前 Host locale
 投影说明。`app.overview` 从侧栏底部或演示设置入口打开应用级概览；
-`main.analytics` 从导航行、工具栏或会话页头打开工作区分析；
-`session.analytics` 在配置原生会话 ID 后打开当前会话正文分析。插件只声明结构化
+`main.analytics` 从导航行或工具栏打开工作区分析；会话页头操作无需配置
+即可在当前会话中展开或收起 `session.analytics`，配置后还可从导航快捷操作打开。
+插件只声明结构化
 `LocalizedText`；Host 负责列表 DOM、搜索、诊断和无障碍。
 
 ## 配置
@@ -29,8 +30,9 @@ Manager 的“路由”详情会将三类 route 与 page 分组展示，并使�
 ```
 
 插件导出 Schemastery `Config` 与 `configApplies = 'plugin-restart'`。
-`sessionId` 最长 128 个字符；留空时不显示会话分析快捷操作，匹配当前选中的原生
-会话时，该操作导航到受控的 `session.content` 页面。保存配置只重建本插件 fiber。
+`sessionId` 最长 128 个字符；留空时只隐藏导航快捷操作，会话页头的上下文操作仍可用。
+配置 ID 匹配当前选中的原生会话时，导航快捷操作会进入受控的 `session.content`
+页面。保存配置只重建本插件 fiber。
 
 屏蔽插件会销毁当前 Cordis fiber、撤销贡献并 Abort/dispose 活跃页面；恢复插件会从
 同一个受信任本地 bundle 创建新的 generation。页面 mount 属于受信任的本地受控

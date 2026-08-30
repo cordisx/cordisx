@@ -86,6 +86,7 @@ describe('Host form primitive registry', () => {
     expect(fillItem.root.dataset.controlLayout).toBe('fill')
     expect(HOST_FORM_STYLES).toContain('.cxf-item[data-control-layout="compact"] .cxf-control-seat')
     expect(HOST_FORM_STYLES).toContain('justify-self: end')
+    expect(HOST_FORM_STYLES).not.toContain('padding-inline-end: var(--td-comp-paddingLR-s)')
     expect(HOST_FORM_STYLES).toContain('.cxf-item[data-control-layout="compact"] .cxf-slider-control')
   })
 
@@ -561,7 +562,6 @@ describe('Host form DOM and accessibility', () => {
     expect(HOST_FORM_STYLES).toContain('.cxf-field-menu-trigger:hover:not(:disabled), .cxf-field-menu-trigger[aria-expanded="true"] { background: transparent;')
     expect(HOST_FORM_STYLES).toContain('t-select.cxf-tdesign-control::part(t-select__right-icon)')
     expect(HOST_FORM_STYLES).toContain('.cxf-time-select { inline-size: 100%; max-inline-size: none; }')
-    expect(HOST_FORM_STYLES).toContain('padding-inline-end: var(--td-comp-paddingLR-s)')
     entries[0]!.click()
     expect(useDefault).toHaveBeenCalledOnce()
     expect(popup.hidden).toBe(true)
