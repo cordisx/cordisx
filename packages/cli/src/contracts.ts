@@ -4,11 +4,11 @@ import type {
   AgentConversationShellCommandContext,
   AgentConversationShellSource,
 } from '@cordisx/protocol/agent-conversation-shell/v1'
-import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type {
   AgentConversationShellBinding as AgentConversationShellBindingV2,
   AgentConversationShellSource as AgentConversationShellSourceV2,
 } from '@cordisx/protocol/agent-conversation-shell/v2'
+import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { ComponentType } from 'react'
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
 import type { CordisXPluginManifestV4, CordisXPluginManifestV5 } from './permission-contracts.js'
