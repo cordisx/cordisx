@@ -10,6 +10,14 @@ describe('provider CDP RPC boundary', () => {
     expect(parseProviderBindingRequest({
       requestId: 'request-2', token: 'fixed-token', operation: 'availability', input: {},
     }, 'fixed-token')).toMatchObject({ operation: 'availability' })
+    expect(parseProviderBindingRequest({
+      requestId: 'request-3', token: 'fixed-token', operation: 'agent-loop.create',
+      input: { model: { providerId: 'alpha', modelId: 'same-model' }, cwd: '/workspace', developerInstructions: 'Agent definition', effort: 'high' },
+    }, 'fixed-token')).toMatchObject({ operation: 'agent-loop.create' })
+    expect(parseProviderBindingRequest({
+      requestId: 'request-4', token: 'fixed-token', operation: 'agent-loop.lifecycle.read',
+      input: { session: { providerId: 'alpha', remoteSessionId: 'same-id' }, afterSequence: 0 },
+    }, 'fixed-token')).toMatchObject({ operation: 'agent-loop.lifecycle.read' })
     expect(() => parseProviderBindingRequest({
       requestId: 'request-1', token: 'wrong', operation: 'tasks.read',
       input: { session: { providerId: 'alpha', remoteSessionId: 'same-id' } },
@@ -20,5 +28,9 @@ describe('provider CDP RPC boundary', () => {
     expect(() => parseProviderBindingRequest({
       requestId: 'request-1', token: 'fixed-token', operation: 'tasks.read', input: { session: { remoteSessionId: 'same-id' } },
     }, 'fixed-token')).toThrow('session.providerId')
+    expect(() => parseProviderBindingRequest({
+      requestId: 'request-5', token: 'fixed-token', operation: 'agent-loop.create',
+      input: { model: { providerId: 'alpha', modelId: 'same-model' }, cwd: '/workspace', imagePath: '/private/raw.png' },
+    }, 'fixed-token')).toThrow('unknown field imagePath')
   })
 })

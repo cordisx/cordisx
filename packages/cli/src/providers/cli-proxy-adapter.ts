@@ -278,6 +278,8 @@ export class CliProxyProviderAdapter implements ProviderConnection {
         model: sourceModelId,
         modelProvider: this.providerId,
         cwd: input.cwd,
+        ...(input.developerInstructions === undefined ? {} : { developerInstructions: input.developerInstructions }),
+        ...(input.effort === undefined ? {} : { effort: input.effort }),
       })
       const thread = response.thread as AppServerThread
       const id = string(thread?.id)

@@ -244,6 +244,16 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     return await this.withProvider(input.model.providerId, async adapter => await adapter.createSession(input))
   }
 
+  /** Host-private AgentLoop create primitive with already-resolved prompt data. */
+  async createAgentLoopTask(input: {
+    readonly model: CordisXTaskCreateInput['model']
+    readonly cwd: string
+    readonly developerInstructions?: string
+    readonly effort?: 'low' | 'medium' | 'high' | 'xhigh'
+  }): Promise<CordisXPlatformResult<CordisXSessionSummary>> {
+    return await this.withProvider(input.model.providerId, async adapter => await adapter.createSession(input))
+  }
+
   async controlTask(input: CordisXTaskControlInput): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>> {
     return await this.withSession(input.session, async adapter => await adapter.controlSession(input))
   }

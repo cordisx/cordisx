@@ -121,4 +121,19 @@ describe('CLIProxy provider adapter', () => {
     })
     await adapter.close()
   })
+
+  it('forwards only resolved Agent definition instructions and effort into task creation', async () => {
+    const codexHome = await mkdtemp(path.join(os.tmpdir(), 'cordisx-adapter-'))
+    const calls: { method: string; params: unknown }[] = []
+    const adapter = new CliProxyProviderAdapter(config(codexHome), rpc(calls))
+    const created = await adapter.createSession({
+      model: { providerId: 'alpha', modelId: 'shared-model' }, cwd: '/workspace',
+      developerInstructions: '## introduction\n\nInternal assistant', effort: 'high',
+    })
+    expect(created.ok).toBe(true)
+    expect(calls.find(call => call.method === 'thread/start')?.params).toMatchObject({
+      cwd: '/workspace', developerInstructions: '## introduction\n\nInternal assistant', effort: 'high',
+    })
+    await adapter.close()
+  })
 })

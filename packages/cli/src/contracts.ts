@@ -15,6 +15,7 @@ export * from './control-contracts.js'
 export * from './platform-contracts.js'
 export * from './permission-contracts.js'
 export * from './agent-contracts.js'
+export * from './agent-loop-contracts.js'
 export * from './plugin-lifecycle-contracts.js'
 export type {
   CordisXBoundConnectorClient,

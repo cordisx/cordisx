@@ -126,6 +126,15 @@ chain, and private Codex event adapter are specified in
 adapter generation, retain only stable projection identities, and define no
 Timeline, session header, DOM surface, or outlet.
 
+The internal text AgentLoop bridge is specified in
+[`agent-loop.md`](agent-loop.md). It injects one principal-bound
+`ctx.agentLoop` client per plugin fiber, resolves the Protocol AgentDefinition
+catalog, creates a fresh binding or binds one explicit opaque task, wakes it
+through the existing Provider Fleet, and proactively projects
+assistant text, observed approvals, and lifecycle. It reuses the existing task
+permissions and prompt runtime, owns no Chatroom data or plugin UI, and returns
+typed unsupported for `image-ref` until a controlled resolver exists.
+
 Durable adapter history is a separate Node/Host read service specified in
 [`agent-history.md`](agent-history.md). It gives plugins permission-scoped,
 redacted Agent-v2 pages and opaque cursors without renderer filesystem access

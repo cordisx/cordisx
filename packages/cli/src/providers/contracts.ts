@@ -61,7 +61,13 @@ export interface ProviderConnection {
     readonly nextCursor?: string
   }>>
   readSession(ref: CordisXPlatformSessionRef): Promise<CordisXPlatformResult<CordisXSessionProjection>>
-  createSession(input: { readonly model: CordisXPlatformModelRef; readonly cwd: string }): Promise<CordisXPlatformResult<CordisXSessionSummary>>
+  createSession(input: {
+    readonly model: CordisXPlatformModelRef
+    readonly cwd: string
+    /** Host-private AgentLoop projection; never accepted by ctx.platform. */
+    readonly developerInstructions?: string
+    readonly effort?: 'low' | 'medium' | 'high' | 'xhigh'
+  }): Promise<CordisXPlatformResult<CordisXSessionSummary>>
   controlSession(input: CordisXTaskControlInput): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>>
   submitTurn(input: { readonly session: CordisXPlatformSessionRef; readonly message: string }): Promise<CordisXPlatformResult<CordisXTurnStart>>
   controlTurn(input: CordisXTurnControlInput): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>>
