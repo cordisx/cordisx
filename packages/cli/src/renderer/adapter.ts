@@ -2280,6 +2280,7 @@ export function installPlaygroundAdapter(
       contextPolicy: 'generation', presentationGroup: 'primary',
     }, controller, path) }
   })
+  const removeStyles = installStyles(document)
   const surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, {
     generation,
     adapterVersion: options.adapterVersion ?? 'ui-playground-v1',
@@ -2290,6 +2291,7 @@ export function installPlaygroundAdapter(
     dispose() {
       surfaces.dispose()
       reasoningControl.dispose()
+      removeStyles()
       for (const item of declared.reverse()) {
         item.dispose()
         item.controller.dispose()
