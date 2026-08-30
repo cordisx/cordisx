@@ -244,7 +244,6 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
       record.trace = clone({
         ...record.trace,
         active: true,
-        status: 'created',
         events: [...record.trace.events, { sequence, type: 'task.bound', detail: 'The Simulator task was explicitly rebound.' }],
       })
     }
@@ -310,7 +309,6 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
     record.trace = clone({
       ...record.trace,
       active: false,
-      status: record.trace.status === 'error' ? 'error' : 'closed',
       events: [...record.trace.events, { sequence, type: 'task.closed', detail: 'The bound Simulator run was disposed.' }],
     })
     this.persist()

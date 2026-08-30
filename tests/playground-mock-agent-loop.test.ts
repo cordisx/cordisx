@@ -257,7 +257,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     }])
     const rebound = await restored.bind(created.value.task)
     expect(rebound).toMatchObject({ ok: true, value: { detailsUrl: created.value.detailsUrl } })
-    expect(restored.snapshot().tasks[0]).toMatchObject({ active: true })
+    expect(restored.snapshot().tasks[0]).toMatchObject({ status: 'completed', active: true })
 
     const separateSession = new PlaygroundMockAgentLoopHost()
     expect(separateSession.snapshot().tasks).toEqual([])
@@ -330,11 +330,11 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(host.activeTaskPresentations()).toHaveLength(1)
     host.release(rebound.value)
     expect(host.activeTaskPresentations()).toEqual([])
-    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'closed', active: false })
+    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'completed', active: false })
 
     const reopened = await host.bind(created.value.task)
     if (!reopened.ok) throw new Error('Simulator reopen failed')
-    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'created', active: true })
+    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'completed', active: true })
     expect(host.snapshot().tasks[0]?.events.at(-1)?.type).toBe('task.bound')
     host.release(reopened.value)
   })
@@ -353,7 +353,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(rebound).toMatchObject({ status: 'accepted', binding: created.binding })
     client.dispose()
     expect(host.activeTaskPresentations()).toEqual([])
-    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'closed', active: false })
+    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'created', active: false })
     broker.dispose()
   })
 
