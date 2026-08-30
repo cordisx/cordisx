@@ -1,4 +1,5 @@
 import type { CordisXIconToken, CordisXJsonValue } from '../../../contracts.js'
+import { cloneAgentAvatarRef, type AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import { CORDISX_HOST_ICON_TOKENS } from '../../surfaces.js'
 import { immutableSnapshot, LOCAL_ID_PATTERN, REFERENCE_PATTERN } from '../../validation.js'
 
@@ -25,6 +26,7 @@ export interface AgentConversationParticipant {
   readonly id: string
   readonly role: AgentConversationParticipantRole
   readonly name: string
+  readonly avatar?: AgentAvatarRef
 }
 
 export interface AgentConversationMessage {
@@ -155,12 +157,13 @@ function assertSelection(selection: AgentConversationSelection): void {
   if (selection.participants.length > 64) throw new Error('selection.participants exceeds 64 items')
   const participantIds = new Set<string>()
   for (const [index, participant] of selection.participants.entries()) {
-    assertKnownKeys(participant, ['id', 'role', 'name'], `selection.participants[${index}]`)
+    assertKnownKeys(participant, ['id', 'role', 'name', 'avatar'], `selection.participants[${index}]`)
     assertOpaque(participant.id, `selection.participants[${index}].id`)
     if (participantIds.has(participant.id)) throw new Error(`duplicate participant ${participant.id}`)
     participantIds.add(participant.id)
     if (!['human', 'agent', 'system'].includes(participant.role)) throw new Error(`selection.participants[${index}].role is invalid`)
     assertText(participant.name, `selection.participants[${index}].name`, 400)
+    if (participant.avatar !== undefined) cloneAgentAvatarRef(participant.avatar)
   }
 }
 

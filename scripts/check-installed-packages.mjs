@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -111,6 +112,35 @@ try {
     ...(protocolTarball === undefined ? [] : [protocolTarball]),
   ], { cwd: runnerDirectory, env: process.env })
 
+  const installedCordisXRoot = path.join(runnerDirectory, 'node_modules', 'cordisx')
+  const installedCordisXManifest = JSON.parse(await readFile(path.join(installedCordisXRoot, 'package.json'), 'utf8'))
+  const avatarVersion = '1.0.0-rc.8'
+  if (installedCordisXManifest.dependencies?.['@oneworks/avatar'] !== avatarVersion
+    || installedCordisXManifest.dependencies?.['@oneworks/avatar-react'] !== avatarVersion) {
+    throw new Error('installed cordisx must pin both OneWorks Avatar packages to exact RC.8 versions')
+  }
+  const installedLock = JSON.parse(await readFile(path.join(runnerDirectory, 'package-lock.json'), 'utf8'))
+  const avatarLock = installedLock.packages?.['node_modules/@oneworks/avatar']
+  const avatarReactLock = installedLock.packages?.['node_modules/@oneworks/avatar-react']
+  if (avatarLock?.version !== avatarVersion
+    || avatarLock?.integrity !== 'sha512-9vKWfiPUlEfVzcO+6Q2QsCmqlINZb2CpXjN4M/JO2+v0IwqsGIcWGaxW44lf3moSQj70lEmnF6F7bZofw7mcXQ==') {
+    throw new Error('installed OneWorks Avatar package version or integrity drifted')
+  }
+  if (avatarReactLock?.version !== avatarVersion
+    || avatarReactLock?.integrity !== 'sha512-fJ+p2LLG5tb3YV5QAAm/3gnkEFuCfMSR/WttpvMv8xNp64Ou6TB4Tz5QE6LqOwgT7q67qrBluZMwDfQUjX++aw=='
+    || avatarReactLock?.dependencies?.['@oneworks/avatar'] !== avatarVersion) {
+    throw new Error('installed OneWorks Avatar React package version, integrity, or singleton pin drifted')
+  }
+  const runnerRequire = createRequire(path.join(runnerDirectory, 'package.json'))
+  const avatarReactManifestPath = path.join(runnerDirectory, 'node_modules', '@oneworks', 'avatar-react', 'package.json')
+  const avatarReactRequire = createRequire(avatarReactManifestPath)
+  const [directAvatarEntry, avatarReactAvatarEntry] = await Promise.all([
+    realpath(runnerRequire.resolve('@oneworks/avatar')),
+    realpath(avatarReactRequire.resolve('@oneworks/avatar')),
+  ])
+  if (directAvatarEntry !== avatarReactAvatarEntry) throw new Error('installed OneWorks Avatar runtime is not a singleton')
+  await access(runnerRequire.resolve('@oneworks/avatar-react/style.css'))
+
   for (const packageName of ['cordisx', 'create-cordisx-plugin']) {
     const packageRoot = path.join(runnerDirectory, 'node_modules', packageName)
     const installedManifest = JSON.parse(await readFile(path.join(packageRoot, 'package.json'), 'utf8'))
@@ -170,6 +200,7 @@ import type {
   AgentLoopTaskBinding as ProtocolAgentLoopTaskBinding,
   BoundAgentLoopClient as ProtocolBoundAgentLoopClient,
 } from '@cordisx/protocol/agent-loop/v1'
+import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type {
   AgentDefinition,
   AgentLoopCommand,
@@ -199,6 +230,7 @@ ctx.agentLoop satisfies BoundAgentLoopClient
 ctx.agentLoop satisfies ProtocolBoundAgentLoopClient
 definition satisfies ProtocolAgentDefinition
 protocolDefinition satisfies AgentDefinition
+definition.avatar satisfies AgentAvatarRef | undefined
 protocolCommand satisfies AgentLoopCommand
 protocolBinding satisfies AgentLoopTaskBinding
 definition.promptSections?.map(section => section.kind satisfies 'introduction' | 'personality' | 'role' | 'operations' | 'tools' | 'knowledge' | 'memory-policy' | 'memory' | 'other')
@@ -268,7 +300,6 @@ ctx.slots.registerCollection({
     config: {},
   })
   await writeFile(configPath, `${JSON.stringify(initialConfig, null, 2)}\n`, 'utf8')
-  const installedCordisXRoot = path.join(runnerDirectory, 'node_modules', 'cordisx')
   const installedSchemasteryUiRoot = path.join(installedCordisXRoot, 'node_modules', '@cordisx', 'schemastery-ui')
   await access(path.join(installedSchemasteryUiRoot, 'dist', 'index.js'))
   const installedSchemasteryUiManifest = JSON.parse(await readFile(path.join(installedSchemasteryUiRoot, 'package.json'), 'utf8'))
@@ -343,7 +374,7 @@ ctx.slots.registerCollection({
   await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
   await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
 
-  console.log(`[cordisx] installed tarballs verified: licenses, combined multi-binding AgentLoop and navigation collection${protocolTarball === undefined ? '' : ', exact local Protocol'}, local AgentLoop provider composition, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run`)
+  console.log(`[cordisx] installed tarballs verified: licenses, exact singleton OneWorks Avatar RC.8 packages/style export, combined multi-binding AgentLoop and navigation collection${protocolTarball === undefined ? '' : ', exact local Protocol'}, local AgentLoop provider composition, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run`)
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }

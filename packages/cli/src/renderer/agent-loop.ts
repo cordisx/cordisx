@@ -1,4 +1,5 @@
 import type { Disposable } from '@deepseek-ai/cordis'
+import { resolveAgentDefinitionAvatar } from '@cordisx/protocol/agent-avatar/v1'
 import {
   CORDISX_AGENT_DEFINITION_SCHEMA_V1,
   CORDISX_AGENT_LOOP_EVENT_PAGE_SCHEMA_V1,
@@ -35,7 +36,8 @@ type EventPayload = CordisXAgentLoopEvent extends infer Event
     : never
   : never
 
-export interface CordisXResolvedAgentDefinition extends Omit<CordisXAgentDefinition, 'extends' | 'inherit'> {
+export interface CordisXResolvedAgentDefinition extends Omit<CordisXAgentDefinition, 'extends' | 'inherit' | 'avatar'> {
+  readonly avatar: NonNullable<CordisXAgentDefinition['avatar']>
   readonly sourceDefinitions: readonly CordisXAgentDefinitionIdentity[]
 }
 
@@ -165,10 +167,17 @@ export function resolveAgentDefinition(command: CreateCommand): CordisXResolvedA
       const parent = visit(parentIdentity)
       aggregate = aggregate === undefined ? parent : mergeResolved(aggregate, parent, MERGE_INHERITANCE)
     }
+    const avatar = resolveAgentDefinitionAvatar({
+      agentId: definition.identity.agentId,
+      ...(definition.avatar === undefined ? {} : { avatar: definition.avatar }),
+      inherit: definition.inherit.avatar ?? 'none',
+      parentAvatars: (definition.extends ?? []).map(parentIdentity => visit(parentIdentity).avatar),
+    })
     const base: CordisXResolvedAgentDefinition = {
       $schema: definition.$schema, contract: definition.contract, schemaVersion: 1, identity: definition.identity,
       ...(definition.name === undefined ? {} : { name: definition.name }),
       ...(definition.description === undefined ? {} : { description: definition.description }),
+      avatar,
       ...(definition.promptSections === undefined ? {} : { promptSections: definition.promptSections }),
       ...(definition.rules === undefined ? {} : { rules: definition.rules }),
       ...(definition.skills === undefined ? {} : { skills: definition.skills }),

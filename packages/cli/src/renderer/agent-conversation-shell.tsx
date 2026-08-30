@@ -1,4 +1,5 @@
 import { Context, Service } from '@deepseek-ai/cordis'
+import { cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type {
   AgentConversationAction as ProtocolAction,
   AgentConversationItem as ProtocolItem,
@@ -133,10 +134,16 @@ function assertAction(value: unknown, label: string): asserts value is ProtocolA
 
 function assertParticipant(value: unknown, label: string): asserts value is ProtocolParticipant {
   plainObject(value, label)
-  exactKeys(value, ['participantId', 'role', 'displayName'], label)
+  exactKeys(value, ['participantId', 'role', 'displayName', 'avatar'], label)
   opaque(value.participantId, `${label}.participantId`)
   if (!['human', 'agent', 'system'].includes(value.role as string)) throw new Error(`${label}.role is invalid`)
   assertLocalizedText(value.displayName, `${label}.displayName`)
+  if (value.avatar !== undefined) cloneAgentAvatarRef(value.avatar)
+}
+
+function sameAvatar(left: ProtocolParticipant['avatar'], right: ProtocolParticipant['avatar']): boolean {
+  if (left === undefined || right === undefined) return left === right
+  return JSON.stringify(cloneAgentAvatarRef(left)) === JSON.stringify(cloneAgentAvatarRef(right))
 }
 
 function assertSelection(value: unknown, label: string): asserts value is ProtocolSelection {
@@ -292,6 +299,7 @@ function projectSnapshot(
     id: participant.participantId,
     role: participant.role,
     name: localization.resolve(participant.displayName, `participants.${index}`),
+    ...(participant.avatar === undefined ? {} : { avatar: cloneAgentAvatarRef(participant.avatar) }),
   })) : []
   const participantById = new Map(snapshot.selection.kind === 'room'
     ? snapshot.selection.participants.map(participant => [participant.participantId, participant])
@@ -307,7 +315,8 @@ function projectSnapshot(
     }
     const declared = participantById.get(item.author.participantId)
     if (declared === undefined || declared.role !== item.author.role
-      || JSON.stringify(declared.displayName) !== JSON.stringify(item.author.displayName)) {
+      || JSON.stringify(declared.displayName) !== JSON.stringify(item.author.displayName)
+      || !sameAvatar(declared.avatar, item.author.avatar)) {
       throw new Error(`snapshot.items[${index}].author does not match the selected room participant`)
     }
     return {

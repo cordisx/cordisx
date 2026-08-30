@@ -3,7 +3,7 @@
 ## Status and boundary
 
 The renderer Host implements an experimental, plugin-facing `ctx.agentLoop`
-service against the local `@cordisx/protocol/agent-loop/v1` candidate. The
+service against the formal `@cordisx/protocol/agent-loop/v1` contract. The
 Protocol remains room-neutral and data-only. Chatroom owns its room data and
 structured state/commands; the Host owns the conversation UI, Agent task
 identity, provider routing, permission decisions, prompt projection, proactive
@@ -27,6 +27,10 @@ resolves ordered parents before applying the leaf's field inheritance modes.
 Prompt sections include introduction, personality, and memory. The effective
 definition is projected into provider task creation and its prompt sections are
 registered through the same Host prompt runtime behind `ctx.systemPrompt`.
+Avatar resolution follows the formal Agent Avatar v1 contract: an explicit
+child ref wins, `inherit.avatar=inherit` may select the last non-generated
+parent ref, and generated parent identities never leak into a child. All other
+definitions receive the stable canonical child-identity generated ref.
 
 Every `target.mode=create` call creates a new task and binding, even when the
 same plugin owner and immutable AgentDefinition identity are used repeatedly.
@@ -103,3 +107,29 @@ An internal Chatroom plugin:
 Chatroom must not infer provider sessions from `binding.task`, move room,
 member, run-list, leader, recipient selection, mention, organization tree, or
 Channel scope into AgentLoop, or provide conversation DOM.
+
+## Host-owned Agent avatar rendering
+
+Conversation participants may carry only the closed Protocol `AgentAvatarRef`
+union. The shell validates and clones it before it enters the immutable Host
+model. URL, path, `data:`, `blob:`, `file:`, and base64-shaped values are
+rejected at this boundary; no ref value is written into DOM attributes.
+
+The Host resolves generated refs into validated, deeply frozen deterministic
+OneWorks Avatar definitions and stores only those successful results in a
+256-entry LRU keyed by algorithm, version, canonical seed, and the generated
+ref's explicit no-revision sentinel (generated v1 has no revision field). Asset,
+definition, and platform refs are not cached; they remain opaque until the
+matching Host-owned broker exists and therefore render typed deterministic
+initials fallback. A missing ref, resolver failure, component exception, or
+renderer error uses the same fallback without changing the conversation model.
+
+The renderer is decorative (`aria-hidden` and inert) because the adjacent Host
+author label already provides the accessible identity. Server rendering and
+the first client render use initials; an effect reads the explicit projected
+Host light/dark theme before mounting the non-interactive, non-autoplay vendor
+renderer. The Host consumes the pinned vendor CSS text and injects its scoped
+Avatar rules once per document under a versioned style marker. Host layout uses
+Host tokens, and reduced-motion disables descendant animation and transition.
+Plugins do not supply components, raw assets, CSS, URLs, paths, or base64
+payloads.

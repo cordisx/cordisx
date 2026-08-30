@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cloneAgentAvatarRef, createGeneratedAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import {
   CORDISX_AGENT_DEFINITION_SCHEMA_V1,
   CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V1,
@@ -118,6 +119,36 @@ describe('Host-bound AgentLoop', () => {
     expect(resolved.rules).toEqual(['rule-leaf', 'rule-a', 'rule-b'])
     expect(resolved.tools).toEqual({ include: ['shell'] })
     expect(resolved.runtimeDefaults).toEqual({ adapterId: 'codex', effort: 'low', model: { providerId: 'alpha', modelId: 'model-1' } })
+    expect(resolved.avatar).toEqual(createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'leaf' }))
+  })
+
+  it('resolves explicit avatar inheritance without inheriting generated parent identities', () => {
+    const asset = definition('asset-parent', {
+      avatar: cloneAgentAvatarRef({ kind: 'asset', ref: 'avatar-assets:release-lead' }),
+    })
+    const generated = definition('generated-parent', {
+      avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'generated-parent' }),
+    })
+    const inheriting = definition('inheriting-child', {
+      extends: [asset.identity, generated.identity],
+      inherit: { ...inherit, avatar: 'inherit' },
+    })
+    expect(resolveAgentDefinition(createCommand([asset, generated, inheriting])).avatar).toEqual(asset.avatar)
+
+    const none = definition('none-child', {
+      extends: [asset.identity],
+      inherit: { ...inherit, avatar: 'none' },
+    })
+    expect(resolveAgentDefinition(createCommand([asset, none])).avatar).toEqual(
+      createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'none-child' }),
+    )
+
+    const explicit = definition('explicit-child', {
+      extends: [asset.identity],
+      inherit: { ...inherit, avatar: 'inherit' },
+      avatar: cloneAgentAvatarRef({ kind: 'definition', ref: 'avatar-definitions:explicit-child', schema: 'oneworks.avatar', definitionVersion: 1 }),
+    })
+    expect(resolveAgentDefinition(createCommand([asset, explicit])).avatar).toEqual(explicit.avatar)
   })
 
   it('rejects unreachable catalog entries and duplicate append identities', () => {

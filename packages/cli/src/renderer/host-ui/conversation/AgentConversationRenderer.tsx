@@ -4,13 +4,13 @@ import { useAutoFollow } from '../useAutoFollow.js'
 import type { AgentConversationCommandController } from './commands.js'
 import {
   participantFor,
-  participantInitials,
   type AgentConversationAction,
   type AgentConversationEntry,
   type AgentConversationMessage,
   type AgentConversationModel,
 } from './model.js'
 import { AGENT_CONVERSATION_STYLES } from './styles.js'
+import { HostAgentAvatar } from './AgentAvatar.js'
 
 export interface AgentConversationRendererCopy {
   readonly locale: string
@@ -88,7 +88,7 @@ function MessageEntry({
     aria-live={entry.ariaLive}
   >
     {showInitials && participant.role !== 'human'
-      ? <span className="cxa-avatar" aria-hidden="true">{participantInitials(participant.name)}</span>
+      ? <HostAgentAvatar participant={participant} />
       : null}
     <div className="cxa-message-content">
       <div className="cxa-message-meta" id={labelId}>
