@@ -107,8 +107,7 @@ body > [data-cordisx-page-outlet] svg.icon-xs { width: 16px !important; height: 
 .pg-recent-task-list, .pg-playground-fixtures { display: grid; gap: 2px; }
 .pg-recent-task-list > p { margin: 0 8px; color: var(--pg-muted); font-size: 10px; }
 .pg-recent-task-list > [data-recent-task-row] { display: contents; }
-.pg-recent-task-list > [data-recent-task-row] .cxsi-icon { display: grid; width: 18px !important; height: 18px !important; overflow: hidden; place-items: center; border: 0; border-radius: 50%; background: transparent; }
-.pg-recent-task-list > [data-recent-task-row] .cxsi-icon > .cxa-avatar { width: 18px; height: 18px; border: 0; border-radius: 50%; }
+.pg-recent-task-list > [data-recent-task-row] .cxsi-icon { border-radius: 50%; }
 .pg-simulator-task-page { min-height: 100vh; padding: 28px; overflow: auto; background: var(--pg-bg); color: var(--pg-text); }
 .pg-simulator-task-page > header { margin-bottom: 18px; }
 .pg-simulator-task-page h1 { margin: 6px 0 2px; font-size: 22px; }

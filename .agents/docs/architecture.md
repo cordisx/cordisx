@@ -561,12 +561,11 @@ freezes each replacement, validates bounded ids/text/icons/routes, renders the
 group heading and rows with the shared SidebarItem primitive, and derives the
 single selected row from the exact owner-qualified route plus parameters.
 
-The Playground unified Recent tasks list also uses that Host SidebarItem
-primitive, but its leading avatar is a Host-rendered React node backed by the
-effective AgentDefinition AvatarRef captured by the Simulator at create time.
-It never substitutes the generic history glyph or derives an avatar from a task
-label. The SidebarItem owns listener cleanup while React owns the portal node
-lifecycle.
+The Playground unified Recent tasks list uses the same Host SidebarItem
+primitive and keeps a task/history semantic icon. Agent identity Avatars belong
+to conversation participant surfaces, not to generic task navigation. A future
+per-Room composite leading visual must come from an exact row-scoped collection
+contract; the Host must not infer it from the current Room selection or title.
 
 Collection subscriptions are owned by the calling Cordis fiber. Plugin block,
 generation replacement, registration disposal, or runtime teardown
