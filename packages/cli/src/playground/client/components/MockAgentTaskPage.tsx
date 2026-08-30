@@ -18,7 +18,7 @@ export function MockAgentTaskPage({ task, locale }: {
     <header>
       <span className="pg-simulator-badge">Mock / Simulator</span>
       <h1 id="pg-simulator-task-title">{task.debugTaskId}</h1>
-      <p>{task.roomLabel} · {task.memberLabel} · {task.runLabel} · {task.status}</p>
+      <p>{task.agentLabel} · {task.identity.agentId} · {task.identity.revision} · {task.status}</p>
     </header>
     <section>
       <h2>{en ? 'Agent identity' : 'Agent 身份'}</h2>

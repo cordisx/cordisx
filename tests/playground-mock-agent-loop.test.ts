@@ -140,7 +140,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(leadLifecycle.value?.events).toMatchObject([
       { type: 'approval', approval: { state: 'pending' } },
       { type: 'approval', approval: { state: 'resolved', outcome: 'approved' } },
-      { type: 'message', message: { role: 'assistant', content: [{ text: expect.stringContaining('[Mock / Simulator] Leader') }] } },
+      { type: 'message', message: { role: 'assistant', content: [{ text: expect.stringContaining('[Mock / Simulator] chatroom.generalist@r1') }] } },
       { type: 'lifecycle', lifecycle: { phase: 'turn.completed' } },
     ])
     expect(reviewerLifecycle.value?.subscription.binding).toEqual(reviewerCreate.binding.binding)
@@ -150,22 +150,22 @@ describe('Playground deterministic AgentLoop Simulator', () => {
 
     const snapshot = host.snapshot()
     expect(snapshot.label).toBe('Mock / Simulator')
-    expect(snapshot.tasks.map(task => [task.memberLabel, task.roomLabel, task.runLabel, task.status])).toEqual([
-      ['Leader', 'Room 1', 'Run 1', 'completed'],
-      ['Reviewer', 'Room 1', 'Run 1', 'error'],
+    expect(snapshot.tasks.map(task => [task.agentLabel, task.identity.agentId, task.identity.revision, task.status])).toEqual([
+      ['Chatroom Agent', 'chatroom.generalist', 'r1', 'completed'],
+      ['Chatroom Reviewer', 'chatroom.reviewer', 'r1', 'error'],
     ])
     expect(snapshot.tasks[1]?.layers.map(layer => layer.identity.agentId)).toEqual(['chatroom.generalist', 'chatroom.reviewer'])
     expect(snapshot.tasks[1]?.effective.promptSections?.map(section => section.kind)).toEqual(['introduction', 'personality', 'memory', 'role'])
     expect(snapshot.tasks[0]?.input).toBe('check token=[redacted] [path redacted] [approval]')
-    expect(host.activeTaskPresentations().map(task => task.memberLabel)).toEqual(['Leader'])
+    expect(host.activeTaskPresentations().map(task => task.identity.agentId)).toEqual(['chatroom.generalist'])
     expect(snapshot.tasks[0]!.detailsUrl).toEqual({
       url: 'app://-/playground/simulator/tasks/Simulator%20Task%201',
       target: 'host',
     })
     expect(host.taskDetails('Simulator Task 2')?.status).toBe('error')
     expect(executor.invocations.map(item => item.argv)).toEqual([
-      ['debug:agent-loop/mock/v1', 'respond', '--format', 'text'],
-      ['debug:agent-loop/mock/v1', 'review', '--format', 'text'],
+      ['debug:agent-loop/mock/v1', 'execute', '--format', 'text'],
+      ['debug:agent-loop/mock/v1', 'execute', '--format', 'text'],
     ])
     expect(JSON.stringify(snapshot)).not.toContain('cxloop-binding')
     expect(JSON.stringify(snapshot)).not.toContain('debug:agent-loop/mock/v1:task:')
@@ -300,6 +300,24 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     host.release(reopened.value)
   })
 
+  it('reuses a same-owner active binding without leaking a Host bind reference', async () => {
+    const host = new PlaygroundMockAgentLoopHost()
+    const broker = new CordisXAgentLoopBroker(host)
+    const client = broker.bind({ ownerKey: 'consumer', active: () => true, authorize: allowed })
+    const agent = definition('consumer.agent')
+    const created = await client.createOrBind(createCommand('create-consumer-agent', agent, [agent]))
+    if (created.status !== 'accepted') throw new Error('Simulator create was not accepted')
+    const rebound = await client.createOrBind({
+      ...createCommand('bind-consumer-agent', agent, [agent]),
+      target: { mode: 'bind', task: created.binding.task },
+    })
+    expect(rebound).toMatchObject({ status: 'accepted', binding: created.binding })
+    client.dispose()
+    expect(host.activeTaskPresentations()).toEqual([])
+    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'closed', active: false })
+    broker.dispose()
+  })
+
   it('boots the same bundled ctx.agentLoop client without a provider bridge and returns only normal public events', async () => {
     const root = path.resolve('.')
     const entry = path.join(root, 'tests/fixtures/agent-loop-runtime-plugin.ts')
@@ -354,7 +372,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
       terminalEvents.push(...(page.value?.events ?? []))
     }
     expect(terminalEvents).toMatchObject([
-      { type: 'message', message: { role: 'assistant', content: [{ text: '[Mock / Simulator] Leader processed: bundled hello' }] } },
+      { type: 'message', message: { role: 'assistant', content: [{ text: '[Mock / Simulator] chatroom.generalist@r1 processed: bundled hello' }] } },
       { type: 'lifecycle', lifecycle: { phase: 'turn.completed' } },
     ])
     const trace = (dom.window as unknown as { __cordisxRuntime?: { playgroundMockAgentLoop?(): { tasks: readonly { identity: { agentId: string } }[] }; dispose(): Promise<void> } }).__cordisxRuntime?.playgroundMockAgentLoop?.()
@@ -365,9 +383,10 @@ describe('Playground deterministic AgentLoop Simulator', () => {
   }, 30_000)
 
   it('keeps an independent Host-owned exact Simulator Task page outside Chatroom and Recent tasks', async () => {
-    const [page, app] = await Promise.all([
+    const [page, app, host] = await Promise.all([
       readFile(path.resolve('packages/cli/src/playground/client/components/MockAgentTaskPage.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/App.tsx'), 'utf8'),
+      readFile(path.resolve('packages/cli/src/renderer/playground-mock-agent-loop.ts'), 'utf8'),
     ])
     expect(page).toContain('data-playground-simulator="true"')
     expect(page).toContain('Mock / Simulator')
@@ -378,5 +397,6 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(app).toContain('data-simulator-task-row')
     expect(app).toContain('task.detailsUrl')
     expect(app.indexOf('pg-session-list')).toBeLessThan(app.indexOf('pg-simulator-task-list'))
+    expect(`${host}\n${app}\n${page}`).not.toMatch(/roomLabel|memberLabel|runLabel|Room 1|Leader|Reviewer/u)
   })
 })

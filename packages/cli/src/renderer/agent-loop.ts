@@ -334,17 +334,22 @@ export class CordisXAgentLoopBroker {
           task = created.value
         } else {
           capability = 'tasks.content.read'
-          const bound = await this.host.bind(command.target.task)
-          if (!bound.ok) return this.refusal(command, capability, 'unavailable', 'task-unavailable')
-          const authorization = await options.authorize({ capability, session: bound.value.session })
-          if (authorization.state !== 'allowed') return this.refusalFrom(command, authorization)
-          task = bound.value
-          const existing = this.boundTasks.get(this.taskKey(options.ownerKey, task.task))
+          const existing = this.boundTasks.get(this.taskKey(options.ownerKey, command.target.task))
           if (existing !== undefined && existing.binding.state === 'active') {
+            const authorization = await options.authorize({ capability, session: existing.task.session })
+            if (authorization.state !== 'allowed') return this.refusalFrom(command, authorization)
             if (!sameIdentity(existing.definition.identity, definition.identity)) return this.refusal(command, capability, 'unavailable', 'unsupported')
             owned.add(existing.binding.binding.bindingId)
             return this.acceptCreate(command, existing.binding)
           }
+          const bound = await this.host.bind(command.target.task)
+          if (!bound.ok) return this.refusal(command, capability, 'unavailable', 'task-unavailable')
+          const authorization = await options.authorize({ capability, session: bound.value.session })
+          if (authorization.state !== 'allowed') {
+            this.host.release?.(bound.value)
+            return this.refusalFrom(command, authorization)
+          }
+          task = bound.value
         }
         const binding = clone({ $schema: CORDISX_AGENT_LOOP_TASK_BINDING_SCHEMA_V1, contract: 'cordisx.agent-loop-task-binding/v1' as const, schemaVersion: 1 as const, binding: { bindingId: `cxloop-binding:${this.nextBinding++}`, generation: 1 }, definition: definition.identity, task: task.task, state: 'active' as const })
         const record: BindingRecord = { ownerKey: options.ownerKey, definition, task, binding, events: [], listeners: new Set(), subscriptions: new Set(), lifecycleCursor: 0, polling: false, poll: undefined, promptDisposers: options.registerPrompt?.(task.session.remoteSessionId, definition) ?? [] }

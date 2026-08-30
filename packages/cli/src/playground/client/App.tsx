@@ -134,8 +134,8 @@ export function App() {
                 data-selected={String(task.debugTaskId === simulatorTaskId)}
                 onClick={() => openSimulatorTask(task.debugTaskId, task.detailsUrl)}
               >
-                <strong>{task.memberLabel}</strong>
-                <span>{task.roomLabel} · {task.runLabel}</span>
+                <strong>{task.agentLabel}</strong>
+                <span>{task.identity.agentId} · {task.identity.revision}</span>
                 <small>{task.status}</small>
               </button>)}
         </section>}

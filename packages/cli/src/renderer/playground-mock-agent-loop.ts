@@ -12,7 +12,8 @@ export const PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE = 'debug:agent-loop/mock/v1' a
 
 export interface PlaygroundMockCliInvocation {
   readonly namespace: typeof PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE
-  readonly operation: 'respond' | 'review'
+  readonly operation: 'execute'
+  readonly identity: AgentDefinitionIdentity
   readonly argv: readonly string[]
   readonly input: string
 }
@@ -45,9 +46,7 @@ export interface PlaygroundMockTaskDetailsUrl {
 export interface PlaygroundMockTaskTrace {
   readonly debugTaskId: string
   readonly detailsUrl: PlaygroundMockTaskDetailsUrl
-  readonly roomLabel: string
-  readonly memberLabel: string
-  readonly runLabel: string
+  readonly agentLabel: string
   readonly active: boolean
   readonly status: 'created' | 'working' | 'approval' | 'completed' | 'error' | 'closed'
   readonly identity: AgentDefinitionIdentity
@@ -134,12 +133,6 @@ function effectiveLayer(definition: AgentDefinition): PlaygroundMockTraceLayer {
   })
 }
 
-function memberLabel(definition: CordisXResolvedAgentDefinition): 'Leader' | 'Reviewer' {
-  return definition.promptSections?.some(section => section.kind === 'role' && /review/iu.test(`${section.sectionId} ${section.text}`)) === true
-    ? 'Reviewer'
-    : 'Leader'
-}
-
 export class DeterministicPlaygroundMockCliExecutor implements PlaygroundMockCliExecutor {
   readonly invocations: PlaygroundMockCliInvocation[] = []
 
@@ -149,7 +142,7 @@ export class DeterministicPlaygroundMockCliExecutor implements PlaygroundMockCli
     if (/\[cli-fail\]/iu.test(invocation.input)) {
       return clone({ status: 'error', error: { code: 'SIMULATED_CLI_FAILURE', message: 'The debug-only deterministic CLI adapter was asked to fail.' } })
     }
-    const actor = invocation.operation === 'review' ? 'Reviewer' : 'Leader'
+    const actor = `${invocation.identity.agentId}@${invocation.identity.revision}`
     return clone({ status: 'ok', stdout: `[Mock / Simulator] ${actor} processed: ${invocation.input}` })
   }
 }
@@ -161,7 +154,6 @@ export class DeterministicPlaygroundMockCliExecutor implements PlaygroundMockCli
  */
 export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
   private readonly tasks = new Map<string, TaskRecord>()
-  private readonly memberRuns = new Map<string, number>()
   private nextTask = 1
 
   constructor(private readonly executor: PlaygroundMockCliExecutor = new DeterministicPlaygroundMockCliExecutor()) {}
@@ -197,9 +189,6 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
     context: CordisXAgentLoopCreateContext,
   ): Promise<CordisXPlatformResult<HostTask>> {
     const ordinal = this.nextTask++
-    const label = memberLabel(definition)
-    const run = (this.memberRuns.get(label) ?? 0) + 1
-    this.memberRuns.set(label, run)
     const hostTask = clone({
       task: `${PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE}:task:${ordinal}`,
       session: { providerId: PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE, remoteSessionId: `simulated-session-${ordinal}` },
@@ -208,9 +197,7 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
     const trace = clone({
       debugTaskId: `Simulator Task ${ordinal}`,
       detailsUrl: { url: `app://-/playground/simulator/tasks/${encodeURIComponent(`Simulator Task ${ordinal}`)}`, target: 'host' as const },
-      roomLabel: 'Room 1',
-      memberLabel: label,
-      runLabel: `Run ${run}`,
+      agentLabel: definition.name ?? definition.identity.agentId,
       status: 'created' as const,
       active: true,
       identity: definition.identity,
@@ -224,7 +211,7 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
         mcpServers: definition.mcpServers,
         runtimeDefaults: definition.runtimeDefaults,
       },
-      events: [{ sequence: 0, type: 'task.created' as const, detail: `${label} prompt resolved from ${definition.sourceDefinitions.length} layer(s).` }],
+      events: [{ sequence: 0, type: 'task.created' as const, detail: `Agent ${definition.identity.agentId} prompt resolved from ${definition.sourceDefinitions.length} layer(s).` }],
     })
     this.tasks.set(hostTask.task, {
       hostTask, definition: clone(definition), context: clone(context), trace, lifecycle: [], nextTurn: 1, activeBindings: 1,
@@ -257,10 +244,11 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
     const input = sanitized(content.map(part => part.kind === 'text' ? part.text : '').join('\n').trim())
     if (input === '') return { ok: false as const, error: { code: 'invalid-request' as const, message: 'The simulated input is empty.' } }
     const turnId = `simulated-turn-${record.nextTurn++}`
-    const operation = record.trace.memberLabel === 'Reviewer' ? 'review' as const : 'respond' as const
+    const operation = 'execute' as const
     const invocation = clone({
       namespace: PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE,
       operation,
+      identity: record.trace.identity,
       argv: [PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE, operation, '--format', 'text'],
       input,
     })
