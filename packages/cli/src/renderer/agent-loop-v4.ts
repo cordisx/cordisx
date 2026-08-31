@@ -101,10 +101,40 @@ export interface AgentLoopV4Transport {
 function clone<Value>(value: Value): Value { return structuredClone(value) }
 function record(value: unknown): Record<string, unknown> | undefined { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined }
 function string(value: unknown): string | undefined { return typeof value === 'string' && value !== '' ? value : undefined }
+function handle(value: unknown): string | undefined {
+  return typeof value === 'string' && [...value].length >= 1 && [...value].length <= 512 ? value : undefined
+}
+
+function derivedEventId(eventId: string, suffix: string): string {
+  const candidate = `${eventId}:${suffix}`
+  if ([...candidate].length <= 512) return candidate
+  let digest = 0x811c9dc5
+  for (const byte of new TextEncoder().encode(candidate)) digest = Math.imul(digest ^ byte, 0x01000193) >>> 0
+  const tail = `:${suffix}:${digest.toString(16).padStart(8, '0')}`
+  return `${[...eventId].slice(0, 512 - [...tail].length).join('')}${tail}`
+}
+
+function shellSafeAssistantMessageId(turn: string): string {
+  const bytes = new TextEncoder().encode(turn)
+  let first = 0x811c9dc5
+  let second = 0x9e3779b9
+  for (const byte of bytes) {
+    first = Math.imul(first ^ byte, 0x01000193) >>> 0
+    second = Math.imul(second ^ byte, 0x85ebca6b) >>> 0
+  }
+  const digest = `${first.toString(16).padStart(8, '0')}${second.toString(16).padStart(8, '0')}`
+  const prefix = 'cxloop-assistant-'
+  const stem = turn.replace(/[^A-Za-z0-9._~-]/gu, '~').slice(0, 512 - prefix.length - digest.length - 1)
+  return `${prefix}${stem}-${digest}`
+}
 function delivery(value: unknown): 'executed' | 'replayed' | 'reconciled' | undefined {
   return value === 'executed' || value === 'replayed' || value === 'reconciled' ? value : undefined
 }
 function scope(profileId: string, compositionGeneration: string, ownerKey: string): CordisXAgentLoopV4Scope { return Object.freeze({ profileId, compositionGeneration, ownerKey }) }
+function tupleKey(...parts: readonly (string | number)[]): string { return JSON.stringify(parts) }
+function correlationKey(authorityScope: CordisXAgentLoopV4Scope, ...parts: readonly (string | number)[]): string {
+  return tupleKey(authorityScope.profileId, authorityScope.compositionGeneration, authorityScope.ownerKey, ...parts)
+}
 
 function refusal<Kind extends AgentLoopResult['type']>(
   command: Extract<Command, { type: Kind }>,
@@ -160,13 +190,15 @@ function internalRefusal<Kind extends AgentLoopResult['type']>(
 
 function bindingFor(command: CreateCommand, task: string, value: unknown): AgentLoopTaskBinding | undefined {
   const binding = record(value)
-  if (typeof binding?.bindingId !== 'string' || binding.bindingId === ''
-    || !Number.isInteger(binding.generation) || (binding.generation as number) < 1) return undefined
+  const bindingId = handle(binding?.bindingId)
+  const generation = binding?.generation
+  if (bindingId === undefined
+    || !Number.isInteger(generation) || (generation as number) < 1) return undefined
   return Object.freeze({
     $schema: CORDISX_AGENT_LOOP_TASK_BINDING_SCHEMA_V4,
     contract: 'cordisx.agent-loop-task-binding/v4',
     schemaVersion: 4,
-    binding: { bindingId: binding.bindingId, generation: binding.generation as number },
+    binding: { bindingId, generation: generation as number },
     definition: clone(command.definition),
     task,
     state: 'active',
@@ -177,7 +209,7 @@ function bindingFor(command: CreateCommand, task: string, value: unknown): Agent
 export class CordisXAgentLoopBrokerV4 {
   private disposed = false
   private nextSubscription = 1
-  private readonly introductions = new Map<string, { operationId: string; participantId: string; memberId: string; runId: string }>()
+  private readonly introductions = new Map<string, { operationId: string; messageId: string; participantId: string; memberId: string; runId: string }>()
   private readonly approvals = new Map<string, string>()
   private readonly cancellations = new Map<string, string>()
   private readonly promptRegistrations = new Map<string, PromptRegistration>()
@@ -198,7 +230,7 @@ export class CordisXAgentLoopBrokerV4 {
     const clientPrompts = new Map<string, PromptRegistration>()
     const live = () => !disposed && !this.disposed && options.active()
     const authorityScope = scope(this.profileId, this.compositionGeneration, options.ownerKey)
-    const mutationKey = (binding: AgentLoopTaskBinding) => `${authorityScope.profileId}\0${authorityScope.ownerKey}\0${binding.task}\0${binding.binding.bindingId}\0${binding.binding.generation}`
+    const mutationKey = (binding: AgentLoopTaskBinding) => tupleKey(authorityScope.profileId, authorityScope.ownerKey, binding.task, binding.binding.bindingId, binding.binding.generation)
     const mutateLifecycle = async <Value>(binding: AgentLoopTaskBinding, operation: () => Promise<Value>): Promise<Value> => {
       const key = mutationKey(binding)
       this.lifecycleMutations.set(key, (this.lifecycleMutations.get(key) ?? 0) + 1)
@@ -218,16 +250,23 @@ export class CordisXAgentLoopBrokerV4 {
       this.promptRegistrations.delete(registration.key)
       for (const disposer of registration.disposers) disposer()
     }
-    const registerPrompt = (task: string, definition: Parameters<NonNullable<typeof options.registerPrompt>>[1]): void => {
+    const registerPrompt = (task: string, definition: Parameters<NonNullable<typeof options.registerPrompt>>[1]): boolean => {
+      if (!live()) return false
       const key = JSON.stringify([authorityScope.profileId, authorityScope.ownerKey, task, definition.identity.agentId, definition.identity.revision])
       const previous = clientPrompts.get(task)
-      if (previous?.key === key) return
+      if (previous?.key === key) return true
       if (previous !== undefined) disposePrompt(previous)
       const shared = this.promptRegistrations.get(key)
-      const registration: PromptRegistration = shared ?? { key, disposers: options.registerPrompt?.(task, definition) ?? [], refCount: 0, disposed: false }
+      const disposers = shared === undefined ? options.registerPrompt?.(task, definition) ?? [] : undefined
+      if (!live()) {
+        for (const disposer of disposers ?? []) disposer()
+        return false
+      }
+      const registration: PromptRegistration = shared ?? { key, disposers: disposers!, refCount: 0, disposed: false }
       registration.refCount += 1
       clientPrompts.set(task, registration)
       this.promptRegistrations.set(key, registration)
+      return true
     }
     const authorize = async (capability: Capability, binding?: AgentLoopTaskBinding): Promise<AgentLoopAuthorizationOutcome> => {
       const request = { capability, ...(binding === undefined ? {} : { task: binding.task }) }
@@ -253,10 +292,12 @@ export class CordisXAgentLoopBrokerV4 {
         let definition
         try { definition = resolveAgentDefinition(command as never) } catch { return refusal(command, capability, 'unavailable', 'unsupported') }
         const allowed = await authorize(capability)
+        if (!live()) return refusal(command, capability, 'unavailable', 'provider-replaced')
         if (allowed.state !== 'allowed') return refusal(command, capability, allowed.state, allowed.code)
         let internal: InternalResult
         if (command.target.mode === 'create') {
           const prepared = await this.prepareHost.prepare(definition)
+          if (!live()) return refusal(command, capability, 'unavailable', 'provider-replaced')
           if (!prepared.ok) return refusal(command, capability, 'unavailable', 'host-unavailable')
           const model = prepared.value.model ?? (this.transport.debugMock === true ? { providerId: 'debug:agent-loop/mock/v1', modelId: 'deterministic' } : undefined)
           const cwd = prepared.value.cwd ?? (this.transport.debugMock === true ? '/playground' : undefined)
@@ -274,8 +315,9 @@ export class CordisXAgentLoopBrokerV4 {
         } else {
           internal = await this.transport.bindAgentLoopV4({ scope: authorityScope, command, operationId: command.commandId, task: command.target.task, definition: command.definition }) as InternalResult
         }
+        if (!live()) return refusal(command, capability, 'unavailable', 'provider-replaced')
         if (internal.status !== 'accepted') return refusal(command, capability, 'unavailable', string(internal.code) ?? 'host-unavailable')
-        const task = string(internal.locator?.task)
+        const task = handle(internal.locator?.task)
         let detailsUrl
         try { detailsUrl = validateAgentLoopTaskDetailsUrl(clone(internal.detailsUrl) as never) } catch { return refusal(command, capability, 'unavailable', 'details-unavailable') }
         const disposition = delivery(internal.delivery)
@@ -283,7 +325,7 @@ export class CordisXAgentLoopBrokerV4 {
         if (disposition === undefined) return refusal(command, capability, 'unavailable', 'reconciliation-required')
         const binding = bindingFor(command, task, internal.locator?.binding)
         if (binding === undefined) return refusal(command, capability, 'unavailable', 'reconciliation-required')
-        registerPrompt(task, definition)
+        if (!registerPrompt(task, definition)) return refusal(command, capability, 'unavailable', 'provider-replaced')
         return Object.freeze({
           $schema: CORDISX_AGENT_LOOP_RESULT_SCHEMA_V4, contract: 'cordisx.agent-loop-result/v4', schemaVersion: 4,
           commandId: command.commandId, type: 'create-or-bind', status: 'accepted', authorization: authorizationFor(capability), binding,
@@ -293,14 +335,16 @@ export class CordisXAgentLoopBrokerV4 {
       send: async (command: SendCommand): Promise<AgentLoopSendResult> => {
         if (!live() || this.transport === undefined) return refusal(command, 'turns.submit', 'unavailable', 'host-unavailable')
         const allowed = await authorize('turns.submit', command.binding)
+        if (!live()) return refusal(command, 'turns.submit', 'unavailable', 'provider-replaced')
         if (allowed.state !== 'allowed') return refusal(command, 'turns.submit', allowed.state, allowed.code)
         if (command.binding.state !== 'active') return refusal(command, 'turns.submit', 'unavailable', 'binding-closed')
         if (command.content.some(part => part.kind !== 'text')) return refusal(command, 'turns.submit', 'unavailable', 'unsupported')
         const message = command.content.map(part => part.kind === 'text' ? part.text : '').join('\n').trim()
         if (message === '') return refusal(command, 'turns.submit', 'unavailable', 'unsupported')
         const internal = await this.transport.sendAgentLoopV4({ scope: authorityScope, command, operationId: command.commandId, task: command.binding.task, binding: command.binding.binding, definition: command.binding.definition, message }) as InternalResult
+        if (!live()) return refusal(command, 'turns.submit', 'unavailable', 'provider-replaced')
         if (internal.status !== 'accepted') return internalRefusal(command, 'turns.submit', string(internal.code) ?? 'host-unavailable')
-        const turn = string(internal.turn); const messageId = string(internal.messageId)
+        const turn = handle(internal.turn); const messageId = handle(internal.messageId)
         const disposition = delivery(internal.delivery)
         if (turn === undefined || messageId === undefined || disposition === undefined) return refusal(command, 'turns.submit', 'unavailable', 'reconciliation-required')
         return Object.freeze({ $schema: CORDISX_AGENT_LOOP_RESULT_SCHEMA_V4, contract: 'cordisx.agent-loop-result/v4', schemaVersion: 4, commandId: command.commandId, type: 'send', status: 'accepted', authorization: authorizationFor('turns.submit'), binding: command.binding, messageId, turn, delivery: { disposition } })
@@ -308,29 +352,34 @@ export class CordisXAgentLoopBrokerV4 {
       decideApproval: async (command: ApprovalCommand): Promise<AgentLoopApprovalDecisionResult> => {
         if (!live() || this.transport === undefined) return refusal(command, 'approvals.decide', 'unavailable', 'host-unavailable')
         const allowed = await authorize('approvals.decide', command.binding)
+        if (!live()) return refusal(command, 'approvals.decide', 'unavailable', 'provider-replaced')
         if (allowed.state !== 'allowed') return refusal(command, 'approvals.decide', allowed.state, allowed.code)
         const internal = await mutateLifecycle(command.binding, async () => await this.transport!.decideAgentLoopApprovalV4({ scope: authorityScope, command, operationId: command.commandId, task: command.binding.task, binding: command.binding.binding, definition: command.binding.definition, turn: command.turn, approvalId: command.approvalId, decision: command.decision }) as InternalResult)
+        if (!live()) return refusal(command, 'approvals.decide', 'unavailable', 'provider-replaced')
         if (internal.status !== 'accepted') return internalRefusal(command, 'approvals.decide', string(internal.code) ?? 'approval-unavailable')
         const disposition = delivery(internal.delivery)
         if (disposition === undefined) return refusal(command, 'approvals.decide', 'unavailable', 'reconciliation-required')
-        this.approvals.set(`${command.binding.task}\0${command.turn}\0${command.approvalId}`, command.commandId)
+        this.approvals.set(correlationKey(authorityScope, command.binding.task, command.turn, command.approvalId), command.commandId)
         return Object.freeze({ $schema: CORDISX_AGENT_LOOP_RESULT_SCHEMA_V4, contract: 'cordisx.agent-loop-result/v4', schemaVersion: 4, commandId: command.commandId, type: 'approval-decision', status: 'accepted', authorization: authorizationFor('approvals.decide'), binding: command.binding, turn: command.turn, approvalId: command.approvalId, decision: command.decision, causation: { operationId: command.commandId }, delivery: { disposition } })
       },
       requestMemberSelfIntroduction: async (command: IntroductionCommand): Promise<AgentLoopRequestMemberSelfIntroductionResult> => {
         if (!live() || this.transport === undefined) return refusal(command, 'turns.introduce', 'unavailable', 'host-unavailable')
         const allowed = await authorize('turns.introduce', command.binding)
+        if (!live()) return refusal(command, 'turns.introduce', 'unavailable', 'provider-replaced')
         if (allowed.state !== 'allowed') return refusal(command, 'turns.introduce', allowed.state, allowed.code)
         const internal = await mutateLifecycle(command.binding, async () => await this.transport!.requestAgentLoopIntroductionV4({ scope: authorityScope, command, operationId: command.commandId, task: command.binding.task, binding: command.binding.binding, definition: command.binding.definition, participantId: command.participantId, memberId: command.memberId, runId: command.runId }) as InternalResult)
+        if (!live()) return refusal(command, 'turns.introduce', 'unavailable', 'provider-replaced')
         if (internal.status !== 'accepted') return internalRefusal(command, 'turns.introduce', string(internal.code) ?? 'introduction-unavailable')
-        const turn = string(internal.turn); const messageId = string(internal.messageId)
+        const turn = handle(internal.turn); const messageId = handle(internal.messageId)
         const disposition = delivery(internal.delivery)
         if (turn === undefined || messageId === undefined || disposition === undefined) return refusal(command, 'turns.introduce', 'unavailable', 'reconciliation-required')
-        this.introductions.set(`${command.binding.task}\0${turn}`, { operationId: command.commandId, participantId: command.participantId, memberId: command.memberId, runId: command.runId })
+        this.introductions.set(correlationKey(authorityScope, command.binding.task, turn), { operationId: command.commandId, messageId, participantId: command.participantId, memberId: command.memberId, runId: command.runId })
         return Object.freeze({ $schema: CORDISX_AGENT_LOOP_RESULT_SCHEMA_V4, contract: 'cordisx.agent-loop-result/v4', schemaVersion: 4, commandId: command.commandId, type: command.type, status: 'accepted', authorization: authorizationFor('turns.introduce'), binding: command.binding, participantId: command.participantId, memberId: command.memberId, runId: command.runId, turn, messageId, causation: { operationId: command.commandId }, delivery: { disposition } })
       },
       cancelMemberSelfIntroduction: async (command: CancelIntroductionCommand): Promise<AgentLoopCancelMemberSelfIntroductionResult> => {
         if (!live() || this.transport === undefined) return refusal(command, 'turns.introduce', 'unavailable', 'host-unavailable')
         const allowed = await authorize('turns.introduce', command.binding)
+        if (!live()) return refusal(command, 'turns.introduce', 'unavailable', 'provider-replaced')
         if (allowed.state !== 'allowed') return refusal(command, 'turns.introduce', allowed.state, allowed.code)
         const internal = await mutateLifecycle(command.binding, async () => await this.transport!.cancelAgentLoopIntroductionV4({
           scope: authorityScope,
@@ -344,18 +393,21 @@ export class CordisXAgentLoopBrokerV4 {
           memberId: command.memberId,
           runId: command.runId,
         }) as InternalResult)
+        if (!live()) return refusal(command, 'turns.introduce', 'unavailable', 'provider-replaced')
         if (internal.status !== 'accepted') return internalRefusal(command, 'turns.introduce', string(internal.code) ?? 'introduction-unavailable')
-        const turn = string(internal.turn); const messageId = string(internal.messageId)
+        const turn = handle(internal.turn); const messageId = handle(internal.messageId)
         const disposition = delivery(internal.delivery)
         if (turn === undefined || messageId === undefined || disposition === undefined) return refusal(command, 'turns.introduce', 'unavailable', 'reconciliation-required')
-        this.cancellations.set(`${command.binding.task}\0${turn}`, command.commandId)
+        this.cancellations.set(correlationKey(authorityScope, command.binding.task, turn), command.commandId)
         return Object.freeze({ $schema: CORDISX_AGENT_LOOP_RESULT_SCHEMA_V4, contract: 'cordisx.agent-loop-result/v4', schemaVersion: 4, commandId: command.commandId, type: command.type, status: 'accepted', authorization: authorizationFor('turns.introduce'), binding: command.binding, participantId: command.participantId, memberId: command.memberId, runId: command.runId, requestOperationId: command.requestOperationId, turn, messageId, causation: { operationId: command.commandId }, delivery: { disposition } })
       },
       subscribe: async (binding: AgentLoopTaskBinding, afterSequence: number): Promise<AgentLoopSubscribeRuntimeResult> => {
         if (!live() || this.transport === undefined) return { status: 'unavailable', authorization: { capability: 'tasks.content.read', state: 'unavailable', code: 'host-unavailable' } }
         const allowed = await authorize('tasks.content.read', binding)
+        if (!live()) return { status: 'unavailable', authorization: { capability: 'tasks.content.read', state: 'unavailable', code: 'host-unavailable' } }
         if (allowed.state !== 'allowed') return { status: allowed.state, authorization: allowed } as AgentLoopSubscribeRuntimeResult
-        const snapshot = await this.publicEvents(authorityScope, binding, mutationKey(binding))
+        const snapshot = await this.publicEvents(authorityScope, binding, mutationKey(binding), live)
+        if (!live()) return { status: 'unavailable', authorization: { capability: 'tasks.content.read', state: 'unavailable', code: 'host-unavailable' } }
         if (snapshot === undefined) return { status: 'unavailable', authorization: { capability: 'tasks.content.read', state: 'unavailable', code: 'task-unavailable' } }
         const subscriptionId = `cxloop-v4-subscription:${this.nextSubscription++}`
         let active = true
@@ -399,7 +451,7 @@ export class CordisXAgentLoopBrokerV4 {
   ): AsyncIterable<AgentLoopEventPage> {
     let cursor = descriptor.afterSequence
     while (active()) {
-      const all = await this.publicEvents(authorityScope, binding, snapshotKey)
+      const all = await this.publicEvents(authorityScope, binding, snapshotKey, active)
       if (all === undefined) return
       const replaying = cursor < descriptor.snapshotSequence
       const events = all.filter(event => event.sequence > cursor
@@ -421,32 +473,48 @@ export class CordisXAgentLoopBrokerV4 {
     }
   }
 
-  private async publicEvents(authorityScope: CordisXAgentLoopV4Scope, binding: AgentLoopTaskBinding, snapshotKey: string): Promise<readonly AgentLoopEvent[] | undefined> {
+  private async publicEvents(authorityScope: CordisXAgentLoopV4Scope, binding: AgentLoopTaskBinding, snapshotKey: string, active: () => boolean): Promise<readonly AgentLoopEvent[] | undefined> {
+    if (!active()) return undefined
     if ((this.lifecycleMutations.get(snapshotKey) ?? 0) > 0) return this.publicEventSnapshots.get(snapshotKey) ?? []
     const result = await this.transport!.readAgentLoopV4Lifecycle({ scope: authorityScope, task: binding.task, binding: binding.binding, definition: binding.definition, afterSequence: 0 }) as InternalLifecycleResult
+    if (!active()) return undefined
     if (result.status !== 'accepted' || !Array.isArray(result.events)) return undefined
     const snapshot = result.events
-      .flatMap(value => this.projectLifecycle(binding, value as InternalLifecycleEvent))
+      .flatMap(value => this.projectLifecycle(authorityScope, binding, value as InternalLifecycleEvent))
       .map((event, index) => Object.freeze({ ...event, sequence: index + 1 }))
     this.publicEventSnapshots.set(snapshotKey, snapshot)
     return snapshot
   }
 
-  private projectLifecycle(binding: AgentLoopTaskBinding, input: InternalLifecycleEvent): readonly AgentLoopEvent[] {
+  private projectLifecycle(authorityScope: CordisXAgentLoopV4Scope, binding: AgentLoopTaskBinding, input: InternalLifecycleEvent): readonly AgentLoopEvent[] {
     const sequence = typeof input.sequence === 'number' ? input.sequence : undefined
-    const turn = string(input.turnId)
+    const turn = handle(input.turnId)
     if (sequence === undefined || turn === undefined) return []
-    const base = { $schema: CORDISX_AGENT_LOOP_EVENT_SCHEMA_V4, contract: 'cordisx.agent-loop-event/v4' as const, schemaVersion: 4 as const, eventId: string(input.eventId) ?? `cxloop-event:${sequence}`, binding: binding.binding, sequence, occurredAt: string(input.observedAt) ?? '1970-01-01T00:00:00.000Z', turn }
-    const durableIntroduction = record(input.introduction)
-    const rememberedIntroduction = this.introductions.get(`${binding.task}\0${turn}`)
-    const introductionOperationId = string(durableIntroduction?.operationId) ?? rememberedIntroduction?.operationId
+    const suppliedEventId = input.eventId === undefined ? undefined : handle(input.eventId)
+    if (input.eventId !== undefined && suppliedEventId === undefined) return []
+    const base = { $schema: CORDISX_AGENT_LOOP_EVENT_SCHEMA_V4, contract: 'cordisx.agent-loop-event/v4' as const, schemaVersion: 4 as const, eventId: suppliedEventId ?? `cxloop-event:${sequence}`, binding: binding.binding, sequence, occurredAt: string(input.observedAt) ?? '1970-01-01T00:00:00.000Z', turn }
+    const durableIntroductionRecord = record(input.introduction)
+    if (input.introduction !== undefined && durableIntroductionRecord === undefined) return []
+    const durableIntroduction = durableIntroductionRecord === undefined ? undefined : {
+      operationId: handle(durableIntroductionRecord.operationId),
+      messageId: handle(durableIntroductionRecord.messageId),
+      participantId: handle(durableIntroductionRecord.participantId),
+      memberId: handle(durableIntroductionRecord.memberId),
+      runId: handle(durableIntroductionRecord.runId),
+    }
+    if (durableIntroduction !== undefined && Object.values(durableIntroduction).some(value => value === undefined)) return []
+    const cancellationRecord = record(input.cancellation)
+    if (input.cancellation !== undefined && cancellationRecord === undefined) return []
+    const cancellationOperationId = cancellationRecord === undefined ? undefined : handle(cancellationRecord.operationId)
+    if (cancellationRecord !== undefined && cancellationOperationId === undefined) return []
+    const rememberedIntroduction = this.introductions.get(correlationKey(authorityScope, binding.task, turn))
+    const introductionOperationId = durableIntroduction?.operationId ?? rememberedIntroduction?.operationId
     if (input.type === 'turn.started') return [{
       ...base, type: 'lifecycle',
       ...(introductionOperationId === undefined ? {} : { causation: { operationId: introductionOperationId } }),
       lifecycle: { phase: 'turn.started' },
     }]
     if (input.type === 'turn.failed') {
-      const cancellationOperationId = string(record(input.cancellation)?.operationId)
       if (cancellationOperationId !== undefined) return [{ ...base, type: 'lifecycle', causation: { operationId: cancellationOperationId }, lifecycle: { phase: 'turn.cancelled' } }]
       const failure = record(input.failure)
       return [{
@@ -456,46 +524,44 @@ export class CordisXAgentLoopBrokerV4 {
       }]
     }
     if (input.type === 'turn.cancelled') {
-      const operationId = string(record(input.cancellation)?.operationId)
-      return operationId === undefined ? [] : [{ ...base, type: 'lifecycle', causation: { operationId }, lifecycle: { phase: 'turn.cancelled' } }]
+      return cancellationOperationId === undefined ? [] : [{ ...base, type: 'lifecycle', causation: { operationId: cancellationOperationId }, lifecycle: { phase: 'turn.cancelled' } }]
     }
     if (input.type === 'turn.completed') {
-      const introduction = durableIntroduction === undefined ? rememberedIntroduction : {
-        operationId: string(durableIntroduction.operationId),
-        participantId: string(durableIntroduction.participantId),
-        memberId: string(durableIntroduction.memberId),
-        runId: string(durableIntroduction.runId),
-      }
+      const introduction = durableIntroduction === undefined ? rememberedIntroduction : durableIntroduction
       const validIntroduction = introduction !== undefined
-        && introduction.operationId !== undefined && introduction.participantId !== undefined
+        && introduction.operationId !== undefined && introduction.messageId !== undefined
+        && introduction.participantId !== undefined
         && introduction.memberId !== undefined && introduction.runId !== undefined
-        ? introduction as { operationId: string; participantId: string; memberId: string; runId: string }
+        ? introduction as { operationId: string; messageId: string; participantId: string; memberId: string; runId: string }
         : undefined
       const output = Array.isArray(input.output) ? input.output.flatMap(value => {
         const item = record(value); const text = string(item?.text)
         return text === undefined ? [] : [{ kind: 'text' as const, text }]
       }) : []
-      const durableCancellation = string(record(input.cancellation)?.operationId)
-      const cancelled = durableCancellation ?? this.cancellations.get(`${binding.task}\0${turn}`)
+      const cancelled = cancellationOperationId ?? this.cancellations.get(correlationKey(authorityScope, binding.task, turn))
       const message = output.length === 0 || cancelled !== undefined ? [] : [{
         ...base,
-        eventId: `${base.eventId}:message`,
+        eventId: derivedEventId(base.eventId, 'message'),
         type: 'message' as const,
         ...(validIntroduction === undefined ? {} : { causation: { operationId: validIntroduction.operationId } }),
         message: validIntroduction === undefined
-          ? { messageId: `cxloop-assistant:${turn}`, role: 'assistant' as const, purpose: 'conversation' as const, content: output as [typeof output[number], ...typeof output] }
-          : { messageId: `cxloop-introduction:${validIntroduction.operationId}`, role: 'assistant' as const, purpose: 'member-self-introduction' as const, content: output as [typeof output[number], ...typeof output] },
+          ? { messageId: shellSafeAssistantMessageId(turn), role: 'assistant' as const, purpose: 'conversation' as const, content: output as [typeof output[number], ...typeof output] }
+          : { messageId: validIntroduction.messageId, role: 'assistant' as const, purpose: 'member-self-introduction' as const, content: output as [typeof output[number], ...typeof output] },
       } as AgentLoopEvent]
       return [...message, cancelled === undefined
         ? { ...base, type: 'lifecycle', lifecycle: { phase: 'turn.completed' } } as AgentLoopEvent
-        : { ...base, eventId: `${base.eventId}:lifecycle`, type: 'lifecycle', causation: { operationId: cancelled }, lifecycle: { phase: 'turn.cancelled' } } as AgentLoopEvent]
+        : { ...base, eventId: derivedEventId(base.eventId, 'lifecycle'), type: 'lifecycle', causation: { operationId: cancelled }, lifecycle: { phase: 'turn.cancelled' } } as AgentLoopEvent]
     }
-    const approval = record(input.approval); const approvalId = string(approval?.approvalId)
+    const approval = record(input.approval); const approvalId = handle(approval?.approvalId)
     if ((input.type === 'approval.required' || input.type === 'approval.resolved') && approvalId !== undefined) {
       const kind = ['file-change', 'external-action', 'other'].includes(String(approval?.kind)) ? approval!.kind as 'file-change' | 'external-action' | 'other' : 'command'
       if (input.type === 'approval.required') return [{ ...base, type: 'approval', approval: { approvalId, kind, state: 'pending' } }]
       const outcome = approval?.outcome
-      const operationId = string(record(input.causation)?.operationId) ?? this.approvals.get(`${binding.task}\0${turn}\0${approvalId}`)
+      const causationRecord = record(input.causation)
+      if (input.causation !== undefined && causationRecord === undefined) return []
+      const durableOperationId = causationRecord === undefined ? undefined : handle(causationRecord.operationId)
+      if (causationRecord !== undefined && durableOperationId === undefined) return []
+      const operationId = durableOperationId ?? this.approvals.get(correlationKey(authorityScope, binding.task, turn, approvalId))
       return operationId === undefined || outcome === 'expired'
         ? [{ ...base, type: 'approval', approval: { approvalId, kind, state: 'resolved', outcome: 'expired' } }]
         : [{ ...base, type: 'approval', causation: { operationId }, approval: { approvalId, kind, state: 'resolved', outcome: outcome === 'denied' || outcome === 'cancelled' ? outcome : 'approved' } }]

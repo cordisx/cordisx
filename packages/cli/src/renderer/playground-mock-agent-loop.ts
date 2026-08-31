@@ -13,6 +13,8 @@ import type { AgentLoopV4Transport } from './agent-loop-v4.js'
 
 export const PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE = 'debug:agent-loop/mock/v1' as const
 
+const simulatorBindingId = (task: string) => `simulated-binding-${task.replace(/[^A-Za-z0-9._~-]/gu, '~')}`
+
 export interface PlaygroundMockCliInvocation {
   readonly namespace: typeof PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE
   readonly operation: 'execute' | 'introduce-member'
@@ -117,7 +119,7 @@ export interface PlaygroundMockAgentLoopPersistence {
 }
 
 interface PlaygroundMockV4PersistedState {
-  readonly version: 1
+  readonly version: 2
   readonly results: readonly { readonly key: string; readonly fingerprint: string; readonly result: unknown }[]
   readonly bindings: readonly { readonly key: string; readonly task: string; readonly bindingId: string; readonly generation: number; readonly definition: AgentDefinitionIdentity }[]
   readonly introductions: readonly { readonly key: string; readonly value: { readonly task: string; readonly turn: string; readonly messageId: string; readonly participantId: string; readonly memberId: string; readonly runId: string; readonly state: 'pending' | 'completed' | 'cancelled' | 'failed' } }[]
@@ -125,7 +127,7 @@ interface PlaygroundMockV4PersistedState {
 }
 
 interface PlaygroundMockAgentLoopPersistedState {
-  readonly version: 1
+  readonly version: 2
   readonly nextTask: number
   readonly tasks: readonly { readonly task: string; readonly record: TaskRecord }[]
 }
@@ -366,6 +368,15 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
     return true
   }
 
+  reserveSemanticTurn(task: string, purpose: 'member-self-introduction'): { readonly turn: string; readonly messageId: string } | undefined {
+    const record = this.tasks.get(task)
+    if (record === undefined) return undefined
+    const ordinal = record.nextTurn++
+    this.persist()
+    const turn = `simulated-${purpose}-turn-${ordinal}`
+    return { turn, messageId: `simulated-${purpose}-message-${ordinal}` }
+  }
+
   hasPendingApproval(task: string, turn: string, approvalId: string): boolean {
     const events = this.tasks.get(task)?.lifecycle.filter(event => event.turnId === turn && event.approval?.approvalId === approvalId) ?? []
     return events.at(-1)?.type === 'approval.required'
@@ -426,7 +437,7 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
       const raw = this.persistence?.read()
       if (raw === undefined) return
       const value = JSON.parse(raw) as Partial<PlaygroundMockAgentLoopPersistedState>
-      if (value.version !== 1 || !Number.isSafeInteger(value.nextTask) || (value.nextTask ?? 0) < 1 || !Array.isArray(value.tasks)) return
+      if (value.version !== 2 || !Number.isSafeInteger(value.nextTask) || (value.nextTask ?? 0) < 1 || !Array.isArray(value.tasks)) return
       const restored = new Map<string, TaskRecord>()
       for (const entry of value.tasks) {
         if (entry === null || typeof entry !== 'object' || typeof entry.task !== 'string' || entry.task === '') return
@@ -458,7 +469,7 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
     if (this.persistence === undefined) return
     try {
       const value: PlaygroundMockAgentLoopPersistedState = {
-        version: 1,
+        version: 2,
         nextTask: this.nextTask,
         tasks: [...this.tasks].map(([task, record]) => ({ task, record })),
       }
@@ -528,7 +539,7 @@ export class PlaygroundMockAgentLoopV4Transport implements AgentLoopV4Transport 
       const definition = resolveAgentDefinition(command)
       const created = await this.host.create(definition, {}, { target: command.definition, definitions: command.definitions })
       if (!created.ok) return { status: 'unavailable', code: 'host-unavailable' }
-      const locator = { task: created.value.task, definition: command.definition, binding: { bindingId: `simulated-binding:${created.value.task}`, generation: 1 } }
+      const locator = { task: created.value.task, definition: command.definition, binding: { bindingId: simulatorBindingId(created.value.task), generation: 1 } }
       this.bindings.set(this.bindingKey(input.scope, created.value.task), { task: created.value.task, ...locator.binding, definition: clone(command.definition) })
       return { status: 'accepted', locator, detailsUrl: created.value.detailsUrl, delivery: 'executed' }
     })
@@ -539,7 +550,7 @@ export class PlaygroundMockAgentLoopV4Transport implements AgentLoopV4Transport 
       const bound = await this.host.bind(input.task)
       if (!bound.ok) return { status: 'unavailable', code: 'task-unavailable' }
       const prior = this.bindings.get(this.bindingKey(input.scope, input.task))
-      const binding = { bindingId: prior?.bindingId ?? `simulated-binding:${input.task}`, generation: (prior?.generation ?? 0) + 1 }
+      const binding = { bindingId: prior?.bindingId ?? simulatorBindingId(input.task), generation: (prior?.generation ?? 0) + 1 }
       const locator = { task: bound.value.task, definition: input.definition, binding }
       this.bindings.set(this.bindingKey(input.scope, input.task), { task: input.task, ...binding, definition: clone(input.definition) })
       return { status: 'accepted', locator, detailsUrl: bound.value.detailsUrl, delivery: 'executed' }
@@ -571,8 +582,9 @@ export class PlaygroundMockAgentLoopV4Transport implements AgentLoopV4Transport 
   async requestAgentLoopIntroductionV4(input: Parameters<AgentLoopV4Transport['requestAgentLoopIntroductionV4']>[0]): Promise<unknown> {
     if (!this.bindingFor(input)) return { status: 'unavailable', code: 'binding-closed' }
     return await this.once(input, async () => {
-      const turn = `simulated-introduction-turn:${input.operationId}`
-      const messageId = `simulated-introduction-message:${input.operationId}`
+      const reserved = this.host.reserveSemanticTurn(input.task, 'member-self-introduction')
+      if (reserved === undefined) return { status: 'unavailable', code: 'introduction-unavailable' }
+      const { turn, messageId } = reserved
       if (!this.host.appendV4Lifecycle(input.task, { turnId: turn, type: 'turn.started' })) return { status: 'unavailable', code: 'introduction-unavailable' }
       const key = `${this.scopeKey(input.scope)}\0${input.operationId}`
       this.introductions.set(key, { task: input.task, turn, messageId, participantId: input.participantId, memberId: input.memberId, runId: input.runId, state: 'pending' })
@@ -621,7 +633,7 @@ export class PlaygroundMockAgentLoopV4Transport implements AgentLoopV4Transport 
     const introductions = new Map([...this.introductions]
       .filter(([key, value]) => key.startsWith(prefix) && value.task === input.task)
       .map(([key, value]) => [value.turn, {
-        operationId: key.slice(prefix.length), participantId: value.participantId,
+        operationId: key.slice(prefix.length), messageId: value.messageId, participantId: value.participantId,
         memberId: value.memberId, runId: value.runId,
       }] as const))
     return {
@@ -678,7 +690,7 @@ export class PlaygroundMockAgentLoopV4Transport implements AgentLoopV4Transport 
       const raw = this.persistence?.read()
       if (raw === undefined) return
       const value = JSON.parse(raw) as Partial<PlaygroundMockV4PersistedState>
-      if (value.version !== 1 || !Array.isArray(value.results) || !Array.isArray(value.bindings)
+      if (value.version !== 2 || !Array.isArray(value.results) || !Array.isArray(value.bindings)
         || !Array.isArray(value.introductions) || !Array.isArray(value.resources)) return
       for (const entry of value.results) {
         if (typeof entry?.key !== 'string' || typeof entry.fingerprint !== 'string') return
@@ -708,7 +720,7 @@ export class PlaygroundMockAgentLoopV4Transport implements AgentLoopV4Transport 
     if (this.persistence === undefined) return
     try {
       const value: PlaygroundMockV4PersistedState = {
-        version: 1,
+        version: 2,
         results: [...this.results].map(([key, entry]) => ({ key, fingerprint: entry.fingerprint, result: entry.result })),
         bindings: [...this.bindings].map(([key, entry]) => ({ key, ...entry })),
         introductions: [...this.introductions].map(([key, value]) => ({ key, value })),

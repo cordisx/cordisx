@@ -550,6 +550,7 @@ export class ProviderFleet implements CordisXPlatformAdapter {
           ...(typeof approval?.operationId === 'string' ? { causation: { operationId: approval.operationId } } : {}),
           ...(introduction === undefined ? {} : { introduction: {
             operationId: introduction.operationId,
+            messageId: introduction.messageId,
             participantId: introduction.participantId,
             memberId: introduction.memberId,
             runId: introduction.runId,
