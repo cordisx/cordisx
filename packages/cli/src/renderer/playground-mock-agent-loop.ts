@@ -621,7 +621,7 @@ export class PlaygroundMockAgentLoopV4Transport implements AgentLoopV4Transport 
     const introductions = new Map([...this.introductions]
       .filter(([key, value]) => key.startsWith(prefix) && value.task === input.task)
       .map(([key, value]) => [value.turn, {
-        operationId: key.slice(prefix.length), participantId: value.participantId,
+        operationId: key.slice(prefix.length), messageId: value.messageId, participantId: value.participantId,
         memberId: value.memberId, runId: value.runId,
       }] as const))
     return {

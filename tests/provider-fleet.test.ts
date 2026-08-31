@@ -436,7 +436,10 @@ describe('Provider Fleet', () => {
       status: 'accepted',
       events: [expect.objectContaining({
         turnId: 'turn-introduction', type: 'turn.completed',
-        introduction: { operationId: 'intro', participantId: 'participant', memberId: 'member', runId: 'run' },
+        introduction: {
+          operationId: 'intro', messageId: 'cxloop-introduction:intro',
+          participantId: 'participant', memberId: 'member', runId: 'run',
+        },
       })],
     })
     await fleet.close()

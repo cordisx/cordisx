@@ -71,7 +71,7 @@ describe('AgentLoop v4 renderer adapter', () => {
       status: 'accepted', nextAfterSequence: 1, events: [{
         eventId: 'restored-event-1', sequence: 1, turnId: requested.turn, type: 'turn.completed',
         output: [{ type: 'text', text: 'Restored introduction.' }],
-        introduction: { operationId: 'introduction-operation-1', participantId: 'agent-1', memberId: 'agent-1', runId: 'run-1' },
+        introduction: { operationId: 'introduction-operation-1', messageId: requested.messageId, participantId: 'agent-1', memberId: 'agent-1', runId: 'run-1' },
       }],
     })
     const restoredBroker = new CordisXAgentLoopBrokerV4(restoredTransport, host, 'playground', 'composition-1')
@@ -86,7 +86,7 @@ describe('AgentLoop v4 renderer adapter', () => {
     expect(page.value?.events).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: 'message', causation: { operationId: 'introduction-operation-1' },
-        message: expect.objectContaining({ purpose: 'member-self-introduction', content: [{ kind: 'text', text: 'Restored introduction.' }] }),
+        message: expect.objectContaining({ messageId: requested.messageId, purpose: 'member-self-introduction', content: [{ kind: 'text', text: 'Restored introduction.' }] }),
       }),
     ]))
     subscribed.handle.unsubscribe()
@@ -270,13 +270,16 @@ describe('AgentLoop v4 renderer adapter', () => {
       const created = await client.createOrBind({ ...base(`create-natural-${index}`), type: 'create-or-bind', definition: configured.identity, definitions: [configured], target: { mode: 'create' } })
       if (created.status !== 'accepted') throw new Error('create failed')
       const request = { ...base(`intro-natural-${index}`), type: 'request-member-self-introduction' as const, binding: created.binding, participantId: `participant-${index}`, memberId: `member-${index}`, runId: `run-${index}`, intent: { kind: 'member-self-introduction' as const, audience: 'room' as const, output: 'assistant-message' as const } }
-      expect((await client.requestMemberSelfIntroduction(request)).status).toBe('accepted')
+      const requested = await client.requestMemberSelfIntroduction(request)
+      expect(requested.status).toBe('accepted')
+      if (requested.status !== 'accepted') throw new Error('introduction failed')
       await new Promise(resolve => setTimeout(resolve, 10))
       const subscribed = await client.subscribe(created.binding, 0)
       if (subscribed.status !== 'accepted') throw new Error('subscribe failed')
       const page = await subscribed.handle.pages[Symbol.asyncIterator]().next()
       const message = page.value?.events.find(event => event.type === 'message')
       if (message?.type !== 'message' || message.message.content[0]?.kind !== 'text') throw new Error('message missing')
+      expect(message.message.messageId).toBe(requested.messageId)
       messages.push(message.message.content[0].text)
       subscribed.handle.unsubscribe()
     }

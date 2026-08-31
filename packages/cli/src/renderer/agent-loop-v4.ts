@@ -177,7 +177,7 @@ function bindingFor(command: CreateCommand, task: string, value: unknown): Agent
 export class CordisXAgentLoopBrokerV4 {
   private disposed = false
   private nextSubscription = 1
-  private readonly introductions = new Map<string, { operationId: string; participantId: string; memberId: string; runId: string }>()
+  private readonly introductions = new Map<string, { operationId: string; messageId: string; participantId: string; memberId: string; runId: string }>()
   private readonly approvals = new Map<string, string>()
   private readonly cancellations = new Map<string, string>()
   private readonly promptRegistrations = new Map<string, PromptRegistration>()
@@ -325,7 +325,7 @@ export class CordisXAgentLoopBrokerV4 {
         const turn = string(internal.turn); const messageId = string(internal.messageId)
         const disposition = delivery(internal.delivery)
         if (turn === undefined || messageId === undefined || disposition === undefined) return refusal(command, 'turns.introduce', 'unavailable', 'reconciliation-required')
-        this.introductions.set(`${command.binding.task}\0${turn}`, { operationId: command.commandId, participantId: command.participantId, memberId: command.memberId, runId: command.runId })
+        this.introductions.set(`${command.binding.task}\0${turn}`, { operationId: command.commandId, messageId, participantId: command.participantId, memberId: command.memberId, runId: command.runId })
         return Object.freeze({ $schema: CORDISX_AGENT_LOOP_RESULT_SCHEMA_V4, contract: 'cordisx.agent-loop-result/v4', schemaVersion: 4, commandId: command.commandId, type: command.type, status: 'accepted', authorization: authorizationFor('turns.introduce'), binding: command.binding, participantId: command.participantId, memberId: command.memberId, runId: command.runId, turn, messageId, causation: { operationId: command.commandId }, delivery: { disposition } })
       },
       cancelMemberSelfIntroduction: async (command: CancelIntroductionCommand): Promise<AgentLoopCancelMemberSelfIntroductionResult> => {
@@ -462,14 +462,16 @@ export class CordisXAgentLoopBrokerV4 {
     if (input.type === 'turn.completed') {
       const introduction = durableIntroduction === undefined ? rememberedIntroduction : {
         operationId: string(durableIntroduction.operationId),
+        messageId: string(durableIntroduction.messageId),
         participantId: string(durableIntroduction.participantId),
         memberId: string(durableIntroduction.memberId),
         runId: string(durableIntroduction.runId),
       }
       const validIntroduction = introduction !== undefined
-        && introduction.operationId !== undefined && introduction.participantId !== undefined
+        && introduction.operationId !== undefined && introduction.messageId !== undefined
+        && introduction.participantId !== undefined
         && introduction.memberId !== undefined && introduction.runId !== undefined
-        ? introduction as { operationId: string; participantId: string; memberId: string; runId: string }
+        ? introduction as { operationId: string; messageId: string; participantId: string; memberId: string; runId: string }
         : undefined
       const output = Array.isArray(input.output) ? input.output.flatMap(value => {
         const item = record(value); const text = string(item?.text)
@@ -484,7 +486,7 @@ export class CordisXAgentLoopBrokerV4 {
         ...(validIntroduction === undefined ? {} : { causation: { operationId: validIntroduction.operationId } }),
         message: validIntroduction === undefined
           ? { messageId: `cxloop-assistant:${turn}`, role: 'assistant' as const, purpose: 'conversation' as const, content: output as [typeof output[number], ...typeof output] }
-          : { messageId: `cxloop-introduction:${validIntroduction.operationId}`, role: 'assistant' as const, purpose: 'member-self-introduction' as const, content: output as [typeof output[number], ...typeof output] },
+          : { messageId: validIntroduction.messageId, role: 'assistant' as const, purpose: 'member-self-introduction' as const, content: output as [typeof output[number], ...typeof output] },
       } as AgentLoopEvent]
       return [...message, cancelled === undefined
         ? { ...base, type: 'lifecycle', lifecycle: { phase: 'turn.completed' } } as AgentLoopEvent
