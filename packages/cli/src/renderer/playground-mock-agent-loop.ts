@@ -119,7 +119,7 @@ export interface PlaygroundMockAgentLoopPersistence {
 }
 
 interface PlaygroundMockV4PersistedState {
-  readonly version: 1
+  readonly version: 2
   readonly results: readonly { readonly key: string; readonly fingerprint: string; readonly result: unknown }[]
   readonly bindings: readonly { readonly key: string; readonly task: string; readonly bindingId: string; readonly generation: number; readonly definition: AgentDefinitionIdentity }[]
   readonly introductions: readonly { readonly key: string; readonly value: { readonly task: string; readonly turn: string; readonly messageId: string; readonly participantId: string; readonly memberId: string; readonly runId: string; readonly state: 'pending' | 'completed' | 'cancelled' | 'failed' } }[]
@@ -127,7 +127,7 @@ interface PlaygroundMockV4PersistedState {
 }
 
 interface PlaygroundMockAgentLoopPersistedState {
-  readonly version: 1
+  readonly version: 2
   readonly nextTask: number
   readonly tasks: readonly { readonly task: string; readonly record: TaskRecord }[]
 }
@@ -437,7 +437,7 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
       const raw = this.persistence?.read()
       if (raw === undefined) return
       const value = JSON.parse(raw) as Partial<PlaygroundMockAgentLoopPersistedState>
-      if (value.version !== 1 || !Number.isSafeInteger(value.nextTask) || (value.nextTask ?? 0) < 1 || !Array.isArray(value.tasks)) return
+      if (value.version !== 2 || !Number.isSafeInteger(value.nextTask) || (value.nextTask ?? 0) < 1 || !Array.isArray(value.tasks)) return
       const restored = new Map<string, TaskRecord>()
       for (const entry of value.tasks) {
         if (entry === null || typeof entry !== 'object' || typeof entry.task !== 'string' || entry.task === '') return
@@ -469,7 +469,7 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
     if (this.persistence === undefined) return
     try {
       const value: PlaygroundMockAgentLoopPersistedState = {
-        version: 1,
+        version: 2,
         nextTask: this.nextTask,
         tasks: [...this.tasks].map(([task, record]) => ({ task, record })),
       }
@@ -690,7 +690,7 @@ export class PlaygroundMockAgentLoopV4Transport implements AgentLoopV4Transport 
       const raw = this.persistence?.read()
       if (raw === undefined) return
       const value = JSON.parse(raw) as Partial<PlaygroundMockV4PersistedState>
-      if (value.version !== 1 || !Array.isArray(value.results) || !Array.isArray(value.bindings)
+      if (value.version !== 2 || !Array.isArray(value.results) || !Array.isArray(value.bindings)
         || !Array.isArray(value.introductions) || !Array.isArray(value.resources)) return
       for (const entry of value.results) {
         if (typeof entry?.key !== 'string' || typeof entry.fingerprint !== 'string') return
@@ -720,7 +720,7 @@ export class PlaygroundMockAgentLoopV4Transport implements AgentLoopV4Transport 
     if (this.persistence === undefined) return
     try {
       const value: PlaygroundMockV4PersistedState = {
-        version: 1,
+        version: 2,
         results: [...this.results].map(([key, entry]) => ({ key, fingerprint: entry.fingerprint, result: entry.result })),
         bindings: [...this.bindings].map(([key, entry]) => ({ key, ...entry })),
         introductions: [...this.introductions].map(([key, value]) => ({ key, value })),

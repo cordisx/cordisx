@@ -96,6 +96,49 @@ describe('AgentLoop v4 renderer adapter', () => {
     restoredClient.dispose()
   })
 
+  it('fails closed on legacy Simulator persistence before an explicit rebind', async () => {
+    let hostState: string | undefined
+    let transportState: string | undefined
+    const hostPersistence = { read: () => hostState, write: (value: string) => { hostState = value } }
+    const transportPersistence = { read: () => transportState, write: (value: string) => { transportState = value } }
+    const host = new PlaygroundMockAgentLoopHost(undefined, hostPersistence)
+    const broker = new CordisXAgentLoopBrokerV4(
+      new PlaygroundMockAgentLoopV4Transport(host, transportPersistence), host, 'playground', 'legacy-persistence',
+    )
+    const client = broker.bind(options())
+    const created = await client.createOrBind({
+      ...base('create-before-reload'), type: 'create-or-bind', definition: definition.identity, definitions: [definition], target: { mode: 'create' },
+    })
+    if (created.status !== 'accepted' || hostState === undefined || transportState === undefined) throw new Error('create did not persist')
+    client.dispose()
+    broker.dispose()
+
+    const legacyTransport = JSON.parse(transportState) as { version: number; bindings: { bindingId: string }[] }
+    legacyTransport.version = 1
+    legacyTransport.bindings[0]!.bindingId = 'simulated-binding:legacy-task'
+    transportState = JSON.stringify(legacyTransport)
+
+    const restoredHost = new PlaygroundMockAgentLoopHost(undefined, hostPersistence)
+    const restoredBroker = new CordisXAgentLoopBrokerV4(
+      new PlaygroundMockAgentLoopV4Transport(restoredHost, transportPersistence), restoredHost, 'playground', 'legacy-persistence-reloaded',
+    )
+    const restoredClient = restoredBroker.bind(options())
+    const rebound = await restoredClient.createOrBind({
+      ...base('bind-after-legacy-state'), type: 'create-or-bind', definition: definition.identity, definitions: [definition], target: { mode: 'bind', task: created.binding.task },
+    })
+    expect(rebound).toMatchObject({ status: 'accepted', binding: { binding: { generation: 1 } } })
+    if (rebound.status !== 'accepted') throw new Error('rebind failed')
+    expect(rebound.binding.binding.bindingId).toMatch(/^[A-Za-z0-9._~-]{1,512}$/u)
+    expect(rebound.binding.binding.bindingId).not.toContain(':')
+    restoredClient.dispose()
+    restoredBroker.dispose()
+
+    const legacyHost = JSON.parse(hostState) as { version: number }
+    legacyHost.version = 1
+    hostState = JSON.stringify(legacyHost)
+    expect(new PlaygroundMockAgentLoopHost(undefined, hostPersistence).snapshot().tasks).toEqual([])
+  })
+
   it('rejects a forged generation and isolates the same operation id by owner', async () => {
     const host = new PlaygroundMockAgentLoopHost()
     const transport = new PlaygroundMockAgentLoopV4Transport(host)
