@@ -13,6 +13,8 @@ import type { AgentLoopV4Transport } from './agent-loop-v4.js'
 
 export const PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE = 'debug:agent-loop/mock/v1' as const
 
+const simulatorBindingId = (task: string) => `simulated-binding-${task.replace(/[^A-Za-z0-9._~-]/gu, '~')}`
+
 export interface PlaygroundMockCliInvocation {
   readonly namespace: typeof PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE
   readonly operation: 'execute' | 'introduce-member'
@@ -537,7 +539,7 @@ export class PlaygroundMockAgentLoopV4Transport implements AgentLoopV4Transport 
       const definition = resolveAgentDefinition(command)
       const created = await this.host.create(definition, {}, { target: command.definition, definitions: command.definitions })
       if (!created.ok) return { status: 'unavailable', code: 'host-unavailable' }
-      const locator = { task: created.value.task, definition: command.definition, binding: { bindingId: `simulated-binding:${created.value.task}`, generation: 1 } }
+      const locator = { task: created.value.task, definition: command.definition, binding: { bindingId: simulatorBindingId(created.value.task), generation: 1 } }
       this.bindings.set(this.bindingKey(input.scope, created.value.task), { task: created.value.task, ...locator.binding, definition: clone(command.definition) })
       return { status: 'accepted', locator, detailsUrl: created.value.detailsUrl, delivery: 'executed' }
     })
@@ -548,7 +550,7 @@ export class PlaygroundMockAgentLoopV4Transport implements AgentLoopV4Transport 
       const bound = await this.host.bind(input.task)
       if (!bound.ok) return { status: 'unavailable', code: 'task-unavailable' }
       const prior = this.bindings.get(this.bindingKey(input.scope, input.task))
-      const binding = { bindingId: prior?.bindingId ?? `simulated-binding:${input.task}`, generation: (prior?.generation ?? 0) + 1 }
+      const binding = { bindingId: prior?.bindingId ?? simulatorBindingId(input.task), generation: (prior?.generation ?? 0) + 1 }
       const locator = { task: bound.value.task, definition: input.definition, binding }
       this.bindings.set(this.bindingKey(input.scope, input.task), { task: input.task, ...binding, definition: clone(input.definition) })
       return { status: 'accepted', locator, detailsUrl: bound.value.detailsUrl, delivery: 'executed' }

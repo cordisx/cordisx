@@ -46,6 +46,7 @@ describe('AgentLoop v4 renderer adapter', () => {
     const created = await client.createOrBind(create)
     expect(created).toMatchObject({ status: 'accepted', binding: { schemaVersion: 4, task: expect.stringContaining('debug:agent-loop/mock/v1:task:') }, delivery: { disposition: 'executed' } })
     if (created.status !== 'accepted') throw new Error('create failed')
+    expect(created.binding.binding.bindingId).toMatch(/^[A-Za-z0-9._~-]{1,512}$/u)
     const send: Extract<AgentLoopCommand, { type: 'send' }> = { ...base('send-1'), type: 'send', binding: created.binding, content: [{ kind: 'text', text: '[approval]' }] }
     const sent = await client.send(send)
     expect(sent).toMatchObject({ status: 'accepted', delivery: { disposition: 'executed' } })
