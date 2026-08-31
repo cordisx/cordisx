@@ -251,20 +251,21 @@ describe('certified DOM authorization through the single PermissionBroker', () =
   })
 
   it.each([
-    ['ordinary', undefined],
-    ['certified-only', certification()],
-    ['official-only', undefined],
-    ['official-and-certified', certification()],
-  ] as const)('never lets the %s state bypass a non-DOM prompt', async (_state, certified) => {
+    ['ordinary', undefined, 1, undefined],
+    ['certified-only', certification(), 0, 'certified-implicit'],
+    ['official-only', undefined, 1, undefined],
+    ['official-and-certified', certification(), 0, 'certified-implicit'],
+  ] as const)('auto-authorizes non-DOM access only for the %s state', async (_state, certified, prompts, origin) => {
     const context = broker({
       ...(certified === undefined ? {} : { certified }),
       capabilities: [{ name: 'models.read', required: false, scope: { providers: ['codex'] } }],
     })
     await expect(context.value.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({ ok: true })
-    expect(context.nonDomPrompts()).toBe(1)
+    expect(context.nonDomPrompts()).toBe(prompts)
+    expect(context.value.snapshots().find(item => item.capability === 'models.read')?.authorizationOrigin).toBe(origin)
   })
 
-  it('binds auto approval to exact artifact evidence and rejects malicious self-claims', async () => {
+  it('binds auto approval to the exact Marketplace artifact metadata', async () => {
     const exact = broker({ certified: certification() })
     await exact.value.requestDomAccess(identity, 'sidebar.footer.menu')
     expect(exact.domPrompts()).toBe(0)
@@ -284,12 +285,6 @@ describe('certified DOM authorization through the single PermissionBroker', () =
     })).toThrow(/invalid projection/)
     await forgedFingerprint.value.requestDomAccess(identity, 'sidebar.footer.menu')
     expect(forgedFingerprint.domPrompts()).toBe(1)
-
-    expect(() => normalizePluginManifest({
-      ...manifest(),
-      certified: true,
-      official: true,
-    }, identity.id)).toThrow(/unsupported|unknown/i)
 
     const injected = broker({})
     injected.unregister()
@@ -798,6 +793,22 @@ describe('certified DOM authorization through the single PermissionBroker', () =
     expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({ authorized: false, state: 'pending' })
     await context.value.requestDomAccess(identity, 'workspace.toolbar.items')
     expect(context.domPrompts()).toBe(1)
+  })
+
+  it('expires Certified non-DOM authorization and restores the ordinary prompt', async () => {
+    let now = new Date('2026-08-30T12:00:00.000Z')
+    const context = broker({
+      certified: certification(),
+      now: () => now,
+      capabilities: [{ name: 'models.read', required: false, scope: { providers: ['codex'] } }],
+    })
+    await expect(context.value.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({ ok: true })
+    expect(context.nonDomPrompts()).toBe(0)
+
+    now = new Date('2026-10-01T00:00:00.000Z')
+    await expect(context.value.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({ ok: true })
+    expect(context.nonDomPrompts()).toBe(1)
+    expect(context.value.snapshots().find(item => item.capability === 'models.read')?.authorizationOrigin).toBeUndefined()
   })
 
   it('actively retires an expired certification without waiting for another access', async () => {

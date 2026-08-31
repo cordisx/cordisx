@@ -345,7 +345,7 @@ describe('Manager Marketplace product list', () => {
       expect(officialDetail.textContent).toContain('never changes PermissionBroker decisions')
       expect(officialDetail.textContent).not.toContain('DOM/render')
       expect(certifiedDetail.textContent).not.toContain(DIGEST)
-      expect(certifiedDetail.textContent).toContain('interface capabilities')
+      expect(certifiedDetail.textContent).toContain("auto-authorizes the plugin's declared permissions")
       expect(certifiedDetail.textContent).toContain('current scope and runtime instance')
       expect(certifiedDetail.querySelector<HTMLAnchorElement>('a')?.href).toBe(EVIDENCE)
       const boundary = dom.window.document.querySelector<HTMLElement>('[data-marketplace-trust-boundary]')!

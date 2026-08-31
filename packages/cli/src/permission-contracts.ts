@@ -32,6 +32,8 @@ export const CORDISX_PERMISSION_POLICY_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v4.schema.json'
 export const CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-plan.v4.schema.json'
+export const CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V5 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-plan.v5.schema.json'
 export const CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v4.schema.json'
 export const CORDISX_PERMISSION_CAPABILITY_CATALOG_SCHEMA_V3 =
@@ -410,6 +412,19 @@ export interface CordisXPermissionAuthorizationPlanV4 {
   readonly schemaVersion: 4
   readonly planId: string
   readonly operation: 'install' | 'update' | 'enable' | 'runtime'
+  readonly profileId: string
+  readonly identity: CordisXPermissionIdentityV2
+  readonly catalogVersion: string
+  readonly binding: CordisXPermissionAuthorizationBindingV2
+  readonly declarations: readonly CordisXPermissionAuthorizationItemV4[]
+}
+
+/** Additive plan successor: an exact Marketplace Certified artifact can auto-authorize every ask item. */
+export interface CordisXPermissionAuthorizationPlanV5 {
+  readonly $schema: typeof CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V5
+  readonly schemaVersion: 5
+  readonly planId: string
+  readonly operation: CordisXPermissionAuthorizationPlanV4['operation']
   readonly profileId: string
   readonly identity: CordisXPermissionIdentityV2
   readonly catalogVersion: string

@@ -392,7 +392,7 @@ describe('Platform permission presentation hierarchy', () => {
       openPluginTab(dom.window.document, 'demo', 'permissions')
       dom.window.document.querySelector<HTMLButtonElement>('[data-permission-open="ui.extension-points.render"]')?.click()
       const trace = dom.window.document.querySelector<HTMLElement>('[data-permission-authorization-origin="certified-implicit"]')
-      expect(trace?.textContent).toContain('认证自动批准的 DOM 权限')
+      expect(trace?.textContent).toContain('因 Certified 自动授权')
       expect(trace?.textContent).toContain('demo@1.2.3')
       expect(trace?.textContent).toContain('https://github.com/cordisx/marketplace/pull/123')
       expect(trace?.textContent).toContain(certification.fingerprint)

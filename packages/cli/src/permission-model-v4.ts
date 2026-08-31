@@ -10,6 +10,7 @@ import {
   type CordisXPermissionAuthorizationKeyV4,
   type CordisXPermissionAuthorizationDecisionV4,
   type CordisXPermissionAuthorizationPlanV4,
+  type CordisXPermissionAuthorizationPlanV5,
   type CordisXPermissionCapabilityV4,
   type CordisXPermissionPolicyRecordV4,
   type CordisXPermissionScopeV4,
@@ -361,7 +362,7 @@ export function hostDomPermissionAuthorizationKeyV4(input: {
 
 /** Validates an explicit-user decision against exactly the items that still require review. */
 export function assertPermissionAuthorizationDecisionV4(
-  plan: CordisXPermissionAuthorizationPlanV4,
+  plan: CordisXPermissionAuthorizationPlanV4 | CordisXPermissionAuthorizationPlanV5,
   decision: CordisXPermissionAuthorizationDecisionV4,
 ): void {
   if (decision === null || typeof decision !== 'object'

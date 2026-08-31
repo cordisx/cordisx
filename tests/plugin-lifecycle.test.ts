@@ -462,9 +462,10 @@ describe('launcher plugin lifecycle coordinator', () => {
       expectedRevision: 0,
       target: { kind: 'candidate', candidateId: planned.candidateId! },
     })
-    expect(plan).toMatchObject({ schemaVersion: 4, operation: 'install' })
+    expect(plan).toMatchObject({ schemaVersion: 5, operation: 'install' })
     expect(plan?.declarations.find(item => item.capability === 'models.read')).toMatchObject({
-      authorizationMode: 'explicit-user', decisionRequired: true, resourceClass: 'non-dom',
+      authorizationMode: 'certified-implicit', decisionRequired: false, resourceClass: 'non-dom',
+      certification: { integrity: expect.stringMatching(/^sha256:/) },
     })
     expect(plan?.declarations.find(item => item.capability === 'ui.host-dom.read')).toMatchObject({
       authorizationMode: 'certified-implicit', decisionRequired: false, resourceClass: 'host-dom',
@@ -507,7 +508,7 @@ describe('launcher plugin lifecycle coordinator', () => {
     expect(runtime.lastStaged?.authorizationDecision).toEqual(decision)
   })
 
-  it('queries certification only for catalog DOM capabilities and falls back to explicit review on lookup failure', async () => {
+  it('queries certification for any declared capability and falls back to explicit review on lookup failure', async () => {
     const { root, home } = await workspace()
     const lookup = vi.fn(async () => { throw new Error('trust source offline') })
     const coordinator = new PluginLifecycleCoordinator({
@@ -529,7 +530,7 @@ describe('launcher plugin lifecycle coordinator', () => {
     expect(nonDomPlan?.declarations[0]).toMatchObject({
       capability: 'models.read', authorizationMode: 'explicit-user', decisionRequired: true,
     })
-    expect(lookup).not.toHaveBeenCalled()
+    expect(lookup).toHaveBeenCalledTimes(1)
 
     const hostDom = await coordinator.handle(request({
       kind: 'inspect-local', sourceDirectory: await localPackageV5(root),
@@ -541,7 +542,7 @@ describe('launcher plugin lifecycle coordinator', () => {
     expect(hostDomPlan?.declarations.find(item => item.capability === 'ui.host-dom.read')).toMatchObject({
       authorizationMode: 'explicit-user', decisionRequired: true,
     })
-    expect(lookup).toHaveBeenCalledTimes(1)
+    expect(lookup).toHaveBeenCalledTimes(2)
   })
 
   it('refuses lifecycle activation when an exact persistent policy denies required Host DOM access', async () => {
@@ -601,6 +602,60 @@ describe('launcher plugin lifecycle coordinator', () => {
     await expect(coordinator.applyPermissionReviewV4({
       requestId: 'required-v4-apply', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0, decision,
     })).rejects.toThrow('A required plugin capability was not granted')
+  })
+
+  it('auto-authorizes manifest-v4 declarations from the exact Marketplace Certified entry on install', async () => {
+    const { root, home } = await workspace()
+    const runtime = new FormalRuntime()
+    let certified = true
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      certifiedPermissionForArtifact: async artifact => certified ? exactCertification(artifact) : undefined,
+      runtime,
+    })
+    const planned = await coordinator.handle(request({ kind: 'inspect-local', sourceDirectory: await localPackageV4(root) }))
+    const plan = await coordinator.permissionReviewPlanV4({
+      requestId: 'v5-manifest-v4-plan', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0,
+      target: { kind: 'candidate', candidateId: planned.candidateId! },
+    })
+    expect(plan).toMatchObject({ schemaVersion: 5, operation: 'install' })
+    expect(plan?.declarations).toHaveLength(2)
+    expect(plan?.declarations.every(item => item.authorizationMode === 'certified-implicit'
+      && item.decisionRequired === false && item.resourceClass === 'non-dom')).toBe(true)
+    const reviewed = {
+      $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
+      schemaVersion: 4 as const,
+      origin: 'explicit-user' as const,
+      planId: plan!.planId,
+      operation: plan!.operation,
+      profileId: plan!.profileId,
+      identity: plan!.identity,
+      binding: plan!.binding,
+      decisions: [],
+    }
+    await expect(coordinator.applyPermissionReviewV4({
+      requestId: 'v5-manifest-v4-apply', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0,
+      decision: reviewed,
+    })).resolves.toMatchObject({ outcome: 'applied', operation: 'install', revision: 1 })
+    expect(runtime.lastStaged?.authorizationDecision).toEqual(reviewed)
+
+    const disablePlan = await coordinator.handle(request({
+      kind: 'disable', pluginId: 'permission-v4', impactToken: 'probe',
+    }, 1))
+    await expect(coordinator.handle(request({
+      kind: 'disable', pluginId: 'permission-v4', impactToken: disablePlan.impactToken!,
+    }, 1))).resolves.toMatchObject({ outcome: 'applied', operation: 'disable', revision: 2 })
+    certified = false
+    const enablePlan = await coordinator.permissionReviewPlanV4({
+      requestId: 'v5-manifest-v4-enable', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 2,
+      target: { kind: 'enable', pluginId: 'permission-v4' },
+    })
+    expect(enablePlan).toMatchObject({ schemaVersion: 5, operation: 'enable' })
+    expect(enablePlan?.declarations.every(item => item.authorizationMode === 'explicit-user'
+      && item.decisionRequired === true)).toBe(true)
   })
 
   it('reviews package-v3/manifest-v4 through the Host-private V2 seam and the existing lifecycle authority', async () => {

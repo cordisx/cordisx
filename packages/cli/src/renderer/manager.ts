@@ -24,7 +24,7 @@ import type {
   CordisXPermissionAuthorizationDecisionV2,
   CordisXPermissionAuthorizationDecisionV4,
   CordisXPermissionAuthorizationPlanV2,
-  CordisXPermissionAuthorizationPlanV4,
+  CordisXPermissionAuthorizationPlanV5,
   CordisXPermissionCapabilityV2,
   CordisXPermissionCapabilityV4,
   CordisXPermissionScopeV4,
@@ -278,7 +278,7 @@ export interface ManagerModel {
   ): Promise<CordisXPluginLifecycleResultV1>
   permissionLifecycleReviewPlanV4?(
     target: { readonly kind: 'candidate'; readonly candidateId: string } | { readonly kind: 'enable'; readonly pluginId: string },
-  ): Promise<CordisXPermissionAuthorizationPlanV4 | undefined>
+  ): Promise<CordisXPermissionAuthorizationPlanV5 | undefined>
   applyPermissionLifecycleReviewV4?(
     decision: CordisXPermissionAuthorizationDecisionV4,
   ): Promise<CordisXPluginLifecycleResultV1>
@@ -1789,7 +1789,7 @@ export async function requestPluginAuthorizationV2(
 export async function requestPluginAuthorizationV4(
   document: Document,
   plugin: Pick<ManagerPluginSnapshot, 'id' | 'source' | 'name'>,
-  plan: CordisXPermissionAuthorizationPlanV4,
+  plan: CordisXPermissionAuthorizationPlanV5,
   permissions: readonly ManagerPermissionSnapshot[],
 ): Promise<CordisXPermissionAuthorizationDecisionV4 | undefined> {
   if (!plan.declarations.some(item => item.decisionRequired)) {
@@ -1996,12 +1996,12 @@ function marketplaceCertifiedDetailCopy(
   return chinese
     ? [
         `CordisX 已按策略 ${policy} 审核当前 ${version} 版本的明确制品，并认定其代码符合该版本策略。新版本或制品变化后必须重新认证。`,
-        '认证不是绝对安全保证，也不放宽沙箱、生命周期或安装审核。仅权限目录明确标记的界面能力可免去显式确认；Host 仍会按当前范围和运行实例创建可撤销、可审计的授权，其他权限照常确认。',
+        '认证不是绝对安全保证，也不放宽沙箱、生命周期或安装审核。通过当前 Marketplace Certified 条目安装或启用时，插件声明的权限会因 Certified 自动授权；Host 仍按当前范围和运行实例创建可撤销、可审计的授权。',
         'v1 信任根是受保护的 Marketplace 合入链；当前不声称存在制品密码学签名。',
       ]
     : [
         `CordisX reviewed the exact artifact for version ${version} under policy ${policy} and determined that its code conforms to that policy version. A new version or changed artifact requires a new certification.`,
-        'Certification is not an absolute safety guarantee and does not relax sandbox, lifecycle, or installation review. Only interface capabilities explicitly marked in the permission catalog may omit explicit confirmation. The Host still creates a revocable, audited authorization for the current scope and runtime instance; every other permission prompts normally.',
+        'Certification is not an absolute safety guarantee and does not relax sandbox, lifecycle, or installation review. Installing or enabling through the current Marketplace Certified entry auto-authorizes the plugin\'s declared permissions. The Host still creates revocable, audited authorization for the current scope and runtime instance.',
         'The v1 trust root is the protected Marketplace merge chain; no cryptographic artifact signature is claimed.',
       ]
 }
@@ -4343,9 +4343,9 @@ export function installCordisXManager(
 
     if (permission.authorizationOrigin !== undefined) {
       const authorization = forms.section(
-        permission.authorizationOrigin === 'certified-implicit' ? '认证自动批准的 DOM 权限' : '最近授权来源',
+        permission.authorizationOrigin === 'certified-implicit' ? '因 Certified 自动授权' : '最近授权来源',
         permission.authorizationReason ?? (permission.authorizationOrigin === 'certified-implicit'
-          ? 'Host 根据精确制品认证投影自动批准；权限仍由 PermissionBroker 签发并审计。'
+          ? 'Host 根据当前 Marketplace Certified 条目自动授权；权限仍由 PermissionBroker 签发并审计。'
           : '由用户显式确认。'),
       )
       authorization.root.dataset.permissionAuthorizationOrigin = permission.authorizationOrigin

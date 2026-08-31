@@ -5,6 +5,7 @@ import {
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V2,
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V3,
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V4,
+  CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V5,
   type CordisXCertifiedPermissionProjectionV1,
   type CordisXCapabilityDeclarationV3,
   type CordisXCapabilityDeclarationV4,
@@ -18,6 +19,7 @@ import {
   type CordisXPermissionAuthorizationPlanV2,
   type CordisXPermissionAuthorizationPlanV3,
   type CordisXPermissionAuthorizationPlanV4,
+  type CordisXPermissionAuthorizationPlanV5,
   type CordisXPermissionIdentityV2,
   type CordisXPermissionPolicyRecordV2,
   type CordisXPermissionPolicyRecordV3,
@@ -728,6 +730,37 @@ export function buildPermissionAuthorizationPlanV4(
     catalogVersion: catalog.versionV4,
     binding,
     declarations: Object.freeze(declarations),
+  })
+}
+
+/**
+ * Permission v5 keeps the frozen catalog classifications while applying the
+ * product-wide Marketplace Certified rule to every exact ask declaration.
+ */
+export function buildPermissionAuthorizationPlanV5(
+  input: PermissionAuthorizationPlanInputV4,
+  catalog = new CapabilityRiskCatalog(),
+  engine = new PermissionDecisionEngine(catalog),
+): CordisXPermissionAuthorizationPlanV5 {
+  const legacy = buildPermissionAuthorizationPlanV4(input, catalog, engine)
+  const certification = input.certification !== undefined
+    && input.certification.source === legacy.identity.source
+    && input.certification.pluginId === legacy.identity.pluginId
+    ? input.certification
+    : undefined
+  return Object.freeze({
+    ...legacy,
+    $schema: CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V5,
+    schemaVersion: 5 as const,
+    declarations: Object.freeze(legacy.declarations.map(item => {
+      if (item.policy !== 'ask' || certification === undefined) return item
+      return Object.freeze({
+        ...item,
+        decisionRequired: false,
+        authorizationMode: 'certified-implicit' as const,
+        certification,
+      })
+    })),
   })
 }
 

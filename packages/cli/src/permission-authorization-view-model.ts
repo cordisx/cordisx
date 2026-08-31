@@ -10,6 +10,7 @@ import {
   type CordisXPermissionAuthorizationPlanV2,
   type CordisXPermissionAuthorizationPlanV3,
   type CordisXPermissionAuthorizationPlanV4,
+  type CordisXPermissionAuthorizationPlanV5,
   type CordisXPermissionCapabilityV4,
   type CordisXPermissionDecisionV2,
   type CordisXPermissionScopeV4,
@@ -171,7 +172,7 @@ export class PermissionAuthorizationViewModel {
   readonly #selected = new Map<CordisXPermissionCapabilityV4, CordisXPermissionDecisionV2>()
   #settled = false
 
-  constructor(readonly plan: CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV3 | CordisXPermissionAuthorizationPlanV4) {
+  constructor(readonly plan: CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV3 | CordisXPermissionAuthorizationPlanV4 | CordisXPermissionAuthorizationPlanV5) {
     const seen = new Set<CordisXPermissionCapabilityV4>()
     for (const item of plan.declarations) {
       if (seen.has(item.capability)) throw new Error(`permission plan contains duplicate capability: ${item.capability}`)
@@ -204,7 +205,7 @@ export class PermissionAuthorizationViewModel {
 
   project(input: PermissionAuthorizationProjectionInput): PermissionAuthorizationDialogProjection {
     const resolve = input.resolve
-    const visibleDeclarations = this.plan.schemaVersion === 4
+    const visibleDeclarations = this.plan.schemaVersion === 4 || this.plan.schemaVersion === 5
       ? this.plan.declarations.filter(item => item.decisionRequired)
       : this.plan.declarations
     const items = visibleDeclarations.map(item => {
@@ -303,7 +304,7 @@ export class PermissionAuthorizationViewModel {
   confirm(): PermissionAuthorizationDialogResult {
     this.assertOpen()
     this.#settled = true
-    if (this.plan.schemaVersion === 4) {
+    if (this.plan.schemaVersion === 4 || this.plan.schemaVersion === 5) {
       const plan = this.plan
       return Object.freeze({
         status: 'confirmed',

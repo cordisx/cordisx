@@ -87,6 +87,7 @@ import {
   type CordisXPermissionAuthorizationPlanV2,
   type CordisXPermissionAuthorizationPlanV3,
   type CordisXPermissionAuthorizationPlanV4,
+  type CordisXPermissionAuthorizationPlanV5,
   type CordisXPermissionCapabilityV2,
   type CordisXPermissionCapabilityV3,
   type CordisXPermissionCapabilityV4,
@@ -105,7 +106,7 @@ import {
   CapabilityRiskCatalog,
   buildDomPermissionAuthorizationPlanV3,
   buildHostDomPermissionAuthorizationPlanV4,
-  buildPermissionAuthorizationPlanV4,
+  buildPermissionAuthorizationPlanV5,
   buildPermissionAuthorizationPlanResultV2,
 } from '../capability-risk-catalog.js'
 import {
@@ -488,7 +489,7 @@ export interface PermissionAuthorizationPromptV2 {
   ): Promise<CordisXPermissionAuthorizationDecisionV3 | undefined>
   cancelV3?(planId: string, binding: CordisXPermissionAuthorizationBindingV2): void
   requestV4?(
-    plan: CordisXPermissionAuthorizationPlanV4,
+    plan: CordisXPermissionAuthorizationPlanV4 | CordisXPermissionAuthorizationPlanV5,
     identity: CordisXPluginIdentity,
   ): Promise<CordisXPermissionAuthorizationDecisionV4 | undefined>
   cancelV4?(planId: string, binding: CordisXPermissionAuthorizationBindingV2): void
@@ -625,7 +626,7 @@ export class BrowserPermissionAuthorizationPromptV2 implements PermissionAuthori
   }
 
   async requestV4(
-    plan: CordisXPermissionAuthorizationPlanV4,
+    plan: CordisXPermissionAuthorizationPlanV4 | CordisXPermissionAuthorizationPlanV5,
     identity: CordisXPluginIdentity,
   ): Promise<CordisXPermissionAuthorizationDecisionV4 | undefined> {
     const result = await this.dialog.show(new PermissionAuthorizationViewModel(plan), {
@@ -823,7 +824,7 @@ export class PermissionBroker {
   private readonly domRequests = new Map<string, Promise<DomPermissionAccessDecision>>()
   private readonly domPromptPlans = new Map<string, CordisXPermissionAuthorizationPlanV3>()
   private readonly domPoints = new Map<string, Readonly<{ identity: CordisXPluginIdentity; pointId: string; moduleGeneration?: string }>>()
-  private readonly domCertificationTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private readonly certificationTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly hostDomLeases = new Map<string, HostDomPermissionLease>()
   private readonly hostDomPromptPlans = new Map<string, Readonly<{
     plan: CordisXPermissionAuthorizationPlanV4
@@ -931,14 +932,14 @@ export class PermissionBroker {
       throw new Error(`plugin ${identity.id} permission generation is already registered`)
     }
     this.registrations.set(key, registration)
-    this.scheduleDomCertificationExpiry(key, registration)
+    this.scheduleCertificationExpiry(key, registration)
     this.migrateLegacy(registration)
     this.migratePolicyRecordsV1(registration)
     if (this.visibility?.visible(generation) !== false) this.changed()
     return () => {
       if (this.registrations.get(key)?.token !== registration.token) return
       this.registrations.delete(key)
-      this.clearDomCertificationTimer(key)
+      this.clearCertificationTimer(key)
       const identityKey = platformIdentityKey(identity)
       this.onceV2.clearGeneration(this.generation, generation.moduleGeneration)
       this.clearDomGeneration(generation.moduleGeneration, identity)
@@ -959,8 +960,18 @@ export class PermissionBroker {
     return [...this.registrations.values()].some(candidate => candidate.token === registration.token)
   }
 
-  /** Refreshes only the Host-owned trust projection for the already bound exact artifact. */
-  private refreshRegistrationDomCertification(
+  private clearCertifiedAuthorizationAudits(registration: Registration): void {
+    const prefix = `${platformIdentityKey(registration.identity)}\u0000`
+    for (const [key, audit] of this.audit) {
+      if (!key.startsWith(prefix) || audit.authorizationOrigin !== 'certified-implicit') continue
+      delete audit.authorizationOrigin
+      delete audit.authorizationReason
+      delete audit.certification
+    }
+  }
+
+  /** Refreshes the Marketplace Certified projection for the already bound exact artifact. */
+  private refreshRegistrationCertification(
     key: string,
     registration: Registration,
     certification?: CordisXCertifiedPermissionProjectionV1,
@@ -973,7 +984,7 @@ export class PermissionBroker {
     }, artifact, this.now())
     const previous = artifact.certification
     if (previous?.fingerprint === normalized?.fingerprint && previous?.revision === normalized?.revision) {
-      this.scheduleDomCertificationExpiry(key, registration)
+      this.scheduleCertificationExpiry(key, registration)
       return
     }
     const next = Object.freeze({
@@ -985,20 +996,10 @@ export class PermissionBroker {
       }),
     })
     this.registrations.set(key, next)
-    this.scheduleDomCertificationExpiry(key, next)
+    this.scheduleCertificationExpiry(key, next)
     this.clearCertifiedDomLeases(registration)
     this.clearCertifiedHostDomLeases(registration)
-    const auditPrefix = this.domAuditPrefix(
-      platformIdentityKey(registration.identity),
-      registration.generation.moduleGeneration,
-    )
-    for (const [key, audit] of this.audit) {
-      if (!key.startsWith(auditPrefix)) continue
-      if (audit.authorizationOrigin !== 'certified-implicit') continue
-      delete audit.authorizationOrigin
-      delete audit.authorizationReason
-      delete audit.certification
-    }
+    this.clearCertifiedAuthorizationAudits(registration)
     this.changed()
   }
 
@@ -1064,7 +1065,7 @@ export class PermissionBroker {
       for (const [registrationKey, registration] of [...this.registrations.entries()]) {
         const artifact = registration.artifact
         if (artifact === undefined) continue
-        this.refreshRegistrationDomCertification(
+        this.refreshRegistrationCertification(
           registrationKey,
           registration,
           this.certifiedProjections.get(certifiedArtifactKey(
@@ -1076,37 +1077,37 @@ export class PermissionBroker {
     })
   }
 
-  private clearDomCertificationTimer(key: string): void {
-    const timer = this.domCertificationTimers.get(key)
+  private clearCertificationTimer(key: string): void {
+    const timer = this.certificationTimers.get(key)
     if (timer !== undefined) clearTimeout(timer)
-    this.domCertificationTimers.delete(key)
+    this.certificationTimers.delete(key)
   }
 
-  private scheduleDomCertificationExpiry(key: string, registration: Registration): void {
-    this.clearDomCertificationTimer(key)
+  private scheduleCertificationExpiry(key: string, registration: Registration): void {
+    this.clearCertificationTimer(key)
     const certification = registration.artifact?.certification
     if (certification === undefined) return
     const remaining = Date.parse(certification.expiresAt) - this.now().getTime()
     if (!Number.isFinite(remaining) || remaining <= 0) {
-      queueMicrotask(() => this.expireDomCertification(key, registration.token))
+      queueMicrotask(() => this.expireCertification(key, registration.token))
       return
     }
     const timer = setTimeout(
-      () => this.expireDomCertification(key, registration.token),
+      () => this.expireCertification(key, registration.token),
       Math.min(remaining, 2_147_483_647),
     )
     ;(timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.()
-    this.domCertificationTimers.set(key, timer)
+    this.certificationTimers.set(key, timer)
   }
 
-  private expireDomCertification(key: string, token: object): void {
-    this.domCertificationTimers.delete(key)
+  private expireCertification(key: string, token: object): void {
+    this.certificationTimers.delete(key)
     const registration = this.registrations.get(key)
     const artifact = registration?.artifact
     const certification = artifact?.certification
     if (registration === undefined || registration.token !== token || artifact === undefined || certification === undefined) return
     if (this.now().getTime() < Date.parse(certification.expiresAt)) {
-      this.scheduleDomCertificationExpiry(key, registration)
+      this.scheduleCertificationExpiry(key, registration)
       return
     }
     const next = Object.freeze({
@@ -1116,17 +1117,7 @@ export class PermissionBroker {
     this.registrations.set(key, next)
     this.clearCertifiedDomLeases(registration)
     this.clearCertifiedHostDomLeases(registration)
-    const auditPrefix = this.domAuditPrefix(
-      platformIdentityKey(registration.identity),
-      registration.generation.moduleGeneration,
-    )
-    for (const [auditKey, audit] of this.audit) {
-      if (!auditKey.startsWith(auditPrefix)) continue
-      if (audit.authorizationOrigin !== 'certified-implicit') continue
-      delete audit.authorizationOrigin
-      delete audit.authorizationReason
-      delete audit.certification
-    }
+    this.clearCertifiedAuthorizationAudits(registration)
     this.changed()
   }
 
@@ -1951,7 +1942,7 @@ export class PermissionBroker {
 
   private grantHostDomAccess(
     registration: Registration,
-    plan: CordisXPermissionAuthorizationPlanV4,
+    plan: CordisXPermissionAuthorizationPlanV4 | CordisXPermissionAuthorizationPlanV5,
     item: CordisXPermissionAuthorizationPlanV4['declarations'][number],
     origin: 'explicit-user' | 'certified-implicit',
   ): HostDomPermissionAccessDecision {
@@ -2286,13 +2277,13 @@ export class PermissionBroker {
     operation: 'install' | 'update' | 'enable' = 'enable',
     view?: PluginGenerationView,
     binding?: CordisXPermissionAuthorizationBindingV2,
-  ): CordisXPermissionAuthorizationPlanV4 | undefined {
+  ): CordisXPermissionAuthorizationPlanV5 | undefined {
     const registration = this.registration(identity, view)
     if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
-    if (registration.manifest.schemaVersion !== 5) return undefined
+    if (registration.manifest.schemaVersion !== 4 && registration.manifest.schemaVersion !== 5) return undefined
     const operationBinding = binding ?? this.binding(registration, `${this.generation}:${identity.id}`)
     const certification = this.activeCertification(registration)
-    return buildPermissionAuthorizationPlanV4({
+    return buildPermissionAuthorizationPlanV5({
       planId: `${this.generation}:${identity.id}`,
       operation,
       profileId: this.profileId,
@@ -2312,8 +2303,8 @@ export class PermissionBroker {
     view?: PluginGenerationView,
   ): Promise<void> {
     const registration = this.registration(identity, view)
-    if (registration === undefined || registration.manifest.schemaVersion !== 5) {
-      throw new Error(`plugin ${identity.id} does not use permission v4`)
+    if (registration === undefined || (registration.manifest.schemaVersion !== 4 && registration.manifest.schemaVersion !== 5)) {
+      throw new Error(`plugin ${identity.id} does not use permission v5`)
     }
     const plan = this.authorizationPlanV4(identity, operation, view, authorization.binding)!
     assertPermissionAuthorizationDecisionV4(plan, authorization)
@@ -2383,6 +2374,17 @@ export class PermissionBroker {
       }, oneShotBinding)
     }
     for (const item of plan.declarations) {
+      if (item.authorizationMode === 'certified-implicit'
+        && item.certification !== undefined
+        && registration.declarations.has(item.capability as CordisXPlatformCapability)) {
+        const capability = item.capability as CordisXPlatformCapability
+        const auditKey = this.auditKey(platformIdentityKey(registration.identity), capability)
+        const audit = this.audit.get(auditKey) ?? { denialCount: 0 }
+        audit.authorizationOrigin = 'certified-implicit'
+        audit.authorizationReason = 'Marketplace Certified source metadata auto-authorized by the Host'
+        audit.certification = item.certification
+        this.audit.set(auditKey, audit)
+      }
       if (!isHostDomPermissionCapability(item.capability)) continue
       const selected = authorization.decisions.find(candidate => candidate.capability === item.capability)?.decision
       const allowed = item.authorizationMode === 'certified-implicit'
@@ -2925,6 +2927,7 @@ export class PermissionBroker {
     }
     const plan = this.planV2(registration, 'runtime', binding, [declaration])
     const item = plan.declarations[0]!
+    const certification = this.activeCertification(registration)
     const activationBinding = this.binding(registration, `${this.generation}:${identity.id}`)
     const activationTicket = this.onceV2.consume(this.authorizationKey(plan, item.capability), activationBinding)
     if (item.policy === 'deny-persistent' && !activationTicket) {
@@ -2932,7 +2935,8 @@ export class PermissionBroker {
       this.denied(identityKey, capability, requested)
       return failure('permission-denied', `${capability} is denied for plugin ${identity.id}`)
     }
-    let allowed = activationTicket || (item.policy === 'allow-persistent' && item.sensitivity !== 'high-risk')
+    const certifiedAutoAuthorized = item.policy === 'ask' && certification !== undefined
+    let allowed = certifiedAutoAuthorized || activationTicket || (item.policy === 'allow-persistent' && item.sensitivity !== 'high-risk')
     if (!allowed) {
       this.consoleObserver?.permission(identity, capability, 'ask', `${capability} requires a decision`)
       let decision: CordisXPermissionAuthorizationDecisionV2 | undefined
@@ -2991,8 +2995,19 @@ export class PermissionBroker {
     const audit = this.audit.get(auditKey) ?? { denialCount: 0 }
     audit.lastUsedAt = isoNow(this.now)
     audit.lastRequested = requestedSnapshot(requested)
+    if (certifiedAutoAuthorized) {
+      audit.authorizationOrigin = 'certified-implicit'
+      audit.authorizationReason = 'Marketplace Certified source metadata auto-authorized by the Host'
+      audit.certification = certification
+    } else {
+      delete audit.authorizationOrigin
+      delete audit.authorizationReason
+      delete audit.certification
+    }
     this.audit.set(auditKey, audit)
-    this.consoleObserver?.permission(identity, capability, 'allow', `${capability} allowed`)
+    this.consoleObserver?.permission(identity, capability, 'allow', certifiedAutoAuthorized
+      ? `${capability} auto-authorized by Marketplace Certified metadata`
+      : `${capability} allowed`)
     this.changed()
     return { ok: true, value: { declaration: legacyDeclaration } }
   }
@@ -3008,8 +3023,10 @@ export class PermissionBroker {
         .map(item => item.name)
     }
     const plan = this.authorizationPlanV2(identity, 'enable', view)
+    const certified = this.activeCertification(registration) !== undefined
     const denied: CordisXPermissionCapabilityV4[] = plan.declarations.filter(item => item.required
       && item.policy !== 'allow-persistent'
+      && !(certified && item.policy === 'ask')
       && !this.onceV2.has(this.authorizationKey(plan, item.capability), plan.binding))
       .map(item => item.capability)
     if (registration.manifest.schemaVersion === 5) {
@@ -3073,6 +3090,9 @@ export class PermissionBroker {
             ...(audit.lastUsedAt === undefined ? {} : { lastUsedAt: audit.lastUsedAt }),
             ...(audit.lastDeniedAt === undefined ? {} : { lastDeniedAt: audit.lastDeniedAt }),
             denialCount: audit.denialCount,
+            ...(audit.authorizationOrigin === undefined ? {} : { authorizationOrigin: audit.authorizationOrigin }),
+            ...(audit.authorizationReason === undefined ? {} : { authorizationReason: audit.authorizationReason }),
+            ...(audit.certification === undefined ? {} : { certification: audit.certification }),
             ...(denied.has(item.capability) ? { blockedReason: `Required capability ${item.capability} is not authorized` } : {}),
           }
         })
@@ -3179,8 +3199,8 @@ export class PermissionBroker {
     this.hostDomPromptPlans.clear()
     this.hostDomPolicyRevisions.clear()
     this.pendingDomReviews.clear()
-    for (const timer of this.domCertificationTimers.values()) clearTimeout(timer)
-    this.domCertificationTimers.clear()
+    for (const timer of this.certificationTimers.values()) clearTimeout(timer)
+    this.certificationTimers.clear()
     this.promptV2?.dispose?.()
     this.listeners.clear()
   }

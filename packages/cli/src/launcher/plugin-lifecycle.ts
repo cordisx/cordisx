@@ -30,6 +30,7 @@ import {
   type CordisXCertifiedPermissionProjectionV1,
   type CordisXPermissionAuthorizationDecisionV4,
   type CordisXPermissionAuthorizationPlanV4,
+  type CordisXPermissionAuthorizationPlanV5,
   type CordisXPermissionAuthorizationDecisionV2,
   type CordisXPermissionAuthorizationPlanV2,
   type CordisXPermissionDecisionV2,
@@ -44,7 +45,7 @@ import {
 import {
   CapabilityRiskCatalog,
   buildPermissionAuthorizationPlanV2,
-  buildPermissionAuthorizationPlanV4,
+  buildPermissionAuthorizationPlanV5,
 } from '../capability-risk-catalog.js'
 import {
   assertPermissionAuthorizationDecisionV2,
@@ -167,7 +168,7 @@ interface CoordinatorOptions {
 
 interface PendingPermissionReview {
   readonly candidateId: string
-  readonly plan: CordisXPermissionAuthorizationPlanV1 | CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4
+  readonly plan: CordisXPermissionAuthorizationPlanV1 | CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4 | CordisXPermissionAuthorizationPlanV5
   readonly decision: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4
 }
 
@@ -370,12 +371,12 @@ function authorizationPlanV4(
   policiesV2: readonly CordisXPermissionPolicyRecordV2[],
   policiesV4: readonly CordisXPermissionPolicyRecordV4[],
   certification?: CordisXCertifiedPermissionProjectionV1,
-): CordisXPermissionAuthorizationPlanV4 {
-  if (staged.manifest.runtimeManifest.schemaVersion !== 5) {
-    throw new LifecycleFailure('permission-denied', 'Permission V4 review requires manifest-v5.')
+): CordisXPermissionAuthorizationPlanV5 {
+  if (staged.manifest.runtimeManifest.schemaVersion !== 4 && staged.manifest.runtimeManifest.schemaVersion !== 5) {
+    throw new LifecycleFailure('permission-denied', 'Permission v5 review requires manifest-v4 or manifest-v5.')
   }
   const catalog = new CapabilityRiskCatalog()
-  return buildPermissionAuthorizationPlanV4({
+  return buildPermissionAuthorizationPlanV5({
     planId: `${generation}:${staged.manifest.id}`,
     operation,
     profileId,
@@ -409,7 +410,7 @@ function validateDecisionV2(
 }
 
 function validateDecisionV4(
-  plan: CordisXPermissionAuthorizationPlanV4,
+  plan: CordisXPermissionAuthorizationPlanV4 | CordisXPermissionAuthorizationPlanV5,
   decision: CordisXPermissionAuthorizationDecisionV4,
 ): void {
   try {
@@ -449,7 +450,7 @@ function allowedDecisionV2(plan: CordisXPermissionAuthorizationPlanV2): CordisXP
   }
 }
 
-function allowedDecisionV4(plan: CordisXPermissionAuthorizationPlanV4): CordisXPermissionAuthorizationDecisionV4 {
+function allowedDecisionV4(plan: CordisXPermissionAuthorizationPlanV4 | CordisXPermissionAuthorizationPlanV5): CordisXPermissionAuthorizationDecisionV4 {
   return {
     $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
     schemaVersion: 4,
@@ -623,11 +624,7 @@ export class PluginLifecycleCoordinator {
 
   private async certifiedPermission(staged: StagedPluginPackage): Promise<CordisXCertifiedPermissionProjectionV1 | undefined> {
     const lookup = this.options.certifiedPermissionForArtifact
-    if (lookup === undefined || !staged.manifest.runtimeManifest.capabilities.some(declaration => {
-      if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return false
-      const name = (declaration as { readonly name?: unknown }).name
-      return name === 'ui.extension-points.render' || name === 'ui.host-dom.read' || name === 'ui.host-dom.modify'
-    })) return undefined
+    if (lookup === undefined || staged.manifest.runtimeManifest.capabilities.length === 0) return undefined
     const projection = await lookup({
       source: staged.identitySource,
       pluginId: staged.manifest.id,
@@ -868,7 +865,7 @@ export class PluginLifecycleCoordinator {
           await this.permissionPoliciesV2(),
         )
         : authorizationPlan(staged, operation, this.options.profileId, this.options.runtimeGeneration, await this.permissionPoliciesV1())
-    if (decision.schemaVersion === 4) validateDecisionV4(plan as CordisXPermissionAuthorizationPlanV4, decision)
+    if (decision.schemaVersion === 4) validateDecisionV4(plan as CordisXPermissionAuthorizationPlanV5, decision)
     else if (decision.schemaVersion === 2) validateDecisionV2(plan as CordisXPermissionAuthorizationPlanV2, decision)
     else validateDecision(plan as CordisXPermissionAuthorizationPlanV1, decision)
     const affected = topologicalPluginOrder(candidate.plugins).filter(id => {
@@ -952,7 +949,7 @@ export class PluginLifecycleCoordinator {
     readonly candidate: CordisXPluginActivationRecordV1
     readonly targetId: string
     readonly staged?: StagedPluginPackage
-    readonly authorizationPlan: CordisXPermissionAuthorizationPlanV1 | CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4
+    readonly authorizationPlan: CordisXPermissionAuthorizationPlanV1 | CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4 | CordisXPermissionAuthorizationPlanV5
     readonly authorizationDecision: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4
   }): Promise<CordisXPluginActivationRecordV1 | undefined> {
     const runtime = this.formalRuntime()
@@ -1202,7 +1199,7 @@ export class PluginLifecycleCoordinator {
       }
     }
     let staged: StagedPluginPackage | undefined
-    let reviewPlan: CordisXPermissionAuthorizationPlanV1 | CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4
+    let reviewPlan: CordisXPermissionAuthorizationPlanV1 | CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4 | CordisXPermissionAuthorizationPlanV5
     let reviewDecision: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4
     if (operation === 'enable') {
       const target = active.plugins.find(plugin => plugin.id === pluginId)!
@@ -1383,10 +1380,10 @@ export class PluginLifecycleCoordinator {
     )
   }
 
-  /** Host-private manifest-v5 review; uses the same PackageLifecycleAuthority transaction. */
+  /** Host-private permission v5 review; uses the same PackageLifecycleAuthority transaction. */
   async permissionReviewPlanV4(
     input: HostPermissionLifecycleReviewV4Request,
-  ): Promise<CordisXPermissionAuthorizationPlanV4 | undefined> {
+  ): Promise<CordisXPermissionAuthorizationPlanV5 | undefined> {
     if (input.profileId !== this.options.profileId || input.runtimeGeneration !== this.options.runtimeGeneration) {
       throw new LifecycleFailure('stale-generation', safeError('stale-generation'), 'conflict')
     }
@@ -1402,7 +1399,7 @@ export class PluginLifecycleCoordinator {
       const operation = active.plugins.some(plugin => plugin.id === pluginId) ? 'update' : 'install'
       const target = candidate.plugins.find(plugin => plugin.id === pluginId)!
       const staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => { throw classify(error) })
-      if (staged.manifest.runtimeManifest.schemaVersion !== 5) return undefined
+      if (staged.manifest.runtimeManifest.schemaVersion !== 4 && staged.manifest.runtimeManifest.schemaVersion !== 5) return undefined
       return authorizationPlanV4(
         staged,
         operation,
@@ -1419,7 +1416,7 @@ export class PluginLifecycleCoordinator {
     const activeTarget = active.plugins.find(plugin => plugin.id === pluginId)
     if (activeTarget === undefined || activeTarget.enabled) throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
     const staged = await loadStagedPluginPackage(this.options.homeDir, activeTarget.digest).catch(error => { throw classify(error) })
-    if (staged.manifest.runtimeManifest.schemaVersion !== 5) return undefined
+    if (staged.manifest.runtimeManifest.schemaVersion !== 4 && staged.manifest.runtimeManifest.schemaVersion !== 5) return undefined
     const { candidate } = this.mutationCandidate(active, 'enable', pluginId)
     await this.store.writeCandidate(candidate)
     const target = candidate.plugins.find(plugin => plugin.id === pluginId)!

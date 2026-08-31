@@ -4867,7 +4867,7 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         || !/PermissionBroker|权限/iu.test(official?.text ?? '')
         || !/policy|策略/iu.test(certified?.text ?? '')
         || !/absolute safety|绝对安全/iu.test(certified?.text ?? '')
-        || !/interface capabilities|界面能力/iu.test(certified?.text ?? '')
+        || !/Certified.*declared permissions|声明的权限.*Certified/iu.test(certified?.text ?? '')
         || !/absolute safety|绝对安全/iu.test(trustDetail?.boundary ?? '')) {
         throw new Error(`Marketplace trust detail assertions failed: ${JSON.stringify(trustDetail)}`)
       }

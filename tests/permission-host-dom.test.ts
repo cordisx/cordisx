@@ -15,6 +15,7 @@ import {
   type CordisXPermissionAuthorizationDecisionV4,
   type CordisXPermissionAuthorizationPlanV2,
   type CordisXPermissionAuthorizationPlanV4,
+  type CordisXPermissionAuthorizationPlanV5,
   type CordisXPluginManifestV5,
 } from '../packages/cli/src/permission-contracts.js'
 import { sha256Hex } from '../packages/cli/src/permission-model-v2.js'
@@ -46,7 +47,7 @@ async function formalPermissionV4Validators(): Promise<{
     'host-dom-common.v1.schema.json',
     'marketplace-certified-permission-projection.v1.schema.json',
     'permission-authorization-decision.v4.schema.json',
-    'permission-authorization-plan.v4.schema.json',
+    'permission-authorization-plan.v5.schema.json',
     'permission-common.v4.schema.json',
     'platform-model.v1.schema.json',
     'platform-session.v1.schema.json',
@@ -64,7 +65,7 @@ async function formalPermissionV4Validators(): Promise<{
   const get = (name: string) => ajv.getSchema(`https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/${name}`)!
   return {
     manifest: get('plugin-manifest.v5.schema.json'),
-    plan: get('permission-authorization-plan.v4.schema.json'),
+    plan: get('permission-authorization-plan.v5.schema.json'),
     decision: get('permission-authorization-decision.v4.schema.json'),
   }
 }
@@ -149,7 +150,7 @@ function decisionV2(plan: CordisXPermissionAuthorizationPlanV2): CordisXPermissi
 }
 
 function decisionV4(
-  plan: CordisXPermissionAuthorizationPlanV4,
+  plan: CordisXPermissionAuthorizationPlanV4 | CordisXPermissionAuthorizationPlanV5,
   selected: CordisXPermissionAuthorizationDecisionV4['decisions'][number]['decision'] = 'allow-once',
 ): CordisXPermissionAuthorizationDecisionV4 {
   return {
@@ -254,20 +255,21 @@ describe('manifest-v5 Host DOM permission model', () => {
   })
 
   it.each([
-    ['ordinary', undefined],
-    ['certified-only', certification()],
-    ['official-only', undefined],
-    ['official-and-certified', certification()],
-  ] as const)('still prompts for non-DOM access in the %s state', async (_state, certified) => {
+    ['ordinary', undefined, 1, undefined],
+    ['certified-only', certification(), 0, 'certified-implicit'],
+    ['official-only', undefined, 1, undefined],
+    ['official-and-certified', certification(), 0, 'certified-implicit'],
+  ] as const)('auto-authorizes declared non-DOM access only for the %s state', async (_state, certified, prompts, origin) => {
     const context = setup({
       ...(certified === undefined ? {} : { certified }),
       capabilities: [declaration('models.read', false, { providers: ['codex'] })],
     })
     await expect(context.broker.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({ ok: true })
-    expect(context.nonDomPrompts()).toBe(1)
+    expect(context.nonDomPrompts()).toBe(prompts)
+    expect(context.broker.snapshots().find(item => item.capability === 'models.read')?.authorizationOrigin).toBe(origin)
   })
 
-  it('binds Certified auto approval to the exact artifact and rejects self-reported trust', async () => {
+  it('binds Certified auto approval to the exact Marketplace artifact', async () => {
     const mismatch = setup({})
     expect(() => mismatch.broker.replaceCertifiedPermissionSnapshot({
       revision: 1,
@@ -284,11 +286,36 @@ describe('manifest-v5 Host DOM permission model', () => {
     await forged.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text'])
     expect(forged.hostDomPrompts()).toBe(1)
 
-    expect(() => normalizePluginManifest({
-      ...manifest([]),
-      certified: true,
-      official: true,
-    }, identity.id)).toThrow(/unsupported/i)
+  })
+
+  it('keeps repeated Certified non-DOM calls dialog-free and restores normal review after source metadata removal', async () => {
+    const exact = certification()
+    const context = setup({
+      certified: exact,
+      capabilities: [declaration('models.read', false, { providers: ['codex'] })],
+    })
+    const plan = context.broker.authorizationPlanV4(identity)!
+    expect(plan).toMatchObject({ schemaVersion: 5 })
+    expect(plan.declarations).toEqual([expect.objectContaining({
+      capability: 'models.read', authorizationMode: 'certified-implicit', decisionRequired: false,
+      resourceClass: 'non-dom', certifiedImplicitApproval: false,
+      certification: expect.objectContaining({ fingerprint: exact.fingerprint }),
+    })])
+    await context.broker.authorizeActivationV4(identity, decisionV4(plan))
+    await expect(context.broker.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({ ok: true })
+    await expect(context.broker.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({ ok: true })
+    expect(context.nonDomPrompts()).toBe(0)
+    expect(context.broker.snapshots()).toContainEqual(expect.objectContaining({
+      capability: 'models.read',
+      authorizationOrigin: 'certified-implicit',
+      authorizationReason: 'Marketplace Certified source metadata auto-authorized by the Host',
+      certification: expect.objectContaining({ fingerprint: exact.fingerprint }),
+    }))
+
+    context.broker.replaceCertifiedPermissionSnapshot({ revision: 2, projections: [] })
+    expect(context.broker.snapshots().find(item => item.capability === 'models.read')?.authorizationOrigin).toBeUndefined()
+    await expect(context.broker.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({ ok: true })
+    expect(context.nonDomPrompts()).toBe(1)
   })
 
   it('lets exact persistent deny override certification and forbids persistent modify allow', async () => {
@@ -299,6 +326,21 @@ describe('manifest-v5 Host DOM permission model', () => {
     expect(context.hostDomPrompts()).toBe(0)
     await expect(context.broker.setHostDomPolicy(identity, 'ui.host-dom.modify', 'allow-persistent'))
       .rejects.toThrow(/does not permit persistent allow/)
+  })
+
+  it('lets an exact persistent non-DOM deny override Marketplace Certified metadata', async () => {
+    const context = setup({
+      certified: certification(),
+      capabilities: [declaration('models.read', true, { providers: ['codex'] })],
+    })
+    await context.broker.setPolicyV2(identity, 'models.read', 'deny-persistent')
+    expect(context.broker.authorizationPlanV4(identity)?.declarations[0]).toMatchObject({
+      authorizationMode: 'persistent-policy', policy: 'deny-persistent', decisionRequired: false,
+    })
+    await expect(context.broker.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({
+      ok: false, error: { code: 'permission-denied' },
+    })
+    expect(context.nonDomPrompts()).toBe(0)
   })
 
   it('rejects root/operation widening and invalidates Certified leases on refresh and generation unload', async () => {

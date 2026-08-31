@@ -37,7 +37,7 @@ import type {
   CordisXPermissionAuthorizationDecisionV2,
   CordisXPermissionAuthorizationDecisionV4,
   CordisXPermissionAuthorizationPlanV2,
-  CordisXPermissionAuthorizationPlanV4,
+  CordisXPermissionAuthorizationPlanV5,
   CordisXPermissionCapabilityV4,
   CordisXPermissionScopeV4,
 } from '../permission-contracts.js'
@@ -354,7 +354,7 @@ interface CordisXRuntimeHandle extends ManagerModel {
   authorizePlugin(id: string, decision: CordisXPermissionAuthorizationDecisionV1): Promise<void>
   permissionAuthorizationPlanV2(id: string): CordisXPermissionAuthorizationPlanV2 | undefined
   authorizePluginV2(id: string, decision: CordisXPermissionAuthorizationDecisionV2): Promise<void>
-  permissionAuthorizationPlanV4(id: string): CordisXPermissionAuthorizationPlanV4 | undefined
+  permissionAuthorizationPlanV4(id: string): CordisXPermissionAuthorizationPlanV5 | undefined
   authorizePluginV4(id: string, decision: CordisXPermissionAuthorizationDecisionV4): Promise<void>
   /** Host-private readback of the registry authority; never used as renderer lifecycle input. */
   activePluginGeneration(): CordisXPluginActivationRecordV1
@@ -1983,7 +1983,7 @@ async function start(
     id: string,
     decision: CordisXPermissionAuthorizationDecisionV4,
   ): Promise<void> => authorizePluginWith(id, async controller => {
-    if (controller.manifest.schemaVersion !== 5) throw new Error(`plugin ${id} does not use permission v4`)
+    if (controller.manifest.schemaVersion !== 4 && controller.manifest.schemaVersion !== 5) throw new Error(`plugin ${id} does not use permission v5`)
     await broker.authorizeActivationV4(controller.identity, decision, 'enable', controller.generationView)
   })
 
@@ -2178,7 +2178,9 @@ async function start(
             && mutation.authorizationDecision !== undefined
             && (mutation.operation === 'install' || mutation.operation === 'update' || mutation.operation === 'enable')) {
             if (mutation.authorizationDecision.schemaVersion === 4) {
-              if (candidate.controller.manifest.schemaVersion !== 5) throw new Error('permission v4 decision requires manifest-v5')
+              if (candidate.controller.manifest.schemaVersion !== 4 && candidate.controller.manifest.schemaVersion !== 5) {
+                throw new Error('permission v5 review requires manifest-v4 or manifest-v5')
+              }
               await broker.authorizeActivationV4(
                 candidate.controller.identity,
                 mutation.authorizationDecision,

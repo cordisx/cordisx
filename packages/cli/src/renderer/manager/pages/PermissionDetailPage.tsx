@@ -15,8 +15,8 @@ export function PermissionDetailPage({ model, snapshot, router }: { readonly mod
     <section className="cxr-section"><h3>能力可用性</h3><p>{permission.availability.status}</p><p>{permission.availability.reasonText}</p></section>
     <section className="cxr-section"><h3>使用范围</h3><pre className="cxr-code">{JSON.stringify(permission.scope, null, 2)}</pre></section>
     {permission.authorizationOrigin === undefined ? null : <section className="cxr-section" data-permission-authorization-origin={permission.authorizationOrigin}>
-      <h3>{permission.authorizationOrigin === 'certified-implicit' ? '认证自动批准的 DOM 权限' : '最近授权来源'}</h3>
-      <p>{permission.authorizationReason ?? (permission.authorizationOrigin === 'certified-implicit' ? 'Host 根据精确制品认证投影自动批准。' : '由用户显式确认。')}</p>
+      <h3>{permission.authorizationOrigin === 'certified-implicit' ? '因 Certified 自动授权' : '最近授权来源'}</h3>
+      <p>{permission.authorizationReason ?? (permission.authorizationOrigin === 'certified-implicit' ? 'Host 根据当前 Marketplace Certified 条目自动授权。' : '由用户显式确认。')}</p>
       {permission.certification === undefined ? null : <dl className="cxr-facts">
         <div><dt>制品</dt><dd><code>{permission.certification.pluginId}@{permission.certification.version}</code></dd></div>
         <div><dt>完整性</dt><dd><code>{permission.certification.integrity}</code></dd></div>

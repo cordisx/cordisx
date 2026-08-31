@@ -10,7 +10,7 @@ import type {
   HostPermissionLifecycleReviewV2Request,
   HostPermissionLifecycleReviewV4Request,
 } from './plugin-lifecycle.js'
-import type { CordisXPermissionAuthorizationPlanV2, CordisXPermissionAuthorizationPlanV4 } from '../permission-contracts.js'
+import type { CordisXPermissionAuthorizationPlanV2, CordisXPermissionAuthorizationPlanV4, CordisXPermissionAuthorizationPlanV5 } from '../permission-contracts.js'
 
 export const PLUGIN_LIFECYCLE_BINDING = '__cordisxPluginLifecycleRequestV1'
 export const PLUGIN_LIFECYCLE_RECEIVER = '__cordisxPluginLifecycleReceiveV1'
@@ -122,7 +122,7 @@ export function parsePluginLifecycleBindingRequest(
 export async function handlePluginLifecycleBindingRequest(
   handler: PluginLifecycleBridgeHandler,
   input: PluginLifecycleBindingRequest,
-): Promise<CordisXPluginLifecycleResultV1 | CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4 | undefined> {
+): Promise<CordisXPluginLifecycleResultV1 | CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4 | CordisXPermissionAuthorizationPlanV5 | undefined> {
   if (input.kind === 'protocol-v1') return await handler.coordinator.handle(input.request)
   if (input.kind === 'permission-review-plan-v2') return await handler.coordinator.permissionReviewPlanV2(input.request)
   if (input.kind === 'permission-review-plan-v4') return await handler.coordinator.permissionReviewPlanV4(input.request)
