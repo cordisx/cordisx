@@ -54,7 +54,7 @@ export function activatePlaygroundReviewNavigation(
  * local review composition; production permission policy remains unchanged.
  */
 export async function authorizePlaygroundReviewNavigation(
-  runtime: PlaygroundRuntime,
+  runtime: Pick<PlaygroundRuntime, 'snapshot' | 'setExtensionPointPolicies'>,
   qualifiedContributionId: string,
 ): Promise<void> {
   const snapshot = runtime.snapshot()
@@ -72,18 +72,6 @@ export async function authorizePlaygroundReviewNavigation(
     : snapshot.navigation.routes.find(candidate =>
       candidate.owner === registration.owner && candidate.id === routeId)
   if (route !== undefined) pointIds.push(route.definition.outlet)
-  const applied: string[] = []
-  try {
-    for (const pointId of new Set(pointIds)) {
-      await runtime.setExtensionPointPolicy(plugin.source, registration.owner, pointId, 'allow')
-      applied.push(pointId)
-    }
-  } catch (error) {
-    // The review convenience must not leave a persistent partial grant when
-    // the route outlet cannot be authorized. Restore the inherited policy for
-    // every point already written, then let the caller remain fail-closed.
-    await Promise.allSettled(applied.reverse().map(pointId =>
-      runtime.setExtensionPointPolicy(plugin.source, registration.owner, pointId, 'inherit')))
-    throw error
-  }
+  await runtime.setExtensionPointPolicies(plugin.source, registration.owner,
+    [...new Set(pointIds)].map(pointId => ({ pointId, policy: 'allow' })))
 }

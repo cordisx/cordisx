@@ -38,13 +38,13 @@ describe('UI Playground', () => {
         ],
         navigation: { routes: [{ owner: 'chatroom', id: 'new-room', definition: { outlet: 'main' } }] },
       }),
-      setExtensionPointPolicy: async (...args: unknown[]) => { calls.push(args) },
+      setExtensionPointPolicies: async (...args: unknown[]) => { calls.push(args) },
     }
     await authorizePlaygroundReviewNavigation(runtime, 'chatroom:chatroom')
-    expect(calls).toEqual([
-      ['file:///plugins/chatroom.ts', 'chatroom', 'sidebar.navigation.items', 'allow'],
-      ['file:///plugins/chatroom.ts', 'chatroom', 'main', 'allow'],
-    ])
+    expect(calls).toEqual([['file:///plugins/chatroom.ts', 'chatroom', [
+      { pointId: 'sidebar.navigation.items', policy: 'allow' },
+      { pointId: 'main', policy: 'allow' },
+    ]]])
   })
 
   it('does not override an explicit denial or authorize a non-sidebar review contribution', async () => {
@@ -58,14 +58,14 @@ describe('UI Playground', () => {
         ],
         navigation: { routes: [] },
       }),
-      setExtensionPointPolicy: async (...args: unknown[]) => { calls.push(args) },
+      setExtensionPointPolicies: async (...args: unknown[]) => { calls.push(args) },
     }
     await authorizePlaygroundReviewNavigation(runtime, 'chatroom:chatroom')
     await authorizePlaygroundReviewNavigation(runtime, 'chatroom:toolbar')
     expect(calls).toEqual([])
   })
 
-  it('rolls back a partial review grant and fails closed when outlet authorization is rejected', async () => {
+  it('fails closed when the runtime rejects the atomic review policy replacement', async () => {
     const calls: unknown[][] = []
     const runtime = {
       snapshot: () => ({
@@ -76,17 +76,16 @@ describe('UI Playground', () => {
         }],
         navigation: { routes: [{ owner: 'chatroom', id: 'new-room', definition: { outlet: 'main' } }] },
       }),
-      setExtensionPointPolicy: async (...args: unknown[]) => {
+      setExtensionPointPolicies: async (...args: unknown[]) => {
         calls.push(args)
-        if (args[2] === 'main') throw new Error('outlet policy unavailable')
+        throw new Error('atomic policy replacement unavailable')
       },
     }
-    await expect(authorizePlaygroundReviewNavigation(runtime, 'chatroom:chatroom')).rejects.toThrow('outlet policy unavailable')
-    expect(calls).toEqual([
-      ['file:///plugins/chatroom.ts', 'chatroom', 'sidebar.navigation.items', 'allow'],
-      ['file:///plugins/chatroom.ts', 'chatroom', 'main', 'allow'],
-      ['file:///plugins/chatroom.ts', 'chatroom', 'sidebar.navigation.items', 'inherit'],
-    ])
+    await expect(authorizePlaygroundReviewNavigation(runtime, 'chatroom:chatroom')).rejects.toThrow('atomic policy replacement unavailable')
+    expect(calls).toEqual([['file:///plugins/chatroom.ts', 'chatroom', [
+      { pointId: 'sidebar.navigation.items', policy: 'allow' },
+      { pointId: 'main', policy: 'allow' },
+    ]]])
   })
 
   it('restores the Host outlet before a Room route projects during Task history back and forward', async () => {

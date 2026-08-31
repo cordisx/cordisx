@@ -2748,29 +2748,46 @@ export class PermissionBroker {
   }
 
   async setDomPolicy(identity: CordisXPluginIdentity, pointId: string, policy: CordisXPermissionPolicyV2): Promise<void> {
+    await this.setDomPolicies(identity, [{ pointId, policy }])
+  }
+
+  /** Persist one plugin's point-policy replacement as one profile-ledger write. */
+  async setDomPolicies(
+    identity: CordisXPluginIdentity,
+    policies: readonly { readonly pointId: string; readonly policy: CordisXPermissionPolicyV2 }[],
+  ): Promise<void> {
     const registration = this.registration(identity)
     if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
-    const key = domPermissionAuthorizationKeyV3({
-      profileId: this.profileId,
-      identity: { source: identity.source, pluginId: identity.id },
-      pointId,
-      catalogVersion: this.catalog.version,
+    const pointIds = new Set<string>()
+    const replacements = policies.map(({ pointId, policy }) => {
+      if (pointIds.has(pointId)) throw new Error(`duplicate extension point policy: ${pointId}`)
+      pointIds.add(pointId)
+      const key = domPermissionAuthorizationKeyV3({
+        profileId: this.profileId,
+        identity: { source: identity.source, pluginId: identity.id },
+        pointId,
+        catalogVersion: this.catalog.version,
+      })
+      const record = normalizePermissionPolicyRecordV3({
+        $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
+        schemaVersion: 3,
+        key,
+        policy,
+      })
+      const recordKey = permissionRecordKeyV3(record)
+      return { pointId, record, recordKey, previous: this.policyRecords.get(recordKey) }
     })
-    const record = normalizePermissionPolicyRecordV3({
-      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
-      schemaVersion: 3,
-      key,
-      policy,
-    })
-    const recordKey = permissionRecordKeyV3(record)
-    const previous = this.policyRecords.get(recordKey)
-    this.policyRecords.set(recordKey, record)
-    this.clearExactDomLease(registration, pointId)
+    for (const replacement of replacements) {
+      this.policyRecords.set(replacement.recordKey, replacement.record)
+      this.clearExactDomLease(registration, replacement.pointId)
+    }
     try {
-      await this.persistV3([record])
+      await this.persistV3(replacements.map(replacement => replacement.record))
     } catch (error) {
-      if (previous === undefined) this.policyRecords.delete(recordKey)
-      else this.policyRecords.set(recordKey, previous)
+      for (const replacement of replacements) {
+        if (replacement.previous === undefined) this.policyRecords.delete(replacement.recordKey)
+        else this.policyRecords.set(replacement.recordKey, replacement.previous)
+      }
       throw error
     } finally {
       this.changed()
