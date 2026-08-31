@@ -31,11 +31,19 @@ import {
   MAX_PROVIDER_REQUESTS,
   parseProviderBindingRequest,
 } from '../launcher/provider-rpc.js'
-import { normalizePermissionPolicyRecord } from '../permissions.js'
+import { normalizePersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import { resolveLocalCodexProviderConfig } from '../providers/config.js'
 import type { CodexProviderConfig } from '../providers/contracts.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
+import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
+import {
+  createOwnerDocumentBridgeHandler,
+  OwnerDocumentLeaseRegistry,
+  ownerDocumentBridgeError,
+  parseOwnerDocumentBindingRequest,
+  type OwnerDocumentBridgeHandler,
+} from '../launcher/owner-document-rpc.js'
 
 export interface PlaygroundFixtureInfo {
   readonly name: string
@@ -48,6 +56,8 @@ interface PlaygroundGeneration {
   readonly token: string
   readonly config: CordisXConfig
   readonly bridge: ConfigBridgeHandler
+  readonly documents: OwnerDocumentBridgeHandler
+  readonly documentSecret: string
   readonly serviceConfig?: ServiceConfigBridgeHandler
   readonly credential?: ChannelCredentialBridgeHandler
   readonly channelConfig?: HostServiceConfigNarrowApi
@@ -67,6 +77,7 @@ export interface PlaygroundSession {
   buildBundle(): Promise<{ readonly generation: string; readonly source: string }>
   buildComposition(runtimeImport: string): Promise<PreparedPlaygroundComposition>
   handleConfigRequest(raw: string): Promise<unknown>
+  handleOwnerDocumentRequest(raw: string): Promise<unknown>
   handleServiceConfigRequest(raw: string): Promise<unknown>
   handleChannelCredentialRequest(raw: string): Promise<unknown>
   handleProviderRequest(raw: string): Promise<unknown>
@@ -127,7 +138,7 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
   const previewPermissionPolicies = playground.permissionPolicies === undefined
     ? []
     : Array.isArray(playground.permissionPolicies)
-      ? playground.permissionPolicies.map((policy, index) => normalizePermissionPolicyRecord(
+      ? playground.permissionPolicies.map((policy, index) => normalizePersistedPermissionPolicyRecord(
         policy,
         `playground.permissionPolicies[${index}]`,
       ))
@@ -176,6 +187,7 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
   let active: PlaygroundGeneration | undefined
   let activeProviderRequests = 0
   const credentialBackend = new PlaygroundCredentialBackend()
+  const ownerDocumentStore = new OwnerDocumentStore(homeDir)
   const nextGeneration = async (): Promise<PlaygroundGeneration> => {
     active?.channelConfig?.dispose()
     await active?.providerFleet?.close()
@@ -204,6 +216,21 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
       generation,
       configPath,
       composition: config,
+    })
+    const identities = new Map(config.plugins.map(plugin => [
+      plugin.id,
+      plugin.source ?? pathToFileURL(plugin.entry).href,
+    ]))
+    const documentSecret = randomBytes(32).toString('hex')
+    const documentLeases = new OwnerDocumentLeaseRegistry({
+      stable: [...identities].map(([pluginId, source]) => ({ pluginId, source })),
+    })
+    const documents = createOwnerDocumentBridgeHandler({
+      secret: documentSecret,
+      profileId: 'playground',
+      generation,
+      store: ownerDocumentStore,
+      principalAllowed: principal => documentLeases.allowed(principal),
     })
     const channelPlugin = config.plugins.find(plugin => plugin.id === 'channel')
     const channelConfig = channelPlugin === undefined ? undefined : new HostServiceConfigNarrowApi({
@@ -235,7 +262,7 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
       writable: channelDescriptor.writable,
     })
     const next: PlaygroundGeneration = {
-      generation, token, config, bridge,
+      generation, token, config, bridge, documents, documentSecret,
       ...(channelConfig === undefined ? {} : { channelConfig }),
       ...(serviceConfig === undefined ? {} : { serviceConfig }),
       ...(credential === undefined ? {} : { credential }),
@@ -250,6 +277,11 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
     playground: true as const,
     generation: generation.generation,
     configBridgeToken: generation.token,
+    ownerDocumentAuthority: {
+      secret: generation.documentSecret,
+      profileId: 'playground',
+      generation: generation.generation,
+    },
     ...(generation.serviceConfig === undefined ? {} : { serviceConfigBridgeToken: generation.serviceConfig.token }),
     ...(generation.credential === undefined ? {} : { channelCredentialBridgeToken: generation.credential.token }),
     ...(generation.channelManager === undefined ? {} : { channelManager: generation.channelManager }),
@@ -290,6 +322,20 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
         return { requestId: parsed.requestId, ok: true, value: await active.bridge.handle(parsed) }
       } catch (error) {
         return { requestId: parsed.requestId, ok: false, ...configBridgeError(error) }
+      }
+    },
+    async handleOwnerDocumentRequest(raw) {
+      if (active === undefined) throw new Error('Playground has no active generation')
+      let requestId = 'invalid'
+      try {
+        const parsed = parseOwnerDocumentBindingRequest(JSON.parse(raw))
+        requestId = parsed.requestId
+        const value = parsed.operation === 'load'
+          ? await active.documents.load(parsed)
+          : await active.documents.replace(parsed)
+        return { requestId, ok: true, value }
+      } catch {
+        return { requestId, ok: true, value: ownerDocumentBridgeError() }
       }
     },
     async handleServiceConfigRequest(raw) {

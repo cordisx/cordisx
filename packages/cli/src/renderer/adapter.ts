@@ -2017,7 +2017,45 @@ class StructuredSurfaceRenderer {
   }
 }
 
+interface StructuredStyleOwnership {
+  readonly element: HTMLStyleElement
+  references: number
+}
+
+const structuredStyleOwnership = new WeakMap<Document, StructuredStyleOwnership>()
+
+function assertStructuredStyleOwnership(document: Document): void {
+  const shared = structuredStyleOwnership.get(document)
+  if (shared !== undefined) {
+    if (
+      !shared.element.isConnected
+      || document.getElementById('cordisx-structured-styles') !== shared.element
+      || document.querySelectorAll('#cordisx-structured-styles').length !== 1
+    ) {
+      throw new Error('CordisX structured style ownership is stale')
+    }
+    return
+  }
+  if (document.getElementById('cordisx-structured-styles') !== null) {
+    throw new Error('CordisX structured styles are already owned by another renderer')
+  }
+}
+
 function installStyles(document: Document): () => void {
+  assertStructuredStyleOwnership(document)
+  const shared = structuredStyleOwnership.get(document)
+  if (shared !== undefined) {
+    shared.references += 1
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      shared.references -= 1
+      if (shared.references > 0) return
+      shared.element.remove()
+      structuredStyleOwnership.delete(document)
+    }
+  }
   const style = document.createElement('style')
   style.id = 'cordisx-structured-styles'
   style.textContent = `
@@ -2142,7 +2180,17 @@ function installStyles(document: Document): () => void {
     .cordisx-env-row-actions .cordisx-shortcut-action { --cordisx-icon-only-glyph-size: 16px; }
   `
   ;(document.head ?? document.documentElement).append(style)
-  return () => style.remove()
+  const ownership: StructuredStyleOwnership = { element: style, references: 1 }
+  structuredStyleOwnership.set(document, ownership)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    ownership.references -= 1
+    if (ownership.references > 0) return
+    style.remove()
+    structuredStyleOwnership.delete(document)
+  }
 }
 
 export interface CodexAdapterHandle {
@@ -2165,6 +2213,7 @@ export function installCodexAdapter(
   extensionPoints: ExtensionPointDescriptorRegistry,
   options: CodexAdapterOptions = {},
 ): CodexAdapterHandle {
+  assertStructuredStyleOwnership(document)
   const unregisterExtensionPoints = extensionPoints.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
   let lastProjectKey: string | undefined
   const app = new DomOutletController(document, 'app', 'fixed', () => {
@@ -2247,6 +2296,7 @@ export function installPlaygroundAdapter(
   extensionPoints: ExtensionPointDescriptorRegistry,
   options: CodexAdapterOptions = {},
 ): CodexAdapterHandle {
+  assertStructuredStyleOwnership(document)
   const unregisterExtensionPoints = extensionPoints.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
   const generation = options.generation ?? (typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
@@ -2258,45 +2308,66 @@ export function installPlaygroundAdapter(
   (candidate, view) => slots.controlGenerationVisible(candidate, view),
   candidate => slots.controlGenerationCallable(candidate))
   reasoningControl.connect(controls)
-  slots.setControlCoordinator(controls)
   const seat = (name: string): HTMLElement | undefined => document.querySelector<HTMLElement>(`[data-cordisx-playground-seat="${name}"]`) ?? undefined
   const controllers = [
     ['app', 'fixed', () => seat('app')],
     ['main', 'portal', () => seat('main')],
     ['session.content', 'absolute', () => seat('session.content')],
   ] as const
-  const declared = controllers.map(([id, placement, resolve]) => {
-    const controller = new DomOutletController(document, id, placement, () => {
-      const anchor = resolve()
-      return anchor === undefined ? undefined : { anchor, contextKey: `playground:${id}` }
-    })
-    const path = id === 'app'
-      ? (value: string) => value !== '/main' && !value.startsWith('/main/') && value !== '/sessions' && !value.startsWith('/sessions/')
-      : id === 'main'
-        ? (value: string) => value.startsWith('/main/') && value.length > '/main/'.length
-        : (value: string) => value.startsWith('/sessions/:sessionId/') && value.length > '/sessions/:sessionId/'.length
-    return { controller, dispose: routes.outlets.declare({
-      schemaVersion: 1, id, authority: 'host-adapter', scope: 'playground', preferredPlacement: placement,
-      contextPolicy: 'generation', presentationGroup: 'primary',
-    }, controller, path) }
-  })
-  const removeStyles = installStyles(document)
-  const surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, {
-    generation,
-    adapterVersion: options.adapterVersion ?? 'ui-playground-v1',
-    hostId: options.hostId ?? 'cordisx.playground',
-    mode: 'playground',
-  })
-  return {
-    dispose() {
-      surfaces.dispose()
-      reasoningControl.dispose()
-      removeStyles()
-      for (const item of declared.reverse()) {
-        item.dispose()
-        item.controller.dispose()
+  let removeStyles: (() => void) | undefined
+  const declared: Array<{ readonly controller: DomOutletController; readonly dispose: () => void }> = []
+  let surfaces: StructuredSurfaceRenderer | undefined
+  try {
+    removeStyles = installStyles(document)
+    for (const [id, placement, resolve] of controllers) {
+      const controller = new DomOutletController(document, id, placement, () => {
+        const anchor = resolve()
+        return anchor === undefined ? undefined : { anchor, contextKey: `playground:${id}` }
+      })
+      const path = id === 'app'
+        ? (value: string) => value !== '/main' && !value.startsWith('/main/') && value !== '/sessions' && !value.startsWith('/sessions/')
+        : id === 'main'
+          ? (value: string) => value.startsWith('/main/') && value.length > '/main/'.length
+          : (value: string) => value.startsWith('/sessions/:sessionId/') && value.length > '/sessions/:sessionId/'.length
+      try {
+        const dispose = routes.outlets.declare({
+          schemaVersion: 1, id, authority: 'host-adapter', scope: 'playground', preferredPlacement: placement,
+          contextPolicy: 'generation', presentationGroup: 'primary',
+        }, controller, path)
+        declared.push({ controller, dispose })
+      } catch (error) {
+        controller.dispose()
+        throw error
       }
-      unregisterExtensionPoints()
-    },
+    }
+    surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, {
+      generation,
+      adapterVersion: options.adapterVersion ?? 'ui-playground-v1',
+      hostId: options.hostId ?? 'cordisx.playground',
+      mode: 'playground',
+    })
+    slots.setControlCoordinator(controls)
+    return {
+      dispose() {
+        surfaces?.dispose()
+        reasoningControl.dispose()
+        removeStyles?.()
+        for (const item of declared.reverse()) {
+          item.dispose()
+          item.controller.dispose()
+        }
+        unregisterExtensionPoints()
+      },
+    }
+  } catch (error) {
+    surfaces?.dispose()
+    reasoningControl.dispose()
+    removeStyles?.()
+    for (const item of declared.reverse()) {
+      item.dispose()
+      item.controller.dispose()
+    }
+    unregisterExtensionPoints()
+    throw error
   }
 }

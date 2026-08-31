@@ -147,6 +147,39 @@ provider, model, App Server, Codex task, process, connection, or login state.
 Its `debug:agent-loop/mock/v1` task registry and trace page are development
 diagnostics, not public runtime state or a permanent CLI contract.
 
+Small plugin-owned durable state uses the Host public
+`cordisx.owner-documents/v1` service at `ctx.documents`. The renderer receives
+one client bound to the Host-issued plugin principal; callers cannot choose a
+profile, source, plugin id, or runtime generation. The launcher keys the store
+by exact profile, source, and plugin id while deliberately excluding module
+generation, so normal reload, disable, uninstall/re-enable, and upgrades from
+the same stable source retain the owner's data. A source replacement is a new
+owner and cannot inherit it. Ordinary disposal never purges state, and v1
+exposes no purge operation.
+
+The launcher, rather than plugin code or renderer local storage, owns the JSON
+document files. A per-owner atomic lock with dead-process recovery serializes
+compare-and-swap across launcher instances and processes, so one expected
+revision has at most one winner. The Host issues one authenticated token per
+exact profile, source, plugin id, runtime generation, and module activation
+generation; the wire never accepts a caller-selected owner. Package reload,
+disable, rollback, and replacement update the launcher lease registry and
+renderer binding in the same lifecycle transaction. The authority repeats its
+principal lease fence under the owner lock immediately before atomic rename,
+after temporary bytes are written and synced: retirement before that point has
+no side effect, while a completed rename always returns its accepted snapshot.
+
+Each snapshot carries a monotonic revision plus a consumer-owned schema
+version; consumer migration is an explicit CAS replacement. Invalid JSON,
+unsupported Host envelope versions, and quota violations fail closed without
+overwriting the recoverable original. Renderer subscriptions emit full snapshot
+replacements and share one single-flight poll per bound owner/document, with
+global request and per-client watch/listener bounds. Unsubscribe, principal
+generation retirement, fiber disposal, and runtime disposal prevent late
+delivery. Playground and installed consumers use the same public
+`ctx.documents` browser bridge and launcher authority; only Playground's
+explicit Reset operation clears its isolated Home.
+
 Durable adapter history is a separate Node/Host read service specified in
 [`agent-history.md`](agent-history.md). It gives plugins permission-scoped,
 redacted Agent-v2 pages and opaque cursors without renderer filesystem access
@@ -275,10 +308,13 @@ kernel under `renderer/host-ui/conversation`. Its immutable render model is a
 private, already-localized projection: it contains only bounded room,
 participant, entry, status, action and composer data. The renderer owns the
 single top chrome, the only timeline scroll container, message grouping,
-conditional Host-generated initials, status announcement, ephemeral draft,
-fixed composer geometry, focus and responsive behavior. Initials are rendered
-only when a multi-participant projection explicitly selects the
-`host-initials` presentation; ordinary task history has no avatar seat.
+exact participant AvatarRef rendering, conditional Host-generated initials,
+status announcement, ephemeral draft, fixed composer geometry, focus and
+responsive behavior. An explicit participant AvatarRef is rendered on every
+incoming Agent message. The legacy `host-initials` presentation controls only
+descriptor-less initials in a multi-participant projection. Identity actions
+remain gated by an exact AgentDefinition identity presentation rather than a
+display-name guess.
 
 The associated command controller preserves the exact owner id,
 `agent-desktop` shell, binding id, owner generation, separate snapshot
@@ -293,8 +329,9 @@ and deeply frozen, so caller mutation cannot change the observed command. The
 no timeline and forbids the separate header-action list. Models contain no callback,
 DOM, CSS, media URL, Connector handle or renderer component.
 
-The production adapter consumes the exact formal Protocol export
-`@cordisx/protocol/agent-conversation-shell/v1`. A plugin injects
+The production adapter preserves the formal v1 compatibility path and consumes
+the exact formal `@cordisx/protocol/agent-conversation-shell/v2` export for
+Agent identity, active runs, presence, acknowledgement sources and reactions. A plugin injects
 `agentConversationShell`, calls `registerSource(factory)`, and gives the
 returned Host-owned `mount` to its normal `pages.register` declaration. The
 Host invokes the factory only after it has issued an immutable binding for the
@@ -315,6 +352,18 @@ Cordis injection name is `agentConversationShell`. The UI Playground may
 construct a package-local, debug-only private projection and mount this
 production renderer; production renderer and adapter modules never import
 Playground fixtures or selectors.
+
+The renderer also owns one fixed-height Room header and one reusable
+`HostConversationRightInspector`. The header projects the Room title and
+description, members/settings/more actions, and a raw composite of the exact
+ordered participant AvatarRefs; it does not infer membership from names or
+decorate the composite with another badge surface. Members, settings, more,
+and Agent identity content all share the same inspector. At sufficient
+container width it is a split pane which compresses the conversation; below
+the container breakpoint it is a drawer with a scrim, focus trap, Escape and
+outside-close behavior, and exact focus return. Resize and snapshot
+replacement preserve the active inspector and focused control. Inspector state
+is local presentation state and does not add native-history entries.
 
 The public plugin surface follows DeepSeek Harness: plugins declare injected
 services and use `ctx.slots.inject/register` for structured shell data. Both
@@ -523,6 +572,21 @@ The source orders its Room descriptors latest-first; the Host clones and
 freezes each replacement, validates bounded ids/text/icons/routes, renders the
 group heading and rows with the shared SidebarItem primitive, and derives the
 single selected row from the exact owner-qualified route plus parameters.
+
+The Playground unified Recent tasks list uses the same Host SidebarItem
+primitive and keeps a task/history semantic icon. Agent identity Avatars belong
+to conversation participant surfaces, not to generic task navigation. A future
+per-Room composite leading visual must come from an exact row-scoped collection
+contract; the Host must not infer it from the current Room selection or title.
+
+AgentLoop v2 commands are accepted only when the Host can provide the formal
+owner/provider durable-ledger semantics. The explicit Playground mock uses
+session-scoped persistence for disposable simulator state. A real/local-cli
+renderer without the launcher-owned durable RPC fails v2 create/send closed as
+`reconciliation-required`; it must not advertise an accepted operation backed
+only by renderer memory or localStorage. Real provider task recovery across a
+Host restart remains unavailable until the launcher-owned, generation-fenced
+ledger and provider reconciliation service is delivered.
 
 Collection subscriptions are owned by the calling Cordis fiber. Plugin block,
 generation replacement, registration disposal, or runtime teardown

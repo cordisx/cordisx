@@ -203,20 +203,8 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-about-copy { display: grid; justify-items: center; gap: 2px; }
   .cxr-about-identity strong { margin-bottom: 7px; font-size: 22px; line-height: 1.2; }
   .cxr-about-identity span { color: var(--cx-muted,#9ca5b5); font-size: 12px; }
-  .cxr-about-powered { color: var(--cx-text,#edf0f4) !important; font-size: 14px !important; }
-  .cxr-about-release { margin-top: 12px; }
   .cxr-about-copyright { margin-top: 9px; }
   .cxr-about-links { width: 100%; max-width: none; }
-  .cxr-icon-theme { display: grid; grid-template-columns: minmax(0,1fr) minmax(220px,320px); gap: 8px 18px; align-items: end; width: 100%; margin: 0 0 18px; padding: 16px; border: 1px solid var(--cx-border,#303744); border-radius: 10px; background: var(--cx-panel,#171b22); }
-  .cxr-icon-theme-copy { grid-row: span 2; min-width: 0; }
-  .cxr-icon-theme h3 { margin: 0 0 5px; font-size: 14px; }
-  .cxr-icon-theme p { margin: 0; color: var(--cx-muted,#9ca5b5); font-size: 12px; line-height: 1.5; }
-  .cxr-icon-theme label { font-size: 12px; font-weight: 600; }
-  .cxr-icon-theme select { width: 100%; min-height: 34px; padding: 5px 30px 5px 10px; border: 1px solid var(--cx-border,#303744); border-radius: 7px; color: var(--cx-text,#f5f7fa); background: var(--cx-field,#11151b); font: inherit; }
-  .cxr-icon-theme select:focus-visible { outline: 2px solid var(--cx-accent,#5b8cff); outline-offset: 2px; }
-  .cxr-icon-theme .cxr-icon-theme-note, .cxr-icon-theme .cxr-icon-theme-error { grid-column: 2; }
-  .cxr-icon-theme .cxr-icon-theme-error { color: var(--cx-danger,#ff7c7c); }
-  @media (max-width: 720px) { .cxr-icon-theme { grid-template-columns: 1fr; } .cxr-icon-theme-copy { grid-row: auto; } .cxr-icon-theme .cxr-icon-theme-note, .cxr-icon-theme .cxr-icon-theme-error { grid-column: 1; } }
   .cxr-about-links > a { text-decoration: none; }
   .cxr-about-links > :is(a,button) > :is(.t-icon,.cordisx-host-icon) { flex: none; color: var(--cx-muted,#9ca5b5); font-size: 15px; }
   .cxr-card-arrow { flex: none; color: var(--cx-muted,#9ca5b5); font-size: 22px; line-height: 1; }

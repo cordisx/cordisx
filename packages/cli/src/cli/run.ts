@@ -15,7 +15,7 @@ import {
 } from '../config/home-config.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
 import { CdpPluginLifecycleRuntime, watchAndInject } from '../launcher/cdp.js'
-import { LocalDevelopmentController, buildLocalDevelopmentPlugin } from '../launcher/development.js'
+import { LocalDevelopmentController, buildLocalDevelopmentPlugin, localDevelopmentPluginIdentity } from '../launcher/development.js'
 import { DirectPublisherGrantAuthority, DirectPublisherGrantStore, MacOSMachineIdentityProvider, StaticPublisherKeyRegistry } from '../launcher/publisher-grants.js'
 import { createPublisherGrantBridgeHandler, type PublisherGrantBridgeHandler } from '../launcher/publisher-grant-rpc.js'
 import { loadConfig, type CordisXConfig } from '../launcher/config.js'
@@ -73,6 +73,12 @@ import {
   type CordisXPluginActivationRecordV1,
 } from '../plugin-lifecycle-contracts.js'
 import type { RollbackPlan } from '../launcher/packages/authority.js'
+import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
+import {
+  createOwnerDocumentBridgeHandler,
+  type OwnerDocumentBridgeHandler,
+  OwnerDocumentLeaseRegistry,
+} from '../launcher/owner-document-rpc.js'
 
 const HELP = `Usage:
   cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-arguments...]
@@ -103,6 +109,11 @@ export interface CordisXCliRuntime {
    * undefined for every product launch.
    */
   readonly internalBuildRendererBundle?: typeof buildRendererBundle
+  /** Repository-only proof that the production composition and authority agree. */
+  readonly internalObserveOwnerDocuments?: (input: {
+    readonly source: string
+    readonly handler: OwnerDocumentBridgeHandler
+  }) => void | Promise<void>
 }
 
 function waitForExit(child: ChildProcess): Promise<void> {
@@ -149,6 +160,7 @@ interface RendererComposition {
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken: string
   readonly configBridgeToken?: string
+  readonly ownerDocumentSecret: string
   readonly serviceConfigBridgeToken?: string
   readonly generation: string
   readonly permissionBridgeToken?: string
@@ -200,16 +212,19 @@ export async function buildRendererComposition(
     : undefined
   const agentHistoryBridgeToken = randomBytes(32).toString('hex')
   const configBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
+  const ownerDocumentSecret = randomBytes(32).toString('hex')
   const serviceConfigBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
   const permissionBridgeToken = options.permission?.persistent === true ? randomBytes(32).toString('hex') : undefined
   const iconThemePreferenceBridgeToken = options.writable === true && options.appId !== undefined
     ? randomBytes(32).toString('hex')
     : undefined
   const generation = options.generation ?? randomBytes(16).toString('hex')
+  const profileId = options.permission?.profileId ?? options.profileId ?? 'development'
   const bundleOptions = {
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
+    ownerDocumentAuthority: { secret: ownerDocumentSecret, profileId, generation },
     ...(serviceConfigBridgeToken === undefined ? {} : { serviceConfigBridgeToken }),
     ...(options.appId === undefined ? {} : { appId: options.appId }),
     ...(options.iconThemePreference === undefined ? {} : { iconThemePreference: options.iconThemePreference }),
@@ -252,6 +267,7 @@ export async function buildRendererComposition(
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
+    ownerDocumentSecret,
     ...(serviceConfigBridgeToken === undefined ? {} : { serviceConfigBridgeToken }),
     generation,
     ...(permissionBridgeToken === undefined ? {} : { permissionBridgeToken }),
@@ -259,6 +275,7 @@ export async function buildRendererComposition(
     ...(options.pluginLifecycle === undefined ? {} : { pluginLifecycleBridgeToken: options.pluginLifecycle.token }),
     rebuild: async (nextConfig, pluginActivation, initialRegistryEpoch) => await buildBundle(nextConfig, {
       ...bundleOptions,
+      ownerDocumentAuthority: { secret: ownerDocumentSecret, profileId, generation },
       pluginActivation,
       initialRegistryEpoch,
     }),
@@ -378,6 +395,7 @@ async function runInjectedHost(input: {
   readonly agentHistoryHost: CodexAgentHistoryHost
   readonly agentHistoryBridgeToken: string
   readonly configBridge?: ConfigBridgeHandler
+  readonly ownerDocuments?: OwnerDocumentBridgeHandler
   readonly serviceConfigBridge?: ServiceConfigBridgeHandler
   readonly channelCredentialBridge?: ChannelCredentialBridgeHandler
   readonly channelActionsBridge?: ChannelActionsBridgeHandler
@@ -420,6 +438,7 @@ async function runInjectedHost(input: {
     agentHistoryHost: input.agentHistoryHost,
     agentHistoryBridgeToken: input.agentHistoryBridgeToken,
     ...(input.configBridge === undefined ? {} : { configBridge: input.configBridge }),
+    ...(input.ownerDocuments === undefined ? {} : { ownerDocuments: input.ownerDocuments }),
     ...(input.serviceConfigBridge === undefined ? {} : { serviceConfigBridge: input.serviceConfigBridge }),
     ...(input.channelCredentialBridge === undefined ? {} : { channelCredentialBridge: input.channelCredentialBridge }),
     ...(input.channelActionsBridge === undefined ? {} : { channelActionsBridge: input.channelActionsBridge }),
@@ -529,6 +548,17 @@ async function runDevelopment(
       pluginActivation: active,
       initialRegistryEpoch: 0,
     })
+    const initialDevelopmentPlugin = await localDevelopmentPluginIdentity(entry)
+    const documentLeases = new OwnerDocumentLeaseRegistry({
+      stable: [{ source: initialDevelopmentPlugin.source, pluginId: initialDevelopmentPlugin.id }],
+    })
+    const ownerDocuments = createOwnerDocumentBridgeHandler({
+      secret: composition.ownerDocumentSecret,
+      profileId: 'development',
+      generation: composition.generation,
+      store: new OwnerDocumentStore(cordisxHomeDir),
+      principalAllowed: principal => documentLeases.allowed(principal),
+    })
     let bootstrapSource = composition.source
     const controller = await LocalDevelopmentController.create({
       entry,
@@ -559,6 +589,7 @@ async function runDevelopment(
         source: () => bootstrapSource,
         agentHistoryHost: agentHistoryHost(environment, homeConfigPath, `development:${config.rootDir}`),
         agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
+        ownerDocuments,
         developmentRuntime: lifecycleRuntime,
         ...(executable === undefined ? {} : { executable }),
         debugPort,
@@ -611,10 +642,22 @@ async function runDevelopment(
         cordisxHomeDir,
         ...(invocation.options.profileDir === undefined ? {} : { explicitProfileDir: invocation.options.profileDir }),
       })
+  const developmentIdentities = new Map(pluginIdentities(config).map(identity => [identity.id, identity.source]))
+  const documentLeases = new OwnerDocumentLeaseRegistry({
+    stable: [...developmentIdentities].map(([pluginId, source]) => ({ pluginId, source })),
+  })
+  const ownerDocuments = createOwnerDocumentBridgeHandler({
+    secret: composition.ownerDocumentSecret,
+    profileId: 'development',
+    generation: composition.generation,
+    store: new OwnerDocumentStore(cordisxHomeDir),
+    principalAllowed: principal => documentLeases.allowed(principal),
+  })
   await runInjectedHost({
     source: composition.source,
     agentHistoryHost: agentHistoryHost(environment, homeConfigPath, `development:${config.rootDir}`),
     agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
+    ownerDocuments,
     ...(composition.providerBridgeToken === undefined ? {} : {
       providerFleet: await ProviderFleet.create(providerConfigs(config, environment), { appServer: { environment } }),
       providerBridgeToken: composition.providerBridgeToken,
@@ -775,10 +818,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   const activatedPlugins = initialActivation === undefined
     ? await loadActivatedPluginComposition(lifecycleStore)
     : await loadPluginComposition(lifecycleStore, initialActivation)
-  const permissionIdentities = new PluginPermissionIdentityRegistry(pluginIdentities({
-    ...configuredComposition,
-    plugins: activatedPlugins,
-  }))
+  const permissionIdentities = new PluginPermissionIdentityRegistry([
+    ...pluginIdentities(configuredComposition),
+    ...pluginIdentities({ ...configuredComposition, plugins: activatedPlugins }),
+  ])
   lifecycleRuntime.setPermissionIdentities(permissionIdentities)
   const collision = activatedPlugins.find(plugin => configuredIds.has(plugin.id))
   if (collision !== undefined) throw new Error(`launcher-configured plugin already owns package id ${collision.id}`)
@@ -846,6 +889,14 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     ...(channelActionsBridgeToken === undefined ? {} : { channelActionsBridgeToken }),
     ...(runtime.internalBuildRendererBundle === undefined ? {} : { internalBuildRendererBundle: runtime.internalBuildRendererBundle }),
   })
+  const documentLeases = new OwnerDocumentLeaseRegistry({
+    stable: pluginIdentities(configuredComposition).map(identity => ({ source: identity.source, pluginId: identity.id })),
+    active: activatedPlugins.flatMap(plugin => plugin.enabled && plugin.package !== undefined ? [{
+      source: plugin.source ?? pathToFileURL(plugin.entry).href,
+      pluginId: plugin.id,
+      moduleGeneration: plugin.package.moduleGeneration,
+    }] : []),
+  })
   const configBridge = rendererComposition.configBridgeToken === undefined
     ? undefined
     : createConfigBridgeHandler({
@@ -859,6 +910,15 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           runtimeGeneration: lifecycleGeneration,
         },
       })
+  const ownerDocuments = createOwnerDocumentBridgeHandler({
+    secret: rendererComposition.ownerDocumentSecret,
+    profileId: selection.profileId,
+    generation: rendererComposition.generation,
+    store: new OwnerDocumentStore(rootFromConfigPath(configPath)),
+    principalAllowed: principal => documentLeases.allowed(principal),
+  })
+  lifecycleRuntime.setOwnerDocumentAuthority({ leases: documentLeases, issue: ownerDocuments.issue })
+  await runtime.internalObserveOwnerDocuments?.({ source: rendererComposition.source, handler: ownerDocuments })
   const permissionPersistence = rendererComposition.permissionBridgeToken === undefined ? undefined : {
     configPath,
     profileId: selection.profileId,
@@ -941,6 +1001,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         providerBridgeToken: rendererComposition.providerBridgeToken,
       }),
       ...(configBridge === undefined ? {} : { configBridge }),
+      ownerDocuments,
       ...(serviceConfigBridge === undefined ? {} : { serviceConfigBridge }),
       ...(channelCredentialBridge === undefined ? {} : { channelCredentialBridge }),
       ...(channelActionsBridge === undefined ? {} : { channelActionsBridge }),
@@ -1019,6 +1080,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       providerBridgeToken: rendererComposition.providerBridgeToken,
     }),
     ...(configBridge === undefined ? {} : { configBridge }),
+    ownerDocuments,
     ...(serviceConfigBridge === undefined ? {} : { serviceConfigBridge }),
     ...(channelCredentialBridge === undefined ? {} : { channelCredentialBridge }),
     ...(channelActionsBridge === undefined ? {} : { channelActionsBridge }),

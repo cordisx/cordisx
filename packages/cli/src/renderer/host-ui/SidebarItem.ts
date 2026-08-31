@@ -19,6 +19,7 @@ export interface SidebarItemControl {
   setSelected(selected: boolean, current?: boolean): void
   setDisabled(disabled: boolean): void
   setActivate(activate: (() => void) | undefined): void
+  dispose(): void
 }
 
 /**
@@ -60,7 +61,9 @@ export function createSidebarItem(document: Document, options: SidebarItemOption
   element.append(primary, actions)
 
   let activate = options.onActivate
-  primary.addEventListener('click', () => activate?.())
+  const onClick = (): void => activate?.()
+  primary.addEventListener('click', onClick)
+  let disposed = false
 
   const control: SidebarItemControl = {
     element,
@@ -78,6 +81,13 @@ export function createSidebarItem(document: Document, options: SidebarItemOption
       else primary.removeAttribute('aria-disabled')
     },
     setActivate(next) { activate = next },
+    dispose() {
+      if (disposed) return
+      disposed = true
+      activate = undefined
+      primary.removeEventListener('click', onClick)
+      element.remove()
+    },
   }
   control.setSelected(options.selected === true)
   control.setDisabled(options.disabled === true)

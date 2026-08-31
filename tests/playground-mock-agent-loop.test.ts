@@ -29,6 +29,7 @@ import {
   simulatorTaskIdFromPath,
   taskNavigationTarget,
 } from '../packages/cli/src/playground/client/task-details-navigation.js'
+import { CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT } from '../packages/cli/src/renderer/host-ui/AgentTaskDetailsNavigator.js'
 
 const inherit: AgentDefinition['inherit'] = {
   promptSections: 'append', rules: 'append', skills: 'append', tools: 'merge', mcpServers: 'merge', runtimeDefaults: 'merge',
@@ -140,9 +141,12 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(leadLifecycle.value?.events).toMatchObject([
       { type: 'approval', approval: { state: 'pending' } },
       { type: 'approval', approval: { state: 'resolved', outcome: 'approved' } },
-      { type: 'message', message: { role: 'assistant', content: [{ text: expect.stringContaining('[Mock / Simulator] chatroom.generalist@r1') }] } },
+      { type: 'message', message: { role: 'assistant', content: [{ text: 'Completed successfully.' }] } },
       { type: 'lifecycle', lifecycle: { phase: 'turn.completed' } },
     ])
+    const assistantBody = leadLifecycle.value?.events.find(event => event.type === 'message')?.message.content[0]?.text ?? ''
+    expect(assistantBody).toBe('Completed successfully.')
+    expect(assistantBody).not.toMatch(/Mock|Simulator|chatroom\.generalist|@r1|processed:/i)
     expect(reviewerLifecycle.value?.subscription.binding).toEqual(reviewerCreate.binding.binding)
     expect(reviewerLifecycle.value?.events).toMatchObject([
       { type: 'lifecycle', lifecycle: { phase: 'turn.failed', failure: { code: 'SIMULATED_CLI_FAILURE' } } },
@@ -178,11 +182,19 @@ describe('Playground deterministic AgentLoop Simulator', () => {
 
   it('navigates create-time task URLs through history and rejects unapproved URL schemes', async () => {
     const dom = new JSDOM('<!doctype html>', { url: 'http://127.0.0.1/' })
+    const hostNavigations: string[] = []
+    dom.window.addEventListener(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT, () => hostNavigations.push(dom.window.location.pathname))
+    dom.window.history.replaceState({
+      key: 'room-entry', idx: 1,
+      __cordisxRouteV1: { schemaVersion: 1, owner: 'chatroom', routeId: 'room', outlet: 'main', path: '/main/chatroom/:roomId', params: { roomId: 'room-1' } },
+    }, '', '/')
     expect(navigateTaskDetails(dom.window, {
       url: 'app://-/playground/simulator/tasks/Simulator%20Task%201',
       target: 'host',
     })).toBe(true)
     expect(dom.window.location.pathname).toBe('/playground/simulator/tasks/Simulator%20Task%201')
+    expect(hostNavigations).toEqual(['/playground/simulator/tasks/Simulator%20Task%201'])
+    expect(dom.window.history.state).not.toHaveProperty('__cordisxRouteV1')
     expect(simulatorTaskIdFromPath(dom.window.location.pathname)).toBe('Simulator Task 1')
     dom.window.history.back()
     await new Promise(resolve => dom.window.addEventListener('popstate', resolve, { once: true }))
@@ -222,6 +234,33 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(reset.snapshot().tasks).toEqual([])
     await reset.create({ ...base, sourceDefinitions: [base.identity] }, prepared.value, { target: base.identity, definitions: [base] })
     expect(reset.snapshot().tasks[0]?.debugTaskId).toBe('Simulator Task 1')
+  })
+
+  it('restores the Host-private task registry across one browser session without changing bind semantics', async () => {
+    let stored: string | undefined
+    const persistence = { read: () => stored, write: (value: string) => { stored = value } }
+    const agent = definition('session.agent', {
+      promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Persisted session prompt' }],
+    })
+    const first = new PlaygroundMockAgentLoopHost(undefined, persistence)
+    const prepared = await first.prepare()
+    if (!prepared.ok) throw new Error('Simulator preparation failed')
+    const created = await first.create({ ...agent, sourceDefinitions: [agent.identity] }, prepared.value, {
+      target: agent.identity, definitions: [agent],
+    })
+    if (!created.ok) throw new Error('Simulator create failed')
+    await first.send(created.value, [{ kind: 'text', text: 'persist this trace' }])
+
+    const restored = new PlaygroundMockAgentLoopHost(undefined, persistence)
+    expect(restored.snapshot().tasks).toMatchObject([{
+      debugTaskId: 'Simulator Task 1', input: 'persist this trace', identity: { agentId: 'session.agent' },
+    }])
+    const rebound = await restored.bind(created.value.task)
+    expect(rebound).toMatchObject({ ok: true, value: { detailsUrl: created.value.detailsUrl } })
+    expect(restored.snapshot().tasks[0]).toMatchObject({ status: 'completed', active: true })
+
+    const separateSession = new PlaygroundMockAgentLoopHost()
+    expect(separateSession.snapshot().tasks).toEqual([])
   })
 
   it('is an explicit Playground-only backend with no provider bridge or codex-local registration', async () => {
@@ -291,11 +330,11 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(host.activeTaskPresentations()).toHaveLength(1)
     host.release(rebound.value)
     expect(host.activeTaskPresentations()).toEqual([])
-    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'closed', active: false })
+    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'completed', active: false })
 
     const reopened = await host.bind(created.value.task)
     if (!reopened.ok) throw new Error('Simulator reopen failed')
-    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'created', active: true })
+    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'completed', active: true })
     expect(host.snapshot().tasks[0]?.events.at(-1)?.type).toBe('task.bound')
     host.release(reopened.value)
   })
@@ -314,7 +353,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(rebound).toMatchObject({ status: 'accepted', binding: created.binding })
     client.dispose()
     expect(host.activeTaskPresentations()).toEqual([])
-    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'closed', active: false })
+    expect(host.snapshot().tasks[0]).toMatchObject({ status: 'created', active: false })
     broker.dispose()
   })
 
@@ -372,7 +411,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
       terminalEvents.push(...(page.value?.events ?? []))
     }
     expect(terminalEvents).toMatchObject([
-      { type: 'message', message: { role: 'assistant', content: [{ text: '[Mock / Simulator] chatroom.generalist@r1 processed: bundled hello' }] } },
+      { type: 'message', message: { role: 'assistant', content: [{ text: 'Completed successfully.' }] } },
       { type: 'lifecycle', lifecycle: { phase: 'turn.completed' } },
     ])
     const trace = (dom.window as unknown as { __cordisxRuntime?: { playgroundMockAgentLoop?(): { tasks: readonly { identity: { agentId: string } }[] }; dispose(): Promise<void> } }).__cordisxRuntime?.playgroundMockAgentLoop?.()
@@ -382,7 +421,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     dom.window.close()
   }, 30_000)
 
-  it('keeps an independent Host-owned exact Simulator Task page outside Chatroom and Recent tasks', async () => {
+  it('projects Simulator tasks into the one Host-owned Recent tasks list and exact Task page', async () => {
     const [page, app, host] = await Promise.all([
       readFile(path.resolve('packages/cli/src/playground/client/components/MockAgentTaskPage.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/App.tsx'), 'utf8'),
@@ -393,10 +432,14 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(page).toContain('Ordered definition catalog')
     expect(page).toContain('task.execution')
     expect(page).not.toContain('cxloop-binding')
-    expect(app).toContain('pg-simulator-task-list')
-    expect(app).toContain('data-simulator-task-row')
+    expect(app.match(/id="pg-recent-task-list-title"/g)).toHaveLength(1)
+    expect(app).toContain('data-playground-recent-tasks')
+    expect(app).toContain('data-recent-task-row')
+    expect(app).not.toContain('pg-simulator-task-list')
+    expect(app).not.toContain('Simulator tasks')
     expect(app).toContain('task.detailsUrl')
-    expect(app.indexOf('pg-session-list')).toBeLessThan(app.indexOf('pg-simulator-task-list'))
+    expect(app).toContain("fixture.reviewNavigationItem === undefined")
+    expect(app.indexOf('pg-recent-task-list')).toBeLessThan(app.indexOf('pg-playground-fixtures'))
     expect(`${host}\n${app}\n${page}`).not.toMatch(/roomLabel|memberLabel|runLabel|Room 1|Leader|Reviewer/u)
   })
 })

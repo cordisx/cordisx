@@ -20,7 +20,7 @@ export function playgroundConversationCopy(locale: 'zh-CN' | 'en'): AgentConvers
   const en = locale === 'en'
   return Object.freeze(en ? {
     locale: 'en',
-    newRoomTitle: 'New room',
+    newRoomTitle: 'Empty conversation fixture',
     timelineLabel: 'Conversation timeline',
     composerLabel: 'Message draft',
     sendLabel: 'Send message',
@@ -31,7 +31,7 @@ export function playgroundConversationCopy(locale: 'zh-CN' | 'en'): AgentConvers
     unavailable: 'Connector unavailable',
   } : {
     locale: 'zh-CN',
-    newRoomTitle: '新建房间',
+    newRoomTitle: '空会话测试场景',
     timelineLabel: '会话时间线',
     composerLabel: '消息草稿',
     sendLabel: '发送消息',

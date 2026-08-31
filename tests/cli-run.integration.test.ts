@@ -2,8 +2,11 @@ import { access, chmod, mkdir, mkdtemp, readFile, stat, symlink, writeFile } fro
 import os from 'node:os'
 import path from 'node:path'
 import { createServer } from 'node:net'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { runCordisXCli } from '../packages/cli/src/cli/run.js'
+import { parseOwnerDocumentBindingRequest } from '../packages/cli/src/launcher/owner-document-rpc.js'
+import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from '../packages/cli/src/renderer/owner-documents.js'
 import { defaultIsolatedProfileDir } from '../packages/cli/src/launcher/process.js'
 import { LauncherMarketplaceCertifiedAuthority } from '../packages/cli/src/launcher/marketplace-certified-authority.js'
 
@@ -53,6 +56,45 @@ describe('functional CordisX CLI', () => {
       open.mockRestore()
     }
   })
+
+  it('authorizes a launcher-configured plugin through the exact production composition bridge', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-owner-documents-'))
+    const home = path.join(root, 'home')
+    const entry = path.resolve('tests/fixtures/owner-documents-runtime-plugin.ts')
+    const runtime = { env: { CORDISX_HOME: home }, stdout: () => undefined }
+    await runCordisXCli(['setup'], runtime)
+    const configPath = path.join(home, 'config.json')
+    const config = JSON.parse(await readFile(configPath, 'utf8')) as { plugins: unknown[] }
+    config.plugins = [{ id: 'owner-documents-runtime', entry, enabled: true, config: {} }]
+    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`)
+    let result: unknown
+    await runCordisXCli(['codex', 'work', '--dry-run', '--executable', process.execPath], {
+      ...runtime,
+      internalObserveOwnerDocuments: async ({ source, handler }) => {
+        const token = source.match(/"token":\s*"([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)"/)?.[1]
+        if (token === undefined) throw new Error('configured plugin binding is missing')
+        const moduleGeneration = (JSON.parse(Buffer.from(token.split('.')[0]!, 'base64url').toString('utf8')) as { moduleGeneration: string }).moduleGeneration
+        globalThis.__cordisxOwnerDocumentRequestV1 = (payload: string) => {
+          void (async () => {
+            const request = parseOwnerDocumentBindingRequest(JSON.parse(payload))
+            const value = request.operation === 'load' ? await handler.load(request) : await handler.replace(request)
+            globalThis.__cordisxOwnerDocumentReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
+          })()
+        }
+        const identity = { source: pathToFileURL(entry).href, id: 'owner-documents-runtime' }
+        const broker = new CordisXOwnerDocumentBroker(new BrowserOwnerDocumentBridge(), [{
+          source: identity.source, pluginId: identity.id, moduleGeneration, token,
+        }])
+        const client = broker.bind({ identity, moduleGeneration, active: () => true })
+        result = await client.replace({
+          contract: 'cordisx.owner-documents/v1', documentId: 'room-registry', expectedRevision: 0, schemaVersion: 1,
+          value: { operationId: 'configured-plugin-operation', state: 'planned' },
+        })
+        broker.dispose(); delete globalThis.__cordisxOwnerDocumentRequestV1; delete globalThis.__cordisxOwnerDocumentReceiveV1
+      },
+    })
+    expect(result).toMatchObject({ status: 'accepted', snapshot: { revision: 1 } })
+  }, 30_000)
 
   it('shares setup with first launch, ignores cwd composition, and reuses an independent shared profile', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))

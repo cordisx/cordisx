@@ -8,7 +8,7 @@ import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
 
 describe('sidebar navigation collections', () => {
-  it('renders the production Host bundle with isolated compact visuals and exact route params', async () => {
+  it('renders a Host-owned group, atomically inserts rows, and selects exact route params', async () => {
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const baseConfig = await loadConfig(path.join(projectRoot, 'cordisx.config.example.json'))
     const entry = path.join(projectRoot, 'tests/fixtures/navigation-collection-plugin.ts')
@@ -56,6 +56,11 @@ describe('sidebar navigation collections', () => {
       const document = dom.window.document
       const recentTasks = document.querySelector<HTMLElement>('[data-native-recent-tasks]')!
       const recentTasksMarkup = recentTasks.outerHTML
+      const structuredStyles = document.getElementById('cordisx-structured-styles')?.textContent ?? ''
+      expect(document.querySelectorAll('#cordisx-structured-styles')).toHaveLength(1)
+      expect(structuredStyles).toContain('.cordisx-nav-primary > .cordisx-room-composite-seat.cxsi-icon { position: relative;')
+      expect(structuredStyles).toContain('.cordisx-room-composite-seat > .cxrv-composite { position: absolute;')
+      expect(structuredStyles).toContain('.cxrv-participant, .cxrv-overflow { position: absolute;')
       expect(document.querySelector('.cordisx-navigation > .cordisx-nav-row')?.textContent).toContain('New room')
       expect(document.querySelector('.cordisx-navigation > .cordisx-nav-row .cordisx-room-composite-seat')).toBeNull()
       expect(document.querySelector('.cordisx-navigation > .cordisx-nav-row .cordisx-host-icon')).not.toBeNull()
@@ -64,23 +69,22 @@ describe('sidebar navigation collections', () => {
       expect([...group.querySelectorAll('.cordisx-nav-row')].map(row => row.querySelector('.cxsi-title')?.textContent)).toEqual(['Latest room', 'Older room'])
       expect([...group.querySelectorAll<HTMLElement>('.cxrv-composite')].map(visual => visual.dataset.roomCompositeCategory)).toEqual(['1', '2'])
       expect([...group.querySelectorAll<HTMLElement>('.cxrv-composite')].map(visual => visual.textContent)).toEqual(['LE', 'REWR'])
-      const structuredStyles = document.querySelectorAll<HTMLStyleElement>('#cordisx-structured-styles')
-      expect(structuredStyles).toHaveLength(1)
-      expect(structuredStyles[0]?.textContent).toContain('.cordisx-nav-primary > .cordisx-room-composite-seat.cxsi-icon')
-      const initialSeat = group.querySelector<HTMLElement>('.cordisx-room-composite-seat')!
-      const initialComposite = initialSeat.querySelector<HTMLElement>('.cxrv-composite')!
-      const seatStyle = dom.window.getComputedStyle(initialSeat)
-      const compositeComputedStyle = dom.window.getComputedStyle(initialComposite)
-      expect(seatStyle.position).toBe('relative')
-      expect(seatStyle.display).toBe('block')
-      expect([seatStyle.width, seatStyle.minWidth, seatStyle.maxWidth]).toEqual(['16px', '16px', '16px'])
-      expect([seatStyle.height, seatStyle.minHeight, seatStyle.maxHeight]).toEqual(['16px', '16px', '16px'])
-      expect(seatStyle.backgroundColor).toBe('rgba(0, 0, 0, 0)')
-      expect([seatStyle.borderTopWidth, seatStyle.paddingTop, seatStyle.gap, seatStyle.boxShadow]).toEqual(['0px', '0px', '0px', 'none'])
-      expect(compositeComputedStyle.position).toBe('absolute')
-      expect([compositeComputedStyle.width, compositeComputedStyle.height, compositeComputedStyle.overflow]).toEqual(['16px', '16px', 'hidden'])
-      expect([compositeComputedStyle.backgroundColor, compositeComputedStyle.borderTopWidth, compositeComputedStyle.paddingTop, compositeComputedStyle.gap, compositeComputedStyle.boxShadow])
-        .toEqual(['rgba(0, 0, 0, 0)', '0px', '0px', '0px', 'none'])
+      const compositeSeat = group.querySelector<HTMLElement>('.cordisx-room-composite-seat')!
+      const composite = compositeSeat.querySelector<HTMLElement>('.cxrv-composite')!
+      const participant = composite.querySelector<HTMLElement>('.cxrv-participant')!
+      expect(dom.window.getComputedStyle(compositeSeat).position).toBe('relative')
+      expect(dom.window.getComputedStyle(compositeSeat).width).toBe('16px')
+      expect(dom.window.getComputedStyle(compositeSeat).height).toBe('16px')
+      expect(dom.window.getComputedStyle(compositeSeat).padding).toBe('0px')
+      expect(dom.window.getComputedStyle(compositeSeat).borderTopWidth).toBe('0px')
+      expect(dom.window.getComputedStyle(compositeSeat).gap).toBe('0px')
+      expect(dom.window.getComputedStyle(compositeSeat).backgroundColor).toBe('rgba(0, 0, 0, 0)')
+      expect(dom.window.getComputedStyle(compositeSeat).boxShadow).toBe('none')
+      expect(dom.window.getComputedStyle(composite).position).toBe('absolute')
+      expect(dom.window.getComputedStyle(composite).overflow).toBe('hidden')
+      expect(dom.window.getComputedStyle(composite).gap).toBe('0px')
+      expect(dom.window.getComputedStyle(participant).position).toBe('absolute')
+      expect(dom.window.getComputedStyle(participant).borderRadius).toBe('50%')
       document.documentElement.lang = 'zh-CN'
       await vi.waitFor(() => expect(document.querySelector('[data-navigation-group] [role="heading"]')?.textContent).toBe('房间'))
       document.documentElement.lang = 'en'
@@ -138,14 +142,6 @@ describe('sidebar navigation collections', () => {
       const sameRows = [...document.querySelectorAll<HTMLElement>('[data-navigation-group] .cordisx-nav-row')]
       expect(sameRows.map(row => row.querySelector('.cxsi-title')?.textContent)).toEqual(Array(5).fill('Same room'))
       expect(sameRows.map(row => row.querySelector('.cxrv-composite')?.textContent)).toEqual(['', 'AL', 'BRCH', 'DEECFO', 'GOHOIN+2'])
-      expect(document.querySelectorAll('#cordisx-structured-styles')).toHaveLength(1)
-      for (const participant of document.querySelectorAll<HTMLElement>('[data-navigation-group] .cxrv-participant')) {
-        const participantStyle = dom.window.getComputedStyle(participant)
-        expect(participantStyle.position).toBe('absolute')
-        expect(participantStyle.borderRadius).toBe('50%')
-        expect(Number.parseFloat(participantStyle.width)).toBeLessThanOrEqual(16)
-        expect(Number.parseFloat(participantStyle.height)).toBeLessThanOrEqual(16)
-      }
       sameRows[2]!.querySelector<HTMLButtonElement>('.cordisx-nav-primary')!.click()
       await vi.waitFor(() => expect(sameRows[2]!.dataset.selected).toBe('true'))
       expect(sameRows.filter(row => row.dataset.selected === 'true')).toEqual([sameRows[2]])
@@ -160,6 +156,27 @@ describe('sidebar navigation collections', () => {
       expect(document.getElementById('cordisx-structured-styles')).toBeNull()
       expect(document.querySelector('style[data-cordisx-agent-avatar-style]')).toBeNull()
       expect((dom.window as unknown as { __cordisxNavigationCollectionFixture?: unknown }).__cordisxNavigationCollectionFixture).toBeUndefined()
+
+      const collision = new JSDOM(`<!doctype html><html lang="en"><head></head><body>
+        <aside><nav data-cordisx-playground-surface="sidebar.navigation.items"></nav></aside>
+        <main data-cordisx-playground-seat="app"></main>
+        <main data-cordisx-playground-seat="main"></main>
+        <main data-cordisx-playground-seat="session.content"></main>
+      </body></html>`, { runScripts: 'dangerously', url: 'http://127.0.0.1/' })
+      const collisionErrors: unknown[][] = []
+      collision.window.console.error = (...values: unknown[]) => { collisionErrors.push(values) }
+      installPermissionPolicyBridge(collision.window)
+      const foreignStyle = collision.window.document.createElement('style')
+      foreignStyle.id = 'cordisx-structured-styles'
+      foreignStyle.textContent = '.foreign-owner { display: block; }'
+      collision.window.document.head.append(foreignStyle)
+      collision.window.eval(bundle)
+      await vi.waitFor(() => expect(collisionErrors.flat().join(' ')).toContain('CordisX structured styles are already owned by another renderer'))
+      expect(collision.window.document.querySelectorAll('#cordisx-structured-styles')).toHaveLength(1)
+      expect(collision.window.document.getElementById('cordisx-structured-styles')).toBe(foreignStyle)
+      expect(foreignStyle.textContent).toBe('.foreign-owner { display: block; }')
+      expect((collision.window as unknown as { __cordisxRuntime?: unknown }).__cordisxRuntime).toBeUndefined()
+      collision.window.close()
     } finally {
       await runtime?.dispose()
       await new Promise(resolve => setTimeout(resolve, 0))

@@ -138,6 +138,9 @@ const globals = new Map<string, unknown>()
 
 function installDom(): JSDOM {
   const dom = new JSDOM('<!doctype html><html><body><main id="page"></main></body></html>', { url: 'https://host.invalid/' })
+  Object.defineProperty(dom.window, 'matchMedia', { configurable: true, value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) })
+  Object.defineProperty(dom.window, 'requestAnimationFrame', { configurable: true, value: (callback: FrameRequestCallback) => dom.window.setTimeout(() => callback(Date.now()), 0) })
+  Object.defineProperty(dom.window, 'cancelAnimationFrame', { configurable: true, value: (handle: number) => dom.window.clearTimeout(handle) })
   for (const [key, value] of Object.entries({
     document: dom.window.document,
     window: dom.window,
@@ -333,9 +336,10 @@ describe('Agent conversation shell public runtime', () => {
       timeout: 1_000, interval: 10,
     })
     expect(dom.window.document.querySelector('[data-agent-conversation-view="room"]')?.getAttribute('data-agent-conversation-room-id')).toBe('room-one')
-    expect(dom.window.document.querySelector('.cxa-participants')?.textContent).toBe('1 participant')
+    expect(dom.window.document.querySelector('.cxa-participants')).toBeNull()
+    expect(dom.window.document.querySelector('.cxa-description-action')?.textContent).toBe('Add a room description')
     expect(dom.window.document.querySelectorAll('[data-agent-conversation-scroll-owner="timeline"]')).toHaveLength(1)
-    expect(dom.window.document.querySelector('.cxa-avatar')).toBeNull()
+    expect(dom.window.document.querySelectorAll('.cxa-room-avatar-cell .cxa-avatar')).toHaveLength(1)
     expect(dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')?.disabled).toBe(true)
 
     stream.push({

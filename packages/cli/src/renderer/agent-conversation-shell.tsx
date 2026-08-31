@@ -1,29 +1,32 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type {
-  AgentConversationAction as ProtocolAction,
-  AgentConversationItem as ProtocolItem,
-  AgentConversationParticipant as ProtocolParticipant,
-  AgentConversationSelection as ProtocolSelection,
   AgentConversationShellBindRequest,
   AgentConversationShellBindResult,
   AgentConversationShellBinding,
   AgentConversationShellHost,
-  AgentConversationShellPage,
-  AgentConversationShellSnapshot,
-  AgentConversationShellSource,
   AgentConversationShellSubscription,
-  AgentConversationShellUpdate,
   CommandReference,
   Disabled,
   LocalizedText,
 } from '@cordisx/protocol/agent-conversation-shell/v1'
+import type {
+  AgentConversationAction as ProtocolAction,
+  AgentConversationItem as ProtocolItem,
+  AgentConversationParticipant as ProtocolParticipant,
+  AgentConversationSelection as ProtocolSelection,
+  AgentConversationShellPage,
+  AgentConversationShellSnapshot,
+  AgentConversationShellSource,
+  AgentConversationShellUpdate,
+} from '@cordisx/protocol/agent-conversation-shell/v2'
 import * as React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type {
   CordisXAgentConversationShell,
   CordisXAgentConversationShellRegistration,
   CordisXAgentConversationShellSourceFactory,
+  CordisXAgentConversationShellSourceFactoryV2,
   CordisXJsonValue,
   CordisXLocalizedText,
   CordisXPageMount,
@@ -36,8 +39,13 @@ import {
   type GenerationVisibilityCoordinator,
   type PluginGenerationEffectIdentity,
 } from './generation-visibility.js'
-import { AgentConversationRenderer, type AgentConversationRendererCopy } from './host-ui/conversation/AgentConversationRenderer.js'
+import {
+  AgentConversationRenderer,
+  type AgentConversationRendererCopy,
+  type AgentConversationRendererProps,
+} from './host-ui/conversation/AgentConversationRenderer.js'
 import { AgentConversationCommandController } from './host-ui/conversation/commands.js'
+import { validateAgentLoopTaskDetailsUrl } from './host-ui/AgentTaskDetailsNavigator.js'
 import { AGENT_CONVERSATION_STYLES } from './host-ui/conversation/styles.js'
 import {
   createAgentConversationModel,
@@ -134,11 +142,18 @@ function assertAction(value: unknown, label: string): asserts value is ProtocolA
 
 function assertParticipant(value: unknown, label: string): asserts value is ProtocolParticipant {
   plainObject(value, label)
-  exactKeys(value, ['participantId', 'role', 'displayName', 'avatar'], label)
+  exactKeys(value, ['participantId', 'role', 'displayName', 'avatar', 'agentIdentity'], label)
   opaque(value.participantId, `${label}.participantId`)
   if (!['human', 'agent', 'system'].includes(value.role as string)) throw new Error(`${label}.role is invalid`)
   assertLocalizedText(value.displayName, `${label}.displayName`)
   if (value.avatar !== undefined) cloneAgentAvatarRef(value.avatar)
+  if (value.agentIdentity !== undefined) {
+    if (value.role !== 'agent') throw new Error(`${label}.agentIdentity requires agent role`)
+    plainObject(value.agentIdentity, `${label}.agentIdentity`)
+    exactKeys(value.agentIdentity, ['agentId', 'revision'], `${label}.agentIdentity`)
+    opaque(value.agentIdentity.agentId, `${label}.agentIdentity.agentId`)
+    opaque(value.agentIdentity.revision, `${label}.agentIdentity.revision`)
+  }
 }
 
 function sameAvatar(left: ProtocolParticipant['avatar'], right: ProtocolParticipant['avatar']): boolean {
@@ -153,7 +168,7 @@ function assertSelection(value: unknown, label: string): asserts value is Protoc
     return
   }
   if (value.kind !== 'room') throw new Error(`${label}.kind is invalid`)
-  exactKeys(value, ['kind', 'roomId', 'title', 'secondary', 'multiParticipant', 'participantPresentation', 'participants'], label)
+  exactKeys(value, ['kind', 'roomId', 'title', 'secondary', 'multiParticipant', 'participantPresentation', 'participants', 'activeRuns'], label)
   opaque(value.roomId, `${label}.roomId`)
   assertLocalizedText(value.title, `${label}.title`)
   if (value.secondary !== undefined) assertLocalizedText(value.secondary, `${label}.secondary`)
@@ -171,10 +186,44 @@ function assertSelection(value: unknown, label: string): asserts value is Protoc
     if (ids.has(participant.participantId)) throw new Error(`${label}.participants has a duplicate id`)
     ids.add(participant.participantId)
   })
+  if (value.activeRuns !== undefined) {
+    if (!Array.isArray(value.activeRuns) || value.activeRuns.length > 256) throw new Error(`${label}.activeRuns is invalid`)
+    const runKeys = new Set<string>()
+    value.activeRuns.forEach((run, index) => {
+      plainObject(run, `${label}.activeRuns[${index}]`)
+      exactKeys(run, ['participantId', 'memberId', 'runId', 'lifecycle', 'detailsUrl'], `${label}.activeRuns[${index}]`)
+      opaque(run.participantId, `${label}.activeRuns[${index}].participantId`)
+      opaque(run.memberId, `${label}.activeRuns[${index}].memberId`)
+      opaque(run.runId, `${label}.activeRuns[${index}].runId`)
+      if (!ids.has(run.participantId) || run.memberId !== run.participantId) throw new Error(`${label}.activeRuns[${index}] association is invalid`)
+      plainObject(run.lifecycle, `${label}.activeRuns[${index}].lifecycle`)
+      exactKeys(run.lifecycle, ['phase', 'updatedAt'], `${label}.activeRuns[${index}].lifecycle`)
+      if (!['active', 'running', 'waiting', 'attention'].includes(run.lifecycle.phase as string)) throw new Error(`${label}.activeRuns[${index}].lifecycle is invalid`)
+      validateAgentLoopTaskDetailsUrl(run.detailsUrl as never)
+      const key = JSON.stringify([run.participantId, run.memberId, run.runId])
+      if (runKeys.has(key)) throw new Error(`${label}.activeRuns has duplicate association`)
+      runKeys.add(key)
+    })
+  }
 }
 
 function assertItem(value: unknown, label: string): asserts value is ProtocolItem {
   plainObject(value, label)
+  if (value.kind === 'member-presence') {
+    exactKeys(value, ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'state', 'retryable', 'diagnostic', 'retry'], label)
+    opaque(value.itemId, `${label}.itemId`)
+    safeSequence(value.sequence, `${label}.sequence`)
+    opaque(value.participantId, `${label}.participantId`)
+    opaque(value.memberId, `${label}.memberId`)
+    opaque(value.runId, `${label}.runId`)
+    if (value.memberId !== value.participantId) throw new Error(`${label}.memberId must equal participantId`)
+    if (!['inviting', 'creating', 'joined', 'ready', 'failed'].includes(value.state as string)) throw new Error(`${label}.state is invalid`)
+    if (typeof value.retryable !== 'boolean') throw new Error(`${label}.retryable is invalid`)
+    if (value.diagnostic !== undefined) assertLocalizedText(value.diagnostic, `${label}.diagnostic`)
+    if (value.retry !== undefined) assertCommand(value.retry, `${label}.retry`)
+    if (value.state !== 'failed' && value.retry !== undefined) throw new Error(`${label}.retry requires failed state`)
+    return
+  }
   if (value.kind === 'status') {
     exactKeys(value, ['kind', 'itemId', 'sequence', 'label', 'state', 'ariaLive'], label)
     opaque(value.itemId, `${label}.itemId`)
@@ -185,7 +234,7 @@ function assertItem(value: unknown, label: string): asserts value is ProtocolIte
     return
   }
   if (value.kind !== 'message') throw new Error(`${label}.kind is invalid`)
-  exactKeys(value, ['kind', 'itemId', 'messageId', 'sequence', 'author', 'body', 'timestamp', 'deliveryState', 'runState', 'ariaLive', 'actions'], label)
+  exactKeys(value, ['kind', 'itemId', 'messageId', 'sequence', 'source', 'author', 'body', 'reactions', 'timestamp', 'deliveryState', 'runState', 'ariaLive', 'actions'], label)
   opaque(value.itemId, `${label}.itemId`)
   opaque(value.messageId, `${label}.messageId`)
   safeSequence(value.sequence, `${label}.sequence`)
@@ -203,6 +252,24 @@ function assertItem(value: unknown, label: string): asserts value is ProtocolIte
   if (!['off', 'polite'].includes(value.ariaLive as string)) throw new Error(`${label}.ariaLive is invalid`)
   if (!Array.isArray(value.actions) || value.actions.length > 8) throw new Error(`${label}.actions is invalid`)
   value.actions.forEach((action, index) => assertAction(action, `${label}.actions[${index}]`))
+  if (value.source !== undefined && value.source !== 'agent-loop' && value.source !== 'chatroom-acknowledgement') throw new Error(`${label}.source is invalid`)
+  if (value.reactions !== undefined) {
+    if (!Array.isArray(value.reactions) || value.reactions.length > 64) throw new Error(`${label}.reactions is invalid`)
+    const reactionIds = new Set<string>()
+    value.reactions.forEach((reaction, index) => {
+      plainObject(reaction, `${label}.reactions[${index}]`)
+      exactKeys(reaction, ['reactionId', 'actorParticipantId', 'value', 'state'], `${label}.reactions[${index}]`)
+      opaque(reaction.reactionId, `${label}.reactions[${index}].reactionId`)
+      opaque(reaction.actorParticipantId, `${label}.reactions[${index}].actorParticipantId`)
+      if (reactionIds.has(reaction.reactionId)) throw new Error(`${label}.reactions has duplicate id`)
+      reactionIds.add(reaction.reactionId)
+      plainObject(reaction.value, `${label}.reactions[${index}].value`)
+      if (reaction.value.kind === 'emoji') text(reaction.value.emoji, `${label}.reactions[${index}].value.emoji`, 64)
+      else if (reaction.value.kind === 'semantic') text(reaction.value.token, `${label}.reactions[${index}].value.token`, 128)
+      else throw new Error(`${label}.reactions[${index}].value is invalid`)
+      if (!['pending', 'completed', 'failed'].includes(reaction.state as string)) throw new Error(`${label}.reactions[${index}].state is invalid`)
+    })
+  }
 }
 
 function assertSnapshot(value: unknown): asserts value is AgentConversationShellSnapshot {
@@ -300,6 +367,7 @@ function projectSnapshot(
     role: participant.role,
     name: localization.resolve(participant.displayName, `participants.${index}`),
     ...(participant.avatar === undefined ? {} : { avatar: cloneAgentAvatarRef(participant.avatar) }),
+    ...(participant.role !== 'agent' || participant.agentIdentity === undefined ? {} : { agentIdentity: participant.agentIdentity }),
   })) : []
   const participantById = new Map(snapshot.selection.kind === 'room'
     ? snapshot.selection.participants.map(participant => [participant.participantId, participant])
@@ -313,10 +381,23 @@ function projectSnapshot(
       state: item.state,
       ariaLive: item.ariaLive,
     }
+    if (item.kind === 'member-presence') return {
+      kind: 'member-presence' as const,
+      itemId: item.itemId,
+      sequence: item.sequence,
+      participantId: item.participantId,
+      memberId: item.memberId,
+      runId: item.runId,
+      state: item.state,
+      retryable: item.retryable,
+      ...(item.diagnostic === undefined ? {} : { diagnostic: localization.resolve(item.diagnostic, `items.${index}.diagnostic`) }),
+      ...(item.retry === undefined ? {} : { retry: { id: item.retry.id, ...(item.retry.arguments === undefined ? {} : { arguments: item.retry.arguments as CordisXJsonValue }) } }),
+    }
     const declared = participantById.get(item.author.participantId)
     if (declared === undefined || declared.role !== item.author.role
       || JSON.stringify(declared.displayName) !== JSON.stringify(item.author.displayName)
-      || !sameAvatar(declared.avatar, item.author.avatar)) {
+      || !sameAvatar(declared.avatar, item.author.avatar)
+      || JSON.stringify(declared.agentIdentity) !== JSON.stringify(item.author.agentIdentity)) {
       throw new Error(`snapshot.items[${index}].author does not match the selected room participant`)
     }
     return {
@@ -331,6 +412,13 @@ function projectSnapshot(
       runState: item.runState,
       ariaLive: item.ariaLive,
       actions: item.actions.map((action, actionIndex) => projectAction(action, localization, `items.${index}.actions.${actionIndex}`)),
+      source: item.source ?? 'agent-loop',
+      reactions: (item.reactions ?? []).map(reaction => ({
+        reactionId: reaction.reactionId,
+        actorParticipantId: reaction.actorParticipantId,
+        value: reaction.value,
+        state: reaction.state,
+      })),
     }
   })
   let selection: AgentConversationModel['selection']
@@ -350,6 +438,7 @@ function projectSnapshot(
       multiParticipant: snapshot.selection.multiParticipant,
       participantPresentation: snapshot.selection.participantPresentation,
       participants,
+      activeRuns: snapshot.selection.activeRuns ?? [],
     }
     headerActions = snapshot.headerActions.map((action, index) => projectAction(action, localization, `headerActions.${index}`))
   }
@@ -408,7 +497,7 @@ interface RegisteredSource {
   readonly owner: string
   readonly ownerGeneration: string
   readonly effect: PluginGenerationEffectIdentity
-  readonly factory: CordisXAgentConversationShellSourceFactory
+  readonly factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2
   readonly principal?: PluginPrincipalToken
   readonly sessions: Set<MountedConversation>
   active: boolean
@@ -466,6 +555,7 @@ class MountedConversation {
     private readonly commands: CordisXCommandService,
     private readonly i18n: CordisXI18nService,
     private readonly console: PluginConsoleAspect | undefined,
+    private readonly identity: AgentConversationRendererProps['identity'],
   ) {
     this.root = createRoot(mountContext.container)
     this.detachTheme = new HostThemeProjection(mountContext.document).attach(mountContext.container)
@@ -496,15 +586,18 @@ class MountedConversation {
   }
 
   private async initialize(): Promise<void> {
-    const source = await this.runPlugin('agent-conversation-shell.source', () => this.record.factory(this.binding))
+    const sourceCandidate = await this.runPlugin('agent-conversation-shell.source', () => (
+      this.record.factory as CordisXAgentConversationShellSourceFactoryV2
+    )(this.binding as never))
     if (this.disposed) {
-      source.dispose()
+      sourceCandidate.dispose()
       return
     }
-    if (source === null || typeof source !== 'object'
-      || typeof source.snapshot !== 'function' || typeof source.subscribe !== 'function' || typeof source.dispose !== 'function') {
+    if (sourceCandidate === null || typeof sourceCandidate !== 'object'
+      || typeof sourceCandidate.snapshot !== 'function' || typeof sourceCandidate.subscribe !== 'function' || typeof sourceCandidate.dispose !== 'function') {
       throw new Error('conversation source must implement snapshot, subscribe, and dispose')
     }
+    const source = sourceCandidate as AgentConversationShellSource
     this.source = source
     const initial = immutableSnapshot(await this.runPlugin('agent-conversation-shell.snapshot', () => source.snapshot()))
     assertSnapshot(initial)
@@ -671,7 +764,24 @@ class MountedConversation {
     if (update.kind === 'item-updated' && existing === -1) throw new Error('item-updated references an unknown item')
     const items = [...this.snapshot.items]
     if (existing === -1) items.push(update.item)
-    else items[existing] = update.item
+    else {
+      const previous = items[existing]!
+      if (previous.kind !== update.item.kind || previous.sequence !== update.item.sequence) {
+        throw new Error('item-updated changed its stable kind or item sequence')
+      }
+      if (previous.kind === 'message' && update.item.kind === 'message'
+        && (previous.messageId !== update.item.messageId
+          || previous.author.participantId !== update.item.author.participantId)) {
+        throw new Error('item-updated changed its message association')
+      }
+      if (previous.kind === 'member-presence' && update.item.kind === 'member-presence'
+        && (previous.participantId !== update.item.participantId
+          || previous.memberId !== update.item.memberId
+          || previous.runId !== update.item.runId)) {
+        throw new Error('item-updated changed its member presence association')
+      }
+      items[existing] = update.item
+    }
     this.snapshot = immutableSnapshot({ ...this.snapshot, snapshotSequence: update.sequence, items })
   }
 
@@ -702,6 +812,7 @@ class MountedConversation {
         model={model}
         commands={controller}
         copy={rendererCopy(this.i18n.getSnapshot().locale)}
+        {...(this.identity === undefined ? {} : { identity: this.identity })}
       />)
     } catch (error) {
       this.fail(error)
@@ -765,6 +876,7 @@ export class AgentConversationShellRegistry {
     private readonly i18n: CordisXI18nService,
     private readonly visibility?: GenerationVisibilityCoordinator,
     private readonly console?: PluginConsoleAspect,
+    private readonly identity?: AgentConversationRendererProps['identity'],
   ) {
     this.disconnectVisibility = visibility?.connect({ notify: () => {
       for (const record of [...this.records]) {
@@ -773,7 +885,7 @@ export class AgentConversationShellRegistry {
     } })
   }
 
-  register(ctx: Context, factory: CordisXAgentConversationShellSourceFactory, principal?: PluginPrincipalToken): CordisXAgentConversationShellRegistration {
+  register(ctx: Context, factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2, principal?: PluginPrincipalToken): CordisXAgentConversationShellRegistration {
     if (this.disposed) throw new Error('Agent conversation shell registry is disposed')
     if (typeof factory !== 'function') throw new Error('Agent conversation shell source factory must be a function')
     const owner = ownerFromContext(ctx)
@@ -811,7 +923,7 @@ export class AgentConversationShellRegistry {
       let mounted = true
       void host.bind(request).then(result => {
         if (!mounted || !record.active || result.status !== 'accepted') return
-        session = new MountedConversation(record, result.binding, mountContext, this.commands, this.i18n, this.console)
+        session = new MountedConversation(record, result.binding, mountContext, this.commands, this.i18n, this.console, this.identity)
         record.sessions.add(session)
         session.start()
       }).catch(error => console.error('[cordisx] Agent conversation bind failed', error))
@@ -849,6 +961,7 @@ export class AgentConversationShellRegistry {
 export interface CordisXAgentConversationShellServiceOptions {
   readonly registry?: AgentConversationShellRegistry
   readonly console?: PluginConsoleAspect
+  readonly identity?: AgentConversationRendererProps['identity']
 }
 
 /** Fiber-aware public service; the renderer and binding authority stay Host-owned. */
@@ -865,11 +978,12 @@ export class CordisXAgentConversationShellService extends Service implements Cor
       ctx.i18n as CordisXI18nService,
       generationVisibilityFromContext(ctx),
       options.console,
+      options.identity,
     )
     ctx.effect(() => () => this.registry.dispose(), 'cordisx: Agent conversation shell registry')
   }
 
-  registerSource(factory: CordisXAgentConversationShellSourceFactory): CordisXAgentConversationShellRegistration {
+  registerSource(factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2): CordisXAgentConversationShellRegistration {
     const principal = this.console?.tokenFromContext(this.ctx)
     let registration: CordisXAgentConversationShellRegistration | undefined
     const dispose = this.ctx.effect(() => {

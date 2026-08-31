@@ -200,7 +200,13 @@ import type {
   AgentLoopTaskBinding as ProtocolAgentLoopTaskBinding,
   BoundAgentLoopClient as ProtocolBoundAgentLoopClient,
 } from '@cordisx/protocol/agent-loop/v1'
+import type {
+  AgentLoopCommand as ProtocolAgentLoopCommandV2,
+  AgentLoopTaskBinding as ProtocolAgentLoopTaskBindingV2,
+  BoundAgentLoopClient as ProtocolBoundAgentLoopClientV2,
+} from '@cordisx/protocol/agent-loop/v2'
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
+import { CORDISX_OWNER_DOCUMENT_SERVICE_V1 } from 'cordisx/contracts'
 import type {
   CordisXNavigationCollectionLeadingVisual,
   AgentDefinition,
@@ -209,6 +215,9 @@ import type {
   AgentLoopSendResult,
   AgentLoopTaskBinding,
   BoundAgentLoopClient,
+  CordisXOwnerDocumentLoadResultV1,
+  CordisXOwnerDocumentReplaceResultV1,
+  CordisXOwnerDocumentsV1,
   CordisXNavigationCollectionSnapshot,
   CordisXNavigationCollectionSource,
 } from 'cordisx/contracts'
@@ -246,12 +255,25 @@ const projectedRooms = {
 CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS satisfies 16
 
 ctx.agentLoop satisfies BoundAgentLoopClient
+ctx.documents satisfies CordisXOwnerDocumentsV1
 ctx.agentLoop satisfies ProtocolBoundAgentLoopClient
+ctx.agentLoop satisfies ProtocolBoundAgentLoopClientV2
 definition satisfies ProtocolAgentDefinition
 protocolDefinition satisfies AgentDefinition
 definition.avatar satisfies AgentAvatarRef | undefined
 protocolCommand satisfies AgentLoopCommand
 protocolBinding satisfies AgentLoopTaskBinding
+declare const protocolCommandV2: ProtocolAgentLoopCommandV2
+declare const protocolBindingV2: ProtocolAgentLoopTaskBindingV2
+if (protocolCommandV2.type === 'create-or-bind') {
+  ctx.agentLoop.createOrBind(protocolCommandV2).then(result => {
+    if (result.status === 'accepted') {
+      result.detailsUrl.target satisfies 'host' | 'external'
+      result.delivery.disposition satisfies 'executed' | 'replayed' | 'reconciled'
+    }
+  })
+}
+ctx.agentLoop.subscribe(protocolBindingV2, -1)
 definition.promptSections?.map(section => section.kind satisfies 'introduction' | 'personality' | 'role' | 'operations' | 'tools' | 'knowledge' | 'memory-policy' | 'memory' | 'other')
 if (created.status === 'accepted') created.binding.task satisfies string
 else created.authorization.state satisfies 'denied' | 'unavailable'
@@ -277,6 +299,18 @@ async function manageMultipleBindings(): Promise<Map<string, { binding: AgentLoo
   return byBinding
 }
 manageMultipleBindings satisfies () => Promise<Map<string, { binding: AgentLoopTaskBinding; cursor: number }>>
+async function persistRoomDelivery(): Promise<CordisXOwnerDocumentLoadResultV1 | CordisXOwnerDocumentReplaceResultV1> {
+  const current = await ctx.documents.load('room-registry')
+  if (current.status === 'unavailable') return current
+  return await ctx.documents.transaction({
+    contract: CORDISX_OWNER_DOCUMENT_SERVICE_V1,
+    documentId: 'room-registry',
+    expectedRevision: current.status === 'loaded' ? current.snapshot.revision : 0,
+    schemaVersion: 1,
+    value: { deliveryId: 'delivery-1', operationId: 'stable-operation-1', state: 'planned' },
+  })
+}
+persistRoomDelivery satisfies () => Promise<CordisXOwnerDocumentLoadResultV1 | CordisXOwnerDocumentReplaceResultV1>
 snapshot.items.map(item => item.route.params?.roomId)
 roomLeadingVisual.participants.map(participant => participant.participantId)
 projectedRooms.items.map(item => item.leadingVisual.participants.length)
@@ -327,10 +361,82 @@ ctx.slots.registerCollection({
   if (installedSchemasteryUiManifest.name !== '@cordisx/schemastery-ui' || installedSchemasteryUiManifest.version !== '0.1.0-beta.2') {
     throw new Error('installed cordisx tarball is missing the pinned @cordisx/schemastery-ui runtime')
   }
-  const [{ loadConfig }, { buildRendererBundle }] = await Promise.all([
+  const [{ loadConfig }, { buildRendererBundle }, { OwnerDocumentStore }, { createOwnerDocumentBridgeHandler, parseOwnerDocumentBindingRequest }, { JSDOM }] = await Promise.all([
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/config.js')).href),
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/bundle.js')).href),
+    import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/owner-document-store.js')).href),
+    import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/owner-document-rpc.js')).href),
+    import('jsdom'),
   ])
+  const ownerDocumentScope = {
+    profileId: 'installed',
+    identity: { source: 'https://plugins.example/chatroom', pluginId: 'chatroom' },
+  }
+  const installedDocumentStore = new OwnerDocumentStore(cordisxHome)
+  const durableOperation = {
+    deliveryId: 'delivery-installed-1', operationId: 'stable-operation-installed-1',
+    issuedAt: 1, exactPayload: { text: 'hello' }, state: 'planned',
+  }
+  const durableAccepted = await installedDocumentStore.replace({
+    scope: ownerDocumentScope, documentId: 'room-registry', expectedRevision: 0, schemaVersion: 1,
+    value: durableOperation,
+  })
+  if (durableAccepted.status !== 'accepted') throw new Error('installed owner document store did not accept an outbox operation')
+  const durableReload = await new OwnerDocumentStore(cordisxHome).load(ownerDocumentScope, 'room-registry')
+  if (durableReload.status !== 'loaded' || durableReload.snapshot.value.operationId !== durableOperation.operationId) {
+    throw new Error('installed owner document store did not reload the exact outbox operation')
+  }
+  // Installed public consumer proof: plugin ctx.documents -> browser binding ->
+  // launcher authority. The direct store reload above is intentionally not the
+  // only durability evidence.
+  const durablePluginEntry = path.join(runnerDirectory, 'durable-plugin.mjs')
+  await writeFile(durablePluginEntry, `export const inject = ['documents']\nexport function apply(ctx) { globalThis.__installedDurableClient = ctx.documents }\n`, 'utf8')
+  const durableSource = pathToFileURL(durablePluginEntry).href
+  const durableGeneration = 'installed-owner-documents-generation'
+  const durableHandler = createOwnerDocumentBridgeHandler({
+    secret: 'installed-owner-documents-secret', profileId: 'installed', generation: durableGeneration,
+    store: new OwnerDocumentStore(cordisxHome),
+    principalAllowed: principal => principal.identity.source === durableSource && principal.identity.pluginId === 'durable-plugin',
+  })
+  const durableBundle = await buildRendererBundle({
+    version: 1, rootDir: runnerDirectory, codex: { debugPort: 9229 }, providers: [],
+    plugins: [{ id: 'durable-plugin', entry: durablePluginEntry, source: durableSource, enabled: true, config: {} }],
+  }, {
+    profileId: 'installed', generation: durableGeneration,
+    ownerDocumentAuthority: { secret: 'installed-owner-documents-secret', profileId: 'installed', generation: durableGeneration },
+  })
+  const durableDom = new JSDOM('<html lang="en"><head></head><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>', {
+    runScripts: 'dangerously', url: 'https://codex.local/',
+  })
+  Object.defineProperty(durableDom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+  Object.defineProperty(durableDom.window, 'structuredClone', { value: globalThis.structuredClone })
+  Object.defineProperty(durableDom.window, 'TextEncoder', { value: globalThis.TextEncoder })
+  Object.defineProperty(durableDom.window, 'TextDecoder', { value: globalThis.TextDecoder })
+  Object.defineProperty(durableDom.window, '__cordisxOwnerDocumentRequestV1', {
+    configurable: true,
+    value: payload => { void (async () => {
+      const request = parseOwnerDocumentBindingRequest(JSON.parse(payload))
+      const value = request.operation === 'load' ? await durableHandler.load(request) : await durableHandler.replace(request)
+      durableDom.window.__cordisxOwnerDocumentReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
+    })() },
+  })
+  durableDom.window.eval(durableBundle)
+  await durableDom.window.__cordisxBoot
+  const durableClient = durableDom.window.__installedDurableClient
+  if (durableClient === undefined || Object.keys(durableClient).length !== 0) throw new Error('installed public ctx.documents client is missing or leaks binding state')
+  const bridgeAccepted = await durableClient.replace({
+    contract: 'cordisx.owner-documents/v1', documentId: 'room-outbox', expectedRevision: 0, schemaVersion: 1,
+    value: { operationId: 'installed-public-bridge-operation', state: 'planned' },
+  })
+  if (bridgeAccepted.status !== 'accepted') throw new Error('installed public ctx.documents bridge did not commit')
+  await durableDom.window.__cordisxRuntime?.dispose()
+  durableDom.window.close()
+  const bridgeReload = await new OwnerDocumentStore(cordisxHome).load({
+    profileId: 'installed', identity: { source: durableSource, pluginId: 'durable-plugin' },
+  }, 'room-outbox')
+  if (bridgeReload.status !== 'loaded' || bridgeReload.snapshot.value.operationId !== 'installed-public-bridge-operation') {
+    throw new Error('installed public ctx.documents bridge did not survive launcher store reload')
+  }
   const installedBundle = await buildRendererBundle(await loadConfig(configPath))
   if (!installedBundle.includes('# CLIProxy Providers') || !installedBundle.includes('External providers and the native connection')) {
     throw new Error('installed built-in CLIProxy plugin bundle is missing its product README')
@@ -395,7 +501,7 @@ ctx.slots.registerCollection({
   await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
   await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
 
-  console.log(`[cordisx] installed tarballs verified: licenses, exact singleton OneWorks Avatar RC.8 packages/style export, combined multi-binding AgentLoop and navigation collection${protocolTarball === undefined ? '' : ', exact local Protocol'}, local AgentLoop provider composition, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run`)
+  console.log(`[cordisx] installed tarballs verified: licenses, exact singleton OneWorks Avatar RC.8 packages/style export, combined multi-binding AgentLoop, owner documents, and navigation collection${protocolTarball === undefined ? '' : ', exact local Protocol'}, durable outbox reload, local AgentLoop provider composition, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run`)
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }
