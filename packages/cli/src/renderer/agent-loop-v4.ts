@@ -132,6 +132,9 @@ function delivery(value: unknown): 'executed' | 'replayed' | 'reconciled' | unde
 }
 function scope(profileId: string, compositionGeneration: string, ownerKey: string): CordisXAgentLoopV4Scope { return Object.freeze({ profileId, compositionGeneration, ownerKey }) }
 function tupleKey(...parts: readonly (string | number)[]): string { return JSON.stringify(parts) }
+function correlationKey(authorityScope: CordisXAgentLoopV4Scope, ...parts: readonly (string | number)[]): string {
+  return tupleKey(authorityScope.profileId, authorityScope.compositionGeneration, authorityScope.ownerKey, ...parts)
+}
 
 function refusal<Kind extends AgentLoopResult['type']>(
   command: Extract<Command, { type: Kind }>,
@@ -356,7 +359,7 @@ export class CordisXAgentLoopBrokerV4 {
         if (internal.status !== 'accepted') return internalRefusal(command, 'approvals.decide', string(internal.code) ?? 'approval-unavailable')
         const disposition = delivery(internal.delivery)
         if (disposition === undefined) return refusal(command, 'approvals.decide', 'unavailable', 'reconciliation-required')
-        this.approvals.set(tupleKey(command.binding.task, command.turn, command.approvalId), command.commandId)
+        this.approvals.set(correlationKey(authorityScope, command.binding.task, command.turn, command.approvalId), command.commandId)
         return Object.freeze({ $schema: CORDISX_AGENT_LOOP_RESULT_SCHEMA_V4, contract: 'cordisx.agent-loop-result/v4', schemaVersion: 4, commandId: command.commandId, type: 'approval-decision', status: 'accepted', authorization: authorizationFor('approvals.decide'), binding: command.binding, turn: command.turn, approvalId: command.approvalId, decision: command.decision, causation: { operationId: command.commandId }, delivery: { disposition } })
       },
       requestMemberSelfIntroduction: async (command: IntroductionCommand): Promise<AgentLoopRequestMemberSelfIntroductionResult> => {
@@ -370,7 +373,7 @@ export class CordisXAgentLoopBrokerV4 {
         const turn = handle(internal.turn); const messageId = handle(internal.messageId)
         const disposition = delivery(internal.delivery)
         if (turn === undefined || messageId === undefined || disposition === undefined) return refusal(command, 'turns.introduce', 'unavailable', 'reconciliation-required')
-        this.introductions.set(tupleKey(command.binding.task, turn), { operationId: command.commandId, messageId, participantId: command.participantId, memberId: command.memberId, runId: command.runId })
+        this.introductions.set(correlationKey(authorityScope, command.binding.task, turn), { operationId: command.commandId, messageId, participantId: command.participantId, memberId: command.memberId, runId: command.runId })
         return Object.freeze({ $schema: CORDISX_AGENT_LOOP_RESULT_SCHEMA_V4, contract: 'cordisx.agent-loop-result/v4', schemaVersion: 4, commandId: command.commandId, type: command.type, status: 'accepted', authorization: authorizationFor('turns.introduce'), binding: command.binding, participantId: command.participantId, memberId: command.memberId, runId: command.runId, turn, messageId, causation: { operationId: command.commandId }, delivery: { disposition } })
       },
       cancelMemberSelfIntroduction: async (command: CancelIntroductionCommand): Promise<AgentLoopCancelMemberSelfIntroductionResult> => {
@@ -395,7 +398,7 @@ export class CordisXAgentLoopBrokerV4 {
         const turn = handle(internal.turn); const messageId = handle(internal.messageId)
         const disposition = delivery(internal.delivery)
         if (turn === undefined || messageId === undefined || disposition === undefined) return refusal(command, 'turns.introduce', 'unavailable', 'reconciliation-required')
-        this.cancellations.set(tupleKey(command.binding.task, turn), command.commandId)
+        this.cancellations.set(correlationKey(authorityScope, command.binding.task, turn), command.commandId)
         return Object.freeze({ $schema: CORDISX_AGENT_LOOP_RESULT_SCHEMA_V4, contract: 'cordisx.agent-loop-result/v4', schemaVersion: 4, commandId: command.commandId, type: command.type, status: 'accepted', authorization: authorizationFor('turns.introduce'), binding: command.binding, participantId: command.participantId, memberId: command.memberId, runId: command.runId, requestOperationId: command.requestOperationId, turn, messageId, causation: { operationId: command.commandId }, delivery: { disposition } })
       },
       subscribe: async (binding: AgentLoopTaskBinding, afterSequence: number): Promise<AgentLoopSubscribeRuntimeResult> => {
@@ -477,13 +480,13 @@ export class CordisXAgentLoopBrokerV4 {
     if (!active()) return undefined
     if (result.status !== 'accepted' || !Array.isArray(result.events)) return undefined
     const snapshot = result.events
-      .flatMap(value => this.projectLifecycle(binding, value as InternalLifecycleEvent))
+      .flatMap(value => this.projectLifecycle(authorityScope, binding, value as InternalLifecycleEvent))
       .map((event, index) => Object.freeze({ ...event, sequence: index + 1 }))
     this.publicEventSnapshots.set(snapshotKey, snapshot)
     return snapshot
   }
 
-  private projectLifecycle(binding: AgentLoopTaskBinding, input: InternalLifecycleEvent): readonly AgentLoopEvent[] {
+  private projectLifecycle(authorityScope: CordisXAgentLoopV4Scope, binding: AgentLoopTaskBinding, input: InternalLifecycleEvent): readonly AgentLoopEvent[] {
     const sequence = typeof input.sequence === 'number' ? input.sequence : undefined
     const turn = handle(input.turnId)
     if (sequence === undefined || turn === undefined) return []
@@ -504,7 +507,7 @@ export class CordisXAgentLoopBrokerV4 {
     if (input.cancellation !== undefined && cancellationRecord === undefined) return []
     const cancellationOperationId = cancellationRecord === undefined ? undefined : handle(cancellationRecord.operationId)
     if (cancellationRecord !== undefined && cancellationOperationId === undefined) return []
-    const rememberedIntroduction = this.introductions.get(tupleKey(binding.task, turn))
+    const rememberedIntroduction = this.introductions.get(correlationKey(authorityScope, binding.task, turn))
     const introductionOperationId = durableIntroduction?.operationId ?? rememberedIntroduction?.operationId
     if (input.type === 'turn.started') return [{
       ...base, type: 'lifecycle',
@@ -535,7 +538,7 @@ export class CordisXAgentLoopBrokerV4 {
         const item = record(value); const text = string(item?.text)
         return text === undefined ? [] : [{ kind: 'text' as const, text }]
       }) : []
-      const cancelled = cancellationOperationId ?? this.cancellations.get(tupleKey(binding.task, turn))
+      const cancelled = cancellationOperationId ?? this.cancellations.get(correlationKey(authorityScope, binding.task, turn))
       const message = output.length === 0 || cancelled !== undefined ? [] : [{
         ...base,
         eventId: derivedEventId(base.eventId, 'message'),
@@ -558,7 +561,7 @@ export class CordisXAgentLoopBrokerV4 {
       if (input.causation !== undefined && causationRecord === undefined) return []
       const durableOperationId = causationRecord === undefined ? undefined : handle(causationRecord.operationId)
       if (causationRecord !== undefined && durableOperationId === undefined) return []
-      const operationId = durableOperationId ?? this.approvals.get(tupleKey(binding.task, turn, approvalId))
+      const operationId = durableOperationId ?? this.approvals.get(correlationKey(authorityScope, binding.task, turn, approvalId))
       return operationId === undefined || outcome === 'expired'
         ? [{ ...base, type: 'approval', approval: { approvalId, kind, state: 'resolved', outcome: 'expired' } }]
         : [{ ...base, type: 'approval', causation: { operationId }, approval: { approvalId, kind, state: 'resolved', outcome: outcome === 'denied' || outcome === 'cancelled' ? outcome : 'approved' } }]

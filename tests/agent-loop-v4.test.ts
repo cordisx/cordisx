@@ -167,6 +167,43 @@ describe('AgentLoop v4 renderer adapter', () => {
     expect(await broker.bind(options('owner-a')).send({ ...base('forged-send'), type: 'send', binding: forged, content: [{ kind: 'text', text: 'forged' }] })).not.toMatchObject({ status: 'accepted' })
   })
 
+  it('isolates lifecycle correlation when owners reuse the same opaque task and turn handles', async () => {
+    const host = new PlaygroundMockAgentLoopHost()
+    const source = new PlaygroundMockAgentLoopV4Transport(host)
+    const transport = Object.create(source) as AgentLoopV4Transport
+    transport.createAgentLoopV4 = async input => {
+      const result = await source.createAgentLoopV4(input) as { locator: { task: string; binding: { bindingId: string; generation: number } } }
+      return { ...result, locator: { task: 'shared-task', binding: { bindingId: 'shared-binding', generation: 1 } } }
+    }
+    transport.requestAgentLoopIntroductionV4 = async input => ({ status: 'accepted', turn: 'shared-turn', messageId: `message-${input.scope.ownerKey}`, delivery: 'executed' })
+    transport.readAgentLoopV4Lifecycle = async () => ({
+      status: 'accepted', nextAfterSequence: 1,
+      events: [{ eventId: 'shared-event', sequence: 1, turnId: 'shared-turn', type: 'turn.completed', output: [{ type: 'text', text: 'owner-scoped reply' }] }],
+    })
+    const broker = new CordisXAgentLoopBrokerV4(transport, host, 'playground', 'owner-correlation')
+    const bind = (ownerKey: string) => broker.bind({ ...options(), ownerKey })
+    const ownerA = bind('owner-a')
+    const ownerB = bind('owner-b')
+    const create = (commandId: string) => ({ ...base(commandId), type: 'create-or-bind' as const, definition: definition.identity, definitions: [definition], target: { mode: 'create' as const } })
+    const createdA = await ownerA.createOrBind(create('create-owner-a'))
+    const createdB = await ownerB.createOrBind(create('create-owner-b'))
+    if (createdA.status !== 'accepted' || createdB.status !== 'accepted') throw new Error('create failed')
+    expect(await ownerA.requestMemberSelfIntroduction({
+      ...base('intro-owner-a'), type: 'request-member-self-introduction', binding: createdA.binding,
+      participantId: 'participant-a', memberId: 'member-a', runId: 'run-a', intent: { kind: 'member-self-introduction', audience: 'room', output: 'assistant-message' },
+    })).toMatchObject({ status: 'accepted', messageId: 'message-owner-a' })
+    const subscribed = await ownerB.subscribe(createdB.binding, 0)
+    if (subscribed.status !== 'accepted') throw new Error('subscribe failed')
+    const page = await subscribed.handle.pages[Symbol.asyncIterator]().next()
+    const message = page.value?.events.find(event => event.type === 'message')
+    expect(message).toMatchObject({ type: 'message', message: { purpose: 'conversation' } })
+    expect(message).not.toMatchObject({ causation: { operationId: 'intro-owner-a' }, message: { messageId: 'message-owner-a' } })
+    subscribed.handle.unsubscribe()
+    ownerA.dispose()
+    ownerB.dispose()
+    broker.dispose()
+  })
+
   it('fails closed on noncanonical task details URLs and unknown delivery dispositions', async () => {
     const invalidUrls = [
       { url: 'javascript:alert(1)', target: 'host' },
