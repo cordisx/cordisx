@@ -9,7 +9,7 @@ import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { defaultUiPlaygroundConfig } from '../packages/cli/src/playground/defaults.js'
 import { startUiPlayground } from '../packages/cli/src/playground/server.js'
 import { createPlaygroundSession } from '../packages/cli/src/playground/session.js'
-import { activatePlaygroundReviewNavigation } from '../packages/cli/src/playground/client/review-navigation.js'
+import { activatePlaygroundReviewNavigation, authorizePlaygroundReviewNavigation } from '../packages/cli/src/playground/client/review-navigation.js'
 import {
   clearPlaygroundSimulatorSessionRegistry,
   subscribePlaygroundTaskLocation,
@@ -24,6 +24,47 @@ const defaultPluginIds = [
 ]
 
 describe('UI Playground', () => {
+  it('authorizes only the exact review contribution owner on the sidebar navigation point', async () => {
+    const calls: unknown[][] = []
+    const runtime = {
+      snapshot: () => ({
+        plugins: [
+          { id: 'chatroom', source: 'file:///plugins/chatroom.ts', status: 'active' },
+          { id: 'other', source: 'file:///plugins/other.ts', status: 'active' },
+        ],
+        registrations: [
+          { owner: 'other', qualifiedId: 'other:row', surface: 'sidebar.navigation.items', authorized: false, pointPolicyReason: 'permission.review-pending' },
+          { owner: 'chatroom', qualifiedId: 'chatroom:chatroom', surface: 'sidebar.navigation.items', authorized: false, pointPolicyReason: 'permission.review-pending', item: { route: { id: 'new-room' } } },
+        ],
+        navigation: { routes: [{ owner: 'chatroom', id: 'new-room', definition: { outlet: 'main' } }] },
+      }),
+      setExtensionPointPolicy: async (...args: unknown[]) => { calls.push(args) },
+    }
+    await authorizePlaygroundReviewNavigation(runtime, 'chatroom:chatroom')
+    expect(calls).toEqual([
+      ['file:///plugins/chatroom.ts', 'chatroom', 'sidebar.navigation.items', 'allow'],
+      ['file:///plugins/chatroom.ts', 'chatroom', 'main', 'allow'],
+    ])
+  })
+
+  it('does not override an explicit denial or authorize a non-sidebar review contribution', async () => {
+    const calls: unknown[][] = []
+    const runtime = {
+      snapshot: () => ({
+        plugins: [{ id: 'chatroom', source: 'file:///plugins/chatroom.ts', status: 'active' }],
+        registrations: [
+          { owner: 'chatroom', qualifiedId: 'chatroom:chatroom', surface: 'sidebar.navigation.items', authorized: false, pointPolicyReason: 'permission.policy-denied' },
+          { owner: 'chatroom', qualifiedId: 'chatroom:toolbar', surface: 'workspace.toolbar.items', authorized: false, pointPolicyReason: 'permission.review-pending' },
+        ],
+        navigation: { routes: [] },
+      }),
+      setExtensionPointPolicy: async (...args: unknown[]) => { calls.push(args) },
+    }
+    await authorizePlaygroundReviewNavigation(runtime, 'chatroom:chatroom')
+    await authorizePlaygroundReviewNavigation(runtime, 'chatroom:toolbar')
+    expect(calls).toEqual([])
+  })
+
   it('restores the Host outlet before a Room route projects during Task history back and forward', async () => {
     const dom = new JSDOM('<!doctype html><body><div id="root"><main data-host-seats><div data-cordisx-playground-seat="main"></div></main></div></body>', {
       url: 'http://127.0.0.1/',

@@ -15,15 +15,42 @@ declare module 'virtual:cordisx-playground-fixture' {
 
 interface PlaygroundPluginSnapshot {
   readonly id: string
+  readonly source: string
   readonly status: string
 }
 
 interface PlaygroundRuntimeSnapshot {
   readonly plugins: readonly PlaygroundPluginSnapshot[]
+  readonly registrations: readonly PlaygroundRegistrationSnapshot[]
+  readonly navigation: {
+    readonly routes: readonly PlaygroundRouteSnapshot[]
+  }
+}
+
+interface PlaygroundRegistrationSnapshot {
+  readonly owner: string
+  readonly qualifiedId: string
+  readonly surface: string
+  readonly authorized: boolean
+  readonly pointPolicyReason?: string
+  readonly item?: {
+    readonly route?: {
+      readonly id: string
+    }
+  }
+}
+
+interface PlaygroundRouteSnapshot {
+  readonly owner: string
+  readonly id: string
+  readonly definition: {
+    readonly outlet: string
+  }
 }
 
 interface PlaygroundRuntime {
   snapshot(): PlaygroundRuntimeSnapshot
+  setExtensionPointPolicy(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
   playgroundMockAgentLoop?(): import('../../renderer/playground-mock-agent-loop.js').PlaygroundMockAgentLoopSnapshot
 }
 
