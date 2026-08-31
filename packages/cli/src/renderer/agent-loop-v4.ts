@@ -104,9 +104,6 @@ function string(value: unknown): string | undefined { return typeof value === 's
 function handle(value: unknown): string | undefined {
   return typeof value === 'string' && [...value].length >= 1 && [...value].length <= 512 ? value : undefined
 }
-function opaqueId(value: unknown): string | undefined {
-  return typeof value === 'string' && /^[A-Za-z0-9._~-]{1,512}$/u.test(value) ? value : undefined
-}
 
 function derivedEventId(eventId: string, suffix: string): string {
   const candidate = `${eventId}:${suffix}`
@@ -475,9 +472,9 @@ export class CordisXAgentLoopBrokerV4 {
     const durableIntroduction = durableIntroductionRecord === undefined ? undefined : {
       operationId: handle(durableIntroductionRecord.operationId),
       messageId: handle(durableIntroductionRecord.messageId),
-      participantId: opaqueId(durableIntroductionRecord.participantId),
-      memberId: opaqueId(durableIntroductionRecord.memberId),
-      runId: opaqueId(durableIntroductionRecord.runId),
+      participantId: handle(durableIntroductionRecord.participantId),
+      memberId: handle(durableIntroductionRecord.memberId),
+      runId: handle(durableIntroductionRecord.runId),
     }
     if (durableIntroduction !== undefined && Object.values(durableIntroduction).some(value => value === undefined)) return []
     const cancellationRecord = record(input.cancellation)

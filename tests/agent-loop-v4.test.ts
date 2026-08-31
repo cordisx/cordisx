@@ -234,31 +234,36 @@ describe('AgentLoop v4 renderer adapter', () => {
     transport.requestAgentLoopIntroductionV4 = input => source.requestAgentLoopIntroductionV4(input)
     const introduction = {
       ...base('intro-before-overlong-cancel'), type: 'request-member-self-introduction' as const, binding: created.binding,
-      participantId: 'participant-1', memberId: 'member-1', runId: 'run-1', intent: { kind: 'member-self-introduction' as const, audience: 'room' as const, output: 'assistant-message' as const },
+      participantId: 'participant:1', memberId: 'member:1', runId: 'run:1', intent: { kind: 'member-self-introduction' as const, audience: 'room' as const, output: 'assistant-message' as const },
     }
     const requested = await client.requestMemberSelfIntroduction(introduction)
     if (requested.status !== 'accepted') throw new Error('introduction failed')
     transport.cancelAgentLoopIntroductionV4 = async () => ({ status: 'accepted', turn: overlong, messageId: overlong, delivery: 'executed' })
     expect(await client.cancelMemberSelfIntroduction({
       ...base('cancel-overlong-results'), type: 'cancel-member-self-introduction', binding: created.binding,
-      participantId: 'participant-1', memberId: 'member-1', runId: 'run-1', requestOperationId: introduction.commandId,
+      participantId: 'participant:1', memberId: 'member:1', runId: 'run:1', requestOperationId: introduction.commandId,
     })).toMatchObject({ status: 'unavailable', code: 'reconciliation-required' })
 
     transport.readAgentLoopV4Lifecycle = async () => ({
-      status: 'accepted', nextAfterSequence: 7, events: [
+      status: 'accepted', nextAfterSequence: 8, events: [
         { eventId: overlong, sequence: 1, turnId: 'turn-valid', type: 'turn.started' },
         { eventId: 'event-overlong-turn', sequence: 2, turnId: overlong, type: 'turn.started' },
         { eventId: 'event-valid', sequence: 3, turnId: 'turn-valid', type: 'approval.required', approval: { approvalId: overlong, kind: 'command' } },
         { eventId: 'event-invalid-introduction', sequence: 4, turnId: requested.turn, type: 'turn.completed', output: [{ type: 'text', text: 'must not be downgraded' }], introduction: { operationId: overlong, messageId: requested.messageId, participantId: 'participant-1', memberId: 'member-1', runId: 'run-1' } },
         { eventId: 'event-invalid-cancellation', sequence: 5, turnId: 'turn-valid', type: 'turn.cancelled', cancellation: { operationId: overlong } },
         { eventId: 'event-invalid-causation', sequence: 6, turnId: 'turn-valid', type: 'approval.resolved', causation: { operationId: overlong }, approval: { approvalId: 'approval-valid', kind: 'command', outcome: 'approved' } },
-        { eventId: 'event-final', sequence: 7, turnId: 'turn-valid', type: 'turn.started' },
+        { eventId: 'event-valid-introduction', sequence: 7, turnId: requested.turn, type: 'turn.completed', output: [{ type: 'text', text: 'valid introduction' }], introduction: { operationId: introduction.commandId, messageId: requested.messageId, participantId: 'participant:1', memberId: 'member:1', runId: 'run:1' } },
+        { eventId: 'event-final', sequence: 8, turnId: 'turn-valid', type: 'turn.started' },
       ],
     })
     const subscribed = await client.subscribe(created.binding, 0)
     if (subscribed.status !== 'accepted') throw new Error('subscribe failed')
     const page = await subscribed.handle.pages[Symbol.asyncIterator]().next()
-    expect(page.value?.events).toEqual([expect.objectContaining({ eventId: 'event-final', turn: 'turn-valid' })])
+    expect(page.value?.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ eventId: 'event-final', turn: 'turn-valid' }),
+      expect.objectContaining({ type: 'message', causation: { operationId: introduction.commandId }, message: expect.objectContaining({ messageId: requested.messageId, purpose: 'member-self-introduction' }) }),
+    ]))
+    expect(page.value?.events.some(event => ['event-invalid-introduction', 'event-invalid-cancellation', 'event-invalid-causation'].includes(event.eventId))).toBe(false)
     subscribed.handle.unsubscribe()
     client.dispose()
     broker.dispose()
