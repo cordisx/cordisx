@@ -1,5 +1,5 @@
 import { cloneAgentAvatarRef, type AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
-import { createSeededAvatarDefinition, parseAvatarDefinition, type AvatarDefinition } from '@oneworks/avatar'
+import { createDefaultAvatarDefinition, createSeededAvatarDefinition, parseAvatarDefinition, type AvatarDefinition } from '@oneworks/avatar'
 import { Avatar as OneWorksAvatar } from '@oneworks/avatar-react'
 import avatarVendorCss from '@oneworks/avatar-react/style.css'
 import * as React from 'react'
@@ -7,9 +7,50 @@ import type { HostAppTheme } from '../../host-theme.js'
 import { participantInitials, type AgentConversationParticipant } from './model.js'
 
 export type HostAgentAvatarResolution =
-  | Readonly<{ status: 'resolved'; avatar: Extract<AgentAvatarRef, { kind: 'generated' }>; definition: AvatarDefinition }>
+  | Readonly<{ status: 'resolved'; avatar: Extract<AgentAvatarRef, { kind: 'generated' | 'definition' }>; definition: AvatarDefinition }>
   | Readonly<{ status: 'unsupported'; avatar: AgentAvatarRef; code: 'unsupported-provider' | 'reference-unavailable' }>
 type HostAgentAvatarResolved = Extract<HostAgentAvatarResolution, { status: 'resolved' }>
+
+export const HOST_ONEWORKS_RED_FOX_AVATAR_REF = 'oneworks-avatar:red-fox-v1' as const
+export const HOST_ONEWORKS_ARCTIC_FOX_AVATAR_REF = 'oneworks-avatar:arctic-fox-v1' as const
+export const HOST_ONEWORKS_ANIMAL_AVATAR_REVISION = 'oneworks-avatar:1.0.0-rc.8-animal-v1' as const
+
+function createOneWorksFoxDefinition(paletteId: 'red-fox' | 'arctic-fox'): AvatarDefinition {
+  const base = createDefaultAvatarDefinition()
+  return parseAvatarDefinition({
+    ...base,
+    scene: {
+      ...base.scene,
+      appearance: { ...base.scene.appearance, paletteId },
+      camera: { ...base.scene.camera, frame: 'circle' },
+      entity: { ...base.scene.entity, preset: 'fox' },
+      face: {
+        ...base.scene.face,
+        mouthEnabled: true,
+        noseEnabled: true,
+        noseShape: 'inverted-triangle',
+      },
+      view: { ...base.scene.view, positionY: 0, scale: 1.4 },
+    },
+    metadata: {
+      name: paletteId === 'red-fox' ? 'Red Fox' : 'Arctic Fox',
+      generation: {
+        version: 1,
+        seed: `oneworks-avatar-${paletteId}-v1`,
+        profileId: paletteId,
+        fields: [],
+      },
+    },
+  })
+}
+
+function resolveOneWorksDefinition(ref: Extract<AgentAvatarRef, { kind: 'definition' }>): AvatarDefinition | undefined {
+  if (ref.schema !== 'oneworks.avatar' || ref.definitionVersion !== 1
+    || ref.revision !== HOST_ONEWORKS_ANIMAL_AVATAR_REVISION) return undefined
+  if (ref.ref === HOST_ONEWORKS_RED_FOX_AVATAR_REF) return createOneWorksFoxDefinition('red-fox')
+  if (ref.ref === HOST_ONEWORKS_ARCTIC_FOX_AVATAR_REF) return createOneWorksFoxDefinition('arctic-fox')
+  return undefined
+}
 
 function avatarKey(avatar: AgentAvatarRef): string {
   return avatar.kind === 'generated'
@@ -70,11 +111,6 @@ export class HostAgentAvatarResolver {
 
   resolve(input: AgentAvatarRef): HostAgentAvatarResolution {
     const avatar = cloneAgentAvatarRef(input)
-    if (avatar.kind !== 'generated') return Object.freeze({
-      status: 'unsupported' as const,
-      avatar,
-      code: avatar.kind === 'platform' ? 'unsupported-provider' as const : 'reference-unavailable' as const,
-    })
     const key = avatarKey(avatar)
     const cached = this.cache.get(key)
     if (cached !== undefined) {
@@ -82,10 +118,23 @@ export class HostAgentAvatarResolver {
       this.cache.set(key, cached)
       return cached
     }
+    if (avatar.kind !== 'generated' && avatar.kind !== 'definition') return Object.freeze({
+      status: 'unsupported' as const,
+      avatar,
+      code: avatar.kind === 'platform' ? 'unsupported-provider' as const : 'reference-unavailable' as const,
+    })
+    const definition = avatar.kind === 'generated'
+      ? this.createDefinition(avatar.seed)
+      : resolveOneWorksDefinition(avatar)
+    if (definition === undefined) return Object.freeze({
+      status: 'unsupported' as const,
+      avatar,
+      code: 'reference-unavailable' as const,
+    })
     const result: HostAgentAvatarResolved = Object.freeze({
       status: 'resolved' as const,
       avatar,
-      definition: freeze(parseAvatarDefinition(this.createDefinition(avatar.seed))),
+      definition: freeze(parseAvatarDefinition(definition)),
     })
     this.cache.set(key, result)
     while (this.cache.size > this.maximumEntries) this.cache.delete(this.cache.keys().next().value!)

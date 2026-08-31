@@ -285,10 +285,10 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(document.querySelectorAll('[role="log"]')).toHaveLength(1)
       expect(document.querySelector('[role="log"]')?.getAttribute('data-agent-conversation-scroll-owner')).toBe('timeline')
       expect(document.querySelectorAll('.cxa-status')).toHaveLength(3)
-      expect(document.querySelectorAll('.cxa-room-avatar-cell')).toHaveLength(0)
-      expect(document.querySelector('.cxa-room-avatar-fallback')).not.toBeNull()
+      expect(document.querySelectorAll('.cxa-room-avatar-cell')).toHaveLength(3)
+      expect(document.querySelector('.cxa-room-avatar-fallback')).toBeNull()
       expect(document.querySelector<HTMLElement>('.cxa-room-avatar')?.dataset.avatarCount).toBe('0')
-      expect(document.querySelectorAll('.cxa-avatar')).toHaveLength(3)
+      expect(document.querySelectorAll('.cxa-room-avatar-cell .cxa-avatar')).toHaveLength(3)
       for (const label of ['群成员', '设置', '更多']) {
         await act(async () => document.querySelector<HTMLButtonElement>(`.cxa-header-icon-action[aria-label="${label}"]`)!.click())
         expect(document.querySelectorAll('[data-host-conversation-inspector="true"]')).toHaveLength(1)
@@ -324,8 +324,8 @@ describe('AgentConversationRenderer production DOM', () => {
     const controller = new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, single)
     const roomHarness = await render(single, controller)
     try {
-      expect(roomHarness.dom.window.document.querySelectorAll('.cxa-room-avatar-cell .cxa-avatar')).toHaveLength(0)
-      expect(roomHarness.dom.window.document.querySelector('.cxa-room-avatar-fallback')).not.toBeNull()
+      expect(roomHarness.dom.window.document.querySelectorAll('.cxa-room-avatar-cell .cxa-avatar')).toHaveLength(1)
+      expect(roomHarness.dom.window.document.querySelector('.cxa-room-avatar-fallback')).toBeNull()
       expect(roomHarness.dom.window.document.querySelectorAll('.cxa-message > .cxa-avatar')).toHaveLength(0)
     } finally {
       await roomHarness.close()
@@ -556,9 +556,9 @@ describe('AgentConversationRenderer production DOM', () => {
       const composite = mixedHarness.dom.window.document.querySelector<HTMLElement>('.cxa-room-avatar')!
       expect(composite.dataset.participantCount).toBe('4')
       expect(composite.dataset.avatarCount).toBe('2')
-      expect([...composite.querySelectorAll<HTMLElement>('.cxa-room-avatar-cell')].map(cell => cell.dataset.participantId)).toEqual(['with-b', 'with-d'])
+      expect([...composite.querySelectorAll<HTMLElement>('.cxa-room-avatar-cell')].map(cell => cell.dataset.participantId)).toEqual(['without-a', 'with-b', 'without-c'])
       const more = mixedHarness.dom.window.document.querySelector<HTMLElement>('.cxa-room-avatar-more')!
-      expect(more.textContent).toBe('+2')
+      expect(more.textContent).toBe('+1')
       expect(mixedHarness.dom.window.getComputedStyle(more).borderTopWidth).toBe('0px')
       expect(mixedHarness.dom.window.getComputedStyle(more).backgroundColor).toMatch(/transparent|rgba\(0, 0, 0, 0\)/)
       expect([...composite.querySelectorAll<HTMLElement>('.cxa-room-avatar-cell')].every(cell => mixedHarness.dom.window.getComputedStyle(cell).borderTopWidth === '0px')).toBe(true)
@@ -573,8 +573,8 @@ describe('AgentConversationRenderer production DOM', () => {
       onOpen={() => undefined}
     />)).window.document
     expect(compact.querySelector('[data-room-avatar-size="compact"]')).not.toBeNull()
-    expect([...compact.querySelectorAll<HTMLElement>('.cxa-room-avatar-cell')].map(cell => cell.dataset.participantId)).toEqual(['with-b', 'with-d'])
-    expect(compact.querySelector('.cxa-room-avatar-more')?.textContent).toBe('+2')
+    expect([...compact.querySelectorAll<HTMLElement>('.cxa-room-avatar-cell')].map(cell => cell.dataset.participantId)).toEqual(['without-a', 'with-b', 'without-c'])
+    expect(compact.querySelector('.cxa-room-avatar-more')?.textContent).toBe('+1')
   })
 
   it('always renders an explicit Agent avatar outside the incoming bubble while identity actions require an exact presentation', async () => {
