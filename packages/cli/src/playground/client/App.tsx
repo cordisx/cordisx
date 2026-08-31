@@ -8,7 +8,7 @@ import { MockAgentTaskPage } from './components/MockAgentTaskPage.js'
 import { ScenarioLabPage } from './components/ScenarioLabPage.js'
 import { playgroundEnvironment, usePlaygroundEnvironment } from './environment.js'
 import fixture from 'virtual:cordisx-playground-fixture'
-import { activatePlaygroundReviewNavigation } from './review-navigation.js'
+import { activatePlaygroundReviewNavigation, authorizePlaygroundReviewNavigation } from './review-navigation.js'
 import { bootRuntime, useRuntimeState } from './runtime-store.js'
 import {
   clearPlaygroundSimulatorSessionRegistry,
@@ -64,7 +64,18 @@ export function App() {
   useEffect(() => shell.current === null ? undefined : playgroundEnvironment.attachTheme(shell.current), [])
   useEffect(() => {
     if (runtime.status !== 'active' || fixture.reviewNavigationItem === undefined) return undefined
-    return activatePlaygroundReviewNavigation(document, fixture.reviewNavigationItem)
+    let disposed = false
+    let deactivate: (() => void) | undefined
+    const hostRuntime = window.__cordisxRuntime
+    if (hostRuntime !== undefined) {
+      void authorizePlaygroundReviewNavigation(hostRuntime, fixture.reviewNavigationItem).then(() => {
+        if (!disposed) deactivate = activatePlaygroundReviewNavigation(document, fixture.reviewNavigationItem!)
+      }).catch(() => undefined)
+    }
+    return () => {
+      disposed = true
+      deactivate?.()
+    }
   }, [runtime.status])
   const recentTasks = [...(runtime.simulator?.tasks ?? [])].reverse()
   const simulatorTask = recentTasks.find(task => task.debugTaskId === simulatorTaskId)

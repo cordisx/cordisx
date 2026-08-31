@@ -349,6 +349,7 @@ interface CordisXRuntimeHandle extends ManagerModel {
   execute(owner: string, reference: CordisXCommandReference, invocationKey?: string): Promise<unknown>
   navigate(owner: string, reference: CordisXRouteReference): Promise<void>
   setExtensionPointPolicy(source: string, pluginId: string, pointId: string, policy: CordisXPointPolicy): Promise<void>
+  setExtensionPointPolicies(source: string, pluginId: string, policies: readonly { readonly pointId: string; readonly policy: CordisXPointPolicy }[]): Promise<void>
   permissionAuthorizationPlan(id: string): CordisXPermissionAuthorizationPlanV1
   authorizePlugin(id: string, decision: CordisXPermissionAuthorizationDecisionV1): Promise<void>
   permissionAuthorizationPlanV2(id: string): CordisXPermissionAuthorizationPlanV2 | undefined
@@ -1859,6 +1860,27 @@ async function start(
     return task
   }
 
+  const setExtensionPointPolicies = (
+    source: string,
+    pluginId: string,
+    policies: readonly { readonly pointId: string; readonly policy: CordisXPointPolicy }[],
+  ): Promise<void> => {
+    const task = operation.then(async () => {
+      if (disposed) throw new Error('CordisX runtime is disposed')
+      const controller = activeController(pluginId, source)
+      if (controller === undefined) throw new Error(`unknown CordisX plugin identity: ${source} / ${pluginId}`)
+      await broker.setDomPolicies(controller.identity, policies.map(({ pointId, policy }) => ({
+        pointId,
+        policy: policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
+      })))
+      slotService?.invalidatePointPolicies()
+      await routeService?.invalidatePointPolicies()
+      notify()
+    })
+    operation = task.catch(() => {})
+    return task
+  }
+
   const setExtensionPointControlAuthorization = (
     _expectedPolicyRevision: number,
     reference: Readonly<{
@@ -2658,6 +2680,7 @@ async function start(
     },
     subscribePluginConsole: listener => pluginConsole.subscribe(listener),
     setExtensionPointPolicy,
+    setExtensionPointPolicies,
     setExtensionPointControlAuthorization,
     setExtensionPointControlGroupChoice,
     permissionAuthorizationPlan,

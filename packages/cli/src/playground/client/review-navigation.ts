@@ -47,3 +47,31 @@ export function activatePlaygroundReviewNavigation(
     observer?.disconnect()
   }
 }
+
+/**
+ * Authorize only the owner and extension point containing the exact configured
+ * review contribution. This is a Playground-only convenience for an explicit
+ * local review composition; production permission policy remains unchanged.
+ */
+export async function authorizePlaygroundReviewNavigation(
+  runtime: Pick<PlaygroundRuntime, 'snapshot' | 'setExtensionPointPolicies'>,
+  qualifiedContributionId: string,
+): Promise<void> {
+  const snapshot = runtime.snapshot()
+  const registration = snapshot.registrations.find(candidate =>
+    candidate.qualifiedId === qualifiedContributionId
+    && candidate.surface === 'sidebar.navigation.items')
+  if (registration === undefined || registration.authorized) return
+  if (registration.pointPolicyReason !== 'permission.review-pending') return
+  const plugin = snapshot.plugins.find(candidate => candidate.id === registration.owner)
+  if (plugin === undefined) return
+  const pointIds = [registration.surface]
+  const routeId = registration.item?.route?.id
+  const route = routeId === undefined
+    ? undefined
+    : snapshot.navigation.routes.find(candidate =>
+      candidate.owner === registration.owner && candidate.id === routeId)
+  if (route !== undefined) pointIds.push(route.definition.outlet)
+  await runtime.setExtensionPointPolicies(plugin.source, registration.owner,
+    [...new Set(pointIds)].map(pointId => ({ pointId, policy: 'allow' })))
+}
