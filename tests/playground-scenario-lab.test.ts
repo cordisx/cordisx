@@ -114,6 +114,7 @@ describe('Playground Scenario Lab Phase 1', () => {
     expect(PLAYGROUND_SCENARIO_CATALOG.find(item => item.id === 'approval-decision')?.availability).toMatchObject({
       state: 'available',
     })
+    expect(controller.getSnapshot().activities.every(activity => activity.kind === 'operation' || activity.kind === 'result')).toBe(true)
     controller.dispose()
   })
 

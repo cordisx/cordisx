@@ -65,14 +65,14 @@ export const PLAYGROUND_SCENARIO_CATALOG: readonly PlaygroundScenarioCatalogEntr
 
 export interface PlaygroundScenarioActivity {
   readonly sequence: number
-  readonly kind: 'operation' | 'result' | 'unavailable'
+  readonly kind: 'operation' | 'result'
   readonly message: string
 }
 
 export interface PlaygroundScenarioLabSnapshot {
   readonly owner: 'host-playground-scenario-lab'
   readonly selectedScenarioId: PlaygroundScenarioId
-  readonly phase: 'idle' | 'running' | 'paused' | 'completed' | 'unavailable' | 'failed'
+  readonly phase: 'idle' | 'running' | 'paused' | 'completed' | 'failed'
   readonly cursor: number
   readonly stepCount: number
   readonly activities: readonly PlaygroundScenarioActivity[]
