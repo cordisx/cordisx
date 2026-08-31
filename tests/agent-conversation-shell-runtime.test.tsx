@@ -14,6 +14,7 @@ import {
   CordisXAgentConversationShellService,
 } from '../packages/cli/src/renderer/agent-conversation-shell.js'
 import { CommandRegistry, CordisXCommandService } from '../packages/cli/src/renderer/commands.js'
+import { HostAgentTaskDetailsNavigator } from '../packages/cli/src/renderer/host-ui/AgentTaskDetailsNavigator.js'
 import { CordisXI18nService } from '../packages/cli/src/renderer/i18n.js'
 import { CordisXPageService } from '../packages/cli/src/renderer/navigation.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
@@ -433,6 +434,152 @@ describe('Agent conversation shell public runtime', () => {
       patch: { name: 'Renamed room', description: { state: 'present', text: 'Updated description' } },
     })
     expect(Object.isFrozen(requests[0])).toBe(true)
+    registration.dispose()
+    runtime.dispose()
+    commands.dispose()
+    await settle()
+    dom.window.close()
+  })
+
+  it('keeps self-introduction and normal Agent avatars bound to the same identity action across history rebind', async () => {
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    const settings = vi.fn()
+    const navigateHost = vi.fn()
+    let effectiveIdentityAvailable = true
+    const identity = {
+      resolve: vi.fn((candidate: { readonly agentId: string; readonly revision: string }) => effectiveIdentityAvailable
+        && candidate.agentId === 'lead'
+        && candidate.revision === 'revision-one'
+        ? { identity: candidate, name: 'Lead exact', introduction: 'Coordinates the room and delegates focused work.' }
+        : undefined),
+      navigator: new HostAgentTaskDetailsNavigator({ navigateHost, navigateExternal: vi.fn() }),
+      onSettings: settings,
+    }
+    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n(), undefined, undefined, identity)
+    const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-v3-identity' })
+    const lead = {
+      participantId: 'participant-lead', role: 'agent' as const, displayName: message('participant.lead', 'Lead source'),
+      avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'lead' }),
+      agentIdentity: { agentId: 'lead', revision: 'revision-one' },
+    }
+    const human = { participantId: 'participant-human', role: 'human' as const, displayName: message('participant.human', 'You') }
+    const bindings: AgentConversationShellBinding[] = []
+    const registration = runtime.register(plugin, binding => {
+      bindings.push(binding)
+      const stream = new PageStream()
+      const mountOrdinal = bindings.length
+      const generation = `snapshot-v3-identity-${mountOrdinal}`
+      const lifecycle = mountOrdinal === 1 ? 'running' as const : 'waiting' as const
+      const detailsUrl = mountOrdinal === 1 ? 'app://-/tasks/lead-history' : 'app://-/tasks/lead-current'
+      const subscription = {
+        subscriptionId: `subscription-identity-${mountOrdinal}`,
+        binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration },
+        generation, afterSequence: 3, snapshotSequence: 3,
+      }
+      return {
+        snapshot: async () => ({
+          binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration },
+          generation, snapshotSequence: 3,
+          selection: {
+            kind: 'room' as const, roomId: 'room-identity', title: message('room.identity', 'Identity room'),
+            multiParticipant: true, participantPresentation: 'host-initials' as const, participants: [lead, human],
+            activeRuns: [{
+              participantId: 'participant-lead', memberId: 'member-lead', runId: 'run-lead',
+              lifecycle: { phase: lifecycle }, detailsUrl: { url: detailsUrl, target: 'host' as const },
+            }],
+          },
+          items: [{
+            kind: 'message' as const, itemId: 'self-introduction', messageId: 'message-introduction', sequence: 1,
+            author: lead, source: 'agent-loop' as const,
+            semantic: {
+              purpose: 'member-self-introduction' as const, causation: { operationId: 'operation-introduction' },
+              participantId: 'participant-lead', memberId: 'member-lead', runId: 'run-lead',
+              binding: { bindingId: 'loop-binding-lead', generation: 1 }, turn: 'turn-introduction',
+            },
+            body: [{ kind: 'text' as const, text: message('message.introduction', 'I coordinate this room.') }],
+            reactions: [], timestamp: '2026-08-31T00:00:00.000Z', deliveryState: 'delivered' as const,
+            runState: 'idle' as const, ariaLive: 'polite' as const, actions: [],
+          }, {
+            kind: 'message' as const, itemId: 'human-message', messageId: 'message-human', sequence: 2,
+            author: human, source: 'agent-loop' as const, semantic: { purpose: 'conversation' as const },
+            body: [{ kind: 'text' as const, text: message('message.human', 'Please continue.') }],
+            reactions: [], timestamp: '2026-08-31T00:00:01.000Z', deliveryState: 'delivered' as const,
+            runState: 'idle' as const, ariaLive: 'off' as const, actions: [],
+          }, {
+            kind: 'message' as const, itemId: 'normal-reply', messageId: 'message-normal', sequence: 3,
+            author: lead, source: 'agent-loop' as const,
+            semantic: { purpose: 'conversation' as const, causation: { operationId: 'operation-normal' } },
+            body: [{ kind: 'text' as const, text: message('message.normal', 'Continuing with the review.') }],
+            reactions: [], timestamp: '2026-08-31T00:00:02.000Z', deliveryState: 'delivered' as const,
+            runState: 'idle' as const, ariaLive: 'polite' as const, actions: [],
+          }],
+          composer: {
+            availability: 'unavailable' as const, placeholder: message('composer.placeholder', 'Message'),
+            disabled: { value: true }, submit: { id: 'send' },
+          },
+          headerActions: [],
+        }),
+        subscribe: async () => ({
+          result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription },
+          handle: { subscription, pages: stream, unsubscribe: () => stream.close() },
+        }),
+        dispose: () => stream.close(),
+      }
+    })
+
+    const assertIdentityActions = async (expectedLifecycle: 'running' | 'waiting', expectedDetailsUrl: string): Promise<void> => {
+      await vi.waitFor(() => expect(dom.window.document.querySelectorAll('.cx-agent-identity-avatar-button')).toHaveLength(2), { timeout: 1_000, interval: 10 })
+      const introduction = dom.window.document.querySelector<HTMLElement>('[data-entry-id="self-introduction"]')!
+      const normal = dom.window.document.querySelector<HTMLElement>('[data-entry-id="normal-reply"]')!
+      for (const entry of [introduction, normal]) {
+        const trigger = entry.querySelector<HTMLButtonElement>('.cx-agent-identity-avatar-button')!
+        expect(trigger.tagName).toBe('BUTTON')
+        expect(trigger.getAttribute('aria-label')).toBe('Open Lead source')
+        expect(trigger.querySelector('.cxa-avatar[data-avatar-kind="generated"]')).not.toBeNull()
+      }
+      introduction.querySelector<HTMLButtonElement>('.cx-agent-identity-avatar-button')!.click()
+      await vi.waitFor(() => expect(dom.window.document.querySelector('[role="dialog"]')?.textContent).toContain('Lead exact'), { timeout: 1_000, interval: 10 })
+      const panel = dom.window.document.querySelector<HTMLElement>('[role="dialog"]')!
+      expect(panel.textContent).toContain('Coordinates the room and delegates focused work.')
+      expect(panel.textContent).toContain('Identity room')
+      expect(panel.textContent).toContain(`Agent task · ${expectedLifecycle}`)
+      expect(panel.textContent).not.toContain(`Agent task · ${expectedLifecycle === 'running' ? 'waiting' : 'running'}`)
+      expect(panel.closest('[data-host-conversation-inspector="true"]')).not.toBeNull()
+      navigateHost.mockClear()
+      dom.window.document.querySelector<HTMLButtonElement>('.cx-agent-identity-session')!.click()
+      await vi.waitFor(() => expect(navigateHost).toHaveBeenCalledWith(expectedDetailsUrl), { timeout: 1_000, interval: 10 })
+      await vi.waitFor(() => expect(dom.window.document.querySelector('[role="dialog"]')).toBeNull(), { timeout: 1_000, interval: 10 })
+      normal.querySelector<HTMLButtonElement>('.cx-agent-identity-avatar-button')!.click()
+      await vi.waitFor(() => expect(dom.window.document.querySelector('[role="dialog"]')?.textContent).toContain('Lead exact'), { timeout: 1_000, interval: 10 })
+      dom.window.document.querySelector<HTMLButtonElement>('.cx-conversation-inspector-icon-action')!.click()
+    }
+
+    const unmount = registration.mount(mountContext(dom, { roomId: 'room-identity' }))
+    await assertIdentityActions('running', 'app://-/tasks/lead-history')
+    if (typeof unmount === 'function') unmount()
+    await settle()
+
+    const unmountReloaded = registration.mount(mountContext(dom, { roomId: 'room-identity' }))
+    await assertIdentityActions('waiting', 'app://-/tasks/lead-current')
+    expect(bindings).toHaveLength(2)
+    expect(bindings[1]?.bindingId).not.toBe(bindings[0]?.bindingId)
+    expect(navigateHost).not.toHaveBeenCalledWith('app://-/tasks/lead-history')
+    expect(identity.resolve).toHaveBeenCalledWith({ agentId: 'lead', revision: 'revision-one' })
+
+    if (typeof unmountReloaded === 'function') unmountReloaded()
+    await settle()
+
+    effectiveIdentityAvailable = false
+    const unmountMissingIdentity = registration.mount(mountContext(dom, { roomId: 'room-identity' }))
+    await vi.waitFor(() => expect(dom.window.document.querySelectorAll('.cxa-message')).toHaveLength(3), { timeout: 1_000, interval: 10 })
+    expect(dom.window.document.querySelectorAll('.cx-agent-identity-avatar-button')).toHaveLength(0)
+    for (const itemId of ['self-introduction', 'normal-reply']) {
+      const entry = dom.window.document.querySelector<HTMLElement>(`[data-entry-id="${itemId}"]`)!
+      expect(entry.querySelector(':scope > .cxa-avatar[data-avatar-kind="generated"]')).not.toBeNull()
+    }
+
+    if (typeof unmountMissingIdentity === 'function') unmountMissingIdentity()
     registration.dispose()
     runtime.dispose()
     commands.dispose()
