@@ -168,6 +168,12 @@ function assertOpaque(value: string, label: string): void {
   if (!/^[A-Za-z0-9._~-]{1,512}$/u.test(value)) throw new Error(`${label} must be an opaque identifier`)
 }
 
+function assertAgentLoopHandle(value: string, label: string): void {
+  if (typeof value !== 'string' || [...value].length < 1 || [...value].length > 512) {
+    throw new Error(`${label} must be an AgentLoop opaque handle`)
+  }
+}
+
 function assertText(value: string, label: string, maximum = 4_000): void {
   if (typeof value !== 'string' || value.trim() === '' || value.length > maximum) {
     throw new Error(`${label} must be non-empty and at most ${maximum} characters`)
@@ -287,9 +293,9 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
       assertOpaque(entry.participantId, `entries[${index}].participantId`)
       assertOpaque(entry.memberId, `entries[${index}].memberId`)
       assertOpaque(entry.runId, `entries[${index}].runId`)
-      assertOpaque(entry.binding.bindingId, `entries[${index}].binding.bindingId`)
-      assertOpaque(entry.turn, `entries[${index}].turn`)
-      assertOpaque(entry.approvalId, `entries[${index}].approvalId`)
+      assertAgentLoopHandle(entry.binding.bindingId, `entries[${index}].binding.bindingId`)
+      assertAgentLoopHandle(entry.turn, `entries[${index}].turn`)
+      assertAgentLoopHandle(entry.approvalId, `entries[${index}].approvalId`)
       if (!participantIds.has(entry.participantId)) throw new Error(`entries[${index}] approval association is invalid`)
       if (!['pending', 'approved', 'denied', 'cancelled', 'failed'].includes(entry.state)) throw new Error(`entries[${index}].state is invalid`)
       if (entry.state === 'pending' && (entry.actions.length < 1 || entry.actions.length > 3)) throw new Error(`entries[${index}].actions is invalid`)
@@ -315,11 +321,11 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
     if (entry.semantic !== undefined) {
       if (!['conversation', 'member-self-introduction', 'chatroom-acknowledgement'].includes(entry.semantic.purpose)) throw new Error(`entries[${index}].semantic is invalid`)
       if (entry.semantic.purpose === 'member-self-introduction') {
-        assertOpaque(entry.semantic.causation.operationId, `entries[${index}].semantic.causation.operationId`)
+        assertAgentLoopHandle(entry.semantic.causation.operationId, `entries[${index}].semantic.causation.operationId`)
         assertOpaque(entry.semantic.participantId, `entries[${index}].semantic.participantId`)
         assertOpaque(entry.semantic.memberId, `entries[${index}].semantic.memberId`)
         assertOpaque(entry.semantic.runId, `entries[${index}].semantic.runId`)
-        assertOpaque(entry.semantic.turn, `entries[${index}].semantic.turn`)
+        assertAgentLoopHandle(entry.semantic.turn, `entries[${index}].semantic.turn`)
         if (entry.source !== 'agent-loop' || entry.authorId !== entry.semantic.participantId) throw new Error(`entries[${index}] self-introduction association is invalid`)
       }
     }

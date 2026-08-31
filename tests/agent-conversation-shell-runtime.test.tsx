@@ -629,7 +629,7 @@ describe('Agent conversation shell public runtime', () => {
       const initialMessage = {
         kind: 'message' as const, itemId: 'message-one', messageId: 'message-one', sequence: 1, source: 'agent-loop' as const,
         author: participant,
-        semantic: { purpose: 'member-self-introduction' as const, causation: { operationId: 'intro-one' }, participantId: 'agent-one', memberId: 'member-one', runId: 'run-one', binding: { bindingId: 'loop-binding-one', generation: 1 }, turn: 'turn-intro' },
+        semantic: { purpose: 'member-self-introduction' as const, causation: { operationId: 'intro:one' }, participantId: 'agent-one', memberId: 'member-one', runId: 'run-one', binding: { bindingId: 'loop:binding:one', generation: 1 }, turn: 'turn:intro' },
         body: [{ kind: 'text' as const, text: message('message.intro', 'I help review changes.') }],
         reactions: [
           { reactionId: 'reaction-one', actorParticipantId: 'agent-one', value: { kind: 'semantic' as const, token: 'acknowledged' }, state: 'pending' as const },
@@ -639,7 +639,7 @@ describe('Agent conversation shell public runtime', () => {
       }
       const initialApproval = {
         kind: 'approval' as const, itemId: 'approval-one', sequence: 2, participantId: 'agent-one', memberId: 'member-one', runId: 'run-one',
-        binding: { bindingId: 'loop-binding-one', generation: 1 }, turn: 'turn-approval', approvalId: 'approval-one', approvalKind: 'command' as const,
+        binding: { bindingId: 'loop:binding:one', generation: 1 }, turn: 'turn:approval', approvalId: 'approval:one', approvalKind: 'command' as const,
         rationale: message('approval.rationale', 'Run checks'), state: 'pending' as const,
         actions: [{ decision: 'approve' as const, command: { id: 'approve' } }],
       }
@@ -721,6 +721,9 @@ describe('Agent conversation shell public runtime', () => {
       [{ ...messageItem, author: { ...agentOne, displayName: message('forged', 'Forged') } }],
       [{ ...messageItem, author: human, semantic: { ...messageItem.semantic, participantId: 'human-one', memberId: 'human-member', runId: 'human-run' } }],
       [{ ...messageItem, semantic: { ...messageItem.semantic, participantId: 'agent-two', memberId: 'member-two', runId: 'run-two' } }],
+      [{ ...messageItem, itemId: 'message:one' }],
+      [{ ...messageItem, semantic: { ...messageItem.semantic, causation: { operationId: '' } } }],
+      [{ ...messageItem, semantic: { ...messageItem.semantic, causation: { operationId: 'x'.repeat(513) } } }],
       [approval('approval-one', 'agent-one', 'member-one', 'run-one'), approval('approval-two', 'agent-two', 'member-two', 'run-two')],
       [approval('approval-one', 'agent-one', 'member-one', 'run-one', [
         { decision: 'approve' as const, command: { id: 'approve-one' } },

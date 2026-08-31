@@ -96,6 +96,12 @@ function opaque(value: unknown, label: string): asserts value is string {
   }
 }
 
+function agentLoopHandle(value: unknown, label: string): asserts value is string {
+  if (typeof value !== 'string' || [...value].length < 1 || [...value].length > 512) {
+    throw new Error(`${label} must be an AgentLoop opaque handle`)
+  }
+}
+
 function safeSequence(value: unknown, label: string): asserts value is number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error(`${label} must be a non-negative safe integer`)
 }
@@ -279,8 +285,8 @@ function assertItem(value: unknown, label: string): asserts value is ProtocolIte
     opaque(value.itemId, `${label}.itemId`); safeSequence(value.sequence, `${label}.sequence`)
     opaque(value.participantId, `${label}.participantId`); opaque(value.memberId, `${label}.memberId`); opaque(value.runId, `${label}.runId`)
     plainObject(value.binding, `${label}.binding`); exactKeys(value.binding, ['bindingId', 'generation'], `${label}.binding`)
-    opaque(value.binding.bindingId, `${label}.binding.bindingId`); safeSequence(value.binding.generation, `${label}.binding.generation`)
-    opaque(value.turn, `${label}.turn`); opaque(value.approvalId, `${label}.approvalId`)
+    agentLoopHandle(value.binding.bindingId, `${label}.binding.bindingId`); safeSequence(value.binding.generation, `${label}.binding.generation`)
+    agentLoopHandle(value.turn, `${label}.turn`); agentLoopHandle(value.approvalId, `${label}.approvalId`)
     if (!['command', 'file-change', 'external-action', 'other'].includes(value.approvalKind as string)) throw new Error(`${label}.approvalKind is invalid`)
     if (!['pending', 'approved', 'denied', 'cancelled', 'failed'].includes(value.state as string)) throw new Error(`${label}.state is invalid`)
     if (value.rationale !== undefined) assertLocalizedText(value.rationale, `${label}.rationale`)
@@ -347,13 +353,13 @@ function assertItem(value: unknown, label: string): asserts value is ProtocolIte
       exactKeys(value.semantic, ['purpose', 'causation'], `${label}.semantic`)
     } else if (value.semantic.purpose === 'member-self-introduction') {
       exactKeys(value.semantic, ['purpose', 'causation', 'participantId', 'memberId', 'runId', 'binding', 'turn'], `${label}.semantic`)
-      opaque(value.semantic.participantId, `${label}.semantic.participantId`); opaque(value.semantic.memberId, `${label}.semantic.memberId`); opaque(value.semantic.runId, `${label}.semantic.runId`); opaque(value.semantic.turn, `${label}.semantic.turn`)
+      opaque(value.semantic.participantId, `${label}.semantic.participantId`); opaque(value.semantic.memberId, `${label}.semantic.memberId`); opaque(value.semantic.runId, `${label}.semantic.runId`); agentLoopHandle(value.semantic.turn, `${label}.semantic.turn`)
       plainObject(value.semantic.binding, `${label}.semantic.binding`); exactKeys(value.semantic.binding, ['bindingId', 'generation'], `${label}.semantic.binding`)
-      opaque(value.semantic.binding.bindingId, `${label}.semantic.binding.bindingId`); safeSequence(value.semantic.binding.generation, `${label}.semantic.binding.generation`)
+      agentLoopHandle(value.semantic.binding.bindingId, `${label}.semantic.binding.bindingId`); safeSequence(value.semantic.binding.generation, `${label}.semantic.binding.generation`)
     } else if (value.semantic.purpose === 'chatroom-acknowledgement') exactKeys(value.semantic, ['purpose'], `${label}.semantic`)
     else throw new Error(`${label}.semantic.purpose is invalid`)
     if (value.semantic.causation !== undefined) {
-      plainObject(value.semantic.causation, `${label}.semantic.causation`); exactKeys(value.semantic.causation, ['operationId'], `${label}.semantic.causation`); opaque(value.semantic.causation.operationId, `${label}.semantic.causation.operationId`)
+      plainObject(value.semantic.causation, `${label}.semantic.causation`); exactKeys(value.semantic.causation, ['operationId'], `${label}.semantic.causation`); agentLoopHandle(value.semantic.causation.operationId, `${label}.semantic.causation.operationId`)
     }
     if (value.source === 'agent-loop' && value.semantic.purpose === 'chatroom-acknowledgement'
       || value.source === 'chatroom-acknowledgement' && value.semantic.purpose !== 'chatroom-acknowledgement') {
