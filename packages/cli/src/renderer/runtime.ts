@@ -102,13 +102,16 @@ import {
   BindingAgentLoopHost,
   CordisXAgentLoopBroker,
   UnavailableAgentLoopHost,
-  type CordisXAgentLoopAuthorizationRequest,
+  type CordisXAgentLoopAuthorizationRequestV4,
   type CordisXBoundAgentLoopClientOptions,
 } from './agent-loop.js'
 import { combineAgentLoopClients, CordisXAgentLoopBrokerV2 } from './agent-loop-v2.js'
+import { adaptAgentLoopV3 } from './agent-loop-v3-compat.js'
+import { CordisXAgentLoopBrokerV4 } from './agent-loop-v4.js'
 import {
   PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE,
   PlaygroundMockAgentLoopHost,
+  PlaygroundMockAgentLoopV4Transport,
   type PlaygroundMockAgentLoopSnapshot,
 } from './playground-mock-agent-loop.js'
 import type { CompatibleBoundAgentLoopClient } from '../agent-loop-contracts.js'
@@ -719,6 +722,14 @@ async function start(
   const playgroundMockAgentLoop = metadata.agentLoopBackend === 'mock'
     ? new PlaygroundMockAgentLoopHost(undefined, simulatorPersistence)
     : undefined
+  const simulatorV4Persistence = {
+    read: () => {
+      try { return document.defaultView?.sessionStorage.getItem(`${simulatorSessionKey}:agent-loop-v4-ledger`) ?? undefined } catch { return undefined }
+    },
+    write: (value: string) => {
+      try { document.defaultView?.sessionStorage.setItem(`${simulatorSessionKey}:agent-loop-v4-ledger`, value) } catch { /* unavailable browser storage */ }
+    },
+  }
   const agentLoopHost = playgroundMockAgentLoop
     ?? (bindingPlatformAdapter === undefined
       ? new UnavailableAgentLoopHost()
@@ -735,6 +746,12 @@ async function start(
         },
       }
     : undefined)
+  const agentLoopBrokerV4 = new CordisXAgentLoopBrokerV4(
+    playgroundMockAgentLoop === undefined ? bindingPlatformAdapter : new PlaygroundMockAgentLoopV4Transport(playgroundMockAgentLoop, simulatorV4Persistence),
+    agentLoopHost,
+    metadata.profileId,
+    generation,
+  )
   // Host-owned only: no plugin or renderer global receives this broker/adapter.
   const connectorBroker = new CordisXConnectorBroker()
   const agentConnector = connectorBroker.register(createCodexAgentConnector(agentAdapter))
@@ -1203,8 +1220,8 @@ async function start(
       },
       authorize: connectorAuthorization,
     })
-    const agentLoopAuthorization = async (
-      request: CordisXAgentLoopAuthorizationRequest,
+    const agentLoopAuthorizationV4 = async (
+      request: CordisXAgentLoopAuthorizationRequestV4,
     ) => {
       if (!controller.principalLive) return { capability: request.capability, state: 'unavailable' as const, code: 'host-unavailable' as const }
       try {
@@ -1237,7 +1254,8 @@ async function start(
           return false
         }
       },
-      authorize: agentLoopAuthorization,
+      authorize: request => agentLoopAuthorizationV4(request) as ReturnType<CordisXBoundAgentLoopClientOptions['authorize']>,
+      authorizeV4: agentLoopAuthorizationV4,
       registerPrompt: (sessionId, definition) => (definition.promptSections ?? []).map((section, order) => agentRuntime.registerPrompt(
         controller.identity,
         'section',
@@ -1250,9 +1268,12 @@ async function start(
         moduleGenerationOf(controller),
       )),
     }
+    const agentLoopClientV4 = agentLoopBrokerV4.bind(agentLoopOptions)
     const agentLoopClient = combineAgentLoopClients(
       agentLoopBroker.bind(agentLoopOptions),
       agentLoopBrokerV2.bind(agentLoopOptions),
+      adaptAgentLoopV3(agentLoopClientV4),
+      agentLoopClientV4,
     )
     const documentsClient = ownerDocumentBroker.bind({
       identity: controller.identity,
@@ -2537,6 +2558,7 @@ async function start(
     connectorBroker.disposeAll()
     agentLoopBroker.dispose()
     agentLoopBrokerV2.dispose()
+    agentLoopBrokerV4.dispose()
     ownerDocumentBroker.dispose()
     await agentRuntime.dispose()
     historyAdapter.dispose()

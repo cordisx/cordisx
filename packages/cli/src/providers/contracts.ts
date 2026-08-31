@@ -83,9 +83,38 @@ export interface ProviderConnection {
     /** Host-private AgentLoop projection; never accepted by ctx.platform. */
     readonly developerInstructions?: string
     readonly effort?: 'low' | 'medium' | 'high' | 'xhigh'
+    /** Host-private AgentLoop policy; public Platform callers cannot set it. */
+    readonly approvalPolicy?: 'never' | 'on-request'
   }): Promise<CordisXPlatformResult<CordisXSessionSummary>>
   controlSession(input: CordisXTaskControlInput): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>>
-  submitTurn(input: { readonly session: CordisXPlatformSessionRef; readonly message: string }): Promise<CordisXPlatformResult<CordisXTurnStart>>
+  submitTurn(input: {
+    readonly session: CordisXPlatformSessionRef
+    readonly message: string
+    readonly operationId?: string
+    readonly operationDigest?: string
+  }): Promise<CordisXPlatformResult<CordisXTurnStart>>
+  decideApproval(input: {
+    readonly session: CordisXPlatformSessionRef
+    readonly turnId: string
+    readonly approvalId: string
+    readonly decision: 'approved' | 'denied' | 'cancelled'
+    readonly operationId: string
+    readonly operationDigest: string
+  }): Promise<CordisXPlatformResult<{ readonly turnId: string; readonly approvalId: string; readonly decision: 'approved' | 'denied' | 'cancelled' }>>
+  requestMemberSelfIntroduction(input: {
+    readonly session: CordisXPlatformSessionRef
+    readonly operationId: string
+    readonly operationDigest: string
+    readonly participantId: string
+    readonly memberId: string
+    readonly runId: string
+  }): Promise<CordisXPlatformResult<{ readonly turnId: string; readonly messageId: string }>>
+  cancelMemberSelfIntroduction(input: {
+    readonly session: CordisXPlatformSessionRef
+    readonly turnId: string
+    readonly operationId: string
+    readonly operationDigest: string
+  }): Promise<CordisXPlatformResult<{ readonly turnId: string }>>
   controlTurn(input: CordisXTurnControlInput): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>>
   /** Node-only normalized signal source; raw App Server frames never cross this seam. */
   subscribeLifecycle?(listener: (event: ProviderLifecycleSignal) => void): () => void

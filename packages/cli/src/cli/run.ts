@@ -74,6 +74,7 @@ import {
 } from '../plugin-lifecycle-contracts.js'
 import type { RollbackPlan } from '../launcher/packages/authority.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
+import { AgentLoopAuthority } from '../launcher/agent-loop-authority.js'
 import {
   createOwnerDocumentBridgeHandler,
   type OwnerDocumentBridgeHandler,
@@ -659,7 +660,10 @@ async function runDevelopment(
     agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
     ownerDocuments,
     ...(composition.providerBridgeToken === undefined ? {} : {
-      providerFleet: await ProviderFleet.create(providerConfigs(config, environment), { appServer: { environment } }),
+      providerFleet: await ProviderFleet.create(providerConfigs(config, environment), {
+        appServer: { environment },
+        agentLoopAuthority: await AgentLoopAuthority.open(cordisxHomeDir, 'development'),
+      }),
       providerBridgeToken: composition.providerBridgeToken,
     }),
     ...(executable === undefined ? {} : { executable }),
@@ -935,7 +939,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   } satisfies IconThemePreferencePersistenceContext
   const providerFleet = rendererComposition.providerBridgeToken === undefined
     ? undefined
-    : await ProviderFleet.create(providerConfigs(composition, runtime.env ?? process.env), { appServer: { environment: runtime.env ?? process.env } })
+    : await ProviderFleet.create(providerConfigs(composition, runtime.env ?? process.env), {
+        appServer: { environment: runtime.env ?? process.env },
+        agentLoopAuthority: await AgentLoopAuthority.open(rootFromConfigPath(configPath), selection.profileId),
+      })
   const serviceConfigToken = rendererComposition.serviceConfigBridgeToken
   const services: Array<{ readonly pluginId: string; readonly serviceId: string; readonly api: HostServiceConfigNarrowApi }> = []
   let channelConfigApi: HostServiceConfigNarrowApi | undefined

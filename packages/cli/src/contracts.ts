@@ -1,13 +1,17 @@
 import type { Context, Disposable, Effect } from '@deepseek-ai/cordis'
 import type {
   AgentConversationShellBinding,
-  AgentConversationShellCommandContext,
   AgentConversationShellSource,
 } from '@cordisx/protocol/agent-conversation-shell/v1'
 import type {
   AgentConversationShellBinding as AgentConversationShellBindingV2,
   AgentConversationShellSource as AgentConversationShellSourceV2,
 } from '@cordisx/protocol/agent-conversation-shell/v2'
+import type {
+  AgentConversationShellCommandContext,
+  AgentConversationShellBinding as AgentConversationShellBindingV3,
+  AgentConversationShellSource as AgentConversationShellSourceV3,
+} from '@cordisx/protocol/agent-conversation-shell/v3'
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { ComponentType } from 'react'
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
@@ -35,8 +39,17 @@ export type {
 } from './renderer/connectors.js'
 export type {
   AgentConversationAction,
+  AgentConversationApprovalAction,
+  AgentConversationApprovalItem,
   AgentConversationItem,
+  AgentConversationMessageItem,
+  AgentConversationMessageSemantic,
   AgentConversationParticipant,
+  AgentConversationRoomCollectionLeadingVisual,
+  AgentConversationRoomDescription,
+  AgentConversationRoomSettingsPatch,
+  AgentConversationRoomSettingsUpdateRequest,
+  AgentConversationRoomSettingsUpdateResult,
   AgentConversationSelection,
   AgentConversationShellBinding,
   AgentConversationShellBindRequest,
@@ -51,7 +64,7 @@ export type {
   AgentConversationShellSubscription,
   AgentConversationShellSubscriptionHandle,
   AgentConversationShellUpdate,
-} from '@cordisx/protocol/agent-conversation-shell/v1'
+} from '@cordisx/protocol/agent-conversation-shell/v3'
 
 /** Scalar parameter values accepted by LocalizedText and the protocol. */
 export type CordisXMessageParam = string | number | boolean | null
@@ -1150,6 +1163,10 @@ export type CordisXAgentConversationShellSourceFactoryV2 = (
   binding: Readonly<AgentConversationShellBindingV2>,
 ) => AgentConversationShellSourceV2 | Promise<AgentConversationShellSourceV2>
 
+export type CordisXAgentConversationShellSourceFactoryV3 = (
+  binding: Readonly<AgentConversationShellBindingV3>,
+) => AgentConversationShellSourceV3 | Promise<AgentConversationShellSourceV3>
+
 /** Host-owned page mount paired with one fiber-owned source registration. */
 export interface CordisXAgentConversationShellRegistration {
   readonly mount: CordisXPageMount
@@ -1160,6 +1177,7 @@ export interface CordisXAgentConversationShellRegistration {
 export interface CordisXAgentConversationShell {
   registerSource(factory: CordisXAgentConversationShellSourceFactory): CordisXAgentConversationShellRegistration
   registerSource(factory: CordisXAgentConversationShellSourceFactoryV2): CordisXAgentConversationShellRegistration
+  registerSource(factory: CordisXAgentConversationShellSourceFactoryV3): CordisXAgentConversationShellRegistration
 }
 
 export interface CordisXRouteDefinition<Outlet extends CordisXOutletName = CordisXOutletName> {

@@ -13,6 +13,7 @@ import {
   type AgentFilter as CordisXAgentFilter,
   type AgentInheritanceMode as CordisXAgentInheritanceMode,
   type AgentLoopAuthorizationOutcome as CordisXAgentLoopAuthorizationOutcome,
+  type AgentLoopAuthorizationOutcomeV4 as CordisXAgentLoopAuthorizationOutcomeV4,
   type AgentLoopContentPart as CordisXAgentLoopContentPart,
   type AgentLoopCreateOrBindResult as CordisXAgentLoopCreateOrBindResult,
   type AgentLoopEvent as CordisXAgentLoopEvent,
@@ -47,12 +48,18 @@ export interface CordisXAgentLoopAuthorizationRequest {
   readonly model?: CordisXPlatformModelRef
   readonly session?: CordisXPlatformSessionRef
   readonly cwd?: string
+  readonly task?: string
+}
+
+export interface CordisXAgentLoopAuthorizationRequestV4 extends Omit<CordisXAgentLoopAuthorizationRequest, 'capability'> {
+  readonly capability: Extract<CordisXPlatformCapability, 'tasks.create' | 'tasks.content.read' | 'turns.submit' | 'turns.introduce' | 'approvals.decide'>
 }
 
 export interface CordisXBoundAgentLoopClientOptions {
   readonly ownerKey: string
   readonly active: () => boolean
   readonly authorize: (request: CordisXAgentLoopAuthorizationRequest) => Promise<CordisXAgentLoopAuthorizationOutcome>
+  readonly authorizeV4?: (request: CordisXAgentLoopAuthorizationRequestV4) => Promise<CordisXAgentLoopAuthorizationOutcomeV4>
   readonly registerPrompt?: (sessionId: string, definition: CordisXResolvedAgentDefinition) => readonly Disposable<void>[]
 }
 

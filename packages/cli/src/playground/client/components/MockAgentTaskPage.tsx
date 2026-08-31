@@ -45,9 +45,22 @@ export function MockAgentTaskPage({ task, locale }: {
       <JsonValue value={task.execution ?? { status: 'not-started' }} />
     </section>
     <section>
-      <h2>{en ? 'Lifecycle trace' : 'Lifecycle trace'}</h2>
+      <h2>{en ? 'Lifecycle and semantic trace' : 'Lifecycle 与语义 trace'}</h2>
       <ol className="pg-simulator-events">
-        {task.events.map(event => <li key={event.sequence}><strong>{event.type}</strong><span>{event.detail}</span></li>)}
+        {task.events.map(event => <li key={event.sequence}>
+          <strong>{event.type}</strong>
+          {event.operationId === undefined
+            ? <span>{event.detail}</span>
+            : <pre>{JSON.stringify({
+                operationId: event.operationId,
+                purpose: event.purpose,
+                turn: event.turn,
+                messageId: event.messageId,
+                participantId: event.participantId,
+                memberId: event.memberId,
+                runId: event.runId,
+              }, null, 2)}</pre>}
+        </li>)}
       </ol>
     </section>
   </main>

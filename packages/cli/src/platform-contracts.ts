@@ -18,6 +18,8 @@ export const CORDISX_PLATFORM_CAPABILITIES = [
   'tasks.control',
   'turns.submit',
   'turns.control',
+  'turns.introduce',
+  'approvals.decide',
   'agent.events.read',
   'agent.history.read',
   'agent.messages.append',

@@ -19,7 +19,7 @@ import type {
 const AVAILABILITY_NAMESPACE = 'cordisx.manager.capability-availability'
 const PLATFORM_CAPABILITIES: readonly CordisXPlatformCapability[] = Object.freeze([
   'models.read', 'tasks.catalog.read', 'tasks.content.read', 'tasks.create',
-  'tasks.control', 'turns.submit', 'turns.control',
+  'tasks.control', 'turns.submit', 'turns.control', 'turns.introduce', 'approvals.decide',
 ])
 const AGENT_INPUT_CAPABILITIES: readonly CordisXPlatformCapability[] = Object.freeze([
   'agent.messages.append', 'agent.steps.reject', 'agent.messages.transform',

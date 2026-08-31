@@ -153,23 +153,29 @@ try {
 
   await writeFile(path.join(runnerDirectory, 'conversation-consumer.ts'), `
 import type { Context } from '@deepseek-ai/cordis'
-import type { AgentConversationShellSource } from '@cordisx/protocol/agent-conversation-shell/v1'
-import type { CordisXAgentConversationShellSourceFactory } from 'cordisx/contracts'
+import type { AgentConversationShellSource } from '@cordisx/protocol/agent-conversation-shell/v3'
+import type { CordisXAgentConversationShellSourceFactoryV3 } from 'cordisx/contracts'
 
 declare const ctx: Context
-const factory: CordisXAgentConversationShellSourceFactory = (binding): AgentConversationShellSource => ({
+const factory: CordisXAgentConversationShellSourceFactoryV3 = (binding): AgentConversationShellSource => ({
   snapshot: async () => ({
     binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration }, generation: 'snapshot-1', snapshotSequence: 0, selection: { kind: 'no-room' }, items: [],
     composer: { availability: 'available', placeholder: { key: 'placeholder', fallback: 'Message' }, disabled: { value: false }, submit: { id: 'create-with-message' } },
     headerActions: [],
   }),
   subscribe: async () => ({ result: { type: 'subscribe', status: 'unavailable', code: 'owner-unavailable' } }),
+  updateRoomSettings: async request => ({
+    type: 'update-room-settings', requestId: request.requestId, binding: request.binding,
+    generation: request.generation, roomId: request.roomId,
+    expectedSnapshotSequence: request.expectedSnapshotSequence,
+    status: 'unavailable', code: 'settings-unavailable',
+  }),
   dispose() {},
 })
 const registration = ctx.agentConversationShell.registerSource(factory)
 registration.mount satisfies Function
 ctx.commands.register({ id: 'create', title: { key: 'create', fallback: 'Create' } }, command => {
-  if (command.hostContext !== undefined && 'scope' in command.hostContext) command.hostContext.scope satisfies 'header' | 'message' | 'composer-submit'
+  if (command.hostContext !== undefined && 'scope' in command.hostContext) command.hostContext.scope satisfies 'header' | 'message' | 'approval' | 'composer-submit'
 })
 `, 'utf8')
   await writeFile(path.join(runnerDirectory, 'connector-consumer.ts'), `
@@ -205,6 +211,16 @@ import type {
   AgentLoopTaskBinding as ProtocolAgentLoopTaskBindingV2,
   BoundAgentLoopClient as ProtocolBoundAgentLoopClientV2,
 } from '@cordisx/protocol/agent-loop/v2'
+import type {
+  AgentLoopCommand as ProtocolAgentLoopCommandV3,
+  AgentLoopTaskBinding as ProtocolAgentLoopTaskBindingV3,
+  BoundAgentLoopClient as ProtocolBoundAgentLoopClientV3,
+} from '@cordisx/protocol/agent-loop/v3'
+import type {
+  AgentLoopCommand as ProtocolAgentLoopCommandV4,
+  AgentLoopTaskBinding as ProtocolAgentLoopTaskBindingV4,
+  BoundAgentLoopClient as ProtocolBoundAgentLoopClientV4,
+} from '@cordisx/protocol/agent-loop/v4'
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import { CORDISX_OWNER_DOCUMENT_SERVICE_V1 } from 'cordisx/contracts'
 import type {
@@ -258,6 +274,8 @@ ctx.agentLoop satisfies BoundAgentLoopClient
 ctx.documents satisfies CordisXOwnerDocumentsV1
 ctx.agentLoop satisfies ProtocolBoundAgentLoopClient
 ctx.agentLoop satisfies ProtocolBoundAgentLoopClientV2
+ctx.agentLoop satisfies ProtocolBoundAgentLoopClientV3
+ctx.agentLoop satisfies ProtocolBoundAgentLoopClientV4
 definition satisfies ProtocolAgentDefinition
 protocolDefinition satisfies AgentDefinition
 definition.avatar satisfies AgentAvatarRef | undefined
@@ -265,6 +283,10 @@ protocolCommand satisfies AgentLoopCommand
 protocolBinding satisfies AgentLoopTaskBinding
 declare const protocolCommandV2: ProtocolAgentLoopCommandV2
 declare const protocolBindingV2: ProtocolAgentLoopTaskBindingV2
+declare const protocolCommandV3: ProtocolAgentLoopCommandV3
+declare const protocolBindingV3: ProtocolAgentLoopTaskBindingV3
+declare const protocolCommandV4: ProtocolAgentLoopCommandV4
+declare const protocolBindingV4: ProtocolAgentLoopTaskBindingV4
 if (protocolCommandV2.type === 'create-or-bind') {
   ctx.agentLoop.createOrBind(protocolCommandV2).then(result => {
     if (result.status === 'accepted') {
@@ -274,6 +296,42 @@ if (protocolCommandV2.type === 'create-or-bind') {
   })
 }
 ctx.agentLoop.subscribe(protocolBindingV2, -1)
+if (protocolCommandV3.type === 'approval-decision') {
+  ctx.agentLoop.decideApproval(protocolCommandV3).then(result => {
+    if (result.status === 'accepted') result.decision satisfies 'approve' | 'deny' | 'cancel'
+  })
+}
+if (protocolCommandV3.type === 'request-member-self-introduction') {
+  ctx.agentLoop.requestMemberSelfIntroduction(protocolCommandV3).then(result => {
+    if (result.status === 'accepted') result.messageId satisfies string
+  })
+}
+if (protocolCommandV3.type === 'cancel-member-self-introduction') {
+  ctx.agentLoop.cancelMemberSelfIntroduction(protocolCommandV3).then(result => {
+    if (result.status === 'accepted') result.requestOperationId satisfies string
+  })
+}
+ctx.agentLoop.subscribe(protocolBindingV3, -1)
+if (protocolCommandV4.type === 'approval-decision') {
+  ctx.agentLoop.decideApproval(protocolCommandV4).then(result => {
+    if (result.status === 'accepted') result.causation.operationId satisfies string
+  })
+}
+if (protocolCommandV4.type === 'request-member-self-introduction') {
+  ctx.agentLoop.requestMemberSelfIntroduction(protocolCommandV4).then(result => {
+    if (result.status === 'accepted') {
+      result.causation.operationId satisfies string
+      result.messageId satisfies string
+    }
+  })
+}
+if (protocolCommandV4.type === 'cancel-member-self-introduction') {
+  ctx.agentLoop.cancelMemberSelfIntroduction(protocolCommandV4).then(result => {
+    if (result.status === 'accepted') result.requestOperationId satisfies string
+  })
+}
+ctx.agentLoop.subscribe(protocolBindingV4, -1)
+ctx.agentLoop.durableLedger.providerAffinity satisfies 'generation-fenced'
 definition.promptSections?.map(section => section.kind satisfies 'introduction' | 'personality' | 'role' | 'operations' | 'tools' | 'knowledge' | 'memory-policy' | 'memory' | 'other')
 if (created.status === 'accepted') created.binding.task satisfies string
 else created.authorization.state satisfies 'denied' | 'unavailable'
@@ -361,12 +419,20 @@ ctx.slots.registerCollection({
   if (installedSchemasteryUiManifest.name !== '@cordisx/schemastery-ui' || installedSchemasteryUiManifest.version !== '0.1.0-beta.2') {
     throw new Error('installed cordisx tarball is missing the pinned @cordisx/schemastery-ui runtime')
   }
-  const [{ loadConfig }, { buildRendererBundle }, { OwnerDocumentStore }, { createOwnerDocumentBridgeHandler, parseOwnerDocumentBindingRequest }, { JSDOM }] = await Promise.all([
+  const [
+    { loadConfig }, { buildRendererBundle }, { OwnerDocumentStore },
+    { createOwnerDocumentBridgeHandler, parseOwnerDocumentBindingRequest }, { JSDOM },
+    { CordisXAgentLoopBrokerV4 }, { PlaygroundMockAgentLoopHost, PlaygroundMockAgentLoopV4Transport },
+    agentLoopContracts,
+  ] = await Promise.all([
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/config.js')).href),
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/bundle.js')).href),
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/owner-document-store.js')).href),
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/owner-document-rpc.js')).href),
     import('jsdom'),
+    import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/renderer/agent-loop-v4.js')).href),
+    import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/renderer/playground-mock-agent-loop.js')).href),
+    import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/agent-loop-contracts.js')).href),
   ])
   const ownerDocumentScope = {
     profileId: 'installed',
@@ -457,6 +523,79 @@ ctx.slots.registerCollection({
     throw new Error('installed cordisx tarball does not compose the explicit local AgentLoop provider bridge')
   }
 
+  const installedMockHost = new PlaygroundMockAgentLoopHost()
+  const installedMockTransport = new PlaygroundMockAgentLoopV4Transport(installedMockHost)
+  const installedBroker = new CordisXAgentLoopBrokerV4(installedMockTransport, installedMockHost, 'installed', 'installed-composition')
+  const installedClient = installedBroker.bind({
+    ownerKey: 'installed-runtime-owner', active: () => true,
+    authorize: async request => ({ capability: request.capability, state: 'allowed', code: 'allowed' }),
+    authorizeV4: async request => ({ capability: request.capability, state: 'allowed', code: 'allowed' }),
+  })
+  const commandBase = commandId => ({
+    $schema: agentLoopContracts.CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V4,
+    contract: 'cordisx.agent-loop-command/v4', schemaVersion: 4, commandId,
+  })
+  const installedDefinition = {
+    $schema: agentLoopContracts.CORDISX_AGENT_DEFINITION_SCHEMA_V1,
+    contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
+    identity: { agentId: 'installed-agent', revision: 'revision-1' },
+    inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
+  }
+  const installedCreated = await installedClient.createOrBind({
+    ...commandBase('installed-create'), type: 'create-or-bind', definition: installedDefinition.identity,
+    definitions: [installedDefinition], target: { mode: 'create' },
+  })
+  if (installedCreated.status !== 'accepted') throw new Error('installed v4 runtime create was not accepted')
+  const installedSendCommand = {
+    ...commandBase('installed-send'), type: 'send', binding: installedCreated.binding,
+    content: [{ kind: 'text', text: '[approval]' }],
+  }
+  const [installedSent, installedReplayed] = await Promise.all([
+    installedClient.send(installedSendCommand), installedClient.send(installedSendCommand),
+  ])
+  if (installedSent.status !== 'accepted' || installedReplayed.status !== 'accepted'
+    || [installedSent.delivery.disposition, installedReplayed.delivery.disposition].sort().join(',') !== 'executed,replayed') {
+    throw new Error('installed v4 runtime did not execute and replay one concurrent send')
+  }
+  const installedApproval = await installedClient.decideApproval({
+    ...commandBase('installed-approval'), type: 'approval-decision', binding: installedCreated.binding,
+    turn: installedSent.turn, approvalId: `simulated-approval-${installedSent.turn}`, decision: 'approved',
+  })
+  if (installedApproval.status !== 'accepted' || installedApproval.causation.operationId !== 'installed-approval') {
+    throw new Error('installed v4 runtime approval decision lost durable causation')
+  }
+  const installedIntroductionCommand = {
+    ...commandBase('installed-introduction'), type: 'request-member-self-introduction', binding: installedCreated.binding,
+    participantId: 'installed-participant', memberId: 'installed-member', runId: 'installed-run',
+    intent: { kind: 'member-self-introduction', audience: 'room', output: 'assistant-message' },
+  }
+  const installedIntroduction = await installedClient.requestMemberSelfIntroduction(installedIntroductionCommand)
+  if (installedIntroduction.status !== 'accepted') throw new Error('installed v4 runtime introduction was not accepted')
+  const installedCancelCommand = {
+    ...commandBase('installed-cancel'), type: 'cancel-member-self-introduction', binding: installedCreated.binding,
+    participantId: installedIntroductionCommand.participantId, memberId: installedIntroductionCommand.memberId,
+    runId: installedIntroductionCommand.runId, requestOperationId: installedIntroductionCommand.commandId,
+  }
+  const installedCancelled = await installedClient.cancelMemberSelfIntroduction(installedCancelCommand)
+  const installedCancelReplay = await installedClient.cancelMemberSelfIntroduction(installedCancelCommand)
+  const installedCancelConflict = await installedClient.cancelMemberSelfIntroduction({ ...installedCancelCommand, commandId: 'installed-cancel-again' })
+  if (installedCancelled.status !== 'accepted' || installedCancelReplay.status !== 'accepted'
+    || installedCancelReplay.delivery.disposition !== 'replayed'
+    || installedCancelConflict.status !== 'conflict' || installedCancelConflict.code !== 'introduction-cancelled') {
+    throw new Error('installed v4 runtime cancellation state or replay drifted')
+  }
+  const installedSubscription = await installedClient.subscribe(installedCreated.binding, 0)
+  if (installedSubscription.status !== 'accepted') throw new Error('installed v4 runtime subscription was unavailable')
+  const installedPage = await installedSubscription.handle.pages[Symbol.asyncIterator]().next()
+  if (!installedPage.value?.events.some(event => event.type === 'lifecycle'
+      && event.lifecycle.phase === 'turn.cancelled' && event.causation?.operationId === 'installed-cancel')
+    || installedPage.value.events.some(event => event.type === 'message' && event.turn === installedIntroduction.turn)) {
+    throw new Error('installed v4 runtime emitted an invalid cancellation event sequence')
+  }
+  installedSubscription.handle.unsubscribe()
+  installedClient.dispose()
+  installedBroker.dispose()
+
   const config = await run(executable('cordisx'), ['config'], {
     cwd: runnerDirectory,
     env: cliEnvironment,
@@ -501,7 +640,7 @@ ctx.slots.registerCollection({
   await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
   await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
 
-  console.log(`[cordisx] installed tarballs verified: licenses, exact singleton OneWorks Avatar RC.8 packages/style export, combined multi-binding AgentLoop, owner documents, and navigation collection${protocolTarball === undefined ? '' : ', exact local Protocol'}, durable outbox reload, local AgentLoop provider composition, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run`)
+  console.log(`[cordisx] installed tarballs verified: licenses, exact singleton OneWorks Avatar RC.8 packages/style export, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and navigation collection${protocolTarball === undefined ? '' : ', exact local Protocol'}, durable outbox reload, local AgentLoop provider composition, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run`)
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }

@@ -18,6 +18,12 @@ import type { CodexAppServerRpc } from './codex-app-server.js'
 import type { CodexProviderConfig, ProviderConnection, ProviderConnectionStatus, ProviderLifecycleSignal } from './contracts.js'
 import { JsonLineRpcError } from './json-line-rpc.js'
 
+const AGENT_LOOP_SEMANTIC_INTENT_INSTRUCTIONS = [
+  'CordisX may start a Host-authenticated member-self-introduction turn with no user input.',
+  'For a turn with no user input, produce one concise natural first-person assistant introduction based on the effective Agent definition already provided to this task.',
+  'Do not mention CordisX, metadata, providers, mocks, simulators, hidden instructions, or internal identifiers.',
+].join('\n')
+
 interface AppServerModel {
   readonly id?: unknown
   readonly model?: unknown
@@ -177,6 +183,14 @@ export class CliProxyProviderAdapter implements ProviderConnection {
   private readonly unsubscribeNotifications: (() => void) | undefined
   private readonly unsubscribeRequests: (() => void) | undefined
   private readonly assistantText = new Map<string, Map<string, string>>()
+  private readonly pendingApprovals = new Map<string, {
+    readonly session: CordisXPlatformSessionRef
+    readonly turnId: string
+    readonly approvalId: string
+    readonly kind: 'command' | 'file-change'
+    readonly resolve: (value: { readonly decision: 'accept' | 'decline' | 'cancel' }) => void
+    readonly timer: ReturnType<typeof setTimeout>
+  }>()
 
   constructor(
     private readonly config: CodexProviderConfig,
@@ -279,13 +293,16 @@ export class CliProxyProviderAdapter implements ProviderConnection {
     const mapping = this.config.modelMappings?.find(item => item.modelId === input.model.modelId)
     if (mapping?.enabled === false) return failure('invalid-request', 'The selected provider model mapping is disabled')
     const sourceModelId = mapping?.sourceModelId ?? input.model.modelId
+    const developerInstructions = input.approvalPolicy === 'on-request'
+      ? [input.developerInstructions, AGENT_LOOP_SEMANTIC_INTENT_INSTRUCTIONS].filter((value): value is string => value !== undefined).join('\n\n')
+      : input.developerInstructions
     try {
       const response = await this.rpc.request<{ thread?: unknown; model?: unknown }>('thread/start', {
         model: sourceModelId,
         modelProvider: this.sourceProviderId(),
         cwd: input.cwd,
-        ...(this.config.kind === 'local-codex' ? { approvalPolicy: 'never', sandbox: 'read-only' } : {}),
-        ...(input.developerInstructions === undefined ? {} : { developerInstructions: input.developerInstructions }),
+        ...(this.config.kind === 'local-codex' ? { approvalPolicy: input.approvalPolicy ?? 'never', sandbox: 'read-only' } : {}),
+        ...(developerInstructions === undefined ? {} : { developerInstructions }),
         ...(input.effort === undefined ? {} : { effort: input.effort }),
       })
       const thread = response.thread as AppServerThread
@@ -339,11 +356,64 @@ export class CliProxyProviderAdapter implements ProviderConnection {
       const response = await this.rpc.request<{ turn?: unknown }>('turn/start', {
         threadId: input.session.remoteSessionId,
         input: [{ type: 'text', text: input.message, text_elements: [] }],
+        ...(input.operationId === undefined ? {} : {
+          clientUserMessageId: input.operationId,
+        }),
       })
       const turn = object(response.turn)
       const turnId = string(turn?.id)
       if (turnId === undefined) throw new Error('invalid turn start response')
       return { ok: true, value: { session: input.session, turnId } }
+    } catch (error) {
+      return diagnostic(error)
+    }
+  }
+
+  async decideApproval(input: Parameters<ProviderConnection['decideApproval']>[0]) {
+    const invalid = this.checkRef(input.session)
+    if (invalid !== undefined) return invalid
+    const key = this.approvalKey(input.session.remoteSessionId, input.turnId, input.approvalId)
+    const pending = this.pendingApprovals.get(key)
+    if (pending === undefined) return failure('task-not-found', 'The pending approval is unavailable')
+    this.pendingApprovals.delete(key)
+    clearTimeout(pending.timer)
+    const decision = input.decision === 'approved' ? 'accept' : input.decision === 'cancelled' ? 'cancel' : 'decline'
+    pending.resolve({ decision })
+    this.publish({
+      session: pending.session,
+      turnId: pending.turnId,
+      type: 'approval.resolved',
+      approval: { approvalId: pending.approvalId, kind: pending.kind, state: 'resolved', outcome: input.decision },
+    })
+    return { ok: true as const, value: { turnId: pending.turnId, approvalId: pending.approvalId, decision: input.decision } }
+  }
+
+  async requestMemberSelfIntroduction(input: Parameters<ProviderConnection['requestMemberSelfIntroduction']>[0]) {
+    const invalid = this.checkRef(input.session)
+    if (invalid !== undefined) return invalid
+    try {
+      const response = await this.rpc.request<{ turn?: unknown }>('turn/start', {
+        threadId: input.session.remoteSessionId,
+        // The task's Host-owned standing instructions define the empty-input
+        // semantic intent. No consumer prompt or synthetic user item is created.
+        input: [],
+        clientUserMessageId: input.operationId,
+      })
+      const turn = object(response.turn)
+      const turnId = string(turn?.id)
+      if (turnId === undefined) throw new Error('invalid member self-introduction turn response')
+      return { ok: true as const, value: { turnId, messageId: `cxloop-introduction:${input.operationId}` } }
+    } catch (error) {
+      return diagnostic(error)
+    }
+  }
+
+  async cancelMemberSelfIntroduction(input: Parameters<ProviderConnection['cancelMemberSelfIntroduction']>[0]) {
+    const invalid = this.checkRef(input.session)
+    if (invalid !== undefined) return invalid
+    try {
+      await this.rpc.request('turn/interrupt', { threadId: input.session.remoteSessionId, turnId: input.turnId })
+      return { ok: true as const, value: { turnId: input.turnId } }
     } catch (error) {
       return diagnostic(error)
     }
@@ -373,6 +443,11 @@ export class CliProxyProviderAdapter implements ProviderConnection {
   async close(): Promise<void> {
     if (this.state === 'closed') return
     this.state = 'draining'
+    for (const pending of this.pendingApprovals.values()) {
+      clearTimeout(pending.timer)
+      pending.resolve({ decision: 'cancel' })
+    }
+    this.pendingApprovals.clear()
     this.unsubscribeNotifications?.()
     this.unsubscribeRequests?.()
     this.lifecycleListeners.clear()
@@ -457,9 +532,24 @@ export class CliProxyProviderAdapter implements ProviderConnection {
     const approvalId = string(value?.approvalId) ?? itemId
     if (threadId === undefined || turnId === undefined || approvalId === undefined) throw new Error('Invalid App Server approval request')
     const approvalKind = method === 'item/fileChange/requestApproval' ? 'file-change' as const : 'command' as const
+    const key = this.approvalKey(threadId, turnId, approvalId)
+    if (this.pendingApprovals.has(key)) throw new Error('Duplicate App Server approval request')
     this.publish({ session: { providerId: this.providerId, remoteSessionId: threadId }, turnId, type: 'approval.required', approval: { approvalId, kind: approvalKind, state: 'pending' } })
-    this.publish({ session: { providerId: this.providerId, remoteSessionId: threadId }, turnId, type: 'approval.resolved', approval: { approvalId, kind: approvalKind, state: 'resolved', outcome: 'denied' } })
-    return { decision: 'decline' }
+    return new Promise<{ readonly decision: 'accept' | 'decline' | 'cancel' }>(resolve => {
+      const timer = setTimeout(() => {
+        if (!this.pendingApprovals.delete(key)) return
+        this.publish({ session: { providerId: this.providerId, remoteSessionId: threadId }, turnId, type: 'approval.resolved', approval: { approvalId, kind: approvalKind, state: 'resolved', outcome: 'expired' } })
+        resolve({ decision: 'cancel' })
+      }, 10 * 60_000)
+      this.pendingApprovals.set(key, {
+        session: { providerId: this.providerId, remoteSessionId: threadId },
+        turnId,
+        approvalId,
+        kind: approvalKind,
+        resolve,
+        timer,
+      })
+    })
   }
 
   private publish(event: ProviderLifecycleSignal): void {
@@ -467,6 +557,7 @@ export class CliProxyProviderAdapter implements ProviderConnection {
   }
 
   private turnKey(threadId: string, turnId: string): string { return `${threadId}\u0000${turnId}` }
+  private approvalKey(threadId: string, turnId: string, approvalId: string): string { return `${threadId}\u0000${turnId}\u0000${approvalId}` }
 
   private sourceProviderId(): string { return this.config.kind === 'local-codex' ? this.config.sourceProviderId : this.config.id }
 

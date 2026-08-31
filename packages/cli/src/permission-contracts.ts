@@ -45,6 +45,8 @@ export const CORDISX_PERMISSION_CAPABILITIES_V2 = [
   'tasks.control',
   'turns.submit',
   'turns.control',
+  'turns.introduce',
+  'approvals.decide',
   'agent.events.read',
   'agent.history.read',
   'agent.messages.append',
