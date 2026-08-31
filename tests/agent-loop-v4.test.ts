@@ -196,6 +196,71 @@ describe('AgentLoop v4 renderer adapter', () => {
     broker.dispose()
   })
 
+  it('fails closed on overlong AgentLoop handles returned by a transport', async () => {
+    const overlong = 'x'.repeat(513)
+    for (const field of ['task', 'binding'] as const) {
+      const host = new PlaygroundMockAgentLoopHost()
+      const source = new PlaygroundMockAgentLoopV4Transport(host)
+      const transport = Object.create(source) as AgentLoopV4Transport
+      transport.createAgentLoopV4 = async input => {
+        const result = await source.createAgentLoopV4(input) as { locator: { task: string; binding: { bindingId: string; generation: number } } }
+        return field === 'task'
+          ? { ...result, locator: { ...result.locator, task: overlong } }
+          : { ...result, locator: { ...result.locator, binding: { ...result.locator.binding, bindingId: overlong } } }
+      }
+      const broker = new CordisXAgentLoopBrokerV4(transport, host, 'playground', `overlong-create-${field}`)
+      expect(await broker.bind(options()).createOrBind({ ...base(`overlong-create-${field}`), type: 'create-or-bind', definition: definition.identity, definitions: [definition], target: { mode: 'create' } }))
+        .toMatchObject({ status: 'unavailable', code: 'reconciliation-required' })
+      broker.dispose()
+    }
+
+    const host = new PlaygroundMockAgentLoopHost()
+    const source = new PlaygroundMockAgentLoopV4Transport(host)
+    const transport = Object.create(source) as AgentLoopV4Transport
+    const broker = new CordisXAgentLoopBrokerV4(transport, host, 'playground', 'overlong-results')
+    const client = broker.bind(options())
+    const created = await client.createOrBind({ ...base('create-overlong-results'), type: 'create-or-bind', definition: definition.identity, definitions: [definition], target: { mode: 'create' } })
+    if (created.status !== 'accepted') throw new Error('create failed')
+
+    transport.sendAgentLoopV4 = async () => ({ status: 'accepted', turn: overlong, messageId: overlong, delivery: 'executed' })
+    expect(await client.send({ ...base('send-overlong-results'), type: 'send', binding: created.binding, content: [{ kind: 'text', text: 'hello' }] }))
+      .toMatchObject({ status: 'unavailable', code: 'reconciliation-required' })
+    transport.requestAgentLoopIntroductionV4 = async () => ({ status: 'accepted', turn: overlong, messageId: overlong, delivery: 'executed' })
+    expect(await client.requestMemberSelfIntroduction({
+      ...base('intro-overlong-results'), type: 'request-member-self-introduction', binding: created.binding,
+      participantId: 'participant-1', memberId: 'member-1', runId: 'run-1', intent: { kind: 'member-self-introduction', audience: 'room', output: 'assistant-message' },
+    })).toMatchObject({ status: 'unavailable', code: 'reconciliation-required' })
+
+    transport.requestAgentLoopIntroductionV4 = input => source.requestAgentLoopIntroductionV4(input)
+    const introduction = {
+      ...base('intro-before-overlong-cancel'), type: 'request-member-self-introduction' as const, binding: created.binding,
+      participantId: 'participant-1', memberId: 'member-1', runId: 'run-1', intent: { kind: 'member-self-introduction' as const, audience: 'room' as const, output: 'assistant-message' as const },
+    }
+    const requested = await client.requestMemberSelfIntroduction(introduction)
+    if (requested.status !== 'accepted') throw new Error('introduction failed')
+    transport.cancelAgentLoopIntroductionV4 = async () => ({ status: 'accepted', turn: overlong, messageId: overlong, delivery: 'executed' })
+    expect(await client.cancelMemberSelfIntroduction({
+      ...base('cancel-overlong-results'), type: 'cancel-member-self-introduction', binding: created.binding,
+      participantId: 'participant-1', memberId: 'member-1', runId: 'run-1', requestOperationId: introduction.commandId,
+    })).toMatchObject({ status: 'unavailable', code: 'reconciliation-required' })
+
+    transport.readAgentLoopV4Lifecycle = async () => ({
+      status: 'accepted', nextAfterSequence: 3, events: [
+        { eventId: overlong, sequence: 1, turnId: 'turn-valid', type: 'turn.started' },
+        { eventId: 'event-overlong-turn', sequence: 2, turnId: overlong, type: 'turn.started' },
+        { eventId: 'event-valid', sequence: 3, turnId: 'turn-valid', type: 'approval.required', approval: { approvalId: overlong, kind: 'command' } },
+        { eventId: 'event-final', sequence: 4, turnId: 'turn-valid', type: 'turn.started' },
+      ],
+    })
+    const subscribed = await client.subscribe(created.binding, 0)
+    if (subscribed.status !== 'accepted') throw new Error('subscribe failed')
+    const page = await subscribed.handle.pages[Symbol.asyncIterator]().next()
+    expect(page.value?.events).toEqual([expect.objectContaining({ eventId: 'event-final', turn: 'turn-valid' })])
+    subscribed.handle.unsubscribe()
+    client.dispose()
+    broker.dispose()
+  })
+
   it('emits retryable introduction failure and permits a new operation to retry the exact member run', async () => {
     let attempts = 0
     let hostState: string | undefined
