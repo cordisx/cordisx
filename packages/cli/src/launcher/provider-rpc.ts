@@ -17,6 +17,13 @@ export type ProviderRpcOperation =
   | 'turns.control'
   | 'agent-loop.create'
   | 'agent-loop.lifecycle.read'
+  | 'agent-loop.v4.create'
+  | 'agent-loop.v4.bind'
+  | 'agent-loop.v4.send'
+  | 'agent-loop.v4.approval.decide'
+  | 'agent-loop.v4.introduction.request'
+  | 'agent-loop.v4.introduction.cancel'
+  | 'agent-loop.v4.lifecycle.read'
 
 export interface ProviderBindingRequest {
   readonly requestId: string
@@ -28,6 +35,8 @@ export interface ProviderBindingRequest {
 const OPERATIONS: readonly ProviderRpcOperation[] = [
   'status', 'availability', 'models.list', 'tasks.list', 'tasks.read', 'tasks.create', 'tasks.control', 'turns.submit', 'turns.control',
   'agent-loop.create', 'agent-loop.lifecycle.read',
+  'agent-loop.v4.create', 'agent-loop.v4.bind', 'agent-loop.v4.send', 'agent-loop.v4.approval.decide',
+  'agent-loop.v4.introduction.request', 'agent-loop.v4.introduction.cancel', 'agent-loop.v4.lifecycle.read',
 ]
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -65,6 +74,39 @@ function modelRef(value: unknown): void {
   const ref = exact(value, ['providerId', 'modelId'], 'model')
   text(ref.providerId, 'model.providerId', 128)
   text(ref.modelId, 'model.modelId', 512)
+}
+
+function agentLoopScope(value: unknown): void {
+  const scope = exact(value, ['profileId', 'compositionGeneration', 'ownerKey'], 'AgentLoop scope')
+  text(scope.profileId, 'AgentLoop scope.profileId', 128)
+  text(scope.compositionGeneration, 'AgentLoop scope.compositionGeneration', 256)
+  text(scope.ownerKey, 'AgentLoop scope.ownerKey', 1024)
+}
+
+function agentLoopCommand(value: unknown): void {
+  object(value, 'AgentLoop command')
+  const encoded = JSON.stringify(value)
+  if (Buffer.byteLength(encoded) > 1024 * 1024) throw new Error('AgentLoop command exceeds its byte limit')
+}
+
+function agentLoopBinding(value: unknown): void {
+  const binding = exact(value, ['bindingId', 'generation'], 'AgentLoop binding')
+  text(binding.bindingId, 'AgentLoop binding.bindingId', 512)
+  if (!Number.isInteger(binding.generation) || (binding.generation as number) < 1) throw new Error('AgentLoop binding.generation is invalid')
+}
+
+function agentLoopDefinition(value: unknown): void {
+  const definition = exact(value, ['agentId', 'revision'], 'AgentLoop definition')
+  text(definition.agentId, 'AgentLoop definition.agentId', 128)
+  text(definition.revision, 'AgentLoop definition.revision', 512)
+}
+
+function agentLoopV4Base(value: unknown, keys: readonly string[]): Record<string, unknown> {
+  const input = exact(value, ['scope', 'command', 'operationId', ...keys], 'AgentLoop v4 input')
+  agentLoopScope(input.scope)
+  agentLoopCommand(input.command)
+  text(input.operationId, 'AgentLoop operationId', 512)
+  return input
 }
 
 function validateInput(operation: ProviderRpcOperation, value: unknown): void {
@@ -109,6 +151,55 @@ function validateInput(operation: ProviderRpcOperation, value: unknown): void {
     const input = exact(value, ['session', 'afterSequence'], 'input')
     sessionRef(input.session)
     if (!Number.isInteger(input.afterSequence) || (input.afterSequence as number) < 0) throw new Error('input.afterSequence is invalid')
+    return
+  }
+  if (operation === 'agent-loop.v4.create') {
+    const input = agentLoopV4Base(value, ['definition', 'model', 'cwd', 'developerInstructions', 'effort'])
+    agentLoopDefinition(input.definition)
+    modelRef(input.model)
+    text(input.cwd, 'AgentLoop cwd')
+    if (input.developerInstructions !== undefined) text(input.developerInstructions, 'AgentLoop developerInstructions', 1_000_000)
+    if (input.effort !== undefined && !['low', 'medium', 'high', 'xhigh'].includes(String(input.effort))) throw new Error('AgentLoop effort is invalid')
+    return
+  }
+  if (operation === 'agent-loop.v4.bind') {
+    const input = agentLoopV4Base(value, ['task', 'definition'])
+    text(input.task, 'AgentLoop task', 512)
+    agentLoopDefinition(input.definition)
+    return
+  }
+  if (operation === 'agent-loop.v4.send') {
+    const input = agentLoopV4Base(value, ['task', 'binding', 'definition', 'message'])
+    text(input.task, 'AgentLoop task', 512)
+    agentLoopBinding(input.binding); agentLoopDefinition(input.definition)
+    text(input.message, 'AgentLoop message', 1_000_000)
+    return
+  }
+  if (operation === 'agent-loop.v4.approval.decide') {
+    const input = agentLoopV4Base(value, ['task', 'binding', 'definition', 'turn', 'approvalId', 'decision'])
+    text(input.task, 'AgentLoop task', 512); text(input.turn, 'AgentLoop turn', 512); text(input.approvalId, 'AgentLoop approvalId', 512)
+    agentLoopBinding(input.binding); agentLoopDefinition(input.definition)
+    if (!['approved', 'denied', 'cancelled'].includes(String(input.decision))) throw new Error('AgentLoop approval decision is invalid')
+    return
+  }
+  if (operation === 'agent-loop.v4.introduction.request') {
+    const input = agentLoopV4Base(value, ['task', 'binding', 'definition', 'participantId', 'memberId', 'runId'])
+    text(input.task, 'AgentLoop task', 512); text(input.participantId, 'AgentLoop participantId', 512); text(input.memberId, 'AgentLoop memberId', 512); text(input.runId, 'AgentLoop runId', 512)
+    agentLoopBinding(input.binding); agentLoopDefinition(input.definition)
+    return
+  }
+  if (operation === 'agent-loop.v4.introduction.cancel') {
+    const input = agentLoopV4Base(value, ['task', 'binding', 'definition', 'requestOperationId', 'participantId', 'memberId', 'runId'])
+    text(input.task, 'AgentLoop task', 512); text(input.requestOperationId, 'AgentLoop requestOperationId', 512)
+    text(input.participantId, 'AgentLoop participantId', 512); text(input.memberId, 'AgentLoop memberId', 512); text(input.runId, 'AgentLoop runId', 512)
+    agentLoopBinding(input.binding); agentLoopDefinition(input.definition)
+    return
+  }
+  if (operation === 'agent-loop.v4.lifecycle.read') {
+    const input = exact(value, ['scope', 'task', 'binding', 'definition', 'afterSequence'], 'AgentLoop v4 lifecycle input')
+    agentLoopScope(input.scope); text(input.task, 'AgentLoop task', 512)
+    agentLoopBinding(input.binding); agentLoopDefinition(input.definition)
+    if (!Number.isInteger(input.afterSequence) || (input.afterSequence as number) < 0) throw new Error('AgentLoop afterSequence is invalid')
     return
   }
   if (operation === 'tasks.control') {
@@ -161,5 +252,12 @@ export async function handleProviderBindingRequest(fleet: ProviderFleet, request
       const input = request.input as { session: Parameters<ProviderFleet['readLifecycle']>[0]; afterSequence: number }
       return fleet.readLifecycle(input.session, input.afterSequence)
     }
+    case 'agent-loop.v4.create': return await fleet.createAgentLoopV4(request.input as Parameters<ProviderFleet['createAgentLoopV4']>[0])
+    case 'agent-loop.v4.bind': return await fleet.bindAgentLoopV4(request.input as Parameters<ProviderFleet['bindAgentLoopV4']>[0])
+    case 'agent-loop.v4.send': return await fleet.sendAgentLoopV4(request.input as Parameters<ProviderFleet['sendAgentLoopV4']>[0])
+    case 'agent-loop.v4.approval.decide': return await fleet.decideAgentLoopApprovalV4(request.input as Parameters<ProviderFleet['decideAgentLoopApprovalV4']>[0])
+    case 'agent-loop.v4.introduction.request': return await fleet.requestAgentLoopIntroductionV4(request.input as Parameters<ProviderFleet['requestAgentLoopIntroductionV4']>[0])
+    case 'agent-loop.v4.introduction.cancel': return await fleet.cancelAgentLoopIntroductionV4(request.input as Parameters<ProviderFleet['cancelAgentLoopIntroductionV4']>[0])
+    case 'agent-loop.v4.lifecycle.read': return fleet.readAgentLoopV4Lifecycle(request.input as Parameters<ProviderFleet['readAgentLoopV4Lifecycle']>[0])
   }
 }

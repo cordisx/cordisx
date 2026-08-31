@@ -1,5 +1,5 @@
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { AgentConversationShellCommandContext } from '@cordisx/protocol/agent-conversation-shell/v1'
+import type { AgentConversationShellCommandContext } from '@cordisx/protocol/agent-conversation-shell/v3'
 import type {
   CordisXCommandHandler,
   CordisXCommandMetadata,

@@ -24,7 +24,6 @@ export function ScenarioLabPage({ locale, onClose }: ScenarioLabPageProps) {
     return () => { unsubscribe(); controller.dispose() }
   }, [controller])
 
-  const unavailable = selected.availability.state === 'unavailable'
   return <main className="pg-scenario-lab" data-playground-scenario-lab data-scenario-owner={snapshot.owner}>
     <header>
       <div>
@@ -48,9 +47,9 @@ export function ScenarioLabPage({ locale, onClose }: ScenarioLabPageProps) {
         </select>
       </label>
       <div className="pg-scenario-actions">
-        <button type="button" onClick={() => { void controller.run() }} disabled={unavailable || snapshot.phase === 'running'}>{en ? 'Run' : '运行'}</button>
+        <button type="button" onClick={() => { void controller.run() }} disabled={snapshot.phase === 'running'}>{en ? 'Run' : '运行'}</button>
         <button type="button" onClick={() => controller.pause()} disabled={snapshot.phase !== 'running'}>{en ? 'Pause' : '暂停'}</button>
-        <button type="button" onClick={() => { void controller.next() }} disabled={unavailable || snapshot.phase === 'running' || snapshot.phase === 'completed'}>{en ? 'Next' : '下一步'}</button>
+        <button type="button" onClick={() => { void controller.next() }} disabled={snapshot.phase === 'running' || snapshot.phase === 'completed'}>{en ? 'Next' : '下一步'}</button>
         <button type="button" onClick={() => controller.reset()}>{en ? 'Reset' : '重置'}</button>
       </div>
     </section>
@@ -59,13 +58,6 @@ export function ScenarioLabPage({ locale, onClose }: ScenarioLabPageProps) {
       <h2>{selected.title[locale]}</h2>
       <p>{selected.description[locale]}</p>
       <p><strong>{en ? 'State' : '状态'}:</strong> {snapshot.phase} · {snapshot.cursor}/{snapshot.stepCount}</p>
-      {selected.availability.state === 'unavailable'
-        ? <div className="pg-scenario-unavailable" role="status">
-            <strong>{selected.availability.code}</strong>
-            <span>{selected.availability.needApi}</span>
-            <span>{en ? 'No approval controls are simulated.' : '不会伪造允许、拒绝或取消控件。'}</span>
-          </div>
-        : null}
       {snapshot.error === undefined ? null : <p role="alert">{snapshot.error}</p>}
     </section>
 

@@ -1,5 +1,7 @@
 import type { Disposable } from '@deepseek-ai/cordis'
 import type { BoundAgentLoopClient as BoundAgentLoopClientV1 } from '@cordisx/protocol/agent-loop/v1'
+import type { BoundAgentLoopClient as BoundAgentLoopClientV3 } from '@cordisx/protocol/agent-loop/v3'
+import type { BoundAgentLoopClient as BoundAgentLoopClientV4 } from '@cordisx/protocol/agent-loop/v4'
 import type {
   AgentLoopAuthorizationOutcome,
   AgentLoopContentPart,
@@ -139,27 +141,34 @@ export function canonicalAgentLoopTaskDetailsUrl(value: AgentLoopTaskDetailsUrl 
 export function combineAgentLoopClients(
   v1: BoundAgentLoopClientV1,
   v2: BoundAgentLoopClient,
+  v3: BoundAgentLoopClientV3,
+  v4: BoundAgentLoopClientV4,
 ): CompatibleBoundAgentLoopClient {
   let disposed = false
   const client = {
-    $schema: CORDISX_BOUND_AGENT_LOOP_CLIENT_SCHEMA_V2,
-    contract: 'cordisx.bound-agent-loop-client/v2',
-    schemaVersion: 2,
-    durableLedger: v2.durableLedger,
-    createOrBind: (command: Parameters<BoundAgentLoopClientV1['createOrBind']>[0] | CreateCommand) => command.schemaVersion === 2
-      ? v2.createOrBind(command)
-      : v1.createOrBind(command),
-    send: (command: Parameters<BoundAgentLoopClientV1['send']>[0] | SendCommand) => command.schemaVersion === 2
-      ? v2.send(command)
-      : v1.send(command),
-    subscribe: (binding: Parameters<BoundAgentLoopClientV1['subscribe']>[0] | AgentLoopTaskBinding, afterSequence: number) => binding.schemaVersion === 2
-      ? v2.subscribe(binding, afterSequence)
-      : v1.subscribe(binding, afterSequence),
+    $schema: v4.$schema,
+    contract: v4.contract,
+    schemaVersion: v4.schemaVersion,
+    durableLedger: v4.durableLedger,
+    createOrBind: (command: Parameters<BoundAgentLoopClientV1['createOrBind']>[0] | CreateCommand | Parameters<BoundAgentLoopClientV3['createOrBind']>[0] | Parameters<BoundAgentLoopClientV4['createOrBind']>[0]) => command.schemaVersion === 4
+      ? v4.createOrBind(command)
+      : command.schemaVersion === 3 ? v3.createOrBind(command) : command.schemaVersion === 2 ? v2.createOrBind(command) : v1.createOrBind(command),
+    send: (command: Parameters<BoundAgentLoopClientV1['send']>[0] | SendCommand | Parameters<BoundAgentLoopClientV3['send']>[0] | Parameters<BoundAgentLoopClientV4['send']>[0]) => command.schemaVersion === 4
+      ? v4.send(command)
+      : command.schemaVersion === 3 ? v3.send(command) : command.schemaVersion === 2 ? v2.send(command) : v1.send(command),
+    subscribe: (binding: Parameters<BoundAgentLoopClientV1['subscribe']>[0] | AgentLoopTaskBinding | Parameters<BoundAgentLoopClientV3['subscribe']>[0] | Parameters<BoundAgentLoopClientV4['subscribe']>[0], afterSequence: number) => binding.schemaVersion === 4
+      ? v4.subscribe(binding, afterSequence)
+      : binding.schemaVersion === 3 ? v3.subscribe(binding, afterSequence) : binding.schemaVersion === 2 ? v2.subscribe(binding, afterSequence) : v1.subscribe(binding, afterSequence),
+    decideApproval: (command: Parameters<BoundAgentLoopClientV3['decideApproval']>[0] | Parameters<BoundAgentLoopClientV4['decideApproval']>[0]) => command.schemaVersion === 4 ? v4.decideApproval(command) : v3.decideApproval(command),
+    requestMemberSelfIntroduction: (command: Parameters<BoundAgentLoopClientV3['requestMemberSelfIntroduction']>[0] | Parameters<BoundAgentLoopClientV4['requestMemberSelfIntroduction']>[0]) => command.schemaVersion === 4 ? v4.requestMemberSelfIntroduction(command) : v3.requestMemberSelfIntroduction(command),
+    cancelMemberSelfIntroduction: (command: Parameters<BoundAgentLoopClientV3['cancelMemberSelfIntroduction']>[0] | Parameters<BoundAgentLoopClientV4['cancelMemberSelfIntroduction']>[0]) => command.schemaVersion === 4 ? v4.cancelMemberSelfIntroduction(command) : v3.cancelMemberSelfIntroduction(command),
     dispose: () => {
       if (disposed) return
       disposed = true
       v1.dispose()
       v2.dispose()
+      v3.dispose()
+      v4.dispose()
     },
   }
   return Object.freeze(client) as unknown as CompatibleBoundAgentLoopClient

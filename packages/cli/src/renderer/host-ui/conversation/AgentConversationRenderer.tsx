@@ -5,6 +5,7 @@ import type { AgentConversationCommandController } from './commands.js'
 import {
   participantFor,
   type AgentConversationAction,
+  type AgentConversationApproval,
   type AgentConversationEntry,
   type AgentConversationMessage,
   type AgentConversationModel,
@@ -34,6 +35,29 @@ export interface AgentConversationRendererCopy {
   readonly unavailable: string
 }
 
+function ApprovalEntry({ entry, model, commands, copy, onCommandError }: {
+  readonly entry: AgentConversationApproval
+  readonly model: AgentConversationModel
+  readonly commands: AgentConversationCommandController
+  readonly copy: AgentConversationRendererCopy
+  readonly onCommandError: (error: unknown) => void
+}) {
+  const participant = participantFor(model, entry.participantId)
+  const chinese = copy.locale.toLowerCase().startsWith('zh')
+  const label = entry.state === 'pending'
+    ? (chinese ? `${participant?.name ?? 'Agent'} 请求批准` : `${participant?.name ?? 'Agent'} requests approval`)
+    : chinese ? `批准状态：${entry.state}` : `Approval: ${entry.state}`
+  return <article className="cxa-entry cxa-approval" data-entry-id={entry.itemId} data-state={entry.state} role="group" aria-label={label}>
+    <div className="cxa-approval-copy"><strong>{label}</strong>{entry.rationale === undefined ? null : <p>{entry.rationale}</p>}{entry.diagnostic === undefined ? null : <p role="status">{entry.diagnostic}</p>}</div>
+    {entry.actions.length === 0 ? null : <div className="cxa-approval-actions">{entry.actions.map(action => <button
+      key={action.decision}
+      type="button"
+      className="cxa-action"
+      onClick={() => { void commands.runApproval(model, entry, action).catch(onCommandError) }}
+    >{action.decision === 'approve' ? (chinese ? '批准' : 'Approve') : action.decision === 'deny' ? (chinese ? '拒绝' : 'Deny') : (chinese ? '取消' : 'Cancel')}</button>)}</div>}
+  </article>
+}
+
 export interface AgentConversationRendererProps {
   readonly model: AgentConversationModel
   readonly commands: AgentConversationCommandController
@@ -43,6 +67,9 @@ export interface AgentConversationRendererProps {
     readonly resolve: (identity: { readonly agentId: string; readonly revision: string }) => { readonly identity: { readonly agentId: string; readonly revision: string }; readonly name: string; readonly introduction: string } | undefined
     readonly navigator: HostAgentTaskDetailsNavigator
     readonly onSettings: (identity: { readonly agentId: string; readonly revision: string }) => void | Promise<void>
+  }
+  readonly roomSettings?: {
+    readonly update: (patch: { readonly name?: string; readonly description?: { readonly state: 'empty' } | { readonly state: 'present'; readonly text: string } }) => Promise<void>
   }
 }
 
@@ -191,6 +218,8 @@ function Timeline({
             {...(identityPresentations.get(entry.authorId) === undefined ? {} : { identityPresentation: identityPresentations.get(entry.authorId)! })}
             onOpenIdentity={() => onOpenIdentity(entry.authorId)}
           />
+        : entry.kind === 'approval'
+          ? <ApprovalEntry key={entry.itemId} entry={entry} model={model} commands={commands} copy={copy} onCommandError={onCommandError} />
         : entry.kind === 'member-presence'
           ? <div key={entry.itemId} className="cxa-entry cxa-status" data-entry-id={entry.itemId} data-state={entry.state} role="status" aria-live="polite">
               <span className="cxa-status-dot" aria-hidden="true" /><span>{presence(entry)}</span>
@@ -253,16 +282,43 @@ function Composer({
   </div>
 }
 
+function RoomSettingsEditor({ title, description, chinese, settings, onError, onDone }: {
+  readonly title: string
+  readonly description: string | undefined
+  readonly chinese: boolean
+  readonly settings: NonNullable<AgentConversationRendererProps['roomSettings']>
+  readonly onError: (error: unknown) => void
+  readonly onDone: () => void
+}) {
+  const [name, setName] = React.useState(title)
+  const [details, setDetails] = React.useState(description ?? '')
+  const [saving, setSaving] = React.useState(false)
+  const save = async (): Promise<void> => {
+    const normalizedName = name.trim()
+    if (normalizedName === '') return
+    setSaving(true)
+    try {
+      await settings.update({ name: normalizedName, description: details.trim() === '' ? { state: 'empty' } : { state: 'present', text: details.trim() } })
+      onDone()
+    } catch (error) { onError(error) } finally { setSaving(false) }
+  }
+  return <form className="cxa-room-settings-form" onSubmit={event => { event.preventDefault(); void save() }}>
+    <label>{chinese ? '群聊名称' : 'Room name'}<input value={name} maxLength={256} onInput={event => setName(event.currentTarget.value)} /></label>
+    <label>{chinese ? '群聊介绍' : 'Description'}<textarea value={details} maxLength={4_000} rows={5} onInput={event => setDetails(event.currentTarget.value)} /></label>
+    <button className="cxa-action" type="submit" disabled={saving || name.trim() === ''}>{saving ? (chinese ? '保存中…' : 'Saving…') : (chinese ? '保存' : 'Save')}</button>
+  </form>
+}
+
 /** Production Host-owned conversation shell. It has no fixture dependency. */
-export function AgentConversationRenderer({ model, commands, copy, debugFixture = false, identity }: AgentConversationRendererProps) {
+export function AgentConversationRenderer({ model, commands, copy, debugFixture = false, identity, roomSettings }: AgentConversationRendererProps) {
   const titleId = React.useId()
   const [commandError, setCommandErrorState] = React.useState<string | undefined>(undefined)
   const [inspector, setInspector] = React.useState<ConversationInspector | undefined>()
   const setCommandError = React.useCallback((value: string | undefined) => setCommandErrorState(value), [])
   const title = model.selection.kind === 'room' ? model.selection.title : copy.newRoomTitle
-  // Shell v2 does not yet expose a Room description/update capability. Never
-  // substitute participant names or a fixture subtitle for product data.
-  const description: string | undefined = undefined
+  const description = model.selection.kind === 'room' && model.selection.description?.state === 'present'
+    ? model.selection.description.text
+    : undefined
   const headerActions = model.headerActions
   const onCommandError = React.useCallback((error: unknown) => {
     setCommandError(error instanceof Error ? error.message : String(error))
@@ -395,8 +451,9 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
       closeLabel={chinese ? '关闭群聊设置' : 'Close room settings'}
       onOpenChange={open => { if (!open) closeInspector() }}
     >
-      <dl className="cxa-inspector-readonly"><dt>{chinese ? '群聊名称' : 'Room name'}</dt><dd>{title}</dd><dt>{chinese ? '群聊介绍' : 'Description'}</dt><dd>{description ?? (chinese ? '尚未添加' : 'Not added')}</dd></dl>
-      <p className="cxa-inspector-note">{chinese ? '当前 Conversation Shell 尚未提供群聊介绍的结构化更新能力。' : 'The Conversation Shell does not yet expose a structured room-description update capability.'}</p>
+      {roomSettings === undefined
+        ? <><dl className="cxa-inspector-readonly"><dt>{chinese ? '群聊名称' : 'Room name'}</dt><dd>{title}</dd><dt>{chinese ? '群聊介绍' : 'Description'}</dt><dd>{description ?? (chinese ? '尚未添加' : 'Not added')}</dd></dl><p className="cxa-inspector-note">{chinese ? '当前数据源未提供群聊设置更新。' : 'The current source does not provide room settings updates.'}</p></>
+        : <RoomSettingsEditor title={title} description={description} chinese={chinese} settings={roomSettings} onError={onCommandError} onDone={closeInspector} />}
     </HostConversationRightInspector>}
     {inspector?.kind !== 'more' ? null : <HostConversationRightInspector
       open={true}

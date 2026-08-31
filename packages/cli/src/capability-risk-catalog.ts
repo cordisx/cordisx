@@ -169,6 +169,14 @@ export const HOST_CAPABILITY_RISK_ENTRIES = Object.freeze([
     'Control active turns', 'Steer or interrupt an active turn.',
     'This can change or stop in-progress work.', 'Only the explicitly targeted turn is affected.',
   ]),
+  entry('turns.introduce', 'platform', 'sensitive', ['sessions'], false, [
+    'Request member introductions', 'Ask an allowed Agent task to introduce a Room member run.',
+    'The provider receives the structured introduction intent.', 'The Host binds it to one exact member run and task.',
+  ]),
+  entry('approvals.decide', 'platform', 'high-risk', ['sessions'], false, [
+    'Decide Agent approvals', 'Approve, deny, or cancel a pending action for an allowed Agent task.',
+    'Approval can authorize an external or file-changing action.', 'The Host binds the decision to one exact pending approval.',
+  ]),
   entry('agent.events.read', 'agent', 'sensitive', ['sessionIds'], false, [
     'Read Agent events', 'Read structured events for allowed Agent sessions.',
     'Events can reveal task activity and tool metadata.', 'Raw bridge and filesystem access remain unavailable.',

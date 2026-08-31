@@ -1,17 +1,18 @@
 import type {
   AgentDefinition,
-  AgentLoopCommandV2,
-  AgentLoopTaskBindingV2,
-  BoundAgentLoopClientV2,
+  AgentLoopCommandV4,
+  AgentLoopTaskBindingV4,
+  BoundAgentLoopClientV4,
 } from '../agent-loop-contracts.js'
 import {
   CORDISX_AGENT_DEFINITION_SCHEMA_V1,
-  CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V2,
+  CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V4,
 } from '../agent-loop-contracts.js'
-import { CordisXAgentLoopBrokerV2 } from '../renderer/agent-loop-v2.js'
+import { CordisXAgentLoopBrokerV4 } from '../renderer/agent-loop-v4.js'
 import {
   PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE,
   PlaygroundMockAgentLoopHost,
+  PlaygroundMockAgentLoopV4Transport,
   type PlaygroundMockTaskTrace,
 } from '../renderer/playground-mock-agent-loop.js'
 
@@ -26,9 +27,7 @@ export interface PlaygroundScenarioCatalogEntry {
   readonly id: PlaygroundScenarioId
   readonly title: { readonly 'zh-CN': string; readonly en: string }
   readonly description: { readonly 'zh-CN': string; readonly en: string }
-  readonly availability:
-    | { readonly state: 'available' }
-    | { readonly state: 'unavailable'; readonly code: 'approval-decision-api-unavailable'; readonly needApi: string }
+  readonly availability: { readonly state: 'available' }
 }
 
 export const PLAYGROUND_SCENARIO_CATALOG: readonly PlaygroundScenarioCatalogEntry[] = Object.freeze([
@@ -41,12 +40,8 @@ export const PLAYGROUND_SCENARIO_CATALOG: readonly PlaygroundScenarioCatalogEntr
   {
     id: 'approval-decision',
     title: { 'zh-CN': '权限申请', en: 'Approval request' },
-    description: { 'zh-CN': '正式 approval decision API 尚未提供；本场景只显示 typed unavailable。', en: 'The formal approval decision API is not available; this scenario reports typed unavailable only.' },
-    availability: {
-      state: 'unavailable',
-      code: 'approval-decision-api-unavailable',
-      needApi: 'NEED_API: AgentLoop approval decision command with allow, deny, and cancel outcomes.',
-    },
+    description: { 'zh-CN': '通过正式 AgentLoop v4 命令分别完成允许、拒绝与取消决策。', en: 'Exercise approve, deny, and cancel through formal AgentLoop v4 commands.' },
+    availability: { state: 'available' },
   },
   {
     id: 'multi-binding',
@@ -86,17 +81,18 @@ export interface PlaygroundScenarioLabSnapshot {
 }
 
 interface ScenarioContext {
-  readonly client: BoundAgentLoopClientV2
-  readonly bindings: Map<string, AgentLoopTaskBindingV2>
+  readonly client: BoundAgentLoopClientV4
+  readonly bindings: Map<string, AgentLoopTaskBindingV4>
   append(kind: PlaygroundScenarioActivity['kind'], message: string): void
   create(alias: string, definition: AgentDefinition): Promise<void>
   send(alias: string, ordinal: number, text: string): Promise<void>
+  decide(alias: string, ordinal: number, decision: 'approved' | 'denied' | 'cancelled'): Promise<void>
 }
 
 export interface PlaygroundScenarioLabRuntime {
   readonly host: PlaygroundMockAgentLoopHost
-  readonly broker: CordisXAgentLoopBrokerV2
-  readonly client: BoundAgentLoopClientV2
+  readonly broker: CordisXAgentLoopBrokerV4
+  readonly client: BoundAgentLoopClientV4
 }
 
 export type PlaygroundScenarioLabRuntimeFactory = () => PlaygroundScenarioLabRuntime
@@ -132,11 +128,11 @@ function agent(alias: 'a' | 'b' | 'c'): AgentDefinition {
   return Object.freeze(definition)
 }
 
-function createCommand(scenarioId: PlaygroundScenarioId, alias: string, definition: AgentDefinition): Extract<AgentLoopCommandV2, { type: 'create-or-bind' }> {
+function createCommand(scenarioId: PlaygroundScenarioId, alias: string, definition: AgentDefinition): Extract<AgentLoopCommandV4, { type: 'create-or-bind' }> {
   return {
-    $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V2,
-    contract: 'cordisx.agent-loop-command/v2',
-    schemaVersion: 2,
+    $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V4,
+    contract: 'cordisx.agent-loop-command/v4',
+    schemaVersion: 4,
     commandId: `host-scenario:${scenarioId}:create:${alias}`,
     type: 'create-or-bind',
     definition: definition.identity,
@@ -149,15 +145,32 @@ function sendCommand(
   scenarioId: PlaygroundScenarioId,
   alias: string,
   ordinal: number,
-  binding: AgentLoopTaskBindingV2,
+  binding: AgentLoopTaskBindingV4,
   text: string,
-): Extract<AgentLoopCommandV2, { type: 'send' }> {
+): Extract<AgentLoopCommandV4, { type: 'send' }> {
   return {
-    $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V2,
-    contract: 'cordisx.agent-loop-command/v2',
-    schemaVersion: 2,
+    $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V4,
+    contract: 'cordisx.agent-loop-command/v4',
+    schemaVersion: 4,
     commandId: `host-scenario:${scenarioId}:send:${alias}:${ordinal}`,
     type: 'send', binding, content: [{ kind: 'text', text }],
+  }
+}
+
+function approvalCommand(
+  scenarioId: PlaygroundScenarioId,
+  alias: string,
+  ordinal: number,
+  binding: AgentLoopTaskBindingV4,
+  decision: 'approved' | 'denied' | 'cancelled',
+): Extract<AgentLoopCommandV4, { type: 'approval-decision' }> {
+  const turn = `simulated-turn-${ordinal}`
+  return {
+    $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V4,
+    contract: 'cordisx.agent-loop-command/v4', schemaVersion: 4,
+    commandId: `host-scenario:${scenarioId}:approval:${alias}:${ordinal}:${decision}`,
+    type: 'approval-decision', binding, turn,
+    approvalId: `simulated-approval-${turn}`, decision,
   }
 }
 
@@ -188,6 +201,21 @@ function stepsFor(id: PlaygroundScenarioId): readonly ScenarioStep[] {
       },
     },
   ]
+  if (id === 'approval-decision') return [
+    { id: 'create-a', execute: context => context.create('a', agent('a')) },
+    {
+      id: 'request-three', execute: async context => {
+        for (let ordinal = 1; ordinal <= 3; ordinal += 1) await context.send('a', ordinal, `Request approval ${ordinal}. [approval]`)
+      },
+    },
+    {
+      id: 'decide-three', execute: async context => {
+        await context.decide('a', 1, 'approved')
+        await context.decide('a', 2, 'denied')
+        await context.decide('a', 3, 'cancelled')
+      },
+    },
+  ]
   if (id === 'failure-retry') return [
     { id: 'create-a', execute: context => context.create('a', agent('a')) },
     { id: 'fail', execute: context => context.send('a', 1, 'Exercise the typed failure path. [cli-fail]') },
@@ -214,21 +242,19 @@ function stepsFor(id: PlaygroundScenarioId): readonly ScenarioStep[] {
 type Listener = () => void
 
 export function createPlaygroundScenarioLabRuntime(): PlaygroundScenarioLabRuntime {
-  let ledger: string | undefined
   const host = new PlaygroundMockAgentLoopHost()
-  const broker = new CordisXAgentLoopBrokerV2(
+  const broker = new CordisXAgentLoopBrokerV4(
+    new PlaygroundMockAgentLoopV4Transport(host),
     host,
+    'playground',
+    'scenario-lab',
     () => new Date('2026-08-31T00:00:00.000Z'),
-    {
-      providerKey: PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE,
-      read: () => ledger,
-      write: value => { ledger = value },
-    },
   )
   const client = broker.bind({
     ownerKey: 'host-playground-scenario-lab',
     active: () => true,
     authorize: async request => ({ capability: request.capability, state: 'allowed', code: 'allowed' }),
+    authorizeV4: async request => ({ capability: request.capability, state: 'allowed', code: 'allowed' }),
   })
   return Object.freeze({ host, broker, client })
 }
@@ -240,7 +266,7 @@ export class PlaygroundScenarioLabController {
   private phase: PlaygroundScenarioLabSnapshot['phase'] = 'idle'
   private cursor = 0
   private activities: PlaygroundScenarioActivity[] = []
-  private bindings = new Map<string, AgentLoopTaskBindingV2>()
+  private bindings = new Map<string, AgentLoopTaskBindingV4>()
   private generation = 0
   private running: Promise<void> | undefined
   private error: string | undefined
@@ -258,11 +284,10 @@ export class PlaygroundScenarioLabController {
   }
 
   readonly getSnapshot = (): PlaygroundScenarioLabSnapshot => {
-    const availability = this.catalogEntry().availability
     return Object.freeze({
       owner: 'host-playground-scenario-lab',
       selectedScenarioId: this.selectedScenarioId,
-      phase: availability.state === 'unavailable' ? 'unavailable' : this.phase,
+      phase: this.phase,
       cursor: this.cursor,
       stepCount: stepsFor(this.selectedScenarioId).length,
       activities: Object.freeze([...this.activities]),
@@ -278,19 +303,11 @@ export class PlaygroundScenarioLabController {
   }
 
   next(): Promise<void> {
-    if (this.catalogEntry().availability.state === 'unavailable') {
-      this.publishUnavailable()
-      return Promise.resolve()
-    }
     if (this.phase === 'running') return this.running ?? Promise.resolve()
     return this.executeNext('paused')
   }
 
   run(): Promise<void> {
-    if (this.catalogEntry().availability.state === 'unavailable') {
-      this.publishUnavailable()
-      return Promise.resolve()
-    }
     if (this.running !== undefined) return this.running
     const generation = this.generation
     this.phase = 'running'
@@ -340,21 +357,6 @@ export class PlaygroundScenarioLabController {
     this.runtime = this.runtimeFactory()
   }
 
-  private catalogEntry(): PlaygroundScenarioCatalogEntry {
-    return PLAYGROUND_SCENARIO_CATALOG.find(item => item.id === this.selectedScenarioId)!
-  }
-
-  private publishUnavailable(): void {
-    const availability = this.catalogEntry().availability
-    if (availability.state !== 'unavailable') return
-    this.phase = 'unavailable'
-    if (!this.activities.some(activity => activity.kind === 'unavailable')) {
-      this.append('unavailable', `${availability.code}: ${availability.needApi}`)
-    } else {
-      this.publish()
-    }
-  }
-
   private async executeNext(resumePhase: 'running' | 'paused'): Promise<void> {
     const step = stepsFor(this.selectedScenarioId)[this.cursor]
     if (step === undefined) {
@@ -375,6 +377,7 @@ export class PlaygroundScenarioLabController {
         },
         create: (alias, definition) => this.create(generation, runtime, bindings, alias, definition),
         send: (alias, ordinal, text) => this.send(generation, runtime, bindings, alias, ordinal, text),
+        decide: (alias, ordinal, decision) => this.decide(generation, runtime, bindings, alias, ordinal, decision),
       })
       if (!this.current(generation, runtime, bindings)) return
       this.cursor += 1
@@ -391,7 +394,7 @@ export class PlaygroundScenarioLabController {
   private async create(
     generation: number,
     runtime: PlaygroundScenarioLabRuntime,
-    bindings: Map<string, AgentLoopTaskBindingV2>,
+    bindings: Map<string, AgentLoopTaskBindingV4>,
     alias: string,
     definition: AgentDefinition,
   ): Promise<void> {
@@ -406,7 +409,7 @@ export class PlaygroundScenarioLabController {
   private async send(
     generation: number,
     runtime: PlaygroundScenarioLabRuntime,
-    bindings: Map<string, AgentLoopTaskBindingV2>,
+    bindings: Map<string, AgentLoopTaskBindingV4>,
     alias: string,
     ordinal: number,
     text: string,
@@ -420,10 +423,26 @@ export class PlaygroundScenarioLabController {
     this.append('result', `send ${alias}/${ordinal}: ${result.delivery.disposition}`)
   }
 
+  private async decide(
+    generation: number,
+    runtime: PlaygroundScenarioLabRuntime,
+    bindings: Map<string, AgentLoopTaskBindingV4>,
+    alias: string,
+    ordinal: number,
+    decision: 'approved' | 'denied' | 'cancelled',
+  ): Promise<void> {
+    const binding = bindings.get(alias)
+    if (binding === undefined) throw new Error(`binding ${alias} is unavailable`)
+    const result = await runtime.client.decideApproval(approvalCommand(this.selectedScenarioId, alias, ordinal, binding, decision))
+    if (!this.current(generation, runtime, bindings)) return
+    if (result.status !== 'accepted') throw new Error(`approval ${alias}/${ordinal}: ${result.status}${'code' in result ? `/${result.code}` : ''}`)
+    this.append('result', `approval ${alias}/${ordinal}: ${result.decision}/${result.delivery.disposition}`)
+  }
+
   private current(
     generation: number,
     runtime: PlaygroundScenarioLabRuntime,
-    bindings: Map<string, AgentLoopTaskBindingV2>,
+    bindings: Map<string, AgentLoopTaskBindingV4>,
   ): boolean {
     return generation === this.generation && runtime === this.runtime && bindings === this.bindings
   }

@@ -23,16 +23,23 @@ export interface CordisXAgentLoopLifecycleEvent {
   readonly sequence: number
   readonly session: CordisXTaskReadInput['session']
   readonly turnId: string
-  readonly type: 'turn.started' | 'turn.completed' | 'turn.failed' | 'approval.required' | 'approval.resolved'
+  readonly type: 'turn.started' | 'turn.completed' | 'turn.failed' | 'turn.cancelled' | 'approval.required' | 'approval.resolved'
   readonly output?: readonly { readonly type: 'text'; readonly text: string }[]
   readonly failure?: { readonly code: string; readonly retryable: boolean }
   readonly approval?: { readonly approvalId: string; readonly kind: 'command' | 'file-change' | 'external-action' | 'other'; readonly state: 'pending' | 'resolved'; readonly outcome?: 'approved' | 'denied' | 'expired' | 'cancelled' }
+  readonly cancellation?: { readonly operationId: string }
 }
 
 export interface CordisXAgentLoopLifecycleRange {
   readonly afterSequence: number
   readonly nextAfterSequence: number
   readonly events: readonly CordisXAgentLoopLifecycleEvent[]
+}
+
+export interface CordisXAgentLoopV4Scope {
+  readonly profileId: string
+  readonly compositionGeneration: string
+  readonly ownerKey: string
 }
 
 const PROVIDER_BINDING = '__cordisxProviderRequestV1'
@@ -155,6 +162,45 @@ export class BindingPlatformAdapter implements CordisXPlatformAdapter {
     afterSequence: number,
   ): Promise<CordisXAgentLoopLifecycleRange> {
     return await this.request<CordisXAgentLoopLifecycleRange>('agent-loop.lifecycle.read', { session, afterSequence })
+  }
+
+  async createAgentLoopV4(input: {
+    readonly scope: CordisXAgentLoopV4Scope
+    readonly command: unknown
+    readonly operationId: string
+    readonly definition: { readonly agentId: string; readonly revision: string }
+    readonly model: CordisXTaskCreateInput['model']
+    readonly cwd: string
+    readonly developerInstructions?: string
+    readonly effort?: 'low' | 'medium' | 'high' | 'xhigh'
+  }): Promise<unknown> { return await this.request('agent-loop.v4.create', input) }
+
+  async bindAgentLoopV4(input: {
+    readonly scope: CordisXAgentLoopV4Scope
+    readonly command: unknown
+    readonly operationId: string
+    readonly task: string
+    readonly definition: { readonly agentId: string; readonly revision: string }
+  }): Promise<unknown> { return await this.request('agent-loop.v4.bind', input) }
+
+  async sendAgentLoopV4(input: { readonly scope: CordisXAgentLoopV4Scope; readonly command: unknown; readonly operationId: string; readonly task: string; readonly binding: { readonly bindingId: string; readonly generation: number }; readonly definition: { readonly agentId: string; readonly revision: string }; readonly message: string }): Promise<unknown> {
+    return await this.request('agent-loop.v4.send', input)
+  }
+
+  async decideAgentLoopApprovalV4(input: { readonly scope: CordisXAgentLoopV4Scope; readonly command: unknown; readonly operationId: string; readonly task: string; readonly binding: { readonly bindingId: string; readonly generation: number }; readonly definition: { readonly agentId: string; readonly revision: string }; readonly turn: string; readonly approvalId: string; readonly decision: 'approved' | 'denied' | 'cancelled' }): Promise<unknown> {
+    return await this.request('agent-loop.v4.approval.decide', input)
+  }
+
+  async requestAgentLoopIntroductionV4(input: { readonly scope: CordisXAgentLoopV4Scope; readonly command: unknown; readonly operationId: string; readonly task: string; readonly binding: { readonly bindingId: string; readonly generation: number }; readonly definition: { readonly agentId: string; readonly revision: string }; readonly participantId: string; readonly memberId: string; readonly runId: string }): Promise<unknown> {
+    return await this.request('agent-loop.v4.introduction.request', input)
+  }
+
+  async cancelAgentLoopIntroductionV4(input: { readonly scope: CordisXAgentLoopV4Scope; readonly command: unknown; readonly operationId: string; readonly requestOperationId: string; readonly task: string; readonly binding: { readonly bindingId: string; readonly generation: number }; readonly definition: { readonly agentId: string; readonly revision: string }; readonly participantId: string; readonly memberId: string; readonly runId: string }): Promise<unknown> {
+    return await this.request('agent-loop.v4.introduction.cancel', input)
+  }
+
+  async readAgentLoopV4Lifecycle(input: { readonly scope: CordisXAgentLoopV4Scope; readonly task: string; readonly binding: { readonly bindingId: string; readonly generation: number }; readonly definition: { readonly agentId: string; readonly revision: string }; readonly afterSequence: number }): Promise<unknown> {
+    return await this.request('agent-loop.v4.lifecycle.read', input)
   }
 
   dispose(): void {

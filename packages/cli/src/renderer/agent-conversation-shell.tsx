@@ -11,15 +11,18 @@ import type {
   LocalizedText,
 } from '@cordisx/protocol/agent-conversation-shell/v1'
 import type {
-  AgentConversationAction as ProtocolAction,
-  AgentConversationItem as ProtocolItem,
-  AgentConversationParticipant as ProtocolParticipant,
-  AgentConversationSelection as ProtocolSelection,
-  AgentConversationShellPage,
-  AgentConversationShellSnapshot,
-  AgentConversationShellSource,
-  AgentConversationShellUpdate,
-} from '@cordisx/protocol/agent-conversation-shell/v2'
+  AgentConversationAction as ProtocolActionV3,
+  AgentConversationItem as ProtocolItemV3,
+  AgentConversationParticipant as ProtocolParticipantV3,
+  AgentConversationSelection as ProtocolSelectionV3,
+  AgentConversationShellPage as AgentConversationShellPageV3,
+  AgentConversationRoomSettingsPatch,
+  AgentConversationRoomSettingsUpdateRequest,
+  AgentConversationRoomSettingsUpdateResult,
+  AgentConversationShellSnapshot as AgentConversationShellSnapshotV3,
+  AgentConversationShellSource as AgentConversationShellSourceV3,
+  AgentConversationShellUpdate as AgentConversationShellUpdateV3,
+} from '@cordisx/protocol/agent-conversation-shell/v3'
 import * as React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type {
@@ -27,6 +30,7 @@ import type {
   CordisXAgentConversationShellRegistration,
   CordisXAgentConversationShellSourceFactory,
   CordisXAgentConversationShellSourceFactoryV2,
+  CordisXAgentConversationShellSourceFactoryV3,
   CordisXJsonValue,
   CordisXLocalizedText,
   CordisXPageMount,
@@ -58,6 +62,15 @@ import { ownerFromContext } from './ownership.js'
 import type { PluginConsoleAspect, PluginPrincipalToken } from './plugin-console.js'
 import { immutableSnapshot, LOCAL_ID_PATTERN, REFERENCE_PATTERN } from './validation.js'
 
+type ProtocolAction = ProtocolActionV3
+type ProtocolItem = ProtocolItemV3
+type ProtocolParticipant = ProtocolParticipantV3
+type ProtocolSelection = ProtocolSelectionV3
+type AgentConversationShellPage = AgentConversationShellPageV3
+type AgentConversationShellSnapshot = AgentConversationShellSnapshotV3
+type AgentConversationShellSource = AgentConversationShellSourceV3
+type AgentConversationShellUpdate = AgentConversationShellUpdateV3
+
 function exactKeys(value: object, expected: readonly string[], label: string): void {
   const keys = Object.keys(value)
   const unknown = keys.find(key => !expected.includes(key))
@@ -85,6 +98,27 @@ function opaque(value: unknown, label: string): asserts value is string {
 
 function safeSequence(value: unknown, label: string): asserts value is number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error(`${label} must be a non-negative safe integer`)
+}
+
+function assertRoomSettingsPatch(value: unknown): asserts value is AgentConversationRoomSettingsPatch {
+  plainObject(value, 'room settings patch')
+  exactKeys(value, ['name', 'description'], 'room settings patch')
+  if (Object.keys(value).length === 0) throw new Error('room settings patch must not be empty')
+  if (value.name !== undefined && (typeof value.name !== 'string' || [...value.name].length < 1
+    || [...value.name].length > 256 || /[\u0000-\u001F\u007F]/u.test(value.name))) {
+    throw new Error('room settings patch name is invalid')
+  }
+  if (value.description !== undefined) {
+    plainObject(value.description, 'room settings patch description')
+    if (value.description.state === 'empty') exactKeys(value.description, ['state'], 'room settings patch description')
+    else if (value.description.state === 'present') {
+      exactKeys(value.description, ['state', 'text'], 'room settings patch description')
+      if (typeof value.description.text !== 'string' || [...value.description.text].length < 1
+        || [...value.description.text].length > 4_000 || /[\u0000-\u0009\u000B-\u001F\u007F]/u.test(value.description.text)) {
+        throw new Error('room settings patch description text is invalid')
+      }
+    } else throw new Error('room settings patch description state is invalid')
+  }
 }
 
 function assertJsonValue(value: unknown, label: string, depth = 0): asserts value is CordisXJsonValue {
@@ -156,6 +190,31 @@ function assertParticipant(value: unknown, label: string): asserts value is Prot
   }
 }
 
+function assertReactionValue(value: unknown, label: string): asserts value is { readonly kind: 'semantic'; readonly token: string } | { readonly kind: 'emoji'; readonly emoji: string } {
+  plainObject(value, label)
+  if (value.kind === 'semantic') {
+    exactKeys(value, ['kind', 'token'], label)
+    if (typeof value.token !== 'string' || !/^[a-z][a-z0-9.-]{0,31}$/u.test(value.token)) {
+      throw new Error(`${label}.token is not canonical`)
+    }
+    return
+  }
+  if (value.kind !== 'emoji') throw new Error(`${label}.kind is invalid`)
+  exactKeys(value, ['kind', 'emoji'], label)
+  if (typeof value.emoji !== 'string' || value.emoji !== value.emoji.trim()
+    || value.emoji !== value.emoji.normalize('NFC')) throw new Error(`${label}.emoji is not canonical`)
+  const scalars = [...value.emoji]
+  if (scalars.length < 1 || scalars.length > 32) throw new Error(`${label}.emoji scalar length is invalid`)
+  const keycaps = value.emoji.match(/[#*0-9]\uFE0F?\u20E3/gu) ?? []
+  const remainder = value.emoji.replace(/[#*0-9]\uFE0F?\u20E3/gu, '')
+  if (/[#*0-9\u20E3]/u.test(remainder)) throw new Error(`${label}.emoji contains an incomplete keycap`)
+  const allowedScalar = /^(?:\p{Extended_Pictographic}|\p{Emoji_Component}|\p{Regional_Indicator}|\u200D|\uFE0F)$/u
+  if ([...remainder].some(scalar => !allowedScalar.test(scalar))
+    || !/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(remainder) && keycaps.length === 0) {
+    throw new Error(`${label}.emoji contains a non-emoji scalar`)
+  }
+}
+
 function sameAvatar(left: ProtocolParticipant['avatar'], right: ProtocolParticipant['avatar']): boolean {
   if (left === undefined || right === undefined) return left === right
   return JSON.stringify(cloneAgentAvatarRef(left)) === JSON.stringify(cloneAgentAvatarRef(right))
@@ -168,9 +227,15 @@ function assertSelection(value: unknown, label: string): asserts value is Protoc
     return
   }
   if (value.kind !== 'room') throw new Error(`${label}.kind is invalid`)
-  exactKeys(value, ['kind', 'roomId', 'title', 'secondary', 'multiParticipant', 'participantPresentation', 'participants', 'activeRuns'], label)
+  exactKeys(value, ['kind', 'roomId', 'title', 'description', 'secondary', 'multiParticipant', 'participantPresentation', 'participants', 'activeRuns'], label)
   opaque(value.roomId, `${label}.roomId`)
   assertLocalizedText(value.title, `${label}.title`)
+  if (value.description !== undefined) {
+    plainObject(value.description, `${label}.description`)
+    exactKeys(value.description, ['state', 'text'], `${label}.description`)
+    if (value.description.state === 'present') assertLocalizedText(value.description.text, `${label}.description.text`)
+    else if (value.description.state !== 'empty') throw new Error(`${label}.description.state is invalid`)
+  }
   if (value.secondary !== undefined) assertLocalizedText(value.secondary, `${label}.secondary`)
   if (typeof value.multiParticipant !== 'boolean') throw new Error(`${label}.multiParticipant must be boolean`)
   if (value.participantPresentation !== 'none' && value.participantPresentation !== 'host-initials') {
@@ -187,7 +252,7 @@ function assertSelection(value: unknown, label: string): asserts value is Protoc
     ids.add(participant.participantId)
   })
   if (value.activeRuns !== undefined) {
-    if (!Array.isArray(value.activeRuns) || value.activeRuns.length > 256) throw new Error(`${label}.activeRuns is invalid`)
+    if (!Array.isArray(value.activeRuns) || value.activeRuns.length > 64) throw new Error(`${label}.activeRuns is invalid`)
     const runKeys = new Set<string>()
     value.activeRuns.forEach((run, index) => {
       plainObject(run, `${label}.activeRuns[${index}]`)
@@ -195,7 +260,7 @@ function assertSelection(value: unknown, label: string): asserts value is Protoc
       opaque(run.participantId, `${label}.activeRuns[${index}].participantId`)
       opaque(run.memberId, `${label}.activeRuns[${index}].memberId`)
       opaque(run.runId, `${label}.activeRuns[${index}].runId`)
-      if (!ids.has(run.participantId) || run.memberId !== run.participantId) throw new Error(`${label}.activeRuns[${index}] association is invalid`)
+      if (!ids.has(run.participantId)) throw new Error(`${label}.activeRuns[${index}] association is invalid`)
       plainObject(run.lifecycle, `${label}.activeRuns[${index}].lifecycle`)
       exactKeys(run.lifecycle, ['phase', 'updatedAt'], `${label}.activeRuns[${index}].lifecycle`)
       if (!['active', 'running', 'waiting', 'attention'].includes(run.lifecycle.phase as string)) throw new Error(`${label}.activeRuns[${index}].lifecycle is invalid`)
@@ -209,6 +274,29 @@ function assertSelection(value: unknown, label: string): asserts value is Protoc
 
 function assertItem(value: unknown, label: string): asserts value is ProtocolItem {
   plainObject(value, label)
+  if (value.kind === 'approval') {
+    exactKeys(value, ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'binding', 'turn', 'approvalId', 'approvalKind', 'rationale', 'state', 'actions', 'diagnostic'], label)
+    opaque(value.itemId, `${label}.itemId`); safeSequence(value.sequence, `${label}.sequence`)
+    opaque(value.participantId, `${label}.participantId`); opaque(value.memberId, `${label}.memberId`); opaque(value.runId, `${label}.runId`)
+    plainObject(value.binding, `${label}.binding`); exactKeys(value.binding, ['bindingId', 'generation'], `${label}.binding`)
+    opaque(value.binding.bindingId, `${label}.binding.bindingId`); safeSequence(value.binding.generation, `${label}.binding.generation`)
+    opaque(value.turn, `${label}.turn`); opaque(value.approvalId, `${label}.approvalId`)
+    if (!['command', 'file-change', 'external-action', 'other'].includes(value.approvalKind as string)) throw new Error(`${label}.approvalKind is invalid`)
+    if (!['pending', 'approved', 'denied', 'cancelled', 'failed'].includes(value.state as string)) throw new Error(`${label}.state is invalid`)
+    if (value.rationale !== undefined) assertLocalizedText(value.rationale, `${label}.rationale`)
+    if (value.diagnostic !== undefined) assertLocalizedText(value.diagnostic, `${label}.diagnostic`)
+    if (!Array.isArray(value.actions) || value.actions.length > 3) throw new Error(`${label}.actions is invalid`)
+    const decisions = new Set<string>()
+    value.actions.forEach((action, index) => {
+      plainObject(action, `${label}.actions[${index}]`); exactKeys(action, ['decision', 'command'], `${label}.actions[${index}]`)
+      if (!['approve', 'deny', 'cancel'].includes(action.decision as string)) throw new Error(`${label}.actions[${index}].decision is invalid`)
+      if (decisions.has(action.decision as string)) throw new Error(`${label}.actions has a duplicate decision`)
+      decisions.add(action.decision as string)
+      assertCommand(action.command, `${label}.actions[${index}].command`)
+    })
+    if (value.state === 'pending' ? value.actions.length === 0 : value.actions.length !== 0) throw new Error(`${label}.actions do not match approval state`)
+    return
+  }
   if (value.kind === 'member-presence') {
     exactKeys(value, ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'state', 'retryable', 'diagnostic', 'retry'], label)
     opaque(value.itemId, `${label}.itemId`)
@@ -216,7 +304,6 @@ function assertItem(value: unknown, label: string): asserts value is ProtocolIte
     opaque(value.participantId, `${label}.participantId`)
     opaque(value.memberId, `${label}.memberId`)
     opaque(value.runId, `${label}.runId`)
-    if (value.memberId !== value.participantId) throw new Error(`${label}.memberId must equal participantId`)
     if (!['inviting', 'creating', 'joined', 'ready', 'failed'].includes(value.state as string)) throw new Error(`${label}.state is invalid`)
     if (typeof value.retryable !== 'boolean') throw new Error(`${label}.retryable is invalid`)
     if (value.diagnostic !== undefined) assertLocalizedText(value.diagnostic, `${label}.diagnostic`)
@@ -234,7 +321,7 @@ function assertItem(value: unknown, label: string): asserts value is ProtocolIte
     return
   }
   if (value.kind !== 'message') throw new Error(`${label}.kind is invalid`)
-  exactKeys(value, ['kind', 'itemId', 'messageId', 'sequence', 'source', 'author', 'body', 'reactions', 'timestamp', 'deliveryState', 'runState', 'ariaLive', 'actions'], label)
+  exactKeys(value, ['kind', 'itemId', 'messageId', 'sequence', 'source', 'author', 'semantic', 'body', 'reactions', 'timestamp', 'deliveryState', 'runState', 'ariaLive', 'actions'], label)
   opaque(value.itemId, `${label}.itemId`)
   opaque(value.messageId, `${label}.messageId`)
   safeSequence(value.sequence, `${label}.sequence`)
@@ -252,10 +339,31 @@ function assertItem(value: unknown, label: string): asserts value is ProtocolIte
   if (!['off', 'polite'].includes(value.ariaLive as string)) throw new Error(`${label}.ariaLive is invalid`)
   if (!Array.isArray(value.actions) || value.actions.length > 8) throw new Error(`${label}.actions is invalid`)
   value.actions.forEach((action, index) => assertAction(action, `${label}.actions[${index}]`))
-  if (value.source !== undefined && value.source !== 'agent-loop' && value.source !== 'chatroom-acknowledgement') throw new Error(`${label}.source is invalid`)
+  if (value.source !== 'agent-loop' && value.source !== 'chatroom-acknowledgement') throw new Error(`${label}.source is invalid`)
+  if (value.semantic === undefined) throw new Error(`${label}.semantic is required`)
+  {
+    plainObject(value.semantic, `${label}.semantic`)
+    if (value.semantic.purpose === 'conversation') {
+      exactKeys(value.semantic, ['purpose', 'causation'], `${label}.semantic`)
+    } else if (value.semantic.purpose === 'member-self-introduction') {
+      exactKeys(value.semantic, ['purpose', 'causation', 'participantId', 'memberId', 'runId', 'binding', 'turn'], `${label}.semantic`)
+      opaque(value.semantic.participantId, `${label}.semantic.participantId`); opaque(value.semantic.memberId, `${label}.semantic.memberId`); opaque(value.semantic.runId, `${label}.semantic.runId`); opaque(value.semantic.turn, `${label}.semantic.turn`)
+      plainObject(value.semantic.binding, `${label}.semantic.binding`); exactKeys(value.semantic.binding, ['bindingId', 'generation'], `${label}.semantic.binding`)
+      opaque(value.semantic.binding.bindingId, `${label}.semantic.binding.bindingId`); safeSequence(value.semantic.binding.generation, `${label}.semantic.binding.generation`)
+    } else if (value.semantic.purpose === 'chatroom-acknowledgement') exactKeys(value.semantic, ['purpose'], `${label}.semantic`)
+    else throw new Error(`${label}.semantic.purpose is invalid`)
+    if (value.semantic.causation !== undefined) {
+      plainObject(value.semantic.causation, `${label}.semantic.causation`); exactKeys(value.semantic.causation, ['operationId'], `${label}.semantic.causation`); opaque(value.semantic.causation.operationId, `${label}.semantic.causation.operationId`)
+    }
+    if (value.source === 'agent-loop' && value.semantic.purpose === 'chatroom-acknowledgement'
+      || value.source === 'chatroom-acknowledgement' && value.semantic.purpose !== 'chatroom-acknowledgement') {
+      throw new Error(`${label}.source and semantic purpose do not match`)
+    }
+  }
   if (value.reactions !== undefined) {
     if (!Array.isArray(value.reactions) || value.reactions.length > 64) throw new Error(`${label}.reactions is invalid`)
     const reactionIds = new Set<string>()
+    const reactionActorValues = new Set<string>()
     value.reactions.forEach((reaction, index) => {
       plainObject(reaction, `${label}.reactions[${index}]`)
       exactKeys(reaction, ['reactionId', 'actorParticipantId', 'value', 'state'], `${label}.reactions[${index}]`)
@@ -263,12 +371,59 @@ function assertItem(value: unknown, label: string): asserts value is ProtocolIte
       opaque(reaction.actorParticipantId, `${label}.reactions[${index}].actorParticipantId`)
       if (reactionIds.has(reaction.reactionId)) throw new Error(`${label}.reactions has duplicate id`)
       reactionIds.add(reaction.reactionId)
-      plainObject(reaction.value, `${label}.reactions[${index}].value`)
-      if (reaction.value.kind === 'emoji') text(reaction.value.emoji, `${label}.reactions[${index}].value.emoji`, 64)
-      else if (reaction.value.kind === 'semantic') text(reaction.value.token, `${label}.reactions[${index}].value.token`, 128)
-      else throw new Error(`${label}.reactions[${index}].value is invalid`)
+      assertReactionValue(reaction.value, `${label}.reactions[${index}].value`)
+      const actorValue = JSON.stringify([
+        reaction.actorParticipantId,
+        reaction.value.kind,
+        reaction.value.kind === 'emoji' ? reaction.value.emoji : reaction.value.token,
+      ])
+      if (reactionActorValues.has(actorValue)) throw new Error(`${label}.reactions has duplicate actor/value pair`)
+      reactionActorValues.add(actorValue)
       if (!['pending', 'completed', 'failed'].includes(reaction.state as string)) throw new Error(`${label}.reactions[${index}].state is invalid`)
     })
+  }
+}
+
+function assertSnapshotAssociations(value: AgentConversationShellSnapshot): void {
+  if (value.selection.kind !== 'room') {
+    if (value.items.some(item => item.kind === 'approval'
+      || item.kind === 'message' && item.semantic.purpose === 'member-self-introduction')) {
+      throw new Error('no-room snapshot contains Room-associated items')
+    }
+    return
+  }
+  const participants = new Map(value.selection.participants.map(participant => [participant.participantId, participant]))
+  const runs = new Set((value.selection.activeRuns ?? []).map(run => JSON.stringify([run.participantId, run.memberId, run.runId])))
+  const approvals = new Set<string>()
+  const introductions = new Set<string>()
+  for (const item of value.items) {
+    if (item.kind === 'message') {
+      const participant = participants.get(item.author.participantId)
+      if (participant === undefined || JSON.stringify(participant) !== JSON.stringify(item.author)) throw new Error('message author is not the exact Room participant')
+      for (const reaction of item.reactions ?? []) {
+        if (!participants.has(reaction.actorParticipantId)) throw new Error('reaction actor is not a Room participant')
+      }
+      if (item.semantic.purpose === 'member-self-introduction') {
+        if (item.author.role !== 'agent' || item.author.agentIdentity === undefined
+          || item.semantic.participantId !== item.author.participantId) {
+          throw new Error('self-introduction message author association is invalid')
+        }
+        const run = JSON.stringify([item.semantic.participantId, item.semantic.memberId, item.semantic.runId])
+        if (!runs.has(run)) throw new Error('self-introduction message does not match an active run')
+        const association = JSON.stringify([run, item.semantic.binding.bindingId, item.semantic.binding.generation, item.semantic.turn])
+        if (introductions.has(association)) throw new Error('duplicate self-introduction association')
+        introductions.add(association)
+      }
+    }
+    if (item.kind === 'approval') {
+      const participant = participants.get(item.participantId)
+      if (participant?.role !== 'agent' || participant.agentIdentity === undefined) throw new Error('approval participant is not an identified Agent')
+      const run = JSON.stringify([item.participantId, item.memberId, item.runId])
+      if (!runs.has(run)) throw new Error('approval does not match an active run')
+      const association = JSON.stringify([item.binding.bindingId, item.binding.generation, item.turn, item.approvalId])
+      if (approvals.has(association)) throw new Error('duplicate approval association')
+      approvals.add(association)
+    }
   }
 }
 
@@ -287,6 +442,7 @@ function assertSnapshot(value: unknown): asserts value is AgentConversationShell
   if (value.items.some(item => item.sequence > (value.snapshotSequence as number))) {
     throw new Error('snapshot item sequence exceeds snapshot.snapshotSequence')
   }
+  assertSnapshotAssociations(value as unknown as AgentConversationShellSnapshot)
   plainObject(value.composer, 'snapshot.composer')
   exactKeys(value.composer, ['availability', 'placeholder', 'disabled', 'submit'], 'snapshot.composer')
   if (!['available', 'unavailable'].includes(value.composer.availability as string)) throw new Error('snapshot.composer.availability is invalid')
@@ -393,6 +549,22 @@ function projectSnapshot(
       ...(item.diagnostic === undefined ? {} : { diagnostic: localization.resolve(item.diagnostic, `items.${index}.diagnostic`) }),
       ...(item.retry === undefined ? {} : { retry: { id: item.retry.id, ...(item.retry.arguments === undefined ? {} : { arguments: item.retry.arguments as CordisXJsonValue }) } }),
     }
+    if (item.kind === 'approval') return {
+      kind: 'approval' as const,
+      itemId: item.itemId,
+      sequence: item.sequence,
+      participantId: item.participantId,
+      memberId: item.memberId,
+      runId: item.runId,
+      binding: item.binding,
+      turn: item.turn,
+      approvalId: item.approvalId,
+      approvalKind: item.approvalKind,
+      state: item.state,
+      actions: item.actions.map(action => ({ decision: action.decision, command: { id: action.command.id, ...(action.command.arguments === undefined ? {} : { arguments: action.command.arguments as CordisXJsonValue }) } })),
+      ...(item.rationale === undefined ? {} : { rationale: localization.resolve(item.rationale, `items.${index}.rationale`) }),
+      ...(item.diagnostic === undefined ? {} : { diagnostic: localization.resolve(item.diagnostic, `items.${index}.diagnostic`) }),
+    }
     const declared = participantById.get(item.author.participantId)
     if (declared === undefined || declared.role !== item.author.role
       || JSON.stringify(declared.displayName) !== JSON.stringify(item.author.displayName)
@@ -413,6 +585,7 @@ function projectSnapshot(
       ariaLive: item.ariaLive,
       actions: item.actions.map((action, actionIndex) => projectAction(action, localization, `items.${index}.actions.${actionIndex}`)),
       source: item.source ?? 'agent-loop',
+      ...(!('semantic' in item) || item.semantic === undefined ? {} : { semantic: item.semantic }),
       reactions: (item.reactions ?? []).map(reaction => ({
         reactionId: reaction.reactionId,
         actorParticipantId: reaction.actorParticipantId,
@@ -434,6 +607,11 @@ function projectSnapshot(
       kind: 'room',
       roomId: snapshot.selection.roomId,
       title: localization.resolve(snapshot.selection.title, 'selection.title'),
+      ...(!('description' in snapshot.selection) || snapshot.selection.description === undefined ? {} : {
+        description: snapshot.selection.description.state === 'empty'
+          ? { state: 'empty' as const }
+          : { state: 'present' as const, text: localization.resolve(snapshot.selection.description.text, 'selection.description') },
+      }),
       ...(snapshot.selection.secondary === undefined ? {} : { secondary: localization.resolve(snapshot.selection.secondary, 'selection.secondary') }),
       multiParticipant: snapshot.selection.multiParticipant,
       participantPresentation: snapshot.selection.participantPresentation,
@@ -497,7 +675,7 @@ interface RegisteredSource {
   readonly owner: string
   readonly ownerGeneration: string
   readonly effect: PluginGenerationEffectIdentity
-  readonly factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2
+  readonly factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2 | CordisXAgentConversationShellSourceFactoryV3
   readonly principal?: PluginPrincipalToken
   readonly sessions: Set<MountedConversation>
   active: boolean
@@ -597,7 +775,7 @@ class MountedConversation {
       || typeof sourceCandidate.snapshot !== 'function' || typeof sourceCandidate.subscribe !== 'function' || typeof sourceCandidate.dispose !== 'function') {
       throw new Error('conversation source must implement snapshot, subscribe, and dispose')
     }
-    const source = sourceCandidate as AgentConversationShellSource
+    const source = sourceCandidate as unknown as AgentConversationShellSource
     this.source = source
     const initial = immutableSnapshot(await this.runPlugin('agent-conversation-shell.snapshot', () => source.snapshot()))
     assertSnapshot(initial)
@@ -692,7 +870,7 @@ class MountedConversation {
     if (this.cursor >= this.subscription.snapshotSequence && page.phase !== 'live') {
       throw new Error('replay subscription page arrived after its watermark')
     }
-    if (!Array.isArray(page.updates) || page.updates.length > 500) throw new Error('subscription page updates are invalid')
+    if (!Array.isArray(page.updates) || page.updates.length > 128) throw new Error('subscription page updates are invalid')
     if (typeof page.hasMore !== 'boolean') throw new Error('subscription page.hasMore must be boolean')
     let expected = this.cursor + 1
     let terminal = false
@@ -769,10 +947,29 @@ class MountedConversation {
       if (previous.kind !== update.item.kind || previous.sequence !== update.item.sequence) {
         throw new Error('item-updated changed its stable kind or item sequence')
       }
-      if (previous.kind === 'message' && update.item.kind === 'message'
-        && (previous.messageId !== update.item.messageId
-          || previous.author.participantId !== update.item.author.participantId)) {
-        throw new Error('item-updated changed its message association')
+      if (previous.kind === 'message' && update.item.kind === 'message') {
+        if (previous.messageId !== update.item.messageId
+          || JSON.stringify(previous.author) !== JSON.stringify(update.item.author)
+          || previous.source !== update.item.source
+          || JSON.stringify(previous.semantic) !== JSON.stringify(update.item.semantic)) {
+          throw new Error('item-updated changed its message association')
+        }
+        const priorReactions = previous.reactions ?? []
+        const nextReactions = update.item.reactions ?? []
+        if (nextReactions.length < priorReactions.length) throw new Error('item-updated removed an existing reaction')
+        for (const [index, prior] of priorReactions.entries()) {
+          const reaction = nextReactions[index]
+          if (reaction === undefined
+            || prior.reactionId !== reaction.reactionId
+            || prior.actorParticipantId !== reaction.actorParticipantId
+            || JSON.stringify(prior.value) !== JSON.stringify(reaction.value)
+            || prior.state !== 'pending' && prior.state !== reaction.state) {
+            throw new Error('item-updated changed its reaction identity or terminal state')
+          }
+        }
+        if (nextReactions.slice(priorReactions.length).some(reaction => reaction.state !== 'pending')) {
+          throw new Error('item-updated appended a terminal reaction')
+        }
       }
       if (previous.kind === 'member-presence' && update.item.kind === 'member-presence'
         && (previous.participantId !== update.item.participantId
@@ -780,9 +977,29 @@ class MountedConversation {
           || previous.runId !== update.item.runId)) {
         throw new Error('item-updated changed its member presence association')
       }
+      if (previous.kind === 'approval' && update.item.kind === 'approval') {
+        if (previous.participantId !== update.item.participantId
+          || previous.memberId !== update.item.memberId
+          || previous.runId !== update.item.runId
+          || previous.binding.bindingId !== update.item.binding.bindingId
+          || previous.binding.generation !== update.item.binding.generation
+          || previous.turn !== update.item.turn
+          || previous.approvalId !== update.item.approvalId
+          || previous.approvalKind !== update.item.approvalKind
+          || JSON.stringify(previous.rationale) !== JSON.stringify(update.item.rationale)) {
+          throw new Error('item-updated changed its approval association')
+        }
+        if (previous.state !== 'pending') {
+          if (JSON.stringify(previous) !== JSON.stringify(update.item)) throw new Error('item-updated changed a terminal approval')
+        } else if (update.item.state === 'pending' && JSON.stringify(previous) !== JSON.stringify(update.item)) {
+          throw new Error('item-updated changed a pending approval without resolving it')
+        }
+      }
       items[existing] = update.item
     }
-    this.snapshot = immutableSnapshot({ ...this.snapshot, snapshotSequence: update.sequence, items })
+    const next = immutableSnapshot({ ...this.snapshot, snapshotSequence: update.sequence, items })
+    assertSnapshotAssociations(next)
+    this.snapshot = next
   }
 
   private assertSnapshotFence(snapshot: AgentConversationShellSnapshot): void {
@@ -812,11 +1029,64 @@ class MountedConversation {
         model={model}
         commands={controller}
         copy={rendererCopy(this.i18n.getSnapshot().locale)}
+        {...(typeof this.source?.updateRoomSettings !== 'function' || model.selection.kind !== 'room' ? {} : {
+          roomSettings: { update: async (patch: AgentConversationRoomSettingsPatch) => await this.updateRoomSettings(patch) },
+        })}
         {...(this.identity === undefined ? {} : { identity: this.identity })}
       />)
     } catch (error) {
       this.fail(error)
     }
+  }
+
+  private async updateRoomSettings(patch: AgentConversationRoomSettingsPatch): Promise<void> {
+    if (this.source === undefined || this.snapshot === undefined || this.snapshot.selection.kind !== 'room'
+      || typeof this.source.updateRoomSettings !== 'function') throw new Error('Room settings are unavailable')
+    assertRoomSettingsPatch(patch)
+    const request: AgentConversationRoomSettingsUpdateRequest = immutableSnapshot({
+      requestId: `settings-${crypto.randomUUID()}`,
+      binding: this.snapshot.binding,
+      generation: this.snapshot.generation,
+      roomId: this.snapshot.selection.roomId,
+      expectedSnapshotSequence: this.snapshot.snapshotSequence,
+      patch,
+    })
+    const result = immutableSnapshot(await this.runPlugin('agent-conversation-shell.update-room-settings', () => this.source!.updateRoomSettings(request)))
+    this.assertRoomSettingsResult(result, request)
+    if (result.status !== 'applied') throw new Error(`Room settings update ${result.code}`)
+  }
+
+  private assertRoomSettingsResult(result: AgentConversationRoomSettingsUpdateResult, request: AgentConversationRoomSettingsUpdateRequest): void {
+    plainObject(result, 'room settings result')
+    exactKeys(result, ['type', 'requestId', 'binding', 'generation', 'roomId', 'expectedSnapshotSequence', 'status', 'code', 'snapshotSequence', 'currentSnapshotSequence'], 'room settings result')
+    if (result.type !== 'update-room-settings' || result.requestId !== request.requestId
+      || !sameBinding(result.binding, request.binding) || result.generation !== request.generation
+      || result.roomId !== request.roomId || result.expectedSnapshotSequence !== request.expectedSnapshotSequence) {
+      throw new Error('Room settings result crossed its request fence')
+    }
+    if (result.status === 'applied') {
+      if (result.code !== 'applied' || !Number.isSafeInteger(result.snapshotSequence)
+        || result.snapshotSequence <= request.expectedSnapshotSequence || result.currentSnapshotSequence !== undefined) {
+        throw new Error('Room settings applied result is invalid')
+      }
+      return
+    }
+    if (result.status === 'conflict') {
+      if (!['request-conflict', 'owner-conflict', 'generation-conflict', 'room-conflict', 'snapshot-conflict'].includes(result.code)
+        || result.snapshotSequence !== undefined
+        || result.currentSnapshotSequence !== undefined && (!Number.isSafeInteger(result.currentSnapshotSequence) || result.currentSnapshotSequence < 0)) {
+        throw new Error('Room settings conflict result is invalid')
+      }
+      return
+    }
+    if (result.status === 'unavailable') {
+      if (!['owner-unavailable', 'settings-unavailable', 'disposed'].includes(result.code)
+        || result.snapshotSequence !== undefined || result.currentSnapshotSequence !== undefined) {
+        throw new Error('Room settings unavailable result is invalid')
+      }
+      return
+    }
+    throw new Error('Room settings result status is invalid')
   }
 
   private renderStatus(state: 'loading' | 'unavailable' | 'error', detail?: string): void {
@@ -885,7 +1155,7 @@ export class AgentConversationShellRegistry {
     } })
   }
 
-  register(ctx: Context, factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2, principal?: PluginPrincipalToken): CordisXAgentConversationShellRegistration {
+  register(ctx: Context, factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2 | CordisXAgentConversationShellSourceFactoryV3, principal?: PluginPrincipalToken): CordisXAgentConversationShellRegistration {
     if (this.disposed) throw new Error('Agent conversation shell registry is disposed')
     if (typeof factory !== 'function') throw new Error('Agent conversation shell source factory must be a function')
     const owner = ownerFromContext(ctx)
@@ -983,7 +1253,7 @@ export class CordisXAgentConversationShellService extends Service implements Cor
     ctx.effect(() => () => this.registry.dispose(), 'cordisx: Agent conversation shell registry')
   }
 
-  registerSource(factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2): CordisXAgentConversationShellRegistration {
+  registerSource(factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2 | CordisXAgentConversationShellSourceFactoryV3): CordisXAgentConversationShellRegistration {
     const principal = this.console?.tokenFromContext(this.ctx)
     let registration: CordisXAgentConversationShellRegistration | undefined
     const dispose = this.ctx.effect(() => {

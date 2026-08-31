@@ -30,7 +30,15 @@ export function validateAgentLoopTaskDetailsUrl(input: AgentLoopTaskDetailsUrl):
   if (input.target !== 'host' && input.target !== 'external') throw new TypeError('Task details target is invalid')
   let parsed: URL
   try { parsed = new URL(input.url) } catch { throw new TypeError('Task details URL is invalid') }
+  for (const match of input.url.matchAll(/%([0-9A-F]{2})/gu)) {
+    const byte = Number.parseInt(match[1]!, 16)
+    if ((byte >= 0x41 && byte <= 0x5a) || (byte >= 0x61 && byte <= 0x7a) || (byte >= 0x30 && byte <= 0x39)
+      || byte === 0x2d || byte === 0x2e || byte === 0x5f || byte === 0x7e) {
+      throw new TypeError('Task details URL must not percent-encode an unreserved character')
+    }
+  }
   if (parsed.username !== '' || parsed.password !== '') throw new TypeError('Task details URL credentials are forbidden')
+  if (parsed.href !== input.url) throw new TypeError('Task details URL must be canonical')
   if (input.target === 'host') {
     if (parsed.protocol !== 'app:') throw new TypeError('Host task details must use app:')
   } else {

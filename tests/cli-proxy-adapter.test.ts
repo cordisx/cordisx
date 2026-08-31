@@ -151,6 +151,8 @@ describe('CLIProxy provider adapter', () => {
       async request<Result>(method: string, params: unknown): Promise<Result> {
         calls.push({ method, params })
         if (method === 'thread/start') return { thread: { id: 'local-session', modelProvider: 'openai', cwd: '/workspace', turns: [] } } as Result
+        if (method === 'turn/start') return { turn: { id: 'introduction-turn' } } as Result
+        if (method === 'turn/interrupt') return {} as Result
         throw new Error(`unexpected method ${method}`)
       },
       subscribeNotifications(listener) { notification = listener; return () => { notification = undefined } },
@@ -160,10 +162,11 @@ describe('CLIProxy provider adapter', () => {
     const adapter = new CliProxyProviderAdapter(local, localRpc)
     const events: unknown[] = []
     adapter.subscribeLifecycle(event => events.push(event))
-    const created = await adapter.createSession({ model: { providerId: 'codex-local', modelId: 'gpt-5.6-luna' }, cwd: '/workspace' })
+    const created = await adapter.createSession({ model: { providerId: 'codex-local', modelId: 'gpt-5.6-luna' }, cwd: '/workspace', approvalPolicy: 'on-request' })
     expect(created.ok && created.value.ref).toEqual({ providerId: 'codex-local', remoteSessionId: 'local-session' })
     expect(calls[0]?.params).toMatchObject({
-      modelProvider: 'openai', model: 'gpt-5.6-luna', approvalPolicy: 'never', sandbox: 'read-only',
+      modelProvider: 'openai', model: 'gpt-5.6-luna', approvalPolicy: 'on-request', sandbox: 'read-only',
+      developerInstructions: expect.stringContaining('Host-authenticated member-self-introduction turn with no user input'),
     })
     notification?.('turn/started', { threadId: 'local-session', turn: { id: 'turn-1' } })
     notification?.('item/agentMessage/delta', { threadId: 'local-session', turnId: 'turn-1', itemId: 'assistant-1', delta: 'Real ' })
@@ -173,13 +176,32 @@ describe('CLIProxy provider adapter', () => {
       expect.objectContaining({ type: 'turn.started', session: { providerId: 'codex-local', remoteSessionId: 'local-session' } }),
       expect.objectContaining({ type: 'turn.completed', output: [{ type: 'text', text: 'Real reply' }] }),
     ]))
-    await expect(Promise.resolve(serverRequest?.('item/commandExecution/requestApproval', {
+    const approvalResponse = Promise.resolve(serverRequest?.('item/commandExecution/requestApproval', {
       threadId: 'local-session', turnId: 'turn-2', itemId: 'command-1', approvalId: 'approval-1',
-    }))).resolves.toEqual({ decision: 'decline' })
+    }))
+    await expect(adapter.decideApproval({
+      session: { providerId: 'codex-local', remoteSessionId: 'local-session' }, turnId: 'turn-2', approvalId: 'approval-1',
+      decision: 'approved', operationId: 'approve-1', operationDigest: 'digest-1',
+    })).resolves.toMatchObject({ ok: true, value: { decision: 'approved' } })
+    await expect(approvalResponse).resolves.toEqual({ decision: 'accept' })
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'approval.required', approval: { approvalId: 'approval-1', kind: 'command', state: 'pending' } }),
-      expect.objectContaining({ type: 'approval.resolved', approval: { approvalId: 'approval-1', kind: 'command', state: 'resolved', outcome: 'denied' } }),
+      expect.objectContaining({ type: 'approval.resolved', approval: { approvalId: 'approval-1', kind: 'command', state: 'resolved', outcome: 'approved' } }),
     ]))
+    await expect(adapter.requestMemberSelfIntroduction({
+      session: { providerId: 'codex-local', remoteSessionId: 'local-session' }, operationId: 'intro-1', operationDigest: 'digest-intro', participantId: 'agent-1', memberId: 'agent-1', runId: 'run-1',
+    })).resolves.toMatchObject({ ok: true, value: { turnId: 'introduction-turn', messageId: 'cxloop-introduction:intro-1' } })
+    expect(calls.find(call => call.method === 'turn/start')?.params).toEqual({
+      threadId: 'local-session', input: [], clientUserMessageId: 'intro-1',
+    })
+    const introductionInput = (calls.find(call => call.method === 'turn/start')?.params as { input?: unknown }).input
+    expect(introductionInput).toEqual([])
+    expect(calls.find(call => call.method === 'turn/start')?.params).not.toHaveProperty('responsesapiClientMetadata')
+    await expect(adapter.cancelMemberSelfIntroduction({
+      session: { providerId: 'codex-local', remoteSessionId: 'local-session' }, turnId: 'introduction-turn',
+      operationId: 'cancel-intro-1', operationDigest: 'digest-cancel-intro',
+    })).resolves.toMatchObject({ ok: true, value: { turnId: 'introduction-turn' } })
+    expect(calls.find(call => call.method === 'turn/interrupt')?.params).toEqual({ threadId: 'local-session', turnId: 'introduction-turn' })
     expect(adapter.status()).toMatchObject({ external: false, nativeCurrentConnection: false, rawBridgeExposed: false })
     await adapter.close()
   })

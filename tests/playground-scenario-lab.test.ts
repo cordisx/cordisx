@@ -5,7 +5,7 @@ import {
   createPlaygroundScenarioLabRuntime,
   type PlaygroundScenarioLabRuntime,
 } from '../packages/cli/src/playground/scenario-lab.js'
-import type { BoundAgentLoopClientV2 } from '../packages/cli/src/agent-loop-contracts.js'
+import type { BoundAgentLoopClientV4 } from '../packages/cli/src/agent-loop-contracts.js'
 
 const immediate = async () => {}
 
@@ -29,7 +29,7 @@ function delayedRuntime(
     if (position === 'after') await release
     return result
   }
-  const client: BoundAgentLoopClientV2 = Object.freeze({
+  const client: BoundAgentLoopClientV4 = Object.freeze({
     ...runtime.client,
     createOrBind: command => operation === 'create'
       ? delayed(() => runtime.client.createOrBind(command))
@@ -94,7 +94,7 @@ describe('Playground Scenario Lab Phase 1', () => {
     controller.dispose()
   })
 
-  it('exposes typed failure then a fresh retry without inventing approval decisions', async () => {
+  it('exposes typed failure then a fresh retry and formal v4 approval decisions', async () => {
     const controller = new PlaygroundScenarioLabController(immediate)
     controller.select('failure-retry')
     await controller.next()
@@ -105,14 +105,14 @@ describe('Playground Scenario Lab Phase 1', () => {
 
     controller.select('approval-decision')
     await controller.run()
-    expect(controller.getSnapshot()).toMatchObject({ phase: 'unavailable', cursor: 0, stepCount: 0 })
-    expect(controller.getSnapshot().activities).toEqual([{
-      sequence: 1,
-      kind: 'unavailable',
-      message: expect.stringContaining('approval-decision-api-unavailable'),
-    }])
+    expect(controller.getSnapshot()).toMatchObject({ phase: 'completed', cursor: 3, stepCount: 3 })
+    expect(controller.getSnapshot().activities.filter(activity => activity.message.startsWith('approval a/')).map(activity => activity.message)).toEqual([
+      'approval a/1: approved/executed',
+      'approval a/2: denied/executed',
+      'approval a/3: cancelled/executed',
+    ])
     expect(PLAYGROUND_SCENARIO_CATALOG.find(item => item.id === 'approval-decision')?.availability).toMatchObject({
-      state: 'unavailable', code: 'approval-decision-api-unavailable',
+      state: 'available',
     })
     controller.dispose()
   })
@@ -214,10 +214,10 @@ describe('Playground Scenario Lab Phase 1', () => {
     expect(app.indexOf("id: 'scenario-lab'")).toBeLessThan(app.indexOf("id: 'runtime-separator'"))
     expect(app).not.toContain('<SidebarItem id="scenario-lab"')
     expect(component).toContain('It does not claim a complete Conversation Shell scenario.')
-    expect(component).toContain('No approval controls are simulated.')
+    expect(component).not.toContain('No approval controls are simulated.')
     expect(component.match(/type="button"/g)).toHaveLength(5)
     expect(component).toContain('aria-label={en ? \'Scenario controls\'')
     expect(component).toContain('<label>')
-    expect(backend).not.toMatch(/\b(room|member|lead|reviewer)\b/iu)
+    expect(backend).not.toMatch(/\b(lead|reviewer|recipient-selection|room-timeline)\b/iu)
   })
 })

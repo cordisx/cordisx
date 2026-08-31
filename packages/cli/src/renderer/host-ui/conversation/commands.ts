@@ -1,6 +1,7 @@
-import type { AgentConversationShellCommandContext } from '@cordisx/protocol/agent-conversation-shell/v1'
+import type { AgentConversationShellCommandContext } from '@cordisx/protocol/agent-conversation-shell/v3'
 import type {
   AgentConversationAction,
+  AgentConversationApproval,
   AgentConversationBindingReference,
   AgentConversationCommandReference,
   AgentConversationMessage,
@@ -77,6 +78,14 @@ export class AgentConversationCommandController {
     if (!message.actions.includes(action)) throw new Error(`message action ${action.id} is not in the current model`)
     return this.run(model, `message:${itemId}:${action.id}`, action.command, {
       binding: model.binding, generation: model.generation, scope: 'message', itemId, command: action.command,
+    })
+  }
+
+  runApproval(model: AgentConversationModel, approval: AgentConversationApproval, action: AgentConversationApproval['actions'][number]): Promise<unknown> {
+    this.assertCurrent(model)
+    if (approval.state !== 'pending' || !approval.actions.includes(action)) throw new Error(`approval ${approval.itemId} action is unavailable`)
+    return this.run(model, `approval:${approval.itemId}:${action.decision}`, action.command, {
+      binding: model.binding, generation: model.generation, scope: 'approval', itemId: approval.itemId, command: action.command,
     })
   }
 
