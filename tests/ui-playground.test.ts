@@ -65,6 +65,30 @@ describe('UI Playground', () => {
     expect(calls).toEqual([])
   })
 
+  it('rolls back a partial review grant and fails closed when outlet authorization is rejected', async () => {
+    const calls: unknown[][] = []
+    const runtime = {
+      snapshot: () => ({
+        plugins: [{ id: 'chatroom', source: 'file:///plugins/chatroom.ts', status: 'active' }],
+        registrations: [{
+          owner: 'chatroom', qualifiedId: 'chatroom:chatroom', surface: 'sidebar.navigation.items',
+          authorized: false, pointPolicyReason: 'permission.review-pending', item: { route: { id: 'new-room' } },
+        }],
+        navigation: { routes: [{ owner: 'chatroom', id: 'new-room', definition: { outlet: 'main' } }] },
+      }),
+      setExtensionPointPolicy: async (...args: unknown[]) => {
+        calls.push(args)
+        if (args[2] === 'main') throw new Error('outlet policy unavailable')
+      },
+    }
+    await expect(authorizePlaygroundReviewNavigation(runtime, 'chatroom:chatroom')).rejects.toThrow('outlet policy unavailable')
+    expect(calls).toEqual([
+      ['file:///plugins/chatroom.ts', 'chatroom', 'sidebar.navigation.items', 'allow'],
+      ['file:///plugins/chatroom.ts', 'chatroom', 'main', 'allow'],
+      ['file:///plugins/chatroom.ts', 'chatroom', 'sidebar.navigation.items', 'inherit'],
+    ])
+  })
+
   it('restores the Host outlet before a Room route projects during Task history back and forward', async () => {
     const dom = new JSDOM('<!doctype html><body><div id="root"><main data-host-seats><div data-cordisx-playground-seat="main"></div></main></div></body>', {
       url: 'http://127.0.0.1/',

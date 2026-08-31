@@ -70,7 +70,7 @@ export function App() {
     if (hostRuntime !== undefined) {
       void authorizePlaygroundReviewNavigation(hostRuntime, fixture.reviewNavigationItem).then(() => {
         if (!disposed) deactivate = activatePlaygroundReviewNavigation(document, fixture.reviewNavigationItem!)
-      })
+      }).catch(() => undefined)
     }
     return () => {
       disposed = true

@@ -72,7 +72,18 @@ export async function authorizePlaygroundReviewNavigation(
     : snapshot.navigation.routes.find(candidate =>
       candidate.owner === registration.owner && candidate.id === routeId)
   if (route !== undefined) pointIds.push(route.definition.outlet)
-  for (const pointId of new Set(pointIds)) {
-    await runtime.setExtensionPointPolicy(plugin.source, registration.owner, pointId, 'allow')
+  const applied: string[] = []
+  try {
+    for (const pointId of new Set(pointIds)) {
+      await runtime.setExtensionPointPolicy(plugin.source, registration.owner, pointId, 'allow')
+      applied.push(pointId)
+    }
+  } catch (error) {
+    // The review convenience must not leave a persistent partial grant when
+    // the route outlet cannot be authorized. Restore the inherited policy for
+    // every point already written, then let the caller remain fail-closed.
+    await Promise.allSettled(applied.reverse().map(pointId =>
+      runtime.setExtensionPointPolicy(plugin.source, registration.owner, pointId, 'inherit')))
+    throw error
   }
 }
