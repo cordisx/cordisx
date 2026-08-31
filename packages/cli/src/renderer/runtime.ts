@@ -1869,24 +1869,20 @@ async function start(
       if (disposed) throw new Error('CordisX runtime is disposed')
       const controller = activeController(pluginId, source)
       if (controller === undefined) throw new Error(`unknown CordisX plugin identity: ${source} / ${pluginId}`)
-      const previous = policies.map(({ pointId }) => ({ pointId, policy: broker.domPolicy(controller.identity, pointId) }))
       await broker.setDomPolicies(controller.identity, policies.map(({ pointId, policy }) => ({
         pointId,
         policy: policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
-      })))
-      try {
-        slotService?.invalidatePointPolicies()
-        await routeService?.invalidatePointPolicies()
-      } catch (error) {
-        await broker.setDomPolicies(controller.identity, previous.map(({ pointId, policy }) => ({
-          pointId,
-          policy: policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
-        })))
-        slotService?.invalidatePointPolicies()
-        await routeService?.invalidatePointPolicies().catch(() => undefined)
-        notify()
-        throw error
-      }
+      })), {
+        beforePersist: async () => {
+          slotService?.invalidatePointPolicies()
+          await routeService?.invalidatePointPolicies()
+        },
+        afterRollback: async () => {
+          slotService?.invalidatePointPolicies()
+          await routeService?.invalidatePointPolicies().catch(() => undefined)
+          notify()
+        },
+      })
       notify()
     })
     operation = task.catch(() => {})

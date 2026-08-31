@@ -161,6 +161,44 @@ function broker(input: {
 }
 
 describe('certified DOM authorization through the single PermissionBroker', () => {
+  it('restores an atomic point-policy batch before persistence or view invalidation failures can grant access', async () => {
+    const backing = new MemoryPermissionPolicyStore()
+    let rejectPersistence = false
+    const store: PermissionPolicyStore = {
+      read: () => backing.read(),
+      write: records => backing.write(records),
+      readV3: () => backing.readV3(),
+      writeV3: records => {
+        if (rejectPersistence) throw new Error('profile ledger unavailable')
+        backing.writeV3(records)
+      },
+    }
+    const value = new PermissionBroker(store, legacyPrompt, () => new Date('2026-08-30T12:00:00.000Z'), 100, 'work', 'runtime-1')
+    const unregister = value.register(identity, manifest(), { pluginId: identity.id, moduleGeneration: 'module-batch' }, undefined, { version: '1.2.3', integrity: digest })
+    const points = ['sidebar.navigation.items', 'main'] as const
+    await value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'deny-persistent' as const })))
+
+    const lifecycle: string[] = []
+    await expect(value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'allow-persistent' as const })), {
+      beforePersist: () => { lifecycle.push('invalidate'); throw new Error('route invalidation failed') },
+      afterRollback: () => { lifecycle.push('rollback') },
+    })).rejects.toThrow('route invalidation failed')
+    expect(lifecycle).toEqual(['invalidate', 'rollback'])
+    expect(points.map(pointId => value.domPolicy(identity, pointId))).toEqual(['deny', 'deny'])
+    expect(backing.readV3().map(record => record.policy)).toEqual(['deny-persistent', 'deny-persistent'])
+
+    rejectPersistence = true
+    lifecycle.length = 0
+    await expect(value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'allow-persistent' as const })), {
+      beforePersist: () => { lifecycle.push('invalidate') },
+      afterRollback: () => { lifecycle.push('rollback') },
+    })).rejects.toThrow('profile ledger unavailable')
+    expect(lifecycle).toEqual(['invalidate', 'rollback'])
+    expect(points.map(pointId => value.domPolicy(identity, pointId))).toEqual(['deny', 'deny'])
+    expect(backing.readV3().map(record => record.policy)).toEqual(['deny-persistent', 'deny-persistent'])
+    unregister()
+  })
+
   it.each([
     ['ordinary', false, false, 1, 'explicit-user'],
     ['certified-only', true, false, 0, 'certified-implicit'],

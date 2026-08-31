@@ -2755,6 +2755,10 @@ export class PermissionBroker {
   async setDomPolicies(
     identity: CordisXPluginIdentity,
     policies: readonly { readonly pointId: string; readonly policy: CordisXPermissionPolicyV2 }[],
+    lifecycle?: Readonly<{
+      readonly beforePersist?: () => void | Promise<void>
+      readonly afterRollback?: () => void | Promise<void>
+    }>,
   ): Promise<void> {
     const registration = this.registration(identity)
     if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
@@ -2782,12 +2786,14 @@ export class PermissionBroker {
       this.clearExactDomLease(registration, replacement.pointId)
     }
     try {
+      await lifecycle?.beforePersist?.()
       await this.persistV3(replacements.map(replacement => replacement.record))
     } catch (error) {
       for (const replacement of replacements) {
         if (replacement.previous === undefined) this.policyRecords.delete(replacement.recordKey)
         else this.policyRecords.set(replacement.recordKey, replacement.previous)
       }
+      try { await lifecycle?.afterRollback?.() } catch { /* Authority is already restored; a stale view cannot grant access. */ }
       throw error
     } finally {
       this.changed()
