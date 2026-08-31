@@ -245,11 +245,14 @@ describe('AgentLoop v4 renderer adapter', () => {
     })).toMatchObject({ status: 'unavailable', code: 'reconciliation-required' })
 
     transport.readAgentLoopV4Lifecycle = async () => ({
-      status: 'accepted', nextAfterSequence: 3, events: [
+      status: 'accepted', nextAfterSequence: 7, events: [
         { eventId: overlong, sequence: 1, turnId: 'turn-valid', type: 'turn.started' },
         { eventId: 'event-overlong-turn', sequence: 2, turnId: overlong, type: 'turn.started' },
         { eventId: 'event-valid', sequence: 3, turnId: 'turn-valid', type: 'approval.required', approval: { approvalId: overlong, kind: 'command' } },
-        { eventId: 'event-final', sequence: 4, turnId: 'turn-valid', type: 'turn.started' },
+        { eventId: 'event-invalid-introduction', sequence: 4, turnId: requested.turn, type: 'turn.completed', output: [{ type: 'text', text: 'must not be downgraded' }], introduction: { operationId: overlong, messageId: requested.messageId, participantId: 'participant-1', memberId: 'member-1', runId: 'run-1' } },
+        { eventId: 'event-invalid-cancellation', sequence: 5, turnId: 'turn-valid', type: 'turn.cancelled', cancellation: { operationId: overlong } },
+        { eventId: 'event-invalid-causation', sequence: 6, turnId: 'turn-valid', type: 'approval.resolved', causation: { operationId: overlong }, approval: { approvalId: 'approval-valid', kind: 'command', outcome: 'approved' } },
+        { eventId: 'event-final', sequence: 7, turnId: 'turn-valid', type: 'turn.started' },
       ],
     })
     const subscribed = await client.subscribe(created.binding, 0)

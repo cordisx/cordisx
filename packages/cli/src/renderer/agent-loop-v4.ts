@@ -104,6 +104,9 @@ function string(value: unknown): string | undefined { return typeof value === 's
 function handle(value: unknown): string | undefined {
   return typeof value === 'string' && [...value].length >= 1 && [...value].length <= 512 ? value : undefined
 }
+function opaqueId(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[A-Za-z0-9._~-]{1,512}$/u.test(value) ? value : undefined
+}
 
 function derivedEventId(eventId: string, suffix: string): string {
   const candidate = `${eventId}:${suffix}`
@@ -467,16 +470,28 @@ export class CordisXAgentLoopBrokerV4 {
     const suppliedEventId = input.eventId === undefined ? undefined : handle(input.eventId)
     if (input.eventId !== undefined && suppliedEventId === undefined) return []
     const base = { $schema: CORDISX_AGENT_LOOP_EVENT_SCHEMA_V4, contract: 'cordisx.agent-loop-event/v4' as const, schemaVersion: 4 as const, eventId: suppliedEventId ?? `cxloop-event:${sequence}`, binding: binding.binding, sequence, occurredAt: string(input.observedAt) ?? '1970-01-01T00:00:00.000Z', turn }
-    const durableIntroduction = record(input.introduction)
+    const durableIntroductionRecord = record(input.introduction)
+    if (input.introduction !== undefined && durableIntroductionRecord === undefined) return []
+    const durableIntroduction = durableIntroductionRecord === undefined ? undefined : {
+      operationId: handle(durableIntroductionRecord.operationId),
+      messageId: handle(durableIntroductionRecord.messageId),
+      participantId: opaqueId(durableIntroductionRecord.participantId),
+      memberId: opaqueId(durableIntroductionRecord.memberId),
+      runId: opaqueId(durableIntroductionRecord.runId),
+    }
+    if (durableIntroduction !== undefined && Object.values(durableIntroduction).some(value => value === undefined)) return []
+    const cancellationRecord = record(input.cancellation)
+    if (input.cancellation !== undefined && cancellationRecord === undefined) return []
+    const cancellationOperationId = cancellationRecord === undefined ? undefined : handle(cancellationRecord.operationId)
+    if (cancellationRecord !== undefined && cancellationOperationId === undefined) return []
     const rememberedIntroduction = this.introductions.get(`${binding.task}\0${turn}`)
-    const introductionOperationId = handle(durableIntroduction?.operationId) ?? rememberedIntroduction?.operationId
+    const introductionOperationId = durableIntroduction?.operationId ?? rememberedIntroduction?.operationId
     if (input.type === 'turn.started') return [{
       ...base, type: 'lifecycle',
       ...(introductionOperationId === undefined ? {} : { causation: { operationId: introductionOperationId } }),
       lifecycle: { phase: 'turn.started' },
     }]
     if (input.type === 'turn.failed') {
-      const cancellationOperationId = handle(record(input.cancellation)?.operationId)
       if (cancellationOperationId !== undefined) return [{ ...base, type: 'lifecycle', causation: { operationId: cancellationOperationId }, lifecycle: { phase: 'turn.cancelled' } }]
       const failure = record(input.failure)
       return [{
@@ -486,17 +501,10 @@ export class CordisXAgentLoopBrokerV4 {
       }]
     }
     if (input.type === 'turn.cancelled') {
-      const operationId = handle(record(input.cancellation)?.operationId)
-      return operationId === undefined ? [] : [{ ...base, type: 'lifecycle', causation: { operationId }, lifecycle: { phase: 'turn.cancelled' } }]
+      return cancellationOperationId === undefined ? [] : [{ ...base, type: 'lifecycle', causation: { operationId: cancellationOperationId }, lifecycle: { phase: 'turn.cancelled' } }]
     }
     if (input.type === 'turn.completed') {
-      const introduction = durableIntroduction === undefined ? rememberedIntroduction : {
-        operationId: handle(durableIntroduction.operationId),
-        messageId: handle(durableIntroduction.messageId),
-        participantId: string(durableIntroduction.participantId),
-        memberId: string(durableIntroduction.memberId),
-        runId: string(durableIntroduction.runId),
-      }
+      const introduction = durableIntroduction === undefined ? rememberedIntroduction : durableIntroduction
       const validIntroduction = introduction !== undefined
         && introduction.operationId !== undefined && introduction.messageId !== undefined
         && introduction.participantId !== undefined
@@ -507,8 +515,7 @@ export class CordisXAgentLoopBrokerV4 {
         const item = record(value); const text = string(item?.text)
         return text === undefined ? [] : [{ kind: 'text' as const, text }]
       }) : []
-      const durableCancellation = handle(record(input.cancellation)?.operationId)
-      const cancelled = durableCancellation ?? this.cancellations.get(`${binding.task}\0${turn}`)
+      const cancelled = cancellationOperationId ?? this.cancellations.get(`${binding.task}\0${turn}`)
       const message = output.length === 0 || cancelled !== undefined ? [] : [{
         ...base,
         eventId: derivedEventId(base.eventId, 'message'),
@@ -527,7 +534,11 @@ export class CordisXAgentLoopBrokerV4 {
       const kind = ['file-change', 'external-action', 'other'].includes(String(approval?.kind)) ? approval!.kind as 'file-change' | 'external-action' | 'other' : 'command'
       if (input.type === 'approval.required') return [{ ...base, type: 'approval', approval: { approvalId, kind, state: 'pending' } }]
       const outcome = approval?.outcome
-      const operationId = handle(record(input.causation)?.operationId) ?? this.approvals.get(`${binding.task}\0${turn}\0${approvalId}`)
+      const causationRecord = record(input.causation)
+      if (input.causation !== undefined && causationRecord === undefined) return []
+      const durableOperationId = causationRecord === undefined ? undefined : handle(causationRecord.operationId)
+      if (causationRecord !== undefined && durableOperationId === undefined) return []
+      const operationId = durableOperationId ?? this.approvals.get(`${binding.task}\0${turn}\0${approvalId}`)
       return operationId === undefined || outcome === 'expired'
         ? [{ ...base, type: 'approval', approval: { approvalId, kind, state: 'resolved', outcome: 'expired' } }]
         : [{ ...base, type: 'approval', causation: { operationId }, approval: { approvalId, kind, state: 'resolved', outcome: outcome === 'denied' || outcome === 'cancelled' ? outcome : 'approved' } }]
