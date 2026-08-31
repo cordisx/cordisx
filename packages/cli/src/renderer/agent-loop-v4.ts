@@ -101,6 +101,20 @@ export interface AgentLoopV4Transport {
 function clone<Value>(value: Value): Value { return structuredClone(value) }
 function record(value: unknown): Record<string, unknown> | undefined { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined }
 function string(value: unknown): string | undefined { return typeof value === 'string' && value !== '' ? value : undefined }
+
+function shellSafeAssistantMessageId(turn: string): string {
+  const bytes = new TextEncoder().encode(turn)
+  let first = 0x811c9dc5
+  let second = 0x9e3779b9
+  for (const byte of bytes) {
+    first = Math.imul(first ^ byte, 0x01000193) >>> 0
+    second = Math.imul(second ^ byte, 0x85ebca6b) >>> 0
+  }
+  const digest = `${first.toString(16).padStart(8, '0')}${second.toString(16).padStart(8, '0')}`
+  const prefix = 'cxloop-assistant-'
+  const stem = turn.replace(/[^A-Za-z0-9._~-]/gu, '~').slice(0, 512 - prefix.length - digest.length - 1)
+  return `${prefix}${stem}-${digest}`
+}
 function delivery(value: unknown): 'executed' | 'replayed' | 'reconciled' | undefined {
   return value === 'executed' || value === 'replayed' || value === 'reconciled' ? value : undefined
 }
@@ -485,7 +499,7 @@ export class CordisXAgentLoopBrokerV4 {
         type: 'message' as const,
         ...(validIntroduction === undefined ? {} : { causation: { operationId: validIntroduction.operationId } }),
         message: validIntroduction === undefined
-          ? { messageId: `cxloop-assistant:${turn}`, role: 'assistant' as const, purpose: 'conversation' as const, content: output as [typeof output[number], ...typeof output] }
+          ? { messageId: shellSafeAssistantMessageId(turn), role: 'assistant' as const, purpose: 'conversation' as const, content: output as [typeof output[number], ...typeof output] }
           : { messageId: validIntroduction.messageId, role: 'assistant' as const, purpose: 'member-self-introduction' as const, content: output as [typeof output[number], ...typeof output] },
       } as AgentLoopEvent]
       return [...message, cancelled === undefined

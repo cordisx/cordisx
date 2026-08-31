@@ -71,10 +71,13 @@ describe('AgentLoop v4 renderer adapter', () => {
 
     const restoredTransport = Object.create(transport) as AgentLoopV4Transport
     restoredTransport.readAgentLoopV4Lifecycle = async () => ({
-      status: 'accepted', nextAfterSequence: 1, events: [{
+      status: 'accepted', nextAfterSequence: 2, events: [{
         eventId: 'restored-event-1', sequence: 1, turnId: requested.turn, type: 'turn.completed',
         output: [{ type: 'text', text: 'Restored introduction.' }],
         introduction: { operationId: 'introduction:operation:1', messageId: requested.messageId, participantId: 'agent-1', memberId: 'agent-1', runId: 'run-1' },
+      }, {
+        eventId: 'restored-event-2', sequence: 2, turnId: 'provider:turn:2', type: 'turn.completed',
+        output: [{ type: 'text', text: 'Restored conversation.' }],
       }],
     })
     const restoredBroker = new CordisXAgentLoopBrokerV4(restoredTransport, host, 'playground', 'composition-1')
@@ -92,6 +95,9 @@ describe('AgentLoop v4 renderer adapter', () => {
         message: expect.objectContaining({ messageId: requested.messageId, purpose: 'member-self-introduction', content: [{ kind: 'text', text: 'Restored introduction.' }] }),
       }),
     ]))
+    const conversation = page.value?.events.find(event => event.type === 'message' && event.message.purpose === 'conversation')
+    expect(conversation?.message.messageId).toMatch(/^[A-Za-z0-9._~-]{1,512}$/u)
+    expect(conversation?.message.messageId).not.toContain(':')
     subscribed.handle.unsubscribe()
     restoredClient.dispose()
   })
