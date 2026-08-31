@@ -32,6 +32,9 @@ vi.mock('@oneworks/avatar-react', () => ({
 }))
 
 import {
+  HOST_ONEWORKS_ANIMAL_AVATAR_REVISION,
+  HOST_ONEWORKS_ARCTIC_FOX_AVATAR_REF,
+  HOST_ONEWORKS_RED_FOX_AVATAR_REF,
   HostAgentAvatar,
   HostAgentAvatarResolver,
 } from '../packages/cli/src/renderer/host-ui/conversation/AgentAvatar.js'
@@ -129,6 +132,34 @@ describe('Host Agent avatar resolver', () => {
       if (result.status === 'resolved') expect(Object.isFrozen(result.definition)).toBe(true)
     }
     expect(resolver.size).toBe(4)
+  })
+
+  it('resolves exact OneWorks RC.8 definition refs to unmistakable fox geometry', () => {
+    const resolver = new HostAgentAvatarResolver()
+    for (const [ref, paletteId] of [
+      [HOST_ONEWORKS_RED_FOX_AVATAR_REF, 'red-fox'],
+      [HOST_ONEWORKS_ARCTIC_FOX_AVATAR_REF, 'arctic-fox'],
+    ] as const) {
+      const avatar = cloneAgentAvatarRef({
+        kind: 'definition', ref, schema: 'oneworks.avatar', definitionVersion: 1,
+        revision: HOST_ONEWORKS_ANIMAL_AVATAR_REVISION,
+      })
+      const result = resolver.resolve(avatar)
+      expect(result.status).toBe('resolved')
+      if (result.status !== 'resolved') continue
+      expect(result.avatar).toEqual(avatar)
+      expect(result.definition).toMatchObject({
+        schema: 'oneworks.avatar', version: 1,
+        scene: {
+          appearance: { paletteId },
+          camera: { frame: 'circle' },
+          entity: { preset: 'fox' },
+          face: { mouthEnabled: true, noseEnabled: true, noseShape: 'inverted-triangle' },
+        },
+      })
+      expect(result.definition.scene.entity.preset).not.toBe('custom')
+      expect(resolver.resolve(avatar)).toBe(result)
+    }
   })
 
   it('does not cache opaque fallbacks or failed generated definitions', () => {
