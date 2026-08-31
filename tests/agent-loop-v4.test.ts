@@ -53,15 +53,17 @@ describe('AgentLoop v4 renderer adapter', () => {
     const approval: Extract<AgentLoopCommand, { type: 'approval-decision' }> = { ...base('approval-operation-1'), type: 'approval-decision', binding: created.binding, turn: sent.turn, approvalId: `simulated-approval-${sent.turn}`, decision: 'approved' }
     expect(await client.decideApproval(approval)).toMatchObject({ status: 'accepted', decision: 'approved', causation: { operationId: 'approval-operation-1' } })
     const introduction: Extract<AgentLoopCommand, { type: 'request-member-self-introduction' }> = {
-      ...base('introduction-operation-1'), type: 'request-member-self-introduction', binding: created.binding,
+      ...base('introduction:operation:1'), type: 'request-member-self-introduction', binding: created.binding,
       participantId: 'agent-1', memberId: 'agent-1', runId: 'run-1', intent: { kind: 'member-self-introduction', audience: 'room', output: 'assistant-message' },
     }
     const requested = await client.requestMemberSelfIntroduction(introduction)
-    expect(requested).toMatchObject({ status: 'accepted', causation: { operationId: 'introduction-operation-1' }, participantId: 'agent-1', runId: 'run-1' })
+    expect(requested).toMatchObject({ status: 'accepted', causation: { operationId: 'introduction:operation:1' }, participantId: 'agent-1', runId: 'run-1' })
     if (requested.status !== 'accepted') throw new Error('introduction failed')
+    expect(requested.turn).toMatch(/^[A-Za-z0-9._~-]{1,512}$/u)
+    expect(requested.messageId).toMatch(/^[A-Za-z0-9._~-]{1,512}$/u)
     const cancel: Extract<AgentLoopCommand, { type: 'cancel-member-self-introduction' }> = {
       ...base('cancel-operation-1'), type: 'cancel-member-self-introduction', binding: created.binding,
-      participantId: 'agent-1', memberId: 'agent-1', runId: 'run-1', requestOperationId: 'introduction-operation-1',
+      participantId: 'agent-1', memberId: 'agent-1', runId: 'run-1', requestOperationId: 'introduction:operation:1',
     }
     expect(await client.cancelMemberSelfIntroduction(cancel)).toMatchObject({ status: 'accepted', turn: requested.turn, messageId: requested.messageId, causation: { operationId: 'cancel-operation-1' } })
     client.dispose()
@@ -71,7 +73,7 @@ describe('AgentLoop v4 renderer adapter', () => {
       status: 'accepted', nextAfterSequence: 1, events: [{
         eventId: 'restored-event-1', sequence: 1, turnId: requested.turn, type: 'turn.completed',
         output: [{ type: 'text', text: 'Restored introduction.' }],
-        introduction: { operationId: 'introduction-operation-1', messageId: requested.messageId, participantId: 'agent-1', memberId: 'agent-1', runId: 'run-1' },
+        introduction: { operationId: 'introduction:operation:1', messageId: requested.messageId, participantId: 'agent-1', memberId: 'agent-1', runId: 'run-1' },
       }],
     })
     const restoredBroker = new CordisXAgentLoopBrokerV4(restoredTransport, host, 'playground', 'composition-1')
@@ -85,7 +87,7 @@ describe('AgentLoop v4 renderer adapter', () => {
     const page = await subscribed.handle.pages[Symbol.asyncIterator]().next()
     expect(page.value?.events).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        type: 'message', causation: { operationId: 'introduction-operation-1' },
+        type: 'message', causation: { operationId: 'introduction:operation:1' },
         message: expect.objectContaining({ messageId: requested.messageId, purpose: 'member-self-introduction', content: [{ kind: 'text', text: 'Restored introduction.' }] }),
       }),
     ]))

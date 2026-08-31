@@ -366,6 +366,15 @@ export class PlaygroundMockAgentLoopHost implements CordisXAgentLoopHost {
     return true
   }
 
+  reserveSemanticTurn(task: string, purpose: 'member-self-introduction'): { readonly turn: string; readonly messageId: string } | undefined {
+    const record = this.tasks.get(task)
+    if (record === undefined) return undefined
+    const ordinal = record.nextTurn++
+    this.persist()
+    const turn = `simulated-${purpose}-turn-${ordinal}`
+    return { turn, messageId: `simulated-${purpose}-message-${ordinal}` }
+  }
+
   hasPendingApproval(task: string, turn: string, approvalId: string): boolean {
     const events = this.tasks.get(task)?.lifecycle.filter(event => event.turnId === turn && event.approval?.approvalId === approvalId) ?? []
     return events.at(-1)?.type === 'approval.required'
@@ -571,8 +580,9 @@ export class PlaygroundMockAgentLoopV4Transport implements AgentLoopV4Transport 
   async requestAgentLoopIntroductionV4(input: Parameters<AgentLoopV4Transport['requestAgentLoopIntroductionV4']>[0]): Promise<unknown> {
     if (!this.bindingFor(input)) return { status: 'unavailable', code: 'binding-closed' }
     return await this.once(input, async () => {
-      const turn = `simulated-introduction-turn:${input.operationId}`
-      const messageId = `simulated-introduction-message:${input.operationId}`
+      const reserved = this.host.reserveSemanticTurn(input.task, 'member-self-introduction')
+      if (reserved === undefined) return { status: 'unavailable', code: 'introduction-unavailable' }
+      const { turn, messageId } = reserved
       if (!this.host.appendV4Lifecycle(input.task, { turnId: turn, type: 'turn.started' })) return { status: 'unavailable', code: 'introduction-unavailable' }
       const key = `${this.scopeKey(input.scope)}\0${input.operationId}`
       this.introductions.set(key, { task: input.task, turn, messageId, participantId: input.participantId, memberId: input.memberId, runId: input.runId, state: 'pending' })
