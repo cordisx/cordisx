@@ -456,6 +456,59 @@ describe('AgentLoop v4 renderer adapter', () => {
     subscribed.handle.unsubscribe()
   })
 
+  it('fences late create and subscribe results after the owning client disposes', async () => {
+    const host = new PlaygroundMockAgentLoopHost()
+    const source = new PlaygroundMockAgentLoopV4Transport(host)
+    const transport = Object.create(source) as AgentLoopV4Transport
+    let releaseCreate!: () => void
+    let markCreateStarted!: () => void
+    const createGate = new Promise<void>(resolve => { releaseCreate = resolve })
+    const createStarted = new Promise<void>(resolve => { markCreateStarted = resolve })
+    transport.createAgentLoopV4 = async input => {
+      markCreateStarted()
+      await createGate
+      return await source.createAgentLoopV4(input)
+    }
+    let promptRegistrations = 0
+    let promptDisposals = 0
+    const broker = new CordisXAgentLoopBrokerV4(transport, host, 'playground', 'dispose-fence')
+    const lateClient = broker.bind({
+      ...options(),
+      registerPrompt: () => {
+        promptRegistrations += 1
+        return [() => { promptDisposals += 1 }]
+      },
+    })
+    const lateCreate = lateClient.createOrBind({ ...base('late-create'), type: 'create-or-bind', definition: definition.identity, definitions: [definition], target: { mode: 'create' } })
+    await createStarted
+    lateClient.dispose()
+    releaseCreate()
+    expect(await lateCreate).toMatchObject({ status: 'unavailable', code: 'provider-replaced' })
+    expect({ promptRegistrations, promptDisposals }).toEqual({ promptRegistrations: 0, promptDisposals: 0 })
+
+    transport.createAgentLoopV4 = input => source.createAgentLoopV4(input)
+    const owner = broker.bind(options())
+    const created = await owner.createOrBind({ ...base('create-before-late-subscribe'), type: 'create-or-bind', definition: definition.identity, definitions: [definition], target: { mode: 'create' } })
+    if (created.status !== 'accepted') throw new Error('create failed')
+    let releaseLifecycle!: () => void
+    let markLifecycleStarted!: () => void
+    const lifecycleGate = new Promise<void>(resolve => { releaseLifecycle = resolve })
+    const lifecycleStarted = new Promise<void>(resolve => { markLifecycleStarted = resolve })
+    transport.readAgentLoopV4Lifecycle = async input => {
+      markLifecycleStarted()
+      await lifecycleGate
+      return await source.readAgentLoopV4Lifecycle(input)
+    }
+    const subscriber = broker.bind(options())
+    const lateSubscribe = subscriber.subscribe(created.binding, 0)
+    await lifecycleStarted
+    subscriber.dispose()
+    releaseLifecycle()
+    expect(await lateSubscribe).toMatchObject({ status: 'unavailable', authorization: { code: 'host-unavailable' } })
+    owner.dispose()
+    broker.dispose()
+  })
+
   it('releases only the owning client prompt registrations and drains survivors on broker disposal', async () => {
     const host = new PlaygroundMockAgentLoopHost()
     const baseTransport = new PlaygroundMockAgentLoopV4Transport(host)
