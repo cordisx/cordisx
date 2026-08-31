@@ -1872,17 +1872,9 @@ async function start(
       await broker.setDomPolicies(controller.identity, policies.map(({ pointId, policy }) => ({
         pointId,
         policy: policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
-      })), {
-        beforePersist: async () => {
-          slotService?.invalidatePointPolicies()
-          await routeService?.invalidatePointPolicies()
-        },
-        afterRollback: async () => {
-          slotService?.invalidatePointPolicies()
-          await routeService?.invalidatePointPolicies().catch(() => undefined)
-          notify()
-        },
-      })
+      })))
+      slotService?.invalidatePointPolicies()
+      await routeService?.invalidatePointPolicies()
       notify()
     })
     operation = task.catch(() => {})

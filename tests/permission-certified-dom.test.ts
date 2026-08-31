@@ -161,41 +161,75 @@ function broker(input: {
 }
 
 describe('certified DOM authorization through the single PermissionBroker', () => {
-  it('restores an atomic point-policy batch before persistence or view invalidation failures can grant access', async () => {
+  it('does not expose a point-policy batch before durable acknowledgement', async () => {
     const backing = new MemoryPermissionPolicyStore()
-    let rejectPersistence = false
+    let deferredWrite: Readonly<{ resolve: () => void; reject: (error: Error) => void }> | undefined
+    let deferPersistence = false
     const store: PermissionPolicyStore = {
       read: () => backing.read(),
       write: records => backing.write(records),
       readV3: () => backing.readV3(),
       writeV3: records => {
-        if (rejectPersistence) throw new Error('profile ledger unavailable')
-        backing.writeV3(records)
+        if (!deferPersistence) return backing.writeV3(records)
+        return new Promise<void>((resolve, reject) => {
+          deferredWrite = Object.freeze({ resolve, reject })
+        }).then(() => backing.writeV3(records))
       },
     }
     const value = new PermissionBroker(store, legacyPrompt, () => new Date('2026-08-30T12:00:00.000Z'), 100, 'work', 'runtime-1')
     const unregister = value.register(identity, manifest(), { pluginId: identity.id, moduleGeneration: 'module-batch' }, undefined, { version: '1.2.3', integrity: digest })
     const points = ['sidebar.navigation.items', 'main'] as const
     await value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'deny-persistent' as const })))
+    let changes = 0
+    const unsubscribe = value.subscribe(() => { changes += 1 })
+    deferPersistence = true
+    const update = value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'allow-persistent' as const })))
+    await Promise.resolve()
+    expect(deferredWrite).toBeDefined()
+    expect(points.map(pointId => value.domPolicy(identity, pointId))).toEqual(['deny', 'deny'])
+    expect(points.map(pointId => value.domAccess(identity, pointId))).toEqual([
+      expect.objectContaining({ authorized: false, state: 'denied', policy: 'deny' }),
+      expect.objectContaining({ authorized: false, state: 'denied', policy: 'deny' }),
+    ])
+    expect(backing.readV3().map(record => record.policy)).toEqual(['deny-persistent', 'deny-persistent'])
+    expect(changes).toBe(0)
+    deferredWrite!.resolve()
+    await update
+    expect(points.map(pointId => value.domPolicy(identity, pointId))).toEqual(['allow', 'allow'])
+    expect(backing.readV3().map(record => record.policy)).toEqual(['allow-persistent', 'allow-persistent'])
+    expect(changes).toBe(1)
+    unsubscribe()
+    unregister()
+  })
 
-    const lifecycle: string[] = []
-    await expect(value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'allow-persistent' as const })), {
-      beforePersist: () => { lifecycle.push('invalidate'); throw new Error('route invalidation failed') },
-      afterRollback: () => { lifecycle.push('rollback') },
-    })).rejects.toThrow('route invalidation failed')
-    expect(lifecycle).toEqual(['invalidate', 'rollback'])
+  it('keeps the prior live policy when durable acknowledgement fails', async () => {
+    const backing = new MemoryPermissionPolicyStore()
+    let rejectWrite: ((error: Error) => void) | undefined
+    let deferPersistence = false
+    const store: PermissionPolicyStore = {
+      read: () => backing.read(),
+      write: records => backing.write(records),
+      readV3: () => backing.readV3(),
+      writeV3: records => {
+        if (!deferPersistence) return backing.writeV3(records)
+        return new Promise<void>((_resolve, reject) => { rejectWrite = reject })
+      },
+    }
+    const value = new PermissionBroker(store, legacyPrompt, () => new Date('2026-08-30T12:00:00.000Z'), 100, 'work', 'runtime-1')
+    const unregister = value.register(identity, manifest(), { pluginId: identity.id, moduleGeneration: 'module-batch' }, undefined, { version: '1.2.3', integrity: digest })
+    const points = ['sidebar.navigation.items', 'main'] as const
+    await value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'deny-persistent' as const })))
+    let changes = 0
+    const unsubscribe = value.subscribe(() => { changes += 1 })
+    deferPersistence = true
+    const update = value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'allow-persistent' as const })))
+    await Promise.resolve()
+    rejectWrite!(new Error('profile ledger unavailable'))
+    await expect(update).rejects.toThrow('profile ledger unavailable')
     expect(points.map(pointId => value.domPolicy(identity, pointId))).toEqual(['deny', 'deny'])
     expect(backing.readV3().map(record => record.policy)).toEqual(['deny-persistent', 'deny-persistent'])
-
-    rejectPersistence = true
-    lifecycle.length = 0
-    await expect(value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'allow-persistent' as const })), {
-      beforePersist: () => { lifecycle.push('invalidate') },
-      afterRollback: () => { lifecycle.push('rollback') },
-    })).rejects.toThrow('profile ledger unavailable')
-    expect(lifecycle).toEqual(['invalidate', 'rollback'])
-    expect(points.map(pointId => value.domPolicy(identity, pointId))).toEqual(['deny', 'deny'])
-    expect(backing.readV3().map(record => record.policy)).toEqual(['deny-persistent', 'deny-persistent'])
+    expect(changes).toBe(0)
+    unsubscribe()
     unregister()
   })
 

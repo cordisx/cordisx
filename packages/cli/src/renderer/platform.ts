@@ -840,6 +840,7 @@ export class PermissionBroker {
   private readonly catalog = new CapabilityRiskCatalog()
   private readonly listeners = new Set<() => void>()
   private readonly migrationTasks: Promise<void>[] = []
+  private domPolicyCommitTail: Promise<void> = Promise.resolve()
   private changeBatchDepth = 0
   private changePending = false
 
@@ -1137,6 +1138,19 @@ export class PermissionBroker {
   private persistV3(records: readonly CordisXPermissionPolicyRecordV3[]): Promise<void> {
     if (this.store.writeV3 === undefined) return Promise.reject(new Error('permission v3 persistence is unavailable'))
     return Promise.resolve(this.store.writeV3(records))
+  }
+
+  private commitDomPolicyRecords(
+    records: readonly CordisXPermissionPolicyRecordV3[],
+    publish: () => void,
+  ): Promise<void> {
+    const task = this.domPolicyCommitTail.then(async () => {
+      await this.persistV3(records)
+      publish()
+      this.changed()
+    })
+    this.domPolicyCommitTail = task.catch(() => undefined)
+    return task
   }
 
   private persistV4(records: readonly CordisXPermissionPolicyRecordV4[]): Promise<void> {
@@ -1518,15 +1532,9 @@ export class PermissionBroker {
         policy: selected.decision,
       })
       const key = permissionRecordKeyV3(record)
-      const previous = this.policyRecords.get(key)
-      this.policyRecords.set(key, record)
-      try {
-        await this.persistV3([record])
-      } catch (error) {
-        if (previous === undefined) this.policyRecords.delete(key)
-        else this.policyRecords.set(key, previous)
-        throw error
-      }
+      await this.commitDomPolicyRecords([record], () => {
+        this.policyRecords.set(key, record)
+      })
     }
     return selected.decision
   }
@@ -2755,10 +2763,6 @@ export class PermissionBroker {
   async setDomPolicies(
     identity: CordisXPluginIdentity,
     policies: readonly { readonly pointId: string; readonly policy: CordisXPermissionPolicyV2 }[],
-    lifecycle?: Readonly<{
-      readonly beforePersist?: () => void | Promise<void>
-      readonly afterRollback?: () => void | Promise<void>
-    }>,
   ): Promise<void> {
     const registration = this.registration(identity)
     if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
@@ -2779,25 +2783,14 @@ export class PermissionBroker {
         policy,
       })
       const recordKey = permissionRecordKeyV3(record)
-      return { pointId, record, recordKey, previous: this.policyRecords.get(recordKey) }
+      return { pointId, record, recordKey }
     })
-    for (const replacement of replacements) {
-      this.policyRecords.set(replacement.recordKey, replacement.record)
-      this.clearExactDomLease(registration, replacement.pointId)
-    }
-    try {
-      await lifecycle?.beforePersist?.()
-      await this.persistV3(replacements.map(replacement => replacement.record))
-    } catch (error) {
+    await this.commitDomPolicyRecords(replacements.map(replacement => replacement.record), () => {
       for (const replacement of replacements) {
-        if (replacement.previous === undefined) this.policyRecords.delete(replacement.recordKey)
-        else this.policyRecords.set(replacement.recordKey, replacement.previous)
+        this.policyRecords.set(replacement.recordKey, replacement.record)
+        this.clearExactDomLease(registration, replacement.pointId)
       }
-      try { await lifecycle?.afterRollback?.() } catch { /* Authority is already restored; a stale view cannot grant access. */ }
-      throw error
-    } finally {
-      this.changed()
-    }
+    })
   }
 
   async settled(): Promise<void> {
