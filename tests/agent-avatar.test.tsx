@@ -1,4 +1,5 @@
 import { cloneAgentAvatarRef, createGeneratedAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
+import { createHash } from 'node:crypto'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
@@ -11,14 +12,15 @@ vi.mock('@oneworks/avatar-react/style.css', () => ({
   default: '.oneworks-avatar,.oneworks-avatar-editor{box-sizing:border-box}.oneworks-avatar *,.oneworks-avatar-editor *{box-sizing:border-box}.oneworks-avatar{position:relative;display:block;width:100%;height:100%}.oneworks-avatar[data-frame=rounded]{border-radius:12.5%}.oneworks-avatar[data-frame=circle]{border-radius:50%}.oneworks-avatar>.interactive-avatar{width:100%;height:100%}',
 }))
 vi.mock('@oneworks/avatar-react', () => ({
-  Avatar: ({ className, theme, interactive, autoplay, onError }: {
+  Avatar: ({ className, definition, theme, interactive, autoplay, onError }: {
     className?: string
+    definition?: unknown
     theme?: string
     interactive?: boolean
     autoplay?: boolean
     onError?: (error: Error) => void
   }) => {
-    avatarRenderSpy({ theme, interactive, autoplay })
+    avatarRenderSpy({ definition, theme, interactive, autoplay })
     return <button
     type="button"
     tabIndex={-1}
@@ -32,12 +34,14 @@ vi.mock('@oneworks/avatar-react', () => ({
 }))
 
 import {
-  HOST_ONEWORKS_ANIMAL_AVATAR_REVISION,
-  HOST_ONEWORKS_ARCTIC_FOX_AVATAR_REF,
-  HOST_ONEWORKS_RED_FOX_AVATAR_REF,
+  HOST_ONEWORKS_ARCTIC_FOX_AVATAR_ASSET_REF,
+  HOST_ONEWORKS_ARCTIC_FOX_AVATAR_ASSET_REVISION,
+  HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REF,
+  HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REVISION,
   HostAgentAvatar,
   HostAgentAvatarResolver,
 } from '../packages/cli/src/renderer/host-ui/conversation/AgentAvatar.js'
+import { OFFICIAL_ONEWORKS_AVATAR_ASSET_PROVENANCE } from '../packages/cli/src/renderer/host-ui/conversation/OfficialOneWorksAvatarAssets.js'
 
 const previousGlobals = new Map<string, unknown>()
 
@@ -91,6 +95,9 @@ describe('Host Agent avatar resolver', () => {
     })
     expect(avatarSource).toContain("import avatarVendorCss from '@oneworks/avatar-react/style.css'")
     expect(avatarSource).toContain('data-cordisx-agent-avatar-style')
+    expect(avatarSource).not.toContain('createDefaultAvatarDefinition')
+    expect(avatarSource).not.toContain('createOneWorksFoxDefinition')
+    expect(avatarSource).not.toContain('red-fox-v1')
     expect(avatarSource).not.toContain('process.env')
     expect(styles).not.toContain('.cxa-avatar .oneworks-avatar *')
     const reducedMotionRule = styles.match(/@media \(prefers-reduced-motion:reduce\)\{[^\n]+/)?.[0] ?? ''
@@ -134,15 +141,14 @@ describe('Host Agent avatar resolver', () => {
     expect(resolver.size).toBe(4)
   })
 
-  it('resolves exact OneWorks RC.8 definition refs to unmistakable fox geometry', () => {
+  it('resolves exact official OneWorks breed exports through opaque asset refs', () => {
     const resolver = new HostAgentAvatarResolver()
-    for (const [ref, paletteId] of [
-      [HOST_ONEWORKS_RED_FOX_AVATAR_REF, 'red-fox'],
-      [HOST_ONEWORKS_ARCTIC_FOX_AVATAR_REF, 'arctic-fox'],
+    for (const [ref, revision, profileId, paletteId, canonicalDefinitionSha256] of [
+      [HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REF, HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REVISION, 'red-fox', 'red-fox', 'e4df5d748767718eeed6cdc77b3ab0cbe10441adf3cf713d3a9e126c3527d0d9'],
+      [HOST_ONEWORKS_ARCTIC_FOX_AVATAR_ASSET_REF, HOST_ONEWORKS_ARCTIC_FOX_AVATAR_ASSET_REVISION, 'arctic-fox', 'arctic-fox', '6a178492316eac13e7198581f4657bc8bd0d2259871eff762a022f4cc1594ab0'],
     ] as const) {
       const avatar = cloneAgentAvatarRef({
-        kind: 'definition', ref, schema: 'oneworks.avatar', definitionVersion: 1,
-        revision: HOST_ONEWORKS_ANIMAL_AVATAR_REVISION,
+        kind: 'asset', ref, revision,
       })
       const result = resolver.resolve(avatar)
       expect(result.status).toBe('resolved')
@@ -152,14 +158,39 @@ describe('Host Agent avatar resolver', () => {
         schema: 'oneworks.avatar', version: 1,
         scene: {
           appearance: { paletteId },
-          camera: { frame: 'circle' },
+          camera: { frame: 'rounded' },
           entity: { preset: 'fox' },
-          face: { mouthEnabled: true, noseEnabled: true, noseShape: 'inverted-triangle' },
+          face: { mouthEnabled: false, noseEnabled: true, noseShape: 'inverted-triangle' },
         },
       })
+      expect(result.definition.metadata?.generation).toMatchObject({ profileId, fields: [] })
+      expect(result.definition.scene.entity.parts.map(part => part.id)).toEqual([
+        'fox-ear-left', 'fox-ear-right', 'fox-head',
+      ])
+      expect(result.definition.scene.decals.map(decal => decal.id)).toEqual([
+        'fox-inner-ear-left', 'fox-inner-ear-right', 'fox-cheek-left', 'fox-cheek-right',
+      ])
+      expect(result.definition.scene.view).toMatchObject({ scale: 1.7697 })
       expect(result.definition.scene.entity.preset).not.toBe('custom')
+      expect(createHash('sha256').update(JSON.stringify(result.definition)).digest('hex')).toBe(canonicalDefinitionSha256)
       expect(resolver.resolve(avatar)).toBe(result)
     }
+    expect(OFFICIAL_ONEWORKS_AVATAR_ASSET_PROVENANCE).toEqual({
+      source: 'https://oneworks.cloud/avatar/',
+      renderer: '@oneworks/avatar-react@1.0.0-rc.8',
+      definitions: {
+        [HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REF]: {
+          profileId: 'red-fox',
+          capturedExportSha256: '2b30c25a3fcd29bf349fed927df85f1ba4b0a6096a9dfc1d2d1088e05654d8aa',
+          canonicalDefinitionSha256: 'e4df5d748767718eeed6cdc77b3ab0cbe10441adf3cf713d3a9e126c3527d0d9',
+        },
+        [HOST_ONEWORKS_ARCTIC_FOX_AVATAR_ASSET_REF]: {
+          profileId: 'arctic-fox',
+          capturedExportSha256: '2c262adc567c423a94d497bfea9c9906f2da71cdde0e0cef6d71c263ceaf3011',
+          canonicalDefinitionSha256: '6a178492316eac13e7198581f4657bc8bd0d2259871eff762a022f4cc1594ab0',
+        },
+      },
+    })
   })
 
   it('does not cache opaque fallbacks or failed generated definitions', () => {
@@ -220,6 +251,32 @@ describe('Host Agent avatar renderer', () => {
     await act(async () => renderer.click())
     expect(wrapper.dataset.avatarState).toBe('fallback')
     expect(wrapper.textContent).toBe('LA')
+    await act(async () => root.unmount())
+    dom.window.close()
+  })
+
+  it('passes the exact official asset definition to the OneWorks renderer without exposing its opaque key', async () => {
+    const dom = installDom()
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    const avatar = cloneAgentAvatarRef({
+      kind: 'asset',
+      ref: HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REF,
+      revision: HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REVISION,
+    })
+    await act(async () => root.render(<HostAgentAvatar participant={{ id: 'lead', role: 'agent', name: 'Lead', avatar }} />))
+    const wrapper = dom.window.document.querySelector<HTMLElement>('.cxa-avatar')!
+    expect(wrapper.dataset.avatarState).toBe('resolved')
+    expect(wrapper.dataset.avatarKind).toBe('asset')
+    expect(dom.window.document.body.innerHTML).not.toContain(HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REF)
+    expect(avatarRenderSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+      definition: expect.objectContaining({
+        metadata: expect.objectContaining({ generation: expect.objectContaining({ profileId: 'red-fox' }) }),
+        scene: expect.objectContaining({
+          appearance: expect.objectContaining({ paletteId: 'red-fox' }),
+          entity: expect.objectContaining({ preset: 'fox' }),
+        }),
+      }),
+    }))
     await act(async () => root.unmount())
     dom.window.close()
   })
