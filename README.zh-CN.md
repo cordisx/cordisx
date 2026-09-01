@@ -33,9 +33,9 @@ cordisx
 <p align="center">
   <a href="https://cordisx.github.io/#showcase">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/a23cc998b64e21dfed65104dfe5ce4ad4698ece8/assets/screenshots/codex-workspace-real.png">
-      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/a23cc998b64e21dfed65104dfe5ce4ad4698ece8/assets/screenshots/codex-workspace-real-light.png">
-      <img alt="CordisX 启动后的 Codex 工作区" src="https://raw.githubusercontent.com/cordisx/cordisx.github.io/a23cc998b64e21dfed65104dfe5ce4ad4698ece8/assets/screenshots/codex-workspace-real-light.png">
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/3e188f355fd5ddb8ed74749fbaa16b138531d7f6/assets/screenshots/codex-workspace-real-zh.png">
+      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/3e188f355fd5ddb8ed74749fbaa16b138531d7f6/assets/screenshots/codex-workspace-real-zh-light.png">
+      <img alt="CordisX 启动后的 Codex 工作区" src="https://raw.githubusercontent.com/cordisx/cordisx.github.io/3e188f355fd5ddb8ed74749fbaa16b138531d7f6/assets/screenshots/codex-workspace-real-zh-light.png">
     </picture>
   </a>
 </p>
