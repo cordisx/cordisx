@@ -261,6 +261,8 @@ describe('renderer bundle', () => {
           applies: 'plugin-restart',
           fields: [expect.objectContaining({
             path: ['sessionId'], label: 'Native session ID', value: sessionId, max: 128,
+          }), expect.objectContaining({
+            path: ['welcomePage'], label: 'Branded welcome page', value: false,
           })],
         }),
       }),

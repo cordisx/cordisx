@@ -11,7 +11,7 @@ import { createBrandMarkElement } from '../host-ui/BrandMark.js'
 import { HostBreadcrumbs, type HostBreadcrumbSegment } from '../host-ui/HostBreadcrumbs.js'
 import { HostSurfaceIcon } from '../host-ui/HostSurfaceIcon.js'
 import { createSidebarItem, type SidebarItemControl } from '../host-ui/SidebarItem.js'
-import { productLocale } from '../ui-copy.js'
+import { managerCopy, productLocale } from '../ui-copy.js'
 import { Navigation } from './components/Navigation.js'
 import { useManagerRouter } from './hooks/useManagerRouter.js'
 import { projectManagerContentBreadcrumbs } from './model/manager-content-breadcrumbs.js'
@@ -32,16 +32,23 @@ import { PluginsPage } from './pages/PluginsPage.js'
 import { RoutesPage } from './pages/RoutesPage.js'
 
 function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
+  const locale = snapshot.localization.locale
   if (route.kind === 'plugin') return snapshot.plugins.find(item => item.id === route.pluginId)?.name ?? route.pluginId
-  if (route.kind === 'permission') return projectPermissionCapabilityName(route.capability, snapshot.localization.locale)
+  if (route.kind === 'permission') return projectPermissionCapabilityName(route.capability, locale)
   if (route.kind === 'extension-point') return snapshot.extensionPoints?.points.find(item => item.id === route.pointId)?.titleProjection.text ?? route.pointId
   if (route.kind === 'route' || route.kind === 'page') return route.qualifiedId
-  if (route.kind === 'marketplace-plugin') return '插件详情'
-  if (route.kind === 'marketplace-sources') return '插件来源'
-  if (route.kind === 'about-acknowledgements') return productLocale(snapshot.localization.locale) === 'zh-CN' ? '致谢' : 'Acknowledgements'
+  if (route.kind === 'marketplace-plugin') return productLocale(locale) === 'zh-CN' ? '插件详情' : 'Plugin details'
+  if (route.kind === 'marketplace-sources') return productLocale(locale) === 'zh-CN' ? '插件来源' : 'Marketplace sources'
+  if (route.kind === 'about-acknowledgements') return productLocale(locale) === 'zh-CN' ? '致谢' : 'Acknowledgements'
   if (route.kind === 'manager-content') return snapshot.settingsNavigationItems?.find(item => item.id === route.id)?.pageTitle ?? route.id
-  const titles = { plugins: '插件', 'extension-points': '扩展点', routes: '路由', marketplace: '插件商店', about: '关于 CordisX' }
-  return titles[route.page]
+  const keys = {
+    plugins: 'manager.nav.plugins',
+    'extension-points': 'manager.nav.extension-points',
+    routes: 'manager.nav.routes',
+    marketplace: 'manager.nav.marketplace',
+    about: 'manager.nav.about',
+  } as const
+  return managerCopy(locale, keys[route.page])
 }
 
 function primaryIcon(route: ManagerRoute) {
@@ -53,15 +60,14 @@ function primaryIcon(route: ManagerRoute) {
   return 'point-info' as const
 }
 
-const PLUGIN_FACET_LABELS = {
-  readme: 'README',
-  config: '配置管理',
-  permissions: '权限',
-  runtime: '运行状态',
-  logs: '日志与诊断',
-  'extension-points': '扩展点位',
-  routes: '路由',
-} as const
+function pluginFacetLabel(page: 'readme' | 'config' | 'permissions' | 'runtime' | 'logs' | 'extension-points' | 'routes', locale: string): string {
+  const labels = productLocale(locale) === 'zh-CN' ? {
+    readme: 'README', config: '配置管理', permissions: '权限', runtime: '运行状态', logs: '日志与诊断', 'extension-points': '扩展点位', routes: '路由',
+  } : {
+    readme: 'README', config: 'Configuration', permissions: 'Permissions', runtime: 'Runtime', logs: 'Logs & diagnostics', 'extension-points': 'Extension points', routes: 'Routes',
+  }
+  return labels[page]
+}
 
 function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
   readonly route: ManagerRoute
@@ -88,9 +94,9 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
   }
   if (route.kind === 'plugin') {
     return <HostBreadcrumbs segments={[
-      { key: 'plugins', label: '插件', onActivate: () => navigate({ kind: 'primary', page: 'plugins' }) },
+      { key: 'plugins', label: managerCopy(snapshot.localization.locale, 'manager.nav.plugins'), onActivate: () => navigate({ kind: 'primary', page: 'plugins' }) },
       { key: route.pluginId, label: heading, onActivate: () => navigate({ kind: 'plugin', pluginId: route.pluginId, page: 'readme' }) },
-      { key: route.page, label: PLUGIN_FACET_LABELS[route.page] },
+      { key: route.page, label: pluginFacetLabel(route.page, snapshot.localization.locale) },
     ]} />
   }
   if (route.kind === 'about-acknowledgements') {
@@ -101,12 +107,12 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
     ]} />
   }
   const parent = route.kind === 'extension-point'
-    ? { label: '扩展点', page: 'extension-points' as const }
+    ? { label: managerCopy(snapshot.localization.locale, 'manager.nav.extension-points'), page: 'extension-points' as const }
     : route.kind === 'route' || route.kind === 'page'
-      ? { label: '路由', page: 'routes' as const }
+      ? { label: managerCopy(snapshot.localization.locale, 'manager.nav.routes'), page: 'routes' as const }
       : route.kind === 'marketplace-plugin' || route.kind === 'marketplace-sources'
-        ? { label: '插件商店', page: 'marketplace' as const }
-        : { label: '插件', page: 'plugins' as const }
+        ? { label: managerCopy(snapshot.localization.locale, 'manager.nav.marketplace'), page: 'marketplace' as const }
+        : { label: managerCopy(snapshot.localization.locale, 'manager.nav.plugins'), page: 'plugins' as const }
   return <HostBreadcrumbs segments={[
     { key: parent.page, label: parent.label, onActivate: () => navigate({ kind: 'primary', page: parent.page }) },
     { key: heading, label: heading },

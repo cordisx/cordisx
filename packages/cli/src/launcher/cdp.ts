@@ -114,7 +114,21 @@ const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
 const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
 const MAX_MARKETPLACE_REQUESTS = 4
 const CDP_REQUEST_TIMEOUT_MS = 5_000
-const CDP_INJECTION_TIMEOUT_MS = 60_000
+const DEFAULT_CDP_INJECTION_TIMEOUT_MS = 60_000
+const MIN_CDP_INJECTION_TIMEOUT_MS = 5_000
+const MAX_CDP_INJECTION_TIMEOUT_MS = 600_000
+
+export function resolveCdpInjectionTimeoutMs(value: string | undefined): number {
+  if (value === undefined || value === '') return DEFAULT_CDP_INJECTION_TIMEOUT_MS
+  if (!/^\d+$/u.test(value)) throw new Error('CORDISX_CDP_INJECTION_TIMEOUT_MS must be an integer number of milliseconds')
+  const timeoutMs = Number(value)
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < MIN_CDP_INJECTION_TIMEOUT_MS || timeoutMs > MAX_CDP_INJECTION_TIMEOUT_MS) {
+    throw new Error(`CORDISX_CDP_INJECTION_TIMEOUT_MS must be between ${MIN_CDP_INJECTION_TIMEOUT_MS} and ${MAX_CDP_INJECTION_TIMEOUT_MS}`)
+  }
+  return timeoutMs
+}
+
+const CDP_INJECTION_TIMEOUT_MS = resolveCdpInjectionTimeoutMs(process.env.CORDISX_CDP_INJECTION_TIMEOUT_MS)
 
 export interface CdpTarget {
   readonly id: string

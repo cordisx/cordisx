@@ -74,9 +74,10 @@ describe('UI demo Config Schemas', () => {
 
   it('projects the slot showcase session option with defaults, bounds, i18n, and restart application', () => {
     expect(slotShowcaseConfigApplies).toBe('plugin-restart')
-    expect(SlotShowcaseConfig({})).toEqual({ sessionId: '' })
+    expect(SlotShowcaseConfig({})).toEqual({ sessionId: '', welcomePage: false })
     expect(SlotShowcaseConfig({ sessionId: 'local:01a03050-bce7-7f03-99b0-a2110cac19c5' })).toEqual({
       sessionId: 'local:01a03050-bce7-7f03-99b0-a2110cac19c5',
+      welcomePage: false,
     })
     expect(() => SlotShowcaseConfig({ sessionId: 'not a native id' })).toThrow()
     expect(() => SlotShowcaseConfig({ sessionId: 'x'.repeat(129) })).toThrow()
@@ -92,10 +93,20 @@ describe('UI demo Config Schemas', () => {
         value: '',
         max: 128,
       }),
+      expect.objectContaining({
+        path: ['welcomePage'],
+        label: 'Branded welcome page',
+        description: 'Enable the optional CordisX welcome destination for demos and product capture.',
+        value: false,
+      }),
     ])
     expect(zh.fields[0]).toMatchObject({
       label: '原生会话 ID',
       description: '可选导航快捷操作使用的原生会话 ID；留空时隐藏该快捷操作。',
+    })
+    expect(zh.fields[1]).toMatchObject({
+      label: '品牌欢迎页',
+      description: '启用用于演示和产品录制的可选 CordisX 品牌欢迎页。',
     })
   })
 
