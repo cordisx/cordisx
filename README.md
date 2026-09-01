@@ -33,11 +33,7 @@ If it does not start, use the
 
 <p align="center">
   <a href="https://cordisx.github.io/#showcase">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/86dbcbcaf9baccc5e9a5f4e0f25b33789a3917a9/assets/screenshots/codex-workspace-real.png">
-      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/86dbcbcaf9baccc5e9a5f4e0f25b33789a3917a9/assets/screenshots/codex-workspace-real-light.png">
-      <img alt="Codex workspace launched by CordisX" src="https://raw.githubusercontent.com/cordisx/cordisx.github.io/86dbcbcaf9baccc5e9a5f4e0f25b33789a3917a9/assets/screenshots/codex-workspace-real-light.png">
-    </picture>
+    <img alt="Codex workspace launched by CordisX" src="https://raw.githubusercontent.com/cordisx/cordisx.github.io/86dbcbcaf9baccc5e9a5f4e0f25b33789a3917a9/assets/screenshots/codex-workspace-real-light.png">
   </a>
 </p>
 
