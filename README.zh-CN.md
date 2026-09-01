@@ -30,6 +30,16 @@ cordisx
 
 没有正常启动？查看[启动问题自助排查](./.agents/docs/startup-qa.zh-CN.md)。
 
+<p align="center">
+  <a href="https://cordisx.github.io/#showcase">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://cordisx.github.io/assets/screenshots/codex-workspace-real.png">
+      <source media="(prefers-color-scheme: light)" srcset="https://cordisx.github.io/assets/screenshots/codex-workspace-real-light.png">
+      <img alt="CordisX 启动后的 Codex 工作区" src="https://cordisx.github.io/assets/screenshots/codex-workspace-real-light.png">
+    </picture>
+  </a>
+</p>
+
 ## 开发插件
 
 启动 CordisX 后，直接告诉 Codex 你想加入什么功能。例如：

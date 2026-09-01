@@ -31,6 +31,16 @@ cordisx
 If it does not start, use the
 [startup Q&A](./.agents/docs/startup-qa.md) to identify the issue.
 
+<p align="center">
+  <a href="https://cordisx.github.io/#showcase">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://cordisx.github.io/assets/screenshots/codex-workspace-real.png">
+      <source media="(prefers-color-scheme: light)" srcset="https://cordisx.github.io/assets/screenshots/codex-workspace-real-light.png">
+      <img alt="Codex workspace launched by CordisX" src="https://cordisx.github.io/assets/screenshots/codex-workspace-real-light.png">
+    </picture>
+  </a>
+</p>
+
 ## Build a plugin
 
 After CordisX starts, tell Codex what you want to add. For example:
