@@ -56,6 +56,8 @@ export interface DeployBundledCordisXSkillOptions {
   readonly sharedHomeOverride?: string
 }
 
+export type DeployBundledCordisXSkillToHomeOptions = Pick<DeployBundledCordisXSkillOptions, 'sourceDir'>
+
 export class CordisXSkillConflictError extends Error {
   constructor(readonly targetDir: string, detail: string) {
     super(
@@ -292,11 +294,11 @@ export function effectiveHomeForCordisXSkill(
 }
 
 /** Deploy only CordisX's own built-in Skill, fully staged before the Host starts. */
-export async function deployBundledCordisXSkill(
-  plan: ResolvedLaunchPlan,
-  options: DeployBundledCordisXSkillOptions = {},
+export async function deployBundledCordisXSkillToHome(
+  rawEffectiveHome: string,
+  options: DeployBundledCordisXSkillToHomeOptions = {},
 ): Promise<CordisXSkillDeploymentResult> {
-  const effectiveHome = effectiveHomeForCordisXSkill(plan, options.sharedHomeOverride)
+  const effectiveHome = absoluteHome(rawEffectiveHome, 'Host launch')
   const targetDir = path.join(effectiveHome, '.agents', 'skills', CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME)
   const sourceDir = path.resolve(options.sourceDir ?? await bundledSkillSourceDir())
   const manifest = await sourceManifest(sourceDir)
@@ -334,4 +336,15 @@ export async function deployBundledCordisXSkill(
   } finally {
     if (stageExists) await rm(stageDir, { recursive: true, force: true })
   }
+}
+
+/** Resolve the named launch's Host HOME, then deploy only CordisX's own built-in Skill. */
+export async function deployBundledCordisXSkill(
+  plan: ResolvedLaunchPlan,
+  options: DeployBundledCordisXSkillOptions = {},
+): Promise<CordisXSkillDeploymentResult> {
+  return await deployBundledCordisXSkillToHome(
+    effectiveHomeForCordisXSkill(plan, options.sharedHomeOverride),
+    options,
+  )
 }

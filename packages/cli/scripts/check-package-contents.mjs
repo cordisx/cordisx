@@ -68,6 +68,7 @@ if (
 for (const required of [
   'SKILL.md',
   'agents/openai.yaml',
+  'references/natural-language-development.md',
   'references/plugin-authoring.md',
   'references/schema-configuration.md',
   'references/ui-system.md',
@@ -134,6 +135,7 @@ for (const required of [
   'dist/src/contracts.d.ts',
   'dist/skills/cordisx-plugin-development/SKILL.md',
   'dist/skills/cordisx-plugin-development/agents/openai.yaml',
+  'dist/skills/cordisx-plugin-development/references/natural-language-development.md',
   'dist/src/plugins/cli-proxy-api/README.md',
   'dist/src/plugins/cli-proxy-api/README.zh-Hans.md',
   'dist/src/plugins/channel/README.md',

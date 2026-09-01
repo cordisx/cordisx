@@ -23,6 +23,7 @@ import type {
   CordisXPluginManifestV1,
   CordisXPluginModule,
   CordisXRouteReference,
+  CordisXExtensionPointControlDeclarationV1,
   CordisXExtensionPointControlMode,
 } from '../contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
@@ -216,10 +217,52 @@ interface CordisXRuntimeMetadata {
   readonly initialRegistryEpoch?: number
   readonly generation?: string
   readonly channelManager?: ChannelManagerProjectionV1
+  /** Host-private, launcher-authenticated exact claim for managed natural-language development. */
+  readonly naturalLanguageControlGrant?: {
+    readonly profile: 'cordisx.composer-submit-celebration/v1'
+    readonly identity: { readonly source: string; readonly id: string }
+    readonly pointId: 'composer.toolbar.items'
+    readonly contributionId: 'submit-celebration'
+    readonly claimId: 'submit-celebration'
+    readonly mode: 'proxy'
+    readonly priority: 100
+    readonly requestedBindings: {
+      readonly properties: readonly ['celebrationProfile']
+      readonly commands: readonly ['presentCelebration', 'dismissCelebration']
+      readonly events: readonly ['submitActivated']
+    }
+  }
   /** Development-only host with explicit semantic seats and no Codex DOM probes. */
   readonly hostKind?: 'codex' | 'playground'
   /** Debug-only deterministic service; accepted only by the explicit Playground host. */
   readonly agentLoopBackend?: 'mock'
+}
+
+function exactStringList(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && actual.every((value, index) => value === expected[index])
+}
+
+function naturalLanguageControlGrantMatches(
+  metadata: CordisXRuntimeMetadata,
+  declaration: CordisXExtensionPointControlDeclarationV1,
+  generation: Readonly<{ source: string; pluginId: string }>,
+): boolean {
+  const grant = metadata.naturalLanguageControlGrant
+  return metadata.profileId === 'development'
+    && grant?.profile === 'cordisx.composer-submit-celebration/v1'
+    && declaration.origin === 'explicit'
+    && declaration.identity.source === grant.identity.source
+    && declaration.identity.pluginId === grant.identity.id
+    && declaration.identity.pointId === grant.pointId
+    && generation.source === grant.identity.source
+    && generation.pluginId === grant.identity.id
+    && declaration.contributionId === grant.contributionId
+    && declaration.claimId === grant.claimId
+    && declaration.mode === grant.mode
+    && declaration.priority === grant.priority
+    && exactStringList(declaration.requestedBindings.properties, grant.requestedBindings.properties)
+    && exactStringList(declaration.requestedBindings.commands, grant.requestedBindings.commands)
+    && exactStringList(declaration.requestedBindings.events, grant.requestedBindings.events)
 }
 
 interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
@@ -2896,6 +2939,18 @@ async function start(
     commandService.setAccessResolver(extensionPointBroker)
     routeService.setAccessResolver(extensionPointBroker)
     slotService.setAccessResolver(extensionPointBroker)
+    if (metadata.naturalLanguageControlGrant !== undefined) {
+      slotService.setHostPrivateControlAccessResolver((declaration, controlGeneration) => (
+        naturalLanguageControlGrantMatches(metadata, declaration, controlGeneration)
+          ? Object.freeze({
+              authorized: true,
+              policy: 'allow' as const,
+              effectivePolicy: 'allow' as const,
+              reason: 'permission.natural-language-exact-control',
+            })
+          : undefined
+      ))
+    }
     registrySubscriptions.push(
       extensionPointDescriptors.subscribe(notifyFrom('extension-descriptors')),
       commandService.subscribeInternal(notifyFrom('commands')),

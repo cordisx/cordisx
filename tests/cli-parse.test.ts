@@ -81,6 +81,7 @@ describe('parseCordisXCli', () => {
     ])).toEqual({
       action: 'dev',
       pluginPath: './plugins/demo.ts',
+      naturalLanguage: false,
       options: {
         attach: false,
         system: true,
@@ -90,6 +91,20 @@ describe('parseCordisXCli', () => {
       },
       hostArgs: ['--host-flag'],
     })
+  })
+
+  it('parses the managed natural-language development mode without a second source input', () => {
+    expect(parseCordisXCli(['dev', '--natural-language', '--dry-run'])).toMatchObject({
+      action: 'dev', naturalLanguage: true, options: { dryRun: true },
+    })
+    expect(() => parseCordisXCli(['dev', './plugin.ts', '--natural-language']))
+      .toThrow('--natural-language creates its managed development entry')
+    expect(() => parseCordisXCli(['dev', '--config', './cordisx.config.json', '--natural-language']))
+      .toThrow('--natural-language creates its managed development entry')
+    expect(() => parseCordisXCli(['dev', '--natural-language', '--attach']))
+      .toThrow('--natural-language must launch a Host')
+    expect(() => parseCordisXCli(['codex', '--natural-language']))
+      .toThrow('--natural-language is only valid with cordisx dev')
   })
 
   it('parses a development composition file without mixing it with a plugin path', () => {

@@ -61,6 +61,7 @@ export interface CordisXDevInvocation {
   readonly action: 'dev'
   readonly pluginPath?: string
   readonly configPath?: string
+  readonly naturalLanguage: boolean
   readonly dataMode?: CordisXDataMode
   readonly options: CordisXLauncherOptions
   readonly hostArgs: readonly string[]
@@ -74,7 +75,7 @@ export type CordisXCliInvocation =
   | CordisXDoctorInvocation
   | CordisXDevInvocation
 
-type BooleanOptionName = 'attach' | 'system' | 'isolated' | 'onlineDevtools' | 'dryRun' | 'help'
+type BooleanOptionName = 'attach' | 'system' | 'isolated' | 'onlineDevtools' | 'dryRun' | 'naturalLanguage' | 'help'
 type ValueOptionName = 'dataMode' | 'profileDir' | 'executable' | 'debugPort' | 'configPath'
 type ParsedOptionName = BooleanOptionName | ValueOptionName
 
@@ -84,6 +85,7 @@ interface ParsedOptions {
   isolated: boolean
   onlineDevtools: boolean
   dryRun: boolean
+  naturalLanguage: boolean
   help: boolean
   dataMode?: CordisXDataMode
   profileDir?: string
@@ -98,6 +100,7 @@ const BOOLEAN_OPTIONS = new Map<string, BooleanOptionName>([
   ['--isolated', 'isolated'],
   ['--online-devtools', 'onlineDevtools'],
   ['--dry-run', 'dryRun'],
+  ['--natural-language', 'naturalLanguage'],
   ['--help', 'help'],
   ['-h', 'help'],
 ])
@@ -153,6 +156,7 @@ function parseCordisXOptions(args: readonly string[]): {
     isolated: false,
     onlineDevtools: false,
     dryRun: false,
+    naturalLanguage: false,
     help: false,
   }
   const seen = new Set<ParsedOptionName>()
@@ -276,6 +280,7 @@ function assertNoOptions(options: ParsedOptions, action: 'setup' | 'config' | 'd
     options.isolated && '--isolated',
     options.onlineDevtools && '--online-devtools',
     options.dryRun && '--dry-run',
+    options.naturalLanguage && '--natural-language',
     options.dataMode !== undefined && '--data',
     options.profileDir !== undefined && '--profile-dir',
     options.executable !== undefined && '--executable',
@@ -346,16 +351,32 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
         'cordisx dev accepts either a plugin path or --config, not both',
       )
     }
+    if (options.naturalLanguage && (positionals[1] !== undefined || options.configPath !== undefined)) {
+      throw new CordisXCliParseError(
+        'conflicting-options',
+        '--natural-language creates its managed development entry and cannot be combined with a plugin path or --config',
+      )
+    }
+    if (options.naturalLanguage && options.attach) {
+      throw new CordisXCliParseError(
+        'conflicting-options',
+        '--natural-language must launch a Host so the active development entry is available to the Codex session',
+      )
+    }
     return {
       action: 'dev',
       ...(positionals[1] === undefined ? {} : { pluginPath: positionals[1] }),
       ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
+      naturalLanguage: options.naturalLanguage,
       options: launcherOptions(options),
       hostArgs,
     }
   }
 
   assertLauncherOptionCompatibility(options)
+  if (options.naturalLanguage) {
+    throw new CordisXCliParseError('unsupported-option', '--natural-language is only valid with cordisx dev')
+  }
   if (options.configPath !== undefined) {
     throw new CordisXCliParseError('unsupported-option', '--config is only valid with cordisx dev')
   }

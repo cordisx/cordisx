@@ -27,6 +27,9 @@ export * from './agent-contracts.js'
 export * from './agent-loop-contracts.js'
 export * from './durable-document-contracts.js'
 export * from './plugin-lifecycle-contracts.js'
+
+/** Exact protocol application profile for Host-owned native-submit celebrations. */
+export const CORDISX_COMPOSER_SUBMIT_CELEBRATION_PROFILE_V1 = 'cordisx.composer-submit-celebration/v1' as const
 export type {
   CordisXBoundConnectorClient,
   CordisXBoundConnectorClientResult,

@@ -22,6 +22,7 @@ cordisx setup
 cordisx config
 cordisx doctor
 cordisx dev [plugin-path]
+cordisx dev --natural-language
 ```
 
 Examples:
@@ -322,6 +323,38 @@ development collection; only the Host-private React Manager model contains
 them. Stopping `cordisx dev` cancels debounce/poll timers,
 waits for the active attempt, removes CDP installation state, and terminates
 only the launcher's owned Host process/profile resources.
+
+`cordisx dev --natural-language` is a convenience entry into that same local
+generation plane, not a second plugin runtime or an agent-side watcher. Before
+launch it creates, only when absent, the inert managed entry
+`<cwd>/.cordisx/plugins/natural-language.ts`; an existing real file is reused
+without rewriting it, while a directory or other non-file at that path fails
+closed. `--dry-run` reports `would-create` or `existing` and remains write-free.
+The option cannot be combined with a positional entry, `--config`, or
+`--attach`, because CordisX must launch the Host that receives the exact active
+entry.
+
+Before that Host starts, CordisX deploys its bundled plugin-development Skill
+into the Host's effective `HOME` and projects two launcher-owned environment
+facts into the process: `CORDISX_DEV_ENTRY` is the absolute watched entry and
+`CORDISX_DEV_MODE` is `natural-language`. The Skill directs the in-session
+Codex agent to edit that exact file and to use only versioned public contracts.
+Saving the file therefore follows the normal debounced candidate build,
+generation transaction, last-good retention, and cleanup described above;
+neither the agent nor the Skill starts or restarts CordisX. Direct
+`cordisx dev <entry>` launches receive the same Skill and exact entry handoff
+with `CORDISX_DEV_MODE=explicit-entry`.
+
+Natural-language mode may also carry one launcher-authenticated, Host-private
+control grant for the maintained submit-celebration recipe. The grant matches
+the stable local-development source and plugin id plus the exact
+`composer.toolbar.items` contribution/claim ids, `proxy` mode, priority, safe
+binding lists, and `cordisx.composer-submit-celebration/v1` profile. It does
+not authorize another contribution from that plugin, another plugin, or a
+direct `cordisx dev <entry>` launch. The normal Permission Broker remains the
+authority for every non-matching extension-point request. The grant is bundled
+only into the launcher-created renderer composition and is omitted from public
+runtime/control snapshots.
 
 Publishing is allowed only from merged `main` through
 `.github/workflows/release-beta.yml`, on a GitHub-hosted runner with OIDC and the

@@ -1,6 +1,6 @@
 ---
 name: cordisx-plugin-development
-description: Create, update, debug, or verify CordisX plugins using the versioned public contracts, Host-owned structured UI, Schemastery configuration, permissions, lifecycle cleanup, and the real local Playground. Use for CordisX plugin manifests, contributions, configuration schemas, routes, pages, slots, commands, icons, localization, packaging, or plugin-facing documentation. Do not use for Codex plugins or unrelated CordisX Host-core implementation.
+description: Create, update, debug, or verify CordisX plugins—including natural-language requests to customize the current CordisX-launched Codex UI—using the versioned public contracts, Host-owned structured UI, Schemastery configuration, permissions, lifecycle cleanup, and the real local Playground. Use for composer/send behavior, celebrations, CordisX plugin manifests, contributions, configuration schemas, routes, pages, slots, commands, icons, localization, packaging, or plugin-facing documentation. Do not use for official Codex plugins or unrelated CordisX Host-core implementation.
 ---
 
 # CordisX Plugin Development
@@ -13,6 +13,7 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 - Add any Manager page, contribution, action, collection, or icon: [ui-system.md](references/ui-system.md)
 - Add or change plugin configuration: [schema-configuration.md](references/schema-configuration.md)
 - Run or deliver the result: [verification.md](references/verification.md)
+- Implement a request inside a live `cordisx dev` session: [natural-language-development.md](references/natural-language-development.md)
 
 ## Core contract
 
@@ -27,13 +28,14 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 ## Universal workflow
 
 1. Inspect the repository guide and the current public plugin contracts.
-2. Locate the closest maintained plugin example, but scaffold rather than copying generated fixtures wholesale.
-3. Define the manifest, localized product copy, structured contributions, config schema, permissions, and lifecycle behavior.
-4. Keep all visual choices inside Host-supported presentation tokens and semantic roles.
-5. Add focused contract and lifecycle tests before relying on visual inspection.
-6. Run the plugin in the real CordisX Playground using an isolated CordisX config/state directory.
-7. Verify reload/dispose, keyboard behavior, light/dark tokens, narrow layout, and honest unavailable states when relevant.
-8. Report implementation, verification, limitations, and planned work separately.
+2. When `CORDISX_DEV_ENTRY` is set, treat that exact file as the already-watched plugin entry and follow the natural-language workflow. Do not start or restart CordisX.
+3. Locate the closest maintained plugin example, but scaffold rather than copying generated fixtures wholesale.
+4. Define the manifest, localized product copy, structured contributions, config schema, permissions, and lifecycle behavior.
+5. Keep all visual choices inside Host-supported presentation tokens and semantic roles.
+6. Add focused contract and lifecycle tests before relying on visual inspection.
+7. Run the plugin in the real CordisX Playground using an isolated CordisX config/state directory.
+8. Verify reload/dispose, keyboard behavior, light/dark tokens, narrow layout, and honest unavailable states when relevant.
+9. Report implementation, verification, limitations, and planned work separately.
 
 ## Product boundaries
 

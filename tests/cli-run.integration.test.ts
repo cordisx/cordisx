@@ -4,7 +4,7 @@ import path from 'node:path'
 import { createServer } from 'node:net'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
-import { runCordisXCli } from '../packages/cli/src/cli/run.js'
+import { ensureNaturalLanguageDevelopmentEntry, naturalLanguageDevelopmentEntry, runCordisXCli } from '../packages/cli/src/cli/run.js'
 import { parseOwnerDocumentBindingRequest } from '../packages/cli/src/launcher/owner-document-rpc.js'
 import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from '../packages/cli/src/renderer/owner-documents.js'
 import { defaultIsolatedProfileDir } from '../packages/cli/src/launcher/process.js'
@@ -280,6 +280,7 @@ describe('functional CordisX CLI', () => {
       await expect(runCordisXCli(['dev', entry, '--executable', executable], {
         cwd: project,
         env: { CORDISX_HOME: home },
+        internalSharedHomeDir: path.join(root, 'host-home'),
         stdout: () => undefined,
       })).rejects.toThrow('Host exited before CordisX CDP became ready')
     }
@@ -407,6 +408,7 @@ describe('functional CordisX CLI', () => {
       cwd: project,
       env: {},
       homedir: isolatedHomedir,
+      internalSharedHomeDir: isolatedHomedir,
       stdout: () => undefined,
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
 
@@ -468,5 +470,59 @@ describe('functional CordisX CLI', () => {
     })
     await writeFile(dependency, 'export const value =\n')
     await expect(runCordisXCli(['dev', entry, '--dry-run'], { cwd: root, stdout: () => undefined })).rejects.toThrow(/Build failed/u)
+  })
+
+  it('prepares a watched natural-language entry, deploys the Skill, and exposes the exact entry to the Host', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-natural-language-'))
+    const project = path.join(root, 'project')
+    const home = path.join(root, 'cordisx-home')
+    const hostHome = path.join(root, 'host-home')
+    const observedEntry = path.join(root, 'observed-entry.txt')
+    const executable = path.join(root, 'capture-development-entry')
+    await mkdir(project, { recursive: true })
+    await writeFile(executable, `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(observedEntry)}, process.env.CORDISX_DEV_ENTRY || '')\n`)
+    await chmod(executable, 0o755)
+
+    const dryOutput: string[] = []
+    await runCordisXCli(['dev', '--natural-language', '--dry-run'], {
+      cwd: project, env: { CORDISX_HOME: home }, stdout: line => { dryOutput.push(line) },
+    })
+    const entry = naturalLanguageDevelopmentEntry(project)
+    expect(JSON.parse(dryOutput.at(-1)!) as unknown).toMatchObject({
+      status: 'ready', origin: 'natural-language', pluginId: 'natural-language',
+      sourcePath: entry, entryState: 'would-create',
+    })
+    await expect(access(entry)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    const output: string[] = []
+    await expect(runCordisXCli(['dev', '--natural-language', '--executable', executable], {
+      cwd: project,
+      env: { CORDISX_HOME: home },
+      internalSharedHomeDir: hostHome,
+      stdout: line => { output.push(line) },
+    })).rejects.toThrow('Host exited before CordisX CDP became ready')
+
+    expect(await readFile(observedEntry, 'utf8')).toBe(entry)
+    expect(await readFile(entry, 'utf8')).toContain('cordisx.natural-language-development-entry/v1')
+    await expect(access(path.join(hostHome, '.agents', 'skills', 'cordisx-plugin-development', 'SKILL.md')))
+      .resolves.toBeUndefined()
+    expect(output.join('\n')).toContain('[cordisx] natural-language entry created:')
+    expect(output.join('\n')).toContain('[cordisx] built-in Skill installed:')
+
+    const existingSource = "export const name = 'natural-language'\nexport const marker = 'keep-me'\n"
+    await writeFile(entry, existingSource)
+    await expect(ensureNaturalLanguageDevelopmentEntry(project)).resolves.toEqual({ entry, status: 'existing' })
+    expect(await readFile(entry, 'utf8')).toBe(existingSource)
+  })
+
+  it('fails a natural-language dry-run when the managed entry path is not a real file', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-natural-language-invalid-'))
+    const entry = naturalLanguageDevelopmentEntry(root)
+    await mkdir(entry, { recursive: true })
+    await expect(runCordisXCli(['dev', '--natural-language', '--dry-run'], {
+      cwd: root,
+      env: { CORDISX_HOME: path.join(root, 'cordisx-home') },
+      stdout: () => undefined,
+    })).rejects.toThrow(`natural-language development entry must be a real file: ${entry}`)
   })
 })

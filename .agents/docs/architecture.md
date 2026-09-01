@@ -71,6 +71,13 @@ projected only into Manager and never become public package sources, lifecycle
 snapshots, permission identities, or share targets. Details and the phase-1
 entry-basename id restriction are in
 [`distribution-and-cli.md`](distribution-and-cli.md#explicit-local-development-entry).
+`cordisx dev --natural-language` prepares a fixed inert entry under the current
+workspace and then enters this exact plane. The launched Host receives the
+absolute active entry and development mode as launcher-owned environment
+facts, allowing its Codex agent to edit the already-watched source without a
+second launcher, watcher, or restart. The option changes source preparation and
+agent guidance only; build, publication, rollback, fencing, diagnostics, and
+shutdown remain the existing local-generation authorities.
 
 The launcher implementation of that boundary is specified separately in
 [`dynamic-package-store.md`](dynamic-package-store.md): it maps source-v1 and
@@ -101,8 +108,9 @@ on shutdown, removes CDP injections then terminates only that group plus
 helpers fenced by its exact CordisX-managed user-data directory; an explicitly
 user-supplied `--profile-dir` never grants a broad helper-cleanup target.
 
-Immediately before a named Host launch, the launcher deploys the versioned
-`cordisx-plugin-development` Skill shipped in its npm distribution. A normal
+Immediately before a named Host launch or a direct-entry development launch,
+the launcher deploys the versioned `cordisx-plugin-development` Skill shipped
+in its npm distribution. A normal
 `shared` launch targets the resolved real `HOME`; `host-isolated` targets only
 the private `HOME` projected by that launch plan. `CORDISX_HOME`, the selected
 CordisX profile id, its independent Chromium `user-data-dir`, and Codex's
@@ -464,9 +472,18 @@ generation of the same canonical source/plugin/origin reuses its Host principal.
 
 The generic resolver implements and tests transitive parent/subtree
 suppression and same-generation restoration. The current production Codex
-control catalog binds only `composer.reasoning-intensity`, so real-App evidence
-for a parent control point must not be claimed until such a semantic parent is
-cataloged and adapted.
+control catalog binds `composer.reasoning-intensity` and
+`composer.toolbar.items`. The toolbar point exposes the exact
+`cordisx.composer-submit-celebration/v1` profile through one host-priority,
+exclusive `proxy` claim: property `celebrationProfile`, event
+`submitActivated`, and commands `presentCelebration` / `dismissCelebration`.
+The Host emits a five-second, opaque, single-use activation only for an enabled
+native submit activation. It alone owns the pointer-inert full-window confetti
+DOM, styles, timer, idempotency, and removal on timeout, unload, replacement,
+candidate abort, rollback, or adapter disposal. The plugin receives no native
+event, selector, node, stylesheet, timer, or presentation handle. Real-App
+evidence for a parent control point still must not be claimed until such a
+semantic parent is cataloged and adapted.
 
 The host-neutral surface/outlet vocabulary, current Codex adapter availability,
 DeepSeek Harness intent mapping, explicit replacement refusals, contextual
