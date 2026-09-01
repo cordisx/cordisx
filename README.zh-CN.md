@@ -32,7 +32,11 @@ cordisx
 
 <p align="center">
   <a href="https://cordisx.github.io/#showcase">
-    <img alt="CordisX 启动后的 Codex 工作区" src="https://raw.githubusercontent.com/cordisx/cordisx.github.io/86dbcbcaf9baccc5e9a5f4e0f25b33789a3917a9/assets/screenshots/codex-workspace-real-light.png">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/a23cc998b64e21dfed65104dfe5ce4ad4698ece8/assets/screenshots/codex-workspace-real.png">
+      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/a23cc998b64e21dfed65104dfe5ce4ad4698ece8/assets/screenshots/codex-workspace-real-light.png">
+      <img alt="CordisX 启动后的 Codex 工作区" src="https://raw.githubusercontent.com/cordisx/cordisx.github.io/a23cc998b64e21dfed65104dfe5ce4ad4698ece8/assets/screenshots/codex-workspace-real-light.png">
+    </picture>
   </a>
 </p>
 
