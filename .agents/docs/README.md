@@ -2,8 +2,13 @@
 
 This directory is the public, aggregatable source for CordisX product and architecture documentation.
 
+- `product-overview.md` and `product-overview.zh-CN.md` preserve the English
+  and Simplified Chinese product story, project background, ecosystem links,
+  and licensing overview that stay outside the task-focused product README.
 - `getting-started.md` records local development, launcher, smoke-test, and
   example-plugin instructions that should not live in the product README.
+- `startup-qa.md` and `startup-qa.zh-CN.md` provide a short English and
+  Simplified Chinese self-service path for common startup questions.
 - `architecture.md` defines the current runtime, lifecycle, slot, and security boundaries.
 - `manager-content-design.md` is the reusable design guideline for manager
   hierarchy, title de-duplication, tabs, flat lists, cards, states, and
