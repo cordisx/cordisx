@@ -11,3 +11,6 @@
 - Follow [functional-delivery.md](functional-delivery.md) for user-visible Manager,
   launcher, bridge, and preview work. It defines the requirement ledger,
   Host/plugin ownership checks, real-runtime proof, and experience-launch gate.
+- Follow [showcase-capture-integration.md](../docs/showcase-capture-integration.md)
+  before changing Manager localization, Slot Showcase capture behavior, CDP
+  injection timing, or the real Codex Desktop homepage capture workflow.
