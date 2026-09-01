@@ -182,18 +182,63 @@ describe('functional CordisX CLI', () => {
 
   it('fails instead of claiming readiness when the launched Host exits before injection', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))
+    const project = path.join(root, 'repository')
+    const repositoryGuide = path.join(project, 'AGENTS.md')
+    const repositorySkill = path.join(project, '.agents', 'skills', 'repository-helper', 'SKILL.md')
+    const sharedHome = path.join(root, 'real-home')
     const executable = path.join(root, 'exits-before-injection')
+    await mkdir(path.dirname(repositorySkill), { recursive: true })
+    await writeFile(repositoryGuide, 'repository-guide-sentinel\n')
+    await writeFile(repositorySkill, 'repository-skill-sentinel\n')
     await writeFile(executable, '#!/usr/bin/env node\nprocess.exit(0)\n')
     await chmod(executable, 0o755)
     const output: string[] = []
+    const processCwd = process.cwd()
     await expect(runCordisXCli([
       'codex', '--data', 'shared', '--executable', executable,
     ], {
+      cwd: project,
       env: { CORDISX_HOME: path.join(root, 'home') },
+      internalSharedHomeDir: sharedHome,
       stdout: line => { output.push(line) },
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
     expect(output.join('\n')).toContain('"status": "launching"')
+    expect(output.join('\n')).toContain('[cordisx] built-in Skill installed:')
     expect(output.join('\n')).not.toContain('CDP renderer ready')
+    expect(process.cwd()).toBe(processCwd)
+    await expect(access(path.join(sharedHome, '.agents', 'skills', 'cordisx-plugin-development', 'SKILL.md')))
+      .resolves.toBeUndefined()
+    await expect(readFile(repositoryGuide, 'utf8')).resolves.toBe('repository-guide-sentinel\n')
+    await expect(readFile(repositorySkill, 'utf8')).resolves.toBe('repository-skill-sentinel\n')
+    await expect(access(path.join(project, '.cordisx', 'studio'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(path.join(sharedHome, '.cordisx', 'studio'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('deploys the built-in Skill into host-isolated HOME without copying a shared personal Skill', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-isolated-skill-'))
+    const cordisxHome = path.join(root, 'cordisx-home')
+    const sharedHome = path.join(root, 'shared-home')
+    const personalSkill = path.join(sharedHome, '.agents', 'skills', 'personal-only', 'SKILL.md')
+    const executable = path.join(root, 'exits-before-injection')
+    await mkdir(path.dirname(personalSkill), { recursive: true })
+    await writeFile(personalSkill, 'personal-sentinel\n')
+    await writeFile(executable, '#!/usr/bin/env node\nprocess.exit(0)\n')
+    await chmod(executable, 0o755)
+
+    await expect(runCordisXCli([
+      'codex', 'private', '--data', 'host-isolated', '--executable', executable,
+    ], {
+      env: { CORDISX_HOME: cordisxHome },
+      internalSharedHomeDir: sharedHome,
+      stdout: () => undefined,
+    })).rejects.toThrow('Host exited before CordisX CDP became ready')
+
+    const privateHome = path.join(cordisxHome, 'apps', 'codex', 'profiles', 'private', 'host-home')
+    await expect(access(path.join(privateHome, '.agents', 'skills', 'cordisx-plugin-development', 'SKILL.md')))
+      .resolves.toBeUndefined()
+    await expect(access(path.join(privateHome, '.agents', 'skills', 'personal-only')))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(personalSkill, 'utf8')).resolves.toBe('personal-sentinel\n')
   })
 
   it('fails closed when a development system launch port is already occupied', async () => {

@@ -101,6 +101,20 @@ on shutdown, removes CDP injections then terminates only that group plus
 helpers fenced by its exact CordisX-managed user-data directory; an explicitly
 user-supplied `--profile-dir` never grants a broad helper-cleanup target.
 
+Immediately before a named Host launch, the launcher deploys the versioned
+`cordisx-plugin-development` Skill shipped in its npm distribution. A normal
+`shared` launch targets the resolved real `HOME`; `host-isolated` targets only
+the private `HOME` projected by that launch plan. `CORDISX_HOME`, the selected
+CordisX profile id, its independent Chromium `user-data-dir`, and Codex's
+official `CODEX_HOME` remain separate concepts and are never substituted for
+the Skill installation HOME. Deployment stages and content-hashes the complete
+Skill before publication, updates only a target with a valid matching CordisX
+management marker, and fails closed without changing a pre-existing unmanaged
+or locally modified target. It neither scans nor copies sibling user Skills,
+writes a repository `AGENTS.md`, creates a Studio checkout, nor changes the
+launcher's current working directory, so repository-local instructions and
+`.agents/skills` remain in scope for the Host process.
+
 The second Desktop process is a UI development host, not a transparent platform
 bridge. CordisX must not start another app-server to impersonate or replace the
 Desktop current connection, and must not create a second AppHost that overwrites

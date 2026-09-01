@@ -75,6 +75,7 @@ import {
 import type { RollbackPlan } from '../launcher/packages/authority.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
 import { AgentLoopAuthority } from '../launcher/agent-loop-authority.js'
+import { deployBundledCordisXSkill } from '../launcher/builtin-skill.js'
 import {
   createOwnerDocumentBridgeHandler,
   type OwnerDocumentBridgeHandler,
@@ -115,6 +116,10 @@ export interface CordisXCliRuntime {
     readonly source: string
     readonly handler: OwnerDocumentBridgeHandler
   }) => void | Promise<void>
+  /** Repository-only source seam for built-in Skill deployment tests. */
+  readonly internalBuiltinSkillSourceDir?: string
+  /** Repository-only HOME seam that prevents shared-launch tests from touching the user's real HOME. */
+  readonly internalSharedHomeDir?: string
 }
 
 function waitForExit(child: ChildProcess): Promise<void> {
@@ -1061,6 +1066,15 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   const debugPort = invocation.options.debugPort ?? await findFreeLoopbackPort()
   if (invocation.options.debugPort !== undefined) await assertLoopbackPortAvailable(debugPort)
   await adapter.prepareLaunch(plan)
+  const skillDeployment = await deployBundledCordisXSkill(plan, {
+    ...(runtime.internalBuiltinSkillSourceDir === undefined
+      ? {}
+      : { sourceDir: runtime.internalBuiltinSkillSourceDir }),
+    ...(runtime.internalSharedHomeDir === undefined
+      ? {}
+      : { sharedHomeOverride: runtime.internalSharedHomeDir }),
+  })
+  stdout(`[cordisx] built-in Skill ${skillDeployment.status}: ${skillDeployment.targetDir}`)
   stdout(`[cordisx] loopback CDP port: ${debugPort}`)
   const chromiumProfile = plan.chromiumProfile
   const profile = chromiumProfile.mode === 'independent'
