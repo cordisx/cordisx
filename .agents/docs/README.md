@@ -9,6 +9,9 @@ This directory is the public, aggregatable source for CordisX product and archit
   example-plugin instructions that should not live in the product README.
 - `startup-qa.md` and `startup-qa.zh-CN.md` provide a short English and
   Simplified Chinese self-service path for common startup questions.
+- `plugin-capabilities.md` and `plugin-capabilities.zh-CN.md` explain what an
+  independently installable plugin can do through public contracts, what stays
+  Host-owned, and how to contribute a missing capability to CordisX or Cordis.
 - `architecture.md` defines the current runtime, lifecycle, slot, and security boundaries.
 - `manager-content-design.md` is the reusable design guideline for manager
   hierarchy, title de-duplication, tabs, flat lists, cards, states, and
