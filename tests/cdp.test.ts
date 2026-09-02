@@ -9,7 +9,6 @@ import {
   CdpPluginLifecycleRuntime,
   iconThemePreferenceDeliveryEvaluation,
   injectableTargets,
-  resolveCdpInjectionTimeoutMs,
   serviceConfigResponseEvaluation,
   watchAndInject,
   type CdpTarget,
@@ -63,20 +62,6 @@ describe('injectableTargets', () => {
       target('first', 'Desktop'),
       target('second', 'Settings'),
     ])).toEqual([])
-  })
-})
-
-describe('CDP injection timeout configuration', () => {
-  it('keeps the product default and accepts a bounded capture override', () => {
-    expect(resolveCdpInjectionTimeoutMs(undefined)).toBe(60_000)
-    expect(resolveCdpInjectionTimeoutMs('')).toBe(60_000)
-    expect(resolveCdpInjectionTimeoutMs('300000')).toBe(300_000)
-  })
-
-  it('rejects malformed or unbounded overrides', () => {
-    expect(() => resolveCdpInjectionTimeoutMs('slow')).toThrow(/integer number of milliseconds/)
-    expect(() => resolveCdpInjectionTimeoutMs('4999')).toThrow(/between 5000 and 600000/)
-    expect(() => resolveCdpInjectionTimeoutMs('600001')).toThrow(/between 5000 and 600000/)
   })
 })
 

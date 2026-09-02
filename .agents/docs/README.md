@@ -2,13 +2,8 @@
 
 This directory is the public, aggregatable source for CordisX product and architecture documentation.
 
-- `product-overview.md` and `product-overview.zh-CN.md` preserve the English
-  and Simplified Chinese product story, project background, ecosystem links,
-  and licensing overview that stay outside the task-focused product README.
 - `getting-started.md` records local development, launcher, smoke-test, and
   example-plugin instructions that should not live in the product README.
-- `startup-qa.md` and `startup-qa.zh-CN.md` provide a short English and
-  Simplified Chinese self-service path for common startup questions.
 - `architecture.md` defines the current runtime, lifecycle, slot, and security boundaries.
 - `manager-content-design.md` is the reusable design guideline for manager
   hierarchy, title de-duplication, tabs, flat lists, cards, states, and
@@ -60,11 +55,6 @@ This directory is the public, aggregatable source for CordisX product and archit
   Harness mapping/refusals, contextual identity boundary, and validation matrix.
 - `distribution-and-cli.md` defines the product monorepo, home configuration,
   app/profile command model, package ownership, and release gates.
-- `showcase-capture-integration.md` defines which real-showcase support belongs
-  in CordisX, which behavior is opt-in, which capture artifacts stay in the
-  homepage repository, which module guides an Agent must read first, and how
-  changes to the root README AI-first plugin demo route to the website-owned
-  [capture workflow](https://github.com/cordisx/cordisx.github.io/blob/main/.agents/docs/ai-plugin-demo-capture.md).
 - `dynamic-package-store.md` maps source-v1/package-v2 intake and Host-private
   transaction hardening onto the single launcher package/activation stores.
 - `platform-capabilities.md` defines the Platform service, permission broker,

@@ -48,31 +48,8 @@ export interface ControlledSurfacePointBinding {
   readonly readProperty: (id: string) => CordisXJsonScalar
   readonly commandAvailability?: (id: string) => Readonly<{ available: boolean; reason?: string }>
   readonly eventAvailability?: (id: string) => Readonly<{ available: boolean; reason?: string }>
-  /** Host-only lifecycle projection for the exact claims selected in this revision. */
-  readonly selectionChanged?: (selected: readonly ControlledSurfaceSelectedClaim[]) => void
   /** Host-only operation. Its result is intentionally discarded by the v1 protocol. */
-  readonly dispatch: (
-    id: string,
-    arguments_: Readonly<Record<string, CordisXJsonScalar>>,
-    context: ControlledSurfaceCommandContext,
-  ) => void | Promise<void>
-}
-
-export interface ControlledSurfaceSelectedClaim {
-  readonly declaration: CordisXExtensionPointControlDeclarationV1
-  readonly generation: ControlledSurfaceGeneration
-}
-
-export interface ControlledSurfaceCommandContext extends ControlledSurfaceSelectedClaim {
-  readonly caller: ControlledSurfaceGeneration
-}
-
-/** A Host binding may reject one safe command with a stable protocol reason. */
-export class ControlledSurfaceCommandError extends Error {
-  constructor(readonly reason: string) {
-    super(reason)
-    this.name = 'ControlledSurfaceCommandError'
-  }
+  readonly dispatch: (id: string, arguments_: Readonly<Record<string, CordisXJsonScalar>>) => void | Promise<void>
 }
 
 export interface ControlledSurfaceRegistration {
@@ -685,15 +662,6 @@ export class ControlledSurfaceCoordinator {
       .map(item => Object.freeze({ declaration: item.record.declaration, presenter: item.record.presenter })))
   }
 
-  selectedClaims(pointId: string): readonly ControlledSurfaceSelectedClaim[] {
-    return Object.freeze([...this.resolve().selected.values()]
-      .filter(item => item.record.declaration.identity.pointId === pointId)
-      .map(item => Object.freeze({
-        declaration: item.record.declaration,
-        generation: item.record.generation,
-      })))
-  }
-
   async invoke(caller: ControlledSurfaceGeneration, request: CordisXExtensionPointControlAccessV1): Promise<CordisXExtensionPointControlResultV1> {
     const reject = (why: string): CordisXExtensionPointControlResultV1 => Object.freeze({
       $schema: CORDISX_EXTENSION_POINT_CONTROL_RESULT_SCHEMA_V1,
@@ -710,29 +678,19 @@ export class ControlledSurfaceCoordinator {
     if (caller.principalHandle !== request.principalHandle || caller.pluginId !== request.identity.pluginId
       || caller.source !== request.identity.source || !this.callableGeneration(caller)) return reject('caller.stale')
     const resolution = this.resolve()
-    const pointSnapshot = resolution.snapshot.points.find(item => item.id === request.identity.pointId)
-    const candidateSnapshot = pointSnapshot?.candidates.find(item => item.principalHandle === request.principalHandle
-      && sameClaim(item, request) && item.contributionId === request.contributionId)
-    if (candidateSnapshot?.authorization === 'denied') return reject('authorization.denied')
-    if (pointSnapshot !== undefined && pointSnapshot.state !== 'active') return reject(pointSnapshot.reason)
     const resolved = resolution.selected.get(claimKey(request))
     if (resolved === undefined || resolved.record.declaration.contributionId !== request.contributionId) return reject('claim.not-selected')
     if (!sameGeneration(resolved.record.generation, caller)) return reject('generation.stale')
     const point = this.points.get(request.identity.pointId)
     const command = point?.safeCommands.find(item => item.id === request.commandId)
     const projected = resolved.snapshot.bindings?.commands.find(item => item.id === request.commandId)
-    if (command === undefined) return reject('command.unavailable')
-    if (projected?.available !== true) return reject(projected?.reason ?? 'command.unavailable')
+    if (command === undefined || projected?.available !== true) return reject('command.unavailable')
     if (!this.validFields(command.arguments, request.arguments)) return reject('arguments.invalid')
     try {
-      await this.bindings[point!.id]!.dispatch(request.commandId, immutableSnapshot(request.arguments), Object.freeze({
-        caller,
-        declaration: resolved.record.declaration,
-        generation: resolved.record.generation,
-      }))
+      await this.bindings[point!.id]!.dispatch(request.commandId, immutableSnapshot(request.arguments))
       return Object.freeze({ ...reject('command.accepted'), outcome: 'accepted', reason: 'command.accepted', revision: this.snapshotRevision })
-    } catch (error) {
-      return reject(error instanceof ControlledSurfaceCommandError ? error.reason : 'command.failed')
+    } catch {
+      return reject('command.failed')
     }
   }
 
@@ -774,14 +732,6 @@ export class ControlledSurfaceCoordinator {
     this.assertLive()
     this.lastEvents.clear()
     this.snapshotRevision += 1
-    const selected = this.resolve().selected
-    for (const [pointId, binding] of Object.entries(this.bindings)) {
-      if (binding.selectionChanged === undefined) continue
-      const claims = Object.freeze([...selected.values()]
-        .filter(item => item.record.declaration.identity.pointId === pointId)
-        .map(item => Object.freeze({ declaration: item.record.declaration, generation: item.record.generation })))
-      try { binding.selectionChanged(claims) } catch { /* Cleanup projection cannot split Host publication. */ }
-    }
     for (const listener of this.listeners) {
       try { listener() } catch { /* One observer cannot split one Host revision. */ }
     }

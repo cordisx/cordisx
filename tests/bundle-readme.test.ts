@@ -1,7 +1,6 @@
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
@@ -121,22 +120,5 @@ describe('plugin README composition', () => {
     expect(composition.source).toContain('__cordisxHostDomPluginModuleV1')
     expect(composition.source).toContain('__hostDomRendererExecutionWouldBeABug')
     expect(composition.source).not.toContain('moduleFactory: (console)')
-  })
-
-  it('marks an explicit Playground composition without exposing a runtime selector', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-agent-session-preview-'))
-    temporaryDirectories.push(root)
-    const entry = path.join(root, 'chatroom.ts')
-    await writeFile(entry, 'export function apply() {}\n')
-    const config: CordisXConfig = {
-      version: 1,
-      rootDir: root,
-      codex: { debugPort: 9229 },
-      providers: [],
-      plugins: [{ id: 'org.cordisx.chatroom', entry, enabled: true, config: {} }],
-    }
-    const composition = await buildRendererCompositionSource(config, { playground: true })
-    expect(composition.source).toContain('hostKind: "playground"')
-    expect(composition.source).toContain(JSON.stringify(pathToFileURL(entry).href))
   })
 })

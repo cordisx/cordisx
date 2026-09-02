@@ -4,6 +4,7 @@ import {
   iconThemeRegistryForDocument,
   renderManagerIconSvg,
   renderHostIconSvg,
+  renderHostSurfaceIconSvg,
   type HostIconState,
   type ManagerIconToken,
 } from '../icons.js'
@@ -38,9 +39,11 @@ export function HostIcon({ token, className, size, state, surfaceToken }: HostIc
         ...(size === undefined ? {} : { size }),
         ...(resolvedState === undefined ? {} : { state: resolvedState }),
       }
-      icon.replaceChildren((isManagerIconToken(token)
-        ? renderManagerIconSvg(document, token, options)
-        : renderHostIconSvg(document, token, options)).svg)
+      icon.replaceChildren((surfaceToken !== undefined
+        ? renderHostSurfaceIconSvg(document, surfaceToken, options)
+        : isManagerIconToken(token)
+          ? renderManagerIconSvg(document, token, options)
+          : renderHostIconSvg(document, token, options)).svg)
     }
     render()
     const unsubscribe = iconThemeRegistryForDocument(document)?.subscribe(render)
@@ -50,7 +53,7 @@ export function HostIcon({ token, className, size, state, surfaceToken }: HostIc
     const observer = new Observer(render)
     observer.observe(themeRoot, { attributes: true, attributeFilter: ['class', 'data-cordisx-app-theme', 'data-theme', 'data-color-theme', 'data-color-scheme'] })
     return () => { observer.disconnect(); unsubscribe?.() }
-  }, [resolvedState, size, token])
+  }, [resolvedState, size, surfaceToken, token])
   return <span ref={ref} className={['cordisx-host-icon', className].filter(Boolean).join(' ')}
     data-host-icon-key={token} {...(surfaceToken === undefined ? {} : { 'data-host-icon': surfaceToken })}
     aria-hidden="true" draggable={false}

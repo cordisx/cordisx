@@ -1,33 +1,6 @@
 {
   "name": "cordisx-monorepo",
-  "version": "0.1.0-beta.2",
   "private": true,
-  "type": "module",
-  "files": [
-    "packages/cli/dist"
-  ],
-  "exports": {
-    "./contracts": {
-      "types": "./packages/cli/dist/src/contracts.d.ts",
-      "default": "./packages/cli/dist/src/contracts.js"
-    },
-    "./react": {
-      "types": "./packages/cli/dist/src/react.d.ts",
-      "default": "./packages/cli/dist/src/react.js"
-    },
-    "./react/jsx-runtime": {
-      "types": "./packages/cli/dist/src/react-jsx-runtime.d.ts",
-      "default": "./packages/cli/dist/src/react-jsx-runtime.js"
-    },
-    "./react/jsx-dev-runtime": {
-      "types": "./packages/cli/dist/src/react-jsx-dev-runtime.d.ts",
-      "default": "./packages/cli/dist/src/react-jsx-dev-runtime.js"
-    },
-    "./ui": {
-      "types": "./packages/cli/dist/src/ui.d.ts",
-      "default": "./packages/cli/dist/src/ui.js"
-    }
-  },
   "workspaces": [
     "packages/*"
   ],
@@ -45,7 +18,6 @@
     "predev": "npm run prepare:dev",
     "precheckpoint:local-dev:app": "npm run build --workspace=cordisx",
     "precheckpoint:local-dev": "npm run build --workspace=cordisx",
-    "prepare": "npm run build --workspace=cordisx",
     "prepare:dev": "npm run prepare:dev --workspace=cordisx",
     "smoke": "node packages/cli/scripts/live-smoke.mjs",
     "smoke:isolated-app": "node packages/cli/scripts/run-isolated-app-smoke.mjs",
@@ -55,13 +27,7 @@
   "engines": {
     "node": ">=22.19"
   },
-  "dependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#5cff7e65c30216dba544e4836f4bd015a46bc53d",
-    "@deepseek-ai/cordis": "4.0.1",
-    "@types/react": "19.2.18",
-    "react": "19.2.8"
-  },
   "devDependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#5cff7e65c30216dba544e4836f4bd015a46bc53d"
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#3ad21adb5fa10c75aec88f7280c5b31f87e76dad"
   }
 }

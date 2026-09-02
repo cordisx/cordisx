@@ -9,6 +9,7 @@ licenses remain with their respective copyright holders:
 | `@deepseek-ai/schemastery` | `3.18.1` | MIT |
 | `@oneworks/avatar` | `1.0.0-rc.8` | MIT |
 | `@oneworks/avatar-react` | `1.0.0-rc.8` | MIT |
+| `@shikitor/core` | `1.0.2` | MIT |
 | `esbuild` | `^0.25.9` | MIT |
 | `intl-messageformat` | `11.2.14` | BSD-3-Clause |
 | `luna-console` | `1.3.6` | MIT |

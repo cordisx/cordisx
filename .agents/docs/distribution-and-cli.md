@@ -144,21 +144,6 @@ boundary:
 platform keychains, device identity, and other operating-system services may
 still be shared unless a future adapter can project them explicitly.
 
-### Development-only CDP injection timeout
-
-Normal renderer injection uses a 60-second timeout. Development and real
-showcase capture bundles can be substantially larger than release bundles and
-may opt into a longer process-local timeout with
-`CORDISX_CDP_INJECTION_TIMEOUT_MS`. The value is milliseconds and must be an
-integer from 5,000 through 600,000. Invalid values fail before injection rather
-than silently changing launcher behavior.
-
-Do not persist this override in the CordisX Home configuration and do not raise
-the product default to accommodate a capture. The homepage capture workflow
-uses `300000`; see
-[`showcase-capture-integration.md`](showcase-capture-integration.md) for the
-ownership and verification boundary.
-
 Version-1 configurations containing `"dataMode": "isolated"` remain accepted
 as a non-destructive alias for `host-isolated`. CordisX does not rewrite that
 file merely by reading it; later profile writes use the explicit spelling.
@@ -322,37 +307,6 @@ development collection; only the Host-private React Manager model contains
 them. Stopping `cordisx dev` cancels debounce/poll timers,
 waits for the active attempt, removes CDP installation state, and terminates
 only the launcher's owned Host process/profile resources.
-
-New independent plugins begin with the published `create-cordisx-plugin`
-scaffolder. The Agent infers a product slug, creates one normal project, and
-then launches its generated entry through `cordisx dev <entry>`. CordisX does
-not create or reuse a shared scratch plugin. Each generated project retains its
-own package metadata, README, localization, tests, and future distribution
-choices.
-
-Creation remains private and `UNLICENSED` by default. Publication metadata is
-requested only when the user asks to share or publish, and an already explicit
-publication request is not followed by a redundant confirmation.
-
-Before a direct-entry Host starts, CordisX deploys its bundled
-plugin-development Skill into the Host's effective `HOME` and projects two
-launcher-owned environment facts into the process: `CORDISX_DEV_ENTRY` is the
-absolute watched entry and `CORDISX_DEV_MODE` is `explicit-entry`. The Skill
-directs the in-session Codex agent to edit that exact scaffolded project and to
-use only versioned public contracts. Saving the entry follows the normal
-debounced candidate build, generation transaction, last-good retention, and
-cleanup described above; neither the agent nor the Skill starts or restarts
-CordisX.
-
-Direct-entry development may carry one launcher-authenticated, Host-private
-control grant for the maintained submit-celebration profile. The grant matches
-the stable local-development source and plugin id plus the exact
-`composer.toolbar.items` contribution/claim ids, `proxy` mode, priority, safe
-binding lists, and `cordisx.composer-submit-celebration/v1` profile. It does
-not authorize another contribution or another plugin. The normal Permission
-Broker remains the authority for every non-matching extension-point request.
-The grant is bundled only into the launcher-created renderer composition and
-is omitted from public runtime/control snapshots.
 
 Publishing is allowed only from merged `main` through
 `.github/workflows/release-beta.yml`, on a GitHub-hosted runner with OIDC and the

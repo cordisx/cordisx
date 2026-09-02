@@ -81,12 +81,14 @@ for (const [label, readme] of [
   ['root README', rootReadme],
   ['Chinese root README', rootReadmeZh],
 ]) {
-  assert(readme.includes('npx cordisx@beta'), `${label} must document the beta launcher`)
-  assert(readme.includes('startup-qa'), `${label} must link startup self-service`)
-  assert(readme.includes('.agents/docs/README.md'), `${label} must link the documentation index`)
-  assert(readme.includes('cordisx-ai-plugin-demo'), `${label} must show the AI-first plugin demo`)
+  assert(readme.includes('npx cordisx@beta setup'), `${label} must document beta setup`)
+  assert(readme.includes('npm create cordisx-plugin@beta'), `${label} must document beta plugin creation`)
+  assert(readme.includes('plugins: []'), `${label} must document the empty plugin default`)
+  assert(readme.includes('--data shared'), `${label} must document shared profiles`)
+  assert(readme.includes('--data host-isolated'), `${label} must document host-isolated profiles`)
+  assert(readme.includes('getting-started.md#npm-beta-installation'), `${label} must link the beta guide`)
+  assert(readme.includes('distribution-and-cli.md'), `${label} must link the CLI and distribution guide`)
 }
-assert(gettingStarted.includes('npx cordisx@beta setup'), 'getting started must document beta setup')
 assert(gettingStarted.includes('plugins: []'), 'getting started must document the empty plugin default')
 assert(gettingStarted.includes('--data shared'), 'getting started must document shared profiles')
 assert(gettingStarted.includes('--data host-isolated'), 'getting started must document host-isolated profiles')

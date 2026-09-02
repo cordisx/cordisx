@@ -1,6 +1,7 @@
 import type { CordisXJsonScalar } from '../contracts.js'
 
 const CORDISX_ROUTE_STATE_KEY = '__cordisxRouteV1'
+const CORDISX_ROUTE_DEEP_LINK_PREFIX = '#cordisx-route-v1='
 
 /** Host-private task/detail surfaces must not inherit a plugin route selection. */
 export function withoutCordisXRouteHistoryEntry(state: unknown): Record<string, unknown> {
@@ -11,6 +12,7 @@ export function withoutCordisXRouteHistoryEntry(state: unknown): Record<string, 
 const CORDISX_NATIVE_STATE_KEY = '__cordisxNativeStateV1'
 const CORDISX_ROUTE_RELOAD_KEY = '__cordisxRouteReloadV1'
 const CORDISX_BROWSER_STATE_KEY = '__cordisxBrowserStateV1'
+const CORDISX_BROWSER_MAX_INDEX_KEY = 'cordisx.playground.route-history-max-index/v1'
 
 export interface CodexRouteHistoryEntry {
   readonly schemaVersion: 1
@@ -25,6 +27,8 @@ export interface CodexRouteHistorySnapshot {
   readonly available: boolean
   readonly key?: string
   readonly index?: number
+  readonly canGoBack?: boolean
+  readonly canGoForward?: boolean
   readonly entry?: CodexRouteHistoryEntry
   readonly reason?: string
 }
@@ -34,6 +38,7 @@ export interface CodexRouteHistoryAdapter {
   subscribe(listener: () => void): () => void
   push(entry: CodexRouteHistoryEntry): CodexRouteHistorySnapshot
   replace(entry?: CodexRouteHistoryEntry): CodexRouteHistorySnapshot
+  deepLink(entry: CodexRouteHistoryEntry): string
   go(delta: -1 | 1): Promise<CodexRouteHistorySnapshot>
   dispose(): void
 }
@@ -73,6 +78,27 @@ function parseEntry(value: unknown): CodexRouteHistoryEntry | undefined {
     path: value.path,
     params,
   })
+}
+
+function routeDeepLink(view: Window, entry: CodexRouteHistoryEntry): string {
+  const url = new URL(view.location.href)
+  url.hash = `${CORDISX_ROUTE_DEEP_LINK_PREFIX.slice(1)}${encodeURIComponent(JSON.stringify(entry))}`
+  return url.href
+}
+
+function parseRouteDeepLink(view: Window): CodexRouteHistoryEntry | undefined {
+  if (!view.location.hash.startsWith(CORDISX_ROUTE_DEEP_LINK_PREFIX)) return undefined
+  try {
+    return parseEntry(JSON.parse(decodeURIComponent(view.location.hash.slice(CORDISX_ROUTE_DEEP_LINK_PREFIX.length))))
+  } catch {
+    return undefined
+  }
+}
+
+function urlWithoutRouteDeepLink(view: Window): string {
+  const url = new URL(view.location.href)
+  url.hash = ''
+  return url.href
 }
 
 interface CodexRouterLocation {
@@ -266,6 +292,10 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     return this.snapshot()
   }
 
+  deepLink(entry: CodexRouteHistoryEntry): string {
+    return routeDeepLink(this.view, entry)
+  }
+
   async go(delta: -1 | 1): Promise<CodexRouteHistorySnapshot> {
     const navigator = this.requireNavigator()
     this.write(() => navigator.go(delta))
@@ -418,6 +448,12 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
       this.writeCheckpoint(location, current)
       return
     }
+    const deepLink = parseRouteDeepLink(this.view)
+    if (deepLink !== undefined) {
+      this.view.history.replaceState(this.view.history.state, '', urlWithoutRouteDeepLink(this.view))
+      this.write(() => navigator.replace({ ...routerTarget(location), hash: '' }, stateWithEntry(location.state, deepLink)))
+      return
+    }
     const checkpoint = isRecord(this.view.history.state)
       ? parseReloadCheckpoint(this.view.history.state[CORDISX_ROUTE_RELOAD_KEY])
       : undefined
@@ -465,11 +501,16 @@ export class BrowserRouteHistoryAdapter implements CodexRouteHistoryAdapter {
   private readonly originalReplaceState: History['replaceState']
   private readonly wrappedPushState: History['pushState']
   private readonly wrappedReplaceState: History['replaceState']
-  private readonly onPopState = () => { if (!this.ownWrite) this.notify() }
+  private readonly onPopState = () => {
+    const index = this.currentIndex()
+    if (index !== undefined && index > this.maxIndex) this.updateMaxIndex(index)
+    if (!this.ownWrite) this.notify()
+  }
   private ownWrite = false
   private scheduled = false
   private disposed = false
   private installReason: string | undefined
+  private maxIndex = 0
 
   constructor(private readonly view: Window, initializeWhenMissing = false) {
     if (initializeWhenMissing && (!isRecord(view.history.state)
@@ -477,11 +518,26 @@ export class BrowserRouteHistoryAdapter implements CodexRouteHistoryAdapter {
       || !Number.isSafeInteger(view.history.state.idx))) {
       view.history.replaceState({ ...(isRecord(view.history.state) ? view.history.state : {}), key: 'default', idx: 0 }, '')
     }
+    const deepLink = parseRouteDeepLink(view)
+    if (deepLink !== undefined && isRecord(view.history.state)) {
+      view.history.replaceState({ ...view.history.state, [CORDISX_ROUTE_STATE_KEY]: deepLink }, '', urlWithoutRouteDeepLink(view))
+    }
+    this.maxIndex = this.restoredMaxIndex()
     this.originalPushState = view.history.pushState
     this.originalReplaceState = view.history.replaceState
     const adapter = this
     this.wrappedPushState = function pushState(data: unknown, unused: string, url?: string | URL | null): void {
-      adapter.originalPushState.call(this, data, unused, url)
+      const index = adapter.currentIndex()
+      const nextIndex = index === undefined ? undefined : index + 1
+      const nextData = nextIndex === undefined
+        ? data
+        : {
+            ...(isRecord(data) ? data : { [CORDISX_BROWSER_STATE_KEY]: data }),
+            key: nextKey(adapter.view),
+            idx: nextIndex,
+          }
+      adapter.originalPushState.call(this, nextData, unused, url)
+      if (nextIndex !== undefined) adapter.updateMaxIndex(nextIndex)
       if (!adapter.ownWrite) adapter.scheduleNotify()
     }
     this.wrappedReplaceState = function replaceState(data: unknown, unused: string, url?: string | URL | null): void {
@@ -517,6 +573,8 @@ export class BrowserRouteHistoryAdapter implements CodexRouteHistoryAdapter {
       available: true,
       key: state.key,
       index: state.idx as number,
+      canGoBack: (state.idx as number) > 0,
+      canGoForward: (state.idx as number) < this.maxIndex,
       ...(entry === undefined ? {} : { entry }),
     })
   }
@@ -536,6 +594,7 @@ export class BrowserRouteHistoryAdapter implements CodexRouteHistoryAdapter {
       [CORDISX_ROUTE_STATE_KEY]: entry,
     }
     this.write(() => this.originalPushState.call(this.view.history, next, '', pluginRouteBrowserUrl(this.view)))
+    this.updateMaxIndex(next.idx)
     return this.snapshot()
   }
 
@@ -546,6 +605,10 @@ export class BrowserRouteHistoryAdapter implements CodexRouteHistoryAdapter {
     else state[CORDISX_ROUTE_STATE_KEY] = entry
     this.write(() => this.originalReplaceState.call(this.view.history, state, ''))
     return this.snapshot()
+  }
+
+  deepLink(entry: CodexRouteHistoryEntry): string {
+    return routeDeepLink(this.view, entry)
   }
 
   go(delta: -1 | 1): Promise<CodexRouteHistorySnapshot> {
@@ -589,6 +652,28 @@ export class BrowserRouteHistoryAdapter implements CodexRouteHistoryAdapter {
     const state: unknown = this.view.history.state
     if (!isRecord(state)) throw new Error('Codex React Router history state is unavailable')
     return state
+  }
+
+  private currentIndex(): number | undefined {
+    const state: unknown = this.view.history.state
+    return isRecord(state) && Number.isSafeInteger(state.idx) && (state.idx as number) >= 0
+      ? state.idx as number
+      : undefined
+  }
+
+  private restoredMaxIndex(): number {
+    const current = this.currentIndex() ?? 0
+    try {
+      const stored = Number.parseInt(this.view.sessionStorage.getItem(CORDISX_BROWSER_MAX_INDEX_KEY) ?? '', 10)
+      return Number.isSafeInteger(stored) && stored >= current ? stored : current
+    } catch {
+      return current
+    }
+  }
+
+  private updateMaxIndex(index: number): void {
+    this.maxIndex = index
+    try { this.view.sessionStorage.setItem(CORDISX_BROWSER_MAX_INDEX_KEY, String(index)) } catch { /* optional Playground session metadata */ }
   }
 
   private write(operation: () => void): void {

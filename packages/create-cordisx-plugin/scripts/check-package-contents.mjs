@@ -26,7 +26,6 @@ for (const required of [
   'README.md',
   'dist/cli.js',
   'template/README.md',
-  'template/README.zh-Hans.md',
   'template/_gitignore',
   'template/package.json',
   'template/src/{{packageName}}.tsx',

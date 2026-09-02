@@ -1,4 +1,4 @@
-import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -11,21 +11,6 @@ function assertManagedHomeRoot(homeRoot) {
     throw new Error('isolated smoke home cleanup refused an unmanaged path')
   }
   return resolved
-}
-
-async function makeManagedTreeWritable(target) {
-  if (process.platform === 'win32') return
-  const metadata = await lstat(target)
-  if (metadata.isSymbolicLink()) return
-  if (!metadata.isDirectory()) {
-    await chmod(target, 0o600)
-    return
-  }
-  await chmod(target, 0o700)
-  for (const entry of await readdir(target, { withFileTypes: true })) {
-    if (entry.isSymbolicLink()) continue
-    await makeManagedTreeWritable(path.join(target, entry.name))
-  }
 }
 
 /** Prepare the only temporary HOME this runner is authorized to delete. */
@@ -58,7 +43,6 @@ export async function prepareIsolatedSmokeHome(homeConfig) {
 export async function cleanupIsolatedSmokeHome(homeRoot) {
   if (homeRoot === undefined) return { homeRoot: null, homeRootRemoved: true, homeRootExists: false }
   const managedRoot = assertManagedHomeRoot(homeRoot)
-  await makeManagedTreeWritable(managedRoot)
   await rm(managedRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   const exists = await access(managedRoot).then(() => true, error => {
     if (error?.code === 'ENOENT') return false

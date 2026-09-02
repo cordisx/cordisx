@@ -1,6 +1,6 @@
 import type { CordisXIconToken, CordisXJsonValue } from '../../../contracts.js'
 import { cloneAgentAvatarRef, type AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
-import type { AgentDefinitionIdentity, AgentDetailReference } from '@cordisx/protocol/agents/v1'
+import type { AgentDefinitionIdentity, AgentLoopBindingIdentity, AgentLoopTaskDetailsUrl } from '@cordisx/protocol/agent-loop/v3'
 import { CORDISX_HOST_ICON_TOKENS } from '../../surfaces.js'
 import { immutableSnapshot, LOCAL_ID_PATTERN, REFERENCE_PATTERN } from '../../validation.js'
 import { validateAgentLoopTaskDetailsUrl } from '../AgentTaskDetailsNavigator.js'
@@ -37,7 +37,7 @@ export interface AgentConversationActiveRun {
   readonly memberId: string
   readonly runId: string
   readonly lifecycle: { readonly phase: 'active' | 'running' | 'waiting' | 'attention'; readonly updatedAt?: string }
-  readonly details?: AgentDetailReference
+  readonly detailsUrl: AgentLoopTaskDetailsUrl
 }
 
 export interface AgentConversationReaction {
@@ -59,11 +59,11 @@ export interface AgentConversationMessage {
   readonly runState: AgentConversationRunState
   readonly ariaLive: 'off' | 'polite'
   readonly actions: readonly AgentConversationAction[]
-  readonly source?: 'session-event' | 'chatroom-acknowledgement'
+  readonly source?: 'agent-loop' | 'chatroom-acknowledgement'
   readonly reactions?: readonly AgentConversationReaction[]
   readonly semantic?:
-    | { readonly purpose: 'conversation'; readonly correlation?: { readonly requestMessageId: string } }
-    | { readonly purpose: 'member-self-introduction'; readonly correlation: { readonly requestMessageId: string }; readonly participantId: string; readonly memberId: string; readonly sessionId: string }
+    | { readonly purpose: 'conversation'; readonly causation?: { readonly operationId: string } }
+    | { readonly purpose: 'member-self-introduction'; readonly causation: { readonly operationId: string }; readonly participantId: string; readonly memberId: string; readonly runId: string; readonly binding: AgentLoopBindingIdentity; readonly turn: string }
     | { readonly purpose: 'chatroom-acknowledgement' }
 }
 
@@ -96,6 +96,7 @@ export interface AgentConversationApproval {
   readonly participantId: string
   readonly memberId: string
   readonly runId: string
+  readonly binding: AgentLoopBindingIdentity
   readonly turn: string
   readonly approvalId: string
   readonly approvalKind: 'command' | 'file-change' | 'external-action' | 'other'
@@ -247,7 +248,7 @@ function assertSelection(selection: AgentConversationSelection): void {
     assertOpaque(run.runId, `selection.activeRuns[${index}].runId`)
     if (!participantIds.has(run.participantId)) throw new Error(`selection.activeRuns[${index}] references an unknown participant`)
     if (!['active', 'running', 'waiting', 'attention'].includes(run.lifecycle.phase)) throw new Error(`selection.activeRuns[${index}].lifecycle is invalid`)
-    if (run.details !== undefined) validateAgentLoopTaskDetailsUrl(run.details)
+    validateAgentLoopTaskDetailsUrl(run.detailsUrl)
     const key = JSON.stringify([run.participantId, run.memberId, run.runId])
     if (runKeys.has(key)) throw new Error('selection.activeRuns contains a duplicate association')
     runKeys.add(key)
@@ -263,7 +264,7 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
     assertKnownKeys(entry, entry.kind === 'message'
       ? ['kind', 'itemId', 'messageId', 'sequence', 'authorId', 'body', 'timestamp', 'deliveryState', 'runState', 'ariaLive', 'actions', 'source', 'reactions', 'semantic']
       : entry.kind === 'approval'
-        ? ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'turn', 'approvalId', 'approvalKind', 'state', 'actions', 'rationale', 'diagnostic']
+        ? ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'binding', 'turn', 'approvalId', 'approvalKind', 'state', 'actions', 'rationale', 'diagnostic']
       : entry.kind === 'member-presence'
         ? ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'state', 'retryable', 'diagnostic', 'retry']
         : ['kind', 'itemId', 'sequence', 'label', 'state', 'ariaLive'], `entries[${index}]`)
@@ -292,6 +293,7 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
       assertOpaque(entry.participantId, `entries[${index}].participantId`)
       assertOpaque(entry.memberId, `entries[${index}].memberId`)
       assertOpaque(entry.runId, `entries[${index}].runId`)
+      assertAgentLoopHandle(entry.binding.bindingId, `entries[${index}].binding.bindingId`)
       assertAgentLoopHandle(entry.turn, `entries[${index}].turn`)
       assertAgentLoopHandle(entry.approvalId, `entries[${index}].approvalId`)
       if (!participantIds.has(entry.participantId)) throw new Error(`entries[${index}] approval association is invalid`)
@@ -315,15 +317,16 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
     if (!DELIVERY_STATES.has(entry.deliveryState)) throw new Error(`entries[${index}].deliveryState is invalid`)
     if (!RUN_STATES.has(entry.runState)) throw new Error(`entries[${index}].runState is invalid`)
     assertActions(entry.actions, `entries[${index}].actions`, 8)
-    if (entry.source !== undefined && !['session-event', 'chatroom-acknowledgement'].includes(entry.source)) throw new Error(`entries[${index}].source is invalid`)
+    if (entry.source !== undefined && !['agent-loop', 'chatroom-acknowledgement'].includes(entry.source)) throw new Error(`entries[${index}].source is invalid`)
     if (entry.semantic !== undefined) {
       if (!['conversation', 'member-self-introduction', 'chatroom-acknowledgement'].includes(entry.semantic.purpose)) throw new Error(`entries[${index}].semantic is invalid`)
       if (entry.semantic.purpose === 'member-self-introduction') {
-        assertOpaque(entry.semantic.correlation.requestMessageId, `entries[${index}].semantic.correlation.requestMessageId`)
+        assertAgentLoopHandle(entry.semantic.causation.operationId, `entries[${index}].semantic.causation.operationId`)
         assertOpaque(entry.semantic.participantId, `entries[${index}].semantic.participantId`)
         assertOpaque(entry.semantic.memberId, `entries[${index}].semantic.memberId`)
-        assertOpaque(entry.semantic.sessionId, `entries[${index}].semantic.sessionId`)
-        if (entry.source !== 'session-event' || entry.authorId !== entry.semantic.participantId) throw new Error(`entries[${index}] self-introduction association is invalid`)
+        assertOpaque(entry.semantic.runId, `entries[${index}].semantic.runId`)
+        assertAgentLoopHandle(entry.semantic.turn, `entries[${index}].semantic.turn`)
+        if (entry.source !== 'agent-loop' || entry.authorId !== entry.semantic.participantId) throw new Error(`entries[${index}] self-introduction association is invalid`)
       }
     }
     const reactionIds = new Set<string>()

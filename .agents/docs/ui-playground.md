@@ -5,12 +5,21 @@ plugin developers. The page uses React Fast Refresh and native ESM HMR for the
 Host shell and React component tree. It runs an independent Cordis renderer
 generation and composes the configured plugin modules with the same runtime,
 Manager, HostForm, theme projection, icon, dialog, and lifecycle source used by
-the production renderer. It does not start Codex Desktop, Chromium, an
-app-server, or a ChatGPT browser profile, and needs no authenticated session.
-The development composition injects the same Agent/Session Runtime authority
-with its deterministic Host transport. This produces only bounded development
-facts and does not start a provider, model, external process, network request,
-or login flow.
+the production renderer. It does not start Codex Desktop, Chromium, or a
+ChatGPT browser profile. By default it starts no app-server and needs no
+authenticated session. A composition may explicitly set
+`codex.agentLoopBackend` to `local-cli`; that opt-in starts an independent,
+launcher-owned app-server using the existing Codex CLI login solely behind the
+normal provider/AgentLoop bridge.
+
+For deterministic consumer development, a composition may instead set
+`codex.agentLoopBackend` to `mock`. This is accepted only when the renderer is
+built as the explicit UI Playground. The visible `Mock / Simulator` task list
+and exact task detail page are Host-owned debug surfaces, separate from Recent
+tasks and plugin content. They show redacted structured execution evidence and
+never expose opaque bindings, provider handles, paths, credentials, or tokens.
+Reset creates a new in-memory Simulator generation with deterministic counters.
+Production bundle construction rejects this backend.
 
 Vite is a development transport, not a second renderer implementation. The
 production `app://` path still uses `buildRendererBundle` and an injected,

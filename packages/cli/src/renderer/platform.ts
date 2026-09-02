@@ -1,5 +1,4 @@
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'
 import {
   CORDISX_PLATFORM_CAPABILITIES,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
@@ -739,7 +738,7 @@ function manifestDeclarationsV2(
 ): readonly CordisXCapabilityDeclarationV2[] {
   if (manifest.schemaVersion === 4) return manifest.capabilities
   if (manifest.schemaVersion === 5) return manifest.capabilities.filter(item => (
-    !isHostDomPermissionCapability(item.name) && !isAgentRuntimePermission(item.name)
+    !isHostDomPermissionCapability(item.name)
   )) as readonly CordisXCapabilityDeclarationV2[]
   return Object.freeze(manifest.capabilities.map(declaration => Object.freeze({
     name: declaration.name as CordisXPermissionCapabilityV2,
@@ -752,22 +751,8 @@ function manifestHostDomDeclarationsV4(
   manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5,
 ): readonly CordisXCapabilityDeclarationV4[] {
   return manifest.schemaVersion === 5
-    ? manifest.capabilities.filter(item => isHostDomPermissionCapability(item.name)) as readonly CordisXCapabilityDeclarationV4[]
+    ? manifest.capabilities.filter(item => isHostDomPermissionCapability(item.name))
     : Object.freeze([])
-}
-
-function isAgentRuntimePermission(value: string): boolean {
-  return value.startsWith('agents.') || value.startsWith('sessions.') || value.startsWith('approvals.')
-}
-
-/** The legacy v4 review UI has no Agent/Session vocabulary; those declarations
- * are evaluated by the Host-private exact Session lease authority instead. */
-function permissionPlanDeclarations(
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5,
-): readonly CordisXCapabilityDeclarationV4[] {
-  return (manifest.schemaVersion === 5
-    ? manifest.capabilities.filter(item => !isAgentRuntimePermission(item.name))
-    : manifest.capabilities) as readonly CordisXCapabilityDeclarationV4[]
 }
 
 interface AuthorizationGrant {
@@ -823,69 +808,6 @@ function isoNow(now: () => Date): string {
   return now().toISOString()
 }
 
-/** Host-only Agent/Session authorization inputs. They are never projected to plugins. */
-export type AgentRuntimeConnection = Readonly<{ connectionId: string; generation: number }>
-export type AgentRuntimeRouteScope = Readonly<{
-  kind: 'host-route'; active: true; owner: { source: string; pluginId: string }; routeId: string
-  routeInstanceId: string; path: string; params: Readonly<{ sessionId: string }>
-}>
-export type AgentRuntimeScopeSource =
-  | Readonly<{ kind: 'host-route'; routeInstanceId: string; routeId: string; path: string; params: Readonly<{ sessionId: string }> }>
-  | Readonly<{ kind: 'host-create'; reservedSessionId: string }>
-export type AgentRuntimePermissionFence = Readonly<{
-  identity: CordisXPluginIdentity; sessionId: string
-  code: 'route-replaced' | 'plugin-generation-replaced' | 'permission-revoked' | 'connection-replaced'
-}>
-export type AgentRuntimeLease = Readonly<{ leaseId: string; sessionId: string }>
-export type DevelopmentAgentRuntimePolicySeedAuthority = object
-
-export type AgentRuntimeAuthorization = Readonly<{
-  authorized: boolean
-  lease?: AgentRuntimeLease
-}>
-
-interface AgentRuntimeLeaseRecord {
-  readonly lease: AgentRuntimeLease
-  readonly identity: CordisXPluginIdentity
-  readonly capability: AgentRuntimeCapability
-  readonly connection: AgentRuntimeConnection
-  readonly routeInstanceId?: string
-  readonly moduleGeneration?: string
-}
-
-function validAgentRuntimeOpaqueId(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= 512
-}
-function validAgentRuntimeSessionId(value: unknown): value is string {
-  return validAgentRuntimeOpaqueId(value) && value !== '*'
-}
-function validAgentRuntimeConnection(value: AgentRuntimeConnection): boolean {
-  return validAgentRuntimeOpaqueId(value.connectionId) && Number.isSafeInteger(value.generation) && value.generation >= 0
-}
-function validAgentRuntimeRoute(value: AgentRuntimeRouteScope): boolean {
-  return value.kind === 'host-route' && value.active === true
-    && validAgentRuntimeOpaqueId(value.owner.source) && validAgentRuntimeOpaqueId(value.owner.pluginId)
-    && validAgentRuntimeOpaqueId(value.routeId) && validAgentRuntimeOpaqueId(value.routeInstanceId)
-    && validAgentRuntimeOpaqueId(value.path) && validAgentRuntimeSessionId(value.params.sessionId)
-}
-function agentRuntimeIdentityKey(value: Readonly<{ source: string; pluginId: string }>): string {
-  return `${value.source}\u0000${value.pluginId}`
-}
-function sameAgentRuntimeConnection(left: AgentRuntimeConnection | undefined, right: AgentRuntimeConnection | undefined): boolean {
-  return left?.connectionId === right?.connectionId && left?.generation === right?.generation
-}
-function sameAgentRuntimeRoute(left: AgentRuntimeRouteScope, right: AgentRuntimeRouteScope): boolean {
-  return left.owner.source === right.owner.source && left.owner.pluginId === right.owner.pluginId
-    && left.routeId === right.routeId && left.routeInstanceId === right.routeInstanceId
-    && left.path === right.path && left.params.sessionId === right.params.sessionId
-}
-function isHostRouteSessionScopeBinding(value: unknown): value is Readonly<{ kind: 'host-route-param'; routeId: string; param: string }> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    && (value as { kind?: unknown }).kind === 'host-route-param'
-    && typeof (value as { routeId?: unknown }).routeId === 'string'
-    && typeof (value as { param?: unknown }).param === 'string'
-}
-
 export class PermissionBroker {
   private readonly registrations = new Map<string, Registration>()
   /** Launcher-fed, renderer-ephemeral exact projections; never a feed/root/store authority. */
@@ -917,11 +839,6 @@ export class PermissionBroker {
   }>>()
   private readonly catalog = new CapabilityRiskCatalog()
   private readonly listeners = new Set<() => void>()
-  private readonly agentRuntimeRoutes = new Map<string, AgentRuntimeRouteScope>()
-  private readonly agentRuntimeLeases = new Map<string, AgentRuntimeLeaseRecord>()
-  private readonly agentRuntimeFenceListeners = new Set<(fence: AgentRuntimePermissionFence) => void>()
-  private readonly developmentAgentRuntimeSeeds = new WeakSet<object>()
-  private agentRuntimeConnection: AgentRuntimeConnection | undefined
   private readonly migrationTasks: Promise<void>[] = []
   private domPolicyCommitTail: Promise<void> = Promise.resolve()
   private changeBatchDepth = 0
@@ -971,7 +888,7 @@ export class PermissionBroker {
                   reason: item.rationale?.description ?? {
                     namespace: 'permission',
                     key: `permission.${item.name}.legacy-reason`,
-                    fallback: this.catalog.get(item.name as CordisXPermissionCapabilityV4).presentation.description.fallback,
+                    fallback: this.catalog.get(item.name).presentation.description.fallback,
                   },
                   scope: item.scope as CordisXCapabilityScope,
                 } as CordisXCapabilityDeclaration] as const]
@@ -1020,7 +937,6 @@ export class PermissionBroker {
     if (this.visibility?.visible(generation) !== false) this.changed()
     return () => {
       if (this.registrations.get(key)?.token !== registration.token) return
-      this.fenceAgentRuntime(identity, 'plugin-generation-replaced')
       this.registrations.delete(key)
       this.clearDomCertificationTimer(key)
       const identityKey = platformIdentityKey(identity)
@@ -1034,197 +950,9 @@ export class PermissionBroker {
     }
   }
 
-  /** Installs the current opaque transport generation. Replacing it fences every lease. */
-  replaceAgentRuntimeConnection(connection: AgentRuntimeConnection): void {
-    if (!validAgentRuntimeConnection(connection)) throw new Error('Agent Session runtime connection is invalid')
-    if (sameAgentRuntimeConnection(this.agentRuntimeConnection, connection)) return
-    this.agentRuntimeConnection = Object.freeze({ ...connection })
-    this.fenceAgentRuntime(undefined, 'connection-replaced')
-  }
-
-  clearAgentRuntimeConnection(): void {
-    if (this.agentRuntimeConnection === undefined) return
-    this.agentRuntimeConnection = undefined
-    this.fenceAgentRuntime(undefined, 'connection-replaced')
-  }
-
-  /** Host Router only: records the active same-plugin route projection. */
-  replaceAgentRuntimeRouteScope(scope: AgentRuntimeRouteScope): void {
-    if (!validAgentRuntimeRoute(scope)) throw new Error('Agent Session runtime route scope is invalid')
-    const key = agentRuntimeIdentityKey(scope.owner)
-    const previous = this.agentRuntimeRoutes.get(key)
-    const next = Object.freeze({
-      ...scope,
-      owner: Object.freeze({ ...scope.owner }),
-      params: Object.freeze({ ...scope.params }),
-    })
-    if (previous !== undefined && !sameAgentRuntimeRoute(previous, next)) {
-      this.agentRuntimeRoutes.set(key, next)
-      this.fenceAgentRuntime({ source: previous.owner.source, id: previous.owner.pluginId }, 'route-replaced')
-      return
-    }
-    this.agentRuntimeRoutes.set(key, next)
-  }
-
-  revokeAgentRuntimeRoute(routeInstanceId: string): void {
-    if (!validAgentRuntimeOpaqueId(routeInstanceId)) return
-    for (const [key, route] of this.agentRuntimeRoutes) {
-      if (route.routeInstanceId !== routeInstanceId) continue
-      this.agentRuntimeRoutes.delete(key)
-      this.fenceAgentRuntime({ source: route.owner.source, id: route.owner.pluginId }, 'route-replaced')
-    }
-  }
-
-  /** Returns an exact revocable lease only after a registered v5 declaration and exact policy match. */
-  async authorizeAgentRuntime(input: Readonly<{
-    identity: CordisXPluginIdentity
-    capability: AgentRuntimeCapability
-    sessionId: string
-    scopeSource: AgentRuntimeScopeSource
-    connection: AgentRuntimeConnection
-    view?: PluginGenerationView
-  }>): Promise<AgentRuntimeAuthorization> {
-    const registration = this.registration(input.identity, input.view)
-    if (registration === undefined || !validAgentRuntimeSessionId(input.sessionId)
-      || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-      || registration.manifest.schemaVersion !== 5) return Object.freeze({ authorized: false })
-    const declaration = registration.manifest.capabilities.find(item => item.name === input.capability)
-    if (declaration === undefined) return Object.freeze({ authorized: false })
-    if (!this.validAgentRuntimeScopeSource(registration, input, declaration.scope.sessionIds)) return Object.freeze({ authorized: false })
-    const policyKey = this.agentRuntimePolicyKey(registration, input.capability, input.sessionId)
-    const policy = this.policyRecords.get(policyKey)
-    if (!isPermissionPolicyRecordV4(policy) || policy.policy !== 'allow-persistent') return Object.freeze({ authorized: false })
-    const existing = [...this.agentRuntimeLeases.values()].find(item => (
-      item.identity.source === input.identity.source && item.identity.id === input.identity.id
-      && item.capability === input.capability && item.lease.sessionId === input.sessionId
-      && sameAgentRuntimeConnection(item.connection, input.connection)
-      && item.routeInstanceId === (input.scopeSource.kind === 'host-route' ? input.scopeSource.routeInstanceId : undefined)
-      && item.moduleGeneration === registration.generation.moduleGeneration
-    ))
-    if (existing !== undefined) return Object.freeze({ authorized: true, lease: existing.lease })
-    const lease = Object.freeze({ leaseId: crypto.randomUUID(), sessionId: input.sessionId })
-    this.agentRuntimeLeases.set(lease.leaseId, Object.freeze({
-      lease, identity: Object.freeze({ ...input.identity }), capability: input.capability,
-      connection: Object.freeze({ ...input.connection }),
-      ...(input.scopeSource.kind === 'host-route' ? { routeInstanceId: input.scopeSource.routeInstanceId } : {}),
-      ...(registration.generation.moduleGeneration === undefined ? {} : { moduleGeneration: registration.generation.moduleGeneration }),
-    }))
-    return Object.freeze({ authorized: true, lease })
-  }
-
-  isAgentRuntimeLeaseActive(identity: CordisXPluginIdentity, leaseId: string, view?: PluginGenerationView): boolean {
-    const lease = this.agentRuntimeLeases.get(leaseId)
-    const registration = this.registration(identity, view)
-    return lease !== undefined && registration !== undefined
-      && lease.identity.source === identity.source && lease.identity.id === identity.id
-      && lease.moduleGeneration === registration.generation.moduleGeneration
-      && sameAgentRuntimeConnection(lease.connection, this.agentRuntimeConnection)
-      && (lease.routeInstanceId === undefined || [...this.agentRuntimeRoutes.values()].some(route => (
-        route.routeInstanceId === lease.routeInstanceId && route.params.sessionId === lease.lease.sessionId
-        && route.owner.source === identity.source && route.owner.pluginId === identity.id
-      )))
-  }
-
-  subscribeAgentRuntimePermissionFences(listener: (fence: AgentRuntimePermissionFence) => void): () => void {
-    this.agentRuntimeFenceListeners.add(listener)
-    return () => this.agentRuntimeFenceListeners.delete(listener)
-  }
-
-  /** Development composition receives this opaque authority; production does not create one. */
-  createDevelopmentAgentRuntimePolicySeedAuthority(): DevelopmentAgentRuntimePolicySeedAuthority {
-    const authority = Object.freeze({})
-    this.developmentAgentRuntimeSeeds.add(authority)
-    return authority
-  }
-
-  async seedAgentRuntimePolicies(
-    authority: DevelopmentAgentRuntimePolicySeedAuthority,
-    identity: CordisXPluginIdentity,
-    entries: readonly Readonly<{ capability: AgentRuntimeCapability; sessionIds: readonly [string, ...string[]]; policy: CordisXPermissionPolicyV2 }>[],
-  ): Promise<void> {
-    if (!this.developmentAgentRuntimeSeeds.has(authority)) throw new Error('Agent Session policy seed authority is invalid')
-    const records = entries.map(entry => {
-      if (entry.sessionIds.length !== 1 || !validAgentRuntimeSessionId(entry.sessionIds[0])) throw new Error('Agent Session seed requires one exact SessionId')
-      if (!isAgentRuntimePermission(entry.capability)) throw new Error('Agent Session seed capability is unsupported')
-      return this.agentRuntimePolicyRecordForIdentity(identity, entry.capability, entry.sessionIds[0]!, entry.policy)
-    })
-    for (const record of records) this.policyRecords.set(permissionRecordKeyV4(record), record)
-    this.fenceAgentRuntime(identity, 'permission-revoked')
-    this.changed()
-    await this.persistV4(records)
-  }
-
   private registration(identity: CordisXPluginIdentity, view?: PluginGenerationView): Registration | undefined {
     return [...this.registrations.values()].find(item => platformIdentityKey(item.identity) === platformIdentityKey(identity)
       && (this.visibility?.visible(item.generation, view) ?? true))
-  }
-
-  private validAgentRuntimeScopeSource(
-    registration: Registration,
-    input: Readonly<{ sessionId: string; capability: AgentRuntimeCapability; scopeSource: AgentRuntimeScopeSource }>,
-    declaredScope: unknown,
-  ): boolean {
-    if (input.scopeSource.kind === 'host-create') {
-      return input.capability === 'agents.create'
-        && input.scopeSource.reservedSessionId === input.sessionId
-        && declaredScope === undefined
-    }
-    if (Array.isArray(declaredScope)) return declaredScope.length === 1 && declaredScope[0] === input.sessionId
-    const route = this.agentRuntimeRoutes.get(agentRuntimeIdentityKey({ source: registration.identity.source, pluginId: registration.identity.id }))
-    const source = input.scopeSource
-    return route !== undefined
-      && route.routeInstanceId === source.routeInstanceId
-      && route.routeId === source.routeId
-      && route.path === source.path
-      && route.params.sessionId === source.params.sessionId
-      && route.params.sessionId === input.sessionId
-      && isHostRouteSessionScopeBinding(declaredScope)
-      && declaredScope.routeId === route.routeId
-      && declaredScope.param === 'sessionId'
-  }
-
-  private agentRuntimePolicyRecord(
-    registration: Registration,
-    capability: AgentRuntimeCapability,
-    sessionId: string,
-    policy: CordisXPermissionPolicyV2,
-  ): CordisXPermissionPolicyRecordV4 {
-    return this.agentRuntimePolicyRecordForIdentity(registration.identity, capability, sessionId, policy)
-  }
-
-  private agentRuntimePolicyRecordForIdentity(
-    identity: CordisXPluginIdentity,
-    capability: AgentRuntimeCapability,
-    sessionId: string,
-    policy: CordisXPermissionPolicyV2,
-  ): CordisXPermissionPolicyRecordV4 {
-    return normalizePermissionPolicyRecordV4({
-      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V4,
-      schemaVersion: 4,
-      key: {
-        profileId: this.profileId,
-        identity: { source: identity.source, pluginId: identity.id },
-        capability,
-        scope: { sessionIds: [sessionId] },
-        securityFingerprint: `sha256:${sha256Hex(JSON.stringify({ capability, sessionId }))}`,
-      },
-      policy,
-    })
-  }
-
-  private agentRuntimePolicyKey(registration: Registration, capability: AgentRuntimeCapability, sessionId: string): string {
-    return permissionRecordKeyV4(this.agentRuntimePolicyRecord(registration, capability, sessionId, 'ask'))
-  }
-
-  private fenceAgentRuntime(identity: CordisXPluginIdentity | undefined, code: AgentRuntimePermissionFence['code']): void {
-    for (const [leaseId, lease] of this.agentRuntimeLeases) {
-      if (identity !== undefined && (lease.identity.source !== identity.source || lease.identity.id !== identity.id)) continue
-      this.agentRuntimeLeases.delete(leaseId)
-      const fence = Object.freeze({ identity: lease.identity, sessionId: lease.lease.sessionId, code })
-      for (const listener of this.agentRuntimeFenceListeners) {
-        try { listener(fence) } catch { /* fences are authoritative; observers are isolated */ }
-      }
-    }
   }
 
   private isRegistered(registration: Registration): boolean {
@@ -2570,7 +2298,7 @@ export class PermissionBroker {
       profileId: this.profileId,
       identity: { source: identity.source, pluginId: identity.id },
       binding: operationBinding,
-      declarations: permissionPlanDeclarations(registration.manifest),
+      declarations: registration.manifest.capabilities,
       policiesV2: [...this.policyRecords.values()].filter(isPermissionPolicyRecordV2),
       policiesV4: [...this.policyRecords.values()].filter(isPermissionPolicyRecordV4),
       ...(certification === undefined ? {} : { certification }),
@@ -3408,7 +3136,7 @@ export class PermissionBroker {
             namespace: 'permission',
             ...this.catalog.get(capability).presentation.description,
           }),
-          scope: key.scope as CordisXPermissionScopeV4,
+          scope: key.scope,
           fingerprint: key.securityFingerprint,
           policy,
           ...(audit.lastUsedAt === undefined ? {} : { lastUsedAt: audit.lastUsedAt }),
@@ -3432,7 +3160,6 @@ export class PermissionBroker {
   }
 
   dispose(): void {
-    this.clearAgentRuntimeConnection()
     this.registrations.clear()
     this.certifiedProjections.clear()
     this.certifiedProjectionRevision = -1
@@ -3451,9 +3178,6 @@ export class PermissionBroker {
     }
     this.hostDomPromptPlans.clear()
     this.hostDomPolicyRevisions.clear()
-    this.agentRuntimeRoutes.clear()
-    this.agentRuntimeLeases.clear()
-    this.agentRuntimeFenceListeners.clear()
     this.pendingDomReviews.clear()
     for (const timer of this.domCertificationTimers.values()) clearTimeout(timer)
     this.domCertificationTimers.clear()

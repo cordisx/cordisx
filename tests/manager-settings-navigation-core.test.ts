@@ -1,10 +1,9 @@
 import { JSDOM } from 'jsdom'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_ROUTE_SCHEMA_V2,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
-  CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V2,
   type CordisXLocalizationSeat,
 } from '../packages/cli/src/contracts.js'
 import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
@@ -49,8 +48,6 @@ function fakeI18n(): CordisXI18nService {
       return { text: message.fallback ?? message.key, namespace: 'demo', key: message.key }
     },
     clearDiagnosticSite() {},
-    subscribeInternal() { return () => {} },
-    getSnapshot() { return { locale: 'en', direction: 'ltr', version: 0 } },
     seatFor(owner: string, namespace: string | undefined, own: LocalizationEffectOwner): CordisXLocalizationSeat {
       return {
         namespace: `${owner}:${namespace ?? owner}`,
@@ -166,9 +163,6 @@ describe('Manager Settings navigation core', () => {
     expect(navigation.managerSettingsNavigationRoute('demo', 'ready')).toMatchObject({ state: 'pending' })
 
     const dom = new JSDOM('<body><main id="manager"></main></body>')
-    vi.stubGlobal('window', dom.window)
-    vi.stubGlobal('document', dom.window.document)
-    vi.stubGlobal('navigator', dom.window.navigator)
     const controller = new FakeOutlet(dom.window.document.getElementById('manager')!)
     outlets.declare({
       schemaVersion: 1, id: 'manager.content', authority: 'host-adapter', scope: 'manager',
@@ -223,12 +217,12 @@ describe('Manager Settings navigation core', () => {
     const configuration = { id: 'configuration', params: { accountId: 'account-1' } } as const
     const logs = { id: 'logs', params: { accountId: 'account-1' } } as const
     navigation.managerContent.registerRecordTitles('demo', [{ id: 'account-1', title: { key: 'account', fallback: 'Ada' } }])
-    const disposeConfigurationNavigation = navigation.managerContent.register('demo', {
+    navigation.managerContent.register('demo', {
       $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1, schemaVersion: 1, id: 'account-configuration', route: configuration,
       parentRoute: { id: 'ready' }, header: { title: { kind: 'record', recordIdParam: 'accountId', fallback: { key: 'account.fallback', fallback: 'Account' } } },
       tabs: [{ id: 'configuration', route: configuration }, { id: 'logs', route: logs }],
     })
-    const disposeLogsNavigation = navigation.managerContent.register('demo', {
+    navigation.managerContent.register('demo', {
       $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1, schemaVersion: 1, id: 'account-logs', route: logs,
       parentRoute: { id: 'ready' }, header: { title: { kind: 'record', recordIdParam: 'accountId', fallback: { key: 'account.fallback', fallback: 'Account' } } },
       tabs: [{ id: 'configuration', route: configuration }],
@@ -239,43 +233,6 @@ describe('Manager Settings navigation core', () => {
       expect.objectContaining({ id: 'configuration', label: 'Configuration', icon: 'host:layers', active: true }),
     ])
     expect(navigation.managerContentPresentation('demo', logs)).toBeUndefined()
-    disposeLogsNavigation()
-    disposeConfigurationNavigation()
-
-    const mixedProjection = {
-      declarations: [{
-        $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V2, schemaVersion: 2 as const, id: 'account-configuration-v2', route: configuration,
-        parentRoute: { id: 'ready' }, header: { title: { kind: 'record' as const, recordIdParam: 'accountId', fallback: { key: 'account.fallback', fallback: 'Account' } } },
-        tabs: [
-          { id: 'configuration', route: configuration, label: { key: 'tab.rooms', fallback: 'Rooms' } },
-          { id: 'logs', route: logs, label: { key: 'tab.activity', fallback: 'Activity' } },
-        ],
-      }, {
-        $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1, schemaVersion: 1 as const, id: 'account-logs-v1', route: logs,
-        parentRoute: { id: 'ready' }, header: { title: { kind: 'record' as const, recordIdParam: 'accountId', fallback: { key: 'account.fallback', fallback: 'Account' } } },
-        tabs: [{ id: 'configuration', route: configuration }, { id: 'logs', route: logs }],
-      }],
-      recordTitles: [{ id: 'account-2', title: { key: 'account.two', fallback: 'Grace' } }],
-    }
-    const disposeMixed = navigation.managerContent.replaceProjection('demo', mixedProjection)
-    expect(navigation.managerContentPresentation('demo', configuration)?.tabs).toEqual([
-      expect.objectContaining({ id: 'configuration', label: 'Rooms', active: true }),
-      expect.objectContaining({ id: 'logs', label: 'Activity', active: false }),
-    ])
-    expect(navigation.managerContentPresentation('demo', logs)?.tabs).toEqual([
-      expect.objectContaining({ id: 'configuration', label: 'Configuration', active: false }),
-      expect.objectContaining({ id: 'logs', label: 'Logs', active: true }),
-    ])
-    expect(() => navigation.managerContent.replaceProjection('demo', {
-      declarations: [mixedProjection.declarations[0]!, { ...mixedProjection.declarations[0]! }],
-      recordTitles: [],
-    })).toThrow(/already registered/)
-    expect(navigation.managerContentPresentation('demo', configuration)?.tabs[0]?.label).toBe('Rooms')
-    expect(() => navigation.managerContent.register('demo', {
-      $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1, schemaVersion: 1, id: 'v1-label-rejected', route: { id: 'ready' },
-      header: { title: { kind: 'route' } }, tabs: [{ id: 'ready', route: { id: 'ready' }, label: { key: 'forbidden' } }],
-    } as never)).toThrow(/unknown field/)
-    disposeMixed()
 
     pages.register('demo', {
       $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3,
@@ -313,13 +270,11 @@ describe('Manager Settings navigation core', () => {
     })
     expect(navigation.managerSettingsNavigationRoute('demo', 'when')).toMatchObject({ state: 'pending' })
 
-    await navigation.dispose()
+    void navigation.dispose()
     pages.dispose()
     outlets.dispose()
     contexts.dispose()
-    await new Promise(resolve => setImmediate(resolve))
     dom.window.close()
-    vi.unstubAllGlobals()
   })
 
 })

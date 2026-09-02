@@ -166,17 +166,62 @@ function Icon({ name, className, ...props }: IconProps): React.ReactElement {
 
 function Select({ options, onChange, className, 'aria-label': ariaLabel, value }: SelectProps): React.ReactElement {
   const [open, setOpen] = React.useState(false)
+  const trigger = React.useRef<HTMLButtonElement>(null)
+  const optionElements = React.useRef(new Map<string, HTMLButtonElement>())
   const selected = options.find(option => option.value === value) ?? options[0]
+  const focusOption = (index: number): void => {
+    const option = options.at(index)
+    if (option === undefined) return
+    queueMicrotask(() => optionElements.current.get(option.value)?.focus({ preventScroll: true }))
+  }
+  const close = (): void => {
+    setOpen(false)
+    queueMicrotask(() => trigger.current?.focus({ preventScroll: true }))
+  }
+  const openAt = (index: number): void => {
+    setOpen(true)
+    focusOption(index)
+  }
+  const optionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      close()
+      return
+    }
+    const next = event.key === 'ArrowDown' ? (index + 1) % options.length
+      : event.key === 'ArrowUp' ? (index - 1 + options.length) % options.length
+        : event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : undefined
+    if (next === undefined) return
+    event.preventDefault()
+    event.stopPropagation()
+    focusOption(next)
+  }
   return React.createElement('div', { className: joinClassName('cxr-ui-select', className) },
     React.createElement('button', {
+      ref: trigger,
       type: 'button', className: 'cxr-ui-select-trigger', 'aria-label': ariaLabel,
       'aria-haspopup': 'listbox', 'aria-expanded': open, onClick: () => setOpen(current => !current),
+      onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => {
+        if (event.key === 'Escape' && open) {
+          event.preventDefault()
+          event.stopPropagation()
+          close()
+          return
+        }
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+        event.preventDefault()
+        event.stopPropagation()
+        openAt(event.key === 'ArrowDown' ? 0 : options.length - 1)
+      },
     }, selected?.prefixIcon, React.createElement('span', undefined, selected?.label ?? '')),
     open ? React.createElement('div', { className: 'cxr-ui-select-list', role: 'listbox', 'aria-label': ariaLabel },
-      options.map(option => React.createElement('button', {
+      options.map((option, index) => React.createElement('button', {
+        ref: (element: HTMLButtonElement | null) => { if (element === null) optionElements.current.delete(option.value); else optionElements.current.set(option.value, element) },
         key: option.value, type: 'button', className: 'cxr-ui-select-option', role: 'option',
         'aria-selected': option.value === value,
-        onClick: () => { onChange(option.value); setOpen(false) },
+        onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => optionKeyDown(event, index),
+        onClick: () => { onChange(option.value); close() },
       }, option.prefixIcon, React.createElement('span', undefined, option.label))),
     ) : null,
   )
@@ -262,15 +307,17 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
     roots.add(root)
     context.container.classList.add('cxr-react-root')
     const detachTheme = theme.attach(context.container)
-    let mounted = true
-    const unmount = (): void => {
-      if (!mounted) return
-      mounted = false
+    let unmountPromise: Promise<void> | undefined
+    const unmount = (): Promise<void> => {
+      if (unmountPromise !== undefined) return unmountPromise
       context.signal.removeEventListener('abort', unmount)
       roots.delete(root)
-      root.unmount()
-      detachTheme()
-      context.container.classList.remove('cxr-react-root')
+      unmountPromise = new Promise<void>(resolve => queueMicrotask(resolve)).then(() => {
+        root.unmount()
+        detachTheme()
+        context.container.classList.remove('cxr-react-root')
+      })
+      return unmountPromise
     }
     context.signal.addEventListener('abort', unmount, { once: true })
     const {

@@ -35,10 +35,15 @@ export function ManagerContentPage({ model, router, locale }: { readonly model: 
     const tab = presentation.tabs[index]
     if (tab === undefined) return
     tabs.current.get(tab.id)?.focus({ preventScroll: true })
-    router.navigate({ kind: 'manager-content', id: contributionId, reference: tab.route })
+    router.replace({ kind: 'manager-content', id: contributionId, reference: tab.route })
   }
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     if (presentation === undefined || presentation.tabs.length === 0) return
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      activateTab(index)
+      return
+    }
     const next = event.key === 'ArrowRight' ? (index + 1) % presentation.tabs.length
       : event.key === 'ArrowLeft' ? (index - 1 + presentation.tabs.length) % presentation.tabs.length
         : event.key === 'Home' ? 0 : event.key === 'End' ? presentation.tabs.length - 1 : undefined
@@ -49,7 +54,7 @@ export function ManagerContentPage({ model, router, locale }: { readonly model: 
   return <section className="cxr-page">
     {presentation === undefined || contributionId === undefined || presentation.tabs.length === 0 ? null : <div className="cxr-tabs" role="tablist" aria-label={presentation.title} data-manager-content-tabs="true">
       {presentation.tabs.map((tab, index) => <button key={tab.id} id={`${panelId}-${tab.id}`} ref={node => { if (node === null) tabs.current.delete(tab.id); else tabs.current.set(tab.id, node) }} type="button" role="tab" data-manager-content-tab={tab.id} aria-selected={tab.active} aria-controls={panelId} tabIndex={tab.active ? 0 : -1}
-        onKeyDown={event => onTabKeyDown(event, index)} onClick={() => router.navigate({ kind: 'manager-content', id: contributionId, reference: tab.route })}>
+        onKeyDown={event => onTabKeyDown(event, index)} onClick={() => router.replace({ kind: 'manager-content', id: contributionId, reference: tab.route })}>
         <HostSurfaceIcon token={tab.icon} /><span>{tab.label}</span>
       </button>)}
     </div>}

@@ -52,7 +52,17 @@ interface PlaygroundRuntime {
   snapshot(): PlaygroundRuntimeSnapshot
   setExtensionPointPolicy(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
   setExtensionPointPolicies(source: string, pluginId: string, policies: readonly { readonly pointId: string; readonly policy: 'inherit' | 'allow' | 'deny' }[]): Promise<void>
-  playgroundAgentSessionProjection?(): import('../../renderer/playground-agent-session-projection.js').PlaygroundAgentSessionProjection
+  playgroundMockAgentLoop?(): import('../../renderer/playground-mock-agent-loop.js').PlaygroundMockAgentLoopSnapshot
+  resetPlaygroundMockAgentLoop?(): Readonly<{ before: number; after: number }>
+  readonly playgroundRoomSimulationBridge?: import('../../renderer/playground-room-simulation-bridge.js').PlaygroundRoomSimulationForwardingClient
+  playgroundRouteHistory?(): Readonly<{
+    available: boolean
+    canGoBack: boolean
+    canGoForward: boolean
+    reason?: string
+  }>
+  subscribePlaygroundRouteHistory?(listener: () => void): () => void
+  goPlaygroundRouteHistory?(delta: -1 | 1): Promise<void>
 }
 
 interface Window {

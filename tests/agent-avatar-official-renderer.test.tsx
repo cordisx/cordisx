@@ -3,11 +3,19 @@ import * as React from 'react'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it } from 'vitest'
+import { HostAgentAvatar } from '../packages/cli/src/renderer/host-ui/conversation/AgentAvatar.js'
 import {
+  HOST_ONEWORKS_ARCTIC_FOX_AVATAR_ASSET_REF,
+  HOST_ONEWORKS_ARCTIC_FOX_AVATAR_ASSET_REVISION,
+  HOST_ONEWORKS_ASIAN_SMALL_CLAWED_OTTER_AVATAR_ASSET_REF,
+  HOST_ONEWORKS_ASIAN_SMALL_CLAWED_OTTER_AVATAR_ASSET_REVISION,
   HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REF,
   HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REVISION,
-  HostAgentAvatar,
-} from '../packages/cli/src/renderer/host-ui/conversation/AgentAvatar.js'
+  HOST_ONEWORKS_SYRIAN_HAMSTER_AVATAR_ASSET_REF,
+  HOST_ONEWORKS_SYRIAN_HAMSTER_AVATAR_ASSET_REVISION,
+  HOST_ONEWORKS_YELLOW_DUCKLING_AVATAR_ASSET_REF,
+  HOST_ONEWORKS_YELLOW_DUCKLING_AVATAR_ASSET_REVISION,
+} from '../packages/cli/src/renderer/host-ui/conversation/OfficialOneWorksAvatarAssets.js'
 
 const previousGlobals = new Map<string, unknown>()
 
@@ -50,28 +58,37 @@ afterEach(() => {
 })
 
 describe('Host Agent avatar official renderer', () => {
-  it('renders the exact exported Red Fox definition with the official RC.8 canvas', async () => {
+  it('renders all five exact animal exports with the official RC.8 canvas', async () => {
     const dom = installDom()
     const root = createRoot(dom.window.document.getElementById('root')!)
+    const assets = [
+      [HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REF, HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REVISION, 'fox'],
+      [HOST_ONEWORKS_ARCTIC_FOX_AVATAR_ASSET_REF, HOST_ONEWORKS_ARCTIC_FOX_AVATAR_ASSET_REVISION, 'fox'],
+      [HOST_ONEWORKS_SYRIAN_HAMSTER_AVATAR_ASSET_REF, HOST_ONEWORKS_SYRIAN_HAMSTER_AVATAR_ASSET_REVISION, 'hamster'],
+      [HOST_ONEWORKS_ASIAN_SMALL_CLAWED_OTTER_AVATAR_ASSET_REF, HOST_ONEWORKS_ASIAN_SMALL_CLAWED_OTTER_AVATAR_ASSET_REVISION, 'otter'],
+      [HOST_ONEWORKS_YELLOW_DUCKLING_AVATAR_ASSET_REF, HOST_ONEWORKS_YELLOW_DUCKLING_AVATAR_ASSET_REVISION, 'duck'],
+    ] as const
     await act(async () => root.render(
       <div data-cordisx-app-theme="light">
-        <HostAgentAvatar participant={{
-          id: 'lead', role: 'agent', name: 'Lead',
+        {assets.map(([ref, revision], index) => <HostAgentAvatar key={ref} participant={{
+          id: `agent-${index}`, role: 'agent', name: `Agent ${index}`,
           avatar: {
             kind: 'asset',
-            ref: HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REF,
-            revision: HOST_ONEWORKS_RED_FOX_AVATAR_ASSET_REVISION,
+            ref,
+            revision,
           },
-        }} />
+        }} />)}
       </div>,
     ))
     await act(async () => await new Promise(resolve => setTimeout(resolve, 0)))
-    const wrapper = dom.window.document.querySelector<HTMLElement>('.cxa-avatar')!
-    expect(wrapper.dataset.avatarState).toBe('resolved')
-    const canvas = wrapper.querySelector<HTMLElement>('.interactive-avatar__canvas')
-    expect(canvas).not.toBeNull()
-    expect(canvas?.querySelector<HTMLElement>('[data-avatar-entity-preset]')?.dataset.avatarEntityPreset).toBe('fox')
-    expect(wrapper.textContent).not.toContain('L')
+    const wrappers = [...dom.window.document.querySelectorAll<HTMLElement>('.cxa-avatar')]
+    expect(wrappers).toHaveLength(5)
+    expect(wrappers.map(wrapper => wrapper.dataset.avatarState)).toEqual(Array(5).fill('resolved'))
+    expect(wrappers.map(wrapper => wrapper
+      .querySelector<HTMLElement>('.interactive-avatar__canvas [data-avatar-entity-preset]')
+      ?.dataset.avatarEntityPreset)).toEqual(assets.map(([, , preset]) => preset))
+    expect(wrappers.every(wrapper => wrapper.querySelector('.interactive-avatar__canvas') !== null)).toBe(true)
+    expect(wrappers.every(wrapper => wrapper.querySelector('.cxa-avatar-initials') === null)).toBe(true)
     await act(async () => root.unmount())
     dom.window.close()
   })

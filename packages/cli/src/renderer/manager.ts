@@ -67,11 +67,6 @@ import type {
 } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
 import type { ControlledSurfaceGroupChoice, ControlledSurfaceManagerSnapshot } from './controlled-surfaces.js'
-import type {
-  CordisXPluginBundleLifecycleOperationV1,
-  CordisXPluginBundleLifecycleResultV1,
-  CordisXPluginBundleManagerSnapshotV1,
-} from '../plugin-bundle-contracts.js'
 import type { RedactedIconThemeProvider, RedactedIconThemeSnapshot } from './icon-theme-registry.js'
 import type {
   ExtensionPointPluginUsageSnapshot,
@@ -215,8 +210,6 @@ export interface ManagerSnapshot {
     readonly runtimeGeneration: string
     readonly operationsAvailable: boolean
   }
-  /** Host-owned bundle projection; bundle ids are management provenance, never runtime principals. */
-  readonly pluginBundles?: CordisXPluginBundleManagerSnapshotV1
   /** Descriptor geometry, private handles, principals and request ids are never projected. */
   readonly iconThemes?: RedactedIconThemeSnapshot
 }
@@ -290,7 +283,6 @@ export interface ManagerModel {
     decision: CordisXPermissionAuthorizationDecisionV4,
   ): Promise<CordisXPluginLifecycleResultV1>
   requestPluginLifecycle?(operation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1>
-  requestPluginBundleLifecycle?(operation: CordisXPluginBundleLifecycleOperationV1): Promise<CordisXPluginBundleLifecycleResultV1>
   setExtensionPointPolicy?(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
   setExtensionPointControlAuthorization?(
     expectedPolicyRevision: number,
@@ -6650,7 +6642,7 @@ export function installCordisXManager(
         icon.classList.add('cxm-tab-icon')
         visibleContent.append(icon, create(document, 'span', undefined, tab.label))
         button.append(visibleContent)
-        const activate = (): void => { void activateManagerContent(id, tab.route, { kind: 'tab', id: tab.id }) }
+        const activate = (): void => { void activateManagerContent(id, tab.route, { kind: 'tab', id: tab.id }, false) }
         button.addEventListener('click', activate)
         button.addEventListener('keydown', event => {
           if (event.key === 'Enter' || event.key === ' ') {
@@ -6666,7 +6658,7 @@ export function installCordisXManager(
           if (event.key === 'End') next = tabs.at(-1)
           if (next === undefined) return
           event.preventDefault()
-          void activateManagerContent(id, next.route, { kind: 'tab', id: next.id })
+          void activateManagerContent(id, next.route, { kind: 'tab', id: next.id }, false)
         })
         tablist.append(button)
       }

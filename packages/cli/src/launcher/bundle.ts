@@ -7,7 +7,6 @@ import type { CordisXConfig, CordisXConfigPlugin } from './config.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { HomeConfigIconThemePreference } from '../config/home-config.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
-import type { CordisXPluginBundleManagerSnapshotV1 } from '../plugin-bundle-contracts.js'
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
 import { issueOwnerDocumentPrincipalToken } from './owner-document-rpc.js'
 import {
@@ -31,30 +30,10 @@ export interface BuildRendererBundleOptions {
   readonly channelActionsBridgeToken?: string
   readonly generation?: string
   readonly pluginLifecycleBridgeToken?: string
-  readonly pluginBundleSnapshot?: CordisXPluginBundleManagerSnapshotV1
   readonly certifiedPermissionChannelToken?: string
   readonly pluginActivation?: CordisXPluginActivationRecordV1
   readonly initialRegistryEpoch?: number
   readonly channelManager?: ChannelManagerProjectionV1
-  /**
-   * Launcher-authored development grant for one exact controlled-surface
-   * declaration. It is consumed only by the Host registry and is never
-   * projected into the public runtime or control protocol.
-   */
-  readonly localDevelopmentControlGrant?: {
-    readonly profile: 'cordisx.composer-submit-celebration/v1'
-    readonly identity: { readonly source: string; readonly id: string }
-    readonly pointId: 'composer.toolbar.items'
-    readonly contributionId: 'submit-celebration'
-    readonly claimId: 'submit-celebration'
-    readonly mode: 'proxy'
-    readonly priority: 100
-    readonly requestedBindings: {
-      readonly properties: readonly ['celebrationProfile']
-      readonly commands: readonly ['presentCelebration', 'dismissCelebration']
-      readonly events: readonly ['submitActivated']
-    }
-  }
   readonly permission?: {
     readonly profileId: string
     readonly policies: readonly CordisXPersistedPermissionPolicyRecord[]
@@ -177,6 +156,9 @@ export async function buildRendererCompositionSource(
   options: BuildRendererBundleOptions = {},
   sourceOptions: RendererCompositionSourceOptions = {},
 ): Promise<RendererCompositionSource> {
+  if (config.codex.agentLoopBackend === 'mock' && options.playground !== true) {
+    throw new Error('config.codex.agentLoopBackend mock is available only in the explicit UI Playground')
+  }
   const enabled = config.plugins.filter(plugin => plugin.enabled)
   for (const plugin of enabled) await access(plugin.entry)
   const [version, readmes, pluginBundles] = await Promise.all([
@@ -258,6 +240,7 @@ export async function buildRendererCompositionSource(
   }).join(',')}]`
   const providers = [
     ...config.providers.filter(provider => provider.enabled).map(provider => ({ id: provider.id, displayName: provider.displayName })),
+    ...(config.codex.agentLoopBackend === 'local-cli' ? [{ id: 'codex-local', displayName: 'Local Codex' }] : []),
   ]
   const ownerDocumentBindings = options.ownerDocumentAuthority === undefined ? undefined : enabled.map((plugin, index) => {
     const source = plugin.source ?? pathToFileURL(plugin.entry).href
@@ -275,7 +258,7 @@ export async function buildRendererCompositionSource(
     }
   })
   const permission = options.permission ?? { profileId: options.profileId ?? 'development', policies: [] }
-  const metadata = `{ version: ${JSON.stringify(version)}, workspaceCwd: ${JSON.stringify(config.rootDir)}, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(permission.profileId)}, permissionPolicies: ${JSON.stringify(permission.policies)}${options.playground === true ? ', hostKind: "playground"' : ''}${options.appId === undefined ? '' : `, appId: ${JSON.stringify(options.appId)}`}${options.iconThemePreference === undefined ? '' : `, iconThemePreference: ${JSON.stringify(options.iconThemePreference)}`}${options.iconThemePreferenceBridgeToken === undefined ? '' : `, iconThemePreferenceBridgeToken: ${JSON.stringify(options.iconThemePreferenceBridgeToken)}`}${options.generation === undefined ? '' : `, generation: ${JSON.stringify(options.generation)}`}${options.providerBridgeToken === undefined ? '' : `, providerBridgeToken: ${JSON.stringify(options.providerBridgeToken)}`}${options.agentHistoryBridgeToken === undefined ? '' : `, agentHistoryBridgeToken: ${JSON.stringify(options.agentHistoryBridgeToken)}`}${options.configBridgeToken === undefined ? '' : `, configBridgeToken: ${JSON.stringify(options.configBridgeToken)}`}${ownerDocumentBindings === undefined ? '' : `, ownerDocumentBindings: ${JSON.stringify(ownerDocumentBindings)}`}${options.serviceConfigBridgeToken === undefined ? '' : `, serviceConfigBridgeToken: ${JSON.stringify(options.serviceConfigBridgeToken)}`}${options.channelCredentialBridgeToken === undefined ? '' : `, channelCredentialBridgeToken: ${JSON.stringify(options.channelCredentialBridgeToken)}`}${options.channelActionsBridgeToken === undefined ? '' : `, channelActionsBridgeToken: ${JSON.stringify(options.channelActionsBridgeToken)}`}${options.pluginLifecycleBridgeToken === undefined ? '' : `, pluginLifecycleBridgeToken: ${JSON.stringify(options.pluginLifecycleBridgeToken)}`}${options.pluginBundleSnapshot === undefined ? '' : `, pluginBundleSnapshot: ${JSON.stringify(options.pluginBundleSnapshot)}`}${options.certifiedPermissionChannelToken === undefined ? '' : `, certifiedPermissionChannelToken: ${JSON.stringify(options.certifiedPermissionChannelToken)}`}${options.pluginActivation === undefined ? '' : `, pluginActivation: ${JSON.stringify(options.pluginActivation)}`}${options.initialRegistryEpoch === undefined ? '' : `, initialRegistryEpoch: ${JSON.stringify(options.initialRegistryEpoch)}`}${options.channelManager === undefined ? '' : `, channelManager: ${JSON.stringify(options.channelManager)}`}${options.localDevelopmentControlGrant === undefined ? '' : `, localDevelopmentControlGrant: ${JSON.stringify(options.localDevelopmentControlGrant)}`}${permission.bridgeToken === undefined ? '' : `, permissionBridgeToken: ${JSON.stringify(permission.bridgeToken)}`} }`
+  const metadata = `{ version: ${JSON.stringify(version)}, workspaceCwd: ${JSON.stringify(config.rootDir)}, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(permission.profileId)}, permissionPolicies: ${JSON.stringify(permission.policies)}${options.playground === true ? ', hostKind: "playground"' : ''}${config.codex.agentLoopBackend === 'mock' ? `, agentLoopBackend: "mock"` : ''}${options.appId === undefined ? '' : `, appId: ${JSON.stringify(options.appId)}`}${options.iconThemePreference === undefined ? '' : `, iconThemePreference: ${JSON.stringify(options.iconThemePreference)}`}${options.iconThemePreferenceBridgeToken === undefined ? '' : `, iconThemePreferenceBridgeToken: ${JSON.stringify(options.iconThemePreferenceBridgeToken)}`}${options.generation === undefined ? '' : `, generation: ${JSON.stringify(options.generation)}`}${options.providerBridgeToken === undefined ? '' : `, providerBridgeToken: ${JSON.stringify(options.providerBridgeToken)}`}${options.agentHistoryBridgeToken === undefined ? '' : `, agentHistoryBridgeToken: ${JSON.stringify(options.agentHistoryBridgeToken)}`}${options.configBridgeToken === undefined ? '' : `, configBridgeToken: ${JSON.stringify(options.configBridgeToken)}`}${ownerDocumentBindings === undefined ? '' : `, ownerDocumentBindings: ${JSON.stringify(ownerDocumentBindings)}`}${options.serviceConfigBridgeToken === undefined ? '' : `, serviceConfigBridgeToken: ${JSON.stringify(options.serviceConfigBridgeToken)}`}${options.channelCredentialBridgeToken === undefined ? '' : `, channelCredentialBridgeToken: ${JSON.stringify(options.channelCredentialBridgeToken)}`}${options.channelActionsBridgeToken === undefined ? '' : `, channelActionsBridgeToken: ${JSON.stringify(options.channelActionsBridgeToken)}`}${options.pluginLifecycleBridgeToken === undefined ? '' : `, pluginLifecycleBridgeToken: ${JSON.stringify(options.pluginLifecycleBridgeToken)}`}${options.certifiedPermissionChannelToken === undefined ? '' : `, certifiedPermissionChannelToken: ${JSON.stringify(options.certifiedPermissionChannelToken)}`}${options.pluginActivation === undefined ? '' : `, pluginActivation: ${JSON.stringify(options.pluginActivation)}`}${options.initialRegistryEpoch === undefined ? '' : `, initialRegistryEpoch: ${JSON.stringify(options.initialRegistryEpoch)}`}${options.channelManager === undefined ? '' : `, channelManager: ${JSON.stringify(options.channelManager)}`}${permission.bridgeToken === undefined ? '' : `, permissionBridgeToken: ${JSON.stringify(permission.bridgeToken)}`} }`
   const boot = `installCordisX(${composition}, ${metadata})`
   const source = sourceOptions.awaitBoot === true
     ? `${imports.join('\n')}\nexport const runtime = await ${boot}\n`

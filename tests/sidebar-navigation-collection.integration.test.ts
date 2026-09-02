@@ -2,7 +2,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
-import type { CordisXNavigationCollectionSnapshotV2 } from '../packages/cli/src/contracts.js'
+import type { CordisXNavigationCollectionSnapshot } from '../packages/cli/src/contracts.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
@@ -44,15 +44,11 @@ describe('sidebar navigation collections', () => {
     dom.window.console.error = (...values: unknown[]) => { errors.push(values) }
     dom.window.console.warn = (...values: unknown[]) => { warnings.push(values) }
     installPermissionPolicyBridge(dom.window)
-    const writeText = vi.fn(async (_value: string) => {})
-    Object.defineProperty(dom.window.navigator, 'clipboard', { configurable: true, value: { writeText } })
     let runtime: { snapshot(): unknown; dispose(): Promise<void> } | undefined
     try {
       dom.window.eval(bundle)
       await vi.waitFor(() => {
-        if (dom.window.document.documentElement.dataset.cordisxReady !== 'true') {
-          throw new Error(JSON.stringify({ errors: errors.map(row => row.map(value => typeof value === 'object' && value !== null ? { message: String((value as { message?: unknown }).message), stack: String((value as { stack?: unknown }).stack) } : value)), warnings, html: dom.window.document.body.innerHTML }))
-        }
+        expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
         runtime = (dom.window as unknown as { __cordisxRuntime?: typeof runtime }).__cordisxRuntime
         const count = dom.window.document.querySelectorAll('.cordisx-nav-row').length
         if (count !== 3) throw new Error(JSON.stringify({ count, snapshot: runtime?.snapshot(), errors, warnings, html: dom.window.document.body.innerHTML }))
@@ -72,7 +68,7 @@ describe('sidebar navigation collections', () => {
       expect(group.querySelector('[role="heading"]')?.textContent).toBe('Rooms')
       expect([...group.querySelectorAll('.cordisx-nav-row')].map(row => row.querySelector('.cxsi-title')?.textContent)).toEqual(['Latest room', 'Older room'])
       expect([...group.querySelectorAll<HTMLElement>('.cxrv-composite')].map(visual => visual.dataset.roomCompositeCategory)).toEqual(['1', '2'])
-      expect([...group.querySelectorAll<HTMLElement>('.cxrv-composite')].map(visual => visual.textContent)).toEqual(['LE', 'REWR'])
+      expect([...group.querySelectorAll<HTMLElement>('.cxrv-composite')].map(visual => visual.textContent)).toEqual(['', ''])
       const compositeSeat = group.querySelector<HTMLElement>('.cordisx-room-composite-seat')!
       const composite = compositeSeat.querySelector<HTMLElement>('.cxrv-composite')!
       const participant = composite.querySelector<HTMLElement>('.cxrv-participant')!
@@ -94,26 +90,6 @@ describe('sidebar navigation collections', () => {
       document.documentElement.lang = 'en'
       await vi.waitFor(() => expect(document.querySelector('[data-navigation-group] [role="heading"]')?.textContent).toBe('Rooms'))
 
-      const latestRow = [...document.querySelectorAll<HTMLElement>('[data-navigation-group] .cordisx-nav-row')]
-        .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')!
-      latestRow.querySelector<HTMLButtonElement>('[aria-label="Pin"]')!.click()
-      await vi.waitFor(() => expect((dom.window as unknown as { __cordisxNavigationCollectionFixture: { commands: string[] } }).__cordisxNavigationCollectionFixture.commands).toEqual(['pin']))
-      const refreshedLatestRow = [...document.querySelectorAll<HTMLElement>('[data-navigation-group] .cordisx-nav-row')]
-        .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')!
-      const overflow = refreshedLatestRow.querySelector<HTMLDetailsElement>('.cordisx-navigation-action-overflow')!
-      overflow.open = true
-      overflow.dispatchEvent(new dom.window.Event('toggle'))
-      refreshedLatestRow.querySelector<HTMLButtonElement>('[aria-label="Copy ID"]')!.click()
-      await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('latest'))
-      overflow.open = true
-      refreshedLatestRow.querySelector<HTMLButtonElement>('[aria-label="Delete"]')!.click()
-      const dialog = document.querySelector<HTMLElement>('.cordisx-navigation-confirmation-dialog')!
-      expect(dialog.getAttribute('aria-modal')).toBe('true')
-      expect(dialog.textContent).toContain('Delete room?')
-      ;[...dialog.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Delete')!.click()
-      await vi.waitFor(() => expect((dom.window as unknown as { __cordisxNavigationCollectionFixture: { commands: string[] } }).__cordisxNavigationCollectionFixture.commands).toEqual(['pin', 'delete']))
-      expect(document.querySelector('.cordisx-navigation-confirmation-dialog')).toBeNull()
-
       const older = [...document.querySelectorAll<HTMLButtonElement>('[data-navigation-group] .cordisx-nav-primary')]
         .find(button => button.querySelector('.cxsi-title')?.textContent === 'Older room')!
       older.click()
@@ -127,7 +103,7 @@ describe('sidebar navigation collections', () => {
         .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')?.dataset.selected).toBe('false')
 
       const fixture = (dom.window as unknown as {
-        __cordisxNavigationCollectionFixture: { replace(next: CordisXNavigationCollectionSnapshotV2): void; commands: string[] }
+        __cordisxNavigationCollectionFixture: { replace(next: CordisXNavigationCollectionSnapshot): void }
       }).__cordisxNavigationCollectionFixture
       fixture.replace({
         revision: 2,
@@ -162,10 +138,10 @@ describe('sidebar navigation collections', () => {
         ],
       })
       await vi.waitFor(() => expect([...document.querySelectorAll<HTMLElement>('[data-navigation-group] .cxrv-composite')]
-        .map(visual => visual.dataset.roomCompositeCategory)).toEqual(['0', '1', '2', '3', '4+']))
+        .map(visual => visual.dataset.roomCompositeCategory)).toEqual(['0', '0', '0', '0', '0']))
       const sameRows = [...document.querySelectorAll<HTMLElement>('[data-navigation-group] .cordisx-nav-row')]
       expect(sameRows.map(row => row.querySelector('.cxsi-title')?.textContent)).toEqual(Array(5).fill('Same room'))
-      expect(sameRows.map(row => row.querySelector('.cxrv-composite')?.textContent)).toEqual(['', 'AL', 'BRCH', 'DEECFO', 'GOHOIN+2'])
+      expect(sameRows.map(row => row.querySelector('.cxrv-composite')?.textContent)).toEqual(['', '', '', '', ''])
       sameRows[2]!.querySelector<HTMLButtonElement>('.cordisx-nav-primary')!.click()
       await vi.waitFor(() => expect(sameRows[2]!.dataset.selected).toBe('true'))
       expect(sameRows.filter(row => row.dataset.selected === 'true')).toEqual([sameRows[2]])

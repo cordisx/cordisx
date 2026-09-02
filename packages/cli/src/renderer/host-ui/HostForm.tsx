@@ -137,7 +137,8 @@ function numericProps(field: Pick<CordisXConfigFieldSnapshot, 'min' | 'max' | 's
   }
 }
 
-function validationIssueText(field: CordisXConfigFieldSnapshot, value: unknown, locale: string): string | undefined {
+/** Shared validation copy for schema-driven Host-owned forms. */
+export function hostFormValidationIssueText(field: CordisXConfigFieldSnapshot, value: unknown, locale: string): string | undefined {
   const issue = validateFormValue(descriptor(field), value)[0]
   if (issue?.code === 'required') return managerCopy(locale, 'form.required')
   if (issue?.code === 'choice') return managerCopy(locale, 'form.choice-invalid')
@@ -159,7 +160,7 @@ function Control({ field, resolved, value, onChange, controlId, locale, transien
   const choices = field.choices?.flatMap(choice => choice.value === null ? [] : [{ label: choice.label, value: choice.value }]) ?? []
   if (resolved === 'sensitive-unavailable') return <div className="cxr-notice cxf-alert" role="note">{managerCopy(locale, 'form.sensitive-unavailable')}</div>
   if (resolved === 'unsupported') return <div className="cxr-notice">当前 Schemastery 字段无法安全编辑</div>
-  if (resolved === 'object-array') return <ArrayEditor field={field} value={Array.isArray(value) ? value as Record<string, unknown>[] : []} onChange={onChange} locale={locale} validateField={candidate => validationIssueText(candidate, candidate.value, locale)} renderFieldRow={props => <ArrayItemFieldRow {...props} locale={locale} />} />
+  if (resolved === 'object-array') return <ArrayEditor field={field} value={Array.isArray(value) ? value as Record<string, unknown>[] : []} onChange={onChange} locale={locale} validateField={candidate => hostFormValidationIssueText(candidate, candidate.value, locale)} renderFieldRow={props => <ArrayItemFieldRow {...props} locale={locale} />} />
   if (resolved === 'textarea') return <Textarea className="cxf-textarea" value={typeof value === 'string' ? value : ''} autosize={{ minRows: 5, maxRows: 14 }} disabled={field.disabled} onChange={onChange} />
   if (resolved === 'json-textarea') return <Textarea className="cxf-textarea cxf-json" value={typeof value === 'string' ? value : JSON.stringify(value, null, 2)} autosize={{ minRows: 5, maxRows: 18 }} disabled={field.disabled} onChange={text => { try { onChange(JSON.parse(text)) } catch { /* retain the last valid value */ } }} />
   if (resolved === 'checkbox') return <Checkbox checked={value === true} disabled={field.disabled} onChange={onChange} />
@@ -364,7 +365,7 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
       <div className="cxf-form-grid">{group.fields.map((field, fieldIndex) => {
         const value = formDraft.value(field.path, field.defaultValue)
         const changed = formDraft.isDirty(field.path)
-        const issueText = validationIssueText(field, value, locale)
+        const issueText = hostFormValidationIssueText(field, value, locale)
         return <HostFieldRow key={pathKey(field)} field={field} value={value} changed={changed} locale={locale} idPrefix={plugin.id} controlId={`cxm-config-${plugin.id}-${fieldIndex}`} customControl={{ model, pluginId: plugin.id }} {...(issueText === undefined ? {} : { issueText })} onUseDefault={() => { if (field.hasDefault === true) change(field, { op: 'unset', path: field.path }) }} onRollback={() => rollback(field)} onCopyPath={() => {
               const clipboard = window.navigator.clipboard
               if (typeof clipboard?.writeText !== 'function') { setMessage(managerCopy(locale, 'form.path-copy-unavailable')); return }

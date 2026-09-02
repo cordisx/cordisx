@@ -66,12 +66,16 @@ its browse page and restores that page's query and scroll state.
 The leading back control is present whenever the route has more than one
 segment. It follows the manager's internal history stack rather than assuming
 that the immediate structural parent was the previous page. Opening a record,
-switching a local or settings tab, opening a permission leaf, selecting a
-primary area, and explicitly choosing an ancestor each create a normal history
-entry. Back restores the most recent surviving route, so a tab switch can go
-back to the prior tab while an explicit ancestor click can go directly to a
-list or default facet. Manager navigation never changes `app://`, calls
-`window.history`, invokes the Codex router, or mutates native Codex route state.
+opening a permission leaf, selecting a primary area, and explicitly choosing
+an ancestor each create a normal history entry. A Host-rendered sibling tab in
+one `manager.content` tabset is different: click, Enter/Space, Left/Right, and
+Home/End activation replace the current Manager route entry. Back therefore
+returns to the route visited before entering that tabset instead of walking
+through previously selected sibling facets. Direct entry to a detail facet,
+plugin page-body navigation, and cross-page navigation remain normal push
+operations. Manager navigation never changes `app://`, calls `window.history`,
+invokes the Codex router, or mutates native Codex route state, so native Host
+Back/Forward state is unaffected by these replacements.
 
 Breadcrumb overflow is also a Host projection. When every segment fits, the
 complete path stays inline. When it does not fit, the root and current segment
@@ -211,15 +215,18 @@ standard header. See
 
 ### Manager Content child routes
 
-`manager-content-navigation.v1` is the only plugin-to-Host declaration for a
-B subroute. It contains an exact same-owner route reference, optional parent
-route, a route or renderer-safe-record header title, and exact sibling tab
-route references. It contains no DOM, CSS, callbacks, URLs, secret data, or
-arbitrary header action. The Host resolves and validates the declaration, then
-owns its breadcrumb/back/history behavior, title, description, and tablist.
-The plugin receives only the active page-body seat plus bounded navigation
-helpers; therefore a detail page must not recreate a title, back button, or
-tabs inside that seat.
+`manager-content-navigation.v1` and v2 are the only plugin-to-Host declarations
+for a B subroute. They contain an exact same-owner route reference, optional
+parent route, a route or renderer-safe-record header title, and exact sibling
+tab route references; v2 may additionally localize a tab label. They contain
+no DOM, CSS, callbacks, URLs, secret data, history policy, or arbitrary header
+action. The Host resolves and validates the declaration, then owns its
+breadcrumb/back/history behavior, title, description, and tablist. Every
+sibling tab declared by the resolved tabset uses the replace semantics above;
+the wire shape stays unchanged and plugins cannot opt into push-per-tab
+history. The plugin receives only the active page-body seat plus bounded
+navigation helpers; therefore a detail page must not recreate a title, back
+button, or tabs inside that seat.
 
 When a writable Host mutation adds or removes a record, the owner replaces its
 record-title catalog and exact child-route declarations as one atomic
