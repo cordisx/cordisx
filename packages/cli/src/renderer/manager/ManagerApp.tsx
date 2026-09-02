@@ -29,11 +29,14 @@ import { NavigationDetailPage } from './pages/NavigationDetailPage.js'
 import { PermissionDetailPage } from './pages/PermissionDetailPage.js'
 import { PluginDetailPage } from './pages/PluginDetailPage.js'
 import { PluginsPage } from './pages/PluginsPage.js'
+import { PluginBundlesPage } from './pages/PluginBundlesPage.js'
+import { PluginBundleDetailPage } from './pages/PluginBundleDetailPage.js'
 import { RoutesPage } from './pages/RoutesPage.js'
 
 function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
   const locale = snapshot.localization.locale
   if (route.kind === 'plugin') return snapshot.plugins.find(item => item.id === route.pluginId)?.name ?? route.pluginId
+  if (route.kind === 'plugin-bundle') return snapshot.pluginBundles?.bundles.find(item => item.id === route.bundleId)?.name ?? route.bundleId
   if (route.kind === 'permission') return projectPermissionCapabilityName(route.capability, locale)
   if (route.kind === 'extension-point') return snapshot.extensionPoints?.points.find(item => item.id === route.pointId)?.titleProjection.text ?? route.pointId
   if (route.kind === 'route' || route.kind === 'page') return route.qualifiedId
@@ -43,6 +46,7 @@ function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
   if (route.kind === 'manager-content') return snapshot.settingsNavigationItems?.find(item => item.id === route.id)?.pageTitle ?? route.id
   const keys = {
     plugins: 'manager.nav.plugins',
+    'plugin-bundles': 'manager.nav.plugin-bundles',
     'extension-points': 'manager.nav.extension-points',
     routes: 'manager.nav.routes',
     marketplace: 'manager.nav.marketplace',
@@ -54,6 +58,7 @@ function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
 function primaryIcon(route: ManagerRoute) {
   if (route.kind !== 'primary') return undefined
   if (route.page === 'plugins') return 'plugins' as const
+  if (route.page === 'plugin-bundles') return 'plugins' as const
   if (route.page === 'extension-points') return 'outlets' as const
   if (route.page === 'routes') return 'routes' as const
   if (route.page === 'marketplace') return 'marketplace' as const
@@ -66,6 +71,13 @@ function pluginFacetLabel(page: 'readme' | 'config' | 'permissions' | 'runtime' 
   } : {
     readme: 'README', config: 'Configuration', permissions: 'Permissions', runtime: 'Runtime', logs: 'Logs & diagnostics', 'extension-points': 'Extension points', routes: 'Routes',
   }
+  return labels[page]
+}
+
+function bundleFacetLabel(page: 'readme' | 'members' | 'permissions' | 'relations' | 'records', locale: string): string {
+  const labels = productLocale(locale) === 'zh-CN'
+    ? { readme: 'README', members: '成员', permissions: '权限', relations: '关联', records: '记录' }
+    : { readme: 'README', members: 'Members', permissions: 'Permissions', relations: 'Relations', records: 'Records' }
   return labels[page]
 }
 
@@ -99,6 +111,13 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
       { key: route.page, label: pluginFacetLabel(route.page, snapshot.localization.locale) },
     ]} />
   }
+  if (route.kind === 'plugin-bundle') {
+    return <HostBreadcrumbs segments={[
+      { key: 'plugin-bundles', label: managerCopy(snapshot.localization.locale, 'manager.nav.plugin-bundles'), onActivate: () => navigate({ kind: 'primary', page: 'plugin-bundles' }) },
+      { key: route.bundleId, label: heading, onActivate: () => navigate({ kind: 'plugin-bundle', bundleId: route.bundleId, page: 'readme' }) },
+      { key: route.page, label: bundleFacetLabel(route.page, snapshot.localization.locale) },
+    ]} />
+  }
   if (route.kind === 'about-acknowledgements') {
     const about = productLocale(snapshot.localization.locale) === 'zh-CN' ? '关于 CordisX' : 'About CordisX'
     return <HostBreadcrumbs segments={[
@@ -122,6 +141,7 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
 function Content({ model, marketplace, snapshot, route }: { readonly model: ManagerModel; readonly marketplace: MarketplaceModel; readonly snapshot: ManagerSnapshot; readonly route: ReturnType<typeof useManagerRouter> }) {
   const current = route.route
   if (current.kind === 'plugin') return <PluginDetailPage model={model} snapshot={snapshot} router={route} />
+  if (current.kind === 'plugin-bundle') return <PluginBundleDetailPage model={model} snapshot={snapshot} router={route} />
   if (current.kind === 'permission') return <PermissionDetailPage model={model} snapshot={snapshot} router={route} />
   if (current.kind === 'extension-point') return <ExtensionPointDetailPage model={model} snapshot={snapshot} router={route} />
   if (current.kind === 'route' || current.kind === 'page') return <NavigationDetailPage snapshot={snapshot} router={route} />
@@ -130,6 +150,7 @@ function Content({ model, marketplace, snapshot, route }: { readonly model: Mana
   if (current.kind === 'about-acknowledgements') return <AcknowledgementsPage locale={snapshot.localization.locale} />
   if (current.kind === 'manager-content') return <ManagerContentPage model={model} router={route} locale={snapshot.localization.locale} />
   if (current.page === 'plugins') return <PluginsPage model={model} snapshot={snapshot} router={route} />
+  if (current.page === 'plugin-bundles') return <PluginBundlesPage model={model} snapshot={snapshot} router={route} />
   if (current.page === 'extension-points') return <ExtensionPointsPage snapshot={snapshot} router={route} />
   if (current.page === 'routes') return <RoutesPage snapshot={snapshot} router={route} />
   if (current.page === 'marketplace') return <MarketplacePage marketplace={marketplace} manager={model} snapshot={snapshot} router={route} />

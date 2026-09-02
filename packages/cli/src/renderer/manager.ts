@@ -67,6 +67,11 @@ import type {
 } from './navigation.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
 import type { ControlledSurfaceGroupChoice, ControlledSurfaceManagerSnapshot } from './controlled-surfaces.js'
+import type {
+  CordisXPluginBundleLifecycleOperationV1,
+  CordisXPluginBundleLifecycleResultV1,
+  CordisXPluginBundleManagerSnapshotV1,
+} from '../plugin-bundle-contracts.js'
 import type { RedactedIconThemeProvider, RedactedIconThemeSnapshot } from './icon-theme-registry.js'
 import type {
   ExtensionPointPluginUsageSnapshot,
@@ -210,6 +215,8 @@ export interface ManagerSnapshot {
     readonly runtimeGeneration: string
     readonly operationsAvailable: boolean
   }
+  /** Host-owned bundle projection; bundle ids are management provenance, never runtime principals. */
+  readonly pluginBundles?: CordisXPluginBundleManagerSnapshotV1
   /** Descriptor geometry, private handles, principals and request ids are never projected. */
   readonly iconThemes?: RedactedIconThemeSnapshot
 }
@@ -283,6 +290,7 @@ export interface ManagerModel {
     decision: CordisXPermissionAuthorizationDecisionV4,
   ): Promise<CordisXPluginLifecycleResultV1>
   requestPluginLifecycle?(operation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1>
+  requestPluginBundleLifecycle?(operation: CordisXPluginBundleLifecycleOperationV1): Promise<CordisXPluginBundleLifecycleResultV1>
   setExtensionPointPolicy?(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
   setExtensionPointControlAuthorization?(
     expectedPolicyRevision: number,

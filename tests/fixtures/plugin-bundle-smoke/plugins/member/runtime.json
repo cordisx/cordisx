@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v1.schema.json",
+  "schemaVersion": 1,
+  "id": "bundle-smoke-member",
+  "name": "Bundle Smoke Member",
+  "capabilities": [
+    {
+      "name": "models.read",
+      "required": true,
+      "reason": {
+        "key": "permission.models",
+        "fallback": "Read the model catalog for the smoke fixture."
+      },
+      "scope": {}
+    }
+  ]
+}

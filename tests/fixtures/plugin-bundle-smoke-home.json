@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "defaultApp": "codex",
+  "providers": [],
+  "plugins": [],
+  "permissions": [],
+  "publisherGrantIssuers": [],
+  "apps": {
+    "codex": {
+      "defaultProfile": "smoke",
+      "profiles": {
+        "smoke": {
+          "displayName": "Plugin bundle smoke",
+          "dataMode": "shared"
+        }
+      }
+    }
+  }
+}

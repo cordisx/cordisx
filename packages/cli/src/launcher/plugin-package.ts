@@ -243,7 +243,8 @@ async function buildArtifact(root: string, entry: string): Promise<{ readonly mo
     logLevel: 'silent' as const,
   }
   const [moduleResult, artifactResult] = await Promise.all([build({
-    entryPoints: [entry],
+    absWorkingDir: root,
+    entryPoints: [specifier],
     format: 'esm',
     ...common,
   }), build({
@@ -253,6 +254,12 @@ async function buildArtifact(root: string, entry: string): Promise<{ readonly mo
       sourcefile: 'cordisx-plugin-generation.ts',
     },
     format: 'iife',
+    // esbuild's readable IIFE output annotates bundled modules with paths that
+    // are relative to the process cwd, so the same package staged in two
+    // directories would otherwise acquire different bytes and digests. Let
+    // esbuild remove only syntactic whitespace/comments; unlike a text
+    // post-processor this cannot rewrite strings, regexes, or source content.
+    minifyWhitespace: true,
     ...common,
   })])
   if (moduleResult.metafile === undefined || artifactResult.metafile === undefined) {
@@ -277,7 +284,8 @@ async function buildServiceArtifact(
 ): Promise<StagedPluginServiceModule> {
   const entry = await regularContainedFile(root, declaration.entry, `service ${declaration.id} entry`)
   const result = await build({
-    entryPoints: [entry],
+    absWorkingDir: root,
+    entryPoints: [`./${path.relative(root, entry).replaceAll(path.sep, '/')}`],
     bundle: true,
     platform: 'node',
     target: ['node22'],

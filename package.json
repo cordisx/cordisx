@@ -56,12 +56,12 @@
     "node": ">=22.19"
   },
   "dependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#3e3f248abb94fe57e613b020ffa8a6ceaba6c3cd",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#5cff7e65c30216dba544e4836f4bd015a46bc53d",
     "@deepseek-ai/cordis": "4.0.1",
     "@types/react": "19.2.18",
     "react": "19.2.8"
   },
   "devDependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#3e3f248abb94fe57e613b020ffa8a6ceaba6c3cd"
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#5cff7e65c30216dba544e4836f4bd015a46bc53d"
   }
 }

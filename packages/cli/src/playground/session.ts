@@ -42,6 +42,7 @@ import {
   parseOwnerDocumentBindingRequest,
   type OwnerDocumentBridgeHandler,
 } from '../launcher/owner-document-rpc.js'
+import { playgroundPluginBundleSnapshot } from './plugin-bundle-fixture.js'
 
 export interface PlaygroundFixtureInfo {
   readonly name: string
@@ -141,6 +142,10 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
         `playground.permissionPolicies[${index}]`,
       ))
       : (() => { throw new Error('playground.permissionPolicies must be an array') })()
+  if (playground.pluginBundleFixture !== undefined && typeof playground.pluginBundleFixture !== 'boolean') {
+    throw new Error('playground.pluginBundleFixture must be a boolean')
+  }
+  const includePluginBundleFixture = playground.pluginBundleFixture === true
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cordisx-ui-playground-'))
   const stateRoot = path.join(homeDir, 'state')
   const configPath = path.join(homeDir, 'config', 'playground.config.json')
@@ -277,6 +282,7 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
     ...(generation.providerToken === undefined ? {} : { providerBridgeToken: generation.providerToken }),
     profileId: 'playground',
     permission: { profileId: 'playground', policies: previewPermissionPolicies },
+    ...(includePluginBundleFixture ? { pluginBundleSnapshot: playgroundPluginBundleSnapshot(generation.generation) } : {}),
   })
 
   return {

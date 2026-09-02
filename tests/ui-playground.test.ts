@@ -296,6 +296,8 @@ describe('UI Playground', () => {
       const bundle = await fetch(`${playground.url}api/bundle`).then(response => response.text())
       expect(bundle).toContain('hostKind: "playground"')
       expect(bundle).toContain('installCordisX')
+      expect(bundle).toContain('pluginBundleSnapshot:')
+      expect(bundle).toContain('Workflow Essentials')
       const serviceConfigToken = /serviceConfigBridgeToken: "([a-f0-9]{64})"/.exec(bundle)?.[1]
       const generation = /generation: "(playground-[a-f0-9]+)"/.exec(bundle)?.[1]
       expect(serviceConfigToken).toBeDefined()

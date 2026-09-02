@@ -26,12 +26,15 @@ const profileDir = value('--profile-dir')
 const devConfig = optionalValue('--dev-config')
 const homeConfig = optionalValue('--home-config')
 const connectorHarness = process.argv.includes('--connector-harness')
+const pluginBundleHarness = process.argv.includes('--plugin-bundle-harness')
 const connectorHarnessPolicy = optionalValue('--connector-harness-policy') ?? 'allow'
 const connectorHarnessScenario = optionalValue('--connector-harness-scenario') ?? 'flow'
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('--port must be an unprivileged TCP port')
 if (devConfig !== undefined && homeConfig !== undefined) throw new Error('--dev-config and --home-config are mutually exclusive')
 if (homeConfig !== undefined && !path.isAbsolute(homeConfig)) throw new Error('--home-config must be an absolute config path')
 if (connectorHarness && (devConfig !== undefined || homeConfig !== undefined)) throw new Error('--connector-harness owns its fixed temporary Home composition')
+if (connectorHarness && pluginBundleHarness) throw new Error('--connector-harness and --plugin-bundle-harness are mutually exclusive')
+if (pluginBundleHarness && homeConfig === undefined) throw new Error('--plugin-bundle-harness requires --home-config')
 if (!['allow', 'deny', 'default'].includes(connectorHarnessPolicy)) throw new Error('--connector-harness-policy must be allow, deny, or default')
 if (!['flow', 'unsubscribe', 'owner-replay', 'owner-live'].includes(connectorHarnessScenario)) throw new Error('--connector-harness-scenario is invalid')
 const smokeArgs = process.argv.slice(separator + 1)
@@ -171,13 +174,17 @@ const homeRoot = connectorHarness
   : homeConfig === undefined ? undefined : await prepareIsolatedSmokeHome(homeConfig)
 const invocation = connectorHarness
   ? ['codex', 'smoke', '--data', 'shared']
+  : pluginBundleHarness ? ['codex', 'smoke', '--data', 'shared']
   : devConfig === undefined
   ? ['codex', 'smoke', '--data', 'host-isolated']
   : ['dev', '--config', devConfig]
 const cliEntry = connectorHarness ? 'tests/fixtures/connector-production-smoke-cli.ts' : 'packages/cli/src/cli.ts'
-const smokeEntry = connectorHarness ? 'tests/fixtures/connector-production-smoke.mjs' : 'packages/cli/scripts/live-smoke.mjs'
+const smokeEntry = connectorHarness
+  ? 'tests/fixtures/connector-production-smoke.mjs'
+  : pluginBundleHarness ? 'tests/fixtures/plugin-bundle-production-smoke.mjs' : 'packages/cli/scripts/live-smoke.mjs'
 const launcherEnvironment = connectorHarness
   ? { ...process.env, CORDISX_HOME: path.join(homeRoot, '.cordisx') }
+  : pluginBundleHarness ? { ...process.env, CORDISX_HOME: path.join(homeRoot, '.cordisx') }
   : homeRoot === undefined ? process.env : { ...process.env, HOME: homeRoot }
 const launcher = spawn(process.execPath, [
   '--import', 'tsx', cliEntry, ...invocation,

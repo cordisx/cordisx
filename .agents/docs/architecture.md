@@ -86,6 +86,27 @@ onto the single package and activation stores implemented by the generation
 runtime slice. It does not create another store/registry, switch renderer
 generations, or render Manager UI.
 
+Plugin bundles layer a Host-owned management registry and coordinator over the
+same single-plugin package lifecycle. A bundle is immutable installation and
+policy metadata, never executable code or a permission principal. The
+coordinator stages explicit-local member packages, compares exact
+`(id, version, digest)` tuples, applies dependency-first, compensates failures
+in reverse order, and records bundle/direct/runtime-dependency claims. Shared
+members have one installed runtime identity; disabling removes only active
+enable intent, while uninstall removes only that bundle's ownership claim.
+Direct Manager removal is fenced while any bundle claim remains.
+
+Bundle permission choices bind exact member permission ids. Enabled bundle
+policies merge `deny > ask > allow`; one explicit plugin override replaces the
+merge globally for that exact plugin permission. Disabling or removing a more
+restrictive bundle persists its former result as a safety floor until a
+confirmed permission review accepts widening. The launcher publishes the
+revision-fenced bundle snapshot and private lifecycle RPC into the production
+renderer composition. Manager owns the bundle list, detail header, exact
+`README / Members / Permissions / Relations / Records` tabs, and all actions.
+The complete behavior and verification ledger are in
+[`plugin-bundles.md`](plugin-bundles.md).
+
 The launcher binds CDP to `127.0.0.1`, records every `Page.addScriptToEvaluateOnNewDocument` identifier, and removes those identifiers on shutdown before asking the live page to dispose CordisX.
 
 For interactive UI development, the normal `shared` launch creates a separate

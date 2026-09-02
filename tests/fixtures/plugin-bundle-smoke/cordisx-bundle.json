@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-bundle.v1.schema.json",
+  "schemaVersion": 1,
+  "id": "workflow-essentials",
+  "name": "Workflow Essentials",
+  "description": "Real app plugin bundle smoke fixture.",
+  "version": "1.0.0",
+  "authors": ["CordisX"],
+  "readme": "./README.md",
+  "canonicalSource": "https://cordisx.dev/plugin-bundles/workflow-essentials",
+  "distribution": {
+    "mode": "explicit-local-v1",
+    "signature": "unsupported"
+  },
+  "members": [
+    {
+      "id": "bundle-smoke-member",
+      "version": "1.0.0",
+      "path": "./plugins/member",
+      "required": true,
+      "enabledByDefault": true
+    }
+  ]
+}
