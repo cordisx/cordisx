@@ -3,6 +3,7 @@ import { createPlaygroundSession, type PlaygroundFixtureInfo } from './session.j
 
 export interface UiPlaygroundOptions {
   readonly configPath: string
+  readonly homeDir?: string
   readonly port?: number
   readonly host?: '127.0.0.1' | '::1'
 }
@@ -56,7 +57,7 @@ boot('initial');</script></body></html>`
 
 /** Production-bundle Playground retained for renderer parity tests. */
 export async function startUiPlayground(options: UiPlaygroundOptions): Promise<UiPlaygroundHandle> {
-  const session = await createPlaygroundSession(options.configPath)
+  const session = await createPlaygroundSession(options.configPath, { ...(options.homeDir === undefined ? {} : { homeDir: options.homeDir }) })
   let activeSource: string | undefined
   const server: Server = createServer(async (request, response) => {
     try {

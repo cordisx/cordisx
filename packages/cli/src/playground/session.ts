@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -84,6 +84,11 @@ export interface PlaygroundSession {
   close(): Promise<void>
 }
 
+export interface PlaygroundSessionOptions {
+  /** Optional externally-owned isolated home; close() never removes it. */
+  readonly homeDir?: string
+}
+
 class PlaygroundCredentialBackend implements LauncherKeychainBackend {
   private readonly values = new Map<string, string>()
 
@@ -123,7 +128,22 @@ function fixtureInfo(source: Record<string, unknown>, sourcePath: string): Playg
  * Materialize a source fixture into an isolated, writable Playground home.
  * Both the production-bundle server and Vite dev server share this authority.
  */
-export async function createPlaygroundSession(sourceConfigPath: string): Promise<PlaygroundSession> {
+async function resolveExternalHome(input: string, sourcePath: string): Promise<string> {
+  if (!path.isAbsolute(input) || input.trim() === '') throw new Error('Playground home must be an absolute path')
+  const home = path.resolve(input)
+  const protectedRoots = [path.parse(home).root, os.homedir(), process.cwd(), path.dirname(sourcePath)].map(candidate => path.resolve(candidate))
+  if (protectedRoots.some(root => home === root || root.startsWith(`${home}${path.sep}`))) throw new Error('Playground home contains a protected root')
+  try {
+    const stat = await lstat(home)
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Playground home must be a real directory')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    await mkdir(home, { recursive: true, mode: 0o700 })
+  }
+  return home
+}
+
+export async function createPlaygroundSession(sourceConfigPath: string, options: PlaygroundSessionOptions = {}): Promise<PlaygroundSession> {
   const sourcePath = path.resolve(sourceConfigPath)
   const source = JSON.parse(await readFile(sourcePath, 'utf8')) as Record<string, unknown>
   if (source.version !== 1 || !Array.isArray(source.plugins)) {
@@ -146,7 +166,8 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
     throw new Error('playground.pluginBundleFixture must be a boolean')
   }
   const includePluginBundleFixture = playground.pluginBundleFixture === true
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cordisx-ui-playground-'))
+  const ownsHome = options.homeDir === undefined
+  const homeDir = options.homeDir === undefined ? await mkdtemp(path.join(os.tmpdir(), 'cordisx-ui-playground-')) : await resolveExternalHome(options.homeDir, sourcePath)
   const stateRoot = path.join(homeDir, 'state')
   const configPath = path.join(homeDir, 'config', 'playground.config.json')
   const serviceConfigPath = path.join(homeDir, 'config', 'playground.home.json')
@@ -386,7 +407,7 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
       await active?.providerFleet?.close()
       credentialBackend.clear()
       active = undefined
-      await rm(homeDir, { recursive: true, force: true })
+      if (ownsHome) await rm(homeDir, { recursive: true, force: true })
     },
   }
 }

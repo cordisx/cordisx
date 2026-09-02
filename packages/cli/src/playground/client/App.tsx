@@ -10,6 +10,8 @@ import { bootRuntime, useRuntimeState } from './runtime-store.js'
 import { MockAgentTaskPage } from './components/MockAgentTaskPage.js'
 import { ScenarioLabPage } from './components/ScenarioLabPage.js'
 
+const RESET_MARKER = 'cordisx.playground.reset/v1'
+
 interface SidebarItemProps {
   readonly id: string
   readonly label: string
@@ -50,6 +52,9 @@ export function App() {
   const [fixtureMode, setFixtureMode] = useState<PlaygroundFixtureMode>(fixture.reviewNavigationItem === undefined ? 'conversation' : 'review')
   const [simulatorOpen, setSimulatorOpen] = useState(false)
   const [simulatorSessionId, setSimulatorSessionId] = useState<string>()
+  const [resetOpen, setResetOpen] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [resetError, setResetError] = useState<string>()
   const shell = useRef<HTMLDivElement>(null)
   const en = environment.locale === 'en'
   const tasks = runtime.simulator?.tasks ?? []
@@ -57,6 +62,9 @@ export function App() {
   const selectedTask = tasks.find(task => task.sessionId === simulatorSessionId)
 
   useEffect(() => { void bootRuntime() }, [])
+  useEffect(() => {
+    if (runtime.status === 'active') sessionStorage.removeItem(RESET_MARKER)
+  }, [runtime.status])
   useEffect(() => shell.current === null ? undefined : playgroundEnvironment.attachTheme(shell.current), [])
   useEffect(() => {
     if (runtime.status !== 'active' || fixture.reviewNavigationItem === undefined) return undefined
@@ -74,9 +82,18 @@ export function App() {
     }
   }, [runtime.status])
   const reset = async () => {
-    await fetch('/api/reset', { method: 'POST' })
-    playgroundEnvironment.resetPreferences()
-    window.location.reload()
+    if (resetting) return
+    setResetting(true); setResetError(undefined)
+    try {
+      sessionStorage.setItem(RESET_MARKER, JSON.stringify({ phase: 'requesting', at: Date.now() }))
+      const response = await fetch('/api/reset', { method: 'POST' })
+      if (!response.ok) throw new Error(`reset failed (${response.status})`)
+      const value = await response.json() as { readonly ok?: unknown }
+      if (value.ok !== true) throw new Error('reset did not acknowledge completion')
+      sessionStorage.setItem(RESET_MARKER, JSON.stringify({ phase: 'applied', at: Date.now() }))
+      playgroundEnvironment.resetPreferences()
+      window.location.reload()
+    } catch (error) { setResetError(error instanceof Error ? error.message : String(error)); setResetting(false) }
   }
   const menuItems: readonly HostMenuItem[] = [
     { kind: 'heading', id: 'theme-heading', label: en ? 'Appearance' : '外观' },
@@ -98,7 +115,7 @@ export function App() {
     { kind: 'separator', id: 'runtime-separator' },
     { kind: 'heading', id: 'runtime-heading', label: en ? 'Runtime' : '运行时' },
     { kind: 'action', id: 'reload', label: en ? 'Reload plugins' : '重载插件', onSelect: () => window.location.reload() },
-    { kind: 'action', id: 'reset', label: en ? 'Reset fixture' : '重置 fixture', onSelect: () => { void reset() } },
+    { kind: 'action', id: 'reset', label: en ? 'Reset fixture' : '重置 fixture', onSelect: () => setResetOpen(true) },
   ]
 
   return (
@@ -145,9 +162,10 @@ export function App() {
       </aside>
       {simulatorOpen && control !== undefined
         ? selectedTask !== undefined
-          ? <MockAgentTaskPage task={selectedTask} locale={environment.locale} control={control} onChanged={() => undefined} onReturn={() => setSimulatorSessionId(undefined)} />
+          ? <MockAgentTaskPage task={selectedTask} tasks={tasks} locale={environment.locale} control={control} onChanged={() => undefined} onReturn={() => setSimulatorSessionId(undefined)} />
           : <ScenarioLabPage locale={environment.locale} tasks={tasks} control={control} onOpenTask={setSimulatorSessionId} onClose={() => setSimulatorOpen(false)} />
         : <HostSeats mode={fixtureMode} locale={environment.locale} />}
+      {resetOpen ? <div className="pg-preview-reset-backdrop" role="presentation"><section className="pg-preview-reset-confirm" role="alertdialog" aria-modal="true" aria-labelledby="pg-reset-title"><h2 id="pg-reset-title">{en ? 'Clear local preview data?' : '清空本地预览数据？'}</h2><p>{en ? 'This is irreversible for the selected Playground home. A reset marker is recorded before the server confirms the operation.' : '这会清除当前 Playground home 中的本地预览数据；服务器确认前会先写入重置标记。'}</p>{resetError === undefined ? null : <p role="alert">{resetError}</p>}<footer><button type="button" disabled={resetting} onClick={() => setResetOpen(false)}>{en ? 'Cancel' : '取消'}</button><button type="button" disabled={resetting} onClick={() => { void reset() }}>{resetting ? (en ? 'Clearing…' : '正在清空…') : (en ? 'Clear and refresh' : '清空并刷新')}</button></footer></section></div> : null}
     </div>
   )
 }
