@@ -1093,7 +1093,38 @@ export class PermissionBroker {
     if (!this.validAgentRuntimeScopeSource(registration, input, declaration.scope.sessionIds)) return Object.freeze({ authorized: false })
     const policyKey = this.agentRuntimePolicyKey(registration, input.capability, input.sessionId)
     const policy = this.policyRecords.get(policyKey)
-    if (!isPermissionPolicyRecordV4(policy) || policy.policy !== 'allow-persistent') return Object.freeze({ authorized: false })
+    if (isPermissionPolicyRecordV4(policy) && policy.policy === 'deny-persistent') return Object.freeze({ authorized: false })
+    if (!isPermissionPolicyRecordV4(policy) || policy.policy !== 'allow-persistent') {
+      const promptDeclaration: CordisXCapabilityDeclaration = Object.freeze({
+        name: input.capability as CordisXPlatformCapability,
+        required: declaration.required,
+        reason: declaration.rationale?.description ?? Object.freeze({
+          namespace: 'permission', key: `agent-runtime.${input.capability}`,
+          fallback: `${input.capability} for one exact Agent Session`,
+        }),
+        scope: Object.freeze({ sessionIds: Object.freeze([input.sessionId]) }),
+      })
+      let decision: Exclude<CordisXPermissionDecision, 'ask'> | 'timeout'
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        decision = await Promise.race([
+          this.prompt.request({
+            identity: input.identity,
+            declaration: promptDeclaration,
+            requested: Object.freeze({ agentSessionId: input.sessionId }),
+          }),
+          new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), this.promptTimeoutMs) }),
+        ])
+      } catch { decision = 'deny' }
+      finally { if (timer !== undefined) clearTimeout(timer) }
+      if (decision !== 'allow' && decision !== 'allow-once') return Object.freeze({ authorized: false })
+      if (decision === 'allow') {
+        const record = this.agentRuntimePolicyRecord(registration, input.capability, input.sessionId, 'allow-persistent')
+        try { await this.persistV4([record]) } catch { return Object.freeze({ authorized: false }) }
+        this.policyRecords.set(permissionRecordKeyV4(record), record)
+        this.changed()
+      }
+    }
     const existing = [...this.agentRuntimeLeases.values()].find(item => (
       item.identity.source === input.identity.source && item.identity.id === input.identity.id
       && item.capability === input.capability && item.lease.sessionId === input.sessionId
