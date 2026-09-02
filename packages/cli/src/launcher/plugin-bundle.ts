@@ -437,7 +437,7 @@ function projectBundle(state: BundleState, bundle: BundleRecord, active: CordisX
   const hasConflict = members.some(member => member.state === 'version-conflict')
   const missingRequired = members.some(member => member.required && (member.state === 'not-installed' || member.state === 'disabled'))
   const permissionBlocked = projectedPermissions.some(permission => permission.required && permission.effectivePolicy !== 'allow')
-  const status: CordisXPluginBundleManagerItemV1['status'] = hasConflict ? 'version-conflict' : permissionBlocked ? 'permission-blocked' : missingRequired ? 'partial' : bundle.enabled ? 'active' : 'disabled'
+  const status: CordisXPluginBundleManagerItemV1['status'] = !bundle.enabled ? 'disabled' : hasConflict ? 'version-conflict' : permissionBlocked ? 'permission-blocked' : missingRequired ? 'partial' : 'active'
   const allClaims = bundle.members.flatMap(member => claims(state, active, member.pluginId))
   const dependencies = bundle.members.flatMap(member => member.dependencies.map(dependency => ({ pluginId: member.pluginId, dependencyId: dependency.id, version: dependency.version })))
   return {

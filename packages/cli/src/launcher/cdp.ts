@@ -238,13 +238,17 @@ class CdpSession {
   }
 }
 
-async function evaluateRuntimeOperation<Value = void>(session: CdpSession, expression: string): Promise<Value> {
+async function evaluateRuntimeOperation<Value = void>(
+  session: CdpSession,
+  expression: string,
+  timeoutMs = CDP_REQUEST_TIMEOUT_MS,
+): Promise<Value> {
   const response = await session.send('Runtime.evaluate', {
     expression,
     awaitPromise: true,
     returnByValue: true,
     allowUnsafeEvalBlockedByCSP: true,
-  })
+  }, timeoutMs)
   const value = (response.result as { value?: unknown } | undefined)?.value as { ok?: unknown; error?: unknown; result?: Value } | undefined
   if (value?.ok !== true) throw new Error(typeof value?.error === 'string' ? value.error : 'renderer lifecycle operation failed')
   return value.result as Value
@@ -1583,7 +1587,7 @@ async function install(
       await evaluateRuntimeOperation(session, `(async () => { try {
         await globalThis.__cordisxBoot
         return { ok: globalThis.__cordisxRuntime !== undefined }
-      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`, CDP_INJECTION_TIMEOUT_MS)
     }
     if (generationRuntime !== undefined) {
       // Reserve this boot-ready renderer before durable recovery. The

@@ -5,11 +5,11 @@
   "name": "Bundle Smoke Member",
   "capabilities": [
     {
-      "name": "models.read",
+      "name": "agent.events.read",
       "required": true,
       "reason": {
-        "key": "permission.models",
-        "fallback": "Read the model catalog for the smoke fixture."
+        "key": "permission.agent-events",
+        "fallback": "Read the Host-local Agent event ledger for the smoke fixture."
       },
       "scope": {}
     }

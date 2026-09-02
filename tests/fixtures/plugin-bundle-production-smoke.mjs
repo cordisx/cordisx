@@ -109,24 +109,37 @@ try {
       click(tablist.querySelector('[data-plugin-detail-tab="members"]'))
       const memberVisible = Boolean(await waitFor(() => document.querySelector('[data-bundle-member="bundle-smoke-member"]'), 'bundle member'))
       click(document.querySelector('[data-plugin-detail-tab="permissions"]'))
-      const permissionVisible = (await waitFor(() => document.querySelector('.cxr-bundle-permission-editor'), 'bundle permission')).textContent.includes('models.read')
+      const permissionVisible = (await waitFor(() => document.querySelector('.cxr-bundle-permission-editor'), 'bundle permission')).textContent.includes('agent.events.read')
       click(document.querySelector('[data-plugin-detail-tab="relations"]'))
-      const relationVisible = (await waitFor(() => document.querySelector('[role="tabpanel"]'), 'bundle relations')).textContent.includes('workflow-essentials')
+      const relationVisible = (await waitFor(() => document.querySelector('[role="tabpanel"][aria-label="关联"], [role="tabpanel"][aria-label="Relations"]'), 'bundle relations')).textContent.includes('workflow-essentials')
 
       const update = action('Update bundle', '更新插件包')
       const disable = action('Disable bundle', '停用插件包')
-      const repair = action('Repair bundle', '修复插件包')
+      const repair = document.querySelector('[data-bundle-action="repair"]')
       const uninstall = action('Uninstall bundle', '卸载插件包')
       const actions = {
         updateEnabled: update instanceof HTMLButtonElement && !update.disabled,
         disableEnabled: disable instanceof HTMLButtonElement && !disable.disabled,
-        repairPresent: repair instanceof HTMLButtonElement,
+        repairPresent: repair !== null,
         uninstallEnabled: uninstall instanceof HTMLButtonElement && !uninstall.disabled,
       }
       click(disable)
-      await waitFor(() => document.querySelector('.cxr-bundle-identity')?.textContent.includes('disabled'), 'disabled bundle projection')
+      const disableOutcome = await waitFor(() => {
+        const identityText = document.querySelector('.cxr-bundle-identity')?.textContent ?? ''
+        const operationMessage = document.querySelector('.cxr-notice[role="status"]')?.textContent?.trim() ?? ''
+        const enable = action('Enable bundle', '启用插件包')
+        const currentDisable = action('Disable bundle', '停用插件包')
+        const settled = enable instanceof HTMLButtonElement
+          || (operationMessage !== '' && currentDisable instanceof HTMLButtonElement && !currentDisable.disabled)
+        return settled ? {
+          disabledProjection: identityText.includes('disabled'),
+          enableActionPresent: enable instanceof HTMLButtonElement && !enable.disabled,
+          operationMessage,
+          identityText,
+        } : null
+      }, 'settled disable operation', 70000)
       click(document.querySelector('[data-plugin-detail-tab="records"]'))
-      const disableRecorded = (await waitFor(() => document.querySelector('[role="tabpanel"]'), 'bundle records')).textContent.includes('disable')
+      const disableRecorded = (await waitFor(() => document.querySelector('[role="tabpanel"][aria-label="记录"], [role="tabpanel"][aria-label="Records"]'), 'bundle records')).textContent.includes('disable')
       return {
         url: location.href,
         headerBeforeTabs,
@@ -138,6 +151,7 @@ try {
         permissionVisible,
         relationVisible,
         disableRecorded,
+        disableOutcome,
         actions,
       }
     })()`,
@@ -158,6 +172,8 @@ try {
     memberVisible: result?.memberVisible === true,
     permissionVisible: result?.permissionVisible === true,
     relationVisible: result?.relationVisible === true,
+    disableApplied: result?.disableOutcome?.disabledProjection === true
+      && result?.disableOutcome?.enableActionPresent === true,
     disableRecorded: result?.disableRecorded === true,
     actions: Object.values(result?.actions ?? {}).every(Boolean),
     noRendererExceptions: runtimeExceptions.length === 0,

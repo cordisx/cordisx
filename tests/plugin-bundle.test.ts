@@ -263,10 +263,12 @@ describe('Host plugin bundle coordinator', () => {
     const secondPreview = await request(coordinator, { kind: 'disable', bundleId: 'bundle-two', impactToken: '' })
     expect(secondPreview).toMatchObject({ affectedPluginIds: [], retainedPluginIds: ['notes'] })
     await request(coordinator, { kind: 'disable', bundleId: 'bundle-two', impactToken: secondPreview.impactToken! })
+    expect((await coordinator.snapshot()).bundles.find(bundle => bundle.id === 'bundle-two')).toMatchObject({ enabled: false, status: 'disabled' })
     const firstPreview = await request(coordinator, { kind: 'disable', bundleId: 'bundle-one', impactToken: '' })
     expect(firstPreview).toMatchObject({ affectedPluginIds: ['notes'], retainedPluginIds: [] })
     await request(coordinator, { kind: 'disable', bundleId: 'bundle-one', impactToken: firstPreview.impactToken! })
     expect((await pluginLifecycle.store.loadActive()).plugins[0]).toMatchObject({ id: 'notes', enabled: false })
+    expect((await coordinator.snapshot()).bundles.find(bundle => bundle.id === 'bundle-one')).toMatchObject({ enabled: false, status: 'disabled' })
 
     const active = await pluginLifecycle.store.loadActive()
     const direct = await pluginLifecycle.handle({

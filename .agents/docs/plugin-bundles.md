@@ -21,7 +21,7 @@ Playground fixture, and app smoke are owned by this repository.
 | The README tab renders only README content; metadata, status, exceptions, and update policy are not repeated there | verified | Manager isolation assertion plus real Playground inspection |
 | Narrow layout keeps the dialog and detail content inside the viewport without page/detail horizontal overflow | verified | real Playground inspection at 720 × 800 |
 | Production launcher publishes the bundle snapshot and token-bound private RPC to the renderer | verified | launcher wiring, bridge tests, and real Playground production composition |
-| A cold isolated `app://` run installs the fixture bundle, confirms permission, opens all tabs, disables it, and reads the audit record | implemented | `tests/fixtures/plugin-bundle-production-smoke.mjs`; local run was prevented by the already-running singleton Host and cleaned its port/process/Home |
+| A cold isolated `app://` run installs the fixture bundle, confirms permission, opens all tabs, disables it, and reads the audit record | verified | `tests/fixtures/plugin-bundle-production-smoke.mjs`; local `app://-/index.html` run passed every assertion and proved CDP port closure, zero remaining profile processes, unchanged Crashpad state, and removal of the isolated Home |
 
 ## Manager information architecture
 

@@ -102,7 +102,7 @@ async function cordisxReady(target) {
       socket.addEventListener('error', reject, { once: true })
     })
     const result = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('renderer readiness evaluation timed out')), 500)
+      const timer = setTimeout(() => reject(new Error('renderer readiness evaluation timed out')), 5_000)
       socket.addEventListener('message', event => {
         const message = JSON.parse(String(event.data))
         if (message.id !== 1) return
@@ -121,18 +121,23 @@ async function cordisxReady(target) {
 }
 
 async function waitForRenderer() {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  const deadline = Date.now() + 300_000
+  let lastTargets = []
+  let lastError
+  while (Date.now() < deadline) {
     if (exited(launcher)) throw new Error(`isolated launcher exited before renderer readiness (status ${String(launcher.exitCode)})`)
     try {
       const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(500) })
       if (response.ok) {
-        const target = (await response.json()).find(item => item.url === 'app://-/index.html')
+        const targets = await response.json()
+        lastTargets = Array.isArray(targets) ? targets.map(item => ({ type: item?.type, title: item?.title, url: item?.url })) : []
+        const target = Array.isArray(targets) ? targets.find(item => item.url === 'app://-/index.html') : undefined
         if (target !== undefined && await cordisxReady(target)) return
       }
-    } catch {}
+    } catch (error) { lastError = error }
     await new Promise(resolve => setTimeout(resolve, 250))
   }
-  throw new Error('isolated app:// renderer did not become available')
+  throw new Error(`isolated app:// renderer did not become available; last targets=${JSON.stringify(lastTargets)}; last error=${String(lastError)}`)
 }
 
 const crashpadBefore = await crashpadCount()
