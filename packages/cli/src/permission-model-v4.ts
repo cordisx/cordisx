@@ -6,17 +6,21 @@ import {
   CORDISX_PERMISSION_POLICY_SCHEMA_V4,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
   type CordisXCapabilityDeclarationV4,
+  type CordisXCapabilityDeclarationV5,
   type CordisXCertifiedPermissionProjectionV1,
   type CordisXPermissionAuthorizationKeyV4,
   type CordisXPermissionAuthorizationDecisionV4,
   type CordisXPermissionAuthorizationPlanV4,
   type CordisXPermissionCapabilityV4,
+  type CordisXPermissionCapabilityV5,
+  type CordisXPermissionScopeV5,
   type CordisXPermissionPolicyRecordV4,
   type CordisXPermissionScopeV4,
   type CordisXPluginManifestV5,
   type CordisXPluginServiceConfigurationV4,
   type CordisXPluginServiceDeclarationV4,
 } from './permission-contracts.js'
+import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'
 import {
   normalizeCapabilityDeclarationV2,
   normalizePermissionIdentityV2,
@@ -30,6 +34,11 @@ const FINGERPRINT = /^sha256:[a-f0-9]{64}$/u
 const LOCAL_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u
 const SERVICE_ENTRY = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:mjs|js)$/u
 const CHANNEL_SERVICE_CONFIG_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
+const AGENT_RUNTIME_CAPABILITIES = new Set<AgentRuntimeCapability>([
+  'agents.create', 'agents.resume', 'agents.get', 'agents.message.submit', 'agents.message.cancel', 'agents.cancel',
+  'agents.live.subscribe', 'sessions.get', 'sessions.read', 'sessions.subscribe', 'approvals.request', 'approvals.answer',
+])
+const SESSION_RUNTIME_CAPABILITIES = new Set<AgentRuntimeCapability>(['sessions.get', 'sessions.read', 'sessions.subscribe'])
 
 export const HOST_DOM_READ_OPERATIONS = Object.freeze([
   'inspect-structure',
@@ -202,6 +211,37 @@ export function normalizeCapabilityDeclarationV4(
   })
 }
 
+function normalizeAgentRuntimeDeclarationV5(value: unknown, label: string): CordisXCapabilityDeclarationV5 | undefined {
+  const declaration = object(value, label)
+  if (!AGENT_RUNTIME_CAPABILITIES.has(declaration.name as AgentRuntimeCapability)) return undefined
+  exact(declaration, ['name', 'required', 'rationale', 'security', 'scope'], label)
+  if (typeof declaration.required !== 'boolean') throw new Error(`${label}.required must be boolean`)
+  const scope = object(declaration.scope, `${label}.scope`)
+  exact(scope, ['sessionIds'], `${label}.scope`)
+  const raw = scope.sessionIds
+  const dynamic = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : undefined
+  const sessionIds: CordisXPermissionScopeV5['sessionIds'] = dynamic === undefined
+    ? uniqueSortedStrings(raw, `${label}.scope.sessionIds`, 100, item => item !== '*' && item.length <= 512)
+    : (() => {
+        exact(dynamic, ['kind', 'routeId', 'param'], `${label}.scope.sessionIds`)
+        if (dynamic.kind !== 'host-route-param' || typeof dynamic.routeId !== 'string' || !LOCAL_ID.test(dynamic.routeId)
+          || typeof dynamic.param !== 'string' || !/^[a-z][a-zA-Z0-9]*$/u.test(dynamic.param)) throw new Error(`${label}.scope.sessionIds is invalid`)
+        if (declaration.required || !['agents.create', 'agents.resume', 'agents.get', 'agents.message.submit', 'agents.message.cancel', 'agents.cancel', 'agents.live.subscribe', 'sessions.get', 'sessions.read', 'sessions.subscribe', 'approvals.request', 'approvals.answer'].includes(declaration.name as string)) {
+          throw new Error(`${label}.scope.sessionIds dynamic binding is invalid for this capability`)
+        }
+        return Object.freeze({ kind: 'host-route-param' as const, routeId: dynamic.routeId, param: dynamic.param })
+      })()
+  if (SESSION_RUNTIME_CAPABILITIES.has(declaration.name as AgentRuntimeCapability) && sessionIds === undefined) {
+    throw new Error(`${label}.scope.sessionIds is required for Session capability`)
+  }
+  return Object.freeze({
+    name: declaration.name as AgentRuntimeCapability, required: declaration.required,
+    ...(declaration.rationale === undefined ? {} : { rationale: normalizePermissionRationaleV2(declaration.rationale, `${label}.rationale`) }),
+    ...(declaration.security === undefined ? {} : { security: normalizePermissionSecurityV2(declaration.security, `${label}.security`) }),
+    scope: Object.freeze({ sessionIds }),
+  })
+}
+
 function serviceConfiguration(value: unknown, label: string): CordisXPluginServiceConfigurationV4 {
   const configuration = object(value, label)
   if (configuration.kind === 'none') {
@@ -244,12 +284,15 @@ export function normalizePluginManifestV5(
   if (!Array.isArray(manifest.capabilities) || manifest.capabilities.length > 24) {
     throw new Error('plugin manifest.capabilities must be an array of at most 24 items')
   }
-  const seenCapabilities = new Set<CordisXPermissionCapabilityV4>()
+  const seenCapabilities = new Set<CordisXPermissionCapabilityV5>()
   const capabilities = Object.freeze(manifest.capabilities.map((candidate, index) => {
-    const declaration = normalizeCapabilityDeclarationV4(candidate, `plugin manifest.capabilities[${index}]`)
+    const declaration = normalizeAgentRuntimeDeclarationV5(candidate, `plugin manifest.capabilities[${index}]`)
+      ?? normalizeCapabilityDeclarationV4(candidate, `plugin manifest.capabilities[${index}]`)
     if (seenCapabilities.has(declaration.name)) throw new Error(`duplicate capability declaration: ${declaration.name}`)
     seenCapabilities.add(declaration.name)
-    catalog.assertScope(declaration.name, declaration.scope)
+    if (!AGENT_RUNTIME_CAPABILITIES.has(declaration.name as AgentRuntimeCapability)) {
+      catalog.assertScope(declaration.name as CordisXPermissionCapabilityV4, declaration.scope as CordisXPermissionScopeV4)
+    }
     return declaration
   }))
   if (!Array.isArray(manifest.services) || manifest.services.length > 16) {
@@ -306,7 +349,8 @@ export function normalizePermissionPolicyRecordV4(
   }
   const key = object(record.key, `${label}.key`)
   exact(key, ['profileId', 'identity', 'capability', 'scope', 'securityFingerprint'], `${label}.key`)
-  if (!isHostDomPermissionCapability(key.capability)) throw new Error(`${label} stores only Host DOM v4 capabilities`)
+  const agentCapability = AGENT_RUNTIME_CAPABILITIES.has(key.capability as AgentRuntimeCapability)
+  if (!isHostDomPermissionCapability(key.capability) && !agentCapability) throw new Error(`${label} capability is unsupported`)
   if (typeof key.securityFingerprint !== 'string' || !FINGERPRINT.test(key.securityFingerprint)) {
     throw new Error(`${label}.key.securityFingerprint is invalid`)
   }
@@ -322,11 +366,22 @@ export function normalizePermissionPolicyRecordV4(
     key: Object.freeze({
       profileId: normalizePermissionLocalIdV2(key.profileId, `${label}.key.profileId`),
       identity: normalizePermissionIdentityV2(key.identity, `${label}.key.identity`),
-      capability: key.capability,
-      scope: normalizeHostDomPermissionScopeV4(key.scope, key.capability, `${label}.key.scope`),
+      capability: key.capability as CordisXPermissionCapabilityV5,
+      scope: agentCapability
+        ? normalizeAgentRuntimePolicyScopeV4(key.scope, `${label}.key.scope`)
+        : normalizeHostDomPermissionScopeV4(key.scope, key.capability as 'ui.host-dom.read' | 'ui.host-dom.modify', `${label}.key.scope`),
       securityFingerprint: key.securityFingerprint as `sha256:${string}`,
     }),
     policy: record.policy,
+  })
+}
+
+/** Persisted Agent/Session policy records are always concrete: routes are resolved before policy lookup. */
+function normalizeAgentRuntimePolicyScopeV4(value: unknown, label: string): CordisXPermissionScopeV5 {
+  const scope = object(value, label)
+  exact(scope, ['sessionIds'], label)
+  return Object.freeze({
+    sessionIds: uniqueSortedStrings(scope.sessionIds, `${label}.sessionIds`, 1, item => item !== '*' && item.length <= 512),
   })
 }
 

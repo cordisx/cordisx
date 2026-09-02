@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/cordisx/cordisx/main/packages/cli/schemas/agent-session-legacy-acquire.v1.schema.json",
+  "title": "CordisX Host Agent Session Legacy Acquire v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$schema", "contract", "schemaVersion", "mutationId", "binding"],
+      "properties": {
+        "$schema": { "const": "https://raw.githubusercontent.com/cordisx/cordisx/main/packages/cli/schemas/agent-session-legacy-acquire.v1.schema.json" },
+        "contract": { "const": "cordisx.host-agent-session-legacy-acquire/v1" },
+        "schemaVersion": { "const": 1 },
+        "mutationId": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "binding": { "$ref": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v4.schema.json" },
+        "options": { "type": "object" },
+        "setup": { "type": "object" }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["$schema", "contract", "schemaVersion", "mutationId", "status"],
+      "properties": {
+        "$schema": { "const": "https://raw.githubusercontent.com/cordisx/cordisx/main/packages/cli/schemas/agent-session-legacy-acquire.v1.schema.json" },
+        "contract": { "const": "cordisx.host-agent-session-legacy-acquire/v1" },
+        "schemaVersion": { "const": 1 },
+        "mutationId": { "type": "string" },
+        "status": { "enum": ["accepted", "denied", "conflict", "unavailable"] }
+      }
+    }
+  ]
+}

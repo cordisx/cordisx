@@ -203,6 +203,10 @@ export class BindingPlatformAdapter implements CordisXPlatformAdapter {
     return await this.request('agent-loop.v4.lifecycle.read', input)
   }
 
+  async resolveAgentLoopV4Session(input: { readonly scope: CordisXAgentLoopV4Scope; readonly task: string; readonly binding: { readonly bindingId: string; readonly generation: number }; readonly definition: { readonly agentId: string; readonly revision: string } }): Promise<unknown> {
+    return await this.request('agent-loop.v4.session.resolve', input)
+  }
+
   dispose(): void {
     if (this.closed) return
     this.closed = true

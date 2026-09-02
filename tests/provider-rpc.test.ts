@@ -38,6 +38,10 @@ describe('provider CDP RPC boundary', () => {
       requestId: 'request-v4-lifecycle', token: 'fixed-token', operation: 'agent-loop.v4.lifecycle.read',
       input: { scope, task: 'task-1', binding, definition, afterSequence: 0 },
     }, 'fixed-token')).toMatchObject({ operation: 'agent-loop.v4.lifecycle.read' })
+    expect(parseProviderBindingRequest({
+      requestId: 'request-v4-session-resolve', token: 'fixed-token', operation: 'agent-loop.v4.session.resolve',
+      input: { scope, task: 'task-1', binding, definition },
+    }, 'fixed-token')).toMatchObject({ operation: 'agent-loop.v4.session.resolve' })
     expect(() => parseProviderBindingRequest({
       requestId: 'request-1', token: 'wrong', operation: 'tasks.read',
       input: { session: { providerId: 'alpha', remoteSessionId: 'same-id' } },
@@ -60,5 +64,9 @@ describe('provider CDP RPC boundary', () => {
       requestId: 'request-v4-private', token: 'fixed-token', operation: 'agent-loop.v4.introduction.request',
       input: { scope, command, operationId: 'operation-2', task: 'task-1', binding, definition, participantId: 'agent-1', memberId: 'member-1', runId: 'run-1', prompt: 'private' },
     }, 'fixed-token')).toThrow('unknown field prompt')
+    expect(() => parseProviderBindingRequest({
+      requestId: 'request-v4-session-resolve-private', token: 'fixed-token', operation: 'agent-loop.v4.session.resolve',
+      input: { scope, task: 'task-1', binding, definition, remoteSessionId: 'forged-session' },
+    }, 'fixed-token')).toThrow('unknown field remoteSessionId')
   })
 })

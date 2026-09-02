@@ -31,6 +31,7 @@ export * from './platform-contracts.js'
 export * from './permission-contracts.js'
 export * from './agent-contracts.js'
 export * from './agent-loop-contracts.js'
+export * from './agent-session-migration-contracts.js'
 export * from './durable-document-contracts.js'
 export * from './plugin-lifecycle-contracts.js'
 export type {
@@ -1250,6 +1251,11 @@ export type CordisXAgentConversationShellSourceFactoryV3 = (
   binding: Readonly<AgentConversationShellBindingV3>,
 ) => AgentConversationShellSourceV3 | Promise<AgentConversationShellSourceV3>
 
+export type CordisXAgentConversationShellSourceFactoryV4 = (
+  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellBinding>,
+) => import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource
+  | Promise<import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource>
+
 /** Host-owned page mount paired with one fiber-owned source registration. */
 export interface CordisXAgentConversationShellRegistration {
   readonly mount: CordisXPageMount
@@ -1261,6 +1267,8 @@ export interface CordisXAgentConversationShell {
   registerSource(factory: CordisXAgentConversationShellSourceFactory): CordisXAgentConversationShellRegistration
   registerSource(factory: CordisXAgentConversationShellSourceFactoryV2): CordisXAgentConversationShellRegistration
   registerSource(factory: CordisXAgentConversationShellSourceFactoryV3): CordisXAgentConversationShellRegistration
+  /** Explicit Session-runtime shell seam; it never reinterprets v4 facts as AgentLoop v3. */
+  registerSourceV4(factory: CordisXAgentConversationShellSourceFactoryV4): CordisXAgentConversationShellRegistration
 }
 
 export interface CordisXRouteDefinition<Outlet extends CordisXOutletName = CordisXOutletName> {

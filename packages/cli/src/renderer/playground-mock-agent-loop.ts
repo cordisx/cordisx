@@ -695,6 +695,12 @@ export class PlaygroundMockAgentLoopV4Transport implements AgentLoopV4Transport 
     }
   }
 
+  async resolveAgentLoopV4Session(input: Parameters<AgentLoopV4Transport['resolveAgentLoopV4Session']>[0]): Promise<unknown> {
+    return this.bindingFor(input)
+      ? { status: 'resolved', sessionId: input.task }
+      : { status: 'unavailable', code: 'binding-closed' }
+  }
+
   private async once(
     input: { readonly scope: Parameters<AgentLoopV4Transport['createAgentLoopV4']>[0]['scope']; readonly operationId: string; readonly command: unknown },
     execute: () => Promise<unknown>,

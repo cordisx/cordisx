@@ -198,6 +198,29 @@ hostSubscription satisfies ConnectorEventSubscription
 if ('handle' in protocolResult) protocolResult.handle.unsubscribe()
 if ('handle' in hostResult) hostResult.handle.unsubscribe()
 `, 'utf8')
+  await writeFile(path.join(runnerDirectory, 'agent-session-consumer.ts'), `
+import type { Context } from '@deepseek-ai/cordis'
+import type { AgentRegistry } from '@cordisx/protocol/agents/v1'
+import type { ApprovalService } from '@cordisx/protocol/approval/v1'
+import type { SessionRegistry } from '@cordisx/protocol/sessions/v1'
+import type {
+  CordisXAgentConversationShellSourceFactoryV4,
+  CordisXAgentSessionLegacyAcquireRequestV1,
+  CordisXAgentSessionLegacyAcquireResultV1,
+} from 'cordisx/contracts'
+
+declare const ctx: Context
+declare const legacyRequest: CordisXAgentSessionLegacyAcquireRequestV1
+declare const shellFactory: CordisXAgentConversationShellSourceFactoryV4
+
+ctx.agents satisfies AgentRegistry
+ctx.sessions satisfies SessionRegistry
+ctx.approvals satisfies ApprovalService
+const migrated: Promise<CordisXAgentSessionLegacyAcquireResultV1> = ctx.agents.acquireLegacyTaskBinding(legacyRequest)
+const registration = ctx.agentConversationShell.registerSourceV4(shellFactory)
+migrated satisfies Promise<CordisXAgentSessionLegacyAcquireResultV1>
+registration.mount satisfies Function
+`, 'utf8')
   await writeFile(path.join(runnerDirectory, 'agent-loop-collection-consumer.ts'), `
 import type { Context } from '@deepseek-ai/cordis'
 import type {
@@ -383,7 +406,7 @@ ctx.slots.registerCollection({
       target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true,
       exactOptionalPropertyTypes: true, noEmit: true, skipLibCheck: false,
     },
-    include: ['conversation-consumer.ts', 'connector-consumer.ts', 'agent-loop-collection-consumer.ts'],
+    include: ['conversation-consumer.ts', 'connector-consumer.ts', 'agent-session-consumer.ts', 'agent-loop-collection-consumer.ts'],
   }, null, 2)}\n`, 'utf8')
   const rootBin = name => path.join(repositoryRoot, 'node_modules', '.bin', process.platform === 'win32' ? `${name}.cmd` : name)
   await run(rootBin('tsc'), ['-p', 'tsconfig.json'], { cwd: runnerDirectory, env: process.env })

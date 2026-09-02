@@ -4,6 +4,10 @@ import type {
   AgentConversationShellSnapshot,
   AgentConversationShellSource,
 } from '@cordisx/protocol/agent-conversation-shell/v1'
+import type {
+  AgentConversationShellSnapshot as AgentConversationShellSnapshotV4,
+  AgentConversationShellSubscriptionClosed as AgentConversationShellSubscriptionClosedV4,
+} from '@cordisx/protocol/agent-conversation-shell/v4'
 import { Context } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
 import { act } from 'react'
@@ -222,6 +226,72 @@ afterEach(() => {
 })
 
 describe('Agent conversation shell public runtime', () => {
+  it('settles a Shell v4 close once and releases its source with an idempotent async unsubscribe', async () => {
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
+    const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-v4' })
+    let resolveClosed: ((value: AgentConversationShellSubscriptionClosedV4) => void) | undefined
+    const closed = new Promise<AgentConversationShellSubscriptionClosedV4>(resolve => { resolveClosed = resolve })
+    let connectionClose: AgentConversationShellSubscriptionClosedV4 | undefined
+    let subscribed = false
+    let unsubscribed = 0
+    let disposed = 0
+    const registration = runtime.register(plugin, binding => {
+      const snapshot: AgentConversationShellSnapshotV4 = {
+        binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration },
+        generation: 'session-generation-v4', snapshotSequence: 0, selection: { kind: 'no-room' }, items: [],
+        composer: { availability: 'available', placeholder: { key: 'composer', fallback: 'Message' }, disabled: { value: false }, submit: { id: 'send' } },
+        headerActions: [],
+      }
+      const subscription = {
+        subscriptionId: 'subscription-v4', binding: snapshot.binding, generation: snapshot.generation,
+        afterSequence: 0, snapshotSequence: 0,
+      }
+      const close = (code: AgentConversationShellSubscriptionClosedV4['code']): AgentConversationShellSubscriptionClosedV4 => ({
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-conversation-shell-subscription-close.v4.schema.json',
+        contract: 'cordisx.agent-conversation-shell-subscription-close/v4', schemaVersion: 4,
+        subscriptionId: subscription.subscriptionId, binding: subscription.binding, generation: subscription.generation,
+        status: 'closed', code,
+      })
+      connectionClose = close('connection-replaced')
+      return {
+        snapshot: async () => snapshot,
+        subscribe: async () => {
+          subscribed = true
+          return {
+            result: { type: 'subscribe', status: 'accepted', code: 'allowed', subscription },
+            handle: {
+              subscription,
+              pages: { async *[Symbol.asyncIterator]() { await new Promise<void>(() => {}) } },
+              closed,
+              unsubscribe: async () => { unsubscribed += 1; return close('unsubscribed') },
+            },
+          }
+        },
+        updateRoomSettings: async request => ({
+          type: 'update-room-settings', requestId: request.requestId, binding: request.binding,
+          generation: request.generation, roomId: request.roomId, expectedSnapshotSequence: request.expectedSnapshotSequence,
+          status: 'unavailable', code: 'settings-unavailable',
+        }),
+        dispose: () => { disposed += 1 },
+      }
+    }, undefined, 4)
+    registration.mount(mountContext(dom))
+    await vi.waitFor(() => expect(subscribed).toBe(true))
+    resolveClosed!(connectionClose!)
+    await waitForRuntimeState(dom, 'unavailable')
+    expect(unsubscribed).toBe(1)
+    expect(disposed).toBe(1)
+    registration.dispose()
+    runtime.dispose()
+    expect(unsubscribed).toBe(1)
+    expect(disposed).toBe(1)
+    commands.dispose()
+    await settle()
+    dom.window.close()
+  })
+
   it('exposes the agentConversationShell injection and owns registration on the plugin fiber', async () => {
     const dom = installDom()
     const root = new Context()

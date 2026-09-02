@@ -17,13 +17,14 @@ import {
   isPlaygroundRoomSimulationBinding,
   type PlaygroundRoomSimulationBinding,
 } from '../../playground-room-simulation-bridge.js'
+import type { AgentConversationActiveRun } from './model.js'
 
-export type HostAgentIdentitySessionLifecycle = AgentConversationActiveRunDescriptor['lifecycle']['phase']
+export type HostAgentIdentitySessionLifecycle = AgentConversationActiveRun['lifecycle']['phase']
 export type HostAgentDefinitionIdentityPresentation = Readonly<AgentDefinitionIdentity>
 
 export interface HostAgentIdentitySessionPresentation {
   /** Exact descriptor from the room snapshot's top-level activeRuns array. */
-  readonly run: AgentConversationActiveRunDescriptor
+  readonly run: AgentConversationActiveRun
   readonly roomLabel: string
   readonly taskLabel: string
   /** Host-private mounted Room correlation. It is never derived from either display label. */
@@ -97,7 +98,7 @@ export interface HostAgentIdentityAvatarButtonProps {
 const PLAYGROUND_TASK_DETAILS_SESSION_RESOLVER = '__cordisxPlaygroundTaskDetailsSessionV1'
 
 interface PlaygroundTaskDetailsSessionResolverInput {
-  readonly detailsUrl: AgentConversationActiveRunDescriptor['detailsUrl']
+  readonly detailsUrl: Extract<AgentConversationActiveRun, { readonly detailsUrl: unknown }>['detailsUrl']
   readonly participantId: string
   readonly memberId: string
   readonly runId: string
@@ -111,7 +112,7 @@ interface PlaygroundTaskDetailsSessionResolverInput {
 }
 
 type PlaygroundTaskDetailsResolverWindow = Window & {
-  [PLAYGROUND_TASK_DETAILS_SESSION_RESOLVER]?: (input: PlaygroundTaskDetailsSessionResolverInput) => AgentConversationActiveRunDescriptor['detailsUrl']
+  [PLAYGROUND_TASK_DETAILS_SESSION_RESOLVER]?: (input: PlaygroundTaskDetailsSessionResolverInput) => Extract<AgentConversationActiveRun, { readonly detailsUrl: unknown }>['detailsUrl']
 }
 
 const HANDLE_PATTERN = /^[^\u0000-\u001f\u007f]{1,512}$/u
@@ -167,8 +168,7 @@ export function createHostAgentIdentityPresentation(input: HostAgentIdentityPres
     if (keys.has(key)) throw new TypeError('Active sessions contain a duplicate participant/member/run association')
     keys.add(key)
     if (!['active', 'running', 'waiting', 'attention'].includes(session.run.lifecycle.phase)) throw new TypeError(`Active session ${index} lifecycle is invalid`)
-    return Object.freeze({
-      run: Object.freeze({
+    const run = !('sessionId' in session.run) ? Object.freeze({
         participantId: sessionParticipantId,
         memberId,
         runId,
@@ -177,7 +177,19 @@ export function createHostAgentIdentityPresentation(input: HostAgentIdentityPres
           ...(session.run.lifecycle.updatedAt === undefined ? {} : { updatedAt: boundedText(session.run.lifecycle.updatedAt, `Active session ${index} lifecycle time`, 64) }),
         }),
         detailsUrl: validateAgentLoopTaskDetailsUrl(session.run.detailsUrl),
-      }),
+      }) : Object.freeze({
+        participantId: sessionParticipantId,
+        memberId,
+        runId,
+        sessionId: boundedHandle(session.run.sessionId, `Active session ${index} session id`),
+        lifecycle: Object.freeze({
+          phase: session.run.lifecycle.phase,
+          ...(session.run.lifecycle.updatedAt === undefined ? {} : { updatedAt: boundedText(session.run.lifecycle.updatedAt, `Active session ${index} lifecycle time`, 64) }),
+        }),
+        ...(session.run.details === undefined ? {} : { details: Object.freeze({ kind: session.run.details.kind, ref: boundedHandle(session.run.details.ref, `Active session ${index} detail ref`) }) }),
+      })
+    return Object.freeze({
+      run,
       roomLabel: boundedText(session.roomLabel, `Active session ${index} room label`, 256),
       taskLabel: boundedText(session.taskLabel, `Active session ${index} task label`, 256),
       ...(session.simulationBinding === undefined ? {} : {
@@ -269,6 +281,12 @@ export function HostAgentIdentityContent({
     if (pendingSession !== undefined) return
     setPendingSession(key)
     try {
+      if ('sessionId' in session.run) {
+        if (session.run.details === undefined) throw new Error('Agent details are unavailable')
+        onClose()
+        await navigator.navigateAgentDetail(session.run.details, session.run.sessionId)
+        return
+      }
       const view = document.defaultView as PlaygroundTaskDetailsResolverWindow | null
       const detailsUrl = view?.[PLAYGROUND_TASK_DETAILS_SESSION_RESOLVER]?.({
         detailsUrl: session.run.detailsUrl,
@@ -389,7 +407,7 @@ export function HostAgentIdentityPanel({
       navigator={navigator}
       onClose={() => onOpenChange(false)}
       onSettings={onSettings}
-      onNavigationError={onNavigationError}
+      {...(onNavigationError === undefined ? {} : { onNavigationError })}
       idPrefix={contentId}
     />
   </HostConversationRightInspector>

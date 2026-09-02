@@ -24,6 +24,7 @@ export type ProviderRpcOperation =
   | 'agent-loop.v4.introduction.request'
   | 'agent-loop.v4.introduction.cancel'
   | 'agent-loop.v4.lifecycle.read'
+  | 'agent-loop.v4.session.resolve'
 
 export interface ProviderBindingRequest {
   readonly requestId: string
@@ -36,7 +37,7 @@ const OPERATIONS: readonly ProviderRpcOperation[] = [
   'status', 'availability', 'models.list', 'tasks.list', 'tasks.read', 'tasks.create', 'tasks.control', 'turns.submit', 'turns.control',
   'agent-loop.create', 'agent-loop.lifecycle.read',
   'agent-loop.v4.create', 'agent-loop.v4.bind', 'agent-loop.v4.send', 'agent-loop.v4.approval.decide',
-  'agent-loop.v4.introduction.request', 'agent-loop.v4.introduction.cancel', 'agent-loop.v4.lifecycle.read',
+  'agent-loop.v4.introduction.request', 'agent-loop.v4.introduction.cancel', 'agent-loop.v4.lifecycle.read', 'agent-loop.v4.session.resolve',
 ]
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -202,6 +203,12 @@ function validateInput(operation: ProviderRpcOperation, value: unknown): void {
     if (!Number.isInteger(input.afterSequence) || (input.afterSequence as number) < 0) throw new Error('AgentLoop afterSequence is invalid')
     return
   }
+  if (operation === 'agent-loop.v4.session.resolve') {
+    const input = exact(value, ['scope', 'task', 'binding', 'definition'], 'AgentLoop v4 Session resolution input')
+    agentLoopScope(input.scope); text(input.task, 'AgentLoop task', 512)
+    agentLoopBinding(input.binding); agentLoopDefinition(input.definition)
+    return
+  }
   if (operation === 'tasks.control') {
     const input = exact(value, ['action', 'session'], 'input')
     if (!['continue', 'fork', 'archive', 'restore', 'delete'].includes(String(input.action))) throw new Error('input.action is invalid')
@@ -259,5 +266,6 @@ export async function handleProviderBindingRequest(fleet: ProviderFleet, request
     case 'agent-loop.v4.introduction.request': return await fleet.requestAgentLoopIntroductionV4(request.input as Parameters<ProviderFleet['requestAgentLoopIntroductionV4']>[0])
     case 'agent-loop.v4.introduction.cancel': return await fleet.cancelAgentLoopIntroductionV4(request.input as Parameters<ProviderFleet['cancelAgentLoopIntroductionV4']>[0])
     case 'agent-loop.v4.lifecycle.read': return fleet.readAgentLoopV4Lifecycle(request.input as Parameters<ProviderFleet['readAgentLoopV4Lifecycle']>[0])
+    case 'agent-loop.v4.session.resolve': return fleet.resolveAgentLoopV4Session(request.input as Parameters<ProviderFleet['resolveAgentLoopV4Session']>[0])
   }
 }
