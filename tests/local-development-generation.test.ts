@@ -104,13 +104,20 @@ describe('local development generations', () => {
     const source = path.join(root, 'src')
     const entry = path.join(source, 'demo.ts')
     const dependency = path.join(source, 'value.ts')
+    const englishReadme = path.join(root, 'README.md')
+    const chineseReadme = path.join(root, 'README.zh-Hans.md')
     await mkdir(source)
     await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.2.3' }))
     await writeFile(entry, "import { value } from './value.js'\nconsole.info('plugin-top-level')\nexport default { manifest: { id: 'demo', name: value }, apply() {} }\n")
     await writeFile(dependency, "export const value = 'one'\n")
+    await writeFile(englishReadme, '# Demo\n')
+    await writeFile(chineseReadme, '# 演示\n')
 
     const firstBuild = await buildLocalDevelopmentPlugin(entry)
     expect(firstBuild.watchFiles).toContain(dependency)
+    expect(firstBuild.watchFiles).toEqual(expect.arrayContaining([englishReadme, chineseReadme]))
+    expect(firstBuild.readme).toBe('# Demo\n')
+    expect(firstBuild.readmes).toEqual({ default: '# Demo\n', 'zh-hans': '# 演示\n' })
     expect(firstBuild.identitySource).toMatch(/^file:\/\/\/cordisx-local-dev\//u)
     expect(firstBuild.identitySource).not.toContain(root)
     expect(firstBuild.runtimeArtifactSource).toContain('__cordisxPendingPluginModuleFactoryV1 = (console) =>')
@@ -141,6 +148,7 @@ describe('local development generations', () => {
         const plugin = config.plugins[0]!
         expect(plugin.development).toMatchObject({ origin: 'local-dev', sourcePath: entry, state: 'ready' })
         expect(plugin.source).not.toContain(root)
+        expect(plugin.readmes).toEqual({ default: '# Demo\n', 'zh-hans': '# 演示\n' })
         return JSON.stringify({ digest: plugin.package?.digest, revision: activation.revision, epoch })
       },
       setBootstrap: sourceText => { bootstraps.push(sourceText) },

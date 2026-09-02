@@ -1,4 +1,5 @@
 import {
+  CORDISX_COMPOSER_SUBMIT_CELEBRATION_PROFILE_V1,
   CORDISX_HOST_EXTENSION_POINT_CONTROL_CATALOG_SCHEMA_V1,
   CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1,
   type CordisXExtensionPointControlMode,
@@ -29,9 +30,12 @@ import { HostTooltipController, type HostTooltipPlacement } from './tooltips.js'
 import { evaluateWhen } from './validation.js'
 import {
   BrowserControlledSurfacePolicyStore,
+  ControlledSurfaceCommandError,
   ControlledSurfaceCoordinator,
   ControlledSurfacePolicyBroker,
+  type ControlledSurfaceCommandContext,
   type ControlledSurfacePointBinding,
+  type ControlledSurfaceSelectedClaim,
 } from './controlled-surfaces.js'
 
 interface ResolvedOutletAnchor {
@@ -931,6 +935,7 @@ export class ReasoningIntensityNativeVisibility {
 }
 
 const REASONING_CONTROL_POINT = 'composer.reasoning-intensity'
+const COMPOSER_TOOLBAR_CONTROL_POINT = 'composer.toolbar.items'
 
 export const CORDISX_CODEX_CONTROL_CATALOG = {
   $schema: CORDISX_HOST_EXTENSION_POINT_CONTROL_CATALOG_SCHEMA_V1,
@@ -955,6 +960,39 @@ export const CORDISX_CODEX_CONTROL_CATALOG = {
     }],
     safeEvents: [{
       id: 'reasoningIntensityChanged', delivery: 'host-projected', payload: [{ id: 'value', schema: { type: 'string' }, required: true }],
+    }],
+    ownership: { scope: 'point', suppressesDescendantsWhenModes: [] },
+  }, {
+    id: COMPOSER_TOOLBAR_CONTROL_POINT,
+    modes: [
+      { id: 'compose', stacking: 'ordered', coexistsWith: ['proxy'], defaultAuthorization: 'allow' },
+      { id: 'proxy', stacking: 'exclusive', exclusiveGroup: 'submit-observer', coexistsWith: ['compose'], defaultAuthorization: 'deny' },
+    ],
+    exclusiveGroups: [{
+      id: 'submit-observer', modes: ['proxy'], cardinality: 'one', selection: 'host-priority', nativeFallback: true,
+    }],
+    safeProperties: [{
+      id: 'celebrationProfile',
+      schema: { type: 'string', enum: [CORDISX_COMPOSER_SUBMIT_CELEBRATION_PROFILE_V1] },
+      visibility: 'renderer-safe',
+      mutable: false,
+    }],
+    safeCommands: [{
+      id: 'presentCelebration', dispatch: 'host-brokered', arguments: [
+        { id: 'requestId', schema: { type: 'string' }, required: true },
+        { id: 'activationId', schema: { type: 'string' }, required: true },
+        { id: 'effect', schema: { type: 'string', enum: ['confetti'] }, required: true },
+        { id: 'durationMs', schema: { type: 'integer' }, required: true },
+      ],
+    }, {
+      id: 'dismissCelebration', dispatch: 'host-brokered', arguments: [
+        { id: 'requestId', schema: { type: 'string' }, required: true },
+      ],
+    }],
+    safeEvents: [{
+      id: 'submitActivated', delivery: 'host-projected', payload: [
+        { id: 'activationId', schema: { type: 'string' }, required: true },
+      ],
     }],
     ownership: { scope: 'point', suppressesDescendantsWhenModes: [] },
   }],
@@ -1019,6 +1057,223 @@ class ReasoningIntensityControlBinding implements ControlledSurfacePointBinding 
   }
 
   dispose(): void { this.update(undefined); this.coordinator = undefined }
+}
+
+function celebrationOwnerKey(value: ControlledSurfaceSelectedClaim): string {
+  const { declaration, generation } = value
+  return [
+    declaration.principalHandle,
+    declaration.identity.source,
+    declaration.identity.pluginId,
+    declaration.identity.pointId,
+    declaration.claimId,
+    declaration.contributionId,
+    declaration.mode,
+    generation.moduleGeneration ?? 'host',
+    generation.transactionId ?? '',
+    generation.transactionEpoch ?? '',
+  ].join('\u0000')
+}
+
+/** @internal Host-owned, pointer-inert full-window presentation. */
+export class HostConfettiPresentation {
+  private readonly root: HTMLElement
+
+  constructor(document: Document) {
+    this.root = create(document, 'div', 'cordisx-celebration')
+    this.root.dataset.cordisxEffect = 'confetti'
+    this.root.setAttribute('aria-hidden', 'true')
+    this.root.style.position = 'fixed'
+    this.root.style.inset = '0'
+    this.root.style.pointerEvents = 'none'
+    this.root.style.overflow = 'hidden'
+    const colors = ['#ff4d6d', '#ffd166', '#06d6a0', '#4cc9f0', '#8b5cf6', '#ff8c42'] as const
+    const fragment = document.createDocumentFragment()
+    for (let index = 0; index < 96; index += 1) {
+      const piece = document.createElement('i')
+      piece.className = 'cordisx-confetti-piece'
+      piece.style.setProperty('--cordisx-confetti-x', `${(index * 37) % 101}%`)
+      piece.style.setProperty('--cordisx-confetti-y', `${8 + ((index * 53) % 84)}%`)
+      piece.style.setProperty('--cordisx-confetti-drift', `${((index * 29) % 31) - 15}vw`)
+      piece.style.setProperty('--cordisx-confetti-delay', `${-((index * 71) % 1600)}ms`)
+      piece.style.setProperty('--cordisx-confetti-duration', `${1450 + ((index * 47) % 1150)}ms`)
+      piece.style.setProperty('--cordisx-confetti-spin', `${240 + ((index * 83) % 640)}deg`)
+      piece.style.setProperty('--cordisx-confetti-color', colors[index % colors.length]!)
+      fragment.append(piece)
+    }
+    this.root.append(fragment)
+    ;(document.body ?? document.documentElement).append(this.root)
+  }
+
+  dispose(): void { this.root.remove() }
+}
+
+interface CelebrationActivation {
+  readonly owner: string
+  readonly expiresAt: number
+  readonly timer: number
+}
+
+interface ActiveCelebration {
+  readonly owner: string
+  readonly requestId: string
+  readonly timer: number
+  readonly presentation: HostConfettiPresentation
+}
+
+/** @internal Exact Host binding for cordisx.composer-submit-celebration/v1. */
+export class ComposerSubmitCelebrationControlBinding implements ControlledSurfacePointBinding {
+  private native: HTMLButtonElement | undefined
+  private coordinator: ControlledSurfaceCoordinator | undefined
+  private readonly activations = new Map<string, CelebrationActivation>()
+  private readonly requests = new Map<string, Readonly<{ owner: string; value: string }>>()
+  private active: ActiveCelebration | undefined
+  private sequence = 0
+
+  constructor(private readonly document: Document) {}
+
+  connect(coordinator: ControlledSurfaceCoordinator): void { this.coordinator = coordinator }
+
+  update(native: HTMLButtonElement | undefined): void {
+    if (this.native === native) return
+    this.native?.removeEventListener('click', this.onNativeActivation)
+    this.native = native
+    this.native?.addEventListener('click', this.onNativeActivation)
+    this.coordinator?.invalidate()
+  }
+
+  currentState(): Readonly<{ state: 'active' | 'not-mounted'; reason: string }> {
+    return this.native?.isConnected === true
+      ? { state: 'active', reason: 'point.mounted' }
+      : { state: 'not-mounted', reason: 'point.not-mounted' }
+  }
+
+  readProperty(id: string): string {
+    if (id !== 'celebrationProfile') throw new Error('celebration profile property is unavailable')
+    return CORDISX_COMPOSER_SUBMIT_CELEBRATION_PROFILE_V1
+  }
+
+  commandAvailability(id: string): Readonly<{ available: boolean; reason?: string }> {
+    return ['presentCelebration', 'dismissCelebration'].includes(id) && this.native?.isConnected === true
+      ? { available: true }
+      : { available: false, reason: this.native?.isConnected === true ? 'celebration.unavailable' : 'point.not-mounted' }
+  }
+
+  eventAvailability(id: string): Readonly<{ available: boolean; reason?: string }> {
+    return id === 'submitActivated' && this.native?.isConnected === true
+      ? { available: true }
+      : { available: false, reason: this.native?.isConnected === true ? 'celebration.unavailable' : 'point.not-mounted' }
+  }
+
+  selectionChanged(selected: readonly ControlledSurfaceSelectedClaim[]): void {
+    const owners = new Set(selected.map(celebrationOwnerKey))
+    for (const [activationId, activation] of this.activations) {
+      if (owners.has(activation.owner)) continue
+      this.clearActivation(activationId)
+    }
+    for (const [key, request] of this.requests) {
+      if (!owners.has(request.owner)) this.requests.delete(key)
+    }
+    if (this.active !== undefined && !owners.has(this.active.owner)) this.dismissActive()
+  }
+
+  dispatch(
+    id: string,
+    arguments_: Readonly<Record<string, string | number | boolean | null>>,
+    context: ControlledSurfaceCommandContext,
+  ): void {
+    const owner = celebrationOwnerKey(context)
+    if (id === 'dismissCelebration') {
+      const requestId = String(arguments_.requestId)
+      if (this.active?.owner === owner && this.active.requestId === requestId) this.dismissActive()
+      return
+    }
+    if (id !== 'presentCelebration') throw new ControlledSurfaceCommandError('celebration.unavailable')
+    const requestId = String(arguments_.requestId)
+    const activationId = String(arguments_.activationId)
+    const effect = String(arguments_.effect)
+    const durationMs = Number(arguments_.durationMs)
+    if (!Number.isInteger(durationMs) || durationMs < 250 || durationMs > 5000) {
+      throw new ControlledSurfaceCommandError('argument.out-of-range')
+    }
+    if (effect !== 'confetti') throw new ControlledSurfaceCommandError('arguments.invalid')
+    const requestKey = JSON.stringify([owner, requestId])
+    const requestValue = JSON.stringify({ requestId, activationId, effect, durationMs })
+    const previous = this.requests.get(requestKey)
+    if (previous !== undefined) {
+      if (previous.value !== requestValue) throw new ControlledSurfaceCommandError('request.conflict')
+      return
+    }
+    const activation = this.activations.get(activationId)
+    if (activation === undefined || activation.owner !== owner || activation.expiresAt <= Date.now()) {
+      if (activation !== undefined) this.clearActivation(activationId)
+      throw new ControlledSurfaceCommandError('activation.stale')
+    }
+    this.clearActivation(activationId)
+    this.dismissActive()
+    let presentation: HostConfettiPresentation | undefined
+    try {
+      presentation = new HostConfettiPresentation(this.document)
+      const view = this.document.defaultView
+      if (view === null) throw new Error('celebration window is unavailable')
+      const timer = view.setTimeout(() => {
+        if (this.active?.owner === owner && this.active.requestId === requestId) this.dismissActive()
+      }, durationMs)
+      this.requests.set(requestKey, { owner, value: requestValue })
+      this.active = { owner, requestId, timer, presentation }
+    } catch {
+      presentation?.dispose()
+      throw new ControlledSurfaceCommandError('presentation.failed')
+    }
+  }
+
+  dispose(): void {
+    this.native?.removeEventListener('click', this.onNativeActivation)
+    this.native = undefined
+    for (const activationId of [...this.activations.keys()]) this.clearActivation(activationId)
+    this.requests.clear()
+    this.dismissActive()
+    this.coordinator = undefined
+  }
+
+  private readonly onNativeActivation = (event: MouseEvent): void => {
+    const native = this.native
+    if (native === undefined || native.disabled || native.getAttribute('aria-disabled') === 'true') return
+    queueMicrotask(() => {
+      if (event.defaultPrevented) return
+      this.issueActivation()
+    })
+  }
+
+  private issueActivation(): void {
+    const coordinator = this.coordinator
+    const selected = coordinator?.selectedClaims(COMPOSER_TOOLBAR_CONTROL_POINT) ?? []
+    if (coordinator === undefined || selected.length !== 1) return
+    const owner = celebrationOwnerKey(selected[0]!)
+    const view = this.document.defaultView
+    if (view === null) return
+    const random = view.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${(++this.sequence).toString(36)}`
+    const activationId = `activation:${random}`
+    const expiresAt = Date.now() + 5000
+    const timer = view.setTimeout(() => this.clearActivation(activationId), 5000)
+    this.activations.set(activationId, { owner, expiresAt, timer })
+    const published = coordinator.publishEvent(COMPOSER_TOOLBAR_CONTROL_POINT, 'submitActivated', { activationId })
+    if (published.length !== 1) this.clearActivation(activationId)
+  }
+
+  private clearActivation(activationId: string): void {
+    const activation = this.activations.get(activationId)
+    if (activation === undefined) return
+    this.document.defaultView?.clearTimeout(activation.timer)
+    this.activations.delete(activationId)
+  }
+
+  private dismissActive(): void {
+    if (this.active === undefined) return
+    this.document.defaultView?.clearTimeout(this.active.timer)
+    this.active.presentation.dispose()
+    this.active = undefined
+  }
 }
 
 function rangeProgress(native: HTMLInputElement): number {
@@ -1164,6 +1419,7 @@ class StructuredSurfaceRenderer {
   private environmentRetryTimer: number | undefined
   private environmentRetryAttempts = 0
   private rebuildScheduled = false
+  private controlBindingUpdate = false
   private disposed = false
   private nextContext = 0
   private readonly routeProjectors = new Map<HTMLButtonElement, () => void>()
@@ -1179,6 +1435,7 @@ class StructuredSurfaceRenderer {
     private readonly routes: CordisXRouteService,
     private readonly i18n: CordisXI18nService,
     private readonly reasoningControl: ReasoningIntensityControlBinding,
+    private readonly celebrationControl: ComposerSubmitCelebrationControlBinding,
     private readonly adapterIdentity: Readonly<{
       generation: string
       adapterVersion: string
@@ -1188,7 +1445,7 @@ class StructuredSurfaceRenderer {
   ) {
     this.tooltips = new HostTooltipController(document)
     this.unsubscribers = [
-      slots.subscribeInternal(() => this.schedule(true)),
+      slots.subscribeInternal(() => this.schedule(!this.controlBindingUpdate)),
       commands.subscribeInternal(() => this.schedule(true)),
       routes.subscribeInternal(() => this.schedule(false)),
       i18n.subscribeInternal(() => this.schedule(true)),
@@ -1238,6 +1495,7 @@ class StructuredSurfaceRenderer {
     this.reasoningProjection = undefined
     this.reasoningNativeVisibility.dispose()
     this.reasoningControl.update(undefined)
+    this.celebrationControl.update(undefined)
     this.sessionBackdropProjection?.dispose()
     this.sessionBackdropProjection = undefined
     this.tooltips.dispose()
@@ -1353,7 +1611,13 @@ class StructuredSurfaceRenderer {
     const reasoningRange = managerOverlay ? undefined : playground
       ? sessionId === undefined ? undefined : this.document.querySelector<HTMLInputElement>('input[data-cordisx-playground-reasoning]') ?? undefined
       : resolveReasoningIntensityRange(this.document, sessionId)
-    this.reasoningControl.update(reasoningRange)
+    this.controlBindingUpdate = true
+    try {
+      this.reasoningControl.update(reasoningRange)
+      this.celebrationControl.update(composerSubmitSeat?.template)
+    } finally {
+      this.controlBindingUpdate = false
+    }
     const contextValues = {
       'sidebar.visible': sidebarNavigation !== undefined || sidebarFooterControl !== undefined,
       'toolbar.visible': toolbarControl !== undefined,
@@ -1485,6 +1749,7 @@ class StructuredSurfaceRenderer {
     if (composerSubmitSeat !== undefined) {
       availableSurfaces.add('composer.toolbar.items')
       const items = active.filter(item => item.surface === 'composer.toolbar.items'
+        && item.control?.mode !== 'proxy'
         && (item.item as { anchor: string; placement: string }).anchor === 'submit'
         && (item.item as { anchor: string; placement: string }).placement === 'before')
       if (items.length > 0) {
@@ -2097,7 +2362,13 @@ function installStyles(document: Document): () => void {
     .cordisx-session-backdrop-portrait[data-active="false"] { opacity:0; }
     .cordisx-session-backdrop[data-peak="true"] .cordisx-session-backdrop-architecture { animation:cordisx-backdrop-crown 8s linear infinite; }
     @keyframes cordisx-backdrop-crown { to { transform:translateY(44%) rotate(366deg); } }
-    @media (prefers-reduced-motion:reduce) { .cordisx-reasoning-intensity *,.cordisx-session-backdrop * { animation:none!important; transition-duration:0ms!important; } }
+    .cordisx-celebration { position:fixed; inset:0; z-index:2147482000; overflow:hidden; contain:strict; pointer-events:none!important; isolation:isolate; background:radial-gradient(circle at 50% 34%,rgba(255,209,102,.16),transparent 23%),radial-gradient(circle at 20% 62%,rgba(76,201,240,.10),transparent 19%),radial-gradient(circle at 82% 58%,rgba(255,77,109,.10),transparent 21%); }
+    .cordisx-celebration,.cordisx-celebration * { box-sizing:border-box; pointer-events:none!important; user-select:none; -webkit-user-select:none; }
+    .cordisx-confetti-piece { position:absolute; top:-12vh; left:var(--cordisx-confetti-x); width:9px; height:17px; border-radius:2px; background:var(--cordisx-confetti-color); box-shadow:0 1px 2px rgba(0,0,0,.18); opacity:0; transform:translate3d(0,-10vh,0) rotate(0deg); animation:cordisx-confetti-fall var(--cordisx-confetti-duration) var(--cordisx-confetti-delay) cubic-bezier(.18,.72,.32,1) infinite; }
+    .cordisx-confetti-piece:nth-child(3n) { width:13px; height:8px; border-radius:999px; }
+    .cordisx-confetti-piece:nth-child(5n) { width:8px; height:8px; transform:rotate(45deg); }
+    @keyframes cordisx-confetti-fall { 0% { opacity:0; transform:translate3d(0,-12vh,0) rotate(0deg); } 8% { opacity:1; } 78% { opacity:1; } 100% { opacity:0; transform:translate3d(var(--cordisx-confetti-drift),118vh,0) rotate(var(--cordisx-confetti-spin)); } }
+    @media (prefers-reduced-motion:reduce) { .cordisx-reasoning-intensity *,.cordisx-session-backdrop * { animation:none!important; transition-duration:0ms!important; } .cordisx-celebration { background:radial-gradient(circle at 50% 44%,rgba(255,209,102,.20),transparent 30%),radial-gradient(circle at 22% 64%,rgba(76,201,240,.12),transparent 22%),radial-gradient(circle at 78% 64%,rgba(255,77,109,.12),transparent 22%); } .cordisx-confetti-piece { top:var(--cordisx-confetti-y); animation:none!important; opacity:.78; transform:rotate(var(--cordisx-confetti-spin)); } }
     .cordisx-sidebar-navigation { display: block; width: 100%; min-width: 0; container-type: inline-size; }
     .cordisx-sidebar-footer-before, .cordisx-sidebar-footer-after { display: flex; flex: 0 0 auto; height: 32px; align-items: center; gap: 4px; min-width: 0; }
     .cordisx-toolbar-before, .cordisx-toolbar-after, .cordisx-session-header-actions { --cordisx-toolbar-action-target-size: 28px; --cordisx-toolbar-action-corner-radius: 8px; --cordisx-toolbar-action-idle-background: transparent; --cordisx-toolbar-action-hover-background: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); --cordisx-toolbar-action-focus-ring: var(--color-ring,rgba(131,195,255,.76)); --cordisx-toolbar-action-disabled-opacity: .4; --cordisx-toolbar-action-pressed-background: color-mix(in oklab,var(--color-text,currentColor) 5%,transparent); --cordisx-toolbar-action-pressed-hover-background: color-mix(in oklab,var(--color-text,currentColor) 10%,transparent); --cordisx-toolbar-action-pressed-foreground: var(--color-text,currentColor); --cordisx-toolbar-action-gap: 6px; display: flex; flex: 0 0 auto; height: var(--cordisx-toolbar-action-target-size); align-items: center; gap: var(--cordisx-toolbar-action-gap); min-width: 0; }
@@ -2255,14 +2526,17 @@ export function installCodexAdapter(
     ? globalThis.crypto.randomUUID()
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const reasoningControl = new ReasoningIntensityControlBinding()
+  const celebrationControl = new ComposerSubmitCelebrationControlBinding(document)
   const controls = new ControlledSurfaceCoordinator(CORDISX_CODEX_CONTROL_CATALOG, {
     [REASONING_CONTROL_POINT]: reasoningControl,
+    [COMPOSER_TOOLBAR_CONTROL_POINT]: celebrationControl,
   }, generation, new ControlledSurfacePolicyBroker(new BrowserControlledSurfacePolicyStore(options.profileId ?? 'default')),
   (candidate, view) => slots.controlGenerationVisible(candidate, view),
   candidate => slots.controlGenerationCallable(candidate))
   reasoningControl.connect(controls)
+  celebrationControl.connect(controls)
   slots.setControlCoordinator(controls)
-  const surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, {
+  const surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, celebrationControl, {
     generation,
     adapterVersion: options.adapterVersion ?? 'ui-catalog-v2',
     hostId: options.hostId ?? 'com.openai.codex',
@@ -2271,6 +2545,7 @@ export function installCodexAdapter(
     dispose() {
       surfaces.dispose()
       reasoningControl.dispose()
+      celebrationControl.dispose()
       removeStyles()
       for (const dispose of undeclare.reverse()) dispose()
       session.dispose()
@@ -2302,12 +2577,15 @@ export function installPlaygroundAdapter(
     ? globalThis.crypto.randomUUID()
     : `playground-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const reasoningControl = new ReasoningIntensityControlBinding()
+  const celebrationControl = new ComposerSubmitCelebrationControlBinding(document)
   const controls = new ControlledSurfaceCoordinator(CORDISX_CODEX_CONTROL_CATALOG, {
     [REASONING_CONTROL_POINT]: reasoningControl,
+    [COMPOSER_TOOLBAR_CONTROL_POINT]: celebrationControl,
   }, generation, new ControlledSurfacePolicyBroker(new BrowserControlledSurfacePolicyStore(options.profileId ?? 'playground')),
   (candidate, view) => slots.controlGenerationVisible(candidate, view),
   candidate => slots.controlGenerationCallable(candidate))
   reasoningControl.connect(controls)
+  celebrationControl.connect(controls)
   const seat = (name: string): HTMLElement | undefined => document.querySelector<HTMLElement>(`[data-cordisx-playground-seat="${name}"]`) ?? undefined
   const controllers = [
     ['app', 'fixed', () => seat('app')],
@@ -2340,7 +2618,7 @@ export function installPlaygroundAdapter(
         throw error
       }
     }
-    surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, {
+    surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, celebrationControl, {
       generation,
       adapterVersion: options.adapterVersion ?? 'ui-playground-v1',
       hostId: options.hostId ?? 'cordisx.playground',
@@ -2351,6 +2629,7 @@ export function installPlaygroundAdapter(
       dispose() {
         surfaces?.dispose()
         reasoningControl.dispose()
+        celebrationControl.dispose()
         removeStyles?.()
         for (const item of declared.reverse()) {
           item.dispose()
@@ -2362,6 +2641,7 @@ export function installPlaygroundAdapter(
   } catch (error) {
     surfaces?.dispose()
     reasoningControl.dispose()
+    celebrationControl.dispose()
     removeStyles?.()
     for (const item of declared.reverse()) {
       item.dispose()

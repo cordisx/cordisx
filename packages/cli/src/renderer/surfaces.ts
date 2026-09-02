@@ -132,6 +132,17 @@ export interface SurfaceContributionSnapshot {
   readonly control?: CordisXExtensionPointControlCandidateSnapshotV1
 }
 
+/** Host-private authorization seam for one launcher-authenticated control claim. */
+export type HostPrivateControlledSurfaceAccessResolver = (
+  declaration: CordisXExtensionPointControlDeclarationV1,
+  generation: ControlledSurfaceGeneration,
+) => Readonly<{
+  authorized: boolean
+  policy: 'inherit' | 'allow' | 'deny'
+  effectivePolicy: 'allow' | 'deny'
+  reason: string
+}> | undefined
+
 export interface NavigationCollectionGroupSnapshot {
   readonly owner: string
   readonly id: string
@@ -491,6 +502,7 @@ export class SurfaceRegistry {
   private readonly disconnectVisibility: (() => void) | undefined
   private resolvers: SurfaceResolvers = { command: () => false, route: () => false }
   private access: ExtensionPointAccessResolver | undefined
+  private hostPrivateControlAccess: HostPrivateControlledSurfaceAccessResolver | undefined
   private controls: ControlledSurfaceCoordinator | undefined
   private disconnectControls: (() => void) | undefined
   private readonly committedControlTransactions = new Map<string, Readonly<{ moduleGeneration: string; transactionId: string; transactionEpoch: string }>>()
@@ -550,6 +562,12 @@ export class SurfaceRegistry {
 
   setAccessResolver(access: ExtensionPointAccessResolver): void {
     this.access = access
+    if (this.controls === undefined) this.notify()
+    else this.controls.invalidate()
+  }
+
+  setHostPrivateControlAccessResolver(access: HostPrivateControlledSurfaceAccessResolver | undefined): void {
+    this.hostPrivateControlAccess = access
     if (this.controls === undefined) this.notify()
     else this.controls.invalidate()
   }
@@ -681,6 +699,8 @@ export class SurfaceRegistry {
       generation: controlGeneration!,
       presenter: snapshot,
       hostAccess: () => {
+        const exactGrant = this.hostPrivateControlAccess?.(controlDeclaration!, controlGeneration!)
+        if (exactGrant !== undefined) return exactGrant
         const decision = this.access?.decision(owner, options.name, 'surface', candidateView)
         return decision === undefined
           ? Object.freeze({ authorized: true })
@@ -805,7 +825,10 @@ export class SurfaceRegistry {
             error = `manager settings navigation route ${qualifyOwnedId(record.owner, routeId)} is referenced by multiple contributions: ${ids.join(', ')}`
           }
         }
-        const pointAccess = this.access?.decision(record.owner, record.options.name, 'surface', view ?? record.candidateView)
+        const pointAccess = (record.controlDeclaration === undefined || record.controlGeneration === undefined
+          ? undefined
+          : this.hostPrivateControlAccess?.(record.controlDeclaration, record.controlGeneration))
+          ?? this.access?.decision(record.owner, record.options.name, 'surface', view ?? record.candidateView)
           ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }
         const control = record.controlDeclaration === undefined ? undefined : controlSnapshot?.points
           .find(point => point.id === record.controlDeclaration!.identity.pointId)?.candidates
@@ -1245,6 +1268,10 @@ export class CordisXSlotService extends Service implements CordisXSlots {
 
   setAccessResolver(access: ExtensionPointAccessResolver): void {
     this.registry.setAccessResolver(access)
+  }
+
+  setHostPrivateControlAccessResolver(access: HostPrivateControlledSurfaceAccessResolver | undefined): void {
+    this.registry.setHostPrivateControlAccessResolver(access)
   }
 
   setControlCoordinator(controls: ControlledSurfaceCoordinator): void {

@@ -13,7 +13,7 @@ import {
   type HomeConfigIconThemePreference,
   type HomeConfigPathOptions,
 } from '../config/home-config.js'
-import { buildRendererBundle } from '../launcher/bundle.js'
+import { buildRendererBundle, type BuildRendererBundleOptions } from '../launcher/bundle.js'
 import { CdpPluginLifecycleRuntime, watchAndInject } from '../launcher/cdp.js'
 import { LocalDevelopmentController, buildLocalDevelopmentPlugin, localDevelopmentPluginIdentity } from '../launcher/development.js'
 import { DirectPublisherGrantAuthority, DirectPublisherGrantStore, MacOSMachineIdentityProvider, StaticPublisherKeyRegistry } from '../launcher/publisher-grants.js'
@@ -75,6 +75,7 @@ import {
 import type { RollbackPlan } from '../launcher/packages/authority.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
 import { AgentLoopAuthority } from '../launcher/agent-loop-authority.js'
+import { deployBundledCordisXSkill, deployBundledCordisXSkillToHome } from '../launcher/builtin-skill.js'
 import {
   createOwnerDocumentBridgeHandler,
   type OwnerDocumentBridgeHandler,
@@ -115,6 +116,10 @@ export interface CordisXCliRuntime {
     readonly source: string
     readonly handler: OwnerDocumentBridgeHandler
   }) => void | Promise<void>
+  /** Repository-only source seam for built-in Skill deployment tests. */
+  readonly internalBuiltinSkillSourceDir?: string
+  /** Repository-only HOME seam that prevents shared-launch tests from touching the user's real HOME. */
+  readonly internalSharedHomeDir?: string
 }
 
 function waitForExit(child: ChildProcess): Promise<void> {
@@ -148,6 +153,25 @@ function localDevelopmentHostConfig(cwd: string): CordisXConfig {
     providers: [],
     plugins: [],
   }
+}
+
+function localDevelopmentControlGrant(
+  identity: Readonly<{ source: string; id: string }>,
+): NonNullable<BuildRendererBundleOptions['localDevelopmentControlGrant']> {
+  return Object.freeze({
+    profile: 'cordisx.composer-submit-celebration/v1',
+    identity: Object.freeze({ source: identity.source, id: identity.id }),
+    pointId: 'composer.toolbar.items',
+    contributionId: 'submit-celebration',
+    claimId: 'submit-celebration',
+    mode: 'proxy',
+    priority: 100,
+    requestedBindings: Object.freeze({
+      properties: Object.freeze(['celebrationProfile'] as const),
+      commands: Object.freeze(['presentCelebration', 'dismissCelebration'] as const),
+      events: Object.freeze(['submitActivated'] as const),
+    }),
+  })
 }
 
 function providerConfigs(config: CordisXConfig, environment: NodeJS.ProcessEnv): readonly CodexProviderConfig[] {
@@ -200,6 +224,7 @@ export async function buildRendererComposition(
     readonly pluginActivation?: CordisXPluginActivationRecordV1
     readonly initialRegistryEpoch?: number
     readonly channelManager?: ChannelManagerBundleProjection
+    readonly localDevelopmentControlGrant?: BuildRendererBundleOptions['localDevelopmentControlGrant']
     /** Transient, launcher-created tokens. They are published only in the injected runtime metadata. */
     readonly channelCredentialBridgeToken?: string
     readonly channelActionsBridgeToken?: string
@@ -251,6 +276,7 @@ export async function buildRendererComposition(
       ? {}
       : { initialRegistryEpoch: options.initialRegistryEpoch ?? options.pluginLifecycle!.registryEpoch }),
     ...(options.channelManager === undefined ? {} : { channelManager: options.channelManager }),
+    ...(options.localDevelopmentControlGrant === undefined ? {} : { localDevelopmentControlGrant: options.localDevelopmentControlGrant }),
   } satisfies NonNullable<Parameters<typeof buildRendererBundle>[1]>
   const buildBundle = options.internalBuildRendererBundle ?? buildRendererBundle
   const source = await buildBundle(config, bundleOptions)
@@ -507,11 +533,13 @@ async function runDevelopment(
   environment: NodeJS.ProcessEnv,
   homeConfigPath: string,
   homeConfigOptions: HomeConfigPathOptions,
+  runtime: Pick<CordisXCliRuntime, 'internalBuiltinSkillSourceDir' | 'internalSharedHomeDir'>,
 ): Promise<void> {
   const cordisxHomeDir = rootFromConfigPath(homeConfigPath)
   if (!invocation.options.dryRun) await ensureCordisXHomeDirectory(homeConfigOptions)
-  if (invocation.pluginPath !== undefined) {
-    const entry = path.resolve(cwd, invocation.pluginPath)
+  const pluginPath = invocation.pluginPath
+  if (pluginPath !== undefined) {
+    const entry = path.resolve(cwd, pluginPath)
     const config = localDevelopmentHostConfig(cwd)
     if (invocation.options.dryRun) {
       const candidate = await buildLocalDevelopmentPlugin(entry)
@@ -530,7 +558,15 @@ async function runDevelopment(
       }, null, 2))
       return
     }
+    const skillDeployment = await deployBundledCordisXSkillToHome(
+      runtime.internalSharedHomeDir ?? environment.HOME ?? os.homedir(),
+      runtime.internalBuiltinSkillSourceDir === undefined
+        ? {}
+        : { sourceDir: runtime.internalBuiltinSkillSourceDir },
+    )
+    stdout(`[cordisx] built-in Skill ${skillDeployment.status}: ${skillDeployment.targetDir}`)
     const runtimeGeneration = randomBytes(16).toString('hex')
+    const initialDevelopmentPlugin = await localDevelopmentPluginIdentity(entry)
     const active: CordisXPluginActivationRecordV1 = {
       $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
       schemaVersion: 1,
@@ -548,8 +584,8 @@ async function runDevelopment(
       generation: runtimeGeneration,
       pluginActivation: active,
       initialRegistryEpoch: 0,
+      localDevelopmentControlGrant: localDevelopmentControlGrant(initialDevelopmentPlugin),
     })
-    const initialDevelopmentPlugin = await localDevelopmentPluginIdentity(entry)
     const documentLeases = new OwnerDocumentLeaseRegistry({
       stable: [{ source: initialDevelopmentPlugin.source, pluginId: initialDevelopmentPlugin.id }],
     })
@@ -597,6 +633,10 @@ async function runDevelopment(
         hostArgs: invocation.hostArgs,
         launcher: invocation.options,
         ...(profile === undefined ? {} : { profile }),
+        environment: {
+          CORDISX_DEV_ENTRY: entry,
+          CORDISX_DEV_MODE: 'explicit-entry',
+        },
         publisherGrant: createPublisherGrantBridgeHandler(new DirectPublisherGrantAuthority(
           new StaticPublisherKeyRegistry([]),
           new MacOSMachineIdentityProvider(),
@@ -709,7 +749,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     return
   }
   if (invocation.action === 'dev') {
-    await runDevelopment(invocation, cwd, stdout, environment, configPath, homeConfigOptions)
+    await runDevelopment(invocation, cwd, stdout, environment, configPath, homeConfigOptions, runtime)
     return
   }
 
@@ -1061,6 +1101,15 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   const debugPort = invocation.options.debugPort ?? await findFreeLoopbackPort()
   if (invocation.options.debugPort !== undefined) await assertLoopbackPortAvailable(debugPort)
   await adapter.prepareLaunch(plan)
+  const skillDeployment = await deployBundledCordisXSkill(plan, {
+    ...(runtime.internalBuiltinSkillSourceDir === undefined
+      ? {}
+      : { sourceDir: runtime.internalBuiltinSkillSourceDir }),
+    ...(runtime.internalSharedHomeDir === undefined
+      ? {}
+      : { sharedHomeOverride: runtime.internalSharedHomeDir }),
+  })
+  stdout(`[cordisx] built-in Skill ${skillDeployment.status}: ${skillDeployment.targetDir}`)
   stdout(`[cordisx] loopback CDP port: ${debugPort}`)
   const chromiumProfile = plan.chromiumProfile
   const profile = chromiumProfile.mode === 'independent'

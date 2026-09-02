@@ -142,10 +142,11 @@ export interface ManagerAppProps {
   readonly triggerSeat: HTMLElement
 }
 
-function PlaygroundManagerTrigger({ seat, open, onToggle }: {
+function PlaygroundManagerTrigger({ seat, open, onToggle, locale }: {
   readonly seat: HTMLElement
   readonly open: boolean
   readonly onToggle: () => void
+  readonly locale: string
 }) {
   const control = useRef<SidebarItemControl | undefined>(undefined)
   const toggle = useRef(onToggle)
@@ -160,13 +161,13 @@ function PlaygroundManagerTrigger({ seat, open, onToggle }: {
       onActivate: () => toggle.current(),
     })
     item.primary.dataset.cordisxManagerTrigger = 'true'
-    item.primary.setAttribute('aria-label', '管理 CordisX 插件')
+    item.primary.setAttribute('aria-label', managerCopy(locale, 'manager.trigger.manage'))
     item.primary.setAttribute('aria-haspopup', 'dialog')
     item.primary.setAttribute('aria-expanded', String(open))
     control.current = item
     seat.replaceChildren(item.element)
     return () => { item.element.remove(); control.current = undefined }
-  }, [seat])
+  }, [locale, seat])
   useLayoutEffect(() => {
     const item = control.current
     if (item === undefined) return
@@ -213,22 +214,22 @@ export function ManagerApp({ model, marketplace, triggerSeat }: ManagerAppProps)
     : undefined
   return <ConfigProvider globalConfig={{ attach }}>
     {playgroundStorage === undefined
-      ? createPortal(<Button className="cxr-trigger" type="button" shape="square" variant="text" data-cordisx-manager-trigger="true" aria-label="管理 CordisX 插件" aria-haspopup="dialog" aria-expanded={open} title="管理 CordisX 插件" icon={<BrandMark className="cxr-trigger-mark" />} onClick={() => flushSync(() => setOpen(true))} />, triggerSeat)
-      : <PlaygroundManagerTrigger seat={triggerSeat} open={open} onToggle={() => flushSync(() => setOpen(value => !value))} />}
+      ? createPortal(<Button className="cxr-trigger" type="button" shape="square" variant="text" data-cordisx-manager-trigger="true" aria-label={managerCopy(snapshot.localization.locale, 'manager.trigger.manage')} aria-haspopup="dialog" aria-expanded={open} title={managerCopy(snapshot.localization.locale, 'manager.trigger.manage')} icon={<BrandMark className="cxr-trigger-mark" />} onClick={() => flushSync(() => setOpen(true))} />, triggerSeat)
+      : <PlaygroundManagerTrigger seat={triggerSeat} open={open} locale={snapshot.localization.locale} onToggle={() => flushSync(() => setOpen(value => !value))} />}
     {open ? <div className="cxr-backdrop" data-cordisx-manager-modal="true" onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false) }}>
-      <section ref={dialog} className="cxr-dialog" role="dialog" aria-modal="true" aria-label="CordisX 插件管理器" tabIndex={-1}>
+      <section ref={dialog} className="cxr-dialog" role="dialog" aria-modal="true" aria-label={managerCopy(snapshot.localization.locale, 'manager.dialog')} tabIndex={-1}>
         <aside className="cxr-sidebar"><Navigation snapshot={snapshot} router={router} /></aside>
         <main className="cxr-main">
           <header className="cxr-header">
             <span className="cxr-header-seat">{router.route.kind === 'primary'
               ? router.route.page === 'about' ? <BrandMark /> : <HostIcon token={primaryIcon(router.route)!} />
               : managerContentBackRoute !== undefined
-                ? <Button shape="square" variant="text" aria-label="返回" icon={<HostIcon token="back" />} onClick={() => router.navigate(managerContentBackRoute)} />
+                ? <Button shape="square" variant="text" aria-label={managerCopy(snapshot.localization.locale, 'manager.back')} icon={<HostIcon token="back" />} onClick={() => router.navigate(managerContentBackRoute)} />
                 : contributionIcon !== undefined
                   ? <HostSurfaceIcon token={contributionIcon} />
-                  : <Button shape="square" variant="text" aria-label="返回" icon={<HostIcon token="back" />} onClick={router.back} />}</span>
+                  : <Button shape="square" variant="text" aria-label={managerCopy(snapshot.localization.locale, 'manager.back')} icon={<HostIcon token="back" />} onClick={router.back} />}</span>
             <div className="cxr-heading"><ManagerBreadcrumbs route={router.route} navigate={router.navigate} heading={heading} model={model} snapshot={snapshot} /></div>
-            <Button shape="square" variant="text" aria-label="关闭" icon={<HostIcon token="close" />} onClick={() => setOpen(false)} />
+            <Button shape="square" variant="text" aria-label={managerCopy(snapshot.localization.locale, 'manager.close')} icon={<HostIcon token="close" />} onClick={() => setOpen(false)} />
           </header>
           <div className="cxr-content"><Content model={model} marketplace={marketplace} snapshot={snapshot} route={router} /></div>
         </main>

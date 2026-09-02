@@ -23,6 +23,7 @@ import type {
   CordisXPluginManifestV1,
   CordisXPluginModule,
   CordisXRouteReference,
+  CordisXExtensionPointControlDeclarationV1,
   CordisXExtensionPointControlMode,
 } from '../contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
@@ -216,10 +217,52 @@ interface CordisXRuntimeMetadata {
   readonly initialRegistryEpoch?: number
   readonly generation?: string
   readonly channelManager?: ChannelManagerProjectionV1
+  /** Host-private, launcher-authenticated exact claim for one explicit local-development entry. */
+  readonly localDevelopmentControlGrant?: {
+    readonly profile: 'cordisx.composer-submit-celebration/v1'
+    readonly identity: { readonly source: string; readonly id: string }
+    readonly pointId: 'composer.toolbar.items'
+    readonly contributionId: 'submit-celebration'
+    readonly claimId: 'submit-celebration'
+    readonly mode: 'proxy'
+    readonly priority: 100
+    readonly requestedBindings: {
+      readonly properties: readonly ['celebrationProfile']
+      readonly commands: readonly ['presentCelebration', 'dismissCelebration']
+      readonly events: readonly ['submitActivated']
+    }
+  }
   /** Development-only host with explicit semantic seats and no Codex DOM probes. */
   readonly hostKind?: 'codex' | 'playground'
   /** Debug-only deterministic service; accepted only by the explicit Playground host. */
   readonly agentLoopBackend?: 'mock'
+}
+
+function exactStringList(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && actual.every((value, index) => value === expected[index])
+}
+
+function localDevelopmentControlGrantMatches(
+  metadata: CordisXRuntimeMetadata,
+  declaration: CordisXExtensionPointControlDeclarationV1,
+  generation: Readonly<{ source: string; pluginId: string }>,
+): boolean {
+  const grant = metadata.localDevelopmentControlGrant
+  return metadata.profileId === 'development'
+    && grant?.profile === 'cordisx.composer-submit-celebration/v1'
+    && declaration.origin === 'explicit'
+    && declaration.identity.source === grant.identity.source
+    && declaration.identity.pluginId === grant.identity.id
+    && declaration.identity.pointId === grant.pointId
+    && generation.source === grant.identity.source
+    && generation.pluginId === grant.identity.id
+    && declaration.contributionId === grant.contributionId
+    && declaration.claimId === grant.claimId
+    && declaration.mode === grant.mode
+    && declaration.priority === grant.priority
+    && exactStringList(declaration.requestedBindings.properties, grant.requestedBindings.properties)
+    && exactStringList(declaration.requestedBindings.commands, grant.requestedBindings.commands)
+    && exactStringList(declaration.requestedBindings.events, grant.requestedBindings.events)
 }
 
 interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
@@ -334,6 +377,7 @@ export interface RendererPluginMutation {
     readonly digest: `sha256:${string}`
     readonly identitySource: string
     readonly readme?: string
+    readonly readmes?: Readonly<Record<string, string>>
     readonly development: CordisXLocalDevelopmentSnapshot
   }
   /** Host-only source held as data and executed solely in the isolated Host DOM worker. */
@@ -2041,7 +2085,9 @@ async function start(
       ...(replacesTarget
         ? replacementPackage!.readme === undefined ? {} : { readme: replacementPackage!.readme }
         : existing!.item.readme === undefined ? {} : { readme: existing!.item.readme }),
-      ...(!replacesTarget && existing!.item.readmes !== undefined ? { readmes: existing!.item.readmes } : {}),
+      ...(replacesTarget
+        ? mutation.developmentPackage?.readmes === undefined ? {} : { readmes: mutation.developmentPackage.readmes }
+        : existing!.item.readmes === undefined ? {} : { readmes: existing!.item.readmes }),
     }
     const controller = createController(item, pluginConsole)
     if (replacesTarget && mutation.developmentPackage !== undefined && controller.status === 'failed') {
@@ -2896,6 +2942,18 @@ async function start(
     commandService.setAccessResolver(extensionPointBroker)
     routeService.setAccessResolver(extensionPointBroker)
     slotService.setAccessResolver(extensionPointBroker)
+    if (metadata.localDevelopmentControlGrant !== undefined) {
+      slotService.setHostPrivateControlAccessResolver((declaration, controlGeneration) => (
+        localDevelopmentControlGrantMatches(metadata, declaration, controlGeneration)
+          ? Object.freeze({
+              authorized: true,
+              policy: 'allow' as const,
+              effectivePolicy: 'allow' as const,
+              reason: 'permission.local-development-exact-control',
+            })
+          : undefined
+      ))
+    }
     registrySubscriptions.push(
       extensionPointDescriptors.subscribe(notifyFrom('extension-descriptors')),
       commandService.subscribeInternal(notifyFrom('commands')),
