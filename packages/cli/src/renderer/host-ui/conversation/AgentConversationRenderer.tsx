@@ -387,13 +387,13 @@ function ConversationContextMenu({ target, chinese, onClose, onMention, onOpenPa
   }
   const actions = [
     ...(target.kind === 'message' && target.messageText !== undefined ? [{
-      id: 'copy', label: chinese ? '复制消息' : 'Copy message', run: copyMessage,
+      id: 'copy', icon: 'host:copy' as const, label: chinese ? '复制消息' : 'Copy message', run: copyMessage,
     }] : []),
     ...(target.participantRole === 'agent' ? [{
-      id: 'mention', label: chinese ? `@提及 ${target.participantName}` : `Mention @${target.participantName}`,
+      id: 'mention', icon: 'host:chat' as const, label: chinese ? `@提及 ${target.participantName}` : `Mention @${target.participantName}`,
       run: () => onMention(target.participantId),
     }, {
-      id: 'profile', label: chinese ? `查看 ${target.participantName}` : `View ${target.participantName}`,
+      id: 'profile', icon: 'host:people-search' as const, label: chinese ? `查看 ${target.participantName}` : `View ${target.participantName}`,
       run: () => onOpenParticipant(target.participantId),
     }] : []),
   ]
@@ -476,7 +476,7 @@ function ConversationContextMenu({ target, chinese, onClose, onMention, onOpenPa
       action.run()
       if (action.id === 'copy') queueMicrotask(() => target.restoreFocus.focus({ preventScroll: true }))
     }}
-  >{action.label}</button>)}</div>, document.body)
+  ><HostSurfaceIcon token={action.icon} /><span>{action.label}</span></button>)}</div>, document.body)
 }
 
 function MessageEntry({
