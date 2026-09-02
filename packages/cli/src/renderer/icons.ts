@@ -100,13 +100,17 @@ export const MANAGER_ICON_SEMANTICS: Readonly<Partial<Record<ManagerIconToken, S
 })
 
 const HOST_SURFACE_ICON_MAP: Readonly<Record<string, SemanticIconKey>> = Object.freeze({
-  'host:analytics': 'navigation.dashboard', 'host:back': 'action.back',
+  'host:analytics': 'navigation.dashboard', 'host:archive': 'content.files', 'host:back': 'action.back',
+  'host:chat': 'content.panel',
   'host:calendar': 'content.calendar', 'host:close': 'action.close', 'host:error': 'status.error',
+  'host:copy': 'action.copy', 'host:delete': 'action.delete',
   'host:files': 'content.files', 'host:folder': 'content.folder', 'host:history': 'navigation.history',
-  'host:info': 'status.info', 'host:layers': 'content.layers', 'host:key': 'content.key',
+  'host:info': 'status.info', 'host:hierarchy': 'navigation.routes', 'host:layers': 'content.layers', 'host:key': 'content.key',
+  'host:link': 'action.share',
   'host:more': 'action.more', 'host:new': 'action.add', 'host:open': 'action.external-link',
+  'host:people-search': 'action.search', 'host:pin': 'action.favorite', 'host:pinned': 'action.favorite',
   'host:palette': 'content.palette', 'host:playground': 'navigation.overview',
-  'host:refresh': 'action.refresh', 'host:reset': 'action.reset', 'host:review': 'control.check',
+  'host:refresh': 'action.refresh', 'host:reset': 'action.reset', 'host:restore': 'action.refresh', 'host:review': 'control.check',
   'host:settings': 'action.settings', 'host:save': 'action.save', 'host:clock': 'content.clock',
   'host:success': 'status.success', 'host:warning': 'status.warning', 'host:tags': 'content.tags',
 })

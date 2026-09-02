@@ -2,7 +2,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
-import type { CordisXNavigationCollectionSnapshot } from '../packages/cli/src/contracts.js'
+import type { CordisXNavigationCollectionSnapshotV2 } from '../packages/cli/src/contracts.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
@@ -44,11 +44,15 @@ describe('sidebar navigation collections', () => {
     dom.window.console.error = (...values: unknown[]) => { errors.push(values) }
     dom.window.console.warn = (...values: unknown[]) => { warnings.push(values) }
     installPermissionPolicyBridge(dom.window)
+    const writeText = vi.fn(async (_value: string) => {})
+    Object.defineProperty(dom.window.navigator, 'clipboard', { configurable: true, value: { writeText } })
     let runtime: { snapshot(): unknown; dispose(): Promise<void> } | undefined
     try {
       dom.window.eval(bundle)
       await vi.waitFor(() => {
-        expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
+        if (dom.window.document.documentElement.dataset.cordisxReady !== 'true') {
+          throw new Error(JSON.stringify({ errors: errors.map(row => row.map(value => typeof value === 'object' && value !== null ? { message: String((value as { message?: unknown }).message), stack: String((value as { stack?: unknown }).stack) } : value)), warnings, html: dom.window.document.body.innerHTML }))
+        }
         runtime = (dom.window as unknown as { __cordisxRuntime?: typeof runtime }).__cordisxRuntime
         const count = dom.window.document.querySelectorAll('.cordisx-nav-row').length
         if (count !== 3) throw new Error(JSON.stringify({ count, snapshot: runtime?.snapshot(), errors, warnings, html: dom.window.document.body.innerHTML }))
@@ -90,6 +94,26 @@ describe('sidebar navigation collections', () => {
       document.documentElement.lang = 'en'
       await vi.waitFor(() => expect(document.querySelector('[data-navigation-group] [role="heading"]')?.textContent).toBe('Rooms'))
 
+      const latestRow = [...document.querySelectorAll<HTMLElement>('[data-navigation-group] .cordisx-nav-row')]
+        .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')!
+      latestRow.querySelector<HTMLButtonElement>('[aria-label="Pin"]')!.click()
+      await vi.waitFor(() => expect((dom.window as unknown as { __cordisxNavigationCollectionFixture: { commands: string[] } }).__cordisxNavigationCollectionFixture.commands).toEqual(['pin']))
+      const refreshedLatestRow = [...document.querySelectorAll<HTMLElement>('[data-navigation-group] .cordisx-nav-row')]
+        .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')!
+      const overflow = refreshedLatestRow.querySelector<HTMLDetailsElement>('.cordisx-navigation-action-overflow')!
+      overflow.open = true
+      overflow.dispatchEvent(new dom.window.Event('toggle'))
+      refreshedLatestRow.querySelector<HTMLButtonElement>('[aria-label="Copy ID"]')!.click()
+      await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('latest'))
+      overflow.open = true
+      refreshedLatestRow.querySelector<HTMLButtonElement>('[aria-label="Delete"]')!.click()
+      const dialog = document.querySelector<HTMLElement>('.cordisx-navigation-confirmation-dialog')!
+      expect(dialog.getAttribute('aria-modal')).toBe('true')
+      expect(dialog.textContent).toContain('Delete room?')
+      ;[...dialog.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Delete')!.click()
+      await vi.waitFor(() => expect((dom.window as unknown as { __cordisxNavigationCollectionFixture: { commands: string[] } }).__cordisxNavigationCollectionFixture.commands).toEqual(['pin', 'delete']))
+      expect(document.querySelector('.cordisx-navigation-confirmation-dialog')).toBeNull()
+
       const older = [...document.querySelectorAll<HTMLButtonElement>('[data-navigation-group] .cordisx-nav-primary')]
         .find(button => button.querySelector('.cxsi-title')?.textContent === 'Older room')!
       older.click()
@@ -103,7 +127,7 @@ describe('sidebar navigation collections', () => {
         .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')?.dataset.selected).toBe('false')
 
       const fixture = (dom.window as unknown as {
-        __cordisxNavigationCollectionFixture: { replace(next: CordisXNavigationCollectionSnapshot): void }
+        __cordisxNavigationCollectionFixture: { replace(next: CordisXNavigationCollectionSnapshotV2): void; commands: string[] }
       }).__cordisxNavigationCollectionFixture
       fixture.replace({
         revision: 2,

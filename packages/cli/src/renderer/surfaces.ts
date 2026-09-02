@@ -22,11 +22,15 @@ import {
   type CordisXIconToken,
   type CordisXNavigationItem,
   type CordisXNavigationCollectionItem,
+  type CordisXNavigationCollectionItemV2,
   type CordisXNavigationCollectionLeadingVisual,
   type CordisXNavigationCollectionOptions,
+  type CordisXNavigationCollectionOptionsV2,
   type CordisXNavigationCollectionRegistration,
   type CordisXNavigationCollectionSnapshot,
+  type CordisXNavigationCollectionSnapshotV2,
   type CordisXNavigationCollectionSource,
+  type CordisXNavigationCollectionSourceV2,
   type CordisXManagerSettingsContentTabItem,
   type CordisXManagerSettingsNavigationItem,
   type CordisXLocalizedText,
@@ -40,6 +44,8 @@ import {
   type CordisXSessionBackdropPresentation,
   type CordisXToolbarItem,
   type CordisXWhen,
+  type NavigationCollectionAction,
+  type NavigationCollectionActions,
 } from '../contracts.js'
 import { generationFromContext, ownerFromContext, qualifyOwnedId, sourceFromContext } from './ownership.js'
 import {
@@ -74,16 +80,26 @@ import {
 
 export const CORDISX_HOST_ICON_TOKENS = [
   'host:analytics',
+  'host:archive',
   'host:back',
+  'host:chat',
   'host:close',
+  'host:copy',
+  'host:delete',
   'host:error',
   'host:files',
   'host:history',
   'host:info',
+  'host:hierarchy',
   'host:layers',
+  'host:link',
   'host:more',
   'host:open',
+  'host:people-search',
+  'host:pin',
+  'host:pinned',
   'host:refresh',
+  'host:restore',
   'host:review',
   'host:settings',
   'host:success',
@@ -267,6 +283,73 @@ function assertDisabled(disabled: CordisXDisabledState | undefined): void {
   if (typeof disabled.value !== 'boolean') throw new Error('disabled.value must be a boolean')
   assertKeys(disabled, ['value', 'reason'], 'disabled')
   if (disabled.reason !== undefined) assertLocalizedText(disabled.reason, 'disabled reason')
+}
+
+function assertNavigationCollectionJson(value: unknown, label: string, seen = new Set<object>()): void {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error(`${label} is not finite`)
+    return
+  }
+  if (typeof value !== 'object') throw new Error(`${label} is not JSON data`)
+  if (seen.has(value)) throw new Error(`${label} contains a cycle`)
+  seen.add(value)
+  if (Array.isArray(value)) {
+    if (value.length > 100) throw new Error(`${label} has too many entries`)
+    for (const [index, item] of value.entries()) assertNavigationCollectionJson(item, `${label}.${index}`, seen)
+  } else {
+    if (Object.keys(value).length > 100) throw new Error(`${label} has too many entries`)
+    for (const [key, item] of Object.entries(value)) assertNavigationCollectionJson(item, `${label}.${key}`, seen)
+  }
+  seen.delete(value)
+}
+
+function assertNavigationCollectionAction(action: NavigationCollectionAction, label: string): void {
+  if (action === null || typeof action !== 'object' || Array.isArray(action)) throw new Error(`${label} must be an object`)
+  const baseKeys = ['kind', 'id', 'label', 'ariaLabel', 'icon', 'placement', 'tone', 'pressed', 'disabled', 'feedback']
+  if (action.kind === 'command') {
+    assertKeys(action, [...baseKeys, 'command', 'confirmation'], label)
+    assertCommand(action.command, label)
+    if (action.command.arguments !== undefined) assertNavigationCollectionJson(action.command.arguments, `${label}.command.arguments`)
+    if (action.tone === 'danger' && action.confirmation === undefined) throw new Error(`${label} requires confirmation for a danger command`)
+    if (action.confirmation !== undefined) {
+      assertKeys(action.confirmation, ['title', 'description', 'confirmLabel'], `${label}.confirmation`)
+      assertLocalizedText(action.confirmation.title, `${label}.confirmation.title`)
+      assertLocalizedText(action.confirmation.description, `${label}.confirmation.description`)
+      assertLocalizedText(action.confirmation.confirmLabel, `${label}.confirmation.confirmLabel`)
+    }
+  } else if (action.kind === 'copy-route-link') {
+    assertKeys(action, baseKeys, label)
+  } else if (action.kind === 'copy-text') {
+    assertKeys(action, [...baseKeys, 'text'], label)
+    assertKeys(action.text, ['value'], `${label}.text`)
+    if (typeof action.text.value !== 'string'
+      || [...action.text.value].length < 1
+      || [...action.text.value].length > 4_096
+      || action.text.value.includes('\0')) throw new Error(`${label}.text.value is invalid`)
+  } else throw new Error(`${label}.kind is invalid`)
+  assertLocalId(action.id, `${label}.id`)
+  assertLocalizedText(action.label, `${label}.label`)
+  if (action.ariaLabel !== undefined) assertLocalizedText(action.ariaLabel, `${label}.ariaLabel`)
+  assertIcon(action.icon, `${label}.icon`)
+  if (action.placement !== 'direct' && action.placement !== 'overflow') throw new Error(`${label}.placement is invalid`)
+  if (action.tone !== 'neutral' && action.tone !== 'danger') throw new Error(`${label}.tone is invalid`)
+  if (typeof action.pressed !== 'boolean') throw new Error(`${label}.pressed must be a boolean`)
+  assertDisabled(action.disabled)
+  assertKeys(action.feedback, ['success', 'failure'], `${label}.feedback`)
+  assertLocalizedText(action.feedback.success, `${label}.feedback.success`)
+  assertLocalizedText(action.feedback.failure, `${label}.feedback.failure`)
+}
+
+function assertNavigationCollectionActions(actions: NavigationCollectionActions | undefined, label: string): void {
+  if (actions === undefined) return
+  if (!Array.isArray(actions) || actions.length > 8) throw new Error(`${label} is invalid`)
+  const ids = new Set<string>()
+  for (const [index, action] of actions.entries()) {
+    assertNavigationCollectionAction(action, `${label}[${index}]`)
+    if (ids.has(action.id)) throw new Error(`${label} has duplicate action ${action.id}`)
+    ids.add(action.id)
+  }
 }
 
 function assertPresentationOptions(
@@ -1021,6 +1104,7 @@ export class CordisXSlotService extends Service implements CordisXSlots {
   private readonly console: PluginConsoleAspect | undefined
   private readonly navigationCollectionGroups = new Map<string, NavigationCollectionGroupSnapshot>()
   private readonly navigationCollectionLeadingVisuals = new Map<string, CordisXNavigationCollectionLeadingVisual>()
+  private readonly navigationCollectionActions = new Map<string, NavigationCollectionActions>()
   private nextNavigationCollection = 1
 
   constructor(ctx: Context, input?: SurfaceRegistry | { readonly registry?: SurfaceRegistry; readonly console: PluginConsoleAspect }) {
@@ -1074,11 +1158,17 @@ export class CordisXSlotService extends Service implements CordisXSlots {
     return dispose
   }
 
+  registerCollection(options: CordisXNavigationCollectionOptionsV2, source: CordisXNavigationCollectionSourceV2): CordisXNavigationCollectionRegistration
+  registerCollection(options: CordisXNavigationCollectionOptions, source: CordisXNavigationCollectionSource): CordisXNavigationCollectionRegistration
   registerCollection(
-    options: CordisXNavigationCollectionOptions,
-    source: CordisXNavigationCollectionSource,
+    options: CordisXNavigationCollectionOptions | CordisXNavigationCollectionOptionsV2,
+    source: CordisXNavigationCollectionSource | CordisXNavigationCollectionSourceV2,
   ): CordisXNavigationCollectionRegistration {
-    assertKeys(options, ['name', 'id', 'group'], 'navigation collection options')
+    const v2 = Object.hasOwn(options, 'contract')
+    assertKeys(options, v2 ? ['name', 'id', 'group', 'contract'] : ['name', 'id', 'group'], 'navigation collection options')
+    if (v2 && (options as CordisXNavigationCollectionOptionsV2).contract !== 'cordisx.navigation-collection/v2') {
+      throw new Error('navigation collection contract is invalid')
+    }
     if (options.name !== 'sidebar.navigation.items') throw new Error('navigation collection requires sidebar.navigation.items')
     assertLocalId(options.id, 'navigation collection id')
     if (options.group === null || typeof options.group !== 'object' || Array.isArray(options.group)) {
@@ -1109,14 +1199,15 @@ export class CordisXSlotService extends Service implements CordisXSlots {
       surfaceGroup,
     })
     let active = true
-    let current: CordisXNavigationCollectionSnapshot | undefined
+    let current: CordisXNavigationCollectionSnapshot | CordisXNavigationCollectionSnapshotV2 | undefined
     let unsubscribe: (() => void) | undefined
     let nextItemSequence = 1
     const stableIds = new Map<string, string>()
     let handles: CordisXContributionHandle<CordisXNavigationItem>[] = []
     let leadingVisualIds = new Set<string>()
+    let actionIds = new Set<string>()
 
-    const read = (): CordisXNavigationCollectionSnapshot => {
+    const read = (): CordisXNavigationCollectionSnapshot | CordisXNavigationCollectionSnapshotV2 => {
       const input = source.snapshot()
       if (input === null || typeof input !== 'object' || Array.isArray(input)) {
         throw new Error('navigation collection snapshot must be an object')
@@ -1129,11 +1220,13 @@ export class CordisXSlotService extends Service implements CordisXSlots {
         throw new Error('navigation collection snapshot items are invalid')
       }
       const ids = new Set<string>()
-      const items = input.items.map((candidate, index): CordisXNavigationCollectionItem => {
+      const items = input.items.map((candidate, index): CordisXNavigationCollectionItem | CordisXNavigationCollectionItemV2 => {
         if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
           throw new Error(`navigation collection item ${index} must be an object`)
         }
-        assertKeys(candidate, ['id', 'label', 'description', 'icon', 'leadingVisual', 'route', 'order', 'disabled'], `navigation collection item ${index}`)
+        assertKeys(candidate, v2
+          ? ['id', 'label', 'description', 'icon', 'leadingVisual', 'route', 'order', 'disabled', 'actions']
+          : ['id', 'label', 'description', 'icon', 'leadingVisual', 'route', 'order', 'disabled'], `navigation collection item ${index}`)
         assertLocalId(candidate.id, `navigation collection item ${index} id`)
         if (ids.has(candidate.id)) throw new Error(`navigation collection has duplicate item ${candidate.id}`)
         ids.add(candidate.id)
@@ -1152,6 +1245,7 @@ export class CordisXSlotService extends Service implements CordisXSlots {
           throw new Error(`navigation collection item ${index} order is invalid`)
         }
         assertDisabled(candidate.disabled)
+        if (v2) assertNavigationCollectionActions((candidate as CordisXNavigationCollectionItemV2).actions, `navigation collection item ${index}.actions`)
         return immutableSnapshot({
           ...candidate,
           ...(leadingVisual === undefined ? {} : { leadingVisual }),
@@ -1160,7 +1254,7 @@ export class CordisXSlotService extends Service implements CordisXSlots {
       return immutableSnapshot({ revision: input.revision, items })
     }
 
-    const replace = (next: CordisXNavigationCollectionSnapshot): void => {
+    const replace = (next: CordisXNavigationCollectionSnapshot | CordisXNavigationCollectionSnapshotV2): void => {
       if (!active) return
       if (current !== undefined && next.revision < current.revision) {
         throw new Error('navigation collection snapshot revision moved backwards')
@@ -1174,9 +1268,11 @@ export class CordisXSlotService extends Service implements CordisXSlots {
       const ordered = [...next.items].sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
       const nextHandles: CordisXContributionHandle<CordisXNavigationItem>[] = []
       const nextLeadingVisuals = new Map<string, CordisXNavigationCollectionLeadingVisual>()
+      const nextActions = new Map<string, NavigationCollectionActions>()
       this.registry.transaction(() => {
         for (const handle of handles) handle.dispose()
         for (const qualifiedItemId of leadingVisualIds) this.navigationCollectionLeadingVisuals.delete(qualifiedItemId)
+        for (const qualifiedItemId of actionIds) this.navigationCollectionActions.delete(qualifiedItemId)
         for (const item of ordered) {
           let syntheticId = stableIds.get(item.id)
           if (syntheticId === undefined) {
@@ -1198,11 +1294,15 @@ export class CordisXSlotService extends Service implements CordisXSlots {
           if (item.leadingVisual !== undefined) {
             nextLeadingVisuals.set(qualifyOwnedId(owner, syntheticId), item.leadingVisual)
           }
+          const itemActions = v2 ? (item as CordisXNavigationCollectionItemV2).actions : undefined
+          if (itemActions !== undefined) nextActions.set(qualifyOwnedId(owner, syntheticId), itemActions)
         }
         for (const [qualifiedItemId, leadingVisual] of nextLeadingVisuals) {
           this.navigationCollectionLeadingVisuals.set(qualifiedItemId, leadingVisual)
         }
         leadingVisualIds = new Set(nextLeadingVisuals.keys())
+        for (const [qualifiedItemId, actions] of nextActions) this.navigationCollectionActions.set(qualifiedItemId, actions)
+        actionIds = new Set(nextActions.keys())
         handles = nextHandles
         current = next
       })
@@ -1215,7 +1315,9 @@ export class CordisXSlotService extends Service implements CordisXSlots {
       unsubscribe = undefined
       this.navigationCollectionGroups.delete(surfaceGroup)
       for (const qualifiedItemId of leadingVisualIds) this.navigationCollectionLeadingVisuals.delete(qualifiedItemId)
+      for (const qualifiedItemId of actionIds) this.navigationCollectionActions.delete(qualifiedItemId)
       leadingVisualIds.clear()
+      actionIds.clear()
       this.registry.transaction(() => {
         for (const handle of handles) handle.dispose()
         handles = []
@@ -1251,6 +1353,10 @@ export class CordisXSlotService extends Service implements CordisXSlots {
 
   navigationCollectionLeadingVisual(qualifiedItemId: string): CordisXNavigationCollectionLeadingVisual | undefined {
     return this.navigationCollectionLeadingVisuals.get(qualifiedItemId)
+  }
+
+  navigationCollectionActionsFor(qualifiedItemId: string): NavigationCollectionActions | undefined {
+    return this.navigationCollectionActions.get(qualifiedItemId)
   }
 
   snapshot(): readonly SurfaceContributionSnapshot[] {

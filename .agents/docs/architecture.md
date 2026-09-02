@@ -497,6 +497,31 @@ configuration planes, file-overlap audit, delivery order, and validation
 matrix are normative in
 [`manager-settings-navigation.md`](manager-settings-navigation.md).
 
+An active authorized `manager.content` page also receives the optional,
+page-scoped `managerCollection` registry in its mount context (and therefore
+in shared-React page props). The Host creates the collection root as a sibling
+of the contributed page body and never exposes that root to the plugin. One
+registration supplies only immutable registration/source data; the Host owns
+view selection, exact Unicode search and final filtering, rows and visuals,
+route activation, menus, text-input and confirmation dialogs, clipboard,
+feedback, focus, keyboard, accessibility, and theme. A route change, page
+close, owner disposal, or generation replacement aborts pending queries,
+unsubscribes, disposes the source exactly once, and removes all Host UI. The
+registry is absent from `manager.settings.content`; separate first-level
+Manager routes register separate collections rather than sharing private view
+state across routes.
+
+Manager content navigation v1 and v2 share one owner-qualified declaration and
+route collision domain. V2 alone accepts an optional localized tab label; the
+Host projects it into the unchanged projection-v1 tab text, otherwise derives
+that text from the target route title. An owner may atomically replace one
+mixed-v1/v2 declaration catalog together with its record-title catalog; every
+declaration still passes its own exact version validator before the transaction
+becomes visible. V1 remains closed and keeps its existing target-page-title
+behavior. Tab labels never alter headers, breadcrumbs,
+record titles, routing, history, selection, or lifecycle, and do not introduce
+a redirect or default-child route.
+
 Native menu contributions use the same boundary: CordisX inserts host-rendered
 rows into the opened Codex Help or account menu and never adds an independent
 fallback menu trigger. Compact shell actions are icon-only and inherit the

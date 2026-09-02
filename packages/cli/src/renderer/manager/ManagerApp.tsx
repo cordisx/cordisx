@@ -128,7 +128,7 @@ function Content({ model, marketplace, snapshot, route }: { readonly model: Mana
   if (current.kind === 'marketplace-plugin') return <MarketplacePluginPage marketplace={marketplace} snapshot={snapshot} router={route} />
   if (current.kind === 'marketplace-sources') return <MarketplaceSourcesPage marketplace={marketplace} locale={snapshot.localization.locale} />
   if (current.kind === 'about-acknowledgements') return <AcknowledgementsPage locale={snapshot.localization.locale} />
-  if (current.kind === 'manager-content') return <ManagerContentPage model={model} router={route} />
+  if (current.kind === 'manager-content') return <ManagerContentPage model={model} router={route} locale={snapshot.localization.locale} />
   if (current.page === 'plugins') return <PluginsPage model={model} snapshot={snapshot} router={route} />
   if (current.page === 'extension-points') return <ExtensionPointsPage snapshot={snapshot} router={route} />
   if (current.page === 'routes') return <RoutesPage snapshot={snapshot} router={route} />
