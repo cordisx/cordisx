@@ -48,13 +48,6 @@ cordisx
 我要发送按钮在点击的时候全屏放礼花。
 ```
 
-CordisX 内置插件开发 Skill。Codex 会把你的需求实现为插件，并在 CordisX
-Playground 中运行和验证。你不需要预先安装 Skill、创建脚手架或了解插件的
-底层命令。
-
-每个功能都会成为一个独立、可继续开发和分享的插件项目。只有当你明确要求
-发布或分享时，Codex 才会处理发布所需的信息。
-
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-zh-dark.gif">
