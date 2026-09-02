@@ -10,6 +10,7 @@ const RESOLVED_FIXTURE_ID = `\0${FIXTURE_ID}`
 
 export interface VitePlaygroundOptions {
   readonly configPath: string
+  readonly homeDir?: string
   readonly port?: number
   readonly host?: '127.0.0.1' | '::1'
 }
@@ -39,7 +40,7 @@ function sendJson(response: import('node:http').ServerResponse, status: number, 
 
 /** Vite transport around the same isolated composition/session used by production parity tests. */
 export async function startVitePlayground(options: VitePlaygroundOptions): Promise<VitePlaygroundHandle> {
-  const session = await createPlaygroundSession(options.configPath)
+  const session = await createPlaygroundSession(options.configPath, { ...(options.homeDir === undefined ? {} : { homeDir: options.homeDir }) })
   const clientRoot = fileURLToPath(new URL('../client', import.meta.url))
   const runtimePath = fileURLToPath(new URL('../../renderer/runtime.ts', import.meta.url))
   const runtimeImport = `/@fs/${runtimePath}`
