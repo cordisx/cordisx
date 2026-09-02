@@ -27,7 +27,7 @@ describe('Agent Session permission-v4 Host authority', () => {
       ...manifest,
       capabilities: [{ name: 'sessions.subscribe', required: false, scope: {} }],
     }, identity.id, { assertScope: () => {} }).capabilities)
-      .toEqual([{ name: 'sessions.subscribe', required: false, scope: { sessionIds: undefined } }])
+      .toEqual([{ name: 'sessions.subscribe', required: false, scope: {} }])
   })
 
   it('prompts for an exact Host-reserved SessionId and persists an allow decision', async () => {
