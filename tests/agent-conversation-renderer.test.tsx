@@ -566,6 +566,61 @@ describe('AgentConversationRenderer production DOM', () => {
     }
   })
 
+  it('renders Host semantic icons without changing avatar or message context-menu labels and order', async () => {
+    const base = createPlaygroundConversationFixture('conversation', 'en')
+    const agent = base.selection.kind === 'room'
+      ? base.selection.participants.find(participant => participant.role === 'agent')!
+      : undefined
+    const message = base.entries.find(entry => entry.kind === 'message' && entry.authorId === agent?.id)!
+    const model = createAgentConversationModel({
+      ...base,
+      selection: base.selection.kind !== 'room' ? base.selection : {
+        ...base.selection,
+        participants: base.selection.participants.map(participant => participant.id === agent?.id
+          ? { ...participant, avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: participant.id }) }
+          : participant),
+      },
+      entries: [message],
+    })
+    const harness = await render(model, new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model))
+    try {
+      const document = harness.dom.window.document
+      const contextMenu = async (target: HTMLElement): Promise<HTMLDivElement> => {
+        await act(async () => {
+          target.dispatchEvent(new harness.dom.window.MouseEvent('contextmenu', {
+            bubbles: true, cancelable: true, clientX: 24, clientY: 24,
+          }))
+        })
+        return document.querySelector<HTMLDivElement>('.cxa-context-menu')!
+      }
+      const items = (menu: HTMLElement) => [...menu.querySelectorAll<HTMLButtonElement>('.cxa-context-menu-item')]
+      const messageMenu = await contextMenu(document.querySelector<HTMLElement>('.cxa-message-surface')!)
+      expect(items(messageMenu).map(item => item.textContent)).toEqual([
+        '复制消息', `@提及 ${agent?.name}`, `查看 ${agent?.name}`,
+      ])
+      expect(items(messageMenu).map(item => item.querySelector<HTMLElement>('.cordisx-host-icon')?.dataset.hostIcon)).toEqual([
+        'host:copy', 'host:chat', 'host:people-search',
+      ])
+
+      await act(async () => {
+        document.dispatchEvent(new harness.dom.window.MouseEvent('pointerdown', { bubbles: true }))
+      })
+      const avatarMenu = await contextMenu(document.querySelector<HTMLElement>('.cx-agent-identity-avatar-button')!)
+      expect(items(avatarMenu).map(item => item.textContent)).toEqual([
+        `@提及 ${agent?.name}`, `查看 ${agent?.name}`,
+      ])
+      expect(items(avatarMenu).map(item => item.querySelector<HTMLElement>('.cordisx-host-icon')?.dataset.hostIcon)).toEqual([
+        'host:chat', 'host:people-search',
+      ])
+      expect(avatarMenu.querySelector<HTMLButtonElement>('.cxa-context-menu-item')).toBe(document.activeElement)
+      const styles = document.querySelector<HTMLStyleElement>('style[data-agent-conversation-styles="production"]')!.textContent!
+      expect(styles).toContain('.cxa-context-menu-item{appearance:none;display:flex')
+      expect(styles).toContain('.cxa-context-menu-item .cordisx-host-icon{width:15px;height:15px;flex:0 0 15px')
+    } finally {
+      await harness.close()
+    }
+  })
+
   it('uses opposite transparent rows with an outer circular Agent avatar and one content-sized incoming surface', async () => {
     const base = createPlaygroundConversationFixture('conversation', 'en')
     const firstAgent = base.entries.find(entry => entry.kind === 'message' && entry.authorId === 'agent-alpha')!
