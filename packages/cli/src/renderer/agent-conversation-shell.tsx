@@ -49,7 +49,6 @@ import {
   type AgentConversationRendererProps,
 } from './host-ui/conversation/AgentConversationRenderer.js'
 import { AgentConversationCommandController } from './host-ui/conversation/commands.js'
-import { validateAgentLoopTaskDetailsUrl } from './host-ui/AgentTaskDetailsNavigator.js'
 import { AGENT_CONVERSATION_STYLES } from './host-ui/conversation/styles.js'
 import {
   createAgentConversationModel,
@@ -262,16 +261,21 @@ function assertSelection(value: unknown, label: string): asserts value is Protoc
     const runKeys = new Set<string>()
     value.activeRuns.forEach((run, index) => {
       plainObject(run, `${label}.activeRuns[${index}]`)
-      exactKeys(run, ['participantId', 'memberId', 'runId', 'lifecycle', 'detailsUrl'], `${label}.activeRuns[${index}]`)
+      exactKeys(run, ['participantId', 'memberId', 'sessionId', 'lifecycle', 'details'], `${label}.activeRuns[${index}]`)
       opaque(run.participantId, `${label}.activeRuns[${index}].participantId`)
       opaque(run.memberId, `${label}.activeRuns[${index}].memberId`)
-      opaque(run.runId, `${label}.activeRuns[${index}].runId`)
+      opaque(run.sessionId, `${label}.activeRuns[${index}].sessionId`)
       if (!ids.has(run.participantId)) throw new Error(`${label}.activeRuns[${index}] association is invalid`)
       plainObject(run.lifecycle, `${label}.activeRuns[${index}].lifecycle`)
       exactKeys(run.lifecycle, ['phase', 'updatedAt'], `${label}.activeRuns[${index}].lifecycle`)
       if (!['active', 'running', 'waiting', 'attention'].includes(run.lifecycle.phase as string)) throw new Error(`${label}.activeRuns[${index}].lifecycle is invalid`)
-      validateAgentLoopTaskDetailsUrl(run.detailsUrl as never)
-      const key = JSON.stringify([run.participantId, run.memberId, run.runId])
+      if (run.details !== undefined) {
+        plainObject(run.details, `${label}.activeRuns[${index}].details`)
+        exactKeys(run.details, ['kind', 'ref'], `${label}.activeRuns[${index}].details`)
+        if (run.details.kind !== 'host') throw new Error(`${label}.activeRuns[${index}].details.kind is invalid`)
+        opaque(run.details.ref, `${label}.activeRuns[${index}].details.ref`)
+      }
+      const key = JSON.stringify([run.participantId, run.memberId, run.sessionId])
       if (runKeys.has(key)) throw new Error(`${label}.activeRuns has duplicate association`)
       runKeys.add(key)
     })
@@ -281,12 +285,10 @@ function assertSelection(value: unknown, label: string): asserts value is Protoc
 function assertItem(value: unknown, label: string): asserts value is ProtocolItem {
   plainObject(value, label)
   if (value.kind === 'approval') {
-    exactKeys(value, ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'binding', 'turn', 'approvalId', 'approvalKind', 'rationale', 'state', 'actions', 'diagnostic'], label)
+    exactKeys(value, ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'sessionId', 'turn', 'approvalId', 'approvalKind', 'rationale', 'state', 'actions', 'diagnostic'], label)
     opaque(value.itemId, `${label}.itemId`); safeSequence(value.sequence, `${label}.sequence`)
-    opaque(value.participantId, `${label}.participantId`); opaque(value.memberId, `${label}.memberId`); opaque(value.runId, `${label}.runId`)
-    plainObject(value.binding, `${label}.binding`); exactKeys(value.binding, ['bindingId', 'generation'], `${label}.binding`)
-    agentLoopHandle(value.binding.bindingId, `${label}.binding.bindingId`); safeSequence(value.binding.generation, `${label}.binding.generation`)
-    agentLoopHandle(value.turn, `${label}.turn`); agentLoopHandle(value.approvalId, `${label}.approvalId`)
+    opaque(value.participantId, `${label}.participantId`); opaque(value.memberId, `${label}.memberId`); opaque(value.sessionId, `${label}.sessionId`)
+    safeSequence(value.turn, `${label}.turn`); agentLoopHandle(value.approvalId, `${label}.approvalId`)
     if (!['command', 'file-change', 'external-action', 'other'].includes(value.approvalKind as string)) throw new Error(`${label}.approvalKind is invalid`)
     if (!['pending', 'approved', 'denied', 'cancelled', 'failed'].includes(value.state as string)) throw new Error(`${label}.state is invalid`)
     if (value.rationale !== undefined) assertLocalizedText(value.rationale, `${label}.rationale`)
@@ -304,12 +306,12 @@ function assertItem(value: unknown, label: string): asserts value is ProtocolIte
     return
   }
   if (value.kind === 'member-presence') {
-    exactKeys(value, ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'state', 'retryable', 'diagnostic', 'retry'], label)
+    exactKeys(value, ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'sessionId', 'state', 'retryable', 'diagnostic', 'retry'], label)
     opaque(value.itemId, `${label}.itemId`)
     safeSequence(value.sequence, `${label}.sequence`)
     opaque(value.participantId, `${label}.participantId`)
     opaque(value.memberId, `${label}.memberId`)
-    opaque(value.runId, `${label}.runId`)
+    opaque(value.sessionId, `${label}.sessionId`)
     if (!['inviting', 'creating', 'joined', 'ready', 'failed'].includes(value.state as string)) throw new Error(`${label}.state is invalid`)
     if (typeof value.retryable !== 'boolean') throw new Error(`${label}.retryable is invalid`)
     if (value.diagnostic !== undefined) assertLocalizedText(value.diagnostic, `${label}.diagnostic`)
@@ -345,23 +347,21 @@ function assertItem(value: unknown, label: string): asserts value is ProtocolIte
   if (!['off', 'polite'].includes(value.ariaLive as string)) throw new Error(`${label}.ariaLive is invalid`)
   if (!Array.isArray(value.actions) || value.actions.length > 8) throw new Error(`${label}.actions is invalid`)
   value.actions.forEach((action, index) => assertAction(action, `${label}.actions[${index}]`))
-  if (value.source !== 'agent-loop' && value.source !== 'chatroom-acknowledgement') throw new Error(`${label}.source is invalid`)
+  if (value.source !== 'session-event' && value.source !== 'chatroom-acknowledgement') throw new Error(`${label}.source is invalid`)
   if (value.semantic === undefined) throw new Error(`${label}.semantic is required`)
   {
     plainObject(value.semantic, `${label}.semantic`)
     if (value.semantic.purpose === 'conversation') {
-      exactKeys(value.semantic, ['purpose', 'causation'], `${label}.semantic`)
+      exactKeys(value.semantic, ['purpose', 'correlation'], `${label}.semantic`)
     } else if (value.semantic.purpose === 'member-self-introduction') {
-      exactKeys(value.semantic, ['purpose', 'causation', 'participantId', 'memberId', 'runId', 'binding', 'turn'], `${label}.semantic`)
-      opaque(value.semantic.participantId, `${label}.semantic.participantId`); opaque(value.semantic.memberId, `${label}.semantic.memberId`); opaque(value.semantic.runId, `${label}.semantic.runId`); agentLoopHandle(value.semantic.turn, `${label}.semantic.turn`)
-      plainObject(value.semantic.binding, `${label}.semantic.binding`); exactKeys(value.semantic.binding, ['bindingId', 'generation'], `${label}.semantic.binding`)
-      agentLoopHandle(value.semantic.binding.bindingId, `${label}.semantic.binding.bindingId`); safeSequence(value.semantic.binding.generation, `${label}.semantic.binding.generation`)
+      exactKeys(value.semantic, ['purpose', 'correlation', 'participantId', 'memberId', 'sessionId'], `${label}.semantic`)
+      opaque(value.semantic.participantId, `${label}.semantic.participantId`); opaque(value.semantic.memberId, `${label}.semantic.memberId`); opaque(value.semantic.sessionId, `${label}.semantic.sessionId`)
     } else if (value.semantic.purpose === 'chatroom-acknowledgement') exactKeys(value.semantic, ['purpose'], `${label}.semantic`)
     else throw new Error(`${label}.semantic.purpose is invalid`)
-    if (value.semantic.causation !== undefined) {
-      plainObject(value.semantic.causation, `${label}.semantic.causation`); exactKeys(value.semantic.causation, ['operationId'], `${label}.semantic.causation`); agentLoopHandle(value.semantic.causation.operationId, `${label}.semantic.causation.operationId`)
+    if (value.semantic.correlation !== undefined) {
+      plainObject(value.semantic.correlation, `${label}.semantic.correlation`); exactKeys(value.semantic.correlation, ['requestMessageId'], `${label}.semantic.correlation`); opaque(value.semantic.correlation.requestMessageId, `${label}.semantic.correlation.requestMessageId`)
     }
-    if (value.source === 'agent-loop' && value.semantic.purpose === 'chatroom-acknowledgement'
+    if (value.source === 'session-event' && value.semantic.purpose === 'chatroom-acknowledgement'
       || value.source === 'chatroom-acknowledgement' && value.semantic.purpose !== 'chatroom-acknowledgement') {
       throw new Error(`${label}.source and semantic purpose do not match`)
     }
@@ -399,7 +399,7 @@ function assertSnapshotAssociations(value: AgentConversationShellSnapshot): void
     return
   }
   const participants = new Map(value.selection.participants.map(participant => [participant.participantId, participant]))
-  const runs = new Set((value.selection.activeRuns ?? []).map(run => JSON.stringify([run.participantId, run.memberId, run.runId])))
+  const runs = new Set((value.selection.activeRuns ?? []).map(run => JSON.stringify([run.participantId, run.memberId, run.sessionId])))
   const approvals = new Set<string>()
   const introductions = new Set<string>()
   for (const item of value.items) {
@@ -414,9 +414,9 @@ function assertSnapshotAssociations(value: AgentConversationShellSnapshot): void
           || item.semantic.participantId !== item.author.participantId) {
           throw new Error('self-introduction message author association is invalid')
         }
-        const run = JSON.stringify([item.semantic.participantId, item.semantic.memberId, item.semantic.runId])
+        const run = JSON.stringify([item.semantic.participantId, item.semantic.memberId, item.semantic.sessionId])
         if (!runs.has(run)) throw new Error('self-introduction message does not match an active run')
-        const association = JSON.stringify([run, item.semantic.binding.bindingId, item.semantic.binding.generation, item.semantic.turn])
+        const association = JSON.stringify([run, item.messageId, item.semantic.correlation.requestMessageId])
         if (introductions.has(association)) throw new Error('duplicate self-introduction association')
         introductions.add(association)
       }
@@ -424,9 +424,9 @@ function assertSnapshotAssociations(value: AgentConversationShellSnapshot): void
     if (item.kind === 'approval') {
       const participant = participants.get(item.participantId)
       if (participant?.role !== 'agent' || participant.agentIdentity === undefined) throw new Error('approval participant is not an identified Agent')
-      const run = JSON.stringify([item.participantId, item.memberId, item.runId])
+      const run = JSON.stringify([item.participantId, item.memberId, item.sessionId])
       if (!runs.has(run)) throw new Error('approval does not match an active run')
-      const association = JSON.stringify([item.binding.bindingId, item.binding.generation, item.turn, item.approvalId])
+      const association = JSON.stringify([item.sessionId, item.turn, item.approvalId])
       if (approvals.has(association)) throw new Error('duplicate approval association')
       approvals.add(association)
     }
@@ -549,7 +549,7 @@ function projectSnapshot(
       sequence: item.sequence,
       participantId: item.participantId,
       memberId: item.memberId,
-      runId: item.runId,
+      runId: item.sessionId,
       state: item.state,
       retryable: item.retryable,
       ...(item.diagnostic === undefined ? {} : { diagnostic: localization.resolve(item.diagnostic, `items.${index}.diagnostic`) }),
@@ -561,9 +561,8 @@ function projectSnapshot(
       sequence: item.sequence,
       participantId: item.participantId,
       memberId: item.memberId,
-      runId: item.runId,
-      binding: item.binding,
-      turn: item.turn,
+      runId: item.sessionId,
+      turn: String(item.turn),
       approvalId: item.approvalId,
       approvalKind: item.approvalKind,
       state: item.state,
@@ -590,8 +589,8 @@ function projectSnapshot(
       runState: item.runState,
       ariaLive: item.ariaLive,
       actions: item.actions.map((action, actionIndex) => projectAction(action, localization, `items.${index}.actions.${actionIndex}`)),
-      source: item.source ?? 'agent-loop',
-      ...(!('semantic' in item) || item.semantic === undefined ? {} : { semantic: item.semantic }),
+      source: item.source,
+      semantic: item.semantic,
       reactions: (item.reactions ?? []).map(reaction => ({
         reactionId: reaction.reactionId,
         actorParticipantId: reaction.actorParticipantId,
@@ -622,7 +621,13 @@ function projectSnapshot(
       multiParticipant: snapshot.selection.multiParticipant,
       participantPresentation: snapshot.selection.participantPresentation,
       participants,
-      activeRuns: snapshot.selection.activeRuns ?? [],
+      activeRuns: (snapshot.selection.activeRuns ?? []).map(run => ({
+        participantId: run.participantId,
+        memberId: run.memberId,
+        runId: run.sessionId,
+        lifecycle: run.lifecycle,
+        ...(run.details === undefined ? {} : { details: run.details }),
+      })),
     }
     headerActions = snapshot.headerActions.map((action, index) => projectAction(action, localization, `headerActions.${index}`))
   }
@@ -980,15 +985,13 @@ class MountedConversation {
       if (previous.kind === 'member-presence' && update.item.kind === 'member-presence'
         && (previous.participantId !== update.item.participantId
           || previous.memberId !== update.item.memberId
-          || previous.runId !== update.item.runId)) {
+          || previous.sessionId !== update.item.sessionId)) {
         throw new Error('item-updated changed its member presence association')
       }
       if (previous.kind === 'approval' && update.item.kind === 'approval') {
         if (previous.participantId !== update.item.participantId
           || previous.memberId !== update.item.memberId
-          || previous.runId !== update.item.runId
-          || previous.binding.bindingId !== update.item.binding.bindingId
-          || previous.binding.generation !== update.item.binding.generation
+          || previous.sessionId !== update.item.sessionId
           || previous.turn !== update.item.turn
           || previous.approvalId !== update.item.approvalId
           || previous.approvalKind !== update.item.approvalKind

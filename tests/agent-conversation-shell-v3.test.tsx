@@ -15,17 +15,17 @@ describe('Conversation Shell v3 production projection', () => {
           { id: 'human-1', role: 'human', name: 'You' },
           { id: 'agent-1', role: 'agent', name: 'Architect', agentIdentity: { agentId: 'architect', revision: 'r1' } },
         ],
-        activeRuns: [{ participantId: 'agent-1', memberId: 'room-member-1', runId: 'run-1', lifecycle: { phase: 'attention' }, detailsUrl: { url: 'app://-/tasks/one', target: 'host' } }],
+        activeRuns: [{ participantId: 'agent-1', memberId: 'room-member-1', runId: 'session-1', lifecycle: { phase: 'attention' }, details: { kind: 'host', ref: 'task-one' } }],
       },
       entries: [
         {
           kind: 'message', itemId: 'message-item-1', messageId: 'message-1', sequence: 1, authorId: 'agent-1', body: ['Hello, I am the Architect.'], timestamp: '2026-08-31T00:00:00.000Z',
-          deliveryState: 'delivered', runState: 'idle', ariaLive: 'polite', actions: [], source: 'agent-loop', reactions: [],
-          semantic: { purpose: 'member-self-introduction', causation: { operationId: 'introduction-1' }, participantId: 'agent-1', memberId: 'room-member-1', runId: 'run-1', binding: { bindingId: 'loop-binding-1', generation: 1 }, turn: 'turn-1' },
+          deliveryState: 'delivered', runState: 'idle', ariaLive: 'polite', actions: [], source: 'session-event', reactions: [],
+          semantic: { purpose: 'member-self-introduction', correlation: { requestMessageId: 'introduction-1' }, participantId: 'agent-1', memberId: 'room-member-1', sessionId: 'session-1' },
         },
         {
-          kind: 'approval', itemId: 'approval-item-1', sequence: 2, participantId: 'agent-1', memberId: 'room-member-1', runId: 'run-1', binding: { bindingId: 'loop-binding-1', generation: 1 },
-          turn: 'turn-2', approvalId: 'approval-1', approvalKind: 'command', state: 'pending', rationale: 'Run checks',
+          kind: 'approval', itemId: 'approval-item-1', sequence: 2, participantId: 'agent-1', memberId: 'room-member-1', runId: 'session-1',
+          turn: '2', approvalId: 'approval-1', approvalKind: 'command', state: 'pending', rationale: 'Run checks',
           actions: [
             { decision: 'approve', command: { id: 'chatroom:approve' } },
             { decision: 'deny', command: { id: 'chatroom:deny' } },

@@ -342,9 +342,15 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
         name: effective.name,
         introduction: effective.introduction,
         activeSessions: (model.selection.activeRuns ?? [])
-          .filter(run => run.participantId === participant.id)
+          .filter((run): run is typeof run & { readonly details: NonNullable<typeof run.details> } => run.participantId === participant.id && run.details !== undefined)
           .map(run => ({
-            run,
+            run: {
+              participantId: run.participantId,
+              memberId: run.memberId,
+              sessionId: run.runId,
+              lifecycle: run.lifecycle,
+              details: run.details,
+            },
             roomLabel: roomTitle,
             taskLabel: `${copy.locale.toLowerCase().startsWith('zh') ? 'Agent 任务' : 'Agent task'} · ${run.lifecycle.phase}`,
           })),
