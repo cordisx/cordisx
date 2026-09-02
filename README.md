@@ -49,6 +49,11 @@ After CordisX starts, tell Codex what you want to add. For example:
 Make the send button launch full-screen confetti when clicked.
 ```
 
+<!--
+AI-first plugin demo source, recorder, and update workflow:
+https://github.com/cordisx/cordisx.github.io/blob/main/.agents/docs/ai-plugin-demo-capture.md
+Regenerate and verify media in cordisx/cordisx.github.io before updating the pinned URLs below.
+-->
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-en-dark.gif">
