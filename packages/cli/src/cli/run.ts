@@ -31,7 +31,6 @@ import {
 import { parseCordisXCli, type CordisXDevInvocation, type CordisXLauncherOptions } from './parse.js'
 import { resolveProfileSelection } from './profiles.js'
 import { ProviderFleet } from '../providers/fleet.js'
-import { resolveLocalCodexProviderConfig } from '../providers/config.js'
 import type { CodexProviderConfig } from '../providers/contracts.js'
 import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
 import { createConfigBridgeHandler, type ConfigBridgeHandler } from '../launcher/config-rpc.js'
@@ -175,8 +174,8 @@ function localDevelopmentControlGrant(
 }
 
 function providerConfigs(config: CordisXConfig, environment: NodeJS.ProcessEnv): readonly CodexProviderConfig[] {
-  const local = resolveLocalCodexProviderConfig(config.codex, environment)
-  return local === undefined ? config.providers : [...config.providers, local]
+  void environment
+  return config.providers
 }
 
 interface RendererComposition {
@@ -231,8 +230,7 @@ export async function buildRendererComposition(
     readonly internalBuildRendererBundle?: typeof buildRendererBundle
   } = {},
 ): Promise<RendererComposition> {
-  const providerBridgeToken = (config.codex.agentLoopBackend === 'local-cli'
-    || config.providers.some(provider => provider.enabled)
+  const providerBridgeToken = (config.providers.some(provider => provider.enabled)
     || config.plugins.some(plugin => plugin.enabled && plugin.id === 'cli-proxy-api'))
     ? randomBytes(32).toString('hex')
     : undefined

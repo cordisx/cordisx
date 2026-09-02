@@ -1,21 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { flushSync } from 'react-dom'
 import { HostMenu, type HostMenuItem } from '../../renderer/host-ui/HostMenu.js'
 import { createSidebarItem, type SidebarItemControl } from '../../renderer/host-ui/SidebarItem.js'
 import { FixtureSummary } from './components/FixtureSummary.js'
 import { HostSeats, type PlaygroundFixtureMode } from './components/HostSeats.js'
-import { MockAgentTaskPage } from './components/MockAgentTaskPage.js'
-import { ScenarioLabPage } from './components/ScenarioLabPage.js'
 import { playgroundEnvironment, usePlaygroundEnvironment } from './environment.js'
 import fixture from 'virtual:cordisx-playground-fixture'
 import { activatePlaygroundReviewNavigation, authorizePlaygroundReviewNavigation } from './review-navigation.js'
 import { bootRuntime, useRuntimeState } from './runtime-store.js'
-import {
-  clearPlaygroundSimulatorSessionRegistry,
-  navigateTaskDetails,
-  simulatorTaskIdFromPath,
-  subscribePlaygroundTaskLocation,
-} from './task-details-navigation.js'
 
 interface SidebarItemProps {
   readonly id: string
@@ -55,8 +46,6 @@ export function App() {
   const runtime = useRuntimeState()
   const environment = usePlaygroundEnvironment()
   const [fixtureMode, setFixtureMode] = useState<PlaygroundFixtureMode>(fixture.reviewNavigationItem === undefined ? 'conversation' : 'review')
-  const [simulatorTaskId, setSimulatorTaskId] = useState<string | undefined>(() => simulatorTaskIdFromPath(window.location.pathname))
-  const [scenarioLabOpen, setScenarioLabOpen] = useState(false)
   const shell = useRef<HTMLDivElement>(null)
   const en = environment.locale === 'en'
 
@@ -77,35 +66,8 @@ export function App() {
       deactivate?.()
     }
   }, [runtime.status])
-  const recentTasks = [...(runtime.simulator?.tasks ?? [])].reverse()
-  const simulatorTask = recentTasks.find(task => task.debugTaskId === simulatorTaskId)
-  useEffect(() => {
-    return subscribePlaygroundTaskLocation(window, (taskId, synchronous) => {
-      if (synchronous) flushSync(() => setSimulatorTaskId(taskId))
-      else setSimulatorTaskId(taskId)
-    })
-  }, [])
-
-  const openSimulatorTask = (detailsUrl: (typeof recentTasks)[number]['detailsUrl']) => {
-    navigateTaskDetails(window, detailsUrl)
-  }
-  const preparePluginNavigation = () => {
-    setScenarioLabOpen(false)
-    if (simulatorTaskId !== undefined) flushSync(() => setSimulatorTaskId(undefined))
-  }
-  const closeSimulatorTask = () => {
-    setSimulatorTaskId(undefined)
-    if (window.location.pathname.startsWith('/playground/simulator/tasks/')) window.history.pushState(window.history.state, '', '/')
-  }
-  const openScenarioLab = () => {
-    closeSimulatorTask()
-    setScenarioLabOpen(true)
-  }
-  const closeScenarioLab = () => setScenarioLabOpen(false)
-
   const reset = async () => {
     await fetch('/api/reset', { method: 'POST' })
-    try { clearPlaygroundSimulatorSessionRegistry(sessionStorage) } catch { /* browser session storage is optional */ }
     playgroundEnvironment.resetPreferences()
     window.location.reload()
   }
@@ -122,12 +84,9 @@ export function App() {
     { kind: 'heading', id: 'locale-heading', label: en ? 'Language' : '语言' },
     { kind: 'action', id: 'locale-zh', label: '中文', selected: environment.locale === 'zh-CN', onSelect: () => playgroundEnvironment.setLocale('zh-CN') },
     { kind: 'action', id: 'locale-en', label: 'English', selected: environment.locale === 'en', onSelect: () => playgroundEnvironment.setLocale('en') },
-    { kind: 'separator' as const, id: 'developer-separator' },
-    { kind: 'heading' as const, id: 'developer-heading', label: en ? 'Developer' : '开发' },
-    { kind: 'action' as const, id: 'scenario-lab', label: en ? 'Chatroom interaction scenarios' : 'Chatroom 交互场景', selected: scenarioLabOpen, onSelect: openScenarioLab },
     ...(fixture.reviewNavigationItem === undefined ? [
-      { kind: 'action' as const, id: 'fixture-conversation', label: en ? 'Conversation fixture' : '有会话 fixture', selected: fixtureMode === 'conversation', onSelect: () => { closeScenarioLab(); closeSimulatorTask(); setFixtureMode('conversation') } },
-      { kind: 'action' as const, id: 'fixture-empty', label: en ? 'Empty fixture' : '空会话 fixture', selected: fixtureMode === 'empty', onSelect: () => { closeScenarioLab(); closeSimulatorTask(); setFixtureMode('empty') } },
+      { kind: 'action' as const, id: 'fixture-conversation', label: en ? 'Conversation fixture' : '有会话 fixture', selected: fixtureMode === 'conversation', onSelect: () => setFixtureMode('conversation') },
+      { kind: 'action' as const, id: 'fixture-empty', label: en ? 'Empty fixture' : '空会话 fixture', selected: fixtureMode === 'empty', onSelect: () => setFixtureMode('empty') },
     ] : []),
     { kind: 'separator', id: 'runtime-separator' },
     { kind: 'heading', id: 'runtime-heading', label: en ? 'Runtime' : '运行时' },
@@ -143,35 +102,20 @@ export function App() {
         </div>
         <div className="pg-sidebar-stack">
           {fixture.reviewNavigationItem === undefined
-            ? <SidebarItem id="action.new" label={en ? 'New task' : '新任务'} icon="host:new" onActivate={() => { closeScenarioLab(); closeSimulatorTask(); setFixtureMode('empty') }} />
+            ? <SidebarItem id="action.new" label={en ? 'New task' : '新任务'} icon="host:new" onActivate={() => setFixtureMode('empty')} />
             : null}
-          <nav className="pg-primary-navigation" aria-label={en ? 'Plugin navigation' : '插件导航'} onClickCapture={preparePluginNavigation}>
+          <nav className="pg-primary-navigation" aria-label={en ? 'Plugin navigation' : '插件导航'}>
             {fixture.reviewNavigationItem === undefined
-              ? <SidebarItem id="host.playground" label="Playground" icon="host:playground" onActivate={() => { closeScenarioLab(); closeSimulatorTask(); setFixtureMode('conversation') }} />
+              ? <SidebarItem id="host.playground" label="Playground" icon="host:playground" onActivate={() => setFixtureMode('conversation')} />
               : null}
             <div className="pg-surface-seat pg-navigation-seat" data-cordisx-playground-surface="sidebar.navigation.items" data-pg-seat-label="sidebar.navigation.items" />
           </nav>
         </div>
-        <section className="pg-recent-task-list" aria-labelledby="pg-recent-task-list-title" data-playground-recent-tasks>
-          <div className="pg-session-heading"><span id="pg-recent-task-list-title">{en ? 'Recent tasks' : '最近任务'}</span></div>
-          {recentTasks.length === 0
-            ? <p>{en ? 'No recent tasks.' : '暂无最近任务。'}</p>
-            : recentTasks.map(task => <div key={task.debugTaskId} data-recent-task-row={task.debugTaskId}>
-                <SidebarItem
-                  id={`task.${task.debugTaskId}`}
-                  label={task.agentLabel}
-                  secondary={`${task.identity.agentId} · ${task.identity.revision} · ${en ? 'Mock' : '模拟'}`}
-                  icon="host:history"
-                  selected={task.debugTaskId === simulatorTaskId}
-                  onActivate={() => { setScenarioLabOpen(false); openSimulatorTask(task.detailsUrl) }}
-                />
-              </div>)}
-        </section>
         {fixture.reviewNavigationItem === undefined ? <section className="pg-playground-fixtures" aria-labelledby="pg-playground-fixtures-title">
           <div className="pg-session-heading"><span id="pg-playground-fixtures-title">{en ? 'Playground fixtures' : 'Playground 测试场景'}</span><small>Debug</small></div>
           <div className="pg-session-list">
-            <SidebarItem id="fixture.conversation" label={en ? 'Plugin composition' : '调试插件组合'} secondary={en ? 'Inspect pages and slots' : '验证页面与插槽贡献'} icon="host:playground" selected={!scenarioLabOpen && simulatorTask === undefined && fixtureMode === 'conversation'} onActivate={() => { closeScenarioLab(); closeSimulatorTask(); setFixtureMode('conversation') }} />
-            <SidebarItem id="fixture.empty" label={en ? 'Empty conversation' : '空会话'} secondary={en ? 'Inspect the no-context state' : '检查无上下文状态'} icon="host:new" selected={!scenarioLabOpen && simulatorTask === undefined && fixtureMode === 'empty'} onActivate={() => { closeScenarioLab(); closeSimulatorTask(); setFixtureMode('empty') }} />
+            <SidebarItem id="fixture.conversation" label={en ? 'Plugin composition' : '调试插件组合'} secondary={en ? 'Inspect pages and slots' : '验证页面与插槽贡献'} icon="host:playground" selected={fixtureMode === 'conversation'} onActivate={() => setFixtureMode('conversation')} />
+            <SidebarItem id="fixture.empty" label={en ? 'Empty conversation' : '空会话'} secondary={en ? 'Inspect the no-context state' : '检查无上下文状态'} icon="host:new" selected={fixtureMode === 'empty'} onActivate={() => setFixtureMode('empty')} />
           </div>
         </section> : null}
         <footer className="pg-sidebar-footer">
@@ -191,11 +135,7 @@ export function App() {
           <div className="pg-footer-surface" data-cordisx-playground-surface="sidebar.footer.after-control" />
         </footer>
       </aside>
-      {scenarioLabOpen
-        ? <ScenarioLabPage locale={environment.locale} onClose={() => setScenarioLabOpen(false)} />
-        : simulatorTask === undefined
-          ? <HostSeats mode={fixtureMode} locale={environment.locale} />
-          : <MockAgentTaskPage task={simulatorTask} locale={environment.locale} />}
+      <HostSeats mode={fixtureMode} locale={environment.locale} />
     </div>
   )
 }

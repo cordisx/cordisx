@@ -471,7 +471,7 @@ describe('Agent conversation shell public runtime', () => {
       const mountOrdinal = bindings.length
       const generation = `snapshot-v3-identity-${mountOrdinal}`
       const lifecycle = mountOrdinal === 1 ? 'running' as const : 'waiting' as const
-      const detailsUrl = mountOrdinal === 1 ? 'app://-/tasks/lead-history' : 'app://-/tasks/lead-current'
+      const detailRef = mountOrdinal === 1 ? 'lead-history' : 'lead-current'
       const subscription = {
         subscriptionId: `subscription-identity-${mountOrdinal}`,
         binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration },
@@ -485,31 +485,30 @@ describe('Agent conversation shell public runtime', () => {
             kind: 'room' as const, roomId: 'room-identity', title: message('room.identity', 'Identity room'),
             multiParticipant: true, participantPresentation: 'host-initials' as const, participants: [lead, human],
             activeRuns: [{
-              participantId: 'participant-lead', memberId: 'member-lead', runId: 'run-lead',
-              lifecycle: { phase: lifecycle }, detailsUrl: { url: detailsUrl, target: 'host' as const },
+              participantId: 'participant-lead', memberId: 'member-lead', sessionId: 'session-lead',
+              lifecycle: { phase: lifecycle }, details: { kind: 'host' as const, ref: detailRef },
             }],
           },
           items: [{
             kind: 'message' as const, itemId: 'self-introduction', messageId: 'message-introduction', sequence: 1,
-            author: lead, source: 'agent-loop' as const,
+            author: lead, source: 'session-event' as const,
             semantic: {
-              purpose: 'member-self-introduction' as const, causation: { operationId: 'operation-introduction' },
-              participantId: 'participant-lead', memberId: 'member-lead', runId: 'run-lead',
-              binding: { bindingId: 'loop-binding-lead', generation: 1 }, turn: 'turn-introduction',
+              purpose: 'member-self-introduction' as const, correlation: { requestMessageId: 'message-request-introduction' },
+              participantId: 'participant-lead', memberId: 'member-lead', sessionId: 'session-lead',
             },
             body: [{ kind: 'text' as const, text: message('message.introduction', 'I coordinate this room.') }],
             reactions: [], timestamp: '2026-08-31T00:00:00.000Z', deliveryState: 'delivered' as const,
             runState: 'idle' as const, ariaLive: 'polite' as const, actions: [],
           }, {
             kind: 'message' as const, itemId: 'human-message', messageId: 'message-human', sequence: 2,
-            author: human, source: 'agent-loop' as const, semantic: { purpose: 'conversation' as const },
+            author: human, source: 'session-event' as const, semantic: { purpose: 'conversation' as const },
             body: [{ kind: 'text' as const, text: message('message.human', 'Please continue.') }],
             reactions: [], timestamp: '2026-08-31T00:00:01.000Z', deliveryState: 'delivered' as const,
             runState: 'idle' as const, ariaLive: 'off' as const, actions: [],
           }, {
             kind: 'message' as const, itemId: 'normal-reply', messageId: 'message-normal', sequence: 3,
-            author: lead, source: 'agent-loop' as const,
-            semantic: { purpose: 'conversation' as const, causation: { operationId: 'operation-normal' } },
+            author: lead, source: 'session-event' as const,
+            semantic: { purpose: 'conversation' as const, correlation: { requestMessageId: 'message-request-normal' } },
             body: [{ kind: 'text' as const, text: message('message.normal', 'Continuing with the review.') }],
             reactions: [], timestamp: '2026-08-31T00:00:02.000Z', deliveryState: 'delivered' as const,
             runState: 'idle' as const, ariaLive: 'polite' as const, actions: [],
@@ -556,15 +555,15 @@ describe('Agent conversation shell public runtime', () => {
     }
 
     const unmount = registration.mount(mountContext(dom, { roomId: 'room-identity' }))
-    await assertIdentityActions('running', 'app://-/tasks/lead-history')
+    await assertIdentityActions('running', 'app://-/playground/simulator/tasks/lead-history')
     if (typeof unmount === 'function') unmount()
     await settle()
 
     const unmountReloaded = registration.mount(mountContext(dom, { roomId: 'room-identity' }))
-    await assertIdentityActions('waiting', 'app://-/tasks/lead-current')
+    await assertIdentityActions('waiting', 'app://-/playground/simulator/tasks/lead-current')
     expect(bindings).toHaveLength(2)
     expect(bindings[1]?.bindingId).not.toBe(bindings[0]?.bindingId)
-    expect(navigateHost).not.toHaveBeenCalledWith('app://-/tasks/lead-history')
+    expect(navigateHost).not.toHaveBeenCalledWith('app://-/playground/simulator/tasks/lead-history')
     expect(identity.resolve).toHaveBeenCalledWith({ agentId: 'lead', revision: 'revision-one' })
 
     if (typeof unmountReloaded === 'function') unmountReloaded()
@@ -774,9 +773,9 @@ describe('Agent conversation shell public runtime', () => {
       const stream = new PageStream()
       let binding: AgentConversationShellBinding | undefined
       const initialMessage = {
-        kind: 'message' as const, itemId: 'message-one', messageId: 'message-one', sequence: 1, source: 'agent-loop' as const,
+        kind: 'message' as const, itemId: 'message-one', messageId: 'message-one', sequence: 1, source: 'session-event' as const,
         author: participant,
-        semantic: { purpose: 'member-self-introduction' as const, causation: { operationId: 'intro:one' }, participantId: 'agent-one', memberId: 'member-one', runId: 'run-one', binding: { bindingId: 'loop:binding:one', generation: 1 }, turn: 'turn:intro' },
+        semantic: { purpose: 'member-self-introduction' as const, correlation: { requestMessageId: 'request-one' }, participantId: 'agent-one', memberId: 'member-one', sessionId: 'session-one' },
         body: [{ kind: 'text' as const, text: message('message.intro', 'I help review changes.') }],
         reactions: [
           { reactionId: 'reaction-one', actorParticipantId: 'agent-one', value: { kind: 'semantic' as const, token: 'acknowledged' }, state: 'pending' as const },
@@ -785,8 +784,8 @@ describe('Agent conversation shell public runtime', () => {
         timestamp: '2026-08-31T00:00:00.000Z', deliveryState: 'delivered' as const, runState: 'idle' as const, ariaLive: 'polite' as const, actions: [],
       }
       const initialApproval = {
-        kind: 'approval' as const, itemId: 'approval-one', sequence: 2, participantId: 'agent-one', memberId: 'member-one', runId: 'run-one',
-        binding: { bindingId: 'loop:binding:one', generation: 1 }, turn: 'turn:approval', approvalId: 'approval:one', approvalKind: 'command' as const,
+        kind: 'approval' as const, itemId: 'approval-one', sequence: 2, participantId: 'agent-one', memberId: 'member-one', sessionId: 'session-one',
+        turn: 1, approvalId: 'approval:one', approvalKind: 'command' as const,
         rationale: message('approval.rationale', 'Run checks'), state: 'pending' as const,
         actions: [{ decision: 'approve' as const, command: { id: 'approve' } }],
       }
@@ -796,7 +795,7 @@ describe('Agent conversation shell public runtime', () => {
         return {
           snapshot: async () => ({
             binding: { bindingId: current.bindingId, ownerGeneration: current.ownerGeneration }, generation: 'snapshot-v3', snapshotSequence: 2,
-            selection: { kind: 'room', roomId: 'room-one', title: message('room.title', 'Review'), multiParticipant: false, participantPresentation: 'none', participants: [participant], activeRuns: [{ participantId: 'agent-one', memberId: 'member-one', runId: 'run-one', lifecycle: { phase: 'active' }, detailsUrl: { url: 'app://-/tasks/one', target: 'host' } }] },
+            selection: { kind: 'room', roomId: 'room-one', title: message('room.title', 'Review'), multiParticipant: false, participantPresentation: 'none', participants: [participant], activeRuns: [{ participantId: 'agent-one', memberId: 'member-one', sessionId: 'session-one', lifecycle: { phase: 'active' }, details: { kind: 'host', ref: 'task-one' } }] },
             items: [initialMessage, initialApproval],
             composer: { availability: 'unavailable', placeholder: message('composer.placeholder', 'Message'), disabled: { value: true }, submit: { id: 'send' } }, headerActions: [],
           }) as never,
@@ -813,7 +812,7 @@ describe('Agent conversation shell public runtime', () => {
         await settle()
         stream.push(page(3, 4, { ...initialApproval, state: 'denied', actions: [] }) as never)
       } else if (candidate === 'message-association') {
-        stream.push(page(2, 3, { ...initialMessage, semantic: { ...initialMessage.semantic, turn: 'turn-forged' } }) as never)
+        stream.push(page(2, 3, { ...initialMessage, semantic: { ...initialMessage.semantic, sessionId: 'session-forged' } }) as never)
       } else if (candidate === 'reaction-identity') {
         stream.push(page(2, 3, { ...initialMessage, reactions: [{ ...initialMessage.reactions[0], actorParticipantId: 'forged-actor' }] }) as never)
       } else if (candidate === 'reaction-disappears') {
@@ -853,24 +852,24 @@ describe('Agent conversation shell public runtime', () => {
     const agentTwo = { participantId: 'agent-two', role: 'agent' as const, displayName: message('agent.two', 'Agent Two'), agentIdentity: { agentId: 'agent-two', revision: 'one' } }
     const human = { participantId: 'human-one', role: 'human' as const, displayName: message('human.one', 'Human One') }
     const messageItem = {
-      kind: 'message' as const, itemId: 'message-one', messageId: 'message-one', sequence: 1, source: 'agent-loop' as const,
+      kind: 'message' as const, itemId: 'message-one', messageId: 'message-one', sequence: 1, source: 'session-event' as const,
       author: agentOne,
-      semantic: { purpose: 'member-self-introduction' as const, causation: { operationId: 'intro-one' }, participantId: 'agent-one', memberId: 'member-one', runId: 'run-one', binding: { bindingId: 'binding-one', generation: 1 }, turn: 'turn-one' },
+      semantic: { purpose: 'member-self-introduction' as const, correlation: { requestMessageId: 'request-one' }, participantId: 'agent-one', memberId: 'member-one', sessionId: 'session-one' },
       body: [{ kind: 'text' as const, text: message('intro.one', 'I review changes.') }], reactions: [],
       timestamp: '2026-08-31T00:00:00.000Z', deliveryState: 'delivered' as const, runState: 'idle' as const, ariaLive: 'polite' as const, actions: [],
     }
-    const approval = (itemId: string, participantId: string, memberId: string, runId: string, actions = [{ decision: 'approve' as const, command: { id: `approve-${itemId}` } }]) => ({
-      kind: 'approval' as const, itemId, sequence: itemId === 'approval-one' ? 1 : 2, participantId, memberId, runId,
-      binding: { bindingId: 'binding-one', generation: 1 }, turn: 'turn-approval', approvalId: 'approval-shared', approvalKind: 'command' as const,
+    const approval = (itemId: string, participantId: string, memberId: string, sessionId: string, actions = [{ decision: 'approve' as const, command: { id: `approve-${itemId}` } }]) => ({
+      kind: 'approval' as const, itemId, sequence: itemId === 'approval-one' ? 1 : 2, participantId, memberId, sessionId,
+      turn: 1, approvalId: 'approval-shared', approvalKind: 'command' as const,
       state: 'pending' as const, actions,
     })
     const candidates = [
       [{ ...messageItem, author: { ...agentOne, displayName: message('forged', 'Forged') } }],
-      [{ ...messageItem, author: human, semantic: { ...messageItem.semantic, participantId: 'human-one', memberId: 'human-member', runId: 'human-run' } }],
-      [{ ...messageItem, semantic: { ...messageItem.semantic, participantId: 'agent-two', memberId: 'member-two', runId: 'run-two' } }],
+      [{ ...messageItem, author: human, semantic: { ...messageItem.semantic, participantId: 'human-one', memberId: 'human-member', sessionId: 'session-human' } }],
+      [{ ...messageItem, semantic: { ...messageItem.semantic, participantId: 'agent-two', memberId: 'member-two', sessionId: 'session-two' } }],
       [{ ...messageItem, itemId: 'message:one' }],
-      [{ ...messageItem, semantic: { ...messageItem.semantic, causation: { operationId: '' } } }],
-      [{ ...messageItem, semantic: { ...messageItem.semantic, causation: { operationId: 'x'.repeat(513) } } }],
+      [{ ...messageItem, semantic: { ...messageItem.semantic, correlation: { requestMessageId: '' } } }],
+      [{ ...messageItem, semantic: { ...messageItem.semantic, correlation: { requestMessageId: 'x'.repeat(513) } } }],
       [approval('approval-one', 'agent-one', 'member-one', 'run-one'), approval('approval-two', 'agent-two', 'member-two', 'run-two')],
       [approval('approval-one', 'agent-one', 'member-one', 'run-one', [
         { decision: 'approve' as const, command: { id: 'approve-one' } },
@@ -883,12 +882,12 @@ describe('Agent conversation shell public runtime', () => {
         snapshot: async () => ({
           binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration }, generation: 'snapshot-invalid', snapshotSequence: 2,
           selection: {
-            kind: 'room', roomId: 'room-one', title: message('room.one', 'Room'), multiParticipant: true, participantPresentation: 'compact',
+            kind: 'room', roomId: 'room-one', title: message('room.one', 'Room'), multiParticipant: true, participantPresentation: 'host-initials',
             participants: [agentOne, agentTwo, human],
             activeRuns: [
-              { participantId: 'agent-one', memberId: 'member-one', runId: 'run-one', lifecycle: { phase: 'active' }, detailsUrl: { url: 'app://-/tasks/one', target: 'host' } },
-              { participantId: 'agent-two', memberId: 'member-two', runId: 'run-two', lifecycle: { phase: 'active' }, detailsUrl: { url: 'app://-/tasks/two', target: 'host' } },
-              { participantId: 'human-one', memberId: 'human-member', runId: 'human-run', lifecycle: { phase: 'active' }, detailsUrl: { url: 'app://-/tasks/human', target: 'host' } },
+              { participantId: 'agent-one', memberId: 'member-one', sessionId: 'session-one', lifecycle: { phase: 'active' }, details: { kind: 'host', ref: 'task-one' } },
+              { participantId: 'agent-two', memberId: 'member-two', sessionId: 'session-two', lifecycle: { phase: 'active' }, details: { kind: 'host', ref: 'task-two' } },
+              { participantId: 'human-one', memberId: 'human-member', sessionId: 'session-human', lifecycle: { phase: 'active' }, details: { kind: 'host', ref: 'task-human' } },
             ],
           },
           items, composer: { availability: 'unavailable', placeholder: message('composer', 'Message'), disabled: { value: true }, submit: { id: 'send' } }, headerActions: [],

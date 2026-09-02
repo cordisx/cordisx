@@ -32,8 +32,6 @@ import {
   parseProviderBindingRequest,
 } from '../launcher/provider-rpc.js'
 import { normalizePersistedPermissionPolicyRecord } from '../permission-persistence.js'
-import { resolveLocalCodexProviderConfig } from '../providers/config.js'
-import type { CodexProviderConfig } from '../providers/contracts.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
@@ -196,20 +194,11 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
     const serviceConfigToken = randomBytes(32).toString('hex')
     const credentialToken = randomBytes(32).toString('hex')
     const config = await loadConfig(configPath, { profileId: 'playground' })
-    const mockAgentLoop = config.codex.agentLoopBackend === 'mock'
-    const localProvider = mockAgentLoop ? undefined : resolveLocalCodexProviderConfig(config.codex, process.env)
-    // The deterministic Simulator is a complete Playground AgentLoop backend.
-    // It must not create a Provider Fleet even when the reviewed composition
-    // still contains enabled real-provider configuration.
-    const providerConfigs: readonly CodexProviderConfig[] = mockAgentLoop
-      ? []
-      : localProvider === undefined
-        ? config.providers
-        : [...config.providers, localProvider]
-    const providerFleet = providerConfigs.some(provider => provider.enabled)
-      ? await ProviderFleet.create(providerConfigs, { appServer: { environment: process.env } })
-      : undefined
-    const providerToken = providerFleet === undefined ? undefined : randomBytes(32).toString('hex')
+    // The development composition injects the deterministic transport into the
+    // same Agent/Session Runtime authority. It never starts a Provider Fleet,
+    // local CLI, or a second app-server connection.
+    const providerFleet = undefined
+    const providerToken = undefined
     const bridge = createConfigBridgeHandler({
       token,
       profileId: 'playground',

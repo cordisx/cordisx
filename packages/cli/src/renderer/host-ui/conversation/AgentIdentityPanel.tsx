@@ -1,10 +1,9 @@
 import { cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type {
-  AgentConversationActiveRunDescriptor,
   AgentConversationParticipant,
   AgentConversationSelection,
-} from '@cordisx/protocol/agent-conversation-shell/v2'
-import type { AgentDefinitionIdentity } from '@cordisx/protocol/agent-loop/v2'
+} from '@cordisx/protocol/agent-conversation-shell/v3'
+import type { AgentDefinitionIdentity, AgentDetailReference } from '@cordisx/protocol/agents/v1'
 import * as React from 'react'
 import { HostSurfaceIcon } from '../HostSurfaceIcon.js'
 import {
@@ -14,12 +13,18 @@ import {
 import { HostAgentAvatar } from './AgentAvatar.js'
 import { HostConversationRightInspector } from './RightInspector.js'
 
-export type HostAgentIdentitySessionLifecycle = AgentConversationActiveRunDescriptor['lifecycle']['phase']
+export type HostAgentIdentitySessionLifecycle = 'active' | 'running' | 'waiting' | 'attention'
 export type HostAgentDefinitionIdentityPresentation = Readonly<AgentDefinitionIdentity>
 
 export interface HostAgentIdentitySessionPresentation {
   /** Exact descriptor from the room snapshot's top-level activeRuns array. */
-  readonly run: AgentConversationActiveRunDescriptor
+  readonly run: {
+    readonly participantId: string
+    readonly memberId: string
+    readonly sessionId: string
+    readonly lifecycle: { readonly phase: HostAgentIdentitySessionLifecycle; readonly updatedAt?: string }
+    readonly details: AgentDetailReference
+  }
   readonly roomLabel: string
   readonly taskLabel: string
 }
@@ -120,8 +125,8 @@ export function createHostAgentIdentityPresentation(input: HostAgentIdentityPres
     const sessionParticipantId = boundedHandle(session.run.participantId, `Active session ${index} participant id`)
     if (sessionParticipantId !== participantId) throw new TypeError(`Active session ${index} crosses participant identity`)
     const memberId = boundedHandle(session.run.memberId, `Active session ${index} member id`)
-    const runId = boundedHandle(session.run.runId, `Active session ${index} run id`)
-    const key = JSON.stringify([sessionParticipantId, memberId, runId])
+    const sessionId = boundedHandle(session.run.sessionId, `Active session ${index} session id`)
+    const key = JSON.stringify([sessionParticipantId, memberId, sessionId])
     if (keys.has(key)) throw new TypeError('Active sessions contain a duplicate participant/member/run association')
     keys.add(key)
     if (!['active', 'running', 'waiting', 'attention'].includes(session.run.lifecycle.phase)) throw new TypeError(`Active session ${index} lifecycle is invalid`)
@@ -129,12 +134,12 @@ export function createHostAgentIdentityPresentation(input: HostAgentIdentityPres
       run: Object.freeze({
         participantId: sessionParticipantId,
         memberId,
-        runId,
+        sessionId,
         lifecycle: Object.freeze({
           phase: session.run.lifecycle.phase,
           ...(session.run.lifecycle.updatedAt === undefined ? {} : { updatedAt: boundedText(session.run.lifecycle.updatedAt, `Active session ${index} lifecycle time`, 64) }),
         }),
-        detailsUrl: validateAgentLoopTaskDetailsUrl(session.run.detailsUrl),
+        details: validateAgentLoopTaskDetailsUrl(session.run.details),
       }),
       roomLabel: boundedText(session.roomLabel, `Active session ${index} room label`, 256),
       taskLabel: boundedText(session.taskLabel, `Active session ${index} task label`, 256),
@@ -163,7 +168,7 @@ export function projectHostAgentIdentityFromShell(
   selection: AgentConversationSelection,
   participantId: string,
   effective: HostEffectiveAgentIdentityProjection,
-  labelsFor: (run: AgentConversationActiveRunDescriptor) => HostAgentIdentitySessionLabels,
+  labelsFor: (run: HostAgentIdentitySessionPresentation['run']) => HostAgentIdentitySessionLabels,
 ): HostAgentIdentityPresentation | undefined {
   boundedHandle(participantId, 'Participant id')
   if (selection.kind !== 'room') return undefined
@@ -176,7 +181,7 @@ export function projectHostAgentIdentityFromShell(
     throw new TypeError('Effective Agent identity does not match the exact participant identity')
   }
   const activeSessions = (selection.activeRuns ?? [])
-    .filter(run => run.participantId === participantId)
+    .filter((run): run is typeof run & { readonly details: AgentDetailReference } => run.participantId === participantId && run.details !== undefined)
     .map(run => ({ run, ...labelsFor(run) }))
   return createHostAgentIdentityPresentation({
     participant,
@@ -221,11 +226,11 @@ export function HostAgentIdentityPanel({
   }, [interactive, onOpenChange, open])
 
   if (!open || !interactive || presentation === undefined) return null
-  const run = async (key: string, detailsUrl: AgentConversationActiveRunDescriptor['detailsUrl']): Promise<void> => {
+  const run = async (key: string, details: AgentDetailReference): Promise<void> => {
     if (pendingSession !== undefined) return
     setPendingSession(key)
     try {
-      await navigator.navigate(detailsUrl)
+      await navigator.navigate(details)
       onOpenChange(false)
     } catch (error) {
       onNavigationError?.(error)
@@ -266,14 +271,14 @@ export function HostAgentIdentityPanel({
           {presentation.activeSessions.length === 0
             ? <p className="cx-agent-identity-empty">{copy.noActiveSessions}</p>
             : <ul className="cx-agent-identity-sessions">{presentation.activeSessions.map(session => {
-              const key = JSON.stringify([session.run.participantId, session.run.memberId, session.run.runId])
+              const key = JSON.stringify([session.run.participantId, session.run.memberId, session.run.sessionId])
               const lifecycle = copy.lifecycle[session.run.lifecycle.phase]
               return <li key={key}><button
                 type="button"
                 className="cx-agent-identity-session"
                 disabled={pendingSession !== undefined}
                 aria-label={`${session.roomLabel} · ${session.taskLabel} · ${lifecycle}`}
-                onClick={() => { void run(key, session.run.detailsUrl) }}
+                onClick={() => { void run(key, session.run.details) }}
               >
                 <span className="cx-agent-identity-room">{session.roomLabel}</span>
                 <span className="cx-agent-identity-task">{session.taskLabel}</span>

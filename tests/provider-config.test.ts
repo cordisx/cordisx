@@ -3,33 +3,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
-import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
-import { codexAppServerArguments, localCodexAppServerArguments } from '../packages/cli/src/providers/codex-app-server.js'
-import { resolveLocalCodexProviderConfig } from '../packages/cli/src/providers/config.js'
+import { codexAppServerArguments } from '../packages/cli/src/providers/codex-app-server.js'
 
 describe('external provider configuration', () => {
-  it('opts into the authenticated local CLI without embedding credentials', async () => {
-    const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-provider-'))
-    const configPath = path.join(directory, 'config.json')
-    await writeFile(configPath, JSON.stringify({
-      version: 1,
-      codex: { executable: '/opt/local/bin/codex', agentLoopBackend: 'local-cli' },
-      providers: [], plugins: [],
-    }))
-    const config = await loadConfig(configPath)
-    const local = resolveLocalCodexProviderConfig(config.codex, { HOME: '/users/example' })
-    expect(local).toMatchObject({
-      id: 'codex-local', kind: 'local-codex', sourceProviderId: 'openai',
-      codexExecutable: '/opt/local/bin/codex', codexHome: '/users/example/.codex', enabled: true,
-    })
-    expect(localCodexAppServerArguments()).toEqual(['app-server', '--stdio', '-c', 'analytics.enabled=false'])
-    expect(JSON.stringify(localCodexAppServerArguments())).not.toMatch(/credential|api.?key|secret/i)
-    const composition = await buildRendererCompositionSource(config, {
-      playground: true, profileId: 'playground', providerBridgeToken: 'local-provider-test-token',
-    })
-    expect(composition.source).toContain('providers: [{"id":"codex-local","displayName":"Local Codex"}]')
-    expect(composition.source).toContain('providerBridgeToken: "local-provider-test-token"')
-  })
   it('resolves plugin-owned runtime/startup service planes ahead of the legacy top-level import', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-provider-config-'))
     const configPath = path.join(directory, 'config.json')
