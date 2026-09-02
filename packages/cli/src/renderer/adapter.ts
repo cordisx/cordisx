@@ -11,6 +11,8 @@ import {
   type CordisXStructuredAction,
   type CordisXSurfaceInvocationContextV1,
   type CordisXSurfaceName,
+  type NavigationCollectionAction,
+  type NavigationCollectionActions,
 } from '../contracts.js'
 import type { CordisXCommandService } from './commands.js'
 import type { CordisXI18nService } from './i18n.js'
@@ -1424,6 +1426,7 @@ class StructuredSurfaceRenderer {
   private nextContext = 0
   private readonly routeProjectors = new Map<HTMLButtonElement, () => void>()
   private navigationLeadingVisualDisposers: (() => void)[] = []
+  private navigationActionDisposers: (() => void)[] = []
   private reasoningProjection: ReasoningIntensityProjection | undefined
   private readonly reasoningNativeVisibility = new ReasoningIntensityNativeVisibility()
   private sessionBackdropProjection: SessionBackdropProjection | undefined
@@ -1500,6 +1503,7 @@ class StructuredSurfaceRenderer {
     this.sessionBackdropProjection = undefined
     this.tooltips.dispose()
     this.disposeNavigationLeadingVisuals()
+    this.disposeNavigationActions()
     for (const unsubscribe of this.unsubscribers) unsubscribe()
     for (const root of this.roots.values()) root.remove()
     this.roots.clear()
@@ -1826,7 +1830,10 @@ class StructuredSurfaceRenderer {
       }
       project()
     }
-    if (!usedRoots.has('sidebar.navigation')) this.disposeNavigationLeadingVisuals()
+    if (!usedRoots.has('sidebar.navigation')) {
+      this.disposeNavigationLeadingVisuals()
+      this.disposeNavigationActions()
+    }
     for (const snapshot of snapshots) {
       const rendered = snapshot.visible && snapshot.authorized && snapshot.valid && !snapshot.pending
         && availableSurfaces.has(snapshot.surface)
@@ -2036,6 +2043,7 @@ class StructuredSurfaceRenderer {
 
   private renderNavigation(root: HTMLElement, snapshots: readonly SurfaceContributionSnapshot[], sites: Set<string>, _nativeTemplate?: HTMLButtonElement): void {
     this.disposeNavigationLeadingVisuals()
+    this.disposeNavigationActions()
     root.replaceChildren()
     const navigation = create(this.document, 'div', 'cordisx-navigation')
     const groups = this.slots.navigationCollectionGroupsSnapshot()
@@ -2081,8 +2089,10 @@ class StructuredSurfaceRenderer {
           this.routeProjectors.set(primary, project)
           project()
         }
-        const actions = control.actions
-        for (const [index, action] of (item.actions ?? []).entries()) actions.append(this.button(snapshot, action, `actions.${index}`, sites, 'shortcut'))
+        const collectionActions = this.slots.navigationCollectionActionsFor(snapshot.qualifiedId)
+        if (collectionActions === undefined) {
+          for (const [index, action] of (item.actions ?? []).entries()) control.actions.append(this.button(snapshot, action, `actions.${index}`, sites, 'shortcut'))
+        } else this.renderNavigationCollectionActions(snapshot, item.route!, collectionActions, control.actions, sites)
         parent.append(row)
       }
     }
@@ -2105,6 +2115,211 @@ class StructuredSurfaceRenderer {
 
   private disposeNavigationLeadingVisuals(): void {
     for (const dispose of this.navigationLeadingVisualDisposers.splice(0)) dispose()
+  }
+
+  private disposeNavigationActions(): void {
+    for (const dispose of this.navigationActionDisposers.splice(0)) dispose()
+  }
+
+  private renderNavigationCollectionActions(
+    snapshot: SurfaceContributionSnapshot,
+    route: CordisXRouteReference,
+    actionItems: NavigationCollectionActions,
+    root: HTMLElement,
+    sites: Set<string>,
+  ): void {
+    const feedback = create(this.document, 'span', 'cordisx-navigation-action-feedback')
+    feedback.setAttribute('aria-live', 'polite')
+    let feedbackTimer: number | undefined
+    const setFeedback = (action: NavigationCollectionAction, success: boolean): void => {
+      if (feedbackTimer !== undefined) this.document.defaultView?.clearTimeout(feedbackTimer)
+      feedback.textContent = this.text(snapshot, success ? action.feedback.success : action.feedback.failure, `navigation.actions.${action.id}.feedback.${success ? 'success' : 'failure'}`, sites)
+      feedback.setAttribute('role', success ? 'status' : 'alert')
+      feedback.dataset.tone = success ? 'success' : 'error'
+      feedbackTimer = this.document.defaultView?.setTimeout(() => {
+        feedback.removeAttribute('role')
+        feedback.removeAttribute('data-tone')
+        feedback.textContent = ''
+        feedbackTimer = undefined
+      }, 4_000)
+    }
+    const activate = async (action: NavigationCollectionAction, returnFocus: HTMLElement): Promise<void> => {
+      if (action.disabled.value) return
+      if (action.kind === 'command' && action.confirmation !== undefined) {
+        const confirmed = await this.confirmNavigationCollectionAction(snapshot, action, sites, returnFocus)
+        if (!confirmed) return
+      }
+      try {
+        if (action.kind === 'command') {
+          await this.commands.executeFor(snapshot.owner, action.command, `navcol:${snapshot.qualifiedId}:${action.id}`, {
+            pointId: snapshot.surface,
+            contributionId: snapshot.qualifiedId,
+          })
+        } else {
+          const clipboard = this.document.defaultView?.navigator.clipboard
+          if (clipboard === undefined) throw new Error('clipboard is unavailable')
+          const value = action.kind === 'copy-text'
+            ? action.text.value
+            : new URL(this.routes.pathFromSurface(snapshot.owner, route, snapshot.surface, snapshot.qualifiedId), this.document.location.href).href
+          await clipboard.writeText(value)
+        }
+        setFeedback(action, true)
+      } catch (error) {
+        returnFocus.dataset.error = error instanceof Error ? error.message : String(error)
+        setFeedback(action, false)
+      }
+    }
+    const buttonFor = (action: NavigationCollectionAction, menu = false): HTMLButtonElement => {
+      const label = this.text(snapshot, action.label, `navigation.actions.${action.id}.label`, sites)
+      const aria = action.ariaLabel === undefined
+        ? label
+        : this.text(snapshot, action.ariaLabel, `navigation.actions.${action.id}.ariaLabel`, sites)
+      const button = this.document.createElement('button')
+      button.type = 'button'
+      button.className = menu ? 'cordisx-navigation-action-menuitem' : 'cordisx-shortcut-action cordisx-icon-only-control'
+      button.dataset.cordisxNoDrag = 'true'
+      button.dataset.tone = action.tone
+      button.setAttribute('aria-label', aria)
+      button.setAttribute('aria-pressed', String(action.pressed))
+      button.disabled = snapshot.disabled || action.disabled.value
+      if (menu) {
+        button.setAttribute('role', 'menuitem')
+        button.tabIndex = -1
+      }
+      if (action.icon !== undefined) button.append(createHostSurfaceIcon(this.document, action.icon))
+      const copy = create(this.document, 'span', 'cordisx-navigation-action-label')
+      copy.textContent = label
+      if (menu || action.icon === undefined) button.append(copy)
+      else {
+        button.dataset.cordisxTooltip = label
+        this.tooltips.attach(button, () => button.dataset.cordisxTooltip, 'top')
+      }
+      if (button.disabled && action.disabled.reason !== undefined) {
+        button.dataset.cordisxTooltip = this.text(snapshot, action.disabled.reason, `navigation.actions.${action.id}.disabled`, sites)
+      }
+      button.addEventListener('click', event => {
+        event.stopPropagation()
+        const details = button.closest('details')
+        if (details !== null) details.removeAttribute('open')
+        void activate(action, button)
+      })
+      return button
+    }
+    for (const action of actionItems.filter(item => item.placement === 'direct')) root.append(buttonFor(action))
+    const overflowActions = actionItems.filter(item => item.placement === 'overflow')
+    if (overflowActions.length > 0) {
+      const overflow = this.document.createElement('details')
+      overflow.className = 'cordisx-surface-overflow cordisx-navigation-action-overflow'
+      overflow.dataset.cordisxNoDrag = 'true'
+      const summary = this.document.createElement('summary')
+      summary.className = 'cordisx-icon-only-control'
+      summary.setAttribute('aria-label', 'More actions')
+      summary.append(createHostSurfaceIcon(this.document, 'host:more'))
+      const menu = create(this.document, 'div', 'cordisx-surface-overflow-menu cordisx-navigation-action-menu')
+      menu.setAttribute('role', 'menu')
+      const buttons = overflowActions.map(action => buttonFor(action, true))
+      menu.append(...buttons)
+      overflow.addEventListener('toggle', () => {
+        if (overflow.open) buttons.find(button => !button.disabled)?.focus()
+      })
+      overflow.addEventListener('keydown', event => {
+        if (!overflow.open) return
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          overflow.open = false
+          summary.focus()
+          return
+        }
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+        event.preventDefault()
+        const enabled = buttons.filter(button => !button.disabled)
+        if (enabled.length === 0) return
+        const current = enabled.indexOf(this.document.activeElement as HTMLButtonElement)
+        const index = event.key === 'Home' ? 0
+          : event.key === 'End' ? enabled.length - 1
+            : event.key === 'ArrowDown' ? (current + 1 + enabled.length) % enabled.length
+              : (current - 1 + enabled.length) % enabled.length
+        enabled[index]?.focus()
+      })
+      const closeOutside = (event: PointerEvent): void => {
+        if (overflow.open && event.target instanceof Node && !overflow.contains(event.target)) overflow.open = false
+      }
+      this.document.addEventListener('pointerdown', closeOutside)
+      this.navigationActionDisposers.push(() => this.document.removeEventListener('pointerdown', closeOutside))
+      overflow.append(summary, menu)
+      root.append(overflow)
+    }
+    root.append(feedback)
+    this.navigationActionDisposers.push(() => {
+      if (feedbackTimer !== undefined) this.document.defaultView?.clearTimeout(feedbackTimer)
+    })
+  }
+
+  private confirmNavigationCollectionAction(
+    snapshot: SurfaceContributionSnapshot,
+    action: Extract<NavigationCollectionAction, { readonly kind: 'command' }>,
+    sites: Set<string>,
+    returnFocus: HTMLElement,
+  ): Promise<boolean> {
+    const confirmation = action.confirmation
+    if (confirmation === undefined) return Promise.resolve(true)
+    return new Promise(resolve => {
+      const overlay = create(this.document, 'div', 'cordisx-navigation-confirmation-overlay')
+      overlay.dataset.cordisxManagerModal = 'true'
+      const dialog = create(this.document, 'section', 'cordisx-navigation-confirmation-dialog')
+      dialog.setAttribute('role', 'dialog')
+      dialog.setAttribute('aria-modal', 'true')
+      dialog.tabIndex = -1
+      const title = create(this.document, 'h2', 'cordisx-navigation-confirmation-title')
+      const description = create(this.document, 'p', 'cordisx-navigation-confirmation-description')
+      const controls = create(this.document, 'div', 'cordisx-navigation-confirmation-controls')
+      const cancel = this.document.createElement('button')
+      cancel.type = 'button'
+      cancel.textContent = (this.document.documentElement.lang || '').toLowerCase().startsWith('zh') ? '取消' : 'Cancel'
+      const confirm = this.document.createElement('button')
+      confirm.type = 'button'
+      confirm.dataset.tone = 'danger'
+      title.textContent = this.text(snapshot, confirmation.title, `navigation.actions.${action.id}.confirmation.title`, sites)
+      description.textContent = this.text(snapshot, confirmation.description, `navigation.actions.${action.id}.confirmation.description`, sites)
+      confirm.textContent = this.text(snapshot, confirmation.confirmLabel, `navigation.actions.${action.id}.confirmation.confirmLabel`, sites)
+      const titleId = `cordisx-navigation-confirmation-${this.nextContext++}`
+      const descriptionId = `${titleId}-description`
+      title.id = titleId
+      description.id = descriptionId
+      dialog.setAttribute('aria-labelledby', titleId)
+      dialog.setAttribute('aria-describedby', descriptionId)
+      controls.append(cancel, confirm)
+      dialog.append(title, description, controls)
+      overlay.append(dialog)
+      let settled = false
+      const finish = (value: boolean): void => {
+        if (settled) return
+        settled = true
+        overlay.remove()
+        const index = this.navigationActionDisposers.indexOf(dispose)
+        if (index >= 0) this.navigationActionDisposers.splice(index, 1)
+        if (returnFocus.isConnected) returnFocus.focus()
+        resolve(value)
+      }
+      const dispose = (): void => finish(false)
+      cancel.addEventListener('click', () => finish(false))
+      confirm.addEventListener('click', () => finish(true))
+      overlay.addEventListener('pointerdown', event => { if (event.target === overlay) finish(false) })
+      dialog.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          finish(false)
+        } else if (event.key === 'Tab') {
+          const targets = [cancel, confirm]
+          const current = targets.indexOf(this.document.activeElement as HTMLButtonElement)
+          event.preventDefault()
+          targets[(current + (event.shiftKey ? -1 : 1) + targets.length) % targets.length]?.focus()
+        }
+      })
+      this.navigationActionDisposers.push(dispose)
+      this.document.body.append(overlay)
+      cancel.focus()
+    })
   }
 
   private renderActions(
@@ -2445,6 +2660,21 @@ function installStyles(document: Document): () => void {
     .cordisx-composer-submit-before > .cordisx-surface-overflow > summary .cordisx-host-icon, .cordisx-composer-submit-before > .cordisx-surface-overflow > summary .cordisx-host-icon svg { width: 16px; height: 16px; }
     .cordisx-surface-overflow-menu { position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; display: grid; min-width: 160px; padding: 4px; border: 1px solid var(--color-border,rgba(255,255,255,.084)); border-radius: var(--radius-lg,10px); background: var(--color-background-elevated-secondary,#242424); box-shadow: 0 8px 28px rgba(0,0,0,.28); }
     .cordisx-surface-overflow:not([open]) > .cordisx-surface-overflow-menu { display: none; }
+    .cordisx-navigation-action-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .cordisx-navigation-action-menuitem { display:flex; width:100%; min-height:30px; align-items:center; gap:8px; border:0; border-radius:7px; padding:5px 8px; background:transparent; color:inherit; font:inherit; text-align:left; }
+    .cordisx-navigation-action-menuitem:hover:not(:disabled), .cordisx-navigation-action-menuitem:focus-visible { outline:0; background:var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); }
+    .cordisx-navigation-action-menuitem[data-tone="danger"] { color:var(--color-text-error,#ff737a); }
+    .cordisx-navigation-action-feedback:empty { display:none; }
+    .cordisx-navigation-action-feedback:not(:empty) { position:fixed; z-index:2147482500; right:18px; bottom:18px; max-width:min(360px,calc(100vw - 36px)); border:1px solid var(--color-border,rgba(255,255,255,.12)); border-radius:9px; padding:8px 11px; background:var(--color-background-elevated-secondary,#242424); box-shadow:0 8px 28px rgba(0,0,0,.28); color:var(--color-text-primary,#f5f5f5); font:13px/18px system-ui,sans-serif; }
+    .cordisx-navigation-action-feedback[data-tone="error"] { border-color:color-mix(in srgb,var(--color-text-error,#ff737a) 55%,transparent); }
+    .cordisx-navigation-confirmation-overlay { position:fixed; z-index:2147482600; inset:0; display:grid; place-items:center; padding:24px; background:rgba(0,0,0,.52); }
+    .cordisx-navigation-confirmation-dialog { width:min(420px,calc(100vw - 48px)); box-sizing:border-box; border:1px solid var(--color-border,rgba(255,255,255,.12)); border-radius:12px; padding:18px; background:var(--color-background-elevated-secondary,#242424); box-shadow:0 18px 64px rgba(0,0,0,.42); color:var(--color-text-primary,#f5f5f5); }
+    .cordisx-navigation-confirmation-title { margin:0; font:600 17px/24px system-ui,sans-serif; }
+    .cordisx-navigation-confirmation-description { margin:8px 0 18px; color:var(--color-text-secondary,rgba(255,255,255,.68)); font:14px/21px system-ui,sans-serif; }
+    .cordisx-navigation-confirmation-controls { display:flex; justify-content:flex-end; gap:8px; }
+    .cordisx-navigation-confirmation-controls button { min-height:32px; border:1px solid var(--color-border,rgba(255,255,255,.12)); border-radius:8px; padding:5px 12px; background:transparent; color:inherit; font:inherit; }
+    .cordisx-navigation-confirmation-controls button[data-tone="danger"] { border-color:transparent; background:var(--color-background-error,#b8323b); color:white; }
+    .cordisx-navigation-confirmation-controls button:focus-visible { outline:2px solid var(--color-ring,rgba(131,195,255,.76)); outline-offset:2px; }
     .cordisx-env-header .cordisx-shortcut-action { --cordisx-icon-only-glyph-size: 18px; }
     .cordisx-env-header .cordisx-shortcut-action .cordisx-host-icon { width: 18px; height: 18px; }
     .cordisx-env-row-leading > .cordisx-host-icon, .cordisx-env-row-leading > .cordisx-host-icon svg { width: 18px; height: 18px; }

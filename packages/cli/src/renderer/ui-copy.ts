@@ -121,6 +121,8 @@ type CopyKey =
   | 'manager.dialog'
   | 'manager.navigation'
   | 'manager.back'
+  | 'manager.content.loading'
+  | 'manager.content.failed'
   | 'plugins.install'
   | 'plugins.install-checking'
   | 'plugins.enable'
@@ -550,6 +552,8 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'manager.dialog': { en: 'CordisX Plugin Manager', 'zh-CN': 'CordisX 插件管理器' },
   'manager.navigation': { en: 'CordisX Manager pages', 'zh-CN': 'CordisX 管理器页面' },
   'manager.back': { en: 'Back', 'zh-CN': '返回' },
+  'manager.content.loading': { en: 'Loading page…', 'zh-CN': '正在加载页面…' },
+  'manager.content.failed': { en: 'This page could not be loaded.', 'zh-CN': '无法加载此页面。' },
   'plugins.install': { en: 'Import local plugin', 'zh-CN': '导入本地插件' },
   'plugins.install-checking': { en: 'Checking local package', 'zh-CN': '检查本地包中' },
   'plugins.enable': { en: 'Enable plugin', 'zh-CN': '启用插件' },

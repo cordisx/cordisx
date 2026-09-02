@@ -231,6 +231,69 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-contributor-grid .cxr-ack-avatar { border-radius: 50%; }
   .cxr-license-grid .cxr-ack-card { min-height: 104px; }
   .cxr-ack-empty { margin-top: 12px; }
+  [data-cordisx-manager-page] { display: grid; min-width: 0; min-height: 100%; grid-template-rows: auto minmax(0,1fr); }
+  [data-cordisx-manager-collection-root]:empty { display: none; }
+  [data-cordisx-manager-page-body] { min-width: 0; min-height: 0; }
+  .cxr-manager-collection { position: relative; display: grid; min-width: 0; gap: 12px; }
+  .cxr-manager-collection-views { display: flex; width: fit-content; max-width: 100%; gap: 3px; border-radius: 9px; padding: 3px; background: var(--cx-hover,rgba(255,255,255,.07)); }
+  .cxr-manager-collection-views button { border: 0; border-radius: 7px; padding: 5px 10px; background: transparent; color: var(--cx-muted,#9ca5b5); font: inherit; cursor: pointer; }
+  .cxr-manager-collection-views button[aria-selected="true"] { background: var(--cx-surface-raised,#20242b); color: var(--cx-text,#edf0f4); box-shadow: 0 1px 4px rgb(0 0 0 / 18%); }
+  .cxr-manager-collection-views button:focus-visible { outline: 2px solid var(--cx-focus,#8aa8ff); outline-offset: 1px; }
+  .cxr-manager-collection-search { display: grid; min-width: 0; grid-template-columns: 18px minmax(0,1fr) auto; align-items: center; gap: 7px; border: 1px solid var(--cx-border,#353a42); border-radius: 9px; padding: 7px 9px; background: var(--cx-surface-raised,#20242b); color: var(--cx-muted,#9ca5b5); }
+  .cxr-manager-collection-search:focus-within { border-color: var(--cx-focus,#8aa8ff); box-shadow: 0 0 0 1px var(--cx-focus,#8aa8ff); }
+  .cxr-manager-collection-search input { min-width: 0; border: 0; outline: 0; padding: 0; background: transparent; color: var(--cx-text,#edf0f4); font: inherit; }
+  .cxr-manager-collection-search button, .cxr-manager-collection-action, .cxr-manager-collection-feedback button { display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 7px; padding: 0; background: transparent; color: var(--cx-muted,#9ca5b5); cursor: pointer; }
+  .cxr-manager-collection-search button:hover, .cxr-manager-collection-action:hover:not(:disabled), .cxr-manager-collection-feedback button:hover { background: var(--cx-hover,rgba(255,255,255,.08)); color: var(--cx-text,#edf0f4); }
+  .cxr-manager-collection-search button:focus-visible, .cxr-manager-collection-action:focus-visible, .cxr-manager-collection-feedback button:focus-visible { outline: 2px solid var(--cx-focus,#8aa8ff); outline-offset: 1px; }
+  .cxr-manager-collection-list { display: grid; min-width: 0; gap: 5px; }
+  .cxr-manager-collection-row { position: relative; display: grid; min-width: 0; grid-template-columns: minmax(0,1fr) auto; align-items: center; border: 1px solid var(--cx-border,#353a42); border-radius: 11px; background: var(--cx-surface-raised,#20242b); }
+  .cxr-manager-collection-row:hover { border-color: color-mix(in srgb,var(--cx-text,#edf0f4) 22%,var(--cx-border,#353a42)); }
+  .cxr-manager-collection-row[data-disabled="true"] { opacity: .62; }
+  .cxr-manager-collection-open { display: grid; min-width: 0; grid-template-columns: 38px minmax(0,1fr); align-items: center; gap: 10px; border: 0; border-radius: 10px; padding: 10px 12px; background: transparent; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+  .cxr-manager-collection-open:disabled { cursor: default; }
+  .cxr-manager-collection-open:focus-visible { outline: 2px solid var(--cx-focus,#8aa8ff); outline-offset: -2px; }
+  .cxr-manager-collection-copy { display: grid; min-width: 0; gap: 2px; }
+  .cxr-manager-collection-copy strong, .cxr-manager-collection-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cxr-manager-collection-copy span { color: var(--cx-muted,#9ca5b5); font-size: 11px; }
+  .cxr-manager-collection-visual { position: relative; display: grid; width: 34px; height: 34px; flex: none; place-items: center; color: var(--cx-muted,#9ca5b5); }
+  .cxr-manager-collection-visual > :is(.cordisx-host-icon,.cxm-host-icon) { width: 20px; height: 20px; }
+  .cxr-manager-collection-visual .cxa-avatar { display: grid; width: 32px; height: 32px; overflow: hidden; place-items: center; border: 1px solid var(--cx-border,#353a42); border-radius: 50%; background: var(--cx-hover,rgba(255,255,255,.08)); color: var(--cx-text,#edf0f4); font: 700 9px/1 system-ui,sans-serif; }
+  .cxr-manager-collection-visual .cxa-avatar-initials, .cxr-manager-collection-visual .cxa-avatar-renderer, .cxr-manager-collection-visual .oneworks-avatar, .cxr-manager-collection-visual .oneworks-avatar svg, .cxr-manager-collection-visual .oneworks-avatar canvas { display: grid; width: 100%; height: 100%; place-items: center; }
+  .cxr-manager-collection-avatar-stack > [data-avatar-slot] { position: absolute; display: grid; width: 22px; height: 22px; place-items: center; }
+  .cxr-manager-collection-avatar-stack > [data-avatar-slot="0"] { top: 0; left: 0; z-index: 3; }
+  .cxr-manager-collection-avatar-stack > [data-avatar-slot="1"] { top: 0; right: 0; z-index: 2; }
+  .cxr-manager-collection-avatar-stack > [data-avatar-slot="2"] { bottom: 0; left: 6px; z-index: 1; }
+  .cxr-manager-collection-avatar-stack > [data-avatar-slot] .cxa-avatar { width: 22px; height: 22px; border: 2px solid var(--cx-surface-raised,#20242b); font-size: 6px; }
+  .cxr-manager-collection-avatar-overflow { position: absolute; right: -2px; bottom: -2px; z-index: 4; display: grid; min-width: 18px; height: 18px; place-items: center; border: 2px solid var(--cx-surface-raised,#20242b); border-radius: 999px; padding: 0 2px; background: var(--cx-hover,#343942); color: var(--cx-text,#edf0f4); font-size: 7px; font-weight: 700; }
+  .cxr-manager-collection-actions { display: flex; align-items: center; gap: 3px; padding-right: 8px; }
+  .cxr-manager-collection-action[data-tone="danger"] { color: var(--cx-danger,#ff6b72); }
+  .cxr-manager-collection-overflow { position: relative; display: inline-flex; }
+  .cxr-manager-collection-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 12; display: grid; width: max-content; min-width: 168px; gap: 2px; border: 1px solid var(--cx-border,#353a42); border-radius: 10px; padding: 5px; background: var(--cx-surface,#17191d); box-shadow: 0 12px 30px rgb(0 0 0 / 32%); }
+  .cxr-manager-collection-menu button { display: grid; grid-template-columns: 18px minmax(0,1fr); align-items: center; gap: 8px; border: 0; border-radius: 7px; padding: 7px 9px; background: transparent; color: var(--cx-text,#edf0f4); text-align: left; font: inherit; cursor: pointer; }
+  .cxr-manager-collection-menu button:hover:not(:disabled), .cxr-manager-collection-menu button:focus-visible { outline: 0; background: var(--cx-hover,rgba(255,255,255,.08)); }
+  .cxr-manager-collection-menu button[data-tone="danger"] { color: var(--cx-danger,#ff6b72); }
+  .cxr-manager-collection-menu button:disabled { opacity: .5; cursor: default; }
+  .cxr-manager-collection-state { display: grid; min-height: 128px; place-content: center; justify-items: center; gap: 4px; color: var(--cx-muted,#9ca5b5); text-align: center; }
+  .cxr-manager-collection-state strong { color: var(--cx-text,#edf0f4); font-size: 14px; }
+  .cxr-manager-collection-state button { margin-top: 5px; border: 1px solid var(--cx-border,#353a42); border-radius: 8px; padding: 6px 10px; background: transparent; color: var(--cx-text,#edf0f4); font: inherit; cursor: pointer; }
+  .cxr-manager-collection-state button:hover { background: var(--cx-hover,rgba(255,255,255,.08)); }
+  .cxr-manager-collection-state button:focus-visible { outline: 2px solid var(--cx-focus,#8aa8ff); outline-offset: 2px; }
+  .cxr-manager-collection-feedback { position: sticky; bottom: 10px; z-index: 8; display: flex; width: fit-content; max-width: min(520px,100%); align-items: center; justify-self: center; gap: 8px; border: 1px solid var(--cx-border,#353a42); border-radius: 9px; padding: 7px 8px 7px 11px; background: var(--cx-surface,#17191d); box-shadow: 0 8px 24px rgb(0 0 0 / 28%); }
+  .cxr-manager-collection-feedback[data-tone="error"] { border-color: color-mix(in srgb,var(--cx-danger,#ff6b72) 55%,var(--cx-border,#353a42)); }
+  .cxr-manager-collection-dialog-backdrop { position: fixed; inset: 0; z-index: 2147483590; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 58%); }
+  .cxr-manager-collection-dialog { display: grid; width: min(440px,calc(100vw - 40px)); gap: 13px; border: 1px solid var(--cx-border,#353a42); border-radius: 13px; padding: 18px; background: var(--cx-surface,#17191d); box-shadow: 0 20px 70px rgb(0 0 0 / 42%); }
+  .cxr-manager-collection-dialog h3, .cxr-manager-collection-dialog p { margin: 0; }
+  .cxr-manager-collection-dialog p { color: var(--cx-muted,#9ca5b5); }
+  .cxr-manager-collection-dialog label { display: grid; gap: 6px; }
+  .cxr-manager-collection-dialog input { width: 100%; border: 1px solid var(--cx-border,#353a42); border-radius: 8px; padding: 8px 10px; outline: 0; background: var(--cx-surface-raised,#20242b); color: var(--cx-text,#edf0f4); font: inherit; }
+  .cxr-manager-collection-dialog input:focus { border-color: var(--cx-focus,#8aa8ff); box-shadow: 0 0 0 1px var(--cx-focus,#8aa8ff); }
+  .cxr-manager-collection-dialog input[aria-invalid="true"] { border-color: var(--cx-danger,#ff6b72); }
+  .cxr-manager-collection-dialog-actions { display: flex; justify-content: flex-end; gap: 7px; }
+  .cxr-manager-collection-dialog-actions button { border: 1px solid var(--cx-border,#353a42); border-radius: 8px; padding: 7px 12px; background: transparent; color: var(--cx-text,#edf0f4); font: inherit; cursor: pointer; }
+  .cxr-manager-collection-dialog-actions button[data-tone="primary"] { border-color: var(--cx-primary,#4c8dff); background: var(--cx-primary,#4c8dff); color: #fff; }
+  .cxr-manager-collection-dialog-actions button[data-tone="danger"] { border-color: var(--cx-danger,#ff6b72); background: var(--cx-danger,#ff6b72); color: #fff; }
+  .cxr-manager-collection-dialog-actions button:disabled { opacity: .5; cursor: default; }
+  .cxr-manager-collection-dialog-actions button:focus-visible { outline: 2px solid var(--cx-focus,#8aa8ff); outline-offset: 2px; }
   @media (max-width: 760px) {
     .cxr-backdrop { padding: 0; }
     .cxr-dialog { width: 100vw; height: 100vh; grid-template-columns: 76px minmax(0,1fr); border-radius: 0; }

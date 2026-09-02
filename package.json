@@ -1,6 +1,33 @@
 {
   "name": "cordisx-monorepo",
+  "version": "0.1.0-beta.2",
   "private": true,
+  "type": "module",
+  "files": [
+    "packages/cli/dist"
+  ],
+  "exports": {
+    "./contracts": {
+      "types": "./packages/cli/dist/src/contracts.d.ts",
+      "default": "./packages/cli/dist/src/contracts.js"
+    },
+    "./react": {
+      "types": "./packages/cli/dist/src/react.d.ts",
+      "default": "./packages/cli/dist/src/react.js"
+    },
+    "./react/jsx-runtime": {
+      "types": "./packages/cli/dist/src/react-jsx-runtime.d.ts",
+      "default": "./packages/cli/dist/src/react-jsx-runtime.js"
+    },
+    "./react/jsx-dev-runtime": {
+      "types": "./packages/cli/dist/src/react-jsx-dev-runtime.d.ts",
+      "default": "./packages/cli/dist/src/react-jsx-dev-runtime.js"
+    },
+    "./ui": {
+      "types": "./packages/cli/dist/src/ui.d.ts",
+      "default": "./packages/cli/dist/src/ui.js"
+    }
+  },
   "workspaces": [
     "packages/*"
   ],
@@ -26,6 +53,12 @@
   },
   "engines": {
     "node": ">=22.19"
+  },
+  "dependencies": {
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#3e3f248abb94fe57e613b020ffa8a6ceaba6c3cd",
+    "@deepseek-ai/cordis": "4.0.1",
+    "@types/react": "19.2.18",
+    "react": "19.2.8"
   },
   "devDependencies": {
     "@cordisx/protocol": "github:cordisx/cordisx-protocol#3e3f248abb94fe57e613b020ffa8a6ceaba6c3cd"
