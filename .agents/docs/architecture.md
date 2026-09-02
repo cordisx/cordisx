@@ -71,13 +71,13 @@ projected only into Manager and never become public package sources, lifecycle
 snapshots, permission identities, or share targets. Details and the phase-1
 entry-basename id restriction are in
 [`distribution-and-cli.md`](distribution-and-cli.md#explicit-local-development-entry).
-`cordisx dev --natural-language` prepares a fixed inert entry under the current
-workspace and then enters this exact plane. The launched Host receives the
-absolute active entry and development mode as launcher-owned environment
-facts, allowing its Codex agent to edit the already-watched source without a
-second launcher, watcher, or restart. The option changes source preparation and
-agent guidance only; build, publication, rollback, fencing, diagnostics, and
-shutdown remain the existing local-generation authorities.
+AI-first development uses the same plane with a normal project created by the
+published plugin scaffolder. The launched Host receives that project's exact
+entry and explicit-development mode as launcher-owned environment facts,
+allowing its Codex agent to edit the already-watched source without a shared
+scratch plugin, second watcher, or restart. Build, publication, rollback,
+fencing, diagnostics, and shutdown remain the existing local-generation
+authorities.
 
 The launcher implementation of that boundary is specified separately in
 [`dynamic-package-store.md`](dynamic-package-store.md): it maps source-v1 and

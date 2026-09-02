@@ -2,7 +2,6 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import os from 'node:os'
-import { lstat, mkdir, writeFile } from 'node:fs/promises'
 import type { ChildProcess } from 'node:child_process'
 import { resolveHostAdapter } from '../adapters/registry.js'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
@@ -89,7 +88,6 @@ const HELP = `Usage:
   cordisx config
   cordisx doctor
   cordisx dev [plugin-path] [--config path] [options] [-- host-arguments...]
-  cordisx dev --natural-language [options] [-- host-arguments...]
 
 Options:
   --attach                 Attach to an existing loopback CDP endpoint
@@ -98,7 +96,6 @@ Options:
   --executable <path>      Override the host executable
   --debug-port <port>      Override the loopback CDP port
   --online-devtools        Allow the official online DevTools frontend
-  --natural-language       Create/reuse a managed entry for in-session plugin authoring
   --dry-run                Resolve and print the plan without starting the host
   -h, --help               Show this help`
 
@@ -158,19 +155,9 @@ function localDevelopmentHostConfig(cwd: string): CordisXConfig {
   }
 }
 
-const NATURAL_LANGUAGE_ENTRY_CONTRACT = 'cordisx.natural-language-development-entry/v1'
-
-function nodeError(error: unknown, code: string): boolean {
-  return error instanceof Error && 'code' in error && error.code === code
-}
-
-export function naturalLanguageDevelopmentEntry(cwd: string): string {
-  return path.join(path.resolve(cwd), '.cordisx', 'plugins', 'natural-language.ts')
-}
-
-function naturalLanguageControlGrant(
+function localDevelopmentControlGrant(
   identity: Readonly<{ source: string; id: string }>,
-): NonNullable<BuildRendererBundleOptions['naturalLanguageControlGrant']> {
+): NonNullable<BuildRendererBundleOptions['localDevelopmentControlGrant']> {
   return Object.freeze({
     profile: 'cordisx.composer-submit-celebration/v1',
     identity: Object.freeze({ source: identity.source, id: identity.id }),
@@ -185,37 +172,6 @@ function naturalLanguageControlGrant(
       events: Object.freeze(['submitActivated'] as const),
     }),
   })
-}
-
-/** Create only the inert watched entry. The Codex session implements the requested behavior in this file. */
-export async function ensureNaturalLanguageDevelopmentEntry(cwd: string): Promise<Readonly<{
-  entry: string
-  status: 'created' | 'existing'
-}>> {
-  const entry = naturalLanguageDevelopmentEntry(cwd)
-  const existing = await lstat(entry).catch(error => {
-    if (nodeError(error, 'ENOENT')) return undefined
-    throw error
-  })
-  if (existing !== undefined) {
-    if (!existing.isFile()) throw new Error(`natural-language development entry must be a real file: ${entry}`)
-    return { entry, status: 'existing' }
-  }
-  await mkdir(path.dirname(entry), { recursive: true })
-  const source = `// ${NATURAL_LANGUAGE_ENTRY_CONTRACT}\n`
-    + '// CordisX watches this inert entry. The bundled Skill guides Codex to implement the requested plugin here.\n'
-    + "export const name = 'natural-language'\n"
-    + 'export const inject = []\n'
-    + 'export function apply(): void {}\n'
-  try {
-    await writeFile(entry, source, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
-    return { entry, status: 'created' }
-  } catch (error) {
-    if (!nodeError(error, 'EEXIST')) throw error
-    const raced = await lstat(entry)
-    if (!raced.isFile()) throw new Error(`natural-language development entry must be a real file: ${entry}`)
-    return { entry, status: 'existing' }
-  }
 }
 
 function providerConfigs(config: CordisXConfig, environment: NodeJS.ProcessEnv): readonly CodexProviderConfig[] {
@@ -268,7 +224,7 @@ export async function buildRendererComposition(
     readonly pluginActivation?: CordisXPluginActivationRecordV1
     readonly initialRegistryEpoch?: number
     readonly channelManager?: ChannelManagerBundleProjection
-    readonly naturalLanguageControlGrant?: BuildRendererBundleOptions['naturalLanguageControlGrant']
+    readonly localDevelopmentControlGrant?: BuildRendererBundleOptions['localDevelopmentControlGrant']
     /** Transient, launcher-created tokens. They are published only in the injected runtime metadata. */
     readonly channelCredentialBridgeToken?: string
     readonly channelActionsBridgeToken?: string
@@ -320,7 +276,7 @@ export async function buildRendererComposition(
       ? {}
       : { initialRegistryEpoch: options.initialRegistryEpoch ?? options.pluginLifecycle!.registryEpoch }),
     ...(options.channelManager === undefined ? {} : { channelManager: options.channelManager }),
-    ...(options.naturalLanguageControlGrant === undefined ? {} : { naturalLanguageControlGrant: options.naturalLanguageControlGrant }),
+    ...(options.localDevelopmentControlGrant === undefined ? {} : { localDevelopmentControlGrant: options.localDevelopmentControlGrant }),
   } satisfies NonNullable<Parameters<typeof buildRendererBundle>[1]>
   const buildBundle = options.internalBuildRendererBundle ?? buildRendererBundle
   const source = await buildBundle(config, bundleOptions)
@@ -581,35 +537,7 @@ async function runDevelopment(
 ): Promise<void> {
   const cordisxHomeDir = rootFromConfigPath(homeConfigPath)
   if (!invocation.options.dryRun) await ensureCordisXHomeDirectory(homeConfigOptions)
-  const naturalLanguageEntry = invocation.naturalLanguage
-    ? naturalLanguageDevelopmentEntry(cwd)
-    : undefined
-  if (invocation.naturalLanguage && invocation.options.dryRun) {
-    const existing = await lstat(naturalLanguageEntry!).catch(error => {
-      if (nodeError(error, 'ENOENT')) return undefined
-      throw error
-    })
-    if (existing !== undefined && !existing.isFile()) {
-      throw new Error(`natural-language development entry must be a real file: ${naturalLanguageEntry}`)
-    }
-    stdout(JSON.stringify({
-      status: 'ready',
-      mode: 'development',
-      origin: 'natural-language',
-      pluginId: 'natural-language',
-      sourcePath: naturalLanguageEntry,
-      entryState: existing === undefined ? 'would-create' : 'existing',
-      debugPort: invocation.options.debugPort ?? (
-        invocation.options.system ? localDevelopmentHostConfig(cwd).codex.debugPort : 'automatic'
-      ),
-      hostArgs: invocation.hostArgs,
-    }, null, 2))
-    return
-  }
-  const preparedNaturalLanguageEntry = invocation.naturalLanguage
-    ? await ensureNaturalLanguageDevelopmentEntry(cwd)
-    : undefined
-  const pluginPath = preparedNaturalLanguageEntry?.entry ?? invocation.pluginPath
+  const pluginPath = invocation.pluginPath
   if (pluginPath !== undefined) {
     const entry = path.resolve(cwd, pluginPath)
     const config = localDevelopmentHostConfig(cwd)
@@ -637,9 +565,6 @@ async function runDevelopment(
         : { sourceDir: runtime.internalBuiltinSkillSourceDir },
     )
     stdout(`[cordisx] built-in Skill ${skillDeployment.status}: ${skillDeployment.targetDir}`)
-    if (preparedNaturalLanguageEntry !== undefined) {
-      stdout(`[cordisx] natural-language entry ${preparedNaturalLanguageEntry.status}: ${entry}`)
-    }
     const runtimeGeneration = randomBytes(16).toString('hex')
     const initialDevelopmentPlugin = await localDevelopmentPluginIdentity(entry)
     const active: CordisXPluginActivationRecordV1 = {
@@ -659,9 +584,7 @@ async function runDevelopment(
       generation: runtimeGeneration,
       pluginActivation: active,
       initialRegistryEpoch: 0,
-      ...(invocation.naturalLanguage
-        ? { naturalLanguageControlGrant: naturalLanguageControlGrant(initialDevelopmentPlugin) }
-        : {}),
+      localDevelopmentControlGrant: localDevelopmentControlGrant(initialDevelopmentPlugin),
     })
     const documentLeases = new OwnerDocumentLeaseRegistry({
       stable: [{ source: initialDevelopmentPlugin.source, pluginId: initialDevelopmentPlugin.id }],
@@ -712,7 +635,7 @@ async function runDevelopment(
         ...(profile === undefined ? {} : { profile }),
         environment: {
           CORDISX_DEV_ENTRY: entry,
-          CORDISX_DEV_MODE: invocation.naturalLanguage ? 'natural-language' : 'explicit-entry',
+          CORDISX_DEV_MODE: 'explicit-entry',
         },
         publisherGrant: createPublisherGrantBridgeHandler(new DirectPublisherGrantAuthority(
           new StaticPublisherKeyRegistry([]),

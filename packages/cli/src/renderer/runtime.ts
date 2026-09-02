@@ -217,8 +217,8 @@ interface CordisXRuntimeMetadata {
   readonly initialRegistryEpoch?: number
   readonly generation?: string
   readonly channelManager?: ChannelManagerProjectionV1
-  /** Host-private, launcher-authenticated exact claim for managed natural-language development. */
-  readonly naturalLanguageControlGrant?: {
+  /** Host-private, launcher-authenticated exact claim for one explicit local-development entry. */
+  readonly localDevelopmentControlGrant?: {
     readonly profile: 'cordisx.composer-submit-celebration/v1'
     readonly identity: { readonly source: string; readonly id: string }
     readonly pointId: 'composer.toolbar.items'
@@ -242,12 +242,12 @@ function exactStringList(actual: readonly string[], expected: readonly string[])
   return actual.length === expected.length && actual.every((value, index) => value === expected[index])
 }
 
-function naturalLanguageControlGrantMatches(
+function localDevelopmentControlGrantMatches(
   metadata: CordisXRuntimeMetadata,
   declaration: CordisXExtensionPointControlDeclarationV1,
   generation: Readonly<{ source: string; pluginId: string }>,
 ): boolean {
-  const grant = metadata.naturalLanguageControlGrant
+  const grant = metadata.localDevelopmentControlGrant
   return metadata.profileId === 'development'
     && grant?.profile === 'cordisx.composer-submit-celebration/v1'
     && declaration.origin === 'explicit'
@@ -2939,14 +2939,14 @@ async function start(
     commandService.setAccessResolver(extensionPointBroker)
     routeService.setAccessResolver(extensionPointBroker)
     slotService.setAccessResolver(extensionPointBroker)
-    if (metadata.naturalLanguageControlGrant !== undefined) {
+    if (metadata.localDevelopmentControlGrant !== undefined) {
       slotService.setHostPrivateControlAccessResolver((declaration, controlGeneration) => (
-        naturalLanguageControlGrantMatches(metadata, declaration, controlGeneration)
+        localDevelopmentControlGrantMatches(metadata, declaration, controlGeneration)
           ? Object.freeze({
               authorized: true,
               policy: 'allow' as const,
               effectivePolicy: 'allow' as const,
-              reason: 'permission.natural-language-exact-control',
+              reason: 'permission.local-development-exact-control',
             })
           : undefined
       ))

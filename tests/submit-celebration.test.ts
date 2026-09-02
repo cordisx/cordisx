@@ -101,29 +101,29 @@ describe('composer submit celebration profile', () => {
   afterEach(() => vi.useRealTimers())
 
   it('builds the maintained agent-authored entry as the exact managed plugin id', async () => {
-    const build = await buildLocalDevelopmentPlugin('tests/fixtures/natural-language.ts')
-    expect(build).toMatchObject({ id: 'natural-language', version: expect.any(String) })
+    const build = await buildLocalDevelopmentPlugin('tests/fixtures/send-confetti.ts')
+    expect(build).toMatchObject({ id: 'send-confetti', version: expect.any(String) })
     expect(build.moduleFactorySource).toContain('submitActivated')
     expect(build.moduleFactorySource).toContain(CORDISX_COMPOSER_SUBMIT_CELEBRATION_PROFILE_V1)
   })
 
-  it('boots the maintained plugin with only its exact natural-language claim grant', async () => {
-    const entry = path.resolve('tests/fixtures/natural-language.ts')
-    const source = 'file:///cordisx-local-dev/fixture/natural-language.js'
+  it('boots the maintained plugin with only its exact local-development claim grant', async () => {
+    const entry = path.resolve('tests/fixtures/send-confetti.ts')
+    const source = 'file:///cordisx-local-dev/fixture/send-confetti.js'
     const config: CordisXConfig = {
       version: 1,
       rootDir: path.resolve('.'),
       codex: { debugPort: 9229 },
       providers: [],
-      plugins: [{ id: 'natural-language', entry, source, enabled: true, config: {} }],
+      plugins: [{ id: 'send-confetti', entry, source, enabled: true, config: {} }],
     }
     const bundle = await buildRendererBundle(config, {
       playground: true,
       profileId: 'development',
-      generation: 'natural-language-celebration-test',
-      naturalLanguageControlGrant: {
+      generation: 'local-development-celebration-test',
+      localDevelopmentControlGrant: {
         profile: CORDISX_COMPOSER_SUBMIT_CELEBRATION_PROFILE_V1,
-        identity: { source, id: 'natural-language' },
+        identity: { source, id: 'send-confetti' },
         pointId: 'composer.toolbar.items',
         contributionId: 'submit-celebration',
         claimId: 'submit-celebration',
@@ -160,7 +160,7 @@ describe('composer submit celebration profile', () => {
         }
       }
       expect(runtime.__cordisxRuntime?.snapshot().registrations).toContainEqual(expect.objectContaining({
-        owner: 'natural-language', surface: 'composer.toolbar.items', authorized: true,
+        owner: 'send-confetti', surface: 'composer.toolbar.items', authorized: true,
       }))
       dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-playground-template="composer.toolbar"]')!.click()
       await Promise.resolve()

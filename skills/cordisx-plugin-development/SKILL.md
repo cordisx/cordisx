@@ -13,7 +13,7 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 - Add any Manager page, contribution, action, collection, or icon: [ui-system.md](references/ui-system.md)
 - Add or change plugin configuration: [schema-configuration.md](references/schema-configuration.md)
 - Run or deliver the result: [verification.md](references/verification.md)
-- Implement a request inside a live `cordisx dev` session: [natural-language-development.md](references/natural-language-development.md)
+- Implement a request inside a live scaffolded-plugin session: [live-plugin-development.md](references/live-plugin-development.md)
 
 ## Core contract
 
@@ -28,14 +28,15 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 ## Universal workflow
 
 1. Inspect the repository guide and the current public plugin contracts.
-2. When `CORDISX_DEV_ENTRY` is set, treat that exact file as the already-watched plugin entry and follow the natural-language workflow. Do not start or restart CordisX.
-3. Locate the closest maintained plugin example, but scaffold rather than copying generated fixtures wholesale.
-4. Define the manifest, localized product copy, structured contributions, config schema, permissions, and lifecycle behavior.
-5. Keep all visual choices inside Host-supported presentation tokens and semantic roles.
-6. Add focused contract and lifecycle tests before relying on visual inspection.
-7. Run the plugin in the real CordisX Playground using an isolated CordisX config/state directory.
-8. Verify reload/dispose, keyboard behavior, light/dark tokens, narrow layout, and honest unavailable states when relevant.
-9. Report implementation, verification, limitations, and planned work separately.
+2. When `CORDISX_DEV_ENTRY` is set, treat that exact file as the already-watched entry of a CLI-created plugin project and follow the live-plugin workflow. Do not create a second project, launcher, or watcher.
+3. Otherwise, when creating a plugin, infer a concise product slug and run `npm create cordisx-plugin@beta <directory>` before implementation. Keep this scaffolding command as an Agent implementation detail unless the user asks for it.
+4. Locate the closest maintained plugin example, but scaffold rather than copying generated fixtures wholesale.
+5. Define the manifest, localized product copy, structured contributions, config schema, permissions, and lifecycle behavior.
+6. Keep all visual choices inside Host-supported presentation tokens and semantic roles.
+7. Add focused contract and lifecycle tests before relying on visual inspection.
+8. Run the plugin in the real CordisX Playground using an isolated CordisX config/state directory.
+9. Verify reload/dispose, keyboard behavior, light/dark tokens, narrow layout, and honest unavailable states when relevant.
+10. Report implementation, verification, limitations, and planned work separately.
 
 ## Product boundaries
 
