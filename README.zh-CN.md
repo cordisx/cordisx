@@ -55,6 +55,14 @@ Playground 中运行和验证。你不需要预先安装 Skill、创建脚手架
 每个功能都会成为一个独立、可继续开发和分享的插件项目。只有当你明确要求
 发布或分享时，Codex 才会处理发布所需的信息。
 
+<p align="center">
+  <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/7b6d93a095c8fa0de2dd44e10352ed4784a0cfce/assets/motion/cordisx-ai-plugin-demo-zh-dark.mp4">
+    <img alt="在 CordisX 中用自然语言创建 Send Confetti 插件的深色界面演示" src="https://raw.githubusercontent.com/cordisx/cordisx.github.io/7b6d93a095c8fa0de2dd44e10352ed4784a0cfce/assets/motion/cordisx-ai-plugin-demo-zh-dark.gif" width="900">
+  </a>
+</p>
+
+<p align="center"><sub>深色界面演示 · 点击查看高清 MP4</sub></p>
+
 ## 文档
 
 - [产品概览](./.agents/docs/product-overview.zh-CN.md)
