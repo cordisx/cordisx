@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AgentRouteSessionScopeAuthority, type AgentActiveRoute } from '../packages/cli/src/renderer/agent-route-session-scope.js'
+import { AgentRouteSessionScopeAuthority, type AgentActiveRoute, type AgentPermissionPlanV4 } from '../packages/cli/src/renderer/agent-route-session-scope.js'
 
 const owner = { pluginId: 'file:///plugins/chatroom.mjs:org.cordisx.chatroom', generation: 7 } as const
 const declaration = {
@@ -24,6 +24,19 @@ function harness(input: { active?: AgentActiveRoute; allow?: boolean } = {}) {
 }
 
 describe('Host route-bound Agent Session authorization', () => {
+  it('authorizes an unbound declaration only as an exact Host-prompted Session scope', async () => {
+    const plans: AgentPermissionPlanV4[] = []
+    const authority = new AgentRouteSessionScopeAuthority({
+      activeRoute: () => undefined,
+      routes: () => [],
+      decide: async plan => { plans.push(plan); return { authorized: true } },
+      connectionGeneration: () => 1,
+    })
+    authority.install(owner.pluginId, [{ name: 'sessions.subscribe', required: false, scope: {} }])
+    expect(await authority.authorize(owner, 'sessions.subscribe', 'room-a-run-a')).toBe(true)
+    expect(plans[0]?.scopeSource).toEqual({ kind: 'host-exact', exactSessionId: 'room-a-run-a' })
+  })
+
   it('allows only the exact SessionId from the active same-plugin route and emits an exact v4 plan', async () => {
     const { authority, plans } = harness({ active: { owner: owner.pluginId, routeId: 'room-session-detail', instanceId: 'route-1', params: { sessionId: 'session-1' } } })
     authority.install(owner.pluginId, [declaration])

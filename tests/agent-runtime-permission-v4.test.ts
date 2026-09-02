@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CordisXPluginManifestV5 } from '../packages/cli/src/permission-contracts.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 } from '../packages/cli/src/permission-contracts.js'
+import { normalizePluginManifestV5 } from '../packages/cli/src/permission-model-v4.js'
 import { MemoryPermissionPolicyStore, PermissionBroker, type PermissionPrompt } from '../packages/cli/src/renderer/platform.js'
 
 const identity = { source: 'file:///plugins/chatroom.mjs', id: 'org.cordisx.chatroom' } as const
@@ -21,6 +22,14 @@ const manifest: CordisXPluginManifestV5 = {
 const prompt: PermissionPrompt = { request: async () => 'deny' }
 
 describe('Agent Session permission-v4 Host authority', () => {
+  it('normalizes unbound declarations for exact per-Session prompting', () => {
+    expect(normalizePluginManifestV5({
+      ...manifest,
+      capabilities: [{ name: 'sessions.subscribe', required: false, scope: {} }],
+    }, identity.id, { assertScope: () => {} }).capabilities)
+      .toEqual([{ name: 'sessions.subscribe', required: false, scope: { sessionIds: undefined } }])
+  })
+
   it('prompts for an exact Host-reserved SessionId and persists an allow decision', async () => {
     const requested: string[] = []
     const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), {
@@ -38,6 +47,27 @@ describe('Agent Session permission-v4 Host authority', () => {
     expect((await broker.authorizeAgentRuntime(input)).authorized).toBe(true)
     expect((await broker.authorizeAgentRuntime(input)).authorized).toBe(true)
     expect(requested).toEqual(['agents.create:host-reserved-session'])
+  })
+
+  it('admits one unbound Session capability only through its Host-issued exact scope', async () => {
+    const requested: string[] = []
+    const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), {
+      request: async input => { requested.push(String(input.requested.agentSessionId)); return 'allow-once' },
+    })
+    broker.register(identity, {
+      ...manifest,
+      capabilities: [{ name: 'sessions.subscribe', required: false, scope: {} }],
+    })
+    broker.replaceAgentRuntimeConnection(connection)
+    expect((await broker.authorizeAgentRuntime({
+      identity, capability: 'sessions.subscribe', sessionId: 'room-a-run-a',
+      scopeSource: { kind: 'host-exact', exactSessionId: 'room-a-run-a' }, connection,
+    })).authorized).toBe(true)
+    expect(await broker.authorizeAgentRuntime({
+      identity, capability: 'sessions.subscribe', sessionId: 'room-a-run-a',
+      scopeSource: { kind: 'host-exact', exactSessionId: 'different-session' }, connection,
+    })).toEqual({ authorized: false })
+    expect(requested).toEqual(['room-a-run-a'])
   })
 
   it('allows only seeded exact create and active same-plugin route leases', async () => {

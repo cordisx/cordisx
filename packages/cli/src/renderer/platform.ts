@@ -832,6 +832,7 @@ export type AgentRuntimeRouteScope = Readonly<{
 export type AgentRuntimeScopeSource =
   | Readonly<{ kind: 'host-route'; routeInstanceId: string; routeId: string; path: string; params: Readonly<{ sessionId: string }> }>
   | Readonly<{ kind: 'host-create'; reservedSessionId: string }>
+  | Readonly<{ kind: 'host-exact'; exactSessionId: string }>
 export type AgentRuntimePermissionFence = Readonly<{
   identity: CordisXPluginIdentity; sessionId: string
   code: 'route-replaced' | 'plugin-generation-replaced' | 'permission-revoked' | 'connection-replaced'
@@ -1199,6 +1200,10 @@ export class PermissionBroker {
       return input.capability === 'agents.create'
         && input.scopeSource.reservedSessionId === input.sessionId
         && declaredScope === undefined
+    }
+    if (input.scopeSource.kind === 'host-exact') {
+      return input.scopeSource.exactSessionId === input.sessionId
+        && (declaredScope === undefined || (Array.isArray(declaredScope) && declaredScope.includes(input.sessionId)))
     }
     if (Array.isArray(declaredScope)) return declaredScope.length === 1 && declaredScope[0] === input.sessionId
     const route = this.agentRuntimeRoutes.get(agentRuntimeIdentityKey({ source: registration.identity.source, pluginId: registration.identity.id }))
