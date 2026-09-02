@@ -45,6 +45,7 @@
     "predev": "npm run prepare:dev",
     "precheckpoint:local-dev:app": "npm run build --workspace=cordisx",
     "precheckpoint:local-dev": "npm run build --workspace=cordisx",
+    "prepare": "npm run build --workspace=cordisx",
     "prepare:dev": "npm run prepare:dev --workspace=cordisx",
     "smoke": "node packages/cli/scripts/live-smoke.mjs",
     "smoke:isolated-app": "node packages/cli/scripts/run-isolated-app-smoke.mjs",
