@@ -57,6 +57,7 @@ import {
   UnavailableAgentSessionTransport,
 } from './codex-desktop-agent-session-transport.js'
 import { DeterministicAgentSessionTransport } from './deterministic-agent-session-transport.js'
+import type { PlaygroundAgentSessionProjection } from './playground-agent-session-projection.js'
 import {
   AgentRouteSessionScopeAuthority,
   type AgentRuntimePermissionDeclaration,
@@ -423,6 +424,7 @@ interface CordisXRuntimeHandle extends ManagerModel {
   abortPluginMutation(transactionId: string): Promise<void>
   reloadPluginGeneration(pluginId: string, moduleGeneration: string, runtimeGeneration: string): Promise<void>
   updateLocalDevelopmentStatus(status: CordisXLocalDevelopmentSnapshot): boolean
+  playgroundAgentSessionProjection?(): PlaygroundAgentSessionProjection
   dispose(): Promise<void>
 }
 
@@ -808,6 +810,7 @@ async function start(
   const agentSessionRuntime = new CordisXAgentSessionRuntime({
     driver: agentSessionTransport,
     authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
+    ...(metadata.hostKind === 'playground' ? { playgroundControl: true as const } : {}),
   })
   const disposeAgentRouteFences = agentRouteScopes.subscribe((owner, sessionId, code) => {
     agentSessionRuntime.fenceSession(sessionId, code)
@@ -2795,6 +2798,13 @@ async function start(
     abortPluginMutation,
     reloadPluginGeneration,
     updateLocalDevelopmentStatus,
+    ...(metadata.hostKind === 'playground' ? {
+      playgroundAgentSessionProjection: (): PlaygroundAgentSessionProjection => Object.freeze({
+        snapshot: () => agentSessionRuntime.playgroundSnapshot(),
+        create: async (text: string) => await agentSessionRuntime.createPlaygroundSession(text),
+        submit: async (sessionId: string, text: string) => await agentSessionRuntime.submitPlaygroundSession(sessionId, text),
+      }),
+    } : {}),
     snapshot: publicSnapshot,
     setPluginBlocked,
     updatePluginConfig,

@@ -1,9 +1,12 @@
 import { useSyncExternalStore } from 'react'
+import type { PlaygroundAgentSessionProjection, PlaygroundAgentSessionProjectionSnapshot } from '../../renderer/playground-agent-session-projection.js'
 
 interface RuntimeState {
   readonly status: 'starting' | 'active' | 'failed'
   readonly plugins: readonly PlaygroundPluginSnapshot[]
   readonly error?: string
+  readonly simulator?: PlaygroundAgentSessionProjectionSnapshot
+  readonly simulatorControl?: PlaygroundAgentSessionProjection
 }
 
 let state: RuntimeState = { status: 'starting', plugins: [] }
@@ -16,7 +19,8 @@ function publish(next: RuntimeState): void {
       const previous = state.plugins[index]
       return previous?.id === plugin.id && previous.status === plugin.status
     })
-  if (next.status === state.status && next.error === state.error && samePlugins) return
+  const sameSimulator = JSON.stringify(next.simulator) === JSON.stringify(state.simulator)
+  if (next.status === state.status && next.error === state.error && samePlugins && sameSimulator && next.simulatorControl === state.simulatorControl) return
   state = next
   for (const listener of listeners) listener()
 }
@@ -24,7 +28,9 @@ function publish(next: RuntimeState): void {
 function refresh(): void {
   const runtime = window.__cordisxRuntime
   if (runtime === undefined) return
-  publish({ status: 'active', plugins: runtime.snapshot().plugins })
+  const simulatorControl = runtime.playgroundAgentSessionProjection?.()
+  const simulator = simulatorControl?.snapshot()
+  publish({ status: 'active', plugins: runtime.snapshot().plugins, ...(simulator === undefined ? {} : { simulator }), ...(simulatorControl === undefined ? {} : { simulatorControl }) })
 }
 
 export async function bootRuntime(): Promise<void> {

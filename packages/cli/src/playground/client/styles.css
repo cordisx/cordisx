@@ -141,12 +141,17 @@ body > [data-cordisx-page-outlet] svg.icon-xs { width: 16px !important; height: 
 .pg-scenario-columns li { min-width: 0; }
 .pg-scenario-columns li > span { display: block; color: var(--pg-muted); font-size: 10px; }
 .pg-scenario-columns code { display: block; overflow-wrap: anywhere; color: var(--pg-text); font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pg-scenario-workbench { max-width: 1080px; padding: 14px; border: 1px solid var(--pg-border-soft); border-radius: 10px; background: var(--pg-panel); }
+.pg-scenario-workbench header h2 { margin: 6px 0 2px; }.pg-scenario-workbench header p { color: var(--pg-muted); }
+.pg-event-composer { display: grid; grid-template-columns: minmax(160px, .45fr) minmax(0, 1fr) auto; gap: 8px; margin: 14px 0; }.pg-event-composer textarea { min-width: 0; resize: vertical; padding: 8px; border: 1px solid var(--pg-border); border-radius: 7px; background: var(--pg-panel-raised); color: var(--pg-text); }.pg-event-composer button,.pg-scenario-controls button { min-height: 34px; padding: 6px 11px; border: 1px solid var(--pg-border); border-radius: 7px; background: var(--pg-panel-raised); color: var(--pg-text); cursor: pointer; }
+.pg-event-timeline { display: grid; gap: 8px; max-height: 420px; margin: 0; padding: 0; overflow: auto; list-style: none; }.pg-event-timeline li { padding: 9px; border: 1px solid var(--pg-border-soft); border-radius: 7px; }.pg-event-timeline pre { max-height: 150px; overflow: auto; white-space: pre-wrap; color: var(--pg-muted); font: 11px/1.4 ui-monospace,monospace; }.pg-scenario-summary li { display: grid; gap: 4px; margin: 8px 0; }.pg-scenario-summary li button { width: fit-content; border: 0; background: transparent; color: var(--pg-accent); cursor: pointer; }.pg-scenario-summary code { color: var(--pg-muted); }
 
 @media (max-width: 780px) {
   .pg-scenario-lab { padding: 18px; }
   .pg-scenario-controls, .pg-scenario-lab > header { align-items: stretch; flex-direction: column; }
   .pg-scenario-columns { grid-template-columns: 1fr; }
 }
+@media (max-width: 780px) { .pg-event-composer { grid-template-columns: 1fr; } }
 
 /* Production structured renderer roots remain Host-owned; these rules only place them in the fixture shell. */
 .pg-surface-seat > [data-cordisx-surface-host], .pg-footer-surface > [data-cordisx-surface-host] { position: static !important; display: flex; align-items: center; gap: 5px; }
