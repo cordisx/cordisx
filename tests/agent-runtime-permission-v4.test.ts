@@ -21,6 +21,25 @@ const manifest: CordisXPluginManifestV5 = {
 const prompt: PermissionPrompt = { request: async () => 'deny' }
 
 describe('Agent Session permission-v4 Host authority', () => {
+  it('prompts for an exact Host-reserved SessionId and persists an allow decision', async () => {
+    const requested: string[] = []
+    const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), {
+      request: async input => {
+        requested.push(`${input.declaration.name}:${input.requested.agentSessionId}`)
+        return 'allow'
+      },
+    })
+    broker.register(identity, manifest)
+    broker.replaceAgentRuntimeConnection(connection)
+    const input = {
+      identity, capability: 'agents.create' as const, sessionId: 'host-reserved-session',
+      scopeSource: { kind: 'host-create' as const, reservedSessionId: 'host-reserved-session' }, connection,
+    }
+    expect((await broker.authorizeAgentRuntime(input)).authorized).toBe(true)
+    expect((await broker.authorizeAgentRuntime(input)).authorized).toBe(true)
+    expect(requested).toEqual(['agents.create:host-reserved-session'])
+  })
+
   it('allows only seeded exact create and active same-plugin route leases', async () => {
     const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), prompt)
     const seed = broker.createDevelopmentAgentRuntimePolicySeedAuthority()
