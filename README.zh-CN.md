@@ -52,6 +52,9 @@ CordisX 内置插件开发 Skill。Codex 会把你的需求实现为插件，并
 Playground 中运行和验证。你不需要预先安装 Skill、创建脚手架或了解插件的
 底层命令。
 
+每个功能都会成为一个独立、可继续开发和分享的插件项目。只有当你明确要求
+发布或分享时，Codex 才会处理发布所需的信息。
+
 ## 文档
 
 - [产品概览](./.agents/docs/product-overview.zh-CN.md)
