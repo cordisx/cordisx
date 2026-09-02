@@ -49,8 +49,6 @@ export interface CordisXConfig {
   readonly codex: {
     readonly debugPort: number
     readonly executable?: string
-    /** Explicit opt-in independent App Server used only by the brokered AgentLoop/Platform boundary. */
-    readonly agentLoopBackend?: 'local-cli' | 'mock'
   }
   readonly providers: readonly CliProxyProviderConfig[]
   readonly plugins: readonly CordisXConfigPlugin[]
@@ -109,9 +107,6 @@ export async function loadConfig(configPath: string, options: LoadConfigOptions 
   const executable = codex.executable === undefined
     ? undefined
     : nonEmptyString(codex.executable, 'config.codex.executable')
-  if (codex.agentLoopBackend !== undefined && codex.agentLoopBackend !== 'local-cli' && codex.agentLoopBackend !== 'mock') {
-    throw new Error('config.codex.agentLoopBackend must be local-cli or mock when provided')
-  }
   if (options.profileId !== undefined && !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(options.profileId)) {
     throw new Error(`invalid profile id: ${options.profileId}`)
   }
@@ -163,21 +158,12 @@ export async function loadConfig(configPath: string, options: LoadConfigOptions 
         ),
         { rootDir: path.dirname(absolutePath) },
       )
-  if (codex.agentLoopBackend === 'local-cli' && providers.some(provider => provider.id === 'codex-local')) {
-    throw new Error('config.providers id codex-local is reserved by config.codex.agentLoopBackend')
-  }
-
   return {
     version: 1,
     rootDir: path.dirname(absolutePath),
     codex: {
       debugPort: debugPort as number,
       ...(executable === undefined ? {} : { executable: path.resolve(path.dirname(absolutePath), executable) }),
-      ...(codex.agentLoopBackend === 'local-cli'
-        ? { agentLoopBackend: 'local-cli' as const }
-        : codex.agentLoopBackend === 'mock'
-          ? { agentLoopBackend: 'mock' as const }
-          : {}),
     },
     providers,
     plugins,

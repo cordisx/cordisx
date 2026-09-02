@@ -148,27 +148,6 @@ chain, and private Codex event adapter are specified in
 adapter generation, retain only stable projection identities, and define no
 Timeline, session header, DOM surface, or outlet.
 
-The internal text AgentLoop bridge is specified in
-[`agent-loop.md`](agent-loop.md). It injects one principal-bound
-`ctx.agentLoop` client per plugin fiber, resolves the Protocol AgentDefinition
-catalog, creates a fresh binding or binds one explicit opaque task, wakes it
-through the existing Provider Fleet, and proactively projects
-assistant text, observed approvals, and lifecycle. It reuses the existing task
-permissions and prompt runtime, owns no Chatroom data or plugin UI, and returns
-typed unsupported for `image-ref` until a controlled resolver exists.
-For internal development and Playground composition, the explicit
-`codex.agentLoopBackend="local-cli"` option adds `codex-local` to that Provider
-Fleet. Its launcher-owned app-server reuses the authenticated local Codex home,
-publishes only the existing token-bound provider RPC, and starts tasks with a
-read-only sandbox plus `approvalPolicy=never`. It is an independent connection,
-not the Desktop current connection or a raw app-server plugin API.
-The alternative `codex.agentLoopBackend="mock"` is fenced to the explicit UI
-Playground and substitutes only a Host-private deterministic in-memory
-AgentLoop host. It uses the same broker and public client but creates no
-provider, model, App Server, Codex task, process, connection, or login state.
-Its `debug:agent-loop/mock/v1` task registry and trace page are development
-diagnostics, not public runtime state or a permanent CLI contract.
-
 Small plugin-owned durable state uses the Host public
 `cordisx.owner-documents/v1` service at `ctx.documents`. The renderer receives
 one client bound to the Host-issued plugin principal; callers cannot choose a

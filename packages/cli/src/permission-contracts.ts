@@ -1,6 +1,8 @@
 import type { CordisXLocalizedText } from './contracts.js'
 import type { CordisXPlatformSessionRef } from './platform-contracts.js'
 import type { HostDomOperation } from '@cordisx/protocol/host-dom/v1'
+import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'
+import type { HostRouteSessionScopeBinding } from '@cordisx/protocol/sessions/v1'
 
 export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v4.schema.json'
@@ -76,6 +78,8 @@ export const CORDISX_PERMISSION_CAPABILITIES_V4 = [
   'ui.host-dom.modify',
 ] as const
 export type CordisXPermissionCapabilityV4 = typeof CORDISX_PERMISSION_CAPABILITIES_V4[number]
+/** v5 adds the closed Agent/Session capability vocabulary; it does not revive AgentLoop permissions. */
+export type CordisXPermissionCapabilityV5 = CordisXPermissionCapabilityV4 | AgentRuntimeCapability
 export type CordisXPermissionSensitivity = 'low' | 'general' | 'sensitive' | 'high-risk'
 export type CordisXPermissionPolicyV2 = 'ask' | 'allow-persistent' | 'deny-persistent'
 export type CordisXPermissionDecisionV2 =
@@ -175,12 +179,21 @@ export interface CordisXCapabilityDeclarationV4 {
   readonly scope: CordisXPermissionScopeV4
 }
 
+export interface CordisXPermissionScopeV5 extends Omit<CordisXPermissionScopeV4, 'sessionIds'> {
+  readonly sessionIds?: readonly string[] | HostRouteSessionScopeBinding
+}
+
+export interface CordisXCapabilityDeclarationV5 extends Omit<CordisXCapabilityDeclarationV4, 'name' | 'scope'> {
+  readonly name: CordisXPermissionCapabilityV5
+  readonly scope: CordisXPermissionScopeV5
+}
+
 export interface CordisXPluginManifestV5 {
   readonly $schema: typeof CORDISX_PLUGIN_MANIFEST_SCHEMA_V5
   readonly schemaVersion: 5
   readonly id: string
   readonly name?: string
-  readonly capabilities: readonly CordisXCapabilityDeclarationV4[]
+  readonly capabilities: readonly CordisXCapabilityDeclarationV5[]
   readonly services: readonly CordisXPluginServiceDeclarationV4[]
 }
 

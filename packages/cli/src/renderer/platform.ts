@@ -738,7 +738,7 @@ function manifestDeclarationsV2(
 ): readonly CordisXCapabilityDeclarationV2[] {
   if (manifest.schemaVersion === 4) return manifest.capabilities
   if (manifest.schemaVersion === 5) return manifest.capabilities.filter(item => (
-    !isHostDomPermissionCapability(item.name)
+    !isHostDomPermissionCapability(item.name) && !isAgentRuntimePermission(item.name)
   )) as readonly CordisXCapabilityDeclarationV2[]
   return Object.freeze(manifest.capabilities.map(declaration => Object.freeze({
     name: declaration.name as CordisXPermissionCapabilityV2,
@@ -751,8 +751,22 @@ function manifestHostDomDeclarationsV4(
   manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5,
 ): readonly CordisXCapabilityDeclarationV4[] {
   return manifest.schemaVersion === 5
-    ? manifest.capabilities.filter(item => isHostDomPermissionCapability(item.name))
+    ? manifest.capabilities.filter(item => isHostDomPermissionCapability(item.name)) as readonly CordisXCapabilityDeclarationV4[]
     : Object.freeze([])
+}
+
+function isAgentRuntimePermission(value: string): boolean {
+  return value.startsWith('agents.') || value.startsWith('sessions.') || value.startsWith('approvals.')
+}
+
+/** The legacy v4 review UI has no Agent/Session vocabulary; those declarations
+ * are evaluated by the Host-private exact Session lease authority instead. */
+function permissionPlanDeclarations(
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5,
+): readonly CordisXCapabilityDeclarationV4[] {
+  return (manifest.schemaVersion === 5
+    ? manifest.capabilities.filter(item => !isAgentRuntimePermission(item.name))
+    : manifest.capabilities) as readonly CordisXCapabilityDeclarationV4[]
 }
 
 interface AuthorizationGrant {
@@ -888,7 +902,7 @@ export class PermissionBroker {
                   reason: item.rationale?.description ?? {
                     namespace: 'permission',
                     key: `permission.${item.name}.legacy-reason`,
-                    fallback: this.catalog.get(item.name).presentation.description.fallback,
+                    fallback: this.catalog.get(item.name as CordisXPermissionCapabilityV4).presentation.description.fallback,
                   },
                   scope: item.scope as CordisXCapabilityScope,
                 } as CordisXCapabilityDeclaration] as const]
@@ -2298,7 +2312,7 @@ export class PermissionBroker {
       profileId: this.profileId,
       identity: { source: identity.source, pluginId: identity.id },
       binding: operationBinding,
-      declarations: registration.manifest.capabilities,
+      declarations: permissionPlanDeclarations(registration.manifest),
       policiesV2: [...this.policyRecords.values()].filter(isPermissionPolicyRecordV2),
       policiesV4: [...this.policyRecords.values()].filter(isPermissionPolicyRecordV4),
       ...(certification === undefined ? {} : { certification }),

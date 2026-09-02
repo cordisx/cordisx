@@ -515,22 +515,6 @@ ctx.slots.registerCollection({
   if (!installedBundle.includes('# CLIProxy Providers') || !installedBundle.includes('External providers and the native connection')) {
     throw new Error('installed built-in CLIProxy plugin bundle is missing its product README')
   }
-  const localAgentLoopConfigPath = path.join(runnerDirectory, 'local-agent-loop.config.json')
-  await writeFile(localAgentLoopConfigPath, `${JSON.stringify({
-    version: 1,
-    codex: { debugPort: 9229, agentLoopBackend: 'local-cli' },
-    providers: [],
-    plugins: [],
-  }, null, 2)}\n`, 'utf8')
-  const localAgentLoopBundle = await buildRendererBundle(await loadConfig(localAgentLoopConfigPath), {
-    playground: true,
-    profileId: 'playground',
-    providerBridgeToken: 'installed-local-agent-loop-token',
-  })
-  if (!localAgentLoopBundle.includes('codex-local') || !localAgentLoopBundle.includes('installed-local-agent-loop-token')) {
-    throw new Error('installed cordisx tarball does not compose the explicit local AgentLoop provider bridge')
-  }
-
   const installedMockHost = new PlaygroundMockAgentLoopHost()
   const installedMockTransport = new PlaygroundMockAgentLoopV4Transport(installedMockHost)
   const installedBroker = new CordisXAgentLoopBrokerV4(installedMockTransport, installedMockHost, 'installed', 'installed-composition')

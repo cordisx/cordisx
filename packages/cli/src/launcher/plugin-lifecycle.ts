@@ -35,6 +35,7 @@ import {
   type CordisXPermissionDecisionV2,
   type CordisXPermissionPolicyRecordV2,
   type CordisXPermissionPolicyRecordV4,
+  type CordisXCapabilityDeclarationV4,
 } from '../permission-contracts.js'
 import {
   isPermissionPolicyRecordV2,
@@ -387,7 +388,9 @@ function authorizationPlanV4(
       moduleGeneration,
       requestId,
     },
-    declarations: staged.manifest.runtimeManifest.capabilities,
+    declarations: (staged.manifest.runtimeManifest.schemaVersion === 5
+      ? staged.manifest.runtimeManifest.capabilities.filter(item => !(item.name.startsWith('agents.') || item.name.startsWith('sessions.') || item.name.startsWith('approvals.')))
+      : staged.manifest.runtimeManifest.capabilities) as readonly CordisXCapabilityDeclarationV4[],
     policiesV2,
     policiesV4,
     ...(certification === undefined ? {} : { certification }),
