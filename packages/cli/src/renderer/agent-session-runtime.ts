@@ -49,6 +49,7 @@ import type {
 } from '@cordisx/protocol/sessions/v1'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
 import { generationFromContext } from './ownership.js'
+import type { PlaygroundAgentSessionProjectionSnapshot } from './playground-agent-session-projection.js'
 
 const ACQUIRE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-acquire-result.v1.schema.json' as const
 const ADMISSION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-admission.v1.schema.json' as const
@@ -99,6 +100,8 @@ export interface CordisXPrivateAgentDriver {
 export interface CordisXAgentSessionRuntimeOptions {
   readonly driver: CordisXPrivateAgentDriver
   readonly authorize: (owner: PluginOwnerIdentity, capability: AgentRuntimeCapability, sessionId?: string) => Promise<boolean>
+  /** Set only by the Playground Host composition, never by plugin input. */
+  readonly playgroundControl?: true
   readonly now?: () => number
 }
 
@@ -264,6 +267,34 @@ export class CordisXAgentSessionRuntime {
     for (const agent of this.agents.values()) this.disposeAgent(agent, 'runtime-disposed')
     for (const session of this.sessions.values()) this.closeSession(session, 'host-unavailable')
     this.options.driver.dispose()
+  }
+
+  /** Host-only development control; every fact still enters this ledger. */
+  playgroundSnapshot(): PlaygroundAgentSessionProjectionSnapshot {
+    return Object.freeze({ tasks: Object.freeze([...this.agents.values()]
+      .filter(record => this.current(record))
+      .map(record => Object.freeze({
+        sessionId: record.id,
+        agentGeneration: record.generation,
+        owner: record.owner.pluginId,
+        events: Object.freeze(record.session.events.map(clone)),
+      }))) })
+  }
+
+  async createPlaygroundSession(text: string): Promise<void> {
+    if (this.options.playgroundControl !== true) throw new Error('Playground control is unavailable')
+    const owner: PluginOwnerIdentity = Object.freeze({ pluginId: 'host:playground', generation: 1 })
+    const sessionId = `playground-session:${crypto.randomUUID()}`
+    const result = await this.acquire(owner, 'create', sessionId, { sessionId, options: {} }, 'host')
+    if (result.status !== 'accepted') throw new Error('Playground Agent/Session creation is unavailable')
+    await result.handle.agent.send(this.playgroundMessage(owner, text), 'next-turn', true)
+  }
+
+  async submitPlaygroundSession(sessionId: string, text: string): Promise<void> {
+    if (this.options.playgroundControl !== true) throw new Error('Playground control is unavailable')
+    const record = this.agents.get(sessionId)
+    if (record === undefined || !this.current(record) || record.owner.pluginId !== 'host:playground') throw new Error('Playground Agent/Session is unavailable')
+    await this.agent(record.owner, record).send(this.playgroundMessage(record.owner, text), 'next-turn', true)
   }
 
   /** Host lifecycle/route/lease fences call this private authority directly. */
@@ -579,7 +610,15 @@ export class CordisXAgentSessionRuntime {
   private sessionLive(record: SessionRecord): boolean { return !this.disposed && record.closed === undefined && this.sessions.get(record.id) === record }
   private sameOwner(left: PluginOwnerIdentity, right: PluginOwnerIdentity): boolean { return left.pluginId === right.pluginId && left.generation === right.generation }
   private sameSource(owner: PluginOwnerIdentity, source: UserMessage['source']): boolean { return source.kind === 'plugin' && source.pluginId === owner.pluginId && source.generation === owner.generation }
-  private async allowed(owner: PluginOwnerIdentity, capability: AgentRuntimeCapability, sessionId?: string): Promise<boolean> { return !this.disposed && await this.options.authorize(owner, capability, sessionId) }
+  private async allowed(owner: PluginOwnerIdentity, capability: AgentRuntimeCapability, sessionId?: string): Promise<boolean> {
+    if (owner.pluginId === 'host:playground') return !this.disposed && this.options.playgroundControl === true
+    return !this.disposed && await this.options.authorize(owner, capability, sessionId)
+  }
+  private playgroundMessage(owner: PluginOwnerIdentity, text: string): UserMessage {
+    const value = text.trim()
+    if (value === '' || value.length > 16_000) throw new Error('Playground message is invalid')
+    return Object.freeze({ id: `playground-message:${crypto.randomUUID()}`, role: 'user', content: [{ type: 'text' as const, text: value }], source: { kind: 'plugin' as const, pluginId: owner.pluginId, generation: owner.generation } })
+  }
   private answererKey(record: AgentRecord): string { return `${record.id}\u0000${record.generation}` }
   private acquireDenied(operation: 'create' | 'resume', mutationId?: string): AgentAcquireResult { return { $schema: ACQUIRE_SCHEMA, contract: 'cordisx.agent-acquire-result/v1', schemaVersion: 1, operation, ...(mutationId === undefined ? {} : { mutationId }), status: 'denied', code: 'permission-denied' } }
   private acquireUnavailable(operation: 'create' | 'resume', mutationId: string | undefined, code: 'runtime-unavailable' | 'host-unavailable' | 'unsupported' | 'session-unavailable'): AgentAcquireResult { return { $schema: ACQUIRE_SCHEMA, contract: 'cordisx.agent-acquire-result/v1', schemaVersion: 1, operation, ...(mutationId === undefined ? {} : { mutationId }), status: 'unavailable', code: code === 'session-unavailable' ? 'session-unavailable' : code } }

@@ -7,6 +7,8 @@ import { playgroundEnvironment, usePlaygroundEnvironment } from './environment.j
 import fixture from 'virtual:cordisx-playground-fixture'
 import { activatePlaygroundReviewNavigation, authorizePlaygroundReviewNavigation } from './review-navigation.js'
 import { bootRuntime, useRuntimeState } from './runtime-store.js'
+import { MockAgentTaskPage } from './components/MockAgentTaskPage.js'
+import { ScenarioLabPage } from './components/ScenarioLabPage.js'
 
 interface SidebarItemProps {
   readonly id: string
@@ -46,8 +48,13 @@ export function App() {
   const runtime = useRuntimeState()
   const environment = usePlaygroundEnvironment()
   const [fixtureMode, setFixtureMode] = useState<PlaygroundFixtureMode>(fixture.reviewNavigationItem === undefined ? 'conversation' : 'review')
+  const [simulatorOpen, setSimulatorOpen] = useState(false)
+  const [simulatorSessionId, setSimulatorSessionId] = useState<string>()
   const shell = useRef<HTMLDivElement>(null)
   const en = environment.locale === 'en'
+  const tasks = runtime.simulator?.tasks ?? []
+  const control = runtime.simulatorControl
+  const selectedTask = tasks.find(task => task.sessionId === simulatorSessionId)
 
   useEffect(() => { void bootRuntime() }, [])
   useEffect(() => shell.current === null ? undefined : playgroundEnvironment.attachTheme(shell.current), [])
@@ -116,6 +123,7 @@ export function App() {
           <div className="pg-session-list">
             <SidebarItem id="fixture.conversation" label={en ? 'Plugin composition' : '调试插件组合'} secondary={en ? 'Inspect pages and slots' : '验证页面与插槽贡献'} icon="host:playground" selected={fixtureMode === 'conversation'} onActivate={() => setFixtureMode('conversation')} />
             <SidebarItem id="fixture.empty" label={en ? 'Empty conversation' : '空会话'} secondary={en ? 'Inspect the no-context state' : '检查无上下文状态'} icon="host:new" selected={fixtureMode === 'empty'} onActivate={() => setFixtureMode('empty')} />
+            <SidebarItem id="fixture.simulator" label={en ? 'Simulator' : '模拟器'} secondary={en ? `${tasks.length} SessionEvent tasks` : `${tasks.length} 个 SessionEvent 任务`} icon="host:playground" selected={simulatorOpen} onActivate={() => { setSimulatorOpen(true); setSimulatorSessionId(undefined) }} />
           </div>
         </section> : null}
         <footer className="pg-sidebar-footer">
@@ -135,7 +143,11 @@ export function App() {
           <div className="pg-footer-surface" data-cordisx-playground-surface="sidebar.footer.after-control" />
         </footer>
       </aside>
-      <HostSeats mode={fixtureMode} locale={environment.locale} />
+      {simulatorOpen && control !== undefined
+        ? selectedTask !== undefined
+          ? <MockAgentTaskPage task={selectedTask} locale={environment.locale} control={control} onChanged={() => undefined} onReturn={() => setSimulatorSessionId(undefined)} />
+          : <ScenarioLabPage locale={environment.locale} tasks={tasks} control={control} onOpenTask={setSimulatorSessionId} onClose={() => setSimulatorOpen(false)} />
+        : <HostSeats mode={fixtureMode} locale={environment.locale} />}
     </div>
   )
 }

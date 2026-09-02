@@ -52,6 +52,7 @@ interface PlaygroundRuntime {
   snapshot(): PlaygroundRuntimeSnapshot
   setExtensionPointPolicy(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
   setExtensionPointPolicies(source: string, pluginId: string, policies: readonly { readonly pointId: string; readonly policy: 'inherit' | 'allow' | 'deny' }[]): Promise<void>
+  playgroundAgentSessionProjection?(): import('../../renderer/playground-agent-session-projection.js').PlaygroundAgentSessionProjection
 }
 
 interface Window {
