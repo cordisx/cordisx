@@ -63,8 +63,6 @@ Playground 中运行和验证。你不需要预先安装 Skill、创建脚手架
   </picture>
 </p>
 
-<p align="center"><sub>随页面主题自动切换 · <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-zh-light.mp4">浅色高清 MP4</a> · <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-zh-dark.mp4">深色高清 MP4</a></sub></p>
-
 ## 文档
 
 - [产品概览](./.agents/docs/product-overview.zh-CN.md)

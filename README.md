@@ -66,8 +66,6 @@ publish or share it.
   </picture>
 </p>
 
-<p align="center"><sub>Switches with the page theme · <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-en-light.mp4">light HD MP4</a> · <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-en-dark.mp4">dark HD MP4</a></sub></p>
-
 ## Documentation
 
 - [Product overview](./.agents/docs/product-overview.md)
